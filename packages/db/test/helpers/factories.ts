@@ -17,7 +17,7 @@ import type { BudgetConfig } from '../../src/budgetConfig.js';
 import type { Db } from '../../src/client.js';
 import { DefinitionsRepo } from '../../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../../src/repositories/executions.js';
-import type { ExecutionCreateInput } from '../../src/types.js';
+import type { CalendarPriceInsert, ExecutionCreateInput } from '../../src/types.js';
 import { T0 } from './db.js';
 
 /** One provider's guard entry. Defaults: a 40usd-shaped subscription (rate 0, no fee). */
@@ -215,5 +215,26 @@ export function withNights(c: CellKey): Cell {
     ...c,
     nights:
       (Date.parse(`${c.returnDate}T00:00:00Z`) - Date.parse(`${c.departureDate}T00:00:00Z`)) / 86_400_000,
+  };
+}
+
+/** A GBP Travelpayouts calendar price at T0 for a cell; override any field per test. */
+export function calendarPrice(c: CellKey, over: Partial<CalendarPriceInsert> = {}): CalendarPriceInsert {
+  return {
+    providerId: 'travelpayouts',
+    sourceKind: 'authorised-cached',
+    cabin: 'economy',
+    cell: c,
+    pricePence: 41_200,
+    priceNativeMinor: 41_200,
+    currencyNative: 'GBP',
+    fx: { converted: false },
+    pointOfSale: 'unknown',
+    fetchedAt: T0,
+    providerObservedAt: null,
+    maxAgeHours: 48,
+    vendorLink: null,
+    reusedFromExecutionId: null,
+    ...over,
   };
 }

@@ -186,4 +186,50 @@ CREATE TABLE `search_executions` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `search_executions_active_parent_uq` ON `search_executions` (`definition_id`) WHERE is_child = 0 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
 CREATE UNIQUE INDEX `search_executions_active_child_uq` ON `search_executions` (`definition_id`,`child_origin`,`child_destination`,`child_departure_date`,`child_return_date`) WHERE is_child = 1 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
-CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);
+CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);--> statement-breakpoint
+CREATE TABLE `calendar_prices` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`execution_id` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`source_kind` text NOT NULL,
+	`cabin` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`price_pence` integer NOT NULL,
+	`price_native_minor` integer NOT NULL,
+	`currency_native` text NOT NULL,
+	`fx_rate_nano` integer,
+	`fx_rate_date` text,
+	`fx_source` text,
+	`fx_converted` integer NOT NULL,
+	`point_of_sale` text NOT NULL,
+	`fetched_at` text NOT NULL,
+	`provider_observed_at` text,
+	`max_age_hours` integer,
+	`vendor_link` text,
+	`reused_from_execution_id` text,
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`reused_from_execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "calendar_prices_price_ck" CHECK(typeof(price_pence) = 'integer' AND price_pence >= 0),
+	CONSTRAINT "calendar_prices_native_ck" CHECK(typeof(price_native_minor) = 'integer' AND price_native_minor >= 0),
+	CONSTRAINT "calendar_prices_fx_converted_ck" CHECK((fx_converted = 1) = (currency_native <> 'GBP')),
+	CONSTRAINT "calendar_prices_fx_complete_ck" CHECK(fx_converted = 0 OR (fx_rate_nano IS NOT NULL AND fx_rate_date IS NOT NULL AND fx_source IS NOT NULL)),
+	CONSTRAINT "calendar_prices_fx_rate_ck" CHECK(fx_rate_nano IS NULL OR (typeof(fx_rate_nano) = 'integer' AND fx_rate_nano >= 0)),
+	CONSTRAINT "calendar_prices_fx_bool_ck" CHECK(fx_converted IN (0, 1)),
+	CONSTRAINT "calendar_prices_currency_ck" CHECK(currency_native GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "calendar_prices_fetched_ck" CHECK(fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "calendar_prices_observed_ck" CHECK(provider_observed_at IS NULL OR provider_observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "calendar_prices_max_age_ck" CHECK(max_age_hours IS NULL OR (typeof(max_age_hours) = 'integer' AND max_age_hours >= 0)),
+	CONSTRAINT "calendar_prices_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "calendar_prices_pos_ck" CHECK(point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "calendar_prices_kind_ck" CHECK(source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')),
+	CONSTRAINT "calendar_prices_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "calendar_prices_provider_kind_ck" CHECK((provider_id = 'fixture') = (source_kind = 'synthetic'))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `calendar_prices_execution_provider_cell_uq` ON `calendar_prices` (`execution_id`,`provider_id`,`origin`,`destination`,`departure_date`,`return_date`);--> statement-breakpoint
+CREATE INDEX `calendar_prices_cell_fetched_idx` ON `calendar_prices` (`origin`,`destination`,`departure_date`,`return_date`,`fetched_at`);--> statement-breakpoint
+CREATE INDEX `calendar_prices_route_fetched_idx` ON `calendar_prices` (`origin`,`destination`,`fetched_at`);--> statement-breakpoint
+CREATE INDEX `calendar_prices_execution_idx` ON `calendar_prices` (`execution_id`);

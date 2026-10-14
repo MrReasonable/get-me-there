@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4b700cf6-c50f-4cb9-a4ee-8015345c861e",
+  "id": "8dca3b77-9a91-4c03-8ffd-741d79b42e40",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -1167,6 +1167,298 @@
         "search_executions_child_cell_ck": {
           "name": "search_executions_child_cell_ck",
           "value": "(is_child = 0 AND child_origin IS NULL AND child_destination IS NULL AND child_departure_date IS NULL AND child_return_date IS NULL) OR (is_child = 1 AND child_origin IS NOT NULL AND child_destination IS NOT NULL AND child_departure_date IS NOT NULL AND child_return_date IS NOT NULL)"
+        }
+      }
+    },
+    "calendar_prices": {
+      "name": "calendar_prices",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "execution_id": {
+          "name": "execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_kind": {
+          "name": "source_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cabin": {
+          "name": "cabin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "destination": {
+          "name": "destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "departure_date": {
+          "name": "departure_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "return_date": {
+          "name": "return_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "price_pence": {
+          "name": "price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "price_native_minor": {
+          "name": "price_native_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency_native": {
+          "name": "currency_native",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fx_rate_nano": {
+          "name": "fx_rate_nano",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fx_rate_date": {
+          "name": "fx_rate_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fx_source": {
+          "name": "fx_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fx_converted": {
+          "name": "fx_converted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "point_of_sale": {
+          "name": "point_of_sale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_observed_at": {
+          "name": "provider_observed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "max_age_hours": {
+          "name": "max_age_hours",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "vendor_link": {
+          "name": "vendor_link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reused_from_execution_id": {
+          "name": "reused_from_execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "calendar_prices_execution_provider_cell_uq": {
+          "name": "calendar_prices_execution_provider_cell_uq",
+          "columns": [
+            "execution_id",
+            "provider_id",
+            "origin",
+            "destination",
+            "departure_date",
+            "return_date"
+          ],
+          "isUnique": true
+        },
+        "calendar_prices_cell_fetched_idx": {
+          "name": "calendar_prices_cell_fetched_idx",
+          "columns": [
+            "origin",
+            "destination",
+            "departure_date",
+            "return_date",
+            "fetched_at"
+          ],
+          "isUnique": false
+        },
+        "calendar_prices_route_fetched_idx": {
+          "name": "calendar_prices_route_fetched_idx",
+          "columns": [
+            "origin",
+            "destination",
+            "fetched_at"
+          ],
+          "isUnique": false
+        },
+        "calendar_prices_execution_idx": {
+          "name": "calendar_prices_execution_idx",
+          "columns": [
+            "execution_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "calendar_prices_execution_id_search_executions_id_fk": {
+          "name": "calendar_prices_execution_id_search_executions_id_fk",
+          "tableFrom": "calendar_prices",
+          "tableTo": "search_executions",
+          "columnsFrom": [
+            "execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "calendar_prices_reused_from_execution_id_search_executions_id_fk": {
+          "name": "calendar_prices_reused_from_execution_id_search_executions_id_fk",
+          "tableFrom": "calendar_prices",
+          "tableTo": "search_executions",
+          "columnsFrom": [
+            "reused_from_execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "calendar_prices_price_ck": {
+          "name": "calendar_prices_price_ck",
+          "value": "typeof(price_pence) = 'integer' AND price_pence >= 0"
+        },
+        "calendar_prices_native_ck": {
+          "name": "calendar_prices_native_ck",
+          "value": "typeof(price_native_minor) = 'integer' AND price_native_minor >= 0"
+        },
+        "calendar_prices_fx_converted_ck": {
+          "name": "calendar_prices_fx_converted_ck",
+          "value": "(fx_converted = 1) = (currency_native <> 'GBP')"
+        },
+        "calendar_prices_fx_complete_ck": {
+          "name": "calendar_prices_fx_complete_ck",
+          "value": "fx_converted = 0 OR (fx_rate_nano IS NOT NULL AND fx_rate_date IS NOT NULL AND fx_source IS NOT NULL)"
+        },
+        "calendar_prices_fx_rate_ck": {
+          "name": "calendar_prices_fx_rate_ck",
+          "value": "fx_rate_nano IS NULL OR (typeof(fx_rate_nano) = 'integer' AND fx_rate_nano >= 0)"
+        },
+        "calendar_prices_fx_bool_ck": {
+          "name": "calendar_prices_fx_bool_ck",
+          "value": "fx_converted IN (0, 1)"
+        },
+        "calendar_prices_currency_ck": {
+          "name": "calendar_prices_currency_ck",
+          "value": "currency_native GLOB '[A-Z][A-Z][A-Z]'"
+        },
+        "calendar_prices_fetched_ck": {
+          "name": "calendar_prices_fetched_ck",
+          "value": "fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "calendar_prices_observed_ck": {
+          "name": "calendar_prices_observed_ck",
+          "value": "provider_observed_at IS NULL OR provider_observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "calendar_prices_max_age_ck": {
+          "name": "calendar_prices_max_age_ck",
+          "value": "max_age_hours IS NULL OR (typeof(max_age_hours) = 'integer' AND max_age_hours >= 0)"
+        },
+        "calendar_prices_cabin_ck": {
+          "name": "calendar_prices_cabin_ck",
+          "value": "cabin IN ('economy', 'premium_economy', 'business', 'first')"
+        },
+        "calendar_prices_pos_ck": {
+          "name": "calendar_prices_pos_ck",
+          "value": "point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'"
+        },
+        "calendar_prices_kind_ck": {
+          "name": "calendar_prices_kind_ck",
+          "value": "source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')"
+        },
+        "calendar_prices_provider_ck": {
+          "name": "calendar_prices_provider_ck",
+          "value": "provider_id IN ('travelpayouts', 'searchapi', 'fixture')"
+        },
+        "calendar_prices_provider_kind_ck": {
+          "name": "calendar_prices_provider_kind_ck",
+          "value": "(provider_id = 'fixture') = (source_kind = 'synthetic')"
         }
       }
     }
