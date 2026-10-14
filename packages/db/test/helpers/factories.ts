@@ -3,12 +3,20 @@ import {
   asIata,
   asIsoDate,
   type CellKey,
+  type Clock,
   type DefinitionInput,
+  type DefinitionSnapshot,
+  type Execution,
   type ExecutionBudget,
+  type ExecutionStatus,
   type ProviderLimits,
+  type SearchDefinition,
 } from '@gmt/core';
 import type { BudgetConfig } from '../../src/budgetConfig.js';
 import type { Db } from '../../src/client.js';
+import { DefinitionsRepo } from '../../src/repositories/definitions.js';
+import { ExecutionsRepo } from '../../src/repositories/executions.js';
+import type { ExecutionCreateInput } from '../../src/types.js';
 import { T0 } from './db.js';
 
 /** One provider's guard entry. Defaults: a 40usd-shaped subscription (rate 0, no fee). */
@@ -132,4 +140,70 @@ export function exampleDefinitionInput(over: Partial<DefinitionInput> = {}): Def
     enabled: true,
     ...over,
   };
+}
+
+/** A frozen snapshot of a definition resolved at T0 (spec §3 "snapshot"). */
+export function snapshotOf(d: SearchDefinition): DefinitionSnapshot {
+  return {
+    ...d,
+    resolved: {
+      origins: d.origins,
+      destinations: d.destinations,
+      departureFrom: asIsoDate('2026-10-21'),
+      departureTo: asIsoDate('2027-04-20'),
+      minNights: d.minNights,
+      maxNights: d.maxNights,
+    },
+    resolvedAt: T0,
+    windowClamped: false,
+    droppedAlwaysInclude: [],
+  };
+}
+
+/** The statuses `create` accepts; anything else is reached through `setStatus`, the path the engine takes. */
+function creatable(s: ExecutionStatus): ExecutionCreateInput['status'] | null {
+  switch (s) {
+    case 'pending':
+    case 'running':
+    case 'skipped_budget':
+    case 'skipped_confirm':
+    case 'skipped_window':
+    case 'skipped_missed':
+      return s;
+    default:
+      return null;
+  }
+}
+
+/** Creates (or reuses) a definition and one execution through the repositories. */
+export function newExecution(
+  db: Db,
+  clock: Clock,
+  opts: {
+    definition?: SearchDefinition;
+    status?: ExecutionStatus;
+    cell?: CellKey | null;
+    trigger?: Execution['trigger'];
+  } = {},
+): { definition: SearchDefinition; execution: Execution } {
+  const definition = opts.definition ?? new DefinitionsRepo(db, clock).create(exampleDefinitionInput());
+  const executions = new ExecutionsRepo(db, clock);
+  const wanted = opts.status ?? 'running';
+  // why: a status `create` refuses goes in through an inactive one, so the partial unique index never sees two active parents (arch-r3-004).
+  const createAs = creatable(wanted) ?? 'skipped_missed';
+  const cell = opts.cell ?? null;
+  const created = executions.create({
+    definitionId: definition.id,
+    isChild: cell !== null,
+    cell,
+    snapshot: snapshotOf(definition),
+    estimate: null,
+    trigger: opts.trigger ?? 'manual',
+    status: createAs,
+  });
+  if (createAs === wanted) return { definition, execution: created };
+  executions.setStatus(created.id, wanted, { finishedAt: clock.now() });
+  const moved = executions.get(created.id);
+  if (moved === null) throw new Error('execution vanished');
+  return { definition, execution: moved };
 }
