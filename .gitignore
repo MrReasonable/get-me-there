@@ -12,7 +12,10 @@ packages/providers/fixtures/recorded/**/*.raw.json
 backups/
 *.db*
 reports/
-coverage/
+# why: anchored, because an unanchored `coverage/` also ignored the source directory packages/core/src/coverage/ (WP1)
+/coverage/
+packages/*/coverage/
+apps/*/coverage/
 .stryker-tmp/
 .worktrees/
 .superpowers/
