@@ -1757,7 +1757,7 @@ Expected: FAIL, `budgetConfigFromConfig` is not exported. The window cases exerc
 
 - [ ] **Step 3: Implement**
 
-Append to `packages/db/src/budgetConfig.ts` (import `syntheticAllowed` as a value from `@gmt/core`):
+Append to `packages/db/src/budgetConfig.ts` (imports: `syntheticAllowed` from `@gmt/core`, a value import):
 
 ```ts
 /** The fixture provider's guard entry: billable at the configured test rate, a finite test cap (no config field exists for it). */
@@ -2429,7 +2429,7 @@ node packages/db/scripts/build-airports.mjs --input /tmp/gmt-airports/airports.j
 node packages/db/scripts/build-airports.mjs --wikitext /tmp/gmt-airports/section8.wiki --revision 1378312633
 ```
 
-Expected: `wrote 79xx airports (…), version 2026-10-01-a89e4e0` (at most 7,917, at least 5,000) and `wrote 53 metro codes from revision 1378312633; dropped: NYC:IDL absent …; BER:SXF …; LUH:HWR …; MIA:PBI …`. `packages/db/data/metros.ATTRIBUTION` (plain text, written by hand):
+Expected: `wrote 79xx airports (…), version 2026-10-01-a89e4e0` (at most 7,917, at least 5,000) and `wrote 53 metro codes from revision 1378312633; dropped: BER:SXF absent from the airports file; LUH:HWR …; MIA:PBI …` (`NYC:IDL` never reaches the drop list: it is introduced by "formerly" and removed first). `packages/db/data/metros.ATTRIBUTION` (plain text, written by hand):
 
 ```
 metros.json: IATA metropolitan area codes extracted from the Wikipedia article "IATA airport code",
@@ -5672,13 +5672,13 @@ Rules: a reuse source is the newest `priced | empty | no_data` discovery outcome
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-import { type CellKey, type IsoDateTime, cellKeyString, fixedClock } from '@gmt/core';
+import { type CellKey, type IsoDateTime, asIsoDate, cellKeyString, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
 import { CellsRepo } from '../src/repositories/cells.js';
 import { DefinitionsRepo } from '../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
-import type { ReusedCopy, TileWrite } from '../src/types.js';
+import type { CalendarPriceRow, ReusedCopy, TileWrite } from '../src/types.js';
 import { T0, at, count, freshDb } from './helpers/db.js';
 import { EWR, calendarPrice, cell, exampleDefinitionInput, newExecution, snapshotOf, withNights } from './helpers/factories.js';
 
@@ -5818,8 +5818,9 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, [withNights(usd)], ['travelpayouts']);
     const real = find(ask(prices, definition.id, [usd]), usd);
-    if (real.price === null) throw new Error('fixture: priced');
-    expect(() => cells.copyReused(c, 'travelpayouts', [{ ...real, price: forge(real.price) }])).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
+    const realPrice = real.price;
+    if (realPrice === null) throw new Error('fixture: priced');
+    expect(() => cells.copyReused(c, 'travelpayouts', [{ ...real, price: forge(realPrice) }])).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual({ n: 0 });
     cells.copyReused(c, 'travelpayouts', [real]); // the unforged copy is accepted and stored with its conversion
     expect(prices.reuseCandidates(definition.id, 'travelpayouts', 'economy', 'unknown', 'authorised-cached', [usd], at('2026-10-14T11:00:00.000Z'))[0]?.price?.fx).toEqual(converted.fx);
@@ -6090,7 +6091,7 @@ const spaceParams = (space: ResolvedSpace | null) => ({
   }
 ```
 
-Add to `packages/db/src/repositories/cells.ts` (imports: `CalendarPriceRow`, `ReusedCopy` from `../types.js`; `type CalendarPriceDbRow, toCalendarPriceRow` added to the `../internal/priceRow.js` import):
+Add to `packages/db/src/repositories/cells.ts` (imports: `CalendarPriceRow`, `ReusedCopy` from `../types.js`; `type CalendarPriceDbRow, toCalendarPriceRow` added to the `../internal/priceRow.js` import; `readSnapshot` from `../internal/definitionRow.js`):
 
 ```ts
 /** prov-005: every field a reused copy carries must agree before anything is written (rule reuse-source). */

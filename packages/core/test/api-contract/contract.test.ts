@@ -123,6 +123,25 @@ describe('api-contract (spec §10)', () => {
     expect(resultRowSchema.safeParse(row).success).toBe(false);
     expect(resultRowSchema.safeParse({ ...row, provenance }).success).toBe(true);
     expect(resultRowSchema.safeParse({ ...row, provenance, searchLink: null }).success).toBe(true);
+    const other = {
+      seller: 'x',
+      pricePence: 1,
+      provenance,
+      booking: { kind: 'none' },
+      stale: false,
+      ageHours: 1,
+      verdictClass: 'failed',
+      unverified: [],
+      notSeenInLatest: null,
+    };
+    expect(resultRowSchema.safeParse({ ...row, provenance, otherOffers: [other] }).success).toBe(true);
+    expect(
+      resultRowSchema.safeParse({
+        ...row,
+        provenance,
+        otherOffers: [{ ...other, verdictClass: 'unchecked' }],
+      }).success,
+    ).toBe(false);
   });
   it('forces bookingLinks true when searchapi verifies', () => {
     const def = {

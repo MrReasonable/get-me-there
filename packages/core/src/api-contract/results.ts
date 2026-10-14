@@ -74,6 +74,7 @@ export const resultRowSchema = z.object({
       ageHours: ageHoursSchema,
       verdictClass: verdictClassSchema,
       unverified: z.array(constraintNameSchema),
+      notSeenInLatest: z.object({ ageHours: ageHoursSchema }).nullable(),
     }),
   ),
   notSeenInLatest: z.object({ ageHours: ageHoursSchema }).nullable(),
