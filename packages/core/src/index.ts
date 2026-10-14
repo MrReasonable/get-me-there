@@ -1,6 +1,18 @@
 // Barrel for @gmt/core. Every public export of the package is re-exported from here;
 // consumers never deep-import. Extended by WP1 and WP2.
 
+// Inferred contract types that other packages name in signatures (the schemas stay under `apiContract`).
+export type {
+  BudgetFit,
+  CalendarDay,
+  CoverageCheckRequest,
+  CoverageCheckResponse,
+  DefinitionResponse,
+  HistoryPoint,
+  ResultRow,
+  RouteSeriesPoint,
+  SchedulerJob,
+} from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
 export * from './config/presets.js';
 export * from './config/schema.js';

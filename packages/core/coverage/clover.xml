@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1792013753090" clover="3.2.0">
-  <project timestamp="1792013753090" name="All files">
-    <metrics statements="342" coveredstatements="342" conditionals="254" coveredconditionals="254" methods="74" coveredmethods="74" elements="670" coveredelements="670" complexity="0" loc="342" ncloc="342" packages="7" files="26" classes="26"/>
+<coverage generated="1792015030002" clover="3.2.0">
+  <project timestamp="1792015030002" name="All files">
+    <metrics statements="343" coveredstatements="343" conditionals="254" coveredconditionals="254" methods="74" coveredmethods="74" elements="671" coveredelements="671" complexity="0" loc="343" ncloc="343" packages="7" files="26" classes="26"/>
     <package name="src">
       <metrics statements="26" coveredstatements="26" conditionals="5" coveredconditionals="5" methods="6" coveredmethods="6"/>
       <file name="errors.ts" path="/Users/iandominey/projects/get-me-there/packages/core/src/errors.ts">
@@ -35,7 +35,7 @@
       </file>
     </package>
     <package name="src.api-contract">
-      <metrics statements="103" coveredstatements="103" conditionals="25" coveredconditionals="25" methods="5" coveredmethods="5"/>
+      <metrics statements="104" coveredstatements="104" conditionals="25" coveredconditionals="25" methods="5" coveredmethods="5"/>
       <file name="airports.ts" path="/Users/iandominey/projects/get-me-there/packages/core/src/api-contract/airports.ts">
         <metrics statements="2" coveredstatements="2" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
         <line num="5" count="3" type="stmt"/>
@@ -86,7 +86,7 @@
         <line num="134" count="3" type="stmt"/>
       </file>
       <file name="definitions.ts" path="/Users/iandominey/projects/get-me-there/packages/core/src/api-contract/definitions.ts">
-        <metrics statements="29" coveredstatements="29" conditionals="12" coveredconditionals="12" methods="4" coveredmethods="4"/>
+        <metrics statements="30" coveredstatements="30" conditionals="12" coveredconditionals="12" methods="4" coveredmethods="4"/>
         <line num="14" count="3" type="stmt"/>
         <line num="15" count="3" type="stmt"/>
         <line num="16" count="3" type="stmt"/>
@@ -108,14 +108,15 @@
         <line num="118" count="1" type="stmt"/>
         <line num="120" count="8" type="cond" truecount="4" falsecount="0"/>
         <line num="121" count="1" type="stmt"/>
-        <line num="128" count="3" type="stmt"/>
         <line num="129" count="3" type="stmt"/>
+        <line num="130" count="3" type="stmt"/>
         <line num="131" count="3" type="stmt"/>
-        <line num="143" count="3" type="stmt"/>
-        <line num="167" count="3" type="stmt"/>
-        <line num="168" count="3" type="stmt"/>
-        <line num="182" count="3" type="stmt"/>
-        <line num="189" count="3" type="stmt"/>
+        <line num="133" count="3" type="stmt"/>
+        <line num="145" count="3" type="stmt"/>
+        <line num="169" count="3" type="stmt"/>
+        <line num="170" count="3" type="stmt"/>
+        <line num="184" count="3" type="stmt"/>
+        <line num="191" count="3" type="stmt"/>
       </file>
       <file name="executions.ts" path="/Users/iandominey/projects/get-me-there/packages/core/src/api-contract/executions.ts">
         <metrics statements="5" coveredstatements="5" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
@@ -305,21 +306,21 @@
         <line num="32" count="2" type="stmt"/>
         <line num="34" count="6" type="stmt"/>
         <line num="36" count="5" type="stmt"/>
-        <line num="42" count="21" type="cond" truecount="2" falsecount="0"/>
-        <line num="43" count="20" type="cond" truecount="2" falsecount="0"/>
+        <line num="42" count="26" type="cond" truecount="2" falsecount="0"/>
+        <line num="43" count="25" type="cond" truecount="2" falsecount="0"/>
         <line num="44" count="6" type="stmt"/>
         <line num="45" count="6" type="cond" truecount="2" falsecount="0"/>
         <line num="46" count="1" type="stmt"/>
-        <line num="50" count="12" type="cond" truecount="2" falsecount="0"/>
-        <line num="55" count="5" type="stmt"/>
-        <line num="56" count="5" type="cond" truecount="3" falsecount="0"/>
-        <line num="58" count="2" type="stmt"/>
+        <line num="50" count="15" type="cond" truecount="2" falsecount="0"/>
+        <line num="55" count="6" type="stmt"/>
+        <line num="56" count="6" type="cond" truecount="3" falsecount="0"/>
+        <line num="58" count="3" type="stmt"/>
         <line num="61" count="2" type="cond" truecount="2" falsecount="0"/>
         <line num="65" count="1" type="stmt"/>
-        <line num="71" count="5" type="stmt"/>
-        <line num="72" count="5" type="cond" truecount="3" falsecount="0"/>
+        <line num="71" count="6" type="stmt"/>
+        <line num="72" count="6" type="cond" truecount="3" falsecount="0"/>
         <line num="74" count="1" type="stmt"/>
-        <line num="76" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="76" count="4" type="cond" truecount="2" falsecount="0"/>
         <line num="78" count="1" type="stmt"/>
         <line num="84" count="5" type="stmt"/>
         <line num="85" count="5" type="stmt"/>

@@ -90,3 +90,5 @@ export const toolRunResponseSchema = z.object({
   lines: z.array(z.string()),
   fixturesWritten: z.array(z.string()),
 });
+
+export type SchedulerJob = z.infer<typeof schedulerJobSchema>;

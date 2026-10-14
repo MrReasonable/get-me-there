@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 11.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 12.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -546,7 +546,10 @@ options for the expanded outbound; **every priced option is persisted as
 its own offer** (same call, no extra cost), and step 3 runs for the
 cheapest priced option per outbound. Outcome rules (all tested): step 1 zero options → `empty`; step 1
 options but every step 2 fails or returns no legs → throw `upstream` with
-`reason = 'no-return-legs'` (non-retryable on resume); some step 2 succeed →
+`reason = 'no-return-legs'` (non-retryable on resume; "fails" means an
+`upstream`, `network` or `parse` error, while `auth`, `quota`, `rate-limit`
+and `limiter-timeout` from any step propagate unchanged and are never counted
+as a failed expansion); some step 2 succeed →
 `priced` with `partial: true` and `failedExpansions`; a step 2 that succeeds
 with zero legs contributes nothing; a cell is `priced` only if ≥1 offer is
 written. **Price source rule (settled by the spike):** the step-2 price is
@@ -1607,6 +1610,11 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 12: second-pass clarifications (2026-10-14)
+
+§5.4: in a chained itinerary search only `upstream`, `network` and `parse`
+errors count as a failed expansion; account and rate refusals propagate.
 
 ### Revision 11: rules settled by the wave-1 brief reviews (2026-10-14)
 

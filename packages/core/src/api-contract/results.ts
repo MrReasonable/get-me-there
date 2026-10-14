@@ -238,3 +238,8 @@ export const routeHistoryResponseSchema = z.object({
     }),
   ),
 });
+
+export type ResultRow = z.infer<typeof resultRowSchema>;
+export type HistoryPoint = z.infer<typeof historyPointSchema>;
+export type RouteSeriesPoint = z.infer<typeof routeSeriesPointSchema>;
+export type CalendarDay = z.infer<typeof calendarDaySchema>;

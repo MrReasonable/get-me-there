@@ -125,6 +125,8 @@ const refineDefinition = (
     });
   }
 };
+/** The unrefined field shape: used to read stored rows back, where the save-time policy refinements must not run. */
+export const definitionShapeSchema = z.object(definitionFields).omit({ confirmedCostPence: true });
 export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
 export const definitionUpdateRequestSchema = z.object(definitionFields).partial();
 
@@ -197,3 +199,8 @@ export const coverageCheckResponseSchema = z.object({
   calls: positiveInt,
   notes: z.array(z.string()),
 });
+
+export type BudgetFit = z.infer<typeof budgetFitSchema>;
+export type CoverageCheckRequest = z.infer<typeof coverageCheckRequestSchema>;
+export type CoverageCheckResponse = z.infer<typeof coverageCheckResponseSchema>;
+export type DefinitionResponse = z.infer<typeof definitionResponseSchema>;
