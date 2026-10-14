@@ -1,4 +1,4 @@
-import { type IsoDate, isoDateSchema, isRealDate } from '../types/ids.js';
+import { type IsoDate, type IsoMonth, isoDateSchema, isoMonthSchema, isRealDate } from '../types/ids.js';
 
 /**
  * Calendar-date arithmetic on epoch-day integers (days since 1970-01-01). Spec §6.1:
@@ -72,4 +72,29 @@ export function addDays(date: IsoDate, n: number): IsoDate {
 /** Calendar days from `a` to `b` (negative when `b` is earlier). `daysBetween(d, d) === 0`. */
 export function daysBetween(a: IsoDate, b: IsoDate): number {
   return toEpochDay(b) - toEpochDay(a);
+}
+
+/** The `YYYY-MM` month a date falls in. Used by month tiles (spec §5.2). */
+export function monthOf(date: IsoDate): IsoMonth {
+  toEpochDay(date); // validates
+  return isoMonthSchema.parse(date.slice(0, 7));
+}
+
+/** Every month from `from`'s month to `to`'s month inclusive, in order; empty when `to < from`. */
+export function monthsSpanned(from: IsoDate, to: IsoDate): IsoMonth[] {
+  if (daysBetween(from, to) < 0) return [];
+  const out: IsoMonth[] = [];
+  let y = Number(from.slice(0, 4));
+  let m = Number(from.slice(5, 7));
+  const last = monthOf(to);
+  for (;;) {
+    const month = isoMonthSchema.parse(`${pad(y, 4)}-${pad(m, 2)}`);
+    out.push(month);
+    if (month === last) return out;
+    m += 1;
+    if (m === 13) {
+      m = 1;
+      y += 1;
+    }
+  }
 }
