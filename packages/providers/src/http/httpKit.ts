@@ -120,6 +120,14 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
         },
       );
     } catch (err) {
+      deps.log.warn(
+        {
+          providerId: r.providerId,
+          endpointPath: r.endpointPath,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'http request failed',
+      );
       // why: p-retry rethrows the signal's reason on abort; the engine contract is AbortedError (spec §5.2).
       if (r.signal.aborted && !(err instanceof AbortedError)) throw new AbortedError();
       throw err;
@@ -159,6 +167,10 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
         tileIndex: r.tileIndex,
         endpointPath: r.endpointPath,
       });
+    deps.log.debug(
+      { providerId: r.providerId, endpointPath: r.endpointPath },
+      'http joined in-flight request',
+    );
     return { ...shared, fromCache: true };
   }
 
@@ -182,6 +194,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
             tileIndex: r.tileIndex,
             endpointPath: r.endpointPath,
           });
+        deps.log.debug({ providerId: r.providerId, endpointPath: r.endpointPath }, 'http cache hit');
         return { status: 200, body: hit.body, fetchedAt: hit.storedAt, fromCache: true, cacheKey: key };
       }
     }

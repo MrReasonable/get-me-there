@@ -118,6 +118,18 @@ export async function runAttempt(
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), limits.requestTimeoutSeconds * 1000);
   const signal = AbortSignal.any([r.signal, timeout.signal]);
+  // why: path, never URL; no headers, no body (spec §14).
+  const logFailure = (stage: 'request' | 'body'): void =>
+    deps.log.warn(
+      {
+        providerId: r.providerId,
+        endpointPath: r.endpointPath,
+        attempt: ctx.attempt,
+        stage,
+        failure: r.signal.aborted ? 'aborted' : timeout.signal.aborted ? 'timeout' : 'network',
+      },
+      'http attempt failed',
+    );
 
   let res: Response;
   try {
@@ -134,6 +146,7 @@ export async function runAttempt(
     if (res.type === 'error') throw new TypeError('network error');
   } catch (err) {
     clearTimeout(timer);
+    logFailure('request');
     if (r.signal.aborted) {
       finalise('unknown');
       throw new AbortedError();
@@ -154,6 +167,7 @@ export async function runAttempt(
   try {
     text = await readCapped(res, signal);
   } catch {
+    logFailure('body');
     if (r.signal.aborted) {
       finalise('unknown', status);
       throw new AbortedError();
@@ -171,6 +185,16 @@ export async function runAttempt(
   const ok = status >= 200 && status < 300;
   const fetchedAt = deps.clock.now();
   finalise(ok ? 'ok' : 'error', status);
+  deps.log.debug(
+    {
+      providerId: r.providerId,
+      endpointPath: r.endpointPath,
+      attempt: ctx.attempt,
+      httpStatus: status,
+      durationMs: Date.now() - started,
+    },
+    'http attempt',
+  );
   if (status >= 300 && status < 400) throw redirectRefused(w, status);
   if (text === null) throw bodyTooLarge(w, status);
 
