@@ -1,9 +1,121 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d272f92c-6191-466c-b986-34a8e6ca3a3f",
+  "id": "e1628ff9-d091-494c-be06-7eeb2ddd0ede",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "airports": {
+      "name": "airports",
+      "columns": {
+        "iata": {
+          "name": "iata",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "icao": {
+          "name": "icao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "city": {
+          "name": "city",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "country": {
+          "name": "country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tz": {
+          "name": "tz",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lat": {
+          "name": "lat",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lon": {
+          "name": "lon",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "metro": {
+          "name": "metro",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dataset_version": {
+          "name": "dataset_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "airports_metro_idx": {
+          "name": "airports_metro_idx",
+          "columns": [
+            "metro"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "airports_iata_ck": {
+          "name": "airports_iata_ck",
+          "value": "iata GLOB '[A-Z][A-Z][A-Z]'"
+        },
+        "airports_metro_ck": {
+          "name": "airports_metro_ck",
+          "value": "metro IS NULL OR metro GLOB '[A-Z][A-Z][A-Z]'"
+        },
+        "airports_country_ck": {
+          "name": "airports_country_ck",
+          "value": "country GLOB '[A-Z][A-Z]'"
+        },
+        "airports_tz_ck": {
+          "name": "airports_tz_ck",
+          "value": "length(tz) > 0"
+        }
+      }
+    },
     "provider_requests": {
       "name": "provider_requests",
       "columns": {
@@ -598,70 +710,28 @@
         }
       }
     },
-    "airports": {
-      "name": "airports",
+    "fx_rates": {
+      "name": "fx_rates",
       "columns": {
-        "iata": {
-          "name": "iata",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "icao": {
-          "name": "icao",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
+        "date": {
+          "name": "date",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "city": {
-          "name": "city",
+        "currency": {
+          "name": "currency",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "country": {
-          "name": "country",
-          "type": "text",
+        "rate_nano": {
+          "name": "rate_nano",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "tz": {
-          "name": "tz",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lat": {
-          "name": "lat",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lon": {
-          "name": "lon",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "metro": {
-          "name": "metro",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "source": {
@@ -670,43 +740,36 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "dataset_version": {
-          "name": "dataset_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         }
       },
-      "indexes": {
-        "airports_metro_idx": {
-          "name": "airports_metro_idx",
-          "columns": [
-            "metro"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "fx_rates_date_currency_pk": {
+          "columns": [
+            "date",
+            "currency"
+          ],
+          "name": "fx_rates_date_currency_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {
-        "airports_iata_ck": {
-          "name": "airports_iata_ck",
-          "value": "iata GLOB '[A-Z][A-Z][A-Z]'"
+        "fx_rates_rate_ck": {
+          "name": "fx_rates_rate_ck",
+          "value": "typeof(rate_nano) = 'integer' AND rate_nano > 0"
         },
-        "airports_metro_ck": {
-          "name": "airports_metro_ck",
-          "value": "metro IS NULL OR metro GLOB '[A-Z][A-Z][A-Z]'"
+        "fx_rates_currency_ck": {
+          "name": "fx_rates_currency_ck",
+          "value": "currency GLOB '[A-Z][A-Z][A-Z]' AND currency <> 'GBP'"
         },
-        "airports_country_ck": {
-          "name": "airports_country_ck",
-          "value": "country GLOB '[A-Z][A-Z]'"
+        "fx_rates_date_ck": {
+          "name": "fx_rates_date_ck",
+          "value": "date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'"
         },
-        "airports_tz_ck": {
-          "name": "airports_tz_ck",
-          "value": "length(tz) > 0"
+        "fx_rates_source_ck": {
+          "name": "fx_rates_source_ck",
+          "value": "length(source) > 0"
         }
       }
     }
