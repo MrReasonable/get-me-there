@@ -64,6 +64,8 @@ export interface OperatorMessage {
 export interface Notifier {
   id: string;
   send(
-    msg: { kind: 'digest'; digest: AlertDigest; subject: string; body: string } | { kind: 'operator'; message: OperatorMessage },
+    msg:
+      | { kind: 'digest'; digest: AlertDigest; subject: string; body: string }
+      | { kind: 'operator'; message: OperatorMessage },
   ): Promise<{ ok: boolean; detail?: string }>;
 }

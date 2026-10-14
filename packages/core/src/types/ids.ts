@@ -18,7 +18,8 @@ export function isRealDate(y: number, m: number, d: number): boolean {
   if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
   if (m < 1 || m > 12 || d < 1) return false;
   const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] ?? 0;
+  const shortMonths = [4, 6, 9, 11];
+  const days = m === 2 ? (leap ? 29 : 28) : shortMonths.includes(m) ? 30 : 31;
   return d <= days;
 }
 

@@ -3,12 +3,12 @@ import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
 import type { BaggageSnapshot, FareConditions, SuppliedField } from '../types/itinerary.js';
 import type { Cabin, PointOfSale, ProviderId, SourceKind } from '../types/provenance.js';
 
-export type { ProviderId, SourceKind, Cabin } from '../types/provenance.js';
+export { AbortedError, BudgetExceeded, ProviderError } from '../errors.js';
 export type { CellKey } from '../types/definition.js';
+export type { Cabin, ProviderId, SourceKind } from '../types/provenance.js';
 export type { BudgetGuard, BudgetScope, Reservation, Usage } from './budget.js';
 export type { ResponseCache } from './cache.js';
 export type { Notifier } from './notifier.js';
-export { AbortedError, BudgetExceeded, ProviderError } from '../errors.js';
 
 /** Spec §5.1 (revision 11). Declared per capability and stamped on every stored price row. */
 export interface CapabilityInfo {
@@ -58,7 +58,12 @@ export type DiscoveryTileResult =
       noFares: CellKey[];
       notes: string[];
     }
-  | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: import('../errors.js').ProviderError };
+  | {
+      kind: 'tile-error';
+      index: number;
+      coveredCells: CellKey[];
+      error: import('../errors.js').ProviderError;
+    };
 
 export interface ItineraryQuery extends CellKey {
   cabin: Cabin;

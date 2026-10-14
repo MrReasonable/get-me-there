@@ -1,6 +1,12 @@
 import type { Cell } from './definition.js';
 import type { IsoDateTime } from './ids.js';
-import type { ConstraintName, NormalisedItinerary, Observation, ResultBasis, VerdictClass } from './itinerary.js';
+import type {
+  ConstraintName,
+  NormalisedItinerary,
+  Observation,
+  ResultBasis,
+  VerdictClass,
+} from './itinerary.js';
 import type { Provenance } from './provenance.js';
 
 /** Spec §6.8 rule. `requireAllVerified` only on the verified basis; cooldown default 336 h. */

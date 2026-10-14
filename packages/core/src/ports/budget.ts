@@ -35,7 +35,12 @@ export interface BudgetGuard {
     httpAttempt: number;
     endpointPath: string;
   }): Reservation;
-  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
+  recordCacheHit(p: {
+    providerId: ProviderId;
+    executionId: string | null;
+    tileIndex: number | null;
+    endpointPath: string;
+  }): void;
   usage(scope: BudgetScope): Usage;
   /** Upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart. */
   recentCalls(providerId: ProviderId, since: IsoDateTime): number;

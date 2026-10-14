@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   asIsoDate,
   asIsoDateTime,
+  asIsoMonth,
   iataSchema,
   isoDateSchema,
   isoDateTimeOfEpochMs,
@@ -36,11 +37,18 @@ describe('isoDateSchema', () => {
     expect(isRealDate(2000, 2, 29)).toBe(true);
     expect(isRealDate(1900, 2, 29)).toBe(false);
     expect(isRealDate(2024, 2, 29)).toBe(true);
+    expect(isRealDate(2026, 4, 31)).toBe(false);
+    expect(isRealDate(2026, 1, 31)).toBe(true);
+    expect(isRealDate(2026, 1.5, 1)).toBe(false);
   });
 });
 
 describe('isoMonthSchema', () => {
   it('accepts YYYY-MM', () => expect(isoMonthSchema.safeParse('2026-11').success).toBe(true));
+  it('asIsoMonth mints or throws', () => {
+    expect(asIsoMonth('2026-11')).toBe('2026-11');
+    expect(() => asIsoMonth('2026-13')).toThrow(/not an ISO month/);
+  });
   it.each(['2026-13', '2026-00', '2026-1', '202611'])('rejects %j', (v) =>
     expect(isoMonthSchema.safeParse(v).success).toBe(false),
   );

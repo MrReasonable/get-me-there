@@ -9,12 +9,22 @@ export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
 export type PointOfSale = string | 'unknown';
 
 export const providerIdSchema = z.enum(['travelpayouts', 'searchapi', 'fixture']);
-export const sourceKindSchema = z.enum(['authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic']);
+export const sourceKindSchema = z.enum([
+  'authorised-cached',
+  'scraped-aggregate',
+  'scraped-search',
+  'synthetic',
+]);
 export const cabinSchema = z.enum(['economy', 'premium_economy', 'business', 'first']);
-export const pointOfSaleSchema = z.string().regex(/^[A-Z]{2}$/).or(z.literal('unknown'));
+export const pointOfSaleSchema = z
+  .string()
+  .regex(/^[A-Z]{2}$/)
+  .or(z.literal('unknown'));
 
 /** Spec §3 "Provenance". `rateNano` = GBP per 1 native unit × 1e9 (spec §6.3). */
-export type FxInfo = { converted: false } | { converted: true; rateNano: number; rateDate: IsoDate; source: string };
+export type FxInfo =
+  | { converted: false }
+  | { converted: true; rateNano: number; rateDate: IsoDate; source: string };
 export const fxInfoSchema: z.ZodType<FxInfo> = z.discriminatedUnion('converted', [
   z.strictObject({ converted: z.literal(false) }),
   z.strictObject({

@@ -13,7 +13,10 @@ describe('cellKeyString', () => {
     expect(cellKeyString(cell)).toBe('LHR|JFK|2027-03-14|2027-03-28');
     expect(parseCellKeyString('LHR|JFK|2027-03-14|2027-03-28')).toEqual(cell);
   });
-  it.each(['LHR|JFK|2027-03-14', 'LHR|JFK|2027-03-14|2027-02-30', 'LHRX|JFK|2027-03-14|2027-03-28', ''])('rejects %j', (s) => {
-    expect(() => parseCellKeyString(s)).toThrow();
-  });
+  it.each(['LHR|JFK|2027-03-14', 'LHR|JFK|2027-03-14|2027-02-30', 'LHRX|JFK|2027-03-14|2027-03-28', ''])(
+    'rejects %j',
+    (s) => {
+      expect(() => parseCellKeyString(s)).toThrow();
+    },
+  );
 });

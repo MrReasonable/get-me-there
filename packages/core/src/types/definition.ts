@@ -1,4 +1,5 @@
-import { type Iata, type IsoDate, type IsoDateTime, asIata, asIsoDate } from './ids.js';
+import { z } from 'zod';
+import { type Iata, type IsoDate, type IsoDateTime, iataSchema, isoDateSchema } from './ids.js';
 import type { Cabin, ProviderId } from './provenance.js';
 
 /** Spec §6.1: absolute `{ from, to }` or relative `{ startOffsetDays ≥ 1, lengthDays }` windows. */
@@ -27,6 +28,8 @@ export interface Cell extends CellKey {
   nights: number;
 }
 
+const cellKeyTuple = z.tuple([iataSchema, iataSchema, isoDateSchema, isoDateSchema]);
+
 /** `O|D|dep|ret`, shared by core, db and engine so every map is keyed the same way. */
 export function cellKeyString(c: CellKey): string {
   return `${c.origin}|${c.destination}|${c.departureDate}|${c.returnDate}`;
@@ -34,18 +37,10 @@ export function cellKeyString(c: CellKey): string {
 
 /** Inverse of cellKeyString; throws on a malformed string. */
 export function parseCellKeyString(s: string): CellKey {
-  const parts = s.split('|');
-  if (parts.length !== 4) throw new Error(`not a cell key: ${s}`);
-  const [origin, destination, departureDate, returnDate] = parts;
-  if (origin === undefined || destination === undefined || departureDate === undefined || returnDate === undefined) {
-    throw new Error(`not a cell key: ${s}`);
-  }
-  return {
-    origin: asIata(origin),
-    destination: asIata(destination),
-    departureDate: asIsoDate(departureDate),
-    returnDate: asIsoDate(returnDate),
-  };
+  const r = cellKeyTuple.safeParse(s.split('|'));
+  if (!r.success) throw new Error(`not a cell key: ${s}`);
+  const [origin, destination, departureDate, returnDate] = r.data;
+  return { origin, destination, departureDate, returnDate };
 }
 
 /** HH:mm, inclusive, local to the airport. */
@@ -120,7 +115,10 @@ export interface SearchDefinition {
   deletedAt: IsoDateTime | null;
 }
 
-export type DefinitionInput = Omit<SearchDefinition, 'id' | 'confirmedCostPence' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
+export type DefinitionInput = Omit<
+  SearchDefinition,
+  'id' | 'confirmedCostPence' | 'createdAt' | 'updatedAt' | 'deletedAt'
+>;
 
 /** The definition as frozen at execution start, with the resolved window. Spec §8.1. */
 export type DefinitionSnapshot = SearchDefinition & {

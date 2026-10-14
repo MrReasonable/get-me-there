@@ -12,7 +12,14 @@ export function stripUrlsInText(text: string): string {
   });
 }
 
-export type ProviderErrorKind = 'auth' | 'rate-limit' | 'quota' | 'upstream' | 'parse' | 'network' | 'limiter-timeout';
+export type ProviderErrorKind =
+  | 'auth'
+  | 'rate-limit'
+  | 'quota'
+  | 'upstream'
+  | 'parse'
+  | 'network'
+  | 'limiter-timeout';
 
 /** Spec §5.1. Thrown by http-kit (classified) and adapters (parse); never retried at adapter level. */
 export class ProviderError extends Error {
@@ -57,7 +64,13 @@ export class BudgetExceeded extends Error {
   readonly current: number;
   readonly requested: number;
   readonly providerId: ProviderId | undefined;
-  constructor(p: { scope: BudgetScopeKind; cap: number; current: number; requested: number; providerId?: ProviderId }) {
+  constructor(p: {
+    scope: BudgetScopeKind;
+    cap: number;
+    current: number;
+    requested: number;
+    providerId?: ProviderId;
+  }) {
     super(
       `budget exceeded: ${p.scope} cap ${p.cap}, current ${p.current}, requested ${p.requested}${
         p.providerId ? ` (${p.providerId})` : ''

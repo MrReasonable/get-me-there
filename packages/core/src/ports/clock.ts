@@ -1,4 +1,4 @@
-import { type IsoDate, type IsoDateTime, asIsoDate, isoDateTimeOfEpochMs } from '../types/ids.js';
+import { asIsoDate, type IsoDate, type IsoDateTime, isoDateTimeOfEpochMs } from '../types/ids.js';
 
 /** Injected everywhere time is read, so tests pin instants. Spec §6.1: dates resolve in Europe/London. */
 export interface Clock {
@@ -25,7 +25,9 @@ export const systemClock: Clock = {
 };
 
 /** Test clock: a fixed instant that can be advanced or set. */
-export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void; set(at: IsoDateTime): void } {
+export function fixedClock(
+  at: IsoDateTime,
+): Clock & { advance(ms: number): void; set(at: IsoDateTime): void } {
   let current = new Date(at).getTime();
   return {
     now: () => isoDateTimeOfEpochMs(current),

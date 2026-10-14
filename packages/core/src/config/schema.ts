@@ -1,0 +1,317 @@
+import { z } from 'zod';
+import {
+  PENCE_TO_MICRO,
+  PLAN_PRESETS,
+  type PlanId,
+  type ProviderLimits,
+  TRAVELPAYOUTS_DEFAULTS,
+} from './presets.js';
+import { Secret } from './secret.js';
+
+/**
+ * Parsed configuration. Spec §12: parsed once in the api bootstrap; empty = unset; invalid or
+ * half-set config fails boot naming the field; nothing defaults to unlimited.
+ */
+export interface Config {
+  nodeEnv: 'production' | 'development' | 'test';
+  databasePath: string;
+  port: number;
+  bindAddress: string;
+  allowedHosts: string[];
+  appBaseUrl: string | null;
+  auth: { user: string; pass: Secret } | null;
+  allowUnauthenticated: boolean;
+  trustProxy: boolean;
+  logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+  pointOfSale: string;
+  staleAfterHours: number;
+  calendarStaleAfterHours: number | null;
+  stuckAfterHours: number;
+  maxCellsPerDefinition: number;
+  schedulerTimezone: string;
+  autoResume: boolean;
+  maxAutoResumes: number;
+  maxWaitSeconds: number;
+  requestTimeoutSeconds: number;
+  estimateRetryFactor: number;
+  fxMaxRateAgeDays: number;
+  spend: {
+    monthlyCapMicroGbp: number;
+    globalBillingDay: number;
+    softConfirmMicroGbp: number;
+    executionMaxCalls: number;
+    executionMaxFreeCalls: number;
+    executionMaxCostMicroGbp: number;
+    childMaxCalls: number;
+  };
+  providers: {
+    travelpayouts: { token: Secret; limits: ProviderLimits } | null;
+    searchapi: { key: Secret; plan: PlanId; trialUsed: number; limits: ProviderLimits } | null;
+    /** only outside production; the fixture provider itself is gated by syntheticAllowed */
+    fixture: { costMicroGbp: number } | null;
+  };
+  smtp: {
+    host: string;
+    port: number;
+    tls: 'implicit' | 'starttls' | 'none';
+    user: string;
+    pass: Secret;
+    to: string;
+    from: string;
+  } | null;
+  inContainer: boolean;
+  allowFixtureProvider: string | null;
+}
+
+export interface ParseConfigOptions {
+  /** injected so core stays pure; api passes fs.realpathSync, tolerating a missing file by resolving its directory */
+  realpath: (p: string) => string;
+}
+export type ConfigError = { field: string; message: string };
+export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: ConfigError[] };
+
+type Env = Record<string, string | undefined>;
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
+const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
+const smtpTuple = z.tuple([z.string(), z.string(), z.string(), z.string(), z.string(), z.string()]);
+
+/** Field readers: each validates one variable, records an error under its name, and returns undefined when unset. */
+class Reader {
+  readonly errors: ConfigError[] = [];
+  constructor(private readonly env: Env) {}
+
+  /** Empty string means unset (spec §12). */
+  raw(name: string): string | undefined {
+    const v = this.env[name];
+    return v === undefined || v === '' ? undefined : v;
+  }
+  private check<T>(name: string, schema: { safeParse(v: unknown): z.ZodSafeParseResult<T> }): T | undefined {
+    const v = this.raw(name);
+    if (v === undefined) return undefined;
+    const r = schema.safeParse(v);
+    if (r.success) return r.data;
+    this.errors.push({ field: name, message: r.error.issues.map((i) => i.message).join('; ') });
+    return undefined;
+  }
+  str(name: string): string | undefined {
+    return this.raw(name);
+  }
+  int(name: string, min: number, max = Number.MAX_SAFE_INTEGER): number | undefined {
+    return this.check(name, z.coerce.number().int().min(min).max(max));
+  }
+  num(name: string, min: number, max: number): number | undefined {
+    return this.check(name, z.coerce.number().min(min).max(max));
+  }
+  bool(name: string): boolean | undefined {
+    return this.check(
+      name,
+      z.enum(['true', 'false']).transform((v) => v === 'true'),
+    );
+  }
+  oneOf<const T extends readonly [string, ...string[]]>(name: string, values: T): T[number] | undefined {
+    return this.check(name, z.enum(values));
+  }
+  /** operator writes pence; code holds micro-GBP */
+  pence(name: string): number | undefined {
+    const v = this.int(name, 0);
+    return v === undefined ? undefined : v * PENCE_TO_MICRO;
+  }
+  fail(field: string, message: string): void {
+    this.errors.push({ field, message });
+  }
+  /** A variable that must be set; records the error and returns '' so parsing can continue and report every field. */
+  required(name: string): string {
+    const v = this.raw(name);
+    if (v !== undefined) return v;
+    this.fail(name, `${name} is required`);
+    return '';
+  }
+}
+
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function providerLimits(r: Reader, prefix: string, base: ProviderLimits): ProviderLimits {
+  return {
+    ...base,
+    billingDay: r.int(`${prefix}_BILLING_DAY`, 1, 28) ?? base.billingDay,
+    monthlyCallCap: r.int(`${prefix}_MONTHLY_CALL_CAP`, 0) ?? base.monthlyCallCap,
+    ratePerMinute: r.int(`${prefix}_RATE_PER_MINUTE`, 1) ?? base.ratePerMinute,
+    ratePerHour: r.int(`${prefix}_RATE_PER_HOUR`, 1) ?? base.ratePerHour,
+    concurrency: r.int(`${prefix}_CONCURRENCY`, 1) ?? base.concurrency,
+    cacheTtlHours: r.int(`${prefix}_CACHE_TTL_HOURS`, 0) ?? base.cacheTtlHours,
+  };
+}
+
+/** Spec §12. Returns every bad field at once rather than the first. */
+export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
+  const r = new Reader(env);
+  const nodeEnv = r.oneOf('NODE_ENV', ['production', 'development', 'test']) ?? 'production';
+  const databasePathRaw = r.required('DATABASE_PATH');
+  const port = r.int('PORT', 1, 65535) ?? 3000;
+  const bindAddress = r.str('BIND_ADDRESS') ?? '0.0.0.0';
+  const allowedHostsRaw = r.str('ALLOWED_HOSTS');
+  const allowedHosts = allowedHostsRaw
+    ? allowedHostsRaw
+        .split(',')
+        .map((h) => h.trim())
+        .filter((h) => h.length > 0)
+    : [`localhost:${port}`, `127.0.0.1:${port}`, ...(nodeEnv === 'development' ? ['localhost:5173'] : [])];
+  const appBaseUrl = r.str('APP_BASE_URL') ?? null;
+  if (appBaseUrl !== null && !z.url({ protocol: /^https$/ }).safeParse(appBaseUrl).success) {
+    r.fail('APP_BASE_URL', 'APP_BASE_URL must be an https URL');
+  }
+
+  // auth: both or neither; password ≥ 12 (spec §4)
+  const authUser = r.str('APP_BASIC_AUTH_USER');
+  const authPass = r.str('APP_BASIC_AUTH_PASS');
+  let auth: Config['auth'] = null;
+  if ((authUser === undefined) !== (authPass === undefined)) {
+    r.fail(
+      authUser === undefined ? 'APP_BASIC_AUTH_USER' : 'APP_BASIC_AUTH_PASS',
+      'APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS must both be set or both be empty',
+    );
+  } else if (authUser !== undefined && authPass !== undefined) {
+    if (authPass.length < 12) r.fail('APP_BASIC_AUTH_PASS', 'password must be at least 12 characters');
+    else auth = { user: authUser, pass: new Secret(authPass) };
+  }
+  const allowUnauthenticated = r.bool('ALLOW_UNAUTHENTICATED') ?? false;
+  if (auth === null && authUser === undefined && !LOOPBACK.test(bindAddress) && !allowUnauthenticated) {
+    r.fail(
+      'BIND_ADDRESS',
+      `binding ${bindAddress} without auth needs ALLOW_UNAUTHENTICATED=true (Tailscale-only hosts)`,
+    );
+    r.fail('ALLOW_UNAUTHENTICATED', 'set to true only on a host that is not reachable from the internet');
+  }
+
+  const pointOfSale = r.str('POINT_OF_SALE') ?? 'GB';
+  if (!/^[A-Z]{2}$/.test(pointOfSale))
+    r.fail('POINT_OF_SALE', 'POINT_OF_SALE must be an ISO 3166-1 alpha-2 code');
+  const schedulerTimezone = r.str('SCHEDULER_TIMEZONE') ?? 'Europe/London';
+  if (!isValidTimeZone(schedulerTimezone))
+    r.fail('SCHEDULER_TIMEZONE', `unknown IANA time zone: ${schedulerTimezone}`);
+
+  // providers
+  const tpToken = r.str('TRAVELPAYOUTS_TOKEN');
+  const travelpayouts =
+    tpToken === undefined
+      ? null
+      : { token: new Secret(tpToken), limits: providerLimits(r, 'TRAVELPAYOUTS', TRAVELPAYOUTS_DEFAULTS) };
+  const saKey = r.str('SEARCHAPI_KEY');
+  const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? 'trial';
+  const preset = PLAN_PRESETS[plan];
+  const searchapi =
+    saKey === undefined
+      ? null
+      : {
+          key: new Secret(saKey),
+          plan,
+          trialUsed: r.int('SEARCHAPI_TRIAL_USED', 0) ?? 0,
+          limits: {
+            ...providerLimits(r, 'SEARCHAPI', preset),
+            costPerCallMicroGbp: r.int('SEARCHAPI_COST_PER_CALL_MICRO_GBP', 0) ?? preset.costPerCallMicroGbp,
+            planFixedMicroGbp: r.pence('SEARCHAPI_PLAN_FIXED_PENCE') ?? preset.planFixedMicroGbp,
+          },
+        };
+  const billedPreset = searchapi === null ? null : preset;
+  // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
+  const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };
+
+  // smtp: all or nothing (spec §8.3)
+  const smtpNames = [
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_USER',
+    'SMTP_PASS',
+    'ALERT_EMAIL_TO',
+    'ALERT_EMAIL_FROM',
+  ] as const;
+  const smtpValues = smtpNames.map((n) => r.raw(n));
+  const smtpSetCount = smtpValues.filter((v) => v !== undefined).length;
+  let smtp: Config['smtp'] = null;
+  if (smtpSetCount > 0 && smtpSetCount < smtpNames.length) {
+    smtpNames.forEach((n, i) => {
+      if (smtpValues[i] === undefined) r.fail(n, 'SMTP settings are all or nothing');
+    });
+  } else if (smtpSetCount === smtpNames.length) {
+    // why: every value is known set here; the tuple parse gives typed strings without defaulted branches.
+    const [host, , user, pass, to, from] = smtpTuple.parse(smtpValues);
+    const smtpPort = r.int('SMTP_PORT', 1, 65535);
+    const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? 'implicit';
+    const plaintextAllowed = LOOPBACK.test(host) || (host === 'mailpit' && nodeEnv === 'development');
+    if (tls === 'none' && !plaintextAllowed) {
+      r.fail(
+        'SMTP_TLS',
+        'SMTP_TLS=none is allowed only for a loopback host or the mailpit host under NODE_ENV=development',
+      );
+    }
+    if (smtpPort !== undefined) smtp = { host, port: smtpPort, tls, user, pass: new Secret(pass), to, from };
+  }
+
+  const spend: Config['spend'] = {
+    monthlyCapMicroGbp: r.pence('MONTHLY_SPEND_CAP_PENCE') ?? billedPreset?.monthlySpendCapMicroGbp ?? 0,
+    globalBillingDay: r.int('GLOBAL_BILLING_DAY', 1, 28) ?? 1,
+    softConfirmMicroGbp: r.pence('SOFT_CONFIRM_PENCE') ?? 100 * PENCE_TO_MICRO,
+    executionMaxCalls: r.int('EXECUTION_MAX_CALLS', 0) ?? billedPreset?.executionMaxCalls ?? 0,
+    executionMaxFreeCalls: r.int('EXECUTION_MAX_FREE_CALLS', 0) ?? 2000,
+    executionMaxCostMicroGbp:
+      r.pence('EXECUTION_MAX_COST_PENCE') ?? billedPreset?.executionMaxCostMicroGbp ?? 0,
+    childMaxCalls: r.int('CHILD_MAX_CALLS', 0) ?? 6,
+  };
+
+  const logLevel = r.oneOf('LOG_LEVEL', LOG_LEVELS) ?? 'info';
+  const staleAfterHours = r.int('STALE_AFTER_HOURS', 1) ?? 192;
+  const calendarStaleAfterHours = r.int('CALENDAR_STALE_AFTER_HOURS', 1) ?? null;
+  const stuckAfterHours = r.int('STUCK_AFTER_HOURS', 1) ?? 12;
+  const maxCellsPerDefinition = r.int('MAX_CELLS_PER_DEFINITION', 1) ?? 50_000;
+  const autoResume = r.bool('AUTO_RESUME') ?? true;
+  const maxAutoResumes = r.int('MAX_AUTO_RESUMES', 0) ?? 3;
+  const maxWaitSeconds = r.int('MAX_WAIT_SECONDS', 1) ?? 3900;
+  const requestTimeoutSeconds = r.int('REQUEST_TIMEOUT_SECONDS', 1) ?? 60;
+  const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
+  const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
+  const trustProxy = r.bool('TRUST_PROXY') ?? false;
+  const inContainer = r.raw('IN_CONTAINER') !== undefined;
+  const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
+
+  if (r.errors.length > 0) return { ok: false, errors: r.errors };
+  const databasePath = databasePathRaw === ':memory:' ? ':memory:' : opts.realpath(databasePathRaw);
+  return {
+    ok: true,
+    config: {
+      nodeEnv,
+      databasePath,
+      port,
+      bindAddress,
+      allowedHosts,
+      appBaseUrl,
+      auth,
+      allowUnauthenticated,
+      trustProxy,
+      logLevel,
+      pointOfSale,
+      staleAfterHours,
+      calendarStaleAfterHours,
+      stuckAfterHours,
+      maxCellsPerDefinition,
+      schedulerTimezone,
+      autoResume,
+      maxAutoResumes,
+      maxWaitSeconds,
+      requestTimeoutSeconds,
+      estimateRetryFactor,
+      fxMaxRateAgeDays,
+      spend,
+      providers: { travelpayouts, searchapi, fixture },
+      smtp,
+      inContainer,
+      allowFixtureProvider,
+    },
+  };
+}

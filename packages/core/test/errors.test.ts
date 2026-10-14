@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AbortedError, BudgetExceeded, NormalisationError, ProviderError, stripUrlsInText } from '../src/errors.js';
+import {
+  AbortedError,
+  BudgetExceeded,
+  NormalisationError,
+  ProviderError,
+  stripUrlsInText,
+} from '../src/errors.js';
 
 describe('ProviderError', () => {
   it('carries kind, retryable and status', () => {
@@ -34,14 +40,25 @@ describe('ProviderError', () => {
 
 describe('BudgetExceeded', () => {
   it('names scope and numbers', () => {
-    const e = new BudgetExceeded({ scope: 'global-month', cap: 35_000_000, current: 34_000_000, requested: 3_200_000 });
+    const e = new BudgetExceeded({
+      scope: 'global-month',
+      cap: 35_000_000,
+      current: 34_000_000,
+      requested: 3_200_000,
+    });
     expect(e.scope).toBe('global-month');
     expect(e.message).toContain('global-month');
     expect(e.message).toContain('35000000');
     expect(e.providerId).toBeUndefined();
-    expect(new BudgetExceeded({ scope: 'provider-month', cap: 1, current: 1, requested: 1, providerId: 'searchapi' }).message).toContain(
-      'searchapi',
-    );
+    expect(
+      new BudgetExceeded({
+        scope: 'provider-month',
+        cap: 1,
+        current: 1,
+        requested: 1,
+        providerId: 'searchapi',
+      }).message,
+    ).toContain('searchapi');
   });
 });
 
