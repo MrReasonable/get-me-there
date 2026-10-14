@@ -268,6 +268,18 @@ CREATE TABLE `price_observations` (
 --> statement-breakpoint
 CREATE INDEX `price_observations_execution_price_idx` ON `price_observations` (`execution_id`,`price_pence`);--> statement-breakpoint
 CREATE INDEX `price_observations_offer_fetched_idx` ON `price_observations` (`offer_id`,`fetched_at`);--> statement-breakpoint
+CREATE TABLE `provider_cache` (
+	`key` text PRIMARY KEY NOT NULL,
+	`provider_id` text,
+	`body_json` text NOT NULL,
+	`stored_at` text NOT NULL,
+	`expires_at` text NOT NULL,
+	CONSTRAINT "provider_cache_key_ck" CHECK(length(key) = 64 AND key NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "provider_cache_stored_ck" CHECK(stored_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "provider_cache_expires_ck" CHECK(expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `provider_cache_expires_idx` ON `provider_cache` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `provider_requests` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`provider_id` text NOT NULL,
@@ -432,15 +444,13 @@ CREATE TABLE `segments` (
 	CONSTRAINT "segments_arrive_utc_ck" CHECK(arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
 --> statement-breakpoint
-CREATE TABLE `provider_cache` (
-	`key` text PRIMARY KEY NOT NULL,
-	`provider_id` text,
-	`body_json` text NOT NULL,
-	`stored_at` text NOT NULL,
-	`expires_at` text NOT NULL,
-	CONSTRAINT "provider_cache_key_ck" CHECK(length(key) = 64 AND key NOT GLOB '*[^0-9a-f]*'),
-	CONSTRAINT "provider_cache_stored_ck" CHECK(stored_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-	CONSTRAINT "provider_cache_expires_ck" CHECK(expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+CREATE TABLE `app_lock` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`holder` text NOT NULL,
+	`heartbeat_at` text NOT NULL,
+	`acquired_at` text NOT NULL,
+	CONSTRAINT "app_lock_singleton_ck" CHECK(id = 1),
+	CONSTRAINT "app_lock_holder_ck" CHECK(holder IN ('app', 'tool')),
+	CONSTRAINT "app_lock_heartbeat_ck" CHECK(heartbeat_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "app_lock_acquired_ck" CHECK(acquired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
---> statement-breakpoint
-CREATE INDEX `provider_cache_expires_idx` ON `provider_cache` (`expires_at`);
