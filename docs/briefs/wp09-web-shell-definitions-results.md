@@ -133,16 +133,17 @@ export function findBannedWords(text: string, allowlist?: readonly string[]): Ar
 
 // Core domain functions (WP2)
 export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
-export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
+export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string;   // itineraryHash, or `calendar:${calendarPriceId}`; the web's `?row=` parameter and email links use it
+export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* resultRowKey */>;
 ```
 
 From the plan's "API contract" (`apiContract`, every path under `/api`), the shapes the views read, copied exactly:
 
 - `common.ts`: `errorEnvelopeSchema` `{ error: { code: string; message: string; details?: { fields?: Array<{ field: string; message: string }> } & Record<string, unknown> } }`; `priceCellSchema` `{ pricePence, provenance, stale, ageHours }`; `coverageSummarySchema` `{ buckets, total, selected, itinerarySearched, onDemand, reused }`; `executionSummarySchema` `{ id, status, isChild, startedAt, finishedAt, ageHours }` (lists are newest first); `usageSchema` `{ scope: string; calls; costMicroGbp; costPence; cap; windowStart; windowEnd }`.
 - `airports.ts`: `GET /api/airports?q=` → `airportsResponseSchema` `Array<{ iata, name, city, country, tz, metro: string | null }>`.
-- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits, runsPerMonth, perScope: Array<{ scope, estimated, cap, fits }> }`; `estimateSchema` `{ cells; perProvider: Array<{ providerId; stage; calls; planCalls; costMicroGbp; costPence; seconds; blocked: string | null }>; totalCalls; totalPlanCalls; totalCostMicroGbp; totalCostPence; seconds; assumptions; windowClamped; retryFactor }`; `POST /api/definitions/estimate` (unsaved body) → `estimateSchema`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month; cachedRows; cellsInBand }> }>; calls; notes }`.
+- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput plus `confirmedCostPence?: number`, the explicit confirmation from the create click); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits, runsPerMonth, perScope: Array<{ scope, estimated, cap, fits }> }`; `estimateSchema` `{ cells; perProvider: Array<{ providerId; stage; calls; planCalls; costMicroGbp; costPence; seconds; blocked: string | null }>; totalCalls; totalPlanCalls; totalCostMicroGbp; totalCostPence; seconds; assumptions; windowClamped; retryFactor }`; `POST /api/definitions/estimate` (unsaved body) and `POST /api/definitions/:id/estimate` → `estimateResponseSchema` `{ estimate: Estimate; budgetFit: BudgetFit }`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month; cachedRows; cellsInBand }> }>; calls; notes }`.
 - `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell, status, stage, reason, resumeAfter, trigger, startedAt, finishedAt, errorText, progress: Array<{ stage, providerId, buckets, total }>, budget: Usage[], estimate, ledger: { calls, costMicroGbp, costPence, tiles, cacheHits, perProvider }, parityBreak, overrun, disabledProviders }`; `startExecutionRequestSchema` `{ confirmCostPence?: number }`; `startExecutionResponseSchema` `{ executionId }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }` → `startExecutionResponseSchema`.
-- `results.ts`: `resultRowSchema` (fields as in the plan, including `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `otherOffers[].stale/ageHours`, `executionId`, `calendarPriceId`, `observationId`); `resultsResponseSchema` `{ rows; total; truncated; basis; basisReason; executions: ExecutionSummary[]; coverage: CoverageSummary; excludedByCurrentSpace; verificationProviderConfigured: boolean; cheapest: ResultRow | null }`; `coverageResponseSchema` `{ executionId; summary; perStage: Array<{ stage; providerId; buckets; total; requests: { calls; cacheHits; costMicroGbp; planCalls: number | null }; overrun; parityBreak }>; selectedNotReached: Array<{ cell: Cell; reason: string }>; errors: Array<{ cell; stage; providerId; reason; lastError; attempts; retryable }>; scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerifiedPence: number | null; cells: Array<{ cell: Cell; calendar: PriceCell; verifyAvailable: boolean }> }`.
+- `results.ts`: `resultRowSchema` (fields as in the plan, including `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `otherOffers[].stale/ageHours`, `executionId`, `calendarPriceId`, `observationId`); `resultsResponseSchema` `{ rows; total; truncated; basis; basisReason; executions: ExecutionSummary[]; coverage: CoverageSummary; excludedByCurrentSpace; verificationProviderConfigured: boolean; cheapest: ResultRow | null }`; `coverageResponseSchema` `{ executionId; summary; perStage: Array<{ stage; providerId; buckets; total; requests: { calls; cacheHits; costMicroGbp; planCalls: number | null }; overrun; parityBreak }>; selectedNotReached: Array<{ cell: Cell; reason: string }>; errors: Array<{ cell; stage; providerId; reason; lastError; attempts; retryable }>; scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerified: (PriceCell & { cell: Cell; itineraryHash: string }) | null; cells: Array<{ cell: Cell; calendar: PriceCell; verifyAvailable: boolean }> }`.
 - `system.ts`: `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`.
 
 Usage scope labels are WP8's `scopeLabel`: `execution-calls`, `execution-free-calls`, `execution-cost`, `global-month`, `provider-month:<id>`, `provider-lifetime:<id>`.
@@ -874,7 +875,7 @@ export const COPY = {
   verifyStarted: 'Itinerary search started for this cell.',
 
   // basis and calendar gap (spec §6.9, §11)
-  calendarGapLead: (n: number, price: string) => `${n} cells have calendar prices below your cheapest verified (${price})`,
+  calendarGapLead: (n: number) => `${n} cells have calendar prices below your cheapest verified`,
   calendarGapList: 'Cells to search',
 
   // coverage view (spec §11 View D)
@@ -1207,7 +1208,7 @@ const SAMPLES: Record<string, unknown[]> = {
   openOn: ['www.google.com'],
   continueOnForm: ['www.google.com'],
   hostShown: ['www.google.com'],
-  calendarGapLead: [3, '£412'],
+  calendarGapLead: [3],
   sumMismatch: [9, 10],
   reusedNote: [4],
   cellLabel: ['LHR', 'JFK', '20 Mar 2027', '1 Apr 2027'],
@@ -1568,7 +1569,8 @@ export type ProviderEntry = ProvidersResponse['providers'][number];
 export type DefinitionResponse = z.infer<typeof apiContract.definitionResponseSchema>;
 export type DefinitionRequest = z.infer<typeof apiContract.definitionCreateRequestSchema>;
 export type DefinitionUpdate = z.infer<typeof apiContract.definitionUpdateRequestSchema>;
-export type EstimateResponse = z.infer<typeof apiContract.estimateSchema>;
+export type Estimate = z.infer<typeof apiContract.estimateSchema>;
+export type EstimateResponse = z.infer<typeof apiContract.estimateResponseSchema>;   // { estimate, budgetFit }
 export type CoverageCheckRequest = z.infer<typeof apiContract.coverageCheckRequestSchema>;
 export type CoverageCheckResponse = z.infer<typeof apiContract.coverageCheckResponseSchema>;
 export type ExecutionResponse = z.infer<typeof apiContract.executionResponseSchema>;
@@ -1600,8 +1602,8 @@ export const api = {
   providers: () => call<ProvidersResponse>('GET', '/api/providers'),
   definitions: () => call<DefinitionResponse[]>('GET', '/api/definitions'),
   estimateDraft: (body: DefinitionRequest) => call<EstimateResponse>('POST', '/api/definitions/estimate', { body }),
-  createDefinition: (body: DefinitionRequest & { confirmedCostPence: number }) => call<DefinitionResponse>('POST', '/api/definitions', { body }),
-  updateDefinition: (id: string, body: DefinitionUpdate | { confirmedCostPence: number }) =>
+  createDefinition: (body: DefinitionRequest) => call<DefinitionResponse>('POST', '/api/definitions', { body }),
+  updateDefinition: (id: string, body: DefinitionUpdate) =>
     call<DefinitionResponse>('PUT', '/api/definitions/:id', { params: { id }, body }),
   coverageCheck: (body: CoverageCheckRequest) => call<CoverageCheckResponse>('POST', '/api/definitions/coverage-check', { body }),
   startExecution: (id: string, body: { confirmCostPence?: number }) =>
@@ -1617,8 +1619,6 @@ export const api = {
   airports: (q: string) => call<AirportsResponse>('GET', '/api/airports', { query: { q } }),
 };
 ```
-
-`// why:` `createDefinition` and the confirmation `updateDefinition` carry `confirmedCostPence`, which the plan's `DefinitionInput` omits; WP8's brief accepts it on both routes (mismatch R1).
 
 `src/api/queries.ts`:
 
@@ -1707,7 +1707,7 @@ export function useExecutionActions() {
 ```ts
 import { asIata, asIsoDate, asIsoDateTime, asIsoMonth, type Layover, type Provenance } from '@gmt/core';
 import type {
-  AirportsResponse, CalendarGapResponse, CoverageCheckResponse, CoverageResponse, DefinitionResponse, EstimateResponse,
+  AirportsResponse, CalendarGapResponse, CoverageCheckResponse, CoverageResponse, DefinitionResponse, Estimate,
   ExecutionResponse, ProvidersResponse, ResultRow, ResultsResponse, UsageRow,
 } from '../src/api/types.js';
 
@@ -1809,7 +1809,7 @@ export function resultsResponse(over: Partial<ResultsResponse> = {}): ResultsRes
   };
 }
 
-export const estimate = (over: Partial<EstimateResponse> = {}): EstimateResponse => ({
+export const estimate = (over: Partial<Estimate> = {}): Estimate => ({
   cells: 2184,
   perProvider: [{ providerId: 'travelpayouts', stage: 'discovery', calls: 14, planCalls: 12, costMicroGbp: 0, costPence: 0, seconds: 20, blocked: null }],
   totalCalls: 14, totalPlanCalls: 12, totalCostMicroGbp: 0, totalCostPence: 0, seconds: 20,
@@ -1904,7 +1904,7 @@ export function coverageResponse(over: Partial<CoverageResponse> = {}): Coverage
 
 export function calendarGap(over: Partial<CalendarGapResponse> = {}): CalendarGapResponse {
   return {
-    cheapestVerifiedPence: 41200,
+    cheapestVerified: { pricePence: 41200, provenance: provSearch, stale: false, ageHours: 5, cell: cell('LHR', 'JFK', '2027-03-14', '2027-03-28', 14), itineraryHash: 'hash-verified-1' },
     cells: [{ cell: cell('LHR', 'EWR', '2027-04-02', '2027-04-16', 14), calendar: { pricePence: 39900, provenance: provCalendar, stale: false, ageHours: 50 }, verifyAvailable: true }],
     ...over,
   };
@@ -1933,7 +1933,7 @@ const MUTATION_BODIES: Record<string, JsonBodyType> = {
   'POST /api/executions/:id/resume': execution({ status: 'running' }),
   'POST /api/definitions/:id/executions': { executionId: 'exec-0002' },
   'POST /api/cells/verify': { executionId: 'exec-child-1' },
-  'POST /api/definitions/estimate': estimate(),
+  'POST /api/definitions/estimate': { estimate: estimate(), budgetFit: definition().budgetFit },
   'POST /api/definitions': definition({ id: 'def-0002' }),
   'PUT /api/definitions/:id': definition(),
   'POST /api/definitions/coverage-check': coverageCheck,
@@ -1992,6 +1992,8 @@ afterEach(() => {
 afterAll(() => server.close());
 // why: jsdom has no matchMedia; every test starts wide and opts into 375px explicitly.
 beforeEach(() => setViewportWidth(1280));
+// why: jsdom has no scrollIntoView; the ?row= test spies on this stub.
+if (typeof Element.prototype.scrollIntoView !== 'function') Element.prototype.scrollIntoView = () => undefined;
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -2013,9 +2015,9 @@ git add apps/web && git commit -m "wp09: typed API client from ROUTES, query hoo
 
 **Interfaces:**
 - Consumes: `SortKey`, `ResultFilters` (plan "Core domain functions"), `VerdictClass`, `ProviderId`, `ConstraintName`, `Iata`.
-- Produces: `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`, `ViewId`, `VIEWS`, `parseView`, `SortDir`, `ResultsUiState`, `parseResultsState`, `resultsStatePatch`, `parseBasis`, `setFilter`, `useMediaQuery`, `NARROW_QUERY`.
+- Produces: `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`, `ViewId`, `VIEWS`, `parseView`, `SortDir`, `ResultsUiState`, `parseResultsState`, `resultsStatePatch`, `parseBasis`, `parseSelectedRow`, `setFilter`, `useMediaQuery`, `NARROW_QUERY`.
 
-Decision (spec §11 "filter and sort state persists across views"): **URL search params**. They survive view switches (nav links copy every parameter except `view`), reloads and bookmarks, and need no store library. Keys: `view`, `def`, `basis`, `sort` (`price.asc`; absent = the server's class-then-price ranking), `f.class`, `f.provider`, `f.stops`, `f.carriers`, `f.dest`, `f.maxPrice` (pence), `f.nights` (`10-14`), `f.stale` (`hide`), `f.unverified`.
+Decision (spec §11 "filter and sort state persists across views"): **URL search params**. They survive view switches (nav links copy every parameter except `view`), reloads and bookmarks, and need no store library. Keys: `view`, `def`, `basis`, `sort` (`price.asc`; absent = the server's class-then-price ranking), `f.class`, `f.provider`, `f.stops`, `f.carriers`, `f.dest`, `f.maxPrice` (pence), `f.nights` (`10-14`), `f.stale` (`hide`), `f.unverified`, and `row=<resultRowKey>`, which selects, expands and scrolls to one results row (plan "Web"; email links use it, e.g. `/?view=results&def=<id>&row=calendar:7`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2024,7 +2026,7 @@ Decision (spec §11 "filter and sort state persists across views"): **URL search
 ```ts
 import { asIata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { parseBasis, parseResultsState, resultsStatePatch, setFilter, type ResultsUiState } from '../../src/state/resultsState.js';
+import { parseBasis, parseResultsState, parseSelectedRow, resultsStatePatch, setFilter, type ResultsUiState } from '../../src/state/resultsState.js';
 import { hrefWith, updateSearchParams } from '../../src/state/urlState.js';
 import { parseView } from '../../src/state/view.js';
 
@@ -2070,6 +2072,14 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect(parseView('coverage')).toBe('coverage');
     expect(parseView(null)).toBe('results');
     expect(parseView('nope')).toBe('results');
+  });
+
+  it('row= selects a results row by resultRowKey (email links)', () => {
+    expect(parseSelectedRow(new URLSearchParams('row=hash-verified-1'))).toBe('hash-verified-1');
+    expect(parseSelectedRow(new URLSearchParams('row=calendar%3A7'))).toBe('calendar:7');
+    expect(parseSelectedRow(new URLSearchParams('row='))).toBeNull();
+    expect(parseSelectedRow(new URLSearchParams(''))).toBeNull();
+    expect(parseSelectedRow(new URLSearchParams(`row=${'x'.repeat(300)}`))).toBeNull();
   });
 
   it('nav hrefs keep filters and sort when the view changes', () => {
@@ -2203,6 +2213,12 @@ export function parseBasis(v: string | null): Basis | null {
   return v === 'verified' || v === 'calendar' ? v : null;
 }
 
+/** `row=<resultRowKey>` (plan "Web"): the row an email link points at; bounded so a pasted URL cannot be huge. */
+export function parseSelectedRow(p: URLSearchParams): string | null {
+  const v = p.get('row');
+  return v !== null && v.length > 0 && v.length <= 200 ? v : null;
+}
+
 /** Strict parse: malformed tokens are dropped, never coerced. */
 export function parseResultsState(p: URLSearchParams): ResultsUiState {
   const rawSort = p.get('sort');
@@ -2277,7 +2293,7 @@ export function useMediaQuery(query: string): boolean {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/state/resultsState.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3249,7 +3265,7 @@ git add apps/web && git commit -m "wp09: expanded row with verdicts, booking for
 - Test: `test/views/results/table.test.tsx`
 
 **Interfaces:**
-- Consumes: `sortRows`, `filterRows`, `bandCheapest` (returns `Set<string>` of row keys), `SortKey` (plan "Core domain functions"); `cellKeyString` (WP0); TanStack Table v9 (Library notes); `ExpandedRow` (Task 9.7); `ViewHeader` (Task 9.6); URL state (Task 9.4).
+- Consumes: `sortRows`, `filterRows`, `bandCheapest` (returns a `Set` of `resultRowKey`s), `resultRowKey`, `SortKey` (plan "Core domain functions"); TanStack Table v9 (Library notes); `ExpandedRow` (Task 9.7); `ViewHeader` (Task 9.6); URL state (Task 9.4).
 - Produces: `ResultsTable`, `WIDE_COLUMNS`, `NARROW_COLUMNS`, `rowId`, `ResultsHeader`, `Filters`, `ResultsView({ definition })` (Task 9.9 gives its final form).
 
 - [ ] **Step 1: Write the failing test**
@@ -3259,7 +3275,7 @@ git add apps/web && git commit -m "wp09: expanded row with verdicts, booking for
 ```tsx
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ResultsView } from '../../../src/views/Results/ResultsView.js';
 import { API, definition, resultsResponse, verifiedRow } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
@@ -3374,6 +3390,24 @@ describe('client-side sort and filter (spec §6.5)', () => {
   });
 });
 
+describe('row= selects, expands and scrolls to a row (plan "Web")', () => {
+  it('the row named by its resultRowKey is marked current, expanded and scrolled into view', async () => {
+    countResults();
+    const scrolled: Element[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      scrolled.push(this);
+    });
+    renderWithProviders(<ResultsView definition={definition()} />, { search: '?view=results&row=hash-partial-1' });
+    await screen.findByRole('table', { name: 'Round trips found' });
+    const selected = dataRows().find((r) => r.getAttribute('aria-current') === 'true');
+    expect(selected).toBeDefined();
+    expect(within(selected ?? document.body).getByText('£388')).toBeInTheDocument();
+    expect(within(selected ?? document.body).getByRole('button', { name: /Hide details/ })).toHaveAttribute('aria-expanded', 'true');
+    await expect.poll(() => scrolled).toEqual([selected]);
+    spy.mockRestore();
+  });
+});
+
 describe('keyboard operation of the table (spec §9 item 6, §11 accessibility)', () => {
   it('sort headers and row expansion work from the keyboard alone', async () => {
     countResults();
@@ -3409,9 +3443,9 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Results/Result
 `src/views/Results/ResultsTable.tsx`:
 
 ```tsx
-import { cellKeyString, effectiveAge, formatDuration, type SortKey } from '@gmt/core';
+import { effectiveAge, formatDuration, resultRowKey, type SortKey } from '@gmt/core';
 import { createColumnHelper, type ExpandedState, rowExpandingFeature, tableFeatures, useTable } from '@tanstack/react-table';
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { ResultRow } from '../../api/types.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
@@ -3443,15 +3477,11 @@ const SORT_KEY: Partial<Record<ColumnId, SortKey>> = {
 
 type Sort = { key: SortKey; dir: SortDir } | null;
 
-/**
- * Stable row identity: the itinerary hash, or cell + provider for calendar rows. It must equal the
- * row key in the Set that core's bandCheapest returns (mismatch R2: the plan does not export that key function).
- */
-export function rowId(r: ResultRow): string {
-  return r.itineraryHash ?? `${cellKeyString(r.cell)}|${r.provenance.providerId}`;
-}
+/** Row identity is core's resultRowKey (itineraryHash, or `calendar:<id>`): the bandCheapest Set and `?row=` both use it. */
+export const rowId = (r: ResultRow): string => resultRowKey(r);
 
 const detailId = (id: string) => `detail-${id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+const rowDomId = (id: string) => `row-${id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 
 function SortHeader({ id, sort, onSort }: { id: ColumnId; sort: Sort; onSort: (k: SortKey) => void }) {
   const key = SORT_KEY[id];
@@ -3545,6 +3575,8 @@ export interface ResultsTableProps {
   rows: readonly ResultRow[];
   /** Row keys core's bandCheapest marked over the filtered set (spec §6.5). */
   banded: ReadonlySet<string>;
+  /** `?row=<resultRowKey>`: selected, expanded and scrolled to (email links). */
+  selectedRow: string | null;
   sort: Sort;
   onSort: (k: SortKey) => void;
   narrow: boolean;
@@ -3553,8 +3585,13 @@ export interface ResultsTableProps {
 }
 
 /** View A table. Rows arrive filtered and sorted by core's functions; the table renders and expands. */
-export function ResultsTable({ rows, banded, sort, onSort, narrow, verificationConfigured, definitionId }: ResultsTableProps) {
-  const [expanded, setExpanded] = useState<ExpandedState>({});
+export function ResultsTable({ rows, banded, selectedRow, sort, onSort, narrow, verificationConfigured, definitionId }: ResultsTableProps) {
+  const [expanded, setExpanded] = useState<ExpandedState>(() => (selectedRow === null ? {} : { [selectedRow]: true }));
+  const selectedPresent = selectedRow !== null && rows.some((r) => rowId(r) === selectedRow);
+  useEffect(() => {
+    // why: an email link lands here; bring its row into view once the rows are rendered.
+    if (selectedRow !== null && selectedPresent) document.getElementById(rowDomId(selectedRow))?.scrollIntoView({ block: 'center' });
+  }, [selectedRow, selectedPresent]);
   const adjusted = rows.some((r) => r.adjustedPence !== null);
   const ids = useMemo(() => (narrow ? NARROW_COLUMNS : WIDE_COLUMNS.filter((c) => c !== 'adjusted' || adjusted)), [narrow, adjusted]);
   const columns = useMemo(() => buildColumns(ids, sort, onSort, banded), [ids, sort, onSort, banded]);
@@ -3583,7 +3620,11 @@ export function ResultsTable({ rows, banded, sort, onSort, narrow, verificationC
       <tbody>
         {table.getRowModel().rows.map((row) => (
           <Fragment key={row.id}>
-            <tr className="border-b border-slate-200 align-top">
+            <tr
+              id={rowDomId(row.id)}
+              aria-current={row.id === selectedRow ? 'true' : undefined}
+              className={`border-b border-slate-200 align-top ${row.id === selectedRow ? 'bg-amber-50 outline outline-2 outline-amber-600' : ''}`}
+            >
               {row.getAllCells().map((c) => (
                 <td key={c.id} className="p-1">
                   <table.FlexRender cell={c} />
@@ -3832,7 +3873,7 @@ import type { DefinitionResponse } from '../../api/types.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
 import { COPY } from '../../copy.js';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
-import { parseBasis, parseResultsState, resultsStatePatch } from '../../state/resultsState.js';
+import { parseBasis, parseResultsState, parseSelectedRow, resultsStatePatch } from '../../state/resultsState.js';
 import { updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { Filters } from './Filters.js';
 import { ResultsHeader } from './ResultsHeader.js';
@@ -3871,6 +3912,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
       <ResultsTable
         rows={rows}
         banded={banded}
+        selectedRow={parseSelectedRow(params)}
         sort={ui.sort}
         onSort={onSort}
         narrow={narrow}
@@ -3887,7 +3929,7 @@ Wire the view into `App.tsx`: replace the `view === 'results'` part of the WP9 p
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 8 + 12 + 8 tests.
+Expected: PASS, 9 + 12 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3903,7 +3945,7 @@ git add apps/web && git commit -m "wp09: View A table, two-line header, client-s
 - Test: `test/views/results/basisAndGap.test.tsx`
 
 **Interfaces:**
-- Consumes: `useCalendarGap`, `useExecutionActions` (Task 9.3); `calendarGapResponseSchema` `{ cheapestVerifiedPence, cells: [{ cell, calendar: PriceCell, verifyAvailable }] }`; `resultsResponse.verificationProviderConfigured`; `cellKeyString` (WP0).
+- Consumes: `useCalendarGap`, `useExecutionActions` (Task 9.3); `calendarGapResponseSchema` `{ cheapestVerified: (PriceCell & { cell, itineraryHash }) | null, cells: [{ cell, calendar: PriceCell, verifyAvailable }] }`; `resultsResponse.verificationProviderConfigured`; `cellKeyString` (WP0).
 - Produces: `BasisSwitch({ basis, reason })`, `CalendarGapBanner({ definitionId })`, final `ResultsView`.
 
 - [ ] **Step 1: Write the failing test**
@@ -3966,7 +4008,9 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
     );
     const { user } = renderWithProviders(<ResultsView definition={definition()} />);
     const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    expect(banner).toHaveTextContent('1 cells have calendar prices below your cheapest verified (£412)');
+    expect(banner).toHaveTextContent('1 cells have calendar prices below your cheapest verified (£412');
+    expect(within(banner).getByText('£412')).toBeInTheDocument();
+    expect(within(banner).getByText('Google Flights via SearchApi')).toBeInTheDocument();
     expect(within(banner).getByText('£399')).toBeInTheDocument();
     expect(within(banner).getByText('Aviasales cache')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Search this cell for itineraries' }));
@@ -4033,22 +4077,28 @@ import { useCalendarGap, useExecutionActions } from '../../api/queries.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, formatPence } from '../../format.js';
+import { formatIsoDate } from '../../format.js';
 
 /**
  * Spec §11: "N cells have calendar prices below your cheapest verified (£X)" with per-cell verify.
  * Rendered only when the results response says a verification provider is configured, so the
- * query never runs on the £0 configuration. £X is a reference to the class-verified headline row,
- * whose provenance the table shows; the contract gives it as pence only (mismatch R3).
+ * query never runs on the £0 configuration. £X renders through PriceCell with its provenance.
  */
 export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
   const gap = useCalendarGap(definitionId, true);
   const actions = useExecutionActions();
   const data = gap.data;
-  if (data === undefined || data.cells.length === 0 || data.cheapestVerifiedPence === null) return null;
+  if (data === undefined || data.cells.length === 0 || data.cheapestVerified === null) return null;
+  const cv = data.cheapestVerified;
   return (
     <section aria-label={COPY.calendarGapList} className="rounded border border-amber-700 bg-amber-50 p-2 text-sm">
-      <p>{COPY.calendarGapLead(data.cells.length, formatPence(data.cheapestVerifiedPence))}</p>
+      <p className="flex flex-wrap items-center gap-1">
+        {COPY.calendarGapLead(data.cells.length)} (
+        <PriceBoundary>
+          <PriceCell pricePence={cv.pricePence} provenance={cv.provenance} calendar={false} stale={cv.stale} destination={cv.cell.destination} />
+        </PriceBoundary>
+        )
+      </p>
       <ul className="mt-1 space-y-1">
         {data.cells.map((c) => {
           const { nights, ...key } = c.cell;
@@ -4086,7 +4136,7 @@ import type { DefinitionResponse } from '../../api/types.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
 import { COPY } from '../../copy.js';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
-import { parseBasis, parseResultsState, resultsStatePatch } from '../../state/resultsState.js';
+import { parseBasis, parseResultsState, parseSelectedRow, resultsStatePatch } from '../../state/resultsState.js';
 import { updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { BasisSwitch } from './BasisSwitch.js';
 import { CalendarGapBanner } from './CalendarGapBanner.js';
@@ -4131,6 +4181,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
       <ResultsTable
         rows={rows}
         banded={banded}
+        selectedRow={parseSelectedRow(params)}
         sort={ui.sort}
         onSort={onSort}
         narrow={narrow}
@@ -4145,7 +4196,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 4 + 8 + 12 + 8 tests.
+Expected: PASS, 4 + 9 + 12 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4570,7 +4621,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { defaultDraft, draftToRequest } from '../../../src/views/Definitions/draft.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
-import { API, estimate, providersResponse } from '../../fixtures.js';
+import { API, definition, estimate, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
@@ -4678,7 +4729,7 @@ describe('per-destination fields and the example (spec §11)', () => {
     server.use(
       http.post(`${API}/definitions/estimate`, async ({ request }) => {
         bodies.push(await request.json());
-        return HttpResponse.json(estimate());
+        return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
       }),
     );
     const { user } = renderForm();
@@ -5264,12 +5315,12 @@ export function CoverageCheck({ draft, available }: { draft: Draft; available: b
 `src/views/Definitions/EstimatePanel.tsx`:
 
 ```tsx
-import type { DefinitionResponse, EstimateResponse } from '../../api/types.js';
+import type { DefinitionResponse, Estimate } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatMicroGbp, formatSeconds } from '../../format.js';
 
 /** Spec §11: the estimate shown before the operator confirms (POST /api/definitions/estimate for an unsaved body). */
-export function EstimatePanel({ estimate }: { estimate: EstimateResponse }) {
+export function EstimatePanel({ estimate }: { estimate: Estimate }) {
   const e = estimate;
   return (
     <section aria-label={COPY.estimateHeading} className="space-y-1 rounded border border-slate-300 p-2 text-sm">
@@ -5299,7 +5350,7 @@ export function EstimatePanel({ estimate }: { estimate: EstimateResponse }) {
   );
 }
 
-/** Spec §8.2: budgetFit (runs per month × estimate vs every cap) from the saved definition; a miss is an alert. */
+/** Spec §8.2: budgetFit (runs per month × estimate vs every cap), from the estimate response before the create click and from the saved definition after; a miss is an alert. */
 export function BudgetFitPanel({ fit }: { fit: DefinitionResponse['budgetFit'] }) {
   return fit.fits ? (
     <p className="text-sm">{COPY.budgetFitOk(fit.runsPerMonth)}</p>
@@ -5345,7 +5396,7 @@ const errorsFor = (errors: ReadonlyArray<{ field: string; message: string }>, fi
 
 /**
  * Spec §11 Definitions form. New definition: "Show estimate" calls POST /api/definitions/estimate
- * with the unsaved body; "Create and confirm" is the explicit confirmation, a POST carrying
+ * with the unsaved body and shows the estimate and budgetFit; "Create and confirm" is the explicit confirmation, a POST carrying
  * confirmedCostPence = ceil(estimate / 10 000) (spec §8.1). Editing the draft after an estimate
  * hides Create until it is re-estimated. Saved definition: "Save changes" PUTs; a needsConfirmation
  * response asks again before scheduled runs proceed.
@@ -5387,7 +5438,7 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
     onError,
   });
   const create = useMutation({
-    mutationFn: (e: EstimateResponse) => api.createDefinition({ ...draftToRequest(draft), confirmedCostPence: confirmationPence(e.totalCostMicroGbp) }),
+    mutationFn: (e: EstimateResponse) => api.createDefinition({ ...draftToRequest(draft), confirmedCostPence: confirmationPence(e.estimate.totalCostMicroGbp) }),
     onSuccess: (d) => {
       accept(d, COPY.created);
       // why: only the selected definition changes; edit= stays, so the form keeps its confirmation notice.
@@ -5523,7 +5574,7 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
         )}
         {saved === null && estimate !== null && estimatedFor === current ? (
           <button type="button" className="rounded bg-slate-900 px-2 text-white" onClick={() => create.mutate(estimate)}>
-            {COPY.createConfirm(formatPence(confirmationPence(estimate.totalCostMicroGbp)))}
+            {COPY.createConfirm(formatPence(confirmationPence(estimate.estimate.totalCostMicroGbp)))}
           </button>
         ) : null}
       </div>
@@ -5539,7 +5590,12 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
           </button>
         </div>
       ) : null}
-      {saved === null && estimate !== null ? <EstimatePanel estimate={estimate} /> : null}
+      {saved === null && estimate !== null ? (
+        <>
+          <EstimatePanel estimate={estimate.estimate} />
+          <BudgetFitPanel fit={estimate.budgetFit} />
+        </>
+      ) : null}
       {saved?.estimate ? <EstimatePanel estimate={saved.estimate} /> : null}
       {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}
       {notice !== null ? <p role="status">{notice}</p> : null}
@@ -5567,7 +5623,7 @@ git add apps/web docs/examples && git commit -m "wp09: Definitions form with air
 - Test: `test/views/definitions/create.test.tsx`
 
 **Interfaces:**
-- Consumes: `DefinitionForm`, `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel` (Task 9.12); every view of Tasks 9.5–9.11; `StatusBar` (Task 9.6); `POST /api/definitions/estimate`, `POST /api/definitions` (with `confirmedCostPence`, mismatch R1), `PUT /api/definitions/:id` (`needsConfirmation`, `notices`).
+- Consumes: `DefinitionForm`, `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel` (Task 9.12); every view of Tasks 9.5–9.11; `StatusBar` (Task 9.6); `POST /api/definitions/estimate` (`{ estimate, budgetFit }`), `POST /api/definitions` (with `confirmedCostPence?`), `PUT /api/definitions/:id` (`needsConfirmation`, `notices`).
 - Produces: `DefinitionsView()`, the final `App()`.
 
 - [ ] **Step 1: Write the failing test**
@@ -5585,6 +5641,7 @@ import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
 const pricedEstimate = estimate({ totalCostMicroGbp: 12_345, totalCostPence: 2 });
+const estimateBody = (budgetFit = definition().budgetFit) => ({ estimate: pricedEstimate, budgetFit });
 
 async function importAndEstimate(user: ReturnType<typeof renderWithProviders>['user']) {
   await user.click(await screen.findByRole('button', { name: 'Import example (London to New York)' }));
@@ -5631,7 +5688,7 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     server.use(
       http.post(`${API}/definitions/estimate`, async ({ request }) => {
         estimates.push(await request.json());
-        return HttpResponse.json(pricedEstimate);
+        return HttpResponse.json(estimateBody());
       }),
       http.post(`${API}/definitions`, async ({ request }) => {
         creates.push(await request.json());
@@ -5644,6 +5701,7 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     expect(within(panel).getByText('2184 cells')).toBeInTheDocument();
     expect(within(panel).getByText('Travelpayouts discovery: 14 calls · £0 · about 20s')).toBeInTheDocument();
     expect(within(panel).getByText('total £0.02 per run · about 20s')).toBeInTheDocument();
+    expect(screen.getByText('Fits every cap at 4 runs a month.')).toBeInTheDocument();
     expect(estimates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: true });
     expect(estimates[0]).not.toHaveProperty('confirmedCostPence');
     expect(creates).toEqual([]);
@@ -5656,7 +5714,7 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
   });
 
   it('editing after an estimate hides Create until the draft is re-estimated', async () => {
-    server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(pricedEstimate)));
+    server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())));
     const { user } = renderWithProviders(<DefinitionsView />);
     await importAndEstimate(user);
     await screen.findByRole('button', { name: /Create and confirm/ });
@@ -5667,16 +5725,16 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     expect(await screen.findByRole('button', { name: /Create and confirm/ })).toBeInTheDocument();
   });
 
-  it('a budgetFit miss on the created definition is shown as an alert', async () => {
+  it('a budgetFit miss is shown as an alert before the create click', async () => {
     server.use(
-      http.post(`${API}/definitions`, () =>
-        HttpResponse.json(definition({ id: 'def-0002', budgetFit: { fits: false, runsPerMonth: 4, perScope: [{ scope: 'provider-month:searchapi', estimated: 12000, cap: 10000, fits: false }] } })),
+      http.post(`${API}/definitions/estimate`, () =>
+        HttpResponse.json(estimateBody({ fits: false, runsPerMonth: 4, perScope: [{ scope: 'provider-month:searchapi', estimated: 12000, cap: 10000, fits: false }] })),
       ),
     );
     const { user } = renderWithProviders(<DefinitionsView />);
     await importAndEstimate(user);
-    await user.click(await screen.findByRole('button', { name: /Create and confirm/ }));
     expect(await screen.findByText('Does not fit every cap at 4 runs a month:')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create and confirm/ })).toBeInTheDocument();
     expect(screen.getByText('provider-month:searchapi: 12000 estimated, cap 10000')).toBeInTheDocument();
   });
 });
@@ -5943,7 +6001,7 @@ Run from the repository root, in order; each must give the stated outcome.
 1. `pnpm install --frozen-lockfile` → exits 0 (the lockfile includes `msw`, `@testing-library/dom` and `zod` for `@gmt/web`).
 2. `pnpm lint:fix && pnpm lint` → `biome check` reports no errors (format and organised imports applied).
 3. `pnpm --filter @gmt/web typecheck` → exits 0. `pnpm -r typecheck` → exits 0.
-4. `pnpm --filter @gmt/web test` → every web test passes (Tasks 9.1–9.14: 5 + 8 + 6 + 6 + 6 + 7 + 12 + 8 + 4 + 7 + 3 + 8 + 9 + 8 = 97 tests, none skipped) and the coverage report shows **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` with no threshold error.
+4. `pnpm --filter @gmt/web test` → every web test passes (Tasks 9.1–9.14: 5 + 8 + 6 + 7 + 6 + 7 + 12 + 9 + 4 + 7 + 3 + 8 + 9 + 8 = 99 tests, none skipped) and the coverage report shows **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` with no threshold error.
 5. `pnpm test` → every package green with its thresholds.
 6. `node scripts/check-boundaries.mjs` → exits 0; `@gmt/web` imports no workspace package except `@gmt/core`.
 7. `pnpm --filter @gmt/web build` → exits 0 and writes `apps/web/dist/index.html` plus hashed assets under `apps/web/dist/assets/`.
@@ -5959,9 +6017,7 @@ None requires the operator's judgement. The contract gaps of the first draft (ai
 
 ### Remaining mismatches (spec, plan, brief; neither spec nor plan edited)
 
-- **R1** The plan's `definitionCreateRequestSchema` is `DefinitionInput`, which omits `confirmedCostPence`, and `definitionUpdateRequestSchema` is its partial; so the contract has no field through which the create click (spec §11) or the re-confirmation after `needsConfirmation` (spec §8.1) sets the confirmation. WP8's brief accepts `confirmedCostPence` on `POST` and `PUT /api/definitions`; this brief sends it there. WP8's brief also still types `needsConfirmation` as a boolean, where the plan has `{ estimateMicroGbp, confirmedCostPence } | null`; this brief follows the plan.
-- **R2** `bandCheapest` returns `Set<string /* row key */>`, but the plan names no row-key function. `rowId` here (`itineraryHash ?? cellKeyString(cell) + '|' + providerId`) must equal WP2's key; the plan should export the function.
-- **R3** `calendarGapResponseSchema.cheapestVerifiedPence` carries no provenance, yet spec §11 prints it in the banner ("… cheapest verified (£X)") and §11 wants provenance on every price. The banner prints it as a reference to the class-verified headline row; a `cheapestVerified: PriceCell` field would remove the exception.
-- **R4** `POST /api/definitions/estimate` returns an estimate only; `budgetFit` exists only on a saved definition, so the creation screen shows the estimate before the confirming click and `budgetFit` right after it, not before (spec §8.2 "budgetFit at save time" is met; §11 lists both on the form).
-- **R5** `docs/briefs/wp02-core-normalise-constraints-alerts.md` still has the pre-reconciliation `ResultFilters` names (`verdictClasses`, `providers`, `destinations`, `unverifiedConstraint`) and a `bandCheapest` that returns rows; this brief follows the plan. If WP2 merges as its brief reads, `src/state/resultsState.ts` and `Filters.tsx` change with it.
-- **R6** WP12 depends on WP9 but owns `docs/examples/london-new-york.json`, which WP9 imports; WP9 writes a stand-in with WP12's exact content when the file is absent, and WP12's Task 12.7 overwrites it (WP12's brief already anticipates this).
+Round-2 pins (plan commit 790d1ea, decision 14) closed the confirmation field (`confirmedCostPence?` on create and update), the row key (`resultRowKey`, used by `bandCheapest` and `?row=`), the calendar-gap price's provenance (`cheapestVerified` is a PriceCell) and budgetFit before the create click (`{ estimate, budgetFit }` from both estimate routes). WP2's brief now uses the plan's `ResultFilters` names.
+
+- **R6** WP12 depends on WP9 but owns `docs/examples/london-new-york.json`, which WP9 imports; WP9 writes it with WP12's content only when absent, and WP12 owns its final content and the docs test.
+- **R7** `docs/briefs/wp08-api.md` (Task 8 definitions routes) still says "the confirmation itself is never written by these routes", which contradicts the plan's `confirmedCostPence?` on create and update that this brief's create click and re-confirmation send. WP8's brief needs the same round-2 pin.

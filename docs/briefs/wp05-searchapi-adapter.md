@@ -10,7 +10,7 @@ status: draft
 
 # WP5: SearchApi adapter
 
-Reconciled on 2026-10-14 against spec revision 10 and the plan's rewritten "Cross-package contracts".
+Reconciled on 2026-10-14 against spec revision 10 (incl. the §5.4 settled cases) and the plan's contracts at commit 790d1ea (round-2 pins, decision 14).
 
 ## 1. Goal
 
@@ -26,13 +26,12 @@ Build `searchApiProvider` in `@gmt/providers`: one `FlightProvider` that plans a
 - Verification `estimate`, `healthcheck`, `suppliedFields`, `cabins`, and the two `CapabilityInfo` values.
 - `searchApiHttpLimits` (hosts, `billable: 'http-200'`, and `classifyError` for the recorded 401/400 bodies plus 429 quota discrimination).
 - `SEARCHAPI_PARAMS`, a code constant that a test asserts equal to the recorded `params-<date>.json`.
-- The shared `ParamsAllowlist` check helpers in `src/params/allowlist.ts` (see §11, item O1).
 - One line each in `apps/api/src/wiring.ts`, in `httpLimitsFor` and `providersFor` (a Modify, per the plan's wiring contract).
 - Test support: in-memory budget and cache ports around the real http-kit, and thin helpers over WP4's `loadRecorded`/`replayHandlers`. Synthetic-shape builders cover the cases the recordings lack.
 
 **Out**
 
-- The http-kit pipeline: retries, limiter, ledger finalisation, cache, egress allowlist enforcement, recorder, the default status classifier. Also `replayHandlers`/`loadRecorded` (the `@gmt/providers/testing` subpath) and `RecordedFixture`. Owner: **WP4**.
+- The http-kit pipeline: retries, limiter, ledger finalisation, cache (key = method + credential-free URL + scrubbed headers + body, never execution or tile ids), egress allowlist enforcement, recorder, the default status classifier. Also `replayHandlers`/`loadRecorded` (the `@gmt/providers/testing` subpath), `RecordedFixture`, and `ParamsAllowlist` / `loadParamsAllowlist` / `assertRequestAllowed` (`src/params/allowlist.ts`). Owner: **WP4**.
 - Recording the fixtures and writing `params-<date>.json`; the rest of `wiring.ts`. Owner: **WP4b**.
 - Cabins a provider does not offer. The engine marks those cells `no_data` with reason `cabin-not-offered` without calling the provider (spec §3, §5.2). Owner: **WP7**. This adapter declares all four cabins.
 - Normalisation: carrier/flight-number canonicalisation, local times, hashing, FX, vendor-URL validation against `google.com`, search links. Owner: **WP2** (pure) and **WP7** (step).
@@ -53,7 +52,7 @@ Build `searchApiProvider` in `@gmt/providers`: one `FlightProvider` that plans a
 - **§3 (rev 10).** An outcome's `reason` is the `ProviderError.kind` or a normalisation reason (`no-return-legs` among them). The vendor message goes to `last_error`, never `reason`. `pointOfSale` is any ISO alpha-2 echo or `'unknown'`.
 - **§5.1 (rev 10).** The shapes listed in §4 below, including `pointOfSale` on both results, optional `routeHistory`, and `tileIndex` on `reserve`.
 - **§5.2 (entire).** Tiling with the tight span, asserted ≤200 before reserve. Cell keys from the response, with drops counted in `notes`. Empty-is-per-capability. Estimate parity. Output is raw only, with `suppliedFields` checked against recorded fixtures. Point of sale: `gl` = `POINT_OF_SALE` lower-cased, `hl=en`, `currency=GBP`, `pointOfSale` from the echo. The dated allowlist names parameters and values. The error table, with the 400 vendor message in `last_error`. No adapter retries.
-- **§5.4 (entire).** `travel_class` values (`first_class` for first), the chain, unpriced skips, every priced step-2 option persisted, step 3 for the cheapest priced option per outbound, the outcome rules, the price-source rule, and calls = `1 + expandTop × 2`.
+- **§5.4 (entire).** `travel_class` values (`first_class` for first), the chain, unpriced skips, every priced step-2 option persisted, step 3 for the cheapest priced option per outbound, the outcome rules, the price-source rule, and calls = `1 + expandTop × 2`. Also the three cases the vendor can produce: every step-1 option unpriced → throw `upstream` with `reason = 'no-priced-options'` (non-retryable on resume); a failed step 3 keeps the step-2 airline offer with `partial: true`; split bookings are skipped and counted in `notes`.
 - **§9 item 2 (this adapter's rows).** Partition and `plan().length` = msw hits. Out-of-band drops. Empty grid → `parse`. `has_no_flights` → `noFares`. Currency from the response. `suppliedFields` from recorded fixtures. Allowlist names and values. Error mapping incl. 403 and quota discrimination. Token responses never cached. Sentinel key.
 
 ## 4. Interfaces consumed
@@ -127,7 +126,8 @@ export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; 
 export function searchApiProvider(o: { http: HttpKit; log: Logger; clock: Clock; key: Secret; plan: PlanId; pointOfSale: string; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }): FlightProvider;
 export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['www.searchapi.io'], billable 'http-200', classifyError for the recorded 401/400 bodies and 429 quota discrimination
 export const SEARCHAPI_PARAMS: ParamsAllowlist;   // code constant; a test asserts it equals fixtures/recorded/searchapi/params-<date>.json
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url)
+export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 over method + credential-free URL (query kept) + scrubbed headers + body only; never executionId or tileIndex
 
 // apps/api src/wiring.ts (WP4b)
 export function httpLimitsFor(config: Config): HttpKitDeps['limits'];   // WP4b writes it with fixture + fx; WP5 and WP6 each add their provider's line (a Modify in their briefs)
@@ -142,14 +142,9 @@ From WP4b (files):
 
 ## 5. Interfaces produced
 
-Exported from `@gmt/providers` (`src/index.ts`) exactly as the plan's contract names them (§4 above): `searchApiProvider`, `searchApiHttpLimits`, `SEARCHAPI_PARAMS`, `ParamsAllowlist`. The brief also exports:
+Exported from `@gmt/providers` (`src/index.ts`) exactly as the plan's contract names them (§4 above): `searchApiProvider`, `searchApiHttpLimits`, `SEARCHAPI_PARAMS`. `ParamsAllowlist` is WP4's and is imported, not redefined. The brief also exports:
 
 ```ts
-// src/params/allowlist.ts: shared allowlist check (see §11 O1)
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
-export function paramViolations(allow: ParamsAllowlist, endpoint: string, params: Readonly<Record<string, string>>): string[];
-export function assertAllowed(allow: ParamsAllowlist, endpoint: string, params: Readonly<Record<string, string>>): void;
-
 // src/searchapi/*: names later briefs and WP13 may read
 export const SEARCHAPI_HOST: 'www.searchapi.io';
 export const SEARCHAPI_DISPLAY_NAME: 'Google Flights via SearchApi';
@@ -161,7 +156,7 @@ export const OUTBOUND_BLOCK_DAYS: 8;
 export function planRectangles(q: DiscoveryQuery): TilePlan[];
 ```
 
-`SEARCHAPI_PARAMS.endpoints` is keyed by **engine** (`google_flights_calendar`, `google_flights`). Both engines share the one path `/api/v1/search`, so a path key could not tell them apart.
+`SEARCHAPI_PARAMS.endpoints` has the one key `/api/v1/search`, per the pinned type (keyed by endpoint path). Both engines share that path, so its `names` are the ascending union of both engines' parameters and `engine` lists both values. As a result, the allowlist cannot stop a calendar request carrying a `departure_token`. The request builders are the per-engine guard, and Task 5.3 tests them name by name.
 
 ## 6. Library notes
 
@@ -212,13 +207,12 @@ All verified on **2026-10-14**.
    - a step 3 for the cheapest priced return option of each;
    - the 401 and 400 bodies.
 2. Every HTTP 200 body carries `search_parameters.currency` and `search_parameters.gl`.
-3. `params-<date>.json` keys `endpoints` by engine, uses `'any'` for `departure_id`, `arrival_id`, every date, `gl`, `departure_token` and `booking_token`, and lists finite values for the rest (`SEARCHAPI_PARAMS` below is the reference).
+3. `params-<date>.json` (read with WP4's `loadParamsAllowlist`) equals `SEARCHAPI_PARAMS` in Task 5.3: one endpoint `/api/v1/search`, names ascending, and `'any'` for `departure_id`, `arrival_id`, every date, `gl`, `departure_token` and `booking_token`.
 
 ## 7. Files
 
 Create, under `packages/providers/`:
 
-- `src/params/allowlist.ts`: the `ParamsAllowlist` type, `paramViolations`, `assertAllowed` (shared with WP6, §11 O1)
 - `src/searchapi/params.ts`: host, endpoint, `SEARCHAPI_PARAMS`, `TRAVEL_CLASS`, request builders, auth header
 - `src/searchapi/shapes.ts`: vendor zod shapes, echo reader, minor units, note counter, `parseError`
 - `src/searchapi/errors.ts`: `classifySearchApiError`, `searchApiHttpLimits`
@@ -508,7 +502,7 @@ export const SEARCHAPI_ENDPOINT_PATH = '/api/v1/search';
 
 ```ts
 // test/searchapi/support/recorded.ts
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RecordedFixture } from '../../../src/index.js';
@@ -544,12 +538,12 @@ export function need(params: Readonly<Record<string, string>>, name: string): st
   return v;
 }
 
-/** The newest dated parameter allowlist WP4b wrote (`searchapi/params-<yyyy-mm-dd>.json`). */
-export function latestParamsFile(): unknown {
+/** Path of the newest dated parameter allowlist WP4b wrote (`searchapi/params-<yyyy-mm-dd>.json`), for WP4's loadParamsAllowlist. */
+export function latestParamsPath(): string {
   const dir = join(RECORDED_ROOT, 'searchapi');
   const last = readdirSync(dir).filter((n) => /^params-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort().at(-1);
   if (last === undefined) throw new Error(`no params-<date>.json under ${dir}`);
-  return JSON.parse(readFileSync(join(dir, last), 'utf8'));
+  return join(dir, last);
 }
 ```
 
@@ -668,9 +662,9 @@ git add packages/providers && git commit -m "wp05: SearchApi test support and re
 
 ### Task 5.3: Parameter allowlist and request builders
 
-**Files:** create `src/params/allowlist.ts` and `test/searchapi/params.test.ts`. Complete `src/searchapi/params.ts`.
+**Files:** create `test/searchapi/params.test.ts`. Complete `src/searchapi/params.ts`.
 
-**Interfaces:** consumes `Cabin`, `DiscoveryQuery`, `ItineraryQuery`, `Secret`, `ProviderId`, `IsoDate`. Produces `ParamsAllowlist`, `paramViolations`, `assertAllowed`, `SEARCHAPI_PARAMS`, `TRAVEL_CLASS`, `calendarParams`, `flightsParams`, `toUrl`, `authHeaders`.
+**Interfaces:** consumes `Cabin`, `DiscoveryQuery`, `ItineraryQuery`, `Secret`, `IsoDate`, and WP4's `ParamsAllowlist`, `loadParamsAllowlist`, `assertRequestAllowed`. Produces `SEARCHAPI_PARAMS`, `TRAVEL_CLASS`, `calendarParams`, `flightsParams`, `toUrl`, `authHeaders`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -678,20 +672,26 @@ git add packages/providers && git commit -m "wp05: SearchApi test support and re
 // test/searchapi/params.test.ts
 import { Secret, asIata, asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { assertAllowed, paramViolations } from '../../src/params/allowlist.js';
-import { SEARCHAPI_PARAMS, TRAVEL_CLASS, authHeaders, calendarParams, flightsParams, toUrl } from '../../src/searchapi/params.js';
-import { latestParamsFile } from './support/recorded.js';
+import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allowlist.js';
+import { SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS, TRAVEL_CLASS, authHeaders, calendarParams, flightsParams, toUrl } from '../../src/searchapi/params.js';
+import { latestParamsPath } from './support/recorded.js';
 import { CELL_QUERY } from './support/synthetic.js';
 
 const rect = { kind: 'rectangle', departFrom: asIsoDate('2026-11-02'), departTo: asIsoDate('2026-11-09'), returnFrom: asIsoDate('2026-11-12'), returnTo: asIsoDate('2026-11-30') } as const;
 const calQ = { origin: asIata('LHR'), destination: asIata('JFK'), cabin: 'economy' as const };
+const allowed = (params: Record<string, string>) => () => assertRequestAllowed(SEARCHAPI_PARAMS, SEARCHAPI_ENDPOINT_PATH, toUrl(params));
 
 describe('SearchApi parameter allowlist (spec §5.2 dated allowlist)', () => {
   it('SEARCHAPI_PARAMS equals the recorded params-<date>.json, names, values and hash', () => {
-    expect(SEARCHAPI_PARAMS).toEqual(latestParamsFile());
+    expect(SEARCHAPI_PARAMS).toEqual(loadParamsAllowlist(latestParamsPath()));
   });
 
-  it('calendar parameters: names, values and point of sale (gl = POINT_OF_SALE lower-cased, hl=en, currency=GBP)', () => {
+  it('names are ascending, as the pinned type requires', () => {
+    const names = SEARCHAPI_PARAMS.endpoints[SEARCHAPI_ENDPOINT_PATH]?.names ?? [];
+    expect(names).toEqual([...names].sort());
+  });
+
+  it('calendar parameters: exact names, values and point of sale (gl = POINT_OF_SALE lower-cased, hl=en, currency=GBP)', () => {
     const p = calendarParams(calQ, rect, 'GB');
     expect(p).toEqual({
       engine: 'google_flights_calendar', departure_id: 'LHR', arrival_id: 'JFK', flight_type: 'round_trip',
@@ -699,7 +699,7 @@ describe('SearchApi parameter allowlist (spec §5.2 dated allowlist)', () => {
       return_date: '2026-11-12', return_date_start: '2026-11-12', return_date_end: '2026-11-30',
       travel_class: 'economy', adults: '1', currency: 'GBP', gl: 'gb', hl: 'en',
     });
-    expect(paramViolations(SEARCHAPI_PARAMS, 'google_flights_calendar', p)).toEqual([]);
+    expect(allowed(p)).not.toThrow();
   });
 
   it.each([
@@ -718,28 +718,18 @@ describe('SearchApi parameter allowlist (spec §5.2 dated allowlist)', () => {
     expect(flightsParams({ ...CELL_QUERY, maxStops: 3 }, 'GB').stops).toBeUndefined();
   });
 
-  it('steps 2 and 3 resend the step-1 parameters plus one token', () => {
+  it('itinerary steps carry exactly the google_flights names; steps 2 and 3 add one token', () => {
     const s1 = flightsParams(CELL_QUERY, 'GB');
+    expect(Object.keys(s1).sort()).toEqual(['adults', 'arrival_id', 'currency', 'departure_id', 'engine', 'flight_type', 'gl', 'hl', 'outbound_date', 'return_date', 'travel_class']);
     expect(flightsParams(CELL_QUERY, 'GB', { departure_token: 'tok' })).toEqual({ ...s1, departure_token: 'tok' });
     expect(flightsParams(CELL_QUERY, 'GB', { booking_token: 'tok' })).toEqual({ ...s1, booking_token: 'tok' });
-    expect(paramViolations(SEARCHAPI_PARAMS, 'google_flights', { ...s1, booking_token: 'tok' })).toEqual([]);
+    expect(allowed({ ...s1, booking_token: 'tok' })).not.toThrow();
   });
 
-  it('rejects unknown names and disallowed values, and never lets a key into the query', () => {
-    const p = { ...calendarParams(calQ, rect, 'GB'), api_key: 'x', currency: 'USD' };
-    expect(paramViolations(SEARCHAPI_PARAMS, 'google_flights_calendar', p)).toHaveLength(2);
-    expect(() => assertAllowed(SEARCHAPI_PARAMS, 'google_flights_calendar', p)).toThrow(/api_key/);
+  it('refuses an unknown name and a disallowed value, and the URL never carries a key', () => {
+    expect(allowed({ ...calendarParams(calQ, rect, 'GB'), api_key: 'x' })).toThrow();
+    expect(allowed({ ...calendarParams(calQ, rect, 'GB'), currency: 'USD' })).toThrow();
     expect(toUrl(calendarParams(calQ, rect, 'GB')).search).not.toContain('api_key');
-  });
-
-  it('rejects parameters addressed to the other engine, and an unknown endpoint', () => {
-    expect(paramViolations(SEARCHAPI_PARAMS, 'google_flights', calendarParams(calQ, rect, 'GB')).length).toBeGreaterThan(0);
-    expect(paramViolations(SEARCHAPI_PARAMS, 'nope', {})).toEqual(['endpoint nope is not in the allowlist']);
-  });
-
-  it('never echoes a token value in a violation', () => {
-    const v = paramViolations({ ...SEARCHAPI_PARAMS, endpoints: { x: { names: ['booking_token'], values: { booking_token: ['a'] } } } }, 'x', { booking_token: 'secret-token' });
-    expect(v.join()).not.toContain('secret-token');
   });
 
   it('puts the key in Authorization: Bearer only (spec §2 fact 8)', () => {
@@ -751,49 +741,9 @@ describe('SearchApi parameter allowlist (spec §5.2 dated allowlist)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/params.test.ts`
-Expected: FAIL. `../../src/params/allowlist.js` cannot be resolved.
+Expected: FAIL. `SEARCHAPI_PARAMS` (and the builders) are not exported from `params.js`.
 
 - [ ] **Step 3: Implement**
-
-```ts
-// src/params/allowlist.ts
-import type { IsoDate, ProviderId } from '@gmt/core';
-
-/**
- * The dated parameter allowlist (spec §5.2): every parameter name and, where finite, every
- * value an adapter may send, per endpoint. Recorded by WP4b as
- * `fixtures/recorded/<provider>/params-<date>.json`; each adapter holds an equal code constant,
- * because `.dockerignore` excludes `fixtures/recorded/` from the image.
- */
-export interface ParamsAllowlist {
-  provider: ProviderId;
-  recordedAt: IsoDate;
-  endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>;
-  contentSha256: string;
-}
-
-/** Every way `params` breaks the allowlist for `endpoint`; empty means allowed. Token values are never echoed. */
-export function paramViolations(allow: ParamsAllowlist, endpoint: string, params: Readonly<Record<string, string>>): string[] {
-  const rules = allow.endpoints[endpoint];
-  if (rules === undefined) return [`endpoint ${endpoint} is not in the allowlist`];
-  const out: string[] = [];
-  for (const [name, value] of Object.entries(params)) {
-    if (!rules.names.includes(name)) {
-      out.push(`${endpoint}: parameter ${name} is not in the allowlist`);
-      continue;
-    }
-    const allowed = rules.values[name] ?? 'any';
-    if (allowed !== 'any' && !allowed.includes(value)) out.push(`${endpoint}: ${name}=${name.endsWith('token') ? '<token>' : value} is not allowed`);
-  }
-  return out;
-}
-
-/** Throws before a request leaves the adapter (so before `budget.reserve`) when a parameter is not allowed. */
-export function assertAllowed(allow: ParamsAllowlist, endpoint: string, params: Readonly<Record<string, string>>): void {
-  const v = paramViolations(allow, endpoint, params);
-  if (v.length > 0) throw new Error(`${allow.provider} parameter allowlist: ${v.join('; ')}`);
-}
-```
 
 Append to `src/searchapi/params.ts`, with the imports moved to the top:
 
@@ -806,38 +756,32 @@ const TRAVEL_CLASSES = ['economy', 'premium_economy', 'business', 'first_class']
 /** Cabin → vendor `travel_class` (spec §5.4: `first` is `first_class`). */
 export const TRAVEL_CLASS: Readonly<Record<Cabin, string>> = { economy: 'economy', premium_economy: 'premium_economy', business: 'business', first: 'first_class' };
 
-const COMMON_NAMES = ['engine', 'departure_id', 'arrival_id', 'flight_type', 'travel_class', 'adults', 'currency', 'gl', 'hl'];
-const COMMON_VALUES: Record<string, string[] | 'any'> = {
-  departure_id: 'any', arrival_id: 'any', flight_type: ['round_trip'], travel_class: TRAVEL_CLASSES,
-  adults: ['1'], currency: ['GBP'], gl: 'any', hl: ['en'],
-};
-
 // why: these two values identify the WP4b recording this constant mirrors; copy them from the
 // newest packages/providers/fixtures/recorded/searchapi/params-<date>.json (Task 5.3 Step 3).
 const RECORDED_AT = '2026-10-14' as IsoDate;
 const RECORDED_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
 /**
- * Every parameter name and value this adapter may send, per engine (spec §5.2). Keyed by
- * engine because both engines share `/api/v1/search`. A test asserts deep equality with
- * WP4b's recorded `params-<date>.json`.
+ * Every parameter name and value this adapter may send (spec §5.2), in WP4's pinned
+ * `ParamsAllowlist` shape: keyed by endpoint path, names ascending. Both engines share
+ * `/api/v1/search`, so names are the union of the calendar and itinerary sets; the per-engine
+ * guard is `calendarParams`/`flightsParams`, tested name by name. A test asserts deep equality
+ * with WP4b's recorded `params-<date>.json`.
  */
 export const SEARCHAPI_PARAMS: ParamsAllowlist = {
   provider: 'searchapi',
   recordedAt: RECORDED_AT,
   endpoints: {
-    google_flights_calendar: {
-      names: [...COMMON_NAMES, 'outbound_date', 'outbound_date_start', 'outbound_date_end', 'return_date', 'return_date_start', 'return_date_end'],
+    [SEARCHAPI_ENDPOINT_PATH]: {
+      names: [
+        'adults', 'arrival_id', 'booking_token', 'currency', 'departure_id', 'departure_token', 'engine', 'flight_type', 'gl', 'hl',
+        'outbound_date', 'outbound_date_end', 'outbound_date_start', 'return_date', 'return_date_end', 'return_date_start', 'stops', 'travel_class',
+      ],
       values: {
-        ...COMMON_VALUES, engine: ['google_flights_calendar'],
-        outbound_date: 'any', outbound_date_start: 'any', outbound_date_end: 'any', return_date: 'any', return_date_start: 'any', return_date_end: 'any',
-      },
-    },
-    google_flights: {
-      names: [...COMMON_NAMES, 'outbound_date', 'return_date', 'stops', 'departure_token', 'booking_token'],
-      values: {
-        ...COMMON_VALUES, engine: ['google_flights'], outbound_date: 'any', return_date: 'any',
-        stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'], departure_token: 'any', booking_token: 'any',
+        adults: ['1'], arrival_id: 'any', booking_token: 'any', currency: ['GBP'], departure_id: 'any', departure_token: 'any',
+        engine: ['google_flights', 'google_flights_calendar'], flight_type: ['round_trip'], gl: 'any', hl: ['en'],
+        outbound_date: 'any', outbound_date_end: 'any', outbound_date_start: 'any', return_date: 'any', return_date_end: 'any', return_date_start: 'any',
+        stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'], travel_class: TRAVEL_CLASSES,
       },
     },
   },
@@ -889,12 +833,12 @@ Set `RECORDED_AT` and `RECORDED_SHA256` to the file's two values. The 2026-10-14
 
 `node -e "const f=require('fs'),d='packages/providers/fixtures/recorded/searchapi',n=f.readdirSync(d).filter(x=>/^params-/.test(x)).sort().at(-1),j=JSON.parse(f.readFileSync(d+'/'+n));console.log(j.recordedAt,j.contentSha256)"`
 
-If the test reports any other difference (names, value lists, `'any'` placement), the recording and this constant disagree on what the adapter sends. Resolve it with Fable; do not edit either side to match blindly.
+If the test reports any other difference (names, value lists, `'any'` placement), the recording and this constant disagree on what the adapter sends. Resolve it with Fable; do not edit either side to match blindly. `assertRequestAllowed` is WP4's; it throws on a name or value outside the allowlist.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/params.test.ts`
-Expected: PASS, 16 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1056,9 +1000,9 @@ git add packages/providers && git commit -m "wp05: SearchApi error classificatio
 import { type DiscoveryQuery, type TilePlan, addDays, asIata, asIsoDate, cellKeyString, toEpochDay } from '@gmt/core';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { paramViolations } from '../../src/params/allowlist.js';
+import { assertRequestAllowed } from '../../src/params/allowlist.js';
 import { type CalendarDeps, fetchCalendarTile, planRectangles } from '../../src/searchapi/calendar.js';
-import { SEARCHAPI_PARAMS, TRAVEL_CLASS } from '../../src/searchapi/params.js';
+import { SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS, TRAVEL_CLASS } from '../../src/searchapi/params.js';
 import { replayHandlers } from '../../src/testing/index.js';
 import { SENTINEL_KEY, captureRequests, ctx, testPorts } from './support/ports.js';
 import { RECORDED_ROOT, byEngine, need, searchApiRecordings } from './support/recorded.js';
@@ -1070,7 +1014,7 @@ const sent = captureRequests(server);
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   // why: spec §5.2 / §9 item 2: every outgoing request's names and values are in the dated allowlist.
-  for (const r of sent) expect(paramViolations(SEARCHAPI_PARAMS, 'google_flights_calendar', r.params)).toEqual([]);
+  for (const r of sent) expect(() => assertRequestAllowed(SEARCHAPI_PARAMS, SEARCHAPI_ENDPOINT_PATH, new URL(r.url))).not.toThrow();
   sent.length = 0;
   server.resetHandlers();
 });
@@ -1373,7 +1317,7 @@ Append to `src/searchapi/calendar.ts`, merging the imports into its import block
 ```ts
 import { type DiscoveryTileResult, type Logger, type ProviderContext, ProviderError, type RawCalendarPrice, type Secret, cellKeyString } from '@gmt/core';
 import type { HttpKit } from '../http/httpKit.js';
-import { type ParamsAllowlist, assertAllowed } from '../params/allowlist.js';
+import { type ParamsAllowlist, assertRequestAllowed } from '../params/allowlist.js';
 import { SEARCHAPI_ENDPOINT_PATH, authHeaders, calendarParams, toUrl } from './params.js';
 import { NoteCounter, calendarResponseSchema, parseError, readEcho, toMinor } from './shapes.js';
 
@@ -1443,12 +1387,13 @@ export async function fetchCalendarTile(d: CalendarDeps, plan: TilePlan, q: Disc
   const req = plan.request;
   if (req.kind !== 'rectangle') throw new TypeError(`searchapi plans rectangle tiles only; got ${req.kind}`);
   assertWithinLimit(req);
-  const params = calendarParams(q, req, d.pointOfSale);
-  assertAllowed(d.allowlist, 'google_flights_calendar', params);
+  const url = toUrl(calendarParams(q, req, d.pointOfSale));
+  assertRequestAllowed(d.allowlist, SEARCHAPI_ENDPOINT_PATH, url);
   try {
+    // why: the cache key excludes execution and tile ids (plan decision 14), so an identical rectangle from a resumed run is a cache hit.
     const res = await d.http.request({
       providerId: 'searchapi', executionId: ctx.executionId, tileIndex: plan.index, endpointPath: SEARCHAPI_ENDPOINT_PATH,
-      method: 'GET', url: toUrl(params), headers: authHeaders(d.key), cache: { ttlSeconds: d.cacheTtlSeconds },
+      method: 'GET', url, headers: authHeaders(d.key), cache: { ttlSeconds: d.cacheTtlSeconds },
       signal: ctx.signal, recordFixtures: ctx.recordFixtures,
     });
     const parsed = parseCalendarBody(res.body, plan, q, d.pointOfSale.toLowerCase());
@@ -1485,9 +1430,9 @@ git add packages/providers && git commit -m "wp05: SearchApi calendar tiles: res
 import { asIata, asIsoDate } from '@gmt/core';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { paramViolations } from '../../src/params/allowlist.js';
+import { assertRequestAllowed } from '../../src/params/allowlist.js';
 import { type ItineraryDeps, searchItinerary, toRawSegment } from '../../src/searchapi/itinerary.js';
-import { SEARCHAPI_PARAMS } from '../../src/searchapi/params.js';
+import { SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS } from '../../src/searchapi/params.js';
 import { replayHandlers } from '../../src/testing/index.js';
 import { captureRequests, ctx, testPorts } from './support/ports.js';
 import { RECORDED_ROOT, chainRecording, need, searchApiRecordings } from './support/recorded.js';
@@ -1497,7 +1442,7 @@ const server = setupServer(...replayHandlers(RECORDED_ROOT));
 const sent = captureRequests(server);
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
-  for (const r of sent) expect(paramViolations(SEARCHAPI_PARAMS, 'google_flights', r.params)).toEqual([]);
+  for (const r of sent) expect(() => assertRequestAllowed(SEARCHAPI_PARAMS, SEARCHAPI_ENDPOINT_PATH, new URL(r.url))).not.toThrow();
   sent.length = 0;
   server.resetHandlers();
 });
@@ -1587,9 +1532,9 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
     expect(seen.some((p) => p.get('booking_token') === 'b2')).toBe(false);
   });
 
-  it('all step-1 options unpriced → upstream error, nothing expanded, cause tagged in the message (synthetic)', async () => {
+  it('all step-1 options unpriced → upstream no-priced-options, nothing expanded (spec §5.4) (synthetic)', async () => {
     const seen = chain(flightsBody([option(OUT_A, undefined, { departure_token: 'dA' })]), {});
-    await expect(searchItinerary(deps(), CELL_QUERY, ctx())).rejects.toMatchObject({ kind: 'upstream', retryable: false, message: expect.stringMatching(/no-priced-options/) });
+    await expect(searchItinerary(deps(), CELL_QUERY, ctx())).rejects.toMatchObject({ kind: 'upstream', reason: 'no-priced-options', retryable: false });
     expect(seen).toHaveLength(1);
   });
 
@@ -1684,7 +1629,7 @@ import {
   type RawSegment, type Secret,
 } from '@gmt/core';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
-import { type ParamsAllowlist, assertAllowed } from '../params/allowlist.js';
+import { type ParamsAllowlist, assertRequestAllowed } from '../params/allowlist.js';
 import { SEARCHAPI_ENDPOINT_PATH, authHeaders, flightsParams, toUrl } from './params.js';
 import {
   NoteCounter, type VendorBookingOption, type VendorOption, type VendorSegment, bookingResponseSchema,
@@ -1742,11 +1687,12 @@ function isExpansionFailure(err: unknown): err is ProviderError {
 }
 
 async function send(d: ItineraryDeps, params: Record<string, string>, ctx: ProviderContext): Promise<HttpKitResponse> {
-  assertAllowed(d.allowlist, 'google_flights', params);
+  const url = toUrl(params);
+  assertRequestAllowed(d.allowlist, SEARCHAPI_ENDPOINT_PATH, url);
   // why: every google_flights response carries departure or booking tokens; spec §5.3: token-bearing responses are never cached.
   return d.http.request({
     providerId: 'searchapi', executionId: ctx.executionId, tileIndex: null, endpointPath: SEARCHAPI_ENDPOINT_PATH,
-    method: 'GET', url: toUrl(params), headers: authHeaders(d.key), cache: 'never', signal: ctx.signal, recordFixtures: ctx.recordFixtures,
+    method: 'GET', url, headers: authHeaders(d.key), cache: 'never', signal: ctx.signal, recordFixtures: ctx.recordFixtures,
   });
 }
 
@@ -1795,7 +1741,7 @@ function airlineNames(out: readonly VendorSegment[], inb: readonly VendorSegment
 export function bookingOffers(q: ItineraryQuery, out: readonly VendorSegment[], inb: readonly VendorSegment[], options: readonly VendorBookingOption[], currency: string, notes: NoteCounter): RawOffer[] {
   const offers: RawOffer[] = [];
   for (const b of options) {
-    // why: a split booking has two prices and two forms; RawOffer holds one booking, and a sum would be our number, not the vendor's.
+    // why: spec §5.4 (rev 10): split bookings are skipped and counted; a sum of two prices would be our number, not the vendor's.
     if (b.is_split_booking === true) {
       notes.add('split-booking-skipped');
       continue;
@@ -1848,8 +1794,8 @@ export async function searchItinerary(d: ItineraryDeps, q: ItineraryQuery, ctx: 
     else usable1.push(o);
   }
   if (usable1.length === 0) {
-    // why: options exist, so "empty" would claim no fares; spec §5.4 skips unpriced options, so nothing can be expanded (§11 O3).
-    throw new ProviderError({ kind: 'upstream', retryable: false, providerId: 'searchapi', message: `searchapi no-priced-options: step 1 returned ${r1.options.length} options and none was priced and expandable` });
+    // why: spec §5.4 (rev 10): every step-1 option unpriced → upstream, reason no-priced-options, non-retryable on resume.
+    throw new ProviderError({ kind: 'upstream', reason: 'no-priced-options', retryable: false, providerId: 'searchapi', message: `searchapi: step 1 returned ${r1.options.length} options and none was priced and expandable` });
   }
   const expand = [...usable1].sort((a, b) => a.price - b.price).slice(0, q.expandTop); // stable: vendor order breaks ties
 
@@ -1899,6 +1845,7 @@ export async function searchItinerary(d: ItineraryDeps, q: ItineraryQuery, ctx: 
       step3 = bookingOffers(q, out.flights, cheapest.flights, r3.options, r3.currency, notes);
     } catch (err) {
       if (!isExpansionFailure(err)) throw err;
+      // why: spec §5.4 (rev 10): a failed step 3 keeps the step-2 airline offer and the cell is priced with partial: true.
       partial = true;
       notes.add('booking-options-failed');
       offers.push(step2Offer);
@@ -1919,7 +1866,7 @@ export async function searchItinerary(d: ItineraryDeps, q: ItineraryQuery, ctx: 
 }
 ```
 
-The `?? ''` on `out.departure_token` is never taken, because `usable1` holds only tokened options. It satisfies the type without a non-null assertion. `reason: 'no-return-legs'` is the only `ProviderError.reason` this adapter sets; it is a `NormalisationReason`, as spec §3 rev 10 requires of outcome reasons.
+The `?? ''` on `out.departure_token` is never taken, because `usable1` holds only tokened options. It satisfies the type without a non-null assertion. The adapter sets `ProviderError.reason` only to `no-return-legs` and `no-priced-options`, the two reasons spec §5.4 names. Every other cause is a tag in the message, which goes to `last_error`.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -2253,8 +2200,6 @@ export function capabilities(p: FlightProvider) {
 `src/index.ts`, appended:
 
 ```ts
-export type { ParamsAllowlist } from './params/allowlist.js';
-export { assertAllowed, paramViolations } from './params/allowlist.js';
 export { SEARCHAPI_DISCOVERY_INFO, SEARCHAPI_DISPLAY_NAME, SEARCHAPI_VERIFICATION_INFO, searchApiProvider } from './searchapi/provider.js';
 export { classifySearchApiError, searchApiHttpLimits } from './searchapi/errors.js';
 export { SEARCHAPI_HOST, SEARCHAPI_PARAMS } from './searchapi/params.js';
@@ -2337,7 +2282,7 @@ describe('the SearchApi key reaches no sink but the Authorization header (spec �
 
 - [ ] **Step 2: Run to verify it fails**
 
-The behaviour exists by design, so prove the test bites. Temporarily make `toUrl` also set `api_key` from a module-level copy of the key, and add `api_key` to both engines' `names`. Then run `pnpm --filter @gmt/providers exec vitest run test/searchapi/sentinel.test.ts`.
+The behaviour exists by design, so prove the test bites. Temporarily make `toUrl` also set `api_key` from a module-level copy of the key, and add `api_key` to `SEARCHAPI_PARAMS` names. Then run `pnpm --filter @gmt/providers exec vitest run test/searchapi/sentinel.test.ts`.
 Expected: FAIL, with a captured URL containing the sentinel. Revert both changes.
 
 - [ ] **Step 3: Implement.** No production change; the revert is the implementation.
@@ -2434,7 +2379,7 @@ None of the plan's five Review Focus lines is owned by WP5. The adapter-local ed
 
 - A wide nights band would push 8 outbound days over 200 combinations (Task 5.1, "shrinks the outbound block").
 - An over-limit calendar request, which the docs say returns "empty" and the spike recorded as 400 (Task 5.5, "asserts ≤200 combinations before reserve").
-- A step-1 response whose options are all unpriced (Task 5.6).
+- A step-1 response whose options are all unpriced (Task 5.6; spec §5.4 `no-priced-options`).
 - A split booking at step 3 (Task 5.7).
 - A missing currency echo (Task 5.5 synthetic test, plus the Task 5.2 inventory assertion over every recording).
 
@@ -2455,10 +2400,6 @@ None of the plan's five Review Focus lines is owned by WP5. The adapter-local ed
 
 None block dispatch. These items are reported for Fable; the spec wins where it speaks.
 
-- **O1, owner of `ParamsAllowlist`.** The plan lists the type under "Adapter constructors and exports (WP5, WP6)" but names no file. This brief creates `src/params/allowlist.ts`, with `paramViolations`/`assertAllowed`. The WP6 brief should import it from there. If WP6 merges first, it creates the identical file and this task imports it.
-- **O2, `SEARCHAPI_PARAMS` values that depend on WP4b's file.** The constant must deep-equal WP4b's `params-<date>.json`, including `recordedAt` and `contentSha256`. Those two values do not exist until WP4b records. Task 5.3 shows stand-ins and a command that prints the real ones. The `'any'` placements in §6 "Inputs from WP4b" item 3 must match WP4b's file.
-- **O3, spec silent on some step outcomes.** Spec §5.4 says nothing about all-unpriced step-1 options, failed step 3, or split bookings. This brief:
-  - throws `upstream`, non-retryable, for all-unpriced step-1 options. Its message is tagged `no-priced-options` and it sets no `reason`, because rev 10 limits outcome reasons to kinds and normalisation reasons. The engine's resume rule will retry it while `attempts < 3`.
-  - keeps the step-2 offer with `partial: true` when step 3 fails;
-  - skips split bookings with a note.
-- **O4, vendor docs gaps.** The vendor docs do not show `search_parameters`, `other_flights`, or the key holding step-2 return options. The spec §5.2 currency and point-of-sale rule rests on WP4b's recordings (Task 5.2 asserts it).
+- **O1, `SEARCHAPI_PARAMS` values that depend on WP4b's file.** The constant must deep-equal WP4b's `params-<date>.json`, including `recordedAt` and `contentSha256`. Those two values do not exist until WP4b records. Task 5.3 shows stand-ins and a command that prints the real ones. The `'any'` placements in §6 "Inputs from WP4b" item 3 must match WP4b's file.
+- **O2, vendor docs gaps.** The vendor docs do not show `search_parameters`, `other_flights`, or the key holding step-2 return options. The spec §5.2 currency and point-of-sale rule rests on WP4b's recordings (Task 5.2 asserts it).
+- **O3, a path-keyed allowlist cannot tell the two engines apart.** The pinned `ParamsAllowlist` is keyed by endpoint path, and both SearchApi engines use `/api/v1/search`. So `assertRequestAllowed` accepts the union of both engines' names; a calendar request carrying `departure_token` would pass it. The per-engine guard is the request builders, whose exact name sets Task 5.3 tests. If the plan wants the allowlist itself to enforce this, `endpoints` would need an engine-qualified key, which is a WP4 contract change.

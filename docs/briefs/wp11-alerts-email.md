@@ -10,7 +10,7 @@ status: draft
 
 # WP11: alerts runner, EmailNotifier, Alerts UI
 
-Reconciled 2026-10-14 against spec revision 10 and the plan's "Cross-package contracts" v2 (commit e804941).
+Reconciled 2026-10-14 against spec revision 10 and the plan's "Cross-package contracts" v2 with the round-2 pins (commit 790d1ea, decision 14).
 
 ## 1. Goal
 
@@ -33,7 +33,7 @@ Turn the prices an execution wrote into at most one plain-text email per alert r
 
 **Out**
 
-- `@gmt/core`, WP2: `evaluateAlertRules`, `identityKey`, `dedupKey`, `isSuppressed`, `buildDigest`, `evaluateConstraints`, `verdictClass`, `unverifiedNames` and `searchLinkFor`.
+- `@gmt/core`, WP2: `evaluateAlertRules` (including the suppression decision), `identityKey`, `dedupKey`, `buildDigest`, `evaluateConstraints`, `verdictClass`, `unverifiedNames` and `searchLinkFor`.
 - `@gmt/core`, WP0:
   - the types `AlertRule`, `AlertCandidate`, `Firing`, `PriorFiring`, `DigestItem` and `AlertDigest`;
   - the `Notifier` port and the alert schemas;
@@ -95,14 +95,14 @@ export interface AlertEvent { id: number; ruleId: string; identityKey: string; o
 export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
-export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean }
+export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean; suppressed: { reason: string } | null }   // evaluateAlertRules returns suppressed firings too; the runner records them with status 'suppressed' and the digest excludes them
 export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
 // identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
 
 // @gmt/core — ports/notifier.ts (WP0)
-export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; searchLink: { url: string; host: string; label: string } }
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string }; rowKey: string /* resultRowKey, for the app link */ }
 export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
-export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'parity_break' | 'alerts_calendar_only';
+export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'provider_capped' | 'parity_break' | 'alerts_calendar_only' | 'crash_loop';   // all rendered by WP7's operator templates
 export interface OperatorMessage { kind: OperatorMessageKind; executionId: string | null; definitionId: string; subject: string; body: string }
 export interface Notifier { id: string; send(msg: { kind: 'digest'; digest: AlertDigest; subject: string; body: string } | { kind: 'operator'; message: OperatorMessage }): Promise<{ ok: boolean; detail?: string }> }
 
@@ -124,7 +124,7 @@ export const BANNED_WORD_ALLOWLIST: readonly string[];   // ['smoke:live', 'live
 export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
 export class Secret { constructor(value: string); reveal(): string }
 // Config: smtp: { host; port; tls: 'implicit' | 'starttls' | 'none'; user; pass: Secret; to; from } | null; nodeEnv; appBaseUrl: string | null
-// api-contract/alerts.ts: alertRuleSchema (AlertRule; requireAllVerified only on basis verified; cooldownHours default 336; thresholdPence required for absolute and dropAbs, pct for dropPct), alertRuleInputSchema, alertEventSchema, alertEventsQuerySchema { ruleId?; limit? }
+// api-contract/alerts.ts: alertRuleSchema (AlertRule; requireAllVerified only on basis verified; cooldownHours default 336; thresholdPence required for absolute and dropAbs, pct for dropPct), alertRuleInputSchema, alertEventSchema, alertEventsQuerySchema { ruleId?; definitionId?; limit? }
 
 // @gmt/core — domain functions (WP1, WP2)
 export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number;
@@ -132,7 +132,7 @@ export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;
 export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts;
 export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
 export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
-export function isSuppressed(f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>, prior: PriorFiring[], cooldownHours: number, now: IsoDateTime): { suppressed: boolean; reason: string | null };
+export function identityKey(rule: AlertRule, c: AlertCandidate): string;
 export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] }): AlertDigest | null;   // null when no firing; top 10 + restCount
 
 // @gmt/db (WP3)
@@ -161,29 +161,21 @@ export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;
 export class LogNotifier implements Notifier { constructor(log: Logger) }
 
 // apps/api (WP8), bootstrap/app.ts: "createEngine(ports, { alerts: runAlerts })"
-// apps/web (WP9): call<T>(method, path, opts?: { params?; query?: Record<string, string | undefined>; body? }); api; COPY; parsePoundsToPence(input): number | undefined;
+// apps/web (WP9): results-row URL parameters `definition=<id>&row=<rowKey>` (pinned); call<T>(method, path, opts?: { params?; query?: Record<string, string | undefined>; body? }); api; COPY; parsePoundsToPence(input): number | undefined;
 //   test/render.tsx renderWithProviders(ui, opts?) → { …render result, user, client }; test/msw/server.ts server (listening from test/setup.ts)
 ```
 
 **Assumptions about code that later waves deliver.** Each is checked again when wave 7 opens.
 
-1. **`evaluateAlertRules` with an empty `prior`.**
-   - With `prior = []` it returns every qualifying firing.
-   - An absent-then-present candidate comes back with `isNew: true`. Under a drop rule that is a listing, not a firing. Under an absolute rule it is a firing that is also new.
-   - The runner always passes `prior = []` and decides suppression itself with `isSuppressed` (section 8, Task 11.5). That way suppressed firings are recorded with their reason whatever `evaluateAlertRules` does with `prior`.
-2. **`buildDigest` and listings.**
-   - Firings with `isNew` and a drop rule go to `newItems`, never `items`.
-   - It returns `null` when no firing is in `items`.
-   - It fills `DigestItem.booking` for calendar items from the row's validated vendor link, or `{ kind: 'none' }`.
+1. **`evaluateAlertRules` and new candidates.** An absent-then-present candidate comes back with `isNew: true`. Under a drop rule it is a listing, never a firing. Under an absolute rule it is a firing that is also new.
+2. **`buildDigest`.** It puts drop-rule `isNew` firings in `newItems`, excludes suppressed firings, and returns `null` when no firing remains in `items`.
 3. **`AlertsRepo.priorFirings`** returns `sent` events only, so a failed delivery never suppresses the next execution.
 4. **WP7's layer-A harness** (`packages/engine/test/harness.ts`) exposes `createHarness()` returning:
    - `deps` and `options`;
    - `createDefinition(patch?)`;
    - `runToCompletion(engine, definitionId)`;
    - `repos` and `notifications`.
-
-   The WP7 brief already has this; its `EngineOptions` predates the `alerts` field, and the plan's contract governs.
-5. **WP8's bootstrap** currently reads `createEngine({ ...ports, notifiers: [new LogNotifier(log)] })` (WP8 brief, app bootstrap task). Task 11.7 rewrites that one line.
+5. **WP8's bootstrap** currently reads `createEngine({ ...ports, notifiers: [new LogNotifier(log)] })`. Task 11.7 rewrites that one line.
 
 ## 5. Interfaces produced
 
@@ -194,14 +186,13 @@ export interface AlertRunResult { digests: number; events: number }
 export async function runAlerts(deps: AlertRunnerDeps, executionId: string): Promise<AlertRunResult>;   // assignable to AlertsStepHook; never rejects
 
 // packages/engine/src/alerts/templates.ts
-export interface ItineraryDetail { outbound: Segment[]; inbound: Segment[]; bookingExpiresAt: IsoDateTime | null }
-export interface DigestRenderInput { digest: AlertDigest; definitionName: string; details: ReadonlyMap<string, ItineraryDetail>; appBaseUrl: string | null; now: IsoDateTime }
+export interface DigestRenderInput { digest: AlertDigest; definitionName: string; appBaseUrl: string | null; now: IsoDateTime }
 export function stripControl(s: string): string;
 export function sourceLabel(p: Provenance): string;
 export function routeLine(item: Pick<DigestItem, 'pricePence' | 'provenance' | 'cell'>): string;
 export function renderSubject(item: DigestItem, now: IsoDateTime): string;
 export function renderBody(input: DigestRenderInput): string;
-export function appRowLink(appBaseUrl: string | null, definitionId: string, itineraryHash: string): string;
+export function appRowLink(appBaseUrl: string | null, definitionId: string, rowKey: string): string;   // `${appBaseUrl ?? ''}/?view=results&definition=<id>&row=<rowKey>`
 
 // packages/engine/src/notifiers/email.ts
 export type SmtpConfig = NonNullable<Config['smtp']>;
@@ -218,7 +209,7 @@ export function buildNotifiers(config: Pick<Config, 'smtp' | 'nodeEnv'>, log: Lo
 // apps/web/src/views/Alerts/index.ts
 export function AlertsView(props: { definitionId: string }): JSX.Element;
 export function describeRule(r: AlertRule): string;
-// apps/web/src/api/endpoints.ts additions: api.alertRules(definitionId), api.createAlertRule(body), api.deleteAlertRule(id), api.alertEvents(limit)
+// apps/web/src/api/endpoints.ts additions: api.alertRules(definitionId), api.createAlertRule(body), api.deleteAlertRule(id), api.alertEvents(definitionId, limit)
 // apps/web/src/copy.ts addition: COPY.alertsView
 ```
 
@@ -588,12 +579,11 @@ Expected: FAIL, because the import `../../src/alerts/runner.js` cannot be resolv
  */
 import {
   effectiveAge, formatAgeFull, formatDuration,
-  type AlertDigest, type AlertRule, type DigestItem, type IsoDateTime, type Provenance, type Segment,
+  type AlertDigest, type AlertRule, type DigestItem, type IsoDateTime, type Provenance,
 } from '@gmt/core';
 
-/** Segments and expiry for a verified item, keyed by itinerary hash; DigestItem carries neither (finding WP11-R1). */
-export interface ItineraryDetail { outbound: Segment[]; inbound: Segment[]; bookingExpiresAt: IsoDateTime | null }
-export interface DigestRenderInput { digest: AlertDigest; definitionName: string; details: ReadonlyMap<string, ItineraryDetail>; appBaseUrl: string | null; now: IsoDateTime }
+/** Everything renderBody needs; the digest items carry segments, expiry and the row key (plan decision 14). */
+export interface DigestRenderInput { digest: AlertDigest; definitionName: string; appBaseUrl: string | null; now: IsoDateTime }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 const NEW_ITEM_LIMIT = 10;
@@ -646,10 +636,9 @@ export function renderSubject(item: DigestItem, now: IsoDateTime): string {
   return stripControl(`[get-me-there] ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${formatAgeFull(effectiveAge(item.provenance, now))} · ${verdictSegment(item)}`);
 }
 
-/** The app URL of a results row: absolute under APP_BASE_URL, else a relative path (spec §12). */
-export function appRowLink(appBaseUrl: string | null, definitionId: string, itineraryHash: string): string {
-  const path = `/?view=results&def=${encodeURIComponent(definitionId)}&basis=verified&row=${encodeURIComponent(itineraryHash)}`;
-  return appBaseUrl === null ? path : new URL(path, appBaseUrl).toString();
+/** The app URL of a results row with WP9's pinned parameters: absolute under APP_BASE_URL, else a relative path (spec §12). */
+export function appRowLink(appBaseUrl: string | null, definitionId: string, rowKey: string): string {
+  return `${(appBaseUrl ?? '').replace(/\/+$/, '')}/?view=results&definition=${encodeURIComponent(definitionId)}&row=${encodeURIComponent(rowKey)}`;
 }
 
 /** https, no userinfo, and (when given) the host the link was validated against. Spec §5.2, re-checked at render. */
@@ -750,7 +739,7 @@ import {
   type IsoDateTime, type Logger, type Notifier, type SearchDefinition,
 } from '@gmt/core';
 import type { EngineDeps } from '../index.js';
-import { renderBody, renderSubject, routeLine, type ItineraryDetail } from './templates.js';
+import { renderBody, renderSubject, routeLine } from './templates.js';
 
 /** What the runner needs from the engine's dependencies; EngineDeps satisfies it, so runAlerts is an AlertsStepHook. */
 export type AlertRunnerDeps = Pick<EngineDeps, 'config' | 'db' | 'repos' | 'notifiers' | 'clock' | 'log'>;
@@ -760,7 +749,7 @@ export interface AlertRunResult { digests: number; events: number }
 interface RunContext {
   deps: AlertRunnerDeps; log: Logger; now: IsoDateTime; executionId: string;
   definition: SearchDefinition; snapshot: DefinitionSnapshot;
-  pools: Map<AlertRule['basis'], AlertCandidate[]>; details: Map<string, ItineraryDetail>;
+  pools: Map<AlertRule['basis'], AlertCandidate[]>;
 }
 
 const NONE: AlertRunResult = { digests: 0, events: 0 };
@@ -777,7 +766,7 @@ export async function runAlerts(deps: AlertRunnerDeps, executionId: string): Pro
     if (rules.length === 0) return NONE;
     const ctx: RunContext = {
       deps, log: deps.log.child({ executionId, definitionId: definition.id }), now: deps.clock.now(), executionId,
-      definition, snapshot: execution.snapshot, pools: new Map(), details: new Map(),
+      definition, snapshot: execution.snapshot, pools: new Map(),
     };
     let digests = 0;
     let events = 0;
@@ -831,6 +820,7 @@ function coverageFor(ctx: RunContext): AlertDigest['coverageCaveat'] {
 
 async function runRule(ctx: RunContext, rule: AlertRule): Promise<AlertRunResult> {
   const candidates = poolFor(ctx, rule.basis);
+  // why: no prior firings until Task 11.5 adds the cooldown lookup.
   const firings = evaluateAlertRules([rule], candidates, [], {
     now: ctx.now, executionId: ctx.executionId, cabin: ctx.snapshot.cabin, discoveryRefreshHours: ctx.snapshot.providers.discoveryRefreshHours,
   });
@@ -848,7 +838,7 @@ async function deliver(ctx: RunContext, rule: AlertRule, firings: Firing[], list
   // why: plan decision 10 — a digest with only "new" items and no firing is not sent.
   if (digest === null || first === undefined) return NONE;
   const subject = renderSubject(first, ctx.now);
-  const body = renderBody({ digest, definitionName: ctx.definition.name, details: ctx.details, appBaseUrl: ctx.deps.config.appBaseUrl, now: ctx.now });
+  const body = renderBody({ digest, definitionName: ctx.definition.name, appBaseUrl: ctx.deps.config.appBaseUrl, now: ctx.now });
   const outcome = await sendToAll(ctx.deps.notifiers, { kind: 'digest', digest, subject, body });
   const digestId = randomUUID();
   ctx.deps.db.transaction(() => {
@@ -900,7 +890,7 @@ Add the following to `packages/engine/src/index.ts`:
 
 ```ts
 export { runAlerts, type AlertRunnerDeps, type AlertRunResult } from './alerts/runner.js';
-export { renderSubject, renderBody, stripControl, sourceLabel, routeLine, appRowLink, type DigestRenderInput, type ItineraryDetail } from './alerts/templates.js';
+export { renderSubject, renderBody, stripControl, sourceLabel, routeLine, appRowLink, type DigestRenderInput } from './alerts/templates.js';
 ```
 
 - [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/runner.digest.test.ts`. Expected: PASS, 3 tests.
@@ -920,10 +910,11 @@ export { renderSubject, renderBody, stripControl, sourceLabel, routeLine, appRow
 ```ts
 /** Hand-built digest items for template and notifier tests (no database). Worked example only. */
 import { asIata, asIsoDate, asIsoDateTime, type AlertDigest, type AlertRule, type DigestItem } from '@gmt/core';
-import type { DigestRenderInput, ItineraryDetail } from '../../src/alerts/templates.js';
+import type { DigestRenderInput } from '../../src/alerts/templates.js';
 
 export const NOW = asIsoDateTime('2026-10-14T15:00:00.000Z');
 export const HASH = 'a'.repeat(64);
+export const ROW_KEY = `v:${HASH}`;
 const LHR = asIata('LHR');
 const JFK = asIata('JFK');
 const CELL = { origin: LHR, destination: JFK, departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-28'), nights: 14 };
@@ -935,6 +926,9 @@ export function verifiedItem(over: Partial<DigestItem> = {}): DigestItem {
     provenance: { providerId: 'searchapi', sourceKind: 'scraped-search', fetchedAt: asIsoDateTime('2026-10-14T10:00:00.000Z'), maxAgeHours: 0, fx: { converted: false }, pointOfSale: 'GB', cabin: 'economy' },
     previousPricePence: null, previousAgeHours: null, isNew: false, firingReason: '£412 is at or below the £450 threshold',
     booking: { kind: 'get', url: 'https://www.google.com/travel/clk?tfs=abc', host: 'www.google.com' }, searchLink: SEARCH,
+    bookingExpiresAt: asIsoDateTime('2026-10-14T18:00:00.000Z'), rowKey: ROW_KEY,
+    outbound: [{ marketingCarrier: 'BA', flightNumber: 117, from: LHR, to: JFK, departLocal: '2027-03-14T08:25', arriveLocal: '2027-03-14T11:20', durationMinutes: 475 }],
+    inbound: [{ marketingCarrier: 'BA', flightNumber: 112, from: JFK, to: LHR, departLocal: '2027-03-28T18:30', arriveLocal: '2027-03-29T06:35', durationMinutes: 425 }],
     ...over,
   };
 }
@@ -946,24 +940,19 @@ export function calendarItem(over: Partial<DigestItem> = {}): DigestItem {
     provenance: { providerId: 'travelpayouts', sourceKind: 'authorised-cached', fetchedAt: asIsoDateTime('2026-10-14T13:00:00.000Z'), maxAgeHours: 168, fx: { converted: false }, pointOfSale: 'unknown', cabin: 'economy' },
     previousPricePence: null, previousAgeHours: null, isNew: false, firingReason: '£389 is at or below the £450 threshold',
     booking: { kind: 'none' }, searchLink: { url: 'https://www.aviasales.com/search/LON1403NYC28031', host: 'www.aviasales.com', label: 'search link, not a fare link' },
+    bookingExpiresAt: null, outbound: null, inbound: null, rowKey: 'c:travelpayouts|LHR|JFK|2027-03-14|2027-03-28',
     ...over,
   };
 }
 
 export const RULE: AlertRule = { id: 'rule-1', definitionId: 'def-1', type: 'absolute', thresholdPence: 45000, pct: null, basis: 'verified', requireAllVerified: false, cooldownHours: 336, enabled: true };
 
-export const DETAIL: ItineraryDetail = {
-  outbound: [{ marketingCarrier: 'BA', flightNumber: 117, from: LHR, to: JFK, departLocal: '2027-03-14T08:25', arriveLocal: '2027-03-14T11:20', durationMinutes: 475 }],
-  inbound: [{ marketingCarrier: 'BA', flightNumber: 112, from: JFK, to: LHR, departLocal: '2027-03-28T18:30', arriveLocal: '2027-03-29T06:35', durationMinutes: 425 }],
-  bookingExpiresAt: asIsoDateTime('2026-10-14T18:00:00.000Z'),
-};
-
 export function digestOf(items: DigestItem[], over: Partial<AlertDigest> = {}): AlertDigest {
   return { ruleId: RULE.id, definitionId: 'def-1', executionId: 'ex-1', basis: 'verified', items, restCount: 0, newItems: [], coverageCaveat: { itinerarySearched: 3, selected: 10, expandTop: 2 }, rule: RULE, ...over };
 }
 
 export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRenderInput {
-  return { digest: digestOf([verifiedItem()]), definitionName: 'London to New York (worked example)', details: new Map([[HASH, DETAIL]]), appBaseUrl: null, now: NOW, ...over };
+  return { digest: digestOf([verifiedItem()]), definitionName: 'London to New York (worked example)', appBaseUrl: null, now: NOW, ...over };
 }
 ```
 
@@ -973,7 +962,7 @@ export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRender
 import { asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { appRowLink, renderBody, renderSubject, sourceLabel, stripControl } from '../../src/alerts/templates.js';
-import { calendarItem, DETAIL, digestOf, HASH, NOW, renderInput, RULE, verifiedItem } from './builders.js';
+import { calendarItem, digestOf, NOW, renderInput, ROW_KEY, RULE, verifiedItem } from './builders.js';
 
 describe('subject formats (spec §8.3)', () => {
   it('verified basis: the worked example', () => {
@@ -1012,16 +1001,16 @@ describe('verified item body (spec §8.3)', () => {
   it('POST booking: links to the app results row (relative without APP_BASE_URL, absolute with it), never the vendor form', () => {
     const post = verifiedItem({ booking: { kind: 'post', url: 'https://www.google.com/travel/clk/f', postData: 'u=formdata', host: 'www.google.com' } });
     const relative = renderBody(renderInput({ digest: digestOf([post]) }));
-    expect(relative).toContain(appRowLink(null, 'def-1', HASH));
+    expect(relative).toContain(`/?view=results&definition=def-1&row=${encodeURIComponent(ROW_KEY)}`);
+    expect(appRowLink(null, 'def-1', ROW_KEY)).toBe(`/?view=results&definition=def-1&row=${encodeURIComponent(ROW_KEY)}`);
     expect(relative).not.toContain('u=formdata');
     expect(relative).not.toContain('https://www.google.com/travel/clk/f');
     const absolute = renderBody(renderInput({ digest: digestOf([post]), appBaseUrl: 'https://gmt.example.ts.net' }));
-    expect(absolute).toContain(`https://gmt.example.ts.net/?view=results&def=def-1&basis=verified&row=${HASH}`);
+    expect(absolute).toContain(`https://gmt.example.ts.net/?view=results&definition=def-1&row=${encodeURIComponent(ROW_KEY)}`);
   });
   it('expired, unstated expiry, no booking → labelled search link, failed validation → no link', () => {
-    const expired = new Map([[HASH, { ...DETAIL, bookingExpiresAt: asIsoDateTime('2026-10-14T13:00:00.000Z') }]]);
-    expect(renderBody(renderInput({ details: expired }))).toContain('expired 2h ago');
-    expect(renderBody(renderInput({ details: new Map([[HASH, { ...DETAIL, bookingExpiresAt: null }]]) }))).toContain('expiry not stated');
+    expect(renderBody(renderInput({ digest: digestOf([verifiedItem({ bookingExpiresAt: asIsoDateTime('2026-10-14T13:00:00.000Z') })]) }))).toContain('expired 2h ago');
+    expect(renderBody(renderInput({ digest: digestOf([verifiedItem({ bookingExpiresAt: null })]) }))).toContain('expiry not stated');
     expect(renderBody(renderInput({ digest: digestOf([verifiedItem({ booking: { kind: 'none' } })]) }))).toContain('Link: https://www.google.com/travel/flights?q=LHR+JFK+2027-03-14+2027-03-28 (host www.google.com, search link, not a fare link)');
     const bad = renderBody(renderInput({ digest: digestOf([verifiedItem({ booking: { kind: 'get', url: 'http://www.google.com/x', host: 'www.google.com' } })]) }));
     expect(bad).not.toContain('http://www.google.com/x');
@@ -1074,7 +1063,7 @@ describe('banned words over rendered output (spec §8.3, §11)', () => {
 
 - [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/templates.test.ts`. Expected: FAIL in "verified item body" and the CRLF seller test. The body still prints "calendar price, no itinerary" for verified items and has no `Seller:` line. The subject tests pass.
 
-- [ ] **Step 3: Implement.** In `templates.ts`, add `type ConstraintName` to the core import and add:
+- [ ] **Step 3: Implement.** In `templates.ts`, add `type ConstraintName, type Segment` to the core import and add:
 
 ```ts
 const HOUR_MS = 3_600_000;
@@ -1107,12 +1096,11 @@ function expiryText(expiresAt: IsoDateTime | null, now: IsoDateTime): string {
 function verifiedLinkLine(item: DigestItem, input: DigestRenderInput): string {
   const b = item.booking;
   if (b.kind === 'post') {
-    return `Link: this fare is booked through a form, which email cannot submit; open the results row in get-me-there: ${appRowLink(input.appBaseUrl, input.digest.definitionId, item.itineraryHash ?? '')}`;
+    return `Link: this fare is booked through a form, which email cannot submit; open the results row in get-me-there: ${appRowLink(input.appBaseUrl, input.digest.definitionId, item.rowKey)}`;
   }
   if (b.kind === 'none') return searchLine(item);
-  const expiresAt = item.itineraryHash === null ? null : (input.details.get(item.itineraryHash)?.bookingExpiresAt ?? null);
   // why: spec §5.3 (rev 10) — a validated booking link keeps its query in email; it carries no credentials.
-  return validHttps(b.url, b.host) === null ? 'Link: none (the stored link failed validation)' : `Link: ${b.url} (host ${b.host}, ${expiryText(expiresAt, input.now)})`;
+  return validHttps(b.url, b.host) === null ? 'Link: none (the stored link failed validation)' : `Link: ${b.url} (host ${b.host}, ${expiryText(item.bookingExpiresAt, input.now)})`;
 }
 ```
 
@@ -1120,13 +1108,12 @@ Then replace `basisLines` and `linkLine` with:
 
 ```ts
 /** Lines specific to the item's basis: segments and verdicts for verified items, a marker for calendar prices. */
-function basisLines(item: DigestItem, input: DigestRenderInput): string[] {
+function basisLines(item: DigestItem, _input: DigestRenderInput): string[] {
   if (item.verdictClass === 'unchecked') return ['   calendar price, no itinerary; constraints not checked'];
-  const detail = item.itineraryHash === null ? undefined : input.details.get(item.itineraryHash);
   return [
     `   Seller: ${stripControl(item.seller ?? 'not stated')}`,
-    detail === undefined ? '   Segments: not available' : `   Outbound: ${detail.outbound.map(segmentLine).join('; ')}`,
-    ...(detail === undefined ? [] : [`   Inbound: ${detail.inbound.map(segmentLine).join('; ')}`]),
+    item.outbound === null ? '   Segments: not available' : `   Outbound: ${item.outbound.map(segmentLine).join('; ')}`,
+    ...(item.inbound === null ? [] : [`   Inbound: ${item.inbound.map(segmentLine).join('; ')}`]),
     item.verdictClass === 'verified'
       ? '   Verdicts: class verified; every constraint passed'
       : `   Verdicts: class ${item.verdictClass}; unverified: ${item.unverified.map((k) => CONSTRAINT_LABELS[k]).join(', ')}`,
@@ -1249,7 +1236,6 @@ function verifiedPool(ctx: RunContext): VerifiedCandidate[] {
     best.set(row.itinerary.hash, { basis: 'verified', observation: row, itinerary: row.itinerary, verdictClass: cls, unverified: unverifiedNames(verdicts), seller: row.seller, previous: null });
   }
   return [...best.values()].map((c) => {
-    ctx.details.set(c.itinerary.hash, { outbound: c.itinerary.outbound, inbound: c.itinerary.inbound, bookingExpiresAt: c.observation.bookingExpiresAt });
     const prev = ctx.deps.repos.itineraries.previousObservation(c.observation.offerId, c.observation.provenance.fetchedAt);
     return prev === null ? c : { ...c, previous: { pricePence: prev.pricePence, fetchedAt: prev.provenance.fetchedAt } };
   });
@@ -1368,7 +1354,7 @@ Move `_hours` above `calendarPool` and make it non-exported. Rename it `hoursBef
 - Modify `packages/engine/src/alerts/runner.ts`.
 - Test `packages/engine/test/alerts/runner.dedup.test.ts`.
 
-**Interfaces:** Consumes `AlertsRepo.priorFirings` and `isSuppressed`.
+**Interfaces:** Consumes `AlertsRepo.priorFirings`, `identityKey` and `Firing.suppressed`.
 
 - [ ] **Step 1: Write the failing test** in `packages/engine/test/alerts/runner.dedup.test.ts`:
 
@@ -1464,29 +1450,25 @@ describe('cooldown across executions (spec §6.8, §9 item 4)', () => {
 
 - [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/runner.dedup.test.ts`. Expected: FAIL, because the second run returns `{ digests: 1, events: 1 }` instead of `{ digests: 0, events: 1 }`.
 
-- [ ] **Step 3: Implement.** In `runner.ts`, add `isSuppressed` to the core import and replace `runRule` with:
+- [ ] **Step 3: Implement.** In `runner.ts`, add `identityKey` to the core import and replace `runRule` with:
 
 ```ts
 async function runRule(ctx: RunContext, rule: AlertRule): Promise<AlertRunResult> {
   const candidates = poolFor(ctx, rule.basis);
-  // why: prior is [] so every qualifying firing comes back; suppression is decided below so suppressed firings are
-  // recorded with their reason (spec §6.8), whatever evaluateAlertRules does with prior.
-  const firings = evaluateAlertRules([rule], candidates, [], {
+  if (candidates.length === 0) return NONE;
+  // why: spec §6.8 suppression looks back cooldownHours over this rule's sent firings for these identities.
+  const prior = ctx.deps.repos.alerts.priorFirings(rule.id, [...new Set(candidates.map((c) => identityKey(rule, c)))], hoursBefore(ctx.now, rule.cooldownHours));
+  const firings = evaluateAlertRules([rule], candidates, prior, {
     now: ctx.now, executionId: ctx.executionId, cabin: ctx.snapshot.cabin, discoveryRefreshHours: ctx.snapshot.providers.discoveryRefreshHours,
   });
-  const listings = firings.filter((f) => f.isNew && rule.type !== 'absolute');
-  const real = firings.filter((f) => !(f.isNew && rule.type !== 'absolute'));
-  if (real.length === 0) return NONE;
-  const prior = ctx.deps.repos.alerts.priorFirings(rule.id, [...new Set(real.map((f) => f.identityKey))], hoursBefore(ctx.now, rule.cooldownHours));
-  const sendable: Firing[] = [];
-  const suppressed: Array<{ f: Firing; reason: string }> = [];
-  for (const f of real) {
-    const s = isSuppressed(f, prior, rule.cooldownHours, ctx.now);
-    if (s.suppressed) suppressed.push({ f, reason: s.reason ?? `suppressed within the ${rule.cooldownHours}h cooldown` });
-    else sendable.push(f);
-  }
+  // why: plan pin — evaluateAlertRules returns suppressed firings too; the runner records them and the digest excludes them.
+  const suppressed = firings.filter((f) => f.suppressed !== null);
+  const live = firings.filter((f) => f.suppressed === null);
+  // why: spec §6.8 — absent-then-present is listed as "new" and is never a drop firing.
+  const listings = live.filter((f) => f.isNew && rule.type !== 'absolute');
+  const sendable = live.filter((f) => !(f.isNew && rule.type !== 'absolute'));
   ctx.deps.db.transaction(() => {
-    for (const { f, reason } of suppressed) ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, 'suppressed', reason, null));
+    for (const f of suppressed) ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, 'suppressed', f.suppressed?.reason ?? `suppressed within the ${rule.cooldownHours}h cooldown`, null));
   });
   if (sendable.length === 0) return { digests: 0, events: suppressed.length };
   const delivered = await deliver(ctx, rule, sendable, listings);
@@ -1627,7 +1609,7 @@ import { describe, expect, it } from 'vitest';
 import { renderBody, renderSubject } from '../../src/alerts/templates.js';
 import { EmailNotifier, smtpTransportOptions, type MailMessage, type SmtpConfig, type SmtpTransportOptions, type TransportFactory } from '../../src/notifiers/email.js';
 import { buildNotifiers } from '../../src/notifiers/index.js';
-import { calendarItem, digestOf, HASH, NOW, renderInput, verifiedItem } from '../alerts/builders.js';
+import { calendarItem, digestOf, NOW, renderInput, ROW_KEY, verifiedItem } from '../alerts/builders.js';
 import { captureLogger } from '../alerts/fixtures.js';
 
 const PASS = 'test-smtp-pass-0123456789abcdef';
@@ -1687,7 +1669,7 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
     const t = jsonFactory();
     const n = new EmailNotifier({ smtp: smtp(), nodeEnv: 'production', log: captureLogger(), createTransport: t.factory });
     await n.send(digestMessage([verifiedItem({ booking: { kind: 'post', url: 'https://www.google.com/travel/clk/f', postData: 'x=1', host: 'www.google.com' } })]));
-    expect(t.messages[0]?.parsed.text).toContain(`/?view=results&def=def-1&basis=verified&row=${HASH}`);
+    expect(t.messages[0]?.parsed.text).toContain(`/?view=results&definition=def-1&row=${encodeURIComponent(ROW_KEY)}`);
   });
 
   it('refuses synthetic rows before anything is sent', async () => {
@@ -1972,7 +1954,7 @@ In `apps/web/src/api/endpoints.ts`, import `type { AlertEvent, AlertRule, AlertR
   alertRules: (definitionId: string) => call<AlertRule[]>('GET', '/api/alerts', { query: { definitionId } }),
   createAlertRule: (body: AlertRuleInput) => call<AlertRule>('POST', '/api/alerts', { body }),
   deleteAlertRule: (id: string) => call<AlertRule>('DELETE', '/api/alerts/:id', { params: { id } }),
-  alertEvents: (limit: number) => call<AlertEvent[]>('GET', '/api/alerts/events', { query: { limit: String(limit) } }),
+  alertEvents: (definitionId: string, limit: number) => call<AlertEvent[]>('GET', '/api/alerts/events', { query: { definitionId, limit: String(limit) } }),
 ```
 
 `// why:` the plan's `ROUTES` paths carry the `/api` prefix, and `findRoute` matches them exactly. If WP9 merged with unprefixed templates, use the same form as its other entries.
@@ -2088,7 +2070,7 @@ export function describeRule(r: AlertRule): string {
   return `${what} · ${basis} · ${C.cooldown} ${r.cooldownHours}`;
 }
 
-export const alertKeys = { rules: (id: string) => ['alerts', id] as const, events: ['alert-events'] as const };
+export const alertKeys = { rules: (id: string) => ['alerts', id] as const, events: (id: string) => ['alert-events', id] as const };
 
 export function AlertsView(props: { definitionId: string }) {
   const qc = useQueryClient();
@@ -2168,7 +2150,14 @@ const events = [
 ];
 
 function withData(r: unknown = rules, e: unknown = events) {
-  server.use(http.get('*/api/alerts', () => HttpResponse.json(r)), http.get('*/api/alerts/events', () => HttpResponse.json(e)));
+  server.use(
+    http.get('*/api/alerts', () => HttpResponse.json(r)),
+    // the server filters by definition (alertEventsQuerySchema.definitionId); this handler proves the view asks for it
+    http.get('*/api/alerts/events', ({ request }) => {
+      const all = e as Array<{ ruleId: string }>;
+      return HttpResponse.json(new URL(request.url).searchParams.get('definitionId') === 'def-1' ? all.filter((x) => x.ruleId !== 'other-definition-rule') : all);
+    }),
+  );
 }
 
 describe('Alerts events list (spec §11)', () => {
@@ -2249,10 +2238,9 @@ In `AlertsView.tsx`:
 3. After `const list = …`, add:
 
 ```tsx
-  // why: alertEventsQuerySchema has no definitionId; this definition's events are those of its rules.
-  const events = useQuery({ queryKey: alertKeys.events, queryFn: () => api.alertEvents(200) });
+  const events = useQuery({ queryKey: alertKeys.events(props.definitionId), queryFn: () => api.alertEvents(props.definitionId, 200) });
   const ruleText = new Map(list.map((r) => [r.id, describeRule(r)] as const));
-  const mine = (events.data ?? []).filter((e) => ruleText.has(e.ruleId));
+  const mine = events.data ?? [];
 ```
 
 4. Before `</section>`, add:
@@ -2265,7 +2253,7 @@ In `AlertsView.tsx`:
       </div>
 ```
 
-5. In the create and delete mutations, also invalidate `alertKeys.events`.
+5. In the create and delete mutations, also invalidate `alertKeys.events(props.definitionId)`.
 
 - [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/web test`. Expected: PASS, with web thresholds of 70/60 met.
 

@@ -42,7 +42,7 @@ Build the execution engine of spec §8 (orchestrator, discovery and verification
 | §3 Cell outcome | Seed `not_run` for every cell × discovery provider at start and for every selected cell × verification provider at selection (`skipped:not_selected` otherwise); a stage with no provider has no rows and a `NULL` roll-up; an interrupted cell returns to `not_run`. |
 | §5.6 | Normalise every raw price and offer: tz from the airports repository, `toGbp` with `FX_MAX_RATE_AGE_DAYS`, ECB currencies only, one calendar price per (provider, cell) per tile, `offers-dropped:n`, cabin evidence on the observation. |
 | §6.7 | Selection runs once per execution, guarded by stage and the existence of verification outcomes; a child execution bypasses it (`alwaysInclude = [cell]`, `maxCells = 1`, no discovery). |
-| §6.9 | The engine writes what results need: `best_observation_id` (selected by the repository, `bestObservationSelector: 'cheapest-verified-or-partial'`), child observations reachable through `observationsForDefinition`, verification outcomes that `latestVerificationOutcomeForCell` reads for `notSeenInLatest`, reused calendar rows carrying the original `fetched_at`. |
+| §6.9 | The engine writes what results need: `best_observation_id` (the cheapest observation written for the cell, verdict-independent; "cheapest verified" is WP8's read-time query), child observations reachable through `observationsForDefinition`, verification outcomes that `latestVerificationOutcomeForCell` reads for `notSeenInLatest`, reused calendar rows carrying the original `fetched_at`. |
 | §7 (rev 10) | `route_price_history` upserted from each verification's `routeHistory`; atomic units (seeding; each tile; selection + verification seeding; each reused cell; supersede in the same transaction; each verified cell); the resume query per (stage, provider); the boot `running → interrupted` update; synchronous transaction callbacks. |
 | §8.1 | Lifecycle, pre-start checks per scope, `SOFT_CONFIRM`, reuse with the 0.9 tolerance, the error table, estimate and parity, resume compare-and-set, `departed`, supersede, boot order, SIGTERM, notifications, single-cell verification. |
 | §8.2 | croner with `timezone`, re-registration on create/PUT/disable/enable/delete, the tick order, one-shot resume jobs, `skipped_missed`, `parseCron` as the sole validator (sub-hourly rejected, tz validated), `budgetFit`. |
@@ -219,9 +219,9 @@ export function londonDateOf(instant: IsoDateTime): IsoDate;
 #### Notifier port (`ports/notifier.ts`, WP0)
 
 ```ts
-export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; searchLink: { url: string; host: string; label: string } }
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string }; rowKey: string /* resultRowKey, for the app link */ }
 export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
-export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'parity_break' | 'alerts_calendar_only';
+export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'provider_capped' | 'parity_break' | 'alerts_calendar_only' | 'crash_loop';
 export interface OperatorMessage { kind: OperatorMessageKind; executionId: string | null; definitionId: string; subject: string; body: string }
 export interface Notifier { id: string; send(msg: { kind: 'digest'; digest: AlertDigest; subject: string; body: string } | { kind: 'operator'; message: OperatorMessage }): Promise<{ ok: boolean; detail?: string }> }
 // Rendering subject and body is the engine's job (WP7 for operator messages, WP11 for digests); core's buildDigest returns the structured AlertDigest only.
@@ -237,7 +237,7 @@ export interface AlertEvent { id: number; ruleId: string; identityKey: string; o
 export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
-export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean }
+export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean; suppressed: { reason: string } | null }   // evaluateAlertRules returns suppressed firings too; the runner records them with status 'suppressed' and the digest excludes them
 export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
 // identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
 ```
@@ -292,7 +292,7 @@ export class LedgerRepo { countsFor(executionId): { calls: number; costMicroGbp:
 export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; delete(id): void; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
 export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean; record(kind, executionId, definitionId, status: 'sent' | 'failed'): void }
 export class RoutePriceHistoryRepo { upsert(rows: Array<{ origin; destination; cabin: Cabin | 'unknown'; providerId; date: IsoDate; lowestPricePence: number; fetchedAt: IsoDateTime }>): void; series(origin, destination, providerId): RouteSeriesPoint[] }
-export interface BudgetConfig { providers: Partial<Record<ProviderId, ProviderLimits & { billable: boolean }>>; spend: Config['spend']; fixtureCostMicroGbp: number }
+export interface BudgetConfig { providers: Partial<Record<ProviderId, ProviderLimits & { billable: boolean; trialUsed: number }>>; spend: Config['spend']; fixtureCostMicroGbp: number }   // trialUsed seeds a lifetime window: effective cap = monthlyCallCap − trialUsed
 export function budgetConfigFromConfig(c: Config): BudgetConfig;
 export class SqliteBudgetGuard implements BudgetGuard { constructor(db: Db, config: BudgetConfig, clock: Clock) }   // execution caps read from the execution's snapshot budget
 export class SqliteResponseCache implements ResponseCache { constructor(db: Db, clock: Clock) }
@@ -301,9 +301,10 @@ export function seedAirports(db: Db, dataset: AirportsDataset): { inserted: numb
 export function sanityCheckAirports(db: Db, referenced: Iata[]): { ok: true } | { ok: false; reason: string };
 export function runMaintenance(db: Db, clock: Clock, log: Logger, opts: { lifetimeProviders: ProviderId[] }): { cacheRowsDeleted: number; ledgerRowsPruned: number; dbBytes: number };
 export function loadAirportsDataset(dir: string): AirportsDataset;   // reads airports.<version>.json + metros.json (CC BY-SA attributed list of IATA metropolitan codes) from packages/db/data
+export function backupDatabase(dbPath: string, backupsDir: string, opts: { keep: number; clock: Clock }): { file: string };   // src/backup.ts (WP3): VACUUM INTO a timestamped file, PRAGMA integrity_check on the output, refuse an existing target, prune to `keep`; throws on any failure. scripts/backup.mjs (WP12) is a CLI wrapper; both bootstraps call it before buildPorts when pendingMigrations() is non-empty and the DB file exists.
 ```
 
-Schema additions over spec §7 (rev 10 records them): `search_definitions.destination_notes_json`, `search_cells.discovery_reason`, `search_cells.verification_reason`, `search_cells.verification_min_pence`, `search_executions.trigger`, `provider_cache.provider_id NULL`, `route_price_history.cabin` allows `'unknown'`.
+Schema additions over spec §7 (rev 10 records them): `search_definitions.destination_notes_json`, `search_cells.discovery_reason`, `search_cells.verification_reason`, `search_cells.verification_min_pence`, `search_executions.trigger`, `search_executions.created_at`, `itineraries.layovers_json`, `fx_rates.source`, `operator_notifications.definition_id`, `provider_cache.provider_id NULL`, `route_price_history.cabin` allows `'unknown'`. `search_cells.best_observation_id` is the cheapest observation written for the cell (verdicts are computed at read time, so "cheapest verified" is a read-time query, never this column).
 
 #### http-kit (`@gmt/providers` `http/httpKit.ts`, WP4)
 
@@ -323,7 +324,9 @@ export function createRecorder(opts: { root: string; secrets: Secret[]; clock: C
 export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string;
 export function scrubSecrets<T>(value: T, secrets: Secret[]): T;
 export function stripUrl(url: string): string;
-export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;
+export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 over method + credential-free URL (query kept) + scrubbed headers + body only; never executionId or tileIndex, so sibling pairs share Travelpayouts metro responses
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url)
+// RecordedFixture.request.headers DROPS credential headers entirely (Authorization, X-Access-Token) rather than scrubbing their values, so the secret scan's header-name rule passes.
 export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
 export function fixtureRouter(root: string): Hono;                      // src/fixture/router.ts; scenario control via POST /__fixture/scenario and the x-fixture-scenario header (documented in the WP4 brief)
 // '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot): RequestHandler[] (serves fixtures/recorded by matching method, path and credential-free query, reversing placeholders); loadRecorded(root, providerId, endpointPath): RecordedFixture[]. msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
@@ -338,7 +341,6 @@ export const SEARCHAPI_PARAMS: ParamsAllowlist;   // code constant; a test asser
 export function travelpayoutsProvider(o: { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: { metroOf(iata: Iata): string | null } }): FlightProvider;
 export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['api.travelpayouts.com'], billable 'never'; no classifyError (default table maps 401 → auth)
 export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
 ```
 
 #### Core domain functions (WP1, WP2)
@@ -364,6 +366,7 @@ export interface NormaliseDeps { providerId: ProviderId; cabin: Cabin; tzOf(iata
 export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps): { ok: true; itinerary: NormalisedItinerary; offer: Offer; observation: ObservationFields } | { ok: false; error: NormalisationError };
 export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts; export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
 export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
+export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string;   // itineraryHash, or `calendar:${calendarPriceId}`; the web's `?row=` parameter and email links use it
 export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
 export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
 export function identityKey(rule: AlertRule, c: AlertCandidate): string; export function dedupKey(identityKey: string, pricePence: number): string; export function isSuppressed(f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>, prior: PriorFiring[], cooldownHours: number, now: IsoDateTime): { suppressed: boolean; reason: string | null };
@@ -372,8 +375,8 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 
 #### API contract shapes the engine produces values of (`api-contract/definitions.ts`, `system.ts`, WP0)
 
-- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput; `bookingLinks` forced true when verification includes `searchapi`; origins/destinations disjoint; `topN ≤ maxCells`; `alwaysInclude.length ≤ maxCells`); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits: boolean; runsPerMonth: number; perScope: Array<{ scope: string; estimated: number; cap: number | null; fits: boolean }> }`; `estimateSchema` (= `Estimate`) `{ cells: number; perProvider: Array<{ providerId; stage: Stage; calls: number; planCalls: number; costMicroGbp: number; costPence: number; seconds: number; blocked: string | null }>; totalCalls: number; totalPlanCalls: number; totalCostMicroGbp: number; totalCostPence: number; seconds: number; assumptions: string[]; windowClamped: boolean; retryFactor: number }` (`planCalls` is pre-factor, for the overrun check); `POST /api/definitions/estimate` (body: `definitionCreateRequestSchema`, unsaved) and `POST /api/definitions/:id/estimate` both → `estimateSchema`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month: IsoMonth; cachedRows: number; cellsInBand: number }> }>; calls: number; notes: string[] }`.
-- `system.ts`: `healthResponseSchema = z.union([healthPublicSchema, healthDetailSchema])` where public is `{ ok: boolean; degraded: boolean }` and detail `{ ok; degraded; db: { ok; path: never /* no path leaks */; sizeBytes }; providers: Array<{ providerId; configured; healthy: boolean | null }>; scheduler: { jobCount; nextRun; lastExecutionAt; degraded; blockedSince: IsoDateTime | null } }`; `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`; `budgetResponseSchema` `{ scopes: Usage[]; monthlyCapMicroGbp; monthlyCapPence; fixedFeesMicroGbp; ceilingNote: string }`; `schedulerJobsResponseSchema` `{ jobs: Array<SchedulerJob> }` with `SchedulerJob = { id: string; kind: 'definition' | 'resume'; definitionId: string; executionId: string | null; cron: string | null; tz: string; nextRun: IsoDateTime | null }`; `toolRecordRequestSchema` `{ budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth }`; `toolSmokeRequestSchema` `{ origin: Iata; destination: Iata }`; `toolRunResponseSchema` `{ exitCode: number; summary: string; lines: string[]; fixturesWritten: string[] }`.
+- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput plus `confirmedCostPence?: number`, the explicit confirmation from the create click; `bookingLinks` forced true when verification includes `searchapi`; origins/destinations disjoint; `topN ≤ maxCells`; `alwaysInclude.length ≤ maxCells`); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits: boolean; runsPerMonth: number; perScope: Array<{ scope: string; estimated: number; cap: number | null; fits: boolean }> }`; `estimateSchema` (= `Estimate`) `{ cells: number; perProvider: Array<{ providerId; stage: Stage; calls: number; planCalls: number; costMicroGbp: number; costPence: number; seconds: number; blocked: string | null }>; totalCalls: number; totalPlanCalls: number; totalCostMicroGbp: number; totalCostPence: number; seconds: number; assumptions: string[]; windowClamped: boolean; retryFactor: number }` (`planCalls` is pre-factor, for the overrun check); `POST /api/definitions/estimate` (body: `definitionCreateRequestSchema`, unsaved) and `POST /api/definitions/:id/estimate` both → `estimateResponseSchema` `{ estimate: Estimate; budgetFit: BudgetFit }` (so the form shows both before the create click); `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month: IsoMonth; cachedRows: number; cellsInBand: number }> }>; calls: number; notes: string[] }`.
+- `system.ts`: `healthResponseSchema = z.union([healthPublicSchema, healthDetailSchema])` where public is `{ ok: boolean; degraded: boolean }` and detail `{ ok; degraded; db: { ok; path: never /* no path leaks */; sizeBytes }; providers: Array<{ providerId; configured; healthy: boolean | null }>; scheduler: { jobCount; nextRun; lastExecutionAt; degraded; blockedSince: IsoDateTime | null } }`; `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`; `budgetResponseSchema` `{ scopes: Usage[]; monthlyCapMicroGbp; monthlyCapPence; fixedFeesMicroGbp; ceilingNote: string }`; `schedulerJobsResponseSchema` `{ jobs: Array<SchedulerJob> }` with `schedulerJobSchema` exported and `SchedulerJob = { id: string; kind: 'definition' | 'resume'; definitionId: string; executionId: string | null; cron: string | null; tz: string; nextRun: IsoDateTime | null }`; `toolRecordRequestSchema` `{ budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth }`; `toolSmokeRequestSchema` `{ origin: Iata; destination: Iata }`; `toolRunResponseSchema` `{ exitCode: number; summary: string; lines: string[]; fixturesWritten: string[] }`.
 
 #### Fixture tree, routes and scenario rules (WP4 brief, `docs/briefs/wp04-http-kit-and-fixture-provider.md`, verbatim)
 
@@ -433,6 +436,7 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 11. The airports dataset ships with a separate attributed metro-code list (`packages/db/data/metros.json`, from Wikipedia's list of IATA metropolitan area codes, CC BY-SA 4.0, attribution file beside it). `SEARCHAPI_PLAN` `trial` keeps the lifetime window.
 12. React is 19 (spec §4 updated). `APP_BASE_URL` is added to config. Smoke and record are invoked from the host with curl against the loopback port; the image has no curl.
 13. Dispatch dependencies: WP5 and WP6 depend on 1, 2, 4, 4b; WP12 depends on 8 and 9 (its docs-equals-constant test); WP4b depends on 3 and 4.
+14. (Round 2) `backupDatabase` lives in `@gmt/db` (WP3) so both bootstraps can call it before WP12 exists; `ParamsAllowlist` lives in `@gmt/providers` (WP4); the cache key never includes execution or tile ids; recorded headers drop credentials entirely; one exit-code table for every CLI; `DigestItem` carries segments, expiry and the row key; `Firing.suppressed`; `resultRowKey`; `cell-mismatch`; `confirmedCostPence` on create/update; estimate responses carry `budgetFit`; calendar-gap carries the verified price with provenance; alert events filter by definition; child budget inherits all but `maxCalls`; `provider_capped` and `crash_loop` notification kinds; `EngineOptions.providerConcurrency`; four schema columns and `best_observation_id` semantics; spec §6.1 signature and §5.4 silent cases settled (rev 10).
 
 ## 5. Interfaces produced
 
@@ -440,7 +444,7 @@ The plan's "Engine" contract, verbatim:
 
 ```ts
 export interface EngineDeps { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; notifiers: Notifier[]; clock: Clock; log: Logger }
-export interface EngineOptions { alerts?: AlertsStepHook; fixtureCostMicroGbp?: number }
+export interface EngineOptions { alerts?: AlertsStepHook; fixtureCostMicroGbp?: number; providerConcurrency?: Partial<Record<ProviderId, number>> /* tests; production reads config limits */ }
 export type AlertsStepHook = (deps: EngineDeps, executionId: string) => Promise<{ digests: number; events: number }>;   // WP11 provides runAlerts; default noAlerts
 export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled'; message: string; details: unknown };
 export type Estimate = z.infer<typeof estimateSchema>; export type BudgetFit = z.infer<typeof budgetFitSchema>; export type SchedulerJob = z.infer<typeof schedulerJobSchema>;
@@ -449,10 +453,11 @@ export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   
 export function parseCron(expr: string, tz: string): { ok: true; next: (from: Date) => Date | null } | { ok: false; reason: string };
 export class LogNotifier implements Notifier { constructor(log: Logger) }
 export function renderOperatorMessage(kind: OperatorMessageKind, ctx: {...}): { subject: string; body: string };   // engine/src/notifiers/operatorTemplates.ts
+// A child execution's snapshot budget is the definition's budget with only maxCalls replaced by CHILD_MAX_CALLS.
 // Rules settled: manual resume of a paused_budget execution-* breach copies the definition's CURRENT budget into the snapshot (only `budget`), then re-checks caps (spec rev 10). Executions whose definition is soft-deleted are never auto-resumed and never scheduled (the record tool's hidden definition relies on this). Supersede of a reused row is enforced in writeTile as a safety net even though the plan never re-fetches a reused cell.
 ```
 
-Precisions this brief adds (no name changes): `renderOperatorMessage`'s context is `{ definitionName: string; executionId: string | null; detail: string }`; `noAlerts: AlertsStepHook` (returns `{ digests: 0, events: 0 }`) is exported for WP8/WP11 tests; `scheduler.blockedSince()` returns the oldest "schedule blocked since" instant among definitions whose last tick was blocked by an active execution (cleared by the next tick that starts or resumes), `null` when none. Internal helpers that later tasks name (`createOrchestrator`, `buildContext`, `runPool`, …) are not exported from the barrel.
+Precisions this brief adds (no name changes): `providerConcurrency` overrides the pool size per provider and is passed only by tests; `renderOperatorMessage`'s context is `{ definitionName: string; executionId: string | null; detail: string }`; `noAlerts: AlertsStepHook` (returns `{ digests: 0, events: 0 }`) is exported for WP8/WP11 tests; `scheduler.blockedSince()` returns the oldest "schedule blocked since" instant among definitions whose last tick was blocked by an active execution (cleared by the next tick that starts or resumes), `null` when none. Internal helpers that later tasks name (`createOrchestrator`, `buildContext`, `runPool`, …) are not exported from the barrel.
 
 ## 6. Library notes
 
@@ -784,10 +789,10 @@ export interface HarnessOptions {
   /** Extra or overriding environment for parseConfig (strings, as in .env). */
   env?: Record<string, string>;
   now?: IsoDateTime;
-  /** http-kit concurrency for fixture.local (the engine's pool size comes from WP4's fixtureHttpLimits, 4). */
+  /** Pool size for the fixture, both in the engine (EngineOptions.providerConcurrency) and in http-kit. */
   fixtureConcurrency?: number;
   fixtureMonthlyCallCap?: number;
-  /** Per-call cost the guard and the engine bill the fixture at; 0 for child-execution tests (child snapshots carry maxCostMicroGbp 0). */
+  /** Per-call cost the guard and the engine bill the fixture at (default FIXTURE_COST_MICRO_GBP). */
   fixtureCostMicroGbp?: number;
   transformFixture?: (fixture: FlightProvider) => FlightProvider;
   extraProviders?: (tools: { clock: Clock; log: Logger; http: HttpKit }) => FlightProvider[];
@@ -945,7 +950,7 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
   };
 
   const deps: EngineDeps = { config, db, repos, budget, cache, http, providers, notifiers: [capturingNotifier(notifications, digests)], clock, log };
-  const options: EngineOptions = { fixtureCostMicroGbp: cost };
+  const options: EngineOptions = { fixtureCostMicroGbp: cost, ...(opts.fixtureConcurrency !== undefined ? { providerConcurrency: { fixture: opts.fixtureConcurrency } } : {}) };
 
   const waitForSettled = (executionId: string): Promise<Execution> =>
     vi.waitFor(
@@ -1048,11 +1053,10 @@ import { type Harness, JFK, LGW, LHR, createHarness, discoveryOf, expectedTiles,
 
 let h: Harness;
 afterEach(() => h.close());
-const okFirstAttempts = (id: string) => h.ledgerRows(id).filter((r) => r.tileIndex !== null && r.httpAttempt === 1 && r.outcome === 'ok').length;
 
 describe('resume after k of n tiles issues n−k (spec §9 item 4; WP7 first failing test)', () => {
-  it('re-plans over the resumable cells only; the second pass issues exactly n − k tile requests', async () => {
-    // why: http-kit serialises fixture calls, so the interrupt lands right after the k-th commit
+  it('re-plans over the resumable cells only and the ledger shows exactly n first-attempt tile requests across both passes', async () => {
+    // why: one tile in flight at a time (EngineOptions.providerConcurrency), so the interrupt lands exactly between tile k and k+1
     h = createHarness({ fixtureConcurrency: 1 });
     const def = h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], providers: noVerification() });
     const n = expectedTiles(h, def);
@@ -1067,8 +1071,7 @@ describe('resume after k of n tiles issues n−k (spec §9 item 4; WP7 first fai
     if (!started.ok) throw new Error(started.message);
     const id = started.executionId;
     expect((await h.waitForSettled(id)).status).toBe('interrupted');
-    expect(okFirstAttempts(id)).toBe(k);
-    const rowsAfterPassOne = h.tileRequests(id); // k, plus any request that was already reserved when the abort landed
+    expect(h.tileRequests(id)).toBe(k);
     const resumable = h.outcomes(id, { stage: 'discovery', status: 'not_run' }).map(cellKeyString).sort();
     expect(resumable.length).toBeGreaterThan(0);
 
@@ -1078,8 +1081,7 @@ describe('resume after k of n tiles issues n−k (spec §9 item 4; WP7 first fai
     expect(await second.resume(id, { manual: false })).toEqual({ ok: true, executionId: id });
     expect((await h.waitForSettled(id)).status).toBe('completed');
 
-    expect(h.tileRequests(id) - rowsAfterPassOne).toBe(n - k); // the second pass issued n − k
-    expect(okFirstAttempts(id)).toBe(n);
+    expect(h.tileRequests(id)).toBe(n); // k in pass one + (n − k) in pass two
     const planned = plan.mock.calls.flatMap(([q]) => (q.cells ?? []).map(cellKeyString)).sort();
     expect(planned).toEqual(resumable); // plan() saw exactly the resumable cells, nothing already committed
     expect(h.outcomes(id, { stage: 'discovery', status: 'not_run' })).toHaveLength(0);
@@ -1237,6 +1239,12 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
   const providers = new Map<ProviderId, FlightProvider>(deps.providers.map((p) => [p.id, p]));
   const config = deps.config;
   const limitsOf = (id: ProviderId): ProviderRunLimits => {
+    const base = baseLimits(id);
+    // why: plan EngineOptions — tests pin the pool size per provider; production reads config limits
+    const pool = options.providerConcurrency?.[id];
+    return pool === undefined ? base : { ...base, concurrency: pool };
+  };
+  const baseLimits = (id: ProviderId): ProviderRunLimits => {
     if (id === 'fixture') {
       // why: Config carries only the fixture's cost (plan "Config"); its pool size and rate are WP4's fixtureHttpLimits
       const cost = options.fixtureCostMicroGbp ?? config.providers.fixture?.costMicroGbp ?? 0;
@@ -1991,7 +1999,7 @@ import type { OperatorKind } from '../run.js';
 /** Every operator-notification kind of spec §8.1 "Operator notifications". */
 export const OPERATOR_KINDS: readonly OperatorKind[] = [
   'paused_budget', 'paused_error', 'skipped_budget', 'skipped_confirm', 'skipped_window', 'skipped_missed',
-  'interrupted', 'provider_disabled', 'parity_break', 'alerts_calendar_only',
+  'interrupted', 'provider_disabled', 'provider_capped', 'parity_break', 'alerts_calendar_only', 'crash_loop',
 ];
 
 // why: spec §11 banned words apply to engine templates; every string here is covered by the
@@ -2005,6 +2013,8 @@ const SUBJECTS: Readonly<Record<OperatorKind, string>> = {
   skipped_missed: 'scheduled run missed while the app was stopped',
   interrupted: 'run interrupted',
   provider_disabled: 'a provider was disabled for this run',
+  provider_capped: 'a provider reached its spend cap; the others carried on',
+  crash_loop: 'automatic resume stopped after repeated restarts',
   parity_break: 'request count differs from the plan',
   alerts_calendar_only: 'alerts running on calendar basis only',
 };
@@ -2017,6 +2027,8 @@ const GUIDANCE: Readonly<Record<OperatorKind, string>> = {
   skipped_missed: 'The next scheduled run goes ahead as normal; start one now if you need newer prices.',
   interrupted: 'It resumes on the next start unless it has restarted too often without progress.',
   provider_disabled: 'The other providers carried on; a manual resume retries this one.',
+  provider_capped: 'Its cells resume when the cap window reopens, or after the cap is raised.',
+  crash_loop: 'Check the logs for the cause, then resume it manually from the status bar.',
   parity_break: 'The plan and the ledger disagree; Coverage shows both counts.',
   alerts_calendar_only: 'Verified-basis alert rules did not run; calendar-basis rules ran, constraints not checked.',
 };
@@ -3488,7 +3500,7 @@ describe('verification stage (spec §8.1 "verification", §6.7, §7 atomic units
     }
   });
 
-  it('a priced cell stores best_observation_id = its cheapest observation in the definition cabin, and min_pence matches', async () => {
+  it('a priced cell stores best_observation_id = the cheapest observation written for it (verdict-independent), and min_pence matches', async () => {
     h = createHarness();
     const e = await h.runToCompletion(orch(), def().id);
     const rows = h.db.raw
@@ -3498,7 +3510,7 @@ describe('verification stage (spec §8.1 "verification", §6.7, §7 atomic units
                 (SELECT min(po.price_pence) FROM price_observations po
                    JOIN fare_offers fo ON fo.id = po.offer_id JOIN itineraries i ON i.hash = fo.itinerary_hash
                   WHERE po.execution_id = sc.execution_id AND i.origin = sc.origin AND i.destination = sc.destination
-                    AND i.departure_date = sc.departure_date AND i.return_date = sc.return_date AND fo.cabin = 'economy') AS minPence
+                    AND i.departure_date = sc.departure_date AND i.return_date = sc.return_date) AS minPence
            FROM search_cells sc WHERE sc.execution_id = ? AND sc.verification_status = 'priced'`,
       )
       .all(e.id) as Array<{ best: number | null; bestPence: number; minPence: number }>;
@@ -3750,7 +3762,8 @@ export function routeHistoryRows(ctx: EngineContext, providerId: ProviderId, cel
 
 /**
  * Writes one verified cell atomically (spec §7: itinerary, segments, offer, observation, outcome,
- * best_observation_id, roll-up; the repository picks the best observation). priced iff ≥ 1 offer
+ * best_observation_id, roll-up). The repository sets best_observation_id to the cheapest observation
+ * written (plan decision 14); verdicts are applied at read time, never to this column. priced iff ≥ 1 offer
  * survives normalisation, with notes `partial-expansion` and `offers-dropped:n`; error with the
  * first normalisation reason when offers existed but none survived; empty otherwise (spec §3, §5.4, §5.6).
  */
@@ -3786,6 +3799,7 @@ export function commitVerifiedCell(ctx: EngineContext, run: RunState, provider: 
   } else {
     outcome = { ...base, status: 'empty', reason: null, lastError: null, minPence: null };
   }
+  // why: the selector literal is the contract's; per plan decision 14 the repository stores the cheapest observation written, verdict-independent
   ctx.repos.cells.writeVerifiedCell(run.executionId, provider.id, { cell, outcome, itineraries: [...groups.values()], bestObservationSelector: 'cheapest-verified-or-partial' });
   const history = routeHistoryRows(ctx, provider.id, cell, result);
   if (history.length > 0) ctx.repos.routeHistory.upsert(history);
@@ -4008,7 +4022,7 @@ describe('BudgetExceeded provider-month (spec §8.1)', () => {
     expect(fixture.filter((o) => o.status === 'skipped').length).toBeGreaterThan(0);
     expect(fixture.filter((o) => o.status === 'not_run' || o.status === 'error')).toHaveLength(0);
     expect(h.outcomes(e.id, { providerId: 'travelpayouts' }).every((o) => o.status === 'no_data')).toBe(true);
-    expect(kinds()).toEqual(['provider_disabled']);
+    expect(kinds()).toEqual(['provider_capped']);
   });
 
   it('no other provider remains: remaining cells skipped:budget; paused_budget with resume_after = next window start; one-shot job', async () => {
@@ -4034,13 +4048,13 @@ describe('BudgetExceeded global-month: a stopping breach aborts siblings → not
     h = createHarness({ fixtureConcurrency: 2 });
     // why: after the pre-start check, another process leaves room for exactly one fixture call under the 100000p global cap
     h.onStageStart('discovery', () => h.spendLedger({ providerId: 'fixture', rows: 1, costMicroGbpEach: 1_000_000_000 - FIXTURE_COST_MICRO_GBP }));
-    const def = h.createDefinition({ origins: [LHR, LGW], destinations: [JFK, EWR] }); // 4 pairs × 2 tiles = 8 tiles; the engine's pool holds 4
+    const def = h.createDefinition({ origins: [LHR, LGW], destinations: [JFK, EWR] }); // 4 pairs × 2 tiles = 8 tiles; the fixture pool holds 2
     const e = await h.runToCompletion(createOrchestrator(buildContext(h.deps, h.options)), def.id);
     expect(e.status).toBe('paused_budget');
     expect(e.resumeAfter).toBe(h.deps.budget.usage({ kind: 'global-month' }).windowEnd);
     const tiles = planTiles(discoveryOf(h.fixture), e.snapshot, generateCells(e.snapshot.resolved)).map((t) => t.plan.coveredCells.map(cellKeyString));
     expect(tiles).toHaveLength(8);
-    const inFlight = new Set(tiles.slice(0, 4).flat()); // handed to fetchTile by the four lanes before the second reserve failed
+    const inFlight = new Set(tiles.slice(0, 2).flat()); // handed to fetchTile by the two lanes; the second one's reserve failed
     for (const o of h.outcomes(e.id, { stage: 'discovery' })) {
       if (inFlight.has(cellKeyString(o))) expect(o.status).toBe('not_run');
       else expect(o).toMatchObject({ status: 'skipped', reason: 'budget' });
@@ -4131,7 +4145,7 @@ export function applyBudgetBreach(ctx: EngineContext, run: RunState, providerId:
     stopRun(run, { kind: 'budget', error: err, resumeAfter: ctx.budget.usage(scope).windowEnd });
     return;
   }
-  run.notices.push({ kind: 'provider_disabled', detail: `${affected.join(', ')} reached the ${err.scope} cap; remaining ${stage} cells are skipped (budget) and the other providers continue.` });
+  run.notices.push({ kind: 'provider_capped', detail: `${affected.join(', ')} reached the ${err.scope} cap; remaining ${stage} cells are skipped (budget) and the other providers continue.` });
 }
 
 /** After a lane's pool drains: finish budget and disable marking (spec §8.1 "remaining cells …"). */
@@ -5276,7 +5290,7 @@ const cell = { origin: LHR, destination: JFK, departureDate: asIsoDate('2026-11-
 
 describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7)', () => {
   it('needs no parent; creates a child that skips discovery with alwaysInclude = [cell], maxCells = 1 and CHILD_MAX_CALLS', async () => {
-    h = createHarness({ fixtureCostMicroGbp: 0 }); // why: a child snapshot carries maxCostMicroGbp 0 (plan Budget port)
+    h = createHarness();
     const def = h.createDefinition({ providers: withVerification() });
     const r = await orch().verifyCell(def.id, cell);
     if (!r.ok) throw new Error(r.message);
@@ -5284,7 +5298,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     expect(e).toMatchObject({ isChild: true, cell, status: 'completed', trigger: 'manual' });
     expect(e.snapshot.providers.discovery).toEqual([]);
     expect(e.snapshot.verification).toMatchObject({ alwaysInclude: [cell], maxCells: 1, topN: 1 });
-    expect(e.snapshot.budget).toEqual({ maxCalls: h.config.spend.childMaxCalls, maxFreeCalls: 0, maxCostMicroGbp: 0 });
+    expect(e.snapshot.budget).toEqual({ ...def.budget, maxCalls: h.config.spend.childMaxCalls });
     expect(h.outcomes(e.id, { stage: 'discovery' })).toHaveLength(0);
     const v = h.outcomes(e.id, { stage: 'verification' });
     expect(v.map(cellKeyString)).toEqual([cellKeyString(cell)]);
@@ -5293,7 +5307,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
   });
 
   it('allows at most one active child per cell', async () => {
-    h = createHarness({ fixtureCostMicroGbp: 0 }); // why: a child snapshot carries maxCostMicroGbp 0 (plan Budget port)
+    h = createHarness();
     h.scenario({ match: (r) => r.kind === 'itinerary', respond: RESPONSES.hold, times: 100 });
     const def = h.createDefinition({ providers: withVerification() });
     const o = orch();
@@ -5308,7 +5322,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
   });
 
   it('refuses a cell outside the current space, and a definition without a verification provider, with code window', async () => {
-    h = createHarness({ fixtureCostMicroGbp: 0 }); // why: a child snapshot carries maxCostMicroGbp 0 (plan Budget port)
+    h = createHarness();
     const def = h.createDefinition({ providers: withVerification() });
     expect(await orch().verifyCell(def.id, { ...cell, departureDate: asIsoDate('2026-12-01'), returnDate: asIsoDate('2026-12-08') })).toMatchObject({ ok: false, code: 'window' });
     const plain = h.createDefinition({ providers: noVerification() });
@@ -5316,13 +5330,13 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
   });
 
   it('its own execution cap: CHILD_MAX_CALLS = 0 refuses with code cap', async () => {
-    h = createHarness({ env: { CHILD_MAX_CALLS: '0' }, fixtureCostMicroGbp: 0 });
+    h = createHarness({ env: { CHILD_MAX_CALLS: '0' } });
     const def = h.createDefinition({ providers: withVerification() });
     expect(await orch().verifyCell(def.id, cell)).toMatchObject({ ok: false, code: 'cap' });
   });
 
   it('is included in results inputs and newest-outcome reads; excluded from latest execution', async () => {
-    h = createHarness({ fixtureCostMicroGbp: 0 }); // why: a child snapshot carries maxCostMicroGbp 0 (plan Budget port)
+    h = createHarness();
     const def = h.createDefinition({ providers: withVerification() });
     const parent = await h.runToCompletion(orch(), def.id);
     h.clock.advance(3_600_000);
@@ -5349,7 +5363,7 @@ Expected: FAIL, `o.verifyCell is not a function`.
 ```ts
 /**
  * Spec §8.1 single-cell verification: a child skips discovery, `alwaysInclude = [cell]`,
- * `maxCells = 1`, its own execution caps (CHILD_MAX_CALLS calls, no free calls, no per-call cost); provider and global caps are shared.
+ * `maxCells = 1`, its own call cap (CHILD_MAX_CALLS; the rest of the definition's budget is inherited); provider and global caps are shared.
  */
 export function childSnapshot(ctx: EngineContext, parent: DefinitionSnapshot, cell: CellKey): DefinitionSnapshot {
   const key = { origin: cell.origin, destination: cell.destination, departureDate: cell.departureDate, returnDate: cell.returnDate };
@@ -5357,8 +5371,8 @@ export function childSnapshot(ctx: EngineContext, parent: DefinitionSnapshot, ce
     ...parent,
     providers: { ...parent.providers, discovery: [] },
     verification: { ...parent.verification, alwaysInclude: [key], maxCells: 1, topN: 1 },
-    // why: plan Budget port — "child executions carry { maxCalls: CHILD_MAX_CALLS, maxFreeCalls: 0, maxCostMicroGbp: 0 } in their snapshot"
-    budget: { maxCalls: ctx.config.spend.childMaxCalls, maxFreeCalls: 0, maxCostMicroGbp: 0 },
+    // why: plan decision 14 — a child inherits the definition's budget with only maxCalls replaced by CHILD_MAX_CALLS
+    budget: { ...parent.budget, maxCalls: ctx.config.spend.childMaxCalls },
   };
 }
 ```
@@ -6247,13 +6261,13 @@ describe('boot (spec §8.1 "Boot order")', () => {
     expect(h.repos.executions.get(id)?.autoResumeCount).toBe(0); // reset by the first commit of the resumed pass
   });
 
-  it('crash-loop cap: auto_resume_count > MAX_AUTO_RESUMES stops auto-resume and tells the operator', async () => {
+  it('crash-loop cap: auto_resume_count > MAX_AUTO_RESUMES stops auto-resume and sends crash_loop', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    const id = ghost(h.createDefinition()); // never notified before, so the per-execution dedup does not hide the message
+    const id = await interrupted(); // already notified `interrupted`; crash_loop has its own dedup key
     h.repos.executions.setStatus(id, 'running', { autoResumeCount: h.config.maxAutoResumes });
     await engine().boot();
     expect(h.repos.executions.get(id)).toMatchObject({ status: 'interrupted', autoResumeCount: h.config.maxAutoResumes + 1 });
-    const msg = h.notifications.find((m): m is OperatorMessage => 'kind' in m && m.kind === 'interrupted' && m.executionId === id);
+    const msg = h.notifications.find((m) => m.kind === 'crash_loop' && m.executionId === id);
     expect(msg?.body).toContain('Automatic resume stopped after 4 restarts without progress');
   });
 
@@ -6470,7 +6484,7 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
     if (exec.autoResumeCount > ctx.config.maxAutoResumes) {
       capped += 1;
       log.warn({ executionId: exec.id, autoResumeCount: exec.autoResumeCount }, 'boot: auto-resume stopped by the crash-loop cap');
-      await notifyOperator(ctx, 'interrupted', { ...p, detail: `Automatic resume stopped after ${exec.autoResumeCount} restarts without progress; resume it manually once the cause is fixed.` });
+      await notifyOperator(ctx, 'crash_loop', { ...p, detail: `Automatic resume stopped after ${exec.autoResumeCount} restarts without progress; resume it manually once the cause is fixed.` });
       continue;
     }
     if (crashMarked.has(exec.id)) await notifyOperator(ctx, 'interrupted', { ...p, detail: 'The app stopped without a clean shutdown during this run.' });
@@ -6794,14 +6808,8 @@ Every task's checkboxes are ticked; every commit message starts `wp07:`.
 
 ## 11. Open questions
 
-None requires the operator's judgment: the coordinator's reconciliation (plan contracts v2, spec revision 10, commit e804941) settled every question the first draft raised, including the former item 1 (a manual `/resume` of a `paused_budget` copies the definition's current `budget` into the snapshot and re-checks; Task 7.14). What remains are small contract seams the brief codes around; each is stated so Fable can confirm or correct it in one line before dispatch:
+None requires the operator's judgment, and no contract gap remains open: plan contracts v2 (commit e804941) and the round-2 pins (commit 790d1ea, decision 14) settled every item the earlier drafts raised. Three engine-side readings are recorded so a reviewer can object:
 
-1. **Fixture pool size.** `EngineOptions` no longer carries per-provider limits, so the engine's pool for the fixture is WP4's `fixtureHttpLimits(...).concurrency` (4). Tests that need one call at a time set the **http-kit** concurrency in the harness (`fixtureConcurrency: 1`), which serialises the calls but lets the engine hand up to four tiles to `fetchTile` at once. Consequences written into the tests: the first failing test asserts that the *second pass issues n − k* requests and that exactly n first-attempt requests succeed overall (a request already reserved when the abort lands may add one aborted row to pass one); error rows are pinned to tiles by WP4 rule params, not request order; the global-month sibling test expects the four handed-out tiles to return to `not_run`.
-2. **Where `Estimate` lives.** Core's `Execution.estimate: Estimate | null` implies core exports `Estimate`, but the plan defines it in the Engine block as `z.infer<typeof estimateSchema>`. The engine defines it the same way (`import type { z } from 'zod'`), so `packages/engine/package.json` gains `zod@4.6.7`, which the plan's engine dependency list lacks. If core exports the type, `src/types.ts` re-exports it instead; the shape is identical.
-3. **`apiContract.schedulerJobSchema`.** The Engine block names `schedulerJobSchema`; the `system.ts` bullet defines only `schedulerJobsResponseSchema` with `SchedulerJob` inline. The brief assumes WP0 exports the element schema under that name.
-4. **WP3 `BudgetConfig`.** The plan's `BudgetConfig` is `{ providers: Partial<Record<ProviderId, ProviderLimits & { billable }>>; spend; fixtureCostMicroGbp }` and `budgetConfigFromConfig(c)`; the WP3 brief's tests use `budgetConfigFromConfig(config, { fixtureCallCap })` and fields `billing`/`callCap`. The harness builds the plan's shape; whichever WP3 merges, only the harness literal changes.
-5. **Child cost cap.** Child snapshots carry `maxCostMicroGbp: 0` (plan Budget port), so a child can never run on a provider with a per-call cost above 0. Correct for SearchApi's subscription plans (cost 0); child tests bill the fixture at 0 for that reason. A future per-call plan would block every on-demand verification.
-6. **`provider_disabled` reused for a capped provider.** `OperatorMessageKind` has no kind for "a provider reached its cap, the others continue" (spec §8.1 "notify once"); the brief sends `provider_disabled` with a budget wording. Deduplication per (kind, execution) also means a crash-loop notice is suppressed if the same execution was already notified `interrupted`.
-7. **`disabled` and manual starts.** The brief refuses a manual start of a disabled definition with `disabled` (the tick skips it silently). If manual starts of disabled definitions should be allowed, only the guard in `startExecution` changes.
-8. **Budget refresh scope.** The decision speaks of an execution-cap pause; the brief refreshes `snapshot.budget` on every manual resume of a parent `paused_budget` (provider and global pauses never read that budget, so the effect is the same) and never on automatic resume or for children.
-9. **Ordinal holds.** WP4's rules match path and params; the harness keeps one thin layer in front of the router for holding a request until released (`hang` can only end by abort) and for counting requests. All §8.1 error rows use WP4's own rules.
+1. **`disabled` and manual starts.** A manual start of a disabled definition is refused with `disabled` (the tick skips it silently). If manual starts of disabled definitions should be allowed, only the guard in `startExecution` changes.
+2. **Budget refresh scope.** The decision speaks of an execution-cap pause; the brief refreshes `snapshot.budget` on every manual resume of a parent `paused_budget` (provider and global pauses never read that budget, so the effect is the same) and never on automatic resume or for children.
+3. **Holding requests.** WP4's rules match path and params; the harness keeps one thin layer in front of the router to hold a request until released (`hang` can only end by abort) and to count requests. Every §8.1 error row uses WP4's own rules.

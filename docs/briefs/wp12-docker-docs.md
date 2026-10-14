@@ -14,7 +14,7 @@ status: draft
 
 ## Goal
 
-Ship the one-container deployment (image, compose file, final `.env.example`), the SQLite backup script with its pre-migration hook and the `/data` writability check, and the three operator documents, each held to the spec by an automated test.
+Ship the one-container deployment (image, compose file, final `.env.example`), the on-demand backup CLI over `@gmt/db` `backupDatabase`, an end-to-end check that boot backs up before migrating, and the three operator documents, each held to the spec by an automated test.
 
 ## Scope
 
@@ -24,16 +24,17 @@ Ship the one-container deployment (image, compose file, final `.env.example`), t
 - `scripts/assert-sqlite-prebuilt.mjs` (build-stage and runtime-stage assertion).
 - `docker-compose.yml` (`app` with an explicit environment allowlist built by interpolation, named volume, loopback port, `mailpit` under the `dev` profile).
 - `.env.example` made byte-equal to the spec §12 block (revision 10, which adds `APP_BASE_URL`), with a test that keeps it so.
-- `scripts/backup.mjs` (exported `backupDatabase`, `verifyBackup`, plus a CLI) and a test that `.gitignore` keeps `backups/` and `*.db*` (WP0 writes them).
-- `apps/api/src/bootstrap/preflight.ts` (writability check, then `backupDatabase` when the DB file exists and WP0's `pendingMigrations()` is non-empty) and its two call sites in the bootstraps, before `buildPorts`.
+- `scripts/backup.mjs`: the on-demand CLI wrapper (argument parsing, exit codes, output) around `@gmt/db` `backupDatabase`, and a test that `.gitignore` keeps `backups/` and `*.db*` (WP0 writes them).
+- An end-to-end test that the real app bootstrap backs up before migrating (exit 74 on a failed backup, schema untouched) and refuses an unwritable `/data`.
+- The exit-code table, listed once in `docs/setup.md`.
 - `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`.
 - The root `infra` Vitest project (`infra/vitest.config.ts`, `infra/tsconfig.json`, `infra/test/**`) and its entry in the root `vitest.config.ts`; `yaml` as a root dev dependency.
 - A `docker` job in `.github/workflows/ci.yml` that builds the image, validates the compose file, boots the container to `healthy` and runs a backup inside it.
 
 **Out**
 
-- The app and tool bootstraps themselves, config parsing, `/api/health`, auth and Host checks: WP8 (`apps/api`), on the WP4b wiring helper; `POST /api/tools/record`: WP8; `POST /api/tools/smoke`: WP13. WP12 owns the one preflight call before `buildPorts` in each bootstrap.
-- `pendingMigrations(db, migrationsDir)` and `applyMigrations`: WP0 (`packages/db/src/migrate.ts`).
+- The app and tool bootstraps themselves, config parsing, `/api/health`, auth and Host checks: WP8 (`apps/api`), on the WP4b wiring helper; `POST /api/tools/record`: WP8; `POST /api/tools/smoke`: WP13. Both bootstraps already call `backupDatabase` before `buildPorts` when `pendingMigrations()` is non-empty and the DB file exists (plan decision 14); WP12 does not modify `apps/api/src/`.
+- `pendingMigrations(db, migrationsDir)` and `applyMigrations`: WP0 (`packages/db/src/migrate.ts`). `backupDatabase` (VACUUM INTO, integrity check, refuse-existing, prune) and its unit tests: WP3 (`packages/db/src/backup.ts`).
 - The Drizzle migrations, the airports dataset and `runMaintenance` (which logs DB size): WP3 (`packages/db`).
 - The config zod schema and `PLAN_PRESETS`: WP0 (`packages/core`). WP12 renders them into docs; it changes neither.
 - The Definitions form and its "import example" action: WP9 (`apps/web`). WP9 owns `apps/web/src/example.ts`; WP12 owns the JSON it re-exports and the equality test (Task 12.9).
@@ -89,45 +90,26 @@ export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in
 export interface Db { raw: BetterSqlite3.Database; drizzle: BetterSQLite3Database; transaction<T>(fn: () => T): T; close(): void }
 export function openDatabase(path: string): Db;
 export function pendingMigrations(db: Db, migrationsDir: string): string[];      // migrate.ts (WP0): names of unapplied migration files
+export function backupDatabase(dbPath: string, backupsDir: string, opts: { keep: number; clock: Clock }): { file: string };   // src/backup.ts (WP3): VACUUM INTO a timestamped file, PRAGMA integrity_check on the output, refuse an existing target, prune to `keep`; throws on any failure. scripts/backup.mjs (WP12) is a CLI wrapper; both bootstraps call it before buildPorts when pendingMigrations() is non-empty and the DB file exists.
+
+// @gmt/core ports/clock.ts (WP0)
+export const systemClock: Clock;
 
 // apps/api src/wiring.ts (WP4b)
 export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string; fixtureRoot?: string }): Ports;   // opens DB, applies migrations (callers run the backup preflight first), createRepos, guard, cache, http-kit with httpLimitsFor(config), providersFor(config, http, ...)
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;   // parseConfig + tolerantRealpath; throws listing every bad field
-// src/bootstrap/tool.ts (WP4b): export async function runTool(name: 'record' | 'smoke', argv: string[]): Promise<number /* exit code */>
+// src/bootstrap/tool.ts (WP4b): export async function runTool(name: 'record' | 'smoke', argv: string[]): Promise<number /* exit code */>; `--dry-run` builds ports and takes the lock without any vendor call
+// Exit codes (one table for every CLI): 0 ok; smoke 1 provider error, 2 zero providers, 3 empty; 64 usage/bad arguments; 70 refused under NODE_ENV=test; 73 pending migrations but the backup preflight is impossible; 74 backup failed; 75 app_lock refused; 78 bad config
 // src/bootstrap/app.ts (WP8): main(); order: refuse NODE_ENV=test → config → logger → preflight backup when pendingMigrations() is non-empty and the DB file exists (WP12's backupDatabase) → buildPorts → seed + sanity → AppLock('app') waits → createEngine(ports, { alerts: runAlerts }) → engine.boot() → serve.
 // src/tools/smoke.ts (WP13): exit codes 0 priced, 1 provider error, 2 zero providers, 3 empty, 64 bad arguments
 ```
 
-Two facts WP12 relies on beyond these signatures, both already true of WP8's code by its own tests: running `node apps/api/dist/bootstrap/app.js` (or `tsx src/bootstrap/app.ts`) executes `main()`, and an exception thrown inside `main()` is printed with its message and exits non-zero. Task 12.5's spawn test proves both for the preflight path.
-
-WP0's `pendingMigrations(db, migrationsDir)` reads `meta/_journal.json` and returns the tags whose `when` is later than the newest `__drizzle_migrations.created_at` (all tags when the table is absent), which is Drizzle's own rule (`drizzle-orm@0.45.4`, `sqlite-core/dialect.js`). WP12 does not reimplement it.
-
-**Who writes the preflight call.** The plan's `app.ts` order names the preflight step but WP8 merges before `backupDatabase` exists. Task 12.5 therefore owns the call: if WP8 left a placeholder comment or an equivalent call at that point of `main()` / `runTool`, Task 12.5 replaces it with `await preflight(...)`; either way exactly one preflight call precedes `buildPorts` in each bootstrap, and the spawn test proves it.
+WP0's `pendingMigrations` applies Drizzle's own rule (`drizzle-orm@0.45.4`, `sqlite-core/dialect.js`): tags whose journal `when` is later than the newest `__drizzle_migrations.created_at`, or all tags when the table is absent. Task 12.5 relies on it by seeding an empty migrations table.
 
 ## Interfaces produced
 
-```js
-// scripts/backup.mjs (WP12). Plain ESM so `docker compose exec app node scripts/backup.mjs` needs no build.
-/** better-sqlite3's Database constructor, resolved from packages/db so the script works in the repo and the image. */
-export const Database;
-/** Throws unless PRAGMA integrity_check on path returns 'ok'. */
-export function verifyBackup(path: string): void;
-/** VACUUM INTO <backupDir>/<base>-<ISO timestamp>.db, verify, prune to `keep` (default 5). Throws on any failure and leaves no partial target. */
-export function backupDatabase(opts: { dbPath: string; backupDir: string; keep?: number; now?: Date }): { path: string; pruned: string[] };
-// CLI: node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n>]; exit 0 prints one JSON line, exit 1 prints the cause.
-```
-
-```ts
-// apps/api/src/bootstrap/preflight.ts (WP12)
-export interface BackupModule {
-  backupDatabase(opts: { dbPath: string; backupDir: string; keep?: number; now?: Date }): { path: string; pruned: string[] };
-}
-export interface PreflightResult { pending: string[]; backupPath: string | null }
-export class PreflightError extends Error {}
-export function assertDataDirWritable(databasePath: string): void;
-export function loadBackupModule(repoRoot?: string): Promise<BackupModule>;
-export function preflight(config: Pick<Config, 'databasePath'>, opts: { migrationsDir: string; log: Logger; backup?: BackupModule }): Promise<PreflightResult>;
-```
+- `scripts/backup.mjs` CLI: `node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n>]`; defaults `DATABASE_PATH` (else `/data/get-me-there.db`), `<db dir>/backups`, 5. Exit 0 prints one line `{"ok":true,"file":"…"}`; 64 usage (stderr starts `usage:`); 74 `backup failed: <cause>` (including a missing database file). No exported functions.
+- `scripts/assert-sqlite-prebuilt.mjs`: exit 0 prints `better-sqlite3 13.0.3 prebuilt ok: <path>`; exit 1 lists every failure.
 
 `docs/examples/london-new-york.json`: the importable example definition, a `definitionCreateRequestSchema`-valid object (plan file map: "WP12 writes it, WP9 imports it"). **Contract with WP9:** `apps/web/src/example.ts` exports `EXAMPLE_DEFINITION` as a JSON-import re-export of that file. Task 12.9 asserts they are equal.
 
@@ -136,8 +118,8 @@ export function preflight(config: Pick<Config, 'databasePath'>, opts: { migratio
 All verified on 2026-10-14.
 
 - **Base image `node:22-slim`**: `docker buildx imagetools inspect node:22-slim` returned the multi-platform index digest `sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392` (image created 2026-10-06, `NODE_VERSION=22.23.3`, Debian bookworm-slim, `linux/amd64` manifest `sha256:efd0ab5780c2d9ab1f0f869571a00d5edb17793bff4cce4a2792e3eb0ffc7562`). Pin the **index** digest (the top-level `Digest:` line) so arm64 hosts get the same release. To refresh: run the same command, copy the top-level `Digest:` into every `FROM`, update the comment block at the top of the Dockerfile and this paragraph.
-- **better-sqlite3 13.0.3** (`packages/db`, from the plan's Task 0.1 list). npm registry integrity `sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==`; the same string must appear in `pnpm-lock.yaml` (Task 12.1 asserts it). The tarball (inspected with `npm pack better-sqlite3@13.0.3`) ships `prebuilds/{linux,linuxmusl,darwin,win32}-{x64,arm64}.node`, has **no `install` script** and `"gypfile": false`; `lib/binding.js` loads `prebuilds/<platform>-<arch>.node` and falls back to `build/Release/better_sqlite3.node` only when no prebuilt exists. So there is no network fetch to make fail-closed: the binary arrives inside the integrity-pinned tarball, and fail-closed means asserting the prebuilt file exists, `build/` does not, and the module loads (`scripts/assert-sqlite-prebuilt.mjs`). `npm_config_build_from_source` is read by `prebuild-install`, which 13.x no longer uses, so it is not set. `onlyBuiltDependencies: [better-sqlite3]` in `pnpm-workspace.yaml` stays as WP0 wrote it; it is now inert for this package and still blocks every other dependency's build scripts. Calls used: `new Database(path, { readonly: true, fileMustExist: true, timeout: 5000 })`, `db.prepare('VACUUM INTO ?').run(target)`, `db.pragma('integrity_check', { simple: true })` (returns `'ok'`), `db.prepare(sql).pluck().all()`. Checked by running them against 13.0.3 on 2026-10-14: `VACUUM INTO` with a bound path works on a WAL source; an existing target throws `SQLITE_ERROR: output file already exists`; a non-SQLite file throws `SQLITE_NOTADB: file is not a database` on open and leaves no target behind; the backup copy has `journal_mode=delete`, which the app's `openDatabase` switches back to WAL on first open.
-- **drizzle-orm 0.45.4** migrator (consumed through WP0's `pendingMigrations`; read in the published package `sqlite-core/dialect.js`, `migrator.js`, and context7 `/drizzle-team/drizzle-orm` "readMigrationFiles"): `<migrationsFolder>/meta/_journal.json` `entries[{ idx, when, tag, breakpoints }]`; table `__drizzle_migrations (id, hash, created_at numeric)`; entries with `when > newest created_at` are applied. The preflight tests write a journal-only temp folder, which is all `pendingMigrations` reads.
+- **better-sqlite3 13.0.3** (`packages/db`, from the plan's Task 0.1 list). npm registry integrity `sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==`; the same string must appear in `pnpm-lock.yaml` (Task 12.1 asserts it). The tarball (inspected with `npm pack better-sqlite3@13.0.3`) ships `prebuilds/{linux,linuxmusl,darwin,win32}-{x64,arm64}.node`, has **no `install` script** and `"gypfile": false`; `lib/binding.js` loads `prebuilds/<platform>-<arch>.node` and falls back to `build/Release/better_sqlite3.node` only when no prebuilt exists. So there is no network fetch to make fail-closed: the binary arrives inside the integrity-pinned tarball, and fail-closed means asserting the prebuilt file exists, `build/` does not, and the module loads (`scripts/assert-sqlite-prebuilt.mjs`). `npm_config_build_from_source` is read by `prebuild-install`, which 13.x no longer uses, so it is not set. `onlyBuiltDependencies: [better-sqlite3]` in `pnpm-workspace.yaml` stays as WP0 wrote it; it is now inert for this package and still blocks every other dependency's build scripts. WP12 code calls only `new Database(':memory:')` and `prepare(…).get()` (the prebuilt assertion) and, in tests, `openDatabase` and `prepare(…).pluck().all()`. Facts checked against 13.0.3 on 2026-10-14 that the CLI tests rely on through WP3's routine: a non-SQLite file throws `SQLITE_NOTADB: file is not a database` and leaves no target behind; an existing `VACUUM INTO` target throws `output file already exists`.
+- **drizzle-orm 0.45.4** migrator (consumed through WP0's `pendingMigrations`; read in the published package `sqlite-core/dialect.js`, `migrator.js`, and context7 `/drizzle-team/drizzle-orm` "readMigrationFiles"): `<migrationsFolder>/meta/_journal.json` `entries[{ idx, when, tag, breakpoints }]`; table `__drizzle_migrations (id, hash, created_at numeric)`; entries with `when > newest created_at` are applied.
 - **yaml 2.9.1** (new root dev dependency, published 2026-09-11): context7 `/eemeli/yaml`, "YAML.parse": `import { parse } from 'yaml'`; `parse(str)` returns plain objects and arrays, throws on error, single document only.
 - **pnpm 12.9.1 via corepack**: `npm view pnpm@12.9.1` exists (engines `node >=18`). Node 22 still bundles corepack (it is removed from Node 25 onward, which is why the image is 22). `corepack enable pnpm` installs the shim; the version comes from `"packageManager": "pnpm@12.9.1"` in the root `package.json`; `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` suppresses the interactive prompt. Task 12.1 Step 4 runs `docker run --rm node:22-slim@sha256:c3de… corepack --version` before the first build to confirm corepack is present in that exact image; the Dockerfile itself fails the build if the resolved pnpm version differs from `packageManager`.
 - **Health route**: every API route is under `/api` (spec rev 10), so the `HEALTHCHECK`, the CI probe and the docs use `GET /api/health` (public, exempt from the Host allowlist).
@@ -148,9 +130,9 @@ All verified on 2026-10-14.
 
 ## Files
 
-- Create: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `scripts/assert-sqlite-prebuilt.mjs`, `scripts/backup.mjs`, `apps/api/src/bootstrap/preflight.ts`, `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`, `infra/vitest.config.ts`, `infra/tsconfig.json`
-- Modify: `.env.example` (byte-equal to spec §12), `vitest.config.ts` (root: add the infra project), `package.json` (root: `yaml` dev dependency, `typecheck` script), `pnpm-lock.yaml` (from `pnpm add`), `apps/api/src/bootstrap/app.ts` and `apps/api/src/bootstrap/tool.ts` (one `await preflight(...)` each), `.github/workflows/ci.yml` (add the `docker` job)
-- Test: `infra/test/helpers.ts`, `infra/test/dockerfile.test.ts`, `infra/test/envExample.test.ts`, `infra/test/compose.test.ts`, `infra/test/backup.test.ts`, `infra/test/presetTable.ts`, `infra/test/apiLimits.test.ts`, `infra/test/docs.test.ts`, `infra/test/exampleDefinition.test.ts`, `apps/api/test/bootstrap/preflight.test.ts`, `apps/api/test/bootstrap/preMigrationBoot.test.ts`
+- Create: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `scripts/assert-sqlite-prebuilt.mjs`, `scripts/backup.mjs`, `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`, `infra/vitest.config.ts`, `infra/tsconfig.json`
+- Modify: `.env.example` (byte-equal to spec §12), `vitest.config.ts` (root: add the infra project), `package.json` (root: `yaml` dev dependency, `typecheck` script), `pnpm-lock.yaml` (from `pnpm add`), `.github/workflows/ci.yml` (add the `docker` job)
+- Test: `infra/test/helpers.ts`, `infra/test/dockerfile.test.ts`, `infra/test/envExample.test.ts`, `infra/test/compose.test.ts`, `infra/test/backup.test.ts`, `infra/test/presetTable.ts`, `infra/test/apiLimits.test.ts`, `infra/test/docs.test.ts`, `infra/test/exampleDefinition.test.ts`, `apps/api/test/bootstrap/preMigrationBoot.test.ts`
 
 ## Tasks
 
@@ -867,129 +849,103 @@ Expected: PASS (9 tests); `docker compose config --quiet` prints nothing and exi
 git add docker-compose.yml package.json pnpm-lock.yaml infra/test && git commit -m "wp12: compose with interpolated environment allowlist and dev mailpit"
 ```
 
-### Task 12.4: `scripts/backup.mjs`
+### Task 12.4: `scripts/backup.mjs`, a CLI wrapper around `@gmt/db` `backupDatabase`
 
 **Files:**
 - Create: `scripts/backup.mjs`
 - Test: `infra/test/backup.test.ts`
 
 **Interfaces:**
-- Produces: `Database`, `verifyBackup`, `backupDatabase`, the CLI. (Pending-migration detection is WP0's `pendingMigrations`; this script does not duplicate it.)
+- Consumes: `backupDatabase(dbPath, backupsDir, { keep, clock })` (WP3, `@gmt/db`), `systemClock` (WP0, `@gmt/core`), the exit-code table (plan, "Wiring and bootstraps").
+- Produces: the CLI `node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n>]`. It owns argument parsing, exit codes and its one output line; the VACUUM INTO, integrity check, refuse-existing and pruning rules are WP3's routine and are tested there.
 
 - [ ] **Step 1: Write the failing test**
 
 `infra/test/backup.test.ts`:
 
 ```ts
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { execSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { Database, backupDatabase, verifyBackup } from '../../scripts/backup.mjs';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { openDatabase } from '../../packages/db/src/index.js';
 import { ROOT, read } from './helpers.js';
 
-const NAME = /^get-me-there-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
+const NAME = /^get-me-there-.+\.db$/;
+
+// why: the CLI imports the built @gmt/db (as it does in the image), so build it and its dependency first.
+beforeAll(() => {
+  execSync('pnpm --filter "@gmt/db..." build', { cwd: ROOT, stdio: 'inherit' });
+}, 180_000);
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), 'gmt-backup-'));
+  return mkdtempSync(join(tmpdir(), 'gmt-backup-cli-'));
 }
 
-/** A small WAL database with one table and a row, standing in for /data/get-me-there.db. */
+/** A small database standing in for /data/get-me-there.db. */
 function sampleDb(dir: string): string {
   const path = join(dir, 'get-me-there.db');
-  const db = new Database(path);
-  db.pragma('journal_mode = WAL');
-  db.exec('CREATE TABLE t (x INTEGER NOT NULL)');
-  db.prepare('INSERT INTO t (x) VALUES (?)').run(42);
+  const db = openDatabase(path);
+  db.raw.exec('CREATE TABLE t (x INTEGER NOT NULL); INSERT INTO t (x) VALUES (42);');
   db.close();
   return path;
 }
 
-describe('backupDatabase (spec §7 Migrations, §13 Backup)', () => {
-  it('writes a timestamped VACUUM INTO copy under the backup dir that passes integrity_check', () => {
+function cli(args: string[], env: Record<string, string> = {}) {
+  return spawnSync(process.execPath, ['scripts/backup.mjs', ...args], { cwd: ROOT, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', ...env } });
+}
+
+describe('backup CLI (spec §13 Backup; exit codes from the plan)', () => {
+  it('exits 0 and prints one JSON line naming the new file', () => {
     const dir = tempDir();
-    const db = sampleDb(dir);
-    const r = backupDatabase({ dbPath: db, backupDir: join(dir, 'backups'), now: new Date('2026-10-14T15:00:00.000Z') });
-    expect(r.path).toBe(join(dir, 'backups', 'get-me-there-2026-10-14T15-00-00-000Z.db'));
-    expect(r.pruned).toEqual([]);
-    const copy = new Database(r.path, { readonly: true });
-    expect(copy.pragma('integrity_check', { simple: true })).toBe('ok');
-    expect(copy.prepare('SELECT x FROM t').pluck().get()).toBe(42);
-    copy.close();
+    const r = cli(['--db', sampleDb(dir), '--dir', join(dir, 'b')]);
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    const out = JSON.parse(r.stdout) as { ok: boolean; file: string };
+    expect(out.ok).toBe(true);
+    expect(existsSync(out.file)).toBe(true);
+    expect(readdirSync(join(dir, 'b')).filter((f) => NAME.test(f))).toHaveLength(1);
   });
 
-  it('refuses an existing target', () => {
+  it('defaults to DATABASE_PATH and <db dir>/backups', () => {
     const dir = tempDir();
-    const db = sampleDb(dir);
-    const now = new Date('2026-10-14T15:00:00.000Z');
-    backupDatabase({ dbPath: db, backupDir: join(dir, 'backups'), now });
-    expect(() => backupDatabase({ dbPath: db, backupDir: join(dir, 'backups'), now })).toThrow(/backup target already exists/);
+    const r = cli([], { DATABASE_PATH: sampleDb(dir) });
+    expect(r.status).toBe(0);
+    expect(readdirSync(join(dir, 'backups')).filter((f) => NAME.test(f))).toHaveLength(1);
   });
 
-  it('keeps the newest 5 and leaves unrelated files alone', () => {
+  it('forwards --keep to the routine', () => {
     const dir = tempDir();
     const db = sampleDb(dir);
-    const backups = join(dir, 'backups');
-    mkdirSync(backups);
-    writeFileSync(join(backups, 'notes.txt'), 'operator notes');
-    const results = [1, 2, 3, 4, 5, 6, 7].map((day) =>
-      backupDatabase({ dbPath: db, backupDir: backups, now: new Date(`2026-10-0${day}T03:15:00.000Z`) }),
-    );
-    const kept = readdirSync(backups).filter((f) => NAME.test(f)).sort();
-    expect(kept).toEqual(['03', '04', '05', '06', '07'].map((d) => `get-me-there-2026-10-${d}T03-15-00-000Z.db`));
-    expect(results.at(-1)?.pruned).toEqual([join(backups, 'get-me-there-2026-10-02T03-15-00-000Z.db')]);
-    expect(existsSync(join(backups, 'notes.txt'))).toBe(true);
+    for (let i = 0; i < 3; i++) expect(cli(['--db', db, '--keep', '1']).status).toBe(0);
+    expect(readdirSync(join(dir, 'backups')).filter((f) => NAME.test(f))).toHaveLength(1);
   });
 
-  it('fails on a corrupted source and leaves no partial target', () => {
+  it('exits 74 with the cause when the backup fails', () => {
     const dir = tempDir();
     const db = join(dir, 'get-me-there.db');
     writeFileSync(db, 'this is not a database file '.repeat(200));
-    expect(() => backupDatabase({ dbPath: db, backupDir: join(dir, 'backups') })).toThrow(/backup failed: .*not a database/);
-    expect(readdirSync(join(dir, 'backups'))).toEqual([]);
+    const r = cli(['--db', db]);
+    expect(r.status).toBe(74);
+    expect(r.stderr).toMatch(/^backup failed: /);
   });
 
-  it('fails when the backup directory cannot be created', () => {
-    const dir = tempDir();
-    const db = sampleDb(dir);
-    writeFileSync(join(dir, 'backups'), 'a file where the directory should be');
-    expect(() => backupDatabase({ dbPath: db, backupDir: join(dir, 'backups') })).toThrow(/backup failed/);
+  it('exits 74 when the database file does not exist', () => {
+    const r = cli(['--db', join(tempDir(), 'absent.db')]);
+    expect(r.status).toBe(74);
+    expect(r.stderr).toMatch(/^backup failed: database not found: /);
   });
-});
 
-describe('verifyBackup', () => {
-  it('passes a sound file and rejects a corrupted one', () => {
-    const dir = tempDir();
-    expect(() => verifyBackup(sampleDb(dir))).not.toThrow();
-    const bad = join(dir, 'bad.db');
-    writeFileSync(bad, 'garbage '.repeat(500));
-    expect(() => verifyBackup(bad)).toThrow(/not a database/);
-  });
-});
-
-describe('backup CLI', () => {
-  it('exits 0 and prints the backup path', () => {
-    const dir = tempDir();
-    const db = sampleDb(dir);
-    const r = spawnSync(process.execPath, ['scripts/backup.mjs', '--db', db, '--dir', join(dir, 'b'), '--keep', '2'], { cwd: ROOT, encoding: 'utf8' });
-    expect(r.status).toBe(0);
-    const out = JSON.parse(r.stdout) as { ok: boolean; path: string; pruned: string[] };
-    expect(out.ok).toBe(true);
-    expect(existsSync(out.path)).toBe(true);
-  });
-  it('exits 1 with the cause on a corrupted database', () => {
-    const dir = tempDir();
-    const db = join(dir, 'get-me-there.db');
-    writeFileSync(db, 'nope '.repeat(500));
-    const r = spawnSync(process.execPath, ['scripts/backup.mjs', '--db', db], { cwd: ROOT, encoding: 'utf8' });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/backup failed: .*not a database/);
-  });
-  it('rejects an unknown flag', () => {
-    const r = spawnSync(process.execPath, ['scripts/backup.mjs', '--force'], { cwd: ROOT, encoding: 'utf8' });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/unknown argument --force/);
+  it.each([
+    [['--force']],
+    [['--db']],
+    [['--keep', '0']],
+    [['--keep', 'two']],
+  ])('exits 64 on bad arguments %j', (args) => {
+    const r = cli(args);
+    expect(r.status).toBe(64);
+    expect(r.stderr).toMatch(/^usage: node scripts\/backup\.mjs/m);
   });
 });
 
@@ -1003,7 +959,7 @@ describe('.gitignore (spec §5.3, §13; lines written by WP0)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm vitest run --project infra backup`
-Expected: FAIL, `Failed to load url ../../scripts/backup.mjs`.
+Expected: FAIL in the CLI tests with `Cannot find module '…/scripts/backup.mjs'` in stderr and status 1; the two `.gitignore` tests pass.
 
 - [ ] **Step 3: Implement**
 
@@ -1011,88 +967,23 @@ Expected: FAIL, `Failed to load url ../../scripts/backup.mjs`.
 
 ```js
 #!/usr/bin/env node
-// SQLite backup for get-me-there. Spec §7 "Migrations" and §13 "Backup".
-//
-// - VACUUM INTO a timestamped file under the backup directory (default <db dir>/backups),
-//   PRAGMA integrity_check on the output, refuse an existing target, keep the newest N (5).
-// - Exported for the api bootstrap's pre-migration hook (apps/api/src/bootstrap/preflight.ts)
-//   and runnable on demand: `docker compose exec app node scripts/backup.mjs`.
-// - Plain ESM with JSDoc types so it runs in the image without a build step.
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+// On-demand SQLite backup for get-me-there. Spec §13 "Backup".
+//   docker compose exec -T app node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n>]
+// A thin wrapper: the VACUUM INTO + integrity_check + refuse-existing + prune routine is
+// @gmt/db `backupDatabase` (WP3), the same function both bootstraps call before migrating.
+// Exit codes follow the one table every CLI shares: 0 ok, 64 usage, 74 backup failed.
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, extname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// why: resolve better-sqlite3 from packages/db (its only workspace dependant) so the same
-// resolution works in the repository and in the image, which keeps the workspace layout.
-const requireFromDb = createRequire(new URL('../packages/db/package.json', import.meta.url));
-
-/** better-sqlite3's Database constructor. @type {typeof import('better-sqlite3')} */
-export const Database = requireFromDb('better-sqlite3');
-
+const EX_OK = 0;
+const EX_USAGE = 64;
+const EX_IOERR = 74;
 const DEFAULT_KEEP = 5;
+const USAGE = 'usage: node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n ≥ 1>]';
 
-/** @param {unknown} err */
-function message(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-
-/** @param {string} s */
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Throws unless `PRAGMA integrity_check` on the file at `path` returns 'ok'.
- * @param {string} path
- */
-export function verifyBackup(path) {
-  const db = new Database(path, { readonly: true, fileMustExist: true });
-  try {
-    const result = db.pragma('integrity_check', { simple: true });
-    if (result !== 'ok') throw new Error(`integrity_check on ${path} returned ${String(result)}`);
-  } finally {
-    db.close();
-  }
-}
-
-/**
- * Backs up `dbPath` with VACUUM INTO, verifies the copy, then prunes older backups of the same
- * database to the newest `keep`. Throws `backup failed: <cause>` on any failure and removes a
- * target it created, so a failed run never counts as a backup. Spec §7, §13.
- * @param {{ dbPath: string; backupDir: string; keep?: number; now?: Date }} opts
- * @returns {{ path: string; pruned: string[] }}
- */
-export function backupDatabase(opts) {
-  const keep = opts.keep ?? DEFAULT_KEEP;
-  const base = basename(opts.dbPath, extname(opts.dbPath));
-  const stamp = (opts.now ?? new Date()).toISOString().replace(/[:.]/g, '-');
-  const target = join(opts.backupDir, `${base}-${stamp}.db`);
-  let created = false;
-  try {
-    if (!Number.isInteger(keep) || keep < 1) throw new Error(`keep must be a positive integer, got ${keep}`);
-    mkdirSync(opts.backupDir, { recursive: true });
-    if (existsSync(target)) throw new Error(`backup target already exists: ${target}`);
-    const db = new Database(opts.dbPath, { fileMustExist: true, timeout: 5000 });
-    try {
-      // why: VACUUM INTO reads one consistent snapshot, so it is safe while the app is writing.
-      db.prepare('VACUUM INTO ?').run(target);
-      created = true;
-    } finally {
-      db.close();
-    }
-    verifyBackup(target);
-  } catch (err) {
-    if (created) rmSync(target, { force: true });
-    throw new Error(`backup failed: ${message(err)}`);
-  }
-  // why: prune only after the new copy is verified, and only files this script names.
-  const pattern = new RegExp(`^${escapeRegExp(base)}-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}Z\\.db$`);
-  const ours = readdirSync(opts.backupDir).filter((f) => pattern.test(f)).sort();
-  const pruned = ours.slice(0, Math.max(0, ours.length - keep)).map((f) => join(opts.backupDir, f));
-  for (const f of pruned) rmSync(f);
-  return { path: target, pruned };
-}
+class UsageError extends Error {}
 
 /**
  * @param {string[]} argv
@@ -1104,152 +995,80 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 2) {
     const name = argv[i] ?? '';
     const value = argv[i + 1];
-    if (!['--db', '--dir', '--keep'].includes(name)) throw new Error(`unknown argument ${name}`);
-    if (value === undefined) throw new Error(`${name} needs a value`);
+    if (!['--db', '--dir', '--keep'].includes(name)) throw new UsageError(`unknown argument ${name}`);
+    if (value === undefined || value.startsWith('--')) throw new UsageError(`${name} needs a value`);
     flags[name] = value;
   }
-  // why: the CLI is an operator tool outside the packages, so it reads DATABASE_PATH directly;
-  // inside the container compose sets it to /data/get-me-there.db.
+  const keep = Number(flags['--keep'] ?? DEFAULT_KEEP);
+  if (!Number.isInteger(keep) || keep < 1) throw new UsageError(`--keep must be a positive integer, got ${flags['--keep']}`);
+  // why: an operator tool outside the packages reads DATABASE_PATH itself; compose sets it to /data/get-me-there.db.
   const db = flags['--db'] ?? process.env.DATABASE_PATH ?? '/data/get-me-there.db';
-  return { db, dir: flags['--dir'] ?? join(dirname(db), 'backups'), keep: Number(flags['--keep'] ?? DEFAULT_KEEP) };
+  return { db, dir: flags['--dir'] ?? join(dirname(db), 'backups'), keep };
 }
 
-const invokedDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-if (invokedDirectly) {
+/**
+ * Loads the built workspace packages through apps/api's dependency links, which exist both in
+ * the repository (after `pnpm build`) and in the image.
+ * @returns {Promise<{ backupDatabase: (dbPath: string, backupsDir: string, opts: { keep: number; clock: unknown }) => { file: string }; systemClock: unknown }>}
+ */
+async function loadPackages() {
+  const requireFromApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
+  const db = await import(pathToFileURL(requireFromApi.resolve('@gmt/db')).href);
+  const core = await import(pathToFileURL(requireFromApi.resolve('@gmt/core')).href);
+  return { backupDatabase: db.backupDatabase, systemClock: core.systemClock };
+}
+
+/** @param {unknown} err */
+function message(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function main() {
+  let args;
   try {
-    const args = parseArgs(process.argv.slice(2));
-    const r = backupDatabase({ dbPath: args.db, backupDir: args.dir, keep: args.keep });
-    console.log(JSON.stringify({ ok: true, path: r.path, pruned: r.pruned }));
+    args = parseArgs(process.argv.slice(2));
   } catch (err) {
-    console.error(message(err));
-    process.exit(1);
+    console.error(`${USAGE}\n${message(err)}`);
+    return EX_USAGE;
+  }
+  try {
+    // why: better-sqlite3 would create an empty file and back that up; a missing DB is an operator error.
+    if (!existsSync(args.db)) throw new Error(`database not found: ${args.db}`);
+    const { backupDatabase, systemClock } = await loadPackages();
+    const r = backupDatabase(args.db, args.dir, { keep: args.keep, clock: systemClock });
+    console.log(JSON.stringify({ ok: true, file: r.file }));
+    return EX_OK;
+  } catch (err) {
+    console.error(`backup failed: ${message(err)}`);
+    return EX_IOERR;
   }
 }
-```
 
-`.gitignore` already carries `backups/` and `*.db*` (WP0, plan decision 9); the test guards them.
+process.exitCode = await main();
+```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm vitest run --project infra backup`
-Expected: PASS (11 tests: 5 backupDatabase, 1 verifyBackup, 3 CLI, 2 .gitignore).
+Expected: PASS (11 tests: 9 CLI, 2 `.gitignore`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/backup.mjs infra/test && git commit -m "wp12: VACUUM INTO backup with integrity check and keep-5 retention"
+git add scripts/backup.mjs infra/test && git commit -m "wp12: backup CLI wrapper over @gmt/db backupDatabase with the shared exit codes"
 ```
 
-### Task 12.5: Pre-migration preflight in the bootstraps
+### Task 12.5: The bootstraps back up before migrating (verification against the real app)
+
+The pre-migration backup, the `/data` writability check and their exit codes are implemented by WP3 (`backupDatabase`) and WP8/WP4b (the call before `buildPorts`). This task adds the end-to-end check that spawns the real app bootstrap, so the deployment guarantee in spec §7 and §13 is held by a test in this package's definition of done.
 
 **Files:**
-- Create: `apps/api/src/bootstrap/preflight.ts`
-- Modify: `apps/api/src/bootstrap/app.ts`, `apps/api/src/bootstrap/tool.ts`
-- Test: `apps/api/test/bootstrap/preflight.test.ts`, `apps/api/test/bootstrap/preMigrationBoot.test.ts`
+- Test: `apps/api/test/bootstrap/preMigrationBoot.test.ts`
 
 **Interfaces:**
-- Consumes: `scripts/backup.mjs` (Task 12.4), `Config`, `Logger` (WP0), `openDatabase` and `pendingMigrations` (WP0, `@gmt/db`), the WP4b/WP8 bootstraps.
-- Produces: `assertDataDirWritable`, `loadBackupModule`, `preflight`, `PreflightError`, `BackupModule`, `PreflightResult`.
+- Consumes: `openDatabase` (WP0), `src/bootstrap/app.ts` `main()` (WP8), exit codes 74 (backup failed) and 73 (pending migrations but the backup preflight is impossible).
 
-- [ ] **Step 1: Write the failing tests**
-
-`apps/api/test/bootstrap/preflight.test.ts`:
-
-```ts
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { openDatabase } from '@gmt/db';
-import type { Logger } from '@gmt/core';
-import { describe, expect, it, vi } from 'vitest';
-import { PreflightError, assertDataDirWritable, loadBackupModule, preflight } from '../../src/bootstrap/preflight.js';
-
-function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), 'gmt-preflight-'));
-}
-
-function logger(): Logger {
-  const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: () => log };
-  return log;
-}
-
-function journal(dir: string): string {
-  const m = join(dir, 'drizzle');
-  mkdirSync(join(m, 'meta'), { recursive: true });
-  writeFileSync(join(m, 'meta', '_journal.json'), JSON.stringify({ version: '7', dialect: 'sqlite', entries: [{ idx: 0, version: '6', when: 1_760_400_000_000, tag: '0000_init', breakpoints: true }] }));
-  return m;
-}
-
-function dbWithMigrations(dir: string, appliedAt: number | null): string {
-  const path = join(dir, 'get-me-there.db');
-  const db = openDatabase(path);
-  db.raw.exec('CREATE TABLE "__drizzle_migrations" (id INTEGER PRIMARY KEY, hash text NOT NULL, created_at numeric)');
-  if (appliedAt !== null) db.raw.prepare('INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (?, ?)').run('h', appliedAt);
-  db.close();
-  return path;
-}
-
-describe('assertDataDirWritable (spec §13: boot fails clearly if /data is not writable)', () => {
-  it('names the directory and the fix when it cannot write', () => {
-    const dir = tempDir();
-    writeFileSync(join(dir, 'data'), 'a file, not a directory');
-    expect(() => assertDataDirWritable(join(dir, 'data', 'get-me-there.db'))).toThrow(PreflightError);
-    expect(() => assertDataDirWritable(join(dir, 'data', 'get-me-there.db'))).toThrow(/DATABASE_PATH directory .*data is not writable.*named volume/);
-  });
-  it('passes on a writable directory and leaves no probe file behind', () => {
-    const dir = tempDir();
-    assertDataDirWritable(join(dir, 'get-me-there.db'));
-    expect(readdirSync(dir)).toEqual([]);
-  });
-});
-
-describe('preflight (spec §7 Migrations)', () => {
-  it('does nothing for an in-memory database', async () => {
-    const backup = { backupDatabase: vi.fn() };
-    await expect(preflight({ databasePath: ':memory:' }, { migrationsDir: '/nowhere', log: logger(), backup })).resolves.toEqual({ pending: [], backupPath: null });
-    expect(backup.backupDatabase).not.toHaveBeenCalled();
-  });
-
-  it('takes no backup on a fresh install and does not create the database file', async () => {
-    const dir = tempDir();
-    const r = await preflight({ databasePath: join(dir, 'get-me-there.db') }, { migrationsDir: journal(dir), log: logger(), backup: await loadBackupModule() });
-    expect(r).toEqual({ pending: [], backupPath: null });
-    expect(existsSync(join(dir, 'backups'))).toBe(false);
-    expect(existsSync(join(dir, 'get-me-there.db'))).toBe(false);
-  });
-
-  it('refuses boot, naming the file, when the database cannot be read', async () => {
-    const dir = tempDir();
-    writeFileSync(join(dir, 'get-me-there.db'), 'not a database '.repeat(300));
-    await expect(preflight({ databasePath: join(dir, 'get-me-there.db') }, { migrationsDir: journal(dir), log: logger() })).rejects.toThrow(/cannot read the migration state of .*get-me-there\.db/);
-  });
-
-  it('takes no backup when no migration is pending', async () => {
-    const dir = tempDir();
-    const db = dbWithMigrations(dir, 1_760_400_000_000);
-    const r = await preflight({ databasePath: db }, { migrationsDir: journal(dir), log: logger(), backup: await loadBackupModule() });
-    expect(r).toEqual({ pending: [], backupPath: null });
-  });
-
-  it('backs up under <db dir>/backups when migrations are pending, and logs it', async () => {
-    const dir = tempDir();
-    const db = dbWithMigrations(dir, null);
-    const log = logger();
-    const r = await preflight({ databasePath: db }, { migrationsDir: journal(dir), log });
-    expect(r.pending).toEqual(['0000_init']);
-    expect(r.backupPath).toMatch(/[/\\]backups[/\\]get-me-there-\d{4}-\d{2}-\d{2}T[\d-]+Z\.db$/);
-    expect(existsSync(r.backupPath ?? '')).toBe(true);
-    expect(log.info).toHaveBeenCalledWith(expect.objectContaining({ pending: ['0000_init'], backupPath: r.backupPath }), 'pre-migration backup written');
-  });
-
-  it('refuses migrations and boot when the backup fails, naming the cause', async () => {
-    const dir = tempDir();
-    const db = dbWithMigrations(dir, null);
-    writeFileSync(join(dir, 'backups'), 'not a directory');
-    await expect(preflight({ databasePath: db }, { migrationsDir: journal(dir), log: logger() })).rejects.toThrow(/pre-migration backup failed, migrations refused: backup failed/);
-  });
-});
-```
+- [ ] **Step 1: Write the test**
 
 `apps/api/test/bootstrap/preMigrationBoot.test.ts`:
 
@@ -1264,14 +1083,21 @@ import { describe, expect, it } from 'vitest';
 
 const API_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
-/** A database whose migrations table is empty, so every migration is pending, and a backup dir that cannot exist. */
-function brokenBackupSetup(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'gmt-boot-'));
+function boot(dbPath: string) {
+  return spawnSync(process.execPath, ['--import', 'tsx', 'src/bootstrap/app.ts'], {
+    cwd: API_ROOT,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { PATH: process.env.PATH ?? '', NODE_ENV: 'production', DATABASE_PATH: dbPath, BIND_ADDRESS: '127.0.0.1', PORT: '39123' },
+  });
+}
+
+/** A database whose migrations table is empty, so every migration is pending. */
+function pendingDb(dir: string): string {
   const dbPath = join(dir, 'get-me-there.db');
   const db = openDatabase(dbPath);
   db.raw.exec('CREATE TABLE "__drizzle_migrations" (id INTEGER PRIMARY KEY, hash text NOT NULL, created_at numeric)');
   db.close();
-  writeFileSync(join(dir, 'backups'), 'not a directory');
   return dbPath;
 }
 
@@ -1282,145 +1108,39 @@ function tables(dbPath: string): string[] {
   return names;
 }
 
-const env = (dbPath: string) => ({ PATH: process.env.PATH, NODE_ENV: 'production', DATABASE_PATH: dbPath, BIND_ADDRESS: '127.0.0.1', PORT: '39123' });
-
-describe('the real bootstraps run the pre-migration backup first (spec §7 Migrations)', () => {
-  it.each([
-    ['app', ['--import', 'tsx', 'src/bootstrap/app.ts']],
-    ['tool', ['--import', 'tsx', 'src/bootstrap/tool.ts', 'record']],
-  ])('%s: a failed backup refuses migrations and boot', (_name, args) => {
-    const dbPath = brokenBackupSetup();
-    const r = spawnSync(process.execPath, args, { cwd: API_ROOT, env: env(dbPath), encoding: 'utf8', timeout: 60_000 });
-    expect(r.status).not.toBe(0);
-    expect(`${r.stdout}${r.stderr}`).toMatch(/pre-migration backup failed, migrations refused/);
+describe('the app bootstrap backs up before it migrates (spec §7 Migrations, §13)', () => {
+  it('exits 74 and leaves the schema untouched when the pre-migration backup fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gmt-boot-'));
+    const dbPath = pendingDb(dir);
+    writeFileSync(join(dir, 'backups'), 'a file where the backups directory should be');
+    const r = boot(dbPath);
+    expect(r.status).toBe(74);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/backup/i);
     expect(tables(dbPath)).toEqual(['__drizzle_migrations']);
+  });
+
+  it('refuses boot with a message naming the directory when /data is not writable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gmt-boot-'));
+    writeFileSync(join(dir, 'data'), 'a file, not a directory');
+    const r = boot(join(dir, 'data', 'get-me-there.db'));
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).toContain(join(dir, 'data'));
   });
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run it**
 
-Run: `pnpm --filter @gmt/api test -- bootstrap/pre`
-Expected: FAIL, `Failed to load url ../../src/bootstrap/preflight.js`; the spawn test fails because the bootstrap migrates the database (its table list gains the WP3 tables) or exits for another reason without the expected message.
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/preMigrationBoot.test.ts`
+Expected: PASS (2 tests); WP8 and WP3 already implement the behaviour, so this test is a guard, not a driver. A failure is a defect in WP8's bootstrap or WP3's `backupDatabase`: report it to Fable with the output; do not change `apps/api/src/bootstrap/` from this branch.
 
-- [ ] **Step 3: Implement**
+Then: `pnpm --filter @gmt/api test`
+Expected: PASS with lines ≥ 85%, branches ≥ 70%.
 
-`apps/api/src/bootstrap/preflight.ts`:
-
-```ts
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { Config, Logger } from '@gmt/core';
-import { openDatabase, pendingMigrations } from '@gmt/db';
-
-/** The part of scripts/backup.mjs the bootstraps use. Spec §7 "Migrations". */
-export interface BackupModule {
-  backupDatabase(opts: { dbPath: string; backupDir: string; keep?: number; now?: Date }): { path: string; pruned: string[] };
-}
-
-export interface PreflightResult {
-  pending: string[];
-  backupPath: string | null;
-}
-
-/** A boot refusal whose message tells the operator what to fix. */
-export class PreflightError extends Error {
-  override name = 'PreflightError';
-}
-
-// why: four levels up from src/bootstrap/ and from dist/bootstrap/ alike is the repository root
-// (or /app in the image), where scripts/backup.mjs lives.
-const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
-
-/**
- * Fails boot with a clear message when the database directory cannot be written, which is
- * what happens with a bind mount owned by root or a read-only volume. Spec §13.
- */
-export function assertDataDirWritable(databasePath: string): void {
-  const dir = dirname(resolve(databasePath));
-  const probe = join(dir, `.gmt-write-probe-${process.pid}`);
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(probe, '');
-    rmSync(probe);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code ?? 'unknown error';
-    throw new PreflightError(
-      `DATABASE_PATH directory ${dir} is not writable by uid ${process.getuid?.() ?? 'unknown'} (${code}). ` +
-        'In Docker use the named volume from docker-compose.yml; for a bind mount, chown the host directory to 1000:1000.',
-    );
-  }
-}
-
-/** Loads scripts/backup.mjs at runtime; the script is plain ESM shared with the operator CLI. */
-export async function loadBackupModule(repoRoot: string = REPO_ROOT): Promise<BackupModule> {
-  const url = pathToFileURL(join(repoRoot, 'scripts', 'backup.mjs')).href;
-  return (await import(url)) as BackupModule;
-}
-
-/**
- * Runs before `buildPorts` (which applies migrations) in both bootstraps:
- * 1. the database directory must be writable;
- * 2. when the database file exists and WP0's `pendingMigrations()` is non-empty, a VACUUM INTO
- *    backup goes to `<db dir>/backups` first (a fresh install has nothing to protect);
- * 3. if that backup fails, boot fails here, so migrations never run without one.
- * Spec §7 "Migrations", §13.
- */
-export async function preflight(
-  config: Pick<Config, 'databasePath'>,
-  opts: { migrationsDir: string; log: Logger; backup?: BackupModule },
-): Promise<PreflightResult> {
-  if (config.databasePath === ':memory:') return { pending: [], backupPath: null };
-  assertDataDirWritable(config.databasePath);
-  // why: openDatabase would create the file; a missing file means a fresh install, no backup needed.
-  if (!existsSync(config.databasePath)) return { pending: [], backupPath: null };
-  let pending: string[];
-  try {
-    const db = openDatabase(config.databasePath);
-    try {
-      pending = pendingMigrations(db, opts.migrationsDir);
-    } finally {
-      db.close();
-    }
-  } catch (err) {
-    throw new PreflightError(`cannot read the migration state of ${config.databasePath}: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (pending.length === 0) return { pending, backupPath: null };
-  const backup = opts.backup ?? (await loadBackupModule());
-  try {
-    const r = backup.backupDatabase({ dbPath: config.databasePath, backupDir: join(dirname(config.databasePath), 'backups') });
-    opts.log.info({ pending, backupPath: r.path, pruned: r.pruned }, 'pre-migration backup written');
-    return { pending, backupPath: r.path };
-  } catch (err) {
-    throw new PreflightError(`pre-migration backup failed, migrations refused: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-```
-
-`apps/api/src/bootstrap/app.ts`: add the import and one statement in `main()`, immediately before the `buildPorts(` call (the plan's order: config → logger → preflight → buildPorts), using the same `config`, `log` and `migrationsDir` values that call receives. If WP8 left a placeholder or its own preflight call at that point, replace it, so exactly one preflight call precedes `buildPorts`:
-
-```ts
-import { preflight } from './preflight.js';
-// … inside main(), directly above `const ports = buildPorts(config, { … migrationsDir })`:
-  // why: buildPorts applies migrations; the backup must exist first or boot stops (spec §7).
-  await preflight(config, { migrationsDir, log });
-```
-
-`apps/api/src/bootstrap/tool.ts`: the same import and the same statement in `runTool(name, argv)`, directly after its config and logger are built and before argument parsing and `buildPorts(` (the tool bootstrap migrates through `buildPorts` too, so it needs the same guard).
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/api test`
-Expected: PASS, including 8 preflight tests and 2 spawn tests; coverage stays at or above 85% lines / 70% branches; `src/bootstrap/preflight.ts` shows 100% lines.
-
-Then: `node scripts/check-boundaries.mjs && pnpm -r typecheck`
-Expected: exit 0 for both (preflight.ts imports `@gmt/core` types, `@gmt/db` and Node built-ins; it reads no `process.env`).
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp12: pre-migration backup and /data writability check before migrations"
+git add apps/api/test/bootstrap/preMigrationBoot.test.ts && git commit -m "wp12: end-to-end check that boot backs up before migrating"
 ```
 
 ### Task 12.6: `docs/api-limits.md` with the generated preset table
@@ -2018,7 +1738,7 @@ docker compose exec -T app node scripts/backup.mjs
 
 It writes `/data/backups/get-me-there-<UTC timestamp>.db` with SQLite `VACUUM INTO` (safe
 while the app runs), checks it with `PRAGMA integrity_check`, refuses to overwrite an existing
-file, keeps the newest 5 inside the volume, and exits non-zero on any failure.
+file, keeps the newest 5 inside the volume, and exits 74 on any failure (see "Exit codes" below).
 
 **Copy backups out of the volume** to the host:
 
@@ -2108,14 +1828,35 @@ curl -u "operator:choose-a-long-passphrase" -X POST \
 ```
 
 The smoke test issues one request per configured provider for that pair and returns
-`{ exitCode, summary, lines, fixturesWritten }`: exit code 0 means a price was found, 1 a
-provider error, 2 no provider configured, 3 an empty result. Recording spends SearchApi
-credits up to `budget` for the given pairs and month (choose a month inside the next year).
+`{ exitCode, summary, lines, fixturesWritten }` with an exit code from the table below.
+Recording spends SearchApi credits up to `budget` for the given pairs and month (choose a
+month inside the next year).
 
 On a development checkout without the container the same tools are `pnpm smoke:live` and
 `pnpm record:fixtures`, with the same arguments as command-line flags.
 
-## 8. Local development
+## 8. Exit codes
+
+Every command-line entry point (the app itself, `pnpm smoke:live`, `pnpm record:fixtures`,
+`node scripts/backup.mjs`) and the `exitCode` of the `/api/tools/*` routes use this one table:
+
+| Code | Meaning |
+|---|---|
+| 0 | success |
+| 1 | smoke test: a configured provider returned an error |
+| 2 | smoke test: no provider is configured |
+| 3 | smoke test: the provider answered with no prices |
+| 64 | bad arguments (usage) |
+| 70 | refused because `NODE_ENV=test` |
+| 73 | migrations are pending but the pre-migration backup cannot be attempted |
+| 74 | the backup failed (boot or `scripts/backup.mjs`); migrations were not applied |
+| 75 | the database lock is held by another process |
+| 78 | bad configuration; the message names every variable to fix |
+
+With `restart: unless-stopped`, an app that exits 73, 74 or 78 restarts and fails the same way
+until you fix the cause; `docker compose logs app` shows the message.
+
+## 9. Local development
 
 ```bash
 pnpm install
@@ -2221,7 +1962,7 @@ Add this job to `.github/workflows/ci.yml` under `jobs:` (after the existing `te
 - [ ] **Step 3: Run to verify it passes**
 
 Run: the Step 1 command block again, then `curl -fsS http://127.0.0.1:3000/api/health` and `docker exec gmt-ci node scripts/backup.mjs`, then `docker stop --time 30 gmt-ci && docker rm gmt-ci`.
-Expected: `healthy`; `/api/health` prints `{"ok":true,"degraded":false}`; the backup prints `{"ok":true,"path":"/data/backups/get-me-there-….db","pruned":[]}`; the stop completes in under 30 s (the app checkpoints and exits on SIGTERM). After pushing the branch, the `docker` job is green.
+Expected: `healthy`; `/api/health` prints `{"ok":true,"degraded":false}`; the backup prints `{"ok":true,"file":"/data/backups/get-me-there-….db"}`; the stop completes in under 30 s (the app checkpoints and exits on SIGTERM). After pushing the branch, the `docker` job is green.
 
 - [ ] **Step 4: Commit**
 
@@ -2284,12 +2025,12 @@ None of the plan's five Review Focus lines is owned by WP12 (they belong to WP0,
 | `node scripts/check-boundaries.mjs` | exit 0 |
 | `pnpm secret-scan` | `secret scan: clean` |
 | `pnpm vitest run --project infra` | all infra tests PASS (dockerfile, envExample, compose, backup, apiLimits, docs, exampleDefinition); no coverage threshold |
-| `pnpm --filter @gmt/api test` | PASS with lines ≥ 85%, branches ≥ 70% |
+| `pnpm --filter @gmt/api test` | PASS with lines ≥ 85%, branches ≥ 70%, including `preMigrationBoot.test.ts` |
 | `pnpm test` | every project PASS |
 | `docker build -t get-me-there:local .` | succeeds; log shows `better-sqlite3 13.0.3 prebuilt ok` three times |
 | `docker compose config --quiet` | exit 0, no output |
 | `docker compose up -d && docker compose ps` (with a three-line `.env`) | `app` reaches `healthy` within 240 s |
-| `docker compose exec -T app node scripts/backup.mjs` | one JSON line with `"ok":true` and a path under `/data/backups/` |
+| `docker compose exec -T app node scripts/backup.mjs` | exit 0, one JSON line `{"ok":true,"file":"/data/backups/…"}` |
 | `docker compose stop app` | stops within 30 s |
 | CI on the branch | `test` and `docker` jobs green |
 

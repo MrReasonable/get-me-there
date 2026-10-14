@@ -10,7 +10,7 @@ status: draft
 
 # WP13: live smoke, layer-B engine tests, app_lock tool test, integration review, final pass
 
-Reconciled on 2026-10-14 against the plan's rewritten "Cross-package contracts", including its "Decisions taken at reconciliation", and against spec revision 10. It also uses the interface sections of the draft briefs WP4, WP4b, WP7, WP8, WP9 and WP11.
+Reconciled on 2026-10-14 against the plan's rewritten "Cross-package contracts", including its "Decisions taken at reconciliation" through round-2 item 14 (commit 790d1ea), and against spec revision 10. It also uses the interface sections of the draft briefs WP4, WP4b, WP7, WP8, WP9 and WP11.
 
 ## 1. Goal
 
@@ -32,7 +32,7 @@ Prove the assembled system against recorded vendor behaviour and the operator's 
   - `smokeTool`, registered in WP4b's `TOOLS` so `runTool('smoke', argv)` runs it;
   - `toToolRunResponse`.
 - `apps/api/src/tools/perRunCap.ts`: the per-run cap of exactly one call per provider, wrapping the real `SqliteBudgetGuard`.
-- Mounting `POST /api/tools/smoke`. The plan assigns this to WP13. WP13 does it by adding `smoke` to WP8's `inProcessTools(ports)` and by giving WP8's `'POST /tools/smoke'` handler the validated `toolSmokeRequestSchema` body, so the route returns `toolRunResponseSchema`.
+- Mounting `POST /api/tools/smoke`, which the plan assigns to WP13. WP13 adds `smoke` to WP8's `ToolRunners` and `inProcessTools(ports)`, adds the `'POST /api/tools/smoke'` handler to WP8's `toolHandlers`, and removes that key from WP8's `OWNED_ELSEWHERE`. The route takes `toolSmokeRequestSchema` and returns `toolRunResponseSchema`.
 - Layer-B engine tests in `packages/engine/test/layerB/*.test.ts`. They run the real `searchApiProvider` and `travelpayoutsProvider` over `replayHandlers(fixtures/recorded)` through WP7's harness. WP13 adds one additive option to that harness (`vendors`) and one field to its `extraProviders` tools (`repos`).
 - The real-process `app_lock` test: the tool bootstrap is spawned as a child process, and the test proves it starts no execution.
 - A root `integration` Vitest project holding:
@@ -78,18 +78,16 @@ Prove the assembled system against recorded vendor behaviour and the operator's 
 - The recorder keeps the credential-free query in `request.url`.
 - A route-run smoke writes no fixtures and says so.
 - `runTool` returns `Promise<number>`.
+- One exit-code table covers every CLI (round 2).
+- WP8's tool runners, `createLogger(config, { destination })` and the `Notifier.send` shape now match the plan in the sibling briefs.
+- msw 3's `onUnhandledFrame` is the right option name.
 - `/api/tools/smoke` is mounted by WP13.
 
-**Still inconsistent** (the spec wins where it speaks; otherwise these are findings for Fable):
+**Still open** (findings for Fable):
 
-1. **Exit-code collision.** WP4b's `EXIT` is `{ ok: 0, failed: 1, refusedTestEnv: 2, badConfig: 3, lockRefused: 4, usage: 5 }`, and `runTool` returns the tool's own code on success. The smoke's 2 (zero providers) and 3 (empty) therefore collide with `refusedTestEnv` and `badConfig`. A malformed `--origin` is rejected by `smokeTool.start` and exits `EXIT.usage` = 5, not 64. The table in §5 states what each path returns today. One of the two tables should move, for example `EXIT` to 64–69.
-2. **WP8's tool runner shape.** WP8's draft `ToolRunners.smoke` takes `Record<string, never>`, returns `{ ok, exitCode, lines }`, and its handler spreads `{ tool: name, ... }`. The plan's `toolRunResponseSchema` is `{ exitCode, summary, lines, fixturesWritten }`, and the request is `toolSmokeRequestSchema`. Task 13.3 changes the smoke runner's argument and result types. The extra `tool` field in WP8's `runTool` handler helper also affects `/tools/record` and is left to WP8.
-3. **`createLogger` signature.** The plan says `createLogger(config: Pick<Config, 'logLevel'>, opts?: { destination })`, owned by WP4b. The WP4b and WP8 drafts both write `createLogger(level, destination?)` in `apps/api/src/logger.ts`. This brief calls the plan's form.
-4. **`Notifier.send` shape.** The plan's port is `send({ kind: 'digest'; digest; subject; body } | { kind: 'operator'; message })`. WP11's draft `EmailNotifier.send(msg: AlertDigest | OperatorMessage)`. This brief calls the plan's form.
-5. **No filter or miss log in replay.** The plan's `replayHandlers(recordedRoot)` has neither a `recordedBy` filter nor a miss log. A smoke recording and a WP4b recording of the same request (for example a Travelpayouts `LON` month tile) compete, and a miss surfaces only as an unhandled-request error. This brief asks WP4 for `replayHandlers(root, opts?: { recordedBy?: string })`. Until then, the tests choose a smoke month WP4b did not record (Task 13.1, Step 5).
-6. **WP7's harness can't reach the vendors.** Its http limits route `travelpayouts` to `stub.local` and give `searchapi` no host, its budget config has no `searchapi`, and `extraProviders` receives no `repos`. Task 13.4 adds `vendors` and `repos` additively.
-7. **msw 3 option name.** WP4 verified that msw 3 renamed `onUnhandledRequest` to `onUnhandledFrame`. WP7's harness still writes `onUnhandledRequest`. This brief uses `onUnhandledFrame`.
-8. **Fixture transport for the sentinel test.** `buildPorts(…, { fixtureRoot })` serves the fixture host in-process, where a test cannot set scenario rules. The sentinel test therefore omits `fixtureRoot`, so `fixture.local` goes to global fetch and is served by msw `fixtureHandlers`, and it sets rules with `fetch(scenarioRequest(rules))`. This assumes `buildPorts` still constructs the fixture provider under `syntheticAllowed` when `fixtureRoot` is absent.
+1. **No filter or miss log in replay.** The plan's `replayHandlers(recordedRoot)` has neither a `recordedBy` filter nor a miss log. A smoke recording and a WP4b recording of the same request (for example a Travelpayouts `LON` month tile) compete, and a miss surfaces only as an unhandled-request error. This brief asks WP4 for `replayHandlers(root, opts?: { recordedBy?: string })`. Until then, the smoke month must differ from WP4b's recorded month (Task 13.1, Step 5).
+2. **WP7's harness can't reach the vendors.** `EngineOptions.providerConcurrency` covers concurrency, but the harness's http limits still route `travelpayouts` to `stub.local` and give `searchapi` no host, its budget config has no `searchapi`, and `extraProviders` receives no `repos`. Task 13.4 adds the `vendors` option and `repos` additively. WP7's harness also still writes `onUnhandledRequest`; Task 13.4 changes it to `onUnhandledFrame`.
+3. **Fixture transport for the sentinel test.** `buildPorts(…, { fixtureRoot })` serves the fixture host in-process, where a test cannot set scenario rules. The sentinel test therefore omits `fixtureRoot`, so `fixture.local` goes to global fetch and msw `fixtureHandlers`, and it sets rules with `fetch(scenarioRequest(rules))`. This assumes `buildPorts` still constructs the fixture provider under `syntheticAllowed` when `fixtureRoot` is absent.
 
 ## 4. Interfaces consumed
 
@@ -166,12 +164,12 @@ From the draft briefs, for names the plan does not pin:
 
 | Name | Source | Shape used here |
 |---|---|---|
-| `EXIT`, `TOOLS`, `ToolEntry`, `StartedTool`, `ToolContext` | WP4b §5.2 | `ToolEntry { start(argv): StartedTool \| { ok: false; message } }`; `StartedTool { ok: true; recordedBy: string \| null; configure(c): Config; precheck(c): string \| null; run(ports, ctx): Promise<number> }`; `ToolContext { recorder; recordedRoot; signal; out(line); err(line) }` |
+| `TOOLS`, `ToolEntry`, `StartedTool`, `ToolContext` | WP4b §5.2 | `ToolEntry { start(argv): StartedTool \| { ok: false; message } }` (a failed start exits 64); `StartedTool { ok: true; recordedBy: string \| null; configure(c): Config; precheck(c): string \| null; run(ports, ctx): Promise<number> }`; `ToolContext { recorder; recordedRoot; signal; out(line); err(line) }` |
 | `MIGRATIONS_DIR`, `RECORDED_ROOT` | WP4b `apps/api/src/paths.ts` | absolute paths |
 | `RECORDED_BY_ALLOWED` | WP4b | includes `'@gmt/api smoke:live'` (the smoke's `recordedBy`) |
-| `record --dry-run` | WP4b | `--budget 12 --route LHR,LGW:JFK,EWR --month 2027-03 --metro LON --dry-run` prints the plan, makes no request, creates no execution, exits 0; output lines `tool lock acquired` / `tool lock released`; refusal on stderr `app_lock is held by app` with `EXIT.lockRefused` |
-| `createApp(ports, engine, options?)`, `AppOptions.tools`, `ToolRunners`, `inProcessTools(ports)`, `toolHandlers`, `API_TEXT`, `API_PREFIX` | WP8 §5 | as written there; Task 13.3 changes `ToolRunners.smoke` |
-| `createHarness(opts)`, `HarnessOptions { env?, now?, extraProviders?, … }`, `Harness { deps, options, config, clock, db, repos, server, createDefinition, runToCompletion, waitForSettled, outcomes, ledgerRows, tileRequests, close }`, `T0` | WP7 test/harness.ts | Task 13.4 adds `vendors` and `repos` |
+| `record --dry-run` | WP4b | `--budget 12 --route LHR,LGW:JFK,EWR --month 2027-03 --metro LON --dry-run` builds ports and takes the lock without any vendor call (plan), creates no execution, exits 0; output lines `tool lock acquired` / `tool lock released`; refusal on stderr `app_lock is held by app`, exit 75 |
+| `createApp(ports, engine, options?)`, `AppOptions.tools`, `ToolRunners`, `ToolRunResponse`, `ToolRecordRequest`, `OWNED_ELSEWHERE`, `inProcessTools(ports)`, `recordResponse`, `toolHandlers`, `ApiError`, `API_TEXT` (`toolUnavailable`, `toolBusy`, `toolFailed`), `API_PREFIX` | WP8 §5 and Task 8.14 | as written there; Task 13.3 adds the smoke member, handler and runner |
+| `createHarness(opts)`, `HarnessOptions { env?, now?, extraProviders?, … }`, `EngineOptions.providerConcurrency` (plan), `Harness { deps, options, config, clock, db, repos, server, createDefinition, runToCompletion, waitForSettled, outcomes, ledgerRows, tileRequests, close }`, `T0` | WP7 test/harness.ts | Task 13.4 adds `vendors` and `repos` |
 | `operatorMessage(kind, { definitionName, executionId, detail })`, `OPERATOR_KINDS` | WP7 | exported from `@gmt/engine` |
 | `EmailNotifier({ smtp, nodeEnv, log, createTransport })`, `TransportFactory = (o: SmtpTransportOptions) => MailTransport`, `MailTransport { sendMail(m: MailMessage): Promise<{ messageId }> }`, `MailMessage { from, to, subject, text }` | WP11 §5 | |
 | `renderBody(input: DigestRenderInput)`, `DigestRenderInput { rule, definitionId, definitionName, items, restCount, newcomers, newcomersRest, coverage, now }` | WP11 §5 | |
@@ -201,7 +199,7 @@ export interface CappedGuard extends BudgetGuard { reservationIds(providerId: Pr
 export function perRunCallCap(inner: BudgetGuard, perProvider: number, freeProviders: ReadonlySet<ProviderId>): CappedGuard;
 
 // apps/api/src/routes/types.ts (WP8 file, changed here)
-smoke?: (args: { origin: Iata; destination: Iata }) => Promise<ToolRunResponse>   // ToolRunResponse = z.infer<typeof toolRunResponseSchema>
+smoke?: (args: ToolSmokeRequest) => Promise<ToolRunResponse>   // and OWNED_ELSEWHERE no longer lists 'POST /api/tools/smoke'
 
 // packages/engine/test/harness.ts (WP7 file, additive)
 HarnessOptions.vendors?: Partial<Record<'searchapi' | 'travelpayouts', { http: ProviderHttpLimits; limits: ProviderLimits; billable: boolean }>>
@@ -210,31 +208,27 @@ extraProviders tools gain repos: Repos
 // root integration project: integration/package.json (@gmt/integration, private), integration/vitest.config.ts (project 'integration', no thresholds)
 ```
 
-**Smoke exit codes.** When several apply, the highest row wins in the order 64, 2, 1, 3, 0.
+**Exit codes** (plan, "Wiring and bootstraps": one table for every CLI). For the smoke, when several apply, the order is 64, 2, 1, 3, 0.
 
-| Code | Meaning | Calls made |
+| Code | Meaning | Who returns it |
 |---|---|---|
-| 64 | Bad arguments that reach `runSmoke`: origin equals destination, or either is absent from the airports table | none |
-| 2 | Zero providers configured (neither `TRAVELPAYOUTS_TOKEN` nor `SEARCHAPI_KEY`) | none |
-| 1 | Any configured provider errored: a `tile-error`, a thrown `ProviderError` or `BudgetExceeded` (including the per-run cap), `plan()` yielding anything but one tile, a ledger assertion failing (not exactly one row, first attempt, `ok`), or a non-GBP price with no FX rate | at most one per provider |
-| 3 | No error, but at least one configured provider's tile held no price (`no_data` or `noFares`) | one per provider |
-| 0 | Every configured provider priced its one tile, with exactly one first-attempt `ok` ledger row each | one per provider |
+| 0 | ok. For the smoke: every configured provider priced its one tile, with exactly one first-attempt `ok` ledger row each | tool |
+| 1 | Smoke: any configured provider errored. This covers a `tile-error`, a thrown `ProviderError` or `BudgetExceeded` (including the per-run cap), `plan()` yielding anything but one tile, a ledger assertion failing, and a non-GBP price with no FX rate | `runSmoke` |
+| 2 | Smoke: zero providers configured; no call made | `runSmoke` |
+| 3 | Smoke: no error, but at least one configured provider's tile held no price (`no_data` or `noFares`) | `runSmoke` |
+| 64 | Usage or bad arguments. From `smokeTool.start`: a missing or malformed `--origin` or `--destination`. From `runSmoke`: origin equals destination, or an airport absent from the table. No call is made | tool / `runSmoke` |
+| 70 | Refused under `NODE_ENV=test` | `runTool` |
+| 73 | Pending migrations, but the backup preflight is impossible | `runTool` |
+| 74 | Backup failed | `runTool` |
+| 75 | `app_lock` refused | `runTool` |
+| 78 | Bad configuration | `runTool` |
 
-Through the CLI, `runTool` returns these codes on a successful start. It returns its own `EXIT` codes before the smoke runs:
-
-| `EXIT` | Code | When |
-|---|---|---|
-| `refusedTestEnv` | 2 | `NODE_ENV=test` |
-| `badConfig` | 3 | invalid configuration |
-| `lockRefused` | 4 | a fresh app lock exists |
-| `usage` | 5 | missing or malformed `--origin` or `--destination`, rejected by `smokeTool.start` |
-
-The 2 and 3 collisions are §3 item 1. Through the route, a malformed body is a 400 from validation, and the codes above arrive in `exitCode`.
+Through the route, a malformed body is a 400 from validation, and codes 0–3 and 64 arrive in `exitCode`.
 
 **Contract additions still proposed** (for Fable):
 
-1. `replayHandlers(root, opts?: { recordedBy?: string })`, plus a miss log (§3 item 5).
-2. WP7 harness `vendors` and `repos` (§3 item 6).
+1. `replayHandlers(root, opts?: { recordedBy?: string })`, plus a miss log (§3 item 1).
+2. WP7 harness `vendors` and `repos` (§3 item 2).
 3. `@gmt/api` and `@gmt/engine` barrels export the names the integration project imports:
    - api: `buildPorts`, `loadConfigFromEnv`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, `API_TEXT`;
    - engine: `operatorMessage`, `OPERATOR_KINDS`, `EmailNotifier`, `renderBody`.
@@ -297,8 +291,8 @@ Verified on 2026-10-14.
 
 - `apps/api/src/bootstrap/tool.ts` (`TOOLS` gains `smoke: smokeTool`)
 - `apps/api/src/tools/inProcess.ts` (adds the `smoke` runner)
-- `apps/api/src/routes/types.ts` (the `ToolRunners.smoke` type)
-- `apps/api/src/routes/tools.ts` (the `'POST /tools/smoke'` handler passes the validated body)
+- `apps/api/src/routes/types.ts` (`ToolRunners.smoke`; `OWNED_ELSEWHERE` emptied)
+- `apps/api/src/routes/tools.ts` (adds the `'POST /api/tools/smoke'` handler)
 - `apps/api/src/index.ts` and `packages/engine/src/index.ts` (barrel exports, §5 addition 3)
 - `packages/engine/test/harness.ts` (`vendors`, `repos`)
 - `pnpm-workspace.yaml`
@@ -676,7 +670,7 @@ export async function runSmoke(ports: Ports, args: { origin: Iata; destination: 
   return done(exitCode, summary, reports, cheapest, [...written].sort());
 }
 
-/** The tool bootstrap entry (WP4b registry). Malformed flags → EXIT.usage before any port is built. */
+/** The tool bootstrap entry (WP4b registry). Malformed flags → exit 64 before any port is built. */
 export const smokeTool: ToolEntry = {
   start(argv) {
     const parsed = parseSmokeArgs(argv);
@@ -704,7 +698,7 @@ export const smokeTool: ToolEntry = {
 
 This spends one SearchApi call and one free Travelpayouts call. Run it on the dev machine with the operator's `.env`, `NODE_ENV=development` and `DATABASE_PATH="$PWD/data/dev.db"`.
 
-Before running, check that the smoke's departure month (the month after today) is not WP4b's recorded month. Run `ls packages/providers/fixtures/recorded/travelpayouts/aviasales_v3_prices_for_dates` and compare with the `--month` WP4b used. If the months match, the two recordings compete in `replayHandlers` (§3 item 5). In that case wait for the next month, or pause here until WP4 adds the `recordedBy` filter.
+Before running, check that the smoke's departure month (the month after today) is not WP4b's recorded month. Run `ls packages/providers/fixtures/recorded/travelpayouts/aviasales_v3_prices_for_dates` and compare with the `--month` WP4b used. If the months match, the two recordings compete in `replayHandlers` (§3 item 1). In that case wait for the next month, or pause here until WP4 adds the `recordedBy` filter.
 
 Run: `pnpm smoke:live -- --origin LHR --destination JFK`
 Expected:
@@ -845,7 +839,7 @@ git add apps/api/test && git commit -m "wp13: smoke exit codes 1, 2, 3, 64 and t
 
 **Files:**
 - Create: `apps/api/test/tools/smokeArgs.test.ts`, `apps/api/test/routes/toolsSmoke.test.ts`
-- Modify: `apps/api/src/routes/types.ts`, `apps/api/src/routes/tools.ts`, `apps/api/src/tools/inProcess.ts`
+- Modify: `apps/api/src/routes/types.ts` (`ToolRunners.smoke`, `OWNED_ELSEWHERE`), `apps/api/src/routes/tools.ts`, `apps/api/src/tools/inProcess.ts`
 
 **Interfaces:**
 - Consumes: `createApp(ports, engine, options)`, `inProcessTools`, `toolHandlers`, `createEngine`, `toolSmokeRequestSchema`, `toolRunResponseSchema`.
@@ -917,25 +911,40 @@ describe('POST /api/tools/smoke (spec §10 rev 10)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/smokeArgs.test.ts test/routes/toolsSmoke.test.ts`
-Expected: `smokeArgs` passes (Task 13.1). The route test FAILS with status 503 `tool_unavailable`, because WP8's `inProcessTools` has no `smoke` yet.
+Expected: `smokeArgs` passes (Task 13.1). The route test FAILS with 404 `not_found`, because WP8 leaves the route unmounted (`OWNED_ELSEWHERE`).
 
 - [ ] **Step 3: Implement**
 
-`apps/api/src/routes/types.ts`, the `smoke` member of `ToolRunners`:
+`apps/api/src/routes/types.ts`: add the `smoke` member to `ToolRunners`, and remove `'POST /api/tools/smoke'` from `OWNED_ELSEWHERE` (leaving it empty):
 
 ```ts
-/** Spec §10 rev 10: the smoke takes the operator's airports and answers toolRunResponseSchema. */
-smoke?: (args: z.infer<typeof apiContract.toolSmokeRequestSchema>) => Promise<z.infer<typeof apiContract.toolRunResponseSchema>>;
+export type ToolSmokeRequest = z.infer<typeof apiContract.toolSmokeRequestSchema>;
+export interface ToolRunners {
+  record?: (args: ToolRecordRequest, signal: AbortSignal) => Promise<ToolRunResponse>;
+  /** Spec §10 rev 10: the smoke takes the operator's airports and answers toolRunResponseSchema. */
+  smoke?: (args: ToolSmokeRequest) => Promise<ToolRunResponse>;
+}
+export const OWNED_ELSEWHERE: ReadonlySet<string> = new Set();
 ```
 
-`apps/api/src/routes/tools.ts`, the smoke entry of `toolHandlers` (WP8's busy, 503 and failure handling in its `runTool` helper stays as written):
+`apps/api/src/routes/tools.ts`: add the handler beside WP8's record handler, with the same busy, 503 and failure rules:
 
 ```ts
-'POST /tools/smoke': (c, input, ctx) => {
+/** Spec §10 `/api/tools/smoke`: the smoke inside the app process, one tool at a time. */
+'POST /api/tools/smoke': async (c, input, ctx) => {
   const smoke = ctx.tools.smoke;
-  // why: the body was validated against ROUTES' toolSmokeRequestSchema by WP8's validator.
-  const body = input.body as z.infer<typeof apiContract.toolSmokeRequestSchema>;
-  return runTool(c, ctx, 'smoke', smoke === undefined ? null : () => smoke(body));
+  if (smoke === undefined) throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable('smoke'));
+  if (ctx.toolInFlight.name !== null) throw new ApiError(409, 'tool_busy', API_TEXT.toolBusy(ctx.toolInFlight.name));
+  ctx.toolInFlight.name = 'smoke';
+  try {
+    // why: the body was validated against ROUTES' toolSmokeRequestSchema before the handler runs.
+    return c.json(await smoke(input.body as ToolSmokeRequest));
+  } catch (err) {
+    ctx.ports.log.error({ tool: 'smoke', err: { message: stripUrlsInText(err instanceof Error ? err.message : String(err)) } }, 'tool failed');
+    throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed('smoke'));
+  } finally {
+    ctx.toolInFlight.name = null;
+  }
 },
 ```
 
@@ -946,14 +955,14 @@ import { runSmoke, toToolRunResponse } from './smoke.js';
 
 export function inProcessTools(ports: Ports): ToolRunners {
   return {
-    record: (args) => recordFixtures(ports, args, ports.log),
+    record: async (args, signal) => recordResponse(await recordFixtures(ports, args, { signal })),
     // why: the app's ports carry recorder null, so the route writes no fixtures and says so (spec §13 rev 10).
     smoke: async (args) => toToolRunResponse(await runSmoke(ports, args)),
   };
 }
 ```
 
-WP8's `runTool` helper spreads `{ tool: name, ...result }`, and `toolRunResponseSchema` does not list `tool` (§3 item 2). The route test parses with the schema, which strips unknown keys, so it passes either way. Removing the `tool` field is WP8's call, since it also affects `/tools/record`.
+WP8's strict-mounting sweep (Task 8.15) skips `OWNED_ELSEWHERE` keys. Once the set is empty, that sweep also covers the smoke route.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1217,7 +1226,7 @@ WP4b's tests call `runTool` in-process. This test spawns the real entry as a sep
 - Create: `apps/api/test/tools/appLock.spawn.test.ts`
 
 **Interfaces:**
-- Consumes: `openDatabase`, `applyMigrations`, `createRepos`, `seedAirports`, `loadAirportsDataset`, `AppLock`, `DefinitionsRepo.create`, `ExecutionsRepo.create`/`setStatus`, `EXIT` (WP4b), the `record --dry-run` arguments.
+- Consumes: `openDatabase`, `applyMigrations`, `createRepos`, `seedAirports`, `loadAirportsDataset`, `AppLock`, `DefinitionsRepo.create`, `ExecutionsRepo.create`/`setStatus`, the exit-code table (75 for a refused lock), and the `record --dry-run` arguments.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1229,7 +1238,6 @@ import { join } from 'node:path';
 import { type DefinitionSnapshot, asIata, asIsoDate, systemClock } from '@gmt/core';
 import { AppLock, applyMigrations, createRepos, loadAirportsDataset, openDatabase, seedAirports } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
-import { EXIT } from '../../src/bootstrap/tool.js';
 import { MIGRATIONS_DIR } from '../../src/paths.js';
 import { AIRPORTS_DIR, SENTINELS, captureLogger } from '../support/env.js';
 
@@ -1298,7 +1306,7 @@ describe('spawned tool bootstrap and app_lock (spec §7)', () => {
 
     const r = await spawnTool(['record', ...DRY], dbPath);
 
-    expect(r.code).toBe(EXIT.lockRefused);
+    expect(r.code).toBe(75); // app_lock refused (plan exit-code table)
     expect(r.stderr).toContain('app_lock is held by app');
     const after = state(dbPath);
     expect(after.lock?.holder).toBe('app');
@@ -1314,7 +1322,7 @@ describe('spawned tool bootstrap and app_lock (spec §7)', () => {
 
     const r = await spawnTool(['record', ...DRY], dbPath);
 
-    expect(r.code).toBe(EXIT.ok);
+    expect(r.code).toBe(0);
     const acquired = r.stdout.indexOf('tool lock acquired');
     expect(acquired).toBeGreaterThanOrEqual(0);
     expect(r.stdout.indexOf('tool lock released')).toBeGreaterThan(acquired);
@@ -1335,7 +1343,7 @@ describe('spawned tool bootstrap and app_lock (spec §7)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/appLock.spawn.test.ts`
-Expected: this characterises merged WP4b code, so both cases may pass at once. Prove the first case bites by commenting out `appLock.acquire(...)`. Expected: FAIL "expected 0 to be 4". Then restore it.
+Expected: this characterises merged WP4b code, so both cases may pass at once. Prove the first case bites by commenting out `appLock.acquire(...)`. Expected: FAIL "expected 0 to be 75". Then restore it.
 
 - [ ] **Step 3: Implement**
 
@@ -1588,7 +1596,7 @@ describe('no secret reaches any sink (spec §5.3)', () => {
     const log = createLogger(config, { destination: sink });
     const clock = fixedClock(recordedAt);
     const recorder = createRecorder({ root: fixturesOut, secrets: [new Secret(S.searchapi), new Secret(S.travelpayouts)], clock, recordedBy: '@gmt/api smoke:live' });
-    // why: no fixtureRoot, so fixture.local goes to global fetch and msw, where scenario rules can be set (brief §3 item 8).
+    // why: no fixtureRoot, so fixture.local goes to global fetch and msw, where scenario rules can be set (brief §3 item 3).
     const ports = buildPorts(config, { log, clock, recorder, migrationsDir: MIGRATIONS_DIR });
     seedAirports(ports.db, loadAirportsDataset(AIRPORTS_DIR));
     const emailOk = new EmailNotifier({ smtp: config.smtp, nodeEnv: config.nodeEnv, log, createTransport: capture });
@@ -1874,4 +1882,4 @@ The plan's five Review Focus lines belong to WP0–WP10. WP13 re-runs them in Ta
 
 ## 11. Open questions
 
-None that need the operator's judgement. The inconsistencies in §3 items 1–8 and the additions in §5 are contract matters for Fable to settle in the plan before dispatch. Item 1, the exit-code collision, is the one that changes observable behaviour.
+None that need the operator's judgement. The open items in §3 and the additions in §5 are contract matters for Fable to settle in the plan before dispatch.

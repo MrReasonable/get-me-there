@@ -51,7 +51,7 @@ Add to `@gmt/core` the pure functions that turn a raw vendor offer into a hashed
 
 ## 4. Interfaces consumed
 
-All from WP0, imported by relative path inside `@gmt/core`. Copied verbatim from the plan's "Cross-package contracts" (contracts v2, commit e804941) and spec §5.1. Only the blocks WP2 reads are shown.
+All from WP0, imported by relative path inside `@gmt/core`. Copied verbatim from the plan's "Cross-package contracts" (commit 790d1ea, round-2 pins included) and spec §5.1. Only the blocks WP2 reads are shown.
 
 ```ts
 // types/ids.ts
@@ -121,12 +121,12 @@ export interface AlertEvent { id: number; ruleId: string; identityKey: string; o
 export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
-export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean }
+export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean; suppressed: { reason: string } | null }   // evaluateAlertRules returns suppressed firings too; the runner records them with status 'suppressed' and the digest excludes them
 export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
 // identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
 
 // ports/notifier.ts (excerpt)
-export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; searchLink: { url: string; host: string; label: string } }
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string }; rowKey: string /* resultRowKey, for the app link */ }
 export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
 
 // ports/provider.ts — spec §5.1 (the parts WP2 reads)
@@ -140,7 +140,7 @@ export interface RawOffer {
 }
 
 // errors.ts (Task 0.4)
-export type NormalisationReason = 'fx-unavailable' | 'currency-unsupported' | 'unknown-airport-tz' | 'no-return-legs' | 'unmappable-carrier' | 'bad-local-time';
+export type NormalisationReason = 'fx-unavailable' | 'currency-unsupported' | 'unknown-airport-tz' | 'no-return-legs' | 'unmappable-carrier' | 'bad-local-time' | 'cell-mismatch';
 export class NormalisationError extends Error { reason: NormalisationReason; detail?: string }   // new NormalisationError(reason, detail?)
 
 // labels/age.ts (Task 0.7, with the maxAgeHours-0 rule settled in contracts v2)
@@ -176,6 +176,7 @@ export interface NormaliseDeps { providerId: ProviderId; cabin: Cabin; tzOf(iata
 export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps): { ok: true; itinerary: NormalisedItinerary; offer: Offer; observation: ObservationFields } | { ok: false; error: NormalisationError };
 export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts; export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
 export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
+export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string;   // itineraryHash, or `calendar:${calendarPriceId}`; the web's `?row=` parameter and email links use it
 export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
 export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
 export function identityKey(rule: AlertRule, c: AlertCandidate): string; export function dedupKey(identityKey: string, pricePence: number): string; export function isSuppressed(f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>, prior: PriorFiring[], cooldownHours: number, now: IsoDateTime): { suppressed: boolean; reason: string | null };
@@ -185,11 +186,13 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 Settled details this brief pins, all inside those signatures:
 
 - `departLocal` and `toIsoDateTime` throw `NormalisationError('unknown-airport-tz')` for a zone the runtime does not know. `normaliseOffer` turns `tzOf(iata) === null` into the same error.
-- `normaliseOffer` drops an offer that does not fly `cell` (origin, final destination, local departure date, local return date compared through `cellKeyString`) as `bad-local-time`, with the detail "offer flies …, cell is …". It never re-keys an offer.
-- `bandCheapest` row key = `itineraryHash`. Only itinerary rows have a travel time, so calendar rows are never in the set.
-- `evaluateAlertRules` leaves out firings that `prior` suppresses. To record suppressed events, WP11 calls it again with `prior = []` and runs `isSuppressed` on each firing. `isNew` firings are never suppressed. The calendar drop window is `2 × (ctx.discoveryRefreshHours[providerId] ?? 168)` whole hours, inclusive. The 168 h default is spec §7's.
-- `prior` passed to `evaluateAlertRules`/`isSuppressed` is this rule's sent firings only. WP11's query excludes `failed` and `suppressed` events.
-- `buildDigest`: `items` = the 10 cheapest non-new firings; `newItems` = the 10 cheapest new cells; `restCount` = everything beyond both lists. It returns null when no non-new firing exists and throws on synthetic provenance. `DigestItem.previousAgeHours` is the previous price's age at this fetch, in whole hours. `booking` is the observation's booking (verified) or `{ kind: 'none' }` (calendar).
+- `normaliseOffer` drops an offer that does not fly `cell` as `cell-mismatch`, with the detail "offer flies …, cell is …". It compares origin, final destination, local departure date and local return date through `cellKeyString`, and never re-keys an offer.
+- `resultRowKey(row)` = `itineraryHash ?? \`calendar:${calendarPriceId}\``. `bandCheapest` returns a set of these keys. Calendar rows have no travel time and are never marked.
+- `evaluateAlertRules` returns suppressed firings too, each with `suppressed: { reason }` from `isSuppressed` against `prior` (this rule set's sent firings; WP11's query excludes `failed` and `suppressed` events), else `suppressed: null`. `isNew` firings are never suppressed. The calendar drop window is `2 × (ctx.discoveryRefreshHours[providerId] ?? 168)` whole hours, inclusive. The 168 h default is spec §7's.
+- `buildDigest` ignores suppressed firings. `items` = the 10 cheapest non-new firings; `newItems` = the 10 cheapest new cells; `restCount` = everything beyond both lists. It returns null when no unsuppressed non-new firing exists and throws on synthetic provenance. Each `DigestItem` is filled from the candidate:
+  - `previousAgeHours`: the previous price's age at this fetch, in whole hours.
+  - `booking`, `bookingExpiresAt`, `outbound`, `inbound`: from the observation and itinerary for a verified candidate; `{ kind: 'none' }`, null, null, null for a calendar one.
+  - `rowKey`: `resultRowKey` of the row the item stands for.
 
 Module-internal helpers are not in the barrel. They are `parseVendorTime`, `requireZone`, `wallToInstant`, `localMinute` and `vendorInstant` (localTime.ts), `hoursSince` and `priceOf` (alerts/dedup.ts), `need` (alerts/evaluate.ts) and `formatPence` (alerts/format.ts). The type `AlertEvalContext` (alerts/evaluate.ts) names the plan's inline `ctx` type.
 
@@ -215,7 +218,7 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 
 - `src/normalise/carrier.ts`, `src/normalise/localTime.ts`, `src/normalise/timestamps.ts`, `src/normalise/hashing.ts`, `src/normalise/money.ts`, `src/normalise/vendorUrl.ts`, `src/normalise/itinerary.ts`
 - `src/constraints/evaluate.ts`, `src/constraints/verdictClass.ts`
-- `src/results/types.ts`, `src/results/dedup.ts`, `src/results/rank.ts`, `src/results/filter.ts`, `src/results/band.ts`, `src/results/searchLink.ts`
+- `src/results/types.ts`, `src/results/dedup.ts`, `src/results/rank.ts`, `src/results/filter.ts`, `src/results/rowKey.ts`, `src/results/band.ts`, `src/results/searchLink.ts`
 - `src/alerts/format.ts`, `src/alerts/dedup.ts`, `src/alerts/evaluate.ts`, `src/alerts/digest.ts` (the alert *types* are WP0's `types/alerts.ts`)
 
 **Modify:**
@@ -231,7 +234,7 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 - `test/alerts/dedup.test.ts`, `test/alerts/evaluate.test.ts`, `test/alerts/digest.test.ts`
 - `test/text/emitted.test.ts`, `test/wp2-barrel.test.ts`
 
-No other package and no WP0 file is touched. The plan file map lists `src/results/rank.ts` for `rankRows` and `sortRows`; `results/types.ts`, `results/searchLink.ts` and `alerts/format.ts` are added here because they have one responsibility each.
+No other package and no WP0 file is touched. The plan file map lists `src/results/rank.ts` for `rankRows` and `sortRows`; `results/types.ts`, `results/rowKey.ts`, `results/searchLink.ts` and `alerts/format.ts` are added here because they have one responsibility each.
 
 ## 8. Tasks
 
@@ -1151,7 +1154,7 @@ git add packages/core && git commit -m "wp02: vendor URL validation against the 
 - Consumes: Tasks 2.1–2.4; `RawOffer`, `RawSegment`, `NormalisedItinerary`, `Segment`, `Layover`, `ObservationFields`, `Offer`, `Booking`, `FxInfo`, `Cabin`, `ProviderId`, `CellKey`, `cellKeyString`
 - Produces: `NormaliseDeps`, `NormaliseResult` (the plan's inline result union, named), `normaliseOffer(raw, cell, deps)`
 
-`AAA` and `BBB` are clearly synthetic connection airports (README rule), zoned `Atlantic/Reykjavik` (UTC+0, no DST) so that layover arithmetic is easy to read. `ZZZ` is the unknown airport. A layover is overnight when the connection interval overlaps 00:00–05:00 local at the connecting airport on any date it touches. `normaliseOffer` *returns* `{ ok: false, error }` for every `NormalisationError` so that WP7 can count `offers-dropped:n`. Any other error is a caller bug and is thrown. The cell guard compares the offer's origin, final destination and local departure and return dates with `cell` through `cellKeyString`. A mismatch is `bad-local-time`, because `NormalisationReason` has no cell-mismatch member. The helper `cellOf(raw)` reads the cell from the raw strings, and the guard tests pass a different cell explicitly.
+`AAA` and `BBB` are clearly synthetic connection airports (README rule), zoned `Atlantic/Reykjavik` (UTC+0, no DST) so that layover arithmetic is easy to read. `ZZZ` is the unknown airport. A layover is overnight when the connection interval overlaps 00:00–05:00 local at the connecting airport on any date it touches. `normaliseOffer` *returns* `{ ok: false, error }` for every `NormalisationError` so that WP7 can count `offers-dropped:n`. Any other error is a caller bug and is thrown. The cell guard compares the offer's origin, final destination and local departure and return dates with `cell` through `cellKeyString`. A mismatch is `cell-mismatch` (plan round-2 pin). The helper `cellOf(raw)` reads the cell from the raw strings, and the guard tests pass a different cell explicitly.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1381,15 +1384,13 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
 
   it('an offer that flies another cell than the one asked is dropped, never re-keyed', () => {
     const asked = cellOf(offer());
-    expect(reason(offer(), deps(), { ...asked, returnDate: '2027-03-27' as never })).toBe('bad-local-time');
-    expect(reason(offer(), deps(), { ...asked, departureDate: '2027-03-13' as never })).toBe(
-      'bad-local-time',
-    );
-    expect(reason(offer(), deps(), { ...asked, origin: iata('LGW') })).toBe('bad-local-time');
-    expect(reason(offer(), deps(), { ...asked, destination: iata('EWR') })).toBe('bad-local-time');
+    expect(reason(offer(), deps(), { ...asked, returnDate: '2027-03-27' as never })).toBe('cell-mismatch');
+    expect(reason(offer(), deps(), { ...asked, departureDate: '2027-03-13' as never })).toBe('cell-mismatch');
+    expect(reason(offer(), deps(), { ...asked, origin: iata('LGW') })).toBe('cell-mismatch');
+    expect(reason(offer(), deps(), { ...asked, destination: iata('EWR') })).toBe('cell-mismatch');
     const r = normaliseOffer(offer(), { ...asked, returnDate: '2027-03-27' as never }, deps());
     expect(r.ok ? '' : r.error.message).toBe(
-      'bad-local-time: offer flies LHR|JFK|2027-03-14|2027-03-28, cell is LHR|JFK|2027-03-14|2027-03-27',
+      'cell-mismatch: offer flies LHR|JFK|2027-03-14|2027-03-28, cell is LHR|JFK|2027-03-14|2027-03-27',
     );
   });
 
@@ -1878,7 +1879,7 @@ export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps
     });
     const asked = cellKeyString(cell);
     if (flown !== asked)
-      throw new NormalisationError('bad-local-time', `offer flies ${flown}, cell is ${asked}`);
+      throw new NormalisationError('cell-mismatch', `offer flies ${flown}, cell is ${asked}`);
     const layovers = [...layoversOf(out, tzOf), ...layoversOf(back, tzOf)];
     const hash = itineraryHash(outbound, inbound);
     const itinerary: NormalisedItinerary = {
@@ -2904,12 +2905,12 @@ git add packages/core && git commit -m "wp02: result dedup, ranking with clamped
 ### Task 2.8: Results: filters, travel-time bands, search links
 
 **Files:**
-- Create: `packages/core/src/results/filter.ts`, `packages/core/src/results/band.ts`, `packages/core/src/results/searchLink.ts`
+- Create: `packages/core/src/results/filter.ts`, `packages/core/src/results/rowKey.ts`, `packages/core/src/results/band.ts`, `packages/core/src/results/searchLink.ts`
 - Test: `packages/core/test/results/filterBandLink.test.ts`
 
 **Interfaces:**
 - Consumes: Task 2.7 types and helpers; `validateVendorUrl`, `LINK_ALLOWLIST` (Task 2.4, test only); `CellKey`
-- Produces: `filterRows(rows, f)`, `bandCheapest(rows, bandHours): Set<string>` (row key = `itineraryHash`), `SEARCH_LINK_LABEL`, `searchLinkFor`
+- Produces: `filterRows(rows, f)`, `resultRowKey(row)`, `bandCheapest(rows, bandHours): Set<string>` of `resultRowKey`s, `SEARCH_LINK_LABEL`, `searchLinkFor`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2920,6 +2921,7 @@ import { describe, expect, it } from 'vitest';
 import { LINK_ALLOWLIST, validateVendorUrl } from '../../src/normalise/vendorUrl.js';
 import { bandCheapest } from '../../src/results/band.js';
 import { filterRows } from '../../src/results/filter.js';
+import { resultRowKey } from '../../src/results/rowKey.js';
 import { SEARCH_LINK_LABEL, searchLinkFor } from '../../src/results/searchLink.js';
 import type { ResultFilters, ResultRow } from '../../src/results/types.js';
 import type { CellKey } from '../../src/types/definition.js';
@@ -2997,7 +2999,6 @@ describe('bandCheapest (spec §6.5, 6h bands)', () => {
       row({ itineraryHash: 'b2', totalMinutes: 720, pricePence: 50_000 }), // 12h00 → band 2
       row({ itineraryHash: 'b2tie', totalMinutes: 800, pricePence: 50_000 }), // tie: first wins
       calendarRow({ pricePence: 1 }), // no travel time: never marked
-      calendarRow({ pricePence: 2, totalMinutes: 100 }), // no itinerary hash, so no row key: never marked
     ];
     const marked = bandCheapest(rows, 6);
     expect(marked).toBeInstanceOf(Set);
@@ -3006,6 +3007,13 @@ describe('bandCheapest (spec §6.5, 6h bands)', () => {
 
   it.each([0, -6, 1.5])('rejects band width %s', (h) => {
     expect(() => bandCheapest([v], h)).toThrow(RangeError);
+  });
+});
+
+describe('resultRowKey (plan contract)', () => {
+  it('is the itinerary hash, or calendar:<calendarPriceId> for a calendar row', () => {
+    expect(resultRowKey(row({ itineraryHash: 'h9' }))).toBe('h9');
+    expect(resultRowKey(calendarRow({ calendarPriceId: 42 }))).toBe('calendar:42');
   });
 });
 
@@ -3112,32 +3120,45 @@ export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[] {
 }
 ```
 
-`packages/core/src/results/band.ts`:
+`packages/core/src/results/rowKey.ts`:
 
 ```ts
 import type { ResultRow } from './types.js';
 
 /**
+ * The stable key of a results row (plan contract): its `itineraryHash`, or
+ * `calendar:${calendarPriceId}` for a calendar-basis row. The web's `?row=` parameter, email links
+ * (`DigestItem.rowKey`) and `bandCheapest` all use it.
+ */
+export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string {
+  return row.itineraryHash ?? `calendar:${row.calendarPriceId}`;
+}
+```
+
+`packages/core/src/results/band.ts`:
+
+```ts
+import { resultRowKey } from './rowKey.js';
+import type { ResultRow } from './types.js';
+
+/**
  * Spec §6.5, §11: the cheapest row in each travel-time band of `bandHours` (6 in the UI):
  * band = floor(totalMinutes / (bandHours × 60)), so 5h59 is band 0 and 6h00 band 1. Returns the
- * set of marked row keys. A row key is the row's `itineraryHash`: only itinerary rows have a
- * travel time, so calendar rows (no `totalMinutes`) are never marked. Equal prices: the first
- * row in input order wins.
+ * set of marked `resultRowKey`s. Rows without a travel time (calendar basis) are never marked.
+ * Equal prices: the first row in input order wins.
  */
 export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string> {
   if (!Number.isInteger(bandHours) || bandHours <= 0) {
     throw new RangeError(`band hours must be a positive integer: ${bandHours}`);
   }
-  const best = new Map<number, ResultRow & { itineraryHash: string; totalMinutes: number }>();
+  const best = new Map<number, ResultRow>();
   for (const r of rows) {
-    if (r.totalMinutes === null || r.itineraryHash === null) continue;
+    if (r.totalMinutes === null) continue;
     const band = Math.floor(r.totalMinutes / (bandHours * 60));
     const current = best.get(band);
-    if (current === undefined || r.pricePence < current.pricePence) {
-      best.set(band, r as ResultRow & { itineraryHash: string; totalMinutes: number });
-    }
+    if (current === undefined || r.pricePence < current.pricePence) best.set(band, r);
   }
-  return new Set([...best.values()].map((r) => r.itineraryHash));
+  return new Set([...best.values()].map(resultRowKey));
 }
 ```
 
@@ -3204,12 +3225,12 @@ export function searchLinkFor(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/results/filterBandLink.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 20 tests; typecheck and lint clean.
+Expected: PASS, 21 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp02: result filters, 6h bands and labelled search links (spec §6.5, §6.9)"
+git add packages/core && git commit -m "wp02: result filters, row keys, 6h bands and labelled search links (spec §6.5, §6.9)"
 ```
 
 ### Task 2.9: Alert identity, dedup key and cooldown suppression
@@ -3549,7 +3570,7 @@ Decisions this task encodes, all from spec §6.8:
 - A calendar candidate without a usable previous price is a `Firing` with `isNew: true`. It never fires a drop and is never suppressed, but an absolute rule still fires on it with `isNew: false`.
 - A verified candidate without a previous observation never fires a drop.
 - One firing per (rule, identity): the cheapest eligible candidate. Verified eligibility is checked here: same execution, definition cabin, class `verified`, or `partially-verified` when `requireAllVerified` is false. Calendar candidates carry no execution id, so "fetched by this execution, not reused" is the engine's query (WP11). Synthetic and other-cabin candidates are refused on both bases.
-- Firings suppressed by `prior` are left out (see §5 for how WP11 records them).
+- Every firing carries `suppressed`: `{ reason }` from `isSuppressed` against `prior`, or null. Suppressed firings are returned so the runner records them with status `suppressed`. `buildDigest` leaves them out.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3637,9 +3658,11 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
     expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 0 })], [same])).toEqual([]);
   });
 
-  it('cooldown: a firing suppressed by prior is left out; with prior = [] it is returned', () => {
-    expect(run([rule()], [verified()], [prior()])).toEqual([]);
-    expect(run([rule()], [verified()], [])).toHaveLength(1);
+  it('cooldown: a firing suppressed by prior is returned with its reason; without prior, suppressed is null', () => {
+    expect(run([rule()], [verified()], [prior()])[0]?.suppressed).toEqual({
+      reason: 'same price band alerted 24h ago (cooldown 336h)',
+    });
+    expect(run([rule()], [verified()], [])[0]?.suppressed).toBeNull();
   });
 
   it('disabled rules are skipped; a rule missing its threshold is a caller bug', () => {
@@ -3731,8 +3754,8 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
     });
     const id = 'r1|travelpayouts|economy|LHR|JFK|2027-03-14|2027-03-28';
     expect(
-      run([drop], [c], [prior({ identityKey: id, dedupKey: `${id}|380`, pricePence: 30_000 })]),
-    ).toHaveLength(1);
+      run([drop], [c], [prior({ identityKey: id, dedupKey: `${id}|380`, pricePence: 30_000 })])[0],
+    ).toMatchObject({ isNew: true, suppressed: null });
   });
 
   it('review focus 2: a previous price stamped in the future is compared as 0 h old, without throwing', () => {
@@ -3830,12 +3853,12 @@ function judge(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): Judge
 }
 
 /**
- * Spec §6.8: evaluate every enabled rule against the current execution's candidates. One result
- * per (rule, identity): the cheapest qualifying candidate. Firings suppressed by `prior` (this
- * rule set's sent firings, see `isSuppressed`) are left out; "new" calendar cells (`isNew`) are
- * never suppressed. To record suppressed events, call again with `prior = []` and run
- * `isSuppressed` on each firing. Synthetic, other-cabin and other-execution candidates never
- * fire. Output order: rule order, then price ascending.
+ * Spec §6.8: evaluate every enabled rule against the current execution's candidates. One firing
+ * per (rule, identity): the cheapest qualifying candidate. Each firing carries `suppressed`: the
+ * cooldown verdict against `prior` (this rule set's sent firings), or null. Suppressed firings are
+ * returned so the runner can record them with status `suppressed`; `buildDigest` leaves them out.
+ * "New" calendar cells (`isNew`) are never suppressed. Synthetic, other-cabin and other-execution
+ * candidates never fire. Output order: rule order, then price ascending.
  */
 export function evaluateAlertRules(
   rules: AlertRule[],
@@ -3855,15 +3878,18 @@ export function evaluateAlertRules(
       const j = judge(rule, c, ctx);
       if (j === null) continue;
       seen.add(id);
-      const firing: Firing = {
+      const key = dedupKey(id, priceOf(c).pricePence);
+      const verdict = j.isNew
+        ? { suppressed: false, reason: null }
+        : isSuppressed({ identityKey: id, dedupKey: key, candidate: c }, prior, rule.cooldownHours, ctx.now);
+      out.push({
         rule,
         candidate: c,
         identityKey: id,
-        dedupKey: dedupKey(id, priceOf(c).pricePence),
+        dedupKey: key,
         ...j,
-      };
-      if (!j.isNew && isSuppressed(firing, prior, rule.cooldownHours, ctx.now).suppressed) continue;
-      out.push(firing);
+        suppressed: verdict.reason === null ? null : { reason: verdict.reason },
+      });
     }
   }
   return out;
@@ -3888,8 +3914,8 @@ git add packages/core && git commit -m "wp02: alert evaluation: identities, spar
 - Test: `packages/core/test/alerts/digest.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 2.8–2.10; `AlertDigest`, `DigestItem` (WP0 `ports/notifier.ts`), `Cell`
-- Produces: `buildDigest(rule, firings, ctx)` returning a structured `AlertDigest | null`
+- Consumes: Tasks 2.8–2.10 (`resultRowKey`, `searchLinkFor`); `AlertDigest`, `DigestItem` (WP0 `ports/notifier.ts`), `Cell`
+- Produces: `buildDigest(rule, firings, ctx)` returning a structured `AlertDigest | null`; each `DigestItem` filled with `bookingExpiresAt`, `outbound`, `inbound` and `rowKey` from the candidate
 
 Core returns the structure only. WP11 renders the subject and body (spec §8.3) from `AlertDigest`, including the coverage caveat it passes in as `ctx.coverageCaveat`. Each item carries its own search link from `searchLinkFor` (Aviasales for Travelpayouts, Google Flights otherwise), so the template never builds a URL.
 
@@ -3944,7 +3970,10 @@ describe('buildDigest (spec §6.8)', () => {
         verified({
           verdictClass: 'partially-verified',
           unverified: ['checkedBagRequired'],
-          observation: { booking: { kind: 'get', url: 'https://www.google.com/b', host: 'www.google.com' } },
+          observation: {
+            booking: { kind: 'get', url: 'https://www.google.com/b', host: 'www.google.com' },
+            bookingExpiresAt: '2027-03-01T13:00:00.000Z' as never,
+          },
         }),
       ],
       [],
@@ -3962,6 +3991,8 @@ describe('buildDigest (spec §6.8)', () => {
       isNew: false,
       firingReason: '£412 is at or below the £450 threshold',
       booking: { kind: 'get', host: 'www.google.com' },
+      bookingExpiresAt: '2027-03-01T13:00:00.000Z',
+      rowKey: 'h1',
       cell: {
         origin: 'LHR',
         destination: 'JFK',
@@ -3971,6 +4002,8 @@ describe('buildDigest (spec §6.8)', () => {
       },
     });
     expect(item?.searchLink).toMatchObject({ host: 'www.google.com', label: 'search link, not a fare link' });
+    expect(item?.outbound?.map((s) => `${s.marketingCarrier}${s.flightNumber}`)).toEqual(['VS938']);
+    expect(item?.inbound?.map((s) => s.departLocal)).toEqual(['2027-03-28T18:30']);
   });
 
   it('a calendar drop item carries the previous price and its age at this fetch, no booking, an Aviasales search link', () => {
@@ -3994,6 +4027,10 @@ describe('buildDigest (spec §6.8)', () => {
       previousPricePence: 45_000,
       previousAgeHours: 48,
       booking: { kind: 'none' },
+      bookingExpiresAt: null,
+      outbound: null,
+      inbound: null,
+      rowKey: 'calendar:1',
     });
     expect(item?.searchLink.host).toBe('search.aviasales.com');
   });
@@ -4032,6 +4069,25 @@ describe('buildDigest (spec §6.8)', () => {
     expect(buildDigest(r2, firings, DCTX)?.items).toHaveLength(1);
   });
 
+  it('suppressed firings are left out of the digest; all suppressed sends nothing', () => {
+    const firings = evaluateAlertRules(
+      [cal],
+      [calendar(), calendar({ cell: cell(16), pricePence: 40_000 })],
+      [],
+      CTX,
+    );
+    // firings are price-ascending, so index 0 is the £400 cell
+    const muted = firings.map((f, i) => (i === 0 ? { ...f, suppressed: { reason: 'cooldown' } } : f));
+    expect(buildDigest(cal, muted, DCTX)?.items.map((i) => i.pricePence)).toEqual([41_200]);
+    expect(
+      buildDigest(
+        cal,
+        muted.map((f) => ({ ...f, suppressed: { reason: 'cooldown' } })),
+        DCTX,
+      ),
+    ).toBeNull();
+  });
+
   it('refuses synthetic rows', () => {
     const [f] = evaluateAlertRules([cal], [calendar()], [], CTX);
     const synthetic = {
@@ -4060,6 +4116,7 @@ Expected: FAIL, `Error: Cannot find module '../../src/alerts/digest.js' …`.
 
 ```ts
 import type { AlertDigest, DigestItem } from '../ports/notifier.js';
+import { resultRowKey } from '../results/rowKey.js';
 import { searchLinkFor } from '../results/searchLink.js';
 import type { AlertRule, Firing } from '../types/alerts.js';
 import type { Cell } from '../types/definition.js';
@@ -4100,13 +4157,20 @@ function item(f: Firing): DigestItem {
     isNew: f.isNew,
     firingReason: f.reason,
     booking: verified ? c.observation.booking : { kind: 'none' },
+    bookingExpiresAt: verified ? c.observation.bookingExpiresAt : null,
+    outbound: verified ? c.itinerary.outbound : null,
+    inbound: verified ? c.itinerary.inbound : null,
     searchLink: searchLinkFor(provenance.providerId, cell, provenance.cabin),
+    rowKey: resultRowKey({
+      itineraryHash: verified ? c.itinerary.hash : null,
+      calendarPriceId: verified ? null : c.calendarPriceId,
+    }),
   };
 }
 
 /**
  * Spec §6.8: one structured digest per rule per execution. `items` are the 10 cheapest firings,
- * `newItems` the 10 cheapest new calendar cells, `restCount` everything beyond those two lists.
+ * `newItems` the 10 cheapest new calendar cells (suppressed firings are excluded), `restCount` everything beyond those two lists.
  * WP11 renders subject and body from it (spec §8.3). Returns null when nothing fires: new cells
  * alone send nothing. Throws if any firing carries synthetic provenance (spec §5.5).
  */
@@ -4115,7 +4179,8 @@ export function buildDigest(
   firings: Firing[],
   ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] },
 ): AlertDigest | null {
-  const own = firings.filter((f) => f.rule.id === rule.id);
+  // why: suppressed firings are recorded by the runner but never sent (spec §6.8 cooldown).
+  const own = firings.filter((f) => f.rule.id === rule.id && f.suppressed === null);
   if (own.some((f) => priceOf(f.candidate).provenance.sourceKind === 'synthetic')) {
     throw new Error('alerts refuse synthetic rows');
   }
@@ -4143,7 +4208,7 @@ export function buildDigest(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/digest.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 7 tests; typecheck and lint clean.
+Expected: PASS, 8 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -4183,6 +4248,7 @@ export { bandCheapest } from './results/band.js';
 export { dedupByItinerary } from './results/dedup.js';
 export { filterRows } from './results/filter.js';
 export { rankRows, sortRows } from './results/rank.js';
+export { resultRowKey } from './results/rowKey.js';
 export { SEARCH_LINK_LABEL, searchLinkFor } from './results/searchLink.js';
 export type { ResultFilters, ResultRow, SortKey } from './results/types.js';
 ```
@@ -4225,7 +4291,7 @@ function emitted(): string[] {
   ];
   const firings = evaluateAlertRules(rules, candidates, [], CTX);
   for (const f of firings) {
-    out.push(f.reason);
+    out.push(f.reason, f.suppressed?.reason ?? '');
     const s1 = isSuppressed(
       f,
       [prior({ identityKey: f.identityKey, dedupKey: f.dedupKey })],
@@ -4330,6 +4396,7 @@ const WP2 = [
   'sortRows',
   'filterRows',
   'bandCheapest',
+  'resultRowKey',
   'evaluateAlertRules',
   'identityKey',
   'dedupKey',
@@ -4361,7 +4428,7 @@ describe('@gmt/core barrel, WP2 exports', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/text/emitted.test.ts test/wp2-barrel.test.ts`
-Expected: FAIL, the barrel test fails on `exports canonicalCarrier` and the 25 other WP2 names (the emitted-strings test already passes, because it imports modules directly).
+Expected: FAIL, the barrel test fails on `exports canonicalCarrier` and the 26 other WP2 names (the emitted-strings test already passes, because it imports modules directly).
 
 - [ ] **Step 3: Implement**
 
@@ -4370,7 +4437,7 @@ Append the export block shown above to `packages/core/src/index.ts`.
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/text/emitted.test.ts test/wp2-barrel.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 36 tests; typecheck and lint clean.
+Expected: PASS, 37 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -4391,7 +4458,7 @@ Run from the repository root, on the `wp/02-core-normalise-constraints-alerts` b
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/core test` | every test passes (WP0's, plus the 264 added here); coverage 100% lines, branches, functions and statements, with no threshold error |
+| `pnpm --filter @gmt/core test` | every test passes (WP0's, plus the 267 added here); coverage 100% lines, branches, functions and statements, with no threshold error |
 | `TZ=UTC pnpm --filter @gmt/core test`, `TZ=America/Los_Angeles pnpm --filter @gmt/core test`, `TZ=Asia/Tokyo pnpm --filter @gmt/core test` | identical result in each |
 | `pnpm --filter @gmt/core mutate` | `hashing.ts`, `money.ts`, `vendorUrl.ts`, `constraints/evaluate.ts` and `alerts/dedup.ts` each at a mutation score ≥ 80% (scratch run: 100 / 94.05 / 95 / 91.70 / 97.87) and the run exits 0. |
 | `pnpm lint` | clean |

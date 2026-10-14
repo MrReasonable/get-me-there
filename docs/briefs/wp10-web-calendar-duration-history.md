@@ -196,8 +196,8 @@ export function formatInstantLondon(ms: number): string;                  // '14
 export function discoverySourceLabel(providerId: ProviderId): string;     // COPY.source of the provider's calendar capability
 // src/api additions
 export type CalendarResponse, CalendarDay, DurationResponse, CellDetailResponse, ItineraryHistoryResponse, RouteHistoryResponse;
-api.calendar(id); api.durationAnalysis(id); api.cellDetail(id, cell); api.itineraryHistory(hash); api.routeHistory(origin, destination);
-qk.calendar(id); qk.duration(id); qk.cell(id, key); qk.itineraryHistory(hash); qk.routeHistory(origin, destination);
+api.calendar(id); api.durationAnalysis(id); api.cellDetail(id, cell); api.itineraryHistory(hash); api.routeHistory(origin, destination, cabin);
+qk.calendar(id); qk.duration(id); qk.cell(id, key); qk.itineraryHistory(hash); qk.routeHistory(origin, destination, cabin);
 // src/views/Calendar
 export type DaySlice; export type DayPrice; export type GlyphStatus; export type DayBasis;
 export function bucketTotal(b: Buckets): number; export function formatDiscoveryMarker(b: Buckets): string;
@@ -458,7 +458,7 @@ export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHisto
 export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
 ```
 
-`apps/web/src/api/endpoints.ts`: add the type imports and these members to `api`. The paths are `ROUTES` templates under `/api`, checked by `findRoute`.
+`apps/web/src/api/endpoints.ts`: add the type imports (and `type Cabin` from `@gmt/core`) and these members to `api`. The paths are `ROUTES` templates under `/api`, checked by `findRoute`.
 
 ```ts
   calendar: (id: string) => call<CalendarResponse>('GET', '/api/definitions/:id/calendar', { params: { id } }),
@@ -468,8 +468,9 @@ export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryRespon
       params: { id, origin: c.origin, destination: c.destination, departureDate: c.departureDate, returnDate: c.returnDate },
     }),
   itineraryHistory: (hash: string) => call<ItineraryHistoryResponse>('GET', '/api/itineraries/:hash/history', { params: { hash } }),
-  routeHistory: (origin: string, destination: string) =>
-    call<RouteHistoryResponse>('GET', '/api/routes/:origin/:destination/history', { params: { origin, destination } }),
+  // why: routeHistoryQuerySchema { cabin?: Cabin } (plan decision 14); the view passes the definition's cabin.
+  routeHistory: (origin: string, destination: string, cabin: Cabin) =>
+    call<RouteHistoryResponse>('GET', '/api/routes/:origin/:destination/history', { params: { origin, destination }, query: { cabin } }),
 ```
 
 `apps/web/src/api/queries.ts`: add to `qk`
@@ -479,7 +480,7 @@ export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryRespon
   duration: (id: string) => ['duration', id] as const,
   cell: (id: string, key: string) => ['cell', id, key] as const,
   itineraryHistory: (hash: string) => ['history', 'itinerary', hash] as const,
-  routeHistory: (origin: string, destination: string) => ['history', 'route', origin, destination] as const,
+  routeHistory: (origin: string, destination: string, cabin: string) => ['history', 'route', origin, destination, cabin] as const,
 ```
 
 `apps/web/src/lib/sources.ts`:
@@ -654,6 +655,7 @@ export function ReusedNote({ count }: { count: number }) {
       noPrices: 'No prices stored for this cell.',
       observation: (seller: string, cls: string) => `itinerary offer · ${seller} · ${cls}`,
       verifyConflict: 'An itinerary search for this cell is already running.',
+      showInResults: 'show in results',
       reusedFrom: (executionId: string) => `run ${executionId}`,
       dash: '—',
     },
@@ -1630,7 +1632,7 @@ git add apps/web && git commit -m "wp10: calendar grid with hatched days, glyphs
 - Create: `apps/web/src/views/Calendar/CellPanel.tsx`, `apps/web/test/views/calendar/panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `api.cellDetail`, `api.verifyCell`, `qk.cell`, `qk.calendar`, `ApiError`, `PriceCell`, `PriceBoundary`, `COPY`, `formatInstantLondon`, `instantMs`, `cellKeyString`, `addDays`, `daysBetween`.
+- Consumes: `api.cellDetail`, `api.verifyCell`, `qk.cell`, `qk.calendar`, `resultRowKey` (WP2, plan decision 14), `hrefWith`/`navigateTo` and WP9's `?row=` parameter, `ApiError`, `PriceCell`, `PriceBoundary`, `COPY`, `formatInstantLondon`, `instantMs`, `cellKeyString`, `addDays`, `daysBetween`.
 - Produces: `cellsForDay(definition, date)`, `CellPanel({ definition, date, initialCell, onClose })`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1638,7 +1640,7 @@ git add apps/web && git commit -m "wp10: calendar grid with hatched days, glyphs
 `apps/web/test/views/calendar/panel.test.tsx`:
 
 ```tsx
-import { asIsoDate } from '@gmt/core';
+import { asIsoDate, resultRowKey } from '@gmt/core';
 import { waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1701,6 +1703,9 @@ describe('View B side panel (spec §11, §10 cells route)', () => {
     expect(provs[0]).toHaveTextContent('constraints not checked');
     expect(within(provs[0] as HTMLElement).getByTitle('fetched 2h ago · provider age unknown (≤2d before that)')).toBeInTheDocument();
     expect(dialog).toHaveTextContent('itinerary offer · Example Air · verified');
+    const link = within(dialog).getByRole('link', { name: 'show in results' }).getAttribute('href') ?? '';
+    expect(new URLSearchParams(link.split('?')[1]).get('row')).toBe(resultRowKey(detail.observations[0] as never));
+    expect(new URLSearchParams(link.split('?')[1]).get('view')).toBe('results');
   });
 
   it('a price lacking provenance fails to render: the contract parse refuses the response and no amount appears', async () => {
@@ -1775,7 +1780,7 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/CellP
 `apps/web/src/views/Calendar/CellPanel.tsx`:
 
 ```tsx
-import { addDays, type CellKey, cellKeyString, daysBetween, type IsoDate } from '@gmt/core';
+import { addDays, type CellKey, cellKeyString, daysBetween, type IsoDate, resultRowKey } from '@gmt/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
@@ -1787,6 +1792,7 @@ import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatDayLong, formatDayShort } from '../../lib/isoDate.js';
 import { formatInstantLondon, instantMs } from '../../lib/time.js';
+import { hrefWith, navigateTo } from '../../state/urlState.js';
 
 const P = COPY.calendarView.panel;
 
@@ -1916,7 +1922,11 @@ function CellDetailBody({ detail, note }: { detail: CellDetailResponse; note: st
           ))}
           {detail.observations.map((o) => (
             <li key={`obs-${o.observationId ?? o.itineraryHash}-${o.seller ?? ''}`}>
-              <span className="text-xs">{P.observation(o.seller ?? COPY.none, COPY.classLabel[o.verdictClass])}</span>
+              <span className="text-xs">{P.observation(o.seller ?? COPY.none, COPY.classLabel[o.verdictClass])}</span>{' '}
+              {/* why: WP9 owns ?row=<resultRowKey>, which selects and scrolls to that results row (plan decision 14) */}
+              <a href={hrefWith({ view: 'results', row: resultRowKey(o) })} onClick={navigateTo({ view: 'results', row: resultRowKey(o) })} className="text-xs underline">
+                {P.showInResults}
+              </a>
               <PriceBoundary>
                 <PriceCell pricePence={o.pricePence} provenance={o.provenance} calendar={o.basis === 'calendar'} stale={o.stale} destination={o.cell.destination} destinationNote={note} />
               </PriceBoundary>
@@ -2816,11 +2826,13 @@ describe('History view (spec §11 History, §10 history routes)', () => {
 
   it('route mode: picks among the definition pairs and fetches the chosen route', async () => {
     const paths: string[] = [];
-    server.use(http.get(routeRoute, ({ request }) => { paths.push(new URL(request.url).pathname); return HttpResponse.json(routeHistory); }));
+    const cabins: Array<string | null> = [];
+    server.use(http.get(routeRoute, ({ request }) => { const u = new URL(request.url); paths.push(u.pathname); cabins.push(u.searchParams.get('cabin')); return HttpResponse.json(routeHistory); }));
     const { findByLabelText, user } = renderWithProviders(<HistoryView definition={definition()} />);
     const picker = await findByLabelText('Route');
     expect([...(picker as HTMLSelectElement).options].map((o) => o.text)).toEqual(['LHR→JFK', 'LHR→EWR', 'LGW→JFK', 'LGW→EWR']);
     await waitFor(() => expect(paths.at(-1)).toBe('/api/routes/LHR/JFK/history'));
+    expect(cabins.at(-1)).toBe('economy'); // routeHistoryQuerySchema { cabin?: Cabin }, the definition's cabin
     await user.selectOptions(picker, '3');
     await waitFor(() => expect(paths.at(-1)).toBe('/api/routes/LGW/EWR/history'));
   });
@@ -3097,8 +3109,8 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
   const gap = (id: keyof typeof definition.providers.discoveryRefreshHours) => 2 * (definition.providers.discoveryRefreshHours[id] ?? 168);
   const itinerary = useQuery({ queryKey: qk.itineraryHistory(hash ?? ''), queryFn: () => api.itineraryHistory(hash ?? ''), enabled: hash !== null && hash !== '' });
   const route = useQuery({
-    queryKey: qk.routeHistory(pair?.origin ?? '', pair?.destination ?? ''),
-    queryFn: () => (pair === null ? Promise.reject(new Error('no route')) : api.routeHistory(pair.origin, pair.destination)),
+    queryKey: qk.routeHistory(pair?.origin ?? '', pair?.destination ?? '', definition.cabin),
+    queryFn: () => (pair === null ? Promise.reject(new Error('no route')) : api.routeHistory(pair.origin, pair.destination, definition.cabin)),
     enabled: (hash === null || hash === '') && pair !== null,
   });
   const q = hash !== null && hash !== '' ? itinerary : route;

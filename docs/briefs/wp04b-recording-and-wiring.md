@@ -26,7 +26,7 @@ Build the wiring helper and tool bootstrap that every later entrypoint reuses. T
 - `apps/api/src/bootstrap/tool.ts`: `runTool(name, argv): Promise<number>`, in this order:
   1. refuse `NODE_ENV=test`;
   2. parse the config;
-  3. run the backup preflight (see section 13, item 1);
+  3. run the backup preflight: when the DB file exists and migrations are pending, call `@gmt/db`'s `backupDatabase` (WP3) before `buildPorts`;
   4. `buildPorts`;
   5. take `AppLock('tool')`, refusing while a fresh lock exists;
   6. heartbeat every 30 s;
@@ -60,7 +60,7 @@ Build the wiring helper and tool bootstrap that every later entrypoint reuses. T
 - **WP6:** the same for Travelpayouts. Both replay the files recorded here.
 - **WP8:** the app bootstrap and `POST /api/tools/record`.
 - **WP13:** `smoke:live`, `/api/tools/smoke`, the layer-B engine tests and the "tool bootstrap starts no execution" lock test.
-- **WP12:** `backupDatabase`. Until it exists, the tool's preflight refuses instead of backing up (section 13, item 1).
+- **WP3:** `backupDatabase` (`@gmt/db` `src/backup.ts`). WP12 owns only the `scripts/backup.mjs` CLI wrapper.
 - **Not specified anywhere:** seeding the airports table at tool start. `record.ts` reads the metro from the table when it is populated and from `--metro` otherwise.
 
 **Adapters do not exist when WP4b runs.** WP5 and WP6 depend on this package. `record.ts` therefore hand-builds every request with the exact URLs and parameters in section 6, and sends them through its own `createHttpKit` instances. Those instances share `ports.budget`, `ports.cache`, `ports.secrets` and the recorder from `ports.recorder`, and use `recordingLimits(config)` for the two vendors. `httpLimitsFor` gains those providers only when WP5 and WP6 add their lines. WP5 and WP6 later replay the recorded files through `@gmt/providers/testing`'s `replayHandlers`. Their `SEARCHAPI_PARAMS` and `TRAVELPAYOUTS_PARAMS` constants are asserted equal to the allowlists written here.
@@ -125,13 +125,17 @@ export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock
 export function fixtureRouter(root: string): Hono;
 ```
 
-The plan's adapter block (WP5/WP6) defines `ParamsAllowlist`. Its exporting package does not exist yet, so `recordParams.ts` declares the identical shape, and WP5 replaces the local declaration with an import:
+`@gmt/providers` `src/params/allowlist.ts` (WP4) exports the allowlist type and helpers. `recordParams.ts` imports the type and does not declare it:
 
 ```ts
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+export function loadParamsAllowlist(path: string): ParamsAllowlist;
+export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: string, url: URL): void;
+// @gmt/db (WP3)
+export function backupDatabase(dbPath: string, backupsDir: string, opts: { keep: number; clock: Clock }): { file: string };   // VACUUM INTO + integrity_check; refuses an existing target; prunes to keep; throws on failure
 ```
 
-`scripts/secret-scan.mjs` (WP0 Task 0.11) is consumed as written. It scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`. That last shape means the recorder must **drop** credential headers rather than keep their names with scrubbed values. The Task 1 test pins this (section 13, item 2).
+`scripts/secret-scan.mjs` (WP0 Task 0.11) is consumed as written. It scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`. Plan decision 14: recorded headers drop credential headers entirely. Task 1's test asserts it.
 
 ## 5. Interfaces produced
 
@@ -174,9 +178,10 @@ export interface StartedTool { ok: true; recordedBy: string | null; precheck(c: 
 export interface ToolEntry { start(argv: readonly string[]): StartedTool | { ok: false; message: string } }
 // src/bootstrap/tool.ts
 export type ToolName = 'record' | 'smoke';
-export const EXIT: { ok: 0; failed: 1; refusedTestEnv: 2; badConfig: 3; lockRefused: 4; usage: 5; preflightRefused: 6 };
+export const EXIT: { ok: 0; failed: 1; usage: 64; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };   // plan's single exit-code table; 1 = a required recording call did not return its expected status (smoke's 'provider error')
 export const TOOLS: Readonly<Partial<Record<ToolName, ToolEntry>>>;   // { record } now; WP13 adds smoke
 export function pendingOnExistingDb(databasePath: string): string[];
+export function backupsDirFor(databasePath: string): string;   // <db dir>/backups (spec §7: /data/backups)
 // src/tools/record.ts
 export const RECORDED_BY = '@gmt/api record:fixtures';
 export const recordTool: ToolEntry;
@@ -189,8 +194,7 @@ export function parseRecordArgs(argv: readonly string[]): { ok: true; args: Reco
 export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[];
 export function formatPlan(plan: readonly PlannedCall[]): string[];
 // src/tools/recordParams.ts
-export interface ParamsAllowlist { /* section 4 */ }
-export function canonicalJson(v: unknown): string;
+export function canonicalJson(v: unknown): string;   // ParamsAllowlist itself is imported from @gmt/providers
 export function writeAllowlist(root: string, doc: ParamsAllowlist): string;
 ```
 
@@ -219,23 +223,23 @@ export function writeAllowlist(root: string, doc: ParamsAllowlist): string;
 - The file is `<root>/<providerId>/<endpointPath with "/" → "_">/<yyyy-mm-dd>-<first 12 hex>.json`. The `.raw.json` sibling is gitignored.
 - `request.url` keeps the query, with tokens as placeholders and no credential parameter. `request.headers` never contains `Authorization` or `X-Access-Token`.
 
-### 5.4 Parameter allowlist file (`<root>/<provider>/params-<yyyy-mm-dd>.json`, plan `ParamsAllowlist`)
+### 5.4 Parameter allowlist file (`<root>/<provider>/params-<yyyy-mm-dd>.json`, plan `ParamsAllowlist`, keyed by endpoint path)
 
 ```json
 {
   "provider": "searchapi",
   "recordedAt": "2026-10-20",
   "endpoints": {
-    "google_flights_calendar": {
-      "names": ["arrival_id", "currency", "departure_id", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start"],
-      "values": { "arrival_id": "any", "currency": ["GBP"], "engine": ["google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any" }
+    "/api/v1/search": {
+      "names": ["arrival_id", "booking_token", "currency", "departure_id", "departure_token", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start"],
+      "values": { "arrival_id": "any", "booking_token": "any", "currency": ["GBP"], "engine": ["google_flights", "google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any" }
     }
   },
   "contentSha256": "…"
 }
 ```
 
-`names` lists every parameter name sent to that endpoint, sorted. `values` has one entry per name:
+Endpoints are keyed by path, so SearchApi's two engines share `/api/v1/search` and their names and values are merged; `engine` lists both. `names` lists every parameter name sent to that path, sorted. `values` has one entry per name:
 - a fixed-value parameter maps to the sorted values actually sent;
 - a variable parameter (airport code, date, month, page, opaque token) maps to `'any'`.
 
@@ -1670,23 +1674,14 @@ export function bookingOptionCount(body: unknown): number {
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import type { IsoDate, ProviderId } from '@gmt/core';
-
-/**
- * Plan contract (adapter block). why: its exporting package is built by WP5; WP5 replaces this
- * declaration with an import of the identical type.
- */
-export interface ParamsAllowlist {
-  provider: ProviderId; recordedAt: IsoDate;
-  endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>;
-  contentSha256: string;
-}
+import type { IsoDate } from '@gmt/core';
+import type { ParamsAllowlist } from '@gmt/providers';
 
 export type EndpointKey = 'prices_for_dates' | 'google_flights_calendar' | 'google_flights';
 const ENDPOINT_KEYS: readonly EndpointKey[] = ['prices_for_dates', 'google_flights_calendar', 'google_flights'];
 type ValueKind = 'iata' | 'iso-date' | 'iso-month' | 'positive-int' | 'opaque-token';
 type ParamRule = { fixed: readonly string[] } | { kind: ValueKind };
-interface EndpointRules { provider: 'travelpayouts' | 'searchapi'; params: Readonly<Record<string, ParamRule>> }
+interface EndpointRules { provider: 'travelpayouts' | 'searchapi'; path: string; params: Readonly<Record<string, ParamRule>> }
 
 const KIND_PATTERN: Record<Exclude<ValueKind, 'opaque-token'>, RegExp> = {
   iata: /^[A-Z]{3}$/, 'iso-date': /^\d{4}-\d{2}-\d{2}$/, 'iso-month': /^\d{4}-\d{2}$/, 'positive-int': /^[1-9]\d*$/,
@@ -1699,18 +1694,18 @@ export function paramRules(gl: string): Readonly<Record<EndpointKey, EndpointRul
   const shared = { flight_type: { fixed: ['round_trip'] }, currency: { fixed: ['GBP'] }, gl: { fixed: [gl] }, hl: { fixed: ['en'] } } as const;
   return {
     prices_for_dates: {
-      provider: 'travelpayouts',
+      provider: 'travelpayouts', path: '/aviasales/v3/prices_for_dates',
       params: { origin: iata, destination: iata, departure_at: { kind: 'iso-month' }, one_way: { fixed: ['false'] }, currency: { fixed: ['gbp'] }, limit: { fixed: ['1000'] }, page: { kind: 'positive-int' } },
     },
     google_flights_calendar: {
-      provider: 'searchapi',
+      provider: 'searchapi', path: '/api/v1/search',
       params: {
         engine: { fixed: ['google_flights_calendar'] }, departure_id: iata, arrival_id: iata, outbound_date: date,
         outbound_date_start: date, outbound_date_end: date, return_date: date, return_date_start: date, return_date_end: date, ...shared,
       },
     },
     google_flights: {
-      provider: 'searchapi',
+      provider: 'searchapi', path: '/api/v1/search',
       params: {
         engine: { fixed: ['google_flights'] }, departure_id: iata, arrival_id: iata, outbound_date: date, return_date: date, ...shared,
         departure_token: { kind: 'opaque-token' }, booking_token: { kind: 'opaque-token' },
@@ -1752,20 +1747,35 @@ export class ParamLog {
     }
   }
 
-  /** The allowlist document for one provider, hashed. */
+  /**
+   * The allowlist document for one provider, hashed. Keyed by endpoint path (plan ParamsAllowlist),
+   * so engines sharing a path merge: names are the union; a name variable in any engine is 'any';
+   * otherwise its values are the union of the fixed values sent.
+   */
   document(provider: 'travelpayouts' | 'searchapi', recordedAt: IsoDate): ParamsAllowlist {
-    const endpoints: ParamsAllowlist['endpoints'] = {};
+    const merged = new Map<string, Map<string, Set<string> | 'any'>>();
     for (const key of ENDPOINT_KEYS) {
       const r = this.rules[key];
       const seen = this.observed.get(key);
       if (r.provider !== provider || seen === undefined) continue;
-      const names = [...seen.keys()].sort();
+      const byName = merged.get(r.path) ?? new Map<string, Set<string> | 'any'>();
+      merged.set(r.path, byName);
+      for (const [name, values] of seen) {
+        const rule = r.params[name];
+        const prior = byName.get(name);
+        if (rule === undefined || !('fixed' in rule) || prior === 'any') { byName.set(name, 'any'); continue; }
+        byName.set(name, new Set([...(prior ?? []), ...values]));
+      }
+    }
+    const endpoints: ParamsAllowlist['endpoints'] = {};
+    for (const [path, byName] of merged) {
+      const names = [...byName.keys()].sort();
       const values: Record<string, string[] | 'any'> = {};
       for (const name of names) {
-        const rule = r.params[name];
-        values[name] = rule !== undefined && 'fixed' in rule ? [...(seen.get(name) ?? [])].sort() : 'any';
+        const v = byName.get(name);
+        values[name] = v === undefined || v === 'any' ? 'any' : [...v].sort();
       }
-      endpoints[key] = { names, values };
+      endpoints[path] = { names, values };
     }
     const body = { provider, recordedAt, endpoints };
     return { ...body, contentSha256: createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex') };
@@ -2094,7 +2104,7 @@ export function formatSummary(s: RecordSummary, v: RunAssessment, a: RecordArgs)
 
 async function runRecord(ports: Ports, a: RecordArgs, dryRun: boolean, ctx: ToolContext): Promise<number> {
   const metro = resolveMetro(ports.repos.airports, a);
-  if (!metro.ok) { ctx.err(metro.message); return 5; }
+  if (!metro.ok) { ctx.err(metro.message); return 64; }
   const plan = planCalls(a, metro.metro);
   for (const line of formatPlan(plan)) ctx.out(line);
   if (dryRun) return 0;
@@ -2141,19 +2151,19 @@ git add apps/api pnpm-lock.yaml && git commit -m "wp04b: record:fixtures run thr
 
 **Files:** create `apps/api/src/bootstrap/tool.ts`, `apps/api/test/bootstrap/tool.test.ts`.
 
-**Interfaces:** consumes `AppLock`, `openDatabase`, `pendingMigrations`, `createRecorder`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `recordTool`. Produces `runTool`, `ToolName`, `EXIT`, `TOOLS`, `pendingOnExistingDb`.
+**Interfaces:** consumes `AppLock`, `openDatabase`, `pendingMigrations`, `backupDatabase`, `createRecorder`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `recordTool`. Produces `runTool`, `ToolName`, `EXIT`, `TOOLS`, `pendingOnExistingDb`, `backupsDirFor`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // apps/api/test/bootstrap/tool.test.ts
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock, systemClock } from '@gmt/core';
 import { AppLock, applyMigrations, openDatabase } from '@gmt/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EXIT, runTool } from '../../src/bootstrap/tool.js';
+import { EXIT, backupsDirFor, runTool } from '../../src/bootstrap/tool.js';
 import { MIGRATIONS_DIR } from '../../src/paths.js';
 import { SENTINEL_SA, SENTINEL_TP, cleanEnv, silentLog } from '../helpers/env.js';
 
@@ -2211,10 +2221,18 @@ describe('runTool (spec §5.5, §7 app_lock tool holder)', () => {
     expect(errs.join('')).toContain('needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY');
   });
 
-  it('refuses to migrate an existing database with pending migrations until a backup has run', async () => {
+  it('backs up an existing database with pending migrations before migrating it', async () => {
     openDatabase(dbPath).close();   // file exists, nothing applied
-    expect(await runTool('record', DRY)).toBe(EXIT.preflightRefused);
-    expect(errs.join('')).toContain('pending migration');
+    expect(await runTool('record', DRY)).toBe(EXIT.ok);
+    expect(out.join('')).toContain('backup before');
+    expect(readdirSync(backupsDirFor(dbPath)).length).toBe(1);
+  });
+
+  it('refuses with 73 when the backups directory cannot be created', async () => {
+    openDatabase(dbPath).close();
+    writeFileSync(backupsDirFor(dbPath), 'not a directory');
+    expect(await runTool('record', DRY)).toBe(EXIT.preflightImpossible);
+    expect(errs.join('')).toContain('cannot be created');
   });
 
   it('refuses while a fresh app lock exists', async () => {
@@ -2259,10 +2277,11 @@ Expected: FAIL, `../../src/bootstrap/tool.js` not found.
  * uses the production ledger, never constructs or boots the engine (no sweep, no auto-resume,
  * no cron), and holds app_lock as 'tool' for its whole run. One of the allowed process.env readers.
  */
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Config, systemClock } from '@gmt/core';
-import { AppLock, openDatabase, pendingMigrations } from '@gmt/db';
+import { AppLock, backupDatabase, openDatabase, pendingMigrations } from '@gmt/db';
 import { createRecorder } from '@gmt/providers';
 import { createLogger } from '../logger.js';
 import { MIGRATIONS_DIR, RECORDED_ROOT } from '../paths.js';
@@ -2273,13 +2292,22 @@ import { ConfigError, buildPorts, collectSecrets, loadConfigFromEnv } from '../w
 export type ToolName = 'record' | 'smoke';
 
 /** Process exit codes of the tool bootstrap. */
-export const EXIT = { ok: 0, failed: 1, refusedTestEnv: 2, badConfig: 3, lockRefused: 4, usage: 5, preflightRefused: 6 } as const;
+/** The plan's single exit-code table for every CLI (smoke adds 2 and 3). 1 = a required call failed. */
+export const EXIT = { ok: 0, failed: 1, usage: 64, refusedTestEnv: 70, preflightImpossible: 73, backupFailed: 74, lockRefused: 75, badConfig: 78 } as const;
 
 /** Registered tools. WP13 adds `smoke`. */
 export const TOOLS: Readonly<Partial<Record<ToolName, ToolEntry>>> = { record: recordTool };
 
 /** Spec §7: heartbeat every 30 s; stale after 3 missed beats. */
 const HEARTBEAT_MS = 30_000;
+
+/** Spec §7: backups live beside the database (`/data/backups` in the container). */
+export function backupsDirFor(databasePath: string): string {
+  return join(dirname(databasePath), 'backups');
+}
+
+/** Spec §7 Migrations: keep the last 5 backups. */
+const BACKUPS_KEPT = 5;
 
 /** Pending migrations on a database file that already exists (none for a new file or :memory:). */
 export function pendingOnExistingDb(databasePath: string): string[] {
@@ -2318,12 +2346,23 @@ export async function runTool(name: ToolName, argv: string[]): Promise<number> {
   if (refusal !== null) { err(refusal); return EXIT.usage; }
 
   // Backup preflight (plan: both bootstraps, before buildPorts, when the DB file exists and
-  // migrations are pending). why: WP12's backupDatabase does not exist when WP4b merges, so the tool
-  // refuses rather than migrate without a backup; WP12 replaces this refusal with the backup call.
+  // migrations are pending; spec §7: a failed backup refuses migrations).
   const pending = pendingOnExistingDb(config.databasePath);
   if (pending.length > 0) {
-    err(`${pending.length} pending migration(s) on an existing database; back it up before migrating (spec §7 Migrations). Refusing.`);
-    return EXIT.preflightRefused;
+    const backupsDir = backupsDirFor(config.databasePath);
+    try {
+      mkdirSync(backupsDir, { recursive: true });
+    } catch {
+      err(`${pending.length} pending migration(s) but the backups directory ${backupsDir} cannot be created; refusing to migrate (spec §7)`);
+      return EXIT.preflightImpossible;
+    }
+    try {
+      const { file } = backupDatabase(config.databasePath, backupsDir, { keep: BACKUPS_KEPT, clock: systemClock });
+      out(`backup before ${pending.length} migration(s): ${file}`);
+    } catch (e) {
+      err(`backup failed, refusing to migrate (spec §7): ${e instanceof Error ? e.message : String(e)}`);
+      return EXIT.backupFailed;
+    }
   }
 
   const log = createLogger(config).child({ tool: name });
@@ -2397,7 +2436,7 @@ if (isEntryPoint()) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts`
-Expected: 8 passed. If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale. That is a WP3 bug against spec §7; raise it.
+Expected: 9 passed. If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale. That is a WP3 bug against spec §7; raise it.
 
 - [ ] **Step 5: Commit**
 
@@ -2457,19 +2496,19 @@ function holdAppLock(dbPath: string, stale: boolean): void {
 }
 
 describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
-  it('NODE_ENV=test → exit 2, nothing opened', () => {
+  it('NODE_ENV=test → exit 70, nothing opened', () => {
     const dbPath = freshDbPath();
     const r = spawnTool(devEnv(dbPath, 'test'));
-    expect(r.status).toBe(2);
+    expect(r.status).toBe(70);
     expect(r.stderr).toContain('tool bootstrap refuses NODE_ENV=test');
     expect(existsSync(dbPath)).toBe(false);
   }, 60_000);
 
-  it('a fresh app lock → exit 4, lock untouched', () => {
+  it('a fresh app lock → exit 75, lock untouched', () => {
     const dbPath = freshDbPath();
     holdAppLock(dbPath, false);
     const r = spawnTool(devEnv(dbPath));
-    expect(r.status).toBe(4);
+    expect(r.status).toBe(75);
     expect(r.stderr).toContain('app_lock is held by app');
     const db = openDatabase(dbPath);
     expect(AppLock.inspect(db)?.holder).toBe('app');
@@ -2591,7 +2630,7 @@ function checkAllowlist(root: string, provider: 'travelpayouts' | 'searchapi'): 
       const v = verifyRecordedFile(path);
       if (!v.ok) throw new Error(`${path}: ${v.reason}`);
       const q = queryOf(v.file);
-      const key = provider === 'travelpayouts' ? 'prices_for_dates' : String(q.get('engine'));
+      const key = v.file.endpointPath;
       const ep = doc.endpoints[key];
       if (!isRecord(ep) || !Array.isArray(ep.names) || !isRecord(ep.values)) throw new Error(`${path}: endpoint ${key} missing`);
       for (const [param, value] of q) {
@@ -2611,11 +2650,15 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
     try {
       const tp = checkAllowlist(run.recordedRoot, 'travelpayouts');
       const sa = checkAllowlist(run.recordedRoot, 'searchapi');
-      expect(tp).toMatchObject({ endpoints: { prices_for_dates: { values: { currency: ['gbp'], one_way: ['false'], limit: ['1000'], origin: 'any', page: 'any' } } } });
+      expect(tp).toMatchObject({ endpoints: { '/aviasales/v3/prices_for_dates': { values: { currency: ['gbp'], one_way: ['false'], limit: ['1000'], origin: 'any', page: 'any' } } } });
       expect(sa).toMatchObject({
         endpoints: {
-          google_flights_calendar: { values: { engine: ['google_flights_calendar'], gl: ['gb'], hl: ['en'], currency: ['GBP'], flight_type: ['round_trip'], outbound_date: 'any' } },
-          google_flights: { values: { engine: ['google_flights'], departure_token: 'any', booking_token: 'any' } },
+          '/api/v1/search': {
+            values: {
+              engine: ['google_flights', 'google_flights_calendar'], gl: ['gb'], hl: ['en'], currency: ['GBP'], flight_type: ['round_trip'],
+              outbound_date: 'any', departure_token: 'any', booking_token: 'any',
+            },
+          },
         },
       });
     } finally {
@@ -2916,7 +2959,7 @@ None. The plan's five Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, W
 | `node --env-file=.env scripts/secret-scan.mjs` (operator machine) | `secret scan: clean` with the real values loaded |
 | `git ls-files packages/providers/fixtures \| grep -c raw.json` | `0` |
 | `DATABASE_PATH="$PWD/data/dev.db" pnpm record:fixtures --budget 12 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run` | exit 0, 34 call lines and the total line of section 7 |
-| `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 5, `--budget is required` |
+| `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 64, `--budget is required` |
 | SearchApi dashboard | credits spent by the run ≤ 12, recorded in the PR |
 | `grep -rnE "LHR\|LGW\|JFK\|EWR\|LON\|NYC" apps/api/src` | no output (airports only in tests, docs and fixtures) |
 
@@ -2924,9 +2967,9 @@ None. The plan's five Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, W
 
 None blocking dispatch. The items below were found while reconciling and need Fable's attention in the plan or in neighbouring briefs. The spec and plan are not edited here.
 
-1. **Backup preflight.** The plan's tool bootstrap calls WP12's `backupDatabase` before `buildPorts`, but WP12 depends on WP8 and WP9 and merges long after WP4b. Until then the tool **refuses** (exit 6) when the DB file exists and migrations are pending. WP12 replaces that refusal with the backup call, which is a Modify in the WP12 brief.
-2. **Credential headers in `RecordedFixture`.** The plan's `request.headers` is "scrubbed", but WP0's secret scan rejects the literal `X-Access-Token`. Credential headers must therefore be dropped from recorded files, not kept with scrubbed values. Task 1 pins this. The alternative fix is to change the scan shape, which would be WP0's.
-3. **`ParamsAllowlist`'s exporting package.** It is defined in the plan's adapter block, whose package does not exist at WP4b. `recordParams.ts` declares the identical shape, and WP5 swaps it for an import.
+1. **Backup preflight.** Resolved by plan decision 14: `@gmt/db`'s `backupDatabase` (WP3) runs in the tool's preflight. Exit 73 covers a backups directory that cannot be created and 74 a failed backup. The backups directory is `<db dir>/backups`; the plan does not name it, so WP8 should use the same `backupsDirFor`.
+2. **Credential headers.** Resolved by plan decision 14: credential headers are dropped entirely. Task 1 asserts it, which also keeps WP0's `X-Access-Token` scan shape satisfied.
+3. **`ParamsAllowlist` keyed by endpoint path.** Resolved: it is imported from `@gmt/providers` (WP4). Keying by path merges SearchApi's two engines into one `/api/v1/search` entry, so `values.engine` is `['google_flights', 'google_flights_calendar']` and per-engine parameter sets are lost. WP5's `assertRequestAllowed` therefore checks against the union. `record.ts` does not call `assertRequestAllowed`: it writes the allowlist, and its own per-engine `ParamLog` check runs before every request.
 4. **`recordingLimits` duplicates future WP5/WP6 code.** It repeats the hosts and billable rules that `searchApiHttpLimits` and `travelpayoutsHttpLimits` will declare. WP5 and WP6 may switch `record.ts` to their functions in a one-line Modify.
 5. **Recorded endpoint directory name.** The plan says `<endpointPath with / → _>`, which is `_api_v1_search` with a leading underscore, or `api_v1_search` if the leading slash is dropped. The verifier and tests in this brief do not depend on the name.
 6. **SearchApi docs versus the spike.** The docs say the calendar's `outbound_date` and `return_date` are required, and that more than 200 combinations "returns an empty response". The spike measured HTTP 400. SA-02 settles it on the public route.

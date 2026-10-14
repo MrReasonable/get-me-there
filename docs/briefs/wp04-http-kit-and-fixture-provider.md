@@ -35,7 +35,7 @@ Build `@gmt/providers`' HTTP layer — the one path by which any provider reache
 **Out**
 
 - `SqliteBudgetGuard`, `SqliteResponseCache`, cap predicates, the ledger schema, `billable` computation at finalise: **WP3** (`@gmt/db`). Tests here use the in-memory fakes defined in Task 4.1 (`test/fakes.ts`).
-- SearchApi and Travelpayouts adapters, `searchApiHttpLimits`/`travelpayoutsHttpLimits` with their `classifyError` overrides, the `ParamsAllowlist` constants and files: **WP5**, **WP6** (this package only guarantees that a hashed allowlist file passes the fixture-tree test).
+- SearchApi and Travelpayouts adapters, `searchApiHttpLimits`/`travelpayoutsHttpLimits` with their `classifyError` overrides, the `SEARCHAPI_PARAMS`/`TRAVELPAYOUTS_PARAMS` constants and allowlist files: **WP5**, **WP6**, **WP4b** (this package provides the `ParamsAllowlist` type, its loader and the request check, and guarantees that a hashed allowlist file passes the fixture-tree test).
 - Recording real fixtures and `apps/api/src/wiring.ts` (`httpLimitsFor`, `providersFor`, the recorder with `recordedBy`, and `inProcessHosts: { 'fixture.local': … }` passed only under `syntheticAllowed`): **WP4b**.
 - The fixture-mode boot matrix, pino setup and `redact` paths: **WP8**/**WP4b** (spec §14 rule; this package only guarantees that nothing it logs carries a URL query or a credential).
 - Engine use of the scenario rules (every §8.1 row in both stages): **WP7**; replay of recorded fixtures in layer-B tests: **WP13**. This brief provides both and documents which rule drives which row.
@@ -165,25 +165,29 @@ export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: st
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
 export function createHttpKit(deps: HttpKitDeps): HttpKit;
-export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* scrubbed */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string>; contentSha256: string }
+export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* scrubbed; credential headers dropped entirely */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string>; contentSha256: string }
 export interface FixtureRecorder { record(r: { providerId: ProviderId | 'fx'; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }): Promise<string /* path written */> }
 export function createRecorder(opts: { root: string; secrets: Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;
 export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string;
 export function scrubSecrets<T>(value: T, secrets: Secret[]): T;
 export function stripUrl(url: string): string;
-export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;
+export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // method + credential-free URL (query kept) + scrubbed headers + body only; never executionId or tileIndex
 export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
 export function fixtureRouter(root: string): Hono;
 // '@gmt/providers/testing' (src/testing/index.ts):
 export function fixtureHandlers(root: string): RequestHandler[];
 export function replayHandlers(recordedRoot: string): RequestHandler[];
 export function loadRecorded(root: string, providerId: string, endpointPath: string): RecordedFixture[];
+// src/params/allowlist.ts (plan decision 14; WP4b, WP5, WP6 import these):
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+export function loadParamsAllowlist(path: string): ParamsAllowlist;
+export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: string, url: URL): void;   // throws ParamsNotAllowedError
 ```
 
 Precisions this brief settles (no name changes):
 
 - `createHttpKit` throws at construction when `inProcessHosts` names any host other than `fixture.local`, so the seam cannot be widened by mistake; wiring decides *whether* to pass it (only under `syntheticAllowed`).
-- The recorded-file path is `<root>/<providerId>/<endpointPath with every / replaced by _>/<yyyy-mm-dd>-<first 12 hex of contentSha256>.json` (`/api/v1/search` → `_api_v1_search`); the unmodified vendor body goes to the same name with `.raw.json`, gitignored. `placeholders` maps each placeholder used in the file to its token key (`{ "<departure_token:0>": "departure_token" }`). `request.url` keeps the query (with placeholders); `request.headers` keeps every header, credential header values replaced by `[redacted]`.
+- The recorded-file path is `<root>/<providerId>/<endpointPath with every / replaced by _>/<yyyy-mm-dd>-<first 12 hex of contentSha256>.json` (`/api/v1/search` → `_api_v1_search`); the unmodified vendor body goes to the same name with `.raw.json`, gitignored. `placeholders` maps each placeholder used in the file to its token key (`{ "<departure_token:0>": "departure_token" }`). `request.url` keeps the query (with placeholders); `request.headers` keeps every header except credential headers (`authorization`, `x-access-token`, `x-api-key`, `proxy-authorization`, `cookie`), which are dropped entirely so the secret scan's header-name rule passes.
 - `contentHash` is sha256 hex over `canonicalJson` (keys sorted at every level). The same function verifies any recorded-tree JSON carrying `contentSha256`, including WP5/WP6's `ParamsAllowlist` files.
 - `scrubSecrets`, `canonicalCacheKey`, `createRecorder` accept `readonly Secret[]`.
 - msw 3 exports no `RequestHandler` from a documented entrypoint (docs verified 2026-10-14); `src/testing/` types it locally as `export type RequestHandler = ReturnType<typeof http.all>`.
@@ -201,6 +205,7 @@ export function parseRetryAfter(value: string | null, now: IsoDateTime): number 
 export function containsSecret(text: string, secrets: readonly Secret[]): boolean;
 export const CREDENTIAL_HEADERS: ReadonlySet<string>;
 export class RecorderRefusedError extends Error {}
+export class ParamsNotAllowedError extends Error {}
 export function canonicalJson(v: unknown): string;
 export function verifyContentHash(file: unknown): boolean;
 export function loadRecordedJson(path: string): Record<string, unknown>;   // any hashed file under fixtures/recorded/ (recordings, ParamsAllowlist)
@@ -233,10 +238,11 @@ Create (all paths under `packages/providers/`):
 - `src/http/types.ts`, `src/http/httpKit.ts`, `src/http/attempt.ts`, `src/http/classify.ts`, `src/http/sleep.ts`, `src/http/limiter.ts`, `src/http/cacheKey.ts`, `src/http/scrub.ts`, `src/http/egress.ts`, `src/http/recorder.ts`
 - `src/fixture/constants.ts`, `src/fixture/dates.ts`, `src/fixture/tree.ts`, `src/fixture/server.ts`, `src/fixture/router.ts`, `src/fixture/provider.ts`
 - `src/testing/index.ts`, `src/testing/handlers.ts`, `src/testing/replay.ts` (the only files that import msw)
+- `src/params/allowlist.ts`
 - `fixtures/synthetic/fixture/calendar/{LHR-JFK,LHR-EWR,LGW-JFK,LGW-EWR}.json`, `fixtures/synthetic/fixture/itinerary/{LHR-JFK,LHR-EWR,LGW-JFK,LGW-EWR}.json`, `fixtures/recorded/.gitkeep`
-- Tests: `test/fakes.ts`, `test/support/msw.ts`, `test/support/setup.ts`, `test/support/time.ts`, `test/http/pipeline.test.ts`, `test/http/scrub.test.ts`, `test/http/cacheKey.test.ts`, `test/http/errors.test.ts`, `test/http/egress.test.ts`, `test/http/inProcess.test.ts`, `test/http/limiter.test.ts`, `test/http/cache.test.ts`, `test/http/recorder.test.ts`, `test/http/sentinel.test.ts`, `test/fixture/server.test.ts`, `test/fixture/provider.test.ts`, `test/testing/replay.test.ts`, `test/fixture/tree.test.ts`, `test/barrel.test.ts`
+- Tests: `test/fakes.ts`, `test/support/msw.ts`, `test/support/setup.ts`, `test/support/time.ts`, `test/http/pipeline.test.ts`, `test/http/scrub.test.ts`, `test/http/cacheKey.test.ts`, `test/http/errors.test.ts`, `test/http/egress.test.ts`, `test/http/inProcess.test.ts`, `test/http/limiter.test.ts`, `test/http/cache.test.ts`, `test/http/recorder.test.ts`, `test/http/sentinel.test.ts`, `test/fixture/server.test.ts`, `test/fixture/provider.test.ts`, `test/testing/replay.test.ts`, `test/params/allowlist.test.ts`, `test/fixture/tree.test.ts`, `test/barrel.test.ts`
 
-Modify: `packages/providers/package.json` (msw as a dependency, `./testing` subpath), `packages/providers/vitest.config.ts` (setup file), the repository `.gitignore` (`packages/providers/fixtures/recorded/**/*.raw.json`, Task 4.7); delete `packages/providers/test/smoke.test.ts` in Task 4.12 (superseded).
+Modify: `packages/providers/package.json` (msw as a dependency, `./testing` subpath), `packages/providers/vitest.config.ts` (setup file), the repository `.gitignore` (`packages/providers/fixtures/recorded/**/*.raw.json`, Task 4.7); delete `packages/providers/test/smoke.test.ts` in Task 4.13 (superseded).
 
 The plan's file map names `src/fixture/handlers.ts` as "msw handlers + a Hono router"; per plan contracts v2 the msw side lives in `src/testing/` and the shared routing core in `src/fixture/server.ts`, with `router.ts` the Hono wrapper. `attempt.ts`, `sleep.ts`, `types.ts`, `constants.ts`, `dates.ts`, `tree.ts` and `util.ts` are new single-responsibility files under the same directories.
 
@@ -948,12 +954,17 @@ describe('canonicalCacheKey (spec §5.3: sha256 over the credential-free canonic
     const reordered = `${SEARCH}?arrival_id=JFK&engine=google_flights&departure_id=LHR`;
     expect(canonicalCacheKey(req({ url }), ALL_SECRETS)).toBe(canonicalCacheKey(req({ url: reordered }), ALL_SECRETS));
   });
-  it('changes with any parameter value, the method, the body or the provider', () => {
+  it('changes with any parameter value, the host, the method or the body', () => {
     const base = canonicalCacheKey(req({ url }), ALL_SECRETS);
     expect(canonicalCacheKey(req({ url: url.replace('JFK', 'EWR') }), ALL_SECRETS)).not.toBe(base);
+    expect(canonicalCacheKey(req({ url: url.replace('www.searchapi.io', 'api.travelpayouts.com') }), ALL_SECRETS)).not.toBe(base);
     expect(canonicalCacheKey(req({ url, method: 'POST' }), ALL_SECRETS)).not.toBe(base);
     expect(canonicalCacheKey(req({ url, body: '{"a":1}' }), ALL_SECRETS)).not.toBe(base);
-    expect(canonicalCacheKey(req({ url, providerId: 'travelpayouts' }), ALL_SECRETS)).not.toBe(base);
+  });
+  it('never includes executionId or tileIndex, so sibling pairs share a cached metro response (plan decision 14)', () => {
+    const base = canonicalCacheKey(req({ url, executionId: 'exec-1', tileIndex: 0 }), ALL_SECRETS);
+    expect(canonicalCacheKey(req({ url, executionId: 'exec-2', tileIndex: 7 }), ALL_SECRETS)).toBe(base);
+    expect(canonicalCacheKey(req({ url, executionId: null, tileIndex: null }), ALL_SECRETS)).toBe(base);
   });
   it('drops a parameter whose value is a secret, so the key matches the credential-free request', () => {
     const leaky = `${url}&api_key=${SENTINELS.searchapi.reveal()}`;
@@ -1066,9 +1077,12 @@ const byPair = (a: [string, string], b: [string, string]): number =>
   a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
 
 /**
- * Cache key = sha256 hex over the credential-free canonical request (spec §5.3): provider, method,
- * origin, path, sorted query pairs without any secret-bearing pair, sorted non-credential headers, and
- * the body with secrets redacted. Two requests that differ only in credentials share a key.
+ * Cache key = sha256 hex over the credential-free canonical request (spec §5.3; plan http-kit block):
+ * method + credential-free URL (origin, path, sorted query pairs without any secret-bearing pair) +
+ * sorted non-credential headers + the body with secrets redacted — nothing else. Never `executionId`,
+ * `tileIndex` or `providerId`. Two requests that differ only in credentials share a key.
+ * why: Travelpayouts sibling pairs that share a metro code issue identical requests from different
+ * tiles and executions and must share the cached response (plan decision 14, spec §5.2 rev 10).
  */
 export function canonicalCacheKey(r: HttpKitRequest, secrets: readonly Secret[]): string {
   const query = [...r.url.searchParams.entries()]
@@ -1079,7 +1093,6 @@ export function canonicalCacheKey(r: HttpKitRequest, secrets: readonly Secret[])
     .filter(([k, v]) => !CREDENTIAL_HEADERS.has(k) && !containsSecret(v, secrets))
     .sort(byPair);
   const canonical = JSON.stringify({
-    provider: r.providerId,
     method: r.method,
     origin: r.url.origin,
     path: r.url.pathname,
@@ -1094,7 +1107,7 @@ export function canonicalCacheKey(r: HttpKitRequest, secrets: readonly Secret[])
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http/scrub.test.ts test/http/cacheKey.test.ts`
-Expected: PASS, 13 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2480,7 +2493,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http`
-Expected: PASS, every file under `test/http` (62 tests).
+Expected: PASS, every file under `test/http` (63 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -2510,7 +2523,7 @@ Recorded file layout (plan contracts v2): `<root>/<providerId>/<endpointPath wit
   "request": {
     "method": "GET",
     "url": "https://www.searchapi.io/api/v1/search?engine=google_flights&departure_token=%3Cdeparture_token%3A1%3E",
-    "headers": { "accept": "application/json", "authorization": "[redacted]" },
+    "headers": { "accept": "application/json" },
     "body": null
   },
   "status": 200,
@@ -2587,7 +2600,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5; plan RecordedFixture)', 
       recordedBy: 'wp04-test',
       providerId: 'searchapi',
       endpointPath: '/api/v1/search',
-      request: { method: 'GET', url: `${SEARCH}?engine=google_flights&departure_id=LHR`, headers: { accept: 'application/json', authorization: '[redacted]' }, body: null },
+      request: { method: 'GET', url: `${SEARCH}?engine=google_flights&departure_id=LHR`, headers: { accept: 'application/json' }, body: null },
       status: 200,
       body: { price: 41200 },
       placeholders: {},
@@ -2596,6 +2609,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5; plan RecordedFixture)', 
     const { contentSha256, ...rest } = json;
     expect(contentHash(rest)).toBe(contentSha256);
     expect(path).toContain(`-${contentSha256.slice(0, 12)}.json`);
+    expect(readFileSync(path, 'utf8')).not.toMatch(/authorization|x-access-token/i);
   });
 
   it('fails closed on a secret substring: throws and writes nothing (neither file)', async () => {
@@ -2845,7 +2859,7 @@ function writeOnce(path: string, text: string): void {
  * Fixture recorder, spec §5.3 "Recorder": writes `RecordedFixture` files under `<root>` (which must end
  * in fixtures/recorded) at `<providerId>/<endpointPath with / → _>/<date>-<sha12>.json`, with the raw
  * vendor body beside it as `.raw.json` (gitignored). Tokens become deterministic placeholders,
- * search_metadata URLs are stripped, credential header values are `[redacted]`, and it **fails closed**:
+ * search_metadata URLs are stripped, credential headers are dropped, and it **fails closed**:
  * if any configured secret (raw or URL-encoded) would be written to either file, it throws
  * RecorderRefusedError and writes nothing.
  */
@@ -2872,8 +2886,14 @@ export function createRecorder(opts: { root: string; secrets: readonly Secret[];
       const query = new URLSearchParams();
       for (const [k, v] of params) query.append(k, tokens.text(v, used));
       url.search = query.toString();
+      // why: credential headers are dropped entirely, not value-scrubbed, so the CI secret scan's header-name rule
+      // (e.g. /X-Access-Token/i) passes over every recorded file (plan decision 14).
       const headers = scrubSecrets(
-        Object.fromEntries(Object.entries(r.request.headers).map(([k, v]) => [k.toLowerCase(), CREDENTIAL_HEADERS.has(k.toLowerCase()) ? '[redacted]' : v])),
+        Object.fromEntries(
+          Object.entries(r.request.headers)
+            .map(([k, v]): [string, string] => [k.toLowerCase(), v])
+            .filter(([k]) => !CREDENTIAL_HEADERS.has(k)),
+        ),
         opts.secrets,
       );
       const unhashed: Omit<RecordedFixture, 'contentSha256'> = {
@@ -2968,7 +2988,7 @@ with
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http`
-Expected: PASS, 74 tests.
+Expected: PASS, 75 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3158,7 +3178,7 @@ Egress refusals happen before `upstream` and are not logged by http-kit; the eng
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http`
-Expected: PASS, 75 tests. If a sink check fails, the assertion names the sink; fix the code that writes it, never the test.
+Expected: PASS, 76 tests. If a sink check fails, the assertion names the sink; fix the code that writes it, never the test.
 
 - [ ] **Step 5: Commit**
 
@@ -4494,7 +4514,188 @@ Expected: PASS, 4 tests.
 git add packages/providers && git commit -m "wp04: replayHandlers and loadRecorded over the recorded tree (@gmt/providers/testing)"
 ```
 
-### Task 4.12: Fixture-tree test, barrel, and the package definition of done
+### Task 4.12: Parameter allowlists — `ParamsAllowlist`, `loadParamsAllowlist`, `assertRequestAllowed`
+
+**Files:**
+- Create: `src/params/allowlist.ts`
+- Test: `test/params/allowlist.test.ts`
+
+**Interfaces:**
+- Consumes: `loadRecordedJson`, `withContentHash` (Task 4.7); `ProviderId`, `IsoDate` (WP0).
+- Produces (plan http-kit block, decision 14; imported by WP4b, WP5, WP6): `ParamsAllowlist`, `loadParamsAllowlist(path)`, `assertRequestAllowed(allowlist, endpointPath, url)`, `ParamsNotAllowedError`.
+
+Rules (spec §5.2 "the dated allowlist enumerates parameter names **and values**; tests assert both"): `endpoints` is keyed by endpoint path; each entry's `names` is strictly ascending (sorted, no duplicates); `values` has exactly one entry per name, either a non-empty string array or `'any'`; the file lives under `fixtures/recorded/` and carries a valid `contentSha256` (checked by `loadRecordedJson`). `assertRequestAllowed` refuses a URL whose path is not the endpoint, any query parameter not in `names`, and any value not listed for its name; its message names the parameter, never the value (a value may be an opaque token).
+
+- [ ] **Step 1: Write the failing test**
+
+`test/params/allowlist.test.ts`:
+
+```ts
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { withContentHash } from '../../src/http/recorder.js';
+import { assertRequestAllowed, loadParamsAllowlist, ParamsNotAllowedError } from '../../src/params/allowlist.js';
+
+const EP = '/api/v1/search';
+const good = {
+  provider: 'searchapi',
+  recordedAt: '2026-10-14',
+  endpoints: { [EP]: { names: ['currency', 'departure_id', 'engine', 'gl'], values: { currency: ['GBP'], departure_id: 'any', engine: ['google_flights', 'google_flights_calendar'], gl: ['gb'] } } },
+};
+function write(content: unknown): string {
+  const dir = join(mkdtempSync(join(tmpdir(), 'gmt-par-')), 'fixtures', 'recorded', 'searchapi');
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, 'params-2026-10-14.json');
+  writeFileSync(p, JSON.stringify(content));
+  return p;
+}
+const allowlist = () => loadParamsAllowlist(write(withContentHash(good)));
+const url = (q: string) => new URL(`https://www.searchapi.io${EP}?${q}`);
+
+describe('loadParamsAllowlist (spec §5.2 dated allowlist)', () => {
+  it('loads a hashed allowlist from the recorded tree', () => {
+    expect(allowlist()).toMatchObject({ provider: 'searchapi', recordedAt: '2026-10-14', endpoints: { [EP]: { names: ['currency', 'departure_id', 'engine', 'gl'] } } });
+  });
+  it('refuses a hand-edited file (content hash)', () => {
+    const edited = { ...withContentHash(good), recordedAt: '2026-10-15' };
+    expect(() => loadParamsAllowlist(write(edited))).toThrow(/content hash mismatch/);
+  });
+  it('refuses names that are not strictly ascending, a value entry for an unlisted name, and a name without values', () => {
+    const unsorted = { ...good, endpoints: { [EP]: { names: ['gl', 'engine'], values: { gl: ['gb'], engine: 'any' } } } };
+    expect(() => loadParamsAllowlist(write(withContentHash(unsorted)))).toThrow(/ascending/);
+    const extra = { ...good, endpoints: { [EP]: { names: ['gl'], values: { gl: ['gb'], hl: ['en'] } } } };
+    expect(() => loadParamsAllowlist(write(withContentHash(extra)))).toThrow(/hl/);
+    const missing = { ...good, endpoints: { [EP]: { names: ['gl', 'hl'], values: { gl: ['gb'] } } } };
+    expect(() => loadParamsAllowlist(write(withContentHash(missing)))).toThrow(/hl/);
+  });
+  it('refuses an unknown provider and a recordedAt that is not a date', () => {
+    expect(() => loadParamsAllowlist(write(withContentHash({ ...good, provider: 'kiwi' })))).toThrow(/provider/);
+    expect(() => loadParamsAllowlist(write(withContentHash({ ...good, recordedAt: '2026-10-14T00:00:00.000Z' })))).toThrow(/recordedAt/);
+  });
+});
+
+describe('assertRequestAllowed (names and values)', () => {
+  it('accepts listed names with listed values, and any value where the allowlist says any', () => {
+    expect(() => assertRequestAllowed(allowlist(), EP, url('engine=google_flights&gl=gb&currency=GBP&departure_id=LHR'))).not.toThrow();
+  });
+  it('refuses an unlisted parameter, naming it', () => {
+    expect(() => assertRequestAllowed(allowlist(), EP, url('engine=google_flights&hl=en'))).toThrow(ParamsNotAllowedError);
+    expect(() => assertRequestAllowed(allowlist(), EP, url('engine=google_flights&hl=en'))).toThrow(/hl/);
+  });
+  it('refuses an unlisted value without echoing it', () => {
+    let message = '';
+    try {
+      assertRequestAllowed(allowlist(), EP, url('engine=google_flights&gl=us-secret-looking-value'));
+    } catch (e) {
+      message = e instanceof Error ? e.message : '';
+    }
+    expect(message).toMatch(/gl/);
+    expect(message).not.toContain('us-secret-looking-value');
+  });
+  it('refuses an unknown endpoint and a URL whose path is not the endpoint', () => {
+    expect(() => assertRequestAllowed(allowlist(), '/other', url('engine=google_flights'))).toThrow(ParamsNotAllowedError);
+    expect(() => assertRequestAllowed(allowlist(), EP, new URL('https://www.searchapi.io/api/v2/search?engine=google_flights'))).toThrow(/path/);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pnpm --filter @gmt/providers exec vitest run test/params/allowlist.test.ts`
+Expected: FAIL — `Failed to load url ../../src/params/allowlist.js`.
+
+- [ ] **Step 3: Implement**
+
+`src/params/allowlist.ts`:
+
+```ts
+import type { IsoDate, ProviderId } from '@gmt/core';
+import { loadRecordedJson } from '../http/recorder.js';
+import { isRecord } from '../util.js';
+
+/**
+ * Dated parameter allowlist, spec §5.2: every parameter name **and value** an adapter may send, per endpoint
+ * path. Written by WP4b under fixtures/recorded/<provider>/params-<date>.json with withContentHash; WP5/WP6
+ * hold an equal code constant (SEARCHAPI_PARAMS, TRAVELPAYOUTS_PARAMS) and assert the two match.
+ */
+export interface ParamsAllowlist {
+  provider: ProviderId;
+  recordedAt: IsoDate;
+  endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>;
+  contentSha256: string;
+}
+
+/** A request would send a parameter or value the dated allowlist does not list. */
+export class ParamsNotAllowedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ParamsNotAllowedError';
+  }
+}
+
+const PROVIDERS: readonly string[] = ['travelpayouts', 'searchapi', 'fixture'];
+
+/** Loads and validates an allowlist file (recorded tree, content hash, shape, ascending names, values per name). */
+export function loadParamsAllowlist(path: string): ParamsAllowlist {
+  const json = loadRecordedJson(path);
+  const fail = (why: string): never => {
+    throw new Error(`refusing params allowlist ${path}: ${why}`);
+  };
+  if (typeof json.provider !== 'string' || !PROVIDERS.includes(json.provider)) fail('unknown provider');
+  if (typeof json.recordedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(json.recordedAt)) fail('recordedAt must be YYYY-MM-DD');
+  if (!isRecord(json.endpoints)) fail('endpoints must be an object keyed by endpoint path');
+  for (const [endpoint, entry] of Object.entries(json.endpoints as Record<string, unknown>)) {
+    if (!endpoint.startsWith('/') || !isRecord(entry) || !Array.isArray(entry.names) || !isRecord(entry.values)) fail(`endpoint ${endpoint} is malformed`);
+    const e = entry as { names: unknown[]; values: Record<string, unknown> };
+    if (!e.names.every((n): n is string => typeof n === 'string')) fail(`endpoint ${endpoint}: names must be strings`);
+    const names = e.names as string[];
+    for (let i = 1; i < names.length; i += 1) {
+      const prev = names[i - 1] ?? '';
+      const cur = names[i] ?? '';
+      if (!(prev < cur)) fail(`endpoint ${endpoint}: names must be strictly ascending (${prev}, ${cur})`);
+    }
+    for (const n of names) {
+      const v = e.values[n];
+      const ok = v === 'any' || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string'));
+      if (!ok) fail(`endpoint ${endpoint}: name ${n} needs 'any' or a non-empty value list`);
+    }
+    for (const k of Object.keys(e.values)) if (!names.includes(k)) fail(`endpoint ${endpoint}: values lists ${k}, which is not in names`);
+  }
+  return json as unknown as ParamsAllowlist;
+}
+
+/**
+ * Throws ParamsNotAllowedError unless every query parameter of `url` is listed for `endpointPath` with an
+ * allowed value (spec §5.2). Adapters call it before http-kit; messages name the parameter, never the value.
+ */
+export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: string, url: URL): void {
+  const entry = allowlist.endpoints[endpointPath];
+  if (entry === undefined) throw new ParamsNotAllowedError(`${allowlist.provider}: endpoint ${endpointPath} is not in the ${allowlist.recordedAt} allowlist`);
+  if (url.pathname !== endpointPath) throw new ParamsNotAllowedError(`${allowlist.provider}: URL path does not match endpoint ${endpointPath}`);
+  for (const [name, value] of url.searchParams.entries()) {
+    if (!entry.names.includes(name)) throw new ParamsNotAllowedError(`${allowlist.provider} ${endpointPath}: parameter ${name} is not in the ${allowlist.recordedAt} allowlist`);
+    const allowed = entry.values[name];
+    if (allowed !== 'any' && !(allowed ?? []).includes(value)) {
+      throw new ParamsNotAllowedError(`${allowlist.provider} ${endpointPath}: a value of ${name} is not in the ${allowlist.recordedAt} allowlist`);
+    }
+  }
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/providers exec vitest run test/params/allowlist.test.ts`
+Expected: PASS, 8 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/providers && git commit -m "wp04: ParamsAllowlist loader and request check (spec §5.2, plan decision 14)"
+```
+
+### Task 4.13: Fixture-tree test, barrel, and the package definition of done
 
 **Files:**
 - Replace: `src/index.ts`
@@ -4597,6 +4798,8 @@ describe('@gmt/providers public surface (plan "http-kit" contract)', () => {
       'createFixtureServer',
       'contentHash',
       'scenarioRequest',
+      'loadParamsAllowlist',
+      'assertRequestAllowed',
     ]) {
       expect(typeof (providers as Record<string, unknown>)[name], name).toBe('function');
     }
@@ -4648,6 +4851,7 @@ export { FIXTURE_TILE_DAYS, fixtureHttpLimits, fixtureProvider, planFixtureTiles
 export { createFixtureServer, type FixtureResponse, type FixtureRule, type FixtureServer, scenarioRequest } from './fixture/server.js';
 export { fixtureRouter } from './fixture/router.js';
 export { calendarPriceMinor, defaultFixtureRoot, type FixtureTree, loadFixtureTree } from './fixture/tree.js';
+export { assertRequestAllowed, loadParamsAllowlist, type ParamsAllowlist, ParamsNotAllowedError } from './params/allowlist.js';
 ```
 
 Delete `packages/providers/test/smoke.test.ts`.
@@ -4655,7 +4859,7 @@ Delete `packages/providers/test/smoke.test.ts`.
 - [ ] **Step 4: Run the whole package**
 
 Run: `pnpm --filter @gmt/providers test`
-Expected: PASS, 119 tests in 15 files; coverage table at or above 85% lines, 70% branches, 85% functions, 85% statements, no threshold error.
+Expected: PASS, 128 tests in 16 files; coverage table at or above 85% lines, 70% branches, 85% functions, 85% statements, no threshold error.
 
 - [ ] **Step 5: Commit**
 
@@ -4671,7 +4875,7 @@ None. The plan's five Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, W
 
 Run from the repository root; each must hold exactly:
 
-1. `pnpm --filter @gmt/providers test` → all 119 tests pass; coverage ≥ 85% lines, ≥ 70% branches, ≥ 85% functions and statements; exit 0.
+1. `pnpm --filter @gmt/providers test` → all 128 tests pass; coverage ≥ 85% lines, ≥ 70% branches, ≥ 85% functions and statements; exit 0.
 2. `pnpm lint` → `Checked … files … No fixes applied.` with zero errors; exit 0.
 3. `pnpm -r typecheck` → exit 0.
 4. `node scripts/check-boundaries.mjs` → exit 0, no output (providers depends on `@gmt/core` only, reads no `process.env`, and imports msw only under `src/testing/`).

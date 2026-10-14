@@ -35,7 +35,6 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - `TRAVELPAYOUTS_PARAMS` (a code constant asserted equal to the recorded allowlist file);
   - `travelpayoutsHttpLimits` (vendor ceiling 600/min, no `classifyError`, so WP4's default table applies);
   - identity fields and a healthcheck that sends no request.
-- `packages/providers/src/allowlist.ts`: the shared `ParamsAllowlist` type from the plan, plus `assertParamsAllowed`.
 - One line each in `apps/api/src/wiring.ts` `httpLimitsFor` and `providersFor`, which is a Modify (plan, "Wiring and bootstraps").
 - Tests:
   - replay of WP4b's recorded fixtures with the `@gmt/providers/testing` helpers through msw and the real http-kit;
@@ -45,6 +44,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
 
 **Out** (owner in brackets)
 
+- `ParamsAllowlist`, `loadParamsAllowlist`, `assertRequestAllowed` (`src/params/allowlist.ts`) [WP4].
 - http-kit pipeline [WP4]: retries, `Retry-After`, limiter, egress allowlist, cache keys, scrubbing, the recorder, and the default status table. Also `@gmt/providers/testing` (`loadRecorded`, `replayHandlers`).
 - Recording the fixtures and writing `params-<date>.json` [WP4b].
 - `buildPorts`, and `httpLimitsFor`/`providersFor` other than the Travelpayouts lines [WP4b, WP8].
@@ -93,10 +93,10 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
 1. **Rate limit stated twice.** Spec §2 gives 600/min (the vendor ceiling), while spec §12 and `TRAVELPAYOUTS_DEFAULTS` give 200/min. `travelpayoutsHttpLimits` keeps the configured value and clamps it to 600.
 2. **The FX assertion is not WP6's.** §9 item 2 says "a non-GBP response asserts conversion and the FX flag", but conversion is WP7 normalisation (§5.6). Here only pass-through is asserted: the vendor's lower-case code (`gbp`) is upper-cased to ISO 4217 and amounts are unchanged.
 3. **Empty envelope without currency.** Spec §2 says a response that states no currency is `parse`. The first failing test's body `{"success": true, "data": []}` has no currency. This brief requires currency only when at least one row is to be denominated.
-4. **`ParamsAllowlist` has no owning file.** The plan lists it among the WP5 and WP6 exports without naming a file. This brief creates `packages/providers/src/allowlist.ts` (type, error, `assertParamsAllowed`). WP5 must import from the same file; whichever of WP5 and WP6 merges second reuses it rather than redefining it.
-5. **The endpoint key is unnamed.** The plan does not say what keys `ParamsAllowlist.endpoints`. This brief uses the endpoint path (`/aviasales/v3/prices_for_dates`) and lists `names` in ascending order. WP4b's writer must match, or the equality test in Task 6.6 fails.
+4. *(Resolved by plan item 14.)* `ParamsAllowlist`, `loadParamsAllowlist` and `assertRequestAllowed` live in WP4's `src/params/allowlist.ts`. This brief imports them and defines no allowlist code of its own.
+5. *(Resolved by plan item 14.)* `endpoints` is keyed by endpoint path, with `names` ascending, and `TRAVELPAYOUTS_PARAMS` follows that.
 6. **`TRAVELPAYOUTS_PARAMS` copies two values from the recording.** `recordedAt` and `contentSha256` exist only once WP4b has recorded. Task 6.6 Step 3 prints them from the file, and the implementer writes them into the constant. That is the one place this brief cannot show the final literal.
-7. **Cache dedup assumes a cache-key rule.** Dedup across sibling pairs assumes WP4's `canonicalCacheKey` covers method, URL and body only, not `executionId` or `tileIndex`. Task 6.4 asserts 14 cache hits, so a key that includes either fails loudly.
+7. *(Resolved by plan item 14.)* `canonicalCacheKey` covers method, credential-free URL, scrubbed headers and body only, never execution or tile ids. Task 6.4's 14 cache hits test that contract.
 8. **`replayHandlers` cannot be used here.** It matches on the credential-free query, and the recorded 401 (invalid token) shares its query with the recorded 200 for the same tile. The replay tests use `loadRecorded` from `@gmt/providers/testing` with their own per-tile handlers.
 9. **The testing subpath is imported by relative path.** Inside `@gmt/providers` the subpath is imported as `../../src/testing/index.js`, because the package `exports` point at `dist/`. It is the same module.
 10. **Wiring structure is unknown.** WP4b's exact code shape for `httpLimitsFor`/`providersFor` is not in the plan. Task 6.9 adds one spread entry to each, in the object or array they return.
@@ -204,7 +204,7 @@ export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; 
 export function travelpayoutsProvider(o: { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: { metroOf(iata: Iata): string | null } }): FlightProvider;
 export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['api.travelpayouts.com'], billable 'never'; no classifyError (default table maps 401 → auth)
 export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url)
 
 // Core domain functions (WP1, WP2)
 export function toEpochDay(d: IsoDate): number; export function monthOf(d: IsoDate): IsoMonth;
@@ -224,17 +224,12 @@ Plan decision 6: "The recorded-fixture file format and hash field (`contentSha25
 All exported from `@gmt/providers` (barrel) unless marked internal.
 
 ```ts
-// allowlist.ts (shared with WP5; mismatch 4)
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
-export class ParamsAllowlistError extends Error {}
-export function assertParamsAllowed(allowlist: ParamsAllowlist, endpoint: string, params: URLSearchParams): void;   // throws ParamsAllowlistError
-
 // travelpayouts/params.ts
 export const TRAVELPAYOUTS_HOST: 'api.travelpayouts.com';
 export const PRICES_FOR_DATES_PATH: '/aviasales/v3/prices_for_dates';
 export const FIXED_PARAMS: { readonly one_way: 'false'; readonly currency: 'gbp'; readonly limit: '1000' };   // internal
 export const FORBIDDEN_PARAM_NAMES: readonly ['token', 'market', 'trip_class', 'return_at'];             // internal
-export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
+export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;   // ParamsAllowlist imported from ../params/allowlist.js (WP4)
 
 // travelpayouts/limits.ts
 export const TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE: 600;
@@ -331,7 +326,6 @@ There is no new dependency, and `zod` is not added to `@gmt/providers`. Envelope
 
 Create:
 
-- `packages/providers/src/allowlist.ts`
 - `packages/providers/src/travelpayouts/params.ts`
 - `packages/providers/src/travelpayouts/tiles.ts`
 - `packages/providers/src/travelpayouts/response.ts`
@@ -365,14 +359,13 @@ Read (produced by WP4b):
 
 **Files:**
 
-- Create `src/allowlist.ts` (type and error only).
 - Create `src/travelpayouts/params.ts` (constants), `tiles.ts`, `response.ts` (first cut) and `provider.ts` (first cut).
 - Create `test/travelpayouts/harness.ts` and `test/travelpayouts/empty.test.ts`.
 
 **Interfaces:**
 
 - Consumes `createHttpKit`, `generateCells`, `monthOf`, and the §5.1 types.
-- Produces `ParamsAllowlist`, `ParamsAllowlistError`, `planMonthTiles`, `tileParams`, `cellsOf`, `originParam` (first cut), `readEnvelope` (first cut), `buildRequestUrl` and `travelpayoutsProvider` (first cut).
+- Produces `planMonthTiles`, `tileParams`, `cellsOf`, `originParam` (first cut), `readEnvelope` (first cut), `buildRequestUrl` and `travelpayoutsProvider` (first cut).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -404,7 +397,7 @@ import {
   Secret,
 } from '@gmt/core';
 import { setupServer } from 'msw/node';
-import type { ParamsAllowlist } from '../../src/allowlist.js';
+import type { ParamsAllowlist } from '../../src/params/allowlist.js';
 import { createHttpKit, type HttpKit, type HttpKitRequest, type ProviderHttpLimits } from '../../src/http/httpKit.js';
 import type { MetroLookup } from '../../src/travelpayouts/tiles.js';
 import { type TravelpayoutsProviderOptions, travelpayoutsProvider } from '../../src/travelpayouts/provider.js';
@@ -643,37 +636,9 @@ describe('travelpayouts: empty is per capability (spec §5.2, authorised-cached)
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/empty.test.ts`
-Expected: FAIL. The suite cannot load, with an import error naming `src/allowlist.js` (or another missing `src/travelpayouts/*.js` module).
+Expected: FAIL. The suite cannot load, with an import error naming a missing `src/travelpayouts/*.js` module.
 
 - [ ] **Step 3: Implement**
-
-`packages/providers/src/allowlist.ts` (first cut; Task 6.6 appends `assertParamsAllowed`):
-
-```ts
-/**
- * The dated parameter allowlist shared by the provider adapters. Spec §5.2: the allowlist
- * enumerates parameter names and values, and tests assert both. Plan decision 6: the runtime
- * allowlist is a code constant per provider, asserted equal to WP4b's recorded file, which
- * carries a contentSha256.
- */
-import type { IsoDate, ProviderId } from '@gmt/core';
-
-/** Plan contract: per endpoint, the parameter names and each name's allowed values ('any' = per-request value). */
-export interface ParamsAllowlist {
-  provider: ProviderId;
-  recordedAt: IsoDate;
-  endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>;
-  contentSha256: string;
-}
-
-/** Raised when an outgoing request breaks the allowlist; requests fail closed. */
-export class ParamsAllowlistError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ParamsAllowlistError';
-  }
-}
-```
 
 `packages/providers/src/travelpayouts/params.ts` (first cut; Task 6.6 appends `TRAVELPAYOUTS_PARAMS`):
 
@@ -818,7 +783,7 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
-import type { ParamsAllowlist } from '../allowlist.js';
+import type { ParamsAllowlist } from '../params/allowlist.js';
 import type { HttpKit } from '../http/httpKit.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { readEnvelope } from './response.js';
@@ -1677,7 +1642,7 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
-import type { ParamsAllowlist } from '../allowlist.js';
+import type { ParamsAllowlist } from '../params/allowlist.js';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { attributeRows, attributionNotes, readEnvelope, resolveCurrency } from './response.js';
@@ -2033,13 +1998,13 @@ git add packages/providers && git commit -m "wp06: travelpayouts error mapping t
 
 **Files:**
 
-- Modify: append to `src/allowlist.ts` and `src/travelpayouts/params.ts`; insert one call into `src/travelpayouts/provider.ts`.
+- Modify: append to `src/travelpayouts/params.ts`; insert one call into `src/travelpayouts/provider.ts`.
 - Create: `test/travelpayouts/recorded.ts`, `test/travelpayouts/params.test.ts`.
 
 **Interfaces:**
 
-- Consumes `loadRecorded` (`@gmt/providers/testing`) and `RecordedFixture`.
-- Produces `assertParamsAllowed`, `TRAVELPAYOUTS_PARAMS`, and the test helpers `loadParamsFile` and `loadPricesForDates`.
+- Consumes `loadRecorded` (`@gmt/providers/testing`), `RecordedFixture`, and `loadParamsAllowlist`, `assertRequestAllowed` (WP4 `src/params/allowlist.ts`).
+- Produces `TRAVELPAYOUTS_PARAMS` and the test helpers `paramsFilePath` and `loadPricesForDates`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2052,7 +2017,7 @@ git add packages/providers && git commit -m "wp06: travelpayouts error mapping t
  * brief mismatch 9). loadRecorded refuses files outside fixtures/recorded/ and files whose
  * contentSha256 no longer matches (spec §5.5).
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RecordedFixture } from '../../src/index.js';
@@ -2062,14 +2027,14 @@ import { PRICES_FOR_DATES_PATH } from '../../src/travelpayouts/params.js';
 export const RECORDED_ROOT = fileURLToPath(new URL('../../fixtures/recorded/', import.meta.url));
 const TRAVELPAYOUTS_DIR = join(RECORDED_ROOT, 'travelpayouts');
 
-/** The latest dated allowlist file (names sort by date), parsed as JSON. */
-export function loadParamsFile(): unknown {
+/** Path of the latest dated allowlist file (names sort by date); WP4's loadParamsAllowlist reads it. */
+export function paramsFilePath(): string {
   const latest = readdirSync(TRAVELPAYOUTS_DIR)
     .filter((n) => /^params-\d{4}-\d{2}-\d{2}\.json$/.test(n))
     .sort()
     .at(-1);
   if (latest === undefined) throw new Error(`no params-<date>.json under ${TRAVELPAYOUTS_DIR} (WP4b writes it)`);
-  return JSON.parse(readFileSync(join(TRAVELPAYOUTS_DIR, latest), 'utf8'));
+  return join(TRAVELPAYOUTS_DIR, latest);
 }
 
 /** Every recorded prices_for_dates exchange with its request URL (credential-free, query kept). */
@@ -2084,22 +2049,22 @@ export function loadPricesForDates(): Array<{ url: URL; fixture: RecordedFixture
 import { asIata, asIsoMonth } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { assertParamsAllowed, ParamsAllowlistError } from '../../src/allowlist.js';
+import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allowlist.js';
 import { FIXED_PARAMS, FORBIDDEN_PARAM_NAMES, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_PARAMS } from '../../src/travelpayouts/params.js';
 import { buildRequestUrl } from '../../src/travelpayouts/provider.js';
 import { ALLOWLIST, ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, only, query, server, TOKEN } from './harness.js';
-import { loadParamsFile } from './recorded.js';
+import { paramsFilePath } from './recorded.js';
 
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 const tp = { origin: 'LON', pairOrigin: asIata('LHR'), destination: asIata('JFK'), month: asIsoMonth('2027-03') };
-const sent = (): URLSearchParams => buildRequestUrl(tp, 1).searchParams;
+const sent = (): URL => buildRequestUrl(tp, 1);
 
 describe('TRAVELPAYOUTS_PARAMS (plan decision 6: a code constant equal to the recorded file)', () => {
   it('equals fixtures/recorded/travelpayouts/params-<date>.json, contentSha256 included', () => {
-    expect(TRAVELPAYOUTS_PARAMS).toEqual(loadParamsFile());
+    expect(TRAVELPAYOUTS_PARAMS).toEqual(loadParamsAllowlist(paramsFilePath()));
   });
 
   it('carries the hard-coded fixed values and no forbidden name (spec §5.2)', () => {
@@ -2110,40 +2075,39 @@ describe('TRAVELPAYOUTS_PARAMS (plan decision 6: a code constant equal to the re
   });
 
   it('accepts exactly what the adapter sends', () => {
-    expect(() => assertParamsAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, sent())).not.toThrow();
+    expect(() => assertRequestAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, sent())).not.toThrow();
   });
 });
 
-describe('assertParamsAllowed (spec §5.2: names and values)', () => {
+describe("assertRequestAllowed (WP4) on Travelpayouts requests (spec §5.2: names and values)", () => {
   it.each([
-    ['an extra parameter', (p: URLSearchParams) => p.set('sorting', 'price'), /sorting is not in the allowlist/],
-    ['market (ignored by the vendor, spec §2 fact 1)', (p: URLSearchParams) => p.set('market', 'uk'), /market is not in the allowlist/],
-    ['trip_class (ignored by the vendor)', (p: URLSearchParams) => p.set('trip_class', '1'), /trip_class is not in the allowlist/],
-    ['return_at (month tiles send none)', (p: URLSearchParams) => p.set('return_at', '2027-03'), /return_at is not in the allowlist/],
-    ['a wrong fixed value', (p: URLSearchParams) => p.set('currency', 'usd'), /currency=usd is not an allowlisted value/],
-    ['a missing parameter', (p: URLSearchParams) => p.delete('page'), /page is missing/],
-    ['a duplicated parameter', (p: URLSearchParams) => p.append('origin', 'LGW'), /origin appears twice/],
-  ] as const)('fails on %s', (_label, mutate, message) => {
-    const p = sent();
-    mutate(p);
-    expect(() => assertParamsAllowed(ALLOWLIST, PRICES_FOR_DATES_PATH, p)).toThrow(message);
+    ['an extra parameter', (u: URL) => u.searchParams.set('sorting', 'price')],
+    ['market (ignored by the vendor, spec §2 fact 1)', (u: URL) => u.searchParams.set('market', 'uk')],
+    ['trip_class (ignored by the vendor)', (u: URL) => u.searchParams.set('trip_class', '1')],
+    ['return_at (month tiles send none)', (u: URL) => u.searchParams.set('return_at', '2027-03')],
+    ['a wrong fixed value', (u: URL) => u.searchParams.set('currency', 'usd')],
+    ['a missing parameter', (u: URL) => u.searchParams.delete('page')],
+    ['a duplicated parameter', (u: URL) => u.searchParams.append('origin', 'LGW')],
+  ] as const)('refuses %s', (_label, mutate) => {
+    const u = sent();
+    mutate(u);
+    expect(() => assertRequestAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, u)).toThrow();
   });
 
-  it('fails on an endpoint the allowlist does not list', () => {
-    expect(() => assertParamsAllowed(ALLOWLIST, '/v1/prices/calendar', sent())).toThrow(/endpoint \/v1\/prices\/calendar is not in the travelpayouts allowlist/);
+  it('refuses an endpoint the allowlist does not list', () => {
+    expect(() => assertRequestAllowed(ALLOWLIST, '/v1/prices/calendar', sent())).toThrow();
   });
 
-  it('refuses a token parameter with a ParamsAllowlistError that does not echo its value', () => {
-    const p = sent();
-    p.set('token', TOKEN);
+  it('refuses a token parameter without echoing its value', () => {
+    const u = sent();
+    u.searchParams.set('token', TOKEN);
     let caught: unknown;
     try {
-      assertParamsAllowed(ALLOWLIST, PRICES_FOR_DATES_PATH, p);
+      assertRequestAllowed(ALLOWLIST, PRICES_FOR_DATES_PATH, u);
     } catch (e) {
       caught = e;
     }
-    expect(caught).toBeInstanceOf(ParamsAllowlistError);
-    expect(String(caught)).toMatch(/token is not in the allowlist/);
+    expect(caught).toBeInstanceOf(Error);
     expect(String(caught)).not.toContain(TOKEN);
   });
 });
@@ -2180,34 +2144,9 @@ describe('requests on the wire', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/params.test.ts`
-Expected: FAIL with `does not provide an export named 'assertParamsAllowed'`. If the error is instead "no params-<date>.json", WP4b has not merged: stop and report, and do not create the file.
+Expected: FAIL with `does not provide an export named 'TRAVELPAYOUTS_PARAMS'`. If the error is instead "no params-<date>.json", WP4b has not merged: stop and report, and do not create the file.
 
 - [ ] **Step 3: Implement**
-
-Append to `packages/providers/src/allowlist.ts`:
-
-```ts
-/**
- * Fails closed unless `params` is exactly what the allowlist permits for `endpoint`: every listed
- * name once, each value in its list (or any value for 'any'), nothing missing, nothing extra
- * (spec §5.2). Messages name a parameter that is not allowlisted without echoing its value.
- */
-export function assertParamsAllowed(allowlist: ParamsAllowlist, endpoint: string, params: URLSearchParams): void {
-  const rules = allowlist.endpoints[endpoint];
-  if (rules === undefined) throw new ParamsAllowlistError(`endpoint ${endpoint} is not in the ${allowlist.provider} allowlist`);
-  const seen = new Set<string>();
-  for (const [name, value] of params) {
-    if (seen.has(name)) throw new ParamsAllowlistError(`parameter ${name} appears twice`);
-    seen.add(name);
-    const allowed = rules.names.includes(name) ? rules.values[name] : undefined;
-    if (allowed === undefined) throw new ParamsAllowlistError(`parameter ${name} is not in the allowlist`);
-    if (allowed !== 'any' && !allowed.includes(value)) throw new ParamsAllowlistError(`parameter ${name}=${value} is not an allowlisted value`);
-  }
-  for (const name of rules.names) {
-    if (!seen.has(name)) throw new ParamsAllowlistError(`parameter ${name} is missing`);
-  }
-}
-```
 
 Print the two values that only the recording knows (brief mismatch 6):
 
@@ -2219,7 +2158,7 @@ Append to `packages/providers/src/travelpayouts/params.ts`, writing the two prin
 
 ```ts
 import type { IsoDate } from '@gmt/core';
-import type { ParamsAllowlist } from '../allowlist.js';
+import type { ParamsAllowlist } from '../params/allowlist.js';
 
 // why: these two fields only exist once WP4b has recorded; they are copied verbatim from
 // fixtures/recorded/travelpayouts/params-<date>.json, and the equality test fails if either drifts.
@@ -2228,7 +2167,7 @@ const CONTENT_SHA256 = 'CONTENT_SHA256_PRINTED_ABOVE';
 
 /**
  * The runtime allowlist (plan decision 6: a code constant asserted equal to the recorded file).
- * Keyed by endpoint path; names in ascending order; 'any' for per-request values (brief mismatch 5).
+ * Keyed by endpoint path; names in ascending order; 'any' for per-request values (plan item 14).
  */
 export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist = {
   provider: 'travelpayouts',
@@ -2253,17 +2192,17 @@ export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist = {
 
 Move the two `import type` lines to the top of the file with the other imports (Biome `organizeImports`).
 
-In `packages/providers/src/travelpayouts/provider.ts`, add `import { assertParamsAllowed } from '../allowlist.js';` and insert directly after `const url = buildRequestUrl(tp, page);`:
+In `packages/providers/src/travelpayouts/provider.ts`, add `import { assertRequestAllowed } from '../params/allowlist.js';` and insert directly after `const url = buildRequestUrl(tp, page);`:
 
 ```ts
       // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
-      assertParamsAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url.searchParams);
+      assertRequestAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url);
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. `params.test.ts` has 13 passed (3 constant, 7 table, 1 endpoint, 1 token, 1 wire), and every other file stays green. If the equality test fails on `endpoints` (a different key or name order in WP4b's file), stop and report it as brief mismatch 5. Do not reshape the constant to the file.
+Expected: PASS. `params.test.ts` has 13 passed (3 constant, 7 table, 1 endpoint, 1 token, 1 wire), and every other file stays green. If the equality test fails on `endpoints` (a different key or name order in WP4b's file), stop and report it (plan item 14 pins path keys and ascending names). Do not reshape the constant to the file.
 
 - [ ] **Step 5: Commit**
 
@@ -2348,7 +2287,6 @@ describe('@gmt/providers barrel', () => {
   it('exports the Travelpayouts surface named in the plan', () => {
     expect(typeof barrel.travelpayoutsProvider).toBe('function');
     expect(typeof barrel.travelpayoutsHttpLimits).toBe('function');
-    expect(typeof barrel.assertParamsAllowed).toBe('function');
     expect(barrel.TRAVELPAYOUTS_PARAMS.provider).toBe('travelpayouts');
     expect(barrel.TRAVELPAYOUTS_POINT_OF_SALE).toBe('unknown');
     expect(barrel.TRAVELPAYOUTS_HOST).toBe('api.travelpayouts.com');
@@ -2394,7 +2332,7 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
-import { assertParamsAllowed, type ParamsAllowlist } from '../allowlist.js';
+import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.js';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { attributeRows, attributionNotes, readEnvelope, resolveCurrency } from './response.js';
@@ -2481,7 +2419,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     for (let page = 1; ; page += 1) {
       const url = buildRequestUrl(tp, page);
       // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
-      assertParamsAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url.searchParams);
+      assertRequestAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url);
       let res: HttpKitResponse;
       try {
         res = await opts.http.request({
@@ -2565,8 +2503,6 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 Append to `packages/providers/src/index.ts`:
 
 ```ts
-// Shared parameter allowlist (WP6; WP5 imports the same file). Spec §5.2.
-export { assertParamsAllowed, type ParamsAllowlist, ParamsAllowlistError } from './allowlist.js';
 // Travelpayouts adapter (WP6). Spec §2, §5.2.
 export {
   TRAVELPAYOUTS_CABINS,
@@ -2606,7 +2542,7 @@ git add packages/providers && git commit -m "wp06: travelpayouts identity, healt
 import { asIata, asIsoDate, cellKeyString, type IsoDate } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { assertParamsAllowed } from '../../src/allowlist.js';
+import { assertRequestAllowed } from '../../src/params/allowlist.js';
 import { PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST, TRAVELPAYOUTS_PARAMS } from '../../src/travelpayouts/params.js';
 import { TRAVELPAYOUTS_SUPPLIED_FIELDS } from '../../src/travelpayouts/provider.js';
 import { suppliedFieldsOfRow } from '../../src/travelpayouts/response.js';
@@ -2727,7 +2663,7 @@ describe("recorded Travelpayouts fixtures (WP4b) replay through msw (@gmt/provid
   });
 
   it('recorded requests satisfy TRAVELPAYOUTS_PARAMS, names and values', () => {
-    for (const x of recorded) expect(() => assertParamsAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, x.url.searchParams)).not.toThrow();
+    for (const x of recorded) expect(() => assertRequestAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, x.url)).not.toThrow();
   });
 });
 ```
@@ -2896,4 +2832,4 @@ None. The plan's Review Focus lines are owned by other packages. One test here g
 
 ## 11. Open questions
 
-None requires operator judgement. Mismatches 4–10 in §3 are coordination findings for Fable. Mismatch 4 (who owns `src/allowlist.ts`) and mismatch 5 (the endpoint key in the allowlist file) must agree with WP5 and WP4b before both adapters are dispatched.
+None requires operator judgement. Mismatches 6, 8, 9 and 10 in §3 remain coordination notes for Fable; 4, 5 and 7 are settled by plan item 14.
