@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   asIata,
   asIsoDate,
+  type Cell,
   type CellKey,
   type Clock,
   type DefinitionInput,
@@ -206,4 +207,13 @@ export function newExecution(
   const moved = executions.get(created.id);
   if (moved === null) throw new Error('execution vanished');
   return { definition, execution: moved };
+}
+
+/** A Cell with its nights computed from the two calendar dates (UTC midnights, so no DST effect). */
+export function withNights(c: CellKey): Cell {
+  return {
+    ...c,
+    nights:
+      (Date.parse(`${c.returnDate}T00:00:00Z`) - Date.parse(`${c.departureDate}T00:00:00Z`)) / 86_400_000,
+  };
 }

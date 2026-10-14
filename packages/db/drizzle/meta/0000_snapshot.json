@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e1628ff9-d091-494c-be06-7eeb2ddd0ede",
+  "id": "4b700cf6-c50f-4cb9-a4ee-8015345c861e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -113,6 +113,307 @@
         "airports_tz_ck": {
           "name": "airports_tz_ck",
           "value": "length(tz) > 0"
+        }
+      }
+    },
+    "cell_outcomes": {
+      "name": "cell_outcomes",
+      "columns": {
+        "execution_id": {
+          "name": "execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "destination": {
+          "name": "destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "departure_date": {
+          "name": "departure_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "return_date": {
+          "name": "return_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "min_pence": {
+          "name": "min_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cabin": {
+          "name": "cabin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "point_of_sale": {
+          "name": "point_of_sale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_kind": {
+          "name": "source_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reused_from_execution_id": {
+          "name": "reused_from_execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "cell_outcomes_stage_provider_status_idx": {
+          "name": "cell_outcomes_stage_provider_status_idx",
+          "columns": [
+            "execution_id",
+            "stage",
+            "provider_id",
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "cell_outcomes_reused_from_execution_id_search_executions_id_fk": {
+          "name": "cell_outcomes_reused_from_execution_id_search_executions_id_fk",
+          "tableFrom": "cell_outcomes",
+          "tableTo": "search_executions",
+          "columnsFrom": [
+            "reused_from_execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cell_outcomes_execution_id_origin_destination_departure_date_return_date_search_cells_execution_id_origin_destination_departure_date_return_date_fk": {
+          "name": "cell_outcomes_execution_id_origin_destination_departure_date_return_date_search_cells_execution_id_origin_destination_departure_date_return_date_fk",
+          "tableFrom": "cell_outcomes",
+          "tableTo": "search_cells",
+          "columnsFrom": [
+            "execution_id",
+            "origin",
+            "destination",
+            "departure_date",
+            "return_date"
+          ],
+          "columnsTo": [
+            "execution_id",
+            "origin",
+            "destination",
+            "departure_date",
+            "return_date"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "cell_outcomes_execution_id_origin_destination_departure_date_return_date_stage_provider_id_pk": {
+          "columns": [
+            "execution_id",
+            "origin",
+            "destination",
+            "departure_date",
+            "return_date",
+            "stage",
+            "provider_id"
+          ],
+          "name": "cell_outcomes_execution_id_origin_destination_departure_date_return_date_stage_provider_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "cell_outcomes_status_ck": {
+          "name": "cell_outcomes_status_ck",
+          "value": "status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')"
+        },
+        "cell_outcomes_stage_ck": {
+          "name": "cell_outcomes_stage_ck",
+          "value": "stage IN ('discovery', 'verification')"
+        },
+        "cell_outcomes_provider_ck": {
+          "name": "cell_outcomes_provider_ck",
+          "value": "provider_id IN ('travelpayouts', 'searchapi', 'fixture')"
+        },
+        "cell_outcomes_skip_reason_ck": {
+          "name": "cell_outcomes_skip_reason_ck",
+          "value": "status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'departed')"
+        },
+        "cell_outcomes_attempts_ck": {
+          "name": "cell_outcomes_attempts_ck",
+          "value": "typeof(attempts) = 'integer' AND attempts >= 0"
+        },
+        "cell_outcomes_min_ck": {
+          "name": "cell_outcomes_min_ck",
+          "value": "min_pence IS NULL OR (typeof(min_pence) = 'integer' AND min_pence >= 0)"
+        },
+        "cell_outcomes_priced_min_ck": {
+          "name": "cell_outcomes_priced_min_ck",
+          "value": "(status = 'priced') = (min_pence IS NOT NULL)"
+        },
+        "cell_outcomes_cabin_ck": {
+          "name": "cell_outcomes_cabin_ck",
+          "value": "cabin IS NULL OR cabin IN ('economy', 'premium_economy', 'business', 'first')"
+        },
+        "cell_outcomes_pos_ck": {
+          "name": "cell_outcomes_pos_ck",
+          "value": "point_of_sale IS NULL OR point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'"
+        },
+        "cell_outcomes_kind_ck": {
+          "name": "cell_outcomes_kind_ck",
+          "value": "source_kind IS NULL OR source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')"
+        },
+        "cell_outcomes_fetched_ck": {
+          "name": "cell_outcomes_fetched_ck",
+          "value": "fetched_at IS NULL OR fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "cell_outcomes_provenance_ck": {
+          "name": "cell_outcomes_provenance_ck",
+          "value": "status NOT IN ('priced', 'empty', 'no_data') OR (status = 'no_data' AND reason IS 'cabin-not-offered') OR (fetched_at IS NOT NULL AND cabin IS NOT NULL AND point_of_sale IS NOT NULL AND source_kind IS NOT NULL)"
+        }
+      }
+    },
+    "fx_rates": {
+      "name": "fx_rates",
+      "columns": {
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rate_nano": {
+          "name": "rate_nano",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "fx_rates_date_currency_pk": {
+          "columns": [
+            "date",
+            "currency"
+          ],
+          "name": "fx_rates_date_currency_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "fx_rates_rate_ck": {
+          "name": "fx_rates_rate_ck",
+          "value": "typeof(rate_nano) = 'integer' AND rate_nano > 0"
+        },
+        "fx_rates_currency_ck": {
+          "name": "fx_rates_currency_ck",
+          "value": "currency GLOB '[A-Z][A-Z][A-Z]' AND currency <> 'GBP'"
+        },
+        "fx_rates_date_ck": {
+          "name": "fx_rates_date_ck",
+          "value": "date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'"
+        },
+        "fx_rates_source_ck": {
+          "name": "fx_rates_source_ck",
+          "value": "length(source) > 0"
         }
       }
     },
@@ -283,6 +584,165 @@
         "provider_requests_path_ck": {
           "name": "provider_requests_path_ck",
           "value": "endpoint_path GLOB '/*' AND endpoint_path NOT GLOB '//*' AND endpoint_path NOT GLOB '*[^A-Za-z0-9._~/-]*' AND length(endpoint_path) <= 200"
+        }
+      }
+    },
+    "search_cells": {
+      "name": "search_cells",
+      "columns": {
+        "execution_id": {
+          "name": "execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "destination": {
+          "name": "destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "departure_date": {
+          "name": "departure_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "return_date": {
+          "name": "return_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "discovery_status": {
+          "name": "discovery_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "discovery_reason": {
+          "name": "discovery_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "discovery_min_pence": {
+          "name": "discovery_min_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_selected": {
+          "name": "verification_selected",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "selection_reason": {
+          "name": "selection_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_status": {
+          "name": "verification_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_reason": {
+          "name": "verification_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_min_pence": {
+          "name": "verification_min_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "best_observation_id": {
+          "name": "best_observation_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "search_cells_execution_id_search_executions_id_fk": {
+          "name": "search_cells_execution_id_search_executions_id_fk",
+          "tableFrom": "search_cells",
+          "tableTo": "search_executions",
+          "columnsFrom": [
+            "execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "search_cells_execution_id_origin_destination_departure_date_return_date_pk": {
+          "columns": [
+            "execution_id",
+            "origin",
+            "destination",
+            "departure_date",
+            "return_date"
+          ],
+          "name": "search_cells_execution_id_origin_destination_departure_date_return_date_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "search_cells_discovery_status_ck": {
+          "name": "search_cells_discovery_status_ck",
+          "value": "discovery_status IS NULL OR discovery_status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')"
+        },
+        "search_cells_verification_status_ck": {
+          "name": "search_cells_verification_status_ck",
+          "value": "verification_status IS NULL OR verification_status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')"
+        },
+        "search_cells_selected_ck": {
+          "name": "search_cells_selected_ck",
+          "value": "verification_selected IN (0, 1)"
+        },
+        "search_cells_selection_reason_ck": {
+          "name": "search_cells_selection_reason_ck",
+          "value": "selection_reason IS NULL OR selection_reason IN ('always_include', 'top_n', 'ceiling', 'stride')"
+        },
+        "search_cells_discovery_min_ck": {
+          "name": "search_cells_discovery_min_ck",
+          "value": "discovery_min_pence IS NULL OR (typeof(discovery_min_pence) = 'integer' AND discovery_min_pence >= 0)"
+        },
+        "search_cells_verification_min_ck": {
+          "name": "search_cells_verification_min_ck",
+          "value": "verification_min_pence IS NULL OR (typeof(verification_min_pence) = 'integer' AND verification_min_pence >= 0)"
         }
       }
     },
@@ -707,69 +1167,6 @@
         "search_executions_child_cell_ck": {
           "name": "search_executions_child_cell_ck",
           "value": "(is_child = 0 AND child_origin IS NULL AND child_destination IS NULL AND child_departure_date IS NULL AND child_return_date IS NULL) OR (is_child = 1 AND child_origin IS NOT NULL AND child_destination IS NOT NULL AND child_departure_date IS NOT NULL AND child_return_date IS NOT NULL)"
-        }
-      }
-    },
-    "fx_rates": {
-      "name": "fx_rates",
-      "columns": {
-        "date": {
-          "name": "date",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rate_nano": {
-          "name": "rate_nano",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "fx_rates_date_currency_pk": {
-          "columns": [
-            "date",
-            "currency"
-          ],
-          "name": "fx_rates_date_currency_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "fx_rates_rate_ck": {
-          "name": "fx_rates_rate_ck",
-          "value": "typeof(rate_nano) = 'integer' AND rate_nano > 0"
-        },
-        "fx_rates_currency_ck": {
-          "name": "fx_rates_currency_ck",
-          "value": "currency GLOB '[A-Z][A-Z][A-Z]' AND currency <> 'GBP'"
-        },
-        "fx_rates_date_ck": {
-          "name": "fx_rates_date_ck",
-          "value": "date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'"
-        },
-        "fx_rates_source_ck": {
-          "name": "fx_rates_source_ck",
-          "value": "length(source) > 0"
         }
       }
     }

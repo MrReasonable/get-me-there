@@ -17,6 +17,54 @@ CREATE TABLE `airports` (
 );
 --> statement-breakpoint
 CREATE INDEX `airports_metro_idx` ON `airports` (`metro`);--> statement-breakpoint
+CREATE TABLE `cell_outcomes` (
+	`execution_id` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`stage` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`status` text NOT NULL,
+	`reason` text,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`last_error` text,
+	`fetched_at` text,
+	`min_pence` integer,
+	`cabin` text,
+	`point_of_sale` text,
+	`source_kind` text,
+	`reused_from_execution_id` text,
+	PRIMARY KEY(`execution_id`, `origin`, `destination`, `departure_date`, `return_date`, `stage`, `provider_id`),
+	FOREIGN KEY (`reused_from_execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`execution_id`,`origin`,`destination`,`departure_date`,`return_date`) REFERENCES `search_cells`(`execution_id`,`origin`,`destination`,`departure_date`,`return_date`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "cell_outcomes_status_ck" CHECK(status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')),
+	CONSTRAINT "cell_outcomes_stage_ck" CHECK(stage IN ('discovery', 'verification')),
+	CONSTRAINT "cell_outcomes_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "cell_outcomes_skip_reason_ck" CHECK(status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'departed')),
+	CONSTRAINT "cell_outcomes_attempts_ck" CHECK(typeof(attempts) = 'integer' AND attempts >= 0),
+	CONSTRAINT "cell_outcomes_min_ck" CHECK(min_pence IS NULL OR (typeof(min_pence) = 'integer' AND min_pence >= 0)),
+	CONSTRAINT "cell_outcomes_priced_min_ck" CHECK((status = 'priced') = (min_pence IS NOT NULL)),
+	CONSTRAINT "cell_outcomes_cabin_ck" CHECK(cabin IS NULL OR cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "cell_outcomes_pos_ck" CHECK(point_of_sale IS NULL OR point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "cell_outcomes_kind_ck" CHECK(source_kind IS NULL OR source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')),
+	CONSTRAINT "cell_outcomes_fetched_ck" CHECK(fetched_at IS NULL OR fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "cell_outcomes_provenance_ck" CHECK(status NOT IN ('priced', 'empty', 'no_data') OR (status = 'no_data' AND reason IS 'cabin-not-offered') OR (fetched_at IS NOT NULL AND cabin IS NOT NULL AND point_of_sale IS NOT NULL AND source_kind IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE INDEX `cell_outcomes_stage_provider_status_idx` ON `cell_outcomes` (`execution_id`,`stage`,`provider_id`,`status`);--> statement-breakpoint
+CREATE TABLE `fx_rates` (
+	`date` text NOT NULL,
+	`currency` text NOT NULL,
+	`rate_nano` integer NOT NULL,
+	`source` text NOT NULL,
+	PRIMARY KEY(`date`, `currency`),
+	CONSTRAINT "fx_rates_rate_ck" CHECK(typeof(rate_nano) = 'integer' AND rate_nano > 0),
+	CONSTRAINT "fx_rates_currency_ck" CHECK(currency GLOB '[A-Z][A-Z][A-Z]' AND currency <> 'GBP'),
+	CONSTRAINT "fx_rates_date_ck" CHECK(date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+	CONSTRAINT "fx_rates_source_ck" CHECK(length(source) > 0)
+);
+--> statement-breakpoint
 CREATE TABLE `provider_requests` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`provider_id` text NOT NULL,
@@ -45,6 +93,31 @@ CREATE TABLE `provider_requests` (
 --> statement-breakpoint
 CREATE INDEX `provider_requests_provider_idx` ON `provider_requests` (`provider_id`,`started_at`,`outcome`,`billable`);--> statement-breakpoint
 CREATE INDEX `provider_requests_execution_idx` ON `provider_requests` (`execution_id`);--> statement-breakpoint
+CREATE TABLE `search_cells` (
+	`execution_id` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`discovery_status` text,
+	`discovery_reason` text,
+	`discovery_min_pence` integer,
+	`verification_selected` integer DEFAULT 0 NOT NULL,
+	`selection_reason` text,
+	`verification_status` text,
+	`verification_reason` text,
+	`verification_min_pence` integer,
+	`best_observation_id` integer,
+	PRIMARY KEY(`execution_id`, `origin`, `destination`, `departure_date`, `return_date`),
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "search_cells_discovery_status_ck" CHECK(discovery_status IS NULL OR discovery_status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')),
+	CONSTRAINT "search_cells_verification_status_ck" CHECK(verification_status IS NULL OR verification_status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')),
+	CONSTRAINT "search_cells_selected_ck" CHECK(verification_selected IN (0, 1)),
+	CONSTRAINT "search_cells_selection_reason_ck" CHECK(selection_reason IS NULL OR selection_reason IN ('always_include', 'top_n', 'ceiling', 'stride')),
+	CONSTRAINT "search_cells_discovery_min_ck" CHECK(discovery_min_pence IS NULL OR (typeof(discovery_min_pence) = 'integer' AND discovery_min_pence >= 0)),
+	CONSTRAINT "search_cells_verification_min_ck" CHECK(verification_min_pence IS NULL OR (typeof(verification_min_pence) = 'integer' AND verification_min_pence >= 0))
+);
+--> statement-breakpoint
 CREATE TABLE `search_definitions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -113,15 +186,4 @@ CREATE TABLE `search_executions` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `search_executions_active_parent_uq` ON `search_executions` (`definition_id`) WHERE is_child = 0 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
 CREATE UNIQUE INDEX `search_executions_active_child_uq` ON `search_executions` (`definition_id`,`child_origin`,`child_destination`,`child_departure_date`,`child_return_date`) WHERE is_child = 1 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
-CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);--> statement-breakpoint
-CREATE TABLE `fx_rates` (
-	`date` text NOT NULL,
-	`currency` text NOT NULL,
-	`rate_nano` integer NOT NULL,
-	`source` text NOT NULL,
-	PRIMARY KEY(`date`, `currency`),
-	CONSTRAINT "fx_rates_rate_ck" CHECK(typeof(rate_nano) = 'integer' AND rate_nano > 0),
-	CONSTRAINT "fx_rates_currency_ck" CHECK(currency GLOB '[A-Z][A-Z][A-Z]' AND currency <> 'GBP'),
-	CONSTRAINT "fx_rates_date_ck" CHECK(date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
-	CONSTRAINT "fx_rates_source_ck" CHECK(length(source) > 0)
-);
+CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);
