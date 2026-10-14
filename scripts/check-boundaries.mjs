@@ -2,7 +2,7 @@
 // Enforces the spec §4 import graph by reading every package.json `dependencies` and every
 // `import ... from '@gmt/…'` under src/. Fails on any edge not in ALLOWED, on `process.env`
 // outside the api bootstrap files, and on msw imported outside providers' src/testing/.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ALLOWED = {

@@ -52,7 +52,10 @@ describe('migrations (spec §7)', () => {
   it('with an empty journal nothing is pending and nothing is applied', () => {
     const dir = mkdtempSync(join(tmpdir(), 'gmt-mig-'));
     mkdirSync(join(dir, 'meta'));
-    writeFileSync(join(dir, 'meta', '_journal.json'), JSON.stringify({ version: '7', dialect: 'sqlite', entries: [] }));
+    writeFileSync(
+      join(dir, 'meta', '_journal.json'),
+      JSON.stringify({ version: '7', dialect: 'sqlite', entries: [] }),
+    );
     const db = openDatabase(':memory:');
     expect(pendingMigrations(db, dir)).toEqual([]);
     expect(applyMigrations(db, dir)).toEqual({ applied: [] });

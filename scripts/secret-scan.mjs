@@ -3,14 +3,19 @@
 // Spec §5.3: CI runs the same secret scan over fixtures/. Values come from the environment so the
 // scan can be run locally with the real .env loaded; in CI the env has no secrets and only the
 // shape rules apply.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const roots = ['packages/providers/fixtures'];
 const secretValues = ['TRAVELPAYOUTS_TOKEN', 'SEARCHAPI_KEY', 'SMTP_PASS', 'APP_BASIC_AUTH_PASS']
   .map((k) => process.env[k])
   .filter((v) => v && v.length >= 8);
-const shapes = [/api_key=[A-Za-z0-9]{8,}/i, /token=[A-Za-z0-9]{16,}/i, /Bearer\s+[A-Za-z0-9._-]{16,}/, /X-Access-Token/i];
+const shapes = [
+  /api_key=[A-Za-z0-9]{8,}/i,
+  /token=[A-Za-z0-9]{16,}/i,
+  /Bearer\s+[A-Za-z0-9._-]{16,}/,
+  /X-Access-Token/i,
+];
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
