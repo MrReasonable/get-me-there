@@ -60,6 +60,7 @@ describe('effectiveAge (spec §3)', () => {
 describe('formatting', () => {
   it('formatDuration', () => {
     expect(formatDuration(0)).toBe('just now');
+    expect(formatDuration(1)).toBe('1h');
     expect(formatDuration(2)).toBe('2h');
     expect(formatDuration(24)).toBe('24h');
     expect(formatDuration(47)).toBe('47h');
@@ -79,6 +80,8 @@ describe('formatting', () => {
     expect(formatAgeFull(u)).toBe('fetched 2h ago · provider age unknown');
     expect(formatAgeCompact(u)).toBe('2h ago · age unknown');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 })).toBe('just now · ≤24h');
+    expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 1, maxAgeHours: 24 })).toBe('1h ago · ≤24h');
+    expect(formatAgeFull({ kind: 'observed', fetchedHours: 1, observedHours: 1 })).toBe('fetched 1h ago · observed 1h ago');
     expect(formatAgeFull({ kind: 'observed', fetchedHours: 0, observedHours: 0 })).toBe(
       'fetched just now · observed just now',
     );
