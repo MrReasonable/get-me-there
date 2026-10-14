@@ -11,7 +11,13 @@ describe('WP1 sources never use Date', () => {
   const files = DIRS.flatMap((dir) => readdirSync(join(ROOT, dir)).map((f) => join(ROOT, dir, f)));
   it('found the files', () => expect(files.length).toBeGreaterThanOrEqual(7));
   it.each(files)('%s has no Date', (file) => {
-    const code = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+    // why: one left-to-right pass matches string literals and comments together, so a `//` inside a
+    // string (a URL) is not taken for a comment start and a quote inside a comment is not taken for a
+    // string start; strings are blanked and comments dropped before the `Date` search.
+    const code = readFileSync(file, 'utf8').replace(
+      /('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`)|\/\*[\s\S]*?\*\/|\/\/.*$/gm,
+      (_match, str: string | undefined) => (str === undefined ? '' : '""'),
+    );
     expect(code).not.toMatch(/\bDate\b/);
   });
 });

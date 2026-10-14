@@ -143,6 +143,20 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
     ]);
   });
 
+  it.each([401, 3_000_000, 10.5])(
+    'rejects startOffsetDays %d with a field error instead of throwing (the resolved window would be unrepresentable)',
+    (startOffsetDays) => {
+      const errs = fields({ ...base, window: { kind: 'relative', startOffsetDays, lengthDays: 10 } });
+      expect(errs.map((e) => e.field)).toEqual(['window.startOffsetDays']);
+    },
+  );
+
+  it('accepts startOffsetDays at the 400-day bound', () => {
+    expect(run({ ...base, window: { kind: 'relative', startOffsetDays: 400, lengthDays: 400 } }).ok).toBe(
+      true,
+    );
+  });
+
   it.each([0, 401, 10.5])('rejects lengthDays %d', (lengthDays) => {
     expect(fields({ ...base, window: { kind: 'relative', startOffsetDays: 7, lengthDays } })).toEqual([
       { field: 'window.lengthDays', message: 'lengthDays must be a whole number from 1 to 400' },
@@ -299,9 +313,34 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
     });
   });
 
-  // Keep last: it reads the strings every test above collected.
+  // why: self-contained, so the check does not depend on test order. It runs a table of invalid inputs
+  // itself and also covers the strings the tests above collected.
   it('every message and note is free of banned words (spec §11)', () => {
-    expect(copy.length).toBeGreaterThanOrEqual(30);
-    for (const s of copy) expect(findBannedWords(s, BANNED_WORD_ALLOWLIST), s).toEqual([]);
+    const invalid: Input[] = [
+      { ...base, origins: iatas('LON'), destinations: iatas('JFK', 'NYC') },
+      { ...base, destinations: iatas('XYZ') },
+      { ...base, origins: [], destinations: [] },
+      { ...base, destinations: iatas('LHR') },
+      { ...base, minNights: -1, maxNights: 200 },
+      { ...base, minNights: 9, maxNights: 8 },
+      { ...base, window: { kind: 'relative', startOffsetDays: 0, lengthDays: 0 } },
+      { ...base, window: { kind: 'relative', startOffsetDays: 401, lengthDays: 401 } },
+      { ...base, window: { kind: 'absolute', from: asIsoDate('2027-03-05'), to: asIsoDate('2027-03-01') } },
+      { ...base, window: { kind: 'absolute', from: asIsoDate('2026-01-01'), to: asIsoDate('2026-02-01') } },
+      policy({ maxCells: -1, topN: 1.5, perDepartureDateBest: -2 }),
+      policy({ maxCells: 3, topN: 4 }),
+    ];
+    const local = invalid.flatMap((input) => {
+      const r = validateSearchSpace(input, today, lookup, MAX);
+      return r.ok ? r.notes : r.errors.map((e) => e.message);
+    });
+    local.push(
+      ...(() => {
+        const r = validateSearchSpace(base, today, lookup, 10);
+        return r.ok ? r.notes : r.errors.map((e) => e.message);
+      })(),
+    );
+    expect(local.length).toBeGreaterThanOrEqual(12);
+    for (const s of [...local, ...copy]) expect(findBannedWords(s, BANNED_WORD_ALLOWLIST), s).toEqual([]);
   });
 });

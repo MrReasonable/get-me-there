@@ -83,6 +83,10 @@ export function validateSearchSpace(
         'window.startOffsetDays',
         'startOffsetDays must be at least 1 (the window starts tomorrow at the earliest)',
       );
+    } else if (w.startOffsetDays > MAX_WINDOW_DAYS) {
+      // why: a huge offset would push the resolved window past 9999-12-31, where addDays throws; bound it
+      // like lengthDays so POST /definitions gets a field error (422) and not a 500.
+      err('window.startOffsetDays', `startOffsetDays must be no greater than ${MAX_WINDOW_DAYS}`);
     }
     if (!Number.isInteger(w.lengthDays) || w.lengthDays < 1 || w.lengthDays > MAX_WINDOW_DAYS) {
       err('window.lengthDays', `lengthDays must be a whole number from 1 to ${MAX_WINDOW_DAYS}`);
@@ -179,9 +183,11 @@ function plural(n: number, word: string): string {
   return `${thousands(n)} ${word}${n === 1 ? '' : 's'}`;
 }
 
-/** Thousands separators without Intl locale data: 13104 → "13,104". */
+const GROUPED = new Intl.NumberFormat('en-GB');
+
+/** en-GB digit grouping, the same convention as WP2's money formatter: 13104 → "13,104". */
 function thousands(n: number): string {
-  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return GROUPED.format(n);
 }
 
 function checkAirports(

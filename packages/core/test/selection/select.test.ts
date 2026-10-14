@@ -37,8 +37,8 @@ const policy = (p: Partial<VerificationPolicy>): VerificationPolicy => ({
   bookingLinks: true,
   ...p,
 });
-const picks = (r: ReturnType<typeof selectCandidates>) =>
-  r.map((s) => [cells.findIndex((c) => cellKeyString(c) === cellKeyString(s.cell)), s.reason]);
+const picks = (r: ReturnType<typeof selectCandidates>, space_: Cell[] = cells) =>
+  r.map((s) => [space_.findIndex((c) => cellKeyString(c) === cellKeyString(s.cell)), s.reason]);
 
 const PRICES: Array<[number, number]> = [
   [0, 600],
@@ -56,6 +56,23 @@ describe('selectCandidates (spec §6.7)', () => {
       [1, 'top_n'],
       [3, 'top_n'],
       [2, 'top_n'], // 400 tie: index 1 before 3
+    ]);
+  });
+
+  it('pins the generation-order tie-break: five equal-price cells keep ascending index, not reversed or shuffled', () => {
+    // 7 departure days × 1 night; prices 5,3,3,3,3,3,1 are non-monotone, so only a correct (price, index)
+    // comparator yields 6, 1, 2, 3.
+    const seven = generateCells(
+      space({ o: ['LHR'], d: ['JFK'], from: '2027-03-01', to: '2027-03-07', min: 7, max: 7 }),
+    );
+    const prices = [5, 3, 3, 3, 3, 3, 1];
+    const discovery = new Map<string, RollUp>();
+    seven.forEach((c, i) => {
+      discovery.set(cellKeyString(c), { status: 'priced', reason: null, minPence: prices[i] ?? 0 });
+    });
+    const r = selectCandidates(policy({ topN: 4 }), seven, discovery, true);
+    expect(r.map((x) => seven.findIndex((c) => cellKeyString(c) === cellKeyString(x.cell)))).toEqual([
+      6, 1, 2, 3,
     ]);
   });
 
@@ -435,6 +452,70 @@ describe('selectCandidates (spec §6.7)', () => {
         { numRuns: 500 },
       );
     });
+  });
+
+  it('property: matches an independent reference (sort by price then index, caps, ceiling) without alwaysInclude', () => {
+    const big = generateCells(
+      space({ o: ['LHR', 'LGW'], d: ['JFK'], from: '2027-03-01', to: '2027-03-04', min: 7, max: 8 }),
+    );
+    const arbCase = fc.record({
+      maxCells: fc.integer({ min: 0, max: 8 }),
+      topN: fc.integer({ min: 0, max: 8 }),
+      ceiling: fc.option(fc.integer({ min: 0, max: 1_000 }), { nil: undefined }),
+      perDate: fc.option(fc.integer({ min: 1, max: 3 }), { nil: undefined }),
+      // Few distinct prices so ties are common.
+      prices: fc.array(
+        fc.option(
+          fc.integer({ min: 0, max: 4 }).map((n) => n * 250),
+          { nil: null },
+        ),
+        {
+          minLength: big.length,
+          maxLength: big.length,
+        },
+      ),
+    });
+    fc.assert(
+      fc.property(arbCase, (c) => {
+        const topN = Math.min(c.topN, c.maxCells);
+        const pol = policy({
+          maxCells: c.maxCells,
+          topN,
+          ...(c.ceiling === undefined ? {} : { priceCeilingPence: c.ceiling }),
+          ...(c.perDate === undefined ? {} : { perDepartureDateBest: c.perDate }),
+        });
+        const discovery = new Map<string, RollUp>();
+        const entries: Array<{ i: number; p: number }> = [];
+        big.forEach((cell, i) => {
+          const p = c.prices[i];
+          if (p === null || p === undefined) return;
+          discovery.set(cellKeyString(cell), { status: 'priced', reason: null, minPence: p });
+          entries.push({ i, p });
+        });
+        // Reference: order the priced cells, then walk once with two phases.
+        const order = [...entries].sort((x, y) => (x.p === y.p ? x.i - y.i : x.p - y.p));
+        const expected: Array<[number, string]> = [];
+        const perDate = new Map<string, number>();
+        let tops = 0;
+        for (const e of order) {
+          const cell = big[e.i];
+          if (cell === undefined) throw new Error('fixture index');
+          const room =
+            expected.length < c.maxCells &&
+            (c.perDate === undefined || (perDate.get(cell.departureDate) ?? 0) < c.perDate);
+          let why: string | null = null;
+          if (tops < topN) {
+            if (room) why = 'top_n';
+          } else if (c.ceiling !== undefined && e.p <= c.ceiling && room) why = 'ceiling';
+          if (why === null) continue;
+          if (why === 'top_n') tops += 1;
+          perDate.set(cell.departureDate, (perDate.get(cell.departureDate) ?? 0) + 1);
+          expected.push([e.i, why]);
+        }
+        expect(picks(selectCandidates(pol, big, discovery, true), big)).toEqual(expected);
+      }),
+      { numRuns: 500 },
+    );
   });
 
   it('is deterministic: the same inputs give the same output', () => {

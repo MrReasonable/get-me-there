@@ -9,7 +9,14 @@ const SKIP_RANK: Record<SkipReason, number> = {
   not_selected: 3,
 };
 const CABIN_NOT_OFFERED: NoDataReason = 'cabin-not-offered';
-const PARTIAL_EXPANSION = 'partial-expansion';
+/**
+ * Roll-up and priced-outcome reason meaning "some price came from a truncated expansion". WP7 writes it
+ * on priced outcomes and `rollUp` carries it up; exported so no writer spells it differently
+ * (skip reasons are snake_case, this one is hyphenated). Not a closed union: tests use `offers-dropped:N`.
+ */
+export const PARTIAL_EXPANSION = 'partial-expansion';
+/** Roll-up reason for an `error` cell whose error outcomes disagree on their reason (spec §6.6). */
+export const MIXED_ERROR_REASON = 'mixed';
 
 function isSkipReason(r: string | null): r is SkipReason {
   return r !== null && Object.hasOwn(SKIP_RANK, r);
@@ -67,7 +74,7 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
     const [only] = reasons;
     return {
       status: 'error',
-      reason: reasons.size === 1 && only !== undefined ? only : 'mixed',
+      reason: reasons.size === 1 && only !== undefined ? only : MIXED_ERROR_REASON,
       minPence: null,
     };
   }
@@ -156,6 +163,9 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
     const partial = a.reason === PARTIAL_EXPANSION || b.reason === PARTIAL_EXPANSION;
     return partial ? { ...source, reason: PARTIAL_EXPANSION } : source;
   }
-  const reasons = [a.reason, b.reason].flatMap((r) => (r === null ? [] : [r])).sort();
-  return { ...a, reason: reasons[0] ?? null };
+  // why: return the input that supplies the chosen reason whole, so `reason`, `lastError`, `fetchedAt`
+  // and `attempts` always describe the same attempt (the sort is stable, so a tie keeps `a`).
+  const named = [a, b].flatMap((o) => (o.reason === null ? [] : [{ o, r: o.reason }]));
+  named.sort((x, y) => (x.r < y.r ? -1 : x.r > y.r ? 1 : 0));
+  return named[0]?.o ?? a;
 }

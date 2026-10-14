@@ -61,6 +61,7 @@ const VARIANTS: O[] = [
   notOffered(),
   o('error', { reason: 'upstream' }),
   o('error', { reason: 'parse' }),
+  o('error'), // an error with no reason: mixes with a named reason as 'mixed'
   skipped('budget'),
   skipped('provider_disabled'),
   skipped('departed'),
@@ -178,13 +179,13 @@ describe('rollUp precedence (spec §6.6)', () => {
       if (prefix.length < 3) for (const v of VARIANTS) walk([...prefix, v]);
     };
     walk([]);
-    expect(cases).toBe(1 + 12 + 144 + 1728);
+    expect(cases).toBe(1 + 13 + 169 + 2197);
   });
 
   const arbOutcome: fc.Arbitrary<O> = fc.oneof(
     fc.constantFrom<CellOutcomeStatus>('not_run', 'empty', 'no_data').map((s) => o(s)),
     fc.constant(null).map(notOffered),
-    fc.constantFrom('upstream', 'parse', 'network').map((reason) => o('error', { reason })),
+    fc.constantFrom(null, 'upstream', 'parse', 'network').map((reason) => o('error', { reason })),
     fc
       .tuple(
         fc.integer({ min: 0, max: 1_000_000 }),
@@ -393,8 +394,21 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
     if (rankOf(a.status) !== rankOf(b.status)) return rankOf(a.status) > rankOf(b.status) ? a : b;
     if (a.status === 'priced' && a.minPence !== null && b.minPence !== null && b.minPence < a.minPence)
       return b;
+    if (a.status !== 'priced' && a.reason !== null && b.reason !== null && b.reason < a.reason) return b;
+    if (a.status !== 'priced' && a.reason === null && b.reason !== null) return b;
     return a;
   };
+
+  it('two errors: the input supplying the smaller reason is returned whole (reason and lastError stay together)', () => {
+    const a = m('error', null, 'upstream', { lastError: 'timed out', attempts: 1 });
+    const b = m('error', null, 'parse', { lastError: 'bad body', attempts: 2 });
+    expect(mergeWithinProvider(a, b)).toEqual(b);
+    expect(mergeWithinProvider(b, a)).toEqual(b);
+    // a null reason loses to a named one, and a full tie keeps `a`
+    const none = m('error', null, null, { lastError: 'no reason' });
+    expect(mergeWithinProvider(none, b)).toEqual(b);
+    expect(mergeWithinProvider(none, { ...none, attempts: 9 })).toEqual(none);
+  });
 
   it('property: a fresh error against a reused priced, empty or no_data outcome keeps the reused one whole', () => {
     const reusedStrong = fc

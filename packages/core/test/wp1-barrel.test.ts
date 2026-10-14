@@ -28,3 +28,10 @@ describe('@gmt/core barrel exports WP1', () => {
     expect(typeof exported[name]).toBe('function');
   });
 });
+
+describe('@gmt/core barrel exports the roll-up reason literals', () => {
+  // why: WP7 writes and WP3/WP9 read these strings; pinning them stops a writer spelling one differently.
+  it('PARTIAL_EXPANSION and MIXED_ERROR_REASON', () => {
+    expect([core.PARTIAL_EXPANSION, core.MIXED_ERROR_REASON]).toEqual(['partial-expansion', 'mixed']);
+  });
+});
