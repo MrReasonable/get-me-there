@@ -1,9 +1,13 @@
 import type {
+  AlertEvent,
+  AlertRuleType,
   Cabin,
   CellOutcomeStatus,
   ErrorReason,
   ExecutionStatus,
+  OperatorMessageKind,
   ProviderId,
+  ResultBasis,
   SelectionReason,
   SkipReason,
   SourceKind,
@@ -91,3 +95,27 @@ export const TERMINAL_STATUSES = [
   'empty',
   'no_data',
 ] as const satisfies readonly CellOutcomeStatus[];
+
+export const ALERT_RULE_TYPES = [
+  'absolute',
+  'dropPct',
+  'dropAbs',
+] as const satisfies readonly AlertRuleType[];
+export const RESULT_BASES = ['verified', 'calendar'] as const satisfies readonly ResultBasis[];
+export const ALERT_EVENT_STATUSES = ['sent', 'failed', 'suppressed'] as const satisfies ReadonlyArray<
+  AlertEvent['status']
+>;
+export const OPERATOR_MESSAGE_KINDS = [
+  'paused_budget',
+  'paused_error',
+  'skipped_budget',
+  'skipped_confirm',
+  'skipped_window',
+  'skipped_missed',
+  'interrupted',
+  'provider_disabled',
+  'provider_capped',
+  'parity_break',
+  'alerts_calendar_only',
+  'crash_loop',
+] as const satisfies readonly OperatorMessageKind[];

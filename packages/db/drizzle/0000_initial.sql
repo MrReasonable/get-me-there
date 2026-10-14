@@ -17,6 +17,48 @@ CREATE TABLE `airports` (
 );
 --> statement-breakpoint
 CREATE INDEX `airports_metro_idx` ON `airports` (`metro`);--> statement-breakpoint
+CREATE TABLE `alert_events` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`rule_id` text NOT NULL,
+	`identity_key` text NOT NULL,
+	`observation_id` integer,
+	`calendar_price_id` integer,
+	`dedup_key` text NOT NULL,
+	`fired_at` text NOT NULL,
+	`status` text NOT NULL,
+	`reason` text,
+	`payload_json` text NOT NULL,
+	FOREIGN KEY (`rule_id`) REFERENCES `alert_rules`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`observation_id`) REFERENCES `price_observations`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`calendar_price_id`) REFERENCES `calendar_prices`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "alert_events_status_ck" CHECK(status IN ('sent', 'failed', 'suppressed')),
+	CONSTRAINT "alert_events_fired_ck" CHECK(fired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `alert_events_rule_dedup_idx` ON `alert_events` (`rule_id`,`dedup_key`,`fired_at`);--> statement-breakpoint
+CREATE INDEX `alert_events_rule_identity_idx` ON `alert_events` (`rule_id`,`identity_key`,`fired_at`);--> statement-breakpoint
+CREATE TABLE `alert_rules` (
+	`id` text PRIMARY KEY NOT NULL,
+	`definition_id` text NOT NULL,
+	`type` text NOT NULL,
+	`threshold_pence` integer,
+	`pct` integer,
+	`basis` text NOT NULL,
+	`require_all_verified` integer,
+	`cooldown_hours` integer DEFAULT 336 NOT NULL,
+	`enabled` integer NOT NULL,
+	`deleted_at` text,
+	FOREIGN KEY (`definition_id`) REFERENCES `search_definitions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "alert_rules_type_ck" CHECK(type IN ('absolute', 'dropPct', 'dropAbs')),
+	CONSTRAINT "alert_rules_basis_ck" CHECK(basis IN ('verified', 'calendar')),
+	CONSTRAINT "alert_rules_threshold_ck" CHECK(threshold_pence IS NULL OR (typeof(threshold_pence) = 'integer' AND threshold_pence >= 0)),
+	CONSTRAINT "alert_rules_pct_ck" CHECK(pct IS NULL OR (typeof(pct) = 'integer' AND pct >= 0)),
+	CONSTRAINT "alert_rules_cooldown_ck" CHECK(typeof(cooldown_hours) = 'integer' AND cooldown_hours >= 0),
+	CONSTRAINT "alert_rules_require_ck" CHECK(require_all_verified IS NULL OR require_all_verified IN (0, 1)),
+	CONSTRAINT "alert_rules_enabled_ck" CHECK(enabled IN (0, 1)),
+	CONSTRAINT "alert_rules_deleted_ck" CHECK(deleted_at IS NULL OR deleted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
 CREATE TABLE `calendar_prices` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`execution_id` text NOT NULL,
@@ -162,6 +204,21 @@ CREATE TABLE `itineraries` (
 	CONSTRAINT "itineraries_first_seen_ck" CHECK(first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
 --> statement-breakpoint
+CREATE TABLE `operator_notifications` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`kind` text NOT NULL,
+	`execution_id` text,
+	`definition_id` text NOT NULL,
+	`sent_at` text NOT NULL,
+	`status` text NOT NULL,
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`definition_id`) REFERENCES `search_definitions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "operator_notifications_kind_ck" CHECK(kind IN ('paused_budget', 'paused_error', 'skipped_budget', 'skipped_confirm', 'skipped_window', 'skipped_missed', 'interrupted', 'provider_disabled', 'provider_capped', 'parity_break', 'alerts_calendar_only', 'crash_loop')),
+	CONSTRAINT "operator_notifications_status_ck" CHECK(status IN ('sent', 'failed')),
+	CONSTRAINT "operator_notifications_sent_ck" CHECK(sent_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `operator_notifications_dedup_idx` ON `operator_notifications` (`kind`,`definition_id`,`execution_id`);--> statement-breakpoint
 CREATE TABLE `price_observations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`offer_id` integer NOT NULL,
@@ -239,6 +296,21 @@ CREATE TABLE `provider_requests` (
 --> statement-breakpoint
 CREATE INDEX `provider_requests_provider_idx` ON `provider_requests` (`provider_id`,`started_at`,`outcome`,`billable`);--> statement-breakpoint
 CREATE INDEX `provider_requests_execution_idx` ON `provider_requests` (`execution_id`);--> statement-breakpoint
+CREATE TABLE `route_price_history` (
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`cabin` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`date` text NOT NULL,
+	`lowest_price_pence` integer NOT NULL,
+	`fetched_at` text NOT NULL,
+	PRIMARY KEY(`origin`, `destination`, `cabin`, `provider_id`, `date`),
+	CONSTRAINT "route_price_history_price_ck" CHECK(typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0),
+	CONSTRAINT "route_price_history_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first', 'unknown')),
+	CONSTRAINT "route_price_history_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "route_price_history_fetched_ck" CHECK(fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
 CREATE TABLE `search_cells` (
 	`execution_id` text NOT NULL,
 	`origin` text NOT NULL,

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "484d790d-aa7b-4406-9795-efba42f740fb",
+  "id": "7db2717a-e17b-443b-8310-b7c6a1b51928",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -113,6 +113,282 @@
         "airports_tz_ck": {
           "name": "airports_tz_ck",
           "value": "length(tz) > 0"
+        }
+      }
+    },
+    "alert_events": {
+      "name": "alert_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "rule_id": {
+          "name": "rule_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identity_key": {
+          "name": "identity_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observation_id": {
+          "name": "observation_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "calendar_price_id": {
+          "name": "calendar_price_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dedup_key": {
+          "name": "dedup_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fired_at": {
+          "name": "fired_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "alert_events_rule_dedup_idx": {
+          "name": "alert_events_rule_dedup_idx",
+          "columns": [
+            "rule_id",
+            "dedup_key",
+            "fired_at"
+          ],
+          "isUnique": false
+        },
+        "alert_events_rule_identity_idx": {
+          "name": "alert_events_rule_identity_idx",
+          "columns": [
+            "rule_id",
+            "identity_key",
+            "fired_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "alert_events_rule_id_alert_rules_id_fk": {
+          "name": "alert_events_rule_id_alert_rules_id_fk",
+          "tableFrom": "alert_events",
+          "tableTo": "alert_rules",
+          "columnsFrom": [
+            "rule_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "alert_events_observation_id_price_observations_id_fk": {
+          "name": "alert_events_observation_id_price_observations_id_fk",
+          "tableFrom": "alert_events",
+          "tableTo": "price_observations",
+          "columnsFrom": [
+            "observation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "alert_events_calendar_price_id_calendar_prices_id_fk": {
+          "name": "alert_events_calendar_price_id_calendar_prices_id_fk",
+          "tableFrom": "alert_events",
+          "tableTo": "calendar_prices",
+          "columnsFrom": [
+            "calendar_price_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "alert_events_status_ck": {
+          "name": "alert_events_status_ck",
+          "value": "status IN ('sent', 'failed', 'suppressed')"
+        },
+        "alert_events_fired_ck": {
+          "name": "alert_events_fired_ck",
+          "value": "fired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        }
+      }
+    },
+    "alert_rules": {
+      "name": "alert_rules",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "definition_id": {
+          "name": "definition_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "threshold_pence": {
+          "name": "threshold_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pct": {
+          "name": "pct",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "basis": {
+          "name": "basis",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "require_all_verified": {
+          "name": "require_all_verified",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cooldown_hours": {
+          "name": "cooldown_hours",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 336
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "alert_rules_definition_id_search_definitions_id_fk": {
+          "name": "alert_rules_definition_id_search_definitions_id_fk",
+          "tableFrom": "alert_rules",
+          "tableTo": "search_definitions",
+          "columnsFrom": [
+            "definition_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "alert_rules_type_ck": {
+          "name": "alert_rules_type_ck",
+          "value": "type IN ('absolute', 'dropPct', 'dropAbs')"
+        },
+        "alert_rules_basis_ck": {
+          "name": "alert_rules_basis_ck",
+          "value": "basis IN ('verified', 'calendar')"
+        },
+        "alert_rules_threshold_ck": {
+          "name": "alert_rules_threshold_ck",
+          "value": "threshold_pence IS NULL OR (typeof(threshold_pence) = 'integer' AND threshold_pence >= 0)"
+        },
+        "alert_rules_pct_ck": {
+          "name": "alert_rules_pct_ck",
+          "value": "pct IS NULL OR (typeof(pct) = 'integer' AND pct >= 0)"
+        },
+        "alert_rules_cooldown_ck": {
+          "name": "alert_rules_cooldown_ck",
+          "value": "typeof(cooldown_hours) = 'integer' AND cooldown_hours >= 0"
+        },
+        "alert_rules_require_ck": {
+          "name": "alert_rules_require_ck",
+          "value": "require_all_verified IS NULL OR require_all_verified IN (0, 1)"
+        },
+        "alert_rules_enabled_ck": {
+          "name": "alert_rules_enabled_ck",
+          "value": "enabled IN (0, 1)"
+        },
+        "alert_rules_deleted_ck": {
+          "name": "alert_rules_deleted_ck",
+          "value": "deleted_at IS NULL OR deleted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     },
@@ -1010,6 +1286,108 @@
         }
       }
     },
+    "operator_notifications": {
+      "name": "operator_notifications",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "execution_id": {
+          "name": "execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "definition_id": {
+          "name": "definition_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "operator_notifications_dedup_idx": {
+          "name": "operator_notifications_dedup_idx",
+          "columns": [
+            "kind",
+            "definition_id",
+            "execution_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "operator_notifications_execution_id_search_executions_id_fk": {
+          "name": "operator_notifications_execution_id_search_executions_id_fk",
+          "tableFrom": "operator_notifications",
+          "tableTo": "search_executions",
+          "columnsFrom": [
+            "execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "operator_notifications_definition_id_search_definitions_id_fk": {
+          "name": "operator_notifications_definition_id_search_definitions_id_fk",
+          "tableFrom": "operator_notifications",
+          "tableTo": "search_definitions",
+          "columnsFrom": [
+            "definition_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "operator_notifications_kind_ck": {
+          "name": "operator_notifications_kind_ck",
+          "value": "kind IN ('paused_budget', 'paused_error', 'skipped_budget', 'skipped_confirm', 'skipped_window', 'skipped_missed', 'interrupted', 'provider_disabled', 'provider_capped', 'parity_break', 'alerts_calendar_only', 'crash_loop')"
+        },
+        "operator_notifications_status_ck": {
+          "name": "operator_notifications_status_ck",
+          "value": "status IN ('sent', 'failed')"
+        },
+        "operator_notifications_sent_ck": {
+          "name": "operator_notifications_sent_ck",
+          "value": "sent_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        }
+      }
+    },
     "price_observations": {
       "name": "price_observations",
       "columns": {
@@ -1475,6 +1853,93 @@
         "provider_requests_path_ck": {
           "name": "provider_requests_path_ck",
           "value": "endpoint_path GLOB '/*' AND endpoint_path NOT GLOB '//*' AND endpoint_path NOT GLOB '*[^A-Za-z0-9._~/-]*' AND length(endpoint_path) <= 200"
+        }
+      }
+    },
+    "route_price_history": {
+      "name": "route_price_history",
+      "columns": {
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "destination": {
+          "name": "destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cabin": {
+          "name": "cabin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lowest_price_pence": {
+          "name": "lowest_price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "route_price_history_origin_destination_cabin_provider_id_date_pk": {
+          "columns": [
+            "origin",
+            "destination",
+            "cabin",
+            "provider_id",
+            "date"
+          ],
+          "name": "route_price_history_origin_destination_cabin_provider_id_date_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "route_price_history_price_ck": {
+          "name": "route_price_history_price_ck",
+          "value": "typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0"
+        },
+        "route_price_history_cabin_ck": {
+          "name": "route_price_history_cabin_ck",
+          "value": "cabin IN ('economy', 'premium_economy', 'business', 'first', 'unknown')"
+        },
+        "route_price_history_provider_ck": {
+          "name": "route_price_history_provider_ck",
+          "value": "provider_id IN ('travelpayouts', 'searchapi', 'fixture')"
+        },
+        "route_price_history_fetched_ck": {
+          "name": "route_price_history_fetched_ck",
+          "value": "fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     },
