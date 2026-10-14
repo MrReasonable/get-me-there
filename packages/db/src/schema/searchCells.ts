@@ -1,6 +1,7 @@
 import { check, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { OUTCOME_STATUSES, SELECTION_REASONS } from '../internal/enums.js';
 import { isBool, isNullOrInteger, isOneOf } from './checks.js';
+import { priceObservations } from './priceObservations.js';
 import { searchExecutions } from './searchExecutions.js';
 
 /** Spec §7 `search_cells` with the stored roll-ups (spec §6.6). NULL status = no provider or no outcome rows yet. `best_observation_id` gains its FK in Task 3.13. */
@@ -22,7 +23,7 @@ export const searchCells = sqliteTable(
     verificationStatus: text('verification_status'),
     verificationReason: text('verification_reason'),
     verificationMinPence: integer('verification_min_pence'),
-    bestObservationId: integer('best_observation_id'),
+    bestObservationId: integer('best_observation_id').references(() => priceObservations.id),
   },
   (t) => [
     primaryKey({ columns: [t.executionId, t.origin, t.destination, t.departureDate, t.returnDate] }),

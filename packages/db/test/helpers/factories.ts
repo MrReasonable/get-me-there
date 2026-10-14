@@ -10,6 +10,7 @@ import {
   type Execution,
   type ExecutionBudget,
   type ExecutionStatus,
+  type NormalisedItinerary,
   type ProviderLimits,
   type SearchDefinition,
 } from '@gmt/core';
@@ -17,7 +18,7 @@ import type { BudgetConfig } from '../../src/budgetConfig.js';
 import type { Db } from '../../src/client.js';
 import { DefinitionsRepo } from '../../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../../src/repositories/executions.js';
-import type { CalendarPriceInsert, ExecutionCreateInput } from '../../src/types.js';
+import type { CalendarPriceInsert, ExecutionCreateInput, VerifiedCellWrite } from '../../src/types.js';
 import { T0 } from './db.js';
 
 /** One provider's guard entry. Defaults: a 40usd-shaped subscription (rate 0, no fee). */
@@ -235,6 +236,83 @@ export function calendarPrice(c: CellKey, over: Partial<CalendarPriceInsert> = {
     maxAgeHours: 48,
     vendorLink: null,
     reusedFromExecutionId: null,
+    ...over,
+  };
+}
+
+/** A nonstop round trip on the worked example; `hash` stands in for WP2's sha256 hex. */
+export function itinerary(hash = 'a'.repeat(64), c: CellKey = cell(), flight = 117): NormalisedItinerary {
+  return {
+    hash,
+    origin: c.origin,
+    destination: c.destination,
+    departureDate: c.departureDate,
+    returnDate: c.returnDate,
+    nights: withNights(c).nights,
+    outbound: [
+      {
+        marketingCarrier: 'BA',
+        flightNumber: flight,
+        from: c.origin,
+        to: c.destination,
+        departLocal: `${c.departureDate}T08:25`,
+        arriveLocal: `${c.departureDate}T11:20`,
+        durationMinutes: 475,
+      },
+    ],
+    inbound: [
+      {
+        marketingCarrier: 'BA',
+        flightNumber: flight - 5,
+        from: c.destination,
+        to: c.origin,
+        departLocal: `${c.returnDate}T18:30`,
+        arriveLocal: `${c.returnDate}T06:35`,
+        durationMinutes: 425,
+      },
+    ],
+    outboundMinutes: 475,
+    inboundMinutes: 425,
+    stopsOut: 0,
+    stopsIn: 0,
+    layovers: [],
+    airportChange: false,
+    marketingCarriers: ['BA'],
+  };
+}
+
+export type ObservationWrite = VerifiedCellWrite['itineraries'][number]['offers'][number]['observation'];
+
+/** One SearchApi observation's fields as normalisation yields them (GBP, unconverted). */
+export function observationWrite(over: Partial<ObservationWrite> = {}): ObservationWrite {
+  return {
+    provenance: {
+      providerId: 'searchapi',
+      sourceKind: 'scraped-search',
+      fetchedAt: T0,
+      maxAgeHours: 0,
+      fx: { converted: false },
+      pointOfSale: 'GB',
+      cabin: 'economy',
+    },
+    pricePence: 41_200,
+    priceNativeMinor: 41_200,
+    currencyNative: 'GBP',
+    fx: { converted: false },
+    taxesIncluded: true,
+    selfTransfer: false,
+    segmentCabins: ['economy', 'economy'],
+    baggage: { cabinBag: 'included', checkedBags: 1 },
+    fareConditions: null,
+    booking: {
+      kind: 'post',
+      url: 'https://www.google.com/travel/clk/f',
+      postData: 'u=<booking_request:0>',
+      host: 'www.google.com',
+    },
+    bookingExpiresAt: null,
+    suppliedFields: ['segments', 'segmentTimes', 'segmentCabins', 'price', 'seller', 'baggage'],
+    partialExpansion: false,
     ...over,
   };
 }

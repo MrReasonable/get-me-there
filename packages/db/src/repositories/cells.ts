@@ -37,7 +37,8 @@ import { insertCalendarPrice, validateCalendarPrice } from '../internal/priceRow
 import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
 import { storeRollUps } from '../internal/rollUps.js';
 import { assertErrorReason, assertInt, RowRejected } from '../internal/validate.js';
-import type { CalendarPriceInsert, RepoOptions, TileWrite } from '../types.js';
+import type { CalendarPriceInsert, RepoOptions, TileWrite, VerifiedCellWrite } from '../types.js';
+import { ItinerariesRepo } from './itineraries.js';
 
 interface CellDbRow {
   origin: string;
@@ -634,6 +635,98 @@ export class CellsRepo {
         storeRollUps(this.db, executionId, 'verification');
       }
       return changes;
+    });
+  }
+
+  /**
+   * Spec §7 atomic unit: one verified cell's itineraries, segments, offers, observations, outcome, best_observation_id
+   * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest observation written (ruling 13).
+   */
+  writeVerifiedCell(executionId: string, providerId: ProviderId, w: VerifiedCellWrite): void {
+    const key = cellKeyString(w.cell);
+    const o = w.outcome;
+    const offers = w.itineraries.flatMap((i) => i.offers.map((x) => ({ ...x, itinerary: i.itinerary })));
+    if (cellKeyString(o) !== key)
+      throw new RowRejected('cell-mismatch', `outcome is for ${cellKeyString(o)}, not ${key}`);
+    if (o.status !== 'priced' && o.status !== 'empty' && o.status !== 'error')
+      throw new RowRejected('verified-status', `a verified cell is priced, empty or error; got ${o.status}`);
+    if (o.status === 'priced' && offers.length === 0)
+      throw new RowRejected('priced-needs-offer', `${key} is priced with no offer (spec §5.4)`);
+    if (o.status !== 'priced' && offers.length > 0)
+      throw new RowRejected('offers-need-priced', `${key} has offers but status ${o.status}`);
+    if (o.status === 'error') assertErrorReason(o.reason);
+    else {
+      assertOutcomeProvenance(o);
+      assertOutcomeReason(o);
+    }
+    for (const x of offers) {
+      if (cellKeyString(x.itinerary) !== key)
+        throw new RowRejected(
+          'cell-mismatch',
+          `itinerary ${x.itinerary.hash} is for ${cellKeyString(x.itinerary)}, not ${key}`,
+        );
+      if (x.offer.itineraryHash !== x.itinerary.hash || x.offer.providerId !== providerId)
+        throw new RowRejected(
+          'offer-mismatch',
+          `offer does not belong to itinerary ${x.itinerary.hash} from ${providerId}`,
+        );
+      const p = x.observation.provenance;
+      if (
+        p.providerId !== providerId ||
+        p.cabin !== o.cabin ||
+        p.pointOfSale !== o.pointOfSale ||
+        p.sourceKind !== o.sourceKind
+      )
+        throw new RowRejected(
+          'outcome-price-mismatch',
+          `${key} observation provenance differs from its outcome (ruling 5)`,
+        );
+    }
+    if (offers.length > 0) {
+      const cheapest = Math.min(...offers.map((x) => x.observation.pricePence));
+      const oldest = offers.map((x) => x.observation.provenance.fetchedAt).sort()[0];
+      if (o.minPence !== cheapest)
+        throw new RowRejected(
+          'min-pence',
+          `${key} min_pence ${String(o.minPence)} differs from the cheapest offer ${cheapest}`,
+        );
+      if (o.fetchedAt !== oldest)
+        throw new RowRejected(
+          'outcome-price-mismatch',
+          `${key} outcome fetchedAt must be its oldest observation's (spec §2)`,
+        );
+    }
+    const itineraries = new ItinerariesRepo(this.db, this.clock, this.opts);
+    this.db.transaction(() => {
+      let best: { id: number; pence: number } | null = null;
+      for (const x of offers) {
+        itineraries.upsertItinerary(x.itinerary);
+        const offerId = itineraries.upsertOffer(x.offer);
+        const id = itineraries.insertObservation({ ...x.observation, offerId, executionId });
+        if (best === null || x.observation.pricePence < best.pence)
+          best = { id, pence: x.observation.pricePence };
+      }
+      const existing = this.current(executionId, w.cell, 'verification', providerId);
+      const incoming: CellOutcome = {
+        ...existing,
+        ...o,
+        minPence: best?.pence ?? null,
+        attempts: existing.attempts,
+        reusedFromExecutionId: null,
+      };
+      storeOutcome(this.db, nextOutcome(existing, incoming, o.status === 'error'));
+      if (best !== null) {
+        this.db.raw
+          .prepare(
+            `UPDATE search_cells SET best_observation_id = @bestId WHERE ${CELL_WHERE} AND (best_observation_id IS NULL OR (SELECT price_pence FROM price_observations WHERE id = search_cells.best_observation_id) > @bestPence)`,
+          )
+          .run({ ...keyParams(executionId, w.cell), bestId: best.id, bestPence: best.pence });
+      }
+      storeRollUps(this.db, executionId, 'verification', [w.cell]);
+      if (o.status !== 'error')
+        this.db.raw
+          .prepare('UPDATE search_executions SET auto_resume_count = 0 WHERE id = ?')
+          .run(executionId);
     });
   }
 }
