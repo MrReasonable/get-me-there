@@ -7,6 +7,7 @@ import {
   type Clock,
   cellKeyString,
   type IsoDate,
+  mergeWithinProvider,
   type NoDataReason,
   type ProviderId,
   type RollUp,
@@ -29,10 +30,11 @@ import {
   toCellKey,
   toOutcome,
 } from '../internal/outcomeRow.js';
+import { insertCalendarPrice, validateCalendarPrice } from '../internal/priceRow.js';
 import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
 import { storeRollUps } from '../internal/rollUps.js';
 import { assertErrorReason, assertInt, RowRejected } from '../internal/validate.js';
-import type { RepoOptions } from '../types.js';
+import type { CalendarPriceInsert, RepoOptions, TileWrite } from '../types.js';
 
 interface CellDbRow {
   origin: string;
@@ -98,6 +100,81 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
   // why: spec §3 reason never holds a vendor message; not_run carries none (prov-r3-003).
   if (status === 'not_run' && reason !== null)
     throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
+}
+
+type Incoming = TileWrite['outcomes'][number];
+const SELECT_OUTCOME_SQL = `SELECT * FROM cell_outcomes WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
+const UPDATE_OUTCOME_SQL = `
+UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = @lastError, fetched_at = @fetchedAt, min_pence = @minPence,
+  cabin = @cabin, point_of_sale = @pointOfSale, source_kind = @sourceKind, attempts = @attempts, reused_from_execution_id = @reusedFromExecutionId
+WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
+const DELETE_REUSED_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NOT NULL`;
+const TILE_STATUSES = ['priced', 'empty', 'no_data'] as const;
+
+/**
+ * The outcome to store when `incoming` (fresh) meets `existing` (ruling 3, spec §6.6). Over not_run, skipped or a reused
+ * copy the fresh outcome replaces the row (an error never does: it only counts an attempt); fresh on fresh goes through
+ * core's mergeWithinProvider. Attempts are the existing count plus one when this pass failed.
+ */
+function nextOutcome(existing: CellOutcome, incoming: CellOutcome, failedPass: boolean): CellOutcome {
+  const attempts = existing.attempts + (failedPass ? 1 : 0);
+  if (existing.status === 'not_run' || existing.status === 'skipped') return { ...incoming, attempts };
+  // why: an error never displaces a stronger result, reused or fresh (plan merge rule, prov-r2-003): the existing outcome
+  // stays, with its reused price row, and only the attempt is counted. Decided here so it does not hang on core's reading.
+  if (incoming.status === 'error' && existing.status !== 'error') return { ...existing, attempts };
+  if (existing.reusedFromExecutionId !== null) return { ...incoming, attempts };
+  const merged = mergeWithinProvider(existing, incoming);
+  // why: when the merge keeps an error, the newest vendor message is the useful one; status, reason and minPence stay core's.
+  return {
+    ...merged,
+    attempts,
+    lastError:
+      merged.status === 'error' && incoming.status === 'error' ? incoming.lastError : merged.lastError,
+  };
+}
+
+function storeOutcome(db: Db, o: CellOutcome): void {
+  db.raw.prepare(UPDATE_OUTCOME_SQL).run({
+    ...keyParams(o.executionId, o),
+    stage: o.stage,
+    providerId: o.providerId,
+    status: o.status,
+    reason: o.reason,
+    lastError: o.lastError === null ? null : stripUrlsInText(o.lastError),
+    fetchedAt: o.fetchedAt,
+    minPence: o.minPence,
+    cabin: o.cabin,
+    pointOfSale: o.pointOfSale,
+    sourceKind: o.sourceKind,
+    attempts: o.attempts,
+    reusedFromExecutionId: o.reusedFromExecutionId,
+  });
+}
+
+/**
+ * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:
+ * priced → null | 'partial-expansion', empty → null, no_data → null | 'cabin-not-offered'.
+ */
+function assertOutcomeReason(o: { status: CellOutcomeStatus; reason: string | null } & CellKey): void {
+  const allowed: Partial<Record<CellOutcomeStatus, ReadonlyArray<string | null>>> = {
+    priced: [null, 'partial-expansion'],
+    empty: [null],
+    no_data: [null, 'cabin-not-offered'],
+  };
+  if (!(allowed[o.status] ?? []).includes(o.reason))
+    throw new RowRejected(
+      'outcome-reason',
+      `${cellKeyString(o)} ${o.status} cannot carry reason ${String(o.reason)}`,
+    );
+}
+
+/** Ruling 5: a fetched terminal outcome carries the provenance reuse matches on. */
+function assertOutcomeProvenance(o: Incoming): void {
+  if (o.fetchedAt === null || o.cabin === null || o.pointOfSale === null || o.sourceKind === null)
+    throw new RowRejected(
+      'outcome-provenance',
+      `${cellKeyString(o)} ${o.status} needs fetchedAt, cabin, pointOfSale and sourceKind`,
+    );
 }
 
 /**
@@ -307,5 +384,127 @@ export class CellsRepo {
       out.set(day, list);
     }
     return out;
+  }
+
+  /**
+   * Spec §7 atomic unit: one tile's prices, outcomes and roll-ups. Validation first (a malformed tile writes nothing);
+   * any SQL failure inside rolls the whole tile back.
+   */
+  writeTile(executionId: string, providerId: ProviderId, w: TileWrite): void {
+    assertInt('tileIndex', w.tileIndex);
+    assertInt('discards', w.discards);
+    const prices = new Map<string, CalendarPriceInsert>();
+    for (const p of w.prices) {
+      if (p.providerId !== providerId)
+        throw new RowRejected('provider', `price from ${p.providerId} in a ${providerId} tile`);
+      const key = cellKeyString(p.cell);
+      if (prices.has(key))
+        throw new RowRejected(
+          'in-tile-conflict',
+          `two prices for ${key} in one tile; the engine keeps one per cell (spec §5.6)`,
+        );
+      validateCalendarPrice(p, this.opts.allowSynthetic, true);
+      prices.set(key, p);
+    }
+    const covered = new Set(w.cells.map(cellKeyString));
+    const seen = new Set<string>();
+    for (const o of w.outcomes) {
+      const key = cellKeyString(o);
+      if (!TILE_STATUSES.some((s) => s === o.status))
+        throw new RowRejected(
+          'tile-status',
+          `a tile outcome is priced, empty or no_data; got ${o.status} (errors go through writeTileError)`,
+        );
+      if (!covered.has(key) || seen.has(key))
+        throw new RowRejected('tile-partition', `${key} is outside the tile or repeated`);
+      seen.add(key);
+      assertOutcomeProvenance(o);
+      assertOutcomeReason(o);
+      const price = prices.get(key);
+      if (o.status === 'priced' && price === undefined)
+        throw new RowRejected(
+          'priced-needs-price',
+          `${key} is priced but the tile wrote no price for it (spec §3)`,
+        );
+      if (o.status !== 'priced' && price !== undefined)
+        throw new RowRejected('price-needs-priced', `${key} has a price but its outcome is ${o.status}`);
+      if (price !== undefined) {
+        if (o.minPence !== price.pricePence)
+          throw new RowRejected(
+            'min-pence',
+            `${key} min_pence ${String(o.minPence)} differs from its price ${price.pricePence}`,
+          );
+        if (
+          o.fetchedAt !== price.fetchedAt ||
+          o.cabin !== price.cabin ||
+          o.pointOfSale !== price.pointOfSale ||
+          o.sourceKind !== price.sourceKind
+        ) {
+          throw new RowRejected(
+            'outcome-price-mismatch',
+            `${key} outcome provenance differs from its price row (ruling 5)`,
+          );
+        }
+      }
+    }
+    if (seen.size !== covered.size)
+      throw new RowRejected('tile-partition', 'every covered cell needs exactly one outcome');
+    for (const key of prices.keys())
+      if (!seen.has(key)) throw new RowRejected('price-needs-priced', `${key} has a price but no outcome`);
+    this.db.transaction(() => {
+      for (const o of w.outcomes)
+        this.db.raw.prepare(DELETE_REUSED_PRICE_SQL).run({ ...keyParams(executionId, o), providerId });
+      for (const p of w.prices) insertCalendarPrice(this.db, executionId, p);
+      for (const o of w.outcomes) {
+        const existing = this.current(executionId, o, 'discovery', providerId);
+        const incoming: CellOutcome = {
+          ...existing,
+          ...o,
+          attempts: existing.attempts,
+          reusedFromExecutionId: null,
+        };
+        storeOutcome(this.db, nextOutcome(existing, incoming, false));
+        // why: per cell, so a later failure in the same tile also rolls back roll-ups already stored (test-011 pins it).
+        storeRollUps(this.db, executionId, 'discovery', [o]);
+      }
+      this.db.raw.prepare('UPDATE search_executions SET auto_resume_count = 0 WHERE id = ?').run(executionId);
+    });
+  }
+
+  /** Spec §8.1 "tile-error marks exactly its cells": error with the kind as reason, attempts + 1, merged through core. */
+  writeTileError(
+    executionId: string,
+    providerId: ProviderId,
+    cells: CellKey[],
+    reason: string,
+    lastError: string | null,
+  ): void {
+    assertErrorReason(reason);
+    this.db.transaction(() => {
+      for (const c of cells) {
+        const existing = this.current(executionId, c, 'discovery', providerId);
+        const incoming: CellOutcome = {
+          ...existing,
+          status: 'error',
+          reason,
+          lastError,
+          fetchedAt: null,
+          minPence: null,
+          reusedFromExecutionId: null,
+        };
+        storeOutcome(this.db, nextOutcome(existing, incoming, true));
+      }
+      storeRollUps(this.db, executionId, 'discovery', cells);
+    });
+  }
+
+  /** The current outcome row inside the caller's transaction; a missing seeded row is a rejection. */
+  private current(executionId: string, c: CellKey, stage: Stage, providerId: ProviderId): CellOutcome {
+    const r = this.db.raw
+      .prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL)
+      .get({ ...keyParams(executionId, c), stage, providerId });
+    if (r === undefined)
+      throw new RowRejected('missing', `no seeded ${stage} outcome for ${providerId} at ${cellKeyString(c)}`);
+    return toOutcome(r);
   }
 }
