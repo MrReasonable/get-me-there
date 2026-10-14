@@ -6,6 +6,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/coverage",
+      "!**/reports",
+      "!**/.stryker-tmp",
       "!**/drizzle/meta",
       "!**/pnpm-lock.yaml"
     ]
@@ -18,7 +20,6 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
       "suspicious": {
         "noExplicitAny": "error"
       },

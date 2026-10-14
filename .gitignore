@@ -11,3 +11,6 @@ data/
 packages/providers/fixtures/recorded/**/*.raw.json
 backups/
 *.db*
+reports/
+coverage/
+.stryker-tmp/

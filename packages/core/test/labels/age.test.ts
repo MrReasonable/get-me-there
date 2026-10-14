@@ -81,7 +81,9 @@ describe('formatting', () => {
     expect(formatAgeCompact(u)).toBe('2h ago · age unknown');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 })).toBe('just now · ≤24h');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 1, maxAgeHours: 24 })).toBe('1h ago · ≤24h');
-    expect(formatAgeFull({ kind: 'observed', fetchedHours: 1, observedHours: 1 })).toBe('fetched 1h ago · observed 1h ago');
+    expect(formatAgeFull({ kind: 'observed', fetchedHours: 1, observedHours: 1 })).toBe(
+      'fetched 1h ago · observed 1h ago',
+    );
     expect(formatAgeFull({ kind: 'observed', fetchedHours: 0, observedHours: 0 })).toBe(
       'fetched just now · observed just now',
     );
