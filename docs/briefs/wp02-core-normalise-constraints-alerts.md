@@ -5,7 +5,7 @@ owner: sonnet
 depends_on: [0]
 spec_sections: ["§5.6 (pure parts: carrier canonicalisation, local time, hashing, money, FX flag; the db-touching step is WP7)", "§6.2", "§6.3", "§6.4", "§6.5", "§6.8", "§6.9 (pure parts: dedup, rank, filters, band, search link)", "§5.2 Vendor links", "§9 item 1"]
 reviewers: [code-architect, test-strategy-reviewer, provenance-auditor, product-owner, security-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP2 — `core`: normalisation, hashing, constraints, results, money, alerts
