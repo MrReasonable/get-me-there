@@ -10,7 +10,7 @@ status: draft
 
 # WP3: `@gmt/db`
 
-Revision 3 (2026-10-14): reconciled with spec revision 10, the plan's "Cross-package contracts" (round 2, commit 790d1ea) and the coordinator's rulings on the first core-roster review (1 Critical, 15 High, 33 Medium, 22 Low; every finding addressed, section 11 lists the contract changes this brief codes against before the plan and spec catch up).
+Revision 4 (2026-10-14): reconciled with spec revision 12, the plan's "Cross-package contracts" (round 4) and main at commit 5a0b72f, and the coordinator's rulings on the first and second core-roster reviews (every finding addressed; section 11 lists what the plan has not yet absorbed).
 
 ## 1. Goal
 
@@ -41,7 +41,7 @@ Make `@gmt/db` the only place that touches SQLite: the complete spec §7 schema 
 
 ## 3. Spec sections
 
-- **§7 entire** (revision 10 and the round-2 columns): every table, column, key, index and CHECK; the transaction units; SQLite settings; idempotent migrations with the pre-migration backup; retention; budget windows; `app_lock`; the airports seed with the 5,000-row sanity check and no network.
+- **§7 entire** (revision 12): every table, column, key, index and CHECK; the transaction units; SQLite settings; idempotent migrations with the pre-migration backup; retention; budget windows; `app_lock`; the airports seed with the 5,000-row sanity check and no network.
 - **§5.3 "Cap predicates"**: billed vendors count `outcome IN ('pending','unknown') OR billable = 1`; free vendors count every non-cache row; `global-month` adds each enabled subscription provider's fixed fee once; a cap of 0 refuses when `current + this > 0`, zero-cost calls pass.
 - **§5.3 "Billable rule"**: `searchapi` (and `fixture` under `syntheticAllowed`) billable iff HTTP 200; `travelpayouts` never; cache hits never. FX is never ledgered.
 - **§5.3 "Crash between reserve and finalise"**: `pending` rows older than 10 minutes become `unknown` and stay counted; every ledger row carries `tile_index` (NULL for verification).
@@ -109,6 +109,7 @@ export interface BudgetGuard {
   reserve(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
   recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
   usage(scope: BudgetScope): Usage;
+  recentCalls(providerId: ProviderId, since: IsoDateTime): number;   // upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart
 }
 export type BudgetScope = { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string } | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId } | { kind: 'global-month' };
 export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }   // cap null for a window the plan does not use
@@ -130,10 +131,12 @@ export interface ProviderLimits { monthlyCallCap: number; window: 'month' | 'lif
 // Config.spend { monthlyCapMicroGbp; globalBillingDay; …; childMaxCalls }; Config.providers { travelpayouts: { token; limits } | null; searchapi: { key; plan; trialUsed; limits } | null; fixture: { costMicroGbp } | null }
 export function parseConfig(env: Record<string, string | undefined>, opts: ParseConfigOptions): ConfigResult;
 export function syntheticAllowed(c: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>): boolean;
-export const definitionCreateRequestSchema;  // parses a DefinitionInput (zod object, unknown keys stripped)
-export const estimateSchema; export const bookingSchema;   // api-contract; Estimate = z.infer<typeof estimateSchema>
-export type HistoryPoint = z.infer<typeof historyPointSchema>;          // { at: IsoDateTime; pricePence; provenance }
-export type RouteSeriesPoint = z.infer<typeof routeSeriesPointSchema>;  // { date: IsoDate; pricePence; fetchedAt; providerId; sourceKind }
+export * as apiContract from './api-contract/index.js';   // schemas live only under this namespace (main 5a0b72f)
+// apiContract.definitionShapeSchema   the unrefined definition field shape (no confirmedCostPence): the read-side schema for stored rows and snapshots
+// apiContract.definitionCreateRequestSchema   the refined request schema: API request path only (WP8), never used by db reads
+// apiContract.estimateSchema, apiContract.bookingSchema   Estimate, Booking
+export type { HistoryPoint, RouteSeriesPoint } from './api-contract/index.js';   // top-level inferred types
+// HistoryPoint = { at: IsoDateTime; pricePence; provenance }; RouteSeriesPoint = { date: IsoDate; pricePence; fetchedAt; providerId; sourceKind }
 
 // WP1 (coverage/rollUp.ts)
 export function resolveWindow(w: WindowSpec, todayLondon: IsoDate): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean };   // history's definition scope (ruling 8)
@@ -166,7 +169,7 @@ export interface Airport { iata: Iata; icao: string | null; name: string; city: 
 export interface AirportsDataset { version: string; airports: Array<Omit<Airport, 'source' | 'datasetVersion'>>; metros: Record<string, string[]> }
 export class AirportsRepo { exists(iata): boolean; get(iata): Airport | null; search(q: string, limit: number): Airport[]; metroOf(iata): string | null; airportsOfMetro(code: string): Iata[]; sharedMetro(iatas: Iata[]): string | null; count(): number; upsertAll(dataset: AirportsDataset): void; datasetVersion(): string | null; tzOf(iata): string | null }
 export class FxRepo { rateNano(date: IsoDate, currency: string): number | null; latest(currency: string, maxAgeDays: number, today: IsoDate): { rateNano: number; date: IsoDate; source: string } | null; upsert(rows: Array<{ date: IsoDate; currency: string; rateNano: number; source: string }>): void }
-export class DefinitionsRepo { create(input: DefinitionInput): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
+export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
 export type ExecutionCreateInput = { definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; estimate: Estimate | null; trigger: Execution['trigger']; status: 'pending' | 'running' | (ExecutionStatus & `skipped_${string}`) }
 export type ExecutionPatch = Partial<Pick<Execution, 'stage' | 'resumeAfter' | 'errorText' | 'startedAt' | 'finishedAt' | 'cancelRequested' | 'estimate' | 'snapshot'>>
 export class ExecutionsRepo { create(input): Execution; get(id): Execution | null; listForDefinition(definitionId, opts: { limit: number; includeChildren: boolean }): Execution[]; listByStatus(statuses: ExecutionStatus[]): Execution[]; activeParent(definitionId): Execution | null; activeChild(definitionId, cell: CellKey): Execution | null; latestCompleted(definitionId): Execution | null; claimResume(id): boolean /* also clears cancel_requested and finished_at (dm-004) */; setStatus(id, status, patch?): void; patch(id, patch): void; requestCancel(id): void; bootSweep(bootAt: IsoDateTime): { interrupted: string[] }; incrementAutoResume(id): number; resetAutoResume(id): void; lastScheduledFiring(definitionId): IsoDateTime | null }
@@ -176,7 +179,7 @@ export interface CalendarPriceRow extends CalendarPriceInsert { id: number; exec
 export interface VerifiedCellWrite { cell: CellKey; outcome: TileWrite['outcomes'][number]; itineraries: Array<{ itinerary: NormalisedItinerary; offers: Array<{ offer: Offer; observation: ObservationFields & { provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean } }> }> }   // ruling 13: bestObservationSelector removed; best_observation_id = cheapest observation written
 export interface ReusedCopy { cell: CellKey; outcome: CellOutcome; price: CalendarPriceRow | null }
 export class CellsRepo { seed(executionId, cells: Cell[], discoveryProviders: ProviderId[]): void; seedVerification(executionId, selected: Array<{ cell: CellKey; reason: SelectionReason }>, allCells: CellKey[], verificationProviders: ProviderId[]): void; outcomes(executionId, filter?: { stage?: Stage; providerId?: ProviderId; cells?: CellKey[] }): CellOutcome[]; resumable(executionId, stage, providerId, manual: boolean): CellKey[]; markDeparted(executionId, today: IsoDate): number; markNoData(executionId, stage, providerId, reason: NoDataReason): number; writeTile(executionId, providerId, w: TileWrite): void; writeTileError(executionId, providerId, cells: CellKey[], reason: string, lastError: string | null): void; writeVerifiedCell(executionId, providerId, w: VerifiedCellWrite): void; setOutcome(executionId, cell, stage, providerId, patch: Partial<CellOutcome> & { incrementAttempts?: boolean }): void /* ruling 4: never sets or rewrites priced|empty|no_data */; setOutcomesForProvider(executionId, stage, providerId, from: CellOutcomeStatus[], to: { status: CellOutcomeStatus; reason: string | null }): number /* ruling 4 */; copyReused(executionId, providerId, copies: ReusedCopy[]): void; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage: Stage; providerId: ProviderId; buckets: Buckets; total: number }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }>; hasVerificationOutcomes(executionId): boolean }
-export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[]; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells: CellKey[], newerThan: IsoDateTime): ReusedCopy[]; supersedeReused(executionId, providerId, cell): void; history(origin, destination, cabin, opts: { definitionId?: string }): Array<{ providerId: ProviderId; points: Array<HistoryPoint & { cell: CellKey }> }> /* ruling 8 */; belowVerified(definitionId, cabin, space, thresholdPence): CalendarPriceRow[] }
+export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[]; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells: CellKey[], newerThan: IsoDateTime): ReusedCopy[]; supersedeReused(executionId, providerId, cell): void; history(origin, destination, cabin, opts?: { definitionId?: string }): Array<{ providerId: ProviderId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> /* ruling 8 */; belowVerified(definitionId, cabin, space, thresholdPence): CalendarPriceRow[] }
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
 export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; upsertOffer(offer: Offer): number; insertObservation(obs: Omit<Observation, 'id'>): number; get(hash): (NormalisedItinerary & { firstSeenAt: IsoDateTime }) | null; observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; offerHistory(hash): Array<{ providerId: ProviderId; seller: string; cabin: Cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell, cabin: Cabin): CellOutcome | null /* ruling 9 */; bestObservationForCell(executionId, cell): number | null }
 export class LedgerRepo { countsFor(executionId): { calls: number; costMicroGbp: number; tiles: number; cacheHits: number; perProvider: Array<{ providerId: ProviderId; stage: Stage | null; calls: number; costMicroGbp: number; tiles: number; cacheHits: number }> } /* ruling 7: tiles = first-attempt upstream rows; parity = tiles + cacheHits */; firstAttemptTiles(executionId, providerId): number; sweepPending(olderThan: IsoDateTime): number; pruneCacheHits(olderThan: IsoDateTime, providerIds: ProviderId[]): number }
@@ -195,13 +198,13 @@ export function loadAirportsDataset(dir: string): AirportsDataset;
 export function backupDatabase(dbPath: string, backupsDir: string, opts: { keep: number; clock: Clock; verify?: (file: string) => string }): { file: string };   // verify is a test seam (default: PRAGMA integrity_check)
 ```
 
-Additional exports (additive): `RowRejected` (every repository refusal, `.rule`), `RowCorrupt` (a stored value that fails to parse, `.column`), `MIGRATIONS_DIR`, `AIRPORTS_DATA_DIR`, `AIRPORTS_MIN_ROWS`, `CLAIM_RESUME_SQL`, `HEARTBEAT_INTERVAL_MS`, `LOCK_STALE_AFTER_MS`, `effectiveCallCap`, `schema` (namespace). `monthWindow` stays internal (arch-012).
+Additional exports (additive): `RowRejected` (every repository refusal, `.rule`), `RowCorrupt` (a stored value that fails to parse, `.column`), `MIGRATIONS_DIR`, `AIRPORTS_DATA_DIR`, `AIRPORTS_MIN_ROWS`, `HEARTBEAT_INTERVAL_MS`, `LOCK_STALE_AFTER_MS`, `effectiveCallCap`. `monthWindow`, `CLAIM_RESUME_SQL` and the Drizzle tables stay internal (arch-012, arch-r2-007): no named consumer, and exporting tables would invite queries outside the repositories.
 
 ## 6. Library notes
 
 Verified on 2026-10-14. Versions are the plan's Task 0.1 pins. "Scratch run" means a throwaway install under the session scratchpad with those exact versions on Node 26.10.
 
-- **drizzle-kit 0.31.11 + drizzle-orm 0.45.4** (context7 `/drizzle-team/drizzle-orm-docs`, `sqlite/indexes-constraints.mdx`, `drizzle-kit-generate.mdx`; scratch run). A schema split over files that import each other as `./parent.js` (NodeNext style) generated cleanly with plain `drizzle-kit generate --name=initial`; `check(name, sql.raw('status IN (…)'))` was emitted as `CONSTRAINT "…" CHECK(status IN (…))`; `uniqueIndex(…).on(…).where(sql.raw('is_child = 0 AND status IN (…)'))` was emitted as `CREATE UNIQUE INDEX … WHERE is_child = 0 AND status IN (…)`; re-running with no schema change printed "No schema changes, nothing to migrate" and wrote nothing. So the one command everywhere is `pnpm --filter @gmt/db db:generate` (= `drizzle-kit generate --name=initial`); no tsx fallback and no hand-appended SQL are needed (ruling 16). Layout: `drizzle/0000_initial.sql`, `drizzle/meta/_journal.json`, `drizzle/meta/0000_snapshot.json`. API used: `sqliteTable(name, columns, (t) => [ … ])`, `integer`, `text`, `real`, `primaryKey({ columns })`, `foreignKey({ columns, foreignColumns })`, `.references(() => t.id)`, `index`, `uniqueIndex`, `.where(sql)`, `check`. Repositories use `db.raw.prepare` with explicit SQL; `// why:` the queries are window functions, CTEs, `json_each` and compare-and-set statements reviewers must read; Drizzle owns schema and migration.
+- **drizzle-kit 0.31.11 + drizzle-orm 0.45.4** (context7 `/drizzle-team/drizzle-orm-docs`, `sqlite/indexes-constraints.mdx`, `drizzle-kit-generate.mdx`; scratch run). A schema split over files that import each other as `./parent.js` (NodeNext style) generated cleanly with plain `drizzle-kit generate --name=initial`; `check(name, sql.raw('status IN (…)'))` was emitted as `CONSTRAINT "…" CHECK(status IN (…))`; `uniqueIndex(…).on(…).where(sql.raw('is_child = 0 AND status IN (…)'))` was emitted as `CREATE UNIQUE INDEX … WHERE is_child = 0 AND status IN (…)`; re-running with no schema change printed "No schema changes, nothing to migrate" and wrote nothing. So the script is `db:generate` = `drizzle-kit generate`; WP3 passes `--name=initial` when it regenerates (`pnpm --filter @gmt/db db:generate --name=initial`), and later work packages name their own migrations (arch-r2-010); no tsx fallback and no hand-appended SQL are needed (ruling 16). Layout: `drizzle/0000_initial.sql`, `drizzle/meta/_journal.json`, `drizzle/meta/0000_snapshot.json`. API used: `sqliteTable(name, columns, (t) => [ … ])`, `integer`, `text`, `real`, `primaryKey({ columns })`, `foreignKey({ columns, foreignColumns })`, `.references(() => t.id)`, `index`, `uniqueIndex`, `.where(sql)`, `check`. Repositories use `db.raw.prepare` with explicit SQL; `// why:` the queries are window functions, CTEs, `json_each` and compare-and-set statements reviewers must read; Drizzle owns schema and migration.
 - **better-sqlite3 13.0.3** (context7 `/wiselibs/better-sqlite3` `docs/api.md`; scratch run). `transaction(fn)` and its `.immediate()` variant (wrapped by WP0's `Db.transaction` and `Db.immediateTransaction`); nested transaction functions become savepoints; async functions are not supported. `pragma(name, { simple: true })`. `Database.SqliteError` with `.code` (`SQLITE_CONSTRAINT_UNIQUE`, `SQLITE_CONSTRAINT_CHECK`, `SQLITE_BUSY`, `SQLITE_NOTADB`). Named parameters `@name`; extra object keys are ignored (verified), a missing key throws. `RETURNING` with `.all()`/`.get()`. `new Database(path, { readonly: true, fileMustExist: true })`. Scratch-verified for `backupDatabase`: a read-only connection runs `VACUUM INTO ?` against a WAL database whose writer is still open with uncheckpointed pages, and the copy holds them; `VACUUM INTO` accepts an existing **empty** target (created with `openSync(file, 'wx', 0o600)`, mode 600 kept) and fails with `SQLITE_ERROR "output file already exists"` on a non-empty one; a non-database source fails with `SQLITE_NOTADB`; `openSync(path, 'wx')` fails with `EEXIST` on a dangling symlink. Scratch-verified for the ledger path CHECK: `GLOB '/*' AND NOT GLOB '//*' AND NOT GLOB '*[^A-Za-z0-9._~/-]*'` accepts `/api/v1/search` and `/aviasales/v3/prices_for_dates` and rejects `//h/x`, `/x#t`, `/x@y`, `/x?y`, `x`, `/a b`. Type affinity: inserting the text `'412'` into an INTEGER column stores the integer 412 (passes `typeof = 'integer'`); `'abc'` and `'412.5'` fail the CHECK.
 - **vitest 5.0.4**: `describe`, `it(name, fn, timeout)`, `it.each`, `afterEach`, `expect(...).toThrow(Class | RegExp | asymmetric)`, `vi.fn`. Per-task runs use `pnpm --filter @gmt/db exec vitest run <file>` (decision 8); thresholds apply to the full `pnpm --filter @gmt/db test`. Hooks registered at module scope of an imported helper apply to the importing test file.
 - **node:worker_threads** (Node ≥ 22): `Worker`, `SharedArrayBuffer`, `Atomics` (claim race; the busy-but-absorbed contention test).
@@ -235,15 +238,15 @@ packages/db/test/helpers/{db.ts,factories.ts,outcomes.ts,claim-worker.mjs,hold-w
 packages/db/test/{budgetGuard.cap,budgetGuard.predicates,budgetGuard.windows,ledger,airports,fx,definitions,executions,cells.rollup,calendarPrices,cells.writeTile,cells.resume,itineraries,reuse,syntheticGate,alerts,responseCache,appLock,backup,maintenance,barrel}.test.ts
 ```
 
-**Modify**: `packages/db/test/client.test.ts` (WP0's; Task 3.1 adds the cases that need a migration, arch-011), `packages/db/src/schema/index.ts`, `packages/db/src/index.ts`, `packages/db/package.json` (dependency `@gmt/core: workspace:*` already present; script `"db:generate": "drizzle-kit generate --name=initial"`). **Delete**: `packages/db/drizzle/.gitkeep`.
+**Modify**: `packages/db/test/client.test.ts` (WP0's; Task 3.1 adds the cases that need a migration, arch-011), `packages/db/src/schema/index.ts`, `packages/db/src/index.ts`, `packages/db/package.json` (dependency `@gmt/core: workspace:*` already present; script `"db:generate": "drizzle-kit generate"`). **Delete**: `packages/db/drizzle/.gitkeep`.
 
-`// why:` the migration is regenerated from scratch whenever a task adds a table (`rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate`). No database outside a test exists before WP3 merges, so the merged branch carries exactly one migration. After WP3 merges, schema changes are new migrations, never edits.
+`// why:` the migration is regenerated from scratch whenever a task adds a table (`rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate --name=initial`). No database outside a test exists before WP3 merges, so the merged branch carries exactly one migration. After WP3 merges, schema changes are new migrations, never edits.
 
-**Code rules this brief keeps (ruling 15)**: no `as` in `src/` or `test/` except `as const` and `satisfies`. Brands are minted only through `asIata`/`asIsoDate`/`asIsoDateTime` (row mappers via `internal/read.ts`, which turns a failure into `RowCorrupt` naming the column); enum columns narrow through `oneOf(values, v)`; JSON columns parse through core schemas (`definitionCreateRequestSchema`, `estimateSchema`, `bookingSchema`) or the small guards in `internal/read.ts`; row interfaces use `string`/`number` for every column; errors narrow with `instanceof`; key lists come from typed constant arrays, never `Object.keys(...) as`.
+**Code rules this brief keeps (ruling 15)**: no `as` in `src/` or `test/` except `as const` and `satisfies`. Brands are minted only through `asIata`/`asIsoDate`/`asIsoDateTime` (row mappers via `internal/read.ts`, which turns a failure into `RowCorrupt` naming the column); enum columns narrow through `oneOf(values, v)`; JSON columns parse through core schemas under `apiContract` (`definitionShapeSchema` for stored definitions and snapshots, never the refined `definitionCreateRequestSchema`, whose save-time refinements belong to the request path; `estimateSchema`, `bookingSchema`) or the small guards in `internal/read.ts` (`readVerificationPolicy` reads the one nested object whose core schema carries a save-time refinement); row interfaces use `string`/`number` for every column; errors narrow with `instanceof`; key lists come from typed constant arrays, never `Object.keys(...) as`.
 
 ## 8. Tasks
 
-Conventions: run commands from the repository root; tests import from `../src/...js`; when a step says "Add to" a file, its `import` lines go to the top and merge with existing ones; commit messages end with `MrReasonable <4990954+MrReasonable@users.noreply.github.com>`. "Regenerate the migration" = `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate`.
+Conventions: run commands from the repository root; tests import from `../src/...js`; when a step says "Add to" a file, its `import` lines go to the top and merge with existing ones; commit messages end with `MrReasonable <4990954+MrReasonable@users.noreply.github.com>`. "Regenerate the migration" = `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate --name=initial`.
 
 ### Task 3.1: Ledger tables, the global-month cap in SQL, and the first migration (first failing test)
 
@@ -379,7 +382,7 @@ parentPort.postMessage('released');
 import { BudgetExceeded, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { SqliteBudgetGuard } from '../src/budgetGuard.js';
-import { T0, count, freshDb } from './helpers/db.js';
+import { T0, at, count, freshDb } from './helpers/db.js';
 import { budgetConfig, limits } from './helpers/factories.js';
 
 const COST = 3_200; // µGBP per call: 0.32p (spec §6.3)
@@ -418,6 +421,24 @@ describe('SqliteBudgetGuard global-month cap in SQL (spec §5.3, §9 item 3)', (
     expect(guard.usage({ kind: 'global-month' })).toMatchObject({ calls: 1000, costMicroGbp: 3_200_000, cap: 3_000_000 });
     expect(() => guard.reserve(call)).toThrow(expect.objectContaining({ scope: 'global-month', current: 3_200_000, requested: 3_200 }));
     expect(count(db, 'provider_requests')).toBe(1000);
+  });
+});
+
+describe('recentCalls seeds the hourly limiter (core BudgetGuard port, cost-r2-001)', () => {
+  it('counts every upstream attempt since `since` (inclusive) for one provider; cache hits, other providers and earlier rows excluded', () => {
+    const db = freshDb();
+    const insert = db.raw.prepare(
+      `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, outcome, billable, cost_micro_gbp, http_attempt) VALUES (@p, NULL, '/x', NULL, @at, @outcome, 0, 0, 1)`,
+    );
+    const since = '2026-10-14T11:00:00.000Z';
+    for (const outcome of ['pending', 'unknown', 'error', 'ok', 'cache_hit']) insert.run({ p: 'searchapi', at: since, outcome });
+    insert.run({ p: 'searchapi', at: '2026-10-14T10:59:59.999Z', outcome: 'ok' }); // 1 ms before: excluded
+    insert.run({ p: 'travelpayouts', at: T0, outcome: 'ok' });
+    insert.run({ p: 'travelpayouts', at: T0, outcome: 'error' });
+    const guard = new SqliteBudgetGuard(db, budgetConfig({ searchapi: limits({ costPerCallMicroGbp: COST }), travelpayouts: limits({ billable: false, costPerCallMicroGbp: 0 }) }, { monthlyCapMicroGbp: CAP }), fixedClock(T0));
+    expect(guard.recentCalls('searchapi', at(since))).toBe(4); // pending, unknown, error, ok
+    expect(guard.recentCalls('travelpayouts', at(since))).toBe(2); // a free vendor is metered the same way
+    expect(() => guard.recentCalls('fixture', at(since))).toThrow(/no budget configuration/);
   });
 });
 ```
@@ -516,7 +537,7 @@ Expected: FAIL with `Cannot find module '../src/budgetGuard.js'` and `'../../src
 
 - [ ] **Step 3: Implement**
 
-`packages/db/package.json`, `scripts`: add `"db:generate": "drizzle-kit generate --name=initial"`.
+`packages/db/package.json`, `scripts`: add `"db:generate": "drizzle-kit generate"` (the migration name is passed per run, arch-r2-010).
 
 `packages/db/src/paths.ts`:
 
@@ -641,7 +662,7 @@ export function assertEndpointPath(path: string): void {
 ```ts
 import {
   type BaggageSnapshot, type Booking, type Cabin, type CellKey, type Estimate, type FareConditions, type Iata, type IsoDate, type IsoDateTime, type Layover,
-  type SuppliedField, asIata, asIsoDate, asIsoDateTime, bookingSchema, estimateSchema,
+  type SuppliedField, type VerificationPolicy, apiContract, asIata, asIsoDate, asIsoDateTime,
 } from '@gmt/core';
 import { CABINS, SUPPLIED_FIELDS } from './enums.js';
 
@@ -750,8 +771,24 @@ export function readFareConditions(column: string, v: unknown): FareConditions {
   const changeable = v.changeable === undefined ? {} : { changeable: readBool(column, v.changeable) };
   return { ...refundable, ...changeable, ...notes(column, v.notes) };
 }
-export const readBooking = (column: string, text: string): Booking => parseWith(column, bookingSchema, readJson(column, text));
-export const readEstimate = (column: string, text: string): Estimate => parseWith(column, estimateSchema, readJson(column, text));
+export const readBooking = (column: string, text: string): Booking => parseWith(column, apiContract.bookingSchema, readJson(column, text));
+export const readEstimate = (column: string, text: string): Estimate => parseWith(column, apiContract.estimateSchema, readJson(column, text));
+
+/**
+ * A stored verification policy, read field by field. // why: core's policy schema refines topN ≤ maxCells and
+ * alwaysInclude ≤ maxCells, which are save-time policy; a stored row (a child snapshot with maxCells 1 and an
+ * inherited topN, spec §8.1) must read back as stored (arch-r2-003, dm-r2-001).
+ */
+export function readVerificationPolicy(column: string, v: unknown): VerificationPolicy {
+  if (!isRecord(v) || !Array.isArray(v.alwaysInclude)) throw new RowCorrupt(column, 'not a verification policy');
+  return {
+    maxCells: readInt(column, v.maxCells), topN: readInt(column, v.topN), expandTop: readInt(column, v.expandTop), bookingLinks: readBool(column, v.bookingLinks),
+    alwaysInclude: v.alwaysInclude.map((x: unknown) => readCellKey(column, x)),
+    ...(v.priceCeilingPence === undefined ? {} : { priceCeilingPence: readInt(column, v.priceCeilingPence) }),
+    ...(v.perDepartureDateBest === undefined ? {} : { perDepartureDateBest: readInt(column, v.perDepartureDateBest) }),
+    ...(v.maxStops === undefined ? {} : { maxStops: readInt(column, v.maxStops) }),
+  };
+}
 ```
 
 `packages/db/src/schema/checks.ts`:
@@ -1028,7 +1065,7 @@ import { monthWindow } from './budget/window.js';
 import { type BudgetConfig, type ProviderBudget, effectiveCallCap } from './budgetConfig.js';
 import type { Db } from './client.js';
 import { PROVIDER_IDS } from './internal/enums.js';
-import { RowRejected, assertEndpointPath, assertInt } from './internal/validate.js';
+import { RowRejected, assertEndpointPath, assertInt, assertIsoDateTime } from './internal/validate.js';
 
 type ReserveParams = Parameters<BudgetGuard['reserve']>[0];
 type CacheHitParams = Parameters<BudgetGuard['recordCacheHit']>[0];
@@ -1116,6 +1153,18 @@ export class SqliteBudgetGuard implements BudgetGuard {
       return { calls: u.calls, costMicroGbp: u.cost, cap: asked === budget.window ? effectiveCallCap(budget) : null, windowStart: u.windowStart, windowEnd: u.windowEnd };
     }
     return this.executionUsage(scope.kind, scope.executionId);
+  }
+
+  /**
+   * Core port (cost-r2-001): upstream attempts for one provider since `since` (inclusive), whatever their outcome or
+   * billable flag, because vendor rate limits meter requests, not billed calls. Cache hits are not requests.
+   */
+  recentCalls(providerId: ProviderId, since: IsoDateTime): number {
+    assertIsoDateTime('since', since);
+    this.budgetFor(providerId); // fail closed on an unconfigured provider
+    return this.db.raw
+      .prepare<[string, string], { n: number }>(`SELECT COUNT(*) AS n FROM provider_requests WHERE provider_id = ? AND outcome <> 'cache_hit' AND started_at >= ?`)
+      .get(providerId, since)?.n ?? 0;
   }
 
   protected checkCaps(p: ReserveParams, budget: ProviderBudget, now: IsoDateTime): void {
@@ -1221,12 +1270,12 @@ export interface ReusedCopy { cell: CellKey; outcome: CellOutcome; price: Calend
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
 ```
 
-Generate the migration: `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate`. Expected: `drizzle/0000_initial.sql` with three `CREATE TABLE` statements and two `CREATE UNIQUE INDEX … WHERE is_child = …` statements (`grep -c "WHERE is_child" packages/db/drizzle/0000_initial.sql` → `2`).
+Generate the migration: `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate --name=initial`. Expected: `drizzle/0000_initial.sql` with three `CREATE TABLE` statements and two `CREATE UNIQUE INDEX … WHERE is_child = …` statements (`grep -c "WHERE is_child" packages/db/drizzle/0000_initial.sql` → `2`).
 
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/budgetGuard.cap.test.ts test/client.test.ts`
-Expected: PASS: 2 cap tests, 6 new client cases, and WP0's own client cases.
+Expected: PASS: 3 cap-file tests, 6 new client cases, and WP0's own client cases.
 
 - [ ] **Step 5: Commit**
 
@@ -1336,20 +1385,19 @@ describe('cost rule (ruling 6): the configured rate is the only cost the ledger 
 
 describe('billable rule at finalise (spec §5.3, cost-004)', () => {
   it.each([
-    // provider, outcome, status, → billable, cost, counted in provider scope, counted in global
+    // provider, outcome, status, → stored billable, stored cost_micro_gbp, counted in provider scope, counted in global
     ['travelpayouts', 'ok', 200, 0, 0, 1, 0],
     ['fixture', 'ok', 200, 1, 3200, 1, 1],
     ['fixture', 'error', 500, 0, 0, 0, 0],
-    ['searchapi', 'ok', 204, 0, 3200, 0, 0],
+    ['searchapi', 'ok', 204, 0, 0, 0, 0],
     ['searchapi', 'ok', 200, 1, 3200, 1, 1],
     ['searchapi', 'unknown', undefined, 0, 3200, 1, 1],
-  ] as const)('%s %s %s → billable %i, cost %i', (providerId, outcome, httpStatus, billable, cost, inProvider, inGlobal) => {
+  ] as const)('%s %s %s → billable %i, stored cost %i', (providerId, outcome, httpStatus, billable, cost, inProvider, inGlobal) => {
     const db = freshDb();
     const guard = new SqliteBudgetGuard(db, budgetConfig({ travelpayouts: tp, fixture, searchapi: perCall }, { monthlyCapMicroGbp: 1_000_000_000 }), fixedClock(T0));
     const rate = providerId === 'travelpayouts' ? 0 : 3200;
     guard.reserve(req(providerId, null, rate)).finalise(httpStatus === undefined ? { outcome, durationMs: 1 } : { outcome, httpStatus, durationMs: 1 });
-    const zeroCost = outcome !== 'unknown' && billable === 0;
-    expect(db.raw.prepare('SELECT billable, cost_micro_gbp AS cost FROM provider_requests').get()).toEqual({ billable, cost: zeroCost ? 0 : cost });
+    expect(db.raw.prepare('SELECT billable, cost_micro_gbp AS cost FROM provider_requests').get()).toEqual({ billable, cost });
     expect(guard.usage({ kind: 'provider-month', providerId }).calls).toBe(inProvider);
     expect(guard.usage({ kind: 'global-month' }).calls).toBe(inGlobal);
   });
@@ -1470,7 +1518,9 @@ describe('cap predicates (spec §5.3)', () => {
       db.raw.prepare(`INSERT INTO provider_requests (provider_id, endpoint_path, started_at, outcome, cost_micro_gbp, http_attempt) VALUES ('searchapi', ?, ?, 'ok', 0, 1)`).run(path, T0);
     expect(sqliteCode(raw('/x?api_key=SECRET'))).toBe('SQLITE_CONSTRAINT_CHECK');
     expect(sqliteCode(raw('no-leading-slash'))).toBe('SQLITE_CONSTRAINT_CHECK');
-    expect(count(db, 'provider_requests')).toBe(0);
+    for (const bad of ['//h/x', '/x#t', '/x@y', `/${'a'.repeat(200)}`]) expect(sqliteCode(raw(bad)), bad).toBe('SQLITE_CONSTRAINT_CHECK');
+    raw(`/${'a'.repeat(199)}`)(); // 200 characters: the longest path allowed
+    expect(count(db, 'provider_requests')).toBe(1);
   });
 
   it('every ledger row carries tile_index as given, NULL for verification (spec §5.3)', () => {
@@ -1609,7 +1659,7 @@ and replace `checkCaps` and `executionUsage`:
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/budgetGuard.cap.test.ts test/budgetGuard.predicates.test.ts`
-Expected: PASS, 2 + 22 tests (the billable `it.each` counts 6).
+Expected: PASS, 3 + 21 tests (the billable `it.each` counts 6).
 
 - [ ] **Step 5: Commit**
 
@@ -1962,7 +2012,9 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(repo.airportsOfMetro('LON')).toEqual(['LCY', 'LGW', 'LHR', 'LTN', 'SEN', 'STN']);
     expect(repo.airportsOfMetro('NYC')).toEqual(['EWR', 'JFK', 'LGA']); // IDL (JFK's former code) is not a member (po-002)
     for (const [code, members] of Object.entries(ds.metros)) {
-      expect(new Set(members.map((m) => repo.get(m)?.country)).size, `metro ${code} spans one country`).toBe(1);
+      const countries = members.map((m) => repo.get(m)?.country);
+      expect(countries, `every member of ${code} is a seeded airport`).not.toContain(undefined);
+      expect(new Set(countries).size, `metro ${code} spans one country`).toBe(1);
     }
     expect(repo.get('LHR')).toMatchObject({ icao: 'EGLL', country: 'GB', tz: 'Europe/London', metro: 'LON', source: expect.stringContaining('mwgg/Airports') });
     expect(repo.tzOf('EWR')).toBe('America/New_York');
@@ -2543,7 +2595,7 @@ git add packages/db && git commit -m "wp03: fx_rates with integer nano rates, so
 - Modify: `test/helpers/factories.ts` (add `exampleDefinitionInput`)
 
 **Interfaces:**
-- Produces: `DefinitionsRepo(db, clock)`; internal `readDefinition`, `readSnapshot` (JSON columns parsed back through core's `definitionCreateRequestSchema`, ruling 15).
+- Produces: `DefinitionsRepo(db, clock)`; internal `readDefinition`, `readSnapshot` (stored definitions and snapshots read through core's unrefined `apiContract.definitionShapeSchema` plus `readVerificationPolicy`; the refined create schema stays on the request path, arch-r2-003, dm-r2-001).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2585,6 +2637,16 @@ describe('DefinitionsRepo (spec §7 search_definitions)', () => {
     expect(created).toEqual({ ...input, id: created.id, confirmedCostPence: null, createdAt: T0, updatedAt: T0, deletedAt: null });
     expect(repo.get(created.id)).toEqual(created);
     expect(repo.get('missing')).toBeNull();
+  });
+
+  it('create stores the create click\'s confirmation in the same INSERT; a non-integer confirmation writes nothing (arch-r2-005, dm-r2-002)', () => {
+    const db = freshDb();
+    const repo = new DefinitionsRepo(db, fixedClock(T0));
+    const created = repo.create({ ...exampleDefinitionInput(), confirmedCostPence: 1_250 });
+    expect(created.confirmedCostPence).toBe(1_250);
+    expect(repo.get(created.id)?.confirmedCostPence).toBe(1_250);
+    expect(() => repo.create({ ...exampleDefinitionInput(), confirmedCostPence: 12.5 })).toThrow(expect.objectContaining({ rule: 'integer' }));
+    expect(repo.list()).toHaveLength(1);
   });
 
   it('update merges a patch and moves updated_at', () => {
@@ -2651,12 +2713,21 @@ Expected: FAIL, `Cannot find module '../src/repositories/definitions.js'`.
 `packages/db/src/internal/definitionRow.ts`:
 
 ```ts
-import { type DefinitionInput, type DefinitionSnapshot, type SearchDefinition, definitionCreateRequestSchema } from '@gmt/core';
-import { RowCorrupt, isRecord, parseWith, readBool, readCellKey, readDate, readInt, readIataArray, readJson, readNullableTime, readString, readTime } from './read.js';
+import { type DefinitionInput, type DefinitionSnapshot, type SearchDefinition, apiContract } from '@gmt/core';
+import { RowCorrupt, isRecord, parseWith, readBool, readCellKey, readDate, readInt, readIataArray, readJson, readNullableTime, readString, readTime, readVerificationPolicy } from './read.js';
 
-/** The JSON and scalar columns of a definition, parsed back through core's request schema (one validator for writes and reads). */
+/**
+ * The definition fields without the verification policy. // why: the unrefined shape (no save-time cross-field rules);
+ * omitting `verification` is allowed because the refinement sits inside that field, not on the object.
+ */
+const SHAPE_WITHOUT_POLICY = apiContract.definitionShapeSchema.omit({ verification: true });
+
+/**
+ * The DefinitionInput fields of a stored row or snapshot. Unknown keys (id, timestamps, resolved space, the confirmed
+ * cost) are stripped by the shape schema; callers read those separately.
+ */
 export function readDefinitionInput(column: string, raw: Record<string, unknown>): DefinitionInput {
-  return parseWith(column, definitionCreateRequestSchema, raw);
+  return { ...parseWith(column, SHAPE_WITHOUT_POLICY, raw), verification: readVerificationPolicy(`${column}.verification`, raw.verification) };
 }
 
 export interface DefinitionDbRow {
@@ -2687,24 +2758,25 @@ export function readDefinition(r: DefinitionDbRow): SearchDefinition {
 export function readSnapshot(column: string, text: string): DefinitionSnapshot {
   const v = readJson(column, text);
   if (!isRecord(v) || !isRecord(v.resolved) || !Array.isArray(v.droppedAlwaysInclude)) throw new RowCorrupt(column, 'not a definition snapshot');
-  const input = readDefinitionInput(column, v);
-  const res = v.resolved;
-  const confirmed = v.confirmedCostPence;
+  // why: the snapshot-only fields are taken out first and read by their own guards; only DefinitionInput fields reach the schema.
+  const { id, confirmedCostPence: confirmed, createdAt, updatedAt, deletedAt, resolved: res, resolvedAt, windowClamped, droppedAlwaysInclude, ...fields } = v;
+  const input = readDefinitionInput(column, fields);
+  if (!isRecord(res) || !Array.isArray(droppedAlwaysInclude)) throw new RowCorrupt(column, 'not a definition snapshot');
   return {
     ...input,
-    id: readString(column, v.id),
-    confirmedCostPence: confirmed === null ? null : readInt(column, confirmed),
-    createdAt: readTime(column, readString(column, v.createdAt)),
-    updatedAt: readTime(column, readString(column, v.updatedAt)),
-    deletedAt: v.deletedAt === null ? null : readTime(column, readString(column, v.deletedAt)),
+    id: readString(column, id),
+    confirmedCostPence: confirmed === null || confirmed === undefined ? null : readInt(column, confirmed),
+    createdAt: readTime(column, readString(column, createdAt)),
+    updatedAt: readTime(column, readString(column, updatedAt)),
+    deletedAt: deletedAt === null || deletedAt === undefined ? null : readTime(column, readString(column, deletedAt)),
     resolved: {
       origins: readIataArray(column, res.origins), destinations: readIataArray(column, res.destinations),
       departureFrom: readDate(column, readString(column, res.departureFrom)), departureTo: readDate(column, readString(column, res.departureTo)),
       minNights: readInt(column, res.minNights), maxNights: readInt(column, res.maxNights),
     },
-    resolvedAt: readTime(column, readString(column, v.resolvedAt)),
-    windowClamped: readBool(column, v.windowClamped),
-    droppedAlwaysInclude: v.droppedAlwaysInclude.map((x: unknown) => readCellKey(column, x)),
+    resolvedAt: readTime(column, readString(column, resolvedAt)),
+    windowClamped: readBool(column, windowClamped),
+    droppedAlwaysInclude: droppedAlwaysInclude.map((x: unknown) => readCellKey(column, x)),
   };
 }
 ```
@@ -2736,15 +2808,18 @@ const params = (d: DefinitionInput, updatedAt: IsoDateTime): Record<string, unkn
   scheduleCron: d.scheduleCron, scheduleTz: d.scheduleTz, enabled: d.enabled ? 1 : 0, updatedAt,
 });
 
-/** Spec §7 `search_definitions`, soft-deleted. `confirmed_cost_pence` changes only through `setConfirmedCost`. */
+/** Spec §7 `search_definitions`, soft-deleted. `confirmed_cost_pence` is set by `create` or `setConfirmedCost`, never by `update`. */
 export class DefinitionsRepo {
   constructor(
     private readonly db: Db,
     private readonly clock: Clock,
   ) {}
 
-  create(input: DefinitionInput): SearchDefinition {
-    validate(input);
+  /** Decision 14: the create click's confirmation is stored in the same INSERT, so it can never be lost between two writes. */
+  create(input: DefinitionInput & { confirmedCostPence?: number }): SearchDefinition {
+    const { confirmedCostPence, ...definition } = input;
+    validate(definition);
+    assertNullableInt('confirmed_cost_pence', confirmedCostPence ?? null);
     const id = randomUUID();
     const now = this.clock.now();
     this.db.raw
@@ -2752,9 +2827,9 @@ export class DefinitionsRepo {
         `INSERT INTO search_definitions (id, created_at, name, origins_json, destinations_json, window_json, min_nights, max_nights, cabin, constraints_json,
           verification_policy_json, budget_json, providers_json, destination_notes_json, onward_cost_json, schedule_cron, schedule_tz, confirmed_cost_pence, enabled, updated_at)
          VALUES (@id, @createdAt, @name, @origins, @destinations, @window, @minNights, @maxNights, @cabin, @constraints, @verification, @budget, @providers,
-          @destinationNotes, @onwardCost, @scheduleCron, @scheduleTz, NULL, @enabled, @updatedAt)`,
+          @destinationNotes, @onwardCost, @scheduleCron, @scheduleTz, @confirmedCostPence, @enabled, @updatedAt)`,
       )
-      .run({ id, createdAt: now, ...params(input, now) });
+      .run({ id, createdAt: now, ...params(definition, now), confirmedCostPence: confirmedCostPence ?? null });
     return this.mustGet(id);
   }
 
@@ -2810,7 +2885,7 @@ export class DefinitionsRepo {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/definitions.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2910,10 +2985,11 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { RowCorrupt } from '../src/internal/read.js';
 import { RowRejected } from '../src/internal/validate.js';
+import { DefinitionsRepo } from '../src/repositories/definitions.js';
 import { CLAIM_RESUME_SQL, ExecutionsRepo } from '../src/repositories/executions.js';
 import { ACTIVE_STATUS_SQL } from '../src/schema/checks.js';
 import { T0, at, freshDb, openTracked, tmpDbPath } from './helpers/db.js';
-import { EWR, cell, newExecution, snapshotOf } from './helpers/factories.js';
+import { EWR, cell, exampleDefinitionInput, newExecution, snapshotOf } from './helpers/factories.js';
 
 /** test-005: 'ok' when the call succeeds, 'unique' on a unique violation; any other failure is rethrown. */
 function attempt(fn: () => unknown): 'ok' | 'unique' {
@@ -2940,6 +3016,20 @@ describe('ExecutionsRepo (spec §7 search_executions, §8.1)', () => {
     expect(newExecution(db, clock, { definition, cell: cell() }).execution).toMatchObject({ isChild: true, cell: cell(), startedAt: T0 });
     expect(newExecution(db, clock, { definition, status: 'skipped_window' }).execution).toMatchObject({ status: 'skipped_window', startedAt: null, finishedAt: T0 });
     expect(() => new ExecutionsRepo(db, clock).create({ definitionId: definition.id, isChild: true, cell: null, snapshot: snapshotOf(definition), estimate: null, trigger: 'manual', status: 'running' })).toThrow(RowRejected);
+  });
+
+  it('a child-shaped snapshot (maxCells 1, alwaysInclude [cell], inherited topN 10, no confirmed cost) round-trips through create and get (dm-r2-001, arch-r2-003)', () => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const definition = new DefinitionsRepo(db, clock).create(exampleDefinitionInput());
+    expect(definition.confirmedCostPence).toBeNull();
+    const parent = snapshotOf(definition);
+    // why: the read path must not depend on WP7 pinning topN to 1; a save-time refinement (topN ≤ maxCells) must not run on stored rows.
+    const childSnapshot = { ...parent, verification: { ...parent.verification, maxCells: 1, alwaysInclude: [cell()] }, providers: { ...parent.providers, discovery: [] } };
+    const repo = new ExecutionsRepo(db, clock);
+    const child = repo.create({ definitionId: definition.id, isChild: true, cell: cell(), snapshot: childSnapshot, estimate: null, trigger: 'manual', status: 'running' });
+    expect(child.snapshot).toEqual(childSnapshot);
+    expect(repo.get(child.id)?.snapshot.verification).toEqual({ ...parent.verification, maxCells: 1, topN: 10, alwaysInclude: [cell()] });
   });
 
   it('a corrupt stored snapshot is reported as RowCorrupt (dm-006)', () => {
@@ -3300,7 +3390,7 @@ export class ExecutionsRepo {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/executions.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -7263,16 +7353,16 @@ const SPEC_TABLES = [
 ];
 
 describe('@gmt/db public surface (plan "Database" contract)', () => {
-  it('exports every contract name, and keeps monthWindow internal (arch-012)', () => {
+  it('exports every contract name, and keeps monthWindow, CLAIM_RESUME_SQL and the tables internal (arch-012, arch-r2-007)', () => {
     for (const name of [
       'openDatabase', 'applyMigrations', 'pendingMigrations', 'createRepos', 'AirportsRepo', 'FxRepo', 'DefinitionsRepo', 'ExecutionsRepo', 'CellsRepo', 'CalendarPricesRepo',
       'ItinerariesRepo', 'LedgerRepo', 'AlertsRepo', 'NotificationsRepo', 'RoutePriceHistoryRepo', 'budgetConfigFromConfig', 'effectiveCallCap', 'SqliteBudgetGuard', 'SqliteResponseCache', 'AppLock',
       'seedAirports', 'sanityCheckAirports', 'runMaintenance', 'loadAirportsDataset', 'backupDatabase', 'RowRejected', 'RowCorrupt', 'MIGRATIONS_DIR', 'AIRPORTS_DATA_DIR', 'AIRPORTS_MIN_ROWS',
-      'CLAIM_RESUME_SQL', 'HEARTBEAT_INTERVAL_MS', 'LOCK_STALE_AFTER_MS', 'schema',
+      'HEARTBEAT_INTERVAL_MS', 'LOCK_STALE_AFTER_MS',
     ]) {
       expect(db, name).toHaveProperty(name);
     }
-    expect(db).not.toHaveProperty('monthWindow');
+    for (const internal of ['monthWindow', 'CLAIM_RESUME_SQL', 'schema']) expect(db).not.toHaveProperty(internal);
   });
 
   it('createRepos builds every repository', () => {
@@ -7398,7 +7488,7 @@ export * from './seed/airports.js';
 export { AirportsRepo } from './repositories/airports.js';
 export { FxRepo } from './repositories/fx.js';
 export { DefinitionsRepo } from './repositories/definitions.js';
-export { CLAIM_RESUME_SQL, ExecutionsRepo } from './repositories/executions.js';
+export { ExecutionsRepo } from './repositories/executions.js';
 export { CellsRepo } from './repositories/cells.js';
 export { CalendarPricesRepo } from './repositories/calendarPrices.js';
 export { ItinerariesRepo } from './repositories/itineraries.js';
@@ -7406,12 +7496,11 @@ export { LedgerRepo } from './repositories/ledger.js';
 export { AlertsRepo } from './repositories/alerts.js';
 export { NotificationsRepo } from './repositories/notifications.js';
 export { RoutePriceHistoryRepo } from './repositories/routePriceHistory.js';
-export * as schema from './schema/index.js';
 ```
 
 (`budgetConfig.ts` exports `budgetConfigFromConfig`, `effectiveCallCap`, `BudgetConfig` and `ProviderBudget`.)
 
-Regenerate the migration one last time and confirm it is the only one: `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate && ls packages/db/drizzle` → `0000_initial.sql  meta`; `grep -c "CREATE TABLE" packages/db/drizzle/0000_initial.sql` → `18`.
+Regenerate the migration one last time and confirm it is the only one: `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate --name=initial && ls packages/db/drizzle` → `0000_initial.sql  meta`; `grep -c "CREATE TABLE" packages/db/drizzle/0000_initial.sql` → `18`.
 
 - [ ] **Step 4: Run to verify they pass**
 
