@@ -14,3 +14,5 @@ backups/
 reports/
 coverage/
 .stryker-tmp/
+.worktrees/
+.superpowers/

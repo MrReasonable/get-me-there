@@ -3455,9 +3455,10 @@ export function rawOutcome(
 ```ts
 import { type CellKey, type CellOutcome, type ProviderId, asIsoDate, cellKeyString, fixedClock, rollUp } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { CELL_KEY_SQL } from '../src/internal/outcomeRow.js';
 import { RowRejected } from '../src/internal/validate.js';
 import { CellsRepo } from '../src/repositories/cells.js';
-import { T0, freshDb } from './helpers/db.js';
+import { T0, freshDb, sqliteCode } from './helpers/db.js';
 import { EWR, cell, newExecution, withNights } from './helpers/factories.js';
 
 const PROVIDERS: ProviderId[] = ['travelpayouts', 'searchapi'];
@@ -3564,6 +3565,28 @@ describe('CellsRepo seeding and stored roll-ups (spec §3, §6.6, §7)', () => {
       { stage: 'discovery', providerId: 'searchapi', buckets: { priced: 0, empty: 0, no_data: 0, error: 1, skipped: 0, not_run: 1, reused: 0 }, total: 2 },
       { stage: 'discovery', providerId: 'travelpayouts', buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 2, reused: 0 }, total: 2 },
     ]);
+  });
+
+  it('CELL_KEY_SQL builds exactly core cellKeyString, the key every map and json_each filter uses (arch-r2-008)', () => {
+    const { db, executionId } = setup([cell(undefined, EWR)]);
+    expect(db.raw.prepare(`SELECT ${CELL_KEY_SQL} AS k FROM search_cells WHERE execution_id = ?`).get(executionId)).toEqual({ k: cellKeyString(cell(undefined, EWR)) });
+  });
+
+  it('cell_outcomes CHECKs hold on their own: priced ⇔ min_pence, provenance on terminal rows, closed skip reasons (test-r2-004)', () => {
+    const { db, executionId } = setup([cell()], ['travelpayouts']);
+    const raw = (set: string) => () => db.raw.prepare(`UPDATE cell_outcomes SET ${set} WHERE execution_id = ?`).run(executionId);
+    const PROV = "fetched_at = '2026-10-14T12:00:00.000Z', cabin = 'economy', point_of_sale = 'unknown', source_kind = 'authorised-cached'";
+    expect(sqliteCode(raw(`status = 'priced', min_pence = NULL, ${PROV}`))).toBe('SQLITE_CONSTRAINT_CHECK');
+    expect(sqliteCode(raw(`status = 'empty', min_pence = 5, ${PROV}`))).toBe('SQLITE_CONSTRAINT_CHECK');
+    for (const missing of ['fetched_at', 'cabin', 'point_of_sale', 'source_kind']) {
+      for (const status of ['priced', 'empty', 'no_data']) {
+        expect(sqliteCode(raw(`status = '${status}', min_pence = ${status === 'priced' ? 100 : 'NULL'}, ${PROV}, ${missing} = NULL`)), `${status} without ${missing}`).toBe('SQLITE_CONSTRAINT_CHECK');
+      }
+    }
+    expect(sqliteCode(raw(`status = 'skipped', reason = 'whim'`))).toBe('SQLITE_CONSTRAINT_CHECK');
+    raw(`status = 'no_data', reason = 'cabin-not-offered'`)(); // the one data-less terminal outcome
+    raw(`status = 'priced', reason = NULL, min_pence = 100, ${PROV}`)(); // positive control
+    expect(db.raw.prepare('SELECT status FROM cell_outcomes WHERE execution_id = ?').get(executionId)).toEqual({ status: 'priced' });
   });
 });
 ```
@@ -3704,6 +3727,8 @@ export function toOutcome(r: OutcomeDbRow): CellOutcome {
 
 /** WHERE fragment for one cell of one execution, with @executionId/@origin/@destination/@departureDate/@returnDate. */
 export const CELL_WHERE = 'execution_id = @executionId AND origin = @origin AND destination = @destination AND departure_date = @departureDate AND return_date = @returnDate';
+/** core's `cellKeyString` format built in SQL; the one place db spells it (arch-r2-008, pinned by a test against core). */
+export const CELL_KEY_SQL = "(origin || '|' || destination || '|' || departure_date || '|' || return_date)";
 export const keyParams = (executionId: string, c: CellKey) => ({ executionId, origin: c.origin, destination: c.destination, departureDate: c.departureDate, returnDate: c.returnDate });
 
 export interface CellKeyDbRow { origin: string; destination: string; departure_date: string; return_date: string }
@@ -3758,7 +3783,7 @@ export function storeRollUps(db: Db, executionId: string, stage: Stage, cells?: 
 import { type Buckets, type Cell, type CellKey, type CellOutcome, type CellOutcomeStatus, type Clock, type IsoDate, type NoDataReason, type ProviderId, type RollUp, type Stage, cellKeyString, stripUrlsInText } from '@gmt/core';
 import type { Db } from '../client.js';
 import { OUTCOME_STATUSES, PROVIDER_IDS, SKIP_REASONS, STAGES, TERMINAL_STATUSES } from '../internal/enums.js';
-import { CELL_WHERE, type OutcomeDbRow, keyParams, toOutcome } from '../internal/outcomeRow.js';
+import { CELL_KEY_SQL, CELL_WHERE, type OutcomeDbRow, keyParams, toCellKey, toOutcome } from '../internal/outcomeRow.js';
 import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
 import { storeRollUps } from '../internal/rollUps.js';
 import { RowRejected, assertErrorReason, assertInt } from '../internal/validate.js';
@@ -3813,7 +3838,7 @@ export class CellsRepo {
     return this.db.raw
       .prepare<Record<string, unknown>, OutcomeDbRow>(
         `SELECT * FROM cell_outcomes WHERE execution_id = @executionId AND (@stage IS NULL OR stage = @stage) AND (@providerId IS NULL OR provider_id = @providerId)
-           AND (@keys IS NULL OR (origin || '|' || destination || '|' || departure_date || '|' || return_date) IN (SELECT value FROM json_each(@keys)))
+           AND (@keys IS NULL OR ${CELL_KEY_SQL} IN (SELECT value FROM json_each(@keys)))
          ORDER BY origin, destination, departure_date, return_date, stage, provider_id`,
       )
       .all({ executionId, stage: filter.stage ?? null, providerId: filter.providerId ?? null, keys: filter.cells === undefined ? null : JSON.stringify(filter.cells.map(cellKeyString)) })
@@ -3872,7 +3897,7 @@ export class CellsRepo {
   rollUps(executionId: string): Map<string, { discovery: RollUp; verification: RollUp }> {
     const out = new Map<string, { discovery: RollUp; verification: RollUp }>();
     for (const r of this.db.raw.prepare<[string], CellDbRow>('SELECT * FROM search_cells WHERE execution_id = ? ORDER BY origin, destination, departure_date, return_date').all(executionId)) {
-      out.set(`${r.origin}|${r.destination}|${r.departure_date}|${r.return_date}`, {
+      out.set(cellKeyString(toCellKey(r)), {
         discovery: { status: nullableOneOf('search_cells.discovery_status', OUTCOME_STATUSES, r.discovery_status), reason: r.discovery_reason, minPence: r.discovery_min_pence },
         verification: { status: nullableOneOf('search_cells.verification_status', OUTCOME_STATUSES, r.verification_status), reason: r.verification_reason, minPence: r.verification_min_pence },
       });
@@ -3911,7 +3936,7 @@ Regenerate the migration.
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/cells.rollup.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4672,7 +4697,7 @@ Expected: FAIL, `repo.hasVerificationOutcomes is not a function`.
 
 - [ ] **Step 3: Implement**
 
-Add to `packages/db/src/repositories/cells.ts` (imports: `SelectionReason` from `@gmt/core`; `SELECTION_REASONS` from `../internal/enums.js`; `type CellKeyDbRow, toCellKey` from `../internal/outcomeRow.js`):
+Add to `packages/db/src/repositories/cells.ts` (imports: `SelectionReason` from `@gmt/core`; `SELECTION_REASONS` from `../internal/enums.js`; `type CellKeyDbRow` from `../internal/outcomeRow.js`):
 
 ```ts
 /** Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. */
@@ -4706,7 +4731,7 @@ ORDER BY origin, destination, departure_date, return_date`;
     for (const s of selected) if (!all.has(cellKeyString(s.cell))) throw new RowRejected('selection-member', `${cellKeyString(s.cell)} is not among allCells`);
     this.db.transaction(() => {
       if (this.hasVerificationOutcomes(executionId)) throw new RowRejected('selection-once', `verification outcomes already exist for ${executionId}; selection runs once per execution`);
-      const inExecution = this.db.raw.prepare<Record<string, unknown>, { n: number }>(`SELECT COUNT(*) AS n FROM search_cells WHERE execution_id = @executionId AND (origin || '|' || destination || '|' || departure_date || '|' || return_date) IN (SELECT value FROM json_each(@keys))`).get({ executionId, keys: JSON.stringify([...all]) })?.n ?? 0;
+      const inExecution = this.db.raw.prepare<Record<string, unknown>, { n: number }>(`SELECT COUNT(*) AS n FROM search_cells WHERE execution_id = @executionId AND ${CELL_KEY_SQL} IN (SELECT value FROM json_each(@keys))`).get({ executionId, keys: JSON.stringify([...all]) })?.n ?? 0;
       if (inExecution !== all.size) throw new RowRejected('selection-member', `allCells names ${all.size - inExecution} cell(s) that are not cells of ${executionId}`);
       this.db.raw.prepare('UPDATE search_cells SET verification_selected = 0, selection_reason = NULL WHERE execution_id = ?').run(executionId);
       const mark = this.db.raw.prepare(`UPDATE search_cells SET verification_selected = 1, selection_reason = @reason WHERE ${CELL_WHERE}`);
@@ -4715,7 +4740,7 @@ ORDER BY origin, destination, departure_date, return_date`;
         `INSERT INTO cell_outcomes (execution_id, origin, destination, departure_date, return_date, stage, provider_id, status, reason, attempts)
          SELECT execution_id, origin, destination, departure_date, return_date, 'verification', @providerId,
                 CASE WHEN verification_selected = 1 THEN 'not_run' ELSE 'skipped' END, CASE WHEN verification_selected = 1 THEN NULL ELSE 'not_selected' END, 0
-         FROM search_cells WHERE execution_id = @executionId AND (origin || '|' || destination || '|' || departure_date || '|' || return_date) IN (SELECT value FROM json_each(@keys))`,
+         FROM search_cells WHERE execution_id = @executionId AND ${CELL_KEY_SQL} IN (SELECT value FROM json_each(@keys))`,
       );
       for (const providerId of verificationProviders) seed.run({ executionId, providerId, keys: JSON.stringify([...all]) });
       storeRollUps(this.db, executionId, 'verification', allCells);
