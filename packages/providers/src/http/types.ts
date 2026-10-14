@@ -1,0 +1,103 @@
+import type {
+  BudgetGuard,
+  Clock,
+  IsoDateTime,
+  Logger,
+  ProviderError,
+  ProviderId,
+  ResponseCache,
+  Secret,
+} from '@gmt/core';
+
+/** Every id http-kit serves: the three providers plus the never-ledgered FX refresh (spec §4, §5.3). */
+export type HttpProviderId = ProviderId | 'fx';
+
+/** What a classifier sees about one non-2xx response (plan http-kit block). `body` and header values are scrubbed. */
+export interface ResponseFacts {
+  status: number;
+  body: unknown;
+  headers: Headers;
+  providerId: HttpProviderId;
+  endpointPath: string;
+}
+
+/**
+ * Per-provider HTTP policy, built from `Config` by WP4b's wiring (spec §5.3): hostname allowlist, chained
+ * per-hour and per-minute reservoirs with `maxConcurrent`, the queue deadline, the per-request timeout.
+ */
+export interface ProviderHttpLimits {
+  hosts: string[];
+  ratePerMinute: number;
+  ratePerHour: number;
+  concurrency: number;
+  /** In http-kit this governs only timeout and failed-body-read retryability; the ledger's billable flag is WP3's. */
+  billable: 'http-200' | 'never';
+  costPerCallMicroGbp: number;
+  maxWaitSeconds: number;
+  requestTimeoutSeconds: number;
+  /** Wait for a 429 without Retry-After (Travelpayouts 60). Absent: such a 429 is non-retryable with a retry time at the hourly window. */
+  rateLimitFallbackWaitSeconds?: number;
+  /** Consulted first for a non-2xx response; `undefined` falls through to the default spec §5.2 table. */
+  classifyError?: (f: ResponseFacts) => ProviderError | undefined;
+}
+
+/** What createHttpKit needs (spec §5.3 rev 11). */
+export interface HttpKitDeps {
+  budget: BudgetGuard;
+  cache: ResponseCache;
+  /** Limits per enabled id; a request for an id without limits is refused by egress. */
+  limits: Partial<Record<HttpProviderId, ProviderHttpLimits>>;
+  clock: Clock;
+  log: Logger;
+  /** Every configured secret; non-empty whenever a real provider is configured. */
+  secrets: Secret[];
+  /** syntheticAllowed(config), computed by wiring; required true for inProcessHosts or limits.fixture. */
+  syntheticAllowed: boolean;
+  recorder?: FixtureRecorder;
+  /** The one transport seam: a request whose hostname is a key here is dispatched in process (fixture.local only). */
+  inProcessHosts?: Record<string, (req: Request) => Promise<Response>>;
+}
+
+/** One logical request. Credentials travel only in `headers` (spec §2 fact 8); `endpointPath` is the URL path. */
+export interface HttpKitRequest {
+  providerId: HttpProviderId;
+  executionId: string | null;
+  tileIndex: number | null;
+  endpointPath: string;
+  method: 'GET' | 'POST';
+  url: URL;
+  headers: Record<string, string>;
+  body?: string;
+  /** `accept` vetoes caching a body the adapter cannot parse; null or empty bodies are never cached. */
+  cache: { ttlSeconds: number; accept?: (body: unknown) => boolean } | 'never';
+  signal: AbortSignal;
+  recordFixtures: boolean;
+}
+
+/** `fetchedAt` is the original `storedAt` on a cache hit and the leader's on a joined request (spec §2). */
+export interface HttpKitResponse {
+  status: number;
+  body: unknown;
+  fetchedAt: IsoDateTime;
+  fromCache: boolean;
+  cacheKey: string;
+}
+
+/** The single egress path for provider HTTP. Spec §5.3. */
+export interface HttpKit {
+  request(r: HttpKitRequest): Promise<HttpKitResponse>;
+  stats(): { inFlight: number };
+}
+
+/** Writes one attempt as a dated, hashed, redacted fixture (spec §5.3 "Recorder"); resolves to the path written. */
+export interface FixtureRecorder {
+  record(r: {
+    providerId: HttpProviderId;
+    endpointPath: string;
+    request: HttpKitRequest;
+    status: number;
+    body: unknown;
+    /** When the response arrived (http-kit's clock); written as recordedAt (prov-r2-003). */
+    fetchedAt: IsoDateTime;
+  }): Promise<string>;
+}

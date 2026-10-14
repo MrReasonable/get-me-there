@@ -8,6 +8,16 @@
       "@gmt/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./fixture": {
+      "@gmt/source": "./src/fixture/index.ts",
+      "types": "./dist/fixture/index.d.ts",
+      "default": "./dist/fixture/index.js"
+    },
+    "./testing": {
+      "@gmt/source": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {
