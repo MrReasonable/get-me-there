@@ -1,12 +1,13 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 10.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 11.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
 §2 facts 4 and 7, the $40 plan in §1) and changes no design rule; revision 10
 records the contract corrections found while drafting the fourteen work
-briefs (§17), none of which changes what the operator sees. Review
+briefs (§17), none of which changes what the operator sees; revision 11
+records the rules settled by the first reviews of those briefs. Review
 summaries and the spike record live outside the repository (the operator's
 private notes), not in `docs/`; the changelog in §17 maps every finding ID.
 The implementation plan under `docs/superpowers/plans/` and the work briefs
@@ -439,8 +440,12 @@ export class AbortedError extends Error {}
   names **and values**; tests assert both.
 - **Errors.** 401/403 → `auth`; 402 → `quota`; 400 → `parse`
   (non-retryable) with the vendor's message in `last_error`; 404 → `upstream`
-  non-retryable; 429 → `rate-limit` unless the ledger shows the provider at
-  its plan cap or the body matches the recorded quota shape, then `quota`;
+  non-retryable; 429 → `rate-limit`, or `quota` when the adapter's
+  classifier recognises the recorded quota body (the ledger cannot tell the
+  two apart for a billed vendor: a refused reservation never reaches the
+  vendor); a 429 without `Retry-After` waits the provider's configured
+  fallback (Travelpayouts 60 s) or, with none, is non-retryable with a
+  retry time at the hourly window;
   other 5xx → `upstream`; malformed → `parse`; socket → `network`; per-request timeout (`REQUEST_TIMEOUT_SECONDS`, separate from
   `ctx.signal`) → `network` finalised `unknown` and **not retried for billed
   vendors**; limiter deadline → `limiter-timeout`. `signal.aborted` →
@@ -454,10 +459,13 @@ export class AbortedError extends Error {}
 
 ### 5.3 http-kit (`packages/providers/src/http/`)
 
-`createHttpKit({ budget, cache, limits, clock, log })` over
-`globalThis.fetch`; there is no injectable transport. Tests intercept with
-`msw` on global fetch; the fixture provider is served at
-`http://fixture.local` the same way. FX refresh goes through http-kit under
+`createHttpKit({ budget, cache, limits, clock, log, secrets, syntheticAllowed, recorder?, inProcessHosts? })`
+over `globalThis.fetch`. The one transport seam is `inProcessHosts`: a
+hostname-keyed in-process handler that only wiring under `syntheticAllowed`
+may supply (http-kit refuses it otherwise), used for `http://fixture.local`;
+tests intercept with `msw` on global fetch. A request that joins an identical
+in-flight request records its own cache-hit ledger row and is raced against
+its own signal; an adapter may veto caching a body it cannot parse. FX refresh goes through http-kit under
 the id `fx` (never ledgered, no caps, host allowlist `api.frankfurter.dev`).
 Pipeline, fixed:
 
@@ -707,9 +715,11 @@ local vs offset inputs, unknown tz.
 ### 6.5 Dedup, ranking and filters
 
 Pure functions shared by `api` and `web`. **Dedup**: one results row per
-itinerary hash, showing the cheapest qualifying offer (any seller) in the
-definition's cabin; the other offers for that itinerary appear in the
-expanded row. `/results` returns up to 1000 such rows ranked by verdict
+itinerary hash, showing that itinerary's best offer in the definition's
+cabin, chosen by verdict class, then seen-in-latest-search, then price, then
+freshness; the other offers for that itinerary appear in the expanded row
+with their own class and unverified constraints. Stale rows are labelled,
+never demoted (hiding them is the opt-in filter). `/results` returns up to 1000 such rows ranked by verdict
 class (verified, partially-verified, failed) then price, for the chosen
 basis and execution set; **all sorting and filtering happen client-side**
 on that set with these functions, composing without refetch; when
@@ -731,8 +741,16 @@ carriers, destination, max price, nights range, stale. `bandCheapest(rows,
 | 5 | any `no_data` | `no_data` |
 | 6 | all `skipped` | `skipped`, reason by priority budget > provider_disabled > departed > not_selected |
 
-Within one provider, monotone merge `priced > empty > no_data > error`,
-`min_pence = min` (tiles partition cells, so this is a safety net, tested).
+`no_data` outcomes whose reason is `cabin-not-offered` are ignored whenever
+any other outcome exists for the cell; a cell whose only outcomes are
+cabin-not-offered rolls up to `no_data` with that reason. Roll-up reasons: a
+`priced` roll-up carries `partial-expansion` when any priced input has it;
+`error` carries the reason when every error input agrees, else `mixed`;
+`skipped` keeps the priority above. Within one provider, monotone merge
+`priced > empty > no_data > error`, `min_pence = min`, every other field
+travelling with the input that supplies the minimum (tiles partition cells,
+so this is a safety net, tested); a fresh write replaces a reused copy
+outright.
 Discovery re-plans only over `not_run` cells, so a reused cell is never
 fetched again in the same execution; the §7 supersede rule is a safety net
 in the tile write, not a path the planner takes. Coverage
@@ -747,7 +765,10 @@ table.
 `policy = { maxCells; topN ≤ maxCells; priceCeilingPence?; perDepartureDateBest?; alwaysInclude: CellKey[] (|·| ≤ maxCells, members of the resolved space) }`.
 
 Selection runs **once per execution**, guarded by `stage`, and is never
-recomputed on resume. Child executions bypass it entirely (`alwaysInclude =
+recomputed on resume. It refuses a policy whose deduplicated in-space
+`alwaysInclude` exceeds `maxCells` or whose counts are not non-negative
+integers (validated at save time too), so `maxCells` is a hard bound on
+verification spend; the stride walks only cells not already chosen. Child executions bypass it entirely (`alwaysInclude =
 [cell]`, `maxCells = 1`, no discovery).
 
 1. Start with `alwaysInclude` (deduplicated, counted toward `maxCells` and
@@ -790,8 +811,11 @@ Rule: `{ type: 'absolute' | 'dropPct' | 'dropAbs', thresholdPence | pct, basis: 
   checked". When verification is budget-skipped the operator is told
   "alerts running on calendar basis only".
 - `dedupKey = identity + floor(pricePence / 100)`. Suppressed if the same key
-  fired within `cooldownHours`, or the same identity fired at an equal or
-  lower price within it. Synthetic rows are refused.
+  fired within `cooldownHours`, or the same identity fired within it at a
+  price that is not at least max(£10, 5%) above the new one (a fare
+  drifting down £1 a day sends one email, not seven). Each identity is
+  judged on its cheapest eligible candidate. Suppressed firings are
+  recorded with status `suppressed`. Synthetic rows are refused.
 - Firings are delivered as **one digest per rule per execution** listing
   the top 10 and a count of the rest (tested: 50 qualifying cells → one
   email). Returns the digest with reason text.
@@ -815,8 +839,8 @@ has no verification provider.
 
 Every row on either basis carries a labelled **search link** (Aviasales
 deep link from Travelpayouts; a Google Flights search URL for SearchApi
-cells; prefilling airports, dates, cabin and one adult) whenever `booking`
-is `none`, labelled "search link, not a fare link".
+cells, which may not prefill every field) whenever `booking` is `none`,
+labelled "search link, not a fare link"; synthetic rows carry none.
 
 ---
 
@@ -833,8 +857,6 @@ are `toISOString()` text; booleans are integers 0/1.
   5,000 rows with IATA code and tz, and that every airport referenced by an
   enabled definition exists, **fails boot** if it fails; no network at
   seed. No specific airport is named in code.
-- `providers` (id PK, display_name, enabled, capabilities_json). Not a
-  provenance source.
 - `search_definitions` (id, name, origins_json, destinations_json,
   window_json {kind: absolute|relative, …}, min_nights, max_nights, cabin,
   constraints_json, verification_policy_json NOT NULL, budget_json NOT NULL
@@ -936,7 +958,7 @@ are `toISOString()` text; booleans are integers 0/1.
 - `fx_rates` (date, currency, rate_nano, source) PK (date, currency).
 - `alert_rules` (id, definition_id, type, threshold_pence NULL, pct NULL,
   basis, require_all_verified NULL, cooldown_hours NOT NULL default 336,
-  enabled).
+  enabled, deleted_at NULL). Soft-deleted; events are kept.
 - `alert_events` (id, rule_id, identity_key, observation_id NULL,
   calendar_price_id NULL, dedup_key, fired_at, status ∈ sent | failed |
   suppressed, reason, payload_json). Index (rule_id, dedup_key, fired_at),
@@ -953,9 +975,9 @@ are `toISOString()` text; booleans are integers 0/1.
   Heartbeat every 30 s; stale after 3 missed beats; liveness judged by
   heartbeat age, never by pid. Graceful SIGTERM releases the lock after the
   checkpoint. At boot, a fresh `tool` lock makes the app wait up to 60 s
-  then refuse; a fresh `app` lock (its own previous process after an
-  ungraceful stop) makes it wait up to 90 s, logging the lock age, then
-  take over; the `HEALTHCHECK` `start_period` covers both waits. The tool
+  then refuse; a fresh `app` lock makes it wait up to 90 s, logging the
+  lock age, then take over a lock that has gone stale and refuse one that
+  is still being heartbeated (a second live app); the `HEALTHCHECK` `start_period` covers both waits. The tool
   bootstrap refuses while a fresh app lock exists; while the app is
   running, the same scripts are reachable as the authenticated routes
   `POST /tools/smoke` and `POST /tools/record` (§10). Acquisition and
@@ -1303,7 +1325,7 @@ shape carries `provenance` and `stale`.
 | `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock` |
-| `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history` | series per provider and kind; reused rows excluded |
+| `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
 
@@ -1585,6 +1607,19 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 11: rules settled by the wave-1 brief reviews (2026-10-14)
+
+Twenty-six reviewer runs over the WP1–WP4 briefs. Folded in: the 429
+quota rule drops its ledger arm and gains a header-less fallback (§5.2); the
+http-kit seam is stated and in-flight joiners are ledgered (§5.3); dedup
+chooses by class before price and stale rows are never demoted (§6.5);
+cabin-not-offered precedence, roll-up reasons and the reused-copy
+replacement rule (§6.6); the `maxCells` hard bound (§6.7); the minimum drop
+step inside the cooldown and suppressed firings recorded (§6.8); the
+`providers` table removed, alert rules soft-deleted, the app-lock refusal of
+a live second app (§7); route calendar history as one point per fetch
+(§10); search links absent on synthetic rows (§11).
 
 ### Revision 10: contract corrections from the brief-drafting pass (2026-10-14)
 
