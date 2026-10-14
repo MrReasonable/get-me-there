@@ -11,6 +11,7 @@ import {
   type NoDataReason,
   type ProviderId,
   type RollUp,
+  type SelectionReason,
   type Stage,
   stripUrlsInText,
 } from '@gmt/core';
@@ -18,6 +19,7 @@ import type { Db } from '../client.js';
 import {
   OUTCOME_STATUSES,
   PROVIDER_IDS,
+  SELECTION_REASONS,
   SKIP_REASONS,
   STAGES,
   TERMINAL_STATUSES,
@@ -25,6 +27,7 @@ import {
 import {
   CELL_KEY_SQL,
   CELL_WHERE,
+  type CellKeyDbRow,
   keyParams,
   type OutcomeDbRow,
   toCellKey,
@@ -176,6 +179,33 @@ function assertOutcomeProvenance(o: Incoming): void {
       `${cellKeyString(o)} ${o.status} needs fetchedAt, cabin, pointOfSale and sourceKind`,
     );
 }
+
+/** Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. */
+const NON_RETRYABLE = [
+  'auth',
+  'quota',
+  'parse',
+  'no-return-legs',
+  'fx-unavailable',
+  'currency-unsupported',
+  'unknown-airport-tz',
+] as const;
+const MANUAL_RETRYABLE = ['auth', 'quota', 'parse'] as const;
+const sqlList = (xs: readonly string[]) => xs.map((r) => `'${r}'`).join(', ');
+
+/**
+ * Spec §7 resume selection for one (stage, provider). `skipped:budget` is returned; the engine keeps it only when
+ * headroom exists (WP7). `priced | empty | no_data` are never returned.
+ */
+export const RESUMABLE_SQL = `
+SELECT origin, destination, departure_date, return_date FROM cell_outcomes
+WHERE execution_id = @executionId AND stage = @stage AND provider_id = @providerId AND (
+  status = 'not_run'
+  OR (status = 'error' AND attempts < 3 AND (reason IS NULL OR reason NOT IN (${sqlList(NON_RETRYABLE)})))
+  OR (status = 'skipped' AND reason = 'budget')
+  OR (@manual = 1 AND ((status = 'skipped' AND reason = 'provider_disabled') OR (status = 'error' AND reason IN (${sqlList(MANUAL_RETRYABLE)}))))
+)
+ORDER BY origin, destination, departure_date, return_date`;
 
 /**
  * Spec §7 `search_cells` + `cell_outcomes` and the stored roll-ups. Every method that changes an outcome stores the
@@ -506,5 +536,104 @@ export class CellsRepo {
     if (r === undefined)
       throw new RowRejected('missing', `no seeded ${stage} outcome for ${providerId} at ${cellKeyString(c)}`);
     return toOutcome(r);
+  }
+
+  /**
+   * Spec §7 atomic unit "selection persistence + verification seeding": marks the selection, seeds one verification
+   * outcome per cell of `allCells` × provider (selected → not_run, others → skipped:not_selected) and stores the
+   * roll-ups. Selection runs once per execution (spec §6.7).
+   */
+  seedVerification(
+    executionId: string,
+    selected: Array<{ cell: CellKey; reason: SelectionReason }>,
+    allCells: CellKey[],
+    verificationProviders: ProviderId[],
+  ): void {
+    const all = new Set(allCells.map(cellKeyString));
+    for (const s of selected)
+      if (!all.has(cellKeyString(s.cell)))
+        throw new RowRejected('selection-member', `${cellKeyString(s.cell)} is not among allCells`);
+    this.db.transaction(() => {
+      if (this.hasVerificationOutcomes(executionId))
+        throw new RowRejected(
+          'selection-once',
+          `verification outcomes already exist for ${executionId}; selection runs once per execution`,
+        );
+      const inExecution =
+        this.db.raw
+          .prepare<Record<string, unknown>, { n: number }>(
+            `SELECT COUNT(*) AS n FROM search_cells WHERE execution_id = @executionId AND ${CELL_KEY_SQL} IN (SELECT value FROM json_each(@keys))`,
+          )
+          .get({ executionId, keys: JSON.stringify([...all]) })?.n ?? 0;
+      if (inExecution !== all.size)
+        throw new RowRejected(
+          'selection-member',
+          `allCells names ${all.size - inExecution} cell(s) that are not cells of ${executionId}`,
+        );
+      this.db.raw
+        .prepare(
+          'UPDATE search_cells SET verification_selected = 0, selection_reason = NULL WHERE execution_id = ?',
+        )
+        .run(executionId);
+      const mark = this.db.raw.prepare(
+        `UPDATE search_cells SET verification_selected = 1, selection_reason = @reason WHERE ${CELL_WHERE}`,
+      );
+      for (const s of selected) mark.run({ ...keyParams(executionId, s.cell), reason: s.reason });
+      const seed = this.db.raw.prepare(
+        `INSERT INTO cell_outcomes (execution_id, origin, destination, departure_date, return_date, stage, provider_id, status, reason, attempts)
+         SELECT execution_id, origin, destination, departure_date, return_date, 'verification', @providerId,
+                CASE WHEN verification_selected = 1 THEN 'not_run' ELSE 'skipped' END, CASE WHEN verification_selected = 1 THEN NULL ELSE 'not_selected' END, 0
+         FROM search_cells WHERE execution_id = @executionId AND ${CELL_KEY_SQL} IN (SELECT value FROM json_each(@keys))`,
+      );
+      for (const providerId of verificationProviders)
+        seed.run({ executionId, providerId, keys: JSON.stringify([...all]) });
+      storeRollUps(this.db, executionId, 'verification', allCells);
+    });
+  }
+
+  selected(executionId: string): Array<{ cell: CellKey; reason: SelectionReason }> {
+    return this.db.raw
+      .prepare<[string], CellKeyDbRow & { selection_reason: string }>(
+        'SELECT origin, destination, departure_date, return_date, selection_reason FROM search_cells WHERE execution_id = ? AND verification_selected = 1 ORDER BY origin, destination, departure_date, return_date',
+      )
+      .all(executionId)
+      .map((r) => ({
+        cell: toCellKey(r),
+        reason: oneOf('search_cells.selection_reason', SELECTION_REASONS, r.selection_reason),
+      }));
+  }
+
+  /** Spec §7: resume re-runs selection only when no verification outcomes exist. */
+  hasVerificationOutcomes(executionId: string): boolean {
+    return (
+      this.db.raw
+        .prepare(
+          `SELECT 1 AS present FROM cell_outcomes WHERE execution_id = ? AND stage = 'verification' LIMIT 1`,
+        )
+        .get(executionId) !== undefined
+    );
+  }
+
+  resumable(executionId: string, stage: Stage, providerId: ProviderId, manual: boolean): CellKey[] {
+    return this.db.raw
+      .prepare<Record<string, unknown>, CellKeyDbRow>(RESUMABLE_SQL)
+      .all({ executionId, stage, providerId, manual: manual ? 1 : 0 })
+      .map(toCellKey);
+  }
+
+  /** Spec §8.1: not_run and skipped outcomes of cells departing on or before `today` become skipped:departed; priced/empty/no_data untouched. */
+  markDeparted(executionId: string, today: IsoDate): number {
+    return this.db.transaction(() => {
+      const changes = this.db.raw
+        .prepare(
+          `UPDATE cell_outcomes SET status = 'skipped', reason = 'departed' WHERE execution_id = @executionId AND departure_date <= @today AND (status = 'not_run' OR (status = 'skipped' AND reason <> 'departed'))`,
+        )
+        .run({ executionId, today }).changes;
+      if (changes > 0) {
+        storeRollUps(this.db, executionId, 'discovery');
+        storeRollUps(this.db, executionId, 'verification');
+      }
+      return changes;
+    });
   }
 }
