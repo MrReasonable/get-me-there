@@ -1,9 +1,9 @@
 packages:
   - packages/*
   - apps/*
-onlyBuiltDependencies:
-  - better-sqlite3
-# why: esbuild's postinstall only re-validates the platform binary that @esbuild/<platform> already ships;
-# it is not needed and pnpm 12 refuses to install while an unapproved build script exists.
-ignoredBuiltDependencies:
-  - esbuild
+# pnpm 12 syntax: build scripts run only for the packages listed here. better-sqlite3 ships its
+# binary inside the package (no install script in 13.x) but is listed so a future version that
+# adds one still installs; esbuild's postinstall only re-validates the platform binary.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
