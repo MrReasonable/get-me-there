@@ -1,10 +1,12 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 9.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 10.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
-§2 facts 4 and 7, the $40 plan in §1) and changes no design rule. Review
+§2 facts 4 and 7, the $40 plan in §1) and changes no design rule; revision 10
+records the contract corrections found while drafting the fourteen work
+briefs (§17), none of which changes what the operator sees. Review
 summaries and the spike record live outside the repository (the operator's
 private notes), not in `docs/`; the changelog in §17 maps every finding ID.
 The implementation plan under `docs/superpowers/plans/` and the work briefs
@@ -73,8 +75,9 @@ fully priced calendars (126 of 126 cells on every probe), itinerary search on `m
 cells per run with real segments, per-seller prices, baggage and constraint
 verdicts, and a free 60-day route price history. On a subscription plan the
 marginal cost per call is zero and the plan's 10,000 calls a month is the
-hard stop; the default uses ~820 of them, so raising `maxCells` to ~200 per
-run (~1,140 per run) or running daily (~5,700 a month) both fit.
+hard stop; the worked example uses ~615 of them a month, so raising
+`maxCells` to ~200 per run (~1,090 per run) or running daily (~4,300 a
+month) both fit (§8.2).
 
 **Non-goals for this build**: ground transport, rail, accommodation,
 multimodal totals (§7 keeps two columns; the operator may enter an
@@ -167,7 +170,8 @@ calls and ~175 free Travelpayouts calls settled every open fact:
    shared metro code (`LON` in the example).
 2. SearchApi calendar: 200-combination limit enforced as HTTP 400; per
    airport only; every probed route fully priced, thin ones included; 9–29 s
-   latency; ~23 rectangles of 8 × 24 days per pair for the default band.
+   latency; ~23 rectangles per pair for the default band (8 outbound days ×
+   the 19-day return span a 12-night band needs; 152 combinations).
 3. SearchApi chain: step-1 price equals the step-2 price for the cheapest
    pairing (£603); step 3 showed an OTA at £573, so **the parity assertion
    fails** and `bookingLinks` is forced on (§5.4). Two of nine step-1
@@ -232,9 +236,13 @@ verification as a free history source (§7 `route_price_history`).
     be normalised.
   - `empty`: positive "no fares" for this cell.
   - `no_data`: the call covered the cell but had nothing cached or computed.
-    Not evidence that no flights exist.
+    Not evidence that no flights exist. Also, with reason `cabin-not-offered`,
+    every cell of a provider whose `cabins` excludes the definition's cabin;
+    no call is made and parity is unaffected.
   - `error`: `reason` is the `ProviderError.kind`, or `fx-unavailable`,
-    `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`.
+    `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
+    `unmappable-carrier`; the vendor's message, URL-stripped, is in
+    `last_error`, never in `reason`.
   - `skipped`: `reason ∈ not_selected | budget | provider_disabled | departed`.
   - Coverage is always shown as **six buckets**: priced, no fares (`empty`),
     no cached data (`no_data`), error, skipped (reasons in the drill-down),
@@ -248,7 +256,7 @@ verification as a free history source (§7 `route_price_history`).
   `partially-verified`, `failed`; calendar prices are `unchecked`. The word
   "verified" is reserved for the class. Stage counts use
   **"itinerary-searched"**.
-- **Provenance** — `{ providerId, sourceKind, fetchedAt, providerObservedAt?, maxAgeHours: number | 'unknown', fx: { converted: false } | { converted: true; rateNano; rateDate; source }, pointOfSale: 'GB' | 'unknown', cabin }`.
+- **Provenance** — `{ providerId, sourceKind, fetchedAt, providerObservedAt?, maxAgeHours: number | 'unknown', fx: { converted: false } | { converted: true; rateNano; rateDate; source }, pointOfSale: <ISO 3166-1 alpha-2, the vendor's echo of `POINT_OF_SALE`> | 'unknown', cabin }`.
 - **Effective age** — `providerObservedAt` age if present; else `fetchedAt`
   age + `maxAgeHours`; else (`'unknown'`) unknown, treated as stale and
   labelled. Two label formats are defined once in `core`: the full form
@@ -267,7 +275,7 @@ one SQLite file, one container. Optional Mailpit for local email.
 |---|---|---|
 | `core` | `zod`, `@noble/hashes`, `@date-fns/tz` (instants and DST; calendar dates stay epoch-day integers) | Types; ports `FlightProvider`, `BudgetGuard`, `ResponseCache`, `Notifier`, `Logger`, `Clock`; errors; the config zod schema (pure) and `syntheticAllowed`; `api-contract`; every §6 function; the label formatter. 100% coverage. |
 | `db` | `core` | Schema, migrations, repositories; `BudgetGuard`, `ResponseCache` implementations; airport and FX repositories; `app_lock`; seed. |
-| `providers` | `core` | Adapters (raw shapes); `createHttpKit({ budget, cache, limits, clock, log })` over `globalThis.fetch`; the fixture provider, which is an ordinary HTTP adapter against `http://fixture.local` (served by `msw` in tests and by an api route in fixture mode). No SQLite, no `process.env`. |
+| `providers` | `core` | Adapters (raw shapes); `createHttpKit({ budget, cache, limits, clock, log })` over `globalThis.fetch`; the fixture provider, which is an ordinary HTTP adapter against `http://fixture.local` (served by `msw` in tests and, in fixture mode, by an in-process router that http-kit dispatches to for that one hostname, a seam gated by `syntheticAllowed`). No SQLite, no `process.env`. |
 | `engine` | `core`, `db`, `providers` | Orchestrator, normalisation step (calls db repositories directly), stage runners, scheduler (owns the single `parseCron` wrapper over `croner`, which `api` imports for validation), notifiers, alert runner, FX refresh (through http-kit under the never-billable id `fx`), maintenance job. |
 | `api` | all | Two entrypoints: the **app bootstrap** and the **tool bootstrap** (§7), both built on the wiring helper from WP4b and parsing `process.env` once through the `core` schema. Routes incl. the authenticated `/tools/*` routes, auth, hardening, static, health. |
 | `web` | `core` (types, `api-contract`, pure filter/rank/verdict/label functions) | SPA. |
@@ -275,7 +283,7 @@ one SQLite file, one container. Optional Mailpit for local email.
 **Tech**: TypeScript strict, Node 22, pnpm, `better-sqlite3` + Drizzle,
 Hono + `@hono/node-server` + `@hono/zod-validator`, `zod`, `@noble/hashes`,
 `@date-fns/tz`, `bottleneck`, `p-retry`, `pino`, `croner`, `nodemailer`,
-Vite + React 18 + TanStack Query + TanStack Table + Tailwind + Recharts,
+Vite + React 19 + TanStack Query + TanStack Table + Tailwind + Recharts,
 Vitest + `msw` + Testing Library + Stryker, Playwright, Biome.
 
 **Integration notes to verify at plan time** (each brief links its source):
@@ -332,6 +340,7 @@ export interface DiscoveryQuery {
 }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
+  | { kind: 'month'; month: IsoMonth }                                   // Travelpayouts month tiles
   | { kind: 'length-month'; length: number; month: IsoMonth }
   | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
   | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
@@ -340,7 +349,7 @@ export interface RawCalendarPrice extends CellKey {
   amountMinor: number; currency: string; providerObservedAt?: IsoDateTime; vendorLink?: string;
 }
 export type DiscoveryTileResult =
-  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
+  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
   | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: ProviderError };
 
 export interface ItineraryQuery extends CellKey { cabin: Cabin; adults: 1; currency: 'GBP'; maxStops?: number; expandTop: number; bookingLinks: boolean }
@@ -352,7 +361,10 @@ export interface RawOffer {
   booking: { kind: 'get'; url: string } | { kind: 'post'; url: string; postData: string } | { kind: 'none' };
   bookingExpiresAt?: IsoDateTime;
 }
-export interface ItinerarySearchResult { offers: RawOffer[]; coverage: 'priced' | 'empty'; fetchedAt: IsoDateTime; partial: boolean; failedExpansions: number; notes: string[] }
+export interface ItinerarySearchResult {
+  offers: RawOffer[]; coverage: 'priced' | 'empty'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; partial: boolean; failedExpansions: number; notes: string[];
+  routeHistory?: Array<{ date: IsoDate; lowestPriceMinor: number; currency: string }>;   // SearchApi price_insights.price_history; the engine upserts route_price_history
+}
 // offers: every return option of every expanded outbound, one RawOffer each; the cheapest per outbound is the step-3 candidate.
 
 export interface ProviderContext { executionId: string | null; signal: AbortSignal; recordFixtures: boolean }
@@ -370,8 +382,8 @@ export interface CostEstimate { calls: number; costMicroGbp: number; seconds: nu
 
 export interface Reservation { id: string; finalise(r: { outcome: 'ok' | 'error' | 'unknown'; httpStatus?: number; durationMs: number }): void }
 export interface BudgetGuard {
-  reserve(p: { providerId: ProviderId; executionId: string | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
-  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; endpointPath: string }): void;
+  reserve(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
+  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
   usage(scope: BudgetScope): Usage;
 }
 export interface ResponseCache { get(key: string): { body: unknown; storedAt: IsoDateTime } | undefined; set(key: string, body: unknown, ttlSeconds: number, storedAt: IsoDateTime): void }
@@ -390,17 +402,19 @@ export class AbortedError extends Error {}
   inside one `fetchTile`, each page ledgered with the tile's `tile_index`,
   and parity counts tiles. **Travelpayouts** (measured): `month` tiles on
   `/aviasales/v3/prices_for_dates` with `departure_at=YYYY-MM`,
-  `one_way=false`, `currency=gbp`, `limit=1000`, no `return_at`; `origin`
-  is each origin airport, collapsed to the shared metro code when the
-  airports table gives one for every origin in the definition; rows are
-  attributed by `origin_airport` and filtered to the definition's origins
-  and nights band. Tiles per scan: `O × D × M`, or `D × M` with a shared
-  metro (the worked example: 2 origins sharing LON × 2 destinations
-  sharing NYC × 7 months = 14, or 28 by airport). **SearchApi**
-  (measured): `rectangle` tiles of 8 outbound × 24 return days (192
-  combinations, 96 useful cells for a 12-night band), asserted ≤200 before
-  reserve; ~23 tiles per pair for a 182-day window (the worked example: 4
-  pairs ≈ 92).
+  `one_way=false`, `currency=gbp`, `limit=1000`, no `return_at`; the query
+  stays per (origin, destination) pair and `origin` is the pair's origin
+  airport's metropolitan code when the airports table maps it to one, else
+  the airport; rows are attributed by `origin_airport` and filtered to the
+  pair and the nights band. Logical tiles per scan: `O × D × M`; identical
+  metro requests from sibling pairs are answered by the response cache
+  inside its TTL, so upstream calls are `D × M` with a shared metro (the
+  worked example: 2 origins sharing LON × 2 destinations × 7 months = 28
+  tiles, 14 upstream calls, 14 cache hits). **SearchApi** (measured):
+  `rectangle` tiles of 8 outbound days × the tight return span the nights
+  band needs (19 days for a 12-night band: 152 combinations, 96 useful
+  cells), asserted ≤200 before reserve; ~23 tiles per pair for a 182-day
+  window (the worked example: 4 pairs ≈ 92).
 - **Cell keys from the response**; entries outside `coveredCells` or with
   nights ≠ the requested length are dropped and counted in `notes`.
 - **Empty is per capability.** `authorised-cached`: a schema-valid success
@@ -418,12 +432,13 @@ export class AbortedError extends Error {}
   echo in `search_parameters`. Travelpayouts
   `currency=gbp` only: its `market` parameter is ignored by the vendor, so
   it stores `pointOfSale: 'unknown'`, and `trip_class` is ignored too, so
-  its adapter returns `no_data` with a note for any non-economy definition.
-  All hard-coded. The dated allowlist
+  it declares `cabins: ['economy']` and the engine marks every cell
+  `no_data` with reason `cabin-not-offered` for a non-economy definition
+  without calling it. All hard-coded. The dated allowlist
   (`fixtures/recorded/<provider>/params-<date>.json`) enumerates parameter
   names **and values**; tests assert both.
-- **Errors.** 401/403 → `auth`; 402 → `quota`; 400 → `parse` with the
-  vendor's message as `reason` (non-retryable); 404 → `upstream`
+- **Errors.** 401/403 → `auth`; 402 → `quota`; 400 → `parse`
+  (non-retryable) with the vendor's message in `last_error`; 404 → `upstream`
   non-retryable; 429 → `rate-limit` unless the ledger shows the provider at
   its plan cap or the body matches the recorded quota shape, then `quota`;
   other 5xx → `upstream`; malformed → `parse`; socket → `network`; per-request timeout (`REQUEST_TIMEOUT_SECONDS`, separate from
@@ -443,8 +458,8 @@ export class AbortedError extends Error {}
 `globalThis.fetch`; there is no injectable transport. Tests intercept with
 `msw` on global fetch; the fixture provider is served at
 `http://fixture.local` the same way. FX refresh goes through http-kit under
-the id `fx` (never billable, no caps, its own host allowlist). Pipeline,
-fixed:
+the id `fx` (never ledgered, no caps, host allowlist `api.frankfurter.dev`).
+Pipeline, fixed:
 
 ```
 cache lookup ─hit─▶ budget.recordCacheHit ─▶ return { body, fetchedAt: storedAt }
@@ -492,7 +507,9 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   never contains a URL; every URL written to `cell_outcomes.last_error`,
   `search_executions.error_text`, `alert_events.payload_json`, API
   `error.details`, email bodies or pino output has its query string and
-  userinfo stripped; pino `redact` covers `apiKey`, `token`, `authorization`,
+  userinfo stripped, with one exception: a validated booking or search link
+  (`https:`, allowlisted host, §5.2) is written whole to API bodies and
+  emails, since the query is the link; pino `redact` covers `apiKey`, `token`, `authorization`,
   `url.query`, `req.headers.authorization`; the recorder fails closed. The
   sentinel-key test configures fake values for every secret (both provider
   keys, the SMTP password, the basic-auth password), exercises every path
@@ -507,7 +524,8 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
 
 ### 5.4 SearchApi itinerary flow
 
-Vendor parameter names from the allowlist. Step 1 (outbound options,
+Vendor parameter names from the allowlist (`travel_class` values `economy |
+premium_economy | business | first_class`). Step 1 (outbound options,
 cheapest-first) → step 2 per `expandTop` outbound (round-trip price for that
 pairing) → optional step 3 (`booking_token` → options; `booking_request` is a
 POST, stored as `{ kind: 'post', url, postData }`, rendered as a browser form,
@@ -573,8 +591,10 @@ price per tile (the minimum `amountMinor`, tie-break on vendor order) and
 counts discards; the roll-up `min_pence` is the minimum over rows actually
 written. Evidenced per-segment cabins are stored on the observation
 (`segment_cabins_json`), never on the shared `segments` rows. FX rates come
-from frankfurter via plain `fetch` + `p-retry` (host-allowlisted, not
-ledgered), refreshed daily.
+from frankfurter (`https://api.frankfurter.dev/v1/latest?from=GBP`; the
+older `.app` host redirects and http-kit refuses redirects) through http-kit
+under the id `fx` (host-allowlisted, never ledgered), refreshed daily by a
+scheduled job that runs after boot.
 
 ---
 
@@ -710,7 +730,8 @@ carriers, destination, max price, nights range, stale. `bandCheapest(rows,
 Within one provider, monotone merge `priced > empty > no_data > error`,
 `min_pence = min` (tiles partition cells, so this is a safety net, tested).
 Discovery re-plans only over `not_run` cells, so a reused cell is never
-fetched again in the same execution; there is no supersede case. Coverage
+fetched again in the same execution; the §7 supersede rule is a safety net
+in the tile write, not a path the planner takes. Coverage
 fractions in the UI always show the **six buckets** of §3 (priced, no
 fares, no cached data, error, skipped, not searched), which sum to the cell
 count; "searched" as an umbrella appears only in View D beside the
@@ -800,9 +821,10 @@ Conventions: `*_pence`, `*_micro_gbp`, `*_nano` are `integer`; timestamps
 are `toISOString()` text; booleans are integers 0/1.
 
 - `airports` (iata PK, icao, name, city, country, tz NOT NULL, lat, lon,
-  metro NULL (IATA metropolitan code when the dataset provides one),
-  source, dataset_version). Seeded from a vendored, versioned
-  `mwgg/Airports` dataset (MIT, has IANA `tz`); re-seeded by upsert when the
+  metro NULL, source, dataset_version). Seeded from a vendored, versioned
+  `mwgg/Airports` dataset (MIT, has IANA `tz`; it carries no metropolitan
+  codes, so `metro` comes from a separately vendored, attributed list of
+  IATA metropolitan area codes beside it); re-seeded by upsert when the
   dataset version changes; the sanity check that the table holds at least
   5,000 rows with IATA code and tz, and that every airport referenced by an
   enabled definition exists, **fails boot** if it fails; no network at
@@ -814,7 +836,7 @@ are `toISOString()` text; booleans are integers 0/1.
   constraints_json, verification_policy_json NOT NULL, budget_json NOT NULL
   {maxCalls, maxFreeCalls, maxCostMicroGbp}, providers_json {discovery[],
   verification[], discoveryRefreshHours{} (default 168 per provider)},
-  onward_cost_json {dest: pence} NULL, schedule_cron NULL, schedule_tz NOT
+  destination_notes_json {dest: text} NULL, onward_cost_json {dest: pence} NULL, schedule_cron NULL, schedule_tz NOT
   NULL, confirmed_cost_pence NULL (set **only** from an explicit
   confirmation the operator submits after seeing the estimate; never
   recomputed automatically), enabled, deleted_at NULL, created_at,
@@ -822,7 +844,7 @@ are `toISOString()` text; booleans are integers 0/1.
 - `search_executions` (id, definition_id, is_child NOT NULL default 0,
   child_origin, child_destination, child_departure_date, child_return_date
   (NULL for parents), definition_snapshot_json NOT NULL (with the resolved
-  window), status ∈ pending | running | paused_budget | paused_error |
+  window), trigger ∈ manual | schedule | tool, status ∈ pending | running | paused_budget | paused_error |
   interrupted | cancelled | completed | skipped_budget | skipped_confirm |
   skipped_window | skipped_missed, stage, estimate_json, cancel_requested, resume_after NULL,
   auto_resume_count NOT NULL default 0, started_at, finished_at,
@@ -836,9 +858,11 @@ are `toISOString()` text; booleans are integers 0/1.
   incremented by graceful SIGTERM. `resume_after` drives a one-shot croner
   job.
 - `search_cells` (execution_id, origin, destination, departure_date,
-  return_date, discovery_status NULL, discovery_min_pence,
-  verification_selected, selection_reason, verification_status NULL,
-  best_observation_id NULL FK `price_observations.id`) PK five keys.
+  return_date, discovery_status NULL, discovery_reason NULL,
+  discovery_min_pence, verification_selected, selection_reason,
+  verification_status NULL, verification_reason NULL,
+  verification_min_pence NULL, best_observation_id NULL FK
+  `price_observations.id`) PK five keys.
   A `NULL` status means the stage has no provider or no outcome rows yet.
 - `cell_outcomes` PK **(execution_id, origin, destination, departure_date,
   return_date, stage, provider_id)** with status, reason, attempts NOT NULL
@@ -901,18 +925,19 @@ are `toISOString()` text; booleans are integers 0/1.
   billable NULL until finalised, cost_micro_gbp NOT NULL, http_attempt).
   Inserted at reserve.
   Index (provider_id, started_at, outcome, billable), (execution_id).
-- `provider_cache` (key PK, provider_id, body_json, stored_at, expires_at).
+- `provider_cache` (key PK, provider_id NULL, body_json, stored_at,
+  expires_at).
 - `fx_rates` (date, currency, rate_nano) PK (date, currency).
 - `alert_rules` (id, definition_id, type, threshold_pence NULL, pct NULL,
-  basis, require_all_verified NULL, cooldown_hours NOT NULL default 168,
+  basis, require_all_verified NULL, cooldown_hours NOT NULL default 336,
   enabled).
 - `alert_events` (id, rule_id, identity_key, observation_id NULL,
   calendar_price_id NULL, dedup_key, fired_at, status ∈ sent | failed |
   suppressed, reason, payload_json). Index (rule_id, dedup_key, fired_at),
   (rule_id, identity_key, fired_at).
 - `operator_notifications` (id, kind, execution_id, sent_at, status).
-- `route_price_history` (origin, destination, cabin, provider_id, date,
-  lowest_price_pence, fetched_at) PK (origin, destination, cabin,
+- `route_price_history` (origin, destination, cabin (a cabin or
+  'unknown'), provider_id, date, lowest_price_pence, fetched_at) PK (origin, destination, cabin,
   provider_id, date): the 60-day `price_insights.price_history` series
   SearchApi returns with every step-1 response, upserted on each
   verification. Shown on the History view as its own labelled series
@@ -983,6 +1008,8 @@ pre-start (scheduler tick and POST): resolve window (§6.1); estimate per provid
    a scheduled run needs definition.confirmed_cost_pence × 10 000 ≥ estimateMicroGbp else skipped_confirm
    + notified; a PUT that raises the estimate above the stored confirmation returns needsConfirmation
 start: snapshot; seed search_cells + cell_outcomes(not_run) for every cell × discovery provider; status=running
+   a provider whose `cabins` excludes the snapshot's cabin is not called in either stage: its cells become
+   no_data reason cabin-not-offered at seeding
 discovery, per discovery provider, per (origin, destination) pair:
    reuse, per cell: the newest priced|empty|no_data outcome for the same cell, provider, definition,
           cabin, point of sale and source kind, from a non-child execution, with age measured from the
@@ -1013,7 +1040,7 @@ completed
 | `BudgetExceeded` provider-month / provider-lifetime, other providers remain in the stage | remaining cells for that provider and stage `skipped:budget` | continue; notify once; no one-shot job |
 | `BudgetExceeded` provider-month / provider-lifetime, no other provider remains | remaining cells `skipped:budget` | `paused_budget` with `resume_after` = next cap window start; a one-shot job resumes it; exempt from the stale-run supersede while `resume_after` is in the future |
 | `BudgetExceeded` global-month (billed providers only; free providers continue) | billed providers' remaining cells `skipped:budget`; in-flight billed siblings aborted → `not_run` | continue if a free provider remains, else `paused_budget` as above |
-| `BudgetExceeded` execution-* | in-flight siblings aborted → `not_run` | `paused_budget` + notify; needs a manual cap change or `/resume` after editing the definition |
+| `BudgetExceeded` execution-* | in-flight siblings aborted → `not_run` | `paused_budget` + notify; needs a manual `/resume`, which copies the definition's current `budget` into the snapshot (nothing else) and re-checks the caps |
 | `AbortedError` (cancel / SIGTERM) | `not_run` | `cancelled` (operator) / `interrupted` (SIGTERM) |
 | normalisation `fx-unavailable` / `currency-unsupported` / `unknown-airport-tz` / unmappable carrier | offers that fail are dropped and counted `offers-dropped:n` on a `priced` outcome; `error` with the reason only when no offer survives | continue |
 | `BudgetExceeded` is never recorded as `error`. | | |
@@ -1049,8 +1076,9 @@ completed
 - **Boot order**: `pending` executions older than the boot and `running`
   executions become `interrupted` (crash-marked rows increment
   `auto_resume_count`); if `AUTO_RESUME`, every `interrupted` execution
-  with count ≤ `MAX_AUTO_RESUMES` resumes; one-shot jobs for `resume_after`
-  are re-registered; **then** cron. SIGTERM: stop scheduler, abort in-flight
+  with count ≤ `MAX_AUTO_RESUMES` resumes (never an execution whose
+  definition is soft-deleted); one-shot jobs for `resume_after` are
+  re-registered; **then** cron. Boot makes no network call. SIGTERM: stop scheduler, abort in-flight
   (cells → `not_run`), status `interrupted` without incrementing the
   counter, checkpoint, exit.
 - **Staleness per price**: effective age (§3) vs `STALE_AFTER_HOURS`
@@ -1101,7 +1129,7 @@ a bounded string in `core/api-contract`; the single `parseCron` wrapper in
 `api` (sub-hourly rejected, tz validated); `core` has no cron parser.
 
 **Cadence arithmetic** (and `docs/scheduling.md`), from the same functions
-as the estimate, for the default space of 6 pairs over a 182-day window,
+as the estimate, for the worked example's 4 pairs over a 182-day window,
 under the §5.2 tilings measured by the spike:
 
 | Config | Per run | Per month (weekly) | Fits |
@@ -1244,15 +1272,18 @@ break threshold of 80%. First-failing-test per WP in §16.
 ---
 
 ## 10. HTTP API
-Schemas in `core/api-contract`; errors `{ error: { code, message, details? } }`;
-every price-bearing shape carries `provenance` and `stale`.
+Schemas in `core/api-contract`; every route is mounted under `/api` (the SPA
+owns `/`; the table omits the prefix); errors `{ error: { code, message,
+details? } }` where a 422 carries `details.fields[]`; every price-bearing
+shape carries `provenance` and `stale`.
 
 | Route | Purpose |
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ enabled scheduled definitions, or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
+| `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }` |
 | `GET /providers` | capabilities, plan, usage vs caps with window bounds; "verification will not run: spend cap is 0" when a billed provider is enabled under a zero cap |
 | `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan**; response includes `budgetFit`; `PUT` re-registers the schedule; a zero-cell window returns 422 |
-| `POST /definitions/:id/estimate` | cells, per-provider calls, cost (micro-GBP and pence), seconds, assumptions |
+| `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions |
 | `POST /definitions/coverage-check` | body: origins, destinations, window, nights; runs Travelpayouts month tiles (free, ledgered, subject to the free-call caps) and returns cached rows per pair per month; never calls a billed provider |
 | `POST /definitions/:id/executions` | pre-start checks; `confirmCostPence?`; 409 on active execution or cap breach naming the cap |
 | `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for all scopes, estimate vs ledger (updates during run) |
@@ -1276,9 +1307,10 @@ every price-bearing shape carries `provenance` and `stale`.
 boundaries and a small allowlist over web, engine templates and API
 strings):** "exhaustive", "all combinations", "every combination", "live",
 "bookable", "guaranteed", "real-time". Use "fetched 12m ago", "Google
-Flights via SearchApi", "Aviasales cache", "estimate vs ledger". The word
-"verified" appears only beside class-`verified` values; stage counts say
-"itinerary-searched".
+Flights via SearchApi" (itinerary search), "Google date grid via SearchApi"
+(calendar), "Aviasales cache", "estimate vs ledger". The word "verified"
+appears only beside class-`verified` values; the `verified` basis is
+labelled "itinerary-search basis"; stage counts say "itinerary-searched".
 
 Layout: nav owned by WP9 for all views; definition selector; **status bar**
 on every view: stage, progress, spend used / cap for execution and month,
@@ -1347,10 +1379,12 @@ merged into price.
   "min among verified (class verified, n=…)" and calendar per provider; `n`
   in label and tooltip; explicit empty and loading states; gaps for
   unsearched nights; no interpolation.
-- **View D Coverage**: counts per stage × provider with the five-way
+- **View D Coverage**: counts per stage × provider with the six-bucket
   breakdown and "searched" as the umbrella beside it; selected but not
   reached with reason; overrun and parity flags; error list with retry.
-- **History**: one series per provider and kind; x = `fetchedAt`; gaps;
+- **History**: one series per provider and kind; x = `fetchedAt` for
+  provider series and the point's own `date` for the route-level series
+  from `route_price_history` (sixty points share one fetch time); gaps;
   reused rows excluded; axis titles; empty state.
 - **Definitions / Alerts / Providers**: forms with estimate, `budgetFit`,
   standing confirmation, onward-cost entries, plan presets shown.
@@ -1376,6 +1410,7 @@ DATABASE_PATH=/data/get-me-there.db      # realpath-resolved at boot; .fixture.d
 PORT=3000
 BIND_ADDRESS=0.0.0.0                     # container binds all; compose publishes 127.0.0.1:3000; non-loopback requires auth
 ALLOWED_HOSTS=                           # Host allowlist; default derived from PORT: localhost:<port>,127.0.0.1:<port>
+APP_BASE_URL=                            # optional https URL of this app, used for links in email; empty = relative links
 APP_BASIC_AUTH_USER=                     # both or neither; required in the compose path; password ≥ 12 chars
 APP_BASIC_AUTH_PASS=
 ALLOW_UNAUTHENTICATED=false              # only for Tailscale-only hosts
@@ -1449,7 +1484,7 @@ dataset and `scripts/` copied into the runtime image; `USER node`;
 `.dockerignore` excludes `.env*`, `data/`, `fixtures/recorded/`,
 `node_modules/`; the Dockerfile creates `/data` owned by `node` before the
 volume is declared so a fresh named volume inherits the ownership;
-`HEALTHCHECK` as a `node -e` fetch of `/health` with a `start_period`
+`HEALTHCHECK` as a `node -e` fetch of `/api/health` with a `start_period`
 covering migrations, backup, seeding and the `app_lock` waits (§7). The
 repository `.gitignore` covers `.env*`, `data/`, `*.db*` and `backups/`, and
 CI runs the secret scan over `fixtures/`.
@@ -1459,15 +1494,18 @@ on Docker Desktop have WAL locking caveats, documented; bind only for
 copying backups out), `ports: 127.0.0.1:3000:3000`, an explicit
 `environment` allowlist (never `ALLOW_FIXTURE_PROVIDER` or `NODE_ENV`),
 `BIND_ADDRESS=0.0.0.0`, `restart: unless-stopped`, `stop_grace_period:
-30s`, `logging` options (`max-size`, `max-file`); boot fails with a clear
-message if `/data` is not writable; `mailpit` under the `dev` profile with
-`SMTP_TLS=none`.
+30s`, `logging` options (`max-size`, `max-file`), no `env_file` (it would
+forward every line of `.env`); boot fails with a clear message if `/data`
+is not writable; `mailpit` under the `dev` profile serves the host-side
+`pnpm dev` process (`SMTP_HOST=127.0.0.1`, `SMTP_TLS=none`); the container
+always uses real SMTP.
 
 **Backup**: `scripts/backup.mjs` (`VACUUM INTO` + `PRAGMA integrity_check`
 on the output, refusing an existing target; a failure refuses migrations)
 runs pre-migration when migrations are pending and on demand via `docker
-compose exec`; the live smoke and recording run the same way through
-`docker compose exec … curl -u … -X POST /tools/smoke`; docs give a
+compose exec`; the live smoke and recording are invoked from the host with
+`curl -u … -X POST http://127.0.0.1:3000/api/tools/smoke` (the image has no
+curl); docs give a
 host cron example with retention, how to copy out of the named volume, and
 an off-box copy. **Restore**: stop; delete `*.db-wal` and `*.db-shm`;
 replace the `.db`; start. Restoring resets month-to-date spend: lower caps
@@ -1526,19 +1564,41 @@ as specified in §5.3; no secrets, no full URLs.
 | 3 | `db`: schema, migrations, repositories, `BudgetGuard`, cache, lock, seed, maintenance | Opus | 0 | 1,000 × 3200 µGBP trips a 300p cap |
 | 4 | `providers`: http-kit, recorder, scrubbing, egress; fixture provider as an HTTP adapter | Opus | 0 | reserve happens before fetch on every attempt |
 | **4b** | `record:fixtures` (records the public example route, LHR/LGW → JFK/EWR, through the real recorder, incl. a 429 if one can be induced; ~12 of the 91 remaining trial credits) and the minimal **wiring helper** (config parse + port construction) that WP8's bootstraps reuse | Fable | 3, 4 | recorded fixture carries a verifiable content hash |
-| 5 | SearchApi adapter | Opus | 4, 4b | tiles partition the band |
-| 6 | Travelpayouts adapter | Sonnet | 4, 4b | empty envelope → `no_data` |
+| 5 | SearchApi adapter | Opus | 1, 2, 4, 4b | tiles partition the band |
+| 6 | Travelpayouts adapter | Sonnet | 1, 2, 4, 4b | empty envelope → `no_data` |
 | 7 | `engine` with layer-A tests (fixture provider through http-kit) | Opus | 1, 2, 3, 4 | resume after k of n tiles issues n−k |
 | 8 | `api` (app and tool bootstraps on the WP4b helper, `/tools/*` routes) | Sonnet | 4b, 7 | production boot lacks `fixture` |
 | 9 | `web` shell, Definitions, Results, Coverage | Sonnet | 8 | price without provenance fails to render |
 | 10 | `web` Calendar, Duration, History | Sonnet | 9 | five-way day counts |
 | 11 | alerts, email, Alerts UI | Sonnet | 7, 8, 10 | 50 firings → one digest |
-| 12 | Docker, compose, env, backup, docs | Sonnet | 8 | Dockerfile sets production + container flag |
+| 12 | Docker, compose, env, backup, docs | Sonnet | 8, 9 | Dockerfile sets production + container flag |
 | 13 | `smoke:live`, layer-B engine tests (real adapters replaying recorded fixtures), the `app_lock` "tool bootstrap starts no execution" test, integration review, final pass | Fable | all | live smoke exits 0 with provenance |
 
 ---
 
 ## 17. Changelog
+
+### Revision 10: contract corrections from the brief-drafting pass (2026-10-14)
+
+Fourteen work briefs were drafted against revision 9 and the implementation
+plan; each reported where the spec was silent or contradicted itself. Folded
+in: `tileIndex` on `reserve`/`recordCacheHit`, a `month` tile kind,
+`pointOfSale` on provider results, optional `routeHistory` (§5.1); point of
+sale is any ISO alpha-2 code (§3); the vendor message lives in `last_error`,
+never `reason` (§3, §5.2); `cabin-not-offered` is an engine rule (§3, §5.2,
+§8.1); Travelpayouts queries per pair by metro code with cache dedup (§5.2);
+SearchApi rectangles use the tight return span (§2, §5.2); FX goes through
+http-kit, never ledgered, at `api.frankfurter.dev` (§5.3, §5.6); validated
+links keep their query in API bodies and emails (§5.3); the supersede rule is
+a safety net (§6.6); schema additions and the 336 h cooldown default (§7);
+manual resume refreshes the snapshot's budget; deleted definitions are never
+resumed; boot makes no network call (§8.1); the cadence table is for the
+worked example's 4 pairs and §1's numbers now match it; the API lives under
+`/api` with `GET /airports` and `POST /definitions/estimate` (§10); vocabulary
+for the calendar source and the basis label, six buckets in View D, History
+x-axis for the route series (§11); `APP_BASE_URL` (§12); no curl in the
+image, no `env_file`, Mailpit for host dev only (§13); React 19 and the gated
+in-process fixture seam (§4); WP dependencies (§16).
 
 ### Revision 9: decisions taken at approval (2026-10-14)
 

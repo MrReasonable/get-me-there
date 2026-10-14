@@ -66,6 +66,7 @@ docs/setup.md                     first-run path, example definition JSON (Londo
 docs/api-limits.md                plan preset table, per-provider facts, reconciliation (WP12)
 docs/scheduling.md                cron examples, cadence table, pausing (WP12)
 docs/briefs/wpNN-<slug>.md        one brief per work package (this plan's companions)
+docs/examples/london-new-york.json the importable example definition; also imported by apps/web/src/example.ts (WP12 writes it, WP9 imports it)
 
 packages/core/                    @gmt/core — pure; 100% coverage
   src/index.ts                    barrel of every public export (WP0, extended by WP1/WP2)
@@ -74,6 +75,7 @@ packages/core/                    @gmt/core — pure; 100% coverage
   src/types/definition.ts         SearchDefinition, WindowSpec, Constraints, VerificationPolicy, Budget, ProvidersConfig (WP0)
   src/types/execution.ts          ExecutionStatus, Stage, CellOutcomeStatus, CellOutcome, RollUp (WP0)
   src/types/itinerary.ts          NormalisedItinerary, Segment, Layover, Offer, Observation (WP0)
+  src/types/alerts.ts             AlertRule, AlertEvent, AlertCandidate, Firing, PriorFiring (WP0)
   src/ports/provider.ts           spec §5.1 verbatim: FlightProvider and friends (WP0)
   src/ports/budget.ts             BudgetGuard, BudgetScope, Usage, Reservation (WP0)
   src/ports/cache.ts              ResponseCache (WP0)
@@ -132,7 +134,8 @@ packages/db/                      @gmt/db — better-sqlite3 + Drizzle
   src/responseCache.ts            SqliteResponseCache (WP3)
   src/appLock.ts                  AppLock (WP3)
   src/seed/airports.ts            seedAirports(db, dataset) + sanity check (WP3)
-  data/airports.<version>.json    vendored mwgg/Airports subset: iata, icao, name, city, country, tz, lat, lon, metro (WP3)
+  data/airports.<version>.json    vendored mwgg/Airports subset: iata, icao, name, city, country, tz, lat, lon (WP3)
+  data/metros.json                attributed list of IATA metropolitan area codes → airports (CC BY-SA 4.0, LICENSE beside it) (WP3)
   src/maintenance.ts              runMaintenance(db, clock, log) (WP3)
   test/**
   vitest.config.ts                85/70 (WP0)
@@ -147,7 +150,8 @@ packages/providers/               @gmt/providers
   src/http/classify.ts            default status → ProviderError mapping (spec §5.2 table) (WP4)
   src/http/recorder.ts            fixture recorder: placeholders, content hash, fails closed (WP4)
   src/fixture/provider.ts         FixtureProvider (HTTP adapter against http://fixture.local) (WP4)
-  src/fixture/handlers.ts         msw handlers + a Hono router serving the same fixture tree (WP4)
+  src/fixture/router.ts           Hono router serving the fixture tree; scenario control (WP4)
+  src/testing/index.ts            '@gmt/providers/testing': fixtureHandlers, replayHandlers, loadRecorded (msw) (WP4)
   src/searchapi/provider.ts       SearchApiProvider (WP5)
   src/searchapi/calendar.ts       rectangle tiling + calendar parsing (WP5)
   src/searchapi/itinerary.ts      step 1→2→3 chain (WP5)
@@ -183,7 +187,8 @@ packages/engine/                  @gmt/engine
   vitest.config.ts                85/70 (WP0)
 
 apps/api/                         @gmt/api
-  src/wiring.ts                   buildPorts(config, opts) (WP4b)
+  src/wiring.ts                   buildPorts, httpLimitsFor, providersFor, loadConfigFromEnv (WP4b)
+  src/logger.ts                   createLogger: pino with the spec §14 redact paths (WP4b)
   src/bootstrap/app.ts            app bootstrap: env → config → ports → migrate → seed → lock → boot engine → serve (WP8)
   src/bootstrap/tool.ts           tool bootstrap: same ports, no sweep/cron, honours app_lock (WP4b; WP8 adds routes)
   src/tools/record.ts             record:fixtures (WP4b)
@@ -227,10 +232,10 @@ apps/web/                         @gmt/web — Vite + React
 | 0 | WP0 (Fable) | — |
 | 1 | WP1, WP2 (Sonnet), WP3, WP4 (Opus) | yes, four worktrees |
 | 2 | WP4b (Fable; needs 3, 4) | — |
-| 3 | WP5 (Opus; 4, 4b), WP6 (Sonnet; 4, 4b), WP7 (Opus; 1, 2, 3, 4) | yes |
+| 3 | WP5 (Opus; 1, 2, 4, 4b), WP6 (Sonnet; 1, 2, 4, 4b), WP7 (Opus; 1, 2, 3, 4) | yes |
 | 4 | WP8 (Sonnet; 4b, 7) | — |
-| 5 | WP9 (Sonnet; 8), WP12 (Sonnet; 8) | yes |
-| 6 | WP10 (Sonnet; 9) | — |
+| 5 | WP9 (Sonnet; 8) | — |
+| 6 | WP10 (Sonnet; 9), WP12 (Sonnet; 8, 9) | yes |
 | 7 | WP11 (Sonnet; 7, 8, 10) | — |
 | 8 | WP13 (Fable; all) | — |
 
@@ -250,36 +255,40 @@ apps/web/                         @gmt/web — Vite + React
 
 ## Cross-package contracts
 
-Everything below is `export`ed from the named file. Later packages consume these exact names. The spec's §5.1 block is reproduced in `packages/core/src/ports/provider.ts` without change and is not repeated here.
+Everything below is `export`ed from the named file. Later packages consume these exact names. These contracts are **frozen** once their package merges; the brief-drafting pass of 2026-10-14 (fourteen briefs) settled every type the first version left implicit, and the decisions it forced are listed in "Decisions taken at reconciliation" at the end of this section. Where this section and spec revision 10 disagree, the spec wins and this section is the bug.
 
 ### Identifiers and dates (`@gmt/core` `types/ids.ts`, WP0)
 
 ```ts
-export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$, upper-case
+export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
 export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
 export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' }; // Date#toISOString() form only
-export const iataSchema: z.ZodType<Iata>;          // z.string().regex(/^[A-Z]{3}$/) then brand
-export const isoDateSchema: z.ZodType<IsoDate>;    // regex + real calendar date check (rejects 2027-02-29)
-export const isoMonthSchema: z.ZodType<IsoMonth>;
-export const isoDateTimeSchema: z.ZodType<IsoDateTime>; // /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/ and Date.parse round-trips
-export function asIata(s: string): Iata;           // throws on mismatch; used by tests and seeds, never on user input (zod does that)
+export const iataSchema: z.ZodType<Iata, string>;  // trims, upper-cases, then requires ^[A-Z]{3}$ (so 'lhr' → 'LHR'; 'LHRX' rejected)
+export const isoDateSchema: z.ZodType<IsoDate, string>;    // regex + real calendar date check (rejects 2027-02-29)
+export const isoMonthSchema: z.ZodType<IsoMonth, string>;
+export const isoDateTimeSchema: z.ZodType<IsoDateTime, string>; // /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/ and Date.parse round-trips
+export function isRealDate(y: number, m: number, d: number): boolean;
+export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
 export function asIsoDate(s: string): IsoDate;
+export function asIsoMonth(s: string): IsoMonth;
 export function asIsoDateTime(s: string): IsoDateTime;
 ```
 
 ### Provenance and shared enums (`types/provenance.ts`, WP0)
 
 ```ts
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';   // defined here; ports/provider.ts re-exports it
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
-export type PointOfSale = 'GB' | 'unknown';
+export type PointOfSale = string | 'unknown';   // ISO 3166-1 alpha-2 upper-case (POINT_OF_SALE echoes), or 'unknown'; pointOfSaleSchema = z.string().regex(/^[A-Z]{2}$/).or(z.literal('unknown'))
 export type FxInfo = { converted: false } | { converted: true; rateNano: number; rateDate: IsoDate; source: string };
 export interface Provenance {
   providerId: ProviderId; sourceKind: SourceKind; fetchedAt: IsoDateTime; providerObservedAt?: IsoDateTime;
   maxAgeHours: number | 'unknown'; fx: FxInfo; pointOfSale: PointOfSale; cabin: Cabin;
 }
-export const provenanceSchema: z.ZodType<Provenance>;
+export const providerIdSchema, sourceKindSchema, cabinSchema, pointOfSaleSchema, fxInfoSchema, provenanceSchema;
+// provenanceSchema uses z.object({...}).strict() with providerObservedAt: isoDateTimeSchema.exactOptional()  (zod 4; needed under exactOptionalPropertyTypes)
 ```
 
 ### Definition types (`types/definition.ts`, WP0)
@@ -287,11 +296,14 @@ export const provenanceSchema: z.ZodType<Provenance>;
 ```ts
 export type WindowSpec = { kind: 'absolute'; from: IsoDate; to: IsoDate } | { kind: 'relative'; startOffsetDays: number; lengthDays: number };
 export interface ResolvedSpace { origins: Iata[]; destinations: Iata[]; departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number }
-export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
+export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }   // the ONLY definition; ports/provider.ts imports it
 export interface Cell extends CellKey { nights: number }
+export function cellKeyString(c: CellKey): string;        // `${origin}|${destination}|${departureDate}|${returnDate}` — lives here (WP0) so WP1, WP2, WP3 all share it
+export function parseCellKeyString(s: string): CellKey;   // inverse; throws on malformed input
+export type LocalTimeWindow = { from: string; to: string };   // HH:mm, inclusive, local to the airport
 export interface Constraints {
   maxStops?: number; maxJourneyMinutes?: number; minLayoverMinutes?: number; maxLayoverMinutes?: number;
-  noOvernightLayover?: boolean; departureWindowLocal?: { from: string; to: string }; arrivalWindowLocal?: { from: string; to: string };
+  noOvernightLayover?: boolean; departureWindowLocal?: LocalTimeWindow; arrivalWindowLocal?: LocalTimeWindow;
   noSelfTransfer?: boolean; noAirportChange?: boolean; includeAirlines?: string[]; excludeAirlines?: string[];
   cabinBagRequired?: boolean; checkedBagRequired?: boolean; minCheckedBags?: number; maxPricePence?: number;
 }
@@ -305,7 +317,8 @@ export interface SearchDefinition {
   scheduleCron: string | null; scheduleTz: string; confirmedCostPence: number | null; enabled: boolean;
   createdAt: IsoDateTime; updatedAt: IsoDateTime; deletedAt: IsoDateTime | null;
 }
-export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; resolvedAt: IsoDateTime; windowClamped: boolean };
+export type DefinitionInput = Omit<SearchDefinition, 'id' | 'confirmedCostPence' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
+export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; resolvedAt: IsoDateTime; windowClamped: boolean; droppedAlwaysInclude: CellKey[] };
 ```
 
 ### Execution types (`types/execution.ts`, WP0)
@@ -318,35 +331,70 @@ export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = ['interrupted', 'p
 export type Stage = 'discovery' | 'verification';
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';
 export type SkipReason = 'not_selected' | 'budget' | 'provider_disabled' | 'departed';
+export type NoDataReason = 'cabin-not-offered';          // a provider whose `cabins` excludes the definition's cabin: every cell no_data, no call
+export type ErrorReason = ProviderErrorKind | NormalisationReason;   // the vendor message goes to lastError, never to reason
 export interface CellOutcome extends CellKey {
   executionId: string; stage: Stage; providerId: ProviderId; status: CellOutcomeStatus; reason: string | null;
   attempts: number; lastError: string | null; fetchedAt: IsoDateTime | null; minPence: number | null;
   cabin: Cabin | null; pointOfSale: PointOfSale | null; sourceKind: SourceKind | null; reusedFromExecutionId: string | null;
 }
-export type RollUpStatus = CellOutcomeStatus;   // NULL in the DB is represented as `null` in TS and 'not_applicable' in the API
-export interface RollUp { status: RollUpStatus | null; reason: SkipReason | string | null; minPence: number | null }
+export interface RollUp { status: CellOutcomeStatus | null; reason: string | null; minPence: number | null }   // null status ↔ API 'not_applicable'
 export type SelectionReason = 'always_include' | 'top_n' | 'ceiling' | 'stride';
+export interface Execution {
+  id: string; definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; status: ExecutionStatus; stage: Stage | null;
+  estimate: Estimate | null; cancelRequested: boolean; resumeAfter: IsoDateTime | null; autoResumeCount: number;
+  startedAt: IsoDateTime | null; finishedAt: IsoDateTime | null; errorText: string | null; createdAt: IsoDateTime; trigger: 'manual' | 'schedule' | 'tool';
+}
+export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }   // bucketsSchema in api-contract/common.ts is z.ZodType<Buckets>
 ```
 
 ### Itinerary types (`types/itinerary.ts`, WP0)
-
-As spec §6.3: `NormalisedItinerary`, `Segment` (`flightNumber: number`), `Layover = { at: Iata; minutes: number; overnight: boolean; airportChange: boolean }`, plus:
 
 ```ts
 export type SuppliedField = 'segments' | 'segmentTimes' | 'segmentCabins' | 'selfTransfer' | 'baggage' | 'fareConditions' | 'seller' | 'price';
 export interface BaggageSnapshot { cabinBag?: 'included' | 'not-included'; checkedBags?: number; notes?: string[] }
 export interface FareConditions { refundable?: boolean; changeable?: boolean; notes?: string[] }
 export type Booking = { kind: 'get'; url: string; host: string } | { kind: 'post'; url: string; postData: string; host: string } | { kind: 'none' };
+export interface Segment { marketingCarrier: string; operatingCarrier?: string; flightNumber: number; from: Iata; to: Iata; departLocal: string; arriveLocal: string; departUtc?: IsoDateTime; arriveUtc?: IsoDateTime; durationMinutes?: number; aircraft?: string }
+export interface Layover { at: Iata; minutes: number; overnight: boolean; airportChange: boolean }
+export interface NormalisedItinerary { hash: string; origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate; nights: number; outbound: Segment[]; inbound: Segment[]; outboundMinutes?: number; inboundMinutes?: number; stopsOut: number; stopsIn: number; layovers: Layover[]; airportChange?: boolean; marketingCarriers: string[] }
 export interface Offer { itineraryHash: string; providerId: ProviderId; seller: string; cabin: Cabin }
-export interface Observation {
-  id: number; offerId: number; executionId: string; provenance: Provenance; pricePence: number; priceNativeMinor: number; currencyNative: string;
-  taxesIncluded: boolean | null; selfTransfer: boolean | null; segmentCabins: Cabin[] | null; baggage: BaggageSnapshot | null;
-  fareConditions: FareConditions | null; booking: Booking; bookingExpiresAt: IsoDateTime | null; suppliedFields: SuppliedField[]; partialExpansion: boolean;
+export interface ObservationFields {   // what normalisation yields for one raw offer, before the db assigns ids
+  pricePence: number; priceNativeMinor: number; currencyNative: string; fx: FxInfo; taxesIncluded: boolean | null; selfTransfer: boolean | null;
+  segmentCabins: Cabin[] | null; baggage: BaggageSnapshot | null; fareConditions: FareConditions | null; booking: Booking; bookingExpiresAt: IsoDateTime | null;
 }
+export interface Observation extends ObservationFields { id: number; offerId: number; executionId: string; provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean }
 export type Verdict = 'pass' | 'fail' | 'unverified';
 export type ConstraintName = keyof Constraints | 'cabin';
 export type Verdicts = Partial<Record<ConstraintName, Verdict>>;
 export type VerdictClass = 'verified' | 'partially-verified' | 'failed';
+export type ResultBasis = 'verified' | 'calendar';   // API values; the UI labels them "itinerary-search basis" and "calendar basis"
+```
+
+### Provider port (`ports/provider.ts`, WP0)
+
+Spec §5.1 (revision 10) verbatim, with these settled details:
+
+```ts
+export type TileRequest =
+  | { kind: 'month'; month: IsoMonth }                                   // Travelpayouts month tiles (added in spec rev 10)
+  | { kind: 'length-month'; length: number; month: IsoMonth }
+  | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
+  | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
+export type DiscoveryTileResult =
+  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
+  | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: ProviderError };
+export interface ItinerarySearchResult {
+  offers: RawOffer[]; coverage: 'priced' | 'empty'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; partial: boolean; failedExpansions: number; notes: string[];
+  routeHistory?: Array<{ date: IsoDate; lowestPriceMinor: number; currency: string }>;   // SearchApi price_insights.price_history; the engine upserts route_price_history
+}
+export interface BudgetGuard {
+  reserve(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
+  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
+  usage(scope: BudgetScope): Usage;
+}
+// DiscoveryQuery stays per (origin, destination) pair. Travelpayouts queries by the origin's metro code when the airports table maps it to one (rows filtered to the pair by origin_airport); identical metro requests from other pairs are answered by the response cache inside the TTL, so a definition whose origins share a metro costs D × M upstream calls.
+// A provider whose `cabins` excludes the definition's cabin is not called at all: the engine marks every cell for that provider and stage no_data with reason 'cabin-not-offered' (spec rev 10).
 ```
 
 ### Budget port (`ports/budget.ts`, WP0)
@@ -357,7 +405,8 @@ export type BudgetScope =
   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
   | { kind: 'global-month' };
 export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
-// Reservation and BudgetGuard exactly as spec §5.1.
+// cap is null for a window the plan does not use (a month scope on a lifetime plan, and vice versa) and for a scope with no cap configured.
+// Per-execution caps come from the execution's snapshot budget (search_executions.definition_snapshot_json → budget), never from config at reserve time; child executions carry { maxCalls: CHILD_MAX_CALLS, maxFreeCalls: 0, maxCostMicroGbp: 0 } in their snapshot. Config EXECUTION_MAX_* are the defaults a new definition is created with.
 ```
 
 ### Logger and clock (`ports/logger.ts`, `ports/clock.ts`, WP0)
@@ -365,167 +414,234 @@ export interface Usage { calls: number; costMicroGbp: number; cap: number | null
 ```ts
 export interface Logger { debug(o: object, msg?: string): void; info(o: object, msg?: string): void; warn(o: object, msg?: string): void; error(o: object, msg?: string): void; child(bindings: object): Logger }
 export interface Clock { now(): IsoDateTime; todayLondon(): IsoDate }
-export const systemClock: Clock;                       // Date.now() + Intl Europe/London
-export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void };   // tests
+export const systemClock: Clock;
+export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void; set(at: IsoDateTime): void };
+export function londonDateOf(instant: IsoDateTime): IsoDate;
+```
+
+### Notifier port (`ports/notifier.ts`, WP0)
+
+```ts
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; searchLink: { url: string; host: string; label: string } }
+export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
+export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'parity_break' | 'alerts_calendar_only';
+export interface OperatorMessage { kind: OperatorMessageKind; executionId: string | null; definitionId: string; subject: string; body: string }
+export interface Notifier { id: string; send(msg: { kind: 'digest'; digest: AlertDigest; subject: string; body: string } | { kind: 'operator'; message: OperatorMessage }): Promise<{ ok: boolean; detail?: string }> }
+// Rendering subject and body is the engine's job (WP7 for operator messages, WP11 for digests); core's buildDigest returns the structured AlertDigest only.
+```
+
+### Alert types (`types/alerts.ts`, WP0)
+
+```ts
+export type AlertRuleType = 'absolute' | 'dropPct' | 'dropAbs';
+export interface AlertRule { id: string; definitionId: string; type: AlertRuleType; thresholdPence: number | null; pct: number | null; basis: ResultBasis; requireAllVerified: boolean | null; cooldownHours: number; enabled: boolean }
+export type AlertRuleInput = Omit<AlertRule, 'id'>;
+export interface AlertEvent { id: number; ruleId: string; identityKey: string; observationId: number | null; calendarPriceId: number | null; dedupKey: string; firedAt: IsoDateTime; status: 'sent' | 'failed' | 'suppressed'; reason: string | null; payload: unknown }
+export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
+export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
+export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
+export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean }
+export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
+// identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
 ```
 
 ### Errors (`errors.ts`, WP0)
 
-`ProviderError`, `BudgetExceeded`, `AbortedError` exactly as spec §5.1, constructed as `new ProviderError({ kind, reason?, retryable, httpStatus?, retryAfterSeconds?, message })`, `new BudgetExceeded({ scope, cap, current, requested })`. Plus:
+As in the WP0 tasks: `ProviderError`, `BudgetExceeded`, `AbortedError`, `NormalisationError`, `stripUrlsInText`. `ProviderErrorKind` and `NormalisationReason` are exported here. The outcome `reason` column holds the kind or normalisation reason only; the vendor message (URL-stripped) goes to `lastError`.
+
+### Config (`config/*.ts`, WP0)
+
+As in the WP0 tasks, plus:
 
 ```ts
-export type NormalisationReason = 'fx-unavailable' | 'currency-unsupported' | 'unknown-airport-tz' | 'no-return-legs' | 'unmappable-carrier' | 'bad-local-time';
-export class NormalisationError extends Error { reason: NormalisationReason; detail?: string }
+appBaseUrl: string | null;        // APP_BASE_URL, optional https URL; used by email templates to link to a results row; null → relative path
+providers.fixture: { costMicroGbp: number } | null;   // only under syntheticAllowed; FIXTURE_COST_MICRO_GBP (default 0) read by the test/dev config, so engine tests can bill the fixture provider
 ```
-
-Error messages never contain a URL; the constructors strip anything matching `/https?:\/\/\S+/` to its origin + path.
-
-### Config (`config/schema.ts`, `config/presets.ts`, `config/secret.ts`, `config/synthetic.ts`, WP0)
-
-```ts
-export class Secret { constructor(value: string); reveal(): string; toString(): '[redacted]'; toJSON(): '[redacted]' }
-export type PlanId = 'trial' | '40usd';
-export interface ProviderLimits { monthlyCallCap: number; window: 'month' | 'lifetime'; billingDay: number; ratePerMinute: number; ratePerHour: number; concurrency: number; cacheTtlHours: number; costPerCallMicroGbp: number; planFixedMicroGbp: number; excludedFromSchedule: boolean }
-export const PLAN_PRESETS: Record<PlanId, ProviderLimits & { monthlySpendCapMicroGbp: number; executionMaxCalls: number; executionMaxCostMicroGbp: number }>;
-export const TRAVELPAYOUTS_DEFAULTS: ProviderLimits;   // cap 50000/mo, 200/min, 10000/h, concurrency 4, TTL 6h, cost 0, fixed 0
-export interface Config {
-  nodeEnv: 'production' | 'development' | 'test'; databasePath: string; port: number; bindAddress: string; allowedHosts: string[];
-  auth: { user: string; pass: Secret } | null; allowUnauthenticated: boolean; trustProxy: boolean; logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error';
-  pointOfSale: string; staleAfterHours: number; calendarStaleAfterHours: number | null; stuckAfterHours: number; maxCellsPerDefinition: number;
-  schedulerTimezone: string; autoResume: boolean; maxAutoResumes: number; maxWaitSeconds: number; requestTimeoutSeconds: number;
-  estimateRetryFactor: number; fxMaxRateAgeDays: number;
-  spend: { monthlyCapMicroGbp: number; globalBillingDay: number; softConfirmMicroGbp: number; executionMaxCalls: number; executionMaxFreeCalls: number; executionMaxCostMicroGbp: number; childMaxCalls: number };
-  providers: { travelpayouts: { token: Secret; limits: ProviderLimits } | null; searchapi: { key: Secret; plan: PlanId; trialUsed: number; limits: ProviderLimits } | null };
-  smtp: { host: string; port: number; tls: 'implicit' | 'starttls' | 'none'; user: string; pass: Secret; to: string; from: string } | null;
-  inContainer: boolean; allowFixtureProvider: string | null;
-}
-export interface ParseConfigOptions { realpath: (p: string) => string }   // injected so core stays pure; api passes fs.realpathSync (tolerating a missing file by resolving its directory)
-export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: Array<{ field: string; message: string }> };
-export function parseConfig(env: Record<string, string | undefined>, opts: ParseConfigOptions): ConfigResult;
-export function syntheticAllowed(c: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>): boolean;
-```
-
-Rules the schema enforces (all tested in WP0): empty string = unset; `*_PENCE` integers ≥ 0 converted to micro-GBP (× 10 000); billing days 1–28; `APP_BASIC_AUTH_*` both or neither, password ≥ 12; `SMTP_*` all or nothing, `none` only when host is loopback (the Mailpit profile sets host `mailpit`, which the schema allows only under `NODE_ENV=development`); `SEARCHAPI_PLAN` default `trial`; preset fills `monthlySpendCapMicroGbp`, `executionMaxCalls`, `executionMaxCostMicroGbp` unless the variable is set; `ALLOWED_HOSTS` default from `PORT` plus `localhost:5173` under development; `ALLOW_UNAUTHENTICATED=true` required when `bindAddress` is non-loopback and `auth` is null, else the result is an error naming both variables.
 
 ### Labels (`labels/age.ts`, WP0)
 
-```ts
-export type EffectiveAge = { kind: 'observed'; fetchedHours: number; observedHours: number } | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number } | { kind: 'unknown'; fetchedHours: number };
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // hours as non-negative numbers, clamped at 0
-export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown';   // observed → observedHours; bounded → fetched + max; unknown → 'unknown'
-export function formatAgeFull(a: EffectiveAge): string;     // "fetched 2h ago · observed 3h ago" | "fetched 2h ago · provider age unknown (≤7d before that)" | "fetched 2h ago · provider age unknown"
-export function formatAgeCompact(a: EffectiveAge): string;  // "2h ago · obs 3h" | "2h ago · ≤7d" | "2h ago · age unknown"
-export function formatDuration(hours: number): string;      // "just now" (<1h), "2h", "3d", "2w" — hours rounded down; days from 48h; weeks from 14d
-export function compareAges(a: EffectiveAge, b: EffectiveAge): number;  // unknown loses to any known; otherwise by worst-case hours
-```
+As in Task 0.7, with one settled rule: a `bounded` age whose `maxAgeHours` is 0 (interactive search at request time) formats as `fetched 5h ago` (full) and `5h ago` (compact); the "(≤… before that)" clause appears only when `maxAgeHours > 0`.
 
 ### Banned words (`text/bannedWords.ts`, WP0)
 
-```ts
-export const BANNED_WORDS: readonly string[] = ['exhaustive', 'all combinations', 'every combination', 'live', 'bookable', 'guaranteed', 'real-time'];
-export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;  // word-boundary, case-insensitive; allowlist entries are exact phrases that may contain a banned word (e.g. "lives in")
-```
+As in Task 0.6, plus `export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in']` — the single allowlist every package's banned-word test passes. Vocabulary (spec §11): the SearchApi calendar source reads "Google date grid via SearchApi", the SearchApi itinerary source "Google Flights via SearchApi", Travelpayouts "Aviasales cache", the verified basis "itinerary-search basis".
 
 ### API contract (`api-contract/*.ts`, WP0)
 
-Every schema is a zod object; every TypeScript type is `z.infer` of its schema. Request schemas end in `RequestSchema`, response schemas in `ResponseSchema`. The barrel exports `ROUTES`, a `const` array of `{ method, path, request?, response }` which WP8 uses to mount routes and WP9 to build the client. Shapes (each a full zod schema in the file; the fields are the contract):
+**Every route is mounted under `/api`** (spec rev 10): the SPA owns `/`, `GET /api/health` is the public health route, the Docker `HEALTHCHECK` fetches it. Zod objects; types are `z.infer`. `ROUTES` entries carry `{ method, path, request?, query?, params?, response, auth: 'public' | 'required' }` and the path strings below include the prefix.
 
-- `common.ts`: `errorEnvelopeSchema` `{ error: { code: string; message: string; details?: unknown } }`; `provenanceSchema`; `moneyPenceSchema` (`z.number().int().min(0)`); `effectiveAgeSchema`; `priceCellSchema` `{ pricePence, provenance, stale: boolean, ageHours: number | 'unknown' }`.
-- `definitions.ts`: `definitionCreateRequestSchema` (every `SearchDefinition` field except id/timestamps; `window` discriminated union; `bookingLinks` forced true when `providers.verification` includes `searchapi` via `superRefine`); `definitionResponseSchema` (`SearchDefinition` + `budgetFit: { fits: boolean; runsPerMonth: number; perScope: Array<{ scope: string; estimated: number; cap: number | null; fits: boolean }> }` + `estimate`); `estimateResponseSchema` `{ cells, perProvider: Array<{ providerId, stage, calls, costMicroGbp, costPence, seconds }>, totalCostMicroGbp, totalCostPence, seconds, assumptions: string[], windowClamped }`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month, cachedRows }> }>, calls, notes }`.
-- `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell?, status, stage, reason, resumeAfter, startedAt, finishedAt, progress: Array<{ stage, providerId, buckets: Buckets, total }>, budget: Array<{ scope, usage: Usage }>, estimate, ledger: { calls, costMicroGbp, costPence } }`; `startExecutionRequestSchema` `{ confirmCostPence?: number }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }`.
-- `results.ts`: `bucketsSchema` `{ priced, empty, no_data, error, skipped, not_run, reused }`; `resultRowSchema` `{ itineraryHash | null, basis, verdictClass: VerdictClass | 'unchecked', pricePence, provenance, stale, ageHours, cell: CellKey & { nights }, outbound: Segment[] | null, inbound: Segment[] | null, totalMinutes | null, stopsOut | null, stopsIn | null, carriers: string[], verdicts: Verdicts, unverified: ConstraintName[], notApplied: ConstraintName[], booking: Booking, searchLink: { url, host, label }, otherOffers: Array<{ seller, pricePence, provenance, booking }>, notSeenInLatest: { ageHours } | null, adjustedPence | null, destinationNote | null, bandCheapest: boolean }`; `resultsResponseSchema` `{ rows, total, truncated, basis, basisReason, executions: Array<{ id, status, ageHours }>, coverage: CoverageSummary, excludedByCurrentSpace: number }`; `calendarResponseSchema` (per day as spec §10); `durationAnalysisResponseSchema`; `coverageResponseSchema`; `calendarGapResponseSchema`; `cellDetailResponseSchema`; `historyResponseSchema`.
-- `alerts.ts`: `alertRuleSchema` (spec §6.8 with the `requireAllVerified` refinement), `alertEventSchema`.
-- `system.ts`: `healthPublicSchema` `{ ok, degraded }`, `healthDetailSchema`, `providersResponseSchema`, `budgetResponseSchema`, `schedulerJobsResponseSchema`, `toolRunResponseSchema`.
-- `cronSchema`: `z.string().min(9).max(100).regex(/^[\d*\/,\-\s]+$/)` (bounded string only; semantic validation is `parseCron` in `engine`).
+- `common.ts`: `errorEnvelopeSchema` `{ error: { code: string; message: string; details?: { fields?: Array<{ field: string; message: string }> } & Record<string, unknown> } }` (a 422 carries `details.fields`); `moneyPenceSchema`; `microGbpSchema`; `ageHoursSchema`; `priceCellSchema` `{ pricePence, provenance, stale, ageHours }`; `bucketsSchema: z.ZodType<Buckets>`; `coverageSummarySchema` `{ buckets, total, selected, itinerarySearched, onDemand, reused }`; `cronSchema`; `bookingSchema`; `executionSummarySchema` `{ id, status, isChild, startedAt, finishedAt, ageHours }` (lists are newest first); `usageSchema` `{ scope: string; calls; costMicroGbp; costPence; cap; windowStart; windowEnd }`; `fieldErrorSchema`.
+- `airports.ts`: `GET /api/airports?q=` → `airportsResponseSchema` `Array<{ iata, name, city, country, tz, metro: string | null }>` (max 20, prefix match on iata, then city/name substring).
+- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput; `bookingLinks` forced true when verification includes `searchapi`; origins/destinations disjoint; `topN ≤ maxCells`; `alwaysInclude.length ≤ maxCells`); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits: boolean; runsPerMonth: number; perScope: Array<{ scope: string; estimated: number; cap: number | null; fits: boolean }> }`; `estimateSchema` (= `Estimate`) `{ cells: number; perProvider: Array<{ providerId; stage: Stage; calls: number; planCalls: number; costMicroGbp: number; costPence: number; seconds: number; blocked: string | null }>; totalCalls: number; totalPlanCalls: number; totalCostMicroGbp: number; totalCostPence: number; seconds: number; assumptions: string[]; windowClamped: boolean; retryFactor: number }` (`planCalls` is pre-factor, for the overrun check); `POST /api/definitions/estimate` (body: `definitionCreateRequestSchema`, unsaved) and `POST /api/definitions/:id/estimate` both → `estimateSchema`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month: IsoMonth; cachedRows: number; cellsInBand: number }> }>; calls: number; notes: string[] }`.
+- `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell, status, stage, reason: string | null, resumeAfter, trigger, startedAt, finishedAt, errorText, progress: Array<{ stage, providerId, buckets: Buckets, total }>, budget: Usage[], estimate: Estimate | null, ledger: { calls, costMicroGbp, costPence, tiles, cacheHits, perProvider: Array<{ providerId, stage: Stage | null, calls, costMicroGbp }> }, parityBreak: boolean, overrun: boolean, disabledProviders: ProviderId[] }`; `startExecutionRequestSchema` `{ confirmCostPence?: number }`; `startExecutionResponseSchema` `{ executionId }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }` → `startExecutionResponseSchema`.
+- `results.ts`: `resultRowSchema` `{ itineraryHash: string | null; basis: ResultBasis; verdictClass: VerdictClass | 'unchecked'; pricePence; provenance; stale; ageHours; cell: Cell; outbound: Segment[] | null; inbound: Segment[] | null; totalMinutes: number | null; outboundMinutes; inboundMinutes; stopsOut; stopsIn; layovers: Layover[]; carriers: string[]; verdicts: Verdicts; unverified: ConstraintName[]; notApplied: ConstraintName[]; seller: string | null; baggage: BaggageSnapshot | null; fareConditions: FareConditions | null; selfTransfer: boolean | null; booking: Booking; searchLink: { url; host; label }; otherOffers: Array<{ seller; pricePence; provenance; booking; stale; ageHours }>; notSeenInLatest: { ageHours } | null; adjustedPence: number | null; destinationNote: string | null; executionId: string; calendarPriceId: number | null; observationId: number | null }`; `resultsQuerySchema` `{ basis?: ResultBasis; executionId?: string; limit?: number ≤ 1000 }`; `resultsResponseSchema` `{ rows; total; truncated; basis; basisReason: string; executions: ExecutionSummary[]; coverage: CoverageSummary; excludedByCurrentSpace: number; verificationProviderConfigured: boolean; cheapest: ResultRow | null }`; `calendarDaySchema` `{ date: IsoDate /* departure date */; discovery: Array<{ providerId; buckets: Buckets; total }>; verification: { selected; itinerarySearched; onDemand }; cheapestVerified: (PriceCell & { cell: Cell; itineraryHash: string }) | null; cheapestPartiallyVerified: (PriceCell & { cell: Cell; itineraryHash: string; count: number }) | null; cheapestCalendar: (PriceCell & { cell: Cell }) | null; byDestination: Array<{ destination: Iata; cheapestVerified: PriceCell | null; cheapestCalendar: PriceCell | null }> }`; `calendarResponseSchema` `{ days: CalendarDay[]; executions: ExecutionSummary[]; staleAfterHours: number; calendarStaleAfterHours: Record<ProviderId, number> }`; `durationAnalysisResponseSchema` `{ byNights: Array<{ nights: number; minVerified: (PriceCell & { n: number }) | null; minCalendar: Array<{ providerId; price: PriceCell; n: number }>; searched: boolean }>; executions: ExecutionSummary[] }`; `coverageResponseSchema` `{ executionId; summary: CoverageSummary; perStage: Array<{ stage; providerId; buckets: Buckets; total; requests: { calls; cacheHits; costMicroGbp; planCalls: number | null }; overrun: boolean; parityBreak: boolean }>; selectedNotReached: Array<{ cell: Cell; reason: string }>; errors: Array<{ cell: Cell; stage; providerId; reason; lastError; attempts; retryable: boolean }>; scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerifiedPence: number | null; cells: Array<{ cell: Cell; calendar: PriceCell; verifyAvailable: boolean }> }`; `cellDetailResponseSchema` `{ cell: Cell; outcomes: CellOutcome[]; calendarPrices: Array<PriceCell & { executionId; calendarPriceId }>; observations: Array<ResultRow> }`; `historyPointSchema` `{ at: IsoDateTime; pricePence; provenance: Provenance }`; `routeSeriesPointSchema` `{ date: IsoDate; pricePence; fetchedAt: IsoDateTime; providerId; sourceKind }` (no cabin, so no full provenance; plotted by `date`); `itineraryHistoryResponseSchema` `{ itineraryHash; series: Array<{ providerId; seller; cabin; points: HistoryPoint[] }> }`; `routeHistoryResponseSchema` `{ origin; destination; calendarSeries: Array<{ providerId; cabin; points: HistoryPoint[] }>; routeSeries: Array<{ providerId; points: RouteSeriesPoint[] }> }`.
+- `alerts.ts`: `alertRuleSchema` (`AlertRule`; `requireAllVerified` only on basis `verified`; `cooldownHours` default 336; `thresholdPence` required for `absolute` and `dropAbs`, `pct` for `dropPct`), `alertRuleInputSchema`, `alertEventSchema`, `alertEventsQuerySchema` `{ ruleId?; limit? }`.
+- `system.ts`: `healthResponseSchema = z.union([healthPublicSchema, healthDetailSchema])` where public is `{ ok: boolean; degraded: boolean }` and detail `{ ok; degraded; db: { ok; path: never /* no path leaks */; sizeBytes }; providers: Array<{ providerId; configured; healthy: boolean | null }>; scheduler: { jobCount; nextRun; lastExecutionAt; degraded; blockedSince: IsoDateTime | null } }`; `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`; `budgetResponseSchema` `{ scopes: Usage[]; monthlyCapMicroGbp; monthlyCapPence; fixedFeesMicroGbp; ceilingNote: string }`; `schedulerJobsResponseSchema` `{ jobs: Array<SchedulerJob> }` with `SchedulerJob = { id: string; kind: 'definition' | 'resume'; definitionId: string; executionId: string | null; cron: string | null; tz: string; nextRun: IsoDateTime | null }`; `toolRecordRequestSchema` `{ budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth }`; `toolSmokeRequestSchema` `{ origin: Iata; destination: Iata }`; `toolRunResponseSchema` `{ exitCode: number; summary: string; lines: string[]; fixturesWritten: string[] }`.
+- `index.ts`: `ROUTES` with one entry per spec §10 row (rev 10, `/api` prefix, plus `GET /api/airports` and `POST /api/definitions/estimate`). `POST /api/tools/smoke` is mounted by WP13, `POST /api/tools/record` by WP8.
 
 ### Database (`@gmt/db`, WP0 skeleton, WP3 everything else)
 
 ```ts
 // client.ts (WP0)
 export interface Db { raw: BetterSqlite3.Database; drizzle: BetterSQLite3Database; transaction<T>(fn: () => T): T; close(): void }
-export function openDatabase(path: string): Db;      // ':memory:' allowed; sets journal_mode=WAL (file only), busy_timeout=5000, foreign_keys=ON
-export function applyMigrations(db: Db, migrationsDir: string): { applied: string[] };   // migrate.ts (WP0), Drizzle migrator wrapped so a failure names the file
-// repositories (WP3) — constructed as new XRepo(db, clock); all methods synchronous; every write that spans tables runs inside db.transaction
-export class AirportsRepo { exists(iata): boolean; get(iata): Airport | null; search(q: string, limit): Airport[]; metroOf(iata): string | null; sharedMetro(iatas: Iata[]): string | null; count(): number; upsertAll(rows, datasetVersion): void }
-export class FxRepo { rateNano(date: IsoDate, currency: string): number | null; latest(currency, maxAgeDays, today): { rateNano; date } | null; upsert(rows): void }
-export class DefinitionsRepo { create(input): SearchDefinition; update(id, patch): SearchDefinition; get(id): SearchDefinition | null; list(): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence): void }
-export class ExecutionsRepo { create(input): Execution; get(id): Execution | null; listForDefinition(id, opts): Execution[]; activeParent(definitionId): Execution | null; activeChild(definitionId, cell): Execution | null; latestCompleted(definitionId): Execution | null; claimResume(id): boolean /* compare-and-set */; setStatus(id, status, patch?): void; bootSweep(bootAt): { interrupted: string[] }; incrementAutoResume(id): number }
-export class CellsRepo { seed(executionId, cells, discoveryProviders): void; seedVerification(executionId, selection, verificationProviders): void; outcomes(executionId, filter?): CellOutcome[]; resumable(executionId, stage, providerId, manual): CellKey[]; markDeparted(executionId, today): number; writeTile(executionId, providerId, result: TileWrite): void /* prices + outcomes + roll-ups atomically */; writeVerifiedCell(executionId, providerId, cell, write: VerifiedCellWrite): void; setOutcome(executionId, cell, stage, providerId, patch): void; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; selected(executionId): Array<CellKey & { reason: SelectionReason }> }
-export class CalendarPricesRepo { insert(rows): void; latestPerCell(definitionId, cabin, space): CalendarPriceRow[]; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells, newerThan): Map<string, { outcome: CellOutcome; price: CalendarPriceRow | null }>; copyReused(executionId, rows): void; supersedeReused(executionId, providerId, cell): void; history(origin, destination, cabin): HistoryPoint[] }
-export class ItinerariesRepo { upsertItinerary(it, segments): void; upsertOffer(offer): number; insertObservation(obs): number; observationsForDefinition(definitionId, executionIds, space, cabin): ObservationRow[]; offerHistory(hash): HistoryPoint[]; latestVerificationOutcomeForCell(definitionId, cell): CellOutcome | null }
-export class LedgerRepo { countsFor(executionId): { calls: number; costMicroGbp: number; tiles: number; cacheHits: number }; overrun(executionId, planLength): boolean; sweepPending(olderThan): number; pruneCacheHits(olderThan, providerIds): number }
-export class AlertsRepo { rules(definitionId?): AlertRule[]; create/update/delete; events(filter): AlertEvent[]; lastFiring(ruleId, dedupKey | identity, since): AlertEvent | null; insertEvent(e): number }
-export class NotificationsRepo { wasSent(kind, executionId): boolean; record(kind, executionId, status): void }
-export class RoutePriceHistoryRepo { upsert(rows): void; series(origin, destination, cabin, providerId): HistoryPoint[] }
-export class SqliteBudgetGuard implements BudgetGuard { constructor(db, config: BudgetConfig, clock) }   // BudgetConfig = per-provider ProviderLimits + spend + which providers are billable + fixture cost rule
-export class SqliteResponseCache implements ResponseCache { constructor(db, clock) }
-export class AppLock { constructor(db, holder: 'app' | 'tool', clock, log); acquire(opts: { waitMs: number }): 'acquired' | 'refused'; heartbeat(): void; release(): void; static inspect(db): { holder; heartbeatAt; acquiredAt } | null }
-export function seedAirports(db, dataset: AirportsDataset): { inserted: number; datasetVersion: string };
-export function sanityCheckAirports(db, referenced: Iata[]): { ok: true } | { ok: false; reason: string };
-export function runMaintenance(db, clock, log, opts: { lifetimeProviders: ProviderId[] }): { cacheRowsDeleted: number; ledgerRowsPruned: number; dbBytes: number };
+export function openDatabase(path: string): Db;
+export function pendingMigrations(db: Db, migrationsDir: string): string[];      // migrate.ts (WP0): names of unapplied migration files
+export function applyMigrations(db: Db, migrationsDir: string): { applied: string[] };
+// repositories (WP3)
+export interface RepoOptions { allowSynthetic: boolean }    // from syntheticAllowed(config); repositories throw on synthetic rows when false
+export interface Repos { airports: AirportsRepo; fx: FxRepo; definitions: DefinitionsRepo; executions: ExecutionsRepo; cells: CellsRepo; calendarPrices: CalendarPricesRepo; itineraries: ItinerariesRepo; ledger: LedgerRepo; alerts: AlertsRepo; notifications: NotificationsRepo; routeHistory: RoutePriceHistoryRepo }
+export function createRepos(db: Db, clock: Clock, opts: RepoOptions): Repos;   // Repos lives HERE, not in engine
+export interface Airport { iata: Iata; icao: string | null; name: string; city: string; country: string; tz: string; lat: number; lon: number; metro: string | null; source: string; datasetVersion: string }
+export interface AirportsDataset { version: string; airports: Array<Omit<Airport, 'source' | 'datasetVersion'>>; metros: Record<string, string[]> /* metro → airports, from the vendored attributed list */ }
+export class AirportsRepo { exists(iata): boolean; get(iata): Airport | null; search(q: string, limit: number): Airport[]; metroOf(iata): string | null; airportsOfMetro(code: string): Iata[]; sharedMetro(iatas: Iata[]): string | null; count(): number; upsertAll(dataset: AirportsDataset): void; datasetVersion(): string | null; tzOf(iata): string | null }
+export class FxRepo { rateNano(date: IsoDate, currency: string): number | null; latest(currency: string, maxAgeDays: number, today: IsoDate): { rateNano: number; date: IsoDate; source: string } | null; upsert(rows: Array<{ date: IsoDate; currency: string; rateNano: number; source: string }>): void }
+export class DefinitionsRepo { create(input: DefinitionInput): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
+export type ExecutionCreateInput = { definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; estimate: Estimate | null; trigger: Execution['trigger']; status: 'pending' | 'running' | ExecutionStatus & `skipped_${string}` }
+export type ExecutionPatch = Partial<Pick<Execution, 'stage' | 'resumeAfter' | 'errorText' | 'startedAt' | 'finishedAt' | 'cancelRequested' | 'estimate' | 'snapshot'>>
+export class ExecutionsRepo { create(input: ExecutionCreateInput): Execution; get(id): Execution | null; listForDefinition(definitionId, opts: { limit: number; includeChildren: boolean }): Execution[]; listByStatus(statuses: ExecutionStatus[]): Execution[]; activeParent(definitionId): Execution | null; activeChild(definitionId, cell: CellKey): Execution | null; latestCompleted(definitionId): Execution | null; claimResume(id): boolean; setStatus(id, status: ExecutionStatus, patch?: ExecutionPatch): void; patch(id, patch: ExecutionPatch): void; requestCancel(id): void; bootSweep(bootAt: IsoDateTime): { interrupted: string[] }; incrementAutoResume(id): number; resetAutoResume(id): void; lastScheduledFiring(definitionId): IsoDateTime | null }
+export interface TileWrite { tileIndex: number; cells: CellKey[]; prices: CalendarPriceInsert[]; outcomes: Array<Pick<CellOutcome, 'origin' | 'destination' | 'departureDate' | 'returnDate' | 'status' | 'reason' | 'lastError' | 'fetchedAt' | 'minPence' | 'cabin' | 'pointOfSale' | 'sourceKind'>>; discards: number }
+export interface CalendarPriceInsert { providerId; sourceKind; cabin; cell: CellKey; pricePence; priceNativeMinor; currencyNative; fx: FxInfo; pointOfSale; fetchedAt; providerObservedAt: IsoDateTime | null; maxAgeHours: number | null; vendorLink: string | null; reusedFromExecutionId: string | null }
+export interface CalendarPriceRow extends CalendarPriceInsert { id: number; executionId: string; provenance: Provenance }
+export interface VerifiedCellWrite { cell: CellKey; outcome: TileWrite['outcomes'][number]; itineraries: Array<{ itinerary: NormalisedItinerary; offers: Array<{ offer: Offer; observation: ObservationFields & { provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean } }> }>; bestObservationSelector: 'cheapest-verified-or-partial' }
+export interface ReusedCopy { cell: CellKey; outcome: CellOutcome; price: CalendarPriceRow | null }
+export class CellsRepo { seed(executionId, cells: Cell[], discoveryProviders: ProviderId[]): void; seedVerification(executionId, selected: Array<{ cell: CellKey; reason: SelectionReason }>, allCells: CellKey[], verificationProviders: ProviderId[]): void; outcomes(executionId, filter?: { stage?: Stage; providerId?: ProviderId; cells?: CellKey[] }): CellOutcome[]; resumable(executionId, stage, providerId, manual: boolean): CellKey[]; markDeparted(executionId, today: IsoDate): number; markNoData(executionId, stage, providerId, reason: NoDataReason): number; writeTile(executionId, providerId, w: TileWrite): void; writeTileError(executionId, providerId, cells: CellKey[], reason: string, lastError: string | null): void; writeVerifiedCell(executionId, providerId, w: VerifiedCellWrite): void; setOutcome(executionId, cell, stage, providerId, patch: Partial<CellOutcome> & { incrementAttempts?: boolean }): void; setOutcomesForProvider(executionId, stage, providerId, from: CellOutcomeStatus[], to: { status; reason }): number; copyReused(executionId, providerId, copies: ReusedCopy[]): void; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets: Buckets; total }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }>; hasVerificationOutcomes(executionId): boolean }
+export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[] /* reused excluded */; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells: CellKey[], newerThan: IsoDateTime): ReusedCopy[]; supersedeReused(executionId, providerId, cell): void; history(origin, destination, cabin): Array<{ providerId; points: HistoryPoint[] }>; belowVerified(definitionId, cabin, space, thresholdPence): CalendarPriceRow[] }
+export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
+export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; upsertOffer(offer: Offer): number; insertObservation(obs: Omit<Observation, 'id'>): number; get(hash): (NormalisedItinerary & { firstSeenAt }) | null; observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell): CellOutcome | null; bestObservationForCell(executionId, cell): number | null }
+export class LedgerRepo { countsFor(executionId): { calls: number; costMicroGbp: number; tiles: number; cacheHits: number; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> }; firstAttemptTiles(executionId, providerId): number; sweepPending(olderThan: IsoDateTime): number; pruneCacheHits(olderThan: IsoDateTime, providerIds: ProviderId[]): number }
+export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; delete(id): void; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
+export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean; record(kind, executionId, definitionId, status: 'sent' | 'failed'): void }
+export class RoutePriceHistoryRepo { upsert(rows: Array<{ origin; destination; cabin: Cabin | 'unknown'; providerId; date: IsoDate; lowestPricePence: number; fetchedAt: IsoDateTime }>): void; series(origin, destination, providerId): RouteSeriesPoint[] }
+export interface BudgetConfig { providers: Partial<Record<ProviderId, ProviderLimits & { billable: boolean }>>; spend: Config['spend']; fixtureCostMicroGbp: number }
+export function budgetConfigFromConfig(c: Config): BudgetConfig;
+export class SqliteBudgetGuard implements BudgetGuard { constructor(db: Db, config: BudgetConfig, clock: Clock) }   // execution caps read from the execution's snapshot budget
+export class SqliteResponseCache implements ResponseCache { constructor(db: Db, clock: Clock) }
+export class AppLock { constructor(db: Db, holder: 'app' | 'tool', clock: Clock, log: Logger); acquire(opts: { waitMs: number }): 'acquired' | 'refused'; heartbeat(): void; release(): void; static inspect(db: Db): { holder; heartbeatAt; acquiredAt } | null }
+export function seedAirports(db: Db, dataset: AirportsDataset): { inserted: number; datasetVersion: string };
+export function sanityCheckAirports(db: Db, referenced: Iata[]): { ok: true } | { ok: false; reason: string };
+export function runMaintenance(db: Db, clock: Clock, log: Logger, opts: { lifetimeProviders: ProviderId[] }): { cacheRowsDeleted: number; ledgerRowsPruned: number; dbBytes: number };
+export function loadAirportsDataset(dir: string): AirportsDataset;   // reads airports.<version>.json + metros.json (CC BY-SA attributed list of IATA metropolitan codes) from packages/db/data
 ```
+
+Schema additions over spec §7 (rev 10 records them): `search_definitions.destination_notes_json`, `search_cells.discovery_reason`, `search_cells.verification_reason`, `search_cells.verification_min_pence`, `search_executions.trigger`, `provider_cache.provider_id NULL`, `route_price_history.cabin` allows `'unknown'`.
 
 ### http-kit (`@gmt/providers` `http/httpKit.ts`, WP4)
 
 ```ts
 export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never'; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; classifyError?: (status: number, body: unknown, ledgerAtCap: boolean) => ProviderError }
-export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Record<ProviderId | 'fx', ProviderHttpLimits>; clock: Clock; log: Logger; secrets: Secret[] /* for scrubbing */; recorder?: FixtureRecorder }
-export interface HttpKitRequest {
-  providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string;
-  method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string;
-  cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean;
-}
+export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
+// inProcessHosts: wiring passes { 'fixture.local': fixtureRouter(root).fetch } only under syntheticAllowed; http-kit dispatches requests whose hostname is a key here to that function instead of globalThis.fetch. Every other step of the pipeline (limiter, reserve, finalise, cache, recorder) still runs. This is the only transport seam and it is gated by the synthetic rule.
+export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean }
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
 export function createHttpKit(deps: HttpKitDeps): HttpKit;
-// Throws ProviderError (classified), BudgetExceeded (from reserve, before any fetch), AbortedError (signal).
-// Retries: p-retry max 3 attempts on retryable ProviderError only; per-request timeout is non-retryable when limits.billable === 'http-200'.
-export interface FixtureRecorder { record(r: { providerId; endpointPath; request: HttpKitRequest; status; body }): Promise<void> }
-export function createRecorder(opts: { root: string; secrets: Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;
-export function scrubSecrets<T>(value: T, secrets: Secret[]): T;       // deep; throws if a secret survives
-export function stripUrl(url: string): string;                          // origin + path only
-export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 hex
-export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>; costMicroGbp: number }): FlightProvider;  // throws unless syntheticAllowed
-export function fixtureHandlers(root: string): RequestHandler[];        // msw handlers for http://fixture.local
-export function fixtureRouter(root: string): Hono;                      // the same tree as a Hono router for fixture mode
+// 'fx' requests skip budget.reserve/recordCacheHit entirely (never ledgered) but keep the limiter, allowlist, timeout and retry.
+// Per-request timeout: setTimeout + AbortController (fakeable), non-retryable when billable === 'http-200'.
+export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* scrubbed */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string>; contentSha256: string }
+export interface FixtureRecorder { record(r: { providerId: ProviderId | 'fx'; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }): Promise<string /* path written */> }
+export function createRecorder(opts: { root: string; secrets: Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;   // files: <root>/<providerId>/<endpointPath with / → _>/<yyyy-mm-dd>-<sha12>.json; raw bodies to *.raw.json beside them (gitignored)
+export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string;
+export function scrubSecrets<T>(value: T, secrets: Secret[]): T;
+export function stripUrl(url: string): string;
+export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;
+export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
+export function fixtureRouter(root: string): Hono;                      // src/fixture/router.ts; scenario control via POST /__fixture/scenario and the x-fixture-scenario header (documented in the WP4 brief)
+// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot): RequestHandler[] (serves fixtures/recorded by matching method, path and credential-free query, reversing placeholders); loadRecorded(root, providerId, endpointPath): RecordedFixture[]. msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
 ```
 
-Adapter constructors (WP5, WP6): `searchApiProvider({ http, log, clock, key: Secret, plan: PlanId, pointOfSale: string, paramsAllowlist })` and `travelpayoutsProvider({ http, log, clock, token: Secret, paramsAllowlist, airports: { sharedMetro(iatas): string | null } })`, both returning `FlightProvider`.
+Adapter constructors and exports (WP5, WP6):
+
+```ts
+export function searchApiProvider(o: { http: HttpKit; log: Logger; clock: Clock; key: Secret; plan: PlanId; pointOfSale: string; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }): FlightProvider;
+export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['www.searchapi.io'], billable 'http-200', classifyError for the recorded 401/400 bodies and 429 quota discrimination
+export const SEARCHAPI_PARAMS: ParamsAllowlist;   // code constant; a test asserts it equals fixtures/recorded/searchapi/params-<date>.json
+export function travelpayoutsProvider(o: { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: { metroOf(iata: Iata): string | null } }): FlightProvider;
+export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['api.travelpayouts.com'], billable 'never'; no classifyError (default table maps 401 → auth)
+export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+```
+
+### Core domain functions (WP1, WP2)
+
+```ts
+// WP1 (dates/, space/, coverage/, selection/)
+export function toEpochDay(d: IsoDate): number; export function fromEpochDay(n: number): IsoDate; export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number /* b − a */; export function monthOf(d: IsoDate): IsoMonth; export function monthsSpanned(from: IsoDate, to: IsoDate): IsoMonth[]; export function isLeapYear(y: number): boolean;
+export function resolveWindow(w: WindowSpec, todayLondon: IsoDate): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean };
+export function generateCells(space: ResolvedSpace): Cell[]; export function countCells(space: ResolvedSpace): number;
+export interface AirportLookup { exists(iata: Iata): boolean; metroOf(iata: Iata): string | null; airportsOfMetro(code: string): Iata[] }
+export type ValidationResult = { ok: true; resolved: ResolvedSpace; clamped: boolean; notes: string[] } | { ok: false; errors: Array<{ field: string; message: string }> };
+export function validateSearchSpace(def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'>, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
+export function rollUp(outcomes: CellOutcome[]): RollUp; export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome;
+export function sixBuckets(outcomes: CellOutcome[]): Buckets /* one stage, one provider */; export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: string }>;
+export function selectCandidates(policy: VerificationPolicy, cells: Cell[], discovery: Map<string, RollUp>, hasDiscoveryProvider: boolean): Array<{ cell: CellKey; reason: SelectionReason }>;
+// WP2 (normalise/, constraints/, results/, alerts/)
+export function canonicalCarrier(s: string): string; export function canonicalFlightNumber(s: string | number, carrier?: string): number;
+export function departLocal(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): string; export function toIsoDateTime(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): IsoDateTime;
+export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;
+export const MINOR_EXPONENT: Record<string, number>; export const ECB_CURRENCIES: readonly string[]; export function toGbp(amountMinor: number, currency: string, rateNano: number): number;
+export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export const SEARCH_LINK_LABEL = 'search link, not a fare link'; export function validateVendorUrl(url: string, allowlist: string[]): Booking; export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string };
+export interface NormaliseDeps { providerId: ProviderId; cabin: Cabin; tzOf(iata: Iata): string | null; rateFor(currency: string): { rateNano: number; rateDate: IsoDate; source: string } | null }
+export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps): { ok: true; itinerary: NormalisedItinerary; offer: Offer; observation: ObservationFields } | { ok: false; error: NormalisationError };
+export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts; export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
+export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
+export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
+export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
+export function identityKey(rule: AlertRule, c: AlertCandidate): string; export function dedupKey(identityKey: string, pricePence: number): string; export function isSuppressed(f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>, prior: PriorFiring[], cooldownHours: number, now: IsoDateTime): { suppressed: boolean; reason: string | null };
+export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] }): AlertDigest | null;   // null when no firing; top 10 + restCount
+```
 
 ### Engine (`@gmt/engine`, WP7; alerts in WP11)
 
 ```ts
 export interface EngineDeps { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; notifiers: Notifier[]; clock: Clock; log: Logger }
-export interface Repos { airports: AirportsRepo; fx: FxRepo; definitions: DefinitionsRepo; executions: ExecutionsRepo; cells: CellsRepo; calendarPrices: CalendarPricesRepo; itineraries: ItinerariesRepo; ledger: LedgerRepo; alerts: AlertsRepo; notifications: NotificationsRepo; routeHistory: RoutePriceHistoryRepo }
-export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window'; message: string; details: unknown };
-export interface Engine {
-  boot(): Promise<void>;                 // sweep → auto-resume → one-shot jobs → cron
-  shutdown(): Promise<void>;             // stop scheduler, abort, checkpoint
-  start(definitionId: string, opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number }): Promise<StartResult>;
-  resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
-  cancel(executionId: string): Promise<boolean>;
-  verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
-  estimate(definition: SearchDefinition, todayLondon: IsoDate): Estimate;
-  estimateRemaining(executionId: string): Estimate;
-  budgetFit(definition: SearchDefinition): BudgetFit;
-  coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;
-  scheduler: { register(def: SearchDefinition): void; unregister(definitionId: string): void; jobs(): SchedulerJob[]; tick(definitionId: string): Promise<void> };
-  status(): { running: string[]; degraded: boolean; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null };
-}
-export function createEngine(deps: EngineDeps): Engine;
-export function parseCron(expr: string, tz: string): { ok: true; next: (from: Date) => Date | null } | { ok: false; reason: string };   // sub-hourly rejected
+export interface EngineOptions { alerts?: AlertsStepHook; fixtureCostMicroGbp?: number }
+export type AlertsStepHook = (deps: EngineDeps, executionId: string) => Promise<{ digests: number; events: number }>;   // WP11 provides runAlerts; default noAlerts
+export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled'; message: string; details: unknown };
+export type Estimate = z.infer<typeof estimateSchema>; export type BudgetFit = z.infer<typeof budgetFitSchema>; export type SchedulerJob = z.infer<typeof schedulerJobSchema>;
+export interface Engine { boot(): Promise<void>; shutdown(): Promise<void>; start(definitionId, opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number }): Promise<StartResult>; resume(executionId, opts: { manual: boolean }): Promise<StartResult>; cancel(executionId): Promise<boolean>; verifyCell(definitionId, cell: CellKey): Promise<StartResult>; estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate; estimateRemaining(executionId): Estimate; budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit; coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>; scheduler: { register(def: SearchDefinition): void; unregister(definitionId): void; jobs(): SchedulerJob[]; tick(definitionId): Promise<void>; blockedSince(): IsoDateTime | null }; status(): { running: string[]; degraded: boolean; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null } }
+export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   // boot() makes no network call (FX refresh is a scheduled job that runs after boot)
+export function parseCron(expr: string, tz: string): { ok: true; next: (from: Date) => Date | null } | { ok: false; reason: string };
+export class LogNotifier implements Notifier { constructor(log: Logger) }
+export function renderOperatorMessage(kind: OperatorMessageKind, ctx: {...}): { subject: string; body: string };   // engine/src/notifiers/operatorTemplates.ts
+// Rules settled: manual resume of a paused_budget execution-* breach copies the definition's CURRENT budget into the snapshot (only `budget`), then re-checks caps (spec rev 10). Executions whose definition is soft-deleted are never auto-resumed and never scheduled (the record tool's hidden definition relies on this). Supersede of a reused row is enforced in writeTile as a safety net even though the plan never re-fetches a reused cell.
 ```
 
 ### Wiring and bootstraps (`apps/api`, WP4b and WP8)
 
 ```ts
-// wiring.ts (WP4b)
-export interface Ports { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; clock: Clock; log: Logger; secrets: Secret[] }
-export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string }): Ports;   // opens DB, applies migrations, constructs guard/cache/http/providers (fixture only under syntheticAllowed)
-export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;   // parseConfig + realpath; throws with every field named on failure
-// bootstrap/app.ts (WP8): main() — refuses NODE_ENV=test; buildPorts; seed; AppLock('app'); engine.boot(); serve
-// bootstrap/tool.ts (WP4b): runTool(name: 'record' | 'smoke', args) — refuses NODE_ENV=test; buildPorts; AppLock('tool'); no engine.boot()
+// src/wiring.ts (WP4b)
+export interface Ports { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; clock: Clock; log: Logger; secrets: Secret[]; recorder: FixtureRecorder | null; fixtureRoot: string | null }
+export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string; fixtureRoot?: string }): Ports;   // opens DB, applies migrations (callers run the backup preflight first), createRepos, guard, cache, http-kit with httpLimitsFor(config), providersFor(config, http, ...)
+export function httpLimitsFor(config: Config): HttpKitDeps['limits'];   // WP4b writes it with fixture + fx; WP5 and WP6 each add their provider's line (a Modify in their briefs)
+export function providersFor(config: Config, deps: { http: HttpKit; log: Logger; clock: Clock; airports: AirportsRepo }): FlightProvider[];   // same ownership rule
+export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;   // parseConfig + tolerantRealpath; throws listing every bad field
+export function createLogger(config: Pick<Config, 'logLevel'>, opts?: { destination?: NodeJS.WritableStream }): Logger;   // src/logger.ts (WP4b): pino with the spec §14 redact paths
+// src/bootstrap/tool.ts (WP4b): export async function runTool(name: 'record' | 'smoke', argv: string[]): Promise<number /* exit code */>
+// src/tools/record.ts (WP4b): export async function recordFixtures(ports: Ports, args: RecordArgs, ctx: { signal: AbortSignal }): Promise<RecordSummary>; RecordArgs = { budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth; metro?: string }; RecordSummary = { calls: Array<{ id: string; providerId; status: number | 'skipped'; file: string | null }>; creditsUsed: number; freeCalls: number }
+// src/tools/smoke.ts (WP13): export async function runSmoke(ports: Ports, args: { origin: Iata; destination: Iata }): Promise<SmokeResult>; exit codes 0 priced, 1 provider error, 2 zero providers, 3 empty, 64 bad arguments
+// src/bootstrap/app.ts (WP8): main(); order: refuse NODE_ENV=test → config → logger → preflight backup when pendingMigrations() is non-empty and the DB file exists (WP12's backupDatabase) → buildPorts → seed + sanity → AppLock('app') waits → createEngine(ports, { alerts: runAlerts }) → engine.boot() → serve. SIGTERM: stop accepting → engine.shutdown() → wal_checkpoint(TRUNCATE) → lock release → exit (spec §7 order).
+// AppLock takeover: a fresh 'app' lock is waited on for 90 s; if it is still being heartbeated after that, boot refuses (two live apps) rather than taking over; a stale one is taken over at once.
 ```
+
+### Web (`apps/web`, WP9, WP10, WP11)
+
+`src/copy.ts` is the single string catalogue; components import strings from it and a source guard rejects literal JSX text. `docs/examples/london-new-york.json` is the importable example; `apps/web/src/example.ts` re-exports it as `EXAMPLE_DEFINITION` via a JSON import, and `scripts/check-boundaries.mjs` allowlists that one file for airport literals. Web dependencies add `msw@3.0.3`, `@testing-library/dom@10.x`, `zod@4.6.7`. The History view plots provider series by `fetchedAt` and the route-level series by its `date`.
+
+### Decisions taken at reconciliation (2026-10-14)
+
+1. `iataSchema` upper-cases input; `PointOfSale` is any ISO alpha-2 code or `'unknown'`; `CellKey` is defined once; `cellKeyString` moves to WP0; `Buckets`, `Estimate`, `BudgetFit`, `SchedulerJob`, `DigestItem`, `Firing`, `AlertCandidate`, `PriorFiring` are defined above.
+2. `BudgetGuard.reserve` and `recordCacheHit` carry `tileIndex` (spec rev 10). `'fx'` is never ledgered and goes through http-kit (spec §5.6 corrected). Frankfurter's host is `api.frankfurter.dev` (`/v1/latest?from=GBP`); the old `.app` host redirects, and http-kit refuses redirects.
+3. `TileRequest` gains `{ kind: 'month' }`. Travelpayouts queries per pair by metro code with cache dedup across pairs. Cabin-not-offered is an engine rule, not an adapter rule. SearchApi rectangles are 8 × 19 for a 12-night band (tile count unchanged).
+4. The API lives under `/api`; `GET /api/airports` and `POST /api/definitions/estimate` are added; `/api/tools/smoke` is mounted by WP13; health is a union schema.
+5. Per-execution caps come from the snapshot; manual resume refreshes only the snapshot's budget. The record tool runs under a hidden soft-deleted definition's execution; deleted definitions are never resumed or scheduled.
+6. The recorded-fixture file format and hash field (`contentSha256`) are pinned above; parameter allowlists carry the same hash; the runtime allowlist is a code constant asserted equal to the recorded file.
+7. The fixture host is reached through http-kit's gated `inProcessHosts`; `@gmt/providers/testing` is the only module that imports msw.
+8. Stryker runs with its command runner (`"testRunner": "command"`, `"commandRunner": { "command": "pnpm exec vitest run --coverage.enabled=false" }`) because `@stryker-mutator/vitest-runner` 10 executes no tests under Vitest 5; `ignorePatterns` uses `"/coverage"` so `src/coverage/` is mutated. Per-task test runs use `pnpm --filter @gmt/<pkg> exec vitest run <file>` (no coverage threshold on a partial run).
+9. The `.gitignore` gains `backups/` and `*.db*`. The boundary script's `process.env` rule applies to `src/` trees only; `apps/api/src/bootstrap/`, `apps/api/src/wiring.ts` (loadConfigFromEnv) and `apps/api/src/logger.ts` are the allowed readers.
+10. `AlertDigest` is structured; subject and body are rendered by WP11's templates. A digest with only "new" items and no firing is not sent. Validated booking and search links keep their query strings in API bodies and emails; every other URL sink is stripped.
+11. The airports dataset ships with a separate attributed metro-code list (`packages/db/data/metros.json`, from Wikipedia's list of IATA metropolitan area codes, CC BY-SA 4.0, attribution file beside it). `SEARCHAPI_PLAN` `trial` keeps the lifetime window.
+12. React is 19 (spec §4 updated). `APP_BASE_URL` is added to config. Smoke and record are invoked from the host with curl against the loopback port; the image has no curl.
+13. Dispatch dependencies: WP5 and WP6 depend on 1, 2, 4, 4b; WP12 depends on 8 and 9 (its docs-equals-constant test); WP4b depends on 3 and 4.
 
 ---
 
@@ -783,7 +899,7 @@ describe('syntheticAllowed (spec §5.5)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/core test -- synthetic`
+Run: `pnpm --filter @gmt/core exec vitest run test/config/synthetic.test.ts`
 Expected: FAIL, "Cannot find module '../../src/config/synthetic.js'".
 
 - [ ] **Step 3: Implement**
@@ -824,7 +940,7 @@ export function syntheticAllowed(c: SyntheticGateInput): boolean {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core test -- synthetic`
+Run: `pnpm --filter @gmt/core exec vitest run test/config/synthetic.test.ts`
 Expected: PASS, 13 cases.
 
 - [ ] **Step 5: Commit**
@@ -849,7 +965,8 @@ import { asIsoDate, iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema
 
 describe('iataSchema', () => {
   it('accepts three upper-case letters', () => expect(iataSchema.safeParse('LHR').success).toBe(true));
-  it.each(['lhr', 'LHRX', 'LH', '12A', ''])('rejects %j', (v) => expect(iataSchema.safeParse(v).success).toBe(false));
+  it('trims and upper-cases input (review focus 1)', () => expect(iataSchema.parse(' lhr ')).toBe('LHR'));
+  it.each(['LHRX', 'LH', '12A', '', 'lh r'])('rejects %j', (v) => expect(iataSchema.safeParse(v).success).toBe(false));
 });
 
 describe('isoDateSchema', () => {
@@ -877,7 +994,7 @@ describe('isoDateTimeSchema', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/core test -- ids`
+Run: `pnpm --filter @gmt/core exec vitest run test/types/ids.test.ts`
 Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement**
@@ -906,9 +1023,13 @@ export function isRealDate(y: number, m: number, d: number): boolean {
   return d <= days;
 }
 
+// why: operators type 'lhr'; the API accepts it and stores 'LHR'. Metro codes (LON) pass this
+// format check and are rejected later by validateSearchSpace against the airports table.
 export const iataSchema = z
   .string()
-  .regex(/^[A-Z]{3}$/, 'IATA code must be three upper-case letters')
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z]{3}$/, 'IATA code must be three letters')
   .transform((s) => s as Iata);
 
 export const isoDateSchema = z
@@ -946,7 +1067,7 @@ export const asIsoDateTime = (s: string): IsoDateTime => must(isoDateTimeSchema,
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core test -- ids`
+Run: `pnpm --filter @gmt/core exec vitest run test/types/ids.test.ts`
 Expected: PASS; `isRealDate` branches covered by the `it.each` rows (add `['2026-00-10']` and `['2026-10-00']` rows if the branch report shows a gap).
 
 - [ ] **Step 5: Commit**
@@ -958,7 +1079,7 @@ git add packages/core && git commit -m "wp0: branded ids and date schemas"
 ### Task 0.4: Domain types, ports and errors
 
 **Files:**
-- Create: `packages/core/src/types/provenance.ts`, `types/definition.ts`, `types/execution.ts`, `types/itinerary.ts`, `ports/provider.ts`, `ports/budget.ts`, `ports/cache.ts`, `ports/notifier.ts`, `ports/logger.ts`, `ports/clock.ts`, `errors.ts`
+- Create: `packages/core/src/types/provenance.ts`, `types/definition.ts` (incl. `cellKeyString`/`parseCellKeyString`), `types/execution.ts`, `types/itinerary.ts`, `types/alerts.ts`, `ports/provider.ts`, `ports/budget.ts`, `ports/cache.ts`, `ports/notifier.ts`, `ports/logger.ts`, `ports/clock.ts`, `errors.ts`
 - Test: `packages/core/test/errors.test.ts`, `packages/core/test/ports/clock.test.ts`, `packages/core/test/types/provenance.test.ts`
 
 **Interfaces:**
@@ -1061,7 +1182,7 @@ Expected: FAIL, modules not found.
 `src/errors.ts`:
 
 ```ts
-import type { ProviderId } from './ports/provider.js';
+import type { ProviderId } from './types/provenance.js';
 
 /** Strip query string and userinfo from every URL inside a message. Spec §5.3: no sink ever holds a full URL. */
 export function stripUrlsInText(text: string): string {
@@ -1182,15 +1303,17 @@ export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void
 
 ```ts
 import { z } from 'zod';
-import type { ProviderId } from '../ports/provider.js';
 import { type IsoDate, type IsoDateTime, isoDateSchema, isoDateTimeSchema } from './ids.js';
 
+/** Spec §5.1. Defined here (not in ports/provider.ts) so types and ports share one source. */
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
-export type PointOfSale = 'GB' | 'unknown';
+/** ISO 3166-1 alpha-2 of the vendor's echoed point of sale (POINT_OF_SALE), or 'unknown' when the vendor ignores it. */
+export type PointOfSale = string | 'unknown';
 export const sourceKindSchema = z.enum(['authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic']);
 export const cabinSchema = z.enum(['economy', 'premium_economy', 'business', 'first']);
-export const pointOfSaleSchema = z.enum(['GB', 'unknown']);
+export const pointOfSaleSchema = z.string().regex(/^[A-Z]{2}$/).or(z.literal('unknown'));
 export const providerIdSchema = z.enum(['travelpayouts', 'searchapi', 'fixture']);
 
 /** Spec §3 "Provenance". `rateNano` = GBP per 1 native unit × 1e9 (spec §6.3). */
@@ -1211,11 +1334,13 @@ export interface Provenance {
   cabin: Cabin;
 }
 
+// why: `.exactOptional()` (zod 4) matches `providerObservedAt?: IsoDateTime` under exactOptionalPropertyTypes;
+// `.optional()` would infer `| undefined` and fail the z.ZodType<Provenance> annotation.
 export const provenanceSchema: z.ZodType<Provenance> = z.object({
   providerId: providerIdSchema,
   sourceKind: sourceKindSchema,
   fetchedAt: isoDateTimeSchema,
-  providerObservedAt: isoDateTimeSchema.optional(),
+  providerObservedAt: isoDateTimeSchema.exactOptional(),
   maxAgeHours: z.union([z.number().int().min(0), z.literal('unknown')]),
   fx: fxInfoSchema,
   pointOfSale: pointOfSaleSchema,
@@ -1223,11 +1348,11 @@ export const provenanceSchema: z.ZodType<Provenance> = z.object({
 });
 ```
 
-`src/ports/provider.ts`: the spec §5.1 block verbatim, with `import type` lines for `Iata`, `IsoDate`, `IsoMonth`, `IsoDateTime`, `Cabin`, `SuppliedField`, `BaggageSnapshot`, `FareConditions`, `BudgetScope`, `Usage`, `AlertDigest`, `OperatorMessage`, and the three error classes re-exported from `../errors.js` (the spec declares them in the same block; they live in `errors.ts` so `providers` can import them without the port types).
+`src/ports/provider.ts`: the spec §5.1 block (revision 10: `tileIndex` on `reserve`/`recordCacheHit`, the `month` tile kind, `pointOfSale` on results, optional `routeHistory`) with `CellKey` imported from `types/definition.ts` and `ProviderId` from `types/provenance.ts`, and `import type` lines for `Iata`, `IsoDate`, `IsoMonth`, `IsoDateTime`, `Cabin`, `SuppliedField`, `BaggageSnapshot`, `FareConditions`, `BudgetScope`, `Usage`, `AlertDigest`, `OperatorMessage`, and the three error classes re-exported from `../errors.js` (the spec declares them in the same block; they live in `errors.ts` so `providers` can import them without the port types).
 
 `src/ports/budget.ts`, `ports/cache.ts`, `ports/notifier.ts`, `ports/logger.ts`: the contract blocks above. `AlertDigest = { ruleId: string; definitionId: string; executionId: string; basis: 'verified' | 'calendar'; subject: string; body: string; items: DigestItem[]; restCount: number }`; `OperatorMessage = { kind: 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'parity_break' | 'alerts_calendar_only'; executionId: string | null; definitionId: string; subject: string; body: string }`.
 
-`src/types/definition.ts`, `types/execution.ts`, `types/itinerary.ts`: the contract blocks above, each with a doc comment naming its spec section.
+`src/types/definition.ts`, `types/execution.ts`, `types/itinerary.ts`, `types/alerts.ts`: the contract blocks above, each with a doc comment naming its spec section. `cellKeyString` joins the four keys with `|`; `parseCellKeyString` splits and validates with the id schemas (a test covers both directions and a malformed string).
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1358,6 +1483,12 @@ describe('parseConfig (spec §12)', () => {
   it('names every bad field at once', () => {
     expect(errors({ ...minimal, PORT: 'abc', LOG_LEVEL: 'loud' })).toEqual(expect.arrayContaining(['PORT', 'LOG_LEVEL']));
   });
+  it('APP_BASE_URL must be https and fixture cost is only read outside production', () => {
+    expect(errors({ ...minimal, APP_BASE_URL: 'http://x' })).toContain('APP_BASE_URL');
+    expect(ok({ ...minimal, APP_BASE_URL: 'https://gmt.example' }).appBaseUrl).toBe('https://gmt.example');
+    expect(ok(minimal).providers.fixture).toBeNull();
+    expect(ok({ ...minimal, NODE_ENV: 'test', DATABASE_PATH: ':memory:', IN_CONTAINER: undefined, FIXTURE_COST_MICRO_GBP: '3200' }).providers.fixture).toEqual({ costMicroGbp: 3200 });
+  });
   it('wraps secrets', () => {
     const c = ok({ ...minimal, TRAVELPAYOUTS_TOKEN: 't'.repeat(32) });
     expect(String(c.providers.travelpayouts?.token)).toBe('[redacted]');
@@ -1369,7 +1500,7 @@ describe('parseConfig (spec §12)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/core test -- config`
+Run: `pnpm --filter @gmt/core exec vitest run test/config`
 Expected: FAIL, modules not found.
 
 - [ ] **Step 3: Implement**
@@ -1452,7 +1583,7 @@ const pence = (v: number | undefined) => (v === undefined ? undefined : v * PENC
 const envSchema = z.object({
   NODE_ENV: str.pipe(z.enum(['production', 'development', 'test']).default('production')),
   DATABASE_PATH: str.pipe(z.string().min(1)),
-  PORT: int(1, 65535), BIND_ADDRESS: str, ALLOWED_HOSTS: str,
+  PORT: int(1, 65535), BIND_ADDRESS: str, ALLOWED_HOSTS: str, APP_BASE_URL: str.pipe(z.string().url().startsWith('https://').optional()),
   APP_BASIC_AUTH_USER: str, APP_BASIC_AUTH_PASS: str, ALLOW_UNAUTHENTICATED: bool, TRUST_PROXY: bool,
   LOG_LEVEL: str.pipe(z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional()),
   POINT_OF_SALE: str.pipe(z.string().regex(/^[A-Z]{2}$/).optional()),
@@ -1465,7 +1596,7 @@ const envSchema = z.object({
   SEARCHAPI_KEY: str, SEARCHAPI_PLAN: str.pipe(z.enum(['trial', '40usd']).optional()), SEARCHAPI_BILLING_DAY: int(1, 28), SEARCHAPI_CACHE_TTL_HOURS: int(0), SEARCHAPI_TRIAL_USED: int(0),
   SEARCHAPI_MONTHLY_CALL_CAP: int(0), SEARCHAPI_RATE_PER_MINUTE: int(1), SEARCHAPI_RATE_PER_HOUR: int(1), SEARCHAPI_CONCURRENCY: int(1), SEARCHAPI_COST_PER_CALL_MICRO_GBP: int(0), SEARCHAPI_PLAN_FIXED_PENCE: int(0),
   SMTP_HOST: str, SMTP_PORT: int(1, 65535), SMTP_TLS: str.pipe(z.enum(['implicit', 'starttls', 'none']).optional()), SMTP_USER: str, SMTP_PASS: str, ALERT_EMAIL_TO: str, ALERT_EMAIL_FROM: str,
-  IN_CONTAINER: str, ALLOW_FIXTURE_PROVIDER: str,
+  IN_CONTAINER: str, ALLOW_FIXTURE_PROVIDER: str, FIXTURE_COST_MICRO_GBP: int(0),
 });
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
@@ -1510,7 +1641,8 @@ export function parseConfig(env: Record<string, string | undefined>, opts: Parse
       monthlyCapMicroGbp: pence(e.MONTHLY_SPEND_CAP_PENCE) ?? preset?.monthlySpendCapMicroGbp ?? 0, globalBillingDay: e.GLOBAL_BILLING_DAY ?? 1, softConfirmMicroGbp: pence(e.SOFT_CONFIRM_PENCE) ?? 100 * PENCE_TO_MICRO,
       executionMaxCalls: e.EXECUTION_MAX_CALLS ?? preset?.executionMaxCalls ?? 0, executionMaxFreeCalls: e.EXECUTION_MAX_FREE_CALLS ?? 2000, executionMaxCostMicroGbp: pence(e.EXECUTION_MAX_COST_PENCE) ?? preset?.executionMaxCostMicroGbp ?? 0, childMaxCalls: e.CHILD_MAX_CALLS ?? 6,
     },
-    providers: { travelpayouts, searchapi }, smtp, inContainer, allowFixtureProvider: e.ALLOW_FIXTURE_PROVIDER ?? null,
+    providers: { travelpayouts, searchapi, fixture: e.FIXTURE_COST_MICRO_GBP === undefined && e.ALLOW_FIXTURE_PROVIDER === undefined && e.NODE_ENV !== 'test' ? null : { costMicroGbp: e.FIXTURE_COST_MICRO_GBP ?? 0 } },
+    smtp, inContainer, allowFixtureProvider: e.ALLOW_FIXTURE_PROVIDER ?? null, appBaseUrl: e.APP_BASE_URL ?? null,
   };
   return { ok: true, config };
 }
@@ -1520,7 +1652,7 @@ export function parseConfig(env: Record<string, string | undefined>, opts: Parse
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core test -- config`
+Run: `pnpm --filter @gmt/core exec vitest run test/config`
 Expected: PASS. Check the coverage table; every `??` default and every `errors.push` branch must be hit, so add a test row for any branch the report shows red (the 100% threshold enforces this).
 
 - [ ] **Step 5: Commit**
@@ -1558,7 +1690,7 @@ describe('findBannedWords (spec §11)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `pnpm --filter @gmt/core test -- banned` → FAIL, module not found.
+- [ ] **Step 2: Run to verify it fails** — `pnpm --filter @gmt/core exec vitest run test/text/bannedWords.test.ts` → FAIL, module not found.
 
 - [ ] **Step 3: Implement**
 
@@ -1589,7 +1721,7 @@ export function findBannedWords(text: string, allowlist: readonly string[] = [])
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes** — `pnpm --filter @gmt/core test -- banned` → PASS.
+- [ ] **Step 4: Run to verify it passes** — `pnpm --filter @gmt/core exec vitest run test/text/bannedWords.test.ts` → PASS.
 
 - [ ] **Step 5: Commit** — `git add packages/core && git commit -m "wp0: banned-word finder"`
 
@@ -1649,6 +1781,9 @@ describe('formatting', () => {
     expect(formatAgeFull(u)).toBe('fetched 2h ago · provider age unknown');
     expect(formatAgeCompact(u)).toBe('2h ago · age unknown');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 })).toBe('just now · ≤24h');
+    // maxAgeHours 0 (SearchApi itinerary search): no bound clause, matching the spec §8.3 subject
+    expect(formatAgeFull({ kind: 'bounded', fetchedHours: 5, maxAgeHours: 0 })).toBe('fetched 5h ago');
+    expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 5, maxAgeHours: 0 })).toBe('5h ago');
   });
 });
 
@@ -1721,7 +1856,8 @@ export function formatAgeFull(a: EffectiveAge): string {
   const fetched = `fetched ${ago(a.fetchedHours)}`;
   switch (a.kind) {
     case 'observed': return `${fetched} · observed ${ago(a.observedHours)}`;
-    case 'bounded': return `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
+    // why: maxAgeHours 0 is an interactive search at request time; there is no bound to show.
+    case 'bounded': return a.maxAgeHours === 0 ? fetched : `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
     case 'unknown': return `${fetched} · provider age unknown`;
   }
 }
@@ -1730,7 +1866,7 @@ export function formatAgeCompact(a: EffectiveAge): string {
   const fetched = ago(a.fetchedHours);
   switch (a.kind) {
     case 'observed': return `${fetched} · obs ${formatDuration(a.observedHours)}`;
-    case 'bounded': return `${fetched} · ≤${formatDuration(a.maxAgeHours)}`;
+    case 'bounded': return a.maxAgeHours === 0 ? fetched : `${fetched} · ≤${formatDuration(a.maxAgeHours)}`;
     case 'unknown': return `${fetched} · age unknown`;
   }
 }
@@ -1755,7 +1891,7 @@ Note `formatDuration(24)` is `'24h'` so the compact bounded example reads `≤24
 ### Task 0.8: API contract
 
 **Files:**
-- Create: `packages/core/src/api-contract/{common,definitions,executions,results,alerts,system,index}.ts`
+- Create: `packages/core/src/api-contract/{common,airports,definitions,executions,results,alerts,system,index}.ts`
 - Test: `packages/core/test/api-contract/contract.test.ts`
 
 **Interfaces:**
@@ -1771,9 +1907,10 @@ const provenance = { providerId: 'searchapi', sourceKind: 'scraped-search', fetc
 
 describe('api-contract (spec §10)', () => {
   it('has a route for every spec §10 row', () => {
-    const paths = ROUTES.map((r) => `${r.method} ${r.path}`);
+    expect(ROUTES.every((r) => r.path.startsWith('/api/'))).toBe(true); // spec §10 rev 10: the SPA owns '/'
+    const paths = ROUTES.map((r) => `${r.method} ${r.path.replace(/^\/api/, '')}`);
     for (const p of [
-      'GET /health', 'GET /providers', 'GET /definitions', 'POST /definitions', 'GET /definitions/:id', 'PUT /definitions/:id', 'DELETE /definitions/:id',
+      'GET /health', 'GET /providers', 'GET /airports', 'POST /definitions/estimate', 'GET /definitions', 'POST /definitions', 'GET /definitions/:id', 'PUT /definitions/:id', 'DELETE /definitions/:id',
       'POST /definitions/:id/estimate', 'POST /definitions/coverage-check', 'POST /definitions/:id/executions', 'GET /executions/:id',
       'POST /executions/:id/cancel', 'POST /executions/:id/resume', 'POST /cells/verify', 'GET /definitions/:id/results', 'GET /definitions/:id/calendar',
       'GET /definitions/:id/duration-analysis', 'GET /definitions/:id/coverage', 'GET /definitions/:id/calendar-gap',
@@ -1843,7 +1980,7 @@ export const bookingSchema = z.discriminatedUnion('kind', [
 
 `definitions.ts`: `windowSpecSchema` (discriminated; `startOffsetDays: z.number().int().min(1)`, `lengthDays: z.number().int().min(1).max(400)`, absolute `to ≥ from` by refine), `constraintsSchema` (every field optional with integer/time-string checks; `departureWindowLocal.from/to` as `HH:mm`), `verificationPolicySchema` with `.superRefine` for `topN ≤ maxCells` (issue path `['topN']`) and `alwaysInclude.length ≤ maxCells`, `definitionCreateRequestSchema` with the top-level `superRefine` that sets an issue at `['verification', 'bookingLinks']` when `providers.verification` includes `'searchapi'` and `bookingLinks` is false, and `origins`/`destinations` disjoint; `definitionUpdateRequestSchema = definitionCreateRequestSchema.partial()`; `budgetFitSchema`; `definitionResponseSchema`; `estimateResponseSchema`; `coverageCheckRequestSchema`; `coverageCheckResponseSchema`.
 
-`executions.ts`, `results.ts`, `alerts.ts`, `system.ts`: the shapes from the contract block, each field typed with the schemas from `common.ts` and `types/`.
+`airports.ts`, `executions.ts`, `results.ts`, `alerts.ts`, `system.ts`: the shapes from the contract block (every field listed there), each typed with the schemas from `common.ts` and `types/`.
 
 `index.ts`:
 
@@ -1852,18 +1989,20 @@ export * from './common.js'; export * from './definitions.js'; export * from './
 import type { z } from 'zod';
 // ... imports of each schema
 
-export interface RouteDef { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; request?: z.ZodTypeAny; query?: z.ZodTypeAny; response: z.ZodTypeAny; auth: 'public' | 'required' }
+export interface RouteDef { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string /* starts with /api/ */; request?: z.ZodTypeAny; query?: z.ZodTypeAny; params?: z.ZodTypeAny; response: z.ZodTypeAny; auth: 'public' | 'required' }
 /** One entry per spec §10 row; api mounts these, web derives its client from them. */
 export const ROUTES: readonly RouteDef[] = [
-  { method: 'GET', path: '/health', response: healthPublicSchema, auth: 'public' },
-  { method: 'GET', path: '/providers', response: providersResponseSchema, auth: 'required' },
-  { method: 'GET', path: '/definitions', response: z.array(definitionResponseSchema), auth: 'required' },
-  { method: 'POST', path: '/definitions', request: definitionCreateRequestSchema.optional(), response: definitionResponseSchema, auth: 'required' },
+  { method: 'GET', path: '/api/health', response: healthResponseSchema, auth: 'public' },
+  { method: 'GET', path: '/api/airports', query: z.object({ q: z.string().min(1).max(40) }), response: airportsResponseSchema, auth: 'required' },
+  { method: 'GET', path: '/api/providers', response: providersResponseSchema, auth: 'required' },
+  { method: 'GET', path: '/api/definitions', response: z.array(definitionResponseSchema), auth: 'required' },
+  { method: 'POST', path: '/api/definitions', request: definitionCreateRequestSchema.optional(), response: definitionResponseSchema, auth: 'required' },
+  { method: 'POST', path: '/api/definitions/estimate', request: definitionCreateRequestSchema, response: estimateSchema, auth: 'required' },
   // … every remaining row of spec §10 in the same form
 ];
 ```
 
-- [ ] **Step 4: Run to verify it passes** — `pnpm --filter @gmt/core test -- contract` → PASS; typecheck clean.
+- [ ] **Step 4: Run to verify it passes** — `pnpm --filter @gmt/core exec vitest run test/api-contract/contract.test.ts` → PASS; typecheck clean.
 
 - [ ] **Step 5: Commit** — `git add packages/core && git commit -m "wp0: api-contract schemas and ROUTES (spec §10)"`
 
@@ -1881,6 +2020,7 @@ export * from './types/provenance.js';
 export * from './types/definition.js';
 export * from './types/execution.js';
 export * from './types/itinerary.js';
+export * from './types/alerts.js';
 export * from './ports/provider.js';
 export * from './ports/budget.js';
 export * from './ports/cache.js';
@@ -1902,12 +2042,16 @@ export * as apiContract from './api-contract/index.js';
 ```json
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "testRunner": "vitest",
+  "testRunner": "command",
+  "commandRunner": { "command": "pnpm exec vitest run --coverage.enabled=false" },
   "mutate": ["src/config/synthetic.ts", "src/labels/age.ts", "src/normalise/hashing.ts", "src/normalise/money.ts", "src/normalise/vendorUrl.ts", "src/constraints/evaluate.ts", "src/selection/select.ts", "src/coverage/rollUp.ts", "src/alerts/dedup.ts"],
   "thresholds": { "high": 90, "low": 80, "break": 80 },
-  "ignorePatterns": ["dist", "coverage"]
+  "ignorePatterns": ["dist", "/coverage"]
 }
 ```
+
+`// why:` the command runner, not `@stryker-mutator/vitest-runner`: two brief dry-runs found the vitest runner executes zero tests per mutant under Vitest 5, which makes every mutant survive. `"/coverage"` rather than `"coverage"` so `src/coverage/` is mutated.
+
 
 Files that do not exist yet (WP1/WP2) are listed now so the threshold applies the moment they land; Stryker skips missing globs with a warning until then.
 
@@ -2000,18 +2144,35 @@ export function openDatabase(path: string): Db {
 
 ```ts
 // src/migrate.ts
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import type { Db } from './client.js';
 
+/** Drizzle's journal lists every migration tag; `__drizzle_migrations` records the applied ones by hash. */
+export function pendingMigrations(db: Db, migrationsDir: string): string[] {
+  const journal = JSON.parse(readFileSync(join(migrationsDir, 'meta', '_journal.json'), 'utf8')) as { entries: Array<{ tag: string; when: number }> };
+  const hasTable = db.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'").get();
+  if (!hasTable) return journal.entries.map((e) => e.tag);
+  const last = db.raw.prepare('SELECT MAX(created_at) AS at FROM __drizzle_migrations').get() as { at: number | null };
+  // why: drizzle applies migrations in journal order and stores the folder timestamp as created_at,
+  // so everything with a later `when` is pending.
+  return journal.entries.filter((e) => last.at === null || e.when > last.at).map((e) => e.tag);
+}
+
 /** Applies the committed Drizzle SQL migrations idempotently. Spec §7 "Migrations". */
-export function applyMigrations(db: Db, migrationsDir: string): void {
+export function applyMigrations(db: Db, migrationsDir: string): { applied: string[] } {
+  const pending = pendingMigrations(db, migrationsDir);
   try {
     migrate(db.drizzle, { migrationsFolder: migrationsDir });
   } catch (err) {
     throw new Error(`migration failed in ${migrationsDir}: ${err instanceof Error ? err.message : String(err)}`);
   }
+  return { applied: pending };
 }
 ```
+
+Add to `test/client.test.ts`: with an empty `drizzle/` journal (`{ "entries": [] }` written to a temp dir) `pendingMigrations` returns `[]` and `applyMigrations` returns `{ applied: [] }`; WP3 extends this once the first migration exists.
 
 `drizzle.config.ts`: `{ dialect: 'sqlite', schema: './src/schema/index.ts', out: './drizzle' }` via `defineConfig` from `drizzle-kit`. `src/schema/index.ts` starts empty (`export {}`); WP3 fills it and generates the first migration.
 
@@ -2132,7 +2293,9 @@ for (const [name, dir] of Object.entries(dirs)) {
     const src = readFileSync(f, 'utf8');
     for (const m of src.matchAll(/from\s+['"](@gmt\/[a-z]+)/g)) if (!ALLOWED[name].includes(m[1])) { console.error(`${f} imports ${m[1]}`); bad++; }
     if (name !== '@gmt/api' && /process\.env/.test(src)) { console.error(`${f} reads process.env outside apps/api`); bad++; }
-    if (name === '@gmt/api' && !f.includes('/bootstrap/') && /process\.env/.test(src)) { console.error(`${f} reads process.env outside bootstrap/`); bad++; }
+    const envReaders = ['/bootstrap/', '/wiring.ts', '/logger.ts'];
+    if (name === '@gmt/api' && !envReaders.some((p) => f.includes(p)) && /process\.env/.test(src)) { console.error(`${f} reads process.env outside bootstrap/, wiring.ts or logger.ts`); bad++; }
+    if (name === '@gmt/providers' && !f.includes('/src/testing/') && /from ['"]msw/.test(src)) { console.error(`${f} imports msw outside src/testing/`); bad++; }
   }
 }
 process.exit(bad ? 1 : 0);
@@ -2172,11 +2335,11 @@ Brief: `docs/briefs/wp04b-recording-and-wiring.md`. Depends on WP3, WP4. Records
 
 ## WP5 — SearchApi adapter (Opus)
 
-Brief: `docs/briefs/wp05-searchapi-adapter.md`. Depends on WP4, WP4b. Spec §2 (SearchApi rows and facts 2–5, 8), §5.2, §5.4, §9 item 2. First failing test: tiles partition the band.
+Brief: `docs/briefs/wp05-searchapi-adapter.md`. Depends on WP1, WP2, WP4, WP4b. Spec §2 (SearchApi rows and facts 2–5, 8), §5.2, §5.4, §9 item 2. First failing test: tiles partition the band.
 
 ## WP6 — Travelpayouts adapter (Sonnet)
 
-Brief: `docs/briefs/wp06-travelpayouts-adapter.md`. Depends on WP4, WP4b. Spec §2 (Travelpayouts row and fact 1), §5.2, §9 item 2. First failing test: empty envelope → `no_data`.
+Brief: `docs/briefs/wp06-travelpayouts-adapter.md`. Depends on WP1, WP2, WP4, WP4b. Spec §2 (Travelpayouts row and fact 1), §5.2, §9 item 2. First failing test: empty envelope → `no_data`.
 
 ## WP7 — `engine` with layer-A tests (Opus)
 
@@ -2200,7 +2363,7 @@ Brief: `docs/briefs/wp11-alerts-email.md`. Depends on WP7, WP8, WP10. Spec §6.8
 
 ## WP12 — Docker, compose, env, backup, docs (Sonnet)
 
-Brief: `docs/briefs/wp12-docker-docs.md`. Depends on WP8. Spec §12 (`.env.example` final), §13, §9 item 8. First failing test: the Dockerfile sets production and the container flag.
+Brief: `docs/briefs/wp12-docker-docs.md`. Depends on WP8, WP9. Spec §12 (`.env.example` final), §13, §9 item 8. First failing test: the Dockerfile sets production and the container flag.
 
 ## WP13 — Live smoke, layer-B engine tests, lock test, integration review (Fable)
 
@@ -2210,7 +2373,7 @@ Brief: `docs/briefs/wp13-smoke-and-final-pass.md`. Depends on all. Spec §9 item
 
 ## Self-review record (2026-10-14)
 
-1. **Spec coverage.** §1 → WP9 (empty state, coverage check), WP8 (`POST /definitions` default for the plan); §2 → WP5, WP6, docs in WP12; the Phase 4 Camoufox fallback has no task by design (spec: not built); §3 → WP0 types, WP1 buckets, WP0 labels; §4 → WP0 scaffold and boundary guard, WP8 auth; §5.1 → WP0; §5.2 → WP5/WP6; §5.3 → WP4; §5.4 → WP5; §5.5 → WP0 gate, WP4 fixture provider, WP8 boot matrix, WP12 Dockerfile; §5.6 → WP2 pure parts, WP7 step; §6 → WP1/WP2; §7 → WP3 (+ WP0 client); §8 → WP7 (+ WP11 notifications); §9 → thresholds WP0, each item in its WP, item 7 in WP13; §10 → WP0 contract, WP8 routes; §11 → WP9/WP10/WP11; §12 → WP0 schema, WP12 docs; §13 → WP12; §14 → WP8 (pino setup in bootstrap) and WP4 (scrubbing). No gap found.
+1. **Spec coverage.** §1 → WP9 (empty state, coverage check), WP8 (`POST /definitions` default for the plan); §2 → WP5, WP6, docs in WP12; the Phase 4 Camoufox fallback has no task by design (spec: not built); §3 → WP0 types, WP1 buckets, WP0 labels; §4 → WP0 scaffold and boundary guard, WP8 auth; §5.1 → WP0; §5.2 → WP5/WP6; §5.3 → WP4; §5.4 → WP5; §5.5 → WP0 gate, WP4 fixture provider, WP8 boot matrix, WP12 Dockerfile; §5.6 → WP2 pure parts, WP7 step; §6 → WP1/WP2; §7 → WP3 (+ WP0 client); §8 → WP7 (+ WP11 notifications); §9 → thresholds WP0, each item in its WP, item 7 split (`record:fixtures` in WP4b, `smoke:live` in WP13); §10 → WP0 contract, WP8 routes; §11 → WP9/WP10/WP11; §12 → WP0 schema, WP12 docs; §13 → WP12; §14 → WP8 (pino setup in bootstrap) and WP4 (scrubbing). No gap found.
 2. **Placeholder scan.** No TBD/TODO. Two code blocks in Task 0.5 and Task 0.8 describe helper functions (`buildSearchApi`, `buildSmtp`, the remaining schema files) in prose with their rules stated; they are bounded by the tests above them, which is the acceptance criterion.
 3. **Type consistency.** `Buckets` is defined once in `api-contract/common.ts` as `bucketsSchema` and re-used by `CellsRepo.buckets` and `sixBuckets`; `RollUp.status` null ↔ API `not_applicable` is stated in the execution types block; `Booking.host` is required on `get`/`post` in both `types/itinerary.ts` and `bookingSchema`; `PlanId` has two members everywhere; `Estimate` is `estimateResponseSchema`'s type.
 4. **Review focus.** All five lines have an owning task: 1 → WP1 validation + WP9 form; 2 → Task 0.7 (test present) + WP2 ordering; 3 → WP10; 4 → WP7 + WP8; 5 → WP3 + WP7. Each brief carries its pinned test.

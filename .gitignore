@@ -9,3 +9,5 @@ dist/
 data/
 .memsearch/
 packages/providers/fixtures/recorded/**/*.raw.json
+backups/
+*.db*
