@@ -19,3 +19,5 @@ apps/*/coverage/
 .stryker-tmp/
 .worktrees/
 .superpowers/
+# raw vendor bodies written beside recorded fixtures (sec-008); never committed, wherever a recorded root lives
+**/fixtures/recorded/**/*.raw.json

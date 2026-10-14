@@ -183,6 +183,17 @@ export async function runAttempt(
     malformed = true;
   }
 
+  if (r.recordFixtures && deps.recorder !== undefined) {
+    // why: before classification, so 429/quota/400 bodies are captured (spec §9 item 7); a refusal fails the request.
+    await deps.recorder.record({
+      providerId: r.providerId,
+      endpointPath: r.endpointPath,
+      request: r,
+      status,
+      body,
+      fetchedAt,
+    });
+  }
   const scrubbed = scrubSecrets(body, deps.secrets);
   if (!ok) {
     const facts: ResponseFacts = {
