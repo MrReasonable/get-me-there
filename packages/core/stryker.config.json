@@ -21,10 +21,6 @@
     "low": 80,
     "break": 80
   },
-  "ignorePatterns": [
-    "dist",
-    "/coverage",
-    "reports"
-  ],
+  "ignorePatterns": ["dist", "/coverage", "reports"],
   "inPlace": true
 }

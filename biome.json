@@ -9,7 +9,9 @@
       "!**/reports",
       "!**/.stryker-tmp",
       "!**/drizzle/meta",
-      "!**/pnpm-lock.yaml"
+      "!**/pnpm-lock.yaml",
+      "!**/.worktrees",
+      "!**/.superpowers"
     ]
   },
   "formatter": {

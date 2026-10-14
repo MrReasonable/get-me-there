@@ -206,7 +206,7 @@ Verified on 2026-10-14. Versions are the plan's Task 0.1 pins. "Scratch run" mea
 
 - **drizzle-kit 0.31.11 + drizzle-orm 0.45.4** (context7 `/drizzle-team/drizzle-orm-docs`, `sqlite/indexes-constraints.mdx`, `drizzle-kit-generate.mdx`; scratch run). A schema split over files that import each other as `./parent.js` (NodeNext style) generated cleanly with plain `drizzle-kit generate --name=initial`; `check(name, sql.raw('status IN (…)'))` was emitted as `CONSTRAINT "…" CHECK(status IN (…))`; `uniqueIndex(…).on(…).where(sql.raw('is_child = 0 AND status IN (…)'))` was emitted as `CREATE UNIQUE INDEX … WHERE is_child = 0 AND status IN (…)`; re-running with no schema change printed "No schema changes, nothing to migrate" and wrote nothing. So the script is `db:generate` = `drizzle-kit generate`; WP3 passes `--name=initial` when it regenerates (`pnpm --filter @gmt/db db:generate --name=initial`), and later work packages name their own migrations (arch-r2-010); no tsx fallback and no hand-appended SQL are needed (ruling 16). Layout: `drizzle/0000_initial.sql`, `drizzle/meta/_journal.json`, `drizzle/meta/0000_snapshot.json`. API used: `sqliteTable(name, columns, (t) => [ … ])`, `integer`, `text`, `real`, `primaryKey({ columns })`, `foreignKey({ columns, foreignColumns })`, `.references(() => t.id)`, `index`, `uniqueIndex`, `.where(sql)`, `check`. Repositories use `db.raw.prepare` with explicit SQL; `// why:` the queries are window functions, CTEs, `json_each` and compare-and-set statements reviewers must read; Drizzle owns schema and migration.
 - **better-sqlite3 13.0.3** (context7 `/wiselibs/better-sqlite3` `docs/api.md`; scratch run). `transaction(fn)` and its `.immediate()` variant (wrapped by WP0's `Db.transaction` and `Db.immediateTransaction`); nested transaction functions become savepoints; async functions are not supported. `pragma(name, { simple: true })`. `Database.SqliteError` with `.code` (`SQLITE_CONSTRAINT_UNIQUE`, `SQLITE_CONSTRAINT_CHECK`, `SQLITE_BUSY`, `SQLITE_NOTADB`). Named parameters `@name`; extra object keys are ignored (verified), a missing key throws. `RETURNING` with `.all()`/`.get()`. `new Database(path, { readonly: true, fileMustExist: true })`. Scratch-verified for `backupDatabase`: a read-only connection runs `VACUUM INTO ?` against a WAL database whose writer is still open with uncheckpointed pages, and the copy holds them; `VACUUM INTO` accepts an existing **empty** target (created with `openSync(file, 'wx', 0o600)`, mode 600 kept) and fails with `SQLITE_ERROR "output file already exists"` on a non-empty one; a non-database source fails with `SQLITE_NOTADB`; `openSync(path, 'wx')` fails with `EEXIST` on a dangling symlink. Scratch-verified for the ledger path CHECK: `GLOB '/*' AND NOT GLOB '//*' AND NOT GLOB '*[^A-Za-z0-9._~/-]*'` accepts `/api/v1/search` and `/aviasales/v3/prices_for_dates` and rejects `//h/x`, `/x#t`, `/x@y`, `/x?y`, `x`, `/a b`. Type affinity: inserting the text `'412'` into an INTEGER column stores the integer 412 (passes `typeof = 'integer'`); `'abc'` and `'412.5'` fail the CHECK.
-- **vitest 5.0.4**: `describe`, `it(name, fn, timeout)`, `it.each`, `afterEach`, `expect(...).toThrow(Class | RegExp | asymmetric)`, `vi.fn`. Per-task runs use `pnpm --filter @gmt/db exec vitest run <file>` (decision 8); thresholds apply to the full `pnpm --filter @gmt/db test`. Hooks registered at module scope of an imported helper apply to the importing test file.
+- **vitest 5.0.4**: `describe`, `it(name, { timeout }, fn)`, `it.each`, `afterEach`, `expect(...).toThrow(Class | RegExp | asymmetric)`, `vi.fn`. Per-task runs use `pnpm --filter @gmt/db exec vitest run <file>` (decision 8); thresholds apply to the full `pnpm --filter @gmt/db test`. Hooks registered at module scope of an imported helper apply to the importing test file.
 - **node:worker_threads** (Node ≥ 22): `Worker`, `SharedArrayBuffer`, `Atomics` (claim race; the busy-but-absorbed contention test).
 - **mwgg/Airports** (MIT) at commit `a89e4e0dda9d9878337e2da190ebe1ef1d6af705` (2026-10-01): 29,308 entries, 7,917 with a three-letter IATA code and a `tz`, no duplicate IATA codes; no metro field.
 - **Wikipedia "IATA airport code", section "Cities with multiple commercial airports"** (CC BY-SA 4.0), revision `1378312633` (raw wikitext `https://en.wikipedia.org/w/index.php?title=IATA_airport_code&oldid=1378312633&action=raw&section=8`). Parsed with the Task 3.5 rules (former codes removed, members checked against the airports file and the metro's majority country) it yields **53** metro codes, dropping `NYC:IDL`, `BER:SXF`, `LUH:HWR`, `MIA:PBI` (absent from the airports file), with `LON: LCY LGW LHR LTN SEN STN` and `NYC: EWR JFK LGA`. The list is illustrative: an airport absent from it has `metro = NULL`, and Travelpayouts queries it per airport (spec §5.2).
@@ -5801,6 +5801,40 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual({ n: 0 });
   });
 
+  // prov-r3-001: provenance the stored price never had is refused, field by field.
+  const forgedProvenance: Array<[string, (p: CalendarPriceRow) => CalendarPriceRow]> = [
+    ['maxAgeHours widened', (p) => ({ ...p, maxAgeHours: 720 })],
+    ['providerObservedAt moved', (p) => ({ ...p, providerObservedAt: at('2026-10-14T11:59:00.000Z') })],
+    ['vendorLink swapped', (p) => ({ ...p, vendorLink: 'https://www.aviasales.com/search/LON1403NYC28031' })],
+    ['fx conversion hidden', (p) => ({ ...p, currencyNative: 'GBP', priceNativeMinor: p.pricePence, fx: { converted: false } })],
+  ];
+  it.each(forgedProvenance)('copyReused refuses a price whose %s, and writes nothing', (_name, forge) => {
+    const { db, clock, cells, prices, definition } = world();
+    const usd = cell(undefined, undefined, '2027-03-18', '2027-04-01');
+    const b = newExecution(db, clock, { definition, status: 'completed' }).execution.id;
+    cells.seed(b, [withNights(usd)], ['travelpayouts']);
+    const converted = calendarPrice(usd, { currencyNative: 'USD', priceNativeMinor: 54_900, pricePence: 41_175, fx: { converted: true, rateNano: 750_000_000, rateDate: asIsoDate('2026-10-13'), source: 'frankfurter' } });
+    cells.writeTile(b, 'travelpayouts', { tileIndex: 0, cells: [usd], discards: 0, prices: [converted], outcomes: [out(usd, 'priced', T0, 41_175)] });
+    const c = newExecution(db, clock, { definition }).execution.id;
+    cells.seed(c, [withNights(usd)], ['travelpayouts']);
+    const real = find(ask(prices, definition.id, [usd]), usd);
+    if (real.price === null) throw new Error('fixture: priced');
+    expect(() => cells.copyReused(c, 'travelpayouts', [{ ...real, price: forge(real.price) }])).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual({ n: 0 });
+    cells.copyReused(c, 'travelpayouts', [real]); // the unforged copy is accepted and stored with its conversion
+    expect(prices.reuseCandidates(definition.id, 'travelpayouts', 'economy', 'unknown', 'authorised-cached', [usd], at('2026-10-14T11:00:00.000Z'))[0]?.price?.fx).toEqual(converted.fx);
+  });
+
+  it('copyReused refuses a source fetched in another cabin than the target searches (prov-r3-002)', () => {
+    const { db, clock, cells, prices, definition } = world();
+    const business = new DefinitionsRepo(db, clock).update(definition.id, { cabin: 'business' });
+    const c = newExecution(db, clock, { definition: business }).execution.id;
+    cells.seed(c, ALL.map(withNights), ['travelpayouts']);
+    expect(() => cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, [P]))).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
+    expect(cells.outcomes(c, { cells: [P] })[0]?.status).toBe('not_run');
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual({ n: 0 });
+  });
+
   // prov-005: each mismatch is refused before any write.
   const mismatches: Array<[string, (p: ReusedCopy) => ReusedCopy]> = [
     ['copy cell ≠ outcome cell', (p) => ({ ...p, cell: E })],
@@ -6092,10 +6126,11 @@ function assertReusable(providerId: ProviderId, { cell, outcome, price }: Reused
         const key = { ...keyParams(executionId, cell), stage: 'discovery', providerId };
         const target = this.db.raw.prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL).get(key);
         if (target?.status !== 'not_run') throw new RowRejected('reuse-target', `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}, not not_run`);
-        this.assertSourceStored(executionId, providerId, { cell, outcome, price });
-        const reusedFrom = outcome.reusedFromExecutionId ?? outcome.executionId;
-        storeOutcome(this.db, { ...outcome, ...keyParams(executionId, cell), executionId, stage: 'discovery', providerId, attempts: 0, lastError: null, reusedFromExecutionId: reusedFrom });
-        if (price !== null) insertCalendarPrice(this.db, executionId, { ...price, reusedFromExecutionId: reusedFrom });
+        // why: what is written is what the database holds (prov-r3-001), never the caller's objects.
+        const { stored, held } = this.assertSourceStored(executionId, providerId, { cell, outcome, price });
+        const reusedFrom = stored.reusedFromExecutionId ?? stored.executionId;
+        storeOutcome(this.db, { ...stored, ...keyParams(executionId, cell), executionId, stage: 'discovery', providerId, attempts: 0, lastError: null, reusedFromExecutionId: reusedFrom });
+        if (held !== null) insertCalendarPrice(this.db, executionId, { ...held, reusedFromExecutionId: reusedFrom });
       }
       storeRollUps(this.db, executionId, 'discovery', copies.map((c) => c.cell));
     });
@@ -6104,9 +6139,10 @@ function assertReusable(providerId: ProviderId, { cell, outcome, price }: Reused
   /**
    * prov-r2-001: the copy must be what the database holds. The source outcome is re-read by its keys and the price by
    * its id; both must equal the values supplied, and the source must be a non-child execution of the target's
-   * definition (spec §8.1). This is the one path that writes a price without a provider call, so it trusts no caller.
+   * definition fetched in the target's cabin (spec §8.1, §9 Layer A). This is the one path that writes a price without a
+ * provider call, so it trusts no caller; copyReused writes the re-read rows it returns.
    */
-  private assertSourceStored(targetExecutionId: string, providerId: ProviderId, { cell, outcome, price }: ReusedCopy): void {
+  private assertSourceStored(targetExecutionId: string, providerId: ProviderId, { cell, outcome, price }: ReusedCopy): { stored: CellOutcome; held: CalendarPriceRow | null } {
     const refuse = (why: string) => new RowRejected('reuse-source', `${cellKeyString(cell)}: ${why} (spec §8.1)`);
     const src = this.db.raw
       .prepare<Record<string, unknown>, OutcomeDbRow & { definition_id: string; is_child: number }>(
@@ -6116,24 +6152,30 @@ function assertReusable(providerId: ProviderId, { cell, outcome, price }: Reused
       )
       .get({ ...keyParams(outcome.executionId, cell), providerId });
     if (src === undefined) throw refuse(`no stored outcome in ${outcome.executionId}`);
-    const target = this.db.raw.prepare<[string], { definition_id: string }>('SELECT definition_id FROM search_executions WHERE id = ?').get(targetExecutionId);
+    const target = this.db.raw.prepare<[string], { definition_id: string; definition_snapshot_json: string }>('SELECT definition_id, definition_snapshot_json FROM search_executions WHERE id = ?').get(targetExecutionId);
     if (src.is_child !== 0 || target === undefined || src.definition_id !== target.definition_id) throw refuse('the source is not a parent execution of the same definition');
     const stored = toOutcome(src);
+    // why: spec §9 Layer A "refuse on a cabin change": the definition's cabin may have been edited since the source ran (prov-r3-002).
+    const targetCabin = readSnapshot('search_executions.definition_snapshot_json', target.definition_snapshot_json).cabin;
+    if (stored.cabin !== targetCabin) throw refuse(`the source was fetched in ${String(stored.cabin)}, the target searches ${targetCabin}`);
     const same = (a: CellOutcome) => [a.status, a.reason, a.fetchedAt, a.minPence, a.cabin, a.pointOfSale, a.sourceKind, a.reusedFromExecutionId].join('|');
     if (same(stored) !== same(outcome)) throw refuse('the supplied outcome differs from the stored one');
-    if (price === null) return;
+    if (price === null) return { stored, held: null };
     const p = this.db.raw.prepare<[number], CalendarPriceDbRow>('SELECT * FROM calendar_prices WHERE id = ?').get(price.id);
     if (p === undefined) throw refuse(`calendar price ${price.id} does not exist`);
     const held = toCalendarPriceRow(p);
-    const priceKey = (x: CalendarPriceRow) => [x.executionId, x.providerId, cellKeyString(x.cell), x.pricePence, x.priceNativeMinor, x.currencyNative, x.fetchedAt, x.cabin, x.pointOfSale, x.sourceKind, x.reusedFromExecutionId].join('|');
+    const fxKey = (x: CalendarPriceRow) => (x.fx.converted ? `1|${x.fx.rateNano}|${x.fx.rateDate}|${x.fx.source}` : '0');
+    const priceKey = (x: CalendarPriceRow) =>
+      [x.executionId, x.providerId, cellKeyString(x.cell), x.pricePence, x.priceNativeMinor, x.currencyNative, fxKey(x), x.fetchedAt, x.providerObservedAt, x.maxAgeHours, x.vendorLink, x.cabin, x.pointOfSale, x.sourceKind, x.reusedFromExecutionId].join('|');
     if (held.executionId !== outcome.executionId || priceKey(held) !== priceKey(price)) throw refuse('the supplied price differs from the stored one');
+    return { stored, held };
   }
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/reuse.test.ts`
-Expected: PASS, 20 tests (8 + 9 `it.each` rows in the reuse block, 2 calendar-basis, 1 route history).
+Expected: PASS, 25 tests (9 + 13 `it.each` rows in the reuse block, 2 calendar-basis, 1 route history).
 
 - [ ] **Step 5: Commit**
 
@@ -6308,7 +6350,7 @@ In `src/repositories/itineraries.ts`, first line of `upsertOffer`: `assertProvid
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/syntheticGate.test.ts test/cells.rollup.test.ts test/cells.writeTile.test.ts test/cells.resume.test.ts test/itineraries.test.ts test/reuse.test.ts`
-Expected: PASS, 12 + 9 + 15 + 5 + 16 + 20 = 77 tests.
+Expected: PASS, 12 + 9 + 15 + 5 + 16 + 25 = 82 tests.
 
 - [ ] **Step 5: Commit**
 
