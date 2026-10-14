@@ -1,0 +1,26 @@
+{
+  "name": "@gmt/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "@gmt/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@gmt/core": "workspace:*",
+    "bottleneck": "2.19.5",
+    "hono": "4.13.13",
+    "msw": "3.0.3",
+    "p-retry": "8.0.1",
+    "zod": "4.6.7"
+  }
+}

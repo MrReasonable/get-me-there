@@ -52,10 +52,15 @@ From the plan's "Cross-package contracts", copied verbatim (the lines WP1 uses):
 export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
 export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
+export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' }; // Date#toISOString() form only
 export const iataSchema: z.ZodType<Iata, string>;  // trims, upper-cases, then requires ^[A-Z]{3}$ (so 'lhr' → 'LHR'; 'LHRX' rejected)
+export const isoDateSchema: z.ZodType<IsoDate, string>;    // regex + real calendar date check (rejects 2027-02-29)
+export const isoMonthSchema: z.ZodType<IsoMonth, string>;
 export function isRealDate(y: number, m: number, d: number): boolean;
 export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
 export function asIsoDate(s: string): IsoDate;
+export function asIsoMonth(s: string): IsoMonth;
+export function asIsoDateTime(s: string): IsoDateTime;
 
 // types/definition.ts (WP0)
 export type WindowSpec = { kind: 'absolute'; from: IsoDate; to: IsoDate } | { kind: 'relative'; startOffsetDays: number; lengthDays: number };
@@ -78,6 +83,7 @@ export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; r
 export type Stage = 'discovery' | 'verification';
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';
 export type SkipReason = 'not_selected' | 'budget' | 'provider_disabled' | 'departed';
+export type NoDataReason = 'cabin-not-offered';          // a provider whose `cabins` excludes the definition's cabin: every cell no_data, no call
 export interface CellOutcome extends CellKey {
   executionId: string; stage: Stage; providerId: ProviderId; status: CellOutcomeStatus; reason: string | null;
   attempts: number; lastError: string | null; fetchedAt: IsoDateTime | null; minPence: number | null;
@@ -86,6 +92,10 @@ export interface CellOutcome extends CellKey {
 export interface RollUp { status: CellOutcomeStatus | null; reason: string | null; minPence: number | null }   // null status ↔ API 'not_applicable'
 export type SelectionReason = 'always_include' | 'top_n' | 'ceiling' | 'stride';
 export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }   // bucketsSchema in api-contract/common.ts is z.ZodType<Buckets>
+
+// text/bannedWords.ts (WP0, Task 0.6 plus the shared allowlist)
+export function findBannedWords(text: string, allowlist: readonly string[] = []): Array<{ word: string; index: number }>;
+export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in'];
 
 // ports/clock.ts (WP0); callers pass clock.todayLondon() as todayLondon, WP1 never reads a clock
 export interface Clock { now(): IsoDateTime; todayLondon(): IsoDate }

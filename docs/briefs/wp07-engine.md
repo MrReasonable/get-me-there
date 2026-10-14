@@ -24,7 +24,7 @@ Build the execution engine of spec §8 (orchestrator, discovery and verification
 - The §5.6 normalisation step: airport tz from `AirportsRepo`, money through `toGbp` with `FxRepo`, one calendar price per cell per tile, `offers-dropped:n`, evidenced segment cabins, vendor-link validation (core's `LINK_ALLOWLIST`); `cabin-not-offered` seeding (`CellsRepo.markNoData`); `route_price_history` upserts from `ItinerarySearchResult.routeHistory`.
 - Bounded pools per provider `CONCURRENCY` (an in-package helper), one `AbortController` per execution, one per (stage, provider) lane, and `AbortSignal.any` per tile or cell.
 - FX refresh through http-kit under the id `fx` (never ledgered), a daily system job, and a daily maintenance job that calls WP3's `runMaintenance`. `boot()` makes no network call.
-- Layer-A tests: `test/harness.ts` (WP4's fixture router reached through http-kit's `inProcessHosts`, WP4's scenario rules via `POST /__fixture/scenario`, real http-kit, real `SqliteBudgetGuard`, `openDatabase(':memory:')` + `applyMigrations` + `createRepos`, `fixedClock`, capturing `Logger` and `Notifier`; msw only for frankfurter), and one test per §8.1 error-table row in both stages plus every §9 item 4 layer-A item listed in the dispatch.
+- Layer-A tests: `src/testing/harness.ts`, exported as `@gmt/engine/testing` for WP13's layer B (WP4's fixture router reached through http-kit's `inProcessHosts`, WP4's scenario rules via `POST /__fixture/scenario`, real http-kit, real `SqliteBudgetGuard`, `openDatabase(':memory:')` + `applyMigrations` + `createRepos`, `fixedClock`, capturing `Logger` and `Notifier`; msw only for frankfurter), and one test per §8.1 error-table row in both stages plus every §9 item 4 layer-A item listed in the dispatch.
 
 **Out**
 
@@ -513,7 +513,7 @@ All verified on 2026-10-14.
 - `src/coverageCheck.ts` — `coverageCheckFor`, `countCachedRows`.
 - `src/fx/refresh.ts` — `refreshFx`, `FRANKFURTER_LATEST_URL`.
 - `src/maintenance.ts` — `runMaintenanceJob`, `runSystemJob`, `FX_REFRESH_CRON`, `MAINTENANCE_CRON`.
-- `test/harness.ts`, `test/wrappers.ts` — layer-A harness and provider decorators.
+- `src/testing/harness.ts` — layer-A harness, exported as `@gmt/engine/testing` for WP13's layer-B tests; `test/wrappers.ts` — provider decorators.
 - `test/*.test.ts` — one file per task as named in each task.
 
 **Modify**
@@ -531,7 +531,7 @@ Conventions for every task: per-task runs use `pnpm --filter @gmt/engine exec vi
 
 **Files:**
 - Modify: `packages/engine/package.json`, `packages/engine/vitest.config.ts`
-- Create: `packages/engine/test/harness.ts`, `packages/engine/test/resume-k-of-n.test.ts`, `packages/engine/test/pool.test.ts`
+- Create: `packages/engine/src/testing/harness.ts`, `packages/engine/test/resume-k-of-n.test.ts`, `packages/engine/test/pool.test.ts`
 - Create: `packages/engine/src/types.ts`, `src/alertsStep.ts`, `src/context.ts`, `src/pool.ts`, `src/run.ts`, `src/registry.ts`, `src/snapshot.ts`, `src/normalise.ts`, `src/stages/discovery.ts`, `src/execute.ts`, `src/start.ts`, `src/resume.ts`, `src/orchestrator.ts`
 
 **Interfaces:**
@@ -565,14 +565,14 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/index.ts', 'src/notifiers/email.ts', 'src/alerts/**'],
+      exclude: ['src/index.ts', 'src/testing/**', 'src/notifiers/email.ts', 'src/alerts/**'],
       thresholds: { lines: 85, branches: 70, functions: 85, statements: 85 },
     },
   },
 });
 ```
 
-`packages/engine/test/harness.ts` (complete; later tasks only call it):
+`packages/engine/src/testing/harness.ts` (complete; later tasks only call it). It lives under `src/testing/` so WP13's layer-B tests can import it as `@gmt/engine/testing` (the boundary script allows `src/testing/` as it does for `@gmt/providers/testing`; production code never imports it). `package.json` gains `"exports": { "./testing": { "types": "./dist/testing/harness.d.ts", "default": "./dist/testing/harness.js" } }` beside `"."`. `vitest` and `msw` stay dev dependencies; a consumer of `@gmt/engine/testing` must have both installed (WP13's tests do):
 
 ```ts
 /**
@@ -601,6 +601,7 @@ import {
   type OperatorMessage,
   type ProviderId,
   type ProvidersConfig,
+  Secret,
   type SearchDefinition,
   type Stage,
   asIata,
@@ -617,16 +618,22 @@ import {
   type HttpKit,
   type ProviderHttpLimits,
   SCENARIO_PATH,
+  SEARCHAPI_PARAMS,
+  TRAVELPAYOUTS_PARAMS,
   createHttpKit,
   defaultFixtureRoot,
   fixtureHttpLimits,
   fixtureProvider,
+  searchApiHttpLimits,
+  searchApiProvider,
+  travelpayoutsHttpLimits,
+  travelpayoutsProvider,
 } from '@gmt/providers';
 import { fixtureRouter } from '@gmt/providers/fixture';
 import { setupServer } from 'msw/node';
 import { fileURLToPath } from 'node:url';
 import { vi } from 'vitest';
-import type { EngineDeps, EngineOptions, StartResult } from '../src/types.js';
+import type { EngineDeps, EngineOptions, StartResult } from '../types.js';
 
 // --- the worked example (docs/briefs/README.md: London → New York only) ---
 export const LHR = asIata('LHR');
@@ -641,8 +648,10 @@ export const WINDOW = { from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-15
 export const FIXTURE_COST_MICRO_GBP = 3200;
 /** Sentinel (README rule): enables config.providers.travelpayouts so the free stub has limits; never sent anywhere real. */
 const TRAVELPAYOUTS_SENTINEL = 'test-travelpayouts-token-0123456789abcdef';
+/** Sentinel SearchApi key for layer B (README rule); replay handlers never check it. */
+const SEARCHAPI_SENTINEL = 'test-searchapi-key-0123456789abcdef';
 
-const MIGRATIONS_DIR = fileURLToPath(new URL('../../db/drizzle/', import.meta.url));
+const MIGRATIONS_DIR = fileURLToPath(new URL('../../../db/drizzle/', import.meta.url));
 
 /** Tiny synthetic airports dataset: the four worked-example airports with their real IANA zones and metros. */
 export const TEST_AIRPORTS: AirportsDataset = {
@@ -682,6 +691,9 @@ export function capturingNotifier(operator: OperatorMessage[], digests: unknown[
 // --- request log (observation only: every control is WP4's scenario rules, hold and release) ---
 export interface FixtureRequest { kind: 'calendar' | 'itinerary' | 'other'; pair: string; ordinal: number; path: string; params: Record<string, string> }
 
+/** The one hold id the layer-A tests use; `h.releaseHolds()` releases it. */
+export const HOLD_ID = 'layer-a';
+
 /** WP4 scenario rules for every §8.1 row (WP4 brief, "Which rule drives which spec §8.1 row"); `times` counts http-kit attempts. */
 export const FIXTURE_RULES = {
   rateLimit: { kind: 'status', status: 429 },
@@ -695,8 +707,8 @@ export const FIXTURE_RULES = {
   limiterTimeout: { kind: 'status', status: 429, headers: { 'retry-after': '4000' } },
   noReturnLegs: { kind: 'no-return-legs' },
   partial: { kind: 'partial', failedExpansions: 1 },
-  // why: plan "http-kit" fixtureRouter — a held request waits for POST /__fixture/release or its own abort
-  hold: { kind: 'hold' },
+  // why: WP4 hold rule — a held request waits for POST /__fixture/release { id } or its own abort
+  hold: { kind: 'hold', id: HOLD_ID },
 } as const satisfies Record<string, FixtureRule['respond']>;
 
 /** One discovery tile of the base window: WP4 tiles start every 7 departure days from WINDOW.from. */
@@ -767,6 +779,14 @@ export interface HarnessOptions {
   fixtureCostMicroGbp?: number;
   transformFixture?: (fixture: FlightProvider) => FlightProvider;
   extraProviders?: (tools: { clock: Clock; log: Logger; http: HttpKit }) => FlightProvider[];
+  /**
+   * Layer B (WP13): construct the real adapters with sentinel keys. The caller installs the msw replay
+   * handlers from `@gmt/providers/testing` on `h.server` before running anything. Do not combine
+   * `travelpayouts: true` with the free stub, which uses the same provider id.
+   */
+  vendors?: { searchapi?: boolean; travelpayouts?: boolean };
+  /** Per-test repository overrides, merged over createRepos. */
+  repos?: Partial<Repos>;
 }
 
 export interface Harness {
@@ -785,8 +805,8 @@ export interface Harness {
   requests: FixtureRequest[];
   /** WP4 scenario control: POST /__fixture/scenario { rules } (replaces the rules). */
   fixtureScenario(rules: FixtureRule[]): Promise<void>;
-  /** WP4 hold control: POST /__fixture/release answers every held request normally. */
-  releaseHolds(): Promise<void>;
+  /** WP4 hold control: POST /__fixture/release { id } answers every request held under that id normally. */
+  releaseHolds(id?: string): Promise<void>;
   onTileCommit(fn: (n: number, executionId: string) => void): void;
   beforeTileWrite(fn: (attempt: number, executionId: string) => void): void;
   onStageStart(stage: Stage, fn: (executionId: string) => void): void;
@@ -831,6 +851,7 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
       REQUEST_TIMEOUT_SECONDS: '10',
       FIXTURE_COST_MICRO_GBP: String(cost),
       TRAVELPAYOUTS_TOKEN: TRAVELPAYOUTS_SENTINEL,
+      ...(opts.vendors?.searchapi ? { SEARCHAPI_KEY: SEARCHAPI_SENTINEL, SEARCHAPI_PLAN: '40usd' } : {}),
       ...opts.env,
     },
     { realpath: (p) => p },
@@ -847,7 +868,7 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
 
   const db = openDatabase(':memory:');
   applyMigrations(db, MIGRATIONS_DIR);
-  const repos = createRepos(db, clock, { allowSynthetic: true });
+  const repos: Repos = { ...createRepos(db, clock, { allowSynthetic: true }), ...opts.repos };
   repos.airports.upsertAll(TEST_AIRPORTS);
 
   const fixtureHttp = { ...fixtureHttpLimits({ costPerCallMicroGbp: cost, maxWaitSeconds: config.maxWaitSeconds, requestTimeoutSeconds: config.requestTimeoutSeconds }), concurrency: opts.fixtureConcurrency ?? 4 };
@@ -857,6 +878,7 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
     providers: {
       fixture: { monthlyCallCap: opts.fixtureMonthlyCallCap ?? 50_000, window: 'month', billingDay: 1, ratePerMinute: fixtureHttp.ratePerMinute, ratePerHour: fixtureHttp.ratePerHour, concurrency: fixtureHttp.concurrency, cacheTtlHours: 0, costPerCallMicroGbp: cost, planFixedMicroGbp: 0, excludedFromSchedule: false, billable: true, trialUsed: 0 },
       travelpayouts: { ...travelpayouts.limits, billable: false, trialUsed: 0 },
+      ...(config.providers.searchapi !== null ? { searchapi: { ...config.providers.searchapi.limits, billable: true, trialUsed: config.providers.searchapi.trialUsed } } : {}),
     },
   };
   const budget = new SqliteBudgetGuard(db, budgetConfig, clock);
@@ -878,15 +900,30 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
     return router.fetch(req);
   };
 
+  const tpSecret = new Secret(TRAVELPAYOUTS_SENTINEL);
+  const saSecret = new Secret(SEARCHAPI_SENTINEL);
+  const searchapiCfg = config.providers.searchapi;
   const http = createHttpKit({
-    budget, cache, clock, log, secrets: [],
+    budget, cache, clock, log, secrets: [tpSecret, saSecret],
     syntheticAllowed: true, // why: plan "http-kit" — required true for inProcessHosts and limits.fixture
-    limits: { fixture: fixtureHttp, fx: freeLimit(['api.frankfurter.dev']), travelpayouts: freeLimit(['stub.local']) },
+    limits: {
+      fixture: fixtureHttp,
+      fx: freeLimit(['api.frankfurter.dev']),
+      travelpayouts: opts.vendors?.travelpayouts ? travelpayoutsHttpLimits(travelpayouts.limits, config) : freeLimit(['stub.local']),
+      ...(opts.vendors?.searchapi && searchapiCfg !== null ? { searchapi: searchApiHttpLimits(searchapiCfg.limits, config) } : {}),
+    },
     // why: plan decision 7 — the only transport seam; the free stub of test/wrappers.ts answers on stub.local
     inProcessHosts: { 'fixture.local': observed, 'stub.local': async () => Response.json({}) },
   });
   const fixture = fixtureProvider({ http, log, clock, config, costMicroGbp: cost });
-  const providers = [opts.transformFixture ? opts.transformFixture(fixture) : fixture, ...(opts.extraProviders?.({ clock, log, http }) ?? [])];
+  const vendors: FlightProvider[] = [];
+  if (opts.vendors?.travelpayouts) {
+    vendors.push(travelpayoutsProvider({ http, log, clock, token: tpSecret, cacheTtlSeconds: travelpayouts.limits.cacheTtlHours * 3600, paramsAllowlist: TRAVELPAYOUTS_PARAMS, airports: repos.airports }));
+  }
+  if (opts.vendors?.searchapi && searchapiCfg !== null) {
+    vendors.push(searchApiProvider({ http, log, clock, key: saSecret, plan: searchapiCfg.plan, pointOfSale: config.pointOfSale, cacheTtlSeconds: searchapiCfg.limits.cacheTtlHours * 3600, paramsAllowlist: SEARCHAPI_PARAMS }));
+  }
+  const providers = [opts.transformFixture ? opts.transformFixture(fixture) : fixture, ...vendors, ...(opts.extraProviders?.({ clock, log, http }) ?? [])];
 
   const server = setupServer();
   server.listen({ onUnhandledFrame: 'error' });
@@ -932,8 +969,8 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
       const res = await control(SCENARIO_PATH, { rules });
       if (!res.ok) throw new Error(`fixture scenario refused: ${res.status}`);
     },
-    releaseHolds: async () => {
-      const res = await control('/__fixture/release');
+    releaseHolds: async (id = HOLD_ID) => {
+      const res = await control('/__fixture/release', { id });
       if (!res.ok) throw new Error(`fixture release refused: ${res.status}`);
     },
     onTileCommit: (fn) => {
@@ -1008,7 +1045,7 @@ import { cellKeyString } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, JFK, LGW, LHR, createHarness, discoveryOf, expectedTiles, noVerification } from './harness.js';
+import { type Harness, JFK, LGW, LHR, createHarness, discoveryOf, expectedTiles, noVerification } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -1857,7 +1894,7 @@ import { notifyOperator } from '../src/notify.js';
 import { LogNotifier, containsSynthetic } from '../src/notifiers/log.js';
 import { OPERATOR_KINDS, renderOperatorMessage } from '../src/notifiers/operatorTemplates.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, type LogLine, capturingLogger, createHarness } from './harness.js';
+import { type Harness, type LogLine, capturingLogger, createHarness } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -2281,7 +2318,7 @@ import { asIsoDate, cellKeyString, generateCells, resolveWindow } from '@gmt/cor
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, discoveryOf, FIXTURE_RULES, type Harness, JFK, LGW, LHR, WINDOW } from './harness.js';
+import { createHarness, discoveryOf, FIXTURE_RULES, type Harness, JFK, LGW, LHR, WINDOW } from '../src/testing/harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -2520,7 +2557,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { addSeconds } from '../src/errors.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, discoveryOf, FIXTURE_RULES, type Harness, JFK, LGW, LHR, T0, tileRule, WINDOW } from './harness.js';
+import { createHarness, discoveryOf, FIXTURE_RULES, type Harness, JFK, LGW, LHR, T0, tileRule, WINDOW } from '../src/testing/harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -2848,7 +2885,7 @@ import { FX_SOURCE, reduceTile, toMoney, vendorLinkOf } from '../src/normalise.j
 import { createOrchestrator } from '../src/orchestrator.js';
 import { newRun } from '../src/run.js';
 import { commitTile, normaliseDeps } from '../src/stages/discovery.js';
-import { type Harness, JFK, LHR, createHarness, discoveryOf } from './harness.js';
+import { type Harness, JFK, LHR, createHarness, discoveryOf } from '../src/testing/harness.js';
 import { mapPrices } from './wrappers.js';
 
 let h: Harness;
@@ -3052,7 +3089,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { FRANKFURTER_LATEST_URL, parseFrankfurter, refreshFx } from '../src/fx/refresh.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, createHarness } from './harness.js';
+import { type Harness, createHarness } from '../src/testing/harness.js';
 import { mapPrices } from './wrappers.js';
 
 let h: Harness;
@@ -3201,7 +3238,7 @@ import { createOrchestrator } from '../src/orchestrator.js';
 import { newRun } from '../src/run.js';
 import { commitTile, discoveryQuery } from '../src/stages/discovery.js';
 import { reuseCutoff } from '../src/stages/reuse.js';
-import { FIXTURE_RULES, type Harness, JFK, LHR, createHarness, discoveryOf, expectedTiles, tileRule } from './harness.js';
+import { FIXTURE_RULES, type Harness, JFK, LHR, createHarness, discoveryOf, expectedTiles, tileRule } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -3437,7 +3474,7 @@ import { type FlightProvider, type ItinerarySearchResult, asIsoDate, cellKeyStri
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, verificationOf, withVerification } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, verificationOf, withVerification } from '../src/testing/harness.js';
 import { mapOffers } from './wrappers.js';
 
 let h: Harness;
@@ -3818,7 +3855,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { addSeconds } from '../src/errors.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, T0, withVerification } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, T0, withVerification } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -3942,7 +3979,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { planTiles } from '../src/stages/discovery.js';
-import { EWR, FIXTURE_COST_MICRO_GBP, type Harness, JFK, LGW, LHR, createHarness, discoveryOf, withVerification } from './harness.js';
+import { EWR, FIXTURE_COST_MICRO_GBP, type Harness, JFK, LGW, LHR, createHarness, discoveryOf, withVerification } from '../src/testing/harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -4321,7 +4358,7 @@ import { createOrchestrator } from '../src/orchestrator.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { itineraryQuery } from '../src/stages/verification.js';
 import type { Estimate } from '../src/types.js';
-import { FIXTURE_COST_MICRO_GBP, type Harness, JFK, LGW, LHR, createHarness, expectedTiles, verificationOf, withVerification } from './harness.js';
+import { FIXTURE_COST_MICRO_GBP, type Harness, JFK, LGW, LHR, createHarness, expectedTiles, verificationOf, withVerification } from '../src/testing/harness.js';
 import { doubleFetch } from './wrappers.js';
 
 let h: Harness;
@@ -4662,7 +4699,7 @@ import { asIsoDate } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_RULES, type Harness, JFK, LHR } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, JFK, LHR } from '../src/testing/harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -5013,7 +5050,7 @@ import { asIsoDateTime, cellKeyString } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
+import { createHarness, FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5243,7 +5280,7 @@ import { asIsoDate, cellKeyString } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, JFK, LHR, noVerification, withVerification } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, JFK, LHR, noVerification, withVerification } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5429,7 +5466,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5491,7 +5528,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 import { type SearchDefinition, asIsoDateTime } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createScheduler } from '../src/scheduler/scheduler.js';
-import { baseDefinition, capturingLogger, FIXTURE_RULES, type LogLine, T0, tileRule } from './harness.js';
+import { baseDefinition, capturingLogger, FIXTURE_RULES, type LogLine, T0, tileRule } from '../src/testing/harness.js';
 
 const def = (patch: Partial<SearchDefinition> = {}): SearchDefinition => ({ ...baseDefinition(), id: 'def-1', confirmedCostPence: null, createdAt: T0, updatedAt: T0, deletedAt: null, scheduleCron: '0 5 * * 1', ...patch });
 
@@ -5596,7 +5633,7 @@ import { asIsoDateTime } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { createHarness, FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
+import { createHarness, FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5957,7 +5994,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { coverageCheckFor, countCachedRows } from '../src/coverageCheck.js';
 import { runMaintenanceJob, runSystemJob } from '../src/maintenance.js';
-import { type Harness, JFK, LGW, LHR, createHarness } from './harness.js';
+import { type Harness, JFK, LGW, LHR, createHarness } from '../src/testing/harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -6146,7 +6183,7 @@ import { type OperatorMessage, type SearchDefinition, asIsoDate, asIsoDateTime }
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../src/index.js';
 import type { Engine } from '../src/types.js';
-import { createHarness, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from '../src/testing/harness.js';
 
 let h: Harness;
 const engines: Engine[] = [];
@@ -6628,7 +6665,7 @@ import { OPERATOR_KINDS, renderOperatorMessage } from '../src/notifiers/operator
 import { createOrchestrator } from '../src/orchestrator.js';
 import type { StopReason } from '../src/run.js';
 import { buildSnapshot } from '../src/snapshot.js';
-import { FIXTURE_RULES, type Harness, JFK, LGW, LHR, createHarness, itineraryRule, tileRule, withVerification } from './harness.js';
+import { FIXTURE_RULES, type Harness, JFK, LGW, LHR, createHarness, itineraryRule, tileRule, withVerification } from '../src/testing/harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -6774,4 +6811,4 @@ None requires the operator's judgment: plan contracts v2 (commit e804941) and th
 
 1. **`disabled` and manual starts.** A manual start of a disabled definition is refused with `disabled` (the tick skips it silently). If manual starts of disabled definitions should be allowed, only the guard in `startExecution` changes.
 2. **Budget refresh scope.** The decision speaks of an execution-cap pause; the brief refreshes `snapshot.budget` on every manual resume of a parent `paused_budget` (provider and global pauses never read that budget, so the effect is the same) and never on automatic resume or for children.
-3. **Hold rule shape.** The plan names WP4's `hold`/`release` (`POST /__fixture/release`) but the WP4 brief does not yet show the rule's `respond` shape; the harness uses `{ kind: 'hold' }` (in `FIXTURE_RULES.hold`), released by that route or by the request's own abort. If WP4 names it differently, only that constant changes. The harness keeps no request-control layer; `h.requests` only logs what reaches the router.
+3. **Hold rule shape.** The harness uses WP4's hold rule as announced for its rewritten brief: `{ kind: 'hold', id }` released by `POST /__fixture/release` with body `{ id }` (`FIXTURE_RULES.hold`, `HOLD_ID`, `h.releaseHolds`). Re-check against WP4's fixture section once that brief is committed; only those three lines change if it differs. The harness keeps no request-control layer; `h.requests` only logs what reaches the router.

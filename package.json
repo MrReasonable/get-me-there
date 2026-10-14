@@ -1,0 +1,31 @@
+{
+  "name": "get-me-there",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' --filter './apps/**' build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "boundaries": "node scripts/check-boundaries.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "mutate": "pnpm --filter @gmt/core mutate",
+    "dev": "pnpm --parallel --filter @gmt/api --filter @gmt/web dev",
+    "smoke:live": "pnpm --filter @gmt/api tool smoke",
+    "record:fixtures": "pnpm --filter @gmt/api tool record",
+    "secret-scan": "node scripts/secret-scan.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.4",
+    "typescript": "5.9.3",
+    "vitest": "5.0.4"
+  }
+}
