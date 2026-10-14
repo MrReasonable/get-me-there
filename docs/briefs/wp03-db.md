@@ -4042,9 +4042,7 @@ describe('calendar_prices writes (spec §5.5, §6.3, §7)', () => {
     const { db, repo, executionId } = setup();
     const write = (over: Parameters<typeof calendarPrice>[1]) => () => repo.insert(executionId, [calendarPrice(cell(), over)]);
     expect(write({ pricePence: 412.5, priceNativeMinor: 412.5 })).toThrow(expect.objectContaining({ rule: 'integer' }));
-    // why: a non-ISO timestamp cannot be typed as IsoDateTime without a cast; JSON.parse yields it as `unknown`, the honest type at a trust boundary.
-    const brokenTime: unknown = JSON.parse('"2026-10-14T12:00:00Z"');
-    expect(() => repo.insert(executionId, [Object.assign(calendarPrice(cell()), { fetchedAt: brokenTime })])).toThrow(expect.objectContaining({ rule: 'timestamp' }));
+    // why: a non-ISO timestamp cannot reach the typed repository without a cast; the SQL CHECK below is its guard (arch-r2-006).
     expect(write({ maxAgeHours: 1.5 })).toThrow(/max_age_hours/);
     expect(write({ pointOfSale: 'gb' })).toThrow(/point_of_sale/);
     expect(write({ reusedFromExecutionId: 'someone-else' })).toThrow(expect.objectContaining({ rule: 'reused' }));
@@ -4379,8 +4377,8 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
     expect(w(tile([A], [out(A, 'priced', 1)]))).toThrow(expect.objectContaining({ rule: 'priced-needs-price' }));
     expect(w(tile([A], [out(A, 'empty')], [calendarPrice(A)]))).toThrow(expect.objectContaining({ rule: 'price-needs-priced' }));
     expect(w(tile([A], [out(A, 'priced', 1)], [calendarPrice(A)]))).toThrow(expect.objectContaining({ rule: 'min-pence' }));
-    expect(w(tile([A], [out(A, 'priced', 41_200, { fetchedAt: at('2026-10-14T11:00:00.000Z') })], [calendarPrice(A)]))).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
-    expect(w(tile([A], [out(A, 'priced', 41_200, { pointOfSale: 'GB' })], [calendarPrice(A)]))).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
+    expect(w(tile([A], [out(A, 'empty', null, { reason: 'HTTP 500 https://api.travelpayouts.com/x?token=SECRET' })]))).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
+    expect(w(tile([A], [out(A, 'no_data', null, { reason: 'partial-expansion' })]))).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
     expect(w(tile([A], [out(A, 'empty', null, { cabin: null })]))).toThrow(expect.objectContaining({ rule: 'outcome-provenance' }));
     expect(w(tile([A], [out(A, 'no_data', null, { fetchedAt: null })]))).toThrow(expect.objectContaining({ rule: 'outcome-provenance' }));
     expect(w(tile([A], [out(A, 'priced', 41_200)], [calendarPrice(A), calendarPrice(A, { pricePence: 1, priceNativeMinor: 1 })]))).toThrow(expect.objectContaining({ rule: 'in-tile-conflict' }));
@@ -4388,6 +4386,18 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
     expect(w(tile([A], [out(A, 'empty'), out(B, 'empty')]))).toThrow(expect.objectContaining({ rule: 'tile-partition' }));
     expect(w(tile([A], [out(A, 'error', null, { reason: 'upstream' })]))).toThrow(expect.objectContaining({ rule: 'tile-status' }));
     expect(w(tile([A], [out(A, 'priced', 41_200)], [calendarPrice(A)]), 'searchapi')).toThrow(RowRejected);
+    expect(count(db, 'calendar_prices')).toBe(0);
+  });
+
+  // test-r2-001: every field the outcome must share with its price, one row each.
+  it.each([
+    ['fetchedAt', { fetchedAt: at('2026-10-14T11:00:00.000Z') }],
+    ['cabin', { cabin: 'business' }],
+    ['pointOfSale', { pointOfSale: 'GB' }],
+    ['sourceKind', { sourceKind: 'scraped-aggregate' }],
+  ] as const)('refuses an outcome whose %s differs from its price', (_field, over) => {
+    const { db, executionId, cells } = setup();
+    expect(() => cells.writeTile(executionId, 'travelpayouts', tile([A], [out(A, 'priced', 41_200, over)], [calendarPrice(A)]))).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
     expect(count(db, 'calendar_prices')).toBe(0);
   });
 
@@ -4441,6 +4451,28 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
     expect(cells.outcomes(executionId, { cells: [A] })[0]).toMatchObject({ status: 'empty', minPence: null, reusedFromExecutionId: null });
     expect(count(db, 'calendar_prices')).toBe(0);
   });
+
+  it('a tile error over a reused priced copy keeps the copy and its price and only counts the attempt (prov-r2-003, test-r2-002)', () => {
+    const { db, clock, definition, executionId, cells } = setup();
+    const origin = newExecution(db, clock, { definition, status: 'completed' }).execution.id;
+    rawOutcome(db, executionId, A, 'discovery', 'travelpayouts', { status: 'priced', minPence: 30_000, reusedFrom: origin });
+    db.raw
+      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id)
+                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', ?, 48, ?)`)
+      .run(executionId, T0, origin);
+    cells.writeTileError(executionId, 'travelpayouts', [A], 'upstream', 'HTTP 503');
+    expect(cells.outcomes(executionId, { cells: [A] })[0]).toMatchObject({ status: 'priced', minPence: 30_000, reusedFromExecutionId: origin, attempts: 1 });
+    expect(count(db, 'calendar_prices')).toBe(1);
+    expect(stored(cells, executionId, A)).toEqual({ status: 'priced', reason: null, minPence: 30_000 });
+  });
+
+  it('a fresh tile replaces skipped:budget outright (test-r2-002)', () => {
+    const { executionId, cells } = setup();
+    cells.setOutcome(executionId, A, 'discovery', 'travelpayouts', { status: 'skipped', reason: 'budget' });
+    cells.writeTile(executionId, 'travelpayouts', tile([A], [out(A, 'empty')]));
+    expect(cells.outcomes(executionId, { cells: [A] })[0]).toMatchObject({ status: 'empty', reason: null, fetchedAt: T0 });
+    expect(stored(cells, executionId, A)).toEqual({ status: 'empty', reason: null, minPence: null });
+  });
 });
 ```
 
@@ -4465,14 +4497,16 @@ const TILE_STATUSES = ['priced', 'empty', 'no_data'] as const;
 
 /**
  * The outcome to store when `incoming` (fresh) meets `existing` (ruling 3, spec §6.6). Over not_run, skipped or a reused
- * copy the fresh outcome replaces the row; fresh on fresh goes through core's mergeWithinProvider. Attempts are the
- * existing count plus one when this pass failed.
+ * copy the fresh outcome replaces the row (an error never does: it only counts an attempt); fresh on fresh goes through
+ * core's mergeWithinProvider. Attempts are the existing count plus one when this pass failed.
  */
 function nextOutcome(existing: CellOutcome, incoming: CellOutcome, failedPass: boolean): CellOutcome {
   const attempts = existing.attempts + (failedPass ? 1 : 0);
-  if (existing.status === 'not_run' || existing.status === 'skipped' || (existing.reusedFromExecutionId !== null && incoming.status !== 'error')) {
-    return { ...incoming, attempts };
-  }
+  if (existing.status === 'not_run' || existing.status === 'skipped') return { ...incoming, attempts };
+  // why: an error never displaces a stronger result, reused or fresh (plan merge rule, prov-r2-003): the existing outcome
+  // stays, with its reused price row, and only the attempt is counted. Decided here so it does not hang on core's reading.
+  if (incoming.status === 'error' && existing.status !== 'error') return { ...existing, attempts };
+  if (existing.reusedFromExecutionId !== null) return { ...incoming, attempts };
   const merged = mergeWithinProvider(existing, incoming);
   // why: when the merge keeps an error, the newest vendor message is the useful one; status, reason and minPence stay core's.
   return { ...merged, attempts, lastError: merged.status === 'error' && incoming.status === 'error' ? incoming.lastError : merged.lastError };
@@ -4480,6 +4514,15 @@ function nextOutcome(existing: CellOutcome, incoming: CellOutcome, failedPass: b
 
 function storeOutcome(db: Db, o: CellOutcome): void {
   db.raw.prepare(UPDATE_OUTCOME_SQL).run({ ...keyParams(o.executionId, o), stage: o.stage, providerId: o.providerId, status: o.status, reason: o.reason, lastError: o.lastError === null ? null : stripUrlsInText(o.lastError), fetchedAt: o.fetchedAt, minPence: o.minPence, cabin: o.cabin, pointOfSale: o.pointOfSale, sourceKind: o.sourceKind, attempts: o.attempts, reusedFromExecutionId: o.reusedFromExecutionId });
+}
+
+/**
+ * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:
+ * priced → null | 'partial-expansion', empty → null, no_data → null | 'cabin-not-offered'.
+ */
+function assertOutcomeReason(o: { status: CellOutcomeStatus; reason: string | null } & CellKey): void {
+  const allowed: Partial<Record<CellOutcomeStatus, ReadonlyArray<string | null>>> = { priced: [null, 'partial-expansion'], empty: [null], no_data: [null, 'cabin-not-offered'] };
+  if (!(allowed[o.status] ?? []).includes(o.reason)) throw new RowRejected('outcome-reason', `${cellKeyString(o)} ${o.status} cannot carry reason ${String(o.reason)}`);
 }
 
 /** Ruling 5: a fetched terminal outcome carries the provenance reuse matches on. */
@@ -4512,6 +4555,7 @@ function assertOutcomeProvenance(o: Incoming): void {
       if (!covered.has(key) || seen.has(key)) throw new RowRejected('tile-partition', `${key} is outside the tile or repeated`);
       seen.add(key);
       assertOutcomeProvenance(o);
+      assertOutcomeReason(o);
       const price = prices.get(key);
       if (o.status === 'priced' && price === undefined) throw new RowRejected('priced-needs-price', `${key} is priced but the tile wrote no price for it (spec §3)`);
       if (o.status !== 'priced' && price !== undefined) throw new RowRejected('price-needs-priced', `${key} has a price but its outcome is ${o.status}`);
@@ -4564,7 +4608,7 @@ function assertOutcomeProvenance(o: Incoming): void {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/cells.rollup.test.ts test/cells.writeTile.test.ts`
-Expected: PASS, 7 + 9 tests.
+Expected: PASS, 9 + 15 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4904,7 +4948,7 @@ describe('itineraries and offers (spec §7)', () => {
     expect(repo.previousObservation(offerId, at('2026-10-14T10:00:00.000Z'))).toBeNull();
   });
 
-  it('observations: provider ⇔ kind both directions, the gate, offer mismatch, disagreeing fx, non-integers, bad timestamps', () => {
+  it('observations: provider ⇔ kind both directions, the gate, offer mismatch, disagreeing fx, non-integers', () => {
     const open = setup(true);
     open.repo.upsertItinerary(itinerary());
     const offerId = open.repo.upsertOffer(offerOf());
@@ -4920,8 +4964,6 @@ describe('itineraries and offers (spec §7)', () => {
     expect(write(closed, offerId, { provenance: { ...SEARCHAPI_PROVENANCE, providerId: 'travelpayouts', sourceKind: 'authorised-cached' } })).toThrow(expect.objectContaining({ rule: 'offer-mismatch' }));
     expect(write(closed, offerId, { provenance: { ...SEARCHAPI_PROVENANCE, fx: { converted: true, rateNano: 1, rateDate: cell().departureDate, source: 'x' } } })).toThrow(expect.objectContaining({ rule: 'fx-mismatch' }));
     expect(write(closed, offerId, { pricePence: 412.5, priceNativeMinor: 412.5 })).toThrow(expect.objectContaining({ rule: 'integer' }));
-    const brokenTime: unknown = JSON.parse('"2026-10-14T12:00:00+00:00"');
-    expect(() => closed.insertObservation({ ...observationWrite(), provenance: Object.assign({ ...SEARCHAPI_PROVENANCE }, { fetchedAt: brokenTime }), offerId, executionId: open.executionId })).toThrow(expect.objectContaining({ rule: 'timestamp' }));
     expect(count(open.db, 'price_observations')).toBe(0);
   });
 
@@ -4929,13 +4971,16 @@ describe('itineraries and offers (spec §7)', () => {
     const { db, executionId, repo } = setup();
     repo.upsertItinerary(itinerary());
     const offerId = repo.upsertOffer(offerOf());
+    rawObservation(db, executionId, offerId, {}); // positive control: the baseline row satisfies every CHECK
+    rawObservation(db, executionId, offerId, { price_pence: '412', price_native_minor: '412' }); // INTEGER affinity stores 412
+    expect(db.raw.prepare('SELECT typeof(price_pence) AS t, price_pence AS p FROM price_observations ORDER BY id DESC LIMIT 1').get()).toEqual({ t: 'integer', p: 412 });
     expect(sqliteCode(() => rawObservation(db, executionId, offerId, { fx_converted: 1, currency_native: 'GBP', fx_rate_nano: 1, fx_rate_date: '2026-10-13', fx_source: 'x' }))).toBe('SQLITE_CONSTRAINT_CHECK');
     expect(sqliteCode(() => rawObservation(db, executionId, offerId, { fx_converted: 0, currency_native: 'USD' }))).toBe('SQLITE_CONSTRAINT_CHECK');
     expect(sqliteCode(() => rawObservation(db, executionId, offerId, { fx_converted: 1, currency_native: 'USD', fx_rate_nano: null, fx_rate_date: '2026-10-13', fx_source: 'x' }))).toBe('SQLITE_CONSTRAINT_CHECK');
     expect(sqliteCode(() => rawObservation(db, executionId, offerId, { price_pence: 412.5, price_native_minor: 412.5 }))).toBe('SQLITE_CONSTRAINT_CHECK');
     expect(sqliteCode(() => rawObservation(db, executionId, offerId, { price_pence: 'abc', price_native_minor: 'abc' }))).toBe('SQLITE_CONSTRAINT_CHECK');
     expect(sqliteCode(() => rawObservation(db, executionId, offerId, { fetched_at: '2026-10-14T12:00:00Z' }))).toBe('SQLITE_CONSTRAINT_CHECK');
-    expect(count(db, 'price_observations')).toBe(0);
+    expect(count(db, 'price_observations')).toBe(2);
   });
 });
 
@@ -4981,7 +5026,7 @@ describe('CellsRepo.writeVerifiedCell (spec §7 atomic unit "each verified cell"
     expect(bestPrice(repo, executionId, cell())).toBe(50_000);
   });
 
-  it('a failure on the second itinerary leaves no itinerary, offer, observation, outcome, best_observation_id or roll-up change', () => {
+  it('a failure on the second itinerary rolls back the first itinerary, its offer and observation', () => {
     const { db, executionId, cells, repo } = seeded();
     const w = write(cell(), [{ hash: 'a'.repeat(64), seller: 'British Airways', pence: 60_300 }, { hash: 'b'.repeat(64), seller: 'Mytrip', pence: 57_300 }]);
     const second = w.itineraries[1]?.offers[0];
@@ -4993,6 +5038,42 @@ describe('CellsRepo.writeVerifiedCell (spec §7 atomic unit "each verified cell"
     expect(cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0]?.status).toBe('not_run');
     expect(repo.bestObservationForCell(executionId, cell())).toBeNull();
     expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification.status).toBe('not_run');
+  });
+
+  it('a failure after the outcome was written (injected at best_observation_id) rolls back the outcome, rows and roll-up (test-r2-005)', () => {
+    const { db, executionId, cells, repo } = seeded();
+    db.raw.exec(`CREATE TRIGGER fail_best BEFORE UPDATE OF best_observation_id ON search_cells WHEN NEW.best_observation_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected'); END`);
+    expect(() => cells.writeVerifiedCell(executionId, 'searchapi', write(cell(), [{ hash: 'a'.repeat(64), seller: 'British Airways', pence: 60_300 }]))).toThrow(/injected/);
+    expect([count(db, 'itineraries'), count(db, 'fare_offers'), count(db, 'price_observations')]).toEqual([0, 0, 0]);
+    expect(cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0]).toMatchObject({ status: 'not_run', minPence: null, attempts: 0 });
+    expect(repo.bestObservationForCell(executionId, cell())).toBeNull();
+    expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification).toEqual({ status: 'not_run', reason: null, minPence: null });
+  });
+
+  // test-r2-001: every field the outcome must share with its observations, one row each.
+  const mismatches: Array<[string, (v: VerifiedCellWrite) => VerifiedCellWrite]> = [
+    ['cabin', (v) => ({ ...v, outcome: { ...v.outcome, cabin: 'business' } })],
+    ['pointOfSale', (v) => ({ ...v, outcome: { ...v.outcome, pointOfSale: 'unknown' } })],
+    ['sourceKind', (v) => ({ ...v, outcome: { ...v.outcome, sourceKind: 'scraped-aggregate' } })],
+    ['provider', (v) => ({ ...v, itineraries: v.itineraries.map((i) => ({ ...i, offers: i.offers.map((o) => ({ ...o, observation: { ...o.observation, provenance: { ...o.observation.provenance, providerId: 'travelpayouts', sourceKind: 'authorised-cached' } } })) })) })],
+  ];
+  it.each(mismatches)('refuses an outcome whose %s differs from its observations', (_field, mutate) => {
+    const { db, executionId, cells } = seeded();
+    expect(() => cells.writeVerifiedCell(executionId, 'searchapi', mutate(write(cell(), [{ hash: 'a'.repeat(64), seller: 'x', pence: 100 }])))).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
+    expect(count(db, 'price_observations')).toBe(0);
+  });
+
+  it("the outcome fetchedAt is the oldest observation's: accepted with the oldest, refused with the newest (spec §2)", () => {
+    const { executionId, cells } = seeded();
+    const later = at('2026-10-14T13:00:00.000Z');
+    const base = write(cell(), [{ hash: 'a'.repeat(64), seller: 'British Airways', pence: 60_300 }, { hash: 'a'.repeat(64), seller: 'Mytrip', pence: 57_300 }]);
+    const mixed: VerifiedCellWrite = {
+      ...base,
+      itineraries: base.itineraries.map((i) => ({ ...i, offers: i.offers.map((o, k) => (k === 1 ? { ...o, observation: { ...o.observation, provenance: { ...o.observation.provenance, fetchedAt: later } } } : o)) })),
+    };
+    expect(() => cells.writeVerifiedCell(executionId, 'searchapi', { ...mixed, outcome: { ...mixed.outcome, fetchedAt: later } })).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
+    cells.writeVerifiedCell(executionId, 'searchapi', mixed);
+    expect(cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0]).toMatchObject({ status: 'priced', fetchedAt: T0, minPence: 57_300 });
   });
 
   it('rejects priced without offers, offers on a non-priced outcome, a foreign cell, a wrong min_pence, missing provenance and mismatched observations', () => {
@@ -5007,6 +5088,7 @@ describe('CellsRepo.writeVerifiedCell (spec §7 atomic unit "each verified cell"
     expect(w({ ...one, outcome: { ...one.outcome, pointOfSale: 'unknown' } })).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
     expect(w({ ...one, outcome: { ...one.outcome, fetchedAt: at('2026-10-14T13:00:00.000Z') } })).toThrow(expect.objectContaining({ rule: 'outcome-price-mismatch' }));
     expect(w({ ...write(cell(), [], 'error'), outcome: { ...write(cell(), [], 'error').outcome, reason: 'socket hang up' } })).toThrow(expect.objectContaining({ rule: 'error-reason' }));
+    expect(w({ ...write(cell(), [], 'empty'), outcome: { ...write(cell(), [], 'empty').outcome, reason: 'no flights https://www.google.com/x?q=1' } })).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
   });
 });
 
@@ -5224,7 +5306,7 @@ In `src/schema/searchCells.ts` change the column to `bestObservationId: integer(
 `packages/db/src/repositories/itineraries.ts`:
 
 ```ts
-import type { Cabin, CellKey, CellOutcome, Clock, HistoryPoint, IsoDateTime, NormalisedItinerary, Observation, Offer, ProviderId, Provenance, ResolvedSpace, Segment } from '@gmt/core';
+import type { Cabin, CellKey, CellOutcome, Clock, FxInfo, HistoryPoint, IsoDateTime, NormalisedItinerary, Observation, Offer, ProviderId, Provenance, ResolvedSpace, Segment } from '@gmt/core';
 import type { Db } from '../client.js';
 import { CABINS, PROVIDER_IDS, SOURCE_KINDS } from '../internal/enums.js';
 import { CELL_WHERE, type OutcomeDbRow, keyParams, toOutcome } from '../internal/outcomeRow.js';
@@ -5250,6 +5332,9 @@ interface SegmentDbRow {
 }
 
 const O = 'price_observations';
+/** Field-wise FxInfo equality (arch-r2-009): independent of key order. */
+const sameFx = (a: FxInfo, b: FxInfo): boolean =>
+  a.converted === b.converted && (!a.converted || !b.converted || (a.rateNano === b.rateNano && a.rateDate === b.rateDate && a.source === b.source));
 const nullableBool = (v: number | null): boolean | null => (v === null ? null : v === 1);
 const boolOrNull = (v: boolean | null) => (v === null ? null : v ? 1 : 0);
 
@@ -5379,7 +5464,7 @@ export class ItinerariesRepo {
     const p = obs.provenance;
     assertProviderKind(p.providerId, p.sourceKind, this.opts.allowSynthetic);
     if (p.providerId !== offer.provider_id || p.cabin !== offer.cabin) throw new RowRejected('offer-mismatch', `observation ${p.providerId}/${p.cabin} does not match offer ${offer.provider_id}/${offer.cabin}`);
-    if (JSON.stringify(p.fx) !== JSON.stringify(obs.fx)) throw new RowRejected('fx-mismatch', 'observation fx and provenance fx disagree');
+    if (!sameFx(p.fx, obs.fx)) throw new RowRejected('fx-mismatch', 'observation fx and provenance fx disagree');
     assertPriceMoney(obs);
     assertIsoDateTime('fetched_at', p.fetchedAt);
     if (p.providerObservedAt !== undefined) assertIsoDateTime('provider_observed_at', p.providerObservedAt);
@@ -5513,7 +5598,10 @@ Add to `packages/db/src/repositories/cells.ts` (imports: `ItinerariesRepo` from 
     if (o.status === 'priced' && offers.length === 0) throw new RowRejected('priced-needs-offer', `${key} is priced with no offer (spec §5.4)`);
     if (o.status !== 'priced' && offers.length > 0) throw new RowRejected('offers-need-priced', `${key} has offers but status ${o.status}`);
     if (o.status === 'error') assertErrorReason(o.reason);
-    else assertOutcomeProvenance(o);
+    else {
+      assertOutcomeProvenance(o);
+      assertOutcomeReason(o);
+    }
     for (const x of offers) {
       if (cellKeyString(x.itinerary) !== key) throw new RowRejected('cell-mismatch', `itinerary ${x.itinerary.hash} is for ${cellKeyString(x.itinerary)}, not ${key}`);
       if (x.offer.itineraryHash !== x.itinerary.hash || x.offer.providerId !== providerId) throw new RowRejected('offer-mismatch', `offer does not belong to itinerary ${x.itinerary.hash} from ${providerId}`);
@@ -5554,7 +5642,7 @@ Regenerate the migration.
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/itineraries.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -5688,6 +5776,24 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     expect(count(db, 'calendar_prices')).toBe(1);
   });
 
+  it('copyReused refuses a copy the database does not hold: an amount the source never fetched, or a source from another definition (prov-r2-001)', () => {
+    const { db, clock, cells, prices, definition } = world();
+    const c = newExecution(db, clock, { definition }).execution.id;
+    cells.seed(c, ALL.map(withNights), ['travelpayouts']);
+    const real = find(ask(prices, definition.id, [P]), P);
+    if (real.price === null) throw new Error('fixture: P is priced');
+    const forged: ReusedCopy = { ...real, outcome: { ...real.outcome, minPence: 1 }, price: { ...real.price, pricePence: 1, priceNativeMinor: 1 } }; // internally consistent
+    expect(() => cells.copyReused(c, 'travelpayouts', [forged])).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
+    const other = new DefinitionsRepo(db, clock).create(exampleDefinitionInput({ name: 'Other' }));
+    const o = newExecution(db, clock, { definition: other, status: 'completed' }).execution.id;
+    cells.seed(o, [withNights(P)], ['travelpayouts']);
+    cells.writeTile(o, 'travelpayouts', pricedTile([[P, 30_000]], T0));
+    const foreign = find(prices.reuseCandidates(other.id, 'travelpayouts', 'economy', 'unknown', 'authorised-cached', [P], at('2026-10-14T11:00:00.000Z')), P);
+    expect(() => cells.copyReused(c, 'travelpayouts', [foreign])).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
+    expect(cells.outcomes(c, { cells: [P] })[0]?.status).toBe('not_run');
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual({ n: 0 });
+  });
+
   // prov-005: each mismatch is refused before any write.
   const mismatches: Array<[string, (p: ReusedCopy) => ReusedCopy]> = [
     ['copy cell ≠ outcome cell', (p) => ({ ...p, cell: E })],
@@ -5767,7 +5873,7 @@ describe('calendar-basis reads (spec §6.9, §6.8) ignore reused copies (test-00
 });
 
 describe('route history (ruling 8, po-001): one point per provider and execution fetch', () => {
-  it('two cells, two fetches: each point is that fetch\'s cheapest cell, with its key and provenance; reused copies and children add nothing', () => {
+  it('two cells, two fetches: each point is that fetch\'s cheapest cell, with its full cell, execution and provenance; reused copies and children add nothing', () => {
     const db = freshDb();
     const clock = fixedClock(T0);
     const cells = new CellsRepo(db, clock, opts);
@@ -5793,12 +5899,12 @@ describe('route history (ruling 8, po-001): one point per provider and execution
     cells.seed(o, [withNights(P)], ['travelpayouts']);
     cells.writeTile(o, 'travelpayouts', pricedTile([[P, 35_000]], clock.now()));
 
-    const all = prices.history(P.origin, P.destination, 'economy', {});
-    expect(all.map((s) => [s.providerId, s.points.map((p) => [p.at, p.pricePence, p.cell.departureDate])])).toEqual([
-      ['travelpayouts', [[T0, 20_000, '2027-05-01'], ['2026-10-14T13:00:00.000Z', 41_000, '2027-03-14'], ['2026-10-14T14:00:00.000Z', 35_000, '2027-03-14']]],
+    const all = prices.history(P.origin, P.destination, 'economy');
+    expect(all.map((s) => [s.providerId, s.points.map((p) => [p.at, p.pricePence, p.cell.departureDate, p.cell.nights, p.executionId])])).toEqual([
+      ['travelpayouts', [[T0, 20_000, '2027-05-01', 14, a.id], ['2026-10-14T13:00:00.000Z', 41_000, '2027-03-14', 14, b], ['2026-10-14T14:00:00.000Z', 35_000, '2027-03-14', 14, o]]],
     ]);
     const scoped = prices.history(P.origin, P.destination, 'economy', { definitionId: definition.id });
-    expect(scoped[0]?.points.map((p) => [p.at, p.pricePence, cellKeyString(p.cell)])).toEqual([[T0, 38_000, cellKeyString(Q)], ['2026-10-14T13:00:00.000Z', 41_000, cellKeyString(P)]]);
+    expect(scoped[0]?.points.map((p) => [p.at, p.pricePence, cellKeyString(p.cell), p.executionId])).toEqual([[T0, 38_000, cellKeyString(Q), a.id], ['2026-10-14T13:00:00.000Z', 41_000, cellKeyString(P), b]]);
     expect(scoped[0]?.points[0]?.provenance).toMatchObject({ providerId: 'travelpayouts', fetchedAt: T0, cabin: 'economy' });
     expect(prices.history(P.origin, P.destination, 'business', {})).toEqual([]);
     expect(() => prices.history(P.origin, P.destination, 'economy', { definitionId: 'missing' })).toThrow(expect.objectContaining({ rule: 'missing' }));
@@ -5813,7 +5919,7 @@ Expected: FAIL, `prices.reuseCandidates is not a function`.
 
 - [ ] **Step 3: Implement**
 
-Add to `packages/db/src/repositories/calendarPrices.ts` (imports: `Cabin`, `CellKey`, `HistoryPoint`, `Iata`, `IsoDateTime`, `PointOfSale`, `ProviderId`, `ResolvedSpace`, `SourceKind`, `cellKeyString`, `resolveWindow` from `@gmt/core`; `type OutcomeDbRow, toOutcome` from `../internal/outcomeRow.js`; `type DefinitionDbRow, readDefinition` from `../internal/definitionRow.js`; `RowRejected, assertIsoDateTime` from `../internal/validate.js`; `RowCorrupt` from `../internal/read.js`; `ReusedCopy` from `../types.js`):
+Add to `packages/db/src/repositories/calendarPrices.ts` (imports: `Cabin`, `Cell`, `CellKey`, `HistoryPoint`, `Iata`, `IsoDateTime`, `PointOfSale`, `ProviderId`, `ResolvedSpace`, `SourceKind`, `cellKeyString`, `resolveWindow` from `@gmt/core`; `type OutcomeDbRow, toOutcome` from `../internal/outcomeRow.js`; `type DefinitionDbRow, readDefinition` from `../internal/definitionRow.js`; `RowRejected, assertIsoDateTime` from `../internal/validate.js`; `RowCorrupt` from `../internal/read.js`; `ReusedCopy` from `../types.js`):
 
 ```ts
 /**
@@ -5858,7 +5964,7 @@ WITH ranked AS (
   WHERE p.origin = @origin AND p.destination = @destination AND p.cabin = @cabin AND p.reused_from_execution_id IS NULL AND e.is_child = 0
     AND (@definitionId IS NULL OR (e.definition_id = @definitionId AND p.departure_date BETWEEN @from AND @to AND ${NIGHTS} BETWEEN @minNights AND @maxNights))
 )
-SELECT * FROM ranked WHERE rn = 1 ORDER BY provider_id, fetched_at, id`;
+SELECT ranked.*, CAST(julianday(return_date) - julianday(departure_date) AS INTEGER) AS nights FROM ranked WHERE rn = 1 ORDER BY provider_id, fetched_at, id`;
 
 const spaceParams = (space: ResolvedSpace | null) => ({
   spaced: space === null ? 0 : 1, origins: JSON.stringify(space?.origins ?? []), destinations: JSON.stringify(space?.destinations ?? []),
@@ -5922,7 +6028,7 @@ const spaceParams = (space: ResolvedSpace | null) => ({
    * Route calendar history (ruling 8): per provider, one point per execution fetch, the cheapest cell's price, key and
    * provenance; oldest first. With `definitionId`: that definition's executions, cells inside its space resolved today.
    */
-  history(origin: Iata, destination: Iata, cabin: Cabin, opts: { definitionId?: string }): Array<{ providerId: ProviderId; points: Array<HistoryPoint & { cell: CellKey }> }> {
+  history(origin: Iata, destination: Iata, cabin: Cabin, opts: { definitionId?: string } = {}): Array<{ providerId: ProviderId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> {
     let scope: { definitionId: string | null; from: string; to: string; minNights: number; maxNights: number } = { definitionId: null, from: '', to: '', minNights: 0, maxNights: 0 };
     if (opts.definitionId !== undefined) {
       const d = this.db.raw.prepare<[string], DefinitionDbRow>('SELECT * FROM search_definitions WHERE id = ?').get(opts.definitionId);
@@ -5931,18 +6037,19 @@ const spaceParams = (space: ResolvedSpace | null) => ({
       const w = resolveWindow(def.window, this.clock.todayLondon());
       scope = { definitionId: def.id, from: w.departureFrom, to: w.departureTo, minNights: def.minNights, maxNights: def.maxNights };
     }
-    const out = new Map<ProviderId, Array<HistoryPoint & { cell: CellKey }>>();
-    for (const r of this.db.raw.prepare<Record<string, unknown>, CalendarPriceDbRow>(HISTORY_SQL).all({ origin, destination, cabin, ...scope })) {
+    const out = new Map<ProviderId, Array<HistoryPoint & { cell: Cell; executionId: string }>>();
+    for (const r of this.db.raw.prepare<Record<string, unknown>, CalendarPriceDbRow & { nights: number }>(HISTORY_SQL).all({ origin, destination, cabin, ...scope })) {
       const row = toCalendarPriceRow(r);
       const points = out.get(row.providerId) ?? [];
-      points.push({ at: row.fetchedAt, pricePence: row.pricePence, provenance: row.provenance, cell: row.cell });
+      // why: the plan contract and core's routeHistoryResponseSchema carry the full Cell and the fetching execution (arch-r2-004).
+      points.push({ at: row.fetchedAt, pricePence: row.pricePence, provenance: row.provenance, cell: { ...row.cell, nights: r.nights }, executionId: row.executionId });
       out.set(row.providerId, points);
     }
     return [...out.entries()].map(([providerId, points]) => ({ providerId, points }));
   }
 ```
 
-Add to `packages/db/src/repositories/cells.ts` (import `ReusedCopy` from `../types.js`):
+Add to `packages/db/src/repositories/cells.ts` (imports: `CalendarPriceRow`, `ReusedCopy` from `../types.js`; `type CalendarPriceDbRow, toCalendarPriceRow` added to the `../internal/priceRow.js` import):
 
 ```ts
 /** prov-005: every field a reused copy carries must agree before anything is written (rule reuse-source). */
@@ -5978,6 +6085,7 @@ function assertReusable(providerId: ProviderId, { cell, outcome, price }: Reused
         const key = { ...keyParams(executionId, cell), stage: 'discovery', providerId };
         const target = this.db.raw.prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL).get(key);
         if (target?.status !== 'not_run') throw new RowRejected('reuse-target', `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}, not not_run`);
+        this.assertSourceStored(executionId, providerId, { cell, outcome, price });
         const reusedFrom = outcome.reusedFromExecutionId ?? outcome.executionId;
         storeOutcome(this.db, { ...outcome, ...keyParams(executionId, cell), executionId, stage: 'discovery', providerId, attempts: 0, lastError: null, reusedFromExecutionId: reusedFrom });
         if (price !== null) insertCalendarPrice(this.db, executionId, { ...price, reusedFromExecutionId: reusedFrom });
@@ -5985,12 +6093,40 @@ function assertReusable(providerId: ProviderId, { cell, outcome, price }: Reused
       storeRollUps(this.db, executionId, 'discovery', copies.map((c) => c.cell));
     });
   }
+
+  /**
+   * prov-r2-001: the copy must be what the database holds. The source outcome is re-read by its keys and the price by
+   * its id; both must equal the values supplied, and the source must be a non-child execution of the target's
+   * definition (spec §8.1). This is the one path that writes a price without a provider call, so it trusts no caller.
+   */
+  private assertSourceStored(targetExecutionId: string, providerId: ProviderId, { cell, outcome, price }: ReusedCopy): void {
+    const refuse = (why: string) => new RowRejected('reuse-source', `${cellKeyString(cell)}: ${why} (spec §8.1)`);
+    const src = this.db.raw
+      .prepare<Record<string, unknown>, OutcomeDbRow & { definition_id: string; is_child: number }>(
+        `SELECT o.*, e.definition_id, e.is_child FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
+         WHERE o.execution_id = @executionId AND o.origin = @origin AND o.destination = @destination AND o.departure_date = @departureDate AND o.return_date = @returnDate
+           AND o.stage = 'discovery' AND o.provider_id = @providerId`,
+      )
+      .get({ ...keyParams(outcome.executionId, cell), providerId });
+    if (src === undefined) throw refuse(`no stored outcome in ${outcome.executionId}`);
+    const target = this.db.raw.prepare<[string], { definition_id: string }>('SELECT definition_id FROM search_executions WHERE id = ?').get(targetExecutionId);
+    if (src.is_child !== 0 || target === undefined || src.definition_id !== target.definition_id) throw refuse('the source is not a parent execution of the same definition');
+    const stored = toOutcome(src);
+    const same = (a: CellOutcome) => [a.status, a.reason, a.fetchedAt, a.minPence, a.cabin, a.pointOfSale, a.sourceKind, a.reusedFromExecutionId].join('|');
+    if (same(stored) !== same(outcome)) throw refuse('the supplied outcome differs from the stored one');
+    if (price === null) return;
+    const p = this.db.raw.prepare<[number], CalendarPriceDbRow>('SELECT * FROM calendar_prices WHERE id = ?').get(price.id);
+    if (p === undefined) throw refuse(`calendar price ${price.id} does not exist`);
+    const held = toCalendarPriceRow(p);
+    const priceKey = (x: CalendarPriceRow) => [x.executionId, x.providerId, cellKeyString(x.cell), x.pricePence, x.priceNativeMinor, x.currencyNative, x.fetchedAt, x.cabin, x.pointOfSale, x.sourceKind, x.reusedFromExecutionId].join('|');
+    if (held.executionId !== outcome.executionId || priceKey(held) !== priceKey(price)) throw refuse('the supplied price differs from the stored one');
+  }
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/reuse.test.ts`
-Expected: PASS, 19 tests (7 + 9 `it.each` rows in the reuse block, 2 calendar-basis, 1 route history).
+Expected: PASS, 20 tests (8 + 9 `it.each` rows in the reuse block, 2 calendar-basis, 1 route history).
 
 - [ ] **Step 5: Commit**
 
@@ -6017,6 +6153,7 @@ The paths: `CellsRepo.seed`, `seedVerification`, `setOutcome`, `setOutcomesForPr
 import { type CellKey, type SourceKind, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { CellsRepo } from '../src/repositories/cells.js';
+import { ExecutionsRepo } from '../src/repositories/executions.js';
 import { ItinerariesRepo } from '../src/repositories/itineraries.js';
 import type { ReusedCopy, TileWrite, VerifiedCellWrite } from '../src/types.js';
 import { T0, count, freshDb, sqliteCode } from './helpers/db.js';
@@ -6107,7 +6244,8 @@ describe('paths carrying a source kind: the gate and fixture ⇔ synthetic, both
     w.open.writeTile(w.executionId, 'fixture', tile(A, 'synthetic'));
     const source = w.open.outcomes(w.executionId, { cells: [A], providerId: 'fixture' })[0];
     if (source === undefined) throw new Error('fixture outcome missing');
-    const target = newExecution(w.db, w.clock).execution.id;
+    new ExecutionsRepo(w.db, w.clock).setStatus(w.executionId, 'completed'); // the source is a finished parent of the same definition (prov-r2-001)
+    const target = newExecution(w.db, w.clock, { definition: w.definition }).execution.id;
     w.open.seed(target, [withNights(A)], ['fixture', 'travelpayouts']);
     const copy: ReusedCopy = { cell: A, outcome: source, price: null };
     expect(() => w.closed.copyReused(target, 'fixture', [copy])).toThrow(gate);
@@ -6163,7 +6301,7 @@ In `src/repositories/itineraries.ts`, first line of `upsertOffer`: `assertProvid
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/syntheticGate.test.ts test/cells.rollup.test.ts test/cells.writeTile.test.ts test/cells.resume.test.ts test/itineraries.test.ts test/reuse.test.ts`
-Expected: PASS, 12 + 7 + 9 + 5 + 10 + 19 = 62 tests.
+Expected: PASS, 12 + 9 + 15 + 5 + 16 + 20 = 77 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -6671,7 +6809,7 @@ Scrubbing is http-kit's obligation (WP4): keys are sha256 hex of a credential-fr
 import { fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { SqliteResponseCache } from '../src/responseCache.js';
-import { T0, at, count, freshDb } from './helpers/db.js';
+import { T0, at, count, freshDb, sqliteCode } from './helpers/db.js';
 
 const K1 = '1'.repeat(64);
 const K2 = 'ab'.repeat(32);
@@ -6706,12 +6844,13 @@ describe('SqliteResponseCache (spec §5.3 "Cache", §7 provider_cache)', () => {
     expect(count(db, 'provider_cache')).toBe(0);
   });
 
-  it('rejects a non-positive or non-integer TTL and a non-ISO storedAt', () => {
-    const cache = new SqliteResponseCache(freshDb(), fixedClock(T0));
+  it('rejects a non-positive or non-integer TTL; SQL refuses a non-ISO stored_at', () => {
+    const db = freshDb();
+    const cache = new SqliteResponseCache(db, fixedClock(T0));
     expect(() => cache.set(K1, {}, 0, T0)).toThrow(/ttl/);
     expect(() => cache.set(K1, {}, 1.5, T0)).toThrow(/ttl/);
-    // why: a mis-typed caller cannot be written without a cast; Reflect.apply passes the raw string through untyped.
-    expect(() => Reflect.apply(cache.set, cache, [K1, {}, 60, '2026-10-14'])).toThrow(expect.objectContaining({ rule: 'timestamp' }));
+    // why: a non-ISO storedAt cannot reach the typed method without a cast (arch-r2-006); the CHECK is its guard.
+    expect(sqliteCode(() => db.raw.prepare(`INSERT INTO provider_cache (key, body_json, stored_at, expires_at) VALUES (?, '{}', '2026-10-14', ?)`).run(K1, T0))).toBe('SQLITE_CONSTRAINT_CHECK');
   });
 });
 ```
@@ -6816,7 +6955,7 @@ git add packages/db && git commit -m "wp03: SqliteResponseCache keeping the orig
 **Interfaces:**
 - Produces: `AppLock`, `HEARTBEAT_INTERVAL_MS`, `LOCK_STALE_AFTER_MS`.
 
-Semantics (spec §7 `app_lock` as being amended, ruling 10; plan "Wiring and bootstraps"): liveness is the heartbeat age, never a pid. A lock is **stale** when its heartbeat is older than 3 missed beats of 30 s, i.e. age **> 90,000 ms**. `acquire({ waitMs })` takes the lock if it is absent, stale, or already this instance's; otherwise it polls until the lock is free or stale, or `waitMs` has elapsed, then refuses. Callers pick `waitMs` (WP8: the app waits 60 s for a fresh `tool` lock and 90 s for a fresh `app` lock; the tool bootstrap passes 0). A crashed app stops beating, so its lock turns stale within 90 s of its last beat and the waiting app takes it over, logging the lock age; an app lock still being heartbeated after the wait is a second live app, and boot refuses. Every attempt runs in `db.immediateTransaction` (ruling 14), so the read and the takeover cannot interleave with another process's.
+Semantics (spec §7 `app_lock`, revision 12; plan "Wiring and bootstraps"): liveness is the heartbeat age, never a pid. A lock is **stale** when its heartbeat is older than 3 missed beats of 30 s, i.e. age **> 90,000 ms**. `acquire({ waitMs })` takes the lock if it is absent, stale, or already this instance's; otherwise it polls until the lock is free or stale, or `waitMs` has elapsed, then refuses. Callers pick `waitMs` (WP8: the app waits 60 s for a fresh `tool` lock and 90 s for a fresh `app` lock; the tool bootstrap passes 0). A crashed app stops beating, so its lock turns stale within 90 s of its last beat and the waiting app takes it over, logging the lock age; an app lock still being heartbeated after the wait is a second live app, and boot refuses. Every attempt runs in `db.immediateTransaction` (ruling 14), so the read and the takeover cannot interleave with another process's.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7551,11 +7690,13 @@ git add packages/db && git commit -m "wp03: maintenance job, createRepos, @gmt/d
 |---|---|
 | migrations, applied twice, idempotent | `client.test.ts` › apply twice; missing directory (3.1); `barrel.test.ts` › exactly the §7 tables, one migration (3.20); DoD `db:generate` writes nothing |
 | async transaction callback rejected | `client.test.ts` › async callback rejected and its writes rolled back, on `transaction` and `immediateTransaction` (3.1) |
-| roll-ups atomic | `cells.writeTile.test.ts` › SQL failure leaves no partial rows; a rejection after an outcome and roll-up were written rolls those back (3.11); `itineraries.test.ts` › failure on the second itinerary leaves no rows, outcome, best id or roll-up change (3.13); `reuse.test.ts` › a later target that is no longer not_run rolls back the earlier copies (3.14) |
+| roll-ups atomic | `cells.writeTile.test.ts` › SQL failure leaves no partial rows; a rejection after an outcome and roll-up were written rolls those back (3.11); `itineraries.test.ts` › failure on the second itinerary rolls back the first's rows; a failure injected after the outcome write rolls back outcome, best id and roll-up (3.13); `reuse.test.ts` › a later target that is no longer not_run rolls back the earlier copies (3.14) |
 | stored roll-up = core `rollUp` (ruling 2) | `cells.rollup.test.ts` › 49 non-terminal pairs; row 0 / no provider NULL (3.9); `cells.writeTile.test.ts` › terminal outcomes across two providers; fresh-on-fresh merge (3.11) |
-| fresh replaces reused; monotone merge (ruling 3) | `cells.writeTile.test.ts` › reused 30,000 then fresh 38,000 stores 38,000; a fresh empty deletes the reused price (3.11); `itineraries.test.ts` › error and empty never downgrade priced, dearer second write keeps the cheaper minimum (3.13) |
+| fresh replaces reused; monotone merge (ruling 3) | `cells.writeTile.test.ts` › reused 30,000 then fresh 38,000 stores 38,000; a fresh empty deletes the reused price; a tile error over a reused copy keeps it and counts the attempt; fresh replaces skipped:budget (3.11); `itineraries.test.ts` › error and empty never downgrade priced, dearer second write keeps the cheaper minimum (3.13) |
 | setOutcome never touches terminal outcomes (ruling 4) | `cells.rollup.test.ts` › setOutcome rules; setOutcomesForProvider and markNoData (3.9) |
-| provenance on outcomes, cross-checked (ruling 5) | `cells.writeTile.test.ts` › malformed tiles (`outcome-provenance`, `outcome-price-mismatch`) (3.11); `itineraries.test.ts` › rejects … missing provenance and mismatched observations (3.13); `reuse.test.ts` › nine `copyReused refuses …` rows (3.14) |
+| provenance on outcomes, cross-checked (ruling 5) | `cells.writeTile.test.ts` › malformed tiles (`outcome-provenance`, `outcome-reason`); one row per compared field (3.11); `itineraries.test.ts` › one row per compared field; oldest observation's fetchedAt (3.13); `reuse.test.ts` › nine `copyReused refuses …` rows; a copy the database does not hold (3.14); `cells.rollup.test.ts` › the cell_outcomes CHECKs on their own (3.9) |
+| `recentCalls` seeds the hourly limiter (cost-r2-001) | `budgetGuard.cap.test.ts` › recentCalls (3.1) |
+| stored definitions and snapshots read through the unrefined shape (dm-r2-001) | `executions.test.ts` › child-shaped snapshot round-trips (3.8); `definitions.test.ts` › create stores the confirmation (3.7) |
 | `latest` ordering (max `fetched_at`, tie by id) | `itineraries.test.ts` › latest = max fetched_at, ties by id (3.13) |
 | UNIQUE keys | `calendarPrices.test.ts` › UNIQUE (execution, provider, cell) (3.10); `itineraries.test.ts` › UNIQUE (hash, provider, seller, cabin) (3.13) |
 | cap predicates: pending/unknown counted, in every scope | `budgetGuard.predicates.test.ts` › provider scope; global scope; execution scopes (3.2); `ledger.test.ts` › sweepPending (3.4) |
@@ -7576,7 +7717,7 @@ git add packages/db && git commit -m "wp03: maintenance job, createRepos, @gmt/d
 | synthetic gate and provider ⇔ kind, both directions, every path (ruling 1) | `syntheticGate.test.ts` (3.15): seven gate-only paths; writeTile, writeVerifiedCell, copyReused both directions; `cell_outcomes` CHECK; `calendarPrices.test.ts` (3.10, repository and SQL); `itineraries.test.ts` › observations (3.13); `alerts.test.ts` › route history (3.16) |
 | FX CHECK constraint, both directions; `price_pence = price_native_minor` unconverted | `calendarPrices.test.ts` › FX CHECK constraints (3.10); `itineraries.test.ts` › price_observations carries the shared price CHECKs (3.13) |
 | parent and child partial unique indexes | `executions.test.ts` › partial unique indexes, positive cases asserted directly (3.8) |
-| price tables reject non-integers and non-`toISOString` timestamps | `calendarPrices.test.ts` › repository and SQL, `'abc'` refused and `'412'` stored as 412 (3.10); `itineraries.test.ts` (3.13) |
+| price tables reject non-integers and non-`toISOString` timestamps | `calendarPrices.test.ts` › repository and SQL, `'abc'` refused and `'412'` stored as 412 (3.10); `itineraries.test.ts` › positive control and `'412'` (3.13) |
 | route history one point per fetch (ruling 8) | `reuse.test.ts` › two cells, two fetches (3.14) |
 | backup private, exclusive, WAL-safe | `backup.test.ts` (3.19): modes; WAL with open writer; existing target and symlink; world-writable directory; prune keeps other files; integrity failure |
 
@@ -7620,21 +7761,19 @@ grep -rnE "[\"'\`][A-Z]{3}[\"'\`]" packages/db/src | grep -v "'GBP'"
 No output (po-006): no quoted or backticked three-letter upper-case code, so no airport, city or metro code, in application code; the only allowed literal is the currency `'GBP'`. The worked example appears only under `test/` and `data/`.
 
 ```bash
-grep -rnE "\bas (unknown|any|[A-Z][A-Za-z0-9_.]*(<[^>]*>)?(\[\])?)\s*[;,)}]" packages/db/src packages/db/test | grep -vE "^\S+:\s*(//|\*|/\*\*)|it\(|describe\("
+git ls-files 'packages/db/src/*.ts' 'packages/db/test/*.ts' | xargs perl -ne 'next if /^\s*(\/\/|\*|\/\*\*)/; s{(["\x27`])(?:\\.|(?!\1).)*\1}{""}g; s{//.*$}{}; print "$ARGV:$.: $_" if /\bas\s+(?!const\b)/ && !/\*\s+as\s/; close ARGV if eof'
 ```
-No output (ruling 15): no type assertion other than `as const`.
+No output (ruling 15, test-r2-003): the coordinator's `\bas\s+(?!const\b)` pattern, matched after string literals and comments are removed and `import * as` is skipped, so `as never`, `as string[]`, `as { n: number }` and every other assertion except `as const` are caught. The brief has no `Object.assign` or `Reflect.apply` workaround either (arch-r2-006); non-ISO timestamps are guarded by the SQL CHECK tests.
 
 ## 11. Open questions
 
 None blocking dispatch.
 
-**Contract and spec changes in flight** (rulings this brief codes against before the plan and spec text catch up):
+**Still waiting on the plan** (spec revision 12 already carries the app_lock rule, the dropped `providers` table and soft-deleted alert rules):
 
-- Spec §7 `app_lock` adopts this brief's rule (ruling 10): the app waits up to 90 s for a fresh `app` lock, takes over a lock whose heartbeat is older than 90 s, and refuses a lock still being heartbeated after the wait (`appLock.test.ts`).
-- `depends_on: [0, 1]`; `rollUp` and `mergeWithinProvider` carry WP1's reason rules (ruling 2).
-- `CalendarPricesRepo.history(origin, destination, cabin, { definitionId? })` (ruling 8): points carry `cell`; child executions are excluded as well as reused copies, because a child fetches one cell, which is not a route minimum. Pin this exclusion in the plan text.
+- `CalendarPricesRepo.history(origin, destination, cabin, opts?)` returns `HistoryPoint & { cell: Cell; executionId }` as the plan says; child executions are excluded as well as reused copies, because a child fetches one cell, which is not a route minimum. Pin this exclusion in the plan text.
 - `ItinerariesRepo.latestVerificationOutcomeForCell(definitionId, cell, cabin)` and `RoutePriceHistoryRepo.series(origin, destination, providerId, cabin)` (ruling 9).
-- `AlertsRepo.softDelete` replaces `delete`, and `AlertsRepo` takes `(db, clock)` to stamp `deleted_at` (ruling 12; the plan's constructor list should say so). The `providers` table is gone (ruling 11). `BudgetConfig.fixtureCostMicroGbp` is gone (ruling 6). `bestObservationSelector` is gone (ruling 13). `Db.immediateTransaction` is WP0's (ruling 14).
+- `AlertsRepo` takes `(db, clock)` to stamp `deleted_at`; the plan's constructor list should say so.
 - The plan's file map for `packages/db` should match section 7 (arch-010), and its `scripts/backup.mjs` line should read "CLI wrapper over @gmt/db backupDatabase (WP12)". This brief cannot edit the plan.
 
 **Where this brief goes beyond the letter of the plan** (reported for Fable; nothing here changes a spec rule):
@@ -7646,6 +7785,7 @@ None blocking dispatch.
 - `AppLock` accepts an optional fifth constructor argument (`sleep`, `pollMs`) and has a protected `afterRead` seam, so the wait and the write lock are testable.
 - `backupDatabase` accepts an optional `verify` seam (default `PRAGMA integrity_check`) so the failure branch is tested.
 - `effectiveCallCap` is exported from `budgetConfig.ts` as the one place the trial rule lives; `RowCorrupt` is exported so callers can tell a corrupt row from a refused write.
+- `CLAIM_RESUME_SQL` and the Drizzle tables are not exported from the barrel (arch-r2-007): no consumer outside `@gmt/db`, and exported tables would invite queries outside the repositories.
 - `upsertItinerary` carries no provider (itineraries are provider-independent, spec §6.4), so it has no gate of its own; the fixture's itineraries are written through `writeVerifiedCell`, which is gated.
 - The reserve race (cost-001) is shown with a deterministic probe inside the transaction and two real connections, not worker threads, because a worker thread cannot load the workspace TypeScript sources the guard is written in; the claim race keeps its worker harness because its SQL is passed in as text.
 - sec-006: `stripUrlsInText` covers URL query strings and userinfo only; keeping bare credentials (`api_key=…`, `Bearer …`) out of error text is WP4's obligation, stated in section 2.
