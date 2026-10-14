@@ -18,20 +18,21 @@ Give `@gmt/core` the pure, timezone-independent functions that define the search
 
 **In**
 
-- `packages/core/src/dates/epochDay.ts`: epoch-day conversion (civil-date algorithm, no `Date`), `addDays`, `daysBetween`, `monthOf`, `monthsSpanned`.
-- `packages/core/src/space/`: `resolveWindow`, `generateCells`, `countCells`, `cellKeyString`, `validateSearchSpace` with the airports lookup object and the metro-code message.
+- `packages/core/src/dates/epochDay.ts`: epoch-day conversion (civil-date algorithm, no `Date`), `addDays`, `daysBetween`, `monthOf`, `monthsSpanned`, `isLeapYear`.
+- `packages/core/src/space/`: `resolveWindow`, `generateCells`, `countCells`, `validateSearchSpace` with the `AirportLookup` object and the metro-code message.
 - `packages/core/src/coverage/`: `rollUp` (spec §6.6 table), `mergeWithinProvider`, `sixBuckets`, `selectedNotReached`.
 - `packages/core/src/selection/select.ts`: `selectCandidates` (spec §6.7 steps 1–6).
 - Tests for every spec §6.1, §6.6, §6.7 and §9 item 1 case owned by these functions, including the TZ matrix, fast-check properties and the independent roll-up enumeration.
-- Barrel exports in `packages/core/src/index.ts`; the `test:tz` script; the Stryker `ignorePatterns` correction so `src/coverage/rollUp.ts` is mutated at all.
+- Barrel exports in `packages/core/src/index.ts`; the `test:tz` script.
 
 **Out**
 
 - Normalisation, hashing, constraints, verdict classes, ranking, filters, money, alerts, vendor URLs: WP2 (`core`).
-- Persisting outcomes, roll-ups, buckets and selections (`CellsRepo.seed`, `writeTile`, `rollUps`, `buckets`, `selected`) and the airports table (`AirportsRepo.exists`, `metroOf`, `airportsOfMetro`): WP3 (`db`). The plan's `AirportsRepo` contract lists `exists` and `metroOf` but not `airportsOfMetro`, which WP3 must add for this lookup.
-- Running selection once per execution, the `skipped_window` status, the "dropped with a note" text for `alwaysInclude` cells that slid out of a relative window, child executions bypassing selection, and calling `clock.todayLondon()`: WP7 (`engine`).
+- `cellKeyString`, `parseCellKeyString`, `Buckets`, `iataSchema` (which trims and upper-cases), and the Stryker configuration (command runner, `ignorePatterns` with `"/coverage"`): WP0. WP1 imports them and defines none of them.
+- Persisting outcomes, roll-ups, buckets and selections (`CellsRepo`) and the airports table (`AirportsRepo.exists`, `metroOf`, `airportsOfMetro`, which satisfies `AirportLookup` structurally): WP3 (`db`).
+- Running selection once per execution, the `skipped_window` status, recording `alwaysInclude` cells that slid out of a relative window in `DefinitionSnapshot.droppedAlwaysInclude`, child executions bypassing selection, and calling `clock.todayLondon()`: WP7 (`engine`).
 - `POST /definitions` returning 422 on a zero-cell window and mapping `ValidationResult.errors` to the error envelope: WP8 (`api`).
-- Upper-casing operator input on blur and showing the city-code message beside the field: WP9 (`web`).
+- Upper-casing operator input: WP0's `iataSchema` at the API boundary and WP9's form on blur. Showing the city-code message beside the field: WP9 (`web`).
 - `@date-fns/tz` instants and DST wall-clock rules: WP2 (`normalise/localTime.ts`).
 
 ## Spec sections
@@ -44,22 +45,25 @@ Give `@gmt/core` the pure, timezone-independent functions that define the search
 
 ## Interfaces consumed
 
-From the plan's "Cross-package contracts" (WP0), copied verbatim:
+From the plan's "Cross-package contracts", copied verbatim (the lines WP1 uses):
 
 ```ts
-// types/ids.ts
-export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$, upper-case
+// types/ids.ts (WP0)
+export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
 export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
-export const iataSchema: z.ZodType<Iata>;          // z.string().regex(/^[A-Z]{3}$/) then brand
-export function asIata(s: string): Iata;           // throws on mismatch; used by tests and seeds, never on user input (zod does that)
+export const iataSchema: z.ZodType<Iata, string>;  // trims, upper-cases, then requires ^[A-Z]{3}$ (so 'lhr' → 'LHR'; 'LHRX' rejected)
+export function isRealDate(y: number, m: number, d: number): boolean;
+export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
 export function asIsoDate(s: string): IsoDate;
 
-// types/definition.ts
+// types/definition.ts (WP0)
 export type WindowSpec = { kind: 'absolute'; from: IsoDate; to: IsoDate } | { kind: 'relative'; startOffsetDays: number; lengthDays: number };
 export interface ResolvedSpace { origins: Iata[]; destinations: Iata[]; departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number }
-export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
+export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }   // the ONLY definition; ports/provider.ts imports it
 export interface Cell extends CellKey { nights: number }
+export function cellKeyString(c: CellKey): string;        // `${origin}|${destination}|${departureDate}|${returnDate}` — lives here (WP0) so WP1, WP2, WP3 all share it
+export function parseCellKeyString(s: string): CellKey;   // inverse; throws on malformed input
 export interface VerificationPolicy { maxCells: number; topN: number; priceCeilingPence?: number; perDepartureDateBest?: number; alwaysInclude: CellKey[]; expandTop: number; bookingLinks: boolean; maxStops?: number }
 export interface SearchDefinition {
   id: string; name: string; origins: Iata[]; destinations: Iata[]; window: WindowSpec; minNights: number; maxNights: number;
@@ -68,8 +72,9 @@ export interface SearchDefinition {
   scheduleCron: string | null; scheduleTz: string; confirmedCostPence: number | null; enabled: boolean;
   createdAt: IsoDateTime; updatedAt: IsoDateTime; deletedAt: IsoDateTime | null;
 }
+export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; resolvedAt: IsoDateTime; windowClamped: boolean; droppedAlwaysInclude: CellKey[] };
 
-// types/execution.ts
+// types/execution.ts (WP0)
 export type Stage = 'discovery' | 'verification';
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';
 export type SkipReason = 'not_selected' | 'budget' | 'provider_disabled' | 'departed';
@@ -78,96 +83,52 @@ export interface CellOutcome extends CellKey {
   attempts: number; lastError: string | null; fetchedAt: IsoDateTime | null; minPence: number | null;
   cabin: Cabin | null; pointOfSale: PointOfSale | null; sourceKind: SourceKind | null; reusedFromExecutionId: string | null;
 }
-export type RollUpStatus = CellOutcomeStatus;   // NULL in the DB is represented as `null` in TS and 'not_applicable' in the API
-export interface RollUp { status: RollUpStatus | null; reason: SkipReason | string | null; minPence: number | null }
+export interface RollUp { status: CellOutcomeStatus | null; reason: string | null; minPence: number | null }   // null status ↔ API 'not_applicable'
 export type SelectionReason = 'always_include' | 'top_n' | 'ceiling' | 'stride';
+export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }   // bucketsSchema in api-contract/common.ts is z.ZodType<Buckets>
 
-// ports/clock.ts (callers pass clock.todayLondon() as todayLondon; WP1 never reads a clock)
+// ports/clock.ts (WP0); callers pass clock.todayLondon() as todayLondon, WP1 never reads a clock
 export interface Clock { now(): IsoDateTime; todayLondon(): IsoDate }
 ```
 
-Also consumed, from WP0 task code rather than the contract block (both exist once WP0 merges):
-
-```ts
-// types/ids.ts (Task 0.3): real-calendar-date check, pure arithmetic
-export function isRealDate(y: number, m: number, d: number): boolean;
-// api-contract/common.ts (Task 0.8)
-export const bucketsSchema = z.object({ priced, empty, no_data, error, skipped, not_run, reused /* each z.number().int().min(0) */ });
-```
-
-`Buckets` is used as `z.infer<typeof bucketsSchema>`, declared locally in `coverage/buckets.ts` and not re-exported, so the one definition stays in `api-contract` (plan self-review item 3).
+WP1 source calls `cellKeyString` and never defines its own; `parseCellKeyString` is what consumers of `selectCandidates`' `discovery` map use to convert keys back. `DefinitionSnapshot.droppedAlwaysInclude` is listed because it is where the engine records the `alwaysInclude` cells `selectCandidates` omits.
 
 ## Interfaces produced
 
-Exported from `@gmt/core` (the barrel). Later packages (WP3, WP6, WP7, WP8, WP9) rely on these names.
+The plan's "Core domain functions (WP1, WP2)" block, WP1 lines, verbatim. Every name is exported from `@gmt/core`:
 
 ```ts
-// dates/epochDay.ts
-export const MIN_EPOCH_DAY = -719_162;   // 0001-01-01
-export const MAX_EPOCH_DAY = 2_932_896;  // 9999-12-31
-export function toEpochDay(date: IsoDate): number;              // RangeError on a non-calendar date
-export function fromEpochDay(day: number): IsoDate;             // RangeError outside 0001–9999 or non-integer
-export function addDays(date: IsoDate, n: number): IsoDate;
-export function daysBetween(a: IsoDate, b: IsoDate): number;    // b − a in days
-export function monthOf(date: IsoDate): IsoMonth;
-export function monthsSpanned(from: IsoDate, to: IsoDate): IsoMonth[];   // inclusive; [] when to < from
-
-// space/window.ts
-export interface ResolvedWindow { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean }
-export function resolveWindow(def: WindowSpec, todayLondon: IsoDate): ResolvedWindow;
-
-// space/generate.ts
-export function countCells(space: ResolvedSpace): number;
-export function generateCells(space: ResolvedSpace): Cell[];    // origin, destination (both sorted), departureDate, nights
-export function cellKeyString(cell: CellKey): string;           // `O|D|dep|ret`
-
-// space/validate.ts
-export interface AirportLookup { exists(iata: string): boolean; metroOf(iata: string): string | null; airportsOfMetro(code: string): Iata[] }
-export type SpaceInput = Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights'> & { verification: Pick<SearchDefinition['verification'], 'alwaysInclude'> };
-export type ValidationResult =
-  | { ok: true; resolved: ResolvedSpace; clamped: boolean; notes: string[] }
-  | { ok: false; errors: Array<{ field: string; message: string }> };
-export const MAX_WINDOW_DAYS = 400;
-export const MAX_NIGHTS = 90;
-export function validateSearchSpace(def: SpaceInput, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
-
-// coverage/rollUp.ts
-export const SKIP_REASON_PRIORITY: readonly SkipReason[];       // budget, provider_disabled, departed, not_selected
-export function rollUp(outcomes: ReadonlyArray<Pick<CellOutcome, 'status' | 'reason' | 'minPence'>>): RollUp;
-export type ProviderCellResult =
-  | { status: 'priced'; minPence: number; reason: string | null }
-  | { status: 'empty' | 'no_data' | 'error'; minPence: null; reason: string | null };
-export type MergeableStatus = ProviderCellResult['status'];
-export function mergeWithinProvider(a: ProviderCellResult, b: ProviderCellResult): ProviderCellResult;
-
-// coverage/buckets.ts
-export function sixBuckets(outcomes: ReadonlyArray<Pick<CellOutcome, keyof CellKey | 'stage' | 'providerId' | 'status' | 'reusedFromExecutionId'>>): Buckets;
-export type NotReachedReason = 'not_run' | 'budget';
-export function selectedNotReached(selected: readonly CellKey[], outcomes: ReadonlyArray<Pick<CellOutcome, keyof CellKey | 'stage' | 'status' | 'reason' | 'minPence'>>): Array<{ cell: CellKey; reason: NotReachedReason }>;
-
-// selection/select.ts
-export type SelectionPolicy = Pick<VerificationPolicy, 'maxCells' | 'topN' | 'priceCeilingPence' | 'perDepartureDateBest' | 'alwaysInclude'>;
-export interface Selected { cell: CellKey; reason: SelectionReason }
-export function selectCandidates(policy: SelectionPolicy, cells: readonly Cell[], discovery: ReadonlyMap<string, RollUp>, hasDiscoveryProvider: boolean): Selected[];
+// WP1 (dates/, space/, coverage/, selection/)
+export function toEpochDay(d: IsoDate): number; export function fromEpochDay(n: number): IsoDate; export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number /* b − a */; export function monthOf(d: IsoDate): IsoMonth; export function monthsSpanned(from: IsoDate, to: IsoDate): IsoMonth[]; export function isLeapYear(y: number): boolean;
+export function resolveWindow(w: WindowSpec, todayLondon: IsoDate): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean };
+export function generateCells(space: ResolvedSpace): Cell[]; export function countCells(space: ResolvedSpace): number;
+export interface AirportLookup { exists(iata: Iata): boolean; metroOf(iata: Iata): string | null; airportsOfMetro(code: string): Iata[] }
+export type ValidationResult = { ok: true; resolved: ResolvedSpace; clamped: boolean; notes: string[] } | { ok: false; errors: Array<{ field: string; message: string }> };
+export function validateSearchSpace(def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'>, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
+export function rollUp(outcomes: CellOutcome[]): RollUp; export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome;
+export function sixBuckets(outcomes: CellOutcome[]): Buckets /* one stage, one provider */; export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: string }>;
+export function selectCandidates(policy: VerificationPolicy, cells: Cell[], discovery: Map<string, RollUp>, hasDiscoveryProvider: boolean): Array<{ cell: CellKey; reason: SelectionReason }>;
 ```
 
-Contract notes for consumers:
+No other name is exported. The limits (window ≤ 400 days, nights ≤ 90, the epoch-day range 0001–9999), the skip-reason priority and the merge ranks are module-local constants.
 
-- `discovery` in `selectCandidates` is keyed by `cellKeyString`, as `CellsRepo.rollUps` (WP3) returns.
-- `sixBuckets` takes the outcomes of **one** stage × provider and throws otherwise; a stage-level header count across providers is the engine's job via `rollUp` per cell.
-- `validateSearchSpace` returns `ok: false` with `field: 'window'` for a zero-cell window; the engine distinguishes `skipped_window` from other failures by calling `resolveWindow` and `countCells` itself.
-- `selectCandidates` silently omits `alwaysInclude` members not in `cells`; the engine compares `policy.alwaysInclude` with the result to write the spec §6.1 note.
+Behaviour later packages rely on, each pinned by a test below:
+
+- `generateCells` orders by origin, destination (both sorted by code), departureDate, nights.
+- `validateSearchSpace` upper-cases nothing. Per code it checks format, duplicate, existence, then `airportsOfMetro`, so a code that is both an airport and a metro code is accepted. A zero-cell window is `ok: false` with `field: 'window'`; the engine tells `skipped_window` apart by calling `resolveWindow` and `countCells` itself.
+- `mergeWithinProvider` accepts only `priced | empty | no_data | error` outcomes of the same cell, stage, provider and execution, and throws otherwise. It returns the winning outcome (`a` on equal status) with the merged `status`, `minPence` and `reason`; callers pass (existing, incoming).
+- `sixBuckets` throws on mixed stages or providers or a repeated cell.
+- `selectedNotReached` returns `reason` `'not_run'` or `'budget'`, judged on the cell's verification roll-up.
+- `selectCandidates` reads `maxCells`, `topN`, `priceCeilingPence`, `perDepartureDateBest` and `alwaysInclude`, and omits `alwaysInclude` members not in `cells`.
 
 ## Library notes
 
-Verified 2026-10-14 against context7 and by running every test and implementation in this brief in a scratch package with the pinned versions installed (`vitest@5.0.4`, `@vitest/coverage-v8@5.0.4`, `fast-check@4.10.2`, `zod@4.6.7`, `typescript@5.9.3`, `@biomejs/biome@2.5.15`, `@stryker-mutator/core@10.0.0`, `@stryker-mutator/vitest-runner@10.0.0`, Node 26.10): 161 tests green, 100% statements/branches/functions/lines on the WP1 files, `tsc --noEmit` clean under the plan's `tsconfig.base.json` flags, `biome check` clean, and the suite green under `TZ=Europe/London`, `TZ=UTC` and `TZ=America/Los_Angeles`.
+Verified 2026-10-14 against context7 and by running every test and implementation in this brief in a scratch package with the pinned versions installed (`vitest@5.0.4`, `@vitest/coverage-v8@5.0.4`, `fast-check@4.10.2`, `zod@4.6.7`, `typescript@5.9.3`, `@biomejs/biome@2.5.15`, `@stryker-mutator/core@10.0.0`, Node 26.10, with stand-ins for WP0's types written from the contract block): 170 tests green, 100% statements/branches/functions/lines on the WP1 files, `tsc --noEmit` clean under the plan's `tsconfig.base.json` flags, `biome check` clean, and the suite green under `TZ=Europe/London`, `TZ=UTC` and `TZ=America/Los_Angeles`.
 
-- **zod 4.6.7** (versions from plan Task 0.1). Source uses only the type-level `z.infer<typeof bucketsSchema>` with `import type { z } from 'zod'`. Tests call `iataSchema.safeParse('lhr')` and read `.success`; the zod 4 result is `{ success: false, error: ZodError }` with `error.issues[]` carrying `code`, `path`, `message`. Source: context7 `/colinhacks/zod/v4.6.5`, `packages/docs/content/error-customization.mdx` and `error-formatting.mdx` (4.6.5 is the newest indexed; the API is unchanged in 4.6.7, which the scratch run used). No `superRefine` is used in WP1: validation is a plain function because its messages depend on the airports lookup.
+- **zod 4.6.7** (versions from plan Task 0.1). WP1 source does not import zod. Tests call `iataSchema.parse('lhr')` (returns `'LHR'` through WP0's `.trim().toUpperCase().regex(...)` chain) and `iataSchema.safeParse('LHRX').success` (false); the zod 4 `safeParse` result is `{ success: false, error: ZodError }` with `error.issues[]` carrying `code`, `path`, `message`. Source: context7 `/colinhacks/zod/v4.6.5`, `packages/docs/content/error-customization.mdx` and `error-formatting.mdx` (4.6.5 is the newest indexed; the scratch run used 4.6.7).
 - **fast-check 4.10.2**. Calls used: `fc.assert(fc.property(...arbs, predicate), { numRuns })`, `fc.integer({ min, max })`, `fc.array(arb, { minLength, maxLength })`, `fc.constantFrom(...values)`, `fc.constant(v)`, `fc.oneof(...arbs)`, `fc.record({ ... })`, `fc.tuple(...)`, `fc.boolean()`, `.map(f)`; the default import `import fc from 'fast-check'`. Source: context7 `/dubzzz/fast-check`, `website/docs/core-blocks/arbitraries/primitives/number.md`, `.../combiners/constant.md`, `.../composites/object.md`.
 - **vitest 5.0.4**. Calls used: `describe`, `it`, `it.each(rows)` with `%s`/`%j`/`%i`/`%d`, `describe.each(objects)` with `$tz` interpolation, `beforeAll`, `afterAll`, `expect(...).toEqual/toBe/toThrow/toContain/toContainEqual/toMatchObject/toHaveLength`, `expect(value, message)`. The default pool is `forks` (each test file in its own child process). The `test.env` option does **not** change the time zone in `threads`/`vmThreads` pools, and `process.env.TZ` set at runtime takes effect in a forked process; so the TZ matrix sets `process.env.TZ` inside the test file and first asserts the zone took effect, and `test:tz` sets `TZ` on the command line for the whole suite. Source: context7 `/vitest-dev/vitest/v5.0.3`, `docs/config/env.md` (warning "TZ set here does not change the time zone in threads and vmThreads pools") and `docs/guide/common-errors.md` ("Time Zone Does Not Change in Worker Threads"; pool defaults in `packages/vitest/src/node/cli/cli-config.ts`).
-- **Stryker 10.0.0** (WP0's `stryker.config.json`). Two findings from the scratch run, both handled in Task 1.8:
-  1. `"ignorePatterns": ["dist", "coverage"]` is gitignore-style and unanchored, so `coverage` also ignores `src/coverage/`; Stryker logged `Glob pattern "src/coverage/rollUp.ts" did not result in any files`. Anchoring as `"/dist", "/coverage"` fixes it.
-  2. With `testRunner: "vitest"` and vitest 5.0.4, every mutant survived and Stryker reported "Ran 0.00 tests per mutant" (perTest and `--coverageAnalysis off` alike, `pool: 'threads'` too). The `command` runner over the same tests scored **96.73%** (`rollUp.ts` 97.94%, `select.ts` 95.73%; the survivors are equivalent mutants such as `m <= 0` → `m < 0`). Task 1.8 ships `stryker.wp1.json` with the command runner as the measured gate for WP1's two files.
+- **Stryker 10.0.0**: WP0's `packages/core/stryker.config.json` is used unchanged (command runner `pnpm exec vitest run --coverage.enabled=false`, `ignorePatterns` with `"/coverage"` so `src/coverage/` is mutated, `mutate` already listing `src/selection/select.ts` and `src/coverage/rollUp.ts`, break 80). A scratch run with that configuration scored 96.28% on the two files (`rollUp.ts` 96.80%, `select.ts` 95.73%); the nine survivors are equivalent mutants (for example `m <= 0` → `m < 0`, the tie-order comparator, the `out.length < maxCells` loop guard that `fits` repeats).
 - **`@date-fns/tz`**: not used in WP1 (WP2 owns instants). **`Intl`**: not needed; WP1 performs no timezone conversion, because `todayLondon` arrives from `Clock.todayLondon()` (WP0).
 
 ## Files
@@ -181,7 +142,6 @@ Verified 2026-10-14 against context7 and by running every test and implementatio
 - `packages/core/src/coverage/rollUp.ts`
 - `packages/core/src/coverage/buckets.ts`
 - `packages/core/src/selection/select.ts`
-- `packages/core/stryker.wp1.json`
 - `packages/core/test/support/build.ts`
 - `packages/core/test/space/generate.test.ts`
 - `packages/core/test/dates/epochDay.test.ts`
@@ -197,8 +157,7 @@ Verified 2026-10-14 against context7 and by running every test and implementatio
 **Modify**
 
 - `packages/core/src/index.ts` (append WP1 exports)
-- `packages/core/package.json` (add `test:tz` and `mutate:wp1` scripts)
-- `packages/core/stryker.config.json` (anchor `ignorePatterns`)
+- `packages/core/package.json` (add the `test:tz` script)
 
 ## Tasks
 
@@ -211,7 +170,7 @@ Per-task runs use `pnpm --filter @gmt/core exec vitest run <path>` without cover
 
 **Interfaces:**
 - Consumes: `Iata`, `IsoDate`, `asIata`, `asIsoDate`, `isRealDate`, `ResolvedSpace`, `CellKey`, `Cell`, `CellOutcome`, `CellOutcomeStatus`.
-- Produces: `toEpochDay`, `fromEpochDay`, `addDays`, `daysBetween`, `MIN_EPOCH_DAY`, `MAX_EPOCH_DAY`, `countCells`, `generateCells`, `cellKeyString`.
+- Produces: `isLeapYear`, `toEpochDay`, `fromEpochDay`, `addDays`, `daysBetween`, `countCells`, `generateCells`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -286,8 +245,8 @@ export function outcome(
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { cellKeyString, countCells, generateCells } from '../../src/space/generate.js';
-import { cellOf, key, space } from '../support/build.js';
+import { countCells, generateCells } from '../../src/space/generate.js';
+import { cellOf, space } from '../support/build.js';
 
 describe('countCells / generateCells (spec §6.1)', () => {
   it('counts the default space by hand: 2 origins × 3 destinations × 182 days × 12 nights = 13,104', () => {
@@ -339,12 +298,6 @@ describe('countCells / generateCells (spec §6.1)', () => {
       countCells(space({ o: ['LHR'], d: ['JFK'], from: '2027-03-01', to: '2027-03-03', min: 9, max: 8 })),
     ).toBe(0);
   });
-
-  it('cellKeyString is O|D|dep|ret', () => {
-    expect(cellKeyString(key('LHR', 'JFK', '2027-03-01', '2027-03-08'))).toBe(
-      'LHR|JFK|2027-03-01|2027-03-08',
-    );
-  });
 });
 ```
 
@@ -374,8 +327,13 @@ import { type IsoDate, isRealDate } from '../types/ids.js';
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** Epoch day of 0001-01-01 and 9999-12-31: the range a four-digit `IsoDate` can express. */
-export const MIN_EPOCH_DAY = -719_162;
-export const MAX_EPOCH_DAY = 2_932_896;
+const MIN_EPOCH_DAY = -719_162;
+const MAX_EPOCH_DAY = 2_932_896;
+
+/** Gregorian leap year: divisible by 4, except centuries not divisible by 400. */
+export function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
 
 /** Days since 1970-01-01 for a real `YYYY-MM-DD`. Throws `RangeError` on anything else. Spec §6.1. */
 export function toEpochDay(date: IsoDate): number {
@@ -429,7 +387,7 @@ export function daysBetween(a: IsoDate, b: IsoDate): number {
 
 ```ts
 import { addDays, daysBetween } from '../dates/epochDay.js';
-import type { Cell, CellKey, ResolvedSpace } from '../types/definition.js';
+import type { Cell, ResolvedSpace } from '../types/definition.js';
 
 /**
  * Number of cells in a resolved space, in closed form with no allocation. Spec §6.1: "the
@@ -475,17 +433,12 @@ export function generateCells(space: ResolvedSpace): Cell[] {
   }
   return cells;
 }
-
-/** Stable string key `O|D|dep|ret` for maps and sets of cells. Used by selection and the engine. */
-export function cellKeyString(cell: CellKey): string {
-  return `${cell.origin}|${cell.destination}|${cell.departureDate}|${cell.returnDate}`;
-}
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/space/generate.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -514,8 +467,7 @@ import {
   addDays,
   daysBetween,
   fromEpochDay,
-  MAX_EPOCH_DAY,
-  MIN_EPOCH_DAY,
+  isLeapYear,
   monthOf,
   monthsSpanned,
   toEpochDay,
@@ -523,6 +475,9 @@ import {
 import { asIsoDate, type IsoDate } from '../../src/types/ids.js';
 
 const d = asIsoDate;
+// Epoch days of 0001-01-01 and 9999-12-31, the range a four-digit IsoDate can express.
+const MIN_EPOCH_DAY = -719_162;
+const MAX_EPOCH_DAY = 2_932_896;
 
 describe('toEpochDay / fromEpochDay (spec §6.1: epoch-day integers, never Date-local arithmetic)', () => {
   // Reference values computed independently when the brief was written (Date.UTC(y, m-1, d) / 86_400_000)
@@ -566,6 +521,19 @@ describe('toEpochDay / fromEpochDay (spec §6.1: epoch-day integers, never Date-
 
   it.each([MIN_EPOCH_DAY - 1, MAX_EPOCH_DAY + 1, 1.5, Number.NaN])('fromEpochDay rejects %d', (n) => {
     expect(() => fromEpochDay(n)).toThrow(RangeError);
+  });
+});
+
+describe('isLeapYear', () => {
+  it.each([
+    [2028, true],
+    [2027, false],
+    [2000, true],
+    [1900, false],
+    [2100, false],
+    [2400, true],
+  ])('%i → %s', (y, leap) => {
+    expect(isLeapYear(y)).toBe(leap);
   });
 });
 
@@ -748,7 +716,7 @@ describe('generation shape (spec §6.1)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/dates test/space/calendar.test.ts`
-Expected: FAIL, `TypeError: monthOf is not a function` and `TypeError: monthsSpanned is not a function` (3 failing tests); every other test in both files passes, pinning Task 1.1's behaviour across the calendar edges and both zones.
+Expected: FAIL, `TypeError: monthOf is not a function` and `TypeError: monthsSpanned is not a function` (3 failing tests); every other test in both files passes, pinning Task 1.1's behaviour (including `isLeapYear`) across the calendar edges and both zones.
 
 - [ ] **Step 3: Implement**
 
@@ -796,7 +764,7 @@ In `packages/core/package.json` add to `scripts` (`// why:` the whole core suite
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/dates test/space && pnpm --filter @gmt/core test:tz`
-Expected: PASS (epochDay 28 tests, calendar 14, generate 6); `test:tz` passes twice. The guard test "the process really is in the zone" passes in both `describe.each` blocks, proving the TZ switch took effect.
+Expected: PASS (epochDay 34 tests, calendar 14, generate 5); `test:tz` passes twice. The guard test "the process really is in the zone" passes in both `describe.each` blocks, proving the TZ switch took effect.
 
 - [ ] **Step 5: Commit**
 
@@ -811,7 +779,7 @@ git add packages/core && git commit -m "wp01: calendar edges, month helpers and 
 
 **Interfaces:**
 - Consumes: `WindowSpec`, `addDays`, `daysBetween`, `countCells`.
-- Produces: `resolveWindow`, `ResolvedWindow`.
+- Produces: `resolveWindow`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -921,39 +889,35 @@ import { addDays, daysBetween } from '../dates/epochDay.js';
 import type { WindowSpec } from '../types/definition.js';
 import type { IsoDate } from '../types/ids.js';
 
-/** A departure window resolved against a London calendar date. Spec §6.1. */
-export interface ResolvedWindow {
-  departureFrom: IsoDate;
-  departureTo: IsoDate;
-  /** True when an absolute window's start was moved forward to tomorrow (noted in the estimate). */
-  clamped: boolean;
-}
-
 /**
  * Resolve a window against `todayLondon` (the caller passes `clock.todayLondon()`). Spec §6.1:
  * relative windows `{ startOffsetDays ≥ 1, lengthDays }` start `startOffsetDays` after today and
  * run `lengthDays` days inclusive; absolute windows are clamped to start no earlier than
  * tomorrow. An absolute window wholly before tomorrow resolves to `departureFrom > departureTo`,
- * which `countCells` counts as zero cells (the zero-cell case of spec §6.1).
+ * which `countCells` counts as zero cells (the zero-cell case of spec §6.1). `clamped` is true
+ * when an absolute window's start was moved forward to tomorrow (noted in the estimate).
  *
  * Throws `RangeError` for a relative window with `startOffsetDays < 1` or `lengthDays < 1`:
  * those are rejected by validation (`validateSearchSpace`) and by the zod schema, so reaching
  * here with one is a programming error, not operator input.
  */
-export function resolveWindow(def: WindowSpec, todayLondon: IsoDate): ResolvedWindow {
+export function resolveWindow(
+  w: WindowSpec,
+  todayLondon: IsoDate,
+): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean } {
   const tomorrow = addDays(todayLondon, 1);
-  if (def.kind === 'relative') {
-    if (!Number.isInteger(def.startOffsetDays) || def.startOffsetDays < 1) {
-      throw new RangeError(`startOffsetDays must be an integer ≥ 1, got ${def.startOffsetDays}`);
+  if (w.kind === 'relative') {
+    if (!Number.isInteger(w.startOffsetDays) || w.startOffsetDays < 1) {
+      throw new RangeError(`startOffsetDays must be an integer ≥ 1, got ${w.startOffsetDays}`);
     }
-    if (!Number.isInteger(def.lengthDays) || def.lengthDays < 1) {
-      throw new RangeError(`lengthDays must be an integer ≥ 1, got ${def.lengthDays}`);
+    if (!Number.isInteger(w.lengthDays) || w.lengthDays < 1) {
+      throw new RangeError(`lengthDays must be an integer ≥ 1, got ${w.lengthDays}`);
     }
-    const departureFrom = addDays(todayLondon, def.startOffsetDays);
-    return { departureFrom, departureTo: addDays(departureFrom, def.lengthDays - 1), clamped: false };
+    const departureFrom = addDays(todayLondon, w.startOffsetDays);
+    return { departureFrom, departureTo: addDays(departureFrom, w.lengthDays - 1), clamped: false };
   }
-  const clamped = daysBetween(def.from, tomorrow) > 0; // from is before tomorrow
-  return { departureFrom: clamped ? tomorrow : def.from, departureTo: def.to, clamped };
+  const clamped = daysBetween(w.from, tomorrow) > 0; // from is before tomorrow
+  return { departureFrom: clamped ? tomorrow : w.from, departureTo: w.to, clamped };
 }
 ```
 
@@ -974,14 +938,14 @@ git add packages/core && git commit -m "wp01: resolveWindow with relative resolu
 - Create: `packages/core/test/space/validate.test.ts`, `packages/core/src/space/validate.ts`
 
 **Interfaces:**
-- Consumes: `SearchDefinition`, `ResolvedSpace`, `CellKey`, `Iata`, `IsoDate`, `iataSchema`, `resolveWindow`, `countCells`, `daysBetween`.
-- Produces: `validateSearchSpace`, `AirportLookup`, `SpaceInput`, `ValidationResult`, `MAX_WINDOW_DAYS`, `MAX_NIGHTS`.
+- Consumes: `SearchDefinition`, `VerificationPolicy`, `ResolvedSpace`, `CellKey`, `Iata`, `IsoDate`, `iataSchema`, `resolveWindow`, `countCells`, `daysBetween`.
+- Produces: `validateSearchSpace`, `AirportLookup`, `ValidationResult`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { type AirportLookup, type SpaceInput, validateSearchSpace } from '../../src/space/validate.js';
+import { type AirportLookup, validateSearchSpace } from '../../src/space/validate.js';
 import { asIsoDate, iataSchema } from '../../src/types/ids.js';
 import { iatas, key } from '../support/build.js';
 
@@ -998,15 +962,17 @@ const lookup: AirportLookup = {
   airportsOfMetro: (c) => iatas(...(METROS[c] ?? [])),
 };
 
-const base: SpaceInput = {
+type Input = Parameters<typeof validateSearchSpace>[0];
+
+const base: Input = {
   origins: iatas('LHR', 'LGW'),
   destinations: iatas('JFK', 'EWR'),
   window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
   minNights: 10,
   maxNights: 21,
-  verification: { alwaysInclude: [] },
+  verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
 };
-const fields = (input: SpaceInput, max = MAX) => {
+const fields = (input: Input, max = MAX) => {
   const r = validateSearchSpace(input, today, lookup, max);
   return r.ok ? [] : r.errors;
 };
@@ -1029,12 +995,18 @@ describe('validateSearchSpace (spec §6.1)', () => {
   });
 
   describe('review focus 1: lowercase and metropolitan codes', () => {
-    it('upstream: the zod IATA schema rejects lowercase rather than upper-casing it', () => {
-      const r = iataSchema.safeParse('lhr');
-      expect(r.success).toBe(false);
+    it('upstream: iataSchema upper-cases operator input at the boundary (lhr → LHR)', () => {
+      expect(iataSchema.parse('lhr')).toBe('LHR');
+      expect(iataSchema.parse(' lgw ')).toBe('LGW');
+      expect(iataSchema.safeParse('LHRX').success).toBe(false);
     });
 
-    it('upper-cases nothing: a lowercase code is a format error, not silently repaired', () => {
+    it('accepts the upper-cased code the schema produced', () => {
+      const origins = ['lhr', 'lgw'].map((c) => iataSchema.parse(c));
+      expect(validateSearchSpace({ ...base, origins }, today, lookup, MAX).ok).toBe(true);
+    });
+
+    it('upper-cases nothing itself: a lowercase code that bypassed the schema is a format error', () => {
       expect(fields({ ...base, origins: ['lhr' as never, ...iatas('LGW')] })).toEqual([
         { field: 'origins.0', message: 'lhr is not a three-letter upper-case IATA code' },
       ]);
@@ -1164,7 +1136,10 @@ describe('validateSearchSpace (spec §6.1)', () => {
       key('LHR', 'AAA', '2026-11-01', '2026-11-15'), // destination not in the definition
       key('AAA', 'JFK', '2026-11-01', '2026-11-15'), // origin not in the definition
     ];
-    const r = fields({ ...base, verification: { alwaysInclude: [inside, ...outside] } });
+    const r = fields({
+      ...base,
+      verification: { ...base.verification, alwaysInclude: [inside, ...outside] },
+    });
     expect(r.map((e) => e.field)).toEqual([1, 2, 3, 4, 5, 6].map((i) => `verification.alwaysInclude.${i}`));
     expect(r[0]?.message).toBe('LHR→JFK 2026-10-20–2026-11-01 is outside the search space');
   });
@@ -1189,31 +1164,23 @@ import { resolveWindow } from './window.js';
 
 /**
  * Airports-table lookups `validateSearchSpace` needs. `AirportsRepo` (WP3) satisfies it; tests
- * pass a literal. `metroOf` is part of the contract for WP9's autocomplete hint and is not
- * called here.
+ * pass a literal. `metroOf` is part of the contract (WP9's autocomplete hint) and is not called
+ * here: the city-code message needs the airports of a metro, which `airportsOfMetro` gives.
  */
 export interface AirportLookup {
-  exists(iata: string): boolean;
-  metroOf(iata: string): string | null;
+  exists(iata: Iata): boolean;
+  metroOf(iata: Iata): string | null;
   /** Airports the table maps to a metropolitan (city) code, in table order; empty when the code is not a metro. */
   airportsOfMetro(code: string): Iata[];
 }
-
-/** The part of a definition that determines its search space. */
-export type SpaceInput = Pick<
-  SearchDefinition,
-  'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights'
-> & {
-  verification: Pick<SearchDefinition['verification'], 'alwaysInclude'>;
-};
 
 export type ValidationResult =
   | { ok: true; resolved: ResolvedSpace; clamped: boolean; notes: string[] }
   | { ok: false; errors: Array<{ field: string; message: string }> };
 
 /** Spec §6.1 limits. */
-export const MAX_WINDOW_DAYS = 400;
-export const MAX_NIGHTS = 90;
+const MAX_WINDOW_DAYS = 400;
+const MAX_NIGHTS = 90;
 const IATA_RE = /^[A-Z]{3}$/;
 
 /**
@@ -1223,15 +1190,18 @@ const IATA_RE = /^[A-Z]{3}$/;
  * `alwaysInclude` members of the resolved space; `startOffsetDays = 0` rejected; a window that
  * resolves to zero cells rejected (spec §10: `POST /definitions` returns 422).
  *
- * why: nothing is upper-cased or otherwise repaired here. A lowercase code is rejected with a
- * format error; correcting it is the form's job (WP9, review focus 1), so the stored definition is
- * always exactly what the operator saw.
+ * why: nothing is upper-cased or otherwise repaired here. `iataSchema` upper-cases operator input
+ * at the API boundary (review focus 1), so codes arrive upper-case; one that does not (a row
+ * written around the schema) is rejected with a format error rather than silently repaired.
  *
  * Every error carries a dotted `field` path matching the request body (`origins.0`,
  * `window.startOffsetDays`, `verification.alwaysInclude.2`) so the form can place it.
  */
 export function validateSearchSpace(
-  def: SpaceInput,
+  def: Pick<
+    SearchDefinition,
+    'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'
+  >,
   todayLondon: IsoDate,
   lookup: AirportLookup,
   maxCells: number,
@@ -1334,7 +1304,7 @@ function airportProblem(code: string, duplicate: boolean, lookup: AirportLookup)
   if (duplicate) return `${code} is listed twice`;
   // why: existence is checked before the metro test, so a code that is both an airport and a
   // metro code in the table (some cities share their main airport's code) is accepted.
-  if (lookup.exists(code)) return null;
+  if (lookup.exists(code as Iata)) return null;
   const metro = lookup.airportsOfMetro(code);
   if (metro.length > 0) return `${code} is a city code; use one of ${metro.join(', ')}`;
   return `${code} is not in the airports table`;
@@ -1371,26 +1341,25 @@ git add packages/core && git commit -m "wp01: validateSearchSpace with metro-cod
 - Create: `packages/core/test/coverage/rollUp.test.ts`, `packages/core/src/coverage/rollUp.ts`
 
 **Interfaces:**
-- Consumes: `CellOutcome`, `RollUp`, `SkipReason`.
-- Produces: `rollUp`, `mergeWithinProvider`, `SKIP_REASON_PRIORITY`, `ProviderCellResult`, `MergeableStatus`.
+- Consumes: `CellOutcome`, `CellOutcomeStatus`, `RollUp`, `SkipReason`, `cellKeyString`.
+- Produces: `rollUp`, `mergeWithinProvider`.
 
 - [ ] **Step 1: Write the failing test**
 
-The precedence table is checked three ways: the named rows, an exhaustive comparison against an oracle transcribed independently from spec §6.6 (every sequence of up to three outcomes over nine variants, 820 cases), and fast-check properties (oracle agreement on longer arrays, order independence, monotonicity under an added `priced`). The merge is checked by cases and by commutativity, associativity, idempotence, rank and min-price properties.
+The precedence table is checked three ways: the named rows, an exhaustive comparison against an oracle transcribed independently from spec §6.6 (every sequence of up to three outcomes over nine variants, 820 cases), and fast-check properties (oracle agreement on longer arrays, order independence, monotonicity under an added `priced`). The merge is checked by cases on the merged fields (`status`, `minPence`, `reason`), by the rule for every other field, by its refusals, and by commutativity, associativity, idempotence, rank and min-price properties.
 
 ```ts
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { mergeWithinProvider, type ProviderCellResult, rollUp } from '../../src/coverage/rollUp.js';
+import { mergeWithinProvider, rollUp } from '../../src/coverage/rollUp.js';
 import type { CellOutcome, RollUp, SkipReason } from '../../src/types/execution.js';
+import { key, outcome } from '../support/build.js';
 
-type O = Pick<CellOutcome, 'status' | 'reason' | 'minPence'>;
-const o = (status: O['status'], extra: Partial<O> = {}): O => ({
-  status,
-  reason: null,
-  minPence: null,
-  ...extra,
-});
+// One cell; the providers differ per row in real data, but rollUp reads only status, reason, minPence.
+const K = key('LHR', 'JFK', '2027-03-01', '2027-03-08');
+type O = CellOutcome;
+const o = (status: O['status'], extra: Partial<Pick<O, 'reason' | 'minPence'>> = {}): O =>
+  outcome(K, status, extra);
 const priced = (p: number) => o('priced', { minPence: p });
 const skipped = (reason: SkipReason) => o('skipped', { reason });
 
@@ -1535,54 +1504,90 @@ describe('rollUp precedence (spec §6.6)', () => {
 });
 
 describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
-  const P = (p: number, reason: string | null = null): ProviderCellResult => ({
-    status: 'priced',
-    minPence: p,
-    reason,
-  });
-  const S = (status: 'empty' | 'no_data' | 'error', reason: string | null = null): ProviderCellResult => ({
-    status,
-    minPence: null,
-    reason,
-  });
+  type M = 'priced' | 'empty' | 'no_data' | 'error';
+  const m = (
+    status: M,
+    minPence: number | null = null,
+    reason: string | null = null,
+    over: Partial<O> = {},
+  ): O => outcome(K, status, { minPence, reason, ...over });
+  const merged = (x: O) => ({ status: x.status, minPence: x.minPence, reason: x.reason });
 
   it.each([
-    [P(500), S('error', 'upstream'), P(500)],
-    [S('error', 'upstream'), P(500, 'partial-expansion'), P(500, 'partial-expansion')],
-    [S('empty', 'x'), S('error', 'upstream'), S('empty', 'x')],
-    [S('empty'), S('no_data'), S('empty')],
-    [S('no_data'), S('error', 'parse'), S('no_data')],
-    [P(700), P(450), P(450)],
-    [S('error', 'upstream'), S('error', 'parse'), S('error', 'parse')],
-    [S('error'), S('error', 'network'), S('error', 'network')],
-    [S('error'), S('error'), S('error')],
-  ])('merge(%j, %j) = %j', (a, b, expected) => {
-    expect(mergeWithinProvider(a, b)).toEqual(expected);
+    [m('priced', 500), m('error', null, 'upstream'), { status: 'priced', minPence: 500, reason: null }],
+    [
+      m('error', null, 'upstream'),
+      m('priced', 500, 'partial-expansion'),
+      { status: 'priced', minPence: 500, reason: 'partial-expansion' },
+    ],
+    [m('empty'), m('no_data'), { status: 'empty', minPence: null, reason: null }],
+    [m('empty', null, 'x'), m('error', null, 'upstream'), { status: 'empty', minPence: null, reason: 'x' }],
+    [m('no_data'), m('error', null, 'parse'), { status: 'no_data', minPence: null, reason: null }],
+    [m('priced', 700), m('priced', 450), { status: 'priced', minPence: 450, reason: null }],
+    [
+      m('error', null, 'upstream'),
+      m('error', null, 'parse'),
+      { status: 'error', minPence: null, reason: 'parse' },
+    ],
+    [m('error'), m('error', null, 'network'), { status: 'error', minPence: null, reason: 'network' }],
+    [m('error'), m('error'), { status: 'error', minPence: null, reason: null }],
+  ])('merge(%j, %j) has status/minPence/reason %j', (a, b, expected) => {
+    expect(merged(mergeWithinProvider(a, b))).toEqual(expected);
   });
 
-  const arb: fc.Arbitrary<ProviderCellResult> = fc.oneof(
-    fc.record({
-      status: fc.constant('priced' as const),
-      minPence: fc.integer({ min: 0, max: 100_000 }),
-      reason: fc.constantFrom(null, 'partial-expansion'),
-    }),
-    fc.record({
-      status: fc.constantFrom('empty' as const, 'no_data' as const, 'error' as const),
-      minPence: fc.constant(null),
-      reason: fc.constantFrom(null, 'upstream', 'parse'),
-    }),
-  );
-  const rank = { priced: 3, empty: 2, no_data: 1, error: 0 } as const;
+  it('keeps the winning outcome’s other fields, and a’s on equal status', () => {
+    const a = m('priced', 700, null, { fetchedAt: '2026-10-14T05:00:00.000Z' as never, attempts: 1 });
+    const b = m('priced', 450, null, { fetchedAt: '2026-10-14T06:00:00.000Z' as never, attempts: 2 });
+    expect(mergeWithinProvider(a, b)).toEqual({ ...a, minPence: 450 });
+    const e = m('empty', null, null, { attempts: 3 });
+    expect(mergeWithinProvider(e, a)).toEqual(a);
+  });
 
-  it('property: commutative, associative, idempotent, never ranks below either input, min price', () => {
+  it('refuses outcomes of different cells, stages, providers or executions', () => {
+    const a = m('priced', 500);
+    const other = outcome(key('LHR', 'JFK', '2027-03-02', '2027-03-09'), 'empty');
+    expect(() => mergeWithinProvider(a, other)).toThrow(/one cell, stage, provider and execution/);
+    expect(() => mergeWithinProvider(a, m('empty', null, null, { stage: 'verification' }))).toThrow(
+      /one cell/,
+    );
+    expect(() => mergeWithinProvider(a, m('empty', null, null, { providerId: 'searchapi' }))).toThrow(
+      /one cell/,
+    );
+    expect(() => mergeWithinProvider(a, m('empty', null, null, { executionId: 'exec-2' }))).toThrow(
+      /one cell/,
+    );
+  });
+
+  it('refuses not_run and skipped (seeding and skipping replace outcomes, they never merge)', () => {
+    expect(() => mergeWithinProvider(m('priced', 500), outcome(K, 'not_run'))).toThrow(
+      /cannot merge priced with not_run/,
+    );
+    expect(() => mergeWithinProvider(outcome(K, 'skipped', { reason: 'budget' }), m('empty'))).toThrow(
+      /cannot merge skipped/,
+    );
+  });
+
+  const arb: fc.Arbitrary<O> = fc.oneof(
+    fc
+      .tuple(fc.integer({ min: 0, max: 100_000 }), fc.constantFrom(null, 'partial-expansion'))
+      .map(([p, r]) => m('priced', p, r)),
+    fc
+      .tuple(fc.constantFrom<M>('empty', 'no_data', 'error'), fc.constantFrom(null, 'upstream', 'parse'))
+      .map(([st, r]) => m(st, null, r)),
+  );
+  const rank: Record<M, number> = { priced: 3, empty: 2, no_data: 1, error: 0 };
+
+  it('property: on status, minPence and reason it is commutative, associative, idempotent, monotone', () => {
     fc.assert(
       fc.property(arb, arb, arb, (a, b, c) => {
         const ab = mergeWithinProvider(a, b);
-        expect(ab).toEqual(mergeWithinProvider(b, a));
-        expect(mergeWithinProvider(ab, c)).toEqual(mergeWithinProvider(a, mergeWithinProvider(b, c)));
-        expect(mergeWithinProvider(a, a)).toEqual(a);
-        expect(rank[ab.status]).toBe(Math.max(rank[a.status], rank[b.status]));
-        const prices = [a, b].flatMap((r) => (r.status === 'priced' ? [r.minPence] : []));
+        expect(merged(ab)).toEqual(merged(mergeWithinProvider(b, a)));
+        expect(merged(mergeWithinProvider(ab, c))).toEqual(
+          merged(mergeWithinProvider(a, mergeWithinProvider(b, c))),
+        );
+        expect(merged(mergeWithinProvider(a, a))).toEqual(merged(a));
+        expect(rank[ab.status as M]).toBe(Math.max(rank[a.status as M], rank[b.status as M]));
+        const prices = [a, b].flatMap((x) => (x.status === 'priced' ? [x.minPence as number] : []));
         expect(ab.minPence).toBe(prices.length > 0 ? Math.min(...prices) : null);
       }),
       { numRuns: 1000 },
@@ -1601,10 +1606,11 @@ Expected: FAIL, `Error: Cannot find module '../../src/coverage/rollUp.js'`.
 `packages/core/src/coverage/rollUp.ts`:
 
 ```ts
-import type { CellOutcome, RollUp, SkipReason } from '../types/execution.js';
+import { cellKeyString } from '../types/definition.js';
+import type { CellOutcome, CellOutcomeStatus, RollUp, SkipReason } from '../types/execution.js';
 
 /** Spec §6.6 row 6: the reason a fully skipped cell reports, highest priority first. */
-export const SKIP_REASON_PRIORITY: readonly SkipReason[] = [
+const SKIP_REASON_PRIORITY: readonly SkipReason[] = [
   'budget',
   'provider_disabled',
   'departed',
@@ -1615,13 +1621,13 @@ export const SKIP_REASON_PRIORITY: readonly SkipReason[] = [
  * Roll the outcomes of one cell in one stage (one row per provider) into the cell's stage status.
  * Spec §6.6 precedence, first matching row wins:
  *
- * | 0 | no outcome rows                                   | `null` (`not_applicable` in the API) |
- * | 1 | any `priced`                                      | `priced`  |
- * | 2 | any `not_run`                                     | `not_run` |
- * | 3 | any `error`                                       | `error`   |
- * | 4 | any `empty`, every other ∈ {empty, no_data, skipped} | `empty` |
- * | 5 | any `no_data`                                     | `no_data` |
- * | 6 | all `skipped`                                     | `skipped`, reason budget > provider_disabled > departed > not_selected |
+ * | 0 | no outcome rows                                      | `null` (`not_applicable` in the API) |
+ * | 1 | any `priced`                                         | `priced`  |
+ * | 2 | any `not_run`                                        | `not_run` |
+ * | 3 | any `error`                                          | `error`   |
+ * | 4 | any `empty`, every other ∈ {empty, no_data, skipped} | `empty`   |
+ * | 5 | any `no_data`                                        | `no_data` |
+ * | 6 | all `skipped`                                        | `skipped`, reason budget > provider_disabled > departed > not_selected |
  *
  * `minPence` is the minimum over `priced` outcomes ("the minimum over rows actually written",
  * spec §5.6), else `null`. `reason` is set only for `skipped`.
@@ -1629,9 +1635,9 @@ export const SKIP_REASON_PRIORITY: readonly SkipReason[] = [
  * Throws on a `skipped` outcome whose reason is not a `SkipReason` and on a `priced` outcome with
  * no `minPence`: both are broken invariants (spec §3) that must not be rolled up silently.
  */
-export function rollUp(outcomes: ReadonlyArray<Pick<CellOutcome, 'status' | 'reason' | 'minPence'>>): RollUp {
+export function rollUp(outcomes: CellOutcome[]): RollUp {
   if (outcomes.length === 0) return { status: null, reason: null, minPence: null };
-  const has = (s: CellOutcome['status']) => outcomes.some((o) => o.status === s);
+  const has = (s: CellOutcomeStatus) => outcomes.some((o) => o.status === s);
   if (has('priced')) {
     let min = Number.POSITIVE_INFINITY;
     for (const o of outcomes) {
@@ -1659,40 +1665,55 @@ export function rollUp(outcomes: ReadonlyArray<Pick<CellOutcome, 'status' | 'rea
   return { status: 'skipped', reason, minPence: null };
 }
 
-/**
- * One provider's result for one cell, as a fetch produces it. Spec §6.6 "monotone merge". A
- * `priced` result always carries its price; the other statuses never do.
- */
-export type ProviderCellResult =
-  | { status: 'priced'; minPence: number; reason: string | null }
-  | { status: 'empty' | 'no_data' | 'error'; minPence: null; reason: string | null };
-export type MergeableStatus = ProviderCellResult['status'];
-const RANK: Record<MergeableStatus, number> = { priced: 3, empty: 2, no_data: 1, error: 0 };
+/** Spec §6.6 merge order; only statuses a fetch produces take part. */
+const RANK: Partial<Record<CellOutcomeStatus, number>> = { priced: 3, empty: 2, no_data: 1, error: 0 };
 
 /**
- * Merge two results for the same cell from the same provider. Spec §6.6: "Within one provider,
+ * Merge two outcomes for the same cell, stage and provider. Spec §6.6: "Within one provider,
  * monotone merge `priced > empty > no_data > error`, `min_pence = min`". Tiles partition cells,
- * so this is a safety net; it is commutative, associative and idempotent (property-tested).
- * The reason follows the winning status; on equal status the lexicographically smaller non-null
- * reason is kept so the merge stays commutative.
+ * so this is a safety net. On the merged fields (`status`, `minPence`, `reason`) it is
+ * commutative, associative and idempotent (property-tested): the status is the higher-ranked,
+ * `minPence` the minimum over the priced inputs, and the reason follows the winning status (on
+ * equal status, the lexicographically smaller non-null reason).
+ *
+ * why: every other field (`fetchedAt`, `attempts`, provenance columns) comes from the winning
+ * outcome, and from `a` on equal status; callers pass (existing, incoming).
+ *
+ * Throws when the two outcomes are for different cells, stages, providers or executions, or when
+ * either status is `not_run` or `skipped` (seeding and skipping replace outcomes; they never merge).
  */
-export function mergeWithinProvider(a: ProviderCellResult, b: ProviderCellResult): ProviderCellResult {
-  const winner = RANK[a.status] >= RANK[b.status] ? a : b;
+export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome {
+  if (
+    cellKeyString(a) !== cellKeyString(b) ||
+    a.stage !== b.stage ||
+    a.providerId !== b.providerId ||
+    a.executionId !== b.executionId
+  ) {
+    throw new Error('mergeWithinProvider merges outcomes of one cell, stage, provider and execution');
+  }
+  const ra = RANK[a.status];
+  const rb = RANK[b.status];
+  if (ra === undefined || rb === undefined) {
+    throw new Error(`mergeWithinProvider: cannot merge ${a.status} with ${b.status}`);
+  }
+  const winner = ra >= rb ? a : b;
   const reasons = [a, b]
-    .filter((r) => r.status === winner.status && r.reason !== null)
-    .map((r) => r.reason as string)
+    .filter((o) => o.status === winner.status && o.reason !== null)
+    .map((o) => o.reason as string)
     .sort();
-  const reason = reasons[0] ?? null;
-  if (winner.status !== 'priced') return { status: winner.status, minPence: null, reason };
-  const prices = [a, b].flatMap((r) => (r.status === 'priced' ? [r.minPence] : []));
-  return { status: 'priced', minPence: Math.min(...prices), reason };
+  const prices = [a, b].flatMap((o) => (o.status === 'priced' && o.minPence !== null ? [o.minPence] : []));
+  return {
+    ...winner,
+    reason: reasons[0] ?? null,
+    minPence: winner.status === 'priced' ? Math.min(...prices) : null,
+  };
 }
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/coverage/rollUp.test.ts`
-Expected: PASS, 25 tests.
+Expected: PASS, 28 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1706,8 +1727,8 @@ git add packages/core && git commit -m "wp01: roll-up precedence and monotone me
 - Create: `packages/core/test/coverage/buckets.test.ts`, `packages/core/src/coverage/buckets.ts`
 
 **Interfaces:**
-- Consumes: `bucketsSchema`, `CellOutcome`, `CellKey`, `cellKeyString`, `rollUp`.
-- Produces: `sixBuckets`, `selectedNotReached`, `NotReachedReason`.
+- Consumes: `Buckets`, `CellOutcome`, `CellKey`, `cellKeyString`, `rollUp`.
+- Produces: `sixBuckets`, `selectedNotReached`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1836,14 +1857,9 @@ Expected: FAIL, `Error: Cannot find module '../../src/coverage/buckets.js'`.
 `packages/core/src/coverage/buckets.ts`:
 
 ```ts
-import type { z } from 'zod';
-import type { bucketsSchema } from '../api-contract/common.js';
-import { cellKeyString } from '../space/generate.js';
-import type { CellKey } from '../types/definition.js';
-import type { CellOutcome } from '../types/execution.js';
+import { type CellKey, cellKeyString } from '../types/definition.js';
+import type { Buckets, CellOutcome } from '../types/execution.js';
 import { rollUp } from './rollUp.js';
-
-type Buckets = z.infer<typeof bucketsSchema>;
 
 /**
  * Count one stage × provider's outcomes into the six coverage buckets of spec §3: priced, no
@@ -1854,11 +1870,7 @@ type Buckets = z.infer<typeof bucketsSchema>;
  * Throws when the outcomes mix stages or providers, or repeat a cell, because then the buckets
  * could not sum to the cell count.
  */
-export function sixBuckets(
-  outcomes: ReadonlyArray<
-    Pick<CellOutcome, keyof CellKey | 'stage' | 'providerId' | 'status' | 'reusedFromExecutionId'>
-  >,
-): Buckets {
+export function sixBuckets(outcomes: CellOutcome[]): Buckets {
   const b: Buckets = { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 };
   const seen = new Set<string>();
   const first = outcomes[0];
@@ -1875,20 +1887,17 @@ export function sixBuckets(
   return b;
 }
 
-/** Why a selected cell was not itinerary-searched. */
-export type NotReachedReason = 'not_run' | 'budget';
-
 /**
  * Spec §6.6: "Selected but not reached" = `selected ∧ (not_run ∨ skipped:budget)`, judged on the
  * cell's verification roll-up across verification providers (so a cell any provider priced was
- * reached). `outcomes` are verification outcomes of the execution; other stages are ignored.
- * Returned in the order of `selected`.
+ * reached). `reason` is `'not_run'` or `'budget'`. `outcomes` are the execution's outcomes;
+ * discovery rows are ignored. Returned in the order of `selected`.
  */
 export function selectedNotReached(
-  selected: readonly CellKey[],
-  outcomes: ReadonlyArray<Pick<CellOutcome, keyof CellKey | 'stage' | 'status' | 'reason' | 'minPence'>>,
-): Array<{ cell: CellKey; reason: NotReachedReason }> {
-  const byCell = new Map<string, Array<Pick<CellOutcome, 'status' | 'reason' | 'minPence'>>>();
+  selected: CellKey[],
+  outcomes: CellOutcome[],
+): Array<{ cell: CellKey; reason: string }> {
+  const byCell = new Map<string, CellOutcome[]>();
   for (const o of outcomes) {
     if (o.stage !== 'verification') continue;
     const key = cellKeyString(o);
@@ -1896,7 +1905,7 @@ export function selectedNotReached(
     list.push(o);
     byCell.set(key, list);
   }
-  const out: Array<{ cell: CellKey; reason: NotReachedReason }> = [];
+  const out: Array<{ cell: CellKey; reason: string }> = [];
   for (const cell of selected) {
     const r = rollUp(byCell.get(cellKeyString(cell)) ?? []);
     if (r.status === 'not_run') out.push({ cell, reason: 'not_run' });
@@ -1924,7 +1933,7 @@ git add packages/core && git commit -m "wp01: six coverage buckets and selected-
 
 **Interfaces:**
 - Consumes: `VerificationPolicy`, `Cell`, `CellKey`, `RollUp`, `SelectionReason`, `cellKeyString`, `generateCells`.
-- Produces: `selectCandidates`, `SelectionPolicy`, `Selected`.
+- Produces: `selectCandidates`.
 
 Interpretation fixed here (spec §6.7 step 5, "advancing past `alwaysInclude` members rather than losing a slot"): the stride keeps a cursor; when the cursor lands on an already selected cell it moves one cell forward and tries again, and after each pick the cursor jumps `k` cells from the pick. The stride ignores `perDepartureDateBest` (spec §6.7 step 5 replaces steps 2–4, which are where that cap applies).
 
@@ -1932,9 +1941,9 @@ Interpretation fixed here (spec §6.7 step 5, "advancing past `alwaysInclude` me
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { type SelectionPolicy, selectCandidates } from '../../src/selection/select.js';
-import { cellKeyString, generateCells } from '../../src/space/generate.js';
-import type { Cell } from '../../src/types/definition.js';
+import { selectCandidates } from '../../src/selection/select.js';
+import { generateCells } from '../../src/space/generate.js';
+import { type Cell, cellKeyString, type VerificationPolicy } from '../../src/types/definition.js';
 import type { RollUp } from '../../src/types/execution.js';
 import { key, space } from '../support/build.js';
 
@@ -1956,10 +1965,13 @@ function priced(
   for (const [i, r] of Object.entries(others)) if (r) m.set(cellKeyString(at(Number(i))), r);
   return m;
 }
-const policy = (p: Partial<SelectionPolicy>): SelectionPolicy => ({
+// expandTop and bookingLinks belong to stage 2's search, not to selection; fixed values here.
+const policy = (p: Partial<VerificationPolicy>): VerificationPolicy => ({
   maxCells: 10,
   topN: 10,
   alwaysInclude: [],
+  expandTop: 2,
+  bookingLinks: true,
   ...p,
 });
 const picks = (r: ReturnType<typeof selectCandidates>) =>
@@ -2233,18 +2245,8 @@ Expected: FAIL, `Error: Cannot find module '../../src/selection/select.js'`.
 `packages/core/src/selection/select.ts`:
 
 ```ts
-import { cellKeyString } from '../space/generate.js';
-import type { Cell, CellKey, VerificationPolicy } from '../types/definition.js';
+import { type Cell, type CellKey, cellKeyString, type VerificationPolicy } from '../types/definition.js';
 import type { RollUp, SelectionReason } from '../types/execution.js';
-
-export type SelectionPolicy = Pick<
-  VerificationPolicy,
-  'maxCells' | 'topN' | 'priceCeilingPence' | 'perDepartureDateBest' | 'alwaysInclude'
->;
-export interface Selected {
-  cell: CellKey;
-  reason: SelectionReason;
-}
 
 /**
  * Choose the cells stage 2 itinerary-searches. Spec §6.7, steps in order:
@@ -2257,7 +2259,8 @@ export interface Selected {
  *  5. with no discovery provider, replace 2–4 by an even stride over generation order (`stride`).
  *
  * `cells` is the resolved space in generation order (`generateCells`). `discovery` maps
- * `cellKeyString` to the cell's discovery roll-up. Pure and deterministic; the engine runs it
+ * `cellKeyString` (WP0, `types/definition.ts`) to the cell's discovery roll-up. Only `maxCells`,
+ * `topN`, `priceCeilingPence`, `perDepartureDateBest` and `alwaysInclude` of the policy are read. Pure and deterministic; the engine runs it
  * once per execution and persists the result (spec §6.7).
  *
  * why: `alwaysInclude` members that are not in `cells` are left out. At execution start a relative
@@ -2265,13 +2268,13 @@ export interface Selected {
  * writes that note by comparing `policy.alwaysInclude` with the result.
  */
 export function selectCandidates(
-  policy: SelectionPolicy,
-  cells: readonly Cell[],
-  discovery: ReadonlyMap<string, RollUp>,
+  policy: VerificationPolicy,
+  cells: Cell[],
+  discovery: Map<string, RollUp>,
   hasDiscoveryProvider: boolean,
-): Selected[] {
+): Array<{ cell: CellKey; reason: SelectionReason }> {
   const inSpace = new Set(cells.map(cellKeyString));
-  const out: Selected[] = [];
+  const out: Array<{ cell: CellKey; reason: SelectionReason }> = [];
   const chosen = new Set<string>();
   const perDate = new Map<string, number>();
   const take = (cell: CellKey, reason: SelectionReason) => {
@@ -2342,7 +2345,7 @@ export function selectCandidates(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/selection/select.test.ts`
-Expected: PASS, 23 tests.
+Expected: PASS, 24 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2353,8 +2356,8 @@ git add packages/core && git commit -m "wp01: candidate selection with ceiling w
 ### Task 1.8: Barrel, no-`Date` guard, thresholds and mutation gate
 
 **Files:**
-- Create: `packages/core/test/barrel-wp1.test.ts`, `packages/core/test/no-date-wp1.test.ts`, `packages/core/stryker.wp1.json`
-- Modify: `packages/core/src/index.ts`, `packages/core/stryker.config.json`, `packages/core/package.json`
+- Create: `packages/core/test/barrel-wp1.test.ts`, `packages/core/test/no-date-wp1.test.ts`
+- Modify: `packages/core/src/index.ts`
 
 **Interfaces:**
 - Produces: every name in "Interfaces produced", from `@gmt/core`.
@@ -2375,10 +2378,10 @@ const WP1_FUNCTIONS = [
   'daysBetween',
   'monthOf',
   'monthsSpanned',
+  'isLeapYear',
   'resolveWindow',
   'generateCells',
   'countCells',
-  'cellKeyString',
   'validateSearchSpace',
   'rollUp',
   'mergeWithinProvider',
@@ -2419,7 +2422,7 @@ describe('WP1 sources never use Date', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/barrel-wp1.test.ts test/no-date-wp1.test.ts`
-Expected: FAIL, 16 `exports …` tests fail with `expected 'undefined' to be 'function'`; the no-`Date` tests pass (8).
+Expected: FAIL, 16 `exports …` tests fail with `expected 'undefined' to be 'function'`; the 8 no-`Date` tests pass.
 
 - [ ] **Step 3: Implement**
 
@@ -2436,54 +2439,26 @@ export * from './coverage/buckets.js';
 export * from './selection/select.js';
 ```
 
-In `packages/core/stryker.config.json`, replace `"ignorePatterns": ["dist", "coverage"]` with:
-
-```json
-"ignorePatterns": ["/dist", "/coverage", "/reports"]
-```
-
-`// why:` Stryker's ignore patterns are gitignore-style; unanchored `coverage` also matched `src/coverage/`, so `rollUp.ts` was never mutated.
-
-Create `packages/core/stryker.wp1.json` (the measured gate for WP1's two mutated files; the command runner re-runs the selection and coverage suites per mutant, which works with vitest 5.0.4 where the vitest runner reported zero tests per mutant):
-
-```json
-{
-  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "testRunner": "command",
-  "commandRunner": { "command": "vitest run test/selection test/coverage" },
-  "mutate": ["src/selection/select.ts", "src/coverage/rollUp.ts"],
-  "thresholds": { "high": 90, "low": 80, "break": 80 },
-  "ignorePatterns": ["/dist", "/coverage", "/reports"]
-}
-```
-
-In `packages/core/package.json` add to `scripts`:
-
-```json
-"mutate:wp1": "stryker run stryker.wp1.json"
-```
-
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core test && pnpm --filter @gmt/core test:tz && pnpm --filter @gmt/core mutate:wp1`
-Expected: every core test passes (WP0's plus 161 from WP1) with coverage 100% statements, branches, functions and lines and no threshold error; `test:tz` passes under both zones; Stryker prints `Final mutation score of … is greater than or equal to break threshold 80` with `select.ts` and `rollUp.ts` both listed (scratch: 96.73% overall, 7 survivors, all equivalent or tie-order mutants).
-
-Then run `pnpm --filter @gmt/core mutate` (WP0's full config). Expected: `src/coverage/rollUp.ts` now appears in "Found N of M file(s) to be mutated". If its log says "Ran 0.00 tests per mutant", that is the vitest-runner problem in the library notes; record it in the PR description for Fable (the WP0 config is a contract file) and rely on `mutate:wp1` for WP1's gate.
+Run: `pnpm --filter @gmt/core test && pnpm --filter @gmt/core test:tz && pnpm --filter @gmt/core mutate`
+Expected: every core test passes (WP0's plus 170 from WP1) with coverage 100% statements, branches, functions and lines and no `ERROR: Coverage for …` line; `test:tz` passes under both zones; Stryker, with WP0's configuration unchanged, lists `src/selection/select.ts` and `src/coverage/rollUp.ts` each at ≥ 80% and prints `Final mutation score of … is greater than or equal to break threshold 80` (scratch: 96.28% on the two files).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp01: barrel exports, no-Date guard, Stryker gate for selection and rollUp"
+git add packages/core && git commit -m "wp01: barrel exports and no-Date guard"
 ```
 
 ## Pinned review-focus tests
 
 - **Review focus 1, operator types a lowercase or metropolitan IATA code (`lhr`, `LON`, `NYC`)**: Task 1.4, `describe('review focus 1: lowercase and metropolitan codes')` in `packages/core/test/space/validate.test.ts`:
-  - `iataSchema.safeParse('lhr')` fails: the upstream zod schema rejects lowercase and does not upper-case it.
-  - `validateSearchSpace` upper-cases nothing: `origins: ['lhr', 'LGW']` yields exactly `{ field: 'origins.0', message: 'lhr is not a three-letter upper-case IATA code' }`.
-  - `origins: ['LON']` yields `{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }`, and `destinations: ['JFK', 'NYC']` yields `{ field: 'destinations.1', message: 'NYC is a city code; use one of JFK, EWR' }`, listing the airports `lookup.airportsOfMetro` maps to the code.
+  - Upstream, `iataSchema.parse('lhr')` is `'LHR'` and `iataSchema.parse(' lgw ')` is `'LGW'`; `'LHRX'` is rejected. Codes reach `validateSearchSpace` upper-case.
+  - `validateSearchSpace` accepts the schema-produced `LHR`, `LGW`.
+  - It upper-cases nothing itself: a lowercase code that bypassed the schema yields exactly `{ field: 'origins.0', message: 'lhr is not a three-letter upper-case IATA code' }`.
+  - `origins: ['LON']` yields `{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }`, and `destinations: ['JFK', 'NYC']` yields `{ field: 'destinations.1', message: 'NYC is a city code; use one of JFK, EWR' }`, listing what `lookup.airportsOfMetro` returns, in its order.
   - `destinations: ['XYZ']` yields `{ field: 'destinations.0', message: 'XYZ is not in the airports table' }`.
-  - A code that is both an airport and a metro code (`AAA`) is accepted: existence is checked first.
+  - A code that is both an airport and a metro code (`AAA`) is accepted, because existence is checked first.
 
 ## Definition of done
 
@@ -2493,10 +2468,10 @@ Run from the repository root on the `wp/01-core-space-coverage-selection` branch
 |---|---|
 | `pnpm --filter @gmt/core test` | PASS; coverage 100% statements, branches, functions, lines for `packages/core/src/**`; no `ERROR: Coverage for …` line |
 | `pnpm --filter @gmt/core test:tz` | PASS twice (`TZ=Europe/London`, then `TZ=UTC`) |
-| `pnpm --filter @gmt/core mutate:wp1` | exit 0; `Final mutation score of X is greater than or equal to break threshold 80`, X ≥ 80, both `select.ts` and `rollUp.ts` in the table |
+| `pnpm --filter @gmt/core mutate` | exit 0; `select.ts` and `rollUp.ts` each ≥ 80% in the table; `Final mutation score of … is greater than or equal to break threshold 80` |
 | `pnpm lint` | `biome check .` reports no errors |
 | `pnpm -r typecheck` | exit 0 |
-| `node scripts/check-boundaries.mjs` | exit 0 (`core` imports only `zod`; no `@gmt/*`, no `process.env` under `src/`) |
+| `node scripts/check-boundaries.mjs` | exit 0 (no `@gmt/*` import and no `process.env` under `packages/core/src/`) |
 | `pnpm test` | every package green at its thresholds |
 | `grep -rnE '\bDate\b' packages/core/src/dates packages/core/src/space packages/core/src/coverage packages/core/src/selection` | only doc-comment lines (the no-`Date` test strips comments and passes) |
 | `grep -rnE '\b(LHR\|LGW\|JFK\|EWR\|LON\|NYC)\b' packages/core/src` | no output (airport codes appear only in tests) |

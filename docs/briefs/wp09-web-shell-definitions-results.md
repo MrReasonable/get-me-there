@@ -20,7 +20,7 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 
 - `apps/web` build and test setup: Vite 8, React 19, Tailwind 4 (CSS-first), Vitest 5 in jsdom, Testing Library, `msw` 3 for the API.
 - Shell: `main.tsx`, `App.tsx`, navigation for every view (Results, Calendar, Duration, History, Coverage, Definitions, Alerts, Providers), definition selector, status bar, red synthetic banner, empty state for no providers.
-- Routing and persisted view state in **URL search params** on the single path `/` (`?view=results&def=<id>&basis=calendar&sort=price.asc&f.stops=1`). Filter and sort state survives every view switch because nav links carry every parameter except `view`.
+- Routing and persisted view state in **URL search params** on the single path `/` (the API is under `/api`) (`?view=results&def=<id>&basis=calendar&sort=price.asc&f.stops=1`). Filter and sort state survives every view switch because nav links carry every parameter except `view`.
 - `api/client.ts`: the one `fetch` in the app, derived from `core/api-contract` `ROUTES`, `X-Requested-With: get-me-there` and `Content-Type: application/json` on every mutation, responses parsed with the route's contract schema in development and test.
 - Components: `Provenance`, `PriceCell`, `PriceBoundary`, `StatusBar`, `ViewHeader`, `ClassBadge`, `VerdictList`, `BookingAction`, `SearchLink`, `SyntheticBanner`, `Nav`, `DefinitionSelector`.
 - `copy.ts`: the string catalogue every component imports; the banned-word test walks it, a source guard rejects literal copy in `.tsx`, and a rendered-DOM sweep checks the views.
@@ -30,11 +30,11 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 **Out**
 
 - View B Calendar, View C Duration, History, the Playwright fixture-mode smoke, and the browser-timezone test of review focus 3: **WP10**. WP9 ships routes for Calendar, Duration and History that render "This view is coming in WP10."; WP10 replaces all three.
-- Alerts view and alert rule forms: **WP11** (WP9 ships its nav entry with a "coming in WP11" placeholder; mismatch M14).
+- Alerts view and alert rule forms: **WP11** (WP9 ships its nav entry with a "coming in WP11" placeholder, allowed by the reconciliation).
 - Every API route, its validation and its strings (`basisReason`, error messages, the zero-cap message): **WP8**. The web only renders them.
-- `sortRows`, `filterRows`, `bandCheapest`, `cellKeyString`, `searchLinkFor`: **WP2/WP1** in `@gmt/core`. The web calls them, never reimplements them.
-- `docs/setup.md` and the docs test asserting that its example JSON equals `EXAMPLE_DEFINITION`: **WP12**.
-- Serving the built `dist/` from the api (`serveStatic` with `index.html` at `/`): **WP8**.
+- `sortRows`, `filterRows`, `bandCheapest` (WP2) and `cellKeyString` (WP0) in `@gmt/core`. The web calls them, never reimplements them.
+- `docs/examples/london-new-york.json`, `docs/setup.md` and the test that `EXAMPLE_DEFINITION` equals the JSON: **WP12**. WP9 writes a stand-in copy of the JSON only if the file is absent when it runs (WP12 depends on WP9), with WP12's exact content.
+- Serving the built `dist/` at `/` (every API route is under `/api`): **WP8**.
 
 ## 3. Spec sections
 
@@ -55,185 +55,120 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 
 ## 4. Interfaces consumed
 
-From `@gmt/core` (plan "Cross-package contracts", copied exactly):
+From `@gmt/core` (plan "Cross-package contracts", rewritten 2026-10-14; copied exactly):
 
 ```ts
 // types/ids.ts (WP0)
-export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$, upper-case
+export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
+export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
 export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' }; // Date#toISOString() form only
-export function asIata(s: string): Iata;           // throws on mismatch; used by tests and seeds, never on user input (zod does that)
+export const iataSchema: z.ZodType<Iata, string>;  // trims, upper-cases, then requires ^[A-Z]{3}$ (so 'lhr' → 'LHR'; 'LHRX' rejected)
+export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
 export function asIsoDate(s: string): IsoDate;
+export function asIsoMonth(s: string): IsoMonth;
 export function asIsoDateTime(s: string): IsoDateTime;
 
 // types/provenance.ts (WP0)
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';   // defined here; ports/provider.ts re-exports it
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
-export type PointOfSale = 'GB' | 'unknown';
+export type PointOfSale = string | 'unknown';
 export type FxInfo = { converted: false } | { converted: true; rateNano: number; rateDate: IsoDate; source: string };
 export interface Provenance {
   providerId: ProviderId; sourceKind: SourceKind; fetchedAt: IsoDateTime; providerObservedAt?: IsoDateTime;
   maxAgeHours: number | 'unknown'; fx: FxInfo; pointOfSale: PointOfSale; cabin: Cabin;
 }
-export const provenanceSchema: z.ZodType<Provenance>;
+export const providerIdSchema, sourceKindSchema, cabinSchema, pointOfSaleSchema, fxInfoSchema, provenanceSchema;
 
 // types/definition.ts (WP0)
 export type WindowSpec = { kind: 'absolute'; from: IsoDate; to: IsoDate } | { kind: 'relative'; startOffsetDays: number; lengthDays: number };
 export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
+export interface Cell extends CellKey { nights: number }
+export function cellKeyString(c: CellKey): string;        // `${origin}|${destination}|${departureDate}|${returnDate}`
+export type LocalTimeWindow = { from: string; to: string };   // HH:mm, inclusive, local to the airport
 export interface Constraints {
   maxStops?: number; maxJourneyMinutes?: number; minLayoverMinutes?: number; maxLayoverMinutes?: number;
-  noOvernightLayover?: boolean; departureWindowLocal?: { from: string; to: string }; arrivalWindowLocal?: { from: string; to: string };
+  noOvernightLayover?: boolean; departureWindowLocal?: LocalTimeWindow; arrivalWindowLocal?: LocalTimeWindow;
   noSelfTransfer?: boolean; noAirportChange?: boolean; includeAirlines?: string[]; excludeAirlines?: string[];
   cabinBagRequired?: boolean; checkedBagRequired?: boolean; minCheckedBags?: number; maxPricePence?: number;
 }
 export interface VerificationPolicy { maxCells: number; topN: number; priceCeilingPence?: number; perDepartureDateBest?: number; alwaysInclude: CellKey[]; expandTop: number; bookingLinks: boolean; maxStops?: number }
 export interface ExecutionBudget { maxCalls: number; maxFreeCalls: number; maxCostMicroGbp: number }
 export interface ProvidersConfig { discovery: ProviderId[]; verification: ProviderId[]; discoveryRefreshHours: Partial<Record<ProviderId, number>> }
+export type DefinitionInput = Omit<SearchDefinition, 'id' | 'confirmedCostPence' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
 
 // types/execution.ts (WP0)
 export type ExecutionStatus = 'pending' | 'running' | 'paused_budget' | 'paused_error' | 'interrupted' | 'cancelled' | 'completed'
   | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed';
 export const ACTIVE_STATUSES: readonly ExecutionStatus[] = ['pending', 'running', 'paused_budget', 'paused_error', 'interrupted'];
 export type Stage = 'discovery' | 'verification';
+export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }
 
 // types/itinerary.ts (WP0)
 export interface BaggageSnapshot { cabinBag?: 'included' | 'not-included'; checkedBags?: number; notes?: string[] }
 export interface FareConditions { refundable?: boolean; changeable?: boolean; notes?: string[] }
 export type Booking = { kind: 'get'; url: string; host: string } | { kind: 'post'; url: string; postData: string; host: string } | { kind: 'none' };
+export interface Segment { marketingCarrier: string; operatingCarrier?: string; flightNumber: number; from: Iata; to: Iata; departLocal: string; arriveLocal: string; departUtc?: IsoDateTime; arriveUtc?: IsoDateTime; durationMinutes?: number; aircraft?: string }
+export interface Layover { at: Iata; minutes: number; overnight: boolean; airportChange: boolean }
 export type Verdict = 'pass' | 'fail' | 'unverified';
 export type ConstraintName = keyof Constraints | 'cabin';
 export type Verdicts = Partial<Record<ConstraintName, Verdict>>;
 export type VerdictClass = 'verified' | 'partially-verified' | 'failed';
+export type ResultBasis = 'verified' | 'calendar';   // API values; the UI labels them "itinerary-search basis" and "calendar basis"
 
-// ports/provider.ts (spec §5.1, WP0)
-export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
+// ports/provider.ts (spec §5.1)
 export interface CapabilityInfo { sourceKind: SourceKind; provenanceNote: string; maxAgeHours: number | 'unknown' }
 
-// ports/budget.ts (WP0)
-export type BudgetScope =
-  | { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string }
-  | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
-  | { kind: 'global-month' };
-export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
-
-// labels/age.ts (WP0)
-export type EffectiveAge = { kind: 'observed'; fetchedHours: number; observedHours: number } | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number } | { kind: 'unknown'; fetchedHours: number };
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // hours as non-negative numbers, clamped at 0
-export function formatAgeFull(a: EffectiveAge): string;     // "fetched 2h ago · observed 3h ago" | "fetched 2h ago · provider age unknown (≤7d before that)" | "fetched 2h ago · provider age unknown"
-export function formatAgeCompact(a: EffectiveAge): string;  // "2h ago · obs 3h" | "2h ago · ≤7d" | "2h ago · age unknown"
-export function formatDuration(hours: number): string;      // "just now" (<1h), "2h", "3d", "2w" — hours rounded down; days from 48h; weeks from 14d
+// labels/age.ts (WP0; a bounded age with maxAgeHours 0 formats as "fetched 5h ago" / "5h ago")
+export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;
+export function formatAgeFull(a: EffectiveAge): string;
+export function formatAgeCompact(a: EffectiveAge): string;
+export function formatDuration(hours: number): string;
 
 // text/bannedWords.ts (WP0)
 export const BANNED_WORDS: readonly string[] = ['exhaustive', 'all combinations', 'every combination', 'live', 'bookable', 'guaranteed', 'real-time'];
-export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;  // word-boundary, case-insensitive; allowlist entries are exact phrases that may contain a banned word (e.g. "lives in")
+export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in'];
+export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
 
-// api-contract (WP0); the barrel exports it as `export * as apiContract from './api-contract/index.js'`
-export interface RouteDef { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; request?: z.ZodTypeAny; query?: z.ZodTypeAny; response: z.ZodTypeAny; auth: 'public' | 'required' }
-export const ROUTES: readonly RouteDef[];
-// Schemas used here: errorEnvelopeSchema, priceCellSchema, bookingSchema, bucketsSchema, coverageSummarySchema,
-// definitionCreateRequestSchema, definitionResponseSchema (budgetFit, estimate), estimateResponseSchema,
-// coverageCheckRequestSchema, coverageCheckResponseSchema, executionResponseSchema, verifyCellRequestSchema,
-// resultRowSchema, resultsResponseSchema, coverageResponseSchema, calendarGapResponseSchema,
-// providersResponseSchema, schedulerJobsResponseSchema.
+// Core domain functions (WP2)
+export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
+export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
 ```
 
-Field lists from the plan's "API contract" block, copied exactly:
+From the plan's "API contract" (`apiContract`, every path under `/api`), the shapes the views read, copied exactly:
 
-- `definitionResponseSchema` (`SearchDefinition` + `budgetFit: { fits: boolean; runsPerMonth: number; perScope: Array<{ scope: string; estimated: number; cap: number | null; fits: boolean }> }` + `estimate`); `estimateResponseSchema` `{ cells, perProvider: Array<{ providerId, stage, calls, costMicroGbp, costPence, seconds }>, totalCostMicroGbp, totalCostPence, seconds, assumptions: string[], windowClamped }`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month, cachedRows }> }>, calls, notes }`.
-- `executionResponseSchema` `{ id, definitionId, isChild, cell?, status, stage, reason, resumeAfter, startedAt, finishedAt, progress: Array<{ stage, providerId, buckets: Buckets, total }>, budget: Array<{ scope, usage: Usage }>, estimate, ledger: { calls, costMicroGbp, costPence } }`; `startExecutionRequestSchema` `{ confirmCostPence?: number }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }`.
-- `bucketsSchema` `{ priced, empty, no_data, error, skipped, not_run, reused }`; `resultRowSchema` `{ itineraryHash | null, basis, verdictClass: VerdictClass | 'unchecked', pricePence, provenance, stale, ageHours, cell: CellKey & { nights }, outbound: Segment[] | null, inbound: Segment[] | null, totalMinutes | null, stopsOut | null, stopsIn | null, carriers: string[], verdicts: Verdicts, unverified: ConstraintName[], notApplied: ConstraintName[], booking: Booking, searchLink: { url, host, label }, otherOffers: Array<{ seller, pricePence, provenance, booking }>, notSeenInLatest: { ageHours } | null, adjustedPence | null, destinationNote | null, bandCheapest: boolean }`; `resultsResponseSchema` `{ rows, total, truncated, basis, basisReason, executions: Array<{ id, status, ageHours }>, coverage: CoverageSummary, excludedByCurrentSpace: number }`.
-- `coverageSummarySchema` `{ buckets, total, selected, itinerarySearched, onDemand }` (Task 0.8 `common.ts`).
+- `common.ts`: `errorEnvelopeSchema` `{ error: { code: string; message: string; details?: { fields?: Array<{ field: string; message: string }> } & Record<string, unknown> } }`; `priceCellSchema` `{ pricePence, provenance, stale, ageHours }`; `coverageSummarySchema` `{ buckets, total, selected, itinerarySearched, onDemand, reused }`; `executionSummarySchema` `{ id, status, isChild, startedAt, finishedAt, ageHours }` (lists are newest first); `usageSchema` `{ scope: string; calls; costMicroGbp; costPence; cap; windowStart; windowEnd }`.
+- `airports.ts`: `GET /api/airports?q=` → `airportsResponseSchema` `Array<{ iata, name, city, country, tz, metro: string | null }>`.
+- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits, runsPerMonth, perScope: Array<{ scope, estimated, cap, fits }> }`; `estimateSchema` `{ cells; perProvider: Array<{ providerId; stage; calls; planCalls; costMicroGbp; costPence; seconds; blocked: string | null }>; totalCalls; totalPlanCalls; totalCostMicroGbp; totalCostPence; seconds; assumptions; windowClamped; retryFactor }`; `POST /api/definitions/estimate` (unsaved body) → `estimateSchema`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month; cachedRows; cellsInBand }> }>; calls; notes }`.
+- `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell, status, stage, reason, resumeAfter, trigger, startedAt, finishedAt, errorText, progress: Array<{ stage, providerId, buckets, total }>, budget: Usage[], estimate, ledger: { calls, costMicroGbp, costPence, tiles, cacheHits, perProvider }, parityBreak, overrun, disabledProviders }`; `startExecutionRequestSchema` `{ confirmCostPence?: number }`; `startExecutionResponseSchema` `{ executionId }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }` → `startExecutionResponseSchema`.
+- `results.ts`: `resultRowSchema` (fields as in the plan, including `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `otherOffers[].stale/ageHours`, `executionId`, `calendarPriceId`, `observationId`); `resultsResponseSchema` `{ rows; total; truncated; basis; basisReason; executions: ExecutionSummary[]; coverage: CoverageSummary; excludedByCurrentSpace; verificationProviderConfigured: boolean; cheapest: ResultRow | null }`; `coverageResponseSchema` `{ executionId; summary; perStage: Array<{ stage; providerId; buckets; total; requests: { calls; cacheHits; costMicroGbp; planCalls: number | null }; overrun; parityBreak }>; selectedNotReached: Array<{ cell: Cell; reason: string }>; errors: Array<{ cell; stage; providerId; reason; lastError; attempts; retryable }>; scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerifiedPence: number | null; cells: Array<{ cell: Cell; calendar: PriceCell; verifyAvailable: boolean }> }`.
+- `system.ts`: `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`.
 
-From `@gmt/core` WP1 (plan "WP1 — Produces"): `cellKeyString(cell): string` (`O|D|dep|ret`).
+Usage scope labels are WP8's `scopeLabel`: `execution-calls`, `execution-free-calls`, `execution-cost`, `global-month`, `provider-month:<id>`, `provider-lifetime:<id>`.
 
-From `@gmt/core` WP2 (plan "WP2 — Produces"): `sortRows(rows, key, dir)`, `filterRows(rows, filters)`, `bandCheapest`. **The plan names these without signatures** (mismatch M5). This brief consumes them as below; the implementer checks the merged WP2 exports and, if they differ, adapts `src/state/resultsState.ts` and `src/views/Results/Filters.tsx` only, recording the difference in the PR:
-
-```ts
-export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted';
-export type SortDir = 'asc' | 'desc';
-export interface ResultFilters {
-  verdictClasses?: Array<VerdictClass | 'unchecked'>; unverifiedConstraint?: ConstraintName; providers?: ProviderId[];
-  maxStops?: number; carriers?: string[]; destinations?: string[]; maxPricePence?: number;
-  nights?: { min: number; max: number }; hideStale?: boolean;
-}
-export function sortRows<R extends ResultRow>(rows: readonly R[], key: SortKey, dir: SortDir): R[];
-export function filterRows<R extends ResultRow>(rows: readonly R[], filters: ResultFilters): R[];
-export function bandCheapest<R extends ResultRow>(rows: readonly R[], hours: number): R[];   // same order, `bandCheapest` set per band
-```
-
-### Contract gaps this brief depends on (Fable amends the plan's contract before dispatch)
-
-The plan's API contract names these schemas but not their fields, or lacks them. The brief is written against the shapes below; each is listed in the mismatch report. The fixtures in `test/fixtures.ts` encode them, and the client parses every response with the contract schema in test, so a difference fails loudly.
-
-```ts
-// G1. New route, missing from ROUTES and spec §10: GET /airports?q=  (backed by AirportsRepo.search)
-//     airportSearchResponseSchema
-Array<{ iata: Iata; name: string; city: string; country: string; metro: string | null }>
-
-// G2. providersResponseSchema (spec §10 "capabilities, plan, usage vs caps with window bounds")
-{
-  synthetic: boolean;                        // true iff a provider with sourceKind 'synthetic' is enabled (§5.5 banner)
-  zeroCapMessage: string | null;             // "verification will not run: spend cap is 0"
-  globalMonth: Usage;                        // MONTHLY_SPEND_CAP in micro-GBP incl. the fixed fee
-  providers: Array<{
-    id: ProviderId; displayName: string; enabled: boolean; plan: 'trial' | '40usd' | null;
-    discovery: CapabilityInfo | null; verification: CapabilityInfo | null;
-    usage: Array<{ scope: 'provider-month' | 'provider-lifetime'; usage: Usage }>;
-  }>;
-  definitionDefaults: {                      // the plan preset of spec §8.2 and the execution caps of spec §12
-    providers: ProvidersConfig; verification: VerificationPolicy; budget: ExecutionBudget; scheduleTz: string;
-  };
-}
-
-// G3. coverageResponseSchema (spec §10 "summary, per-provider request counts, overrun and parity flags,
-//     'selected but not reached', errors with retry")
-{
-  executionId: string | null;
-  stages: Array<{ stage: Stage; providerId: ProviderId; buckets: Buckets; total: number }>;
-  requests: Array<{ providerId: ProviderId; calls: number; cacheHits: number; tiles: number; costMicroGbp: number }>;
-  overrun: boolean; parityBreak: boolean;
-  selectedNotReached: Array<{ cell: CellKey; reason: 'not_run' | 'skipped:budget' }>;
-  errors: Array<{ cell: CellKey; stage: Stage; providerId: ProviderId; reason: string; lastError: string | null; attempts: number }>;
-  retryable: boolean;
-}
-
-// G4. calendarGapResponseSchema
-{ cheapestVerified: PriceCell | null; cells: Array<{ cell: CellKey & { nights: number }; price: PriceCell }> }
-
-// G5. schedulerJobsResponseSchema ("schedule blocked since <date>" has no source in the contract)
-Array<{ definitionId: string; nextRun: IsoDateTime | null; blockedSince: IsoDateTime | null }>
-
-// G6. definitionResponseSchema gains (spec §8.1 "a PUT that raises the estimate above the stored confirmation returns needsConfirmation")
-needsConfirmation: { estimatePence: number; confirmedPence: number | null } | null
-
-// G7. resultRowSchema gains (spec §11 expanded row: "baggage, conditions" and the seller)
-seller: string | null; baggage: BaggageSnapshot | null; fareConditions: FareConditions | null;
-
-// G8. error envelope details on 422 (validateSearchSpace's error list, carrying the metro message of review focus 1)
-{ error: { code: 'validation'; message: string; details: Array<{ field: string; message: string }> } }
-
-// G9. resultsResponseSchema.executions is ordered newest first (the status bar reads executions[0]).
-// G10. executionResponseSchema.budget[].scope is a BudgetScope object (read as scope.kind).
-```
+From the plan's "Web" section: `src/copy.ts` is the catalogue; `docs/examples/london-new-york.json` is re-exported by `apps/web/src/example.ts` as `EXAMPLE_DEFINITION`; the boundary script allowlists that file.
 
 ## 5. Interfaces produced
 
-Later packages (WP10, WP11) rely on these names.
+Later packages (WP10, WP11, WP12) rely on these names.
 
 ```ts
 // apps/web/src/copy.ts
 export const COPY: { /* the full catalogue, Task 9.1 */ };
+// apps/web/src/example.ts
+export const EXAMPLE_DEFINITION: DefinitionRequest;   // definitionCreateRequestSchema.parse(docs/examples/london-new-york.json)
 // apps/web/src/api/client.ts
 export class ApiError extends Error { readonly status: number; readonly code: string; readonly details: unknown; fieldErrors(): Array<{ field: string; message: string }> }
 export function findRoute(method: Method, path: string): RouteDef;
 export async function call<T>(method: Method, path: string, opts?: CallOptions): Promise<T>;
 // apps/web/src/api/endpoints.ts
-export const api: { providers, definitions, createDefinition, updateDefinition, deleteDefinition, coverageCheck, startExecution,
-  execution, cancel, resume, verifyCell, results, coverage, calendarGap, schedulerJobs, airports };
+export const api: { providers, definitions, estimateDraft, createDefinition, updateDefinition, coverageCheck, startExecution,
+  execution, cancel, resume, verifyCell, results, coverage, calendarGap, airports };
 // apps/web/src/api/queries.ts
-export const qk: { providers; definitions; results(id, basis); execution(id); coverage(id); calendarGap(id); jobs; airports(q) };
+export const qk: { providers; definitions; results(id, basis); execution(id); coverage(id); calendarGap(id); airports(q) };
 export function useProviders(); useDefinitions(); useResults(defId, basis); useExecution(id); useCoverage(defId);
-export function useCalendarGap(defId, enabled); useSchedulerJobs(); useAirportSearch(q); useExecutionActions();
+export function useCalendarGap(defId, enabled); useAirportSearch(q); useExecutionActions();
 // apps/web/src/components/*
 export function Provenance(props: ProvenanceProps): JSX.Element;      // throws MissingProvenanceError without valid provenance
 export function PriceCell(props: PriceCellProps): JSX.Element;        // the only way a price reaches the DOM
@@ -247,13 +182,11 @@ export function hrefWith(patch): string; export function navigateTo(patch): (e: 
 // apps/web/src/state/view.ts
 export type ViewId = 'results' | 'calendar' | 'duration' | 'history' | 'coverage' | 'definitions' | 'alerts' | 'providers';
 // apps/web/src/state/resultsState.ts
-export interface ResultsUiState; parseResultsState; resultsStatePatch; parseBasis; setFilter;
+export type SortDir; export interface ResultsUiState; parseResultsState; resultsStatePatch; parseBasis; setFilter;
 // apps/web/src/now.tsx, src/hooks/useMediaQuery.ts, src/format.ts
-export const NowContext; useNow(); useMediaQuery(q); NARROW_QUERY; formatPence; formatMicroGbp; formatIsoDate; formatLocalDateTime; formatMinutes; formatSeconds; parsePoundsToPence;
-// apps/web/src/views/Definitions/exampleDefinition.ts
-export const EXAMPLE_DEFINITION;      // WP12's docs test asserts docs/setup.md's JSON block equals JSON.stringify(EXAMPLE_DEFINITION, null, 2)
+export const NowContext; useNow(); useMediaQuery(q); NARROW_QUERY; formatPence; formatMicroGbp; formatIsoDate; formatLocalDateTime; formatMinutes; formatSeconds; parsePoundsToPence; penceToPoundsInput;
 // apps/web/test/*
-export function renderWithProviders(ui, opts?); export const NOW; export const server; fixtures builders; setViewportWidth(px)
+export function renderWithProviders(ui, opts?); export const NOW; export const server; fixture builders; setViewportWidth(px)
 ```
 
 ## 6. Library notes
@@ -261,17 +194,17 @@ export function renderWithProviders(ui, opts?); export const NOW; export const s
 Versions from the plan's Task 0.1 list. Verified on 2026-10-14 with context7 against the sources named.
 
 - **react 19.3.1, react-dom 19.3.1.** `createRoot(el).render(<StrictMode>…)`; error boundaries are still class components with `static getDerivedStateFromError` and `componentDidCatch(error, info)` (react.dev `reference/react/Component`; in development a caught error still reaches `window.onerror`, so boundary tests prevent the default on `window` `error` events and mute `console.error`). `useSyncExternalStore(subscribe, getSnapshot)` for the URL and `matchMedia` stores (react.dev `reference/react/useSyncExternalStore`).
-- **vite 8.3.4 + @vitejs/plugin-react 6.1.2.** `defineConfig({ plugins: [react(), tailwindcss()], server: { proxy } })`; `server.proxy` keys are path prefixes mapped to `{ target }` (vite.dev `config/server-options`, "server.proxy"). No `changeOrigin`: the api sees `Host: localhost:5173`, which spec §4 adds to `ALLOWED_HOSTS` under `NODE_ENV=development`. Vite resolves a `.js` import from a `.ts` file to the `.ts` source, so the `@gmt/core` alias to `packages/core/src/index.ts` works without building core.
+- **vite 8.3.4 + @vitejs/plugin-react 6.1.2.** `defineConfig({ plugins: [react(), tailwindcss()], server: { proxy: { '/api': { target } } } })`; `server.proxy` keys are path prefixes mapped to `{ target }` (vite.dev `config/server-options`, "server.proxy"). Vite imports JSON (`import x from '…json' with { type: 'json' }`, with `resolveJsonModule` in tsconfig) and allows files inside the pnpm workspace root, so `src/example.ts` can import `docs/examples/london-new-york.json`. No `changeOrigin`: the api sees `Host: localhost:5173`, which spec §4 adds to `ALLOWED_HOSTS` under `NODE_ENV=development`. Vite resolves a `.js` import from a `.ts` file to the `.ts` source, so the `@gmt/core` alias to `packages/core/src/index.ts` works without building core.
 - **tailwindcss 4.3.3 + @tailwindcss/vite 4.3.3.** CSS-first: `@import "tailwindcss";` in `src/styles.css` and the `tailwindcss()` Vite plugin; no `tailwind.config.js`, no PostCSS config (tailwindcss.com blog "Tailwind CSS v4.0", "Configure the Vite plugin"). No inline `style` props anywhere: spec §4's CSP `default-src 'self'` blocks inline styles.
 - **@tanstack/react-query 5.104.2.** `useQuery({ queryKey, queryFn, enabled, refetchInterval: (query) => … })` (v5 passes only `query` to the callback), `useMutation({ mutationFn, onSuccess })`, `queryClient.invalidateQueries({ queryKey: [prefix] })` (tanstack.com/query `guides/polling`, `quick-start`, `migrating-to-v5`). Query functions do not forward TanStack's `AbortSignal` to `fetch` (`// why:` in the client: under jsdom the signal is jsdom's `AbortSignal`, which Node's `fetch` rejects; the single-operator app does not need query cancellation).
 - **@tanstack/react-table 9.3.1** (v9 API, changed from v8; github.com/TanStack/table `docs/framework/react/guide/migrating.md`, `packages/react-table/skills/getting-started`, `docs/reference/index/interfaces/Row_RowExpanding.md`). Used: `tableFeatures({ rowExpandingFeature })`; `createColumnHelper<typeof features, ResultRow>()` (v9 takes the features type first); `helper.columns([...])`; `helper.display({ id, header, cell })`; `useTable({ features, columns, data, getRowId, getRowCanExpand: () => true, state: { expanded }, onExpandedChange })`; `table.getHeaderGroups()`, `table.getRowModel().rows`, `row.getAllCells()`, `row.getIsExpanded()`, `row.getToggleExpandedHandler()`, `<table.FlexRender header={…} />`, `<table.FlexRender cell={…} />`; `ExpandedState`. **No sorted or filtered row models are registered**: spec §6.5 requires core's `sortRows`/`filterRows`, so the rows arrive at the table already filtered and sorted, and sort state lives in the URL.
-- **@testing-library/react 16.3.3** needs **`@testing-library/dom`** as a peer since v16 (README "Installation"; not in the plan's list, added in Task 9.1). Auto-cleanup registers only when `afterEach` is a global; Vitest runs without globals here, so `test/setup.ts` calls `cleanup()` in `afterEach`.
+- **@testing-library/react 16.3.3** needs **`@testing-library/dom`** (plan: `10.x`) as a peer since v16 (README "Installation"). Auto-cleanup registers only when `afterEach` is a global; Vitest runs without globals here, so `test/setup.ts` calls `cleanup()` in `afterEach`.
 - **@testing-library/user-event 14.6.8.** `const user = userEvent.setup(); await user.type(el, 'lhr'); await user.tab(); await user.keyboard('{Enter}'); await user.click(el)`.
 - **@testing-library/jest-dom 7.0.1.** `import '@testing-library/jest-dom/vitest'` in the setup file (the plan's Task 0.1 setup line); matchers `toBeInTheDocument`, `toHaveTextContent`, `toHaveAttribute`, `toBeVisible`, `toHaveValue`, `toBeDisabled`.
 - **jsdom 30.1.2** via `environment: 'jsdom'` and `environmentOptions.jsdom.url = 'http://localhost:3000/'` so `window.location.origin` is absolute. jsdom has no `matchMedia`; `test/viewport.ts` installs one.
-- **msw 3.0.3** (mswjs.io "Quick start" Node integration, "Defaults", runbook "relative URLs"). `setupServer(...handlers)` from `msw/node`; `http.get/post/put/delete(url, resolver)` and `HttpResponse.json(body, { status })` from `msw`; `server.listen({ onUnhandledRequest: 'error' })` in `beforeAll`, `server.resetHandlers()` in `afterEach`, `server.close()` in `afterAll`; `server.use(...)` prepends per-test overrides. Under jsdom, `fetch` is Node's global fetch, which `setupServer` intercepts; requests must use **absolute URLs** (relative URLs are not intercepted in Node), which is why the client builds `new URL(path, window.location.origin)`. Not in the plan's web dependency list; added in Task 9.1.
+- **msw 3.0.3** (mswjs.io "Quick start" Node integration, "Defaults", runbook "relative URLs"). `setupServer(...handlers)` from `msw/node`; `http.get/post/put/delete(url, resolver)` and `HttpResponse.json(body, { status })` from `msw`; `server.listen({ onUnhandledRequest: 'error' })` in `beforeAll`, `server.resetHandlers()` in `afterEach`, `server.close()` in `afterAll`; `server.use(...)` prepends per-test overrides. Under jsdom, `fetch` is Node's global fetch, which `setupServer` intercepts; requests must use **absolute URLs** (relative URLs are not intercepted in Node), which is why the client builds `new URL(path, window.location.origin)`.
 - **vitest 5.0.4.** `defineConfig` from `vitest/config`; `test.environment`, `test.environmentOptions`, `test.setupFiles`, `test.coverage.thresholds`; `vi.spyOn`, `vi.fn`. `import.meta.env.DEV` is `true` under Vitest, so contract parsing runs in every test.
-- **zod 4.6.7.** `import type { z } from 'zod'` for `z.infer`; runtime parsing uses the contract's schemas. Added to web dependencies (type import needs resolution; mismatch M9, with `msw` and `@testing-library/dom`).
+- **zod 4.6.7.** `import type { z } from 'zod'` for `z.infer`; runtime parsing uses the contract's schemas. A web dependency per the plan's "Web" section.
 
 ## 7. Files
 
@@ -292,15 +225,17 @@ src/components/StatusBar.tsx  src/components/ViewHeader.tsx
 src/views/Placeholder.tsx
 src/views/Results/ResultsView.tsx  src/views/Results/ResultsHeader.tsx  src/views/Results/ResultsTable.tsx
 src/views/Results/ExpandedRow.tsx  src/views/Results/Filters.tsx  src/views/Results/BasisSwitch.tsx
-src/views/Results/CalendarGapBanner.tsx  src/views/Results/layovers.ts
+src/views/Results/CalendarGapBanner.tsx
 src/views/Coverage/CoverageView.tsx
 src/views/Providers/ProvidersView.tsx
 src/views/Definitions/DefinitionsView.tsx  src/views/Definitions/DefinitionForm.tsx
 src/views/Definitions/AirportListInput.tsx  src/views/Definitions/AdvancedFields.tsx
 src/views/Definitions/CoverageCheck.tsx  src/views/Definitions/EstimatePanel.tsx
-src/views/Definitions/draft.ts  src/views/Definitions/exampleDefinition.ts
+src/views/Definitions/draft.ts  src/example.ts
 test/msw/server.ts  test/msw/handlers.ts  test/fixtures.ts  test/render.tsx  test/viewport.ts
 ```
+
+**Create (stand-in, WP12 owns it):** `docs/examples/london-new-york.json`, only when absent (Task 9.12).
 
 **Modify:** `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/vitest.config.ts`, `apps/web/test/setup.ts` (all created empty-ish by WP0 Task 0.1); delete `apps/web/test/smoke.test.ts` in Task 9.1 (superseded).
 
@@ -314,8 +249,8 @@ test/api/client.test.ts                    Task 9.3
 test/state/resultsState.test.ts            Task 9.4
 test/app/shell.test.tsx                    Task 9.5
 test/components/statusBar.test.tsx         Task 9.6
-test/views/results/table.test.tsx          Task 9.7
-test/views/results/expanded.test.tsx       Task 9.8
+test/views/results/expanded.test.tsx       Task 9.7
+test/views/results/table.test.tsx          Task 9.8
 test/views/results/basisAndGap.test.tsx    Task 9.9
 test/views/coverage.test.tsx               Task 9.10
 test/views/providers.test.tsx              Task 9.11
@@ -422,8 +357,9 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(screen.getByText('£412')).toBeInTheDocument();
     expect(screen.getByText('SearchApi')).toBeInTheDocument();
     expect(screen.getByText('Google Flights via SearchApi')).toBeInTheDocument();
-    const age = screen.getByText('5h ago · ≤just now');
-    expect(age).toHaveAttribute('title', 'fetched 5h ago · provider age unknown (≤just now before that)');
+    // why: maxAgeHours 0 (priced at request time) has no "≤…" clause (plan "Labels").
+    const age = screen.getByText('5h ago');
+    expect(age).toHaveAttribute('title', 'fetched 5h ago');
     expect(screen.queryByText('constraints not checked')).toBeNull();
     expect(screen.queryByText('≈')).toBeNull();
   });
@@ -445,8 +381,6 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
   });
 });
 ```
-
-The `≤just now` text in the first case is what `formatAgeCompact` yields for `maxAgeHours: 0` (`formatDuration(0)` is "just now"), which is the WP0 formatter's behaviour; WP9 does not re-word core labels (mismatch M12 asks WP0 to consider "≤0h").
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -509,6 +443,7 @@ Expected: FAIL with `Failed to resolve import "../../src/components/PriceBoundar
     "moduleResolution": "Bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
+    "resolveJsonModule": true,
     "types": ["vite/client", "node"],
     "noEmit": true,
     "composite": false,
@@ -531,14 +466,10 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 /**
- * First path segment of every core/api-contract route, plus /airports (contract gap G1).
- * The SPA itself lives only at "/" with its state in search params, so these never collide
- * with a page path. test/api/client.test.ts asserts the list covers ROUTES.
+ * Every core/api-contract route lives under /api (spec §10); the SPA owns "/" with its state in
+ * search params. test/api/client.test.ts asserts every ROUTES path starts with this prefix.
  */
-export const API_PREFIXES = [
-  '/health', '/providers', '/definitions', '/executions', '/cells', '/tools', '/itineraries', '/routes',
-  '/alerts', '/scheduler', '/budget', '/airports',
-] as const;
+export const API_PREFIX = '/api';
 
 /** core is consumed from source so `pnpm dev` and `vite build` never need core's dist. */
 export const CORE_SRC = fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url));
@@ -550,7 +481,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // why: no changeOrigin, so the api sees Host localhost:5173, which spec §4 allowlists in development.
-    proxy: Object.fromEntries(API_PREFIXES.map((p) => [p, { target: 'http://localhost:3000' }])),
+    proxy: { [API_PREFIX]: { target: 'http://localhost:3000' } },
   },
   build: { outDir: 'dist', emptyOutDir: true },
 });
@@ -801,7 +732,7 @@ export const COPY = {
   provider: { travelpayouts: 'Travelpayouts', searchapi: 'SearchApi', fixture: 'Fixture' } satisfies Record<ProviderId, string>,
   source: {
     'authorised-cached': 'Aviasales cache',
-    'scraped-aggregate': 'Google Flights calendar via SearchApi',
+    'scraped-aggregate': 'Google date grid via SearchApi',
     'scraped-search': 'Google Flights via SearchApi',
     synthetic: 'synthetic fixture data',
   } satisfies Record<SourceKind, string>,
@@ -918,7 +849,8 @@ export const COPY = {
   noSegments: 'calendar price, no itinerary',
   layovers: 'Layovers',
   layover: (at: string, duration: string) => `${at}: ${duration}`,
-  layoverUnknown: 'duration not stated',
+  overnightLayover: 'overnight',
+  selfTransfer: 'self-transfer: you re-check bags and the airlines do not protect the connection',
   airportChange: 'airport change',
   noLayovers: 'none',
   baggage: 'Baggage',
@@ -942,7 +874,7 @@ export const COPY = {
   verifyStarted: 'Itinerary search started for this cell.',
 
   // basis and calendar gap (spec §6.9, §11)
-  calendarGapLead: (n: number) => `${n} cells have calendar prices below your cheapest verified`,
+  calendarGapLead: (n: number, price: string) => `${n} cells have calendar prices below your cheapest verified (${price})`,
   calendarGapList: 'Cells to search',
 
   // coverage view (spec §11 View D)
@@ -962,8 +894,8 @@ export const COPY = {
   overrunFlag: 'Overrun: ledger calls exceed the plan by more than 10%.',
   parityFlag: 'Parity break: tile requests differ from the plan.',
   requestsHeading: 'Requests (estimate vs ledger)',
-  requestRow: (calls: number, hits: number, tiles: number, cost: string) =>
-    `${calls} calls · ${hits} cache hits · ${tiles} tiles · ledger cost ${cost}, from configured rates`,
+  requestRow: (calls: number, planned: string, hits: number, cost: string) =>
+    `${calls} of ${planned} planned calls · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
   errorsHeading: 'Errors',
   errorRow: (reason: string, attempts: number) => `${reason} after ${attempts} attempt${attempts === 1 ? '' : 's'}`,
   noErrors: 'No errors.',
@@ -981,7 +913,7 @@ export const COPY = {
   maxAgeZero: 'priced at request time',
   usageWindow: (calls: number, cap: string, start: string, end: string) => `${calls} of ${cap} calls · window ${start} to ${end}`,
   usageLifetime: (calls: number, cap: string) => `${calls} of ${cap} calls over the plan's lifetime`,
-  globalMonth: (used: string, cap: string) => `total spend this month: ${used} of ${cap}`,
+  excludedFromSchedule: 'excluded from scheduled runs',
 
   // definitions form (spec §11)
   definitionsHeading: 'Definitions',
@@ -1045,7 +977,6 @@ export const COPY = {
   showEstimate: 'Show estimate',
   save: 'Save changes',
   createConfirm: (amount: string) => `Create and confirm up to ${amount} per run`,
-  discardDraft: 'Discard draft',
   created: 'Created. Scheduled runs use the cost you confirmed.',
   saved: 'Saved.',
   fieldErrorsHeading: 'Fix these before saving:',
@@ -1056,6 +987,8 @@ export const COPY = {
     `${provider} ${stage}: ${calls} calls · ${cost} · about ${time}`,
   estimateTotal: (cost: string, time: string) => `total ${cost} per run · about ${time}`,
   windowClamped: 'The window was moved to start tomorrow.',
+  estimateBlocked: (reason: string) => `blocked: ${reason}`,
+  definitionNotices: 'Notices for this definition',
   assumptions: 'Assumptions',
   budgetFitOk: (runs: number) => `Fits every cap at ${runs} runs a month.`,
   budgetFitWarn: (runs: number) => `Does not fit every cap at ${runs} runs a month:`,
@@ -1216,30 +1149,19 @@ git add apps/web pnpm-lock.yaml && git commit -m "wp09: web scaffold, copy catal
 - Test: `test/copy/catalogue.test.ts`, `test/copy/sourceGuard.test.ts`
 
 **Interfaces:**
-- Consumes: `BANNED_WORDS`, `findBannedWords` (WP0); `COPY` (Task 9.1).
-- Produces: `WEB_ALLOWLIST` (exported from `test/copy/catalogue.test.ts`'s sibling module `test/copy/allowlist.ts`), used by Task 9.14.
+- Consumes: `BANNED_WORDS`, `findBannedWords`, `BANNED_WORD_ALLOWLIST` (WP0, the single allowlist every package passes); `COPY` (Task 9.1).
+- Produces: nothing new; the tests guard `src/copy.ts` and the `.tsx` sources.
 
 Chosen approach (spec §9 item 6 "over every string in apps/web/src"): the **catalogue** `src/copy.ts` holds all copy, and two guards make that true: (1) the catalogue test walks every string and calls every function entry with sample arguments, failing when a function has no sample; (2) the source guard fails when any `.tsx` under `src/` contains JSX text with a letter or a literal `aria-label`, `title`, `placeholder`, `alt` or `label` attribute with a letter. Task 9.14 adds a sweep over the rendered DOM of every view.
 
 - [ ] **Step 1: Write the failing tests**
 
-`test/copy/allowlist.ts`:
-
-```ts
-/**
- * Exact phrases allowed to contain a banned word (spec §11 "a small allowlist").
- * Empty by design; an entry here needs the provenance-auditor's agreement in review.
- */
-export const WEB_ALLOWLIST: readonly string[] = [];
-```
-
 `test/copy/catalogue.test.ts`:
 
 ```ts
-import { findBannedWords } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
-import { WEB_ALLOWLIST } from './allowlist.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[]> = {
@@ -1285,17 +1207,16 @@ const SAMPLES: Record<string, unknown[]> = {
   openOn: ['www.google.com'],
   continueOnForm: ['www.google.com'],
   hostShown: ['www.google.com'],
-  calendarGapLead: [3],
+  calendarGapLead: [3, '£412'],
   sumMismatch: [9, 10],
   reusedNote: [4],
   cellLabel: ['LHR', 'JFK', '20 Mar 2027', '1 Apr 2027'],
-  requestRow: [14, 2, 14, '£0'],
+  requestRow: [14, '14', 2, '£0'],
   errorRow: ['rate-limit', 3],
   plan: ['40usd'],
   maxAge: ['2d'],
   usageWindow: [615, '10000', '1 Oct 2026', '1 Nov 2026'],
   usageLifetime: [9, '100'],
-  globalMonth: ['£32', '£35'],
   editDefinition: ['London to New York (example)'],
   removeAirport: ['LHR'],
   fieldError: ['origins.0', 'LON is a city code'],
@@ -1309,6 +1230,7 @@ const SAMPLES: Record<string, unknown[]> = {
   estimateCells: [13104],
   estimateRow: ['SearchApi', 'discovery', 92, '£0', '30m'],
   estimateTotal: ['£0', '45m'],
+  estimateBlocked: ['searchapi provider-month cap 10000, estimated 12000'],
   budgetFitOk: [4],
   budgetFitWarn: [4],
   budgetScope: ['provider-month', 615, '10000'],
@@ -1356,7 +1278,7 @@ describe('COPY catalogue (spec §11 banned words)', () => {
   });
 
   it('no string contains a banned word (word boundaries, small allowlist)', () => {
-    const hits = strings.flatMap(({ path, text }) => findBannedWords(text, WEB_ALLOWLIST).map((h) => `${path}: "${h.word}" in "${text}"`));
+    const hits = strings.flatMap(({ path, text }) => findBannedWords(text, BANNED_WORD_ALLOWLIST).map((h) => `${path}: "${h.word}" in "${text}"`));
     expect(hits).toEqual([]);
   });
 
@@ -1373,7 +1295,7 @@ describe('COPY catalogue (spec §11 banned words)', () => {
   });
 
   it('the guard itself works: a planted banned word is found', () => {
-    expect(findBannedWords('Live fares', WEB_ALLOWLIST)).toHaveLength(1);
+    expect(findBannedWords('Live fares', BANNED_WORD_ALLOWLIST)).toHaveLength(1);
   });
 });
 ```
@@ -1431,7 +1353,7 @@ Expected: FAIL, three tests: "every function entry has sample arguments" (`COPY.
 
 - [ ] **Step 3: Implement**
 
-Remove the three planted lines. No other production code: the catalogue exists from Task 9.1. Any real copy the test flags is reworded in `src/copy.ts`, never added to the allowlist.
+Remove the three planted lines. No other production code: the catalogue exists from Task 9.1. Any real copy the test flags is reworded in `src/copy.ts`; the allowlist is core's and is not extended from the web.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1452,7 +1374,7 @@ git add apps/web && git commit -m "wp09: banned-word tests over the copy catalog
 - Test: `test/api/client.test.ts`
 
 **Interfaces:**
-- Consumes: `apiContract.ROUTES`, `apiContract.errorEnvelopeSchema`, every response schema named in §4, contract gaps G1–G10.
+- Consumes: `apiContract.ROUTES` (every path under `/api`), `apiContract.errorEnvelopeSchema` (422 `details.fields`), the response schemas named in §4, `ResultRow`, `ResultBasis`.
 - Produces: `ApiError`, `findRoute`, `fillPath`, `call`, `api`, `qk`, the query hooks, `useExecutionActions`, the response types, the fixture builders and `server`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1463,7 +1385,7 @@ git add apps/web && git commit -m "wp09: banned-word tests over the copy catalog
 import { apiContract } from '@gmt/core';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { API_PREFIXES } from '../../vite.config.js';
+import { API_PREFIX } from '../../vite.config.js';
 import { ApiError, call, findRoute } from '../../src/api/client.js';
 import { api } from '../../src/api/endpoints.js';
 import { API, calendarRow, resultsResponse } from '../fixtures.js';
@@ -1471,23 +1393,23 @@ import { fixtureFor } from '../msw/handlers.js';
 import { server } from '../msw/server.js';
 
 describe('api client (derived from core/api-contract ROUTES)', () => {
-  it('builds an absolute same-origin URL with path params and query, and parses with the contract', async () => {
+  it('builds an absolute same-origin /api URL with path params and query, and parses with the contract', async () => {
     let seen = '';
     server.use(
       http.get(`${API}/definitions/:id/results`, ({ request }) => {
         seen = request.url;
-        return HttpResponse.json(resultsResponse({ rows: [calendarRow()] }));
+        return HttpResponse.json(resultsResponse({ rows: [calendarRow()], total: 1 }));
       }),
     );
     const r = await api.results('def 1', 'calendar');
-    expect(seen).toBe('http://localhost:3000/definitions/def%201/results?basis=calendar');
+    expect(seen).toBe('http://localhost:3000/api/definitions/def%201/results?basis=calendar');
     expect(r.rows).toHaveLength(1);
   });
 
   it('rejects a response that breaks the contract (a row without provenance) in development', async () => {
     const { provenance: _drop, ...bare } = calendarRow();
     server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(resultsResponse({ rows: [bare as never] }))));
-    await expect(api.results('d1', null)).rejects.toThrow(/GET \/definitions\/:id\/results response does not match core\/api-contract/);
+    await expect(api.results('d1', null)).rejects.toThrow(/GET \/api\/definitions\/:id\/results response does not match core\/api-contract/);
   });
 
   it('sends X-Requested-With and Content-Type on every mutation, even without a body', async () => {
@@ -1495,38 +1417,37 @@ describe('api client (derived from core/api-contract ROUTES)', () => {
     server.use(
       http.post(`${API}/executions/:id/cancel`, ({ request }) => {
         headers.push({ xrw: request.headers.get('x-requested-with'), ct: request.headers.get('content-type') });
-        return HttpResponse.json(fixtureFor('POST', '/executions/:id/cancel'));
+        return HttpResponse.json(fixtureFor('POST', '/api/executions/:id/cancel'));
       }),
     );
     await api.cancel('e1');
     expect(headers).toEqual([{ xrw: 'get-me-there', ct: 'application/json' }]);
   });
 
-  it('turns the error envelope into an ApiError carrying field errors (contract gap G8)', async () => {
+  it('turns the error envelope into an ApiError carrying details.fields', async () => {
     server.use(
-      http.post(`${API}/definitions`, () =>
+      http.post(`${API}/definitions/estimate`, () =>
         HttpResponse.json(
-          { error: { code: 'validation', message: 'invalid definition', details: [{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }] } },
+          { error: { code: 'validation', message: 'invalid definition', details: { fields: [{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }] } } },
           { status: 422 },
         ),
       ),
     );
-    const err = await call('POST', '/definitions', { body: {} }).catch((e: unknown) => e);
+    const err = await call('POST', '/api/definitions/estimate', { body: {} }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(422);
     expect((err as ApiError).fieldErrors()).toEqual([{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }]);
   });
 
-  it('refuses a route that is not in ROUTES', async () => {
-    expect(() => findRoute('GET', '/not-a-route')).toThrow('route GET /not-a-route is not in core/api-contract ROUTES');
+  it('refuses a route that is not in ROUTES', () => {
+    expect(() => findRoute('GET', '/api/not-a-route')).toThrow('route GET /api/not-a-route is not in core/api-contract ROUTES');
   });
 
-  it('the dev proxy covers the first path segment of every route', () => {
-    const firsts = new Set(apiContract.ROUTES.map((r) => `/${r.path.split('/')[1] ?? ''}`));
-    for (const f of firsts) expect(API_PREFIXES).toContain(f);
+  it('every route is under /api, which is the one prefix the dev server proxies', () => {
+    expect(API_PREFIX).toBe('/api');
+    for (const r of apiContract.ROUTES) expect(r.path.startsWith('/api/')).toBe(true);
   });
 });
-
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1563,10 +1484,12 @@ export class ApiError extends Error {
     this.details = details;
   }
 
-  /** The 422 field list (contract gap G8), e.g. the metro-code message of review focus 1. */
+  /** A 422's `details.fields` (spec §10), e.g. the metro-code message of review focus 1. */
   fieldErrors(): Array<{ field: string; message: string }> {
-    if (!Array.isArray(this.details)) return [];
-    return this.details.flatMap((d: unknown) => (isFieldError(d) ? [d] : []));
+    if (typeof this.details !== 'object' || this.details === null) return [];
+    const fields = (this.details as { fields?: unknown }).fields;
+    if (!Array.isArray(fields)) return [];
+    return fields.flatMap((d: unknown) => (isFieldError(d) ? [d] : []));
   }
 }
 
@@ -1576,14 +1499,14 @@ function isFieldError(d: unknown): d is { field: string; message: string } {
   return typeof r.field === 'string' && typeof r.message === 'string';
 }
 
-/** The ROUTES entry for a method and path template; an unknown route is a programming error. */
+/** The ROUTES entry for a method and path template (paths include `/api`); an unknown route is a programming error. */
 export function findRoute(method: Method, path: string): apiContract.RouteDef {
   const route = apiContract.ROUTES.find((r) => r.method === method && r.path === path);
   if (!route) throw new Error(`route ${method} ${path} is not in core/api-contract ROUTES`);
   return route;
 }
 
-/** "/definitions/:id/results" + { id } → "/definitions/abc/results", every value URL-encoded. */
+/** "/api/definitions/:id/results" + { id } → "/api/definitions/abc/results", every value URL-encoded. */
 export function fillPath(path: string, params: Record<string, string>): string {
   return path.replace(/:([A-Za-z]+)/g, (_m, name: string) => {
     const v = params[name];
@@ -1636,26 +1559,29 @@ export async function call<T>(method: Method, path: string, opts: CallOptions = 
 `src/api/types.ts`:
 
 ```ts
-import type { apiContract } from '@gmt/core';
+import type { apiContract, ResultBasis } from '@gmt/core';
 import type { z } from 'zod';
 
 /** Response and request types, each the z.infer of its contract schema (plan "API contract"). */
 export type ProvidersResponse = z.infer<typeof apiContract.providersResponseSchema>;
+export type ProviderEntry = ProvidersResponse['providers'][number];
 export type DefinitionResponse = z.infer<typeof apiContract.definitionResponseSchema>;
 export type DefinitionRequest = z.infer<typeof apiContract.definitionCreateRequestSchema>;
-export type EstimateResponse = z.infer<typeof apiContract.estimateResponseSchema>;
+export type DefinitionUpdate = z.infer<typeof apiContract.definitionUpdateRequestSchema>;
+export type EstimateResponse = z.infer<typeof apiContract.estimateSchema>;
 export type CoverageCheckRequest = z.infer<typeof apiContract.coverageCheckRequestSchema>;
 export type CoverageCheckResponse = z.infer<typeof apiContract.coverageCheckResponseSchema>;
 export type ExecutionResponse = z.infer<typeof apiContract.executionResponseSchema>;
-export type VerifyCellRequest = z.infer<typeof apiContract.verifyCellRequestSchema>;
-export type ResultRow = z.infer<typeof apiContract.resultRowSchema>;
+export type StartExecutionResponse = z.infer<typeof apiContract.startExecutionResponseSchema>;
 export type ResultsResponse = z.infer<typeof apiContract.resultsResponseSchema>;
+export type ExecutionSummary = ResultsResponse['executions'][number];
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
 export type CalendarGapResponse = z.infer<typeof apiContract.calendarGapResponseSchema>;
-export type SchedulerJobsResponse = z.infer<typeof apiContract.schedulerJobsResponseSchema>;
-export type AirportSearchResponse = z.infer<typeof apiContract.airportSearchResponseSchema>;
+export type AirportsResponse = z.infer<typeof apiContract.airportsResponseSchema>;
 export type PriceCellData = z.infer<typeof apiContract.priceCellSchema>;
-export type Basis = 'verified' | 'calendar';
+export type UsageRow = z.infer<typeof apiContract.usageSchema>;
+export type Basis = ResultBasis;
+export type { ResultRow } from '@gmt/core';
 ```
 
 `src/api/endpoints.ts`:
@@ -1664,33 +1590,35 @@ export type Basis = 'verified' | 'calendar';
 import type { CellKey } from '@gmt/core';
 import { call } from './client.js';
 import type {
-  AirportSearchResponse, Basis, CalendarGapResponse, CoverageCheckRequest, CoverageCheckResponse, CoverageResponse,
-  DefinitionRequest, DefinitionResponse, ExecutionResponse, ProvidersResponse, ResultsResponse, SchedulerJobsResponse,
+  AirportsResponse, Basis, CalendarGapResponse, CoverageCheckRequest, CoverageCheckResponse, CoverageResponse,
+  DefinitionRequest, DefinitionResponse, DefinitionUpdate, EstimateResponse, ExecutionResponse, ProvidersResponse,
+  ResultsResponse, StartExecutionResponse,
 } from './types.js';
 
-/** One typed wrapper per spec §10 route the views use. Paths are ROUTES templates, checked by findRoute. */
+/** One typed wrapper per spec §10 route the WP9 views use. Paths are ROUTES templates, checked by findRoute. */
 export const api = {
-  providers: () => call<ProvidersResponse>('GET', '/providers'),
-  definitions: () => call<DefinitionResponse[]>('GET', '/definitions'),
-  createDefinition: (body: DefinitionRequest) => call<DefinitionResponse>('POST', '/definitions', { body }),
-  updateDefinition: (id: string, body: Partial<DefinitionRequest>) =>
-    call<DefinitionResponse>('PUT', '/definitions/:id', { params: { id }, body }),
-  deleteDefinition: (id: string) => call<unknown>('DELETE', '/definitions/:id', { params: { id } }),
-  coverageCheck: (body: CoverageCheckRequest) => call<CoverageCheckResponse>('POST', '/definitions/coverage-check', { body }),
+  providers: () => call<ProvidersResponse>('GET', '/api/providers'),
+  definitions: () => call<DefinitionResponse[]>('GET', '/api/definitions'),
+  estimateDraft: (body: DefinitionRequest) => call<EstimateResponse>('POST', '/api/definitions/estimate', { body }),
+  createDefinition: (body: DefinitionRequest & { confirmedCostPence: number }) => call<DefinitionResponse>('POST', '/api/definitions', { body }),
+  updateDefinition: (id: string, body: DefinitionUpdate | { confirmedCostPence: number }) =>
+    call<DefinitionResponse>('PUT', '/api/definitions/:id', { params: { id }, body }),
+  coverageCheck: (body: CoverageCheckRequest) => call<CoverageCheckResponse>('POST', '/api/definitions/coverage-check', { body }),
   startExecution: (id: string, body: { confirmCostPence?: number }) =>
-    call<ExecutionResponse>('POST', '/definitions/:id/executions', { params: { id }, body }),
-  execution: (id: string) => call<ExecutionResponse>('GET', '/executions/:id', { params: { id } }),
-  cancel: (id: string) => call<unknown>('POST', '/executions/:id/cancel', { params: { id } }),
-  resume: (id: string) => call<unknown>('POST', '/executions/:id/resume', { params: { id } }),
-  verifyCell: (body: { definitionId: string; cell: CellKey }) => call<unknown>('POST', '/cells/verify', { body }),
+    call<StartExecutionResponse>('POST', '/api/definitions/:id/executions', { params: { id }, body }),
+  execution: (id: string) => call<ExecutionResponse>('GET', '/api/executions/:id', { params: { id } }),
+  cancel: (id: string) => call<unknown>('POST', '/api/executions/:id/cancel', { params: { id } }),
+  resume: (id: string) => call<unknown>('POST', '/api/executions/:id/resume', { params: { id } }),
+  verifyCell: (body: { definitionId: string; cell: CellKey }) => call<StartExecutionResponse>('POST', '/api/cells/verify', { body }),
   results: (id: string, basis: Basis | null) =>
-    call<ResultsResponse>('GET', '/definitions/:id/results', { params: { id }, query: { basis: basis ?? undefined } }),
-  coverage: (id: string) => call<CoverageResponse>('GET', '/definitions/:id/coverage', { params: { id } }),
-  calendarGap: (id: string) => call<CalendarGapResponse>('GET', '/definitions/:id/calendar-gap', { params: { id } }),
-  schedulerJobs: () => call<SchedulerJobsResponse>('GET', '/scheduler/jobs'),
-  airports: (q: string) => call<AirportSearchResponse>('GET', '/airports', { query: { q } }),
+    call<ResultsResponse>('GET', '/api/definitions/:id/results', { params: { id }, query: { basis: basis ?? undefined } }),
+  coverage: (id: string) => call<CoverageResponse>('GET', '/api/definitions/:id/coverage', { params: { id } }),
+  calendarGap: (id: string) => call<CalendarGapResponse>('GET', '/api/definitions/:id/calendar-gap', { params: { id } }),
+  airports: (q: string) => call<AirportsResponse>('GET', '/api/airports', { query: { q } }),
 };
 ```
+
+`// why:` `createDefinition` and the confirmation `updateDefinition` carry `confirmedCostPence`, which the plan's `DefinitionInput` omits; WP8's brief accepts it on both routes (mismatch R1).
 
 `src/api/queries.ts`:
 
@@ -1708,7 +1636,6 @@ export const qk = {
   execution: (id: string) => ['execution', id] as const,
   coverage: (id: string) => ['coverage', id] as const,
   calendarGap: (id: string) => ['calendar-gap', id] as const,
-  jobs: ['scheduler-jobs'] as const,
   airports: (q: string) => ['airports', q] as const,
 };
 
@@ -1741,20 +1668,17 @@ export function useExecution(id: string | null) {
   });
 }
 
-export function useCoverage(definitionId: string) {
-  return useQuery({ queryKey: qk.coverage(definitionId), queryFn: () => api.coverage(definitionId) });
+/** View D and the status bar's "schedule blocked since" (coverage.scheduleBlockedSince). */
+export function useCoverage(definitionId: string | null) {
+  return useQuery({ queryKey: qk.coverage(definitionId ?? ''), queryFn: () => api.coverage(definitionId ?? ''), enabled: definitionId !== null });
 }
 
-/** Spec §6.9: only fetched when the definition has a verification provider. */
+/** Spec §6.9: only fetched when a verification provider is configured. */
 export function useCalendarGap(definitionId: string, enabled: boolean) {
   return useQuery({ queryKey: qk.calendarGap(definitionId), queryFn: () => api.calendarGap(definitionId), enabled });
 }
 
-export function useSchedulerJobs() {
-  return useQuery({ queryKey: qk.jobs, queryFn: () => api.schedulerJobs() });
-}
-
-/** Airport autocomplete (contract gap G1); two characters minimum. */
+/** Airport autocomplete (GET /api/airports?q=); two characters minimum. */
 export function useAirportSearch(q: string) {
   return useQuery({ queryKey: qk.airports(q), queryFn: () => api.airports(q), enabled: q.length >= 2, staleTime: 60_000 });
 }
@@ -1763,9 +1687,7 @@ export function useAirportSearch(q: string) {
 export function useExecutionActions() {
   const qc = useQueryClient();
   const refresh = async () => {
-    await Promise.all(
-      [['results'], ['execution'], ['coverage'], ['calendar-gap'], ['scheduler-jobs']].map((queryKey) => qc.invalidateQueries({ queryKey })),
-    );
+    await Promise.all([['results'], ['execution'], ['coverage'], ['calendar-gap']].map((queryKey) => qc.invalidateQueries({ queryKey })));
   };
   return {
     cancel: useMutation({ mutationFn: (id: string) => api.cancel(id), onSuccess: refresh }),
@@ -1780,16 +1702,17 @@ export function useExecutionActions() {
 }
 ```
 
-`test/fixtures.ts` (worked example only: LHR, LGW → JFK, EWR; carriers `ZZ`/`YY` are synthetic codes):
+`test/fixtures.ts` (worked example only: LHR, LGW → JFK, EWR; carriers `ZZ` and the hub `BBB` are synthetic codes):
 
 ```ts
-import { asIata, asIsoDate, asIsoDateTime, type Provenance } from '@gmt/core';
+import { asIata, asIsoDate, asIsoDateTime, asIsoMonth, type Layover, type Provenance } from '@gmt/core';
 import type {
-  CalendarGapResponse, CoverageCheckResponse, CoverageResponse, DefinitionResponse, ExecutionResponse,
-  ProvidersResponse, ResultRow, ResultsResponse, SchedulerJobsResponse, AirportSearchResponse,
+  AirportsResponse, CalendarGapResponse, CoverageCheckResponse, CoverageResponse, DefinitionResponse, EstimateResponse,
+  ExecutionResponse, ProvidersResponse, ResultRow, ResultsResponse, UsageRow,
 } from '../src/api/types.js';
 
-export const API = 'http://localhost:3000';
+/** Base of every handler URL: the api lives under /api (spec §10). */
+export const API = 'http://localhost:3000/api';
 const I = asIata;
 const D = asIsoDate;
 const T = asIsoDateTime;
@@ -1802,22 +1725,15 @@ export const provCalendar: Provenance = {
   providerId: 'travelpayouts', sourceKind: 'authorised-cached', fetchedAt: T('2026-10-14T13:00:00.000Z'),
   maxAgeHours: 48, fx: { converted: false }, pointOfSale: 'unknown', cabin: 'economy',
 };
-export const provSynthetic: Provenance = {
-  providerId: 'fixture', sourceKind: 'synthetic', fetchedAt: T('2026-10-14T14:00:00.000Z'),
-  maxAgeHours: 0, fx: { converted: false }, pointOfSale: 'unknown', cabin: 'economy',
-};
 
-/** A segment with local and UTC times, so layovers can be computed. */
-export function seg(carrier: string, flight: number, from: string, to: string, depLocal: string, arrLocal: string, depUtc: string, arrUtc: string) {
-  return {
-    marketingCarrier: carrier, flightNumber: flight, from: I(from), to: I(to),
-    departLocal: depLocal, arriveLocal: arrLocal, departUtc: T(depUtc), arriveUtc: T(arrUtc),
-  };
+export function seg(carrier: string, flight: number, from: string, to: string, depLocal: string, arrLocal: string) {
+  return { marketingCarrier: carrier, flightNumber: flight, from: I(from), to: I(to), departLocal: depLocal, arriveLocal: arrLocal };
 }
 
 const cell = (o: string, d: string, dep: string, ret: string, nights: number) => ({
   origin: I(o), destination: I(d), departureDate: D(dep), returnDate: D(ret), nights,
 });
+const hubLayover: Layover = { at: I('BBB'), minutes: 90, overnight: false, airportChange: false };
 
 /** Class-verified itinerary row: one stop out via a synthetic hub, direct back. */
 export function verifiedRow(over: Partial<ResultRow> = {}): ResultRow {
@@ -1825,31 +1741,39 @@ export function verifiedRow(over: Partial<ResultRow> = {}): ResultRow {
     itineraryHash: 'hash-verified-1', basis: 'verified', verdictClass: 'verified', pricePence: 41200,
     provenance: provSearch, stale: false, ageHours: 5,
     cell: cell('LHR', 'JFK', '2027-03-14', '2027-03-28', 14),
-    outbound: [
-      seg('ZZ', 117, 'LHR', 'BBB', '2027-03-14T10:25', '2027-03-14T12:00', '2027-03-14T10:25:00.000Z', '2027-03-14T15:00:00.000Z'),
-      seg('ZZ', 9, 'BBB', 'JFK', '2027-03-14T13:30', '2027-03-14T15:10', '2027-03-14T16:30:00.000Z', '2027-03-14T19:10:00.000Z'),
-    ],
-    inbound: [seg('ZZ', 178, 'JFK', 'LHR', '2027-03-28T19:00', '2027-03-29T07:00', '2027-03-28T23:00:00.000Z', '2027-03-29T07:00:00.000Z')],
-    totalMinutes: 1005, stopsOut: 1, stopsIn: 0, carriers: ['ZZ'],
+    outbound: [seg('ZZ', 117, 'LHR', 'BBB', '2027-03-14T10:25', '2027-03-14T12:00'), seg('ZZ', 9, 'BBB', 'JFK', '2027-03-14T13:30', '2027-03-14T15:10')],
+    inbound: [seg('ZZ', 178, 'JFK', 'LHR', '2027-03-28T19:00', '2027-03-29T07:00')],
+    totalMinutes: 1005, outboundMinutes: 525, inboundMinutes: 480, stopsOut: 1, stopsIn: 0, layovers: [hubLayover], carriers: ['ZZ'],
     verdicts: { cabin: 'pass', maxStops: 'pass', maxJourneyMinutes: 'pass', arrivalWindowLocal: 'pass' },
     unverified: [], notApplied: [],
+    seller: 'Example Travel', baggage: { cabinBag: 'included', checkedBags: 1 }, fareConditions: { refundable: false, changeable: true }, selfTransfer: false,
     booking: { kind: 'get', url: 'https://www.google.com/travel/clk/f?id=1', host: 'www.google.com' },
     searchLink: { url: 'https://www.google.com/travel/flights?q=LHR.JFK.2027-03-14', host: 'www.google.com', label: 'search link, not a fare link' },
-    otherOffers: [], notSeenInLatest: null, adjustedPence: null, destinationNote: null, bandCheapest: true,
-    seller: 'Example Travel', baggage: { cabinBag: 'included', checkedBags: 1 }, fareConditions: { refundable: false, changeable: true },
+    otherOffers: [], notSeenInLatest: null, adjustedPence: null, destinationNote: null,
+    executionId: 'exec-0001', calendarPriceId: null, observationId: 101,
     ...over,
   };
 }
 
-/** Class-failed row carrying all three verdicts, for the distinct-text-and-ARIA test. */
+/** Class partially-verified, cheaper: shown by default (spec §6.9 hides only `failed` by default). */
+export function partialRow(over: Partial<ResultRow> = {}): ResultRow {
+  return verifiedRow({
+    itineraryHash: 'hash-partial-1', verdictClass: 'partially-verified', pricePence: 38800, observationId: 102,
+    cell: cell('LGW', 'EWR', '2027-03-15', '2027-03-27', 12),
+    verdicts: { cabin: 'pass', checkedBagRequired: 'unverified' }, unverified: ['checkedBagRequired'],
+    ...over,
+  });
+}
+
+/** Class-failed row carrying all three verdicts, with a POST booking and no baggage or conditions. */
 export function failedRow(over: Partial<ResultRow> = {}): ResultRow {
   return verifiedRow({
-    itineraryHash: 'hash-failed-1', verdictClass: 'failed', pricePence: 38800,
-    cell: cell('LGW', 'EWR', '2027-03-15', '2027-03-27', 12),
+    itineraryHash: 'hash-failed-1', verdictClass: 'failed', pricePence: 37700, observationId: 103,
+    cell: cell('LGW', 'EWR', '2027-03-16', '2027-03-28', 12),
     verdicts: { cabin: 'pass', arrivalWindowLocal: 'fail', checkedBagRequired: 'unverified' },
-    unverified: ['checkedBagRequired'], bandCheapest: false,
+    unverified: ['checkedBagRequired'],
     booking: { kind: 'post', url: 'https://www.google.com/travel/clk/f', postData: 'u=abc&tfu=xyz', host: 'www.google.com' },
-    baggage: null, fareConditions: null,
+    baggage: null, fareConditions: null, selfTransfer: null,
     ...over,
   });
 }
@@ -1860,34 +1784,42 @@ export function calendarRow(over: Partial<ResultRow> = {}): ResultRow {
     itineraryHash: null, basis: 'calendar', verdictClass: 'unchecked', pricePence: 39900,
     provenance: provCalendar, stale: false, ageHours: 50,
     cell: cell('LHR', 'EWR', '2027-04-02', '2027-04-16', 14),
-    outbound: null, inbound: null, totalMinutes: null, stopsOut: null, stopsIn: null, carriers: [],
-    verdicts: {}, unverified: [], notApplied: ['arrivalWindowLocal', 'maxJourneyMinutes', 'maxStops'],
-    booking: { kind: 'none' },
+    outbound: null, inbound: null, totalMinutes: null, outboundMinutes: null, inboundMinutes: null, stopsOut: null, stopsIn: null,
+    layovers: [], carriers: [], verdicts: {}, unverified: [], notApplied: ['arrivalWindowLocal', 'maxJourneyMinutes', 'maxStops'],
+    seller: null, baggage: null, fareConditions: null, selfTransfer: null, booking: { kind: 'none' },
     searchLink: { url: 'https://www.aviasales.com/search/LHR0204EWR16041', host: 'www.aviasales.com', label: 'search link, not a fare link' },
-    otherOffers: [], notSeenInLatest: null, adjustedPence: null, destinationNote: 'onward leg not included', bandCheapest: false,
-    seller: null, baggage: null, fareConditions: null,
+    otherOffers: [], notSeenInLatest: null, adjustedPence: null, destinationNote: 'onward leg not included',
+    executionId: 'exec-0001', calendarPriceId: 7, observationId: null,
     ...over,
   };
 }
+
+export const summary = (status: ResultsResponse['executions'][number]['status'] = 'completed', ageHours = 2) => ({
+  id: 'exec-0001', status, isChild: false, startedAt: T('2026-10-14T12:00:00.000Z'), finishedAt: status === 'completed' ? T('2026-10-14T13:00:00.000Z') : null, ageHours,
+});
 
 export function resultsResponse(over: Partial<ResultsResponse> = {}): ResultsResponse {
+  const rows = over.rows ?? [verifiedRow(), partialRow()];
   return {
-    rows: [verifiedRow(), failedRow()], total: 2, truncated: false, basis: 'verified',
-    basisReason: 'itinerary-searched observations exist', executions: [{ id: 'exec-0001', status: 'completed', ageHours: 2 }],
-    coverage: { buckets: { priced: 3, empty: 1, no_data: 2, error: 0, skipped: 0, not_run: 4, reused: 0 }, total: 10, selected: 10, itinerarySearched: 2, onDemand: 1 },
-    excludedByCurrentSpace: 0,
+    rows, total: rows.length, truncated: false, basis: 'verified',
+    basisReason: 'itinerary-searched observations exist', executions: [summary()],
+    coverage: { buckets: { priced: 3, empty: 1, no_data: 2, error: 0, skipped: 0, not_run: 4, reused: 0 }, total: 10, selected: 10, itinerarySearched: 2, onDemand: 1, reused: 0 },
+    excludedByCurrentSpace: 0, verificationProviderConfigured: true, cheapest: rows[0] ?? null,
     ...over,
   };
 }
 
-const estimate = {
-  cells: 2184, perProvider: [{ providerId: 'travelpayouts' as const, stage: 'discovery' as const, calls: 14, costMicroGbp: 0, costPence: 0, seconds: 20 }],
-  totalCostMicroGbp: 0, totalCostPence: 0, seconds: 20, assumptions: ['Travelpayouts month tiles via the shared metro code'], windowClamped: false,
-};
+export const estimate = (over: Partial<EstimateResponse> = {}): EstimateResponse => ({
+  cells: 2184,
+  perProvider: [{ providerId: 'travelpayouts', stage: 'discovery', calls: 14, planCalls: 12, costMicroGbp: 0, costPence: 0, seconds: 20, blocked: null }],
+  totalCalls: 14, totalPlanCalls: 12, totalCostMicroGbp: 0, totalCostPence: 0, seconds: 20,
+  assumptions: ['Travelpayouts month tiles via the shared metro code'], windowClamped: false, retryFactor: 1.2,
+  ...over,
+});
 
 export function definition(over: Partial<DefinitionResponse> = {}): DefinitionResponse {
   return {
-    id: 'def-0001', name: 'London to New York (example)', origins: [I('LHR'), I('LGW')], destinations: [I('JFK'), I('EWR')],
+    id: 'def-0001', name: 'London → New York (example)', origins: [I('LHR'), I('LGW')], destinations: [I('JFK'), I('EWR')],
     window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 }, minNights: 10, maxNights: 21, cabin: 'economy',
     constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
     verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
@@ -1896,37 +1828,40 @@ export function definition(over: Partial<DefinitionResponse> = {}): DefinitionRe
     destinationNotes: {}, onwardCostPence: {}, scheduleCron: '0 5 * * 1', scheduleTz: 'Europe/London', confirmedCostPence: 0, enabled: true,
     createdAt: T('2026-10-14T09:00:00.000Z'), updatedAt: T('2026-10-14T09:00:00.000Z'), deletedAt: null,
     budgetFit: { fits: true, runsPerMonth: 4, perScope: [{ scope: 'provider-month:searchapi', estimated: 615, cap: 10000, fits: true }] },
-    estimate, needsConfirmation: null,
+    estimate: estimate(), needsConfirmation: null, notices: [],
     ...over,
   };
 }
 
-const usage = (calls: number, cap: number | null, start: string | null, end: string | null) => ({
-  calls, costMicroGbp: 0, cap, windowStart: start === null ? null : T(start), windowEnd: end === null ? null : T(end),
+export const usage = (scope: string, calls: number, cap: number | null, costMicroGbp = 0, start: string | null = null, end: string | null = null): UsageRow => ({
+  scope, calls, costMicroGbp, costPence: Math.ceil(costMicroGbp / 10_000), cap,
+  windowStart: start === null ? null : T(start), windowEnd: end === null ? null : T(end),
 });
 
 export function providersResponse(over: Partial<ProvidersResponse> = {}): ProvidersResponse {
   return {
-    synthetic: false, zeroCapMessage: null,
-    globalMonth: { calls: 0, costMicroGbp: 32_000_000, cap: 35_000_000, windowStart: T('2026-10-01T00:00:00.000Z'), windowEnd: T('2026-11-01T00:00:00.000Z') },
+    synthetic: false, pointOfSale: 'GB',
     providers: [
       {
-        id: 'travelpayouts', displayName: 'Travelpayouts', enabled: true, plan: null,
-        discovery: { sourceKind: 'authorised-cached', provenanceNote: 'Aviasales cache of recent user searches', maxAgeHours: 48 }, verification: null,
-        usage: [{ scope: 'provider-month', usage: usage(60, 50000, '2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z') }],
+        providerId: 'travelpayouts', displayName: 'Travelpayouts', enabled: true, plan: 'free', excludedFromSchedule: false, notices: [],
+        capabilities: { discovery: { sourceKind: 'authorised-cached', provenanceNote: 'Aviasales cache of recent user searches', maxAgeHours: 48 }, verification: null },
+        usage: [usage('provider-month:travelpayouts', 60, 50000, 0, '2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')],
       },
       {
-        id: 'searchapi', displayName: 'SearchApi', enabled: true, plan: '40usd',
-        discovery: { sourceKind: 'scraped-aggregate', provenanceNote: 'Google Flights date grid via SearchApi', maxAgeHours: 24 },
-        verification: { sourceKind: 'scraped-search', provenanceNote: 'Google Flights search via SearchApi', maxAgeHours: 0 },
-        usage: [{ scope: 'provider-month', usage: usage(615, 10000, '2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z') }],
+        providerId: 'searchapi', displayName: 'SearchApi', enabled: true, plan: '40usd', excludedFromSchedule: false, notices: [],
+        capabilities: {
+          discovery: { sourceKind: 'scraped-aggregate', provenanceNote: 'Google date grid via SearchApi', maxAgeHours: 24 },
+          verification: { sourceKind: 'scraped-search', provenanceNote: 'Google Flights search via SearchApi', maxAgeHours: 0 },
+        },
+        usage: [usage('provider-month:searchapi', 615, 10000, 0, '2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')],
       },
     ],
-    definitionDefaults: {
+    presets: {
+      policy: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true },
       providers: { discovery: ['travelpayouts', 'searchapi'], verification: ['searchapi'], discoveryRefreshHours: { travelpayouts: 168, searchapi: 168 } },
-      verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
       budget: { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 },
-      scheduleTz: 'Europe/London',
+      discoveryRefreshHours: 168,
+      schedulerTimezone: 'Europe/London',
     },
     ...over,
   };
@@ -1938,18 +1873,16 @@ const buckets = (priced: number, empty: number, noData: number, error: number, s
 
 export function execution(over: Partial<ExecutionResponse> = {}): ExecutionResponse {
   return {
-    id: 'exec-0001', definitionId: 'def-0001', isChild: false, status: 'running', stage: 'discovery', reason: null, resumeAfter: null,
-    startedAt: T('2026-10-14T14:00:00.000Z'), finishedAt: null,
+    id: 'exec-0001', definitionId: 'def-0001', isChild: false, cell: null, status: 'running', stage: 'discovery', reason: null, resumeAfter: null,
+    trigger: 'manual', startedAt: T('2026-10-14T14:00:00.000Z'), finishedAt: null, errorText: null,
     progress: [
       { stage: 'discovery', providerId: 'travelpayouts', buckets: buckets(60, 10, 40, 0, 0, 16), total: 126 },
       { stage: 'verification', providerId: 'searchapi', buckets: buckets(0, 0, 0, 0, 116, 10), total: 126 },
     ],
-    budget: [
-      { scope: { kind: 'execution-calls', executionId: 'exec-0001' }, usage: usage(42, 2000, null, null) },
-      { scope: { kind: 'execution-free-calls', executionId: 'exec-0001' }, usage: usage(14, 2000, null, null) },
-      { scope: { kind: 'global-month' }, usage: { calls: 0, costMicroGbp: 32_000_000, cap: 35_000_000, windowStart: null, windowEnd: null } },
-    ],
-    estimate, ledger: { calls: 56, costMicroGbp: 0, costPence: 0 },
+    budget: [usage('execution-calls', 42, 2000), usage('execution-free-calls', 14, 2000), usage('global-month', 0, 35_000_000, 32_000_000)],
+    estimate: estimate(),
+    ledger: { calls: 56, costMicroGbp: 0, costPence: 0, tiles: 14, cacheHits: 0, perProvider: [{ providerId: 'travelpayouts', stage: 'discovery', calls: 14, costMicroGbp: 0 }] },
+    parityBreak: false, overrun: false, disabledProviders: [],
     ...over,
   };
 }
@@ -1957,62 +1890,53 @@ export function execution(over: Partial<ExecutionResponse> = {}): ExecutionRespo
 export function coverageResponse(over: Partial<CoverageResponse> = {}): CoverageResponse {
   return {
     executionId: 'exec-0001',
-    stages: [
-      { stage: 'discovery', providerId: 'travelpayouts', buckets: buckets(60, 10, 40, 6, 0, 10), total: 126 },
-      { stage: 'verification', providerId: 'searchapi', buckets: buckets(8, 1, 0, 1, 116, 0), total: 126 },
+    summary: { buckets: buckets(60, 10, 40, 6, 0, 10), total: 126, selected: 10, itinerarySearched: 8, onDemand: 0, reused: 0 },
+    perStage: [
+      { stage: 'discovery', providerId: 'travelpayouts', buckets: buckets(60, 10, 40, 6, 0, 10), total: 126, requests: { calls: 14, cacheHits: 0, costMicroGbp: 0, planCalls: 14 }, overrun: false, parityBreak: false },
+      { stage: 'verification', providerId: 'searchapi', buckets: buckets(8, 1, 0, 1, 116, 0), total: 126, requests: { calls: 50, cacheHits: 0, costMicroGbp: 0, planCalls: 50 }, overrun: false, parityBreak: false },
     ],
-    requests: [{ providerId: 'travelpayouts', calls: 14, cacheHits: 0, tiles: 14, costMicroGbp: 0 }],
-    overrun: false, parityBreak: false,
-    selectedNotReached: [{ cell: { origin: I('LHR'), destination: I('JFK'), departureDate: D('2027-03-20'), returnDate: D('2027-04-01') }, reason: 'skipped:budget' }],
-    errors: [{ cell: { origin: I('LGW'), destination: I('EWR'), departureDate: D('2027-03-21'), returnDate: D('2027-04-02') }, stage: 'discovery', providerId: 'travelpayouts', reason: 'rate-limit', lastError: 'HTTP 429', attempts: 3 }],
-    retryable: true,
+    selectedNotReached: [{ cell: cell('LHR', 'JFK', '2027-03-20', '2027-04-01', 12), reason: 'skipped:budget' }],
+    errors: [{ cell: cell('LGW', 'EWR', '2027-03-21', '2027-04-02', 12), stage: 'discovery', providerId: 'travelpayouts', reason: 'rate-limit', lastError: 'HTTP 429', attempts: 3, retryable: true }],
+    scheduleBlockedSince: null,
     ...over,
   };
 }
 
 export function calendarGap(over: Partial<CalendarGapResponse> = {}): CalendarGapResponse {
   return {
-    cheapestVerified: { pricePence: 41200, provenance: provSearch, stale: false, ageHours: 5 },
-    cells: [{ cell: cell('LHR', 'EWR', '2027-04-02', '2027-04-16', 14), price: { pricePence: 39900, provenance: provCalendar, stale: false, ageHours: 50 } }],
+    cheapestVerifiedPence: 41200,
+    cells: [{ cell: cell('LHR', 'EWR', '2027-04-02', '2027-04-16', 14), calendar: { pricePence: 39900, provenance: provCalendar, stale: false, ageHours: 50 }, verifyAvailable: true }],
     ...over,
   };
 }
 
-export const jobs: SchedulerJobsResponse = [{ definitionId: 'def-0001', nextRun: T('2026-10-19T04:00:00.000Z'), blockedSince: null }];
-
-export const airports: AirportSearchResponse = [
-  { iata: I('LHR'), name: 'Heathrow', city: 'London', country: 'United Kingdom', metro: 'LON' },
-  { iata: I('LGW'), name: 'Gatwick', city: 'London', country: 'United Kingdom', metro: 'LON' },
+export const airports: AirportsResponse = [
+  { iata: I('LHR'), name: 'Heathrow', city: 'London', country: 'United Kingdom', tz: 'Europe/London', metro: 'LON' },
+  { iata: I('LGW'), name: 'Gatwick', city: 'London', country: 'United Kingdom', tz: 'Europe/London', metro: 'LON' },
 ];
 
 export const coverageCheck: CoverageCheckResponse = {
-  pairs: [
-    { origin: I('LHR'), destination: I('JFK'), months: [{ month: '2027-03', cachedRows: 5 }, { month: '2027-04', cachedRows: 0 }] },
-  ],
+  pairs: [{ origin: I('LHR'), destination: I('JFK'), months: [{ month: asIsoMonth('2027-03'), cachedRows: 5, cellsInBand: 372 }, { month: asIsoMonth('2027-04'), cachedRows: 0, cellsInBand: 360 }] }],
   calls: 14, notes: [],
-} as CoverageCheckResponse;
+};
 ```
-
-`// why:` the `coverageCheck` cast is the one place a brand (`IsoMonth`) is not constructed through a core helper (core exposes `isoMonthSchema` but no `asIsoMonth`); replace it with `isoMonthSchema.parse('2027-03')` if WP0 exports the schema at top level.
 
 `test/msw/handlers.ts`:
 
 ```ts
 import { http, HttpResponse, type JsonBodyType } from 'msw';
-import {
-  airports, API, calendarGap, coverageCheck, coverageResponse, definition, execution, jobs, providersResponse, resultsResponse,
-} from '../fixtures.js';
+import { airports, API, calendarGap, coverageCheck, coverageResponse, definition, estimate, execution, providersResponse, resultsResponse } from '../fixtures.js';
 
-/** A valid response body for each mutation the views send, keyed "METHOD path-template". */
+/** A valid response body for each mutation the views send, keyed "METHOD /api/path-template". */
 const MUTATION_BODIES: Record<string, JsonBodyType> = {
-  'POST /executions/:id/cancel': execution({ status: 'cancelled' }),
-  'POST /executions/:id/resume': execution({ status: 'running' }),
-  'POST /definitions/:id/executions': execution({ status: 'pending' }),
-  'POST /cells/verify': execution({ id: 'exec-child-1', isChild: true, status: 'pending' }),
-  'POST /definitions': definition({ id: 'def-draft-1', enabled: false, confirmedCostPence: null }),
-  'PUT /definitions/:id': definition(),
-  'DELETE /definitions/:id': definition({ deletedAt: definition().createdAt }),
-  'POST /definitions/coverage-check': coverageCheck,
+  'POST /api/executions/:id/cancel': execution({ status: 'cancelled' }),
+  'POST /api/executions/:id/resume': execution({ status: 'running' }),
+  'POST /api/definitions/:id/executions': { executionId: 'exec-0002' },
+  'POST /api/cells/verify': { executionId: 'exec-child-1' },
+  'POST /api/definitions/estimate': estimate(),
+  'POST /api/definitions': definition({ id: 'def-0002' }),
+  'PUT /api/definitions/:id': definition(),
+  'POST /api/definitions/coverage-check': coverageCheck,
 };
 
 /** The body a default handler returns for a mutation; tests reuse it when they override a handler. */
@@ -2030,12 +1954,12 @@ export const handlers = [
   http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'completed', stage: 'verification', finishedAt: definition().updatedAt }))),
   http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json(coverageResponse())),
   http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap({ cells: [] }))),
-  http.get(`${API}/scheduler/jobs`, () => HttpResponse.json(jobs)),
   http.get(`${API}/airports`, () => HttpResponse.json(airports)),
   ...Object.keys(MUTATION_BODIES).map((key) => {
     const [method, path] = key.split(' ') as [string, string];
-    const verb = method === 'POST' ? http.post : method === 'PUT' ? http.put : http.delete;
-    return verb(`${API}${path}`, () => HttpResponse.json(MUTATION_BODIES[key]));
+    const verb = method === 'POST' ? http.post : http.put;
+    // why: handler URLs are absolute; API already ends in /api, the keys start with it.
+    return verb(`${API}${path.slice('/api'.length)}`, () => HttpResponse.json(MUTATION_BODIES[key]));
   }),
 ];
 ```
@@ -2073,7 +1997,7 @@ beforeEach(() => setViewportWidth(1280));
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/api/client.test.ts test/components test/copy`
-Expected: PASS, 6 + 5 + 8 tests. A failure naming a field in "response does not match core/api-contract" means the WP0 schema differs from contract gaps G2–G10: stop and report it to Fable (do not loosen the fixture).
+Expected: PASS, 6 + 5 + 8 tests. A failure naming a field in "response does not match core/api-contract" means a fixture differs from the merged WP0 schema: fix the fixture to the schema (never loosen the schema) and note it in the PR.
 
 - [ ] **Step 5: Commit**
 
@@ -2088,8 +2012,8 @@ git add apps/web && git commit -m "wp09: typed API client from ROUTES, query hoo
 - Test: `test/state/resultsState.test.ts`
 
 **Interfaces:**
-- Consumes: `SortKey`, `SortDir`, `ResultFilters` (WP2, as stated in §4), `VerdictClass`, `ProviderId`, `ConstraintName`.
-- Produces: `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`, `ViewId`, `VIEWS`, `parseView`, `ResultsUiState`, `parseResultsState`, `resultsStatePatch`, `parseBasis`, `setFilter`, `useMediaQuery`, `NARROW_QUERY`.
+- Consumes: `SortKey`, `ResultFilters` (plan "Core domain functions"), `VerdictClass`, `ProviderId`, `ConstraintName`, `Iata`.
+- Produces: `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`, `ViewId`, `VIEWS`, `parseView`, `SortDir`, `ResultsUiState`, `parseResultsState`, `resultsStatePatch`, `parseBasis`, `setFilter`, `useMediaQuery`, `NARROW_QUERY`.
 
 Decision (spec §11 "filter and sort state persists across views"): **URL search params**. They survive view switches (nav links copy every parameter except `view`), reloads and bookmarks, and need no store library. Keys: `view`, `def`, `basis`, `sort` (`price.asc`; absent = the server's class-then-price ranking), `f.class`, `f.provider`, `f.stops`, `f.carriers`, `f.dest`, `f.maxPrice` (pence), `f.nights` (`10-14`), `f.stale` (`hide`), `f.unverified`.
 
@@ -2098,6 +2022,7 @@ Decision (spec §11 "filter and sort state persists across views"): **URL search
 `test/state/resultsState.test.ts`:
 
 ```ts
+import { asIata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { parseBasis, parseResultsState, resultsStatePatch, setFilter, type ResultsUiState } from '../../src/state/resultsState.js';
 import { hrefWith, updateSearchParams } from '../../src/state/urlState.js';
@@ -2106,8 +2031,8 @@ import { parseView } from '../../src/state/view.js';
 const full: ResultsUiState = {
   sort: { key: 'totalTime', dir: 'desc' },
   filters: {
-    verdictClasses: ['verified', 'partially-verified'], providers: ['searchapi'], maxStops: 1, carriers: ['ZZ', 'YY'],
-    destinations: ['JFK'], maxPricePence: 50000, nights: { min: 10, max: 14 }, hideStale: true, unverifiedConstraint: 'checkedBagRequired',
+    verdictClass: ['verified', 'partially-verified'], providerId: ['searchapi'], maxStops: 1, carriers: ['ZZ', 'YY'],
+    destination: [asIata('JFK')], maxPricePence: 50000, nights: { min: 10, max: 14 }, hideStale: true, unverified: ['checkedBagRequired', 'cabin'],
   },
 };
 
@@ -2129,7 +2054,7 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
 
   it('ignores malformed values instead of guessing', () => {
     const s = parseResultsState(new URLSearchParams('sort=bogus.up&f.class=verified,nope&f.stops=-1&f.nights=14-10x&f.provider=amadeus'));
-    expect(s).toEqual({ sort: null, filters: { verdictClasses: ['verified'] } });
+    expect(s).toEqual({ sort: null, filters: { verdictClass: ['verified'] } });
   });
 
   it('setFilter adds and removes keys without leaving undefined behind', () => {
@@ -2236,8 +2161,11 @@ export function parseView(v: string | null): ViewId {
 `src/state/resultsState.ts`:
 
 ```ts
-import type { ConstraintName, ProviderId, ResultFilters, SortDir, SortKey, VerdictClass } from '@gmt/core';
+import type { ConstraintName, Iata, ProviderId, ResultFilters, SortKey, VerdictClass } from '@gmt/core';
 import type { Basis } from '../api/types.js';
+
+/** sortRows's direction parameter (plan "Core domain functions": `dir: 'asc' | 'desc'`). */
+export type SortDir = 'asc' | 'desc';
 
 /** View A state held in the URL (spec §11). `sort: null` keeps the server's class-then-price order. */
 export interface ResultsUiState {
@@ -2285,22 +2213,23 @@ export function parseResultsState(p: URLSearchParams): ResultsUiState {
   }
   let f: ResultFilters = {};
   const classes = list(p.get('f.class')).filter(oneOf(CLASSES));
-  if (classes.length > 0) f = setFilter(f, 'verdictClasses', classes);
+  if (classes.length > 0) f = setFilter(f, 'verdictClass', classes);
   const providers = list(p.get('f.provider')).filter(oneOf(PROVIDERS));
-  if (providers.length > 0) f = setFilter(f, 'providers', providers);
+  if (providers.length > 0) f = setFilter(f, 'providerId', providers);
   f = setFilter(f, 'maxStops', int(p.get('f.stops')));
   const carriers = list(p.get('f.carriers')).filter((c) => CARRIER.test(c));
   if (carriers.length > 0) f = setFilter(f, 'carriers', carriers);
-  const dests = list(p.get('f.dest')).filter((c) => IATA.test(c));
-  if (dests.length > 0) f = setFilter(f, 'destinations', dests);
+  // why: the URL is operator-editable; only well-formed codes become the branded Iata the filter takes.
+  const dests = list(p.get('f.dest')).filter((c) => IATA.test(c)) as Iata[];
+  if (dests.length > 0) f = setFilter(f, 'destination', dests);
   f = setFilter(f, 'maxPricePence', int(p.get('f.maxPrice')));
   const nights = /^(\d+)-(\d+)$/.exec(p.get('f.nights') ?? '');
   if (nights?.[1] !== undefined && nights[2] !== undefined && Number(nights[1]) <= Number(nights[2])) {
     f = setFilter(f, 'nights', { min: Number(nights[1]), max: Number(nights[2]) });
   }
   if (p.get('f.stale') === 'hide') f = setFilter(f, 'hideStale', true);
-  const unverified = p.get('f.unverified');
-  if (unverified !== null && oneOf(CONSTRAINTS)(unverified)) f = setFilter(f, 'unverifiedConstraint', unverified);
+  const unverified = list(p.get('f.unverified')).filter(oneOf(CONSTRAINTS));
+  if (unverified.length > 0) f = setFilter(f, 'unverified', unverified);
   return { sort, filters: f };
 }
 
@@ -2312,15 +2241,15 @@ export function resultsStatePatch(s: ResultsUiState): Record<string, string | nu
   const f = s.filters;
   return {
     sort: s.sort === null ? null : `${s.sort.key}.${s.sort.dir}`,
-    'f.class': joined(f.verdictClasses),
-    'f.provider': joined(f.providers),
+    'f.class': joined(f.verdictClass),
+    'f.provider': joined(f.providerId),
     'f.stops': num(f.maxStops),
     'f.carriers': joined(f.carriers),
-    'f.dest': joined(f.destinations),
+    'f.dest': joined(f.destination),
     'f.maxPrice': num(f.maxPricePence),
     'f.nights': f.nights === undefined ? null : `${f.nights.min}-${f.nights.max}`,
     'f.stale': f.hideStale === true ? 'hide' : null,
-    'f.unverified': f.unverifiedConstraint ?? null,
+    'f.unverified': joined(f.unverified),
   };
 }
 ```
@@ -2603,7 +2532,7 @@ git add apps/web && git commit -m "wp09: shell with nav, definition selector, sy
 - Test: `test/components/statusBar.test.tsx`
 
 **Interfaces:**
-- Consumes: `useResults`, `useExecution`, `useSchedulerJobs`, `useExecutionActions` (Task 9.3); `ACTIVE_STATUSES`, `formatDuration` (WP0); contract gaps G5, G9, G10.
+- Consumes: `useResults`, `useExecution`, `useCoverage`, `useExecutionActions` (Task 9.3); `ACTIVE_STATUSES`, `formatDuration` (WP0); `coverageResponse.scheduleBlockedSince`, newest-first `executions`, flat `Usage` rows with scope labels (`execution-calls`, `global-month`, `provider-month:<id>`).
 - Produces: `StatusBar({ definition })`, `ViewHeader({ title, executions, stale })`.
 
 - [ ] **Step 1: Write the failing test**
@@ -2617,7 +2546,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { StatusBar } from '../../src/components/StatusBar.js';
 import { ViewHeader } from '../../src/components/ViewHeader.js';
-import { API, definition, execution, jobs, resultsResponse } from '../fixtures.js';
+import { API, coverageResponse, definition, execution, resultsResponse } from '../fixtures.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 
@@ -2662,8 +2591,8 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => resumed).toBe(1);
   });
 
-  it('shows "schedule blocked since <date>" from the scheduler jobs (contract gap G5)', async () => {
-    server.use(http.get(`${API}/scheduler/jobs`, () => HttpResponse.json([{ ...jobs[0], blockedSince: asIsoDateTime('2026-10-12T05:00:00.000Z') }])));
+  it('shows "schedule blocked since <date>" from coverage.scheduleBlockedSince', async () => {
+    server.use(http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json(coverageResponse({ scheduleBlockedSince: asIsoDateTime('2026-10-12T05:00:00.000Z') }))));
     renderWithProviders(<StatusBar definition={definition()} />);
     expect(await screen.findByText('schedule blocked since 12 Oct 2026')).toBeInTheDocument();
   });
@@ -2674,7 +2603,7 @@ describe('status bar (spec §11)', () => {
       http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(resultsResponse({ rows: [], total: 0, executions: [] }))),
       http.post(`${API}/definitions/:id/executions`, async ({ request }) => {
         bodies.push(await request.json());
-        return HttpResponse.json(execution({ status: 'pending' }));
+        return HttpResponse.json({ executionId: 'exec-0002' });
       }),
     );
     const { user } = renderWithProviders(<StatusBar definition={definition({ confirmedCostPence: 0 })} />);
@@ -2711,11 +2640,11 @@ Expected: FAIL with `Failed to resolve import "../../src/components/StatusBar.js
 `src/components/StatusBar.tsx`:
 
 ```tsx
-import { ACTIVE_STATUSES, type Usage } from '@gmt/core';
+import { ACTIVE_STATUSES } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
-import { useExecution, useExecutionActions, useResults, useSchedulerJobs } from '../api/queries.js';
-import type { DefinitionResponse, ExecutionResponse } from '../api/types.js';
+import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
+import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp } from '../format.js';
 import { parseBasis } from '../state/resultsState.js';
@@ -2735,8 +2664,9 @@ function stageTotals(e: ExecutionResponse): Array<{ stage: string; done: number;
   return [...by.entries()].map(([stage, v]) => ({ stage, ...v }));
 }
 
-function usageOf(e: ExecutionResponse, kind: string): Usage | null {
-  return e.budget.find((b) => b.scope.kind === kind)?.usage ?? null;
+/** Usage rows carry WP8's scope label (`execution-calls`, `global-month`, `provider-month:searchapi`). */
+function usageOf(e: ExecutionResponse, label: string): UsageRow | null {
+  return e.budget.find((u) => u.scope === label) ?? null;
 }
 
 const capText = (cap: number | null, fmt: (n: number) => string): string => (cap === null ? COPY.noCap : fmt(cap));
@@ -2745,10 +2675,10 @@ const capText = (cap: number | null, fmt: (n: number) => string): string => (cap
 export function StatusBar({ definition }: { definition: DefinitionResponse | null }) {
   const params = useSearchParams();
   const results = useResults(definition?.id ?? null, parseBasis(params.get('basis')));
-  // why: contract gap G9, executions are newest first, so [0] is the run the status bar follows.
+  // why: execution lists are newest first (plan "API contract"), so [0] is the run the status bar follows.
   const latestId = results.data?.executions[0]?.id ?? null;
   const execution = useExecution(latestId);
-  const jobs = useSchedulerJobs();
+  const coverage = useCoverage(definition?.id ?? null);
   const actions = useExecutionActions();
   const qc = useQueryClient();
 
@@ -2764,7 +2694,7 @@ export function StatusBar({ definition }: { definition: DefinitionResponse | nul
   }, [status, qc]);
 
   if (definition === null) return null;
-  const job = jobs.data?.find((j) => j.definitionId === definition.id);
+  const blockedSince = coverage.data?.scheduleBlockedSince ?? null;
   const e = execution.data;
   const failure = actions.cancel.error ?? actions.resume.error ?? actions.start.error;
   const runCalls = e ? usageOf(e, 'execution-calls') : null;
@@ -2779,6 +2709,7 @@ export function StatusBar({ definition }: { definition: DefinitionResponse | nul
       ) : (
         <>
           <span className="font-semibold">{COPY.statusName[e.status]}</span>
+          {e.stage !== null ? <span>{COPY.stageName[e.stage] ?? e.stage}</span> : null}
           {stageTotals(e).map((s) => (
             <span key={s.stage}>{COPY.progress(COPY.stageName[s.stage] ?? s.stage, s.done, s.total)}</span>
           ))}
@@ -2788,7 +2719,7 @@ export function StatusBar({ definition }: { definition: DefinitionResponse | nul
           {month ? <span>{COPY.spendMonth(formatMicroGbp(month.costMicroGbp), capText(month.cap, formatMicroGbp))}</span> : null}
         </>
       )}
-      {job?.blockedSince ? <span className="font-medium">{COPY.scheduleBlocked(formatIsoDate(job.blockedSince.slice(0, 10)))}</span> : null}
+      {blockedSince !== null ? <span className="font-medium">{COPY.scheduleBlocked(formatIsoDate(blockedSince.slice(0, 10)))}</span> : null}
       {e && (e.status === 'paused_budget' || e.status === 'paused_error') ? (
         <>
           <span className="font-medium">{COPY.paused(e.reason ?? COPY.statusName[e.status])}</span>
@@ -2824,7 +2755,7 @@ import { COPY } from '../copy.js';
 
 export interface ViewHeaderProps {
   title: string;
-  /** Newest first (contract gap G9). */
+  /** ExecutionSummary rows, newest first (plan "API contract"). */
   executions: ReadonlyArray<{ id: string; status: ExecutionStatus; ageHours: number }>;
   stale: boolean;
 }
@@ -2869,24 +2800,25 @@ git add apps/web && git commit -m "wp09: status bar and per-view header"
 ### Task 9.7: Expanded row: segments, layovers, baggage, conditions, verdicts, booking and search links
 
 **Files:**
-- Create: `src/components/ClassBadge.tsx`, `src/components/VerdictList.tsx`, `src/components/BookingAction.tsx`, `src/views/Results/layovers.ts`, `src/views/Results/ExpandedRow.tsx`
+- Create: `src/components/ClassBadge.tsx`, `src/components/VerdictList.tsx`, `src/components/BookingAction.tsx`, `src/views/Results/ExpandedRow.tsx`
 - Test: `test/views/results/expanded.test.tsx`
 
 **Interfaces:**
-- Consumes: `ResultRow` (with contract gap G7), `Booking`, `Verdicts`, `effectiveAge`, `formatDuration`; `PriceCell`, `PriceBoundary` (Task 9.1); `useExecutionActions` (Task 9.3).
-- Produces: `ClassBadge({ cls })`, `VerdictList({ verdicts })`, `BookingAction({ booking })`, `SearchLink({ link })`, `safeHttpsUrl(url, host)`, `layoversOf(segments)`, `ExpandedRow({ row, extras, verificationConfigured, definitionId })`.
+- Consumes: `ResultRow` (with `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`), `Booking`, `Verdicts`, `effectiveAge`, `formatDuration`; `PriceCell`, `PriceBoundary` (Task 9.1); `useExecutionActions` (Task 9.3).
+- Produces: `ClassBadge({ cls })`, `VerdictList({ verdicts })`, `BookingAction({ booking })`, `SearchLink({ link })`, `safeHttpsUrl(url, host)`, `ExpandedRow({ row, extras, verificationConfigured, definitionId })`.
 
 - [ ] **Step 1: Write the failing test**
 
 `test/views/results/expanded.test.tsx`:
 
 ```tsx
+import { asIata } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BookingAction, safeHttpsUrl } from '../../../src/components/BookingAction.js';
 import { ExpandedRow } from '../../../src/views/Results/ExpandedRow.js';
-import { API, calendarRow, execution, failedRow, verifiedRow } from '../../fixtures.js';
+import { API, calendarRow, failedRow, verifiedRow } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
@@ -2967,6 +2899,13 @@ describe('itinerary detail (spec §11 expanded row)', () => {
     expect(screen.getByText('sold by Example Travel')).toBeInTheDocument();
   });
 
+  it('an overnight layover and a self-transfer are named', () => {
+    render(verifiedRow({ layovers: [{ at: asIata('BBB'), minutes: 540, overnight: true, airportChange: false }], selfTransfer: true }));
+    expect(screen.getByText('BBB: 9h 00m')).toBeInTheDocument();
+    expect(screen.getByText('overnight')).toBeInTheDocument();
+    expect(screen.getByText('self-transfer: you re-check bags and the airlines do not protect the connection')).toBeInTheDocument();
+  });
+
   it('missing baggage and conditions say "not stated", never a default', () => {
     render(failedRow());
     expect(screen.getByText('cabin bag not stated')).toBeInTheDocument();
@@ -2980,7 +2919,7 @@ describe('itinerary detail (spec §11 expanded row)', () => {
   });
 
   it('other sellers render through the provenance-checked price', () => {
-    render(verifiedRow({ otherOffers: [{ seller: 'Second Seller', pricePence: 42000, provenance: verifiedRow().provenance, booking: { kind: 'none' } }] }));
+    render(verifiedRow({ otherOffers: [{ seller: 'Second Seller', pricePence: 42000, provenance: verifiedRow().provenance, booking: { kind: 'none' }, stale: false, ageHours: 5 }] }));
     const others = screen.getByRole('region', { name: 'Other sellers for this itinerary' });
     expect(within(others).getByText('£420')).toBeInTheDocument();
     expect(within(others).getByText('Google Flights via SearchApi')).toBeInTheDocument();
@@ -2999,7 +2938,7 @@ describe('calendar rows (spec §6.9)', () => {
     server.use(
       http.post(`${API}/cells/verify`, async ({ request }) => {
         bodies.push(await request.json());
-        return HttpResponse.json(execution({ id: 'exec-child-1', isChild: true, status: 'pending' }));
+        return HttpResponse.json({ executionId: 'exec-child-1' });
       }),
     );
     const { user, unmount } = render(calendarRow());
@@ -3140,37 +3079,6 @@ export function SearchLink({ link }: { link: { url: string; host: string; label:
 }
 ```
 
-`src/views/Results/layovers.ts`:
-
-```ts
-import type { ResultRow } from '../../api/types.js';
-
-type Segment = NonNullable<ResultRow['outbound']>[number];
-
-export interface LayoverView {
-  at: string;
-  /** Null when the provider did not give both UTC instants; never estimated from local times. */
-  minutes: number | null;
-  airportChange: boolean;
-}
-
-/** Layovers between consecutive segments of one direction (spec §11 expanded row). */
-export function layoversOf(segments: readonly Segment[]): LayoverView[] {
-  const out: LayoverView[] = [];
-  for (let i = 1; i < segments.length; i += 1) {
-    const prev = segments[i - 1];
-    const next = segments[i];
-    if (prev === undefined || next === undefined) continue;
-    const minutes =
-      prev.arriveUtc !== undefined && next.departUtc !== undefined
-        ? Math.round((Date.parse(next.departUtc) - Date.parse(prev.arriveUtc)) / 60_000)
-        : null;
-    out.push({ at: prev.to, minutes, airportChange: prev.to !== next.from });
-  }
-  return out;
-}
-```
-
 `src/views/Results/ExpandedRow.tsx`:
 
 ```tsx
@@ -3184,7 +3092,6 @@ import { VerdictList } from '../../components/VerdictList.js';
 import { COPY } from '../../copy.js';
 import { formatLocalDateTime, formatMinutes, formatPence } from '../../format.js';
 import { useNow } from '../../now.js';
-import { layoversOf } from './layovers.js';
 
 type Segment = NonNullable<ResultRow['outbound']>[number];
 
@@ -3213,7 +3120,6 @@ export interface ExpandedRowProps {
 export function ExpandedRow({ row, extras, verificationConfigured, definitionId }: ExpandedRowProps) {
   const now = useNow();
   const actions = useExecutionActions();
-  const layovers = [...layoversOf(row.outbound ?? []), ...layoversOf(row.inbound ?? [])];
   const age = effectiveAge(row.provenance, now);
   const { nights: _nights, ...cellKey } = row.cell;
   return (
@@ -3252,18 +3158,20 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
       </section>
       <section aria-label={COPY.layovers}>
         <h4 className="font-semibold">{COPY.layovers}</h4>
-        {layovers.length === 0 ? (
+        {row.layovers.length === 0 ? (
           <p>{COPY.noLayovers}</p>
         ) : (
           <ul>
-            {layovers.map((l, i) => (
+            {row.layovers.map((l, i) => (
               <li key={`${l.at}-${i}`}>
-                {COPY.layover(l.at, l.minutes === null ? COPY.layoverUnknown : formatMinutes(l.minutes))}
+                {COPY.layover(l.at, formatMinutes(l.minutes))}
+                {l.overnight ? <span className="ml-1 font-semibold">{COPY.overnightLayover}</span> : null}
                 {l.airportChange ? <span className="ml-1 font-semibold">{COPY.airportChange}</span> : null}
               </li>
             ))}
           </ul>
         )}
+        {row.selfTransfer === true ? <p className="font-semibold">{COPY.selfTransfer}</p> : null}
       </section>
       <section aria-label={COPY.baggage}>
         <h4 className="font-semibold">{COPY.baggage}</h4>
@@ -3326,7 +3234,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results/expanded.test.tsx test/copy`
-Expected: PASS, 11 + 8 tests.
+Expected: PASS, 12 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3341,7 +3249,7 @@ git add apps/web && git commit -m "wp09: expanded row with verdicts, booking for
 - Test: `test/views/results/table.test.tsx`
 
 **Interfaces:**
-- Consumes: `sortRows`, `filterRows`, `bandCheapest`, `cellKeyString`, `SortKey` (WP1/WP2, §4); TanStack Table v9 (Library notes); `ExpandedRow` (Task 9.7); `ViewHeader` (Task 9.6); URL state (Task 9.4).
+- Consumes: `sortRows`, `filterRows`, `bandCheapest` (returns `Set<string>` of row keys), `SortKey` (plan "Core domain functions"); `cellKeyString` (WP0); TanStack Table v9 (Library notes); `ExpandedRow` (Task 9.7); `ViewHeader` (Task 9.6); URL state (Task 9.4).
 - Produces: `ResultsTable`, `WIDE_COLUMNS`, `NARROW_COLUMNS`, `rowId`, `ResultsHeader`, `Filters`, `ResultsView({ definition })` (Task 9.9 gives its final form).
 
 - [ ] **Step 1: Write the failing test**
@@ -3411,7 +3319,7 @@ describe('View A header (spec §11 two lines)', () => {
     countResults();
     renderWithProviders(<ResultsView definition={definition()} />, { search: '?view=results&def=def-0001' });
     expect(
-      await screen.findByText('cheapest found £412 · JFK 14 Mar 2027–28 Mar 2027 (14n) · itinerary-search basis · verified · Google Flights via SearchApi · 5h ago · ≤just now'),
+      await screen.findByText('cheapest found £412 · JFK 14 Mar 2027–28 Mar 2027 (14n) · itinerary-search basis · verified · Google Flights via SearchApi · 5h ago'),
     ).toBeInTheDocument();
     const line2 = screen.getByRole('link', {
       name: 'discovery: 3 priced · 1 no fares · 2 no cached data · 0 error · 0 skipped · 4 not searched of 10 (0 reused) · itinerary-searched 2 of 10 selected (2 outbounds each) +1 on demand',
@@ -3420,7 +3328,7 @@ describe('View A header (spec §11 two lines)', () => {
   });
 
   it('says "within the cheapest 1000 of N" when truncated, and reports rows outside the current space', async () => {
-    countResults(resultsResponse({ truncated: true, total: 4210, excludedByCurrentSpace: 3 }));
+    countResults({ ...resultsResponse({ truncated: true, excludedByCurrentSpace: 3 }), total: 4210 });
     renderWithProviders(<ResultsView definition={definition()} />);
     expect(await screen.findByText('within the cheapest 2 of 4210')).toBeInTheDocument();
     expect(screen.getByText('3 rows outside the current window and nights range are not shown')).toBeInTheDocument();
@@ -3446,7 +3354,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
 
   it('filters survive a view switch because they are in the URL', async () => {
     countResults();
-    const first = renderWithProviders(<ResultsView definition={definition()} />, { search: '?view=results&f.class=failed' });
+    const first = renderWithProviders(<ResultsView definition={definition()} />, { search: '?view=results&f.class=partially-verified' });
     await screen.findByRole('table', { name: 'Round trips found' });
     expect(dataRows()).toHaveLength(1);
     const search = window.location.search;
@@ -3454,7 +3362,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
     renderWithProviders(<ResultsView definition={definition()} />, { search });
     await screen.findByRole('table', { name: 'Round trips found' });
     expect(dataRows()).toHaveLength(1);
-    expect(screen.getByRole('checkbox', { name: 'failed' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'partially verified' })).toBeChecked();
   });
 
   it('stops and carriers filters are disabled on the calendar basis', async () => {
@@ -3501,7 +3409,7 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Results/Result
 `src/views/Results/ResultsTable.tsx`:
 
 ```tsx
-import { cellKeyString, effectiveAge, formatDuration, type SortDir, type SortKey } from '@gmt/core';
+import { cellKeyString, effectiveAge, formatDuration, type SortKey } from '@gmt/core';
 import { createColumnHelper, type ExpandedState, rowExpandingFeature, tableFeatures, useTable } from '@tanstack/react-table';
 import { Fragment, useMemo, useState } from 'react';
 import type { ResultRow } from '../../api/types.js';
@@ -3511,6 +3419,7 @@ import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatMinutes, formatPence } from '../../format.js';
 import { useNow } from '../../now.js';
+import type { SortDir } from '../../state/resultsState.js';
 import { ExpandedRow } from './ExpandedRow.js';
 
 // why: only the expanding feature; sorting and filtering are core's functions over the fetched page (spec §6.5).
@@ -3534,7 +3443,10 @@ const SORT_KEY: Partial<Record<ColumnId, SortKey>> = {
 
 type Sort = { key: SortKey; dir: SortDir } | null;
 
-/** Stable row identity: the itinerary hash, or cell + provider for calendar rows. */
+/**
+ * Stable row identity: the itinerary hash, or cell + provider for calendar rows. It must equal the
+ * row key in the Set that core's bandCheapest returns (mismatch R2: the plan does not export that key function).
+ */
 export function rowId(r: ResultRow): string {
   return r.itineraryHash ?? `${cellKeyString(r.cell)}|${r.provenance.providerId}`;
 }
@@ -3560,7 +3472,7 @@ function FetchedAgo({ row }: { row: ResultRow }) {
   return <span>{COPY.fetchedAgo(COPY.ago(formatDuration(effectiveAge(row.provenance, now).fetchedHours)))}</span>;
 }
 
-function PriceColumn({ row }: { row: ResultRow }) {
+function PriceColumn({ row, banded }: { row: ResultRow; banded: boolean }) {
   return (
     <div className="flex flex-col gap-0.5">
       <PriceBoundary>
@@ -3576,7 +3488,7 @@ function PriceColumn({ row }: { row: ResultRow }) {
       {row.basis === 'calendar' && row.notApplied.length > 0 ? (
         <span className="text-xs">{COPY.notApplied(row.notApplied.map((n) => COPY.constraint[n]).join(', '))}</span>
       ) : null}
-      {row.bandCheapest ? <span className="text-xs font-medium">{COPY.bandCheapest}</span> : null}
+      {banded ? <span className="text-xs font-medium">{COPY.bandCheapest}</span> : null}
       {row.notSeenInLatest !== null ? (
         <span className="text-xs">{COPY.notSeenInLatest(COPY.ago(formatDuration(row.notSeenInLatest.ageHours)))}</span>
       ) : null}
@@ -3584,10 +3496,10 @@ function PriceColumn({ row }: { row: ResultRow }) {
   );
 }
 
-function cellFor(id: ColumnId, r: ResultRow) {
+function cellFor(id: ColumnId, r: ResultRow, banded: ReadonlySet<string>) {
   const calendar = r.basis === 'calendar';
   switch (id) {
-    case 'price': return <PriceColumn row={r} />;
+    case 'price': return <PriceColumn row={r} banded={banded.has(rowId(r))} />;
     case 'totalTime': return <span>{r.totalMinutes === null ? COPY.notChecked : formatMinutes(r.totalMinutes)}</span>;
     case 'departure': return <span>{formatIsoDate(r.cell.departureDate)}</span>;
     case 'return': return <span>{formatIsoDate(r.cell.returnDate)}</span>;
@@ -3603,13 +3515,13 @@ function cellFor(id: ColumnId, r: ResultRow) {
   }
 }
 
-function buildColumns(ids: readonly ColumnId[], sort: Sort, onSort: (k: SortKey) => void) {
+function buildColumns(ids: readonly ColumnId[], sort: Sort, onSort: (k: SortKey) => void, banded: ReadonlySet<string>) {
   return ids.map((id) =>
     helper.display({
       id,
       header: () => <SortHeader id={id} sort={sort} onSort={onSort} />,
       cell: ({ row }) => {
-        if (id !== 'expand') return cellFor(id, row.original);
+        if (id !== 'expand') return cellFor(id, row.original, banded);
         const open = row.getIsExpanded();
         const name = COPY.rowName(row.original.cell.destination, formatIsoDate(row.original.cell.departureDate), formatIsoDate(row.original.cell.returnDate));
         return (
@@ -3631,6 +3543,8 @@ function buildColumns(ids: readonly ColumnId[], sort: Sort, onSort: (k: SortKey)
 
 export interface ResultsTableProps {
   rows: readonly ResultRow[];
+  /** Row keys core's bandCheapest marked over the filtered set (spec §6.5). */
+  banded: ReadonlySet<string>;
   sort: Sort;
   onSort: (k: SortKey) => void;
   narrow: boolean;
@@ -3639,11 +3553,11 @@ export interface ResultsTableProps {
 }
 
 /** View A table. Rows arrive filtered and sorted by core's functions; the table renders and expands. */
-export function ResultsTable({ rows, sort, onSort, narrow, verificationConfigured, definitionId }: ResultsTableProps) {
+export function ResultsTable({ rows, banded, sort, onSort, narrow, verificationConfigured, definitionId }: ResultsTableProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const adjusted = rows.some((r) => r.adjustedPence !== null);
   const ids = useMemo(() => (narrow ? NARROW_COLUMNS : WIDE_COLUMNS.filter((c) => c !== 'adjusted' || adjusted)), [narrow, adjusted]);
-  const columns = useMemo(() => buildColumns(ids, sort, onSort), [ids, sort, onSort]);
+  const columns = useMemo(() => buildColumns(ids, sort, onSort, banded), [ids, sort, onSort, banded]);
   const data = useMemo(() => [...rows], [rows]);
   const table = useTable({
     features, columns, data, getRowId: rowId, getRowCanExpand: () => true, state: { expanded }, onExpandedChange: setExpanded,
@@ -3726,13 +3640,13 @@ function Headline({ row }: { row: ResultRow }) {
 
 /** Spec §11: the two-line Results header, plus the truncation and current-space notes. */
 export function ResultsHeader({ data, definition }: { data: ResultsResponse; definition: DefinitionResponse }) {
-  // why: server order is class then price, so the first non-failed row is the cheapest round trip found at the best class.
-  const headline = data.rows.find((r) => r.verdictClass !== 'failed') ?? null;
+  // why: the API picks the headline row (resultsResponse.cheapest), so web and email agree on it.
+  const headline = data.cheapest;
   const c = data.coverage;
   const b = c.buckets;
   const line2 =
-    COPY.coverageLine({ priced: b.priced, empty: b.empty, noData: b.no_data, error: b.error, skipped: b.skipped, notRun: b.not_run, total: c.total, reused: b.reused }) +
-    (definition.providers.verification.length > 0
+    COPY.coverageLine({ priced: b.priced, empty: b.empty, noData: b.no_data, error: b.error, skipped: b.skipped, notRun: b.not_run, total: c.total, reused: c.reused }) +
+    (data.verificationProviderConfigured
       ? COPY.itineraryLine({ searched: c.itinerarySearched, selected: c.selected, expandTop: definition.verification.expandTop, onDemand: c.onDemand })
       : COPY.noItinerarySearch);
   return (
@@ -3759,7 +3673,7 @@ export function ResultsHeader({ data, definition }: { data: ResultsResponse; def
 `src/views/Results/Filters.tsx`:
 
 ```tsx
-import type { ConstraintName, ResultFilters, VerdictClass } from '@gmt/core';
+import type { ConstraintName, Iata, ResultFilters, VerdictClass } from '@gmt/core';
 import type { ResultRow } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { penceToPoundsInput, parsePoundsToPence } from '../../format.js';
@@ -3796,7 +3710,7 @@ export function Filters({ state, rows, calendarBasis }: { state: ResultsUiState;
         <legend className="font-semibold">{COPY.filterClass}</legend>
         {CLASSES.map((c) => (
           <label key={c} className="flex items-center gap-1">
-            <input type="checkbox" checked={f.verdictClasses?.includes(c) ?? false} onChange={() => apply(setFilter(f, 'verdictClasses', toggle(f.verdictClasses, c)))} />
+            <input type="checkbox" checked={f.verdictClass?.includes(c) ?? false} onChange={() => apply(setFilter(f, 'verdictClass', toggle(f.verdictClass, c)))} />
             {COPY.classLabel[c]}
           </label>
         ))}
@@ -3805,7 +3719,7 @@ export function Filters({ state, rows, calendarBasis }: { state: ResultsUiState;
         <legend className="font-semibold">{COPY.filterProvider}</legend>
         {providers.map((p) => (
           <label key={p} className="flex items-center gap-1">
-            <input type="checkbox" checked={f.providers?.includes(p) ?? false} onChange={() => apply(setFilter(f, 'providers', toggle(f.providers, p)))} />
+            <input type="checkbox" checked={f.providerId?.includes(p) ?? false} onChange={() => apply(setFilter(f, 'providerId', toggle(f.providerId, p)))} />
             {COPY.provider[p]}
           </label>
         ))}
@@ -3814,7 +3728,7 @@ export function Filters({ state, rows, calendarBasis }: { state: ResultsUiState;
         <legend className="font-semibold">{COPY.filterDestinations}</legend>
         {destinations.map((d) => (
           <label key={d} className="flex items-center gap-1">
-            <input type="checkbox" checked={f.destinations?.includes(d) ?? false} onChange={() => apply(setFilter(f, 'destinations', toggle(f.destinations, d)))} />
+            <input type="checkbox" checked={f.destination?.includes(d) ?? false} onChange={() => apply(setFilter(f, 'destination', toggle<Iata>(f.destination, d)))} />
             {d}
           </label>
         ))}
@@ -3887,8 +3801,9 @@ export function Filters({ state, rows, calendarBasis }: { state: ResultsUiState;
         <select
           id="filter-unverified"
           disabled={calendarBasis}
-          value={f.unverifiedConstraint ?? ''}
-          onChange={(e) => apply(setFilter(f, 'unverifiedConstraint', e.target.value === '' ? undefined : (e.target.value as ConstraintName)))}
+          // why: core's filter takes a list; this control picks one constraint (a row matches if it is unverified there).
+          value={f.unverified?.[0] ?? ''}
+          onChange={(e) => apply(setFilter(f, 'unverified', e.target.value === '' ? undefined : [e.target.value as ConstraintName]))}
         >
           <option value="">{COPY.any}</option>
           {constraints.map((c) => (
@@ -3932,11 +3847,12 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const ui = useMemo(() => parseResultsState(params), [params]);
   const results = useResults(definition.id, basis);
   const narrow = useMediaQuery(NARROW_QUERY);
-  const rows = useMemo(() => {
-    if (results.data === undefined) return [];
+  const { rows, banded } = useMemo(() => {
+    if (results.data === undefined) return { rows: [], banded: new Set<string>() };
+    const filtered = filterRows(results.data.rows, ui.filters);
     // why: band over the filtered set, so "cheapest in its band" means among the rows the operator is looking at.
-    const filtered = bandCheapest(filterRows(results.data.rows, ui.filters), BAND_HOURS);
-    return ui.sort === null ? filtered : sortRows(filtered, ui.sort.key, ui.sort.dir);
+    const marked = bandCheapest(filtered, BAND_HOURS);
+    return { rows: ui.sort === null ? filtered : sortRows(filtered, ui.sort.key, ui.sort.dir), banded: marked };
   }, [results.data, ui]);
   const onSort = useCallback((key: SortKey) => {
     const current = parseResultsState(new URLSearchParams(window.location.search));
@@ -3954,10 +3870,11 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} />
       <ResultsTable
         rows={rows}
+        banded={banded}
         sort={ui.sort}
         onSort={onSort}
         narrow={narrow}
-        verificationConfigured={definition.providers.verification.length > 0}
+        verificationConfigured={data.verificationProviderConfigured}
         definitionId={definition.id}
       />
     </div>
@@ -3970,7 +3887,7 @@ Wire the view into `App.tsx`: replace the `view === 'results'` part of the WP9 p
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 8 + 11 + 8 tests. If the sort or filter tests fail because WP2's `filterRows` treats `verdictClasses` under another name, adapt `src/state/resultsState.ts` and `Filters.tsx` to the merged signature (mismatch M5) and record it in the PR.
+Expected: PASS, 8 + 12 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3986,7 +3903,7 @@ git add apps/web && git commit -m "wp09: View A table, two-line header, client-s
 - Test: `test/views/results/basisAndGap.test.tsx`
 
 **Interfaces:**
-- Consumes: `useCalendarGap`, `useExecutionActions` (Task 9.3); contract gap G4; `cellKeyString` (WP1).
+- Consumes: `useCalendarGap`, `useExecutionActions` (Task 9.3); `calendarGapResponseSchema` `{ cheapestVerifiedPence, cells: [{ cell, calendar: PriceCell, verifyAvailable }] }`; `resultsResponse.verificationProviderConfigured`; `cellKeyString` (WP0).
 - Produces: `BasisSwitch({ basis, reason })`, `CalendarGapBanner({ definitionId })`, final `ResultsView`.
 
 - [ ] **Step 1: Write the failing test**
@@ -3994,15 +3911,17 @@ git add apps/web && git commit -m "wp09: View A table, two-line header, client-s
 `test/views/results/basisAndGap.test.tsx`:
 
 ```tsx
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { ResultsView } from '../../../src/views/Results/ResultsView.js';
-import { API, calendarGap, calendarRow, definition, execution, resultsResponse } from '../../fixtures.js';
+import { API, calendarGap, calendarRow, definition, resultsResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
 const calendarOnly = definition({ providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } } });
+const calendarResults = () =>
+  resultsResponse({ basis: 'calendar', basisReason: 'no verification provider configured', rows: [calendarRow()], verificationProviderConfigured: false });
 
 describe('basis (spec §6.9)', () => {
   it('calendar default says why and switches basis in one click, refetching with basis=', async () => {
@@ -4010,7 +3929,7 @@ describe('basis (spec §6.9)', () => {
     server.use(
       http.get(`${API}/definitions/:id/results`, ({ request }) => {
         urls.push(new URL(request.url).search);
-        return HttpResponse.json(resultsResponse({ basis: 'calendar', basisReason: 'no verification provider configured', rows: [calendarRow()], total: 1 }));
+        return HttpResponse.json(calendarResults());
       }),
     );
     const { user } = renderWithProviders(<ResultsView definition={calendarOnly} />);
@@ -4023,9 +3942,7 @@ describe('basis (spec §6.9)', () => {
 
   it('calendar headline and coverage line when no verification provider is configured', async () => {
     server.use(
-      http.get(`${API}/definitions/:id/results`, () =>
-        HttpResponse.json(resultsResponse({ basis: 'calendar', basisReason: 'no verification provider configured', rows: [calendarRow()], total: 1 })),
-      ),
+      http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(calendarResults())),
     );
     renderWithProviders(<ResultsView definition={calendarOnly} />);
     expect(
@@ -4044,14 +3961,14 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
       http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap())),
       http.post(`${API}/cells/verify`, async ({ request }) => {
         verifies.push(await request.json());
-        return HttpResponse.json(execution({ id: 'exec-child-1', isChild: true, status: 'pending' }));
+        return HttpResponse.json({ executionId: 'exec-child-1' });
       }),
     );
     const { user } = renderWithProviders(<ResultsView definition={definition()} />);
     const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    expect(banner).toHaveTextContent('1 cells have calendar prices below your cheapest verified');
-    expect(banner).toHaveTextContent('£412');
-    expect(banner).toHaveTextContent('£399');
+    expect(banner).toHaveTextContent('1 cells have calendar prices below your cheapest verified (£412)');
+    expect(within(banner).getByText('£399')).toBeInTheDocument();
+    expect(within(banner).getByText('Aviasales cache')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Search this cell for itineraries' }));
     await expect.poll(() => verifies).toEqual([
       { definitionId: 'def-0001', cell: { origin: 'LHR', destination: 'EWR', departureDate: '2027-04-02', returnDate: '2027-04-16' } },
@@ -4061,6 +3978,7 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
   it('is hidden, and never requested, without a verification provider', async () => {
     let gapHits = 0;
     server.use(
+      http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(calendarResults())),
       http.get(`${API}/definitions/:id/calendar-gap`, () => {
         gapHits += 1;
         return HttpResponse.json(calendarGap());
@@ -4115,28 +4033,22 @@ import { useCalendarGap, useExecutionActions } from '../../api/queries.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate } from '../../format.js';
+import { formatIsoDate, formatPence } from '../../format.js';
 
 /**
  * Spec §11: "N cells have calendar prices below your cheapest verified (£X)" with per-cell verify.
- * Rendered only when the definition has a verification provider (ResultsView decides), so the
- * query below never runs on the £0 configuration.
+ * Rendered only when the results response says a verification provider is configured, so the
+ * query never runs on the £0 configuration. £X is a reference to the class-verified headline row,
+ * whose provenance the table shows; the contract gives it as pence only (mismatch R3).
  */
 export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
   const gap = useCalendarGap(definitionId, true);
   const actions = useExecutionActions();
   const data = gap.data;
-  if (data === undefined || data.cells.length === 0 || data.cheapestVerified === null) return null;
-  const cv = data.cheapestVerified;
+  if (data === undefined || data.cells.length === 0 || data.cheapestVerifiedPence === null) return null;
   return (
     <section aria-label={COPY.calendarGapList} className="rounded border border-amber-700 bg-amber-50 p-2 text-sm">
-      <p className="flex flex-wrap items-center gap-1">
-        {COPY.calendarGapLead(data.cells.length)} (
-        <PriceBoundary>
-          <PriceCell pricePence={cv.pricePence} provenance={cv.provenance} calendar={false} stale={cv.stale} />
-        </PriceBoundary>
-        )
-      </p>
+      <p>{COPY.calendarGapLead(data.cells.length, formatPence(data.cheapestVerifiedPence))}</p>
       <ul className="mt-1 space-y-1">
         {data.cells.map((c) => {
           const { nights, ...key } = c.cell;
@@ -4146,11 +4058,13 @@ export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
                 {COPY.coverageCheckPair(c.cell.origin, c.cell.destination)} {COPY.dateRange(formatIsoDate(c.cell.departureDate), formatIsoDate(c.cell.returnDate), nights)}
               </span>
               <PriceBoundary>
-                <PriceCell pricePence={c.price.pricePence} provenance={c.price.provenance} calendar stale={c.price.stale} destination={c.cell.destination} />
+                <PriceCell pricePence={c.calendar.pricePence} provenance={c.calendar.provenance} calendar stale={c.calendar.stale} destination={c.cell.destination} />
               </PriceBoundary>
-              <button type="button" className="rounded border border-slate-500 px-2" onClick={() => actions.verify.mutate({ definitionId, cell: key })}>
-                {COPY.verifyCell}
-              </button>
+              {c.verifyAvailable ? (
+                <button type="button" className="rounded border border-slate-500 px-2" onClick={() => actions.verify.mutate({ definitionId, cell: key })}>
+                  {COPY.verifyCell}
+                </button>
+              ) : null}
             </li>
           );
         })}
@@ -4190,12 +4104,12 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const ui = useMemo(() => parseResultsState(params), [params]);
   const results = useResults(definition.id, basis);
   const narrow = useMediaQuery(NARROW_QUERY);
-  const verificationConfigured = definition.providers.verification.length > 0;
-  const rows = useMemo(() => {
-    if (results.data === undefined) return [];
+  const { rows, banded } = useMemo(() => {
+    if (results.data === undefined) return { rows: [], banded: new Set<string>() };
+    const filtered = filterRows(results.data.rows, ui.filters);
     // why: band over the filtered set, so "cheapest in its band" means among the rows the operator is looking at.
-    const filtered = bandCheapest(filterRows(results.data.rows, ui.filters), BAND_HOURS);
-    return ui.sort === null ? filtered : sortRows(filtered, ui.sort.key, ui.sort.dir);
+    const marked = bandCheapest(filtered, BAND_HOURS);
+    return { rows: ui.sort === null ? filtered : sortRows(filtered, ui.sort.key, ui.sort.dir), banded: marked };
   }, [results.data, ui]);
   const onSort = useCallback((key: SortKey) => {
     const current = parseResultsState(new URLSearchParams(window.location.search));
@@ -4206,6 +4120,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   if (results.error) return <p role="alert">{COPY.loadFailed(results.error.message)}</p>;
   if (results.data === undefined) return <p>{COPY.loading}</p>;
   const data = results.data;
+  const verificationConfigured = data.verificationProviderConfigured;
   return (
     <div className="space-y-3">
       <ViewHeader title={COPY.nav.results} executions={data.executions} stale={data.rows.length > 0 && data.rows.every((r) => r.stale)} />
@@ -4215,6 +4130,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} />
       <ResultsTable
         rows={rows}
+        banded={banded}
         sort={ui.sort}
         onSort={onSort}
         narrow={narrow}
@@ -4229,7 +4145,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 4 + 8 + 11 + 8 tests.
+Expected: PASS, 4 + 8 + 12 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4244,7 +4160,7 @@ git add apps/web && git commit -m "wp09: basis switch and calendar-gap banner wi
 - Test: `test/views/coverage.test.tsx`
 
 **Interfaces:**
-- Consumes: `useCoverage`, `useResults`, `useExecutionActions` (Task 9.3); contract gap G3; `ViewHeader` (Task 9.6).
+- Consumes: `useCoverage`, `useResults`, `useExecutionActions` (Task 9.3); `coverageResponseSchema` `{ executionId, summary, perStage: [{ stage, providerId, buckets, total, requests: { calls, cacheHits, costMicroGbp, planCalls }, overrun, parityBreak }], selectedNotReached: [{ cell, reason }], errors: [{ cell, stage, providerId, reason, lastError, attempts, retryable }], scheduleBlockedSince }`; `ViewHeader` (Task 9.6).
 - Produces: `CoverageView({ definition })`.
 
 - [ ] **Step 1: Write the failing test**
@@ -4263,28 +4179,31 @@ import { renderWithProviders } from '../render.js';
 const rowTexts = (table: HTMLElement) =>
   within(table).getAllByRole('row').slice(1).map((r) => [...r.querySelectorAll('th, td')].map((c) => c.textContent));
 
+function withStage(patch: Partial<ReturnType<typeof coverageResponse>['perStage'][number]>) {
+  const base = coverageResponse();
+  const [first, ...rest] = base.perStage;
+  if (first === undefined) throw new Error('fixture');
+  return { ...base, perStage: [{ ...first, ...patch }, ...rest] };
+}
+
 describe('View D (spec §11, §6.6)', () => {
-  it('counts per stage × provider in the six buckets, with cells and the "searched" umbrella beside', async () => {
+  it('counts per stage × provider in the six buckets, with cells, the "searched" umbrella and estimate vs ledger beside', async () => {
     renderWithProviders(<CoverageView definition={definition()} />);
     const table = await screen.findByRole('table', { name: 'Coverage' });
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
-      'Stage', 'Provider', 'priced', 'no fares', 'no cached data', 'error', 'skipped', 'not searched', 'cells', 'searched (priced + no fares + no cached data)',
+      'Stage', 'Provider', 'priced', 'no fares', 'no cached data', 'error', 'skipped', 'not searched', 'cells',
+      'searched (priced + no fares + no cached data)', 'Requests (estimate vs ledger)',
     ]);
     expect(rowTexts(table)).toEqual([
-      ['discovery', 'Travelpayouts', '60', '10', '40', '6', '0', '10', '126', '110'],
-      ['itinerary search', 'SearchApi', '8', '1', '0', '1', '116', '0', '126', '9'],
+      ['discovery', 'Travelpayouts', '60', '10', '40', '6', '0', '10', '126', '110', '14 of 14 planned calls · 0 cache hits · ledger cost £0, from configured rates'],
+      ['itinerary search', 'SearchApi', '8', '1', '0', '1', '116', '0', '126', '9', '50 of 50 planned calls · 0 cache hits · ledger cost £0, from configured rates'],
     ]);
   });
 
-  it('View D sums: buckets that do not add up to the cell count are flagged, never hidden', async () => {
-    const bad = coverageResponse();
-    const first = bad.stages[0];
+  it('View D sums: six buckets that do not add up to the cell count are flagged, never hidden', async () => {
+    const first = coverageResponse().perStage[0];
     if (first === undefined) throw new Error('fixture');
-    server.use(
-      http.get(`${API}/definitions/:id/coverage`, () =>
-        HttpResponse.json({ ...bad, stages: [{ ...first, buckets: { ...first.buckets, not_run: 9 } }] }),
-      ),
-    );
+    server.use(http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json(withStage({ buckets: { ...first.buckets, not_run: 9 } }))));
     renderWithProviders(<CoverageView definition={definition()} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('buckets sum to 125, not 126; report this');
   });
@@ -4301,19 +4220,19 @@ describe('View D (spec §11, §6.6)', () => {
     expect(within(list).getByText('LHR → JFK 20 Mar 2027 to 1 Apr 2027: skipped: budget')).toBeInTheDocument();
   });
 
-  it('overrun and parity flags appear only when set', async () => {
+  it('overrun and parity flags appear on their stage row only when set', async () => {
     const { unmount } = renderWithProviders(<CoverageView definition={definition()} />);
     await screen.findByRole('table', { name: 'Coverage' });
     expect(screen.queryByText(/Overrun/)).toBeNull();
     expect(screen.queryByText(/Parity break/)).toBeNull();
     unmount();
-    server.use(http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json(coverageResponse({ overrun: true, parityBreak: true }))));
+    server.use(http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json(withStage({ overrun: true, parityBreak: true }))));
     renderWithProviders(<CoverageView definition={definition()} />);
     expect(await screen.findByText('Overrun: ledger calls exceed the plan by more than 10%.')).toBeInTheDocument();
     expect(screen.getByText('Parity break: tile requests differ from the plan.')).toBeInTheDocument();
   });
 
-  it('lists errors and retries them through POST /executions/:id/resume', async () => {
+  it('lists errors and retries the retryable ones through POST /api/executions/:id/resume', async () => {
     const resumed: string[] = [];
     server.use(
       http.post(`${API}/executions/:id/resume`, ({ params }) => {
@@ -4328,9 +4247,12 @@ describe('View D (spec §11, §6.6)', () => {
     await expect.poll(() => resumed).toEqual(['exec-0001']);
   });
 
-  it('shows requests as estimate vs ledger', async () => {
+  it('no Retry button when no error is retryable', async () => {
+    const base = coverageResponse();
+    server.use(http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json({ ...base, errors: base.errors.map((e) => ({ ...e, retryable: false })) })));
     renderWithProviders(<CoverageView definition={definition()} />);
-    expect(await screen.findByText('Travelpayouts: 14 calls · 0 cache hits · 14 tiles · ledger cost £0, from configured rates')).toBeInTheDocument();
+    await screen.findByRole('list', { name: 'Errors' });
+    expect(screen.queryByRole('button', { name: 'Retry errors' })).toBeNull();
   });
 });
 ```
@@ -4358,8 +4280,9 @@ import { useSearchParams } from '../../state/urlState.js';
 const BUCKETS = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run'] as const;
 
 const cellText = (c: CellKey) => COPY.cellLabel(c.origin, c.destination, formatIsoDate(c.departureDate), formatIsoDate(c.returnDate));
+const reasonText = (r: string) => (r === 'skipped:budget' ? COPY.reasonBudget : r === 'not_run' ? COPY.reasonNotRun : r);
 
-/** View D (spec §11): per stage × provider counts, selected-not-reached, overrun and parity flags, errors with retry. */
+/** View D (spec §11): per stage × provider counts, estimate vs ledger, selected-not-reached, flags, errors with retry. */
 export function CoverageView({ definition }: { definition: DefinitionResponse }) {
   const params = useSearchParams();
   const results = useResults(definition.id, parseBasis(params.get('basis')));
@@ -4369,6 +4292,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
   if (coverage.data === undefined) return <p>{COPY.loading}</p>;
   const c = coverage.data;
   const executionId = c.executionId;
+  const retryable = c.errors.some((e) => e.retryable);
   return (
     <div className="space-y-4">
       <ViewHeader title={COPY.coverageHeading} executions={results.data?.executions ?? []} stale={false} />
@@ -4382,15 +4306,17 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
             ))}
             <th scope="col" className="p-1 text-right">{COPY.coverageCells}</th>
             <th scope="col" className="border-l border-slate-400 p-1 text-right">{COPY.coverageSearched}</th>
+            <th scope="col" className="p-1 text-left">{COPY.requestsHeading}</th>
           </tr>
         </thead>
         <tbody>
-          {c.stages.map((s) => {
+          {c.perStage.map((s) => {
             const sum = BUCKETS.reduce((n, b) => n + s.buckets[b], 0);
             // why: "searched" is computed here from its definition (spec §3), never taken on trust.
             const searched = s.buckets.priced + s.buckets.empty + s.buckets.no_data;
+            const planned = s.requests.planCalls === null ? COPY.none : String(s.requests.planCalls);
             return (
-              <tr key={`${s.stage}-${s.providerId}`} className="border-t border-slate-200">
+              <tr key={`${s.stage}-${s.providerId}`} className="border-t border-slate-200 align-top">
                 <th scope="row" className="p-1 text-left font-normal">{COPY.stageName[s.stage] ?? s.stage}</th>
                 <td className="p-1">{COPY.provider[s.providerId]}</td>
                 {BUCKETS.map((b) => (
@@ -4398,29 +4324,20 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
                 ))}
                 <td className="p-1 text-right tabular-nums">{s.total}</td>
                 <td className="border-l border-slate-400 p-1 text-right tabular-nums">{searched}</td>
-                {sum !== s.total ? (
-                  <td role="alert" className="p-1 font-semibold text-red-800">{COPY.sumMismatch(sum, s.total)}</td>
-                ) : null}
+                <td className="p-1">
+                  {COPY.requestRow(s.requests.calls, planned, s.requests.cacheHits, formatMicroGbp(s.requests.costMicroGbp))}
+                  {s.overrun ? <p className="font-semibold">{COPY.overrunFlag}</p> : null}
+                  {s.parityBreak ? <p className="font-semibold">{COPY.parityFlag}</p> : null}
+                  {sum !== s.total ? (
+                    <p role="alert" className="font-semibold text-red-800">{COPY.sumMismatch(sum, s.total)}</p>
+                  ) : null}
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-      {c.stages.some((s) => s.buckets.reused > 0) ? (
-        <p className="text-sm">{COPY.reusedNote(c.stages.reduce((n, s) => n + s.buckets.reused, 0))}</p>
-      ) : null}
-      {c.overrun ? <p className="font-semibold">{COPY.overrunFlag}</p> : null}
-      {c.parityBreak ? <p className="font-semibold">{COPY.parityFlag}</p> : null}
-      <section>
-        <h3 className="font-semibold">{COPY.requestsHeading}</h3>
-        <ul className="text-sm">
-          {c.requests.map((r) => (
-            <li key={r.providerId}>
-              {COPY.provider[r.providerId]}: {COPY.requestRow(r.calls, r.cacheHits, r.tiles, formatMicroGbp(r.costMicroGbp))}
-            </li>
-          ))}
-        </ul>
-      </section>
+      {c.summary.reused > 0 ? <p className="text-sm">{COPY.reusedNote(c.summary.reused)}</p> : null}
       <section>
         <h3 className="font-semibold">{COPY.selectedNotReached}</h3>
         {c.selectedNotReached.length === 0 ? (
@@ -4429,7 +4346,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
           <ul aria-label={COPY.selectedNotReached} className="text-sm">
             {c.selectedNotReached.map((x) => (
               <li key={`${x.cell.origin}${x.cell.destination}${x.cell.departureDate}${x.cell.returnDate}`}>
-                {cellText(x.cell)}: {x.reason === 'skipped:budget' ? COPY.reasonBudget : COPY.reasonNotRun}
+                {cellText(x.cell)}: {reasonText(x.reason)}
               </li>
             ))}
           </ul>
@@ -4449,7 +4366,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
             ))}
           </ul>
         )}
-        {c.retryable && executionId !== null && c.errors.length > 0 ? (
+        {retryable && executionId !== null ? (
           <button type="button" className="mt-1 rounded border border-slate-500 px-2" onClick={() => actions.resume.mutate(executionId)}>
             {COPY.retry}
           </button>
@@ -4461,6 +4378,8 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
 }
 ```
 
+`// why:` the sum-mismatch alert sits inside the requests cell so every row keeps the same column count.
+
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/coverage.test.tsx test/copy`
@@ -4469,7 +4388,7 @@ Expected: PASS, 7 + 8 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp09: View D coverage with six buckets, flags and retry"
+git add apps/web && git commit -m "wp09: View D coverage with six buckets, estimate vs ledger, flags and retry"
 ```
 
 ### Task 9.11: Providers view
@@ -4479,7 +4398,7 @@ git add apps/web && git commit -m "wp09: View D coverage with six buckets, flags
 - Test: `test/views/providers.test.tsx`
 
 **Interfaces:**
-- Consumes: `useProviders` (Task 9.3); contract gap G2; `formatDuration` (WP0).
+- Consumes: `useProviders` (Task 9.3); `providersResponseSchema` `{ providers: [{ providerId, displayName, enabled, capabilities: { discovery, verification }, plan, usage: Usage[], excludedFromSchedule, notices }], synthetic, presets, pointOfSale }`; `formatDuration` (WP0).
 - Produces: `ProvidersView()`.
 
 - [ ] **Step 1: Write the failing test**
@@ -4491,7 +4410,7 @@ import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { ProvidersView } from '../../src/views/Providers/ProvidersView.js';
-import { API, providersResponse } from '../fixtures.js';
+import { API, providersResponse, usage } from '../fixtures.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 
@@ -4500,45 +4419,48 @@ describe('Providers view (spec §10, §11)', () => {
     renderWithProviders(<ProvidersView />);
     const searchapi = await screen.findByRole('region', { name: 'SearchApi' });
     expect(within(searchapi).getByText('plan: 40usd')).toBeInTheDocument();
-    expect(within(searchapi).getByText('Discovery: Google Flights calendar via SearchApi · prices up to 24h old when fetched')).toBeInTheDocument();
+    expect(within(searchapi).getByText('Discovery: Google date grid via SearchApi · prices up to 24h old when fetched')).toBeInTheDocument();
     expect(within(searchapi).getByText('Itinerary search: Google Flights via SearchApi · priced at request time')).toBeInTheDocument();
     expect(within(searchapi).getByText('615 of 10000 calls · window 1 Oct 2026 to 1 Nov 2026')).toBeInTheDocument();
     const tp = screen.getByRole('region', { name: 'Travelpayouts' });
     expect(within(tp).getByText('Discovery: Aviasales cache · prices up to 2d old when fetched')).toBeInTheDocument();
     expect(within(tp).getByText('Aviasales cache of recent user searches')).toBeInTheDocument();
-    expect(screen.getByText('total spend this month: £32 of £35')).toBeInTheDocument();
+    expect(within(tp).getByText('plan: free')).toBeInTheDocument();
   });
 
-  it('shows the zero-cap message from the API and marks unconfigured providers', async () => {
+  it("shows each provider's notices (the zero-cap message) and marks unconfigured providers", async () => {
     const base = providersResponse();
     server.use(
       http.get(`${API}/providers`, () =>
         HttpResponse.json({
           ...base,
-          zeroCapMessage: 'verification will not run: spend cap is 0',
-          providers: base.providers.map((p) => (p.id === 'searchapi' ? { ...p, enabled: false } : p)),
+          providers: base.providers.map((p) =>
+            p.providerId === 'searchapi' ? { ...p, enabled: false, notices: ['verification will not run: spend cap is 0'] } : p,
+          ),
         }),
       ),
     );
     renderWithProviders(<ProvidersView />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('verification will not run: spend cap is 0');
-    expect(within(screen.getByRole('region', { name: 'SearchApi' })).getByText('not configured')).toBeInTheDocument();
+    const searchapi = await screen.findByRole('region', { name: 'SearchApi' });
+    expect(within(searchapi).getByRole('alert')).toHaveTextContent('verification will not run: spend cap is 0');
+    expect(within(searchapi).getByText('not configured')).toBeInTheDocument();
   });
 
-  it('a lifetime (trial) window is labelled as such', async () => {
+  it('a lifetime (trial) window is labelled as such, and exclusion from schedules is stated', async () => {
     const base = providersResponse();
-    const sa = base.providers[1];
-    if (sa === undefined) throw new Error('fixture');
     server.use(
       http.get(`${API}/providers`, () =>
         HttpResponse.json({
           ...base,
-          providers: [base.providers[0], { ...sa, plan: 'trial', usage: [{ scope: 'provider-lifetime', usage: { calls: 9, costMicroGbp: 0, cap: 100, windowStart: null, windowEnd: null } }] }],
+          providers: base.providers.map((p) =>
+            p.providerId === 'searchapi' ? { ...p, plan: 'trial', excludedFromSchedule: true, usage: [usage('provider-lifetime:searchapi', 9, 100)] } : p,
+          ),
         }),
       ),
     );
     renderWithProviders(<ProvidersView />);
     expect(await screen.findByText("9 of 100 calls over the plan's lifetime")).toBeInTheDocument();
+    expect(screen.getByText('excluded from scheduled runs')).toBeInTheDocument();
   });
 });
 ```
@@ -4553,10 +4475,11 @@ Expected: FAIL with `Failed to resolve import "../../src/views/Providers/Provide
 `src/views/Providers/ProvidersView.tsx`:
 
 ```tsx
-import { type CapabilityInfo, formatDuration, type Usage } from '@gmt/core';
+import { type CapabilityInfo, formatDuration } from '@gmt/core';
 import { useProviders } from '../../api/queries.js';
+import type { UsageRow } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, formatMicroGbp } from '../../format.js';
+import { formatIsoDate } from '../../format.js';
 
 function maxAgeText(h: CapabilityInfo['maxAgeHours']): string {
   if (h === 'unknown') return COPY.maxAgeUnknown;
@@ -4574,38 +4497,38 @@ function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   );
 }
 
-function usageText(scope: 'provider-month' | 'provider-lifetime', u: Usage): string {
+/** A lifetime scope (`provider-lifetime:<id>`) or a row without window bounds reads as lifetime. */
+function usageText(u: UsageRow): string {
   const cap = u.cap === null ? COPY.noCap : String(u.cap);
-  if (scope === 'provider-lifetime' || u.windowStart === null || u.windowEnd === null) return COPY.usageLifetime(u.calls, cap);
+  if (u.scope.startsWith('provider-lifetime') || u.windowStart === null || u.windowEnd === null) return COPY.usageLifetime(u.calls, cap);
   return COPY.usageWindow(u.calls, cap, formatIsoDate(u.windowStart.slice(0, 10)), formatIsoDate(u.windowEnd.slice(0, 10)));
 }
 
-/** Spec §11 Providers: capabilities, plan, usage vs caps with window bounds, the zero-cap message. */
+/** Spec §11 Providers: capabilities, plan, usage vs caps with window bounds, and the API's notices (the zero-cap message). */
 export function ProvidersView() {
   const q = useProviders();
   if (q.error) return <p role="alert">{COPY.loadFailed(q.error.message)}</p>;
   if (q.data === undefined) return <p>{COPY.loading}</p>;
-  const d = q.data;
   return (
     <div className="space-y-3 text-sm">
       <h2 className="text-xl font-semibold">{COPY.providersHeading}</h2>
-      {d.zeroCapMessage !== null ? (
-        <p role="alert" className="rounded border border-red-700 p-2 font-medium">
-          {d.zeroCapMessage}
-        </p>
-      ) : null}
-      <p>{COPY.globalMonth(formatMicroGbp(d.globalMonth.costMicroGbp), d.globalMonth.cap === null ? COPY.noCap : formatMicroGbp(d.globalMonth.cap))}</p>
-      {d.providers.map((p) => (
-        <section key={p.id} aria-label={p.displayName} className="rounded border border-slate-300 p-2">
+      {q.data.providers.map((p) => (
+        <section key={p.providerId} aria-label={p.displayName} className="rounded border border-slate-300 p-2">
           <h3 className="font-semibold">
             {p.displayName} <span className="font-normal">{p.enabled ? COPY.providerEnabled : COPY.providerDisabled}</span>
           </h3>
-          {p.plan !== null ? <p>{COPY.plan(p.plan)}</p> : null}
-          {p.discovery !== null ? <Capability title={COPY.capabilityDiscovery} info={p.discovery} /> : null}
-          {p.verification !== null ? <Capability title={COPY.capabilityVerification} info={p.verification} /> : null}
+          {p.notices.map((n) => (
+            <p key={n} role="alert" className="rounded border border-red-700 p-1 font-medium">
+              {n}
+            </p>
+          ))}
+          <p>{COPY.plan(p.plan)}</p>
+          {p.excludedFromSchedule ? <p>{COPY.excludedFromSchedule}</p> : null}
+          {p.capabilities.discovery !== null ? <Capability title={COPY.capabilityDiscovery} info={p.capabilities.discovery} /> : null}
+          {p.capabilities.verification !== null ? <Capability title={COPY.capabilityVerification} info={p.capabilities.verification} /> : null}
           <ul>
             {p.usage.map((u) => (
-              <li key={u.scope}>{usageText(u.scope, u.usage)}</li>
+              <li key={u.scope}>{usageText(u)}</li>
             ))}
           </ul>
         </section>
@@ -4623,18 +4546,19 @@ Expected: PASS, 3 + 8 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp09: Providers view with capabilities, plan and usage windows"
+git add apps/web && git commit -m "wp09: Providers view with capabilities, plan, usage windows and notices"
 ```
 
 ### Task 9.12: Definitions form: airports, defaults, advanced fold, example import
 
 **Files:**
-- Create: `src/views/Definitions/draft.ts`, `src/views/Definitions/exampleDefinition.ts`, `src/views/Definitions/AirportListInput.tsx`, `src/views/Definitions/AdvancedFields.tsx`, `src/views/Definitions/CoverageCheck.tsx`, `src/views/Definitions/EstimatePanel.tsx`, `src/views/Definitions/DefinitionForm.tsx`
+- Create: `src/example.ts`, `src/views/Definitions/draft.ts`, `src/views/Definitions/AirportListInput.tsx`, `src/views/Definitions/AdvancedFields.tsx`, `src/views/Definitions/CoverageCheck.tsx`, `src/views/Definitions/EstimatePanel.tsx`, `src/views/Definitions/DefinitionForm.tsx`
+- Create (stand-in, owned by WP12): `docs/examples/london-new-york.json`, only if it does not exist yet; WP12 Task 12.7 overwrites it and Task 12.9 asserts the import still resolves.
 - Test: `test/views/definitions/form.test.tsx`
 
 **Interfaces:**
-- Consumes: `api`, `useAirportSearch`, `ApiError` (Task 9.3); contract gaps G1, G2 (`definitionDefaults`), G6, G8; `WindowSpec`, `Constraints`, `VerificationPolicy`, `ExecutionBudget`, `ProvidersConfig`, `Cabin`, `ProviderId`.
-- Produces: `Draft`, `defaultDraft`, `definitionToDraft`, `draftToRequest`, `applyExample`, `normaliseIata`, `confirmationPence`, `withKey`, `EXAMPLE_DEFINITION`, `AirportListInput`, `AdvancedFields`, `NumberField`, `CoverageCheck`, `EstimatePanel`, `DefinitionForm({ existing, providers })`. Task 9.13 tests the coverage-check, estimate, create and confirmation flows through `DefinitionsView`.
+- Consumes: `api`, `useAirportSearch`, `ApiError` (Task 9.3); `providersResponse.presets`; `definitionCreateRequestSchema` (parses the example); `POST /api/definitions/estimate`; 422 `details.fields`; `WindowSpec`, `Constraints`, `VerificationPolicy`, `ExecutionBudget`, `ProvidersConfig`, `Cabin`, `ProviderId`, `Iata`.
+- Produces: `EXAMPLE_DEFINITION` (from `src/example.ts`), `Draft`, `defaultDraft`, `definitionToDraft`, `draftToRequest`, `applyExample`, `normaliseIata`, `confirmationPence`, `withKey`, `AirportListInput`, `AdvancedFields`, `NumberField`, `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel`, `DefinitionForm({ existing, providers })`. Task 9.13 tests the coverage-check, estimate, create and confirmation flows through `DefinitionsView`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4646,17 +4570,17 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { defaultDraft, draftToRequest } from '../../../src/views/Definitions/draft.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
-import { API, definition, providersResponse } from '../../fixtures.js';
+import { API, estimate, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
 const renderForm = () => renderWithProviders(<DefinitionForm existing={null} providers={providersResponse()} />);
+const valueOf = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).value;
 /** The chip list inside the Origins or Destinations group. */
 const chips = (name: string) => within(screen.getByRole('group', { name })).getByRole('list');
-const valueOf = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).value;
 
 describe('Definitions form defaults (spec §11)', () => {
-  it('starts with empty airports and the spec defaults; plan preset fills providers, policy and budget', async () => {
+  it('starts with empty airports and the spec defaults; the plan preset fills providers, policy and budget', async () => {
     const { user } = renderForm();
     expect(chips('Origins').children).toHaveLength(0);
     expect(screen.getByRole('radio', { name: 'Relative to today' })).toBeChecked();
@@ -4676,18 +4600,18 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(screen.getByRole('checkbox', { name: 'Fetch booking options' })).toBeDisabled();
     expect(screen.getByText('Always on for SearchApi: its sellers can undercut the airline fare.')).toBeInTheDocument();
     expect(valueOf('Max billed calls per run')).toBe('2000');
+    expect(valueOf('Travelpayouts refresh interval (hours)')).toBe('168');
     expect(valueOf('Cron (blank: manual runs only)')).toBe('0 5 * * 1');
     expect(valueOf('Time zone')).toBe('Europe/London');
   });
 
-  it('defaultDraft and draftToRequest carry the spec values', () => {
-    const req = draftToRequest(defaultDraft(providersResponse().definitionDefaults));
+  it('defaultDraft and draftToRequest carry the spec values; the request never carries a confirmation', () => {
+    const req = draftToRequest(defaultDraft(providersResponse().presets));
     expect(req).toMatchObject({
       window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 }, minNights: 10, maxNights: 21, cabin: 'economy',
       constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } }, scheduleCron: '0 5 * * 1',
-      verification: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true },
+      verification: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true, alwaysInclude: [] }, enabled: true,
     });
-    expect(req).not.toHaveProperty('enabled');
     expect(req).not.toHaveProperty('confirmedCostPence');
   });
 });
@@ -4711,14 +4635,14 @@ describe('airport entry (review focus 1)', () => {
     expect(screen.getByText('An airport code is three letters.')).toBeInTheDocument();
   });
 
-  it('autocompletes from GET /airports?q= (contract gap G1)', async () => {
+  it('autocompletes from GET /api/airports?q=', async () => {
     const queries: string[] = [];
     server.use(
       http.get(`${API}/airports`, ({ request }) => {
         queries.push(new URL(request.url).searchParams.get('q') ?? '');
         return HttpResponse.json([
-          { iata: 'LHR', name: 'Heathrow', city: 'London', country: 'United Kingdom', metro: 'LON' },
-          { iata: 'LGW', name: 'Gatwick', city: 'London', country: 'United Kingdom', metro: 'LON' },
+          { iata: 'LHR', name: 'Heathrow', city: 'London', country: 'United Kingdom', tz: 'Europe/London', metro: 'LON' },
+          { iata: 'LGW', name: 'Gatwick', city: 'London', country: 'United Kingdom', tz: 'Europe/London', metro: 'LON' },
         ]);
       }),
     );
@@ -4730,11 +4654,11 @@ describe('airport entry (review focus 1)', () => {
     expect(queries.at(-1)).toBe('lon');
   });
 
-  it("shows the API's metro-code message under the field it names", async () => {
+  it("shows the API's metro-code message (422 details.fields) under the field it names", async () => {
     server.use(
-      http.post(`${API}/definitions`, () =>
+      http.post(`${API}/definitions/estimate`, () =>
         HttpResponse.json(
-          { error: { code: 'validation', message: 'invalid definition', details: [{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }] } },
+          { error: { code: 'validation', message: 'invalid definition', details: { fields: [{ field: 'origins.0', message: 'LON is a city code; use one of LHR, LGW' }] } } },
           { status: 422 },
         ),
       ),
@@ -4749,12 +4673,12 @@ describe('airport entry (review focus 1)', () => {
 });
 
 describe('per-destination fields and the example (spec §11)', () => {
-  it('note and onward cost per destination reach the request in pence', async () => {
+  it('note and onward cost per destination reach the estimate request in pence', async () => {
     const bodies: unknown[] = [];
     server.use(
-      http.post(`${API}/definitions`, async ({ request }) => {
+      http.post(`${API}/definitions/estimate`, async ({ request }) => {
         bodies.push(await request.json());
-        return HttpResponse.json(definition({ id: 'def-draft-1', enabled: false, confirmedCostPence: null }));
+        return HttpResponse.json(estimate());
       }),
     );
     const { user } = renderForm();
@@ -4764,16 +4688,14 @@ describe('per-destination fields and the example (spec §11)', () => {
     await user.type(screen.getByLabelText('Onward cost to JFK in £ (optional, shown as a separate adjusted column)'), '25.50');
     await user.click(screen.getByRole('button', { name: 'Show estimate' }));
     await expect.poll(() => bodies.length).toBe(1);
-    expect(bodies[0]).toMatchObject({
-      origins: ['LHR'], destinations: ['JFK'], destinationNotes: { JFK: 'onward leg not included' }, onwardCostPence: { JFK: 2550 },
-      enabled: false, confirmedCostPence: null,
-    });
+    expect(bodies[0]).toMatchObject({ origins: ['LHR'], destinations: ['JFK'], destinationNotes: { JFK: 'onward leg not included' }, onwardCostPence: { JFK: 2550 } });
+    expect(bodies[0]).not.toHaveProperty('confirmedCostPence');
   });
 
-  it('"import example" loads the London to New York definition', async () => {
+  it('"import example" loads the route, window, nights, cabin and constraints of docs/examples/london-new-york.json', async () => {
     const { user } = renderForm();
     await user.click(screen.getByRole('button', { name: 'Import example (London to New York)' }));
-    expect(valueOf('Name')).toBe('London to New York (example)');
+    expect(valueOf('Name')).toBe('London → New York (example)');
     expect(within(chips('Origins')).getAllByRole('listitem').map((li) => li.firstChild?.textContent)).toEqual(['LHR', 'LGW']);
     expect(within(chips('Destinations')).getAllByRole('listitem').map((li) => li.firstChild?.textContent)).toEqual(['JFK', 'EWR']);
     expect(valueOf('Min nights')).toBe('10');
@@ -4789,29 +4711,56 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Definitions/dr
 
 - [ ] **Step 3: Implement**
 
-`src/views/Definitions/exampleDefinition.ts`:
+`docs/examples/london-new-york.json` (stand-in, only when absent; byte-for-byte WP12's Task 12.7 content):
+
+```json
+{
+  "name": "London → New York (example)",
+  "origins": ["LHR", "LGW"],
+  "destinations": ["JFK", "EWR"],
+  "window": { "kind": "relative", "startOffsetDays": 7, "lengthDays": 182 },
+  "minNights": 10,
+  "maxNights": 21,
+  "cabin": "economy",
+  "constraints": {
+    "maxJourneyMinutes": 1500,
+    "arrivalWindowLocal": { "from": "06:00", "to": "23:00" }
+  },
+  "verification": {
+    "maxCells": 10,
+    "topN": 10,
+    "alwaysInclude": [],
+    "expandTop": 2,
+    "bookingLinks": true
+  },
+  "budget": { "maxCalls": 2000, "maxFreeCalls": 2000, "maxCostMicroGbp": 0 },
+  "providers": {
+    "discovery": ["travelpayouts", "searchapi"],
+    "verification": ["searchapi"],
+    "discoveryRefreshHours": { "travelpayouts": 168, "searchapi": 168 }
+  },
+  "destinationNotes": {},
+  "onwardCostPence": {},
+  "scheduleCron": "0 5 * * 1",
+  "scheduleTz": "Europe/London",
+  "enabled": true
+}
+```
+
+`src/example.ts`:
 
 ```ts
+import { apiContract } from '@gmt/core';
+import example from '../../../docs/examples/london-new-york.json' with { type: 'json' };
+import type { DefinitionRequest } from './api/types.js';
+
 /**
- * The worked example of spec §1 (London → New York: LHR and LGW to JFK and EWR, 10–21 nights,
- * relative 182-day window), as the partial definition "import example" loads into the form.
- * Providers, policy, budget and schedule come from the plan preset, not from the example.
- * WP12's docs test asserts that the JSON block in docs/setup.md equals
- * JSON.stringify(EXAMPLE_DEFINITION, null, 2). This file is the one place in application code
- * that names airports, by spec §11 ("import example"); scripts/check-boundaries.mjs allowlists it.
+ * Spec §1 / §11 "import example": the worked example (London → New York) as a create body.
+ * The airport codes live in docs/examples/london-new-york.json (WP12 owns the file and the
+ * equality test); this is the one application file allowed to reference them, and
+ * scripts/check-boundaries.mjs allowlists it. Parsed with the contract so a drift fails at load.
  */
-export const EXAMPLE_DEFINITION = {
-  name: 'London to New York (example)',
-  origins: ['LHR', 'LGW'],
-  destinations: ['JFK', 'EWR'],
-  window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
-  minNights: 10,
-  maxNights: 21,
-  cabin: 'economy',
-  constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
-  destinationNotes: {},
-  onwardCostPence: {},
-} as const;
+export const EXAMPLE_DEFINITION: DefinitionRequest = apiContract.definitionCreateRequestSchema.parse(example);
 ```
 
 `src/views/Definitions/draft.ts`:
@@ -4819,7 +4768,6 @@ export const EXAMPLE_DEFINITION = {
 ```ts
 import type { Cabin, Constraints, ExecutionBudget, Iata, ProvidersConfig, VerificationPolicy, WindowSpec } from '@gmt/core';
 import type { DefinitionRequest, DefinitionResponse, ProvidersResponse } from '../../api/types.js';
-import type { EXAMPLE_DEFINITION } from './exampleDefinition.js';
 
 /** The form's model: a definition being edited, before the API validates it. */
 export interface Draft {
@@ -4840,9 +4788,6 @@ export interface Draft {
   scheduleTz: string;
 }
 
-/** The request body minus the two fields only an explicit action sets (spec §8.1 confirmation). */
-export type DraftRequest = Omit<DefinitionRequest, 'enabled' | 'confirmedCostPence'>;
-
 /** Returns a copy with `key` set, or removed when `value` is undefined (exactOptionalPropertyTypes-safe). */
 export function withKey<T extends object, K extends keyof T>(obj: T, key: K, value: T[K] | undefined): T {
   const next = { ...obj };
@@ -4851,7 +4796,7 @@ export function withKey<T extends object, K extends keyof T>(obj: T, key: K, val
   return next;
 }
 
-/** Trim and upper-case (review focus 1); validity is the API's call. */
+/** Trim and upper-case on blur (review focus 1); the API's iataSchema upper-cases too and is the validator. */
 export function normaliseIata(s: string): string {
   return s.trim().toUpperCase();
 }
@@ -4861,8 +4806,8 @@ export function confirmationPence(estimateMicroGbp: number): number {
   return Math.ceil(estimateMicroGbp / 10_000);
 }
 
-/** Spec §11 defaults; providers, policy, budget and time zone come from the plan preset (contract gap G2). */
-export function defaultDraft(d: ProvidersResponse['definitionDefaults']): Draft {
+/** Spec §11 defaults; providers, policy, budget and time zone come from the plan preset (`/api/providers` presets). */
+export function defaultDraft(presets: ProvidersResponse['presets']): Draft {
   return {
     name: '',
     origins: [],
@@ -4872,15 +4817,18 @@ export function defaultDraft(d: ProvidersResponse['definitionDefaults']): Draft 
     maxNights: 21,
     cabin: 'economy',
     constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
-    verification: structuredClone(d.verification),
-    budget: { ...d.budget },
-    providers: structuredClone(d.providers),
+    verification: { ...presets.policy, alwaysInclude: [] },
+    budget: { ...presets.budget },
+    providers: structuredClone(presets.providers),
     destinationNotes: {},
     onwardCostPence: {},
     scheduleCron: '0 5 * * 1',
-    scheduleTz: d.scheduleTz,
+    scheduleTz: presets.schedulerTimezone,
   };
 }
+
+const defined = <V>(rec: Partial<Record<string, V>>): Record<string, V> =>
+  Object.fromEntries(Object.entries(rec).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]])));
 
 export function definitionToDraft(def: DefinitionResponse): Draft {
   return {
@@ -4895,36 +4843,41 @@ export function definitionToDraft(def: DefinitionResponse): Draft {
     verification: structuredClone(def.verification),
     budget: { ...def.budget },
     providers: structuredClone(def.providers),
-    destinationNotes: Object.fromEntries(Object.entries(def.destinationNotes).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
-    onwardCostPence: Object.fromEntries(Object.entries(def.onwardCostPence).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
+    destinationNotes: defined(def.destinationNotes),
+    onwardCostPence: defined(def.onwardCostPence),
     scheduleCron: def.scheduleCron,
     scheduleTz: def.scheduleTz,
   };
 }
 
-/** Merges the example's route, window, nights, cabin and constraints over the current draft. */
-export function applyExample(d: Draft, ex: typeof EXAMPLE_DEFINITION): Draft {
+/**
+ * Loads the example's route, window, nights, cabin, constraints and notes over the draft.
+ * why: providers, policy, budget and schedule stay on the plan preset, so importing the example
+ * on a £0 install does not ask for SearchApi.
+ */
+export function applyExample(d: Draft, ex: DefinitionRequest): Draft {
   return {
     ...d,
     name: ex.name,
     origins: [...ex.origins],
     destinations: [...ex.destinations],
-    window: { ...ex.window },
+    window: structuredClone(ex.window),
     minNights: ex.minNights,
     maxNights: ex.maxNights,
     cabin: ex.cabin,
-    constraints: { maxJourneyMinutes: ex.constraints.maxJourneyMinutes, arrivalWindowLocal: { ...ex.constraints.arrivalWindowLocal } },
-    destinationNotes: {},
-    onwardCostPence: {},
+    constraints: structuredClone(ex.constraints),
+    destinationNotes: defined(ex.destinationNotes),
+    onwardCostPence: defined(ex.onwardCostPence),
   };
 }
 
 /** Only notes and costs for destinations still in the list are sent. */
 function forDestinations<V>(rec: Record<string, V>, destinations: readonly string[]): Record<string, V> {
-  return Object.fromEntries(Object.entries(rec).filter(([k, v]) => destinations.includes(k) && v !== '' && v !== undefined));
+  return Object.fromEntries(Object.entries(rec).filter(([k, v]) => destinations.includes(k) && v !== ''));
 }
 
-export function draftToRequest(d: Draft): DraftRequest {
+/** The create/update body (plan `DefinitionInput`): never `confirmedCostPence`, which only the explicit confirmation sets. */
+export function draftToRequest(d: Draft): DefinitionRequest {
   return {
     name: d.name,
     // why: unvalidated operator input; the API's zod schema and validateSearchSpace are the validators (spec §6.1).
@@ -4942,11 +4895,12 @@ export function draftToRequest(d: Draft): DraftRequest {
     onwardCostPence: forDestinations(d.onwardCostPence, d.destinations) as Partial<Record<Iata, number>>,
     scheduleCron: d.scheduleCron,
     scheduleTz: d.scheduleTz,
-  } as DraftRequest;
+    enabled: true,
+  } as DefinitionRequest;
 }
 ```
 
-`// why:` the final `as DraftRequest` bridges the branded `IsoDate` inside an absolute `window` the operator typed; the server parses it.
+`// why:` the final `as DefinitionRequest` bridges the branded `IsoDate` inside an absolute `window` the operator typed; the server parses it.
 
 `src/views/Definitions/AirportListInput.tsx`:
 
@@ -4971,7 +4925,7 @@ export interface AirportListInputProps {
   addLabel: string;
   codes: readonly string[];
   onChange: (codes: string[]) => void;
-  /** Messages from the API's 422 for this field (contract gap G8), e.g. the metro-code message. */
+  /** Messages from the API's 422 `details.fields` for this field, e.g. the metro-code message. */
   errors: readonly string[];
 }
 
@@ -5310,14 +5264,13 @@ export function CoverageCheck({ draft, available }: { draft: Draft; available: b
 `src/views/Definitions/EstimatePanel.tsx`:
 
 ```tsx
-import type { DefinitionResponse } from '../../api/types.js';
+import type { DefinitionResponse, EstimateResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatMicroGbp, formatSeconds } from '../../format.js';
 
-/** Spec §11: estimate and budgetFit shown before the operator confirms. */
-export function EstimatePanel({ def }: { def: DefinitionResponse }) {
-  const e = def.estimate;
-  const fit = def.budgetFit;
+/** Spec §11: the estimate shown before the operator confirms (POST /api/definitions/estimate for an unsaved body). */
+export function EstimatePanel({ estimate }: { estimate: EstimateResponse }) {
+  const e = estimate;
   return (
     <section aria-label={COPY.estimateHeading} className="space-y-1 rounded border border-slate-300 p-2 text-sm">
       <h3 className="font-semibold">{COPY.estimateHeading}</h3>
@@ -5326,6 +5279,7 @@ export function EstimatePanel({ def }: { def: DefinitionResponse }) {
         {e.perProvider.map((p) => (
           <li key={`${p.providerId}-${p.stage}`}>
             {COPY.estimateRow(COPY.provider[p.providerId], COPY.stageName[p.stage] ?? p.stage, p.calls, formatMicroGbp(p.costMicroGbp), formatSeconds(p.seconds))}
+            {p.blocked !== null ? <span className="ml-1 font-semibold">{COPY.estimateBlocked(p.blocked)}</span> : null}
           </li>
         ))}
       </ul>
@@ -5341,19 +5295,25 @@ export function EstimatePanel({ def }: { def: DefinitionResponse }) {
           </ul>
         </div>
       ) : null}
-      {fit.fits ? (
-        <p>{COPY.budgetFitOk(fit.runsPerMonth)}</p>
-      ) : (
-        <div role="alert">
-          <p className="font-semibold">{COPY.budgetFitWarn(fit.runsPerMonth)}</p>
-          <ul>
-            {fit.perScope.filter((s) => !s.fits).map((s) => (
-              <li key={s.scope}>{COPY.budgetScope(s.scope, s.estimated, s.cap === null ? COPY.noCap : String(s.cap))}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </section>
+  );
+}
+
+/** Spec §8.2: budgetFit (runs per month × estimate vs every cap) from the saved definition; a miss is an alert. */
+export function BudgetFitPanel({ fit }: { fit: DefinitionResponse['budgetFit'] }) {
+  return fit.fits ? (
+    <p className="text-sm">{COPY.budgetFitOk(fit.runsPerMonth)}</p>
+  ) : (
+    <div role="alert" className="text-sm">
+      <p className="font-semibold">{COPY.budgetFitWarn(fit.runsPerMonth)}</p>
+      <ul>
+        {fit.perScope
+          .filter((s) => !s.fits)
+          .map((s) => (
+            <li key={s.scope}>{COPY.budgetScope(s.scope, s.estimated, s.cap === null ? COPY.noCap : String(s.cap))}</li>
+          ))}
+      </ul>
+    </div>
   );
 }
 ```
@@ -5366,41 +5326,42 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
-import type { DefinitionResponse, ProvidersResponse } from '../../api/types.js';
+import type { DefinitionResponse, EstimateResponse, ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { formatPence, parsePoundsToPence, penceToPoundsInput } from '../../format.js';
+import { EXAMPLE_DEFINITION } from '../../example.js';
+import { formatMicroGbp, formatPence, parsePoundsToPence, penceToPoundsInput } from '../../format.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { AdvancedFields, NumberField, type ProviderCapabilities } from './AdvancedFields.js';
 import { AirportListInput } from './AirportListInput.js';
 import { CoverageCheck } from './CoverageCheck.js';
 import { applyExample, confirmationPence, type Draft, defaultDraft, definitionToDraft, draftToRequest, withKey } from './draft.js';
-import { EstimatePanel } from './EstimatePanel.js';
-import { EXAMPLE_DEFINITION } from './exampleDefinition.js';
+import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
 
 const CABINS: readonly Cabin[] = ['economy', 'premium_economy', 'business', 'first'];
 
-/** Field errors whose path is `field` or starts with `field.` (contract gap G8). */
+/** Field errors whose path is `field` or starts with `field.` (422 `details.fields`). */
 const errorsFor = (errors: ReadonlyArray<{ field: string; message: string }>, field: string) =>
   errors.filter((e) => e.field === field || e.field.startsWith(`${field}.`)).map((e) => e.message);
 
 /**
- * Spec §11 Definitions form. Flow for a new definition: "Show estimate" POSTs a disabled draft
- * (enabled: false, confirmedCostPence: null) so the API can estimate it; "Create and confirm" is
- * the explicit confirmation, a PUT setting enabled and confirmedCostPence = ceil(estimate / 10 000).
- * Editing the draft after an estimate hides Create until it is re-estimated.
+ * Spec §11 Definitions form. New definition: "Show estimate" calls POST /api/definitions/estimate
+ * with the unsaved body; "Create and confirm" is the explicit confirmation, a POST carrying
+ * confirmedCostPence = ceil(estimate / 10 000) (spec §8.1). Editing the draft after an estimate
+ * hides Create until it is re-estimated. Saved definition: "Save changes" PUTs; a needsConfirmation
+ * response asks again before scheduled runs proceed.
  */
 export function DefinitionForm({ existing, providers }: { existing: DefinitionResponse | null; providers: ProvidersResponse }) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<Draft>(() => (existing ? definitionToDraft(existing) : defaultDraft(providers.definitionDefaults)));
+  const [draft, setDraft] = useState<Draft>(() => (existing ? definitionToDraft(existing) : defaultDraft(providers.presets)));
   const [saved, setSaved] = useState<DefinitionResponse | null>(existing);
+  const [estimate, setEstimate] = useState<EstimateResponse | null>(null);
   const [estimatedFor, setEstimatedFor] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Array<{ field: string; message: string }>>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const capabilities: ProviderCapabilities[] = providers.providers
     .filter((p) => p.enabled)
-    .map((p) => ({ id: p.id, displayName: p.displayName, discovery: p.discovery !== null, verification: p.verification !== null }));
-  const travelpayouts = providers.providers.some((p) => p.id === 'travelpayouts' && p.enabled);
-  const isDraft = saved !== null && !saved.enabled && saved.confirmedCostPence === null;
+    .map((p) => ({ id: p.providerId, displayName: p.displayName, discovery: p.capabilities.discovery !== null, verification: p.capabilities.verification !== null }));
+  const travelpayouts = providers.providers.some((p) => p.providerId === 'travelpayouts' && p.enabled);
   const current = JSON.stringify(draft);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['definitions'] });
@@ -5415,19 +5376,18 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
     void refresh();
   };
 
-  const estimate = useMutation({
-    mutationFn: () =>
-      saved === null
-        ? api.createDefinition({ ...draftToRequest(draft), enabled: false, confirmedCostPence: null })
-        : api.updateDefinition(saved.id, draftToRequest(draft)),
-    onSuccess: (d) => {
+  const estimateDraft = useMutation({
+    mutationFn: () => api.estimateDraft(draftToRequest(draft)),
+    onSuccess: (e) => {
+      setEstimate(e);
       setEstimatedFor(current);
-      accept(d, null);
+      setFieldErrors([]);
+      setNotice(null);
     },
     onError,
   });
   const create = useMutation({
-    mutationFn: (s: DefinitionResponse) => api.updateDefinition(s.id, { enabled: true, confirmedCostPence: confirmationPence(s.estimate.totalCostMicroGbp) }),
+    mutationFn: (e: EstimateResponse) => api.createDefinition({ ...draftToRequest(draft), confirmedCostPence: confirmationPence(e.totalCostMicroGbp) }),
     onSuccess: (d) => {
       accept(d, COPY.created);
       // why: only the selected definition changes; edit= stays, so the form keeps its confirmation notice.
@@ -5445,18 +5405,9 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
     onSuccess: (d) => accept(d, COPY.saved),
     onError,
   });
-  const discard = useMutation({
-    mutationFn: (id: string) => api.deleteDefinition(id),
-    onSuccess: () => {
-      setSaved(null);
-      setEstimatedFor(null);
-      setNotice(null);
-      void refresh();
-    },
-    onError,
-  });
 
   const w = draft.window;
+  const n = saved?.needsConfirmation ?? null;
   return (
     <form onSubmit={(e) => e.preventDefault()} className="space-y-3 text-sm">
       {fieldErrors.length > 0 ? (
@@ -5468,6 +5419,13 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
             ))}
           </ul>
         </div>
+      ) : null}
+      {saved !== null && saved.notices.length > 0 ? (
+        <ul aria-label={COPY.definitionNotices} className="rounded border border-amber-700 bg-amber-50 p-2">
+          {saved.notices.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
       ) : null}
       <button type="button" className="rounded border border-slate-500 px-2" onClick={() => setDraft(applyExample(draft, EXAMPLE_DEFINITION))}>
         {COPY.importExample}
@@ -5520,8 +5478,8 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
         </span>
         {w.kind === 'relative' ? (
           <>
-            <NumberField id="w-offset" label={COPY.startOffsetDays} value={w.startOffsetDays} onChange={(n) => setDraft({ ...draft, window: { ...w, startOffsetDays: n ?? 0 } })} />
-            <NumberField id="w-length" label={COPY.lengthDays} value={w.lengthDays} onChange={(n) => setDraft({ ...draft, window: { ...w, lengthDays: n ?? 0 } })} />
+            <NumberField id="w-offset" label={COPY.startOffsetDays} value={w.startOffsetDays} onChange={(v) => setDraft({ ...draft, window: { ...w, startOffsetDays: v ?? 0 } })} />
+            <NumberField id="w-length" label={COPY.lengthDays} value={w.lengthDays} onChange={(v) => setDraft({ ...draft, window: { ...w, lengthDays: v ?? 0 } })} />
           </>
         ) : (
           <>
@@ -5535,8 +5493,8 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
             </span>
           </>
         )}
-        <NumberField id="n-min" label={COPY.minNights} value={draft.minNights} onChange={(n) => setDraft({ ...draft, minNights: n ?? 0 })} />
-        <NumberField id="n-max" label={COPY.maxNights} value={draft.maxNights} onChange={(n) => setDraft({ ...draft, maxNights: n ?? 0 })} />
+        <NumberField id="n-min" label={COPY.minNights} value={draft.minNights} onChange={(v) => setDraft({ ...draft, minNights: v ?? 0 })} />
+        <NumberField id="n-max" label={COPY.maxNights} value={draft.maxNights} onChange={(v) => setDraft({ ...draft, maxNights: v ?? 0 })} />
         <span className="flex flex-col">
           <label htmlFor="d-cabin">{COPY.cabin}</label>
           <select id="d-cabin" value={draft.cabin} onChange={(e) => setDraft({ ...draft, cabin: e.target.value as Cabin })}>
@@ -5554,8 +5512,8 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
       </details>
       <CoverageCheck draft={draft} available={travelpayouts} />
       <div className="flex flex-wrap gap-2">
-        {saved === null || isDraft ? (
-          <button type="button" className="rounded border border-slate-700 px-2" onClick={() => estimate.mutate()}>
+        {saved === null ? (
+          <button type="button" className="rounded border border-slate-700 px-2" onClick={() => estimateDraft.mutate()}>
             {COPY.showEstimate}
           </button>
         ) : (
@@ -5563,38 +5521,27 @@ export function DefinitionForm({ existing, providers }: { existing: DefinitionRe
             {COPY.save}
           </button>
         )}
-        {saved !== null && isDraft && estimatedFor === current ? (
-          <button type="button" className="rounded bg-slate-900 px-2 text-white" onClick={() => create.mutate(saved)}>
-            {COPY.createConfirm(formatPence(confirmationPence(saved.estimate.totalCostMicroGbp)))}
-          </button>
-        ) : null}
-        {saved !== null && isDraft ? (
-          <button type="button" className="rounded border border-slate-500 px-2" onClick={() => discard.mutate(saved.id)}>
-            {COPY.discardDraft}
+        {saved === null && estimate !== null && estimatedFor === current ? (
+          <button type="button" className="rounded bg-slate-900 px-2 text-white" onClick={() => create.mutate(estimate)}>
+            {COPY.createConfirm(formatPence(confirmationPence(estimate.totalCostMicroGbp)))}
           </button>
         ) : null}
       </div>
-      {saved?.needsConfirmation ? (
+      {saved !== null && n !== null ? (
         <div role="alert" className="rounded border border-amber-700 bg-amber-50 p-2">
-          <p>
-            {COPY.needsConfirmation(
-              formatPence(saved.needsConfirmation.estimatePence),
-              saved.needsConfirmation.confirmedPence === null ? COPY.none : formatPence(saved.needsConfirmation.confirmedPence),
-            )}
-          </p>
+          <p>{COPY.needsConfirmation(formatMicroGbp(n.estimateMicroGbp), n.confirmedCostPence === null ? COPY.none : formatPence(n.confirmedCostPence))}</p>
           <button
             type="button"
             className="rounded border border-slate-700 px-2"
-            onClick={() => {
-              const n = saved.needsConfirmation;
-              if (n) confirm.mutate({ id: saved.id, pence: n.estimatePence });
-            }}
+            onClick={() => confirm.mutate({ id: saved.id, pence: confirmationPence(n.estimateMicroGbp) })}
           >
-            {COPY.confirmNew(formatPence(saved.needsConfirmation.estimatePence))}
+            {COPY.confirmNew(formatPence(confirmationPence(n.estimateMicroGbp)))}
           </button>
         </div>
       ) : null}
-      {saved !== null ? <EstimatePanel def={saved} /> : null}
+      {saved === null && estimate !== null ? <EstimatePanel estimate={estimate} /> : null}
+      {saved?.estimate ? <EstimatePanel estimate={saved.estimate} /> : null}
+      {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}
       {notice !== null ? <p role="status">{notice}</p> : null}
     </form>
   );
@@ -5609,10 +5556,10 @@ Expected: PASS, 8 + 8 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp09: Definitions form with airport autocomplete, defaults, advanced fold, example import"
+git add apps/web docs/examples && git commit -m "wp09: Definitions form with airport autocomplete, defaults, advanced fold, example import"
 ```
 
-### Task 9.13: Definitions view, create-and-confirm flow, final App wiring
+### Task 9.13: Definitions view, estimate-then-create flow, final App wiring
 
 **Files:**
 - Create: `src/views/Definitions/DefinitionsView.tsx`
@@ -5620,7 +5567,7 @@ git add apps/web && git commit -m "wp09: Definitions form with airport autocompl
 - Test: `test/views/definitions/create.test.tsx`
 
 **Interfaces:**
-- Consumes: `DefinitionForm`, `CoverageCheck`, `EstimatePanel` (Task 9.12); every view of Tasks 9.5–9.11; `StatusBar` (Task 9.6).
+- Consumes: `DefinitionForm`, `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel` (Task 9.12); every view of Tasks 9.5–9.11; `StatusBar` (Task 9.6); `POST /api/definitions/estimate`, `POST /api/definitions` (with `confirmedCostPence`, mismatch R1), `PUT /api/definitions/:id` (`needsConfirmation`, `notices`).
 - Produces: `DefinitionsView()`, the final `App()`.
 
 - [ ] **Step 1: Write the failing test**
@@ -5633,12 +5580,16 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
-import { API, coverageCheck, definition, providersResponse } from '../../fixtures.js';
+import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
-const draftResponse = (over: Parameters<typeof definition>[0] = {}) =>
-  definition({ id: 'def-draft-1', enabled: false, confirmedCostPence: null, estimate: { ...definition().estimate, totalCostMicroGbp: 12_345, totalCostPence: 2 }, ...over });
+const pricedEstimate = estimate({ totalCostMicroGbp: 12_345, totalCostPence: 2 });
+
+async function importAndEstimate(user: ReturnType<typeof renderWithProviders>['user']) {
+  await user.click(await screen.findByRole('button', { name: 'Import example (London to New York)' }));
+  await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+}
 
 describe('coverage check before saving (spec §1, §10, §11)', () => {
   it('posts the entered pairs, window and nights and shows cached rows per pair per month', async () => {
@@ -5664,7 +5615,9 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
   it('says what it needs when Travelpayouts is not configured', async () => {
     const base = providersResponse();
     server.use(
-      http.get(`${API}/providers`, () => HttpResponse.json({ ...base, providers: base.providers.map((p) => (p.id === 'travelpayouts' ? { ...p, enabled: false } : p)) })),
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json({ ...base, providers: base.providers.map((p) => (p.providerId === 'travelpayouts' ? { ...p, enabled: false } : p)) }),
+      ),
     );
     renderWithProviders(<DefinitionsView />);
     expect(await screen.findByText('The free coverage check needs TRAVELPAYOUTS_TOKEN.')).toBeInTheDocument();
@@ -5672,40 +5625,40 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
 });
 
 describe('estimate, then the create click as the explicit confirmation (spec §8.1, §11)', () => {
-  it('POSTs a disabled, unconfirmed draft; Create PUTs enabled + ceil(estimate / 10 000)', async () => {
-    const posts: unknown[] = [];
-    const puts: unknown[] = [];
+  it('estimates the unsaved body; Create POSTs it with confirmedCostPence = ceil(estimate / 10 000)', async () => {
+    const estimates: unknown[] = [];
+    const creates: unknown[] = [];
     server.use(
-      http.post(`${API}/definitions`, async ({ request }) => {
-        posts.push(await request.json());
-        return HttpResponse.json(draftResponse());
+      http.post(`${API}/definitions/estimate`, async ({ request }) => {
+        estimates.push(await request.json());
+        return HttpResponse.json(pricedEstimate);
       }),
-      http.put(`${API}/definitions/:id`, async ({ request, params }) => {
-        puts.push({ id: params.id, body: await request.json() });
-        return HttpResponse.json(draftResponse({ enabled: true, confirmedCostPence: 2 }));
+      http.post(`${API}/definitions`, async ({ request }) => {
+        creates.push(await request.json());
+        return HttpResponse.json(definition({ id: 'def-0002', confirmedCostPence: 2, estimate: pricedEstimate }));
       }),
     );
     const { user } = renderWithProviders(<DefinitionsView />);
-    await user.click(await screen.findByRole('button', { name: 'Import example (London to New York)' }));
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await importAndEstimate(user);
     const panel = await screen.findByRole('region', { name: 'Estimate' });
     expect(within(panel).getByText('2184 cells')).toBeInTheDocument();
     expect(within(panel).getByText('Travelpayouts discovery: 14 calls · £0 · about 20s')).toBeInTheDocument();
     expect(within(panel).getByText('total £0.02 per run · about 20s')).toBeInTheDocument();
-    expect(within(panel).getByText('Fits every cap at 4 runs a month.')).toBeInTheDocument();
-    expect(posts[0]).toMatchObject({ enabled: false, confirmedCostPence: null, origins: ['LHR', 'LGW'] });
-    expect(puts).toEqual([]);
+    expect(estimates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: true });
+    expect(estimates[0]).not.toHaveProperty('confirmedCostPence');
+    expect(creates).toEqual([]);
 
     await user.click(screen.getByRole('button', { name: 'Create and confirm up to £0.02 per run' }));
-    await expect.poll(() => puts).toEqual([{ id: 'def-draft-1', body: { enabled: true, confirmedCostPence: 2 } }]);
+    await expect.poll(() => creates.length).toBe(1);
+    expect(creates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: true, confirmedCostPence: 2 });
     expect(await screen.findByRole('status')).toHaveTextContent('Created. Scheduled runs use the cost you confirmed.');
+    expect(screen.getByText('Fits every cap at 4 runs a month.')).toBeInTheDocument();
   });
 
   it('editing after an estimate hides Create until the draft is re-estimated', async () => {
-    server.use(http.post(`${API}/definitions`, () => HttpResponse.json(draftResponse())), http.put(`${API}/definitions/:id`, () => HttpResponse.json(draftResponse())));
+    server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(pricedEstimate)));
     const { user } = renderWithProviders(<DefinitionsView />);
-    await user.click(await screen.findByRole('button', { name: 'Import example (London to New York)' }));
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await importAndEstimate(user);
     await screen.findByRole('button', { name: /Create and confirm/ });
     await user.clear(screen.getByLabelText('Max nights'));
     await user.type(screen.getByLabelText('Max nights'), '14');
@@ -5714,61 +5667,52 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     expect(await screen.findByRole('button', { name: /Create and confirm/ })).toBeInTheDocument();
   });
 
-  it('a budgetFit miss is shown before the operator confirms', async () => {
+  it('a budgetFit miss on the created definition is shown as an alert', async () => {
     server.use(
       http.post(`${API}/definitions`, () =>
-        HttpResponse.json(draftResponse({ budgetFit: { fits: false, runsPerMonth: 4, perScope: [{ scope: 'provider-month:searchapi', estimated: 12000, cap: 10000, fits: false }] } })),
+        HttpResponse.json(definition({ id: 'def-0002', budgetFit: { fits: false, runsPerMonth: 4, perScope: [{ scope: 'provider-month:searchapi', estimated: 12000, cap: 10000, fits: false }] } })),
       ),
     );
     const { user } = renderWithProviders(<DefinitionsView />);
-    await user.click(await screen.findByRole('button', { name: 'Import example (London to New York)' }));
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
-    const panel = await screen.findByRole('region', { name: 'Estimate' });
-    expect(within(panel).getByRole('alert')).toHaveTextContent('Does not fit every cap at 4 runs a month:');
-    expect(within(panel).getByText('provider-month:searchapi: 12000 estimated, cap 10000')).toBeInTheDocument();
-  });
-
-  it('Discard draft deletes the disabled draft', async () => {
-    const deleted: string[] = [];
-    server.use(
-      http.post(`${API}/definitions`, () => HttpResponse.json(draftResponse())),
-      http.delete(`${API}/definitions/:id`, ({ params }) => {
-        deleted.push(String(params.id));
-        return HttpResponse.json(draftResponse({ deletedAt: definition().createdAt }));
-      }),
-    );
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await user.click(await screen.findByRole('button', { name: 'Import example (London to New York)' }));
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
-    await user.click(await screen.findByRole('button', { name: 'Discard draft' }));
-    await expect.poll(() => deleted).toEqual(['def-draft-1']);
+    await importAndEstimate(user);
+    await user.click(await screen.findByRole('button', { name: /Create and confirm/ }));
+    expect(await screen.findByText('Does not fit every cap at 4 runs a month:')).toBeInTheDocument();
+    expect(screen.getByText('provider-month:searchapi: 12000 estimated, cap 10000')).toBeInTheDocument();
   });
 });
 
-describe('needsConfirmation on PUT (spec §8.1)', () => {
-  it('a save that raises the estimate above the confirmation asks again, and Confirm PUTs the new amount', async () => {
+describe('saved definitions (spec §8.1)', () => {
+  it('a save that raises the estimate above the confirmation asks again, and Confirm PUTs ceil(estimate / 10 000)', async () => {
     const puts: unknown[] = [];
     server.use(
       http.put(`${API}/definitions/:id`, async ({ request }) => {
-        const body = await request.json();
-        puts.push(body);
+        puts.push(await request.json());
         return HttpResponse.json(
-          puts.length === 1 ? definition({ needsConfirmation: { estimatePence: 250, confirmedPence: 100 } }) : definition({ confirmedCostPence: 250 }),
+          puts.length === 1 ? definition({ needsConfirmation: { estimateMicroGbp: 2_500_000, confirmedCostPence: 100 } }) : definition({ confirmedCostPence: 250 }),
         );
       }),
     );
     const { user } = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
-    const alert = await screen.findByText('The new estimate (£2.50 per run) is above your confirmation (£1). Scheduled runs are skipped until you confirm.');
-    expect(alert).toBeInTheDocument();
+    expect(
+      await screen.findByText('The new estimate (£2.50 per run) is above your confirmation (£1). Scheduled runs are skipped until you confirm.'),
+    ).toBeInTheDocument();
+    expect(puts[0]).not.toHaveProperty('confirmedCostPence');
     await user.click(screen.getByRole('button', { name: 'Confirm up to £2.50 per run' }));
     await expect.poll(() => puts.at(-1)).toEqual({ confirmedCostPence: 250 });
+  });
+
+  it("shows the definition's notices from the API", async () => {
+    server.use(http.get(`${API}/definitions`, () => HttpResponse.json([definition({ notices: ['alerts running on calendar basis only'] })])));
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
+    const list = await screen.findByRole('list', { name: 'Notices for this definition' });
+    expect(within(list).getByText('alerts running on calendar basis only')).toBeInTheDocument();
   });
 });
 
 describe('the App (spec §11 layout)', () => {
   it('filter state persists across a view switch, and the status bar is on every view', async () => {
-    const { user } = renderWithProviders(<App />, { search: '?view=results&def=def-0001&f.class=failed' });
+    const { user } = renderWithProviders(<App />, { search: '?view=results&def=def-0001&f.class=partially-verified' });
     const table = await screen.findByRole('table', { name: 'Round trips found' });
     expect(within(table).getAllByRole('row')).toHaveLength(2);
     const nav = screen.getByRole('navigation', { name: 'Views' });
@@ -5778,7 +5722,7 @@ describe('the App (spec §11 layout)', () => {
     await user.click(within(nav).getByRole('link', { name: 'Results' }));
     const again = await screen.findByRole('table', { name: 'Round trips found' });
     expect(within(again).getAllByRole('row')).toHaveLength(2);
-    expect(screen.getByRole('checkbox', { name: 'failed' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'partially verified' })).toBeChecked();
   });
 
   it('Coverage is reachable from the Results header link', async () => {
@@ -5908,7 +5852,7 @@ git add apps/web && git commit -m "wp09: Definitions view with create-and-confir
 - Test: `test/copy/renderedSweep.test.tsx`
 
 **Interfaces:**
-- Consumes: `App` (Task 9.13), `findBannedWords` (WP0), `WEB_ALLOWLIST` (Task 9.2).
+- Consumes: `App` (Task 9.13), `findBannedWords`, `BANNED_WORD_ALLOWLIST` (WP0).
 - Produces: nothing new; closes spec §9 item 6's banned-word row for WP9's views.
 
 - [ ] **Step 1: Write the failing test**
@@ -5916,16 +5860,15 @@ git add apps/web && git commit -m "wp09: Definitions view with create-and-confir
 `test/copy/renderedSweep.test.tsx`:
 
 ```tsx
-import { findBannedWords } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../src/App.js';
 import { VIEWS } from '../../src/state/view.js';
-import { API, calendarGap, providersResponse, resultsResponse, calendarRow, verifiedRow, failedRow } from '../fixtures.js';
+import { API, calendarGap, calendarRow, failedRow, partialRow, providersResponse, resultsResponse, verifiedRow } from '../fixtures.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
-import { WEB_ALLOWLIST } from './allowlist.js';
 
 /** Every visible string plus the attributes a screen reader or tooltip shows. */
 function renderedCopy(): string {
@@ -5939,18 +5882,24 @@ describe('rendered views contain no banned word (spec §11, §9 item 6)', () => 
   for (const view of VIEWS) {
     it(`view=${view}`, async () => {
       server.use(
-        http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true, zeroCapMessage: 'verification will not run: spend cap is 0' }))),
-        http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(resultsResponse({ rows: [verifiedRow(), failedRow(), calendarRow()], total: 3, truncated: true }))),
+        http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))),
+        http.get(`${API}/definitions/:id/results`, () =>
+          HttpResponse.json(resultsResponse({ rows: [verifiedRow(), partialRow(), failedRow(), calendarRow()], truncated: true })),
+        ),
         http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap())),
       );
       const { user } = renderWithProviders(<App />, { search: `?view=${view}&def=def-0001` });
       await screen.findByRole('navigation', { name: 'Views' });
       await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
       if (view === 'results') {
+        // why: failed rows are hidden by default (spec §6.9); select every class so all rows' copy is swept.
+        for (const name of ['verified', 'partially verified', 'failed', 'constraints not checked']) {
+          await user.click(await screen.findByRole('checkbox', { name }));
+        }
         for (const b of await screen.findAllByRole('button', { name: /Show details/ })) await user.click(b);
       }
       if (view === 'definitions') await user.click(screen.getByText('Advanced: constraints and policy'));
-      const hits = findBannedWords(renderedCopy(), WEB_ALLOWLIST);
+      const hits = findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST);
       expect(hits.map((h) => h.word)).toEqual([]);
     });
   }
@@ -5983,7 +5932,7 @@ git add apps/web && git commit -m "wp09: banned-word sweep over every rendered v
 
 The plan's Review Focus lines this package owns:
 
-- **Review focus 1 (WP9 half): "Operator types a lowercase or metropolitan IATA code (`lhr`, `LON`, `NYC`) into the Definitions form or the example JSON. Expected: upper-cased before validation; a metro code is rejected with a message naming it as a city code and listing the airports the table maps to it."** WP1 owns the rejection and its message; WP9 owns the form. Pinned in Task 9.12, `test/views/definitions/form.test.tsx`: "upper-cases a lowercase code on blur and adds it" (`lhr` → `LHR` on blur) and "shows the API's metro-code message under the field it names" (`LON` → the 422's `origins.0` message rendered inside the Origins group). The example JSON path is covered by `EXAMPLE_DEFINITION` holding upper-case airport codes only; WP12's docs test keeps docs and constant equal.
+- **Review focus 1 (WP9 half): "Operator types a lowercase or metropolitan IATA code (`lhr`, `LON`, `NYC`) into the Definitions form or the example JSON. Expected: upper-cased before validation; a metro code is rejected with a message naming it as a city code and listing the airports the table maps to it."** WP1 owns the rejection and its message; WP9 owns the form. Pinned in Task 9.12, `test/views/definitions/form.test.tsx`: "upper-cases a lowercase code on blur and adds it" (`lhr` → `LHR` on blur) and "shows the API's metro-code message under the field it names" (`LON` → the 422's `details.fields` entry for `origins.0` rendered inside the Origins group). The API's `iataSchema` also upper-cases, so the blur rule is the visible half, not the only one. The example JSON path is covered by `EXAMPLE_DEFINITION` being parsed through `definitionCreateRequestSchema` at load; WP12's test keeps the JSON and the import equal.
 
 Review focus 3 (browser outside Europe/London) is WP10's; WP9's `formatIsoDate` and `formatLocalDateTime` already format by string slicing, never through `Date`, so WP10's `TZ` test covers the Results date columns without a change here.
 
@@ -5994,36 +5943,25 @@ Run from the repository root, in order; each must give the stated outcome.
 1. `pnpm install --frozen-lockfile` → exits 0 (the lockfile includes `msw`, `@testing-library/dom` and `zod` for `@gmt/web`).
 2. `pnpm lint:fix && pnpm lint` → `biome check` reports no errors (format and organised imports applied).
 3. `pnpm --filter @gmt/web typecheck` → exits 0. `pnpm -r typecheck` → exits 0.
-4. `pnpm --filter @gmt/web test` → every web test passes (Tasks 9.1–9.14: 5 + 8 + 6 + 6 + 6 + 7 + 11 + 8 + 4 + 7 + 3 + 8 + 9 + 8 = 96 tests, none skipped) and the coverage report shows **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` with no threshold error.
+4. `pnpm --filter @gmt/web test` → every web test passes (Tasks 9.1–9.14: 5 + 8 + 6 + 6 + 6 + 7 + 12 + 8 + 4 + 7 + 3 + 8 + 9 + 8 = 97 tests, none skipped) and the coverage report shows **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` with no threshold error.
 5. `pnpm test` → every package green with its thresholds.
 6. `node scripts/check-boundaries.mjs` → exits 0; `@gmt/web` imports no workspace package except `@gmt/core`.
 7. `pnpm --filter @gmt/web build` → exits 0 and writes `apps/web/dist/index.html` plus hashed assets under `apps/web/dist/assets/`.
 8. `grep -rn "style={" apps/web/src` → no output (spec §4 CSP `default-src 'self'` blocks inline styles).
 9. `grep -rn "process\.env" apps/web/src` → no output.
-10. `grep -rnE "'(LHR|LGW|JFK|EWR|LON|NYC)'" apps/web/src` → matches only `apps/web/src/views/Definitions/exampleDefinition.ts`.
+10. `grep -rnE "(LHR|LGW|JFK|EWR|LON|NYC)" apps/web/src` → no output (the example's codes live in `docs/examples/london-new-york.json`; `src/example.ts` only names the file).
 11. `grep -rnE "\b(Live|live|bookable|guaranteed|exhaustive|real-time)\b" apps/web/src` → no output (a cheap cross-check of the three banned-word tests; identifiers included).
-12. With WP8 merged: `pnpm dev`, open `http://localhost:5173/?view=providers` with `ALLOW_FIXTURE_PROVIDER=i-understand-this-is-fake`, `NODE_ENV=development`, `DATABASE_PATH=./data/dev.fixture.db` → the red synthetic banner shows on every view; without those three variables and with `TRAVELPAYOUTS_TOKEN` set → no banner, and "Check free coverage" on Definitions returns a table. Record both screenshots in the PR.
+12. With WP8 merged: `pnpm dev`, open `http://localhost:5173/?view=providers` (API calls go to `/api` through the Vite proxy) with `ALLOW_FIXTURE_PROVIDER=i-understand-this-is-fake`, `NODE_ENV=development`, `DATABASE_PATH=./data/dev.fixture.db` → the red synthetic banner shows on every view; without those three variables and with `TRAVELPAYOUTS_TOKEN` set → no banner, and "Check free coverage" on Definitions returns a table. Record both screenshots in the PR.
 
 ## 11. Open questions
 
-None requires the operator's judgement. **Dispatch prerequisite (Fable):** the plan's API contract must gain contract gaps G1–G10 of §4 (one route and nine field specifications) before this brief is dispatched; each is listed with its spec source in the mismatch report that accompanies this brief. If Fable resolves any gap differently, this brief's fixtures (`test/fixtures.ts`) and the named component change with it before dispatch.
+None requires the operator's judgement. The contract gaps of the first draft (airports route, providers, coverage, calendar-gap and scheduler shapes, `needsConfirmation`, result-row fields, 422 details, unsaved-body estimate, list order, `Usage`) are closed by plan contracts v2 and spec revision 10, and this brief now follows them.
 
-### Mismatch report (spec, plan, brief; neither spec nor plan edited)
+### Remaining mismatches (spec, plan, brief; neither spec nor plan edited)
 
-- **M1** Spec §4 "Tech" says React 18; plan Task 0.1 and this brief use React 19.3.1. The spec line needs amending (or the plan downgrading).
-- **M2** Spec §11 View D says "five-way breakdown"; spec §3, §6.6 and the §11 Results header say six buckets. The brief uses six.
-- **M3** No airport search route in spec §10 or plan `ROUTES`; the Definitions autocomplete needs `GET /airports?q=` (gap G1; `AirportsRepo.search` already exists in WP3).
-- **M4** `providersResponseSchema` has no fields in the plan: the data-driven synthetic flag (§5.5), the zero-cap message, usage windows and the plan-preset defaults the form needs (§8.2, §11; the web cannot read config) are gap G2.
-- **M5** WP2's `sortRows`, `filterRows`, `bandCheapest` and their `SortKey` / `ResultFilters` types have no signatures in the plan.
-- **M6** `coverageResponseSchema`, `calendarGapResponseSchema`, `schedulerJobsResponseSchema` are unspecified (G3–G5); "schedule blocked since <date>" (§8.2, §11) has no API source at all (G5); `needsConfirmation` (§8.1) is not on `definitionResponseSchema` (G6); `resultRowSchema` lacks baggage, fare conditions and seller that the §11 expanded row shows (G7), and layovers (computed client-side from UTC times here).
-- **M7** No route estimates an unsaved definition, yet §11 shows the estimate on the creation screen before the confirming click; the brief POSTs a disabled draft and PUTs the confirmation. A `POST /definitions/estimate` taking a create body would be cleaner.
-- **M8** The 422 `error.details` shape is unspecified (G8); the metro-code message (review focus 1) depends on it.
-- **M9** Plan Task 0.1's web dependencies lack `msw`, `@testing-library/dom` (RTL 16 peer) and `zod`.
-- **M10** The api has no path prefix, so a `serveStatic` SPA fallback would collide with `/definitions` etc.; the brief keeps the SPA at `/` with state in search params, and WP8 must serve `index.html` at `/`.
-- **M11** Global constraint "no airport literal in application code" vs §11's embedded "import example": `exampleDefinition.ts` needs an allowlist entry in `scripts/check-boundaries.mjs`.
-- **M12** `formatAgeCompact` renders `maxAgeHours: 0` as "≤just now".
-- **M13** Execution list order (G9) and the budget scope shape (G10) are unstated; no definition field names its latest execution, so the status bar reads `results.executions[0]`.
-- **M14** §11 nav includes Alerts (WP11); the brief ships a "coming in WP11" placeholder, beyond the three WP10 placeholders allowed.
-- **M15** §6.9 names a basis `verified`, but §11 reserves "verified" for class values; the UI labels it "itinerary-search basis".
-- **M16** `resultRowSchema.bandCheapest` is server-computed, but §6.5 has the client band the filtered set; the brief recomputes and ignores the field.
-
+- **R1** The plan's `definitionCreateRequestSchema` is `DefinitionInput`, which omits `confirmedCostPence`, and `definitionUpdateRequestSchema` is its partial; so the contract has no field through which the create click (spec §11) or the re-confirmation after `needsConfirmation` (spec §8.1) sets the confirmation. WP8's brief accepts `confirmedCostPence` on `POST` and `PUT /api/definitions`; this brief sends it there. WP8's brief also still types `needsConfirmation` as a boolean, where the plan has `{ estimateMicroGbp, confirmedCostPence } | null`; this brief follows the plan.
+- **R2** `bandCheapest` returns `Set<string /* row key */>`, but the plan names no row-key function. `rowId` here (`itineraryHash ?? cellKeyString(cell) + '|' + providerId`) must equal WP2's key; the plan should export the function.
+- **R3** `calendarGapResponseSchema.cheapestVerifiedPence` carries no provenance, yet spec §11 prints it in the banner ("… cheapest verified (£X)") and §11 wants provenance on every price. The banner prints it as a reference to the class-verified headline row; a `cheapestVerified: PriceCell` field would remove the exception.
+- **R4** `POST /api/definitions/estimate` returns an estimate only; `budgetFit` exists only on a saved definition, so the creation screen shows the estimate before the confirming click and `budgetFit` right after it, not before (spec §8.2 "budgetFit at save time" is met; §11 lists both on the form).
+- **R5** `docs/briefs/wp02-core-normalise-constraints-alerts.md` still has the pre-reconciliation `ResultFilters` names (`verdictClasses`, `providers`, `destinations`, `unverifiedConstraint`) and a `bandCheapest` that returns rows; this brief follows the plan. If WP2 merges as its brief reads, `src/state/resultsState.ts` and `Filters.tsx` change with it.
+- **R6** WP12 depends on WP9 but owns `docs/examples/london-new-york.json`, which WP9 imports; WP9 writes a stand-in with WP12's exact content when the file is absent, and WP12's Task 12.7 overwrites it (WP12's brief already anticipates this).

@@ -2,11 +2,13 @@
 wp: 12
 title: Docker, compose, env, backup, docs
 owner: sonnet
-depends_on: [8]
+depends_on: [8, 9]
 spec_sections: ["§12", "§13", "§5.5", "§7 Migrations", "§7 Retention", "§7 Budget windows", "§8.2", "§4 auth", "§1", "§9 item 8"]
 reviewers: [code-architect, test-strategy-reviewer, devops-reviewer, security-reviewer, cost-and-budget-reviewer, persona-flexible-traveller]
 status: draft
 ---
+
+<!-- Reconciled 2026-10-14 against spec revision 10 and the plan's rewritten cross-package contracts. -->
 
 # WP12: Docker, compose, env, backup, docs
 
@@ -21,27 +23,28 @@ Ship the one-container deployment (image, compose file, final `.env.example`), t
 - `Dockerfile` (multi-stage, `node:22-slim` pinned by index digest, pnpm through corepack, fail-closed `better-sqlite3` prebuilt check, `NODE_ENV=production`, `IN_CONTAINER=1`, `/data` owned by `node` before `VOLUME`, `HEALTHCHECK`, `USER node`) and `.dockerignore`.
 - `scripts/assert-sqlite-prebuilt.mjs` (build-stage and runtime-stage assertion).
 - `docker-compose.yml` (`app` with an explicit environment allowlist built by interpolation, named volume, loopback port, `mailpit` under the `dev` profile).
-- `.env.example` made byte-equal to the spec §12 block, with a test that keeps it so.
-- `scripts/backup.mjs` (exported `pendingMigrations`, `backupDatabase`, `verifyBackup`, plus a CLI) and the `backups/` line in `.gitignore`.
-- `apps/api/src/bootstrap/preflight.ts` (writability check, pending-migration detection, pre-migration backup) and its two call sites in the WP8 bootstraps.
+- `.env.example` made byte-equal to the spec §12 block (revision 10, which adds `APP_BASE_URL`), with a test that keeps it so.
+- `scripts/backup.mjs` (exported `backupDatabase`, `verifyBackup`, plus a CLI) and a test that `.gitignore` keeps `backups/` and `*.db*` (WP0 writes them).
+- `apps/api/src/bootstrap/preflight.ts` (writability check, then `backupDatabase` when the DB file exists and WP0's `pendingMigrations()` is non-empty) and its two call sites in the bootstraps, before `buildPorts`.
 - `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`.
 - The root `infra` Vitest project (`infra/vitest.config.ts`, `infra/tsconfig.json`, `infra/test/**`) and its entry in the root `vitest.config.ts`; `yaml` as a root dev dependency.
 - A `docker` job in `.github/workflows/ci.yml` that builds the image, validates the compose file, boots the container to `healthy` and runs a backup inside it.
 
 **Out**
 
-- The app and tool bootstraps themselves, config parsing, `/health`, `/tools/*`, auth and Host checks: WP8 (`apps/api`), on the WP4b wiring helper. WP12 only inserts one `await preflight(...)` line into each bootstrap.
-- `applyMigrations`, the Drizzle migrations, the airports dataset and `runMaintenance` (which logs DB size): WP3 (`packages/db`).
+- The app and tool bootstraps themselves, config parsing, `/api/health`, auth and Host checks: WP8 (`apps/api`), on the WP4b wiring helper; `POST /api/tools/record`: WP8; `POST /api/tools/smoke`: WP13. WP12 owns the one preflight call before `buildPorts` in each bootstrap.
+- `pendingMigrations(db, migrationsDir)` and `applyMigrations`: WP0 (`packages/db/src/migrate.ts`).
+- The Drizzle migrations, the airports dataset and `runMaintenance` (which logs DB size): WP3 (`packages/db`).
 - The config zod schema and `PLAN_PRESETS`: WP0 (`packages/core`). WP12 renders them into docs; it changes neither.
-- The Definitions form and its "import example" action: WP9 (`apps/web`). WP9 owns `apps/web/src/views/Definitions/exampleDefinition.ts`; WP12 owns the JSON it re-exports and the equality test (Task 12.9).
+- The Definitions form and its "import example" action: WP9 (`apps/web`). WP9 owns `apps/web/src/example.ts`; WP12 owns the JSON it re-exports and the equality test (Task 12.9).
 - The live smoke and recording scripts: WP4b (`record`) and WP13 (`smoke`). WP12 documents how to run them in the container.
-- The secret scan and the boundary guard: WP0. WP12 adds no rule to either.
+- The secret scan, the boundary guard (which allowlists `apps/web/src/example.ts` for airport literals) and the `.gitignore` lines: WP0. WP12 adds no rule to any of them.
 
 ## Spec sections
 
-- **§12**: `.env.example` is the §12 block verbatim; the full preset table (every field per plan) lives in `docs/api-limits.md` and matches the zod presets.
+- **§12**: `.env.example` is the §12 block verbatim (56 variables including `APP_BASE_URL`); the full preset table (every field per plan) lives in `docs/api-limits.md` and matches the zod presets.
 - **§13 entire**: Dockerfile, `.dockerignore`, compose, backup and restore, local dev commands and the three docs, each rule listed in §13.
-- **§5.5**: the Dockerfile sets `NODE_ENV=production` and `IN_CONTAINER=1`; compose passes an explicit `environment` allowlist that never carries `ALLOW_FIXTURE_PROVIDER` or `NODE_ENV`.
+- **§5.5**: the Dockerfile sets `NODE_ENV=production` and `IN_CONTAINER=1`; compose passes an explicit `environment` allowlist that never carries `ALLOW_FIXTURE_PROVIDER` or `NODE_ENV`, and no `env_file` (§13).
 - **§7 Migrations**: a `VACUUM INTO` backup runs first only when migrations are pending, to a timestamped file under `/data/backups`, keeps the last 5, refuses an existing target; a failed backup refuses migrations and boot, naming the cause.
 - **§7 Retention**: expected DB growth per month is documented in `docs/setup.md`.
 - **§7 Budget windows**: billing days 1–28 (UTC), `trial` lifetime window; `docs/api-limits.md` explains window bounds and reconciliation with the vendor dashboard.
@@ -70,6 +73,13 @@ export interface Logger { debug(o: object, msg?: string): void; info(o: object, 
 // @gmt/core text/bannedWords.ts (WP0)
 export const BANNED_WORDS: readonly string[] = ['exhaustive', 'all combinations', 'every combination', 'live', 'bookable', 'guaranteed', 'real-time'];
 export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
+export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in'];   // the single allowlist every banned-word test passes
+
+// @gmt/core api-contract/system.ts (WP0)
+// toolRecordRequestSchema { budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth }
+// toolSmokeRequestSchema  { origin: Iata; destination: Iata }
+// toolRunResponseSchema   { exitCode: number; summary: string; lines: string[]; fixturesWritten: string[] }
+// healthPublicSchema { ok: boolean; degraded: boolean }   — GET /api/health (every route is under /api)
 
 // @gmt/core api-contract/definitions.ts (WP0)
 // definitionCreateRequestSchema (every SearchDefinition field except id/timestamps; `window` discriminated union;
@@ -78,17 +88,21 @@ export function findBannedWords(text: string, allowlist?: readonly string[]): Ar
 // @gmt/db client.ts (WP0)
 export interface Db { raw: BetterSqlite3.Database; drizzle: BetterSQLite3Database; transaction<T>(fn: () => T): T; close(): void }
 export function openDatabase(path: string): Db;
+export function pendingMigrations(db: Db, migrationsDir: string): string[];      // migrate.ts (WP0): names of unapplied migration files
 
-// apps/api wiring.ts (WP4b)
-export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string }): Ports;   // opens DB, applies migrations, …
-export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;
-// bootstrap/app.ts (WP8): main() — refuses NODE_ENV=test; buildPorts; seed; AppLock('app'); engine.boot(); serve
-// bootstrap/tool.ts (WP4b): runTool(name: 'record' | 'smoke', args) — refuses NODE_ENV=test; buildPorts; AppLock('tool'); no engine.boot()
+// apps/api src/wiring.ts (WP4b)
+export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string; fixtureRoot?: string }): Ports;   // opens DB, applies migrations (callers run the backup preflight first), createRepos, guard, cache, http-kit with httpLimitsFor(config), providersFor(config, http, ...)
+export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;   // parseConfig + tolerantRealpath; throws listing every bad field
+// src/bootstrap/tool.ts (WP4b): export async function runTool(name: 'record' | 'smoke', argv: string[]): Promise<number /* exit code */>
+// src/bootstrap/app.ts (WP8): main(); order: refuse NODE_ENV=test → config → logger → preflight backup when pendingMigrations() is non-empty and the DB file exists (WP12's backupDatabase) → buildPorts → seed + sanity → AppLock('app') waits → createEngine(ports, { alerts: runAlerts }) → engine.boot() → serve.
+// src/tools/smoke.ts (WP13): exit codes 0 priced, 1 provider error, 2 zero providers, 3 empty, 64 bad arguments
 ```
 
 Two facts WP12 relies on beyond these signatures, both already true of WP8's code by its own tests: running `node apps/api/dist/bootstrap/app.js` (or `tsx src/bootstrap/app.ts`) executes `main()`, and an exception thrown inside `main()` is printed with its message and exits non-zero. Task 12.5's spawn test proves both for the preflight path.
 
-Drizzle's migrator (`drizzle-orm@0.45.4`, `sqlite-core/dialect.js`) applies a journal entry when `__drizzle_migrations` has no row or its newest `created_at` is less than the entry's `when`. `pendingMigrations` in Task 12.4 reproduces exactly that rule without writing.
+WP0's `pendingMigrations(db, migrationsDir)` reads `meta/_journal.json` and returns the tags whose `when` is later than the newest `__drizzle_migrations.created_at` (all tags when the table is absent), which is Drizzle's own rule (`drizzle-orm@0.45.4`, `sqlite-core/dialect.js`). WP12 does not reimplement it.
+
+**Who writes the preflight call.** The plan's `app.ts` order names the preflight step but WP8 merges before `backupDatabase` exists. Task 12.5 therefore owns the call: if WP8 left a placeholder comment or an equivalent call at that point of `main()` / `runTool`, Task 12.5 replaces it with `await preflight(...)`; either way exactly one preflight call precedes `buildPorts` in each bootstrap, and the spawn test proves it.
 
 ## Interfaces produced
 
@@ -96,8 +110,6 @@ Drizzle's migrator (`drizzle-orm@0.45.4`, `sqlite-core/dialect.js`) applies a jo
 // scripts/backup.mjs (WP12). Plain ESM so `docker compose exec app node scripts/backup.mjs` needs no build.
 /** better-sqlite3's Database constructor, resolved from packages/db so the script works in the repo and the image. */
 export const Database;
-/** Journal tags Drizzle would apply to the database at dbPath; [] when the file does not exist. Spec §7 "Migrations". */
-export function pendingMigrations(dbPath: string, migrationsDir: string): string[];
 /** Throws unless PRAGMA integrity_check on path returns 'ok'. */
 export function verifyBackup(path: string): void;
 /** VACUUM INTO <backupDir>/<base>-<ISO timestamp>.db, verify, prune to `keep` (default 5). Throws on any failure and leaves no partial target. */
@@ -108,7 +120,6 @@ export function backupDatabase(opts: { dbPath: string; backupDir: string; keep?:
 ```ts
 // apps/api/src/bootstrap/preflight.ts (WP12)
 export interface BackupModule {
-  pendingMigrations(dbPath: string, migrationsDir: string): string[];
   backupDatabase(opts: { dbPath: string; backupDir: string; keep?: number; now?: Date }): { path: string; pruned: string[] };
 }
 export interface PreflightResult { pending: string[]; backupPath: string | null }
@@ -118,7 +129,7 @@ export function loadBackupModule(repoRoot?: string): Promise<BackupModule>;
 export function preflight(config: Pick<Config, 'databasePath'>, opts: { migrationsDir: string; log: Logger; backup?: BackupModule }): Promise<PreflightResult>;
 ```
 
-`docs/examples/london-new-york.json`: the importable example definition, a `definitionCreateRequestSchema`-valid object. **Contract for WP9:** `apps/web/src/views/Definitions/exampleDefinition.ts` exports `EXAMPLE_DEFINITION` as a re-export of that file (`import example from '../../../../../docs/examples/london-new-york.json' with { type: 'json' }`), so no airport code is written in application source (spec §1). Task 12.9 asserts both halves.
+`docs/examples/london-new-york.json`: the importable example definition, a `definitionCreateRequestSchema`-valid object (plan file map: "WP12 writes it, WP9 imports it"). **Contract with WP9:** `apps/web/src/example.ts` exports `EXAMPLE_DEFINITION` as a JSON-import re-export of that file. Task 12.9 asserts they are equal.
 
 ## Library notes
 
@@ -126,9 +137,10 @@ All verified on 2026-10-14.
 
 - **Base image `node:22-slim`**: `docker buildx imagetools inspect node:22-slim` returned the multi-platform index digest `sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392` (image created 2026-10-06, `NODE_VERSION=22.23.3`, Debian bookworm-slim, `linux/amd64` manifest `sha256:efd0ab5780c2d9ab1f0f869571a00d5edb17793bff4cce4a2792e3eb0ffc7562`). Pin the **index** digest (the top-level `Digest:` line) so arm64 hosts get the same release. To refresh: run the same command, copy the top-level `Digest:` into every `FROM`, update the comment block at the top of the Dockerfile and this paragraph.
 - **better-sqlite3 13.0.3** (`packages/db`, from the plan's Task 0.1 list). npm registry integrity `sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==`; the same string must appear in `pnpm-lock.yaml` (Task 12.1 asserts it). The tarball (inspected with `npm pack better-sqlite3@13.0.3`) ships `prebuilds/{linux,linuxmusl,darwin,win32}-{x64,arm64}.node`, has **no `install` script** and `"gypfile": false`; `lib/binding.js` loads `prebuilds/<platform>-<arch>.node` and falls back to `build/Release/better_sqlite3.node` only when no prebuilt exists. So there is no network fetch to make fail-closed: the binary arrives inside the integrity-pinned tarball, and fail-closed means asserting the prebuilt file exists, `build/` does not, and the module loads (`scripts/assert-sqlite-prebuilt.mjs`). `npm_config_build_from_source` is read by `prebuild-install`, which 13.x no longer uses, so it is not set. `onlyBuiltDependencies: [better-sqlite3]` in `pnpm-workspace.yaml` stays as WP0 wrote it; it is now inert for this package and still blocks every other dependency's build scripts. Calls used: `new Database(path, { readonly: true, fileMustExist: true, timeout: 5000 })`, `db.prepare('VACUUM INTO ?').run(target)`, `db.pragma('integrity_check', { simple: true })` (returns `'ok'`), `db.prepare(sql).pluck().all()`. Checked by running them against 13.0.3 on 2026-10-14: `VACUUM INTO` with a bound path works on a WAL source; an existing target throws `SQLITE_ERROR: output file already exists`; a non-SQLite file throws `SQLITE_NOTADB: file is not a database` on open and leaves no target behind; the backup copy has `journal_mode=delete`, which the app's `openDatabase` switches back to WAL on first open.
-- **drizzle-orm 0.45.4** migrator: read in the published package (`sqlite-core/dialect.js`, `migrator.js`) and context7 `/drizzle-team/drizzle-orm` ("readMigrationFiles"): reads `<migrationsFolder>/meta/_journal.json` `entries[{ idx, when, tag, breakpoints }]`; table `__drizzle_migrations (id, hash, created_at numeric)`; selects the newest `created_at` and applies entries with `when > created_at`.
+- **drizzle-orm 0.45.4** migrator (consumed through WP0's `pendingMigrations`; read in the published package `sqlite-core/dialect.js`, `migrator.js`, and context7 `/drizzle-team/drizzle-orm` "readMigrationFiles"): `<migrationsFolder>/meta/_journal.json` `entries[{ idx, when, tag, breakpoints }]`; table `__drizzle_migrations (id, hash, created_at numeric)`; entries with `when > newest created_at` are applied. The preflight tests write a journal-only temp folder, which is all `pendingMigrations` reads.
 - **yaml 2.9.1** (new root dev dependency, published 2026-09-11): context7 `/eemeli/yaml`, "YAML.parse": `import { parse } from 'yaml'`; `parse(str)` returns plain objects and arrays, throws on error, single document only.
 - **pnpm 12.9.1 via corepack**: `npm view pnpm@12.9.1` exists (engines `node >=18`). Node 22 still bundles corepack (it is removed from Node 25 onward, which is why the image is 22). `corepack enable pnpm` installs the shim; the version comes from `"packageManager": "pnpm@12.9.1"` in the root `package.json`; `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` suppresses the interactive prompt. Task 12.1 Step 4 runs `docker run --rm node:22-slim@sha256:c3de… corepack --version` before the first build to confirm corepack is present in that exact image; the Dockerfile itself fails the build if the resolved pnpm version differs from `packageManager`.
+- **Health route**: every API route is under `/api` (spec rev 10), so the `HEALTHCHECK`, the CI probe and the docs use `GET /api/health` (public, exempt from the Host allowlist).
 - **Dockerfile syntax**: context7 `/docker/docs` (Dockerfile reference, "HEALTHCHECK"): options `--interval` (default 30s), `--timeout` (30s), `--start-period` (0s), `--start-interval` (5s, Engine ≥ 25), `--retries` (3); exec form `CMD ["node", "-e", "…"]`; only the last `HEALTHCHECK` counts; probe failures during the start period do not count toward retries. Multi-stage `FROM … AS name` and `COPY --from=name`; `RUN --mount=type=cache,id=…,target=…` (BuildKit, the default builder).
 - **Compose**: context7 `/docker/docs` ("variable interpolation"): `${VAR:-default}` resolves from the shell, then `--env-file`, then the project `.env`; `docker compose config` shows the result. Interpolation is the allowlist mechanism here: only the names written in `environment:` reach the container, unlike `env_file:`, which forwards every line of `.env`.
 - **Mailpit** (`dev` profile only): `docker buildx imagetools inspect axllent/mailpit:latest` returned `sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea` (created 2026-10-11); SMTP on 1025, web UI on 8025.
@@ -137,7 +149,7 @@ All verified on 2026-10-14.
 ## Files
 
 - Create: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `scripts/assert-sqlite-prebuilt.mjs`, `scripts/backup.mjs`, `apps/api/src/bootstrap/preflight.ts`, `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`, `infra/vitest.config.ts`, `infra/tsconfig.json`
-- Modify: `.env.example` (byte-equal to spec §12), `.gitignore` (add `backups/`), `vitest.config.ts` (root: add the infra project), `package.json` (root: `yaml` dev dependency, `typecheck` script), `pnpm-lock.yaml` (from `pnpm add`), `apps/api/src/bootstrap/app.ts` and `apps/api/src/bootstrap/tool.ts` (one `await preflight(...)` each), `.github/workflows/ci.yml` (add the `docker` job)
+- Modify: `.env.example` (byte-equal to spec §12), `vitest.config.ts` (root: add the infra project), `package.json` (root: `yaml` dev dependency, `typecheck` script), `pnpm-lock.yaml` (from `pnpm add`), `apps/api/src/bootstrap/app.ts` and `apps/api/src/bootstrap/tool.ts` (one `await preflight(...)` each), `.github/workflows/ci.yml` (add the `docker` job)
 - Test: `infra/test/helpers.ts`, `infra/test/dockerfile.test.ts`, `infra/test/envExample.test.ts`, `infra/test/compose.test.ts`, `infra/test/backup.test.ts`, `infra/test/presetTable.ts`, `infra/test/apiLimits.test.ts`, `infra/test/docs.test.ts`, `infra/test/exampleDefinition.test.ts`, `apps/api/test/bootstrap/preflight.test.ts`, `apps/api/test/bootstrap/preMigrationBoot.test.ts`
 
 ## Tasks
@@ -318,13 +330,13 @@ describe('Dockerfile (spec §13, §5.5, §9 item 8)', () => {
     expect(volume).toBeGreaterThan(prepare);
   });
 
-  it('has a node fetch HEALTHCHECK of /health whose start period covers boot (≥ 180 s)', () => {
+  it('has a node fetch HEALTHCHECK of /api/health whose start period covers boot (≥ 180 s)', () => {
     const hc = runtimeInstructions.find((i) => i.startsWith('HEALTHCHECK '));
     expect(hc).toBeDefined();
     const start = Number(/--start-period=(\d+)s/.exec(hc ?? '')?.[1]);
     expect(start).toBeGreaterThanOrEqual(180);
     expect(hc).toContain('CMD ["node", "-e",');
-    expect(hc).toContain("fetch('http://127.0.0.1:3000/health')");
+    expect(hc).toContain("fetch('http://127.0.0.1:3000/api/health')");
   });
 
   it('starts the app bootstrap', () => {
@@ -512,7 +524,7 @@ EXPOSE 3000
 # why: start period 240 s covers migrations, the pre-migration backup, airport seeding and the
 # app_lock waits (60 s for a tool lock, 90 s for a stale app lock; spec §7) with margin.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=240s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "apps/api/dist/bootstrap/app.js"]
 ```
 
@@ -607,10 +619,10 @@ describe('.env.example (spec §12)', () => {
     expect(read('.env.example')).toBe(`${specEnvBlock()}\n`);
   });
 
-  it('defines the 55 variables of spec §12, overrides expanded', () => {
+  it('defines the 56 variables of spec §12, overrides expanded', () => {
     const names = envExampleVariables(read('.env.example'));
-    expect(names).toHaveLength(55);
-    expect(names).toEqual(expect.arrayContaining(['NODE_ENV', 'ALLOW_FIXTURE_PROVIDER', 'TRAVELPAYOUTS_CACHE_TTL_HOURS', 'SEARCHAPI_PLAN_FIXED_PENCE', 'SEARCHAPI_COST_PER_CALL_MICRO_GBP', 'ALERT_EMAIL_FROM']));
+    expect(names).toHaveLength(56);
+    expect(names).toEqual(expect.arrayContaining(['NODE_ENV', 'ALLOW_FIXTURE_PROVIDER', 'APP_BASE_URL', 'TRAVELPAYOUTS_CACHE_TTL_HOURS', 'SEARCHAPI_PLAN_FIXED_PENCE', 'SEARCHAPI_COST_PER_CALL_MICRO_GBP', 'ALERT_EMAIL_FROM']));
     expect(names).not.toContain('IN_CONTAINER');
   });
 });
@@ -682,7 +694,7 @@ const FIXED: Record<string, string> = { DATABASE_PATH: '/data/get-me-there.db', 
 describe('docker-compose.yml app service (spec §13, §5.5)', () => {
   it('passes an explicit allowlist: every spec §12 operator variable and nothing else', () => {
     const expected = envExampleVariables(read('.env.example')).filter((n) => !NEVER.includes(n));
-    expect(expected).toHaveLength(53);
+    expect(expected).toHaveLength(54);
     expect(Object.keys(env).sort()).toEqual(expected);
   });
 
@@ -748,7 +760,7 @@ Expected: FAIL, `ENOENT … docker-compose.yml`.
 # .env for ${...} interpolation only; the container receives exactly the names listed under
 # `environment:` below. That list is the allowlist of spec §5.5: NODE_ENV and IN_CONTAINER come
 # from the Dockerfile, and ALLOW_FIXTURE_PROVIDER is never passed. Do not add `env_file:`, which
-# would forward every line of .env and defeat the allowlist.
+# would forward every line of .env and defeat the allowlist (spec §13 rev 10).
 name: get-me-there
 
 services:
@@ -770,6 +782,7 @@ services:
       BIND_ADDRESS: "0.0.0.0"
       # --- core ---
       ALLOWED_HOSTS: "${ALLOWED_HOSTS:-}"
+      APP_BASE_URL: "${APP_BASE_URL:-}"
       APP_BASIC_AUTH_USER: "${APP_BASIC_AUTH_USER:-}"
       APP_BASIC_AUTH_PASS: "${APP_BASIC_AUTH_PASS:-}"
       ALLOW_UNAUTHENTICATED: "${ALLOW_UNAUTHENTICATED:-}"
@@ -830,9 +843,8 @@ services:
         max-file: "5"
 
   # Local mail catcher for development only: `docker compose --profile dev up -d mailpit`.
-  # why: it serves `pnpm dev` on the host (SMTP_HOST=127.0.0.1, SMTP_PORT=1025, SMTP_TLS=none,
-  # which the config schema allows on loopback). The app container runs NODE_ENV=production, where
-  # SMTP_TLS=none is refused for any non-loopback host, so the container never mails through it.
+  # why: spec §13 (rev 10): it serves the host-side `pnpm dev` process (SMTP_HOST=127.0.0.1,
+  # SMTP_PORT=1025, SMTP_TLS=none, allowed on loopback); the container always uses real SMTP.
   mailpit:
     image: axllent/mailpit@sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea
     profiles: ["dev"]
@@ -859,11 +871,10 @@ git add docker-compose.yml package.json pnpm-lock.yaml infra/test && git commit 
 
 **Files:**
 - Create: `scripts/backup.mjs`
-- Modify: `.gitignore` (add `backups/`)
 - Test: `infra/test/backup.test.ts`
 
 **Interfaces:**
-- Produces: `Database`, `pendingMigrations`, `verifyBackup`, `backupDatabase`, the CLI.
+- Produces: `Database`, `verifyBackup`, `backupDatabase`, the CLI. (Pending-migration detection is WP0's `pendingMigrations`; this script does not duplicate it.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -875,7 +886,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Database, backupDatabase, pendingMigrations, verifyBackup } from '../../scripts/backup.mjs';
+import { Database, backupDatabase, verifyBackup } from '../../scripts/backup.mjs';
 import { ROOT, read } from './helpers.js';
 
 const NAME = /^get-me-there-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
@@ -893,27 +904,6 @@ function sampleDb(dir: string): string {
   db.prepare('INSERT INTO t (x) VALUES (?)').run(42);
   db.close();
   return path;
-}
-
-/** A Drizzle-shaped migrations folder with two journal entries. */
-function migrationsDir(dir: string): string {
-  const out = join(dir, 'drizzle');
-  mkdirSync(join(out, 'meta'), { recursive: true });
-  writeFileSync(join(out, 'meta', '_journal.json'), JSON.stringify({
-    version: '7', dialect: 'sqlite',
-    entries: [
-      { idx: 0, version: '6', when: 1_760_400_000_000, tag: '0000_init', breakpoints: true },
-      { idx: 1, version: '6', when: 1_760_500_000_000, tag: '0001_next', breakpoints: true },
-    ],
-  }));
-  return out;
-}
-
-function markApplied(dbPath: string, createdAt: number | null): void {
-  const db = new Database(dbPath);
-  db.exec('CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (id INTEGER PRIMARY KEY, hash text NOT NULL, created_at numeric)');
-  if (createdAt !== null) db.prepare('INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (?, ?)').run('h', createdAt);
-  db.close();
 }
 
 describe('backupDatabase (spec §7 Migrations, §13 Backup)', () => {
@@ -978,30 +968,6 @@ describe('verifyBackup', () => {
   });
 });
 
-describe('pendingMigrations (Drizzle rule: apply entries whose `when` > newest created_at)', () => {
-  it('is empty when the database file does not exist', () => {
-    const dir = tempDir();
-    expect(pendingMigrations(join(dir, 'absent.db'), migrationsDir(dir))).toEqual([]);
-  });
-  it('lists every entry when the migrations table is missing or empty', () => {
-    const dir = tempDir();
-    const db = sampleDb(dir);
-    const m = migrationsDir(dir);
-    expect(pendingMigrations(db, m)).toEqual(['0000_init', '0001_next']);
-    markApplied(db, null);
-    expect(pendingMigrations(db, m)).toEqual(['0000_init', '0001_next']);
-  });
-  it('lists only entries newer than the last applied one', () => {
-    const dir = tempDir();
-    const db = sampleDb(dir);
-    const m = migrationsDir(dir);
-    markApplied(db, 1_760_400_000_000);
-    expect(pendingMigrations(db, m)).toEqual(['0001_next']);
-    markApplied(db, 1_760_500_000_000);
-    expect(pendingMigrations(db, m)).toEqual([]);
-  });
-});
-
 describe('backup CLI', () => {
   it('exits 0 and prints the backup path', () => {
     const dir = tempDir();
@@ -1027,9 +993,9 @@ describe('backup CLI', () => {
   });
 });
 
-describe('.gitignore (spec §5.3, §13)', () => {
-  it('ignores backups/', () => {
-    expect(read('.gitignore').split('\n')).toContain('backups/');
+describe('.gitignore (spec §5.3, §13; lines written by WP0)', () => {
+  it.each(['backups/', '*.db*'])('ignores %s', (entry) => {
+    expect(read('.gitignore').split('\n')).toContain(entry);
   });
 });
 ```
@@ -1052,7 +1018,7 @@ Expected: FAIL, `Failed to load url ../../scripts/backup.mjs`.
 // - Exported for the api bootstrap's pre-migration hook (apps/api/src/bootstrap/preflight.ts)
 //   and runnable on demand: `docker compose exec app node scripts/backup.mjs`.
 // - Plain ESM with JSDoc types so it runs in the image without a build step.
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1074,31 +1040,6 @@ function message(err) {
 /** @param {string} s */
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Journal tags that Drizzle's migrator would apply to the database at `dbPath`, using its own
- * rule: an entry is applied when `__drizzle_migrations` is empty or its newest `created_at` is
- * less than the entry's `when`. A missing file has nothing to protect, so it returns [].
- * Opens the database read-only and writes nothing.
- * @param {string} dbPath
- * @param {string} migrationsDir
- * @returns {string[]}
- */
-export function pendingMigrations(dbPath, migrationsDir) {
-  if (!existsSync(dbPath)) return [];
-  /** @type {{ entries: Array<{ when: number; tag: string }> }} */
-  const journal = JSON.parse(readFileSync(join(migrationsDir, 'meta', '_journal.json'), 'utf8'));
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 5000 });
-  try {
-    const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'").pluck().get();
-    /** @type {unknown} */
-    const last = hasTable ? db.prepare('SELECT created_at FROM "__drizzle_migrations" ORDER BY created_at DESC LIMIT 1').pluck().get() : undefined;
-    const lastMillis = last === undefined || last === null ? null : Number(last);
-    return journal.entries.filter((e) => lastMillis === null || lastMillis < e.when).map((e) => e.tag);
-  } finally {
-    db.close();
-  }
 }
 
 /**
@@ -1186,17 +1127,17 @@ if (invokedDirectly) {
 }
 ```
 
-`.gitignore`: append one line `backups/`.
+`.gitignore` already carries `backups/` and `*.db*` (WP0, plan decision 9); the test guards them.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm vitest run --project infra backup`
-Expected: PASS (13 tests).
+Expected: PASS (11 tests: 5 backupDatabase, 1 verifyBackup, 3 CLI, 2 .gitignore).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/backup.mjs .gitignore infra/test && git commit -m "wp12: VACUUM INTO backup with integrity check and keep-5 retention"
+git add scripts/backup.mjs infra/test && git commit -m "wp12: VACUUM INTO backup with integrity check and keep-5 retention"
 ```
 
 ### Task 12.5: Pre-migration preflight in the bootstraps
@@ -1207,7 +1148,7 @@ git add scripts/backup.mjs .gitignore infra/test && git commit -m "wp12: VACUUM 
 - Test: `apps/api/test/bootstrap/preflight.test.ts`, `apps/api/test/bootstrap/preMigrationBoot.test.ts`
 
 **Interfaces:**
-- Consumes: `scripts/backup.mjs` (Task 12.4), `Config`, `Logger` (WP0), `openDatabase` (WP0), the WP8 bootstraps.
+- Consumes: `scripts/backup.mjs` (Task 12.4), `Config`, `Logger` (WP0), `openDatabase` and `pendingMigrations` (WP0, `@gmt/db`), the WP4b/WP8 bootstraps.
 - Produces: `assertDataDirWritable`, `loadBackupModule`, `preflight`, `PreflightError`, `BackupModule`, `PreflightResult`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1264,16 +1205,23 @@ describe('assertDataDirWritable (spec §13: boot fails clearly if /data is not w
 
 describe('preflight (spec §7 Migrations)', () => {
   it('does nothing for an in-memory database', async () => {
-    const backup = { pendingMigrations: vi.fn(), backupDatabase: vi.fn() };
+    const backup = { backupDatabase: vi.fn() };
     await expect(preflight({ databasePath: ':memory:' }, { migrationsDir: '/nowhere', log: logger(), backup })).resolves.toEqual({ pending: [], backupPath: null });
-    expect(backup.pendingMigrations).not.toHaveBeenCalled();
+    expect(backup.backupDatabase).not.toHaveBeenCalled();
   });
 
-  it('takes no backup on a fresh install (no database file yet)', async () => {
+  it('takes no backup on a fresh install and does not create the database file', async () => {
     const dir = tempDir();
     const r = await preflight({ databasePath: join(dir, 'get-me-there.db') }, { migrationsDir: journal(dir), log: logger(), backup: await loadBackupModule() });
     expect(r).toEqual({ pending: [], backupPath: null });
     expect(existsSync(join(dir, 'backups'))).toBe(false);
+    expect(existsSync(join(dir, 'get-me-there.db'))).toBe(false);
+  });
+
+  it('refuses boot, naming the file, when the database cannot be read', async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'get-me-there.db'), 'not a database '.repeat(300));
+    await expect(preflight({ databasePath: join(dir, 'get-me-there.db') }, { migrationsDir: journal(dir), log: logger() })).rejects.toThrow(/cannot read the migration state of .*get-me-there\.db/);
   });
 
   it('takes no backup when no migration is pending', async () => {
@@ -1339,7 +1287,7 @@ const env = (dbPath: string) => ({ PATH: process.env.PATH, NODE_ENV: 'production
 describe('the real bootstraps run the pre-migration backup first (spec §7 Migrations)', () => {
   it.each([
     ['app', ['--import', 'tsx', 'src/bootstrap/app.ts']],
-    ['tool', ['--import', 'tsx', 'src/bootstrap/tool.ts', 'smoke']],
+    ['tool', ['--import', 'tsx', 'src/bootstrap/tool.ts', 'record']],
   ])('%s: a failed backup refuses migrations and boot', (_name, args) => {
     const dbPath = brokenBackupSetup();
     const r = spawnSync(process.execPath, args, { cwd: API_ROOT, env: env(dbPath), encoding: 'utf8', timeout: 60_000 });
@@ -1360,14 +1308,14 @@ Expected: FAIL, `Failed to load url ../../src/bootstrap/preflight.js`; the spawn
 `apps/api/src/bootstrap/preflight.ts`:
 
 ```ts
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Config, Logger } from '@gmt/core';
+import { openDatabase, pendingMigrations } from '@gmt/db';
 
 /** The part of scripts/backup.mjs the bootstraps use. Spec §7 "Migrations". */
 export interface BackupModule {
-  pendingMigrations(dbPath: string, migrationsDir: string): string[];
   backupDatabase(opts: { dbPath: string; backupDir: string; keep?: number; now?: Date }): { path: string; pruned: string[] };
 }
 
@@ -1414,7 +1362,8 @@ export async function loadBackupModule(repoRoot: string = REPO_ROOT): Promise<Ba
 /**
  * Runs before `buildPorts` (which applies migrations) in both bootstraps:
  * 1. the database directory must be writable;
- * 2. when migrations are pending, a VACUUM INTO backup goes to `<db dir>/backups` first;
+ * 2. when the database file exists and WP0's `pendingMigrations()` is non-empty, a VACUUM INTO
+ *    backup goes to `<db dir>/backups` first (a fresh install has nothing to protect);
  * 3. if that backup fails, boot fails here, so migrations never run without one.
  * Spec §7 "Migrations", §13.
  */
@@ -1424,14 +1373,21 @@ export async function preflight(
 ): Promise<PreflightResult> {
   if (config.databasePath === ':memory:') return { pending: [], backupPath: null };
   assertDataDirWritable(config.databasePath);
-  const backup = opts.backup ?? (await loadBackupModule());
+  // why: openDatabase would create the file; a missing file means a fresh install, no backup needed.
+  if (!existsSync(config.databasePath)) return { pending: [], backupPath: null };
   let pending: string[];
   try {
-    pending = backup.pendingMigrations(config.databasePath, opts.migrationsDir);
+    const db = openDatabase(config.databasePath);
+    try {
+      pending = pendingMigrations(db, opts.migrationsDir);
+    } finally {
+      db.close();
+    }
   } catch (err) {
     throw new PreflightError(`cannot read the migration state of ${config.databasePath}: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (pending.length === 0) return { pending, backupPath: null };
+  const backup = opts.backup ?? (await loadBackupModule());
   try {
     const r = backup.backupDatabase({ dbPath: config.databasePath, backupDir: join(dirname(config.databasePath), 'backups') });
     opts.log.info({ pending, backupPath: r.path, pruned: r.pruned }, 'pre-migration backup written');
@@ -1442,7 +1398,7 @@ export async function preflight(
 }
 ```
 
-`apps/api/src/bootstrap/app.ts`: add the import and one statement in `main()`, immediately before the `buildPorts(` call, using the same `config`, `log` and `migrationsDir` values that call receives:
+`apps/api/src/bootstrap/app.ts`: add the import and one statement in `main()`, immediately before the `buildPorts(` call (the plan's order: config → logger → preflight → buildPorts), using the same `config`, `log` and `migrationsDir` values that call receives. If WP8 left a placeholder or its own preflight call at that point, replace it, so exactly one preflight call precedes `buildPorts`:
 
 ```ts
 import { preflight } from './preflight.js';
@@ -1451,15 +1407,15 @@ import { preflight } from './preflight.js';
   await preflight(config, { migrationsDir, log });
 ```
 
-`apps/api/src/bootstrap/tool.ts`: the same import and the same statement in `runTool`, directly above its `buildPorts(` call.
+`apps/api/src/bootstrap/tool.ts`: the same import and the same statement in `runTool(name, argv)`, directly after its config and logger are built and before argument parsing and `buildPorts(` (the tool bootstrap migrates through `buildPorts` too, so it needs the same guard).
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api test`
-Expected: PASS, including 7 preflight tests and 2 spawn tests; coverage stays at or above 85% lines / 70% branches; `src/bootstrap/preflight.ts` shows 100% lines.
+Expected: PASS, including 8 preflight tests and 2 spawn tests; coverage stays at or above 85% lines / 70% branches; `src/bootstrap/preflight.ts` shows 100% lines.
 
 Then: `node scripts/check-boundaries.mjs && pnpm -r typecheck`
-Expected: exit 0 for both (preflight.ts imports only `@gmt/core` types and Node built-ins; it reads no `process.env`).
+Expected: exit 0 for both (preflight.ts imports `@gmt/core` types, `@gmt/db` and Node built-ins; it reads no `process.env`).
 
 - [ ] **Step 5: Commit**
 
@@ -1620,11 +1576,12 @@ window's start and end with calls and cost so far.
 
 ### Travelpayouts (Aviasales Data API): authorised, cached, free
 
-- Endpoint `/aviasales/v3/prices_for_dates`, one request per (destination, month) with
-  `departure_at=YYYY-MM`, `one_way=false`, `currency=gbp`, up to 1000 rows a page. When every
-  origin shares a metro code in the airports table the request uses it (`LON` for LHR and
-  LGW) and rows are attributed by their `origin_airport` field. The worked example (2 origins,
-  2 destinations, 7 months) costs 14 requests a scan, or 28 by airport.
+- Endpoint `/aviasales/v3/prices_for_dates`, one logical request per (origin, destination,
+  month) with `departure_at=YYYY-MM`, `one_way=false`, `currency=gbp`, up to 1000 rows a page.
+  The origin is sent as its metro code when the airports table has one (`LON` for LHR and LGW)
+  and rows are attributed by their `origin_airport` field. Sibling pairs that share a metro
+  send identical requests, which the response cache answers: the worked example (2 origins,
+  2 destinations, 7 months) is 28 tiles, 14 upstream calls and 14 cache hits a scan.
 - Prices are Aviasales users' own recent searches (within about 48 hours), so the app labels
   them "Aviasales cache" with an age bound of 48 h. Rows carry no `found_at`.
 - The vendor ignores `market` (point of sale is recorded as unknown) and `trip_class`
@@ -1637,11 +1594,12 @@ window's start and end with calls and cost so far.
 ### SearchApi (Google Flights engines): scraping-derived, opt-in
 
 - SearchApi obtains Google's results in a way Google's terms prohibit; the app uses it because
-  the operator opted in (decision 2026-10-14) and labels every price "Google Flights via
-  SearchApi".
+  the operator opted in (decision 2026-10-14) and labels its prices "Google date grid via
+  SearchApi" (calendar) and "Google Flights via SearchApi" (itinerary search).
 - `google_flights_calendar` (discovery): at most 200 date combinations per call (HTTP 400
   above that), one airport per side (city codes are rejected), 9 to 29 seconds per call. The
-  app tiles 8 outbound × 24 return days, about 23 calls per airport pair for a 182-day window;
+  app tiles 8 outbound days × the return span the nights band needs (19 days for 10–21 nights,
+  152 combinations), about 23 calls per airport pair for a 182-day window;
   the worked example's 4 pairs need about 92. Age bound 24 h.
 - `google_flights` (verification): three steps per cell, `1 + expandTop × 2` calls, 5 at the
   default `expandTop` of 2. Step 3 can show an online agency below the airline's fare, so it
@@ -1707,15 +1665,13 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { definitionCreateRequestSchema } from '../../packages/core/src/api-contract/index.js';
-import { findBannedWords } from '../../packages/core/src/text/bannedWords.js';
+import { BANNED_WORD_ALLOWLIST, findBannedWords } from '../../packages/core/src/text/bannedWords.js';
 import { ROOT, SPEC_PATH, between, read } from './helpers.js';
 
 /** Operator-facing docs, held to the spec §11 word list. */
 const SCANNED = ['api-limits.md', 'scheduling.md', 'setup.md'];
 /** Research notes that quote vendor terminology verbatim; not operator-facing text. */
 const EXCLUDED = ['providers.md'];
-/** Exact phrases allowed although they contain a banned word: the script name from spec §9 item 7. */
-const ALLOWLIST = ['smoke:live'];
 
 const example = JSON.parse(read('docs/examples/london-new-york.json')) as unknown;
 
@@ -1760,7 +1716,7 @@ describe('banned words in operator docs (spec §11)', () => {
 
   it.each(SCANNED)('%s contains no banned word', (file) => {
     const text = read(`docs/${file}`);
-    const hits = findBannedWords(text, ALLOWLIST).map((h) => `${h.word} @${h.index}: …${text.slice(Math.max(0, h.index - 30), h.index + 30)}…`);
+    const hits = findBannedWords(text, BANNED_WORD_ALLOWLIST).map((h) => `${h.word} @${h.index}: …${text.slice(Math.max(0, h.index - 30), h.index + 30)}…`);
     expect(hits).toEqual([]);
   });
 
@@ -1986,6 +1942,10 @@ ALLOWED_HOSTS=flights.example.com
 TRUST_PROXY=true
 ```
 
+Set `APP_BASE_URL` to the address you type (for example `APP_BASE_URL=https://flights.example.com`
+or your `https://…ts.net` name) so alert emails link straight to the results row; left empty,
+emails carry relative links.
+
 `TRUST_PROXY=true` makes the failed-login rate limit read the client address from
 `X-Forwarded-For`; set it only when a proxy you control sits in front. Keep port 3000 bound to
 `127.0.0.1` (as compose does) so the proxy is the only way in.
@@ -2133,24 +2093,27 @@ naming the directory if it cannot write there.
 ## 7. Smoke test and fixture recording inside the container
 
 While the app runs it holds the database lock, so the smoke test and the recorder run inside
-the app process through authenticated routes. The image has no `curl`, so call them from the
-host through the loopback port:
+the app process through authenticated routes under `/api`. The image has no `curl`, so call
+them from the host through the loopback port:
 
 ```bash
 curl -u "operator:choose-a-long-passphrase" -X POST \
   -H 'Content-Type: application/json' -H 'X-Requested-With: get-me-there' \
-  -d '{}' http://127.0.0.1:3000/tools/smoke
+  -d '{"origin":"LHR","destination":"JFK"}' http://127.0.0.1:3000/api/tools/smoke
 
 curl -u "operator:choose-a-long-passphrase" -X POST \
   -H 'Content-Type: application/json' -H 'X-Requested-With: get-me-there' \
-  -d '{"budget":12}' http://127.0.0.1:3000/tools/record
+  -d '{"budget":12,"origins":["LHR","LGW"],"destinations":["JFK","EWR"],"month":"2027-03"}' \
+  http://127.0.0.1:3000/api/tools/record
 ```
 
-The smoke test issues one request per configured provider and prints the cheapest price with
-its provenance. Recording spends SearchApi credits up to the budget you pass.
+The smoke test issues one request per configured provider for that pair and returns
+`{ exitCode, summary, lines, fixturesWritten }`: exit code 0 means a price was found, 1 a
+provider error, 2 no provider configured, 3 an empty result. Recording spends SearchApi
+credits up to `budget` for the given pairs and month (choose a month inside the next year).
 
 On a development checkout without the container the same tools are `pnpm smoke:live` and
-`pnpm record:fixtures --budget 12`.
+`pnpm record:fixtures`, with the same arguments as command-line flags.
 
 ## 8. Local development
 
@@ -2180,7 +2143,7 @@ host; the container never uses Mailpit.
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm vitest run --project infra docs`
-Expected: PASS (9 tests: 3 example, 1 cadence, 1 scan-set, 3 per-file scans, 1 allowlist). If a banned-word test fails, the failure lists `word @index: …context…`; reword that sentence (never extend the allowlist beyond the script name).
+Expected: PASS (9 tests: 3 example, 1 cadence, 1 scan-set, 3 per-file scans, 1 allowlist). If a banned-word test fails, the failure lists `word @index: …context…`; reword that sentence (the allowlist is WP0's `BANNED_WORD_ALLOWLIST`; never add a local one).
 
 - [ ] **Step 5: Commit**
 
@@ -2194,7 +2157,7 @@ git add docs/setup.md docs/scheduling.md docs/examples infra/test && git commit 
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: the image (Task 12.1), compose file (Task 12.3), backup CLI (Task 12.4), `/health` (WP8).
+- Consumes: the image (Task 12.1), compose file (Task 12.3), backup CLI (Task 12.4), `GET /api/health` (WP8).
 
 - [ ] **Step 1: Write the failing check**
 
@@ -2247,7 +2210,7 @@ Add this job to `.github/workflows/ci.yml` under `jobs:` (after the existing `te
           done
           docker logs gmt-ci | tail -n 50
           test "$(docker inspect --format '{{.State.Health.Status}}' gmt-ci)" = healthy
-          curl -fsS http://127.0.0.1:3000/health
+          curl -fsS http://127.0.0.1:3000/api/health
       - name: Backup runs inside the container
         run: docker exec gmt-ci node scripts/backup.mjs
       - name: Stop gracefully within the grace period
@@ -2257,8 +2220,8 @@ Add this job to `.github/workflows/ci.yml` under `jobs:` (after the existing `te
 
 - [ ] **Step 3: Run to verify it passes**
 
-Run: the Step 1 command block again, then `curl -fsS http://127.0.0.1:3000/health` and `docker exec gmt-ci node scripts/backup.mjs`, then `docker stop --time 30 gmt-ci && docker rm gmt-ci`.
-Expected: `healthy`; `/health` prints `{"ok":true,"degraded":false}`; the backup prints `{"ok":true,"path":"/data/backups/get-me-there-….db","pruned":[]}`; the stop completes in under 30 s (the app checkpoints and exits on SIGTERM). After pushing the branch, the `docker` job is green.
+Run: the Step 1 command block again, then `curl -fsS http://127.0.0.1:3000/api/health` and `docker exec gmt-ci node scripts/backup.mjs`, then `docker stop --time 30 gmt-ci && docker rm gmt-ci`.
+Expected: `healthy`; `/api/health` prints `{"ok":true,"degraded":false}`; the backup prints `{"ok":true,"path":"/data/backups/get-me-there-….db","pruned":[]}`; the stop completes in under 30 s (the app checkpoints and exits on SIGTERM). After pushing the branch, the `docker` job is green.
 
 - [ ] **Step 4: Commit**
 
@@ -2268,7 +2231,7 @@ git add .github/workflows/ci.yml && git commit -m "wp12: CI builds the image, bo
 
 ### Task 12.9: The WP9 example constant equals the docs JSON
 
-**Precondition:** WP9 has merged to `main`. Rebase this branch on `main` first (`git fetch && git rebase origin/main`); WP9's brief creates `apps/web/src/views/Definitions/exampleDefinition.ts` to the contract in "Interfaces produced". If WP9 has not merged when Tasks 12.1–12.8 are done, stop here, report to Fable, and leave this task unticked; WP12 is not done until it passes.
+WP9 is a declared dependency (`depends_on: [8, 9]`), so `apps/web/src/example.ts` exists on `main` when this brief is dispatched. WP9 imports `docs/examples/london-new-york.json`; if WP9 merged with a stand-in copy of that file, Task 12.7 overwrites it with the content above and this test proves the import still resolves.
 
 **Files:**
 - Test: `infra/test/exampleDefinition.test.ts`
@@ -2282,7 +2245,7 @@ git add .github/workflows/ci.yml && git commit -m "wp12: CI builds the image, bo
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { EXAMPLE_DEFINITION } from '../../apps/web/src/views/Definitions/exampleDefinition.js';
+import { EXAMPLE_DEFINITION } from '../../apps/web/src/example.js';
 import { read } from './helpers.js';
 
 describe('the Definitions "import example" constant (spec §1, §11)', () => {
@@ -2290,18 +2253,16 @@ describe('the Definitions "import example" constant (spec §1, §11)', () => {
     expect(EXAMPLE_DEFINITION).toEqual(JSON.parse(read('docs/examples/london-new-york.json')));
   });
 
-  it('writes no airport code in application source (it re-exports the docs JSON)', () => {
-    const src = read('apps/web/src/views/Definitions/exampleDefinition.ts');
-    expect(src).toContain('docs/examples/london-new-york.json');
-    expect(src).not.toMatch(/\b(LHR|LGW|JFK|EWR|LON|NYC)\b/);
+  it('re-exports the docs JSON rather than copying it', () => {
+    expect(read('apps/web/src/example.ts')).toContain('docs/examples/london-new-york.json');
   });
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails or passes**
+- [ ] **Step 2: Run to verify it passes**
 
 Run: `pnpm vitest run --project infra exampleDefinition`
-Expected: PASS when WP9 followed the contract. A failure is a WP9 defect (or a drift in the docs JSON): report it to Fable with the diff; do not edit WP9's file from this branch.
+Expected: PASS (2 tests). A failure is a WP9 defect: report it to Fable with the diff; do not edit WP9's file from this branch.
 
 - [ ] **Step 3: Commit**
 

@@ -23,19 +23,19 @@ Add to `@gmt/core` the pure functions that turn a raw vendor offer into a hashed
 - `toGbp`, `MINOR_EXPONENT`, `ECB_CURRENCIES` (spec §6.3).
 - `validateVendorUrl` and the per-provider `LINK_ALLOWLIST` (spec §5.2).
 - `normaliseOffer`: the pure half of the spec §5.6 step for one `RawOffer`.
-- `evaluateConstraints`, `verdictClass` (spec §6.2).
+- `evaluateConstraints`, `verdictClass`, `unverifiedNames` (spec §6.2).
 - `dedupByItinerary`, `rankRows`, `sortRows`, `filterRows`, `bandCheapest`, `searchLinkFor` (spec §6.5, §6.9).
-- `evaluateAlertRules`, `dedupKey`, `isSuppressed`, `buildDigest` (spec §6.8).
+- `evaluateAlertRules`, `identityKey`, `dedupKey`, `isSuppressed`, `buildDigest` (structured `AlertDigest`, no text) (spec §6.8).
 - Barrel exports for all of the above in `packages/core/src/index.ts`.
 
 **Out**
 
 - Reading the airports and FX repositories, writing prices, outcomes and `offers-dropped:n`, the per-tile minimum per cell, the FX refresh: **WP7** (`engine`, `src/normalise.ts`, `src/fx/refresh.ts`).
-- Persisting `alert_events`, sending digests, the email templates with the coverage caveat and links: **WP11** (`engine/src/alerts/runner.ts`, `templates.ts`, `notifiers/email.ts`).
+- Assembling alert candidates (current execution, non-reused calendar rows), persisting `alert_events`, rendering the digest subject and body (spec §8.3), sending: **WP11** (`engine/src/alerts/runner.ts`, `templates.ts`, `notifiers/email.ts`).
 - The `/results` query, `basisReason`, `excludedByCurrentSpace`, the calendar-basis `notApplied` list and the default basis choice: **WP8** (`api`).
-- Windows, cells, epoch-day helpers, roll-up, buckets, selection, `cellKeyString`: **WP1** (runs in parallel; WP2 must not import it).
+- Windows, cells, epoch-day helpers, roll-up, buckets, selection: **WP1** (runs in parallel; WP2 must not import it). `cellKeyString` is WP0's.
 - Rendering rows, links and forms: **WP9**/**WP10** (`web`).
-- Types, ports, errors, labels, banned words, api-contract schemas, the Stryker config: **WP0** (consumed, not changed).
+- Types (including every alert type in `types/alerts.ts` and `DigestItem`/`AlertDigest` in `ports/notifier.ts`), ports, errors, labels, banned words and `BANNED_WORD_ALLOWLIST`, api-contract schemas, the Stryker config: **WP0** (consumed, not changed).
 
 ## 3. Spec sections
 
@@ -51,56 +51,85 @@ Add to `@gmt/core` the pure functions that turn a raw vendor offer into a hashed
 
 ## 4. Interfaces consumed
 
-All from WP0 (`@gmt/core` itself, imported by relative path inside the package). Copied from the plan's "Cross-package contracts" and spec §5.1 / §6.3.
+All from WP0, imported by relative path inside `@gmt/core`. Copied verbatim from the plan's "Cross-package contracts" (contracts v2, commit e804941) and spec §5.1. Only the blocks WP2 reads are shown.
 
 ```ts
 // types/ids.ts
-export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$, upper-case
+export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
+export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
 export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' }; // Date#toISOString() form only
-export function isRealDate(y: number, m: number, d: number): boolean;   // Task 0.3 implementation, exported from ids.ts
+export const iataSchema: z.ZodType<Iata, string>;  // trims, upper-cases, then requires ^[A-Z]{3}$ (so 'lhr' → 'LHR'; 'LHRX' rejected)
+export const isoDateSchema: z.ZodType<IsoDate, string>;    // regex + real calendar date check (rejects 2027-02-29)
+export const isoMonthSchema: z.ZodType<IsoMonth, string>;
+export const isoDateTimeSchema: z.ZodType<IsoDateTime, string>; // /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/ and Date.parse round-trips
+export function isRealDate(y: number, m: number, d: number): boolean;
+export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
+export function asIsoDate(s: string): IsoDate;
+export function asIsoMonth(s: string): IsoMonth;
+export function asIsoDateTime(s: string): IsoDateTime;
 
 // types/provenance.ts
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';   // defined here; ports/provider.ts re-exports it
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
-export type PointOfSale = 'GB' | 'unknown';
+export type PointOfSale = string | 'unknown';   // ISO 3166-1 alpha-2 upper-case (POINT_OF_SALE echoes), or 'unknown'; pointOfSaleSchema = z.string().regex(/^[A-Z]{2}$/).or(z.literal('unknown'))
 export type FxInfo = { converted: false } | { converted: true; rateNano: number; rateDate: IsoDate; source: string };
 export interface Provenance {
   providerId: ProviderId; sourceKind: SourceKind; fetchedAt: IsoDateTime; providerObservedAt?: IsoDateTime;
   maxAgeHours: number | 'unknown'; fx: FxInfo; pointOfSale: PointOfSale; cabin: Cabin;
 }
+export const providerIdSchema, sourceKindSchema, cabinSchema, pointOfSaleSchema, fxInfoSchema, provenanceSchema;
+// provenanceSchema uses z.object({...}).strict() with providerObservedAt: isoDateTimeSchema.exactOptional()  (zod 4; needed under exactOptionalPropertyTypes)
 
-// types/definition.ts
-export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
+// types/definition.ts (excerpt)
+export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }   // the ONLY definition; ports/provider.ts imports it
 export interface Cell extends CellKey { nights: number }
+export function cellKeyString(c: CellKey): string;        // `${origin}|${destination}|${departureDate}|${returnDate}` — lives here (WP0) so WP1, WP2, WP3 all share it
+export type LocalTimeWindow = { from: string; to: string };   // HH:mm, inclusive, local to the airport
 export interface Constraints {
   maxStops?: number; maxJourneyMinutes?: number; minLayoverMinutes?: number; maxLayoverMinutes?: number;
-  noOvernightLayover?: boolean; departureWindowLocal?: { from: string; to: string }; arrivalWindowLocal?: { from: string; to: string };
-  noSelfTransfer?: boolean; noAirportChange?: boolean; includeAirlines?: string[]; excludeAirlines?: string[];
+  noOvernightLayover?: boolean; departureWindowLocal?: LocalTimeWindow; arrivalWindowLocal?: LocalTimeWindow;
   cabinBagRequired?: boolean; checkedBagRequired?: boolean; minCheckedBags?: number; maxPricePence?: number;
 }
 
-// types/itinerary.ts — spec §6.3 plus the plan block
-// NormalisedItinerary = { hash, origin, destination, departureDate, returnDate, nights, outbound: Segment[], inbound: Segment[], outboundMinutes?, inboundMinutes?, stopsOut, stopsIn, layovers: Layover[], airportChange?, marketingCarriers: string[] }
-// Segment = { marketingCarrier, operatingCarrier?, flightNumber: number, from, to, departLocal, arriveLocal, departUtc?, arriveUtc?, durationMinutes?, aircraft? }
-// Layover = { at: Iata; minutes: number; overnight: boolean; airportChange: boolean }
+// types/itinerary.ts
 export type SuppliedField = 'segments' | 'segmentTimes' | 'segmentCabins' | 'selfTransfer' | 'baggage' | 'fareConditions' | 'seller' | 'price';
 export interface BaggageSnapshot { cabinBag?: 'included' | 'not-included'; checkedBags?: number; notes?: string[] }
 export interface FareConditions { refundable?: boolean; changeable?: boolean; notes?: string[] }
 export type Booking = { kind: 'get'; url: string; host: string } | { kind: 'post'; url: string; postData: string; host: string } | { kind: 'none' };
+export interface Segment { marketingCarrier: string; operatingCarrier?: string; flightNumber: number; from: Iata; to: Iata; departLocal: string; arriveLocal: string; departUtc?: IsoDateTime; arriveUtc?: IsoDateTime; durationMinutes?: number; aircraft?: string }
+export interface Layover { at: Iata; minutes: number; overnight: boolean; airportChange: boolean }
+export interface NormalisedItinerary { hash: string; origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate; nights: number; outbound: Segment[]; inbound: Segment[]; outboundMinutes?: number; inboundMinutes?: number; stopsOut: number; stopsIn: number; layovers: Layover[]; airportChange?: boolean; marketingCarriers: string[] }
 export interface Offer { itineraryHash: string; providerId: ProviderId; seller: string; cabin: Cabin }
-export interface Observation {
-  id: number; offerId: number; executionId: string; provenance: Provenance; pricePence: number; priceNativeMinor: number; currencyNative: string;
-  taxesIncluded: boolean | null; selfTransfer: boolean | null; segmentCabins: Cabin[] | null; baggage: BaggageSnapshot | null;
-  fareConditions: FareConditions | null; booking: Booking; bookingExpiresAt: IsoDateTime | null; suppliedFields: SuppliedField[]; partialExpansion: boolean;
+export interface ObservationFields {   // what normalisation yields for one raw offer, before the db assigns ids
+  pricePence: number; priceNativeMinor: number; currencyNative: string; fx: FxInfo; taxesIncluded: boolean | null; selfTransfer: boolean | null;
+  segmentCabins: Cabin[] | null; baggage: BaggageSnapshot | null; fareConditions: FareConditions | null; booking: Booking; bookingExpiresAt: IsoDateTime | null;
 }
+export interface Observation extends ObservationFields { id: number; offerId: number; executionId: string; provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean }
 export type Verdict = 'pass' | 'fail' | 'unverified';
 export type ConstraintName = keyof Constraints | 'cabin';
 export type Verdicts = Partial<Record<ConstraintName, Verdict>>;
 export type VerdictClass = 'verified' | 'partially-verified' | 'failed';
+export type ResultBasis = 'verified' | 'calendar';   // API values; the UI labels them "itinerary-search basis" and "calendar basis"
 
-// ports/provider.ts — spec §5.1 verbatim (the parts WP2 reads)
-export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
+// types/alerts.ts
+export type AlertRuleType = 'absolute' | 'dropPct' | 'dropAbs';
+export interface AlertRule { id: string; definitionId: string; type: AlertRuleType; thresholdPence: number | null; pct: number | null; basis: ResultBasis; requireAllVerified: boolean | null; cooldownHours: number; enabled: boolean }
+export type AlertRuleInput = Omit<AlertRule, 'id'>;
+export interface AlertEvent { id: number; ruleId: string; identityKey: string; observationId: number | null; calendarPriceId: number | null; dedupKey: string; firedAt: IsoDateTime; status: 'sent' | 'failed' | 'suppressed'; reason: string | null; payload: unknown }
+export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
+export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
+export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
+export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean }
+export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
+// identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
+
+// ports/notifier.ts (excerpt)
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; searchLink: { url: string; host: string; label: string } }
+export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
+
+// ports/provider.ts — spec §5.1 (the parts WP2 reads)
 export interface RawSegment { marketingCarrier: string; operatingCarrier?: string; flightNumber: string; from: Iata; to: Iata; depart: string; arrive: string; timeKind: 'local' | 'utc' | 'offset'; cabin?: Cabin; durationMinutes?: number; aircraft?: string }
 export interface RawOffer {
   outbound: RawSegment[]; inbound: RawSegment[]; seller: string; requestedCabin: Cabin;
@@ -110,117 +139,59 @@ export interface RawOffer {
   bookingExpiresAt?: IsoDateTime;
 }
 
-// errors.ts
+// errors.ts (Task 0.4)
 export type NormalisationReason = 'fx-unavailable' | 'currency-unsupported' | 'unknown-airport-tz' | 'no-return-legs' | 'unmappable-carrier' | 'bad-local-time';
-export class NormalisationError extends Error { reason: NormalisationReason; detail?: string }   // constructed as new NormalisationError(reason, detail?) (Task 0.4)
+export class NormalisationError extends Error { reason: NormalisationReason; detail?: string }   // new NormalisationError(reason, detail?)
 
-// labels/age.ts
-export type EffectiveAge = { kind: 'observed'; fetchedHours: number; observedHours: number } | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number } | { kind: 'unknown'; fetchedHours: number };
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // hours as non-negative numbers, clamped at 0
-export function formatAgeFull(a: EffectiveAge): string;
+// labels/age.ts (Task 0.7, with the maxAgeHours-0 rule settled in contracts v2)
+export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // hours non-negative, clamped at 0
 export function formatAgeCompact(a: EffectiveAge): string;
 export function compareAges(a: EffectiveAge, b: EffectiveAge): number;  // unknown loses to any known; otherwise by worst-case hours
 
 // text/bannedWords.ts
-export const BANNED_WORDS: readonly string[];
 export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
+export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in'];
 
-// api-contract/results.ts — resultRowSchema, whose z.infer is the result row:
-// { itineraryHash | null, basis, verdictClass: VerdictClass | 'unchecked', pricePence, provenance, stale, ageHours, cell: CellKey & { nights },
-//   outbound: Segment[] | null, inbound: Segment[] | null, totalMinutes | null, stopsOut | null, stopsIn | null, carriers: string[],
-//   verdicts: Verdicts, unverified: ConstraintName[], notApplied: ConstraintName[], booking: Booking, searchLink: { url, host, label },
-//   otherOffers: Array<{ seller, pricePence, provenance, booking }>, notSeenInLatest: { ageHours } | null, adjustedPence | null,
-//   destinationNote | null, bandCheapest: boolean }
-export const resultRowSchema: z.ZodObject<…>;
-
-// ports/notifier.ts (Task 0.4)
-export type AlertDigest = { ruleId: string; definitionId: string; executionId: string; basis: 'verified' | 'calendar'; subject: string; body: string; items: DigestItem[]; restCount: number };
-```
-
-**Contract gap to close before dispatch.** `AlertDigest.items` is typed `DigestItem[]`, but the plan never defines `DigestItem`. `WP0` must define it in `ports/notifier.ts`, and Fable must add it to the plan's contracts in the same commit, as follows. This brief fills it in `buildDigest` (Task 2.11):
-
-```ts
-export interface DigestItem {
-  section: 'firing' | 'new'; kind: 'absolute' | 'drop' | 'new'; identityKey: string; dedupKey: string;
-  cell: CellKey & { nights: number }; itineraryHash: string | null; pricePence: number;
-  previousPricePence: number | null; previousAgeHours: number | null; provenance: Provenance;
-  verdictClass: VerdictClass | 'unchecked'; unverified: ConstraintName[]; reason: string;
-  observationId: number | null; calendarPriceId: number | null;
-}
+// api-contract/results.ts — resultRowSchema (its z.infer is ResultRow; fields per the plan's API contract block):
+// { itineraryHash: string | null; basis: ResultBasis; verdictClass: VerdictClass | 'unchecked'; pricePence; provenance; stale; ageHours; cell: Cell;
+//   outbound: Segment[] | null; inbound: Segment[] | null; totalMinutes: number | null; outboundMinutes; inboundMinutes; stopsOut; stopsIn; layovers: Layover[];
+//   carriers: string[]; verdicts: Verdicts; unverified: ConstraintName[]; notApplied: ConstraintName[]; seller: string | null; baggage: BaggageSnapshot | null;
+//   fareConditions: FareConditions | null; selfTransfer: boolean | null; booking: Booking; searchLink: { url; host; label };
+//   otherOffers: Array<{ seller; pricePence; provenance; booking; stale; ageHours }>; notSeenInLatest: { ageHours } | null; adjustedPence: number | null;
+//   destinationNote: string | null; executionId: string; calendarPriceId: number | null; observationId: number | null }
 ```
 
 ## 5. Interfaces produced
 
-Exported from `@gmt/core` (barrel). Later packages rely on these exact names. Where a signature is wider than the plan's one-line summary, the reason is given in a `why` line.
+The plan's "Core domain functions (WP2)" block, verbatim. Later packages rely on these names, and the code in §8 implements exactly these signatures:
 
 ```ts
-// normalise/carrier.ts
-export function canonicalCarrier(s: string): string;                          // throws NormalisationError('unmappable-carrier')
-export function canonicalFlightNumber(s: string, carrier?: string): number;   // why: optional carrier rejects "BA 938" offered as a VS segment
-// normalise/localTime.ts
-export type TimeKind = 'local' | 'utc' | 'offset';
-export function departLocal(value: string, timeKind: TimeKind, tz: string | null): string;   // 'YYYY-MM-DDTHH:mm'; DST rules; null tz → unknown-airport-tz
-// normalise/timestamps.ts
-export function toIsoDateTime(value: string, timeKind: TimeKind, tz: string | null): IsoDateTime;
-// normalise/hashing.ts
-export type HashSegment = Pick<Segment, 'marketingCarrier' | 'flightNumber' | 'from' | 'to' | 'departLocal'>;
-export function itineraryHash(outbound: readonly HashSegment[], inbound: readonly HashSegment[]): string;   // sha256 lower-case hex
-// normalise/money.ts
-export const ECB_CURRENCIES: readonly string[];
-export const MINOR_EXPONENT: Readonly<Record<string, number>>;
-export function toGbp(amountMinor: number, currency: string, rateNano: number): number;   // integer pence, half-up
-// normalise/vendorUrl.ts
-export const LINK_ALLOWLIST: Readonly<Record<ProviderId, readonly string[]>>;   // why: engine (calendar vendorLink) and api-contract re-validation need the same list
-export function validateVendorUrl(url: string, allowlist: readonly string[]): Booking;   // 'get' with host, or { kind: 'none' }
-// normalise/itinerary.ts
-export interface NormaliseDeps {
-  providerId: ProviderId;   // why: Offer.providerId and the link allowlist need it; the plan's deps omitted it
-  tzOf(iata: Iata): string | null;
-  rateFor(currency: string): { rateNano: number; rateDate: IsoDate; source: string } | null;
-  cabin: Cabin;
-}
-export type ObservationFields = Pick<Observation, 'pricePence' | 'priceNativeMinor' | 'currencyNative' | 'taxesIncluded' | 'selfTransfer' | 'segmentCabins' | 'baggage' | 'fareConditions' | 'booking' | 'bookingExpiresAt'> & { fx: FxInfo };
-export interface NormalisedOffer { itinerary: NormalisedItinerary; offer: Offer; observationFields: ObservationFields }
-export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOffer | NormalisationError;
-// constraints/evaluate.ts, constraints/verdictClass.ts
-export type ConstraintOffer = Pick<Observation, 'pricePence' | 'segmentCabins' | 'selfTransfer' | 'baggage'> & { cabin: Cabin };
-export function evaluateConstraints(it: NormalisedItinerary, offer: ConstraintOffer, c: Constraints, supplied: readonly SuppliedField[]): Verdicts;
-export function verdictClass(v: Verdicts): VerdictClass;
-// results/*
-export type ResultRow = z.infer<typeof resultRowSchema>;
-export type OfferRow = ResultRow & { seller: string };   // why: resultRowSchema has no seller for the primary offer, and otherOffers needs one
-export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted';
-export type SortDir = 'asc' | 'desc';
-export interface ResultFilters {
-  verdictClasses?: ReadonlyArray<VerdictClass | 'unchecked'>; unverifiedConstraint?: ConstraintName; providers?: readonly ProviderId[];
-  maxStops?: number; carriers?: readonly string[]; destinations?: readonly Iata[]; maxPricePence?: number;
-  nights?: { min: number; max: number }; hideStale?: boolean;
-}
-export function dedupByItinerary(rows: readonly OfferRow[], cabin: Cabin): OfferRow[];
-export function rankRows<T extends ResultRow>(rows: readonly T[], now: IsoDateTime): T[];
-export function sortRows<T extends ResultRow>(rows: readonly T[], key: SortKey, dir: SortDir): T[];
-export function filterRows<T extends ResultRow>(rows: readonly T[], f: ResultFilters): T[];
-export function bandCheapest<T extends ResultRow>(rows: readonly T[], hours: number): T[];
-export const SEARCH_LINK_LABEL = 'search link, not a fare link';
-export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string };
-// alerts/*
-export interface AlertRuleInput { id: string; definitionId: string; type: 'absolute' | 'dropPct' | 'dropAbs'; thresholdPence: number | null; pct: number | null; basis: 'verified' | 'calendar'; requireAllVerified: boolean | null; cooldownHours: number; enabled: boolean }
-export interface PreviousPrice { pricePence: number; fetchedAt: IsoDateTime }
-export type AlertCandidate =
-  | { basis: 'verified'; executionId: string; cell: Cell; pricePence: number; provenance: Provenance; previous: PreviousPrice | null; observationId: number; offerId: number; itineraryHash: string; verdicts: Verdicts }
-  | { basis: 'calendar'; executionId: string; cell: Cell; pricePence: number; provenance: Provenance; previous: PreviousPrice | null; calendarPriceId: number; reusedFromExecutionId: string | null; discoveryRefreshHours: number };
-export interface PastFiring { ruleId: string; identityKey: string; dedupKey: string; pricePence: number; firedAt: IsoDateTime; status: 'sent' | 'failed' | 'suppressed' }
-export interface Firing { ruleId: string; identityKey: string; dedupKey: string; kind: 'absolute' | 'drop' | 'new'; status: 'fire' | 'suppressed' | 'listed'; reason: string; candidate: AlertCandidate; verdictClass: VerdictClass | 'unchecked'; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | null }
-export interface AlertContext { now: IsoDateTime; executionId: string; cabin: Cabin }
-export function evaluateAlertRules(rules: readonly AlertRuleInput[], candidates: readonly AlertCandidate[], previous: readonly PastFiring[], ctx: AlertContext): Firing[];
-  // why: the plan's 4th argument `now` becomes `ctx` because "current execution" and "definition cabin" filters need executionId and cabin
-export function dedupKey(identityKey: string, pricePence: number): string;
-export function isSuppressed(f: { ruleId: string; identityKey: string; dedupKey: string; pricePence: number }, history: readonly PastFiring[], cooldownHours: number, now: IsoDateTime): boolean;
-export function buildDigest(rule: AlertRuleInput, firings: readonly Firing[], ctx: { now: IsoDateTime }): AlertDigest | null;
-  // why: age labels need `now`; null when nothing fires (new cells alone send nothing)
+// WP2 (normalise/, constraints/, results/, alerts/)
+export function canonicalCarrier(s: string): string; export function canonicalFlightNumber(s: string | number, carrier?: string): number;
+export function departLocal(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): string; export function toIsoDateTime(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): IsoDateTime;
+export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;
+export const MINOR_EXPONENT: Record<string, number>; export const ECB_CURRENCIES: readonly string[]; export function toGbp(amountMinor: number, currency: string, rateNano: number): number;
+export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export const SEARCH_LINK_LABEL = 'search link, not a fare link'; export function validateVendorUrl(url: string, allowlist: string[]): Booking; export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string };
+export interface NormaliseDeps { providerId: ProviderId; cabin: Cabin; tzOf(iata: Iata): string | null; rateFor(currency: string): { rateNano: number; rateDate: IsoDate; source: string } | null }
+export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps): { ok: true; itinerary: NormalisedItinerary; offer: Offer; observation: ObservationFields } | { ok: false; error: NormalisationError };
+export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts; export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
+export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
+export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
+export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
+export function identityKey(rule: AlertRule, c: AlertCandidate): string; export function dedupKey(identityKey: string, pricePence: number): string; export function isSuppressed(f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>, prior: PriorFiring[], cooldownHours: number, now: IsoDateTime): { suppressed: boolean; reason: string | null };
+export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] }): AlertDigest | null;   // null when no firing; top 10 + restCount
 ```
 
-`AlertRuleInput` is the subset of WP0's `alertRuleSchema` the core reads. WP0's inferred `AlertRule` type must be assignable to it. If a field name differs, WP11 maps it in one place, `engine/src/alerts/runner.ts`.
+Settled details this brief pins, all inside those signatures:
+
+- `departLocal` and `toIsoDateTime` throw `NormalisationError('unknown-airport-tz')` for a zone the runtime does not know. `normaliseOffer` turns `tzOf(iata) === null` into the same error.
+- `normaliseOffer` drops an offer that does not fly `cell` (origin, final destination, local departure date, local return date compared through `cellKeyString`) as `bad-local-time`, with the detail "offer flies …, cell is …". It never re-keys an offer.
+- `bandCheapest` row key = `itineraryHash`. Only itinerary rows have a travel time, so calendar rows are never in the set.
+- `evaluateAlertRules` leaves out firings that `prior` suppresses. To record suppressed events, WP11 calls it again with `prior = []` and runs `isSuppressed` on each firing. `isNew` firings are never suppressed. The calendar drop window is `2 × (ctx.discoveryRefreshHours[providerId] ?? 168)` whole hours, inclusive. The 168 h default is spec §7's.
+- `prior` passed to `evaluateAlertRules`/`isSuppressed` is this rule's sent firings only. WP11's query excludes `failed` and `suppressed` events.
+- `buildDigest`: `items` = the 10 cheapest non-new firings; `newItems` = the 10 cheapest new cells; `restCount` = everything beyond both lists. It returns null when no non-new firing exists and throws on synthetic provenance. `DigestItem.previousAgeHours` is the previous price's age at this fetch, in whole hours. `booking` is the observation's booking (verified) or `{ kind: 'none' }` (calendar).
+
+Module-internal helpers are not in the barrel. They are `parseVendorTime`, `requireZone`, `wallToInstant`, `localMinute` and `vendorInstant` (localTime.ts), `hoursSince` and `priceOf` (alerts/dedup.ts), `need` (alerts/evaluate.ts) and `formatPence` (alerts/format.ts). The type `AlertEvalContext` (alerts/evaluate.ts) names the plan's inline `ctx` type.
 
 ## 6. Library notes
 
@@ -230,10 +201,10 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 |---|---|---|---|
 | `@date-fns/tz` | 1.5.0 | `new TZDate(epochMs, tz)` then `getFullYear/getMonth/getDate/getHours/getMinutes` (wall-clock reading in `tz`); `tzOffset(tz, date)` returns minutes east of UTC, and `NaN` for an unknown zone (it never throws) | context7 `/date-fns/tz` (`_autodocs/api-reference/tzdate.md`: constructor overloads; an invalid zone gives Invalid Date without throwing) and source `src/date/mini.js`. **The component constructor `new TZDate(y, m, d, h, mi, tz)` is deliberately not used.** It resolves wall components through the *system* zone and has no disambiguation option, so an ambiguous time would depend on the host TZ. `wallToInstant` computes both candidate offsets with `tzOffset` instead. Scratch run: `tzOffset('Europe/London', 2027-03-28T01:30Z) = 60`, `tzOffset('Bad/Zone', …) = NaN`. |
 | `@noble/hashes` | 2.4.0 | `import { sha256 } from '@noble/hashes/sha2.js'`; `import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'` | context7 `/paulmillr/noble-hashes` (README "SHA-2"; `_autodocs/api-reference/utils.md` `bytesToHex`). v2 needs the `.js` subpaths; `@noble/hashes/sha256` is gone. Scratch run: `bytesToHex(sha256(utf8ToBytes('abc')))` = `ba7816bf…15ad`. |
-| `zod` | 4.6.7 | Only `z.infer<typeof resultRowSchema>` (type position); no schemas are defined in WP2 | WP0's schemas. Under `exactOptionalPropertyTypes`, `.optional()` infers `T \| undefined`; zod 4.6.7 has `.exactOptional()` (see `node_modules/zod/v4/classic/schemas.d.ts`). This affects WP0, not WP2 code. |
+| `zod` | 4.6.7 | Only `z.infer<typeof resultRowSchema>` (type position) and `resultRowSchema.parse` in a test helper; WP2 defines no schemas | WP0's schemas (contracts v2 use `.exactOptional()` for `providerObservedAt`). |
 | `fast-check` | 4.10.2 | `fc.assert`, `fc.property`, `fc.integer({ min, max })`, `fc.record`, `fc.constantFrom`, `fc.array(arb, { minLength, maxLength })`, `fc.date({ min, max, noInvalidDate: true })` | Scratch run of every property in this brief. |
-| `vitest` | 5.0.4 | `describe`, `it`, `it.each`, `expect(...).toBe/toEqual/toMatchObject/toThrow/toHaveProperty`; a missing module fails with `Error: Cannot find module '<path>' imported from <test>` | Scratch run; that failure text is what the "verify it fails" steps expect. |
-| Stryker | `@stryker-mutator/core` + `vitest-runner` 10.0.0 | `pnpm --filter @gmt/core mutate` (WP0's `stryker.config.json`) | **Caution.** In the scratch install with vitest 5.0.4, Stryker reported "Initial test run succeeded. Ran 222 tests" and then "Ran 0.00 tests per mutant", so every mutant survived. If the WP0 setup shows the same, the runner is not activating mutants. Stop and raise it with Fable. Do not lower the threshold or delete mutants. |
+| `vitest` | 5.0.4 | `describe`, `it`, `it.each`, `expect(...).toBe/toEqual/toMatchObject/toThrow/toHaveProperty`; a missing module fails with `Error: Cannot find module '<path>' imported from <test>` | Scratch run; that failure text is what the "verify it fails" steps expect. Per-task runs use `pnpm --filter @gmt/core exec vitest run <file>` (no coverage thresholds on a partial run; plan decision 8). |
+| Stryker | `@stryker-mutator/core` 10.0.0, command runner | `pnpm --filter @gmt/core mutate` with WP0's config (`"testRunner": "command"`, `pnpm exec vitest run --coverage.enabled=false`; plan decision 8) | Scratch run with that runner on this brief's code (2026-10-14): hashing 100%, money 94.05%, vendorUrl 95%, constraints/evaluate 91.70%, alerts/dedup 97.87%. The one alerts/dedup survivor (`maxAgeHours: 'unknown'` → `""` inside `hoursSince`) is equivalent, because `fetchedHours` does not read `maxAgeHours`. |
 | frankfurter (data, not a dependency) | — | the `ECB_CURRENCIES` list | `GET https://api.frankfurter.dev/v1/currencies` on 2026-10-14: 30 codes, no BGN or RUB. |
 | Aviasales search URL (data) | — | `https://search.aviasales.com/flights/?origin_iata=&destination_iata=&depart_date=&return_date=&adults=&children=&infants=&trip_class=` | The Travelpayouts help-centre search-form example (`origin_iata=LON…&trip_class=0&depart_date=…&return_date=…`), found by web search on 2026-10-14; a direct fetch of the article returned 403. `trip_class` is 0 economy, 1 business, 2 first. |
 | Google Flights search URL (data) | — | `https://www.google.com/travel/flights?q=<words>&hl=en&curr=GBP` | Google publishes no documented deep-link format (spec §2: no public API). The natural-language `q` form is the search-box entry point. It is a convenience search link, labelled as such; WP9's manual check opens one. |
@@ -245,7 +216,7 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 - `src/normalise/carrier.ts`, `src/normalise/localTime.ts`, `src/normalise/timestamps.ts`, `src/normalise/hashing.ts`, `src/normalise/money.ts`, `src/normalise/vendorUrl.ts`, `src/normalise/itinerary.ts`
 - `src/constraints/evaluate.ts`, `src/constraints/verdictClass.ts`
 - `src/results/types.ts`, `src/results/dedup.ts`, `src/results/rank.ts`, `src/results/filter.ts`, `src/results/band.ts`, `src/results/searchLink.ts`
-- `src/alerts/types.ts`, `src/alerts/dedup.ts`, `src/alerts/format.ts`, `src/alerts/evaluate.ts`, `src/alerts/digest.ts`
+- `src/alerts/format.ts`, `src/alerts/dedup.ts`, `src/alerts/evaluate.ts`, `src/alerts/digest.ts` (the alert *types* are WP0's `types/alerts.ts`)
 
 **Modify:**
 
@@ -260,11 +231,11 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 - `test/alerts/dedup.test.ts`, `test/alerts/evaluate.test.ts`, `test/alerts/digest.test.ts`
 - `test/text/emitted.test.ts`, `test/wp2-barrel.test.ts`
 
-No other package and no WP0 file is touched. The plan file map lists `src/results/rank.ts` for `rankRows` and `sortRows`; `types.ts`, `searchLink.ts` and `alerts/{types,format}.ts` are added here because they have one responsibility each.
+No other package and no WP0 file is touched. The plan file map lists `src/results/rank.ts` for `rankRows` and `sortRows`; `results/types.ts`, `results/searchLink.ts` and `alerts/format.ts` are added here because they have one responsibility each.
 
 ## 8. Tasks
 
-Every "Run" step runs **only that task's test file and skips coverage**. `pnpm --filter @gmt/core test` enables coverage with the 100% thresholds over all of `src`, so a subset run would fail those thresholds even when every test passes. The full coverage run belongs in the definition of done. The code below is already formatted with the plan's `biome.json` (Biome 2.5.15). Run `pnpm lint:fix` if an edit reflows it.
+Every "Run" step runs **only that task's test file**, with `pnpm --filter @gmt/core exec vitest run <file>` (plan decision 8). `pnpm --filter @gmt/core test` enables coverage with the 100% thresholds over all of `src`, so a partial run would fail those thresholds even when every test passes. The full coverage run belongs in the definition of done. The code below is already formatted with the plan's `biome.json` (Biome 2.5.15). Run `pnpm lint:fix` if an edit reflows it.
 
 ### Task 2.1: Carrier canonicalisation and the itinerary hash (first failing test)
 
@@ -276,7 +247,7 @@ Every "Run" step runs **only that task's test file and skips coverage**. `pnpm -
 - Consumes: `NormalisationError` (errors.ts), `Segment`, `Iata` (types), `sha256`, `bytesToHex`, `utf8ToBytes` (`@noble/hashes`)
 - Produces: `canonicalCarrier`, `canonicalFlightNumber`, `HashSegment`, `itineraryHash`
 
-The first test is the plan's first failing test: `VS 938` ≡ `VS938`. The golden value was computed from the literal string `OUT|VS:938:LHR:JFK:2027-03-14T10:05|IN|VS:939:JFK:LHR:2027-03-28T18:30`, independently of the implementation. If the hash input format ever changes, this test must fail.
+The first test is the plan's first failing test: `VS 938` ≡ `VS938`. The golden value was computed from the literal string `OUT|VS:938:LHR:JFK:2027-03-14T10:05|IN|VS:939:JFK:LHR:2027-03-28T18:30`, independently of the implementation. A second golden value, two segments each way, pins the `;` separator. If the hash input format ever changes, these tests must fail. `itineraryHash` accepts `Pick<Segment, …>` (`HashSegment`), which is wider than the plan's `Segment[]`, so every `Segment[]` caller compiles unchanged.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -340,6 +311,21 @@ describe('itinerary identity (spec §6.4)', () => {
     expect(itineraryHash(...trip('VS', '938'))).toBe(
       '3e3edd61cf5e74553b055c04f2e900d3dcc398977171e8ae25e19b8d754fe75c',
     );
+    // Two segments each way pins the ';' separator inside a direction. Golden input:
+    // OUT|VS:938:LGW:AAA:2027-03-14T10:05;VS:1:AAA:JFK:2027-03-14T15:00|IN|VS:2:JFK:BBB:2027-03-28T18:30;VS:3:BBB:LHR:2027-03-29T01:00
+    const s = (flightNumber: number, from: string, to: string, departLocal: string): HashSegment => ({
+      marketingCarrier: 'VS',
+      flightNumber,
+      from: from as Iata,
+      to: to as Iata,
+      departLocal,
+    });
+    expect(
+      itineraryHash(
+        [s(938, 'LGW', 'AAA', '2027-03-14T10:05'), s(1, 'AAA', 'JFK', '2027-03-14T15:00')],
+        [s(2, 'JFK', 'BBB', '2027-03-28T18:30'), s(3, 'BBB', 'LHR', '2027-03-29T01:00')],
+      ),
+    ).toBe('c3cbf8809e84d4b8762f1bfd437a5f345b0effd5b2633ac3058ba48264ddecc3');
   });
 
   it.each(['VIR', 'C', 'C-', 'Virgin Atlantic', ''])(
@@ -358,6 +344,12 @@ describe('itinerary identity (spec §6.4)', () => {
     expect(() => canonicalFlightNumber(f)).toThrow(NormalisationError);
   });
 
+  it('a numeric flight number gets the same canonical form and range check', () => {
+    expect(canonicalFlightNumber(938, 'VS')).toBe(938);
+    for (const n of [0, -938, 93.8, 10_000])
+      expect(() => canonicalFlightNumber(n)).toThrow(NormalisationError);
+  });
+
   it('a designator prefix naming another airline is rejected, not re-labelled', () => {
     expect(() => canonicalFlightNumber('BA 938', 'VS')).toThrow(/does not belong to VS/);
   });
@@ -370,6 +362,9 @@ describe('itinerary identity (spec §6.4)', () => {
     expect(() =>
       itineraryHash([{ ...(out[0] as HashSegment), departLocal: '2027-03-14 10:05' }], back),
     ).toThrow(RangeError);
+    expect(() =>
+      itineraryHash([{ ...(out[0] as HashSegment), departLocal: 'x2027-03-14T10:05' }], back),
+    ).toThrow('departLocal not canonical: x2027-03-14T10:05');
   });
 
   it('property: equal inputs give equal hashes; any change to a hashed field changes it', () => {
@@ -433,13 +428,15 @@ export function canonicalCarrier(s: string): string {
 }
 
 /**
- * Canonical flight number: an integer without leading zeros. Spec §6.4.
- * Accepts `938`, `0938`, `VS938`, `VS 938`; when `carrier` is given, a designator prefix in
+ * Canonical flight number: an integer 1–9999 without leading zeros. Spec §6.4.
+ * Accepts `938`, `0938`, `VS938`, `VS 938`, or a number; when `carrier` is given, a designator prefix in
  * the string must equal it (a vendor string naming another airline is not silently re-labelled).
  * Throws `NormalisationError('unmappable-carrier')` for anything else (suffix letters, 0, >4 digits).
  */
-export function canonicalFlightNumber(s: string, carrier?: string): number {
-  const m = FLIGHT_RE.exec(s.trim().toUpperCase());
+export function canonicalFlightNumber(s: string | number, carrier?: string): number {
+  // why: some vendors send the number as JSON number; it gets the same range check as a string.
+  const text = typeof s === 'number' ? (Number.isInteger(s) && s >= 0 ? String(s) : 'x') : s;
+  const m = FLIGHT_RE.exec(text.trim().toUpperCase());
   const prefix = m?.[1];
   const digits = m?.[2];
   if (digits === undefined)
@@ -491,7 +488,7 @@ export function itineraryHash(outbound: readonly HashSegment[], inbound: readonl
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/normalise/hashing.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 19 tests; typecheck and lint clean.
+Expected: PASS, 20 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -509,7 +506,7 @@ git add packages/core && git commit -m "wp02: carrier canonicalisation and itine
 - Consumes: `NormalisationError`, `isRealDate`, `IsoDateTime`, `TZDate` and `tzOffset` (`@date-fns/tz`)
 - Produces: `TimeKind`, `departLocal`, `toIsoDateTime`; module-internal `parseVendorTime`, `requireZone`, `wallToInstant`, `localMinute`, `vendorInstant` (not in the barrel)
 
-The DST cases use the 2027 changes: UK/EU 28 Mar 2027 at 01:00 GMT (gap 01:00–02:00) and 31 Oct 2027 at 02:00 BST (overlap 01:00–02:00), and US 14 Mar and 7 Nov 2027. A nonexistent wall time is read with the offset in force before the gap, which shifts it forward by the gap. An ambiguous one takes the earlier instant.
+The DST cases use the 2027 changes: UK/EU 28 Mar 2027 at 01:00 GMT (gap 01:00–02:00) and 31 Oct 2027 at 02:00 BST (overlap 01:00–02:00), and US 14 Mar and 7 Nov 2027. A nonexistent wall time is read with the offset in force before the gap, which shifts it forward by the gap. An ambiguous one takes the earlier instant. `tz` is a non-null string, per the plan. An unknown zone string (including `''`) is `unknown-airport-tz`, and a null from the airports table is turned into the same error by `normaliseOffer` (Task 2.5).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -553,16 +550,18 @@ describe('departLocal input forms (spec §6.4 matrix)', () => {
     expect(departLocal('2027-06-01T10:00-0400', 'offset', NEW_YORK)).toBe('2027-06-01T10:00');
     expect(departLocal('2027-06-01T10:00', 'local', NEW_YORK)).toBe('2027-06-01T10:00');
     expect(toIsoDateTime('2027-06-01T10:00', 'local', NEW_YORK)).toBe('2027-06-01T14:00:00.000Z');
-    expect(toIsoDateTime('2027-06-01T15:30:00+05:30', 'offset', null)).toBe('2027-06-01T10:00:00.000Z');
+    expect(toIsoDateTime('2027-06-01T15:30:00+05:30', 'offset', 'UTC')).toBe('2027-06-01T10:00:00.000Z');
   });
 
-  it('unknown airport tz is NormalisationError(unknown-airport-tz) for every time kind; UTC is never hashed', () => {
-    expect(reasonOf(() => departLocal('2027-03-14T10:05:00Z', 'utc', null))).toBe('unknown-airport-tz');
-    expect(reasonOf(() => departLocal('2027-03-14T10:05', 'local', null))).toBe('unknown-airport-tz');
+  it('an unknown zone is NormalisationError(unknown-airport-tz) for every time kind; UTC is never hashed', () => {
+    expect(reasonOf(() => departLocal('2027-03-14T10:05:00Z', 'utc', 'Mars/Olympus_Mons'))).toBe(
+      'unknown-airport-tz',
+    );
+    expect(reasonOf(() => departLocal('2027-03-14T10:05', 'local', ''))).toBe('unknown-airport-tz');
     expect(reasonOf(() => departLocal('2027-03-14T10:05:00+00:00', 'offset', 'Mars/Olympus_Mons'))).toBe(
       'unknown-airport-tz',
     );
-    expect(reasonOf(() => toIsoDateTime('2027-03-14T10:05', 'local', null))).toBe('unknown-airport-tz');
+    expect(reasonOf(() => toIsoDateTime('2027-03-14T10:05', 'local', ''))).toBe('unknown-airport-tz');
   });
 });
 
@@ -625,8 +624,8 @@ describe('timestamp format rejection (spec §6.3)', () => {
   });
 
   it('keeps milliseconds and always emits the toISOString form', () => {
-    expect(toIsoDateTime('2027-06-01T14:00:00.5Z', 'utc', null)).toBe('2027-06-01T14:00:00.500Z');
-    expect(toIsoDateTime('2027-06-01 14:00', 'utc', null)).toBe('2027-06-01T14:00:00.000Z');
+    expect(toIsoDateTime('2027-06-01T14:00:00.5Z', 'utc', 'UTC')).toBe('2027-06-01T14:00:00.500Z');
+    expect(toIsoDateTime('2027-06-01 14:00', 'utc', 'UTC')).toBe('2027-06-01T14:00:00.000Z');
   });
 
   it('property: any toISOString value round-trips', () => {
@@ -638,7 +637,7 @@ describe('timestamp format rejection (spec §6.3)', () => {
           noInvalidDate: true,
         }),
         (d) => {
-          expect(toIsoDateTime(d.toISOString(), 'utc', null)).toBe(d.toISOString());
+          expect(toIsoDateTime(d.toISOString(), 'utc', 'UTC')).toBe(d.toISOString());
         },
       ),
     );
@@ -772,10 +771,11 @@ export function vendorInstant(value: string, timeKind: TimeKind, tz: string | nu
 /**
  * Departure (or arrival) wall time at the airport, exactly `YYYY-MM-DDTHH:mm`. Spec §5.6, §6.4.
  * UTC and offset inputs are converted into `tz`; local inputs are re-read through `tz` so a
- * nonexistent wall time comes out shifted forward. `tz === null` (airport not in the table) is
- * `unknown-airport-tz` for every time kind: UTC is never hashed.
+ * nonexistent wall time comes out shifted forward. A zone the runtime does not know is
+ * `unknown-airport-tz` for every time kind: UTC is never hashed. (An airport missing from the
+ * table is caught one step earlier, in `normaliseOffer`, when `tzOf` returns null.)
  */
-export function departLocal(value: string, timeKind: TimeKind, tz: string | null): string {
+export function departLocal(value: string, timeKind: TimeKind, tz: string): string {
   const zone = requireZone(tz);
   return localMinute(vendorInstant(value, timeKind, zone), zone);
 }
@@ -790,9 +790,9 @@ import { type TimeKind, vendorInstant } from './localTime.js';
 /**
  * A vendor time as the one stored timestamp form, `Date#toISOString()` (spec §6.3:
  * "vendor times normalised to it in `core`"). Same accepted shapes and DST rules as
- * `departLocal`; `tz` is needed only for `local` input.
+ * `departLocal`; `tz` is read only for `local` input (pass the airport's zone regardless).
  */
-export function toIsoDateTime(value: string, timeKind: TimeKind, tz: string | null): IsoDateTime {
+export function toIsoDateTime(value: string, timeKind: TimeKind, tz: string): IsoDateTime {
   return new Date(vendorInstant(value, timeKind, tz)).toISOString() as IsoDateTime;
 }
 ```
@@ -898,10 +898,13 @@ describe('toGbp (spec §6.3): rateNano = GBP per 1 native unit × 1e9, half-up t
   });
 
   it('ECB list and exponents (frankfurter 2026-10-14)', () => {
-    expect(ECB_CURRENCIES).toHaveLength(30);
-    expect(ECB_CURRENCIES).toContain('GBP');
+    const list =
+      'AUD BRL CAD CHF CNY CZK DKK EUR GBP HKD HUF IDR ILS INR ISK JPY KRW MXN MYR NOK NZD PHP PLN RON SEK SGD THB TRY USD ZAR';
+    expect(ECB_CURRENCIES).toEqual(list.split(' '));
     expect(ECB_CURRENCIES).not.toContain('BGN');
-    expect(MINOR_EXPONENT).toMatchObject({ JPY: 0, KRW: 0, ISK: 0, CNY: 2, USD: 2, EUR: 2 });
+    expect(MINOR_EXPONENT).toEqual(
+      Object.fromEntries(list.split(' ').map((c) => [c, ['ISK', 'JPY', 'KRW'].includes(c) ? 0 : 2])),
+    );
   });
 
   it('property: within half a penny of the exact value and monotone in the amount', () => {
@@ -975,7 +978,7 @@ export const ECB_CURRENCIES: readonly string[] = [
  * ISO 4217 minor-unit exponent for every ECB currency (spec §6.3: "Native amounts are integer
  * minor units with the ISO 4217 exponent"). ISK, JPY and KRW have no minor unit.
  */
-export const MINOR_EXPONENT: Readonly<Record<string, number>> = Object.fromEntries(
+export const MINOR_EXPONENT: Record<string, number> = Object.fromEntries(
   ECB_CURRENCIES.map((c) => [c, c === 'ISK' || c === 'JPY' || c === 'KRW' ? 0 : 2]),
 );
 
@@ -1091,15 +1094,15 @@ Expected: FAIL, `Error: Cannot find module '../../src/normalise/vendorUrl.js' �
 `packages/core/src/normalise/vendorUrl.ts`:
 
 ```ts
-import type { ProviderId } from '../ports/provider.js';
 import type { Booking } from '../types/itinerary.js';
+import type { ProviderId } from '../types/provenance.js';
 
 /**
  * Per-provider link allowlist. Spec §5.2 "Vendor links": `aviasales.com` for Travelpayouts,
  * `google.com` for SearchApi (its step-3 `booking_request` always targets Google). The fixture
  * provider gets none: synthetic rows never carry a followable link.
  */
-export const LINK_ALLOWLIST: Readonly<Record<ProviderId, readonly string[]>> = {
+export const LINK_ALLOWLIST: Record<ProviderId, string[]> = {
   travelpayouts: ['aviasales.com'],
   searchapi: ['google.com'],
   fixture: [],
@@ -1145,10 +1148,10 @@ git add packages/core && git commit -m "wp02: vendor URL validation against the 
 - Test: `packages/core/test/helpers/offers.ts`, `packages/core/test/normalise/itinerary.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 2.1–2.4; `RawOffer`, `RawSegment`, `NormalisedItinerary`, `Segment`, `Layover`, `Observation`, `Offer`, `Booking`, `FxInfo`, `Cabin`
-- Produces: `NormaliseDeps`, `ObservationFields`, `NormalisedOffer`, `normaliseOffer`
+- Consumes: Tasks 2.1–2.4; `RawOffer`, `RawSegment`, `NormalisedItinerary`, `Segment`, `Layover`, `ObservationFields`, `Offer`, `Booking`, `FxInfo`, `Cabin`, `ProviderId`, `CellKey`, `cellKeyString`
+- Produces: `NormaliseDeps`, `NormaliseResult` (the plan's inline result union, named), `normaliseOffer(raw, cell, deps)`
 
-`AAA` and `BBB` are clearly synthetic connection airports (README rule), zoned `Atlantic/Reykjavik` (UTC+0, no DST) so that layover arithmetic is easy to read. `ZZZ` is the unknown airport. A layover is overnight when the connection interval overlaps 00:00–05:00 local at the connecting airport on any date it touches. `normaliseOffer` *returns* a `NormalisationError` so that WP7 can count `offers-dropped:n`. Any other error is a caller bug and is thrown.
+`AAA` and `BBB` are clearly synthetic connection airports (README rule), zoned `Atlantic/Reykjavik` (UTC+0, no DST) so that layover arithmetic is easy to read. `ZZZ` is the unknown airport. A layover is overnight when the connection interval overlaps 00:00–05:00 local at the connecting airport on any date it touches. `normaliseOffer` *returns* `{ ok: false, error }` for every `NormalisationError` so that WP7 can count `offers-dropped:n`. Any other error is a caller bug and is thrown. The cell guard compares the offer's origin, final destination and local departure and return dates with `cell` through `cellKeyString`. A mismatch is `bad-local-time`, because `NormalisationReason` has no cell-mismatch member. The helper `cellOf(raw)` reads the cell from the raw strings, and the guard tests pass a different cell explicitly.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1157,6 +1160,7 @@ git add packages/core && git commit -m "wp02: vendor URL validation against the 
 ```ts
 import type { NormaliseDeps } from '../../src/normalise/itinerary.js';
 import type { RawOffer, RawSegment } from '../../src/ports/provider.js';
+import type { CellKey } from '../../src/types/definition.js';
 import type { Iata, IsoDate } from '../../src/types/ids.js';
 
 /** Worked-example zones plus two clearly synthetic connection airports (AAA, BBB). */
@@ -1213,6 +1217,23 @@ export function offer(over: Partial<RawOffer> = {}): RawOffer {
     ...over,
   };
 }
+
+/**
+ * The cell a raw offer was returned for, read from its first and last segments as written. Tests
+ * that check the cell guard pass a different cell explicitly; local and UTC inputs used here fall
+ * on the same calendar day in both zones.
+ */
+export function cellOf(raw: RawOffer): CellKey {
+  const first = raw.outbound[0];
+  const last = raw.outbound[raw.outbound.length - 1];
+  const back = raw.inbound[0];
+  return {
+    origin: first?.from ?? iata('LHR'),
+    destination: last?.to ?? iata('JFK'),
+    departureDate: (first?.depart.slice(0, 10) ?? '2027-03-14') as IsoDate,
+    returnDate: (back?.depart.slice(0, 10) ?? '2027-03-28') as IsoDate,
+  };
+}
 ```
 
 `packages/core/test/normalise/itinerary.test.ts`:
@@ -1220,18 +1241,21 @@ export function offer(over: Partial<RawOffer> = {}): RawOffer {
 ```ts
 import { describe, expect, it } from 'vitest';
 import { NormalisationError } from '../../src/errors.js';
-import { type NormalisedOffer, normaliseOffer } from '../../src/normalise/itinerary.js';
+import { type NormaliseResult, normaliseOffer } from '../../src/normalise/itinerary.js';
 import type { RawOffer } from '../../src/ports/provider.js';
-import { deps, iata, offer, seg } from '../helpers/offers.js';
+import type { CellKey } from '../../src/types/definition.js';
+import { cellOf, deps, iata, offer, seg } from '../helpers/offers.js';
 
-function ok(raw: RawOffer, d = deps()): NormalisedOffer {
-  const r = normaliseOffer(raw, d);
-  if (r instanceof NormalisationError) throw new Error(`unexpected ${r.reason}: ${r.message}`);
+function ok(raw: RawOffer, d = deps(), cell: CellKey = cellOf(raw)): Extract<NormaliseResult, { ok: true }> {
+  const r = normaliseOffer(raw, cell, d);
+  if (!r.ok) throw new Error(`unexpected ${r.error.reason}: ${r.error.message}`);
   return r;
 }
-function reason(raw: RawOffer, d = deps()): string {
-  const r = normaliseOffer(raw, d);
-  return r instanceof NormalisationError ? r.reason : 'normalised';
+function reason(raw: RawOffer, d = deps(), cell: CellKey = cellOf(raw)): string {
+  const r = normaliseOffer(raw, cell, d);
+  if (r.ok) return 'normalised';
+  expect(r.error).toBeInstanceOf(NormalisationError);
+  return r.error.reason;
 }
 
 describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', () => {
@@ -1355,6 +1379,26 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     expect(reason(op)).toBe('unmappable-carrier');
   });
 
+  it('an offer that flies another cell than the one asked is dropped, never re-keyed', () => {
+    const asked = cellOf(offer());
+    expect(reason(offer(), deps(), { ...asked, returnDate: '2027-03-27' as never })).toBe('bad-local-time');
+    expect(reason(offer(), deps(), { ...asked, departureDate: '2027-03-13' as never })).toBe(
+      'bad-local-time',
+    );
+    expect(reason(offer(), deps(), { ...asked, origin: iata('LGW') })).toBe('bad-local-time');
+    expect(reason(offer(), deps(), { ...asked, destination: iata('EWR') })).toBe('bad-local-time');
+    const r = normaliseOffer(offer(), { ...asked, returnDate: '2027-03-27' as never }, deps());
+    expect(r.ok ? '' : r.error.message).toBe(
+      'bad-local-time: offer flies LHR|JFK|2027-03-14|2027-03-28, cell is LHR|JFK|2027-03-14|2027-03-27',
+    );
+  });
+
+  it('an airport missing from the airports table is unknown-airport-tz', () => {
+    expect(reason(offer(), deps({ tzOf: (a) => (a === 'JFK' ? null : 'Europe/London') }))).toBe(
+      'unknown-airport-tz',
+    );
+  });
+
   it('missing directions are no-return-legs; impossible times are bad-local-time', () => {
     expect(reason(offer({ inbound: [] }))).toBe('no-return-legs');
     expect(reason(offer({ outbound: [] }))).toBe('no-return-legs');
@@ -1396,13 +1440,13 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
   });
 
   it('a requested cabin that differs from the definition cabin is a caller bug and throws', () => {
-    expect(() => normaliseOffer(offer({ requestedCabin: 'business' }), deps())).toThrow(
+    expect(() => normaliseOffer(offer({ requestedCabin: 'business' }), cellOf(offer()), deps())).toThrow(
       /differs from the definition cabin/,
     );
   });
 
   it('non-normalisation errors (a float amount) are thrown, not returned', () => {
-    expect(() => normaliseOffer(offer({ amountMinor: 412.5 }), deps())).toThrow(RangeError);
+    expect(() => normaliseOffer(offer({ amountMinor: 412.5 }), cellOf(offer()), deps())).toThrow(RangeError);
   });
 });
 
@@ -1535,7 +1579,7 @@ describe('normaliseOffer: derived itinerary fields', () => {
         arrive: '2027-03-29T06:40',
       }),
     ];
-    expect(ok(all).observationFields.segmentCabins).toEqual(['premium_economy', 'economy']);
+    expect(ok(all).observation.segmentCabins).toEqual(['premium_economy', 'economy']);
     const some = offer();
     some.outbound = [
       seg({
@@ -1546,13 +1590,13 @@ describe('normaliseOffer: derived itinerary fields', () => {
         arrive: '2027-03-14T13:05',
       }),
     ];
-    expect(ok(some).observationFields.segmentCabins).toBeNull();
+    expect(ok(some).observation.segmentCabins).toBeNull();
   });
 });
 
 describe('normaliseOffer: money and the FX flag (spec §5.6, §6.3)', () => {
   it('GBP is unconverted and keeps pence equal to native minor units', () => {
-    expect(ok(offer({ currency: 'gbp' })).observationFields).toMatchObject({
+    expect(ok(offer({ currency: 'gbp' })).observation).toMatchObject({
       pricePence: 41_200,
       priceNativeMinor: 41_200,
       currencyNative: 'GBP',
@@ -1561,7 +1605,7 @@ describe('normaliseOffer: money and the FX flag (spec §5.6, §6.3)', () => {
   });
 
   it('CNY converts with the rate stored beside it', () => {
-    expect(ok(offer({ currency: 'CNY', amountMinor: 412_345 })).observationFields).toMatchObject({
+    expect(ok(offer({ currency: 'CNY', amountMinor: 412_345 })).observation).toMatchObject({
       pricePence: 43_008,
       priceNativeMinor: 412_345,
       currencyNative: 'CNY',
@@ -1575,7 +1619,7 @@ describe('normaliseOffer: money and the FX flag (spec §5.6, §6.3)', () => {
   });
 
   it('optional fare facts are null when absent and copied when present', () => {
-    expect(ok(offer()).observationFields).toMatchObject({
+    expect(ok(offer()).observation).toMatchObject({
       taxesIncluded: null,
       selfTransfer: null,
       baggage: null,
@@ -1589,7 +1633,7 @@ describe('normaliseOffer: money and the FX flag (spec §5.6, §6.3)', () => {
       fareConditions: { refundable: false },
       bookingExpiresAt: '2027-03-01T12:00:00.000Z' as never,
     });
-    expect(ok(rich).observationFields).toMatchObject({
+    expect(ok(rich).observation).toMatchObject({
       taxesIncluded: true,
       selfTransfer: false,
       baggage: { checkedBags: 1 },
@@ -1603,7 +1647,7 @@ describe('normaliseOffer: booking links (spec §5.2)', () => {
   it('a GET link on the provider allowlist is kept with its host', () => {
     expect(
       ok(offer({ booking: { kind: 'get', url: 'https://www.google.com/travel/flights/booking?x=1' } }))
-        .observationFields.booking,
+        .observation.booking,
     ).toEqual({
       kind: 'get',
       url: 'https://www.google.com/travel/flights/booking?x=1',
@@ -1613,7 +1657,7 @@ describe('normaliseOffer: booking links (spec §5.2)', () => {
   it('a POST booking keeps its form data and host', () => {
     expect(
       ok(offer({ booking: { kind: 'post', url: 'https://www.google.com/travel/clk', postData: 'u=abc' } }))
-        .observationFields.booking,
+        .observation.booking,
     ).toEqual({
       kind: 'post',
       url: 'https://www.google.com/travel/clk',
@@ -1623,14 +1667,14 @@ describe('normaliseOffer: booking links (spec §5.2)', () => {
   });
   it('anything off the allowlist becomes none, for GET and POST', () => {
     expect(
-      ok(offer({ booking: { kind: 'get', url: 'https://seller.example/pay' } })).observationFields.booking,
+      ok(offer({ booking: { kind: 'get', url: 'https://seller.example/pay' } })).observation.booking,
     ).toEqual({ kind: 'none' });
     expect(
       ok(offer({ booking: { kind: 'post', url: 'http://www.google.com/travel/clk', postData: 'u' } }))
-        .observationFields.booking,
+        .observation.booking,
     ).toEqual({ kind: 'none' });
     expect(
-      ok(offer({ booking: { kind: 'get', url: 'https://www.aviasales.com/x' } })).observationFields.booking,
+      ok(offer({ booking: { kind: 'get', url: 'https://www.aviasales.com/x' } })).observation.booking,
     ).toEqual({ kind: 'none' });
   });
   it('the offer carries provider, seller and the requested cabin', () => {
@@ -1656,17 +1700,18 @@ Expected: FAIL, `Error: Cannot find module '../../src/normalise/itinerary.js' �
 
 ```ts
 import { NormalisationError } from '../errors.js';
-import type { ProviderId, RawOffer, RawSegment } from '../ports/provider.js';
+import type { RawOffer, RawSegment } from '../ports/provider.js';
+import { type CellKey, cellKeyString } from '../types/definition.js';
 import type { Iata, IsoDate, IsoDateTime } from '../types/ids.js';
 import type {
   Booking,
   Layover,
   NormalisedItinerary,
-  Observation,
+  ObservationFields,
   Offer,
   Segment,
 } from '../types/itinerary.js';
-import type { Cabin, FxInfo } from '../types/provenance.js';
+import type { Cabin, FxInfo, ProviderId } from '../types/provenance.js';
 import { canonicalCarrier, canonicalFlightNumber } from './carrier.js';
 import { itineraryHash } from './hashing.js';
 import { localMinute, requireZone, vendorInstant, wallToInstant } from './localTime.js';
@@ -1676,34 +1721,18 @@ import { LINK_ALLOWLIST, validateVendorUrl } from './vendorUrl.js';
 /** What the pure normaliser needs from the engine (which reads the airports and FX repositories). */
 export interface NormaliseDeps {
   providerId: ProviderId;
+  /** The definition's cabin; must equal `raw.requestedCabin`. */
+  cabin: Cabin;
   /** IANA zone of an airport from the airports table, or null when the airport is unknown. */
   tzOf(iata: Iata): string | null;
   /** A rate already checked against `FX_MAX_RATE_AGE_DAYS` by the engine, or null. */
   rateFor(currency: string): { rateNano: number; rateDate: IsoDate; source: string } | null;
-  /** The definition's cabin; must equal `raw.requestedCabin`. */
-  cabin: Cabin;
 }
 
-/** Observation columns derived from one raw offer (the engine adds ids, provenance and suppliedFields). */
-export type ObservationFields = Pick<
-  Observation,
-  | 'pricePence'
-  | 'priceNativeMinor'
-  | 'currencyNative'
-  | 'taxesIncluded'
-  | 'selfTransfer'
-  | 'segmentCabins'
-  | 'baggage'
-  | 'fareConditions'
-  | 'booking'
-  | 'bookingExpiresAt'
-> & { fx: FxInfo };
-
-export interface NormalisedOffer {
-  itinerary: NormalisedItinerary;
-  offer: Offer;
-  observationFields: ObservationFields;
-}
+/** `normaliseOffer`'s result: the three parts on success, or the reason the offer is dropped. */
+export type NormaliseResult =
+  | { ok: true; itinerary: NormalisedItinerary; offer: Offer; observation: ObservationFields }
+  | { ok: false; error: NormalisationError };
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
@@ -1714,7 +1743,7 @@ interface TimedSegment {
   arriveMs: number;
 }
 
-function normaliseSegment(raw: RawSegment, tzOf: (iata: Iata) => string | null): TimedSegment {
+function normaliseSegment(raw: RawSegment, tzOf: (iata: Iata) => string): TimedSegment {
   const marketingCarrier = canonicalCarrier(raw.marketingCarrier);
   const flightNumber = canonicalFlightNumber(raw.flightNumber, marketingCarrier);
   const from = raw.from.toUpperCase() as Iata;
@@ -1759,7 +1788,7 @@ function spansNight(arriveMs: number, departMs: number, tz: string): boolean {
   return false;
 }
 
-function layoversOf(direction: readonly TimedSegment[], tzOf: (iata: Iata) => string | null): Layover[] {
+function layoversOf(direction: readonly TimedSegment[], tzOf: (iata: Iata) => string): Layover[] {
   const out: Layover[] = [];
   for (let i = 0; i + 1 < direction.length; i++) {
     const inbound = direction[i] as TimedSegment;
@@ -1786,7 +1815,7 @@ function directionMinutes(direction: readonly TimedSegment[]): number {
   return Math.round((last.arriveMs - first.departMs) / MINUTE_MS);
 }
 
-function money(raw: RawOffer, deps: NormaliseDeps): Pick<ObservationFields, 'pricePence' | 'fx'> {
+function money(raw: RawOffer, deps: NormaliseDeps): { pricePence: number; fx: FxInfo } {
   const currency = raw.currency.toUpperCase();
   if (currency === 'GBP') return { pricePence: toGbp(raw.amountMinor, 'GBP', 1), fx: { converted: false } };
   if (!ECB_CURRENCIES.includes(currency)) throw new NormalisationError('currency-unsupported', currency);
@@ -1805,16 +1834,28 @@ function booking(raw: RawOffer, providerId: ProviderId): Booking {
   return { kind: 'post', url: checked.url, postData: raw.booking.postData, host: checked.host };
 }
 
+function zoneOf(tzOf: NormaliseDeps['tzOf'], iata: Iata): string {
+  const tz = tzOf(iata);
+  // why: an airport missing from the table must stop the offer here; UTC is never hashed (spec §6.4).
+  if (tz === null) throw new NormalisationError('unknown-airport-tz', `no time zone for ${iata}`);
+  return tz;
+}
+
 /**
- * Spec §5.6 pure step for one raw offer: carriers and flight numbers canonicalised, local and
- * UTC times per segment (DST rules), layovers, identity hash (§6.4), evidenced cabins, money in
- * pence with the FX flag (§6.3), booking link validated (§5.2).
- * Returns (does not throw) a `NormalisationError` so the engine can drop the offer and count it
- * as `offers-dropped:n`. Programming errors (cabin mismatch, non-integer amounts) still throw.
+ * Spec §5.6 pure step for one raw offer returned for `cell`: carriers and flight numbers
+ * canonicalised, local and UTC times per segment (DST rules), layovers, identity hash (§6.4),
+ * evidenced cabins, money in pence with the FX flag (§6.3), booking link validated (§5.2).
+ * The offer must fly the cell it was returned for (origin, destination, local departure and
+ * return dates); a vendor answer for another cell is dropped, never re-keyed (spec §5.2 "cell
+ * keys from the response").
+ * Returns `{ ok: false, error }` for every `NormalisationError`, so the engine can drop the offer
+ * and count it as `offers-dropped:n`. Programming errors (cabin mismatch, non-integer amounts) throw.
  */
-export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOffer | NormalisationError {
-  if (raw.requestedCabin !== deps.cabin)
+export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps): NormaliseResult {
+  if (raw.requestedCabin !== deps.cabin) {
     throw new Error(`requestedCabin ${raw.requestedCabin} differs from the definition cabin ${deps.cabin}`);
+  }
+  const tzOf = (iata: Iata): string => zoneOf(deps.tzOf, iata);
   try {
     if (raw.outbound.length === 0 || raw.inbound.length === 0) {
       throw new NormalisationError(
@@ -1822,24 +1863,31 @@ export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOf
         raw.outbound.length === 0 ? 'no outbound segments' : 'no inbound segments',
       );
     }
-    const out = raw.outbound.map((s) => normaliseSegment(s, deps.tzOf));
-    const back = raw.inbound.map((s) => normaliseSegment(s, deps.tzOf));
+    const out = raw.outbound.map((s) => normaliseSegment(s, tzOf));
+    const back = raw.inbound.map((s) => normaliseSegment(s, tzOf));
     const outbound = out.map((t) => t.segment);
     const inbound = back.map((t) => t.segment);
-    const layovers = [...layoversOf(out, deps.tzOf), ...layoversOf(back, deps.tzOf)];
-    const hash = itineraryHash(outbound, inbound);
     const firstOut = outbound[0] as Segment;
     const lastOut = outbound[outbound.length - 1] as Segment;
     const firstIn = inbound[0] as Segment;
-    const departureDate = firstOut.departLocal.slice(0, 10) as IsoDate;
-    const returnDate = firstIn.departLocal.slice(0, 10) as IsoDate;
-    const itinerary: NormalisedItinerary = {
-      hash,
+    const flown = cellKeyString({
       origin: firstOut.from,
       destination: lastOut.to,
-      departureDate,
-      returnDate,
-      nights: Math.round((Date.parse(returnDate) - Date.parse(departureDate)) / DAY_MS),
+      departureDate: firstOut.departLocal.slice(0, 10) as IsoDate,
+      returnDate: firstIn.departLocal.slice(0, 10) as IsoDate,
+    });
+    const asked = cellKeyString(cell);
+    if (flown !== asked)
+      throw new NormalisationError('bad-local-time', `offer flies ${flown}, cell is ${asked}`);
+    const layovers = [...layoversOf(out, tzOf), ...layoversOf(back, tzOf)];
+    const hash = itineraryHash(outbound, inbound);
+    const itinerary: NormalisedItinerary = {
+      hash,
+      origin: cell.origin,
+      destination: cell.destination,
+      departureDate: cell.departureDate,
+      returnDate: cell.returnDate,
+      nights: Math.round((Date.parse(cell.returnDate) - Date.parse(cell.departureDate)) / DAY_MS),
       outbound,
       inbound,
       outboundMinutes: directionMinutes(out),
@@ -1856,6 +1904,7 @@ export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOf
     const segmentCabins = all.every((s) => s.cabin !== undefined) ? all.map((s) => s.cabin as Cabin) : null;
     const { pricePence, fx } = money(raw, deps);
     return {
+      ok: true,
       itinerary,
       offer: {
         itineraryHash: hash,
@@ -1863,7 +1912,7 @@ export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOf
         seller: raw.seller,
         cabin: raw.requestedCabin,
       },
-      observationFields: {
+      observation: {
         pricePence,
         fx,
         priceNativeMinor: raw.amountMinor,
@@ -1878,7 +1927,7 @@ export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOf
       },
     };
   } catch (e) {
-    if (e instanceof NormalisationError) return e;
+    if (e instanceof NormalisationError) return { ok: false, error: e };
     throw e;
   }
 }
@@ -1887,7 +1936,7 @@ export function normaliseOffer(raw: RawOffer, deps: NormaliseDeps): NormalisedOf
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/normalise/itinerary.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 24 tests; typecheck and lint clean.
+Expected: PASS, 26 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -1902,14 +1951,14 @@ git add packages/core && git commit -m "wp02: normaliseOffer: segments, layovers
 - Test: `packages/core/test/constraints/evaluate.test.ts`
 
 **Interfaces:**
-- Consumes: `normaliseOffer` (Task 2.5, to build the test itinerary), `Constraints`, `NormalisedItinerary`, `Observation`, `SuppliedField`, `Verdict(s)`, `VerdictClass`
-- Produces: `ConstraintOffer`, `evaluateConstraints`, `verdictClass`
+- Consumes: `normaliseOffer` (Task 2.5, to build the test itinerary), `Constraints`, `NormalisedItinerary`, `ObservationFields`, `SuppliedField`, `Verdict(s)`, `VerdictClass`, `ConstraintName`, `Cabin`
+- Produces: `evaluateConstraints(it, obs, c, requestedCabin, supplied)`, `verdictClass`, `unverifiedNames`
 
 Rules per spec §6.2 row. "Absent" means the field is missing from `supplied`, or the value the rule needs is null or undefined.
 
 | Constraint | Needs | Rule |
 |---|---|---|
-| cabin (always) | `segmentCabins` supplied, one per segment | fail if any segment is below the requested cabin, else pass |
+| cabin (always) | `segmentCabins` supplied, one per segment | fail if any segment is below `requestedCabin`, else pass |
 | maxStops | `segments` | `stopsOut ≤ n` and `stopsIn ≤ n` |
 | maxJourneyMinutes | `segments`+`segmentTimes`, both direction minutes | each direction ≤ n |
 | min/maxLayoverMinutes | `segments`+`segmentTimes` | every layover (none = pass) |
@@ -1929,63 +1978,62 @@ Rules per spec §6.2 row. "Absent" means the field is missing from `supplied`, o
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { type ConstraintOffer, evaluateConstraints } from '../../src/constraints/evaluate.js';
-import { verdictClass } from '../../src/constraints/verdictClass.js';
-import { NormalisationError } from '../../src/errors.js';
+import { evaluateConstraints } from '../../src/constraints/evaluate.js';
+import { unverifiedNames, verdictClass } from '../../src/constraints/verdictClass.js';
 import { normaliseOffer } from '../../src/normalise/itinerary.js';
 import type { Constraints } from '../../src/types/definition.js';
 import type {
   ConstraintName,
   NormalisedItinerary,
+  ObservationFields,
   SuppliedField,
   Verdict,
 } from '../../src/types/itinerary.js';
-import { deps, iata, offer, seg } from '../helpers/offers.js';
+import type { Cabin } from '../../src/types/provenance.js';
+import { cellOf, deps, iata, offer, seg } from '../helpers/offers.js';
 
 /**
  * One-stop out via AAA (overnight, 430 min), one-stop back changing AAA→BBB (120 min), VS and 4U.
  * Out: LGW 20:00 → AAA 23:10, AAA 06:20 → JFK 08:00 (+1). Back: JFK 10:00 → AAA 19:00, BBB 21:00 → LHR 00:10 (+1).
  */
 function itinerary(): NormalisedItinerary {
-  const r = normaliseOffer(
-    offer({
-      outbound: [
-        seg({
-          marketingCarrier: '4U',
-          flightNumber: '8888',
-          from: iata('LGW'),
-          to: iata('AAA'),
-          depart: '2027-03-14T20:00',
-          arrive: '2027-03-14T23:10',
-        }),
-        seg({
-          flightNumber: '1',
-          from: iata('AAA'),
-          to: iata('JFK'),
-          depart: '2027-03-15T06:20',
-          arrive: '2027-03-15T08:00',
-        }),
-      ],
-      inbound: [
-        seg({
-          flightNumber: '2',
-          from: iata('JFK'),
-          to: iata('AAA'),
-          depart: '2027-03-28T10:00',
-          arrive: '2027-03-28T19:00',
-        }),
-        seg({
-          flightNumber: '3',
-          from: iata('BBB'),
-          to: iata('LHR'),
-          depart: '2027-03-28T21:00',
-          arrive: '2027-03-29T00:10',
-        }),
-      ],
-    }),
-    deps(),
-  );
-  if (r instanceof NormalisationError) throw r;
+  const raw = offer({
+    outbound: [
+      seg({
+        marketingCarrier: '4U',
+        flightNumber: '8888',
+        from: iata('LGW'),
+        to: iata('AAA'),
+        depart: '2027-03-14T20:00',
+        arrive: '2027-03-14T23:10',
+      }),
+      seg({
+        flightNumber: '1',
+        from: iata('AAA'),
+        to: iata('JFK'),
+        depart: '2027-03-15T06:20',
+        arrive: '2027-03-15T08:00',
+      }),
+    ],
+    inbound: [
+      seg({
+        flightNumber: '2',
+        from: iata('JFK'),
+        to: iata('AAA'),
+        depart: '2027-03-28T10:00',
+        arrive: '2027-03-28T19:00',
+      }),
+      seg({
+        flightNumber: '3',
+        from: iata('BBB'),
+        to: iata('LHR'),
+        depart: '2027-03-28T21:00',
+        arrive: '2027-03-29T00:10',
+      }),
+    ],
+  });
+  const r = normaliseOffer(raw, cellOf(raw), deps());
+  if (!r.ok) throw r.error;
   return r.itinerary;
 }
 
@@ -2001,15 +2049,28 @@ const ALL: SuppliedField[] = [
   'price',
 ];
 const without = (...f: SuppliedField[]): SuppliedField[] => ALL.filter((x) => !f.includes(x));
-const OFFER: ConstraintOffer = {
-  cabin: 'economy',
+const OFFER: ObservationFields = {
   pricePence: 41_200,
-  segmentCabins: ['economy', 'economy', 'economy', 'economy'],
+  priceNativeMinor: 41_200,
+  currencyNative: 'GBP',
+  fx: { converted: false },
+  taxesIncluded: true,
   selfTransfer: false,
+  segmentCabins: ['economy', 'economy', 'economy', 'economy'],
   baggage: { cabinBag: 'included', checkedBags: 1 },
+  fareConditions: null,
+  booking: { kind: 'none' },
+  bookingExpiresAt: null,
 };
 
-type Row = [ConstraintName, Constraints, Partial<ConstraintOffer>, SuppliedField[], Verdict];
+/** Third column: observation overrides, plus `cabin` for the requested cabin (default economy). */
+type Row = [
+  ConstraintName,
+  Constraints,
+  Partial<ObservationFields> & { cabin?: Cabin },
+  SuppliedField[],
+  Verdict,
+];
 
 // Every row of the spec §6.2 table, each with pass, fail and absent-input → unverified.
 const ROWS: Row[] = [
@@ -2092,7 +2153,8 @@ const ROWS: Row[] = [
 
 describe('evaluateConstraints (spec §6.2)', () => {
   it.each(ROWS)('%s %j %j → %s', (name, c, o, supplied, expected) => {
-    expect(evaluateConstraints(IT, { ...OFFER, ...o }, c, supplied)[name]).toBe(expected);
+    const { cabin = 'economy', ...obs } = o;
+    expect(evaluateConstraints(IT, { ...OFFER, ...obs }, c, cabin, supplied)[name]).toBe(expected);
   });
 
   it('judges only the constraints that are set (false and [] are not set); cabin is always judged', () => {
@@ -2108,6 +2170,7 @@ describe('evaluateConstraints (spec §6.2)', () => {
         cabinBagRequired: false,
         checkedBagRequired: false,
       },
+      'economy',
       ALL,
     );
     expect(v).toEqual({ cabin: 'pass' });
@@ -2115,14 +2178,14 @@ describe('evaluateConstraints (spec §6.2)', () => {
 
   it('journey minutes missing from the itinerary are unverified even when times are supplied', () => {
     const { outboundMinutes: _o, ...rest } = IT;
-    expect(evaluateConstraints(rest, OFFER, { maxJourneyMinutes: 1500 }, ALL).maxJourneyMinutes).toBe(
-      'unverified',
-    );
+    expect(
+      evaluateConstraints(rest, OFFER, { maxJourneyMinutes: 1500 }, 'economy', ALL).maxJourneyMinutes,
+    ).toBe('unverified');
   });
 
   it('a malformed time window is a caller error', () => {
     expect(() =>
-      evaluateConstraints(IT, OFFER, { departureWindowLocal: { from: '9:00', to: '21:00' } }, ALL),
+      evaluateConstraints(IT, OFFER, { departureWindowLocal: { from: '9:00', to: '21:00' } }, 'economy', ALL),
     ).toThrow(RangeError);
   });
 
@@ -2133,6 +2196,7 @@ describe('evaluateConstraints (spec §6.2)', () => {
         direct,
         OFFER,
         { minLayoverMinutes: 60, maxLayoverMinutes: 300, noOvernightLayover: true },
+        'economy',
         ALL,
       ),
     ).toMatchObject({ minLayoverMinutes: 'pass', maxLayoverMinutes: 'pass', noOvernightLayover: 'pass' });
@@ -2150,6 +2214,20 @@ describe('verdictClass (spec §3, §6.2)', () => {
     expect(verdictClass(v)).toBe(cls);
   });
 });
+
+describe('unverifiedNames', () => {
+  it('lists the unverified constraints in key order', () => {
+    expect(
+      unverifiedNames({
+        cabin: 'unverified',
+        maxStops: 'pass',
+        checkedBagRequired: 'unverified',
+        maxPricePence: 'fail',
+      }),
+    ).toEqual(['cabin', 'checkedBagRequired']);
+    expect(unverifiedNames({})).toEqual([]);
+  });
+});
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -2165,19 +2243,13 @@ Expected: FAIL, `Error: Cannot find module '../../src/constraints/evaluate.js' �
 import type { Constraints } from '../types/definition.js';
 import type {
   NormalisedItinerary,
-  Observation,
+  ObservationFields,
   Segment,
   SuppliedField,
   Verdict,
   Verdicts,
 } from '../types/itinerary.js';
 import type { Cabin } from '../types/provenance.js';
-
-/** The fare-level facts a verdict needs: the observation's evidence plus the offer's requested cabin. */
-export type ConstraintOffer = Pick<
-  Observation,
-  'pricePence' | 'segmentCabins' | 'selfTransfer' | 'baggage'
-> & { cabin: Cabin };
 
 const CABIN_RANK: Readonly<Record<Cabin, number>> = { economy: 0, premium_economy: 1, business: 2, first: 3 };
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -2199,12 +2271,14 @@ const lastOf = (d: readonly Segment[]): Segment => d[d.length - 1] as Segment;
  * Spec §6.2. Evaluated at read time against the current definition's constraints and the
  * observation's stored `supplied_fields_json`, so an edited constraint re-judges old rows.
  * Only constraints the definition sets are judged (a `false` boolean or an empty airline list is
- * "not set"); `cabin` is always judged. Absent input is `unverified`, never `pass`.
+ * "not set"); `cabin` is always judged against `requestedCabin` (the offer's cabin, never
+ * evidence itself). Absent input is `unverified`, never `pass`.
  */
 export function evaluateConstraints(
   it: NormalisedItinerary,
-  offer: ConstraintOffer,
+  obs: ObservationFields & { segmentCabins: Cabin[] | null },
   c: Constraints,
+  requestedCabin: Cabin,
   supplied: readonly SuppliedField[],
 ): Verdicts {
   const has = (f: SuppliedField): boolean => supplied.includes(f);
@@ -2215,11 +2289,11 @@ export function evaluateConstraints(
 
   // why: requestedCabin is never evidence; only per-segment cabins stated by the vendor count, and
   // only when every segment states one (mixed-cabin itineraries are common).
-  const cabins = has('segmentCabins') ? offer.segmentCabins : null;
+  const cabins = has('segmentCabins') ? obs.segmentCabins : null;
   v.cabin =
     cabins === null || cabins.length !== all.length
       ? 'unverified'
-      : verdict(cabins.every((k) => CABIN_RANK[k] >= CABIN_RANK[offer.cabin]));
+      : verdict(cabins.every((k) => CABIN_RANK[k] >= CABIN_RANK[requestedCabin]));
 
   if (c.maxStops !== undefined) {
     const max = c.maxStops;
@@ -2263,7 +2337,7 @@ export function evaluateConstraints(
   }
   if (c.noSelfTransfer === true) {
     v.noSelfTransfer =
-      has('selfTransfer') && offer.selfTransfer !== null ? verdict(!offer.selfTransfer) : 'unverified';
+      has('selfTransfer') && obs.selfTransfer !== null ? verdict(!obs.selfTransfer) : 'unverified';
   }
   if (c.noAirportChange === true) {
     v.noAirportChange =
@@ -2279,7 +2353,7 @@ export function evaluateConstraints(
       ? verdict(!all.some((s) => list.includes(s.marketingCarrier)))
       : 'unverified';
   }
-  const bags = has('baggage') ? offer.baggage : null;
+  const bags = has('baggage') ? obs.baggage : null;
   if (c.cabinBagRequired === true) {
     const cabinBag = bags?.cabinBag;
     v.cabinBagRequired = cabinBag === undefined ? 'unverified' : verdict(cabinBag === 'included');
@@ -2294,7 +2368,7 @@ export function evaluateConstraints(
     v.minCheckedBags = n === undefined ? 'unverified' : verdict(n >= min);
   }
   if (c.maxPricePence !== undefined) {
-    v.maxPricePence = has('price') ? verdict(offer.pricePence <= c.maxPricePence) : 'unverified';
+    v.maxPricePence = has('price') ? verdict(obs.pricePence <= c.maxPricePence) : 'unverified';
   }
   return v;
 }
@@ -2303,7 +2377,7 @@ export function evaluateConstraints(
 `packages/core/src/constraints/verdictClass.ts`:
 
 ```ts
-import type { Verdict, VerdictClass, Verdicts } from '../types/itinerary.js';
+import type { ConstraintName, Verdict, VerdictClass, Verdicts } from '../types/itinerary.js';
 
 /**
  * Spec §3, §6.2: `failed` iff any verdict is `fail`; `verified` iff every verdict is `pass`;
@@ -2314,17 +2388,24 @@ export function verdictClass(v: Verdicts): VerdictClass {
   if (values.includes('fail')) return 'failed';
   return values.every((x) => x === 'pass') ? 'verified' : 'partially-verified';
 }
+
+/** The constraints judged `unverified`, in `Verdicts` key order; a row and a firing list these (spec §6.8, §11). */
+export function unverifiedNames(v: Verdicts): ConstraintName[] {
+  return (Object.entries(v) as Array<[ConstraintName, Verdict]>)
+    .filter(([, x]) => x === 'unverified')
+    .map(([k]) => k);
+}
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/constraints/evaluate.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 60 tests; typecheck and lint clean.
+Expected: PASS, 61 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp02: evaluateConstraints and verdictClass, table-driven (spec §6.2)"
+git add packages/core && git commit -m "wp02: evaluateConstraints, verdictClass, unverifiedNames, table-driven (spec §6.2)"
 ```
 
 ### Task 2.7: Results: dedup, rank (review focus 2), sort
@@ -2334,10 +2415,10 @@ git add packages/core && git commit -m "wp02: evaluateConstraints and verdictCla
 - Test: `packages/core/test/helpers/rows.ts`, `packages/core/test/results/dedupRank.test.ts`
 
 **Interfaces:**
-- Consumes: `resultRowSchema` (api-contract), `effectiveAge`, `compareAges`, `formatAgeCompact` (labels), `Cabin`, `ProviderId`, `ConstraintName`, `VerdictClass`
-- Produces: `ResultRow`, `OfferRow`, `SortKey`, `SortDir`, `ResultFilters`, `dedupByItinerary`, `rankRows`, `sortRows`
+- Consumes: `resultRowSchema` (api-contract), `effectiveAge`, `compareAges`, `formatAgeCompact` (labels), `cellKeyString`, `ProviderId`, `ConstraintName`, `VerdictClass`
+- Produces: `ResultRow`, `SortKey`, `ResultFilters`, `dedupByItinerary(rows)`, `rankRows(rows, now)`, `sortRows(rows, key, dir)`
 
-`test/helpers/rows.ts` parses every fixture row through WP0's `resultRowSchema`. If the merged schema requires a field this helper lacks, the parse fails loudly. Add the field with a value the schema accepts. Never loosen the schema from WP2.
+`dedupByItinerary` takes no cabin: WP8 reads only rows in the definition's cabin (spec §6.5), so the rows it passes are already in-cabin. `rankRows` orders by class, then seen-in-latest before `notSeenInLatest` (spec §8.1), then price, age (`compareAges`) and identity. `test/helpers/rows.ts` parses every fixture row through WP0's `resultRowSchema`. If the merged schema requires a field this helper lacks, the parse fails loudly. Add the field with a value the schema accepts. Never loosen the schema from WP2.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2345,23 +2426,23 @@ git add packages/core && git commit -m "wp02: evaluateConstraints and verdictCla
 
 ```ts
 import { resultRowSchema } from '../../src/api-contract/results.js';
-import type { OfferRow } from '../../src/results/types.js';
+import type { ResultRow } from '../../src/results/types.js';
 import type { IsoDateTime } from '../../src/types/ids.js';
 
 export const NOW = '2027-03-01T12:00:00.000Z' as IsoDateTime;
 
-type Over = Partial<Omit<OfferRow, 'provenance' | 'cell'>> & {
-  provenance?: Partial<OfferRow['provenance']>;
-  cell?: Partial<OfferRow['cell']>;
+type Over = Partial<Omit<ResultRow, 'provenance' | 'cell'>> & {
+  provenance?: Partial<ResultRow['provenance']>;
+  cell?: Partial<ResultRow['cell']>;
 };
 
 /**
  * A verified-basis row on the worked example, parsed through WP0's `resultRowSchema` so a
  * fixture that drifts from the contract fails here, not silently in a later package.
  */
-export function row(over: Over = {}): OfferRow {
-  const { provenance, cell, seller, ...rest } = over;
-  const base = {
+export function row(over: Over = {}): ResultRow {
+  const { provenance, cell, ...rest } = over;
+  return resultRowSchema.parse({
     itineraryHash: 'h1',
     basis: 'verified',
     verdictClass: 'verified',
@@ -2389,12 +2470,19 @@ export function row(over: Over = {}): OfferRow {
     outbound: [],
     inbound: [],
     totalMinutes: 850,
+    outboundMinutes: 420,
+    inboundMinutes: 430,
     stopsOut: 0,
     stopsIn: 0,
+    layovers: [],
     carriers: ['VS'],
     verdicts: { cabin: 'pass' },
     unverified: [],
     notApplied: [],
+    seller: 'Virgin Atlantic',
+    baggage: null,
+    fareConditions: null,
+    selfTransfer: null,
     booking: { kind: 'none' },
     searchLink: {
       url: 'https://www.google.com/travel/flights?q=x',
@@ -2405,14 +2493,15 @@ export function row(over: Over = {}): OfferRow {
     notSeenInLatest: null,
     adjustedPence: null,
     destinationNote: null,
-    bandCheapest: false,
+    executionId: 'ex-2',
+    calendarPriceId: null,
+    observationId: 1,
     ...rest,
-  };
-  return { ...resultRowSchema.parse(base), seller: seller ?? 'Virgin Atlantic' };
+  });
 }
 
 /** A calendar-basis row: no segments, class unchecked, Travelpayouts provenance. */
-export function calendarRow(over: Over = {}): OfferRow {
+export function calendarRow(over: Over = {}): ResultRow {
   return row({
     itineraryHash: null,
     basis: 'calendar',
@@ -2420,11 +2509,15 @@ export function calendarRow(over: Over = {}): OfferRow {
     outbound: null,
     inbound: null,
     totalMinutes: null,
+    outboundMinutes: null,
+    inboundMinutes: null,
     stopsOut: null,
     stopsIn: null,
     carriers: [],
     verdicts: {},
-    seller: 'Aviasales',
+    seller: null,
+    observationId: null,
+    calendarPriceId: 7,
     ...over,
     provenance: {
       providerId: 'travelpayouts',
@@ -2448,44 +2541,54 @@ import type { SortKey } from '../../src/results/types.js';
 import { calendarRow, NOW, row } from '../helpers/rows.js';
 
 describe('dedupByItinerary (spec §6.5)', () => {
-  it('one row per itinerary showing the cheapest qualifying offer in the definition cabin; others go to the expanded row', () => {
+  it('one row per itinerary showing the cheapest qualifying offer; others go to the expanded row with their age', () => {
     const rows = [
-      row({ seller: 'A', pricePence: 52_000, verdictClass: 'verified' }),
+      row({ seller: 'A', pricePence: 52_000, verdictClass: 'verified', stale: true, ageHours: 300 }),
       row({ seller: 'B', pricePence: 48_000, verdictClass: 'failed' }),
       row({ seller: 'C', pricePence: 50_000, verdictClass: 'partially-verified' }),
-      row({ seller: 'D', pricePence: 49_000, provenance: { cabin: 'business' } }),
     ];
-    const out = dedupByItinerary(rows, 'economy');
+    const out = dedupByItinerary(rows);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ seller: 'C', pricePence: 50_000, verdictClass: 'partially-verified' });
     expect(out[0]?.otherOffers.map((o) => [o.seller, o.pricePence])).toEqual([
       ['B', 48_000],
       ['A', 52_000],
     ]);
+    expect(out[0]?.otherOffers[1]).toMatchObject({ stale: true, ageHours: 300 });
+  });
+
+  it('an itinerary row without a seller sorts as an empty name and lists as ""', () => {
+    // Both input orders, so the comparator sees the missing seller on either side.
+    for (const rows of [
+      [row({ seller: null, pricePence: 1 }), row({ seller: 'A', pricePence: 1 })],
+      [row({ seller: 'A', pricePence: 1 }), row({ seller: null, pricePence: 1 })],
+    ]) {
+      const out = dedupByItinerary(rows);
+      expect(out[0]?.seller).toBeNull();
+      expect(out[0]?.otherOffers.map((o) => o.seller)).toEqual(['A']);
+    }
+    expect(
+      dedupByItinerary([row({ seller: 'A', pricePence: 1 }), row({ seller: null, pricePence: 2 })])[0]
+        ?.otherOffers[0]?.seller,
+    ).toBe('');
   });
 
   it('an itinerary whose every offer failed keeps its cheapest failed offer', () => {
-    const out = dedupByItinerary(
-      [
-        row({ seller: 'A', pricePence: 60_000, verdictClass: 'failed' }),
-        row({ seller: 'B', pricePence: 55_000, verdictClass: 'failed' }),
-      ],
-      'economy',
-    );
+    const out = dedupByItinerary([
+      row({ seller: 'A', pricePence: 60_000, verdictClass: 'failed' }),
+      row({ seller: 'B', pricePence: 55_000, verdictClass: 'failed' }),
+    ]);
     expect(out[0]).toMatchObject({ seller: 'B', verdictClass: 'failed' });
   });
 
   it('equal prices pick by seller name; calendar rows pass through; first-appearance order is kept', () => {
     const cal = calendarRow();
-    const out = dedupByItinerary(
-      [
-        row({ itineraryHash: 'h2', seller: 'Z' }),
-        cal,
-        row({ itineraryHash: 'h2', seller: 'M' }),
-        row({ itineraryHash: 'h1' }),
-      ],
-      'economy',
-    );
+    const out = dedupByItinerary([
+      row({ itineraryHash: 'h2', seller: 'Z' }),
+      cal,
+      row({ itineraryHash: 'h2', seller: 'M' }),
+      row({ itineraryHash: 'h1' }),
+    ]);
     expect(out.map((r) => r.itineraryHash)).toEqual(['h2', null, 'h1']);
     expect(out[0]?.seller).toBe('M');
     expect(out[1]).toBe(cal);
@@ -2504,6 +2607,17 @@ describe('rankRows (spec §6.5: class, then price)', () => {
       NOW,
     );
     expect(ranked.map((r) => r.itineraryHash)).toEqual(['v1', 'v2', 'p', 'f']);
+  });
+
+  it('within a class, rows not seen in the latest search rank after seen rows (spec §8.1)', () => {
+    const ranked = rankRows(
+      [
+        row({ itineraryHash: 'gone', pricePence: 30_000, notSeenInLatest: { ageHours: 5 } }),
+        row({ itineraryHash: 'seen', pricePence: 45_000 }),
+      ],
+      NOW,
+    );
+    expect(ranked.map((r) => r.itineraryHash)).toEqual(['seen', 'gone']);
   });
 
   it('calendar rows (unchecked) rank by price after any checked class', () => {
@@ -2623,31 +2737,28 @@ Expected: FAIL, `Error: Cannot find module '../../src/results/dedup.js' …`.
 ```ts
 import type { z } from 'zod';
 import type { resultRowSchema } from '../api-contract/results.js';
-import type { ProviderId } from '../ports/provider.js';
 import type { Iata } from '../types/ids.js';
 import type { ConstraintName, VerdictClass } from '../types/itinerary.js';
+import type { ProviderId } from '../types/provenance.js';
 
-/** One `/results` row (spec §6.5, §10), the type of WP0's `resultRowSchema`. */
+/** One `/results` row (spec §6.5, §10): the type of WP0's `resultRowSchema`. */
 export type ResultRow = z.infer<typeof resultRowSchema>;
-
-/** A row built from one offer before dedup; `seller` feeds the expanded row's `otherOffers`. */
-export type OfferRow = ResultRow & { seller: string };
 
 /** Spec §6.5 sort keys: price, total travel time, departure, return, nights, stops, adjusted. */
 export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted';
-export type SortDir = 'asc' | 'desc';
 
 /**
- * Spec §6.5 filters. Every field is optional and they compose (AND). `verdictClasses` absent
- * means "every class except `failed`" (spec §6.9: failed excluded by default, included by filter).
+ * Spec §6.5 filters, composed with AND. `verdictClass` absent means "every class except
+ * `failed`" (spec §6.9: failed excluded by default, included by filter). `unverified` keeps a row
+ * that leaves any of the named constraints unverified.
  */
 export interface ResultFilters {
-  verdictClasses?: ReadonlyArray<VerdictClass | 'unchecked'>;
-  unverifiedConstraint?: ConstraintName;
-  providers?: readonly ProviderId[];
+  verdictClass?: Array<VerdictClass | 'unchecked'>;
+  unverified?: ConstraintName[];
+  providerId?: ProviderId[];
   maxStops?: number;
-  carriers?: readonly string[];
-  destinations?: readonly Iata[];
+  carriers?: string[];
+  destination?: Iata[];
   maxPricePence?: number;
   nights?: { min: number; max: number };
   hideStale?: boolean;
@@ -2657,22 +2768,20 @@ export interface ResultFilters {
 `packages/core/src/results/dedup.ts`:
 
 ```ts
-import type { Cabin } from '../types/provenance.js';
-import type { OfferRow } from './types.js';
+import type { ResultRow } from './types.js';
 
 /**
  * Spec §6.5 dedup: one row per itinerary hash, showing the cheapest *qualifying* offer (any
- * seller) in the definition's cabin; the itinerary's other in-cabin offers go to `otherOffers`
- * (cheapest first) for the expanded row. Qualifying = not `failed` when the itinerary has any
- * non-failed offer; an itinerary whose every offer failed keeps its cheapest failed offer so the
- * failed filter can still show it. Offers in another cabin are dropped. Calendar rows
- * (`itineraryHash === null`) pass through unchanged. Input order of first appearance is kept.
+ * seller); the itinerary's other offers go to `otherOffers` (cheapest first) for the expanded row.
+ * Qualifying = not `failed` when the itinerary has any non-failed offer; an itinerary whose every
+ * offer failed keeps its cheapest failed offer so the failed filter can still show it. Rows are
+ * already in the definition's cabin (WP8 filters on read). Calendar rows (`itineraryHash === null`)
+ * pass through unchanged. Input order of first appearance is kept.
  */
-export function dedupByItinerary(rows: readonly OfferRow[], cabin: Cabin): OfferRow[] {
-  const groups = new Map<string, OfferRow[]>();
-  const out: Array<OfferRow | string> = [];
+export function dedupByItinerary(rows: ResultRow[]): ResultRow[] {
+  const groups = new Map<string, ResultRow[]>();
+  const out: Array<ResultRow | string> = [];
   for (const row of rows) {
-    if (row.provenance.cabin !== cabin) continue;
     if (row.itineraryHash === null) {
       out.push(row);
       continue;
@@ -2687,19 +2796,21 @@ export function dedupByItinerary(rows: readonly OfferRow[], cabin: Cabin): Offer
   }
   return out.map((entry) => {
     if (typeof entry !== 'string') return entry;
-    const group = groups.get(entry) as OfferRow[];
+    const group = groups.get(entry) as ResultRow[];
     // why: cheapest first, then seller name, so the pick is deterministic across runs.
     const byPrice = [...group].sort(
-      (a, b) => a.pricePence - b.pricePence || a.seller.localeCompare(b.seller),
+      (a, b) => a.pricePence - b.pricePence || (a.seller ?? '').localeCompare(b.seller ?? ''),
     );
-    const primary = byPrice.find((r) => r.verdictClass !== 'failed') ?? (byPrice[0] as OfferRow);
+    const primary = byPrice.find((r) => r.verdictClass !== 'failed') ?? (byPrice[0] as ResultRow);
     const otherOffers = byPrice
       .filter((r) => r !== primary)
       .map((r) => ({
-        seller: r.seller,
+        seller: r.seller ?? '',
         pricePence: r.pricePence,
         provenance: r.provenance,
         booking: r.booking,
+        stale: r.stale,
+        ageHours: r.ageHours,
       }));
     return { ...primary, otherOffers };
   });
@@ -2710,8 +2821,9 @@ export function dedupByItinerary(rows: readonly OfferRow[], cabin: Cabin): Offer
 
 ```ts
 import { compareAges, effectiveAge } from '../labels/age.js';
+import { cellKeyString } from '../types/definition.js';
 import type { IsoDateTime } from '../types/ids.js';
-import type { ResultRow, SortDir, SortKey } from './types.js';
+import type { ResultRow, SortKey } from './types.js';
 
 const CLASS_RANK: Readonly<Record<ResultRow['verdictClass'], number>> = {
   verified: 0,
@@ -2721,22 +2833,21 @@ const CLASS_RANK: Readonly<Record<ResultRow['verdictClass'], number>> = {
 };
 
 function identity(r: ResultRow): string {
-  return (
-    r.itineraryHash ??
-    `${r.provenance.providerId}|${r.cell.origin}|${r.cell.destination}|${r.cell.departureDate}|${r.cell.returnDate}`
-  );
+  return r.itineraryHash ?? `${r.provenance.providerId}|${cellKeyString(r.cell)}`;
 }
 
 /**
  * Spec §6.5 server ranking: verdict class (verified, partially-verified, failed; calendar rows
- * are `unchecked`) then price; ties by effective age through core's `compareAges` (fresher
- * first, unknown age loses to any known age, a future timestamp clamps to "just now": plan
- * review focus 2), then by identity so the order is total and deterministic. Returns a copy.
+ * are `unchecked`); within a class, rows seen in the latest search before rows marked
+ * `notSeenInLatest` (spec §8.1); then price; ties by effective age through core's `compareAges`
+ * (fresher first, unknown age loses to any known age, a future timestamp clamps to "just now":
+ * plan review focus 2), then by identity so the order is total and deterministic. Returns a copy.
  */
-export function rankRows<T extends ResultRow>(rows: readonly T[], now: IsoDateTime): T[] {
+export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[] {
   return [...rows].sort(
     (a, b) =>
       CLASS_RANK[a.verdictClass] - CLASS_RANK[b.verdictClass] ||
+      Number(a.notSeenInLatest !== null) - Number(b.notSeenInLatest !== null) ||
       a.pricePence - b.pricePence ||
       compareAges(effectiveAge(a.provenance, now), effectiveAge(b.provenance, now)) ||
       identity(a).localeCompare(identity(b)),
@@ -2767,7 +2878,7 @@ function keyOf(r: ResultRow, key: SortKey): number | string | null {
  * Rows lacking the key (calendar rows have no travel time or stops; `adjusted` needs an
  * operator onward cost) sort last in both directions. Stable, so equal keys keep the ranked order.
  */
-export function sortRows<T extends ResultRow>(rows: readonly T[], key: SortKey, dir: SortDir): T[] {
+export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[] {
   const sign = dir === 'asc' ? 1 : -1;
   return [...rows].sort((a, b) => {
     const ka = keyOf(a, key);
@@ -2782,7 +2893,7 @@ export function sortRows<T extends ResultRow>(rows: readonly T[], key: SortKey, 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/results/dedupRank.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 15 tests; typecheck and lint clean.
+Expected: PASS, 17 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -2798,7 +2909,7 @@ git add packages/core && git commit -m "wp02: result dedup, ranking with clamped
 
 **Interfaces:**
 - Consumes: Task 2.7 types and helpers; `validateVendorUrl`, `LINK_ALLOWLIST` (Task 2.4, test only); `CellKey`
-- Produces: `filterRows`, `bandCheapest`, `SEARCH_LINK_LABEL`, `searchLinkFor`
+- Produces: `filterRows(rows, f)`, `bandCheapest(rows, bandHours): Set<string>` (row key = `itineraryHash`), `SEARCH_LINK_LABEL`, `searchLinkFor`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2810,7 +2921,7 @@ import { LINK_ALLOWLIST, validateVendorUrl } from '../../src/normalise/vendorUrl
 import { bandCheapest } from '../../src/results/band.js';
 import { filterRows } from '../../src/results/filter.js';
 import { SEARCH_LINK_LABEL, searchLinkFor } from '../../src/results/searchLink.js';
-import type { ResultFilters } from '../../src/results/types.js';
+import type { ResultFilters, ResultRow } from '../../src/results/types.js';
 import type { CellKey } from '../../src/types/definition.js';
 import { calendarRow, row } from '../helpers/rows.js';
 
@@ -2843,29 +2954,29 @@ const f = row({
 });
 const c = calendarRow({ pricePence: 29_000, cell: { nights: 21 } });
 const ALL = [v, p, f, c];
-const names = (rows: typeof ALL) => rows.map((r) => r.itineraryHash ?? 'cal');
+const names = (rows: ResultRow[]) => rows.map((r) => r.itineraryHash ?? 'cal');
 
 describe('filterRows (spec §6.5 filters, §6.9 defaults)', () => {
   it.each<[string, ResultFilters, string[]]>([
     ['default: every class except failed', {}, ['v', 'p', 'cal']],
-    ['verdict class, failed included by filter', { verdictClasses: ['failed'] }, ['f']],
+    ['verdict class, failed included by filter', { verdictClass: ['failed'] }, ['f']],
     [
       'unverified-constraint name',
       {
-        verdictClasses: ['verified', 'partially-verified', 'failed', 'unchecked'],
-        unverifiedConstraint: 'cabinBagRequired',
+        verdictClass: ['verified', 'partially-verified', 'failed', 'unchecked'],
+        unverified: ['cabinBagRequired', 'noSelfTransfer'],
       },
       ['p'],
     ],
-    ['provider', { providers: ['travelpayouts'] }, ['cal']],
+    ['provider', { providerId: ['travelpayouts'] }, ['cal']],
     ['stops (calendar rows have no stops and are kept)', { maxStops: 0 }, ['v', 'cal']],
     ['carriers: any carrier on the row matches (calendar rows kept)', { carriers: ['4U'] }, ['p', 'cal']],
-    ['destination', { destinations: ['EWR' as never] }, ['p']],
+    ['destination', { destination: ['EWR' as never] }, ['p']],
     ['max price', { maxPricePence: 40_000 }, ['p', 'cal']],
     ['nights range', { nights: { min: 11, max: 20 } }, ['v']],
-    ['stale shown unless hidden', { verdictClasses: ['failed'], hideStale: true }, []],
-    ['stale shown by default', { verdictClasses: ['failed'], hideStale: false }, ['f']],
-    ['filters compose with AND', { maxPricePence: 40_000, destinations: ['JFK' as never] }, ['cal']],
+    ['stale shown unless hidden', { verdictClass: ['failed'], hideStale: true }, []],
+    ['stale shown by default', { verdictClass: ['failed'], hideStale: false }, ['f']],
+    ['filters compose with AND', { maxPricePence: 40_000, destination: ['JFK' as never] }, ['cal']],
   ])('%s', (_label, filters, expected) => {
     expect(names(filterRows(ALL, filters))).toEqual(expected);
   });
@@ -2886,12 +2997,11 @@ describe('bandCheapest (spec §6.5, 6h bands)', () => {
       row({ itineraryHash: 'b2', totalMinutes: 720, pricePence: 50_000 }), // 12h00 → band 2
       row({ itineraryHash: 'b2tie', totalMinutes: 800, pricePence: 50_000 }), // tie: first wins
       calendarRow({ pricePence: 1 }), // no travel time: never marked
+      calendarRow({ pricePence: 2, totalMinutes: 100 }), // no itinerary hash, so no row key: never marked
     ];
-    expect(
-      bandCheapest(rows, 6)
-        .filter((r) => r.bandCheapest)
-        .map((r) => r.itineraryHash),
-    ).toEqual(['b0', 'b1a', 'b2']);
+    const marked = bandCheapest(rows, 6);
+    expect(marked).toBeInstanceOf(Set);
+    expect([...marked]).toEqual(['b0', 'b1a', 'b2']);
   });
 
   it.each([0, -6, 1.5])('rejects band width %s', (h) => {
@@ -2970,11 +3080,7 @@ Expected: FAIL, `Error: Cannot find module '../../src/results/band.js' …`.
 ```ts
 import type { ResultFilters, ResultRow } from './types.js';
 
-const DEFAULT_CLASSES: ReadonlyArray<ResultRow['verdictClass']> = [
-  'verified',
-  'partially-verified',
-  'unchecked',
-];
+const DEFAULT_CLASSES: Array<ResultRow['verdictClass']> = ['verified', 'partially-verified', 'unchecked'];
 
 /**
  * Spec §6.5 filters, composed with AND: verdict class, unverified-constraint name, provider,
@@ -2983,12 +3089,12 @@ const DEFAULT_CLASSES: ReadonlyArray<ResultRow['verdictClass']> = [
  * carriers filters do not apply to rows without segments (calendar basis, spec §6.9), so such
  * rows are kept rather than silently dropped.
  */
-export function filterRows<T extends ResultRow>(rows: readonly T[], f: ResultFilters): T[] {
-  const classes = f.verdictClasses ?? DEFAULT_CLASSES;
+export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[] {
+  const classes = f.verdictClass ?? DEFAULT_CLASSES;
   return rows.filter((r) => {
     if (!classes.includes(r.verdictClass)) return false;
-    if (f.unverifiedConstraint !== undefined && !r.unverified.includes(f.unverifiedConstraint)) return false;
-    if (f.providers !== undefined && !f.providers.includes(r.provenance.providerId)) return false;
+    if (f.unverified !== undefined && !f.unverified.some((name) => r.unverified.includes(name))) return false;
+    if (f.providerId !== undefined && !f.providerId.includes(r.provenance.providerId)) return false;
     if (f.maxStops !== undefined && r.stopsOut !== null && r.stopsIn !== null) {
       if (r.stopsOut > f.maxStops || r.stopsIn > f.maxStops) return false;
     }
@@ -2996,7 +3102,7 @@ export function filterRows<T extends ResultRow>(rows: readonly T[], f: ResultFil
       const wanted = f.carriers;
       if (!r.carriers.some((c) => wanted.includes(c))) return false;
     }
-    if (f.destinations !== undefined && !f.destinations.includes(r.cell.destination)) return false;
+    if (f.destination !== undefined && !f.destination.includes(r.cell.destination)) return false;
     if (f.maxPricePence !== undefined && r.pricePence > f.maxPricePence) return false;
     if (f.nights !== undefined && (r.cell.nights < f.nights.min || r.cell.nights > f.nights.max))
       return false;
@@ -3012,32 +3118,34 @@ export function filterRows<T extends ResultRow>(rows: readonly T[], f: ResultFil
 import type { ResultRow } from './types.js';
 
 /**
- * Spec §6.5, §11: mark the cheapest row in each travel-time band of `hours` (6 in the UI):
- * band = floor(totalMinutes / (hours × 60)), so 5h59 is band 0 and 6h00 band 1. Rows without a
- * travel time (calendar basis) are never marked. Equal prices: the first row in input order wins.
- * Returns copies with `bandCheapest` set on every row.
+ * Spec §6.5, §11: the cheapest row in each travel-time band of `bandHours` (6 in the UI):
+ * band = floor(totalMinutes / (bandHours × 60)), so 5h59 is band 0 and 6h00 band 1. Returns the
+ * set of marked row keys. A row key is the row's `itineraryHash`: only itinerary rows have a
+ * travel time, so calendar rows (no `totalMinutes`) are never marked. Equal prices: the first
+ * row in input order wins.
  */
-export function bandCheapest<T extends ResultRow>(rows: readonly T[], hours: number): T[] {
-  if (!Number.isInteger(hours) || hours <= 0)
-    throw new RangeError(`band hours must be a positive integer: ${hours}`);
-  const best = new Map<number, number>();
-  rows.forEach((r, i) => {
-    if (r.totalMinutes === null) return;
-    const band = Math.floor(r.totalMinutes / (hours * 60));
+export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string> {
+  if (!Number.isInteger(bandHours) || bandHours <= 0) {
+    throw new RangeError(`band hours must be a positive integer: ${bandHours}`);
+  }
+  const best = new Map<number, ResultRow & { itineraryHash: string; totalMinutes: number }>();
+  for (const r of rows) {
+    if (r.totalMinutes === null || r.itineraryHash === null) continue;
+    const band = Math.floor(r.totalMinutes / (bandHours * 60));
     const current = best.get(band);
-    if (current === undefined || r.pricePence < (rows[current] as T).pricePence) best.set(band, i);
-  });
-  const marked = new Set(best.values());
-  return rows.map((r, i) => ({ ...r, bandCheapest: marked.has(i) }));
+    if (current === undefined || r.pricePence < current.pricePence) {
+      best.set(band, r as ResultRow & { itineraryHash: string; totalMinutes: number });
+    }
+  }
+  return new Set([...best.values()].map((r) => r.itineraryHash));
 }
 ```
 
 `packages/core/src/results/searchLink.ts`:
 
 ```ts
-import type { ProviderId } from '../ports/provider.js';
 import type { CellKey } from '../types/definition.js';
-import type { Cabin } from '../types/provenance.js';
+import type { Cabin, ProviderId } from '../types/provenance.js';
 
 /** The one label every search link carries (spec §6.9). */
 export const SEARCH_LINK_LABEL = 'search link, not a fare link';
@@ -3104,36 +3212,50 @@ Expected: PASS, 20 tests; typecheck and lint clean.
 git add packages/core && git commit -m "wp02: result filters, 6h bands and labelled search links (spec §6.5, §6.9)"
 ```
 
-### Task 2.9: Alert dedup key and cooldown suppression
+### Task 2.9: Alert identity, dedup key and cooldown suppression
 
 **Files:**
-- Create: `packages/core/src/alerts/types.ts`, `packages/core/src/alerts/dedup.ts`
+- Create: `packages/core/src/alerts/format.ts`, `packages/core/src/alerts/dedup.ts`
 - Test: `packages/core/test/helpers/alerts.ts`, `packages/core/test/alerts/dedup.test.ts`
 
 **Interfaces:**
-- Consumes: `effectiveAge` (labels), `Cell`, `Provenance`, `Verdicts`, `VerdictClass`, `ConstraintName`, `Cabin`, `IsoDateTime`
-- Produces: `AlertRuleInput`, `PreviousPrice`, `AlertCandidate`, `PastFiring`, `Firing`, `AlertContext`, `dedupKey`, `isSuppressed`; module-internal `hoursSince`
+- Consumes: `effectiveAge` (labels), `cellKeyString`, `AlertRule`, `AlertCandidate`, `Firing`, `PriorFiring` (WP0 `types/alerts.ts`), `normaliseOffer` (Task 2.5, test helper)
+- Produces: `identityKey`, `dedupKey`, `isSuppressed`; module-internal `hoursSince`, `priceOf`, `formatPence`
 
-Elapsed hours are whole hours from core's `effectiveAge` (floored, clamped at 0), the same figure the email shows. So 335 h is inside a 336 h cooldown and 336 h is outside. A firing stamped in the future reads as 0 h.
+Elapsed hours are whole hours from core's `effectiveAge` (floored, clamped at 0), the same figure the email shows. So 335 h is inside a 336 h cooldown and 336 h is outside. A firing stamped in the future reads as 0 h. `isSuppressed` returns the reason text WP11 stores on a suppressed `alert_events` row.
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/core/test/helpers/alerts.ts`:
 
 ```ts
-import type { AlertCandidate, AlertContext, AlertRuleInput, PastFiring } from '../../src/alerts/types.js';
+import { normaliseOffer } from '../../src/normalise/itinerary.js';
+import type { AlertRule, CalendarCandidate, PriorFiring, VerifiedCandidate } from '../../src/types/alerts.js';
 import type { Cell } from '../../src/types/definition.js';
 import type { IsoDateTime } from '../../src/types/ids.js';
-import type { Provenance } from '../../src/types/provenance.js';
+import type { Observation } from '../../src/types/itinerary.js';
+import type { Cabin, Provenance, ProviderId } from '../../src/types/provenance.js';
+import { cellOf, deps, offer } from './offers.js';
 
 export const NOW = '2027-03-01T12:00:00.000Z' as IsoDateTime;
-export const CTX: AlertContext = { now: NOW, executionId: 'ex-2', cabin: 'economy' };
+/** `evaluateAlertRules`' context (spelled out so this helper compiles before Task 2.10 exists). */
+export const CTX: {
+  now: IsoDateTime;
+  executionId: string;
+  cabin: Cabin;
+  discoveryRefreshHours: Partial<Record<ProviderId, number>>;
+} = {
+  now: NOW,
+  executionId: 'ex-2',
+  cabin: 'economy',
+  discoveryRefreshHours: {},
+};
 
 /** ISO instant `h` hours before NOW (negative = in the future). */
 export const hoursAgo = (h: number): IsoDateTime =>
   new Date(Date.parse(NOW) - h * 3_600_000).toISOString() as IsoDateTime;
 
-export function rule(over: Partial<AlertRuleInput> = {}): AlertRuleInput {
+export function rule(over: Partial<AlertRule> = {}): AlertRule {
   return {
     id: 'r1',
     definitionId: 'd1',
@@ -3173,38 +3295,50 @@ const calendarProv: Provenance = {
   cabin: 'economy',
 };
 
-type VOver = Partial<Omit<Extract<AlertCandidate, { basis: 'verified' }>, 'provenance'>> & {
-  provenance?: Partial<Provenance>;
-};
-type COver = Partial<Omit<Extract<AlertCandidate, { basis: 'calendar' }>, 'provenance'>> & {
-  provenance?: Partial<Provenance>;
+/** The worked-example itinerary from `offers.ts`, normalised once (LHR→JFK 14–28 Mar 2027). */
+const NORMALISED = (() => {
+  const raw = offer();
+  const r = normaliseOffer(raw, cellOf(raw), deps());
+  if (!r.ok) throw r.error;
+  return r;
+})();
+
+type VOver = Partial<Omit<VerifiedCandidate, 'observation'>> & {
+  observation?: Partial<Omit<Observation, 'provenance'>> & { provenance?: Partial<Provenance> };
+  hash?: string;
 };
 
-export function verified(over: VOver = {}): AlertCandidate {
-  const { provenance, ...rest } = over;
+export function verified(over: VOver = {}): VerifiedCandidate {
+  const { observation, hash, ...rest } = over;
+  const { provenance, ...obs } = observation ?? {};
   return {
     basis: 'verified',
-    executionId: 'ex-2',
-    observationId: 1,
-    offerId: 1,
-    itineraryHash: 'h1',
-    cell: cell(),
-    pricePence: 41_200,
+    observation: {
+      ...NORMALISED.observation,
+      id: 1,
+      offerId: 1,
+      executionId: 'ex-2',
+      suppliedFields: ['segments', 'segmentTimes', 'price', 'seller'],
+      partialExpansion: false,
+      ...obs,
+      provenance: { ...verifiedProv, ...provenance },
+    },
+    itinerary: { ...NORMALISED.itinerary, hash: hash ?? 'h1' },
+    verdictClass: 'verified',
+    unverified: [],
+    seller: 'Virgin Atlantic',
     previous: null,
-    verdicts: { cabin: 'pass', maxStops: 'pass' },
     ...rest,
-    provenance: { ...verifiedProv, ...provenance },
   };
 }
 
-export function calendar(over: COver = {}): AlertCandidate {
+type COver = Partial<Omit<CalendarCandidate, 'provenance'>> & { provenance?: Partial<Provenance> };
+
+export function calendar(over: COver = {}): CalendarCandidate {
   const { provenance, ...rest } = over;
   return {
     basis: 'calendar',
-    executionId: 'ex-2',
     calendarPriceId: 1,
-    reusedFromExecutionId: null,
-    discoveryRefreshHours: 168,
     cell: cell(),
     pricePence: 41_200,
     previous: null,
@@ -3213,16 +3347,8 @@ export function calendar(over: COver = {}): AlertCandidate {
   };
 }
 
-export function sent(over: Partial<PastFiring> = {}): PastFiring {
-  return {
-    ruleId: 'r1',
-    identityKey: 'r1|it|h1',
-    dedupKey: 'r1|it|h1|412',
-    pricePence: 41_200,
-    firedAt: hoursAgo(24),
-    status: 'sent',
-    ...over,
-  };
+export function prior(over: Partial<PriorFiring> = {}): PriorFiring {
+  return { identityKey: 'r1|h1', dedupKey: 'r1|h1|412', pricePence: 41_200, firedAt: hoursAgo(24), ...over };
 }
 ```
 
@@ -3230,74 +3356,84 @@ export function sent(over: Partial<PastFiring> = {}): PastFiring {
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { dedupKey, isSuppressed } from '../../src/alerts/dedup.js';
-import { hoursAgo, NOW, sent } from '../helpers/alerts.js';
+import { dedupKey, identityKey, isSuppressed } from '../../src/alerts/dedup.js';
+import { calendar, cell, hoursAgo, NOW, prior, rule, verified } from '../helpers/alerts.js';
 
-const f = { ruleId: 'r1', identityKey: 'r1|it|h1', dedupKey: 'r1|it|h1|412', pricePence: 41_200 };
+const f = {
+  identityKey: 'r1|h1',
+  dedupKey: 'r1|h1|412',
+  candidate: verified({ observation: { pricePence: 41_200 } }),
+};
+
+describe('identityKey (plan contract formats, spec §6.8)', () => {
+  it('verified is ruleId|itineraryHash; calendar is ruleId|providerId|cabin|cellKeyString', () => {
+    expect(identityKey(rule(), verified())).toBe('r1|h1');
+    expect(identityKey(rule({ basis: 'calendar' }), calendar({ cell: cell(15) }))).toBe(
+      'r1|travelpayouts|economy|LHR|JFK|2027-03-15|2027-03-29',
+    );
+  });
+});
 
 describe('dedupKey (spec §6.8)', () => {
   it('is identity + floor(pricePence / 100)', () => {
-    expect(dedupKey('r1|it|h1', 41_200)).toBe('r1|it|h1|412');
-    expect(dedupKey('r1|it|h1', 41_299)).toBe('r1|it|h1|412');
-    expect(dedupKey('r1|it|h1', 41_300)).toBe('r1|it|h1|413');
-    expect(dedupKey('r1|it|h1', 99)).toBe('r1|it|h1|0');
+    expect(dedupKey('r1|h1', 41_200)).toBe('r1|h1|412');
+    expect(dedupKey('r1|h1', 41_299)).toBe('r1|h1|412');
+    expect(dedupKey('r1|h1', 41_300)).toBe('r1|h1|413');
+    expect(dedupKey('r1|h1', 99)).toBe('r1|h1|0');
   });
 });
 
 describe('isSuppressed (spec §6.8 cooldown, default 336 h)', () => {
-  it('same dedup key within the cooldown is suppressed; at the cooldown it is not', () => {
-    expect(isSuppressed(f, [sent({ firedAt: hoursAgo(335) })], 336, NOW)).toBe(true);
-    expect(isSuppressed(f, [sent({ firedAt: hoursAgo(336) })], 336, NOW)).toBe(false);
+  it('same dedup key within the cooldown is suppressed, with a reason; at the cooldown it is not', () => {
+    expect(isSuppressed(f, [prior({ firedAt: hoursAgo(335) })], 336, NOW)).toEqual({
+      suppressed: true,
+      reason: 'same price band alerted 335h ago (cooldown 336h)',
+    });
+    expect(isSuppressed(f, [prior({ firedAt: hoursAgo(336) })], 336, NOW)).toEqual({
+      suppressed: false,
+      reason: null,
+    });
   });
 
   it('same identity at an equal or lower price within the cooldown is suppressed', () => {
-    expect(
-      isSuppressed(
-        { ...f, dedupKey: 'r1|it|h1|415', pricePence: 41_500 },
-        [sent({ pricePence: 41_200 })],
-        336,
-        NOW,
-      ),
-    ).toBe(true);
-    expect(
-      isSuppressed(
-        { ...f, dedupKey: 'r1|it|h1|412', pricePence: 41_250 },
-        [sent({ dedupKey: 'other', pricePence: 41_250 })],
-        336,
-        NOW,
-      ),
-    ).toBe(true);
+    const higher = {
+      ...f,
+      dedupKey: 'r1|h1|415',
+      candidate: verified({ observation: { pricePence: 41_500 } }),
+    };
+    expect(isSuppressed(higher, [prior({ pricePence: 41_200 })], 336, NOW)).toEqual({
+      suppressed: true,
+      reason: 'alerted at £412 24h ago, not above this price (cooldown 336h)',
+    });
+    expect(isSuppressed(f, [prior({ dedupKey: 'other', pricePence: 41_200 })], 336, NOW).suppressed).toBe(
+      true,
+    );
   });
 
-  it('a lower price than the earlier firing (new pound bucket) fires again', () => {
+  it('a lower price than the earlier firing (new pound bucket) fires again; other identities do not count', () => {
+    const lower = {
+      ...f,
+      dedupKey: 'r1|h1|398',
+      candidate: verified({ observation: { pricePence: 39_800 } }),
+    };
+    expect(isSuppressed(lower, [prior()], 336, NOW).suppressed).toBe(false);
     expect(
-      isSuppressed(
-        { ...f, dedupKey: 'r1|it|h1|398', pricePence: 39_800 },
-        [sent({ pricePence: 41_200 })],
-        336,
-        NOW,
-      ),
+      isSuppressed(f, [prior({ identityKey: 'r1|h9', dedupKey: 'r1|h9|412' })], 336, NOW).suppressed,
     ).toBe(false);
   });
 
-  it('failed and suppressed events, other rules and other identities do not count', () => {
+  it('calendar candidates are priced from the candidate itself', () => {
+    const c = { identityKey: 'k', dedupKey: 'k|300', candidate: calendar({ pricePence: 30_000 }) };
     expect(
-      isSuppressed(
-        f,
-        [
-          sent({ status: 'failed' }),
-          sent({ status: 'suppressed' }),
-          sent({ ruleId: 'r2' }),
-          sent({ identityKey: 'r1|it|h9', dedupKey: 'r1|it|h9|412' }),
-        ],
-        336,
-        NOW,
-      ),
-    ).toBe(false);
+      isSuppressed(c, [prior({ identityKey: 'k', dedupKey: 'x', pricePence: 30_000 })], 336, NOW).suppressed,
+    ).toBe(true);
   });
 
   it('review focus 2: a firing stamped in the future reads as 0 h old (inside the cooldown) without throwing', () => {
-    expect(isSuppressed(f, [sent({ firedAt: hoursAgo(-3) })], 336, NOW)).toBe(true);
+    expect(isSuppressed(f, [prior({ firedAt: hoursAgo(-3) })], 336, NOW)).toEqual({
+      suppressed: true,
+      reason: 'same price band alerted 0h ago (cooldown 336h)',
+    });
   });
 });
 ```
@@ -3309,91 +3445,14 @@ Expected: FAIL, `Error: Cannot find module '../../src/alerts/dedup.js' …`.
 
 - [ ] **Step 3: Implement**
 
-`packages/core/src/alerts/types.ts`:
+`packages/core/src/alerts/format.ts`:
 
 ```ts
-import type { Cell } from '../types/definition.js';
-import type { IsoDateTime } from '../types/ids.js';
-import type { ConstraintName, VerdictClass, Verdicts } from '../types/itinerary.js';
-import type { Cabin, Provenance } from '../types/provenance.js';
-
-/** An alert rule as evaluated (spec §6.8; the fields of WP0's `alertRuleSchema` the core needs). */
-export interface AlertRuleInput {
-  id: string;
-  definitionId: string;
-  type: 'absolute' | 'dropPct' | 'dropAbs';
-  thresholdPence: number | null; // absolute and dropAbs
-  pct: number | null; // dropPct
-  basis: 'verified' | 'calendar';
-  requireAllVerified: boolean | null; // verified basis only
-  cooldownHours: number;
-  enabled: boolean;
-}
-
-/** The price an alert compares against: the offer's previous observation, or the cell's previous calendar price. */
-export interface PreviousPrice {
-  pricePence: number;
-  fetchedAt: IsoDateTime;
-}
-
-interface CandidateBase {
-  executionId: string;
-  cell: Cell;
-  pricePence: number;
-  provenance: Provenance;
-  previous: PreviousPrice | null;
-}
-
-/** Spec §6.8 candidates, assembled by the engine from rows written by the current execution. */
-export type AlertCandidate =
-  | (CandidateBase & {
-      basis: 'verified';
-      observationId: number;
-      offerId: number;
-      itineraryHash: string;
-      verdicts: Verdicts;
-    })
-  | (CandidateBase & {
-      basis: 'calendar';
-      calendarPriceId: number;
-      reusedFromExecutionId: string | null;
-      discoveryRefreshHours: number;
-    });
-
-/** An earlier `alert_events` row, as far as suppression needs it. */
-export interface PastFiring {
-  ruleId: string;
-  identityKey: string;
-  dedupKey: string;
-  pricePence: number;
-  firedAt: IsoDateTime;
-  status: 'sent' | 'failed' | 'suppressed';
-}
-
-/**
- * One rule's verdict on one identity. `fire` is sent, `suppressed` is persisted with its reason
- * and not sent, `listed` is a calendar cell seen for the first time (the digest's "new" section;
- * never a drop firing, never persisted as an event).
- */
-export interface Firing {
-  ruleId: string;
-  identityKey: string;
-  dedupKey: string;
-  kind: 'absolute' | 'drop' | 'new';
-  status: 'fire' | 'suppressed' | 'listed';
-  reason: string;
-  candidate: AlertCandidate;
-  verdictClass: VerdictClass | 'unchecked';
-  unverified: ConstraintName[];
-  previousPricePence: number | null;
-  previousAgeHours: number | null;
-}
-
-/** Per-run context: the evaluation instant, the execution whose rows are candidates, the definition cabin. */
-export interface AlertContext {
-  now: IsoDateTime;
-  executionId: string;
-  cabin: Cabin;
+/** `41200` → `£412`, `41205` → `£412.05`. Integer arithmetic only. */
+export function formatPence(pence: number): string {
+  const pounds = Math.floor(pence / 100);
+  const rest = pence % 100;
+  return rest === 0 ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
 }
 ```
 
@@ -3401,68 +3460,96 @@ export interface AlertContext {
 
 ```ts
 import { effectiveAge } from '../labels/age.js';
+import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
+import { cellKeyString } from '../types/definition.js';
 import type { IsoDateTime } from '../types/ids.js';
-import type { PastFiring } from './types.js';
+import type { Provenance } from '../types/provenance.js';
+import { formatPence } from './format.js';
+
+/** Whole hours from `at` to `now`, clamped at 0 through core's `effectiveAge` (plan review focus 2). */
+export function hoursSince(at: IsoDateTime, now: IsoDateTime): number {
+  return effectiveAge({ fetchedAt: at, maxAgeHours: 'unknown' }, now).fetchedHours;
+}
+
+/** The candidate's price and provenance, whichever basis it is on. */
+export function priceOf(c: AlertCandidate): { pricePence: number; provenance: Provenance } {
+  return c.basis === 'verified'
+    ? { pricePence: c.observation.pricePence, provenance: c.observation.provenance }
+    : { pricePence: c.pricePence, provenance: c.provenance };
+}
+
+/**
+ * Spec §6.8 identity, in the plan's pinned formats: verified `${ruleId}|${itineraryHash}`;
+ * calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`.
+ */
+export function identityKey(rule: AlertRule, c: AlertCandidate): string {
+  if (c.basis === 'verified') return `${rule.id}|${c.itinerary.hash}`;
+  return `${rule.id}|${c.provenance.providerId}|${c.provenance.cabin}|${cellKeyString(c.cell)}`;
+}
 
 /** Spec §6.8: `dedupKey = identity + floor(pricePence / 100)` (whole pounds). */
 export function dedupKey(identityKey: string, pricePence: number): string {
   return `${identityKey}|${Math.floor(pricePence / 100)}`;
 }
 
-/** Whole hours since `at`, clamped at 0 through core's `effectiveAge` (plan review focus 2). */
-export function hoursSince(at: IsoDateTime, now: IsoDateTime): number {
-  return effectiveAge({ fetchedAt: at, maxAgeHours: 'unknown' }, now).fetchedHours;
-}
-
 /**
- * Spec §6.8 cooldown: suppressed when, within `cooldownHours` before `now`, a *sent* firing of the
- * same rule had the same dedup key, or the same identity fired at an equal or lower price.
- * Failed and suppressed events do not count (a failed send must be retried next run). A firing
- * stamped in the future (clock skew) reads as 0 h old, i.e. inside the cooldown.
+ * Spec §6.8 cooldown. `prior` is this rule's *sent* firings (the engine's query excludes failed
+ * and suppressed events, so a failed send is retried next run). Suppressed when, within
+ * `cooldownHours` before `now`, a prior firing had the same dedup key, or the same identity
+ * fired at an equal or lower price. A prior firing stamped in the future reads as 0 h old.
  */
 export function isSuppressed(
-  f: { ruleId: string; identityKey: string; dedupKey: string; pricePence: number },
-  history: readonly PastFiring[],
+  f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>,
+  prior: PriorFiring[],
   cooldownHours: number,
   now: IsoDateTime,
-): boolean {
-  return history.some(
-    (h) =>
-      h.ruleId === f.ruleId &&
-      h.status === 'sent' &&
-      hoursSince(h.firedAt, now) < cooldownHours &&
-      (h.dedupKey === f.dedupKey || (h.identityKey === f.identityKey && h.pricePence <= f.pricePence)),
-  );
+): { suppressed: boolean; reason: string | null } {
+  const price = priceOf(f.candidate).pricePence;
+  for (const p of prior) {
+    const age = hoursSince(p.firedAt, now);
+    if (age >= cooldownHours) continue;
+    if (p.dedupKey === f.dedupKey) {
+      return { suppressed: true, reason: `same price band alerted ${age}h ago (cooldown ${cooldownHours}h)` };
+    }
+    if (p.identityKey === f.identityKey && p.pricePence <= price) {
+      return {
+        suppressed: true,
+        reason: `alerted at ${formatPence(p.pricePence)} ${age}h ago, not above this price (cooldown ${cooldownHours}h)`,
+      };
+    }
+  }
+  return { suppressed: false, reason: null };
 }
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/dedup.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 6 tests; typecheck and lint clean.
+Expected: PASS, 7 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp02: alert dedupKey and cooldown suppression with clamped ages (spec §6.8)"
+git add packages/core && git commit -m "wp02: alert identityKey, dedupKey and cooldown suppression with clamped ages (spec §6.8)"
 ```
 
 ### Task 2.10: Alert evaluation on both bases
 
 **Files:**
-- Create: `packages/core/src/alerts/format.ts`, `packages/core/src/alerts/evaluate.ts`
+- Create: `packages/core/src/alerts/evaluate.ts`
 - Test: `packages/core/test/alerts/evaluate.test.ts`
 
 **Interfaces:**
-- Consumes: Task 2.9; `verdictClass` (Task 2.6)
-- Produces: `evaluateAlertRules`; module-internal `need`, `formatPence`
+- Consumes: Task 2.9; `AlertRule`, `AlertCandidate`, `Firing`, `PriorFiring`
+- Produces: `evaluateAlertRules(rules, candidates, prior, ctx)`, type `AlertEvalContext`; module-internal `need`
 
 Decisions this task encodes, all from spec §6.8:
 
-- The sparse-cache window is inclusive. A drop compares when the previous price was fetched **≤ 2 × `discoveryRefreshHours`** whole hours before this one. With refresh 84 h, 167 h and 168 h compare and 169 h does not. `maxAgeHours` 168 on the row is deliberately present, to show that the provider's age bound does not enter the rule.
-- A calendar candidate without a usable previous price is `kind: 'new'`, `status: 'listed'`. It never fires a drop and is never persisted as an event, but an absolute rule still fires on it.
-- A verified candidate without a previous observation never fires a drop and is not listed.
-- One result per (rule, identity): the cheapest eligible candidate. Suppressed results are returned so that WP11 can persist them with `status = suppressed`.
+- The sparse-cache window is inclusive. A drop compares when the previous price was fetched **≤ 2 × `ctx.discoveryRefreshHours[providerId]`** whole hours before this one (168 per provider when absent, spec §7). With refresh 84 h, 167 h and 168 h compare and 169 h does not. `maxAgeHours` 168 on the row is deliberately present, to show that the provider's age bound does not enter the rule.
+- A calendar candidate without a usable previous price is a `Firing` with `isNew: true`. It never fires a drop and is never suppressed, but an absolute rule still fires on it with `isNew: false`.
+- A verified candidate without a previous observation never fires a drop.
+- One firing per (rule, identity): the cheapest eligible candidate. Verified eligibility is checked here: same execution, definition cabin, class `verified`, or `partially-verified` when `requireAllVerified` is false. Calendar candidates carry no execution id, so "fetched by this execution, not reused" is the engine's query (WP11). Synthetic and other-cabin candidates are refused on both bases.
+- Firings suppressed by `prior` are left out (see §5 for how WP11 records them).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3471,37 +3558,33 @@ Decisions this task encodes, all from spec §6.8:
 ```ts
 import { describe, expect, it } from 'vitest';
 import { evaluateAlertRules } from '../../src/alerts/evaluate.js';
-import type { AlertCandidate } from '../../src/alerts/types.js';
-import { CTX, calendar, cell, hoursAgo, rule, sent, verified } from '../helpers/alerts.js';
+import type { AlertCandidate, AlertRule, PriorFiring } from '../../src/types/alerts.js';
+import { CTX, calendar, cell, hoursAgo, prior, rule, verified } from '../helpers/alerts.js';
 
-const run = (r: ReturnType<typeof rule>[], c: AlertCandidate[], prev = [] as ReturnType<typeof sent>[]) =>
-  evaluateAlertRules(r, c, prev, CTX);
+const run = (r: AlertRule[], c: AlertCandidate[], p: PriorFiring[] = [], ctx = CTX) =>
+  evaluateAlertRules(r, c, p, ctx);
+const prices = (fs: ReturnType<typeof run>) =>
+  fs.map((f) =>
+    f.candidate.basis === 'verified' ? f.candidate.observation.pricePence : f.candidate.pricePence,
+  );
 
 describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
-  it('identity is (ruleId, itineraryHash); an absolute rule fires at or below the threshold', () => {
-    const [f] = run([rule()], [verified({ pricePence: 45_000 })]);
+  it('identity is ruleId|itineraryHash; an absolute rule fires at or below the threshold', () => {
+    const [f] = run([rule()], [verified({ observation: { pricePence: 45_000 } })]);
     expect(f).toMatchObject({
-      ruleId: 'r1',
-      identityKey: 'r1|it|h1',
-      dedupKey: 'r1|it|h1|450',
-      kind: 'absolute',
-      status: 'fire',
-      verdictClass: 'verified',
-      unverified: [],
+      identityKey: 'r1|h1',
+      dedupKey: 'r1|h1|450',
+      isNew: false,
+      reason: '£450 is at or below the £450 threshold',
     });
-    expect(run([rule()], [verified({ pricePence: 45_001 })])).toEqual([]);
+    expect(f?.rule.id).toBe('r1');
+    expect(run([rule()], [verified({ observation: { pricePence: 45_001 } })])).toEqual([]);
   });
 
-  it('partially-verified candidates count only when requireAllVerified is false, and the firing lists the unverified constraints', () => {
-    const partial = verified({
-      verdicts: { cabin: 'unverified', maxStops: 'pass', checkedBagRequired: 'unverified' },
-    });
+  it('partially-verified candidates count only when requireAllVerified is false', () => {
+    const partial = verified({ verdictClass: 'partially-verified', unverified: ['cabin'] });
     expect(run([rule({ requireAllVerified: true })], [partial])).toEqual([]);
-    const [f] = run([rule({ requireAllVerified: false })], [partial]);
-    expect(f).toMatchObject({
-      verdictClass: 'partially-verified',
-      unverified: ['cabin', 'checkedBagRequired'],
-    });
+    expect(run([rule({ requireAllVerified: false })], [partial])).toHaveLength(1);
   });
 
   it('failed candidates, other executions, other cabins and synthetic rows never fire', () => {
@@ -3509,79 +3592,69 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
       run(
         [rule({ requireAllVerified: false })],
         [
-          verified({ verdicts: { cabin: 'fail' } }),
-          verified({ executionId: 'ex-1' }),
-          verified({ provenance: { cabin: 'business' } }),
-          verified({ provenance: { providerId: 'fixture', sourceKind: 'synthetic' } }),
+          verified({ verdictClass: 'failed' }),
+          verified({ observation: { executionId: 'ex-1' } }),
+          verified({ observation: { provenance: { cabin: 'business' } } }),
+          verified({ observation: { provenance: { providerId: 'fixture', sourceKind: 'synthetic' } } }),
         ],
       ),
     ).toEqual([]);
   });
 
-  it('one result per identity: the cheapest offer of the itinerary', () => {
+  it('one firing per identity: the cheapest offer of the itinerary', () => {
     const out = run(
       [rule()],
       [
-        verified({ offerId: 2, pricePence: 43_000 }),
-        verified({ offerId: 1, pricePence: 41_200 }),
-        verified({ itineraryHash: 'h2', pricePence: 44_000 }),
+        verified({ observation: { offerId: 2, pricePence: 43_000 } }),
+        verified({ observation: { offerId: 1, pricePence: 41_200 } }),
+        verified({ hash: 'h2', observation: { pricePence: 44_000 } }),
       ],
     );
-    expect(out.map((f) => [f.identityKey, f.candidate.pricePence])).toEqual([
-      ['r1|it|h1', 41_200],
-      ['r1|it|h2', 44_000],
-    ]);
+    expect(out.map((f) => f.identityKey)).toEqual(['r1|h1', 'r1|h2']);
+    expect(prices(out)).toEqual([41_200, 44_000]);
   });
 
   it('drops compare the latest observation of an offer with its previous one (dropAbs and dropPct)', () => {
-    const c = verified({ pricePence: 40_500, previous: { pricePence: 45_000, fetchedAt: hoursAgo(200) } });
-    expect(run([rule({ type: 'dropAbs', thresholdPence: 4_500 })], [c])[0]).toMatchObject({
-      kind: 'drop',
-      previousPricePence: 45_000,
-      previousAgeHours: 200,
-      reason: 'down £45 (10%) from £450',
+    const c = verified({
+      observation: { pricePence: 40_500 },
+      previous: { pricePence: 45_000, fetchedAt: hoursAgo(200) },
     });
+    expect(run([rule({ type: 'dropAbs', thresholdPence: 4_500 })], [c])[0]?.reason).toBe(
+      'down £45 (10%) from £450',
+    );
     expect(run([rule({ type: 'dropAbs', thresholdPence: 4_501 })], [c])).toEqual([]);
-    expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 10 })], [c])[0]?.kind).toBe('drop');
-    expect(
-      run(
-        [rule({ type: 'dropPct', thresholdPence: null, pct: 10 })],
-        [verified({ pricePence: 40_501, previous: { pricePence: 45_000, fetchedAt: hoursAgo(1) } })],
-      ),
-    ).toEqual([]);
+    expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 10 })], [c])).toHaveLength(1);
+    const short = verified({
+      observation: { pricePence: 40_501 },
+      previous: { pricePence: 45_000, fetchedAt: hoursAgo(1) },
+    });
+    expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 10 })], [short])).toEqual([]);
   });
 
   it('no previous observation, or a price that did not fall, never fires a drop', () => {
     expect(run([rule({ type: 'dropAbs', thresholdPence: 1 })], [verified()])).toEqual([]);
-    expect(
-      run(
-        [rule({ type: 'dropPct', thresholdPence: null, pct: 0 })],
-        [verified({ previous: { pricePence: 41_200, fetchedAt: hoursAgo(1) } })],
-      ),
-    ).toEqual([]);
+    const same = verified({ previous: { pricePence: 41_200, fetchedAt: hoursAgo(1) } });
+    expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 0 })], [same])).toEqual([]);
   });
 
-  it('cooldown: an earlier sent firing suppresses (status suppressed, still returned for the event log)', () => {
-    const [f] = run([rule()], [verified()], [sent()]);
-    expect(f?.status).toBe('suppressed');
+  it('cooldown: a firing suppressed by prior is left out; with prior = [] it is returned', () => {
+    expect(run([rule()], [verified()], [prior()])).toEqual([]);
+    expect(run([rule()], [verified()], [])).toHaveLength(1);
   });
 
   it('disabled rules are skipped; a rule missing its threshold is a caller bug', () => {
     expect(run([rule({ enabled: false })], [verified()])).toEqual([]);
     expect(() => run([rule({ thresholdPence: null })], [verified()])).toThrow(RangeError);
-    expect(() =>
-      run(
-        [rule({ type: 'dropPct', pct: null })],
-        [verified({ previous: { pricePence: 50_000, fetchedAt: hoursAgo(1) } })],
-      ),
-    ).toThrow(RangeError);
+    const dropping = verified({ previous: { pricePence: 50_000, fetchedAt: hoursAgo(1) } });
+    expect(() => run([rule({ type: 'dropPct', pct: null })], [dropping])).toThrow(RangeError);
   });
 });
 
 describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
   const cal = rule({ basis: 'calendar', requireAllVerified: null });
+  const drop = rule({ basis: 'calendar', type: 'dropAbs', thresholdPence: 1_000, requireAllVerified: null });
 
-  it('identity is (ruleId, providerId, cabin, cellKey); providers and cells are separate identities', () => {
+  it('identity is ruleId|providerId|cabin|cellKey; providers and cells are separate identities', () => {
     const out = run(
       [cal],
       [
@@ -3591,27 +3664,33 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
       ],
     );
     expect(out.map((f) => f.identityKey)).toEqual([
-      'r1|cal|travelpayouts|economy|LHR|JFK|2027-03-14|2027-03-28',
-      'r1|cal|searchapi|economy|LHR|JFK|2027-03-14|2027-03-28',
-      'r1|cal|travelpayouts|economy|LHR|JFK|2027-03-15|2027-03-29',
+      'r1|travelpayouts|economy|LHR|JFK|2027-03-14|2027-03-28',
+      'r1|searchapi|economy|LHR|JFK|2027-03-14|2027-03-28',
+      'r1|travelpayouts|economy|LHR|JFK|2027-03-15|2027-03-29',
     ]);
-    expect(out.every((f) => f.verdictClass === 'unchecked')).toBe(true);
   });
 
-  it('reused calendar rows are excluded', () => {
-    expect(run([cal], [calendar({ reusedFromExecutionId: 'ex-1' })])).toEqual([]);
+  it('other-cabin and synthetic calendar rows are refused', () => {
+    expect(
+      run(
+        [cal],
+        [
+          calendar({ provenance: { cabin: 'business' } }),
+          calendar({ provenance: { providerId: 'fixture', sourceKind: 'synthetic' } }),
+        ],
+      ),
+    ).toEqual([]);
   });
 
-  // Sparse-cache drop rule: refresh 84 h, so the window is 2 × 84 = 168 h; maxAgeHours 168 on
-  // the row shows the provider's age bound does not enter the comparison.
+  // Sparse-cache drop rule: discoveryRefreshHours 84, so the window is 2 × 84 = 168 h; maxAgeHours 168
+  // on the row shows the provider's age bound does not enter the comparison.
   it.each([
-    [167, 'drop'],
-    [168, 'drop'],
-    [169, 'new'],
-  ] as const)('previous fetched %i h before this fetch → %s', (gap, kind) => {
+    [167, false],
+    [168, false],
+    [169, true],
+  ] as const)('previous fetched %i h before this fetch → isNew %s', (gap, isNew) => {
     const fetchedAt = hoursAgo(2);
     const c = calendar({
-      discoveryRefreshHours: 84,
       pricePence: 38_000,
       provenance: { fetchedAt, maxAgeHours: 168 },
       previous: {
@@ -3619,25 +3698,46 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
         fetchedAt: new Date(Date.parse(fetchedAt) - gap * 3_600_000).toISOString() as never,
       },
     });
-    const [f] = run([rule({ basis: 'calendar', type: 'dropAbs', thresholdPence: 1_000 })], [c]);
-    expect(f?.kind).toBe(kind);
-    expect(f?.status).toBe(kind === 'new' ? 'listed' : 'fire');
+    const [f] = run([drop], [c], [], { ...CTX, discoveryRefreshHours: { travelpayouts: 84 } });
+    expect(f?.isNew).toBe(isNew);
+    expect(f?.reason).toBe(
+      isNew
+        ? 'first price in the comparison window; no earlier price to compare'
+        : 'down £70 (15%) from £450',
+    );
   });
 
-  it('absent-then-present is listed as new and never fires as a drop; absolute rules still apply to it', () => {
+  it('the window defaults to 2 × 168 h when the definition omits the provider', () => {
+    const c = calendar({
+      pricePence: 38_000,
+      previous: { pricePence: 45_000, fetchedAt: hoursAgo(2 + 336) },
+    });
+    expect(run([drop], [c])[0]?.isNew).toBe(false);
+    const older = calendar({
+      pricePence: 38_000,
+      previous: { pricePence: 45_000, fetchedAt: hoursAgo(2 + 337) },
+    });
+    expect(run([drop], [older])[0]?.isNew).toBe(true);
+  });
+
+  it('absent-then-present is listed as new and never a drop firing; absolute rules still apply; new is never suppressed', () => {
     const c = calendar({ pricePence: 38_000, previous: null });
     expect(
-      run([rule({ basis: 'calendar', type: 'dropPct', thresholdPence: null, pct: 5 })], [c])[0],
-    ).toMatchObject({ kind: 'new', status: 'listed', previousPricePence: null });
-    expect(run([cal], [c])[0]).toMatchObject({ kind: 'absolute', status: 'fire' });
+      run([rule({ basis: 'calendar', type: 'dropPct', thresholdPence: null, pct: 5 })], [c])[0]?.isNew,
+    ).toBe(true);
+    expect(run([cal], [c])[0]).toMatchObject({
+      isNew: false,
+      reason: '£380 is at or below the £450 threshold',
+    });
+    const id = 'r1|travelpayouts|economy|LHR|JFK|2027-03-14|2027-03-28';
+    expect(
+      run([drop], [c], [prior({ identityKey: id, dedupKey: `${id}|380`, pricePence: 30_000 })]),
+    ).toHaveLength(1);
   });
 
   it('review focus 2: a previous price stamped in the future is compared as 0 h old, without throwing', () => {
     const c = calendar({ pricePence: 38_000, previous: { pricePence: 45_000, fetchedAt: hoursAgo(-5) } });
-    expect(run([rule({ basis: 'calendar', type: 'dropAbs', thresholdPence: 1_000 })], [c])[0]).toMatchObject({
-      kind: 'drop',
-      previousAgeHours: 0,
-    });
+    expect(run([drop], [c])[0]).toMatchObject({ isNew: false, reason: 'down £70 (15%) from £450' });
   });
 
   it('basis must match: a calendar candidate is not seen by a verified rule and vice versa', () => {
@@ -3654,93 +3754,71 @@ Expected: FAIL, `Error: Cannot find module '../../src/alerts/evaluate.js' …`.
 
 - [ ] **Step 3: Implement**
 
-`packages/core/src/alerts/format.ts`:
-
-```ts
-/** `41200` → `£412`, `41205` → `£412.05`. Integer arithmetic only. */
-export function formatPence(pence: number): string {
-  const pounds = Math.floor(pence / 100);
-  const rest = pence % 100;
-  return rest === 0 ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
-}
-```
-
 `packages/core/src/alerts/evaluate.ts`:
 
 ```ts
-import { verdictClass } from '../constraints/verdictClass.js';
-import type { ConstraintName, Verdict, VerdictClass } from '../types/itinerary.js';
-import { dedupKey, hoursSince, isSuppressed } from './dedup.js';
+import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
+import type { IsoDateTime } from '../types/ids.js';
+import type { Cabin, ProviderId } from '../types/provenance.js';
+import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf } from './dedup.js';
 import { formatPence } from './format.js';
-import type { AlertCandidate, AlertContext, AlertRuleInput, Firing, PastFiring } from './types.js';
 
-/** Spec §6.8 identity: verified `(ruleId, itineraryHash)`; calendar `(ruleId, providerId, cabin, cellKey)`. */
-function identityOf(ruleId: string, c: AlertCandidate): string {
-  if (c.basis === 'verified') return `${ruleId}|it|${c.itineraryHash}`;
-  const k = c.cell;
-  return `${ruleId}|cal|${c.provenance.providerId}|${c.provenance.cabin}|${k.origin}|${k.destination}|${k.departureDate}|${k.returnDate}`;
-}
+/** Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. */
+const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
 
-function classOf(c: AlertCandidate): {
-  verdictClass: VerdictClass | 'unchecked';
-  unverified: ConstraintName[];
-} {
-  if (c.basis === 'calendar') return { verdictClass: 'unchecked', unverified: [] };
-  const unverified = (Object.entries(c.verdicts) as Array<[ConstraintName, Verdict]>)
-    .filter(([, v]) => v === 'unverified')
-    .map(([k]) => k);
-  return { verdictClass: verdictClass(c.verdicts), unverified };
-}
-
-function eligible(rule: AlertRuleInput, c: AlertCandidate, ctx: AlertContext): boolean {
-  // why: synthetic rows are refused by alerts outright (spec §5.5, §6.8).
-  if (c.provenance.sourceKind === 'synthetic') return false;
-  if (c.basis !== rule.basis || c.executionId !== ctx.executionId || c.provenance.cabin !== ctx.cabin)
-    return false;
-  // why: reused calendar rows carry an earlier execution's price; alerting on them would re-fire old news.
-  if (c.basis === 'calendar') return c.reusedFromExecutionId === null;
-  const cls = verdictClass(c.verdicts);
-  return cls === 'verified' || (cls === 'partially-verified' && rule.requireAllVerified === false);
+/** Per-run context for `evaluateAlertRules` (plan contract). */
+export interface AlertEvalContext {
+  now: IsoDateTime;
+  executionId: string;
+  cabin: Cabin;
+  discoveryRefreshHours: Partial<Record<ProviderId, number>>;
 }
 
 /** A rule field zod guarantees for this rule type; a missing one is a caller bug, never "0". */
-export function need(n: number | null, field: string, rule: AlertRuleInput): number {
-  // why: zod rejects a rule without its threshold; a missing one here is a caller bug, never "0".
+export function need(n: number | null, field: string, rule: AlertRule): number {
   if (n === null) throw new RangeError(`alert rule ${rule.id} (${rule.type}) has no ${field}`);
   return n;
 }
 
-type Judged = Pick<Firing, 'kind' | 'reason' | 'previousPricePence' | 'previousAgeHours'> | null;
+function eligible(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): boolean {
+  const { provenance } = priceOf(c);
+  // why: synthetic rows are refused by alerts outright (spec §5.5, §6.8).
+  if (provenance.sourceKind === 'synthetic') return false;
+  if (c.basis !== rule.basis || provenance.cabin !== ctx.cabin) return false;
+  // why: calendar candidates carry no execution id; the engine's query supplies only prices fetched
+  // by this execution and never reused copies (spec §6.8). Verified ones are checked here.
+  if (c.basis === 'calendar') return true;
+  if (c.observation.executionId !== ctx.executionId) return false;
+  return (
+    c.verdictClass === 'verified' ||
+    (c.verdictClass === 'partially-verified' && rule.requireAllVerified === false)
+  );
+}
 
-function judge(rule: AlertRuleInput, c: AlertCandidate, now: AlertContext['now']): Judged {
+type Judged = { reason: string; isNew: boolean } | null;
+
+function judge(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): Judged {
+  const { pricePence, provenance } = priceOf(c);
   if (rule.type === 'absolute') {
     const threshold = need(rule.thresholdPence, 'thresholdPence', rule);
-    if (c.pricePence > threshold) return null;
+    if (pricePence > threshold) return null;
     return {
-      kind: 'absolute',
-      reason: `${formatPence(c.pricePence)} is at or below the ${formatPence(threshold)} threshold`,
-      previousPricePence: null,
-      previousAgeHours: null,
+      reason: `${formatPence(pricePence)} is at or below the ${formatPence(threshold)} threshold`,
+      isNew: false,
     };
   }
   const prev = c.previous;
-  // why (sparse-cache rule, spec §6.8): a calendar price compares only with a previous price for
-  // the same provider, cabin and cell fetched within 2 × discoveryRefreshHours of this one; with
-  // none, the cell is listed as new and never fires as a drop.
+  // why (sparse-cache rule, spec §6.8): a calendar price compares only with a previous price for the
+  // same provider, cabin and cell fetched within 2 × discoveryRefreshHours of this one (inclusive,
+  // whole hours); with none, the cell is listed as new and never fires as a drop.
+  const window = 2 * (ctx.discoveryRefreshHours[provenance.providerId] ?? DEFAULT_DISCOVERY_REFRESH_HOURS);
   const usable =
-    prev !== null &&
-    (c.basis === 'verified' ||
-      hoursSince(prev.fetchedAt, c.provenance.fetchedAt) <= 2 * c.discoveryRefreshHours);
+    prev !== null && (c.basis === 'verified' || hoursSince(prev.fetchedAt, provenance.fetchedAt) <= window);
   if (!usable) {
     if (c.basis === 'verified') return null;
-    return {
-      kind: 'new',
-      reason: 'first price in the comparison window; no earlier price to compare',
-      previousPricePence: null,
-      previousAgeHours: null,
-    };
+    return { reason: 'first price in the comparison window; no earlier price to compare', isNew: true };
   }
-  const drop = prev.pricePence - c.pricePence;
+  const drop = prev.pricePence - pricePence;
   if (drop <= 0) return null;
   const fires =
     rule.type === 'dropAbs'
@@ -3748,57 +3826,44 @@ function judge(rule: AlertRuleInput, c: AlertCandidate, now: AlertContext['now']
       : drop * 100 >= need(rule.pct, 'pct', rule) * prev.pricePence;
   if (!fires) return null;
   const pct = Math.floor((drop * 100) / prev.pricePence);
-  const ageHours = hoursSince(prev.fetchedAt, now);
-  return {
-    kind: 'drop',
-    reason: `down ${formatPence(drop)} (${pct}%) from ${formatPence(prev.pricePence)}`,
-    previousPricePence: prev.pricePence,
-    previousAgeHours: ageHours,
-  };
+  return { reason: `down ${formatPence(drop)} (${pct}%) from ${formatPence(prev.pricePence)}`, isNew: false };
 }
 
 /**
- * Spec §6.8: evaluate every enabled rule against the current execution's candidates.
- * One result per (rule, identity): the cheapest qualifying candidate. Cooldown suppression is
- * applied against `previous` (earlier `alert_events`). Synthetic, reused, other-cabin and
- * other-execution candidates never fire. Output order: rule order, then price ascending.
+ * Spec §6.8: evaluate every enabled rule against the current execution's candidates. One result
+ * per (rule, identity): the cheapest qualifying candidate. Firings suppressed by `prior` (this
+ * rule set's sent firings, see `isSuppressed`) are left out; "new" calendar cells (`isNew`) are
+ * never suppressed. To record suppressed events, call again with `prior = []` and run
+ * `isSuppressed` on each firing. Synthetic, other-cabin and other-execution candidates never
+ * fire. Output order: rule order, then price ascending.
  */
 export function evaluateAlertRules(
-  rules: readonly AlertRuleInput[],
-  candidates: readonly AlertCandidate[],
-  previous: readonly PastFiring[],
-  ctx: AlertContext,
+  rules: AlertRule[],
+  candidates: AlertCandidate[],
+  prior: PriorFiring[],
+  ctx: AlertEvalContext,
 ): Firing[] {
   const out: Firing[] = [];
-  const byPrice = [...candidates].sort((a, b) => a.pricePence - b.pricePence);
+  const byPrice = [...candidates].sort((a, b) => priceOf(a).pricePence - priceOf(b).pricePence);
   for (const rule of rules) {
     if (!rule.enabled) continue;
     const seen = new Set<string>();
     for (const c of byPrice) {
       if (!eligible(rule, c, ctx)) continue;
-      const identityKey = identityOf(rule.id, c);
-      if (seen.has(identityKey)) continue;
-      const j = judge(rule, c, ctx.now);
+      const id = identityKey(rule, c);
+      if (seen.has(id)) continue;
+      const j = judge(rule, c, ctx);
       if (j === null) continue;
-      seen.add(identityKey);
-      const key = dedupKey(identityKey, c.pricePence);
-      const suppressed =
-        j.kind !== 'new' &&
-        isSuppressed(
-          { ruleId: rule.id, identityKey, dedupKey: key, pricePence: c.pricePence },
-          previous,
-          rule.cooldownHours,
-          ctx.now,
-        );
-      out.push({
-        ruleId: rule.id,
-        identityKey,
-        dedupKey: key,
-        ...j,
-        status: j.kind === 'new' ? 'listed' : suppressed ? 'suppressed' : 'fire',
+      seen.add(id);
+      const firing: Firing = {
+        rule,
         candidate: c,
-        ...classOf(c),
-      });
+        identityKey: id,
+        dedupKey: dedupKey(id, priceOf(c).pricePence),
+        ...j,
+      };
+      if (!j.isNew && isSuppressed(firing, prior, rule.cooldownHours, ctx.now).suppressed) continue;
+      out.push(firing);
     }
   }
   return out;
@@ -3808,7 +3873,7 @@ export function evaluateAlertRules(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/evaluate.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 16 tests; typecheck and lint clean.
+Expected: PASS, 17 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -3823,10 +3888,10 @@ git add packages/core && git commit -m "wp02: alert evaluation: identities, spar
 - Test: `packages/core/test/alerts/digest.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 2.9–2.10; `effectiveAge`, `formatAgeFull` (labels); `AlertDigest`, `DigestItem` (ports/notifier.ts, see the contract gap in §4)
-- Produces: `buildDigest`; module-internal `DIGEST_TOP`
+- Consumes: Tasks 2.8–2.10; `AlertDigest`, `DigestItem` (WP0 `ports/notifier.ts`), `Cell`
+- Produces: `buildDigest(rule, firings, ctx)` returning a structured `AlertDigest | null`
 
-The subject follows spec §8.3, with the cheapest firing plus `· +N more`. Provider words follow spec §11: "Google Flights via SearchApi", "Aviasales cache". WP11's email template wraps `subject` and `body`, adding the coverage caveat "itinerary-searched K of N cells" and the validated link, and does not rebuild them.
+Core returns the structure only. WP11 renders the subject and body (spec §8.3) from `AlertDigest`, including the coverage caveat it passes in as `ctx.coverageCaveat`. Each item carries its own search link from `searchLinkFor` (Aviasales for Travelpayouts, Google Flights otherwise), so the template never builds a URL.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3837,11 +3902,16 @@ import { describe, expect, it } from 'vitest';
 import { buildDigest } from '../../src/alerts/digest.js';
 import { evaluateAlertRules } from '../../src/alerts/evaluate.js';
 import { formatPence } from '../../src/alerts/format.js';
-import { CTX, calendar, cell, NOW, rule, verified } from '../helpers/alerts.js';
+import { CTX, calendar, cell, hoursAgo, rule, verified } from '../helpers/alerts.js';
 
 const cal = rule({ basis: 'calendar', requireAllVerified: null });
+const DCTX = {
+  executionId: 'ex-2',
+  definitionId: 'd1',
+  coverageCaveat: { itinerarySearched: 9, selected: 10, expandTop: 2 },
+};
 
-describe('buildDigest (spec §6.8, §8.3)', () => {
+describe('buildDigest (spec §6.8)', () => {
   it('50 qualifying cells → one digest listing the cheapest 10 and counting the other 40', () => {
     const candidates = Array.from({ length: 50 }, (_, i) =>
       calendar({
@@ -3852,106 +3922,114 @@ describe('buildDigest (spec §6.8, §8.3)', () => {
     );
     const firings = evaluateAlertRules([cal], candidates, [], CTX);
     expect(firings).toHaveLength(50);
-    const d = buildDigest(cal, firings, { now: NOW });
-    expect(d).not.toBeNull();
-    expect(d?.items).toHaveLength(10);
+    const d = buildDigest(cal, firings, DCTX);
     expect(d?.items.map((i) => i.pricePence)).toEqual(Array.from({ length: 10 }, (_, i) => 30_000 + i * 100));
-    expect(d?.restCount).toBe(40);
-    expect(d?.body).toContain('and 40 more not shown');
-    expect(d).toMatchObject({ ruleId: 'r1', definitionId: 'd1', executionId: 'ex-2', basis: 'calendar' });
-  });
-
-  it('verified subject in the spec §8.3 form, naming the unverified constraint count', () => {
-    const r = rule({ requireAllVerified: false });
-    const firings = evaluateAlertRules(
-      [r],
-      [verified({ verdicts: { cabin: 'pass', checkedBagRequired: 'unverified' } })],
-      [],
-      CTX,
-    );
-    const d = buildDigest(r, firings, { now: NOW });
-    expect(
-      d?.subject.startsWith(
-        '[get-me-there] £412 LHR→JFK 14 Mar–28 Mar (14n) · Google Flights via SearchApi · fetched 5h ago',
-      ),
-    ).toBe(true);
-    expect(d?.subject.endsWith('· 1 constraint unverified')).toBe(true);
-    expect(d?.body).toContain('unverified: checkedBagRequired');
-    expect(d?.items[0]).toMatchObject({
-      section: 'firing',
-      itineraryHash: 'h1',
-      observationId: 1,
-      calendarPriceId: null,
-      verdictClass: 'partially-verified',
+    expect(d).toMatchObject({
+      ruleId: 'r1',
+      definitionId: 'd1',
+      executionId: 'ex-2',
+      basis: 'calendar',
+      restCount: 40,
+      newItems: [],
+      coverageCaveat: DCTX.coverageCaveat,
+      rule: cal,
     });
   });
 
-  it('a class-verified firing says so; several unverified constraints are counted', () => {
+  it('a verified item carries the itinerary, seller, unverified names, booking and a Google search link', () => {
     const r = rule({ requireAllVerified: false });
-    const one = buildDigest(r, evaluateAlertRules([r], [verified()], [], CTX), { now: NOW });
-    expect(one?.subject).toContain('· class verified');
-    const two = buildDigest(
-      r,
-      evaluateAlertRules(
-        [r],
-        [verified({ verdicts: { cabin: 'unverified', maxStops: 'unverified' } })],
-        [],
-        CTX,
-      ),
-      { now: NOW },
-    );
-    expect(two?.subject).toContain('· 2 constraints unverified');
-  });
-
-  it('calendar subject carries the provider, the full age label and "constraints not checked"', () => {
-    const d = buildDigest(
-      cal,
-      evaluateAlertRules([cal], [calendar(), calendar({ cell: cell(15), pricePence: 42_000 })], [], CTX),
-      { now: NOW },
-    );
-    expect(d?.subject).toBe(
-      '[get-me-there] £412 LHR→JFK 14 Mar–28 Mar (14n) · Aviasales cache · fetched 2h ago · provider age unknown (≤2d before that) · constraints not checked · +1 more',
-    );
-    expect(d?.body).toContain('calendar price, no itinerary');
-    expect(d?.body.endsWith('Rule: price at or below £450 (calendar basis)')).toBe(true);
-    expect(d?.items[0]).toMatchObject({ itineraryHash: null, observationId: null, calendarPriceId: 1 });
-  });
-
-  it('new cells ride in their own section; new cells alone send nothing', () => {
-    const drop = rule({ basis: 'calendar', type: 'dropAbs', thresholdPence: 1_000 });
-    const listedOnly = evaluateAlertRules([drop], [calendar({ previous: null })], [], CTX);
-    expect(buildDigest(drop, listedOnly, { now: NOW })).toBeNull();
-    const mixed = evaluateAlertRules(
-      [drop],
+    const firings = evaluateAlertRules(
+      [r],
       [
-        calendar({ previous: null }),
-        calendar({ cell: cell(20), pricePence: 30_000, previous: { pricePence: 40_000, fetchedAt: NOW } }),
+        verified({
+          verdictClass: 'partially-verified',
+          unverified: ['checkedBagRequired'],
+          observation: { booking: { kind: 'get', url: 'https://www.google.com/b', host: 'www.google.com' } },
+        }),
       ],
       [],
       CTX,
     );
-    const d = buildDigest(drop, mixed, { now: NOW });
-    expect(d?.items.map((i) => i.section)).toEqual(['firing', 'new']);
-    expect(d?.body).toContain('New in this run (no earlier price to compare):');
-    expect(d?.body.endsWith('Rule: drop of at least £10 (calendar basis)')).toBe(true);
-    expect(d?.restCount).toBe(0);
+    const item = buildDigest(r, firings, DCTX)?.items[0];
+    expect(item).toMatchObject({
+      pricePence: 41_200,
+      itineraryHash: 'h1',
+      seller: 'Virgin Atlantic',
+      verdictClass: 'partially-verified',
+      unverified: ['checkedBagRequired'],
+      previousPricePence: null,
+      previousAgeHours: null,
+      isNew: false,
+      firingReason: '£412 is at or below the £450 threshold',
+      booking: { kind: 'get', host: 'www.google.com' },
+      cell: {
+        origin: 'LHR',
+        destination: 'JFK',
+        departureDate: '2027-03-14',
+        returnDate: '2027-03-28',
+        nights: 14,
+      },
+    });
+    expect(item?.searchLink).toMatchObject({ host: 'www.google.com', label: 'search link, not a fare link' });
   });
 
-  it('suppressed firings and other rules are not in the digest; dropPct rule text', () => {
-    const pct = rule({ id: 'r2', type: 'dropPct', thresholdPence: null, pct: 10 });
-    const firings = evaluateAlertRules(
-      [rule(), pct],
-      [verified({ pricePence: 30_000, previous: { pricePence: 40_000, fetchedAt: NOW } })],
+  it('a calendar drop item carries the previous price and its age at this fetch, no booking, an Aviasales search link', () => {
+    const drop = rule({
+      basis: 'calendar',
+      type: 'dropAbs',
+      thresholdPence: 1_000,
+      requireAllVerified: null,
+    });
+    const c = calendar({
+      pricePence: 38_000,
+      provenance: { fetchedAt: hoursAgo(2) },
+      previous: { pricePence: 45_000, fetchedAt: hoursAgo(50) },
+    });
+    const item = buildDigest(drop, evaluateAlertRules([drop], [c], [], CTX), DCTX)?.items[0];
+    expect(item).toMatchObject({
+      verdictClass: 'unchecked',
+      itineraryHash: null,
+      seller: null,
+      unverified: [],
+      previousPricePence: 45_000,
+      previousAgeHours: 48,
+      booking: { kind: 'none' },
+    });
+    expect(item?.searchLink.host).toBe('search.aviasales.com');
+  });
+
+  it('new cells go to newItems; new cells alone send nothing', () => {
+    const drop = rule({
+      basis: 'calendar',
+      type: 'dropAbs',
+      thresholdPence: 1_000,
+      requireAllVerified: null,
+    });
+    expect(buildDigest(drop, evaluateAlertRules([drop], [calendar()], [], CTX), DCTX)).toBeNull();
+    const mixed = evaluateAlertRules(
+      [drop],
+      [
+        calendar(),
+        calendar({
+          cell: cell(20),
+          pricePence: 30_000,
+          previous: { pricePence: 40_000, fetchedAt: hoursAgo(10) },
+        }),
+      ],
       [],
       CTX,
     );
-    const d = buildDigest(
-      pct,
-      [...firings, { ...(firings[1] as (typeof firings)[number]), status: 'suppressed' }],
-      { now: NOW },
-    );
-    expect(d?.items).toHaveLength(1);
-    expect(d?.body.endsWith('Rule: drop of at least 10% (verified basis)')).toBe(true);
+    const d = buildDigest(drop, mixed, DCTX);
+    expect(d?.items.map((i) => i.isNew)).toEqual([false]);
+    expect(d?.newItems.map((i) => i.isNew)).toEqual([true]);
+    expect(d?.restCount).toBe(0);
+  });
+
+  it('only the digest rule’s own firings are used', () => {
+    const r2 = rule({ id: 'r2' });
+    const firings = evaluateAlertRules([rule(), r2], [verified()], [], CTX);
+    expect(firings).toHaveLength(2);
+    expect(buildDigest(r2, firings, DCTX)?.items).toHaveLength(1);
   });
 
   it('refuses synthetic rows', () => {
@@ -3960,7 +4038,7 @@ describe('buildDigest (spec §6.8, §8.3)', () => {
       ...(f as NonNullable<typeof f>),
       candidate: calendar({ provenance: { providerId: 'fixture', sourceKind: 'synthetic' } }),
     };
-    expect(() => buildDigest(cal, [synthetic], { now: NOW })).toThrow(/synthetic/);
+    expect(() => buildDigest(cal, [synthetic], DCTX)).toThrow(/synthetic/);
   });
 
   it('formatPence', () => {
@@ -3981,122 +4059,83 @@ Expected: FAIL, `Error: Cannot find module '../../src/alerts/digest.js' …`.
 `packages/core/src/alerts/digest.ts`:
 
 ```ts
-import { effectiveAge, formatAgeFull } from '../labels/age.js';
 import type { AlertDigest, DigestItem } from '../ports/notifier.js';
-import type { ProviderId } from '../ports/provider.js';
-import type { IsoDate, IsoDateTime } from '../types/ids.js';
-import { need } from './evaluate.js';
-import { formatPence } from './format.js';
-import type { AlertRuleInput, Firing } from './types.js';
+import { searchLinkFor } from '../results/searchLink.js';
+import type { AlertRule, Firing } from '../types/alerts.js';
+import type { Cell } from '../types/definition.js';
+import { hoursSince, priceOf } from './dedup.js';
 
-/** Spec §6.8: a digest lists the top 10 firings (and top 10 new cells) and counts the rest. */
-export const DIGEST_TOP = 10;
+/** Spec §6.8: a digest lists the cheapest 10 firings (and 10 new cells) and counts the rest. */
+const DIGEST_TOP = 10;
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-// why: the provider words of spec §11 ("Google Flights via SearchApi", "Aviasales cache"); the
-// fixture label is never rendered because synthetic rows are refused, but the map is total.
-const PROVIDER_LABEL: Readonly<Record<ProviderId, string>> = {
-  travelpayouts: 'Aviasales cache',
-  searchapi: 'Google Flights via SearchApi',
-  fixture: 'synthetic fixture',
-};
-
-/** `2027-03-14` → `14 Mar`, read from the string so no timezone can shift the day. */
-function shortDate(d: IsoDate): string {
-  return `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
-}
-
-function constraintNote(f: Firing): string {
-  if (f.verdictClass === 'unchecked') return 'constraints not checked';
-  if (f.unverified.length === 0) return `class ${f.verdictClass}`;
-  return `${f.unverified.length} constraint${f.unverified.length === 1 ? '' : 's'} unverified`;
-}
-
-/** Spec §8.3 one-line form: price, route, dates, nights, provider, age, constraint state. */
-function line(f: Firing, now: IsoDateTime): string {
+function cellOf(f: Firing): Cell {
   const c = f.candidate;
-  const age = formatAgeFull(effectiveAge(c.provenance, now));
-  return `${formatPence(c.pricePence)} ${c.cell.origin}→${c.cell.destination} ${shortDate(c.cell.departureDate)}–${shortDate(c.cell.returnDate)} (${c.cell.nights}n) · ${PROVIDER_LABEL[c.provenance.providerId]} · ${age} · ${constraintNote(f)}`;
-}
-
-function ruleText(rule: AlertRuleInput): string {
-  const what =
-    rule.type === 'absolute'
-      ? `price at or below ${formatPence(need(rule.thresholdPence, 'thresholdPence', rule))}`
-      : rule.type === 'dropAbs'
-        ? `drop of at least ${formatPence(need(rule.thresholdPence, 'thresholdPence', rule))}`
-        : `drop of at least ${need(rule.pct, 'pct', rule)}%`;
-  return `Rule: ${what} (${rule.basis} basis)`;
-}
-
-function item(f: Firing, section: DigestItem['section']): DigestItem {
-  const c = f.candidate;
+  if (c.basis === 'calendar') return c.cell;
+  const it = c.itinerary;
   return {
-    section,
-    kind: f.kind,
-    identityKey: f.identityKey,
-    dedupKey: f.dedupKey,
-    cell: c.cell,
-    itineraryHash: c.basis === 'verified' ? c.itineraryHash : null,
-    pricePence: c.pricePence,
-    previousPricePence: f.previousPricePence,
-    previousAgeHours: f.previousAgeHours,
-    provenance: c.provenance,
-    verdictClass: f.verdictClass,
-    unverified: f.unverified,
-    reason: f.reason,
-    observationId: c.basis === 'verified' ? c.observationId : null,
-    calendarPriceId: c.basis === 'calendar' ? c.calendarPriceId : null,
+    origin: it.origin,
+    destination: it.destination,
+    departureDate: it.departureDate,
+    returnDate: it.returnDate,
+    nights: it.nights,
+  };
+}
+
+function item(f: Firing): DigestItem {
+  const c = f.candidate;
+  const { pricePence, provenance } = priceOf(c);
+  const cell = cellOf(f);
+  const verified = c.basis === 'verified';
+  return {
+    pricePence,
+    provenance,
+    cell,
+    verdictClass: verified ? c.verdictClass : 'unchecked',
+    itineraryHash: verified ? c.itinerary.hash : null,
+    seller: verified ? c.seller : null,
+    unverified: verified ? c.unverified : [],
+    previousPricePence: c.previous === null ? null : c.previous.pricePence,
+    // why: the previous price's age at the time of this fetch, the figure the drop rule judged.
+    previousAgeHours: c.previous === null ? null : hoursSince(c.previous.fetchedAt, provenance.fetchedAt),
+    isNew: f.isNew,
+    firingReason: f.reason,
+    booking: verified ? c.observation.booking : { kind: 'none' },
+    searchLink: searchLinkFor(provenance.providerId, cell, provenance.cabin),
   };
 }
 
 /**
- * Spec §6.8: one digest per rule per execution. Items: the 10 cheapest `fire` firings, then the
- * 10 cheapest `listed` new cells; `restCount` counts everything beyond those. Subject and body
- * are plain text in the spec §8.3 form, built from core's age labels; WP11's templates wrap them
- * (coverage caveat, links). Returns null when nothing fires (new cells alone send nothing).
- * Throws if any firing carries synthetic provenance (alerts refuse synthetic rows, spec §5.5).
+ * Spec §6.8: one structured digest per rule per execution. `items` are the 10 cheapest firings,
+ * `newItems` the 10 cheapest new calendar cells, `restCount` everything beyond those two lists.
+ * WP11 renders subject and body from it (spec §8.3). Returns null when nothing fires: new cells
+ * alone send nothing. Throws if any firing carries synthetic provenance (spec §5.5).
  */
 export function buildDigest(
-  rule: AlertRuleInput,
-  firings: readonly Firing[],
-  ctx: { now: IsoDateTime },
+  rule: AlertRule,
+  firings: Firing[],
+  ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] },
 ): AlertDigest | null {
-  const own = firings.filter((f) => f.ruleId === rule.id);
-  if (own.some((f) => f.candidate.provenance.sourceKind === 'synthetic'))
+  const own = firings.filter((f) => f.rule.id === rule.id);
+  if (own.some((f) => priceOf(f.candidate).provenance.sourceKind === 'synthetic')) {
     throw new Error('alerts refuse synthetic rows');
-  const cheapest = (a: Firing, b: Firing): number => a.candidate.pricePence - b.candidate.pricePence;
-  const fired = own.filter((f) => f.status === 'fire').sort(cheapest);
-  const listed = own.filter((f) => f.status === 'listed').sort(cheapest);
-  const top = fired[0];
-  if (top === undefined) return null;
-  const shownFired = fired.slice(0, DIGEST_TOP);
-  const shownNew = listed.slice(0, DIGEST_TOP);
-  const restCount = fired.length - shownFired.length + (listed.length - shownNew.length);
-  const more = fired.length > 1 ? ` · +${fired.length - 1} more` : '';
-  const subject = `[get-me-there] ${line(top, ctx.now)}${more}`;
-  const body = [
-    ...shownFired.map(
-      (f) =>
-        `${line(f, ctx.now)}\n  ${f.reason}${f.unverified.length > 0 ? `; unverified: ${f.unverified.join(', ')}` : ''}${f.verdictClass === 'unchecked' ? '; calendar price, no itinerary' : ''}`,
-    ),
-    ...(shownNew.length > 0
-      ? ['', 'New in this run (no earlier price to compare):', ...shownNew.map((f) => line(f, ctx.now))]
-      : []),
-    ...(restCount > 0 ? ['', `and ${restCount} more not shown`] : []),
-    '',
-    ruleText(rule),
-  ].join('\n');
+  }
+  const cheapest = (a: Firing, b: Firing): number =>
+    priceOf(a.candidate).pricePence - priceOf(b.candidate).pricePence;
+  const fired = own.filter((f) => !f.isNew).sort(cheapest);
+  const listed = own.filter((f) => f.isNew).sort(cheapest);
+  if (fired.length === 0) return null;
+  const items = fired.slice(0, DIGEST_TOP).map(item);
+  const newItems = listed.slice(0, DIGEST_TOP).map(item);
   return {
     ruleId: rule.id,
-    definitionId: rule.definitionId,
-    executionId: top.candidate.executionId,
+    definitionId: ctx.definitionId,
+    executionId: ctx.executionId,
     basis: rule.basis,
-    subject,
-    body,
-    items: [...shownFired.map((f) => item(f, 'firing')), ...shownNew.map((f) => item(f, 'new'))],
-    restCount,
+    items,
+    restCount: fired.length - items.length + (listed.length - newItems.length),
+    newItems,
+    coverageCaveat: ctx.coverageCaveat,
+    rule,
   };
 }
 ```
@@ -4104,12 +4143,12 @@ export function buildDigest(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/digest.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 8 tests; typecheck and lint clean.
+Expected: PASS, 7 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp02: one digest per rule per execution, top 10 and a count of the rest (spec §6.8, §8.3)"
+git add packages/core && git commit -m "wp02: structured digest per rule per execution, top 10 and a count of the rest (spec §6.8)"
 ```
 
 ### Task 2.12: Banned words over every emitted string, and the barrel
@@ -4127,30 +4166,16 @@ Append this block to the end of `packages/core/src/index.ts`. Keep WP0's lines u
 ```ts
 // --- WP2: normalisation, hashing, constraints, results, money, alerts (spec §5.6 pure parts, §6.2–§6.5, §6.8, §6.9) ---
 // why: named exports, not `export *`, so module-internal helpers (wallToInstant, vendorInstant,
-// hoursSince, need, formatPence) stay private to core and the public surface is exactly the plan's.
-
-export { dedupKey, isSuppressed } from './alerts/dedup.js';
+// hoursSince, priceOf, need, formatPence) stay private to core and the public surface is exactly the plan's.
+export { dedupKey, identityKey, isSuppressed } from './alerts/dedup.js';
 export { buildDigest } from './alerts/digest.js';
 export { evaluateAlertRules } from './alerts/evaluate.js';
-export type {
-  AlertCandidate,
-  AlertContext,
-  AlertRuleInput,
-  Firing,
-  PastFiring,
-  PreviousPrice,
-} from './alerts/types.js';
-export { type ConstraintOffer, evaluateConstraints } from './constraints/evaluate.js';
-export { verdictClass } from './constraints/verdictClass.js';
+export { evaluateConstraints } from './constraints/evaluate.js';
+export { unverifiedNames, verdictClass } from './constraints/verdictClass.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
-export { type HashSegment, itineraryHash } from './normalise/hashing.js';
-export {
-  type NormaliseDeps,
-  type NormalisedOffer,
-  normaliseOffer,
-  type ObservationFields,
-} from './normalise/itinerary.js';
-export { departLocal, type TimeKind } from './normalise/localTime.js';
+export { itineraryHash } from './normalise/hashing.js';
+export { type NormaliseDeps, normaliseOffer } from './normalise/itinerary.js';
+export { departLocal } from './normalise/localTime.js';
 export { ECB_CURRENCIES, MINOR_EXPONENT, toGbp } from './normalise/money.js';
 export { toIsoDateTime } from './normalise/timestamps.js';
 export { LINK_ALLOWLIST, validateVendorUrl } from './normalise/vendorUrl.js';
@@ -4159,10 +4184,10 @@ export { dedupByItinerary } from './results/dedup.js';
 export { filterRows } from './results/filter.js';
 export { rankRows, sortRows } from './results/rank.js';
 export { SEARCH_LINK_LABEL, searchLinkFor } from './results/searchLink.js';
-export type { OfferRow, ResultFilters, ResultRow, SortDir, SortKey } from './results/types.js';
+export type { ResultFilters, ResultRow, SortKey } from './results/types.js';
 ```
 
-Named exports keep the module helpers (`wallToInstant`, `vendorInstant`, `parseVendorTime`, `localMinute`, `requireZone`, `hoursSince`, `need`, `formatPence`, `DIGEST_TOP`) private. The barrel test pins that.
+Named exports keep the module helpers (`wallToInstant`, `vendorInstant`, `parseVendorTime`, `localMinute`, `requireZone`, `hoursSince`, `priceOf`, `need`, `formatPence`) private. The barrel test pins that. The emitted-strings test passes WP0's `BANNED_WORD_ALLOWLIST`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4170,15 +4195,15 @@ Named exports keep the module helpers (`wallToInstant`, `vendorInstant`, `parseV
 
 ```ts
 import { describe, expect, it } from 'vitest';
+import { isSuppressed } from '../../src/alerts/dedup.js';
 import { buildDigest } from '../../src/alerts/digest.js';
 import { evaluateAlertRules } from '../../src/alerts/evaluate.js';
-import { NormalisationError } from '../../src/errors.js';
 import { normaliseOffer } from '../../src/normalise/itinerary.js';
 import { searchLinkFor } from '../../src/results/searchLink.js';
-import { findBannedWords } from '../../src/text/bannedWords.js';
+import { BANNED_WORD_ALLOWLIST, findBannedWords } from '../../src/text/bannedWords.js';
 import type { CellKey } from '../../src/types/definition.js';
-import { CTX, calendar, cell, NOW, rule, verified } from '../helpers/alerts.js';
-import { deps, iata, offer, seg } from '../helpers/offers.js';
+import { CTX, calendar, cell, hoursAgo, prior, rule, verified } from '../helpers/alerts.js';
+import { cellOf, deps, iata, offer, seg } from '../helpers/offers.js';
 
 /** Every user-facing string WP2 emits, gathered from real calls (spec §11 banned words). */
 function emitted(): string[] {
@@ -4192,18 +4217,33 @@ function emitted(): string[] {
   ];
   const candidates = [
     verified({
-      pricePence: 30_000,
-      previous: { pricePence: 40_000, fetchedAt: NOW },
-      verdicts: { cabin: 'unverified', maxStops: 'pass' },
+      observation: { pricePence: 30_000 },
+      previous: { pricePence: 40_000, fetchedAt: hoursAgo(30) },
     }),
-    calendar({ pricePence: 30_000, previous: { pricePence: 40_000, fetchedAt: NOW } }),
+    calendar({ pricePence: 30_000, previous: { pricePence: 40_000, fetchedAt: hoursAgo(30) } }),
     calendar({ cell: cell(20), previous: null }),
   ];
   const firings = evaluateAlertRules(rules, candidates, [], CTX);
-  for (const f of firings) out.push(f.reason);
+  for (const f of firings) {
+    out.push(f.reason);
+    const s1 = isSuppressed(
+      f,
+      [prior({ identityKey: f.identityKey, dedupKey: f.dedupKey })],
+      336,
+      CTX.now,
+    ).reason;
+    const s2 = isSuppressed(
+      f,
+      [prior({ identityKey: f.identityKey, dedupKey: 'x', pricePence: 1 })],
+      336,
+      CTX.now,
+    ).reason;
+    out.push(s1 ?? '', s2 ?? '');
+  }
   for (const r of rules) {
-    const d = buildDigest(r, firings, { now: NOW });
-    if (d !== null) out.push(d.subject, d.body, ...d.items.map((i) => i.reason));
+    const d = buildDigest(r, firings, { executionId: 'ex-2', definitionId: 'd1', coverageCaveat: null });
+    if (d !== null)
+      out.push(...[...d.items, ...d.newItems].flatMap((i) => [i.firingReason, i.searchLink.label]));
   }
   const c = {
     origin: 'LHR',
@@ -4240,17 +4280,23 @@ function emitted(): string[] {
     }),
   ];
   for (const raw of failures) {
-    const r = normaliseOffer(raw, deps());
-    if (r instanceof NormalisationError) out.push(r.message);
+    const r = normaliseOffer(raw, cellOf(raw), deps());
+    if (!r.ok) out.push(r.error.message);
   }
+  const wrongCell = normaliseOffer(
+    offer(),
+    { ...cellOf(offer()), returnDate: '2027-03-27' } as CellKey,
+    deps(),
+  );
+  if (!wrongCell.ok) out.push(wrongCell.error.message);
   return out;
 }
 
 describe('banned words (spec §11) in every string core emits', () => {
-  it('none of them contains a banned word', () => {
+  it('none of them contains a banned word (with the shared allowlist)', () => {
     const strings = emitted();
-    expect(strings.length).toBeGreaterThan(20);
-    for (const s of strings) expect(findBannedWords(s), s).toEqual([]);
+    expect(strings.filter((s) => s !== '').length).toBeGreaterThan(25);
+    for (const s of strings) expect(findBannedWords(s, BANNED_WORD_ALLOWLIST), s).toEqual([]);
   });
 });
 ```
@@ -4261,50 +4307,52 @@ describe('banned words (spec §11) in every string core emits', () => {
 import { describe, expect, it } from 'vitest';
 import * as core from '../src/index.js';
 
-// The WP2 public surface (plan "WP2 — Produces"), plus the two constants the engine and
-// api-contract need to apply the same link rule (LINK_ALLOWLIST, SEARCH_LINK_LABEL).
+// The WP2 public surface: the plan's "Core domain functions (WP2)" block.
 const WP2 = [
   'canonicalCarrier',
   'canonicalFlightNumber',
   'departLocal',
   'toIsoDateTime',
   'itineraryHash',
-  'toGbp',
   'MINOR_EXPONENT',
   'ECB_CURRENCIES',
-  'validateVendorUrl',
+  'toGbp',
   'LINK_ALLOWLIST',
+  'SEARCH_LINK_LABEL',
+  'validateVendorUrl',
+  'searchLinkFor',
   'normaliseOffer',
   'evaluateConstraints',
   'verdictClass',
+  'unverifiedNames',
   'dedupByItinerary',
   'rankRows',
   'sortRows',
   'filterRows',
   'bandCheapest',
   'evaluateAlertRules',
+  'identityKey',
   'dedupKey',
   'isSuppressed',
   'buildDigest',
-  'searchLinkFor',
-  'SEARCH_LINK_LABEL',
+];
+const PRIVATE = [
+  'wallToInstant',
+  'vendorInstant',
+  'parseVendorTime',
+  'localMinute',
+  'requireZone',
+  'hoursSince',
+  'priceOf',
+  'need',
+  'formatPence',
 ];
 
 describe('@gmt/core barrel, WP2 exports', () => {
   it.each(WP2)('exports %s', (name) => {
     expect(core).toHaveProperty(name);
   });
-  it.each([
-    'wallToInstant',
-    'vendorInstant',
-    'parseVendorTime',
-    'localMinute',
-    'requireZone',
-    'hoursSince',
-    'need',
-    'formatPence',
-    'DIGEST_TOP',
-  ])('keeps %s private', (name) => {
+  it.each(PRIVATE)('keeps %s private', (name) => {
     expect(core).not.toHaveProperty(name);
   });
 });
@@ -4313,7 +4361,7 @@ describe('@gmt/core barrel, WP2 exports', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/text/emitted.test.ts test/wp2-barrel.test.ts`
-Expected: FAIL, the barrel test fails on `exports canonicalCarrier` and the 23 other WP2 names (the emitted-strings test already passes, because it imports modules directly).
+Expected: FAIL, the barrel test fails on `exports canonicalCarrier` and the 25 other WP2 names (the emitted-strings test already passes, because it imports modules directly).
 
 - [ ] **Step 3: Implement**
 
@@ -4322,7 +4370,7 @@ Append the export block shown above to `packages/core/src/index.ts`.
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/text/emitted.test.ts test/wp2-barrel.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 34 tests; typecheck and lint clean.
+Expected: PASS, 36 tests; typecheck and lint clean.
 
 - [ ] **Step 5: Commit**
 
@@ -4332,9 +4380,9 @@ git add packages/core && git commit -m "wp02: WP2 barrel exports and the banned-
 
 ## 9. Pinned review-focus tests
 
-- **Plan Review Focus line 2: a vendor timestamp in the future.** WP0 clamps `effectiveAge` at 0 (Task 0.7). WP2 owns ordering and the alert age comparisons, and every one of them goes through `effectiveAge` and `compareAges`. Ordering is in `rankRows`. The alert comparisons are the sparse-cache window and the previous-price age in `evaluate.ts`, plus cooldown age in `isSuppressed` via `hoursSince`, which wraps `effectiveAge`. Pinned tests:
+- **Plan Review Focus line 2: a vendor timestamp in the future.** WP0 clamps `effectiveAge` at 0 (Task 0.7). WP2 owns ordering and the alert age comparisons, and every one of them goes through `effectiveAge` and `compareAges`. Ordering is in `rankRows`. The alert comparisons are the sparse-cache window in `evaluate.ts`, the previous-price age in `buildDigest`, and cooldown age in `isSuppressed`, all via `hoursSince`, which wraps `effectiveAge`. Pinned tests:
   - Task 2.7, `test/results/dedupRank.test.ts`, "review focus 2: a future fetchedAt or providerObservedAt sorts as "just now" and never throws". A row fetched 3 h in the future, observed 4 h in the future, ranks ahead of a row fetched 3 h ago, at equal class and price. Its age is `{ kind: 'observed', fetchedHours: 0, observedHours: 0 }` and its compact label is `just now · obs just now`. `rankRows` does not throw.
-  - Task 2.10, `test/alerts/evaluate.test.ts`, "review focus 2: a previous price stamped in the future is compared as 0 h old, without throwing". The calendar drop fires with `previousAgeHours: 0`.
+  - Task 2.10, `test/alerts/evaluate.test.ts`, "review focus 2: a previous price stamped in the future is compared as 0 h old, without throwing". The calendar drop still fires (`isNew: false`, reason `down £70 (15%) from £450`).
   - Task 2.9, `test/alerts/dedup.test.ts`, "review focus 2: a firing stamped in the future reads as 0 h old (inside the cooldown) without throwing".
 
 ## 10. Definition of done
@@ -4343,9 +4391,9 @@ Run from the repository root, on the `wp/02-core-normalise-constraints-alerts` b
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/core test` | every test passes (WP0's, plus the 255 added here); coverage 100% lines, branches, functions and statements, with no threshold error |
+| `pnpm --filter @gmt/core test` | every test passes (WP0's, plus the 264 added here); coverage 100% lines, branches, functions and statements, with no threshold error |
 | `TZ=UTC pnpm --filter @gmt/core test`, `TZ=America/Los_Angeles pnpm --filter @gmt/core test`, `TZ=Asia/Tokyo pnpm --filter @gmt/core test` | identical result in each |
-| `pnpm --filter @gmt/core mutate` | `hashing.ts`, `money.ts`, `vendorUrl.ts`, `constraints/evaluate.ts` and `alerts/dedup.ts` each at a mutation score ≥ 80% and the run exits 0. The report shows more than 0 tests per mutant (see the Stryker caution in §6). |
+| `pnpm --filter @gmt/core mutate` | `hashing.ts`, `money.ts`, `vendorUrl.ts`, `constraints/evaluate.ts` and `alerts/dedup.ts` each at a mutation score ≥ 80% (scratch run: 100 / 94.05 / 95 / 91.70 / 97.87) and the run exits 0. |
 | `pnpm lint` | clean |
 | `pnpm -r typecheck` | clean |
 | `node scripts/check-boundaries.mjs` | exit 0: `@gmt/core` depends only on `zod`, `@noble/hashes` and `@date-fns/tz`, and nothing outside `apps/api/src/bootstrap/` reads `process.env` |
@@ -4359,4 +4407,4 @@ grep -rnE "process\.env|Math\.random|new Date\(\)" packages/core/src/normalise p
 
 ## 11. Open questions
 
-None. Before dispatch, Fable closes the `DigestItem` contract gap (§4) in WP0 and the plan.
+None.

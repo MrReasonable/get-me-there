@@ -2,7 +2,7 @@
 wp: 6
 title: Travelpayouts adapter
 owner: sonnet
-depends_on: [4, 4b]
+depends_on: [1, 2, 4, 4b]
 spec_sections: ["§2", "§5.1", "§5.2", "§6.9", "§9 item 2"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer]
 status: draft
@@ -10,77 +10,104 @@ status: draft
 
 # WP6: Travelpayouts adapter
 
+Reconciled with spec revision 10 and the plan's rewritten "Cross-package contracts" (2026-10-14).
+
 ## 1. Goal
 
-Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns cached Aviasales round-trip prices from `/aviasales/v3/prices_for_dates` into raw, cell-keyed calendar prices. One month tile per (origin or shared metro, destination, departure month). Nothing is defaulted and nothing is invented.
+Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns cached Aviasales round-trip prices from `/aviasales/v3/prices_for_dates` into raw, cell-keyed calendar prices.
+
+- There is one month tile per (origin, destination) pair and departure month.
+- The request uses the origin's metro code when the airports table has one.
+- Sibling pairs that share a metro are deduplicated by the response cache.
+- Nothing is defaulted and nothing is invented.
 
 ## 2. Scope
 
 **In**
 
-- `packages/providers/src/travelpayouts/`: month tiling (`plan`), row attribution by response dates, pagination inside `fetchTile`, envelope and currency checks, the vendor-link prefix and check, the dated parameter allowlist (parse WP4b's file and enforce it), the `ProviderHttpLimits` builder (vendor ceiling 600/min, WP4's default error table), the identity fields, and a healthcheck that sends no request.
-- Tests that replay WP4b's recorded fixtures through msw on global fetch and the real http-kit, plus synthetic-shape tests for cases that were not recorded.
+- `packages/providers/src/travelpayouts/`:
+  - month tiling per pair (`plan`);
+  - the metro-or-airport `origin` parameter;
+  - row attribution by response dates, filtered to the pair;
+  - pagination inside `fetchTile`;
+  - envelope and currency checks;
+  - the vendor-link prefix and check;
+  - `TRAVELPAYOUTS_PARAMS` (a code constant asserted equal to the recorded allowlist file);
+  - `travelpayoutsHttpLimits` (vendor ceiling 600/min, no `classifyError`, so WP4's default table applies);
+  - identity fields and a healthcheck that sends no request.
+- `packages/providers/src/allowlist.ts`: the shared `ParamsAllowlist` type from the plan, plus `assertParamsAllowed`.
+- One line each in `apps/api/src/wiring.ts` `httpLimitsFor` and `providersFor`, which is a Modify (plan, "Wiring and bootstraps").
+- Tests:
+  - replay of WP4b's recorded fixtures with the `@gmt/providers/testing` helpers through msw and the real http-kit;
+  - synthetic-shape tests for cases that were not recorded;
+  - a wiring test in `apps/api`.
 - Barrel exports from `packages/providers/src/index.ts`.
 
 **Out** (owner in brackets)
 
-- http-kit pipeline, retries, `Retry-After`, limiter, egress allowlist enforcement, cache keys, scrubbing, recorder [WP4].
-- Recording the fixtures and writing `params-<date>.json`; reading the allowlist file from disk at boot; registering `travelpayoutsHttpLimits(...)` in `HttpKitDeps.limits` [WP4b wiring helper, then WP8].
-- FX conversion, the `fx.converted` flag, `toGbp`, tz handling, `min_pence` per tile, stamping `pointOfSale` and `sourceKind` on stored rows, cell outcome writes, parity measurement [WP7].
-- `validateVendorUrl`, `searchLinkFor` (the Aviasales search link shown when `booking` is `none`, spec §6.9), `MINOR_EXPONENT` [WP2].
-- `generateCells`, `monthOf`, `toEpochDay`, `cellKeyString` [WP1].
-- `AirportsRepo.sharedMetro` (the airports table) [WP3].
-- The coverage-check route that runs these tiles for free [WP7 `coverageCheck`, WP8 route].
+- http-kit pipeline [WP4]: retries, `Retry-After`, limiter, egress allowlist, cache keys, scrubbing, the recorder, and the default status table. Also `@gmt/providers/testing` (`loadRecorded`, `replayHandlers`).
+- Recording the fixtures and writing `params-<date>.json` [WP4b].
+- `buildPorts`, and `httpLimitsFor`/`providersFor` other than the Travelpayouts lines [WP4b, WP8].
+- Engine rules [WP7]:
+  - the `cabin-not-offered` rule: a provider whose `cabins` excludes the definition's cabin is never called;
+  - FX conversion and the `fx.converted` flag, normalisation, and `min_pence` per tile;
+  - stamping provenance from `pointOfSale` and `sourceKind`;
+  - cell outcome writes, and writing the vendor message to `last_error`;
+  - parity measurement.
+- Core helpers [WP2]: `validateVendorUrl`, `LINK_ALLOWLIST`, `searchLinkFor` (the Aviasales search link shown when `booking` is `none`, spec §6.9), and `MINOR_EXPONENT`.
+- `generateCells`, `monthOf`, `toEpochDay` [WP1]. `cellKeyString` [WP0].
+- `AirportsRepo.metroOf` and the attributed metro list [WP3].
+- The coverage-check route [WP7 `coverageCheck`, WP8 route].
 
 ## 3. Spec sections
 
-- **§2 Travelpayouts row.** `/aviasales/v3/prices_for_dates`, month tiles (`departure_at=YYYY-MM`, `one_way=false`, no `return_at`). The origin is an airport code, or the metro code when the definition's origins share one, with rows split by `origin_airport`. Pages of 1000. The source is authorised, cached from the last 48 h, has no `found_at`, ignores `market` and is economy only. Free, 600/min. `sourceKind` is `authorised-cached` and `maxAgeHours` is 48.
-- **§2 fact 1.** Every row carries `origin_airport`. `currency=gbp` is honoured. `market` and `trip_class` are ignored, so the point of sale is unknown and only economy is searched. Rows have no `found_at`. The cheapest tiling uses the shared metro code.
-- **§2 consequences.** Adapters return raw vendor shapes. The native currency is read from the response; a response that states no currency is a `parse` error. Rows for airports outside the definition are dropped. `point_of_sale` is `'unknown'`.
-- **§5.1.** The contract implemented here: `DiscoveryCapability.plan` / `fetchTile` and `FlightProvider`.
-- **§5.2.**
-  - Tiles partition the cells and `plan` is pure.
+- **§2 Travelpayouts row.** The endpoint is `/aviasales/v3/prices_for_dates`, with month tiles (`departure_at=YYYY-MM`, `one_way=false`, no `return_at`), paginated at 1000.
+  - It is authorised and cached from the last 48 h. It has no `found_at`, ignores `market`, and is economy only.
+  - It is free at 600/min. `sourceKind` is `authorised-cached` and `maxAgeHours` is 48.
+- **§2 fact 1.** `origin_airport` is on every row. `currency=gbp` is honoured. `market` and `trip_class` are ignored. There is no `found_at`.
+- **§2 consequences.** Adapters return raw vendor shapes, and currency is read from the response. Rows for airports outside the pair are dropped.
+- **§5.1 (rev 10).**
+  - `TileRequest` has `{ kind: 'month'; month }`.
+  - `DiscoveryTileResult` `'tile'` carries `pointOfSale`.
+  - `BudgetGuard.reserve` and `recordCacheHit` carry `tileIndex`.
+- **§5.2 (rev 10).**
+  - Tiles partition the cells.
+  - The query is per pair. `origin` is the pair origin's metro code when the airports table maps it to one, else the airport.
+  - Rows are attributed by `origin_airport` and filtered to the pair and the nights band.
+  - Identical metro requests from sibling pairs are answered by the response cache. The worked example gives 28 tiles, 14 upstream calls and 14 cache hits.
   - Pages are fetched inside one `fetchTile`, each ledgered under the tile's index.
-  - Cell keys come from the response; out-of-band entries are dropped and counted in `notes`.
+  - Cell keys come from the response, and out-of-band entries are dropped and counted.
   - Empty is per capability: a valid empty envelope gives `no_data`; a malformed envelope or `success:false` gives `parse`.
-  - Parity: `plan(q).length` is the estimate.
-  - Raw only, and `suppliedFields` come from recorded fixtures.
-  - `currency=gbp` only, `pointOfSale` is unknown, and a non-economy definition gets `no_data` with a note.
+  - `plan(q).length` is the estimate.
+  - `suppliedFields` come from recorded fixtures.
+  - `currency=gbp` only and `pointOfSale: 'unknown'`.
+  - The adapter declares `cabins: ['economy']`, and the engine handles every other cabin.
   - The dated allowlist covers names and values.
-  - Error mapping follows the table.
+  - Errors follow the table, with the vendor message in `last_error`, never in `reason`.
   - Vendor links must match the `aviasales.com` allowlist.
-- **§6.9.** The Aviasales deep link is the search-link source for Travelpayouts rows. This adapter supplies it as `vendorLink`; WP2 `searchLinkFor` covers rows without one.
-- **§9 item 2.** Tiles partition cells. `plan().length` equals msw hits exactly. Response-date keying drops out-of-band entries. The Travelpayouts empty envelope gives `no_data`. Currency is read from the response. `suppliedFields` come from recorded fixtures only. Parameter names and values match the dated allowlist.
+- **§6.9.** The Aviasales deep link is the search-link source for Travelpayouts rows, supplied here as `vendorLink`.
+- **§9 item 2.** Tiles partition cells. `plan().length` matches the ledger (upstream plus cache hits). Response-date keying is tested. The empty envelope gives `no_data`. Currency comes from the response. `suppliedFields` come from recorded fixtures. Parameter names and values match the dated allowlist.
 
-### Mismatches found while writing this brief (spec wins; reported, not papered over)
+### Mismatches still open after revision 10 (spec wins; reported, not papered over)
 
-1. **No `month` TileRequest.** Spec §2 and §5.2 say "`month` tiles", but the §5.1 `TileRequest` union has no month variant. This brief uses `{ kind: 'month-pair', departMonth: m, returnMonth: m }` so that it compiles against the frozen contract; the adapter ignores `returnMonth` because `return_at` is never sent. Recommendation: add `{ kind: 'month'; month: IsoMonth }` to §5.1.
-2. **One origin per `DiscoveryQuery`.** §5.1 `DiscoveryQuery` carries a single `origin` and `destination`, so a metro collapse (spec §5.2 "collapsed to the shared metro code when the airports table gives one for every origin in the definition") is impossible from that query alone. This brief takes the origin and destination sets from `q.cells` when it is set. WP7 must pass a query whose `cells` span all of the definition's origins (and may span its destinations) to get the worked example's 14 tiles; per-pair queries give 28. Recommendation: `origins: Iata[]; destinations: Iata[]` on `DiscoveryQuery`.
-3. **No `pointOfSale` field.** §5.1 `RawCalendarPrice`, `DiscoveryTileResult` and `CapabilityInfo` have nowhere to put it. This brief exports `TRAVELPAYOUTS_POINT_OF_SALE = 'unknown'` for WP7 to stamp. Recommendation: `pointOfSale` on `CapabilityInfo`.
-4. **Rate limit.** Spec §2 says 600/min (the vendor ceiling). Spec §12 and `TRAVELPAYOUTS_DEFAULTS` default to 200/min. `travelpayoutsHttpLimits` keeps the configured value and clamps it to 600. No conflict in practice, but the figure is stated twice.
-5. **Cache TTL.** Spec §5.3 says "TTLs from config", but the plan's constructor line has no TTL. This brief adds a required `cacheTtlSeconds` option (WP4b/WP8 pass `limits.cacheTtlHours × 3600`).
-6. **Who wires the limits.** The wiring helper (WP4b) is built before WP6 exists, so the Travelpayouts `ProviderHttpLimits` builder (`travelpayoutsHttpLimits`) exported here must be registered by WP8 or WP13 in `buildPorts`.
-7. **No `classifyError` hook, against the instruction for this brief.** The instruction asked for a Travelpayouts `classifyError` hook mapping the 401 plain-text body to `auth`. The WP4 brief's http-kit calls a hook *instead of* its default table, and the hook signature `(status, body, ledgerAtCap)` receives no headers. A hook would therefore drop spec §5.3's "Retry-After honoured up to MAX_WAIT_SECONDS, beyond → limiter-timeout". WP4's default table already gives everything spec §5.2 asks for Travelpayouts: 401 or 403 → `auth` (the plain-text body arrives as a string), 400 → `parse` with the vendor message, 429 → `rate-limit`. It gives `quota` only at the plan cap, and `BudgetExceeded` pre-empts that for a free provider. So `travelpayoutsHttpLimits` registers no hook, and Task 6.5 pins the mapping through the real http-kit, including a 429 `Retry-After: 3600` → `limiter-timeout`.
-8. **Parity vs non-economy tiles.** Spec §5.2 requires `no_data` with a note and the instructions require no HTTP call. Those tiles therefore leave no ledger rows, and §8.1 parity (distinct tile requests equal to `plan` length) would report a break for a non-economy definition. WP7 must not count a tile with the note `cabin-unsupported:*` as a missing request.
-9. **FX assertion belongs elsewhere.** §9 item 2 says "a non-GBP response asserts conversion and the FX flag", but conversion is WP7 normalisation (§5.6). Here only pass-through is asserted. The vendor sends lower-case codes (`gbp`), and the adapter upper-cases them to ISO 4217 (`GBP`) without changing amounts.
-10. **File formats.** The plan does not define `params-<date>.json` or the recorded exchange file. The WP4b brief pins both (its §5.3 and §5.4), and this brief follows it: `request.url` is origin + path, the query is in `request.params`, and the allowlist is `{ provider, recordedAt, recordedBy, credential: 'header', endpoints: [{ key, method, path, params: { name: { fixed: [...] } | { kind } } }] }`. Two conflicts between the WP4 and WP4b briefs touch WP6's tests:
-    - WP4b §5.3 names the hash field `sha256`, but WP4's `RecordedFixture` and `loadRecordedFixture` use `contentSha256`.
-    - WP4's `loadRecordedJson` requires a content hash on every recorded-tree file (its own test calls a params allowlist "hashed"), but WP4b §5.4 writes the allowlist without one.
-
-    WP6 loads exchanges through `loadRecordedFixture` and reads the allowlist with plain `JSON.parse`.
-11. **Missing dependencies.** `depends_on: [4, 4b]` omits WP1 (`generateCells`, `monthOf`, `toEpochDay`, `cellKeyString`) and WP2 (`MINOR_EXPONENT`, `validateVendorUrl`). Both are merged in wave 1, before WP6's wave 3, but the frontmatter should read `[1, 2, 4, 4b]`.
-12. **Ledger `tile_index`.** §5.1 `BudgetGuard.reserve` params have no tile index, yet §5.3 requires `tile_index` on every ledger row. This brief asserts `tileIndex` on every `HttpKitRequest`; the ledger column is WP4/WP3.
-13. **An empty envelope with no currency.** Spec §2 says a response that states no currency is `parse`. The first failing test's body `{"success": true, "data": []}` has no currency. This brief treats currency as required only when there is at least one row to denominate, so an empty envelope without currency gives `no_data`.
+1. **Rate limit stated twice.** Spec §2 gives 600/min (the vendor ceiling), while spec §12 and `TRAVELPAYOUTS_DEFAULTS` give 200/min. `travelpayoutsHttpLimits` keeps the configured value and clamps it to 600.
+2. **The FX assertion is not WP6's.** §9 item 2 says "a non-GBP response asserts conversion and the FX flag", but conversion is WP7 normalisation (§5.6). Here only pass-through is asserted: the vendor's lower-case code (`gbp`) is upper-cased to ISO 4217 and amounts are unchanged.
+3. **Empty envelope without currency.** Spec §2 says a response that states no currency is `parse`. The first failing test's body `{"success": true, "data": []}` has no currency. This brief requires currency only when at least one row is to be denominated.
+4. **`ParamsAllowlist` has no owning file.** The plan lists it among the WP5 and WP6 exports without naming a file. This brief creates `packages/providers/src/allowlist.ts` (type, error, `assertParamsAllowed`). WP5 must import from the same file; whichever of WP5 and WP6 merges second reuses it rather than redefining it.
+5. **The endpoint key is unnamed.** The plan does not say what keys `ParamsAllowlist.endpoints`. This brief uses the endpoint path (`/aviasales/v3/prices_for_dates`) and lists `names` in ascending order. WP4b's writer must match, or the equality test in Task 6.6 fails.
+6. **`TRAVELPAYOUTS_PARAMS` copies two values from the recording.** `recordedAt` and `contentSha256` exist only once WP4b has recorded. Task 6.6 Step 3 prints them from the file, and the implementer writes them into the constant. That is the one place this brief cannot show the final literal.
+7. **Cache dedup assumes a cache-key rule.** Dedup across sibling pairs assumes WP4's `canonicalCacheKey` covers method, URL and body only, not `executionId` or `tileIndex`. Task 6.4 asserts 14 cache hits, so a key that includes either fails loudly.
+8. **`replayHandlers` cannot be used here.** It matches on the credential-free query, and the recorded 401 (invalid token) shares its query with the recorded 200 for the same tile. The replay tests use `loadRecorded` from `@gmt/providers/testing` with their own per-tile handlers.
+9. **The testing subpath is imported by relative path.** Inside `@gmt/providers` the subpath is imported as `../../src/testing/index.js`, because the package `exports` point at `dist/`. It is the same module.
+10. **Wiring structure is unknown.** WP4b's exact code shape for `httpLimitsFor`/`providersFor` is not in the plan. Task 6.9 adds one spread entry to each, in the object or array they return.
 
 ## 4. Interfaces consumed
 
-From spec §5.1 (`@gmt/core` `ports/provider.ts`, verbatim):
+Spec §5.1 (revision 10), the parts this package uses, verbatim:
 
 ```ts
-export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
 export interface CapabilityInfo { sourceKind: SourceKind; provenanceNote: string; maxAgeHours: number | 'unknown' }
 export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
-
 export interface DiscoveryQuery {
   origin: Iata; destination: Iata;
   departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number;
@@ -89,20 +116,17 @@ export interface DiscoveryQuery {
 }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
+  | { kind: 'month'; month: IsoMonth }                                   // Travelpayouts month tiles
   | { kind: 'length-month'; length: number; month: IsoMonth }
   | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
   | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
-
 export interface RawCalendarPrice extends CellKey {
   amountMinor: number; currency: string; providerObservedAt?: IsoDateTime; vendorLink?: string;
 }
 export type DiscoveryTileResult =
-  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
+  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
   | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: ProviderError };
-
 export interface ProviderContext { executionId: string | null; signal: AbortSignal; recordFixtures: boolean }
-// Adapters are constructed once with { http: HttpKit, log: Logger, clock: Clock }; the context carries only per-call state.
-
 export interface DiscoveryCapability { info: CapabilityInfo; plan(q: DiscoveryQuery): TilePlan[]; fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult> }
 export interface FlightProvider {
   readonly id: ProviderId; readonly displayName: string;
@@ -112,30 +136,37 @@ export interface FlightProvider {
 }
 export interface Reservation { id: string; finalise(r: { outcome: 'ok' | 'error' | 'unknown'; httpStatus?: number; durationMs: number }): void }
 export interface BudgetGuard {
-  reserve(p: { providerId: ProviderId; executionId: string | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
-  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; endpointPath: string }): void;
+  reserve(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
+  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
   usage(scope: BudgetScope): Usage;
 }
 export interface ResponseCache { get(key: string): { body: unknown; storedAt: IsoDateTime } | undefined; set(key: string, body: unknown, ttlSeconds: number, storedAt: IsoDateTime): void }
 export class ProviderError extends Error { kind: 'auth' | 'rate-limit' | 'quota' | 'upstream' | 'parse' | 'network' | 'limiter-timeout'; reason?: string; retryable: boolean; httpStatus?: number; retryAfterSeconds?: number }
 export class BudgetExceeded extends Error { scope: 'execution-calls' | 'execution-free-calls' | 'execution-cost' | 'provider-month' | 'provider-lifetime' | 'global-month' }
 export class AbortedError extends Error {}
+// Plan, provider port: DiscoveryQuery stays per (origin, destination) pair. Travelpayouts queries by the origin's metro code when the airports table maps it to one (rows filtered to the pair by origin_airport); identical metro requests from other pairs are answered by the response cache inside the TTL, so a definition whose origins share a metro costs D × M upstream calls.
+// Plan, provider port: A provider whose `cabins` excludes the definition's cabin is not called at all: the engine marks every cell for that provider and stage no_data with reason 'cabin-not-offered' (spec rev 10).
 ```
 
-From the plan's "Cross-package contracts", verbatim:
+Plan, "Cross-package contracts", verbatim:
 
 ```ts
 // types/ids.ts (WP0)
-export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$, upper-case
+export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
 export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
 export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' }; // Date#toISOString() form only
-export const iataSchema: z.ZodType<Iata>;          // z.string().regex(/^[A-Z]{3}$/) then brand
-export const isoDateSchema: z.ZodType<IsoDate>;    // regex + real calendar date check (rejects 2027-02-29)
-export function asIata(s: string): Iata;           // throws on mismatch; used by tests and seeds, never on user input (zod does that)
+export const iataSchema: z.ZodType<Iata, string>;  // trims, upper-cases, then requires ^[A-Z]{3}$ (so 'lhr' → 'LHR'; 'LHRX' rejected)
+export const isoDateSchema: z.ZodType<IsoDate, string>;    // regex + real calendar date check (rejects 2027-02-29)
+export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
 export function asIsoDate(s: string): IsoDate;
+export function asIsoMonth(s: string): IsoMonth;
 export function asIsoDateTime(s: string): IsoDateTime;
-// plus, from plan Task 0.3's implementation of ids.ts: export const asIsoMonth = (s: string): IsoMonth
+export function cellKeyString(c: CellKey): string;        // `${origin}|${destination}|${departureDate}|${returnDate}` — lives here (WP0) so WP1, WP2, WP3 all share it
+
+// types/provenance.ts (WP0)
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';   // defined here; ports/provider.ts re-exports it
+export type PointOfSale = string | 'unknown';   // ISO 3166-1 alpha-2 upper-case (POINT_OF_SALE echoes), or 'unknown'; pointOfSaleSchema = z.string().regex(/^[A-Z]{2}$/).or(z.literal('unknown'))
 
 // types/itinerary.ts (WP0)
 export type SuppliedField = 'segments' | 'segmentTimes' | 'segmentCabins' | 'selfTransfer' | 'baggage' | 'fareConditions' | 'seller' | 'price';
@@ -147,108 +178,93 @@ export interface Usage { calls: number; costMicroGbp: number; cap: number | null
 // ports/logger.ts, ports/clock.ts (WP0)
 export interface Logger { debug(o: object, msg?: string): void; info(o: object, msg?: string): void; warn(o: object, msg?: string): void; error(o: object, msg?: string): void; child(bindings: object): Logger }
 export interface Clock { now(): IsoDateTime; todayLondon(): IsoDate }
-export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void };   // tests
+export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void; set(at: IsoDateTime): void };
 
-// config (WP0)
-export class Secret { constructor(value: string); reveal(): string; toString(): '[redacted]'; toJSON(): '[redacted]' }
-export interface ProviderLimits { monthlyCallCap: number; window: 'month' | 'lifetime'; billingDay: number; ratePerMinute: number; ratePerHour: number; concurrency: number; cacheTtlHours: number; costPerCallMicroGbp: number; planFixedMicroGbp: number; excludedFromSchedule: boolean }
-export const TRAVELPAYOUTS_DEFAULTS: ProviderLimits;   // cap 50000/mo, 200/min, 10000/h, concurrency 4, TTL 6h, cost 0, fixed 0
+// errors.ts (WP0): The outcome `reason` column holds the kind or normalisation reason only; the vendor message (URL-stripped) goes to `lastError`.
 
-// text/bannedWords.ts (WP0)
+// config (WP0, Task 0.5): Secret { reveal(): string; toString(): '[redacted]' }; ProviderLimits { …; ratePerMinute; ratePerHour; concurrency; cacheTtlHours; … };
+// TRAVELPAYOUTS_DEFAULTS: cap 50000/mo, 200/min, 10000/h, concurrency 4, TTL 6h, cost 0, fixed 0;
+// Config.providers.travelpayouts: { token: Secret; limits: ProviderLimits } | null; Config.maxWaitSeconds; Config.requestTimeoutSeconds; parseConfig(env, { realpath }): ConfigResult.
 export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
+
+// Database (WP3)
+export class AirportsRepo { … metroOf(iata): string | null; … }
 
 // http-kit (@gmt/providers http/httpKit.ts, WP4)
 export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never'; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; classifyError?: (status: number, body: unknown, ledgerAtCap: boolean) => ProviderError }
-export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Record<ProviderId | 'fx', ProviderHttpLimits>; clock: Clock; log: Logger; secrets: Secret[] /* for scrubbing */; recorder?: FixtureRecorder }
-export interface HttpKitRequest {
-  providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string;
-  method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string;
-  cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean;
-}
+export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
+export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean }
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
 export function createHttpKit(deps: HttpKitDeps): HttpKit;
-// Throws ProviderError (classified), BudgetExceeded (from reserve, before any fetch), AbortedError (signal).
-// Retries: p-retry max 3 attempts on retryable ProviderError only; per-request timeout is non-retryable when limits.billable === 'http-200'.
+export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* scrubbed */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string>; contentSha256: string }
+// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot): RequestHandler[] (serves fixtures/recorded by matching method, path and credential-free query, reversing placeholders); loadRecorded(root, providerId, endpointPath): RecordedFixture[]. msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
+
+// Adapter constructors and exports (WP6 implements these exactly)
+export function travelpayoutsProvider(o: { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: { metroOf(iata: Iata): string | null } }): FlightProvider;
+export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['api.travelpayouts.com'], billable 'never'; no classifyError (default table maps 401 → auth)
+export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+
+// Core domain functions (WP1, WP2)
+export function toEpochDay(d: IsoDate): number; export function monthOf(d: IsoDate): IsoMonth;
+export function generateCells(space: ResolvedSpace): Cell[];
+export const MINOR_EXPONENT: Record<string, number>;
+export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export function validateVendorUrl(url: string, allowlist: string[]): Booking;
+
+// Wiring (apps/api src/wiring.ts, WP4b)
+export function httpLimitsFor(config: Config): HttpKitDeps['limits'];   // WP4b writes it with fixture + fx; WP5 and WP6 each add their provider's line (a Modify in their briefs)
+export function providersFor(config: Config, deps: { http: HttpKit; log: Logger; clock: Clock; airports: AirportsRepo }): FlightProvider[];   // same ownership rule
 ```
 
-From the WP4 brief (`packages/providers/src/http/recorder.ts`; not in the plan's contract block), used only by the test loader:
-
-```ts
-export interface RecordedFixture { recordedAt; recordedBy; providerId; endpointPath; request: { method; url; params; body }; status; body; contentSha256 }
-export function loadRecordedFixture(path: string): RecordedFixture;
-```
-
-Plan, adapter constructor line (WP6 implements it, with one added option; see mismatch 5):
-
-```ts
-travelpayoutsProvider({ http, log, clock, token: Secret, paramsAllowlist, airports: { sharedMetro(iatas): string | null } })   // returning FlightProvider
-```
-
-Plan, errors: `ProviderError`, `BudgetExceeded`, `AbortedError` "constructed as `new ProviderError({ kind, reason?, retryable, httpStatus?, retryAfterSeconds?, message })`, `new BudgetExceeded({ scope, cap, current, requested })`". WP0's implementation also accepts `providerId` on both.
-
-Plan, database block (WP3): `export class AirportsRepo { … sharedMetro(iatas: Iata[]): string | null; … }`.
-
-Plan, WP1 produces: `toEpochDay(IsoDate): number`, `monthOf(IsoDate): IsoMonth`, `generateCells`, `cellKeyString(cell): string` (`O|D|dep|ret`). Spec §6.1: `generateCells(space: ResolvedSpace): Cell[]      // deterministic order: origin, destination, departureDate, nights`. Plan types: `export interface ResolvedSpace { origins: Iata[]; destinations: Iata[]; departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number }`, `export interface Cell extends CellKey { nights: number }`.
-
-Plan, WP2 produces: `toGbp(amountMinor, currency, rateNano): number` with `MINOR_EXPONENT: Record<string, number>` and `ECB_CURRENCIES`, `validateVendorUrl(url, allowlist): Booking`.
+Plan decision 6: "The recorded-fixture file format and hash field (`contentSha256`) are pinned above; parameter allowlists carry the same hash; the runtime allowlist is a code constant asserted equal to the recorded file." Decision 8: per-task test runs use `pnpm --filter @gmt/<pkg> exec vitest run <file>`.
 
 ## 5. Interfaces produced
 
 All exported from `@gmt/providers` (barrel) unless marked internal.
 
 ```ts
+// allowlist.ts (shared with WP5; mismatch 4)
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>; contentSha256: string }
+export class ParamsAllowlistError extends Error {}
+export function assertParamsAllowed(allowlist: ParamsAllowlist, endpoint: string, params: URLSearchParams): void;   // throws ParamsAllowlistError
+
+// travelpayouts/params.ts
+export const TRAVELPAYOUTS_HOST: 'api.travelpayouts.com';
+export const PRICES_FOR_DATES_PATH: '/aviasales/v3/prices_for_dates';
+export const FIXED_PARAMS: { readonly one_way: 'false'; readonly currency: 'gbp'; readonly limit: '1000' };   // internal
+export const FORBIDDEN_PARAM_NAMES: readonly ['token', 'market', 'trip_class', 'return_at'];             // internal
+export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
+
+// travelpayouts/limits.ts
+export const TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE: 600;
+export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;
+
 // travelpayouts/provider.ts
 export const TRAVELPAYOUTS_INFO: CapabilityInfo;                       // { sourceKind: 'authorised-cached', maxAgeHours: 48, provenanceNote }
 export const TRAVELPAYOUTS_SUPPLIED_FIELDS: readonly SuppliedField[];  // ['price']
 export const TRAVELPAYOUTS_CABINS: readonly Cabin[];                   // ['economy']
 export const TRAVELPAYOUTS_POINT_OF_SALE: 'unknown';
-export const PAGE_LIMIT: 1000;   // internal
-export const MAX_PAGES: 50;      // internal
-export interface TravelpayoutsProviderOptions {
-  http: HttpKit; log: Logger; clock: Clock; token: Secret;
-  paramsAllowlist: TravelpayoutsParamsAllowlist;
-  airports: MetroLookup;
-  cacheTtlSeconds: number;      // added (mismatch 5): limits.cacheTtlHours × 3600
-}
-export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): FlightProvider;   // id 'travelpayouts', displayName 'Aviasales cache'
-export function buildRequestUrl(tp: TileParams, page: number): URL;  // internal
+export interface TravelpayoutsProviderOptions { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: MetroLookup }
+export function travelpayoutsProvider(o: TravelpayoutsProviderOptions): FlightProvider;   // id 'travelpayouts', displayName 'Aviasales cache'
+export const PAGE_LIMIT: 1000; export const MAX_PAGES: 50;                                 // internal
+export function buildRequestUrl(tp: TileParams, page: number): URL;                        // internal
 
-// travelpayouts/params.ts
-export const TRAVELPAYOUTS_HOST: 'api.travelpayouts.com';
-export const PRICES_FOR_DATES_PATH: '/aviasales/v3/prices_for_dates';
-export const FIXED_PARAMS: { readonly one_way: 'false'; readonly currency: 'gbp'; readonly limit: '1000' };
-export const DYNAMIC_PARAM_KINDS: { readonly origin: 'iata'; readonly destination: 'iata'; readonly departure_at: 'iso-month'; readonly page: 'positive-int' };
-export const FORBIDDEN_PARAM_NAMES: readonly ['token', 'market', 'trip_class', 'return_at'];
-export interface TravelpayoutsParamsAllowlist {
-  readonly provider: 'travelpayouts'; readonly endpointPath: '/aviasales/v3/prices_for_dates'; readonly recordedAt: string;
-  readonly fixed: Readonly<Record<string, string>>; readonly dynamic: Readonly<Record<string, RegExp>>;
-}
-export class ParamsAllowlistError extends Error {}
-export function parseTravelpayoutsAllowlist(json: unknown): TravelpayoutsParamsAllowlist;   // input: WP4b brief §5.4 document; throws ParamsAllowlistError
-export function assertParamsAllowed(allowlist: TravelpayoutsParamsAllowlist, params: URLSearchParams): void;   // throws ParamsAllowlistError
-
-// travelpayouts/limits.ts
-export const TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE: 600;
-export function travelpayoutsHttpLimits(limits: ProviderLimits, opts: { maxWaitSeconds: number; requestTimeoutSeconds: number }): ProviderHttpLimits;   // no classifyError: WP4's default table applies
-
-// travelpayouts/tiles.ts (internal)
-export interface MetroLookup { sharedMetro(iatas: Iata[]): string | null }
-export interface OriginGroup { readonly param: string; readonly members: readonly Iata[] }
-export interface TileParams { readonly origin: string; readonly members: ReadonlySet<Iata>; readonly destination: Iata; readonly departureMonth: IsoMonth }
-export function originGroups(origins: readonly Iata[], airports: MetroLookup): OriginGroup[];
+// travelpayouts/tiles.ts (internal except MetroLookup)
+export interface MetroLookup { metroOf(iata: Iata): string | null }
+export interface TileParams { readonly origin: string; readonly pairOrigin: Iata; readonly destination: Iata; readonly month: IsoMonth }
+export function originParam(origin: Iata, airports: MetroLookup): string;
 export function cellsOf(q: DiscoveryQuery): CellKey[];
-export function planMonthTiles(q: DiscoveryQuery, airports: MetroLookup): TilePlan[];
-export function tileParams(plan: TilePlan, airports: MetroLookup): TileParams;
+export function planMonthTiles(q: DiscoveryQuery): TilePlan[];
+export function tileParams(plan: TilePlan, q: DiscoveryQuery, airports: MetroLookup): TileParams;
 
 // travelpayouts/response.ts (internal)
-export type Envelope = { ok: true; data: readonly unknown[]; currency: string | null } | { ok: false; reason: string };
+export type Envelope = { ok: true; data: readonly unknown[]; currency: string | null } | { ok: false; reason: 'malformed-envelope' | 'vendor-error'; detail: string | null };
 export type DropReason = 'malformed-row' | 'one-way' | 'other-origin' | 'other-destination' | 'out-of-band' | 'outside-tile' | 'unpriced' | 'bad-price';
 export const DROP_REASONS: readonly DropReason[];
 export const AVIASALES_BASE: 'https://www.aviasales.com';
-export const AVIASALES_LINK_ALLOWLIST: readonly string[];   // ['aviasales.com']
 export function readEnvelope(body: unknown): Envelope;
-export function resolveCurrency(raw: string | null): { ok: true; code: string; exponent: number } | { ok: false; reason: string };
+export function resolveCurrency(raw: string | null): { ok: true; code: string; exponent: number } | { ok: false; reason: 'currency-missing' | 'currency-malformed' | 'currency-exponent-unknown'; detail: string | null };
 export function majorToMinor(price: number, exponent: number): number | null;
 export function vendorLinkFor(link: string): string | null;
 export function attributeRows(rows: readonly unknown[], input: AttributionInput): Attribution;
@@ -256,43 +272,69 @@ export function attributionNotes(a: Attribution, rowsReceived: number, pages: nu
 export function suppliedFieldsOfRow(row: unknown): SuppliedField[];
 ```
 
-**Notes vocabulary** (`DiscoveryTileResult.notes`, consumed by WP7 and shown in the coverage drill-down): `rows-received:<n>`, `pages:<n>`, `dropped:<DropReason>:<n>` (non-zero only, in `DROP_REASONS` order), `link-rejected:<n>`, `pages-truncated:50`, `cabin-unsupported:<cabin>`.
+**`ProviderError.reason` vocabulary** (spec rev 10: machine reasons only; vendor text goes in the message, which the engine writes to `last_error`):
 
-**Semantics WP7 relies on.** Covered cells with no price in a `tile` result are `no_data`. `noFares` is always `[]`, because a cache never proves that no fares exist. Several prices may share one cell (different fares), and the engine keeps the minimum per tile (spec §5.6). `providerObservedAt` is never set. `currency` is the envelope's code upper-cased. `fetchedAt` is the oldest page's.
+- `malformed-envelope`
+- `vendor-error`
+- `currency-missing`
+- `currency-malformed`
+- `currency-exponent-unknown`
+- `currency-changed-between-pages`
+- `unexpected-status`
+
+**Notes vocabulary** (`DiscoveryTileResult.notes`):
+
+- `rows-received:<n>`
+- `pages:<n>`
+- `dropped:<DropReason>:<n>` (non-zero only, in `DROP_REASONS` order)
+- `link-rejected:<n>`
+- `pages-truncated:50`
+
+**Semantics WP7 relies on.**
+
+- Covered cells with no price in a `tile` result are `no_data`.
+- `noFares` is always `[]`, because a cache never proves that no fares exist.
+- Several prices may share a cell, and the engine keeps the minimum (spec §5.6).
+- `providerObservedAt` is never set.
+- `currency` is the envelope's code upper-cased.
+- `fetchedAt` is the oldest page's (a cache hit's is the original `storedAt`).
+- `pointOfSale` is `'unknown'` on every tile.
 
 ## 6. Library notes
 
 Verified on 2026-10-14.
 
-- **Travelpayouts Data API, `/aviasales/v3/prices_for_dates`.** `support.travelpayouts.com` (the links in `docs/providers.md`) answered HTTP 403 to every automated fetch on 2026-10-14. The endpoint was therefore verified from Travelpayouts' own published Postman collection, "Travelpayouts Data API" (postman.com/travelpayouts, collection `16826686-bfa85f3b-c07c-42f6-8ac3-2021f453b4fc`, read as JSON through `www.postman.com/_api/collection/…?populate=true`). Verified there:
-  - **Parameters.** `origin` ("IATA code of a city or an airport"), `destination`, `departure_at` ("2006-01 or 2006-01-02 format"), `return_at`, `unique`, `sorting`, `direct`, `currency` (default `rub`), `market`, `limit` ("Allowed value from 1 to 1000"), `page` ("chunked reading of a large result"), `one_way` ("true - one way, false - back-to-back"). **`trip_class` is not a parameter of this endpoint**, consistent with spike fact 1.
-  - **Token.** Passed "in the X-Access-Token header or in the token parameter"; this adapter uses the header only.
-  - **Response envelope.** `{ "currency": "rub", "data": [ … ], "success": true }`, with the currency in the envelope, lower-case.
-  - **Row fields** in the published sample: `airline`, `departure_at` (local time with offset, `2021-09-14T08:55:00+03:00`), `destination`, `destination_airport`, `duration`, `flight_number`, `link` (a relative path such as `/MOW1409LED1?t=…`), `origin`, `origin_airport`, `price` (an integer in the currency's major unit in the sample), `return_transfers`, `transfers`.
+- **Travelpayouts Data API, `/aviasales/v3/prices_for_dates`.** `support.travelpayouts.com` (linked from `docs/providers.md`) answered HTTP 403 to every automated fetch. The endpoint was verified from Travelpayouts' own published Postman collection "Travelpayouts Data API" (postman.com/travelpayouts, collection `16826686-bfa85f3b-c07c-42f6-8ac3-2021f453b4fc`, read as JSON).
+  - **Parameters:** `origin` ("IATA code of a city or an airport"), `destination`, `departure_at` ("2006-01 or 2006-01-02 format"), `return_at`, `unique`, `sorting`, `direct`, `currency` (default `rub`), `market`, `limit` ("Allowed value from 1 to 1000"), `page`, `one_way`. **`trip_class` is not a parameter of this endpoint.**
+  - **Token:** passed "in the X-Access-Token header or in the token parameter". The adapter uses the header only.
+  - **Envelope:** `{ "currency": "rub", "data": [...], "success": true }`.
+  - **Row fields:** `airline`, `departure_at` (local with offset, `2021-09-14T08:55:00+03:00`), `destination`, `destination_airport`, `duration`, `flight_number`, `link` (relative path), `origin`, `origin_airport`, `price` (integer, major unit, in the sample), `return_transfers`, `transfers`.
   - **Not verifiable from the docs:**
-    - `return_at` on rows: the published sample is a one-way request. The spike and WP4b's recorded fixtures are the source, and Task 6.8 asserts the field on the recordings.
-    - Error bodies: the collection's "Incorrect request" and error responses have `null` bodies. The plain-text 401 `Unauthorized` comes from spike fact 5.
-    - `found_at` is absent from the sample (the spike says the same).
-    - The public host `api.travelpayouts.com`: the collection's `baseUrl` is an internal host. Task 6.8 asserts the host on WP4b's recorded request URLs.
-    - The 600/min limit: taken from `docs/providers.md` (support article 4402565416594, which returned 403). It was not re-verified.
-  - The recorded set this brief replays is WP4b's plan TP-01…TP-20: fourteen `LON` metro tiles to JFK and EWR (2027-03 to 2027-09), four airport tiles for 2027-03, one empty-envelope probe (2028-02) and one 401 with an invalid token.
-- **msw 3.0.3** (dev dependency of `@gmt/providers`, plan Task 0.1). Verified with context7 `/websites/mswjs_io` and the official `https://mswjs.io/docs/migrations/2.x-to-3.x`.
-  - Request handlers are imported from `msw/http` (`import { http, HttpResponse } from 'msw/http'`); the root import is gone in 3.x.
-  - `setupServer` comes from `msw/node`.
-  - `server.listen({ onUnhandledFrame: 'error' })` replaces 2.x's `onUnhandledRequest`.
-  - Also used: `server.use`, `server.resetHandlers`, `server.close`; `HttpResponse.json(body, init?)` and `HttpResponse.text(body, init?)` (unchanged from 2.x, not listed as breaking); `request.url` (a string) and `request.headers.get(name)`.
-  - Node ≥ 22 is required, which the plan meets.
-- **vitest 5.0.4** (root dev dependency). Verified with context7 `/vitest-dev/vitest/v5.0.3`, the closest indexed version. Used: `describe`, `it`, `it.each`, `expect` (`toEqual`, `toMatchObject`, `toHaveLength`, `toContain`, `toThrow`, `rejects.toBeInstanceOf`, `not.toHaveProperty`), `beforeAll`, `afterEach`, `afterAll`, a per-test timeout as the third argument of `it`, and the CLI form `vitest run <file>`. Single-file runs use `pnpm --filter @gmt/providers exec vitest run <file>`, not `pnpm --filter @gmt/providers test -- <file>`, because the package `test` script runs `--coverage` with thresholds over all of `src/`, and a single-file run would fail the thresholds.
+    - `return_at` on rows (the sample is one-way).
+    - Error bodies (null in the collection); the 401 plain-text body comes from spike fact 5.
+    - The public host `api.travelpayouts.com` (the collection's base URL is internal).
+    - The 600/min limit (taken from `docs/providers.md`).
 
-No new dependency. `@gmt/providers` already has `@gmt/core` and dev `msw@3.0.3`; `zod` is not added (envelope checks are hand-written type guards, and dates and IATA codes reuse core's `isoDateSchema` and `iataSchema`).
+    Task 6.8 asserts `return_at` and the host on WP4b's recordings.
+- **msw 3.0.3.** Verified with context7 `/websites/mswjs_io` and `https://mswjs.io/docs/migrations/2.x-to-3.x`.
+  - Imports: `http` and `HttpResponse` from `msw/http`; `setupServer` from `msw/node`.
+  - `server.listen({ onUnhandledFrame: 'error' })` is the 3.x rename of `onUnhandledRequest`.
+  - Also used: `server.use`, `server.resetHandlers`, `server.close`, `HttpResponse.json(body, init?)`, `HttpResponse.text(body, init?)`, `request.url`, `request.headers.get`.
+  - msw is a runtime dependency of `@gmt/providers` (plan: the testing subpath imports it).
+- **vitest 5.0.4.** Verified with context7 `/vitest-dev/vitest/v5.0.3` (closest indexed).
+  - Used: `describe`, `it`, `it.each`, `expect` (`toEqual`, `toMatchObject`, `toHaveLength`, `toContain`, `toThrow`, `rejects.toBeInstanceOf`, `not.toHaveProperty`), `beforeAll`, `afterEach`, `afterAll`, and a per-test timeout as the third argument.
+  - Single files run with `pnpm --filter @gmt/<pkg> exec vitest run <file>` (plan decision 8).
+
+There is no new dependency, and `zod` is not added to `@gmt/providers`. Envelope checks are hand-written guards, and dates and IATA codes reuse core's `isoDateSchema` and `iataSchema`.
 
 ## 7. Files
 
 Create:
 
+- `packages/providers/src/allowlist.ts`
 - `packages/providers/src/travelpayouts/params.ts`
 - `packages/providers/src/travelpayouts/tiles.ts`
-- `packages/providers/src/travelpayouts/response.ts` (beside the plan's file map: envelope and row parsing kept apart from tiling)
+- `packages/providers/src/travelpayouts/response.ts`
 - `packages/providers/src/travelpayouts/limits.ts`
 - `packages/providers/src/travelpayouts/provider.ts`
 - `packages/providers/test/travelpayouts/harness.ts`
@@ -305,34 +347,42 @@ Create:
 - `packages/providers/test/travelpayouts/params.test.ts`
 - `packages/providers/test/travelpayouts/provider.test.ts`
 - `packages/providers/test/travelpayouts/replay.test.ts`
+- `apps/api/test/wiring.travelpayouts.test.ts`
 
 Modify:
 
-- `packages/providers/src/index.ts` (barrel exports, Task 6.7)
+- `packages/providers/src/index.ts` (barrel, Task 6.7)
+- `apps/api/src/wiring.ts` (`httpLimitsFor`, `providersFor`, Task 6.9)
 
-Read (not written; produced by WP4b):
+Read (produced by WP4b):
 
 - `packages/providers/fixtures/recorded/travelpayouts/params-<yyyy-mm-dd>.json`
-- `packages/providers/fixtures/recorded/travelpayouts/**/<yyyy-mm-dd>-<sha>.json`
+- the recorded `prices_for_dates` exchanges under `packages/providers/fixtures/recorded/travelpayouts/`
 
 ## 8. Tasks
 
 ### Task 6.1: Empty envelope → `no_data` (first failing test)
 
-**Files:** create `src/travelpayouts/params.ts`, `src/travelpayouts/tiles.ts`, `src/travelpayouts/response.ts`, `src/travelpayouts/provider.ts`, `test/travelpayouts/harness.ts`, `test/travelpayouts/empty.test.ts`.
+**Files:**
 
-**Interfaces:** consumes `createHttpKit`, `HttpKit`, `ProviderHttpLimits`, `generateCells`, `monthOf`, the §5.1 provider types. Produces `travelpayoutsProvider` (first cut), `parseTravelpayoutsAllowlist`, `planMonthTiles`, `tileParams`, `cellsOf`, `readEnvelope` (first cut), `buildRequestUrl`.
+- Create `src/allowlist.ts` (type and error only).
+- Create `src/travelpayouts/params.ts` (constants), `tiles.ts`, `response.ts` (first cut) and `provider.ts` (first cut).
+- Create `test/travelpayouts/harness.ts` and `test/travelpayouts/empty.test.ts`.
+
+**Interfaces:**
+
+- Consumes `createHttpKit`, `generateCells`, `monthOf`, and the §5.1 types.
+- Produces `ParamsAllowlist`, `ParamsAllowlistError`, `planMonthTiles`, `tileParams`, `cellsOf`, `originParam` (first cut), `readEnvelope` (first cut), `buildRequestUrl` and `travelpayoutsProvider` (first cut).
 
 - [ ] **Step 1: Write the failing test**
 
-`packages/providers/test/travelpayouts/harness.ts` (the final harness; later tasks import from it):
+`packages/providers/test/travelpayouts/harness.ts` (final; later tasks import from it):
 
 ```ts
 /**
  * Test harness for the Travelpayouts adapter (WP6). It builds the REAL http-kit (WP4) over
  * in-memory fakes of the BudgetGuard and ResponseCache ports, so every test runs the production
- * pipeline (cache → dedup → retry → limiter → reserve → fetch) while msw intercepts global fetch
- * (spec §5.3: there is no injectable transport).
+ * pipeline (cache → dedup → retry → limiter → reserve → fetch) while msw intercepts global fetch.
  */
 import {
   asIata,
@@ -354,8 +404,9 @@ import {
   Secret,
 } from '@gmt/core';
 import { setupServer } from 'msw/node';
+import type { ParamsAllowlist } from '../../src/allowlist.js';
 import { createHttpKit, type HttpKit, type HttpKitRequest, type ProviderHttpLimits } from '../../src/http/httpKit.js';
-import { parseTravelpayoutsAllowlist } from '../../src/travelpayouts/params.js';
+import type { MetroLookup } from '../../src/travelpayouts/tiles.js';
 import { type TravelpayoutsProviderOptions, travelpayoutsProvider } from '../../src/travelpayouts/provider.js';
 
 /** Sentinel credential (briefs README: secrets in tests are sentinels). */
@@ -375,24 +426,24 @@ export const silentLog: Logger = {
 };
 
 export interface Ledger {
-  reservations: Array<{ endpointPath: string; executionId: string | null }>;
-  cacheHits: number;
+  reservations: Array<{ endpointPath: string; executionId: string | null; tileIndex: number | null }>;
+  cacheHits: Array<{ endpointPath: string; tileIndex: number | null }>;
 }
 
-/** BudgetGuard fake: records reservations; `refuse` makes reserve throw like a 0 cap would (spec §5.3). */
+/** BudgetGuard fake: records reservations and cache hits with their tileIndex; `refuse` throws like a 0 cap. */
 export function fakeBudget(o: { refuse?: boolean } = {}): BudgetGuard & { ledger: Ledger } {
-  const ledger: Ledger = { reservations: [], cacheHits: 0 };
+  const ledger: Ledger = { reservations: [], cacheHits: [] };
   return {
     ledger,
     reserve(p) {
       if (o.refuse === true) {
         throw new BudgetExceeded({ scope: 'execution-free-calls', cap: 0, current: 0, requested: 1, providerId: 'travelpayouts' });
       }
-      ledger.reservations.push({ endpointPath: p.endpointPath, executionId: p.executionId });
+      ledger.reservations.push({ endpointPath: p.endpointPath, executionId: p.executionId, tileIndex: p.tileIndex });
       return { id: `r${ledger.reservations.length}`, finalise: () => {} };
     },
-    recordCacheHit() {
-      ledger.cacheHits += 1;
+    recordCacheHit(p) {
+      ledger.cacheHits.push({ endpointPath: p.endpointPath, tileIndex: p.tileIndex });
     },
     usage: () => ({ calls: ledger.reservations.length, costMicroGbp: 0, cap: null, windowStart: null, windowEnd: null }),
   };
@@ -408,9 +459,9 @@ export function memoryCache(): ResponseCache {
   };
 }
 
-function limitsFor(host: string): ProviderHttpLimits {
+function defaultLimits(): ProviderHttpLimits {
   return {
-    hosts: [host],
+    hosts: ['api.travelpayouts.com'],
     ratePerMinute: 600,
     ratePerHour: 36_000,
     concurrency: 4,
@@ -428,7 +479,7 @@ export interface Harness {
   clock: ReturnType<typeof fixedClock>;
 }
 
-/** The real http-kit, spied so tests can read the tileIndex of every page (spec §5.2). */
+/** The real http-kit, spied so tests can read every request the adapter made (tileIndex included). */
 export function makeHarness(o: { limits?: ProviderHttpLimits; refuse?: boolean } = {}): Harness {
   const budget = fakeBudget({ refuse: o.refuse ?? false });
   const clock = fixedClock(asIsoDateTime(NOW));
@@ -438,12 +489,7 @@ export function makeHarness(o: { limits?: ProviderHttpLimits; refuse?: boolean }
     clock,
     log: silentLog,
     secrets: [new Secret(TOKEN)],
-    limits: {
-      travelpayouts: o.limits ?? limitsFor('api.travelpayouts.com'),
-      searchapi: limitsFor('www.searchapi.io'),
-      fixture: limitsFor('fixture.local'),
-      fx: limitsFor('api.frankfurter.app'),
-    },
+    limits: { travelpayouts: o.limits ?? defaultLimits() },
   });
   const requests: HttpKitRequest[] = [];
   // why: a spy around the real kit records each request without replacing the pipeline under test.
@@ -457,40 +503,24 @@ export function makeHarness(o: { limits?: ProviderHttpLimits; refuse?: boolean }
   return { http, requests, budget, clock };
 }
 
-/** Synthetic stand-in for AirportsRepo.sharedMetro over the worked example only (London → New York). */
-export const airports = {
-  sharedMetro(iatas: Iata[]): string | null {
-    const within = (members: string[]) => iatas.every((i) => members.includes(i));
-    if (within(['LHR', 'LGW'])) return 'LON';
-    if (within(['JFK', 'EWR'])) return 'NYC';
-    return null;
+/** Synthetic stand-in for AirportsRepo.metroOf over the worked example only (London → New York). */
+export const airports: MetroLookup = {
+  metroOf: (iata) => (iata === 'LHR' || iata === 'LGW' ? 'LON' : iata === 'JFK' || iata === 'EWR' ? 'NYC' : null),
+};
+export const noMetro: MetroLookup = { metroOf: () => null };
+
+/** Synthetic allowlist in the plan's ParamsAllowlist shape (not the recorded one; Task 6.6 tests that). */
+export const ALLOWLIST: ParamsAllowlist = {
+  provider: 'travelpayouts',
+  recordedAt: asIsoDate('2026-10-14'),
+  endpoints: {
+    '/aviasales/v3/prices_for_dates': {
+      names: ['currency', 'departure_at', 'destination', 'limit', 'one_way', 'origin', 'page'],
+      values: { currency: ['gbp'], departure_at: 'any', destination: 'any', limit: ['1000'], one_way: ['false'], origin: 'any', page: 'any' },
+    },
   },
+  contentSha256: 'synthetic',
 };
-
-/** Synthetic allowlist parameters in the shape WP4b writes to params-<date>.json (WP4b brief §5.4). */
-export const ALLOWLIST_PARAMS: Record<string, unknown> = {
-  origin: { kind: 'iata', observed: [] },
-  destination: { kind: 'iata', observed: [] },
-  departure_at: { kind: 'iso-month', observed: [] },
-  one_way: { fixed: ['false'], observed: [] },
-  currency: { fixed: ['gbp'], observed: [] },
-  limit: { fixed: ['1000'], observed: [] },
-  page: { kind: 'positive-int', observed: [] },
-};
-
-/** A whole synthetic allowlist document around `params`; `over` replaces top-level fields. */
-export function allowlistWith(params: Record<string, unknown>, over: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    provider: 'travelpayouts',
-    recordedAt: '2026-10-14T00:00:00.000Z',
-    recordedBy: 'synthetic test allowlist',
-    credential: 'header',
-    endpoints: [{ key: 'prices_for_dates', method: 'GET', path: '/aviasales/v3/prices_for_dates', params }],
-    ...over,
-  };
-}
-
-export const ALLOWLIST_JSON = allowlistWith(ALLOWLIST_PARAMS);
 
 export function makeProvider(h: Harness, over: Partial<TravelpayoutsProviderOptions> = {}): FlightProvider {
   return travelpayoutsProvider({
@@ -498,9 +528,9 @@ export function makeProvider(h: Harness, over: Partial<TravelpayoutsProviderOpti
     log: silentLog,
     clock: h.clock,
     token: new Secret(TOKEN),
-    paramsAllowlist: parseTravelpayoutsAllowlist(ALLOWLIST_JSON),
-    airports,
     cacheTtlSeconds: 6 * 3600,
+    paramsAllowlist: ALLOWLIST,
+    airports,
     ...over,
   });
 }
@@ -535,17 +565,15 @@ export function query(over: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
   };
 }
 
-export function cellsFor(
-  origins: Iata[],
-  destinations: Iata[],
-  from: string,
-  to: string,
-  minNights: number,
-  maxNights: number,
-): CellKey[] {
-  return generateCells({ origins, destinations, departureFrom: asIsoDate(from), departureTo: asIsoDate(to), minNights, maxNights }).map(
-    ({ origin, destination, departureDate, returnDate }) => ({ origin, destination, departureDate, returnDate }),
-  );
+export function cellsFor(origin: Iata, destination: Iata, from: string, to: string, minNights: number, maxNights: number): CellKey[] {
+  return generateCells({
+    origins: [origin],
+    destinations: [destination],
+    departureFrom: asIsoDate(from),
+    departureTo: asIsoDate(to),
+    minNights,
+    maxNights,
+  }).map(({ origin: o, destination: d, departureDate, returnDate }) => ({ origin: o, destination: d, departureDate, returnDate }));
 }
 
 export interface RowSpec {
@@ -590,22 +618,24 @@ afterAll(() => server.close());
 
 describe('travelpayouts: empty is per capability (spec §5.2, authorised-cached)', () => {
   it('a schema-valid {"success": true, "data": []} marks every covered cell no_data: zero prices, zero noFares', async () => {
-    const hits: URL[] = [];
+    let hits = 0;
     server.use(
-      http.get(ENDPOINT, ({ request }) => {
-        hits.push(new URL(request.url));
+      http.get(ENDPOINT, () => {
+        hits += 1;
         // synthetic shape: the exact body named as WP6's first failing test
         return HttpResponse.json({ success: true, data: [] });
       }),
     );
-    const d = discoveryOf(makeProvider(makeHarness()));
+    const h = makeHarness();
+    const d = discoveryOf(makeProvider(h));
     const q = query();
     const tile = only(d.plan(q));
     const r = await d.fetchTile(tile, q, ctx());
-    expect(r).toMatchObject({ kind: 'tile', index: 0, prices: [], noFares: [], fetchedAt: NOW });
+    expect(r).toMatchObject({ kind: 'tile', index: 0, pointOfSale: 'unknown', prices: [], noFares: [], fetchedAt: NOW });
     // 11 departure days × 3 nights, all covered and none priced: WP7 records each as no_data.
     expect(r.coveredCells).toHaveLength(33);
-    expect(hits).toHaveLength(1);
+    expect(hits).toBe(1);
+    expect(h.budget.ledger.reservations).toEqual([{ endpointPath: '/aviasales/v3/prices_for_dates', executionId: 'exec-1', tileIndex: 0 }]);
   });
 });
 ```
@@ -613,156 +643,105 @@ describe('travelpayouts: empty is per capability (spec §5.2, authorised-cached)
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/empty.test.ts`
-Expected: FAIL. The suite cannot load, with an import error naming `src/travelpayouts/params.js` (or `provider.js`).
+Expected: FAIL. The suite cannot load, with an import error naming `src/allowlist.js` (or another missing `src/travelpayouts/*.js` module).
 
 - [ ] **Step 3: Implement**
 
-`packages/providers/src/travelpayouts/params.ts`:
+`packages/providers/src/allowlist.ts` (first cut; Task 6.6 appends `assertParamsAllowed`):
 
 ```ts
 /**
- * Travelpayouts request facts and the dated parameter allowlist. Spec §2 (Travelpayouts row) and
- * §5.2 "Point of sale": `currency=gbp` only, `market` and `trip_class` never sent, all
- * hard-coded. The allowlist file `fixtures/recorded/travelpayouts/params-<date>.json`, written by
- * WP4b in the shape of its brief §5.4, enumerates parameter names and values, and the adapter
- * enforces it.
+ * The dated parameter allowlist shared by the provider adapters. Spec §5.2: the allowlist
+ * enumerates parameter names and values, and tests assert both. Plan decision 6: the runtime
+ * allowlist is a code constant per provider, asserted equal to WP4b's recorded file, which
+ * carries a contentSha256.
  */
+import type { IsoDate, ProviderId } from '@gmt/core';
 
-/** Public Data API host; the only host in this provider's egress allowlist (spec §5.3). */
-export const TRAVELPAYOUTS_HOST = 'api.travelpayouts.com';
-
-/** The only endpoint this adapter calls (spec §2); also the ledger endpoint_path (path only, spec §5.3). */
-export const PRICES_FOR_DATES_PATH = '/aviasales/v3/prices_for_dates';
-
-/**
- * Fixed parameters, hard-coded (spec §5.2). `market` and `trip_class` are absent on purpose:
- * the spike proved the vendor ignores both (spec §2 fact 1).
- */
-export const FIXED_PARAMS = { one_way: 'false', currency: 'gbp', limit: '1000' } as const;
-
-/** Parameters whose value varies per request, with the WP4b value kind each carries. `return_at` is never sent. */
-export const DYNAMIC_PARAM_KINDS = { origin: 'iata', destination: 'iata', departure_at: 'iso-month', page: 'positive-int' } as const;
-
-type DynamicKind = (typeof DYNAMIC_PARAM_KINDS)[keyof typeof DYNAMIC_PARAM_KINDS];
-
-/** The adapter's own pattern per WP4b kind; iso-month also rejects months 00 and 13. */
-const KIND_PATTERNS: Readonly<Record<DynamicKind, RegExp>> = {
-  iata: /^[A-Z]{3}$/,
-  'iso-month': /^\d{4}-(0[1-9]|1[0-2])$/,
-  'positive-int': /^[1-9]\d*$/,
-};
-
-/** The parsed allowlist: fixed name → exact value; dynamic name → pattern its value must match. */
-export interface TravelpayoutsParamsAllowlist {
-  readonly provider: 'travelpayouts';
-  readonly endpointPath: typeof PRICES_FOR_DATES_PATH;
-  readonly recordedAt: string;
-  readonly fixed: Readonly<Record<string, string>>;
-  readonly dynamic: Readonly<Record<string, RegExp>>;
+/** Plan contract: per endpoint, the parameter names and each name's allowed values ('any' = per-request value). */
+export interface ParamsAllowlist {
+  provider: ProviderId;
+  recordedAt: IsoDate;
+  endpoints: Record<string, { names: string[]; values: Record<string, string[] | 'any'> }>;
+  contentSha256: string;
 }
 
-/** Raised when the allowlist file or an outgoing request breaks the allowlist; fails closed. */
+/** Raised when an outgoing request breaks the allowlist; requests fail closed. */
 export class ParamsAllowlistError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ParamsAllowlistError';
   }
 }
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function sameNames(actual: readonly string[], expected: readonly string[]): boolean {
-  return [...actual].sort().join(',') === [...expected].sort().join(',');
-}
-
-/**
- * Parses WP4b's params-<date>.json (its brief §5.4) for the prices_for_dates endpoint. Spec §5.2:
- * the allowlist enumerates names and values, and the adapter's hard-coded values must equal it.
- * why: a recording that disagrees with the code means the vendor or the code drifted; refuse to
- * construct the provider rather than send either version.
- */
-export function parseTravelpayoutsAllowlist(json: unknown): TravelpayoutsParamsAllowlist {
-  if (!isRecord(json)) throw new ParamsAllowlistError('allowlist is not an object');
-  if (json.provider !== 'travelpayouts') throw new ParamsAllowlistError('allowlist provider must be travelpayouts');
-  // why: spec §2 fact 8, the credential travels in a header; an allowlist recorded any other way is refused.
-  if (json.credential !== 'header') throw new ParamsAllowlistError('allowlist credential must be header');
-  const { recordedAt } = json;
-  if (typeof recordedAt !== 'string') throw new ParamsAllowlistError('allowlist recordedAt must be a string');
-  const endpoints: readonly unknown[] = Array.isArray(json.endpoints) ? json.endpoints : [];
-  const endpoint = endpoints.find((e) => isRecord(e) && e.path === PRICES_FOR_DATES_PATH);
-  if (!isRecord(endpoint) || !isRecord(endpoint.params)) {
-    throw new ParamsAllowlistError(`allowlist has no ${PRICES_FOR_DATES_PATH} endpoint`);
-  }
-  const params = endpoint.params;
-  const expected = [...Object.keys(FIXED_PARAMS), ...Object.keys(DYNAMIC_PARAM_KINDS)];
-  if (!sameNames(Object.keys(params), expected)) {
-    throw new ParamsAllowlistError(
-      `parameters ${Object.keys(params).sort().join(',')} differ from the adapter's ${[...expected].sort().join(',')}`,
-    );
-  }
-  const fixed: Record<string, string> = {};
-  for (const [name, value] of Object.entries(FIXED_PARAMS)) {
-    const rule = params[name];
-    if (!isRecord(rule) || !Array.isArray(rule.fixed) || rule.fixed.length !== 1 || rule.fixed[0] !== value) {
-      throw new ParamsAllowlistError(`parameter ${name} must be fixed to exactly ${value} in the allowlist`);
-    }
-    fixed[name] = value;
-  }
-  const dynamic: Record<string, RegExp> = {};
-  for (const [name, kind] of Object.entries(DYNAMIC_PARAM_KINDS)) {
-    const rule = params[name];
-    if (!isRecord(rule) || rule.kind !== kind) {
-      throw new ParamsAllowlistError(`parameter ${name} must be of kind ${kind} in the allowlist`);
-    }
-    dynamic[name] = KIND_PATTERNS[kind];
-  }
-  return { provider: 'travelpayouts', endpointPath: PRICES_FOR_DATES_PATH, recordedAt, fixed, dynamic };
-}
 ```
 
-`packages/providers/src/travelpayouts/tiles.ts`:
+`packages/providers/src/travelpayouts/params.ts` (first cut; Task 6.6 appends `TRAVELPAYOUTS_PARAMS`):
 
 ```ts
 /**
- * Travelpayouts month tiling. Spec §5.2: one tile per (origin or shared metro, destination,
- * departure month) on /aviasales/v3/prices_for_dates with departure_at=YYYY-MM; tiles partition
- * the query's cells; plan is pure and deterministic. No airport is named here (spec §1).
+ * Travelpayouts request facts. Spec §2 (Travelpayouts row) and §5.2 "Point of sale":
+ * `currency=gbp` only, `market` and `trip_class` never sent, all hard-coded.
+ */
+
+/** Public Data API host; the only host in this provider's egress allowlist (spec §5.3). */
+export const TRAVELPAYOUTS_HOST = 'api.travelpayouts.com';
+
+/** The only endpoint this adapter calls (spec §2); also the ledger endpoint_path and the allowlist key. */
+export const PRICES_FOR_DATES_PATH = '/aviasales/v3/prices_for_dates';
+
+/**
+ * Fixed parameters (spec §5.2). `market` and `trip_class` are absent on purpose: the spike
+ * proved the vendor ignores both (spec §2 fact 1).
+ */
+export const FIXED_PARAMS = { one_way: 'false', currency: 'gbp', limit: '1000' } as const;
+
+/**
+ * Names that must never be sent. `token`: the credential travels in X-Access-Token only (spec §2
+ * fact 8). `market`, `trip_class`: ignored by the vendor (fact 1). `return_at`: month tiles send
+ * none (spec §5.2).
+ */
+export const FORBIDDEN_PARAM_NAMES = ['token', 'market', 'trip_class', 'return_at'] as const;
+```
+
+`packages/providers/src/travelpayouts/tiles.ts` (first cut; Task 6.3 replaces `originParam`):
+
+```ts
+/**
+ * Travelpayouts month tiling. Spec §5.2 (rev 10): the query stays per (origin, destination) pair;
+ * one `month` tile per departure month on /aviasales/v3/prices_for_dates; tiles partition the
+ * pair's cells; plan is pure and deterministic. No airport is named here (spec §1).
  */
 import { type CellKey, type DiscoveryQuery, generateCells, type Iata, type IsoMonth, monthOf, type TilePlan } from '@gmt/core';
 
 /** The part of AirportsRepo (WP3) the adapter needs; the plan's constructor `airports` option. */
 export interface MetroLookup {
-  sharedMetro(iatas: Iata[]): string | null;
+  metroOf(iata: Iata): string | null;
 }
 
-/** One vendor `origin` parameter and the definition airports whose rows it returns. */
-export interface OriginGroup {
-  readonly param: string;
-  readonly members: readonly Iata[];
-}
-
-/** What one tile sends and how its rows are attributed back (spec §5.2). */
+/** What one tile sends (`origin` may be a metro code) and which pair its rows are filtered to. */
 export interface TileParams {
   readonly origin: string;
-  readonly members: ReadonlySet<Iata>;
+  readonly pairOrigin: Iata;
   readonly destination: Iata;
-  readonly departureMonth: IsoMonth;
+  readonly month: IsoMonth;
 }
 
-/** Origin grouping. First cut: one group per airport; Task 6.3 adds the shared-metro collapse. */
-export function originGroups(origins: readonly Iata[], _airports: MetroLookup): OriginGroup[] {
-  return origins.map((o) => ({ param: o, members: [o] }));
+/** The vendor `origin` parameter. First cut: the airport; Task 6.3 adds the metro code. */
+export function originParam(origin: Iata, _airports: MetroLookup): string {
+  return origin;
 }
 
-function distinct<T>(xs: readonly T[]): T[] {
-  return [...new Set(xs)];
-}
-
-/** The cells to tile: `q.cells` when set (spec §5.1 re-plan), else the query's full space (spec §6.1 order). */
+/**
+ * The cells to tile: `q.cells` when set (spec §5.1 re-plan), else the pair's full space in
+ * generation order (spec §6.1). Every cell must belong to the query's pair (plan, provider port).
+ */
 export function cellsOf(q: DiscoveryQuery): CellKey[] {
-  if (q.cells !== undefined) return q.cells;
+  if (q.cells !== undefined) {
+    if (q.cells.some((c) => c.origin !== q.origin || c.destination !== q.destination)) {
+      throw new Error('a Travelpayouts query is per (origin, destination) pair; every cell must belong to it');
+    }
+    return q.cells;
+  }
   return generateCells({
     origins: [q.origin],
     destinations: [q.destination],
@@ -773,59 +752,26 @@ export function cellsOf(q: DiscoveryQuery): CellKey[] {
   }).map(({ origin, destination, departureDate, returnDate }) => ({ origin, destination, departureDate, returnDate }));
 }
 
-/**
- * Spec §5.2 Travelpayouts tiling. Each cell lands in exactly one bucket (its origin group, its
- * destination, its departure month), so the tiles partition the cells.
- * why: the §5.1 TileRequest union has no month variant (brief mismatch 1); 'month-pair' with
- * returnMonth = departMonth carries the month, and returnMonth is ignored because return_at is
- * never sent.
- */
-export function planMonthTiles(q: DiscoveryQuery, airports: MetroLookup): TilePlan[] {
-  const cells = cellsOf(q);
-  const groups = originGroups(distinct(cells.map((c) => c.origin)), airports);
-  const destinations = distinct(cells.map((c) => c.destination));
-  const buckets = new Map<string, { month: IsoMonth; cells: CellKey[] }>();
-  for (const group of groups) {
-    for (const destination of destinations) {
-      for (const cell of cells) {
-        if (cell.destination !== destination || !group.members.includes(cell.origin)) continue;
-        const month = monthOf(cell.departureDate);
-        const key = `${group.param}|${destination}|${month}`;
-        const bucket = buckets.get(key);
-        if (bucket === undefined) buckets.set(key, { month, cells: [cell] });
-        else bucket.cells.push(cell);
-      }
-    }
+/** Spec §5.2: one `month` tile per departure month of the pair; each cell lands in exactly one. */
+export function planMonthTiles(q: DiscoveryQuery): TilePlan[] {
+  const buckets = new Map<IsoMonth, CellKey[]>();
+  for (const cell of cellsOf(q)) {
+    const month = monthOf(cell.departureDate);
+    const bucket = buckets.get(month);
+    if (bucket === undefined) buckets.set(month, [cell]);
+    else bucket.push(cell);
   }
-  return [...buckets.values()].map(
-    (b, index): TilePlan => ({
-      index,
-      coveredCells: b.cells,
-      request: { kind: 'month-pair', departMonth: b.month, returnMonth: b.month },
-    }),
-  );
+  return [...buckets.entries()].map(([month, cells], index): TilePlan => ({ index, coveredCells: cells, request: { kind: 'month', month } }));
 }
 
-/**
- * Re-derives a tile's vendor parameters from its covered cells, so fetchTile needs nothing the
- * TilePlan does not carry. Throws on a tile that is not a Travelpayouts month tile.
- */
-export function tileParams(plan: TilePlan, airports: MetroLookup): TileParams {
-  if (plan.request.kind !== 'month-pair') {
-    throw new Error(`travelpayouts tiles are month tiles, got ${plan.request.kind}`);
-  }
-  const groups = originGroups(distinct(plan.coveredCells.map((c) => c.origin)), airports);
-  const destinations = distinct(plan.coveredCells.map((c) => c.destination));
-  const [group] = groups;
-  const [destination] = destinations;
-  if (groups.length !== 1 || destinations.length !== 1 || group === undefined || destination === undefined) {
-    throw new Error('a travelpayouts tile covers exactly one origin group and one destination');
-  }
-  return { origin: group.param, members: new Set(group.members), destination, departureMonth: plan.request.departMonth };
+/** A tile's vendor parameters, from the plan and the pair. Throws on a tile that is not a month tile. */
+export function tileParams(plan: TilePlan, q: DiscoveryQuery, airports: MetroLookup): TileParams {
+  if (plan.request.kind !== 'month') throw new Error(`travelpayouts tiles are month tiles, got ${plan.request.kind}`);
+  return { origin: originParam(q.origin, airports), pairOrigin: q.origin, destination: q.destination, month: plan.request.month };
 }
 ```
 
-`packages/providers/src/travelpayouts/response.ts`:
+`packages/providers/src/travelpayouts/response.ts` (first cut):
 
 ```ts
 /**
@@ -833,8 +779,10 @@ export function tileParams(plan: TilePlan, airports: MetroLookup): TileParams {
  * schema-valid success envelope with zero entries → no_data; malformed or success:false → parse.
  */
 
-/** A checked envelope: rows still unparsed, currency as the vendor wrote it (lower-case ISO). */
-export type Envelope = { ok: true; data: readonly unknown[]; currency: string | null } | { ok: false; reason: string };
+/** A checked envelope (rows still unparsed, currency as the vendor wrote it), or a machine reason plus vendor detail. */
+export type Envelope =
+  | { ok: true; data: readonly unknown[]; currency: string | null }
+  | { ok: false; reason: 'malformed-envelope' | 'vendor-error'; detail: string | null };
 
 /** First cut: one failure reason. Task 6.5 adds vendor-error. */
 export function readEnvelope(body: unknown): Envelope {
@@ -844,7 +792,7 @@ export function readEnvelope(body: unknown): Envelope {
       return { ok: true, data: b.data, currency: typeof b.currency === 'string' ? b.currency : null };
     }
   }
-  return { ok: false, reason: 'malformed-envelope' };
+  return { ok: false, reason: 'malformed-envelope', detail: null };
 }
 ```
 
@@ -854,8 +802,7 @@ export function readEnvelope(body: unknown): Envelope {
 /**
  * Travelpayouts / Aviasales Data API adapter (WP6). Spec §2 (Travelpayouts row, fact 1), §5.1,
  * §5.2. Discovery only: cached round-trip prices from /aviasales/v3/prices_for_dates, one month
- * tile per (origin or shared metro, destination, departure month). Returns raw vendor shapes;
- * the engine normalises (spec §5.6).
+ * tile per pair and departure month. Returns raw vendor shapes; the engine normalises (spec §5.6).
  */
 import {
   type Cabin,
@@ -871,8 +818,9 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
+import type { ParamsAllowlist } from '../allowlist.js';
 import type { HttpKit } from '../http/httpKit.js';
-import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST, type TravelpayoutsParamsAllowlist } from './params.js';
+import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { readEnvelope } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
@@ -883,27 +831,27 @@ export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
   provenanceNote:
     'Cached round-trip prices that Aviasales users found in the last 48 hours, from the authorised Travelpayouts Data API. Economy only; point of sale unknown; not a fare quote; constraints are not checked.',
 };
-
 /** Spec §5.2: from recorded fixtures only (Task 6.8 derives it from them). A row states a price and nothing else checkable. */
 export const TRAVELPAYOUTS_SUPPLIED_FIELDS: readonly SuppliedField[] = ['price'];
-/** Spec §2 fact 1: trip_class is ignored, so economy only. */
+/** Spec §2 fact 1 and §5.2 (rev 10): trip_class is ignored, so economy only; the engine handles other cabins. */
 export const TRAVELPAYOUTS_CABINS: readonly Cabin[] = ['economy'];
-/** Spec §2: market is ignored, so the point of sale is unknown on every price (brief mismatch 3). */
+/** Spec §2: market is ignored, so every tile's point of sale is unknown. */
 export const TRAVELPAYOUTS_POINT_OF_SALE = 'unknown' as const;
 /** Spec §5.2: limit=1000 per page. */
 export const PAGE_LIMIT = 1000;
 /** Hard stop on pages per tile; a tile that reaches it says so in notes. */
 export const MAX_PAGES = 50;
 
+/** The plan's constructor options, field for field. */
 export interface TravelpayoutsProviderOptions {
   http: HttpKit;
   log: Logger;
   clock: Clock;
   token: Secret;
-  paramsAllowlist: TravelpayoutsParamsAllowlist;
-  airports: MetroLookup;
-  /** Response cache window, from TRAVELPAYOUTS_CACHE_TTL_HOURS (spec §5.3 "TTLs from config"; brief mismatch 5). */
+  /** Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, sibling pairs' metro requests are cache hits. */
   cacheTtlSeconds: number;
+  paramsAllowlist: ParamsAllowlist;
+  airports: MetroLookup;
 }
 
 /** The request URL for one page of a tile. The token never appears here (spec §2 fact 8: header only). */
@@ -911,7 +859,7 @@ export function buildRequestUrl(tp: TileParams, page: number): URL {
   const url = new URL(`https://${TRAVELPAYOUTS_HOST}${PRICES_FOR_DATES_PATH}`);
   url.searchParams.set('origin', tp.origin);
   url.searchParams.set('destination', tp.destination);
-  url.searchParams.set('departure_at', tp.departureMonth);
+  url.searchParams.set('departure_at', tp.month);
   for (const [name, value] of Object.entries(FIXED_PARAMS)) url.searchParams.set(name, value);
   url.searchParams.set('page', String(page));
   return url;
@@ -919,8 +867,8 @@ export function buildRequestUrl(tp: TileParams, page: number): URL {
 
 /** Spec §5.1 FlightProvider for Travelpayouts. First cut: one page, no row attribution yet. */
 export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): FlightProvider {
-  async function fetchTile(plan: TilePlan, _q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult> {
-    const tp = tileParams(plan, opts.airports);
+  async function fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult> {
+    const tp = tileParams(plan, q, opts.airports);
     const res = await opts.http.request({
       providerId: 'travelpayouts',
       executionId: ctx.executionId,
@@ -949,6 +897,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
       index: plan.index,
       coveredCells: plan.coveredCells,
       fetchedAt: res.fetchedAt,
+      pointOfSale: TRAVELPAYOUTS_POINT_OF_SALE,
       prices: [],
       noFares: [],
       notes: [`rows-received:${env.data.length}`, 'pages:1'],
@@ -960,7 +909,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     displayName: 'Aviasales cache',
     suppliedFields: TRAVELPAYOUTS_SUPPLIED_FIELDS,
     cabins: TRAVELPAYOUTS_CABINS,
-    discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q, opts.airports), fetchTile },
+    discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q), fetchTile },
     healthcheck: async () => ({ ok: true, detail: 'token configured' }),
   };
 }
@@ -981,7 +930,10 @@ git add packages/providers && git commit -m "wp06: travelpayouts empty envelope 
 
 **Files:** replace `src/travelpayouts/response.ts`; create `test/travelpayouts/response.test.ts`.
 
-**Interfaces:** consumes `cellKeyString`, `toEpochDay` (WP1), `MINOR_EXPONENT`, `validateVendorUrl` (WP2), `iataSchema`, `isoDateSchema` (WP0). Produces `attributeRows`, `attributionNotes`, `resolveCurrency`, `majorToMinor`, `vendorLinkFor`, `DROP_REASONS`, `AVIASALES_BASE`, `AVIASALES_LINK_ALLOWLIST`.
+**Interfaces:**
+
+- Consumes `cellKeyString`, `iataSchema`, `isoDateSchema` (WP0), `toEpochDay` (WP1), and `MINOR_EXPONENT`, `LINK_ALLOWLIST`, `validateVendorUrl` (WP2).
+- Produces `attributeRows`, `attributionNotes`, `resolveCurrency`, `majorToMinor`, `vendorLinkFor`, `DROP_REASONS` and `AVIASALES_BASE`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -990,31 +942,23 @@ git add packages/providers && git commit -m "wp06: travelpayouts empty envelope 
 ```ts
 import { asIata, type CellKey } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import {
-  attributeRows,
-  attributionNotes,
-  majorToMinor,
-  resolveCurrency,
-  vendorLinkFor,
-} from '../../src/travelpayouts/response.js';
+import { attributeRows, attributionNotes, majorToMinor, resolveCurrency, vendorLinkFor } from '../../src/travelpayouts/response.js';
 import { cellsOf } from '../../src/travelpayouts/tiles.js';
 import { query, row } from './harness.js';
 
-const LHR = asIata('LHR');
-const JFK = asIata('JFK');
 const covered: CellKey[] = cellsOf(query());
-const input = { coveredCells: covered, members: new Set([LHR]), destination: JFK, minNights: 10, maxNights: 12, currency: 'GBP', exponent: 2 };
+const input = { coveredCells: covered, origin: asIata('LHR'), destination: asIata('JFK'), minNights: 10, maxNights: 12, currency: 'GBP', exponent: 2 };
 const LINK = 'https://www.aviasales.com/search/synthetic?t=1';
 
-describe('attributeRows: cell keys from the response (spec §5.2)', () => {
-  // synthetic shapes, one per drop reason
+describe('attributeRows: cell keys from the response, filtered to the pair (spec §5.2)', () => {
+  // synthetic shapes, one per drop reason; a metro (LON) response also carries the sibling airport's rows
   const rows: unknown[] = [
     row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }), // 11 nights: kept
     row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 398 }), // same cell, another fare: kept (engine keeps the minimum, §5.6)
     row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-14', ret: '2027-03-24', price: 401, link: 'https://evil.example/x' }), // kept, link refused
     row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-30', price: 350 }), // 18 nights: out-of-band
     row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-25', ret: '2027-04-05', price: 380 }), // after the window: outside-tile
-    row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 300 }), // not a member: other-origin
+    row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 300 }), // sibling airport of the metro: other-origin
     row({ origin: 'LHR', dest: 'EWR', dep: '2027-03-12', ret: '2027-03-23', price: 300 }), // other-destination
     row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: null, price: 200 }), // one-way
     { origin_airport: 'LHR' }, // malformed-row
@@ -1023,7 +967,7 @@ describe('attributeRows: cell keys from the response (spec §5.2)', () => {
   ];
   const a = attributeRows(rows, input);
 
-  it('keeps rows whose response dates name a covered cell, keyed by those dates', () => {
+  it('keeps rows whose response dates name a covered cell of the pair, keyed by those dates', () => {
     expect(a.prices).toEqual([
       { origin: 'LHR', destination: 'JFK', departureDate: '2027-03-12', returnDate: '2027-03-23', amountMinor: 41200, currency: 'GBP', vendorLink: LINK },
       { origin: 'LHR', destination: 'JFK', departureDate: '2027-03-12', returnDate: '2027-03-23', amountMinor: 39800, currency: 'GBP', vendorLink: LINK },
@@ -1084,21 +1028,21 @@ describe('majorToMinor (spec §6.3: integer minor units, no float money)', () =>
   });
 });
 
-describe('resolveCurrency (spec §2: currency read from the response)', () => {
+describe('resolveCurrency (spec §2: currency read from the response; rev 10: vendor text never in reason)', () => {
   it('upper-cases the vendor code and finds its exponent', () => {
     expect(resolveCurrency('gbp')).toEqual({ ok: true, code: 'GBP', exponent: 2 });
     expect(resolveCurrency('usd')).toEqual({ ok: true, code: 'USD', exponent: 2 });
   });
   it.each([
-    [null, 'currency-missing'],
-    ['g1p', 'currency-malformed: g1p'],
-    ['qqq', 'currency-exponent-unknown: QQQ'],
-  ] as const)('%s → %s', (raw, reason) => {
-    expect(resolveCurrency(raw)).toEqual({ ok: false, reason });
+    [null, 'currency-missing', null],
+    ['g1p', 'currency-malformed', 'g1p'],
+    ['qqq', 'currency-exponent-unknown', 'QQQ'],
+  ] as const)('%s → %s', (raw, reason, detail) => {
+    expect(resolveCurrency(raw)).toEqual({ ok: false, reason, detail });
   });
 });
 
-describe('vendorLinkFor (spec §5.2 vendor links: aviasales.com allowlist)', () => {
+describe('vendorLinkFor (spec §5.2 vendor links: LINK_ALLOWLIST.travelpayouts)', () => {
   it('prefixes the relative link with the Aviasales site', () => {
     expect(vendorLinkFor('/search/synthetic?t=1')).toBe(LINK);
   });
@@ -1111,7 +1055,7 @@ describe('vendorLinkFor (spec §5.2 vendor links: aviasales.com allowlist)', () 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/response.test.ts`
-Expected: FAIL with `SyntaxError: The requested module '../../src/travelpayouts/response.js' does not provide an export named 'attributeRows'` (or Vitest's equivalent "is not a function").
+Expected: FAIL with `does not provide an export named 'attributeRows'`.
 
 - [ ] **Step 3: Implement**
 
@@ -1120,7 +1064,9 @@ Replace `packages/providers/src/travelpayouts/response.ts` with:
 ```ts
 /**
  * Travelpayouts response parsing and row attribution. Spec §2 (raw shapes, currency from the
- * response), §5.2 ("Empty is per capability", "Cell keys from the response", vendor links).
+ * response), §5.2 ("Empty is per capability", "Cell keys from the response", rows filtered to the
+ * pair, vendor links). Reasons are machine words only; vendor text travels as `detail` and ends up
+ * in the error message → last_error (spec rev 10).
  */
 import {
   type CellKey,
@@ -1129,14 +1075,17 @@ import {
   type IsoDate,
   iataSchema,
   isoDateSchema,
+  LINK_ALLOWLIST,
   MINOR_EXPONENT,
   type RawCalendarPrice,
   toEpochDay,
   validateVendorUrl,
 } from '@gmt/core';
 
-/** A checked envelope: rows still unparsed, currency as the vendor wrote it (lower-case ISO). */
-export type Envelope = { ok: true; data: readonly unknown[]; currency: string | null } | { ok: false; reason: string };
+/** A checked envelope (rows still unparsed, currency as the vendor wrote it), or a machine reason plus vendor detail. */
+export type Envelope =
+  | { ok: true; data: readonly unknown[]; currency: string | null }
+  | { ok: false; reason: 'malformed-envelope' | 'vendor-error'; detail: string | null };
 
 /** First cut: one failure reason. Task 6.5 adds vendor-error. */
 export function readEnvelope(body: unknown): Envelope {
@@ -1146,7 +1095,7 @@ export function readEnvelope(body: unknown): Envelope {
       return { ok: true, data: b.data, currency: typeof b.currency === 'string' ? b.currency : null };
     }
   }
-  return { ok: false, reason: 'malformed-envelope' };
+  return { ok: false, reason: 'malformed-envelope', detail: null };
 }
 
 /** Why a row was not returned; each is counted in notes (spec §5.2). */
@@ -1172,16 +1121,18 @@ export const DROP_REASONS: readonly DropReason[] = [
 
 /** The Aviasales site the vendor's relative `link` is relative to (docs/providers.md). */
 export const AVIASALES_BASE = 'https://www.aviasales.com';
-/** Spec §5.2: the Travelpayouts link allowlist. */
-export const AVIASALES_LINK_ALLOWLIST: readonly string[] = ['aviasales.com'];
 
-/** Spec §2: the envelope's currency, upper-cased to ISO 4217; absent → parse (brief mismatch 13). */
-export function resolveCurrency(raw: string | null): { ok: true; code: string; exponent: number } | { ok: false; reason: string } {
-  if (raw === null) return { ok: false, reason: 'currency-missing' };
+/** Spec §2: the envelope's currency, upper-cased to ISO 4217; absent → parse (brief mismatch 3). */
+export function resolveCurrency(
+  raw: string | null,
+):
+  | { ok: true; code: string; exponent: number }
+  | { ok: false; reason: 'currency-missing' | 'currency-malformed' | 'currency-exponent-unknown'; detail: string | null } {
+  if (raw === null) return { ok: false, reason: 'currency-missing', detail: null };
   const code = raw.toUpperCase();
-  if (!/^[A-Z]{3}$/.test(code)) return { ok: false, reason: `currency-malformed: ${raw.slice(0, 10)}` };
+  if (!/^[A-Z]{3}$/.test(code)) return { ok: false, reason: 'currency-malformed', detail: raw.slice(0, 10) };
   const exponent = MINOR_EXPONENT[code];
-  if (exponent === undefined) return { ok: false, reason: `currency-exponent-unknown: ${code}` };
+  if (exponent === undefined) return { ok: false, reason: 'currency-exponent-unknown', detail: code };
   return { ok: true, code, exponent };
 }
 
@@ -1199,20 +1150,20 @@ export function majorToMinor(price: number, exponent: number): number | null {
 }
 
 /**
- * Spec §5.2 vendor links: the relative Aviasales path prefixed with the site, then checked
- * against the aviasales.com allowlist by core's validateVendorUrl (WP2). Null when refused.
- * why: only a site-relative path is accepted; an absolute or protocol-relative value from the
- * vendor is refused rather than resolved.
+ * Spec §5.2 vendor links: the relative Aviasales path prefixed with the site, then checked by
+ * core's validateVendorUrl against LINK_ALLOWLIST.travelpayouts (WP2). Null when refused.
+ * why: only a site-relative path is accepted; an absolute or protocol-relative value is refused, never resolved.
  */
 export function vendorLinkFor(link: string): string | null {
   if (!link.startsWith('/') || link.startsWith('//')) return null;
-  const booking = validateVendorUrl(`${AVIASALES_BASE}${link}`, [...AVIASALES_LINK_ALLOWLIST]);
+  const booking = validateVendorUrl(`${AVIASALES_BASE}${link}`, LINK_ALLOWLIST.travelpayouts);
   return booking.kind === 'get' ? booking.url : null;
 }
 
 export interface AttributionInput {
   coveredCells: readonly CellKey[];
-  members: ReadonlySet<Iata>;
+  /** The pair's origin airport; rows from other airports of a metro response are dropped. */
+  origin: Iata;
   destination: Iata;
   minNights: number;
   maxNights: number;
@@ -1254,9 +1205,8 @@ function readRow(x: unknown): Row | null {
 }
 
 /**
- * Vendor times are local with an offset (`2021-09-14T08:55:00+03:00`); the first ten
- * characters are the local calendar date, which is the cell's date (spec §6.1: calendar dates
- * never pass through UTC).
+ * Vendor times are local with an offset (`2021-09-14T08:55:00+03:00`); the first ten characters
+ * are the local calendar date, which is the cell's date (spec §6.1: never through UTC).
  */
 function localDate(s: string): IsoDate | null {
   const r = isoDateSchema.safeParse(s.slice(0, 10));
@@ -1265,8 +1215,8 @@ function localDate(s: string): IsoDate | null {
 
 /**
  * Spec §5.2: rows are attributed by origin_airport and destination_airport and their own dates,
- * filtered to the tile's member airports, the nights band and the covered cells. Every row that
- * is not returned is counted under exactly one DropReason.
+ * filtered to the pair, the nights band and the covered cells. Every row that is not returned
+ * is counted under exactly one DropReason.
  */
 export function attributeRows(rows: readonly unknown[], input: AttributionInput): Attribution {
   const covered = new Set(input.coveredCells.map(cellKeyString));
@@ -1284,7 +1234,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       continue;
     }
     const origin = iataSchema.safeParse(row.origin_airport);
-    if (!origin.success || !input.members.has(origin.data)) {
+    if (!origin.success || origin.data !== input.origin) {
       dropped['other-origin'] += 1;
       continue;
     }
@@ -1348,26 +1298,26 @@ Expected: PASS, `21 passed` (4 attribution, 8 majorToMinor, 4 resolveCurrency, 5
 git add packages/providers && git commit -m "wp06: travelpayouts row attribution by response dates, currency and vendor link"
 ```
 
-### Task 6.3: Shared-metro collapse; tiles partition the cells
+### Task 6.3: Metro origin parameter; month tiles partition the pair's cells
 
-**Files:** modify `src/travelpayouts/tiles.ts` (replace `originGroups`); create `test/travelpayouts/tiles.test.ts`.
+**Files:** modify `src/travelpayouts/tiles.ts` (replace `originParam`); create `test/travelpayouts/tiles.test.ts`.
 
-**Interfaces:** consumes `MetroLookup.sharedMetro`, `cellKeyString`. Produces the final `originGroups`.
+**Interfaces:** consumes `MetroLookup.metroOf` and `cellKeyString`. Produces the final `originParam`.
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/providers/test/travelpayouts/tiles.test.ts`:
 
 ```ts
-import { asIata, asIsoDate, asIsoMonth, type CellKey, cellKeyString, type TilePlan } from '@gmt/core';
+import { asIata, asIsoDate, type CellKey, cellKeyString, type DiscoveryQuery, type Iata, type TilePlan } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { cellsOf, planMonthTiles, tileParams } from '../../src/travelpayouts/tiles.js';
-import { airports, cellsFor, query } from './harness.js';
+import { airports, cellsFor, noMetro, query } from './harness.js';
 
 const [LHR, LGW, JFK, EWR] = [asIata('LHR'), asIata('LGW'), asIata('JFK'), asIata('EWR')];
-const noMetro = { sharedMetro: (): string | null => null };
-// Spec §5.2 worked example: LHR, LGW → JFK, EWR; 182 days (2027-01-01 … 2027-07-01, 7 months); 10–21 nights.
-const worked = cellsFor([LHR, LGW], [JFK, EWR], '2027-01-01', '2027-07-01', 10, 21);
+/** Spec §5.2 worked example, one pair: 182 days (2027-01-01 … 2027-07-01, 7 months), 10–21 nights. */
+const worked = (origin: Iata, destination: Iata): DiscoveryQuery =>
+  query({ origin, destination, departureFrom: asIsoDate('2027-01-01'), departureTo: asIsoDate('2027-07-01'), minNights: 10, maxNights: 21 });
 
 function expectPartition(cells: readonly CellKey[], plans: readonly TilePlan[]): void {
   const keys = plans.flatMap((p) => p.coveredCells.map(cellKeyString));
@@ -1376,71 +1326,58 @@ function expectPartition(cells: readonly CellKey[], plans: readonly TilePlan[]):
   expect(new Set(keys)).toEqual(new Set(cells.map(cellKeyString)));
   for (const [i, p] of plans.entries()) {
     expect(p.index).toBe(i);
-    expect(new Set(p.coveredCells.map((c) => c.destination)).size).toBe(1);
     const months = [...new Set(p.coveredCells.map((c) => c.departureDate.slice(0, 7)))];
-    expect(months).toEqual([p.request.kind === 'month-pair' ? p.request.departMonth : 'not a month tile']);
+    expect(months).toEqual([p.request.kind === 'month' ? p.request.month : 'not a month tile']);
   }
 }
 
-describe('planMonthTiles (spec §5.2 Travelpayouts tiling)', () => {
-  it('worked example: 2 origins sharing LON × 2 destinations × 7 months = 14 tiles', () => {
-    expect(worked).toHaveLength(2 * 2 * 182 * 12);
-    expect(planMonthTiles(query({ cells: worked }), airports)).toHaveLength(14);
+describe('planMonthTiles (spec §5.2 rev 10: per pair, one month tile per departure month)', () => {
+  it("one tile per departure month: 7 for the worked example's 182-day window", () => {
+    const plans = planMonthTiles(worked(LHR, JFK));
+    expect(plans.map((p) => p.request)).toEqual(
+      ['2027-01', '2027-02', '2027-03', '2027-04', '2027-05', '2027-06', '2027-07'].map((m) => ({ kind: 'month', month: m })),
+    );
   });
 
-  it('by airport when the airports table gives no shared metro: 28 tiles', () => {
-    expect(planMonthTiles(query({ cells: worked }), noMetro)).toHaveLength(28);
-  });
-
-  it('ignores a metro code that is not three upper-case letters', () => {
-    expect(planMonthTiles(query({ cells: worked }), { sharedMetro: () => 'LONDON' })).toHaveLength(28);
+  it('worked example: 4 pairs × 7 months = 28 logical tiles', () => {
+    const pairs = [worked(LHR, JFK), worked(LHR, EWR), worked(LGW, JFK), worked(LGW, EWR)];
+    expect(pairs.reduce((n, q) => n + planMonthTiles(q).length, 0)).toBe(28);
   });
 
   it.each([
-    ['worked example, shared metro', worked, airports],
-    ['worked example, by airport', worked, noMetro],
-    ['single-origin query without cells', cellsOf(query()), airports],
-    ['every 7th cell of the worked example (re-plan subset)', worked.filter((_, i) => i % 7 === 0), airports],
-  ] as const)('tiles partition the cells: %s', (_label, cells, lookup) => {
-    expectPartition(cells, planMonthTiles(query({ cells: [...cells] }), lookup));
+    ['the default query', query()],
+    ['the worked example pair', worked(LHR, JFK)],
+    ['every 7th cell of the worked pair (re-plan subset)', query({ ...worked(LHR, JFK), cells: cellsOf(worked(LHR, JFK)).filter((_, i) => i % 7 === 0) })],
+  ] as const)('tiles partition the cells: %s', (_label, q) => {
+    expectPartition(cellsOf(q), planMonthTiles(q));
   });
 
   it('is pure and deterministic', () => {
-    expect(planMonthTiles(query({ cells: worked }), airports)).toEqual(planMonthTiles(query({ cells: worked }), airports));
+    expect(planMonthTiles(worked(LHR, JFK))).toEqual(planMonthTiles(worked(LHR, JFK)));
   });
 
-  it('plans the full query space when cells is unset: one March tile of 33 cells', () => {
-    const [tile, ...rest] = planMonthTiles(query(), airports);
-    expect(rest).toEqual([]);
-    expect(tile?.coveredCells).toHaveLength(33);
-    expect(tile?.request).toEqual({ kind: 'month-pair', departMonth: '2027-03', returnMonth: '2027-03' });
+  it('refuses cells from another pair (the query stays per pair)', () => {
+    expect(() => planMonthTiles(query({ cells: cellsFor(LGW, JFK, '2027-03-10', '2027-03-10', 10, 10) }))).toThrow(/per \(origin, destination\) pair/);
   });
 });
 
-describe('tileParams', () => {
-  it('sends the metro code and keeps the member airports for attribution', () => {
-    const [first] = planMonthTiles(query({ cells: worked }), airports);
+describe('tileParams and the metro origin (spec §5.2 rev 10)', () => {
+  const firstOf = (q: DiscoveryQuery): TilePlan => {
+    const [first] = planMonthTiles(q);
     if (first === undefined) throw new Error('no tile');
-    const tp = tileParams(first, airports);
-    expect(tp.origin).toBe('LON');
-    expect([...tp.members].sort()).toEqual(['LGW', 'LHR']);
-    expect(tp.destination).toBe('JFK');
-    expect(tp.departureMonth).toBe('2027-01');
+    return first;
+  };
+
+  it("sends the pair origin's metro code when the airports table maps it to one", () => {
+    expect(tileParams(firstOf(query()), query(), airports)).toEqual({ origin: 'LON', pairOrigin: 'LHR', destination: 'JFK', month: '2027-03' });
   });
 
-  it('never collapses a single origin to its metro', () => {
-    const [first] = planMonthTiles(query(), airports);
-    if (first === undefined) throw new Error('no tile');
-    expect(tileParams(first, airports).origin).toBe('LHR');
+  it('sends the airport when there is no metro', () => {
+    expect(tileParams(firstOf(query()), query(), noMetro).origin).toBe('LHR');
   });
 
-  it('refuses a tile that mixes destinations', () => {
-    const mixed: TilePlan = {
-      index: 0,
-      coveredCells: cellsFor([LHR], [JFK, EWR], '2027-03-10', '2027-03-10', 10, 10),
-      request: { kind: 'month-pair', departMonth: asIsoMonth('2027-03'), returnMonth: asIsoMonth('2027-03') },
-    };
-    expect(() => tileParams(mixed, airports)).toThrow(/exactly one origin group and one destination/);
+  it('ignores a metro code that is not three upper-case letters', () => {
+    expect(tileParams(firstOf(query()), query(), { metroOf: () => 'LONDON' }).origin).toBe('LHR');
   });
 
   it('refuses a tile that is not a month tile', () => {
@@ -1455,7 +1392,7 @@ describe('tileParams', () => {
         returnTo: asIsoDate('2027-04-01'),
       },
     };
-    expect(() => tileParams(rect, airports)).toThrow(/month tiles/);
+    expect(() => tileParams(rect, query(), airports)).toThrow(/month tiles/);
   });
 });
 ```
@@ -1463,58 +1400,55 @@ describe('tileParams', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/tiles.test.ts`
-Expected: FAIL. `worked example … = 14 tiles` fails with `expected [ …(28) ] to have a length of 14 but got 28`, and `sends the metro code` fails with `expected 'LHR' to be 'LON'`. The other tests pass.
+Expected: FAIL. Only `sends the pair origin's metro code` fails, with `expected { origin: 'LHR', … } to deeply equal { origin: 'LON', … }`; the other ten pass with the first cut.
 
 - [ ] **Step 3: Implement**
 
-In `packages/providers/src/travelpayouts/tiles.ts`, replace the first-cut `originGroups` with:
+In `packages/providers/src/travelpayouts/tiles.ts`, replace the first-cut `originParam` with:
 
 ```ts
 const CODE_RE = /^[A-Z]{3}$/;
 
 /**
- * Spec §2 and §5.2: the origin parameter is each origin airport, collapsed to the shared metro
- * code when the airports table gives one for every origin; rows are split back by origin_airport.
- * why: a single origin is never collapsed (it would fetch other airports' rows to drop them), and
- * a malformed code from the table is treated as no metro rather than sent to the vendor.
+ * Spec §5.2 (rev 10): `origin` is the pair origin's metropolitan code when the airports table
+ * maps it to one, else the airport. Rows are filtered back to the pair by origin_airport, and a
+ * sibling pair's identical request is answered by the response cache inside the TTL.
+ * why: a malformed code from the table is treated as no metro rather than sent to the vendor.
  */
-export function originGroups(origins: readonly Iata[], airports: MetroLookup): OriginGroup[] {
-  if (origins.length >= 2) {
-    const metro = airports.sharedMetro([...origins]);
-    if (metro !== null && CODE_RE.test(metro)) return [{ param: metro, members: [...origins] }];
-  }
-  return origins.map((o) => ({ param: o, members: [o] }));
+export function originParam(origin: Iata, airports: MetroLookup): string {
+  const metro = airports.metroOf(origin);
+  return metro !== null && CODE_RE.test(metro) ? metro : origin;
 }
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/tiles.test.ts test/travelpayouts/empty.test.ts`
-Expected: PASS, `14 passed` in `tiles.test.ts` and `1 passed` in `empty.test.ts`.
+Expected: PASS, `11 passed` in `tiles.test.ts` and `1 passed` in `empty.test.ts`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp06: travelpayouts shared-metro month tiles partition the cells"
+git add packages/providers && git commit -m "wp06: travelpayouts metro origin parameter and per-pair month tiles"
 ```
 
-### Task 6.4: Pagination inside `fetchTile`; every page under the tile's index
+### Task 6.4: Pagination inside `fetchTile`; cache dedup across sibling pairs
 
-**Files:** modify `src/travelpayouts/provider.ts` (replace `fetchTile`, add imports); create `test/travelpayouts/fetchTile.test.ts`.
+**Files:** modify `src/travelpayouts/provider.ts` (imports and `travelpayoutsProvider` body); create `test/travelpayouts/fetchTile.test.ts`.
 
-**Interfaces:** consumes `attributeRows`, `attributionNotes`, `resolveCurrency`, `HttpKitResponse`. Produces the paginated `fetchTile`.
+**Interfaces:** consumes `attributeRows`, `attributionNotes`, `resolveCurrency` and `HttpKitResponse`. Produces the paginated `fetchTile`.
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/providers/test/travelpayouts/fetchTile.test.ts`:
 
 ```ts
-import { asIata } from '@gmt/core';
+import { asIata, asIsoDate } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { MAX_PAGES } from '../../src/travelpayouts/provider.js';
 import { cellsOf } from '../../src/travelpayouts/tiles.js';
-import { cellsFor, ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, NOW, only, query, row, server } from './harness.js';
+import { ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, NOW, only, query, row, server } from './harness.js';
 
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -1550,10 +1484,9 @@ describe('fetchTile pagination (spec §5.2: one tile, every page ledgered under 
     const r = await d.fetchTile(tile, q, ctx());
     expect(pages).toEqual(['1', '2']);
     expect(h.requests.map((x) => x.tileIndex)).toEqual([tile.index, tile.index]);
-    expect(h.requests.map((x) => x.executionId)).toEqual(['exec-1', 'exec-1']);
-    expect(h.budget.ledger.reservations.map((x) => x.endpointPath)).toEqual([
-      '/aviasales/v3/prices_for_dates',
-      '/aviasales/v3/prices_for_dates',
+    expect(h.budget.ledger.reservations).toEqual([
+      { endpointPath: '/aviasales/v3/prices_for_dates', executionId: 'exec-1', tileIndex: tile.index },
+      { endpointPath: '/aviasales/v3/prices_for_dates', executionId: 'exec-1', tileIndex: tile.index },
     ]);
     if (r.kind !== 'tile') throw new Error(`expected a tile, got ${r.kind}`);
     expect(r.prices).toHaveLength(1003);
@@ -1609,30 +1542,41 @@ describe('fetchTile pagination (spec §5.2: one tile, every page ledgered under 
   });
 });
 
-describe('estimate parity (spec §5.2: plan(q).length is the estimate)', () => {
-  it('plan().length equals msw hits exactly over a whole scan', async () => {
-    const seen: string[] = [];
+describe('estimate parity and cache dedup across sibling pairs (spec §5.2 rev 10)', () => {
+  it('worked example: 28 tiles, 14 upstream calls, 14 cache hits, every one ledgered under its tile index', async () => {
+    const upstream: string[] = [];
     server.use(
       http.get(ENDPOINT, ({ request }) => {
         const u = new URL(request.url);
-        seen.push(`${u.searchParams.get('origin')}|${u.searchParams.get('destination')}|${u.searchParams.get('departure_at')}`);
+        upstream.push(`${u.searchParams.get('origin')}|${u.searchParams.get('destination')}|${u.searchParams.get('departure_at')}`);
         return HttpResponse.json(envelope([]));
       }),
     );
-    const cells = cellsFor([asIata('LHR'), asIata('LGW')], [asIata('JFK')], '2027-01-01', '2027-07-01', 10, 21);
-    const q = query({ cells });
-    const d = discoveryOf(makeProvider(makeHarness()));
-    const plans = d.plan(q);
-    for (const p of plans) await d.fetchTile(p, q, ctx());
-    expect(plans).toHaveLength(7);
-    expect(seen).toHaveLength(plans.length);
-    expect(new Set(seen).size).toBe(plans.length);
-    expect(seen.every((s) => s.startsWith('LON|JFK|2027-'))).toBe(true);
+    const h = makeHarness();
+    const d = discoveryOf(makeProvider(h));
+    let tiles = 0;
+    for (const origin of [asIata('LHR'), asIata('LGW')]) {
+      for (const destination of [asIata('JFK'), asIata('EWR')]) {
+        const q = query({ origin, destination, departureFrom: asIsoDate('2027-01-01'), departureTo: asIsoDate('2027-07-01'), minNights: 10, maxNights: 21 });
+        for (const p of d.plan(q)) {
+          tiles += 1;
+          expect((await d.fetchTile(p, q, ctx())).kind).toBe('tile');
+        }
+      }
+    }
+    expect(tiles).toBe(28);
+    expect(h.requests).toHaveLength(28);
+    expect(upstream).toHaveLength(14);
+    expect(new Set(upstream).size).toBe(14);
+    expect(upstream.every((s) => s.startsWith('LON|'))).toBe(true);
+    expect(h.budget.ledger.reservations).toHaveLength(14);
+    expect(h.budget.ledger.cacheHits).toHaveLength(14);
+    expect([...h.budget.ledger.reservations, ...h.budget.ledger.cacheHits].every((x) => x.tileIndex !== null)).toBe(true);
   });
 });
 
 describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () => {
-  it('keys prices by the response dates and counts out-of-band and foreign rows in notes', async () => {
+  it('keys prices by the response dates and counts out-of-band and sibling-airport rows in notes', async () => {
     server.use(
       http.get(ENDPOINT, () =>
         HttpResponse.json(
@@ -1660,6 +1604,7 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
       },
     ]);
     expect(r.noFares).toEqual([]);
+    expect(r.pointOfSale).toBe('unknown');
     expect(r.notes).toEqual(['rows-received:3', 'pages:1', 'dropped:other-origin:1', 'dropped:out-of-band:1']);
   });
 
@@ -1704,7 +1649,13 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/fetchTile.test.ts`
-Expected: FAIL. The pagination test sees `['1']` instead of `['1', '2']`; the attribution tests see `prices: []`; the currency tests see `kind: 'tile'`; the MAX_PAGES test sees 1 hit. The parity and oldest-`fetchedAt` tests already pass with the first cut (one page each).
+Expected: FAIL.
+
+- The pagination tests see one page.
+- The attribution tests see `prices: []`.
+- The currency tests see `kind: 'tile'`.
+
+The cache-dedup and oldest-`fetchedAt` tests already pass with the first cut, because each makes one request per tile.
 
 - [ ] **Step 3: Implement**
 
@@ -1726,8 +1677,9 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
+import type { ParamsAllowlist } from '../allowlist.js';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
-import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST, type TravelpayoutsParamsAllowlist } from './params.js';
+import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { attributeRows, attributionNotes, readEnvelope, resolveCurrency } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 ```
@@ -1739,8 +1691,15 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
   const log = opts.log.child({ providerId: 'travelpayouts' });
   let lastError: ProviderError | null = null;
 
-  const parseError = (reason: string): ProviderError =>
-    new ProviderError({ kind: 'parse', retryable: false, reason, providerId: 'travelpayouts', message: `travelpayouts response unusable: ${reason}` });
+  // why: spec rev 10, `reason` is a machine word; vendor text goes into the message, which the engine writes to last_error.
+  const parseError = (reason: string, detail: string | null): ProviderError =>
+    new ProviderError({
+      kind: 'parse',
+      retryable: false,
+      reason,
+      providerId: 'travelpayouts',
+      message: detail === null ? `travelpayouts response unusable: ${reason}` : `travelpayouts response unusable: ${reason}: ${detail}`,
+    });
 
   function tileError(plan: TilePlan, error: ProviderError): DiscoveryTileResult {
     lastError = error;
@@ -1750,10 +1709,10 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 
   /**
    * Spec §5.2: one tile, all of its pages (limit=1000, page=1..n until a short page), each sent
-   * through http-kit with the tile's index so the ledger counts tiles for parity.
+   * through http-kit with the tile's index, so the ledger (upstream rows and cache hits) counts tiles.
    */
   async function fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult> {
-    const tp = tileParams(plan, opts.airports);
+    const tp = tileParams(plan, q, opts.airports);
     const rows: unknown[] = [];
     let currency: string | null = null;
     let fetchedAt: IsoDateTime | undefined;
@@ -1783,9 +1742,9 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
       }
       pages += 1;
       const env = readEnvelope(res.body);
-      if (!env.ok) return tileError(plan, parseError(env.reason));
+      if (!env.ok) return tileError(plan, parseError(env.reason, env.detail));
       if (env.currency !== null) {
-        if (currency !== null && currency !== env.currency) return tileError(plan, parseError('currency-changed-between-pages'));
+        if (currency !== null && currency !== env.currency) return tileError(plan, parseError('currency-changed-between-pages', null));
         currency = env.currency;
       }
       // why: spec §2, fetchedAt of a multi-call result is the oldest call; ISO strings order lexically.
@@ -1799,15 +1758,16 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     }
     if (fetchedAt === undefined) throw new Error('travelpayouts: no page was fetched');
     lastError = null;
+    const base = { kind: 'tile' as const, index: plan.index, coveredCells: plan.coveredCells, fetchedAt, pointOfSale: TRAVELPAYOUTS_POINT_OF_SALE };
     if (rows.length === 0) {
-      // Spec §5.2 "Empty is per capability": every covered cell is no_data; no currency needed (brief mismatch 13).
-      return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt, prices: [], noFares: [], notes: ['rows-received:0', `pages:${pages}`] };
+      // Spec §5.2 "Empty is per capability": every covered cell is no_data; no currency needed (brief mismatch 3).
+      return { ...base, prices: [], noFares: [], notes: ['rows-received:0', `pages:${pages}`] };
     }
     const cur = resolveCurrency(currency);
-    if (!cur.ok) return tileError(plan, parseError(cur.reason));
+    if (!cur.ok) return tileError(plan, parseError(cur.reason, cur.detail));
     const attribution = attributeRows(rows, {
       coveredCells: plan.coveredCells,
-      members: tp.members,
+      origin: tp.pairOrigin,
       destination: tp.destination,
       minNights: q.minNights,
       maxNights: q.maxNights,
@@ -1817,7 +1777,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     const notes = attributionNotes(attribution, rows.length, pages);
     if (truncated) notes.push(`pages-truncated:${MAX_PAGES}`);
     // why: a cache never proves "no fares", so noFares is always empty (spec §5.2 authorised-cached).
-    return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt, prices: attribution.prices, noFares: [], notes };
+    return { ...base, prices: attribution.prices, noFares: [], notes };
   }
 
   return {
@@ -1825,7 +1785,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     displayName: 'Aviasales cache',
     suppliedFields: TRAVELPAYOUTS_SUPPLIED_FIELDS,
     cabins: TRAVELPAYOUTS_CABINS,
-    discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q, opts.airports), fetchTile },
+    discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q), fetchTile },
     healthcheck: async () => ({ ok: lastError === null, detail: lastError === null ? 'token configured' : `last request failed: ${lastError.kind}` }),
   };
 }
@@ -1834,19 +1794,22 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. All four files are green (`fetchTile.test.ts` 9 passed); no test is skipped.
+Expected: PASS. All four files are green, and `fetchTile.test.ts` has 9 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp06: travelpayouts pagination inside one tile with tile-indexed pages"
+git add packages/providers && git commit -m "wp06: travelpayouts pagination inside one tile; sibling-pair cache dedup"
 ```
 
 ### Task 6.5: Error mapping through the real http-kit; HTTP limits
 
-**Files:** create `src/travelpayouts/limits.ts`, `test/travelpayouts/errors.test.ts`; modify `src/travelpayouts/response.ts` (replace `readEnvelope`).
+**Files:** create `src/travelpayouts/limits.ts` and `test/travelpayouts/errors.test.ts`; modify `src/travelpayouts/response.ts` (replace `readEnvelope`).
 
-**Interfaces:** consumes `ProviderHttpLimits`, `ProviderLimits`, `TRAVELPAYOUTS_DEFAULTS`, `AbortedError`, `BudgetExceeded`, and WP4's default status table (through `createHttpKit`). Produces `travelpayoutsHttpLimits`, `TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE`, the final `readEnvelope`.
+**Interfaces:**
+
+- Consumes `ProviderHttpLimits`, `ProviderLimits`, `Config` (`maxWaitSeconds`, `requestTimeoutSeconds`), `TRAVELPAYOUTS_DEFAULTS`, `AbortedError`, `BudgetExceeded`, and WP4's default status table (through `createHttpKit`).
+- Produces `travelpayoutsHttpLimits`, `TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE` and the final `readEnvelope`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1863,11 +1826,11 @@ beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-const limitOpts = { maxWaitSeconds: 5, requestTimeoutSeconds: 5 };
-const limits = travelpayoutsHttpLimits(TRAVELPAYOUTS_DEFAULTS, limitOpts);
+const cfg = { maxWaitSeconds: 5, requestTimeoutSeconds: 5 };
+const limits = travelpayoutsHttpLimits(TRAVELPAYOUTS_DEFAULTS, cfg);
 
 describe('travelpayoutsHttpLimits (spec §2, §5.3)', () => {
-  it('is never billable, costs nothing, allows one host and keeps the default error table (no classifyError)', () => {
+  it('is never billable, costs nothing, allows one host and has no classifyError (WP4 default table)', () => {
     expect(limits).toEqual({
       hosts: ['api.travelpayouts.com'],
       ratePerMinute: 200,
@@ -1881,7 +1844,7 @@ describe('travelpayoutsHttpLimits (spec §2, §5.3)', () => {
   });
 
   it('clamps the per-minute rate to the vendor ceiling of 600 (spec §2)', () => {
-    expect(travelpayoutsHttpLimits({ ...TRAVELPAYOUTS_DEFAULTS, ratePerMinute: 900 }, limitOpts).ratePerMinute).toBe(600);
+    expect(travelpayoutsHttpLimits({ ...TRAVELPAYOUTS_DEFAULTS, ratePerMinute: 900 }, cfg).ratePerMinute).toBe(600);
   });
 });
 
@@ -1898,6 +1861,11 @@ describe('fetchTile error mapping through the real http-kit (spec §5.2 Errors)'
     const q = query();
     return { result: d.fetchTile(only(d.plan(q)), q, ctx()), hits: () => hits };
   }
+  async function errorOf(p: Promise<unknown>) {
+    const r = (await p) as { kind: string; error?: { kind: string; reason?: string; message: string } };
+    if (r.kind !== 'tile-error' || r.error === undefined) throw new Error(`expected a tile-error, got ${r.kind}`);
+    return r.error;
+  }
 
   it('401 plain-text Unauthorized (spec §2 fact 5) → tile-error auth, sent once', async () => {
     const { result, hits } = run(() => HttpResponse.text('Unauthorized', { status: 401 }));
@@ -1905,9 +1873,9 @@ describe('fetchTile error mapping through the real http-kit (spec §5.2 Errors)'
     expect(hits()).toBe(1);
   });
 
-  it("400 → parse with the vendor's message as reason, sent once", async () => {
+  it('400 → parse, non-retryable, sent once', async () => {
     const { result, hits } = run(() => HttpResponse.json({ error: 'departure_at is invalid' }, { status: 400 }));
-    expect(await result).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', reason: 'departure_at is invalid', retryable: false } });
+    expect(await result).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', retryable: false, httpStatus: 400 } });
     expect(hits()).toBe(1);
   });
 
@@ -1941,14 +1909,16 @@ describe('fetchTile error mapping through the real http-kit (spec §5.2 Errors)'
     expect(hits()).toBe(1);
   });
 
-  it('success:false → parse with the vendor error as reason', async () => {
+  it('success:false → parse, reason vendor-error, the vendor text only in the message (spec rev 10)', async () => {
     const { result } = run(() => HttpResponse.json({ success: false, data: null, error: 'invalid destination' }));
-    expect(await result).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', reason: 'vendor-error: invalid destination', retryable: false } });
+    const e = await errorOf(result);
+    expect(e).toMatchObject({ kind: 'parse', reason: 'vendor-error' });
+    expect(e.message).toContain('invalid destination');
   });
 
-  it('success:false without a message still names vendor-error', async () => {
+  it('success:false without a message is still vendor-error', async () => {
     const { result } = run(() => HttpResponse.json({ success: false }));
-    expect(await result).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', reason: 'vendor-error: unspecified' } });
+    expect(await errorOf(result)).toMatchObject({ kind: 'parse', reason: 'vendor-error' });
   });
 
   it.each([
@@ -1958,12 +1928,12 @@ describe('fetchTile error mapping through the real http-kit (spec §5.2 Errors)'
     ['currency not a string', { success: true, data: [], currency: 7 }],
   ] as const)('a malformed envelope (%s) → parse', async (_label, body) => {
     const { result } = run(() => HttpResponse.json(body));
-    expect(await result).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', reason: 'malformed-envelope' } });
+    expect(await errorOf(result)).toMatchObject({ kind: 'parse', reason: 'malformed-envelope' });
   });
 
   it('a non-JSON 200 body → parse', async () => {
     const { result } = run(() => HttpResponse.text('<html>maintenance</html>', { status: 200 }));
-    expect(await result).toMatchObject({ kind: 'tile-error', error: { kind: 'parse' } });
+    expect(await errorOf(result)).toMatchObject({ kind: 'parse' });
   });
 
   it('an aborted signal raises AbortedError, never a tile-error', async () => {
@@ -1995,10 +1965,9 @@ Expected: FAIL. The suite cannot load, with an import error naming `src/travelpa
 ```ts
 /**
  * Travelpayouts HTTP limits for http-kit. Spec §2 (free, 600/min), §5.3 (never billable,
- * per-provider host allowlist). Registered as HttpKitDeps.limits.travelpayouts by the wiring
- * (brief mismatch 6).
+ * per-provider host allowlist). Registered by apps/api httpLimitsFor (Task 6.9).
  */
-import type { ProviderLimits } from '@gmt/core';
+import type { Config, ProviderLimits } from '@gmt/core';
 import type { ProviderHttpLimits } from '../http/httpKit.js';
 import { TRAVELPAYOUTS_HOST } from './params.js';
 
@@ -2006,16 +1975,15 @@ import { TRAVELPAYOUTS_HOST } from './params.js';
 export const TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE = 600;
 
 /**
- * The configured limits, with the rate clamped to the vendor's ceiling; never billable, cost 0.
- * why: no classifyError hook. WP4's default status table already maps every Travelpayouts case
- * as spec §5.2 requires: 401 plain text → auth, 400 → parse with the vendor message, 402 → quota,
- * 404 → upstream, 429 → rate-limit (quota only at the plan cap, which BudgetExceeded pre-empts
- * for a free provider), 5xx → upstream. A hook would replace that whole table, including its
- * Retry-After and limiter-timeout handling, because the hook receives no headers (brief mismatch 7).
+ * The configured limits with the rate clamped to the vendor's ceiling; never billable, cost 0.
+ * why: no classifyError. WP4's default table maps every Travelpayouts case spec §5.2 lists
+ * (401 plain text → auth, 400 → parse, 402 → quota, 404 → upstream, 429 → rate-limit, 5xx →
+ * upstream), and a hook would replace that table along with its Retry-After and limiter-timeout
+ * handling, because the hook receives no headers (plan: "no classifyError (default table maps 401 → auth)").
  */
 export function travelpayoutsHttpLimits(
   limits: ProviderLimits,
-  opts: { maxWaitSeconds: number; requestTimeoutSeconds: number },
+  cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>,
 ): ProviderHttpLimits {
   return {
     hosts: [TRAVELPAYOUTS_HOST],
@@ -2024,8 +1992,8 @@ export function travelpayoutsHttpLimits(
     concurrency: limits.concurrency,
     billable: 'never',
     costPerCallMicroGbp: 0,
-    maxWaitSeconds: opts.maxWaitSeconds,
-    requestTimeoutSeconds: opts.requestTimeoutSeconds,
+    maxWaitSeconds: cfg.maxWaitSeconds,
+    requestTimeoutSeconds: cfg.requestTimeoutSeconds,
   };
 }
 ```
@@ -2035,18 +2003,17 @@ In `packages/providers/src/travelpayouts/response.ts`, replace `readEnvelope` (a
 ```ts
 /**
  * Spec §5.2 "Empty is per capability" (authorised-cached): a schema-valid success envelope is
- * returned as is (zero rows → no_data upstream); `success:false` → `vendor-error: <message>`;
- * anything else → `malformed-envelope`. Both failures become `parse` in fetchTile.
+ * returned as is (zero rows → no_data upstream); `success:false` → `vendor-error` with the
+ * vendor's text as detail; anything else → `malformed-envelope`. Both become `parse` in fetchTile.
  */
 export function readEnvelope(body: unknown): Envelope {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) return { ok: false, reason: 'malformed-envelope' };
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return { ok: false, reason: 'malformed-envelope', detail: null };
   const b = body as Record<string, unknown>;
   if (b.success === false) {
-    const vendor = typeof b.error === 'string' && b.error.length > 0 ? b.error.slice(0, 200) : 'unspecified';
-    return { ok: false, reason: `vendor-error: ${vendor}` };
+    return { ok: false, reason: 'vendor-error', detail: typeof b.error === 'string' && b.error.length > 0 ? b.error.slice(0, 200) : null };
   }
-  if (b.success !== true || !Array.isArray(b.data)) return { ok: false, reason: 'malformed-envelope' };
-  if (b.currency !== undefined && typeof b.currency !== 'string') return { ok: false, reason: 'malformed-envelope' };
+  if (b.success !== true || !Array.isArray(b.data)) return { ok: false, reason: 'malformed-envelope', detail: null };
+  if (b.currency !== undefined && typeof b.currency !== 'string') return { ok: false, reason: 'malformed-envelope', detail: null };
   return { ok: true, data: b.data, currency: typeof b.currency === 'string' ? b.currency : null };
 }
 ```
@@ -2062,11 +2029,17 @@ Expected: PASS. `errors.test.ts` has 18 passed (2 limits, 16 error-mapping), and
 git add packages/providers && git commit -m "wp06: travelpayouts error mapping through http-kit and http limits"
 ```
 
-### Task 6.6: Dated parameter allowlist enforced on every request
+### Task 6.6: `TRAVELPAYOUTS_PARAMS` equal to the recorded allowlist; enforced on every request
 
-**Files:** modify `src/travelpayouts/params.ts` (append), `src/travelpayouts/provider.ts` (one call inserted); create `test/travelpayouts/recorded.ts`, `test/travelpayouts/params.test.ts`.
+**Files:**
 
-**Interfaces:** produces `assertParamsAllowed`, `FORBIDDEN_PARAM_NAMES`, and the test loaders `loadAllowlistJson`, `loadRecordedPricesForDates`.
+- Modify: append to `src/allowlist.ts` and `src/travelpayouts/params.ts`; insert one call into `src/travelpayouts/provider.ts`.
+- Create: `test/travelpayouts/recorded.ts`, `test/travelpayouts/params.test.ts`.
+
+**Interfaces:**
+
+- Consumes `loadRecorded` (`@gmt/providers/testing`) and `RecordedFixture`.
+- Produces `assertParamsAllowed`, `TRAVELPAYOUTS_PARAMS`, and the test helpers `loadParamsFile` and `loadPricesForDates`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2074,62 +2047,34 @@ git add packages/providers && git commit -m "wp06: travelpayouts error mapping t
 
 ```ts
 /**
- * Loaders for WP4b's recorded Travelpayouts fixtures. Exchanges go through WP4's
- * loadRecordedFixture, which refuses files outside fixtures/recorded/, synthetic files and files
- * whose content hash no longer matches (spec §5.5). File shape: WP4b brief §5.3, where
- * request.url is origin + path and request.params holds the query.
+ * Loaders for WP4b's recorded Travelpayouts fixtures, through the package's testing subpath
+ * (`@gmt/providers/testing`; imported relatively because the package exports point at dist/,
+ * brief mismatch 9). loadRecorded refuses files outside fixtures/recorded/ and files whose
+ * contentSha256 no longer matches (spec §5.5).
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRecordedFixture } from '../../src/http/recorder.js';
+import type { RecordedFixture } from '../../src/index.js';
+import { loadRecorded } from '../../src/testing/index.js';
 import { PRICES_FOR_DATES_PATH } from '../../src/travelpayouts/params.js';
 
-export const RECORDED_ROOT = fileURLToPath(new URL('../../fixtures/recorded/travelpayouts/', import.meta.url));
+export const RECORDED_ROOT = fileURLToPath(new URL('../../fixtures/recorded/', import.meta.url));
+const TRAVELPAYOUTS_DIR = join(RECORDED_ROOT, 'travelpayouts');
 
-export interface RecordedExchange {
-  readonly file: string;
-  readonly url: URL;
-  readonly status: number;
-  readonly body: unknown;
-}
-
-function* jsonFiles(dir: string): Generator<string> {
-  for (const name of readdirSync(dir).sort()) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) yield* jsonFiles(p);
-    else if (p.endsWith('.json')) yield p;
-  }
-}
-
-/**
- * The latest dated allowlist; file names sort by date.
- * why: read as plain JSON, because WP4b §5.4 writes the allowlist without the content hash that
- * WP4's loadRecordedJson requires (brief mismatch 10).
- */
-export function loadAllowlistJson(): unknown {
-  const latest = readdirSync(RECORDED_ROOT)
+/** The latest dated allowlist file (names sort by date), parsed as JSON. */
+export function loadParamsFile(): unknown {
+  const latest = readdirSync(TRAVELPAYOUTS_DIR)
     .filter((n) => /^params-\d{4}-\d{2}-\d{2}\.json$/.test(n))
     .sort()
     .at(-1);
-  if (latest === undefined) throw new Error(`no params-<date>.json under ${RECORDED_ROOT} (WP4b writes it)`);
-  return JSON.parse(readFileSync(join(RECORDED_ROOT, latest), 'utf8'));
+  if (latest === undefined) throw new Error(`no params-<date>.json under ${TRAVELPAYOUTS_DIR} (WP4b writes it)`);
+  return JSON.parse(readFileSync(join(TRAVELPAYOUTS_DIR, latest), 'utf8'));
 }
 
-/** Every recorded prices_for_dates exchange, in file-name order, with its full request URL rebuilt. */
-export function loadRecordedPricesForDates(): RecordedExchange[] {
-  const out: RecordedExchange[] = [];
-  for (const file of jsonFiles(RECORDED_ROOT)) {
-    const name = basename(file);
-    // why: *.raw.json is the unredacted local copy (gitignored, WP4b §5.3); never read it.
-    if (name.startsWith('params-') || name.endsWith('.raw.json')) continue;
-    const f = loadRecordedFixture(file);
-    if (f.endpointPath !== PRICES_FOR_DATES_PATH) continue;
-    const url = new URL(f.request.url);
-    for (const [k, v] of Object.entries(f.request.params)) url.searchParams.set(k, v);
-    out.push({ file, url, status: f.status, body: f.body });
-  }
-  return out;
+/** Every recorded prices_for_dates exchange with its request URL (credential-free, query kept). */
+export function loadPricesForDates(): Array<{ url: URL; fixture: RecordedFixture }> {
+  return loadRecorded(RECORDED_ROOT, 'travelpayouts', PRICES_FOR_DATES_PATH).map((fixture) => ({ url: new URL(fixture.request.url), fixture }));
 }
 ```
 
@@ -2139,92 +2084,72 @@ export function loadRecordedPricesForDates(): RecordedExchange[] {
 import { asIata, asIsoMonth } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { assertParamsAllowed, parseTravelpayoutsAllowlist } from '../../src/travelpayouts/params.js';
+import { assertParamsAllowed, ParamsAllowlistError } from '../../src/allowlist.js';
+import { FIXED_PARAMS, FORBIDDEN_PARAM_NAMES, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_PARAMS } from '../../src/travelpayouts/params.js';
 import { buildRequestUrl } from '../../src/travelpayouts/provider.js';
-import {
-  ALLOWLIST_JSON,
-  ALLOWLIST_PARAMS,
-  allowlistWith,
-  ctx,
-  discoveryOf,
-  ENDPOINT,
-  makeHarness,
-  makeProvider,
-  only,
-  query,
-  server,
-  TOKEN,
-} from './harness.js';
-import { loadAllowlistJson } from './recorded.js';
+import { ALLOWLIST, ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, only, query, server, TOKEN } from './harness.js';
+import { loadParamsFile } from './recorded.js';
 
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-const allow = parseTravelpayoutsAllowlist(ALLOWLIST_JSON);
-const tp = { origin: 'LON', members: new Set([asIata('LHR'), asIata('LGW')]), destination: asIata('JFK'), departureMonth: asIsoMonth('2027-03') };
+const tp = { origin: 'LON', pairOrigin: asIata('LHR'), destination: asIata('JFK'), month: asIsoMonth('2027-03') };
 const sent = (): URLSearchParams => buildRequestUrl(tp, 1).searchParams;
-const { page: _page, ...withoutPage } = ALLOWLIST_PARAMS;
 
-describe('parseTravelpayoutsAllowlist (spec §5.2: dated allowlist of names and values)', () => {
-  it('parses the dated allowlist WP4b recorded, and it matches the hard-coded values', () => {
-    const a = parseTravelpayoutsAllowlist(loadAllowlistJson());
-    expect(a.fixed).toEqual({ one_way: 'false', currency: 'gbp', limit: '1000' });
-    expect(Object.keys(a.dynamic).sort()).toEqual(['departure_at', 'destination', 'origin', 'page']);
+describe('TRAVELPAYOUTS_PARAMS (plan decision 6: a code constant equal to the recorded file)', () => {
+  it('equals fixtures/recorded/travelpayouts/params-<date>.json, contentSha256 included', () => {
+    expect(TRAVELPAYOUTS_PARAMS).toEqual(loadParamsFile());
   });
 
-  it.each([
-    ['a non-object', 'nope', /not an object/],
-    ['another provider', allowlistWith(ALLOWLIST_PARAMS, { provider: 'searchapi' }), /provider must be travelpayouts/],
-    ['a credential recorded other than in a header', allowlistWith(ALLOWLIST_PARAMS, { credential: 'query' }), /credential must be header/],
-    ['a missing recordedAt', allowlistWith(ALLOWLIST_PARAMS, { recordedAt: 7 }), /recordedAt/],
-    ['no prices_for_dates endpoint', allowlistWith(ALLOWLIST_PARAMS, { endpoints: [] }), /has no \/aviasales\/v3\/prices_for_dates endpoint/],
-    ['a different fixed value', allowlistWith({ ...ALLOWLIST_PARAMS, currency: { fixed: ['usd'], observed: [] } }), /currency must be fixed to exactly gbp/],
-    ['two allowed values', allowlistWith({ ...ALLOWLIST_PARAMS, currency: { fixed: ['gbp', 'usd'], observed: [] } }), /currency must be fixed to exactly gbp/],
-    ['an extra parameter', allowlistWith({ ...ALLOWLIST_PARAMS, market: { fixed: ['uk'], observed: [] } }), /parameters .* differ/],
-    ['a missing parameter', allowlistWith(withoutPage), /parameters .* differ/],
-    ['a different value kind', allowlistWith({ ...ALLOWLIST_PARAMS, departure_at: { kind: 'iso-date', observed: [] } }), /departure_at must be of kind iso-month/],
-  ] as const)('rejects %s', (_label, json, message) => {
-    expect(() => parseTravelpayoutsAllowlist(json)).toThrow(message);
+  it('carries the hard-coded fixed values and no forbidden name (spec §5.2)', () => {
+    const rules = TRAVELPAYOUTS_PARAMS.endpoints[PRICES_FOR_DATES_PATH];
+    if (rules === undefined) throw new Error('no prices_for_dates rules');
+    for (const [name, value] of Object.entries(FIXED_PARAMS)) expect(rules.values[name]).toEqual([value]);
+    for (const name of FORBIDDEN_PARAM_NAMES) expect(rules.names).not.toContain(name);
+  });
+
+  it('accepts exactly what the adapter sends', () => {
+    expect(() => assertParamsAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, sent())).not.toThrow();
   });
 });
 
 describe('assertParamsAllowed (spec §5.2: names and values)', () => {
-  it('accepts exactly what the adapter sends', () => {
-    expect(() => assertParamsAllowed(allow, sent())).not.toThrow();
-  });
-
   it.each([
     ['an extra parameter', (p: URLSearchParams) => p.set('sorting', 'price'), /sorting is not in the allowlist/],
-    ['market (ignored by the vendor, spec §2 fact 1)', (p: URLSearchParams) => p.set('market', 'uk'), /market is forbidden/],
-    ['trip_class (ignored by the vendor)', (p: URLSearchParams) => p.set('trip_class', '1'), /trip_class is forbidden/],
-    ['return_at (month tiles send none)', (p: URLSearchParams) => p.set('return_at', '2027-03'), /return_at is forbidden/],
-    ['a wrong fixed value', (p: URLSearchParams) => p.set('currency', 'usd'), /currency=usd is not the allowlisted value gbp/],
-    ['a dynamic value off-pattern', (p: URLSearchParams) => p.set('departure_at', '2027-13'), /departure_at=2027-13 does not match/],
+    ['market (ignored by the vendor, spec §2 fact 1)', (p: URLSearchParams) => p.set('market', 'uk'), /market is not in the allowlist/],
+    ['trip_class (ignored by the vendor)', (p: URLSearchParams) => p.set('trip_class', '1'), /trip_class is not in the allowlist/],
+    ['return_at (month tiles send none)', (p: URLSearchParams) => p.set('return_at', '2027-03'), /return_at is not in the allowlist/],
+    ['a wrong fixed value', (p: URLSearchParams) => p.set('currency', 'usd'), /currency=usd is not an allowlisted value/],
     ['a missing parameter', (p: URLSearchParams) => p.delete('page'), /page is missing/],
     ['a duplicated parameter', (p: URLSearchParams) => p.append('origin', 'LGW'), /origin appears twice/],
   ] as const)('fails on %s', (_label, mutate, message) => {
     const p = sent();
     mutate(p);
-    expect(() => assertParamsAllowed(allow, p)).toThrow(message);
+    expect(() => assertParamsAllowed(ALLOWLIST, PRICES_FOR_DATES_PATH, p)).toThrow(message);
   });
 
-  it('names a token parameter without echoing its value', () => {
+  it('fails on an endpoint the allowlist does not list', () => {
+    expect(() => assertParamsAllowed(ALLOWLIST, '/v1/prices/calendar', sent())).toThrow(/endpoint \/v1\/prices\/calendar is not in the travelpayouts allowlist/);
+  });
+
+  it('refuses a token parameter with a ParamsAllowlistError that does not echo its value', () => {
     const p = sent();
     p.set('token', TOKEN);
-    expect(() => assertParamsAllowed(allow, p)).toThrow(/token is forbidden/);
-    let message = '';
+    let caught: unknown;
     try {
-      assertParamsAllowed(allow, p);
+      assertParamsAllowed(ALLOWLIST, PRICES_FOR_DATES_PATH, p);
     } catch (e) {
-      message = String(e);
+      caught = e;
     }
-    expect(message).not.toContain(TOKEN);
+    expect(caught).toBeInstanceOf(ParamsAllowlistError);
+    expect(String(caught)).toMatch(/token is not in the allowlist/);
+    expect(String(caught)).not.toContain(TOKEN);
   });
 });
 
 describe('requests on the wire', () => {
-  it('carry exactly the allowlisted names and values, and the token only in X-Access-Token', async () => {
+  it('carry exactly the allowlisted names and values, the metro origin, and the token only in X-Access-Token', async () => {
     const seen: Array<{ url: string; token: string | null }> = [];
     server.use(
       http.get(ENDPOINT, ({ request }) => {
@@ -2232,14 +2157,13 @@ describe('requests on the wire', () => {
         return HttpResponse.json({ success: true, data: [], currency: 'gbp' });
       }),
     );
-    const d = discoveryOf(makeProvider(makeHarness()));
+    const d = discoveryOf(makeProvider(makeHarness(), { paramsAllowlist: TRAVELPAYOUTS_PARAMS }));
     const q = query();
     await d.fetchTile(only(d.plan(q)), q, ctx());
     const req = only(seen);
     const u = new URL(req.url);
-    expect([...u.searchParams.keys()].sort()).toEqual(['currency', 'departure_at', 'destination', 'limit', 'one_way', 'origin', 'page']);
     expect(Object.fromEntries(u.searchParams)).toEqual({
-      origin: 'LHR',
+      origin: 'LON',
       destination: 'JFK',
       departure_at: '2027-03',
       one_way: 'false',
@@ -2249,7 +2173,6 @@ describe('requests on the wire', () => {
     });
     expect(req.token).toBe(TOKEN);
     expect(req.url).not.toContain(TOKEN);
-    expect(() => assertParamsAllowed(parseTravelpayoutsAllowlist(loadAllowlistJson()), u.searchParams)).not.toThrow();
   });
 });
 ```
@@ -2257,71 +2180,102 @@ describe('requests on the wire', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/params.test.ts`
-Expected: FAIL with `does not provide an export named 'assertParamsAllowed'`.
+Expected: FAIL with `does not provide an export named 'assertParamsAllowed'`. If the error is instead "no params-<date>.json", WP4b has not merged: stop and report, and do not create the file.
 
 - [ ] **Step 3: Implement**
 
-Append to `packages/providers/src/travelpayouts/params.ts`:
+Append to `packages/providers/src/allowlist.ts`:
 
 ```ts
 /**
- * Names that must never be sent. `token`: the credential travels in X-Access-Token only (spec §2
- * fact 8). `market`, `trip_class`: ignored by the vendor (fact 1), so sending them would only
- * pretend to a point of sale or cabin. `return_at`: month tiles send none (spec §5.2).
+ * Fails closed unless `params` is exactly what the allowlist permits for `endpoint`: every listed
+ * name once, each value in its list (or any value for 'any'), nothing missing, nothing extra
+ * (spec §5.2). Messages name a parameter that is not allowlisted without echoing its value.
  */
-export const FORBIDDEN_PARAM_NAMES = ['token', 'market', 'trip_class', 'return_at'] as const;
-
-/**
- * Fails closed unless `params` is exactly the allowlist: every name once, fixed values equal,
- * dynamic values matching their pattern, nothing missing and nothing extra (spec §5.2).
- * Messages never contain the value of a forbidden name.
- */
-export function assertParamsAllowed(allowlist: TravelpayoutsParamsAllowlist, params: URLSearchParams): void {
+export function assertParamsAllowed(allowlist: ParamsAllowlist, endpoint: string, params: URLSearchParams): void {
+  const rules = allowlist.endpoints[endpoint];
+  if (rules === undefined) throw new ParamsAllowlistError(`endpoint ${endpoint} is not in the ${allowlist.provider} allowlist`);
   const seen = new Set<string>();
   for (const [name, value] of params) {
     if (seen.has(name)) throw new ParamsAllowlistError(`parameter ${name} appears twice`);
     seen.add(name);
-    if ((FORBIDDEN_PARAM_NAMES as readonly string[]).includes(name)) {
-      throw new ParamsAllowlistError(`parameter ${name} is forbidden`);
-    }
-    const fixed = allowlist.fixed[name];
-    if (fixed !== undefined) {
-      if (value !== fixed) throw new ParamsAllowlistError(`parameter ${name}=${value} is not the allowlisted value ${fixed}`);
-      continue;
-    }
-    const pattern = allowlist.dynamic[name];
-    if (pattern === undefined) throw new ParamsAllowlistError(`parameter ${name} is not in the allowlist`);
-    if (!pattern.test(value)) throw new ParamsAllowlistError(`parameter ${name}=${value} does not match ${pattern.source}`);
+    const allowed = rules.names.includes(name) ? rules.values[name] : undefined;
+    if (allowed === undefined) throw new ParamsAllowlistError(`parameter ${name} is not in the allowlist`);
+    if (allowed !== 'any' && !allowed.includes(value)) throw new ParamsAllowlistError(`parameter ${name}=${value} is not an allowlisted value`);
   }
-  for (const name of [...Object.keys(allowlist.fixed), ...Object.keys(allowlist.dynamic)]) {
+  for (const name of rules.names) {
     if (!seen.has(name)) throw new ParamsAllowlistError(`parameter ${name} is missing`);
   }
 }
 ```
 
-In `packages/providers/src/travelpayouts/provider.ts`, import `assertParamsAllowed` from `./params.js` (add it to the existing `./params.js` import), and in `fetchTile` insert directly after `const url = buildRequestUrl(tp, page);`:
+Print the two values that only the recording knows (brief mismatch 6):
+
+```bash
+node -e "const f=require('fs');const d='packages/providers/fixtures/recorded/travelpayouts';const n=f.readdirSync(d).filter(x=>/^params-\d{4}-\d{2}-\d{2}\.json$/.test(x)).sort().at(-1);const j=JSON.parse(f.readFileSync(d+'/'+n,'utf8'));console.log(j.recordedAt, j.contentSha256)"
+```
+
+Append to `packages/providers/src/travelpayouts/params.ts`, writing the two printed values into `RECORDED_AT` and `CONTENT_SHA256`:
+
+```ts
+import type { IsoDate } from '@gmt/core';
+import type { ParamsAllowlist } from '../allowlist.js';
+
+// why: these two fields only exist once WP4b has recorded; they are copied verbatim from
+// fixtures/recorded/travelpayouts/params-<date>.json, and the equality test fails if either drifts.
+const RECORDED_AT = 'RECORDED_AT_PRINTED_ABOVE' as IsoDate;
+const CONTENT_SHA256 = 'CONTENT_SHA256_PRINTED_ABOVE';
+
+/**
+ * The runtime allowlist (plan decision 6: a code constant asserted equal to the recorded file).
+ * Keyed by endpoint path; names in ascending order; 'any' for per-request values (brief mismatch 5).
+ */
+export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist = {
+  provider: 'travelpayouts',
+  recordedAt: RECORDED_AT,
+  endpoints: {
+    [PRICES_FOR_DATES_PATH]: {
+      names: ['currency', 'departure_at', 'destination', 'limit', 'one_way', 'origin', 'page'],
+      values: {
+        currency: [FIXED_PARAMS.currency],
+        departure_at: 'any',
+        destination: 'any',
+        limit: [FIXED_PARAMS.limit],
+        one_way: [FIXED_PARAMS.one_way],
+        origin: 'any',
+        page: 'any',
+      },
+    },
+  },
+  contentSha256: CONTENT_SHA256,
+};
+```
+
+Move the two `import type` lines to the top of the file with the other imports (Biome `organizeImports`).
+
+In `packages/providers/src/travelpayouts/provider.ts`, add `import { assertParamsAllowed } from '../allowlist.js';` and insert directly after `const url = buildRequestUrl(tp, page);`:
 
 ```ts
       // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
-      assertParamsAllowed(opts.paramsAllowlist, url.searchParams);
+      assertParamsAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url.searchParams);
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. `params.test.ts` has 22 passed (11 parse, 10 assert, 1 wire), and every other file stays green. If `params.test.ts` fails on `loadAllowlistJson` with "no params-<date>.json", WP4b has not merged: stop and report, do not create the file.
+Expected: PASS. `params.test.ts` has 13 passed (3 constant, 7 table, 1 endpoint, 1 token, 1 wire), and every other file stays green. If the equality test fails on `endpoints` (a different key or name order in WP4b's file), stop and report it as brief mismatch 5. Do not reshape the constant to the file.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp06: travelpayouts dated parameter allowlist enforced before every request"
+git add packages/providers && git commit -m "wp06: TRAVELPAYOUTS_PARAMS equals the recorded allowlist and is enforced before every request"
 ```
 
-### Task 6.7: Identity, non-economy `no_data` without HTTP, healthcheck, barrel
+### Task 6.7: Identity, healthcheck, barrel
 
 **Files:** replace `src/travelpayouts/provider.ts` with its final form; modify `src/index.ts`; create `test/travelpayouts/provider.test.ts`.
 
-**Interfaces:** consumes `findBannedWords`, `Secret`. Produces the final `travelpayoutsProvider` and the barrel exports.
+**Interfaces:** consumes `findBannedWords` and `Secret`. Produces the final `travelpayoutsProvider` and the barrel exports.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2333,14 +2287,14 @@ import { HttpResponse, http } from 'msw/http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import * as barrel from '../../src/index.js';
 import { TRAVELPAYOUTS_INFO, TRAVELPAYOUTS_POINT_OF_SALE } from '../../src/travelpayouts/provider.js';
-import { ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, NOW, only, query, server, TOKEN } from './harness.js';
+import { ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, only, query, server, TOKEN } from './harness.js';
 
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-describe('travelpayoutsProvider identity (spec §2, §5.1)', () => {
-  it('is a discovery-only authorised-cached provider for economy', () => {
+describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2 rev 10)', () => {
+  it('is a discovery-only authorised-cached provider that declares economy only', () => {
     const p = makeProvider(makeHarness());
     expect(p.id).toBe('travelpayouts');
     expect(p.displayName).toBe('Aviasales cache');
@@ -2357,36 +2311,6 @@ describe('travelpayoutsProvider identity (spec §2, §5.1)', () => {
 
   it.each([-1, 1.5, Number.NaN])('refuses cacheTtlSeconds %d', (ttl) => {
     expect(() => makeProvider(makeHarness(), { cacheTtlSeconds: ttl })).toThrow(/cacheTtlSeconds/);
-  });
-});
-
-describe('non-economy definitions (spec §5.2: trip_class is ignored, so no_data with a note)', () => {
-  it('plans the same tiles as economy and resolves them to no_data without any HTTP call', async () => {
-    let hits = 0;
-    server.use(
-      http.get(ENDPOINT, () => {
-        hits += 1;
-        return HttpResponse.json({ success: true, data: [], currency: 'gbp' });
-      }),
-    );
-    const h = makeHarness();
-    const d = discoveryOf(makeProvider(h));
-    const q = query({ cabin: 'business' });
-    const plans = d.plan(q);
-    expect(plans).toEqual(d.plan(query()));
-    const tile = only(plans);
-    expect(await d.fetchTile(tile, q, ctx())).toEqual({
-      kind: 'tile',
-      index: 0,
-      coveredCells: tile.coveredCells,
-      fetchedAt: NOW,
-      prices: [],
-      noFares: [],
-      notes: ['cabin-unsupported:business'],
-    });
-    expect(hits).toBe(0);
-    expect(h.requests).toHaveLength(0);
-    expect(h.budget.ledger.reservations).toHaveLength(0);
   });
 });
 
@@ -2421,13 +2345,14 @@ describe('healthcheck (sends no request; reports the last classified failure)', 
 });
 
 describe('@gmt/providers barrel', () => {
-  it('exports the Travelpayouts surface', () => {
+  it('exports the Travelpayouts surface named in the plan', () => {
     expect(typeof barrel.travelpayoutsProvider).toBe('function');
-    expect(typeof barrel.parseTravelpayoutsAllowlist).toBe('function');
-    expect(barrel.TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE).toBe(600);
     expect(typeof barrel.travelpayoutsHttpLimits).toBe('function');
+    expect(typeof barrel.assertParamsAllowed).toBe('function');
+    expect(barrel.TRAVELPAYOUTS_PARAMS.provider).toBe('travelpayouts');
     expect(barrel.TRAVELPAYOUTS_POINT_OF_SALE).toBe('unknown');
     expect(barrel.TRAVELPAYOUTS_HOST).toBe('api.travelpayouts.com');
+    expect(barrel.TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE).toBe(600);
     expect(barrel.TRAVELPAYOUTS_INFO.sourceKind).toBe('authorised-cached');
   });
 });
@@ -2436,7 +2361,11 @@ describe('@gmt/providers barrel', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/provider.test.ts`
-Expected: FAIL. The barrel test fails with `expected 'undefined' to be 'function'`, the non-economy test fails because `hits` is 1, the TTL tests fail with "did not throw", and the healthcheck detail tests fail on the strings.
+Expected: FAIL.
+
+- The barrel test fails with `expected 'undefined' to be 'function'`.
+- The TTL tests fail with "did not throw".
+- The healthcheck tests fail on the detail strings.
 
 - [ ] **Step 3: Implement**
 
@@ -2445,10 +2374,10 @@ Replace `packages/providers/src/travelpayouts/provider.ts` with the final file:
 ```ts
 /**
  * Travelpayouts / Aviasales Data API adapter (WP6). Spec §2 (Travelpayouts row, fact 1), §5.1,
- * §5.2, §6.9. Discovery only: cached round-trip prices from /aviasales/v3/prices_for_dates, one
- * month tile per (origin or shared metro, destination, departure month), every page through
- * http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6). No airport is named
- * here (spec §1).
+ * §5.2 (rev 10), §6.9. Discovery only: cached round-trip prices from
+ * /aviasales/v3/prices_for_dates, one month tile per (origin, destination) pair and departure
+ * month, queried by the origin's metro code when there is one, every page through http-kit.
+ * Returns raw vendor shapes; the engine normalises (spec §5.6). No airport is named here (spec §1).
  */
 import {
   type Cabin,
@@ -2465,14 +2394,9 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
+import { assertParamsAllowed, type ParamsAllowlist } from '../allowlist.js';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
-import {
-  assertParamsAllowed,
-  FIXED_PARAMS,
-  PRICES_FOR_DATES_PATH,
-  TRAVELPAYOUTS_HOST,
-  type TravelpayoutsParamsAllowlist,
-} from './params.js';
+import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { attributeRows, attributionNotes, readEnvelope, resolveCurrency } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
@@ -2483,27 +2407,27 @@ export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
   provenanceNote:
     'Cached round-trip prices that Aviasales users found in the last 48 hours, from the authorised Travelpayouts Data API. Economy only; point of sale unknown; not a fare quote; constraints are not checked.',
 };
-
 /** Spec §5.2: from recorded fixtures only (Task 6.8 derives it from them). A row states a price and nothing else checkable. */
 export const TRAVELPAYOUTS_SUPPLIED_FIELDS: readonly SuppliedField[] = ['price'];
-/** Spec §2 fact 1: trip_class is ignored, so economy only. */
+/** Spec §2 fact 1 and §5.2 (rev 10): trip_class is ignored, so economy only; the engine never calls this provider for another cabin. */
 export const TRAVELPAYOUTS_CABINS: readonly Cabin[] = ['economy'];
-/** Spec §2: market is ignored, so the point of sale is unknown on every price (brief mismatch 3). */
+/** Spec §2: market is ignored, so every tile's point of sale is unknown. */
 export const TRAVELPAYOUTS_POINT_OF_SALE = 'unknown' as const;
 /** Spec §5.2: limit=1000 per page. */
 export const PAGE_LIMIT = 1000;
 /** Hard stop on pages per tile; a tile that reaches it says so in notes. */
 export const MAX_PAGES = 50;
 
+/** The plan's constructor options, field for field. */
 export interface TravelpayoutsProviderOptions {
   http: HttpKit;
   log: Logger;
   clock: Clock;
   token: Secret;
-  paramsAllowlist: TravelpayoutsParamsAllowlist;
-  airports: MetroLookup;
-  /** Response cache window, from TRAVELPAYOUTS_CACHE_TTL_HOURS (spec §5.3 "TTLs from config"; brief mismatch 5). */
+  /** Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, sibling pairs' metro requests are cache hits. */
   cacheTtlSeconds: number;
+  paramsAllowlist: ParamsAllowlist;
+  airports: MetroLookup;
 }
 
 /** The request URL for one page of a tile. The token never appears here (spec §2 fact 8: header only). */
@@ -2511,7 +2435,7 @@ export function buildRequestUrl(tp: TileParams, page: number): URL {
   const url = new URL(`https://${TRAVELPAYOUTS_HOST}${PRICES_FOR_DATES_PATH}`);
   url.searchParams.set('origin', tp.origin);
   url.searchParams.set('destination', tp.destination);
-  url.searchParams.set('departure_at', tp.departureMonth);
+  url.searchParams.set('departure_at', tp.month);
   for (const [name, value] of Object.entries(FIXED_PARAMS)) url.searchParams.set(name, value);
   url.searchParams.set('page', String(page));
   return url;
@@ -2527,8 +2451,15 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
   // named in code (spec §1); it reports the most recent classified failure instead.
   let lastError: ProviderError | null = null;
 
-  const parseError = (reason: string): ProviderError =>
-    new ProviderError({ kind: 'parse', retryable: false, reason, providerId: 'travelpayouts', message: `travelpayouts response unusable: ${reason}` });
+  // why: spec rev 10, `reason` is a machine word; vendor text goes into the message, which the engine writes to last_error.
+  const parseError = (reason: string, detail: string | null): ProviderError =>
+    new ProviderError({
+      kind: 'parse',
+      retryable: false,
+      reason,
+      providerId: 'travelpayouts',
+      message: detail === null ? `travelpayouts response unusable: ${reason}` : `travelpayouts response unusable: ${reason}: ${detail}`,
+    });
 
   function tileError(plan: TilePlan, error: ProviderError): DiscoveryTileResult {
     lastError = error;
@@ -2538,23 +2469,10 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 
   /**
    * Spec §5.2: one tile, all of its pages (limit=1000, page=1..n until a short page), each sent
-   * through http-kit with the tile's index so the ledger counts tiles for parity.
+   * through http-kit with the tile's index, so the ledger (upstream rows and cache hits) counts tiles.
    */
   async function fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult> {
-    if (q.cabin !== 'economy') {
-      // why: spec §2 fact 1 and §5.2. trip_class is ignored by the vendor, so a request would return
-      // economy prices under a premium label; no_data with a note, and nothing is sent (brief mismatch 8).
-      return {
-        kind: 'tile',
-        index: plan.index,
-        coveredCells: plan.coveredCells,
-        fetchedAt: opts.clock.now(),
-        prices: [],
-        noFares: [],
-        notes: [`cabin-unsupported:${q.cabin}`],
-      };
-    }
-    const tp = tileParams(plan, opts.airports);
+    const tp = tileParams(plan, q, opts.airports);
     const rows: unknown[] = [];
     let currency: string | null = null;
     let fetchedAt: IsoDateTime | undefined;
@@ -2563,7 +2481,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     for (let page = 1; ; page += 1) {
       const url = buildRequestUrl(tp, page);
       // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
-      assertParamsAllowed(opts.paramsAllowlist, url.searchParams);
+      assertParamsAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url.searchParams);
       let res: HttpKitResponse;
       try {
         res = await opts.http.request({
@@ -2586,9 +2504,9 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
       }
       pages += 1;
       const env = readEnvelope(res.body);
-      if (!env.ok) return tileError(plan, parseError(env.reason));
+      if (!env.ok) return tileError(plan, parseError(env.reason, env.detail));
       if (env.currency !== null) {
-        if (currency !== null && currency !== env.currency) return tileError(plan, parseError('currency-changed-between-pages'));
+        if (currency !== null && currency !== env.currency) return tileError(plan, parseError('currency-changed-between-pages', null));
         currency = env.currency;
       }
       // why: spec §2, fetchedAt of a multi-call result is the oldest call; ISO strings order lexically.
@@ -2602,15 +2520,16 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     }
     if (fetchedAt === undefined) throw new Error('travelpayouts: no page was fetched');
     lastError = null;
+    const base = { kind: 'tile' as const, index: plan.index, coveredCells: plan.coveredCells, fetchedAt, pointOfSale: TRAVELPAYOUTS_POINT_OF_SALE };
     if (rows.length === 0) {
-      // Spec §5.2 "Empty is per capability": every covered cell is no_data; no currency needed (brief mismatch 13).
-      return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt, prices: [], noFares: [], notes: ['rows-received:0', `pages:${pages}`] };
+      // Spec §5.2 "Empty is per capability": every covered cell is no_data; no currency needed (brief mismatch 3).
+      return { ...base, prices: [], noFares: [], notes: ['rows-received:0', `pages:${pages}`] };
     }
     const cur = resolveCurrency(currency);
-    if (!cur.ok) return tileError(plan, parseError(cur.reason));
+    if (!cur.ok) return tileError(plan, parseError(cur.reason, cur.detail));
     const attribution = attributeRows(rows, {
       coveredCells: plan.coveredCells,
-      members: tp.members,
+      origin: tp.pairOrigin,
       destination: tp.destination,
       minNights: q.minNights,
       maxNights: q.maxNights,
@@ -2620,7 +2539,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     const notes = attributionNotes(attribution, rows.length, pages);
     if (truncated) notes.push(`pages-truncated:${MAX_PAGES}`);
     // why: a cache never proves "no fares", so noFares is always empty (spec §5.2 authorised-cached).
-    return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt, prices: attribution.prices, noFares: [], notes };
+    return { ...base, prices: attribution.prices, noFares: [], notes };
   }
 
   async function healthcheck(_ctx: ProviderContext): Promise<{ ok: boolean; detail: string }> {
@@ -2637,7 +2556,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     displayName: 'Aviasales cache',
     suppliedFields: TRAVELPAYOUTS_SUPPLIED_FIELDS,
     cabins: TRAVELPAYOUTS_CABINS,
-    discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q, opts.airports), fetchTile },
+    discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q), fetchTile },
     healthcheck,
   };
 }
@@ -2646,6 +2565,8 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 Append to `packages/providers/src/index.ts`:
 
 ```ts
+// Shared parameter allowlist (WP6; WP5 imports the same file). Spec §5.2.
+export { assertParamsAllowed, type ParamsAllowlist, ParamsAllowlistError } from './allowlist.js';
 // Travelpayouts adapter (WP6). Spec §2, §5.2.
 export {
   TRAVELPAYOUTS_CABINS,
@@ -2655,14 +2576,7 @@ export {
   type TravelpayoutsProviderOptions,
   travelpayoutsProvider,
 } from './travelpayouts/provider.js';
-export {
-  assertParamsAllowed,
-  ParamsAllowlistError,
-  PRICES_FOR_DATES_PATH,
-  parseTravelpayoutsAllowlist,
-  TRAVELPAYOUTS_HOST,
-  type TravelpayoutsParamsAllowlist,
-} from './travelpayouts/params.js';
+export { PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST, TRAVELPAYOUTS_PARAMS } from './travelpayouts/params.js';
 export { TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE, travelpayoutsHttpLimits } from './travelpayouts/limits.js';
 export type { MetroLookup } from './travelpayouts/tiles.js';
 ```
@@ -2670,19 +2584,19 @@ export type { MetroLookup } from './travelpayouts/tiles.js';
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. `provider.test.ts` has 9 passed, and every earlier file stays green.
+Expected: PASS. `provider.test.ts` has 8 passed, and every earlier file stays green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp06: travelpayouts identity, economy-only no_data, healthcheck and barrel"
+git add packages/providers && git commit -m "wp06: travelpayouts identity, healthcheck and barrel"
 ```
 
 ### Task 6.8: Recorded fixtures replay; `suppliedFields` from recordings
 
 **Files:** modify `src/travelpayouts/response.ts` (append `suppliedFieldsOfRow`); create `test/travelpayouts/replay.test.ts`.
 
-**Interfaces:** consumes WP4b's recorded fixtures and allowlist through `test/travelpayouts/recorded.ts`. Produces `suppliedFieldsOfRow`.
+**Interfaces:** consumes WP4b's recordings through `loadPricesForDates` (built on `loadRecorded`). Produces `suppliedFieldsOfRow`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2692,92 +2606,99 @@ git add packages/providers && git commit -m "wp06: travelpayouts identity, econo
 import { asIata, asIsoDate, cellKeyString, type IsoDate } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { assertParamsAllowed, parseTravelpayoutsAllowlist, TRAVELPAYOUTS_HOST } from '../../src/travelpayouts/params.js';
+import { assertParamsAllowed } from '../../src/allowlist.js';
+import { PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST, TRAVELPAYOUTS_PARAMS } from '../../src/travelpayouts/params.js';
 import { TRAVELPAYOUTS_SUPPLIED_FIELDS } from '../../src/travelpayouts/provider.js';
 import { suppliedFieldsOfRow } from '../../src/travelpayouts/response.js';
-import { cellsFor, ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, only, query, server } from './harness.js';
-import { loadAllowlistJson, loadRecordedPricesForDates, type RecordedExchange } from './recorded.js';
+import { ctx, discoveryOf, ENDPOINT, makeHarness, makeProvider, noMetro, only, query, server } from './harness.js';
+import { loadPricesForDates } from './recorded.js';
 
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-const recorded = loadRecordedPricesForDates();
-const ok = recorded.filter((x) => x.status === 200);
+const recorded = loadPricesForDates();
+const ok = recorded.filter((x) => x.fixture.status === 200);
 
-/** Recorded pages grouped into tiles by (origin, destination, departure month). */
-const tiles = new Map<string, RecordedExchange[]>();
+/** Recorded 200 pages grouped into tiles by (origin, destination, departure month). */
+const tiles = new Map<string, typeof ok>();
 for (const x of ok) {
   const key = ['origin', 'destination', 'departure_at'].map((n) => x.url.searchParams.get(n) ?? '?').join('|');
   tiles.set(key, [...(tiles.get(key) ?? []), x]);
 }
 
-function rowsOf(x: RecordedExchange): unknown[] {
-  const b = x.body as { data?: unknown } | null;
-  return b !== null && Array.isArray(b.data) ? b.data : [];
+function rowsOf(body: unknown): unknown[] {
+  return typeof body === 'object' && body !== null && Array.isArray((body as { data?: unknown }).data) ? (body as { data: unknown[] }).data : [];
+}
+
+function sameQuery(a: URL, b: URL): boolean {
+  const norm = (u: URL) => JSON.stringify([...u.searchParams.entries()].sort());
+  return norm(a) === norm(b);
 }
 
 function lastDayOf(month: string): IsoDate {
   const [y, m] = month.split('-').map(Number);
   if (y === undefined || m === undefined) throw new Error(`bad month ${month}`);
   // why: UTC arithmetic on a calendar month, never local time (spec §6.1).
-  const day = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return asIsoDate(`${month}-${String(day).padStart(2, '0')}`);
+  return asIsoDate(`${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`);
 }
 
-describe('recorded Travelpayouts fixtures (WP4b) replay through msw', () => {
+describe("recorded Travelpayouts fixtures (WP4b) replay through msw (@gmt/providers/testing's loadRecorded)", () => {
   it('exist for prices_for_dates, carry rows, and target the public host', () => {
     expect(ok.length).toBeGreaterThan(0);
-    expect(ok.some((x) => rowsOf(x).length > 0)).toBe(true);
+    expect(ok.some((x) => rowsOf(x.fixture.body).length > 0)).toBe(true);
     for (const x of recorded) expect(x.url.hostname).toBe(TRAVELPAYOUTS_HOST);
   });
 
-  it.each([...tiles.entries()])('tile %s: plan().length equals msw hits, every price attributed inside the tile', async (key, pages) => {
+  it.each([...tiles.entries()])('tile %s replays for every pair it serves; a sibling pair is a cache hit', async (key, pages) => {
     const [origin, destination, month] = key.split('|');
     if (origin === undefined || destination === undefined || month === undefined) throw new Error(`bad key ${key}`);
-    const hits: string[] = [];
+    let hits = 0;
     server.use(
       http.get(ENDPOINT, ({ request }) => {
-        const page = new URL(request.url).searchParams.get('page');
-        hits.push(page ?? '?');
-        const match = pages.find((p) => p.url.searchParams.get('page') === page);
+        hits += 1;
+        // the adapter's request must equal a recorded one exactly (names and values)
+        const match = pages.find((p) => sameQuery(p.url, new URL(request.url)));
         return match === undefined
-          ? HttpResponse.text('no recorded page', { status: 404 })
-          : HttpResponse.json(match.body as Record<string, unknown>);
+          ? HttpResponse.text('no recorded page for this query', { status: 404 })
+          : HttpResponse.json(match.fixture.body as Record<string, unknown>);
       }),
     );
-    // why: the worked example's metro (LON = LHR, LGW) is the only metro the recordings use (spec §1).
-    const members = origin === 'LON' ? [asIata('LHR'), asIata('LGW')] : [asIata(origin)];
-    const dest = asIata(destination);
+    // why: the worked example's metro (LON = LHR, LGW) serves both origins; an airport tile was recorded without a metro.
+    const isMetro = origin === 'LON';
+    const pairOrigins = isMetro ? [asIata('LHR'), asIata('LGW')] : [asIata(origin)];
+    const h = makeHarness();
+    const d = discoveryOf(makeProvider(h, isMetro ? {} : { airports: noMetro }));
+    const received = pages.reduce((n, p) => n + rowsOf(p.fixture.body).length, 0);
     const from = asIsoDate(`${month}-01`);
     const to = lastDayOf(month);
-    const cells = cellsFor(members, [dest], from, to, 0, 90);
-    const first = members[0] ?? asIata(origin);
-    const q = query({ origin: first, destination: dest, departureFrom: from, departureTo: to, minNights: 0, maxNights: 90, cells });
-    const d = discoveryOf(makeProvider(makeHarness()));
-    const plans = d.plan(q);
-    expect(plans).toHaveLength(1);
-    const r = await d.fetchTile(only(plans), q, ctx());
-    if (r.kind !== 'tile') throw new Error(`replay of ${key} failed: ${r.error.kind} ${r.error.reason ?? ''}`);
-    expect(hits).toHaveLength(pages.length);
-    const covered = new Set(r.coveredCells.map(cellKeyString));
-    for (const p of r.prices) {
-      expect(covered.has(cellKeyString(p))).toBe(true);
-      expect(p.currency).toBe('GBP');
-      expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
-      expect('providerObservedAt' in p).toBe(false);
-      if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
+    for (const pairOrigin of pairOrigins) {
+      const q = query({ origin: pairOrigin, destination: asIata(destination), departureFrom: from, departureTo: to, minNights: 0, maxNights: 90 });
+      const r = await d.fetchTile(only(d.plan(q)), q, ctx());
+      if (r.kind !== 'tile') throw new Error(`replay of ${key} for ${pairOrigin} failed: ${r.error.kind} ${r.error.message}`);
+      expect(r.pointOfSale).toBe('unknown');
+      const covered = new Set(r.coveredCells.map(cellKeyString));
+      for (const p of r.prices) {
+        expect(p.origin).toBe(pairOrigin);
+        expect(covered.has(cellKeyString(p))).toBe(true);
+        expect(p.currency).toBe('GBP');
+        expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
+        expect('providerObservedAt' in p).toBe(false);
+        if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
+      }
+      const dropped = r.notes.filter((n) => n.startsWith('dropped:')).reduce((n, s) => n + Number(s.split(':')[2]), 0);
+      expect(r.notes).toContain(`rows-received:${received}`);
+      expect(r.prices.length + dropped).toBe(received);
     }
-    const received = pages.reduce((n, x) => n + rowsOf(x).length, 0);
-    const dropped = r.notes.filter((n) => n.startsWith('dropped:')).reduce((n, s) => n + Number(s.split(':')[2]), 0);
-    expect(r.notes).toContain(`rows-received:${received}`);
-    expect(r.prices.length + dropped).toBe(received);
+    // plan().length per pair is 1; the first pair reaches upstream once per page, the sibling is served by the cache.
+    expect(hits).toBe(pages.length);
+    expect(h.budget.ledger.cacheHits).toHaveLength(pages.length * (pairOrigins.length - 1));
   });
 
-  it('the recorded 401 (invalid token, TP-20) replays as tile-error auth (spec §2 fact 5)', async () => {
-    const unauthorised = recorded.find((x) => x.status === 401);
+  it('the recorded 401 (invalid token) replays as tile-error auth (spec §2 fact 5)', async () => {
+    const unauthorised = recorded.find((x) => x.fixture.status === 401);
     if (unauthorised === undefined) throw new Error('WP4b recorded no Travelpayouts 401');
-    const body = unauthorised.body;
+    const body = unauthorised.fixture.body;
     server.use(
       http.get(ENDPOINT, () =>
         typeof body === 'string' ? HttpResponse.text(body, { status: 401 }) : HttpResponse.json(body as Record<string, unknown>, { status: 401 }),
@@ -2789,14 +2710,14 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through msw', () => {
   });
 
   it('suppliedFields equal what the recorded rows actually supply (spec §5.2)', () => {
-    const fields = new Set(ok.flatMap((x) => rowsOf(x).flatMap((row) => suppliedFieldsOfRow(row))));
+    const fields = new Set(ok.flatMap((x) => rowsOf(x.fixture.body).flatMap((row) => suppliedFieldsOfRow(row))));
     expect([...fields].sort()).toEqual([...TRAVELPAYOUTS_SUPPLIED_FIELDS].sort());
   });
 
   it('spike fact 1 holds on the recordings: origin_airport and return_at on every row, no found_at, currency gbp', () => {
     for (const x of ok) {
-      expect((x.body as { currency?: unknown }).currency).toBe('gbp');
-      for (const row of rowsOf(x)) {
+      expect((x.fixture.body as { currency?: unknown }).currency).toBe('gbp');
+      for (const row of rowsOf(x.fixture.body)) {
         const r = row as Record<string, unknown>;
         expect(typeof r.origin_airport).toBe('string');
         expect(typeof r.return_at).toBe('string');
@@ -2805,9 +2726,8 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through msw', () => {
     }
   });
 
-  it('recorded requests satisfy the dated allowlist, names and values', () => {
-    const allow = parseTravelpayoutsAllowlist(loadAllowlistJson());
-    for (const x of recorded) expect(() => assertParamsAllowed(allow, x.url.searchParams)).not.toThrow();
+  it('recorded requests satisfy TRAVELPAYOUTS_PARAMS, names and values', () => {
+    for (const x of recorded) expect(() => assertParamsAllowed(TRAVELPAYOUTS_PARAMS, PRICES_FOR_DATES_PATH, x.url.searchParams)).not.toThrow();
   });
 });
 ```
@@ -2823,8 +2743,8 @@ Append to `packages/providers/src/travelpayouts/response.ts` (and add `type Supp
 
 ```ts
 /**
- * The constraint inputs a prices_for_dates row actually supplies (spec §5.2: suppliedFields
- * from recorded fixtures only).
+ * The constraint inputs a prices_for_dates row actually supplies (spec §5.2: suppliedFields from
+ * recorded fixtures only).
  * why: a row names one airline, one flight number and transfer counts. That is not a segment
  * list, so segments, segmentTimes and seller are never claimed and their constraints stay
  * unverified (spec §6.2). Any array-valued field would be a segment list this code has not seen,
@@ -2843,7 +2763,7 @@ export function suppliedFieldsOfRow(row: unknown): SuppliedField[] {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. Every file is green and `replay.test.ts` has `5 + <recorded 200 tiles>` passed (24 with WP4b's TP-01…TP-19). If a recorded tile fails with `currency` other than `gbp`, `return_at` missing, or `segments` reported, stop and report it as a spike-fact divergence. Do not change the assertion.
+Expected: PASS. Every file is green, and `replay.test.ts` has `5 + <recorded 200 tiles>` passed. If a recorded tile fails on a currency other than `gbp`, a missing `return_at`, a reported `segments`, or a 404 from the replay handler (the adapter's request differs from the recorded one), stop and report it. Do not change the assertion.
 
 - [ ] **Step 5: Commit**
 
@@ -2851,22 +2771,129 @@ Expected: PASS. Every file is green and `replay.test.ts` has `5 + <recorded 200 
 git add packages/providers && git commit -m "wp06: travelpayouts recorded fixtures replay; suppliedFields from recordings"
 ```
 
+### Task 6.9: Wire the adapter into `apps/api`
+
+**Files:** modify `apps/api/src/wiring.ts` (`httpLimitsFor` and `providersFor`, one entry each); create `apps/api/test/wiring.travelpayouts.test.ts`.
+
+**Interfaces:**
+
+- Consumes `httpLimitsFor`, `providersFor` (WP4b), `parseConfig` (WP0), and `travelpayoutsProvider`, `travelpayoutsHttpLimits`, `TRAVELPAYOUTS_PARAMS` (this brief).
+- Produces nothing new. This is the plan's "WP5 and WP6 each add their provider's line (a Modify in their briefs)".
+
+- [ ] **Step 1: Write the failing test**
+
+`apps/api/test/wiring.travelpayouts.test.ts`:
+
+```ts
+import { asIsoDateTime, type Config, fixedClock, type Logger, parseConfig } from '@gmt/core';
+import type { AirportsRepo } from '@gmt/db';
+import { type HttpKit, travelpayoutsHttpLimits } from '@gmt/providers';
+import { describe, expect, it } from 'vitest';
+import { httpLimitsFor, providersFor } from '../src/wiring.js';
+
+const TOKEN = 'test-travelpayouts-token-0123456789abcdef';
+const base = { NODE_ENV: 'test', DATABASE_PATH: ':memory:', BIND_ADDRESS: '127.0.0.1' };
+
+function config(env: Record<string, string>): Config {
+  const r = parseConfig(env, { realpath: (p) => p });
+  if (!r.ok) throw new Error(JSON.stringify(r.errors));
+  return r.config;
+}
+const silentLog: Logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, child: () => silentLog };
+const unusedHttp: HttpKit = { request: () => Promise.reject(new Error('not called')), stats: () => ({ inFlight: 0 }) };
+// why: providersFor's contract takes an AirportsRepo; the Travelpayouts adapter only calls metroOf, so a one-method stand-in is enough here.
+const airports = { metroOf: () => null } as unknown as AirportsRepo;
+const deps = { http: unusedHttp, log: silentLog, clock: fixedClock(asIsoDateTime('2026-10-14T15:00:00.000Z')), airports };
+
+describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => {
+  it('httpLimitsFor registers travelpayoutsHttpLimits when TRAVELPAYOUTS_TOKEN is set', () => {
+    const c = config({ ...base, TRAVELPAYOUTS_TOKEN: TOKEN });
+    const tp = c.providers.travelpayouts;
+    if (tp === null) throw new Error('travelpayouts not configured');
+    expect(httpLimitsFor(c).travelpayouts).toEqual(travelpayoutsHttpLimits(tp.limits, c));
+  });
+
+  it('httpLimitsFor has no travelpayouts entry without a token', () => {
+    expect(httpLimitsFor(config(base)).travelpayouts).toBeUndefined();
+  });
+
+  it('providersFor constructs the adapter when TRAVELPAYOUTS_TOKEN is set, and not otherwise', () => {
+    expect(providersFor(config({ ...base, TRAVELPAYOUTS_TOKEN: TOKEN }), deps).map((p) => p.id)).toContain('travelpayouts');
+    expect(providersFor(config(base), deps).map((p) => p.id)).not.toContain('travelpayouts');
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/wiring.travelpayouts.test.ts`
+Expected: FAIL. The first test sees `undefined`, and the third test's first assertion fails (`expected [ … ] to include 'travelpayouts'`).
+
+- [ ] **Step 3: Implement**
+
+In `apps/api/src/wiring.ts`, add to the imports:
+
+```ts
+import { TRAVELPAYOUTS_PARAMS, travelpayoutsHttpLimits, travelpayoutsProvider } from '@gmt/providers';
+```
+
+In `httpLimitsFor`, add this entry to the object literal it returns:
+
+```ts
+    // WP6: Travelpayouts, only when configured (spec §2, §5.3).
+    ...(config.providers.travelpayouts === null
+      ? {}
+      : { travelpayouts: travelpayoutsHttpLimits(config.providers.travelpayouts.limits, config) }),
+```
+
+In `providersFor`, add this entry to the array it returns:
+
+```ts
+    // WP6: Travelpayouts, only when configured; the cache TTL is what dedups sibling pairs' metro requests (spec §5.2).
+    ...(config.providers.travelpayouts === null
+      ? []
+      : [
+          travelpayoutsProvider({
+            http: deps.http,
+            log: deps.log,
+            clock: deps.clock,
+            token: config.providers.travelpayouts.token,
+            cacheTtlSeconds: config.providers.travelpayouts.limits.cacheTtlHours * 3600,
+            paramsAllowlist: TRAVELPAYOUTS_PARAMS,
+            airports: deps.airports,
+          }),
+        ]),
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/wiring.travelpayouts.test.ts`
+Expected: PASS, `3 passed`. Then run `pnpm --filter @gmt/api test`, which must pass with its thresholds; WP4b's own wiring tests stay green.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api && git commit -m "wp06: wire the travelpayouts adapter and its http limits into apps/api"
+```
+
 ## 9. Pinned review-focus tests
 
-None. The plan's five Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, WP8, WP9 and WP10. One test here guards an adjacent risk: Review Focus 1 (metro codes). In WP6 a metro code is only ever a vendor query parameter taken from the airports table, never operator input. Task 6.3's "never collapses a single origin to its metro" and "ignores a metro code that is not three upper-case letters" pin that.
+None. The plan's Review Focus lines are owned by other packages. One test here guards an adjacent risk, Review Focus 1 (metro codes): in WP6 a metro code is only ever a vendor query parameter taken from the airports table, never operator input. Task 6.3's "sends the airport when there is no metro" and "ignores a metro code that is not three upper-case letters" pin that.
 
 ## 10. Definition of done
 
 - `pnpm --filter @gmt/providers test` passes every test file. Coverage on `packages/providers/src` meets lines 85 / branches 70 / functions 85 / statements 85, with no "threshold not met" line.
 - `pnpm --filter @gmt/providers exec vitest run test/travelpayouts` passes eight files with no skipped test.
+- `pnpm --filter @gmt/api test` passes with its thresholds (including `test/wiring.travelpayouts.test.ts`).
 - `pnpm lint` reports no diagnostics.
 - `pnpm -r typecheck` exits 0.
-- `node scripts/check-boundaries.mjs` exits 0 (`@gmt/providers` imports only `@gmt/core`, and no `process.env`).
+- `node scripts/check-boundaries.mjs` exits 0. `@gmt/providers` imports only `@gmt/core`, production code never imports the testing subpath, and `process.env` is read only in the allowed files.
 - `pnpm secret-scan` exits 0.
 - `grep -rnE "'(LHR|LGW|JFK|EWR|LON|NYC)'" packages/providers/src` prints nothing (no airport in code, spec §1).
 - `grep -rn "token=" packages/providers/src/travelpayouts` prints nothing (header only, spec §2 fact 8).
-- `git log --oneline main..HEAD` shows the eight `wp06:` commits of Tasks 6.1–6.8.
+- `grep -rn "PRINTED_ABOVE" packages/providers/src` prints nothing (Task 6.6's two copied values are filled in).
+- `git log --oneline main..HEAD` shows the nine `wp06:` commits of Tasks 6.1–6.9.
 
 ## 11. Open questions
 
-None requiring operator judgement. The thirteen mismatches in §3 are contract findings for Fable to settle in the plan, in particular 1, 2, 3, 5, 7, 8 and 10. This brief compiles and runs against the frozen contracts as written, so it is dispatchable once its review passes.
+None requires operator judgement. Mismatches 4–10 in §3 are coordination findings for Fable. Mismatch 4 (who owns `src/allowlist.ts`) and mismatch 5 (the endpoint key in the allowlist file) must agree with WP5 and WP4b before both adapters are dispatched.

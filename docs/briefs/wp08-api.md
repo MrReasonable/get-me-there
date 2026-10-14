@@ -1,6 +1,6 @@
 ---
 wp: 8
-title: "api: app bootstrap, routes, auth, hardening, static, health, tools routes"
+title: "api: app bootstrap, routes, auth, hardening, static, health, record tool route"
 owner: sonnet
 depends_on: [4b, 7]
 spec_sections: ["§4 Auth and request hardening", "§5.5", "§6.5", "§6.9", "§7 app_lock", "§8.1 Single-cell verification", "§8.1 Resume", "§8.2", "§9 item 5", "§10", "§12", "§13", "§14"]
@@ -8,222 +8,199 @@ reviewers: [code-architect, test-strategy-reviewer, security-reviewer, provenanc
 status: draft
 ---
 
-# WP8 — `@gmt/api`: app bootstrap, routes, auth, hardening, static, health, tools routes
+# WP8 — `@gmt/api`: app bootstrap, routes, auth, hardening, static, health, record tool route
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 9) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`) before Task 8.1. **This brief is not dispatchable until every item under "Open questions" is closed by Fable** (each is a contract amendment, not a design question for the operator).
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 10) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`, "Cross-package contracts" and "Decisions taken at reconciliation") before Task 8.1. Reconciled against both on 2026-10-14.
 
 ## 1. Goal
 
-Turn the engine, repositories and ports into the one HTTP surface of spec §10, behind the auth and hardening of spec §4, started by an app bootstrap that honours the §5.5 synthetic gates, the §7 `app_lock` waits and the §7 pre-migration backup, and that shuts down gracefully (§13).
+Turn the engine, repositories and ports into the one HTTP surface of spec §10 under `/api`, behind the auth and hardening of spec §4, started by an app bootstrap that honours the §5.5 synthetic gates, the §7 `app_lock` waits and the pre-migration backup, and that shuts down gracefully (§13).
 
 ## 2. Scope
 
 **In**
 
-- `apps/api/src/app.ts`: `createApp(ports, engine, options?)`, a Hono app that mounts every `ROUTES` entry of `@gmt/core` `apiContract` under the `/api` prefix (see Open question 1) with `@hono/zod-validator` on bodies and queries, the error envelope `{ error: { code, message, details? } }`, security headers, Host/Origin/Content-Type/X-Requested-With checks, basic auth with the failed-auth rate limit, static serving of the built web app with an SPA fallback.
-- Every route of spec §10 with its semantics: health (public and authenticated detail), providers, definitions CRUD with the plan-aware default definition, estimate, coverage check, executions (start, read, cancel, resume), single-cell verify, results (§6.5/§6.9), calendar, duration analysis, coverage, calendar gap, cell detail, history, alerts CRUD and events (storage only), scheduler jobs, budget, `/tools/smoke` and `/tools/record`.
-- `apps/api/src/bootstrap/app.ts`: `bootApp(deps)` and `main()`; `apps/api/src/bootstrap/start.ts` entry; config parsed once (§12); pre-migration backup through an injected port; airport seed and sanity check; `AppLock('app')` with the 60 s / 90 s waits and the 30 s heartbeat; `engine.boot()`; `@hono/node-server` on `bindAddress:port`; SIGTERM/SIGINT graceful shutdown; pino with the §14 redact paths.
+- `apps/api/src/app.ts`: `createApp(ports, engine, options?)`, a Hono app that mounts every `ROUTES` entry of `@gmt/core` `apiContract` (paths already carry `/api`) with `@hono/zod-validator` on bodies, queries and path params, the error envelope `{ error: { code, message, details? } }` (a 422 carries `details.fields`), security headers, Host/Origin/Content-Type/X-Requested-With checks, basic auth with the failed-auth rate limit, static serving of the built web app with an SPA fallback outside `/api`.
+- Every route of spec §10 (rev 10) except `POST /api/tools/smoke`: health (union schema), airports autocomplete, providers, definitions CRUD with the plan-preset draft, both estimate routes, coverage check, executions, single-cell verify, results (§6.5/§6.9), calendar, duration analysis, coverage, calendar gap, cell detail, history, alert rule storage and events, scheduler jobs, budget, `POST /api/tools/record` calling WP4b's `recordFixtures`.
+- `apps/api/src/bootstrap/app.ts`: `bootApp(deps)` and `main(env)` in the plan's order: refuse `NODE_ENV=test` → config → logger → backup preflight (WP12's `backupDatabase`) when `pendingMigrations()` is non-empty and the database file exists → `buildPorts` → seed + sanity → `AppLock('app')` waits and 30 s heartbeat → `createEngine` → `engine.boot()` → serve; SIGTERM: stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → exit 0.
 - Every §9 item 5 test as real code, plus the review-focus line 4 test (`excludedByCurrentSpace` and the `basisReason` wording).
 
 **Out**
 
-- `buildPorts`, `loadConfigFromEnv`, the tool bootstrap and the `record:fixtures` tool: WP4b (consumed here).
-- The live smoke tool function (`apps/api/src/tools/smoke.ts`) and the "tool bootstrap starts no execution" test: WP13. WP8 mounts `/tools/smoke` and answers `503 tool_unavailable` until WP13 registers the runner.
-- The alert runner, `EmailNotifier` and alert templates: WP11. WP8 stores and reads alert rules and events only.
-- `scripts/backup.mjs` and its `backupDatabase` export: WP12. WP8 injects a `backup` port and loads that export at runtime.
-- Dockerfile, compose, `HEALTHCHECK`, `docs/*`: WP12.
-- The SPA itself and its API client: WP9/WP10.
-- Engine semantics (pre-start checks, resume compare-and-set, child execution rules, scheduler ticks): WP7. WP8 calls the engine and maps its `StartResult` to HTTP.
+- `buildPorts`, `loadConfigFromEnv`, `createLogger` (with the §14 redact paths), the tool bootstrap and `recordFixtures`: WP4b (consumed here).
+- `POST /api/tools/smoke`, `runSmoke` and the "tool bootstrap starts no execution" test: WP13. WP8 leaves the smoke route unmounted (key listed in `OWNED_ELSEWHERE`); WP13 adds its handler and removes the key.
+- The alert runner (`runAlerts`, passed to `createEngine` as `opts.alerts`), `EmailNotifier`, templates: WP11, which modifies `bootApp` to pass `{ alerts: runAlerts }`. WP8 stores and reads alert rules and events only.
+- `scripts/backup.mjs` (`backupDatabase`): WP12. WP8 calls it through an injected `backup` port.
+- Dockerfile, compose, `HEALTHCHECK` (fetches `GET /api/health`), docs: WP12.
+- The SPA and its client: WP9/WP10.
+- Engine semantics (pre-start checks, resume compare-and-set, child rules, scheduler): WP7. WP8 maps `StartResult` to HTTP.
 
 ## 3. Spec sections
 
 | Section | What it requires of WP8 |
 |---|---|
-| §4 "Auth and request hardening" | Basic auth (both vars or neither, password ≥ 12, constant-time compare), failed-auth limit 5/min per source IP (from `X-Forwarded-For` only with `TRUST_PROXY=true`) with a global 20/min, everything authenticated except the minimal `GET /health`, which is also Host-exempt; `ALLOWED_HOSTS` rejection names the header value and the variable; mutating routes need `Content-Type: application/json` and `X-Requested-With: get-me-there`; `Origin`, when present, must match; CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`. |
-| §5.5 | Bootstraps refuse `NODE_ENV=test`; `databasePath` realpath-resolved before the config is built (WP4b's `loadConfigFromEnv`); injected-config boot matrix; one test spawning the real bootstrap with a real production environment. |
-| §6.5 | `/results` dedups per itinerary hash (cheapest offer in the definition's cabin, others in the expanded row), ranks by class then price, returns at most 1000 rows with `truncated` and `total`, no sort/filter parameters. |
-| §6.9 | Basis `verified` or `calendar`; calendar rows are class `unchecked` with a "not applied" list; default basis is calendar when the snapshot has no verification provider or no observations exist, with a reason; calendar-gap empty with no verification provider; a search link on every row whose booking is `none`. |
-| §7 `app_lock` | App holder: heartbeat every 30 s; a fresh `tool` lock → wait up to 60 s then refuse; a fresh `app` lock → wait up to 90 s logging the lock age, then take over; SIGTERM releases the lock after the checkpoint. Pre-migration `VACUUM INTO` backup only when migrations are pending; a failed backup refuses boot. Seed and the airport sanity check fail boot. |
-| §8.1 "Single-cell verification" | `POST /cells/verify` validates the cell ∈ the current resolved space and that its airports exist; 409 when a child is active for that cell; hidden (refused) when the definition has no verification provider. Children are included in results, calendar, calendar-gap and duration analysis. |
+| §4 "Auth and request hardening" | Basic auth (both vars or neither, password ≥ 12, constant-time compare), failed-auth limit 5/min per source IP (from `X-Forwarded-For` only with `TRUST_PROXY=true`) with a global 20/min, everything authenticated except the minimal `GET /api/health`, which is also Host-exempt; `ALLOWED_HOSTS` rejection names the header value and the variable; mutating routes need `Content-Type: application/json` and `X-Requested-With: get-me-there`; `Origin`, when present, must match; CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`. |
+| §5.5 | Bootstraps refuse `NODE_ENV=test`; injected-config boot matrix; one test spawning the real bootstrap with a real production environment. |
+| §6.5 | `/results` dedups per itinerary hash, ranks by class then price, returns at most 1000 rows with `truncated` and `total`, no sort/filter parameters. |
+| §6.9 | Basis `verified` or `calendar`; calendar rows are class `unchecked` with a "not applied" list; default basis calendar when the snapshot has no verification provider or no observations exist, with a reason; calendar gap empty with no verification provider; a search link on every row. |
+| §7 `app_lock`, Migrations | App holder: heartbeat every 30 s; a fresh `tool` lock → wait up to 60 s then refuse; a fresh `app` lock → wait 90 s logging its age, refuse if still heartbeated, take over a stale lock at once; SIGTERM releases the lock after the checkpoint. Backup before migrations when migrations are pending; a failed backup refuses boot. Seed and the airport sanity check fail boot. |
+| §8.1 "Single-cell verification" | `POST /api/cells/verify` validates membership in the current resolved space and that airports exist; 409 when a child is active; refused when the definition has no verification provider. Children are included in results, calendar, calendar gap and duration analysis. |
 | §8.1 "Resume" | `/resume` is manual (`{ manual: true }`), 409 when another execution is active or the compare-and-set loses. |
-| §8.2 | `POST`/`PUT`/`DELETE` of a definition (re)register or unregister its cron job in the same request; cron validated by `engine.parseCron` (sub-hourly rejected); the default definition uses the plan-aware policy preset. |
-| §9 item 5 | Every test listed there (see Task 8.15 for the sweep). |
-| §10 | The route table, the error envelope, `provenance` and `stale` on every price-bearing shape. |
-| §12 | `process.env` parsed once in the bootstrap through the `core` schema; invalid config fails boot naming the field. |
-| §13 | `/health` for the `HEALTHCHECK`; graceful shutdown: stop, checkpoint, release lock, exit 0. |
-| §14 | pino JSON to stdout; `redact` paths `apiKey`, `token`, `authorization`, `url.query`, `req.headers.authorization`; URL query/userinfo stripped from every logged string. |
+| §8.2 | Definition create/PUT/disable/enable/delete (re)register its cron job in the same request; cron validated by `engine.parseCron` (sub-hourly rejected); the default definition uses the plan-aware preset. |
+| §9 item 5 | Every test listed there (Task 8.15 sweeps). |
+| §10 (rev 10) | The route table under `/api`, incl. `GET /airports` and `POST /definitions/estimate`; the error envelope with `details.fields` on 422; `provenance` and `stale` on every price-bearing shape. |
+| §12 | `process.env` parsed once in the bootstrap through the `core` schema. |
+| §13, §14 | `/api/health` for the `HEALTHCHECK`; graceful shutdown; pino with redaction (WP4b's `createLogger`). |
 
 ## 4. Interfaces consumed
 
-Copied from the plan's "Cross-package contracts" without change, then the items this brief needs that the plan does not spell out (each listed again in Open questions).
+Exact signatures from the plan's "Cross-package contracts" (revision of 2026-10-14). Only the members WP8 calls are listed; the plan is authoritative for the rest.
 
 ```ts
 // @gmt/core (WP0)
 export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
-export interface Clock { now(): IsoDateTime; todayLondon(): IsoDate }
-export const systemClock: Clock;
-export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void };
-export interface Logger { debug(o: object, msg?: string): void; info(o: object, msg?: string): void; warn(o: object, msg?: string): void; error(o: object, msg?: string): void; child(bindings: object): Logger }
-export class Secret { constructor(value: string); reveal(): string; toString(): '[redacted]'; toJSON(): '[redacted]' }
-export interface Config { /* the plan's Config block, verbatim */ }
-export function parseConfig(env: Record<string, string | undefined>, opts: ParseConfigOptions): ConfigResult;
-export function syntheticAllowed(c: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>): boolean;
-export const FIXTURE_OPT_IN_PHRASE = 'i-understand-this-is-fake';
+export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
+export interface Cell extends CellKey { nights: number }
+export function cellKeyString(c: CellKey): string;
+export type DefinitionInput = Omit<SearchDefinition, 'id' | 'confirmedCostPence' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
+export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; resolvedAt: IsoDateTime; windowClamped: boolean; droppedAlwaysInclude: CellKey[] };
+export interface Execution { id; definitionId; isChild; cell: CellKey | null; snapshot: DefinitionSnapshot; status: ExecutionStatus; stage: Stage | null; estimate: Estimate | null; cancelRequested; resumeAfter; autoResumeCount; startedAt: IsoDateTime | null; finishedAt: IsoDateTime | null; errorText: string | null; createdAt: IsoDateTime; trigger: 'manual' | 'schedule' | 'tool' }
+export interface Buckets { priced; empty; no_data; error; skipped; not_run; reused }
+export interface Observation extends ObservationFields { id: number; offerId: number; executionId: string; provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean }
+export type ResultBasis = 'verified' | 'calendar';
+export interface AlertRule { id; definitionId; type; thresholdPence; pct; basis: ResultBasis; requireAllVerified; cooldownHours; enabled }
+export type AlertRuleInput = Omit<AlertRule, 'id'>;
+export interface Usage { calls; costMicroGbp; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
+export type BudgetScope = { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string } | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId } | { kind: 'global-month' };
+export const PENCE_TO_MICRO = 10_000;
+export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void; set(at: IsoDateTime): void };
 export function stripUrlsInText(text: string): string;
-export class BudgetExceeded extends Error { scope; cap; current; requested }
-export const BANNED_WORDS: readonly string[];
+export const BANNED_WORD_ALLOWLIST: readonly string[];
 export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;
-export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown';
-export type BudgetScope =
-  | { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string }
-  | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
-  | { kind: 'global-month' };
-export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
-export interface SearchDefinition { /* the plan's Definition types block, verbatim */ }
-export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; resolvedAt: IsoDateTime; windowClamped: boolean };
-export const ACTIVE_STATUSES: readonly ExecutionStatus[];
+export function effectiveAge(...): EffectiveAge; export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown';
+export const iataSchema: z.ZodType<Iata, string>;   // trims and upper-cases
+export const isoDateSchema: z.ZodType<IsoDate, string>; export const cabinSchema;
+export const FIXTURE_OPT_IN_PHRASE = 'i-understand-this-is-fake';
 export * as apiContract from './api-contract/index.js';
-// apiContract: ROUTES, RouteDef { method; path; request?; query?; response; auth: 'public' | 'required' }, errorEnvelopeSchema,
-// priceCellSchema, bucketsSchema, coverageSummarySchema, bookingSchema, definitionCreateRequestSchema,
-// definitionUpdateRequestSchema, definitionResponseSchema, estimateResponseSchema, coverageCheckRequestSchema,
-// coverageCheckResponseSchema, executionResponseSchema, startExecutionRequestSchema, verifyCellRequestSchema,
-// resultRowSchema, resultsResponseSchema, calendarResponseSchema, durationAnalysisResponseSchema,
-// coverageResponseSchema, calendarGapResponseSchema, cellDetailResponseSchema, historyResponseSchema,
-// alertRuleSchema, alertEventSchema, healthPublicSchema, healthDetailSchema, providersResponseSchema,
-// budgetResponseSchema, schedulerJobsResponseSchema, toolRunResponseSchema, cronSchema
+// apiContract: ROUTES (RouteDef { method; path /* starts with /api/ */; request?; query?; params?; response; auth }), errorEnvelopeSchema,
+// usageSchema, executionSummarySchema, definitionResponseSchema, estimateSchema, budgetFitSchema, executionResponseSchema,
+// startExecutionResponseSchema, resultRowSchema, resultsQuerySchema, resultsResponseSchema, calendarResponseSchema,
+// durationAnalysisResponseSchema, coverageResponseSchema, calendarGapResponseSchema, cellDetailResponseSchema,
+// itineraryHistoryResponseSchema, routeHistoryResponseSchema, airportsResponseSchema, providersResponseSchema,
+// budgetResponseSchema, schedulerJobsResponseSchema, healthResponseSchema (union), healthDetailSchema,
+// alertRuleSchema, alertRuleInputSchema, alertEventSchema, alertEventsQuerySchema, toolRecordRequestSchema, toolRunResponseSchema
 
-// @gmt/core (WP1, plan "WP1" Produces)
-export function resolveWindow(def: WindowSpec, todayLondon: IsoDate): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean };
-export function countCells(space: ResolvedSpace): number;
-export function generateCells(space: ResolvedSpace): Cell[];
-export function addDays(d: IsoDate, n: number): IsoDate;
-export function daysBetween(a: IsoDate, b: IsoDate): number;        // b − a in days (assumed direction; Open question 6)
-export function validateSearchSpace(def, todayLondon, lookup: { exists(iata): boolean; metroOf(iata): string | null; airportsOfMetro(code): Iata[] }, maxCells): ValidationResult;
-export function sixBuckets(outcomes: CellOutcome[]): Buckets;
-export function cellKeyString(cell: CellKey): string;                 // `O|D|dep|ret`
-
-// @gmt/core (WP2, plan "WP2" Produces; parameter shapes not in the plan, Open question 6)
-export function evaluateConstraints(it: NormalisedItinerary, offer: EvaluatedOffer, c: Constraints, supplied: readonly SuppliedField[]): Verdicts;
-export interface EvaluatedOffer { requestedCabin: Cabin; pricePence: number; segmentCabins: Cabin[] | null; selfTransfer: boolean | null; baggage: BaggageSnapshot | null }
-export function verdictClass(v: Verdicts): VerdictClass;
-export function dedupByItinerary(rows: ResultRow[]): ResultRow[];     // one row per itineraryHash, cheapest kept, others into otherOffers
-export function rankRows(rows: ResultRow[]): ResultRow[];             // class, then seen before notSeenInLatest, then price, then compareAges
-export function bandCheapest(rows: ResultRow[], hours: number): ResultRow[]; // sets bandCheapest on the cheapest per band
+// @gmt/core (WP1, WP2)
+export function resolveWindow(w: WindowSpec, todayLondon: IsoDate): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean };
+export function generateCells(space: ResolvedSpace): Cell[]; export function countCells(space: ResolvedSpace): number;
+export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number /* b − a */;
+export function validateSearchSpace(def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'>, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
+export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: string }>;
+export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts;
+export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
 export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string };
+export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[];
 
 // @gmt/db (WP0, WP3)
-export interface Db { raw: BetterSqlite3.Database; drizzle: BetterSQLite3Database; transaction<T>(fn: () => T): T; close(): void }
+export interface Db { raw; drizzle; transaction<T>(fn: () => T): T; close(): void }
 export function openDatabase(path: string): Db;
-export class AppLock { constructor(db, holder: 'app' | 'tool', clock, log); acquire(opts: { waitMs: number }): 'acquired' | 'refused'; heartbeat(): void; release(): void; static inspect(db): { holder; heartbeatAt; acquiredAt } | null }
-export function seedAirports(db, dataset: AirportsDataset): { inserted: number; datasetVersion: string };
-export function sanityCheckAirports(db, referenced: Iata[]): { ok: true } | { ok: false; reason: string };
-export class AirportsRepo { exists(iata): boolean; get(iata): Airport | null; metroOf(iata): string | null; airportsOfMetro(code: string): Iata[] /* Open question 3 */; count(): number }
-export class DefinitionsRepo { create(input): SearchDefinition; update(id, patch): SearchDefinition; get(id): SearchDefinition | null; list(): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence): void }
-export class ExecutionsRepo { get(id): Execution | null; listForDefinition(id, opts: { includeChildren: boolean }): Execution[]; activeParent(definitionId): Execution | null; latestCompleted(definitionId): Execution | null }
-export class CellsRepo { outcomes(executionId, filter?): CellOutcome[]; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; selected(executionId): Array<CellKey & { reason: SelectionReason }> }
-export class CalendarPricesRepo { insert(rows): void; latestPerCell(definitionId, cabin, space: ResolvedSpace | null /* Open question 3 */): CalendarPriceRow[]; history(origin, destination, cabin): HistoryPoint[] }
-export class ItinerariesRepo { observationsForDefinition(definitionId, executionIds, space: ResolvedSpace | null /* Open question 3 */, cabin): ObservationRow[]; offerHistory(hash): HistoryPoint[]; latestVerificationOutcomeForCell(definitionId, cell): CellOutcome | null }
-export class LedgerRepo { countsFor(executionId): { calls: number; costMicroGbp: number; tiles: number; cacheHits: number }; overrun(executionId, planLength): boolean }
-export class AlertsRepo { rules(definitionId?): AlertRule[]; create(input: AlertRuleInput): AlertRule; update(id: string, patch: Partial<AlertRuleInput>): AlertRule; delete(id: string): void; get(id: string): AlertRule | null; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[] }
-export class NotificationsRepo { wasSent(kind, executionId): boolean }
-export class RoutePriceHistoryRepo { series(origin, destination, cabin, providerId): HistoryPoint[] }
-// Row types the plan names without fields (Open question 3); WP8 reads exactly these fields:
-export interface Execution { id: string; definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; status: ExecutionStatus; stage: Stage | null; estimate: Estimate | null; resumeAfter: IsoDateTime | null; startedAt: IsoDateTime | null; finishedAt: IsoDateTime | null; errorText: string | null }
-export interface CalendarPriceRow extends CellKey { id: number; executionId: string; providerId: ProviderId; sourceKind: SourceKind; cabin: Cabin; pricePence: number; fx: FxInfo; pointOfSale: PointOfSale; fetchedAt: IsoDateTime; providerObservedAt: IsoDateTime | null; maxAgeHours: number | null; vendorLink: string | null; reusedFromExecutionId: string | null }
-export interface ObservationRow { observation: Observation; offer: Offer & { id: number }; itinerary: NormalisedItinerary; executionId: string; isChild: boolean }
-export interface HistoryPoint { providerId: ProviderId; kind: 'observation' | 'calendar' | 'route-lowest'; fetchedAt: IsoDateTime; pricePence: number; provenance: Provenance }
+export function pendingMigrations(db: Db, migrationsDir: string): string[];
+export class AppLock { constructor(db: Db, holder: 'app' | 'tool', clock: Clock, log: Logger); acquire(opts: { waitMs: number }): 'acquired' | 'refused'; heartbeat(): void; release(): void; static inspect(db: Db): { holder; heartbeatAt; acquiredAt } | null }
+export function seedAirports(db: Db, dataset: AirportsDataset): { inserted: number; datasetVersion: string };
+export function sanityCheckAirports(db: Db, referenced: Iata[]): { ok: true } | { ok: false; reason: string };
+export function loadAirportsDataset(dir: string): AirportsDataset;   // airports.<version>.json + metros.json
+export interface AirportsDataset { version: string; airports: Array<Omit<Airport, 'source' | 'datasetVersion'>>; metros: Record<string, string[]> }
+export class AirportsRepo { exists(iata): boolean; search(q: string, limit: number): Airport[]; metroOf(iata): string | null; airportsOfMetro(code: string): Iata[] }
+export class DefinitionsRepo { create(input: DefinitionInput): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
+export class ExecutionsRepo { get(id): Execution | null; listForDefinition(definitionId, opts: { limit: number; includeChildren: boolean }): Execution[] }
+export class CellsRepo { outcomes(executionId, filter?: { stage?; providerId?; cells? }): CellOutcome[]; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets: Buckets; total }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }> }
+export interface CalendarPriceInsert { providerId; sourceKind; cabin; cell: CellKey; pricePence; priceNativeMinor; currencyNative; fx: FxInfo; pointOfSale; fetchedAt; providerObservedAt: IsoDateTime | null; maxAgeHours: number | null; vendorLink: string | null; reusedFromExecutionId: string | null }
+export interface CalendarPriceRow extends CalendarPriceInsert { id: number; executionId: string; provenance: Provenance }
+export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; history(origin, destination, cabin): Array<{ providerId; points: HistoryPoint[] }> }
+export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
+export class ItinerariesRepo { observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell): CellOutcome | null }
+export class LedgerRepo { countsFor(executionId): { calls; costMicroGbp; tiles; cacheHits; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> } }
+export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; delete(id): void; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[] }
+export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean }
+export class RoutePriceHistoryRepo { series(origin, destination, providerId): RouteSeriesPoint[] }
 
 // @gmt/providers (WP4)
-export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>; costMicroGbp: number }): FlightProvider;
-export function fixtureHandlers(root: string): RequestHandler[];
+export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
 
 // @gmt/engine (WP7)
-export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window'; message: string; details: unknown };
-export interface Engine {
-  boot(): Promise<void>; shutdown(): Promise<void>;
-  start(definitionId: string, opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number }): Promise<StartResult>;
-  resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
-  cancel(executionId: string): Promise<boolean>;
-  verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
-  estimate(definition: SearchDefinition, todayLondon: IsoDate): Estimate;
-  estimateRemaining(executionId: string): Estimate;
-  budgetFit(definition: SearchDefinition): BudgetFit;
-  coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;
-  scheduler: { register(def: SearchDefinition): void; unregister(definitionId: string): void; jobs(): SchedulerJob[]; tick(definitionId: string): Promise<void> };
-  status(): { running: string[]; degraded: boolean; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null };
-}
-export function createEngine(deps: EngineDeps): Engine;
+export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled'; message: string; details: unknown };
+export interface Engine { boot(); shutdown(); start(definitionId, opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number }): Promise<StartResult>; resume(executionId, opts: { manual: boolean }): Promise<StartResult>; cancel(executionId): Promise<boolean>; verifyCell(definitionId, cell: CellKey): Promise<StartResult>; estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate; budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit; coverageCheck(req): Promise<CoverageCheckResponse>; scheduler: { register(def): void; unregister(definitionId): void; jobs(): SchedulerJob[]; tick(definitionId): Promise<void>; blockedSince(): IsoDateTime | null }; status(): { running: string[]; degraded: boolean; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null } }
+export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   // boot() makes no network call
+export interface EngineOptions { alerts?: AlertsStepHook; fixtureCostMicroGbp?: number }
 export function parseCron(expr: string, tz: string): { ok: true; next: (from: Date) => Date | null } | { ok: false; reason: string };
-export class LogNotifier implements Notifier { constructor(log: Logger) }   // plan file map names src/notifiers/log.ts; export not in the contract (Open question 5)
-export interface SchedulerJob { definitionId: string; kind: 'cron' | 'resume'; cron: string | null; tz: string; nextRun: IsoDateTime | null; executionId: string | null } // Open question 5
+export class LogNotifier implements Notifier { constructor(log: Logger) }
 
 // apps/api (WP4b)
-export interface Ports { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; clock: Clock; log: Logger; secrets: Secret[] }
-export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string }): Ports;
+export interface Ports { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; clock: Clock; log: Logger; secrets: Secret[]; recorder: FixtureRecorder | null; fixtureRoot: string | null }
+export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string; fixtureRoot?: string }): Ports;
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;
-// apps/api/src/tools/record.ts (WP4b), in-process entry (Open question 4):
-export function recordFixtures(ports: Ports, args: { budget: number }, log: Logger): Promise<ToolRunResult>;
-export interface ToolRunResult { ok: boolean; exitCode: number; lines: string[] }
+export function createLogger(config: Pick<Config, 'logLevel'>, opts?: { destination?: NodeJS.WritableStream }): Logger;   // src/logger.ts
+export async function recordFixtures(ports: Ports, args: RecordArgs, ctx: { signal: AbortSignal }): Promise<RecordSummary>;   // src/tools/record.ts
+// RecordArgs = { budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth; metro?: string }
+// RecordSummary = { calls: Array<{ id: string; providerId; status: number | 'skipped'; file: string | null }>; creditsUsed: number; freeCalls: number }
 
-// scripts/backup.mjs (WP12), loaded at runtime (Open question 4):
-export function backupDatabase(dbPath: string): Promise<string>;   // VACUUM INTO + integrity_check, refuses an existing target, keeps 5; returns the backup path
+// scripts/backup.mjs (WP12)
+export function backupDatabase(opts: { dbPath: string; backupDir: string; keep?: number; now?: Date }): { path: string; pruned: string[] };
 ```
+
+The fixture provider is reached through http-kit's gated `inProcessHosts` seam (`buildPorts` wires it when `fixtureRoot` is given and `syntheticAllowed` holds), so route tests need no `msw`.
 
 ## 5. Interfaces produced
 
 ```ts
+// apps/api/src/routes/types.ts
+export const API_PREFIX = '/api';
+export type AppEnv = { Variables: { authenticated: boolean; optionalBody?: { present: boolean; value: unknown } } };
+export type RouteKey = `${'GET' | 'POST' | 'PUT' | 'DELETE'} /api/${string}`;
+export type ToolRunResponse = z.infer<typeof apiContract.toolRunResponseSchema>;
+export interface ToolRunners { record?: (args: z.infer<typeof apiContract.toolRecordRequestSchema>, signal: AbortSignal) => Promise<ToolRunResponse> }
+/** ROUTES entries whose handler another package owns; left unmounted here. WP13 removes 'POST /api/tools/smoke' when it adds its handler. */
+export const OWNED_ELSEWHERE: ReadonlySet<string>;
+
 // apps/api/src/app.ts
-export type RouteKey = `${'GET' | 'POST' | 'PUT' | 'DELETE'} ${string}`;
-export interface ToolRunners { smoke?: (args: Record<string, never>) => Promise<ToolRunResult>; record?: (args: { budget: number }) => Promise<ToolRunResult> }
-export interface AppOptions { webRoot?: string | null; tools?: ToolRunners; clientIp?: (c: Context<AppEnv>) => string | null; routes?: readonly RouteDef[] }
-export const API_PREFIX = '/api';   // defined in src/routes/types.ts, re-exported by src/app.ts
+export interface AppOptions { webRoot?: string | null; tools?: ToolRunners; clientIp?: (c: Context<AppEnv>) => string | null; routes?: readonly apiContract.RouteDef[] }
 export function createApp(ports: Ports, engine: Engine, options?: AppOptions): Hono<AppEnv>;
+export { API_PREFIX };
 
 // apps/api/src/errors.ts
-export class ApiError extends Error { constructor(status: ContentfulStatusCode, code: string, message: string, details?: unknown) }
-export function envelope(code: string, message: string, details?: unknown): { error: { code: string; message: string; details?: unknown } };
-
-// apps/api/src/logger.ts
-export const REDACT_PATHS: readonly string[];   // spec §14, exactly five
-export function createLogger(level: Config['logLevel'], destination?: pino.DestinationStream): Logger;
+export class ApiError extends Error { constructor(status: ContentfulStatusCode, code: string, message: string, details?: Record<string, unknown>) }
+export function envelope(code: string, message: string, details?: Record<string, unknown>): { error: { code: string; message: string; details?: Record<string, unknown> } };
+export function fieldsDetail(fields: Array<{ field: string; message: string }>): { fields: Array<{ field: string; message: string }> };
 
 // apps/api/src/bootstrap/app.ts
 export interface BootDeps {
   config: Config; log: Logger; clock?: Clock; listen: boolean; assets: AssetPaths;
-  backup?: (dbPath: string) => Promise<void>;                 // default: loadBackup(assets.backupModule)
-  sleep?: (ms: number) => Promise<void>;                      // default: setTimeout
+  backup?: (dbPath: string) => Promise<void>;     // default: WP12 backupDatabase({ dbPath, backupDir: <db dir>/backups })
+  sleep?: (ms: number) => Promise<void>;
   timers?: { setInterval(fn: () => void, ms: number): unknown; clearInterval(handle: unknown): void };
-  tools?: (ports: Ports) => ToolRunners;                      // main() passes inProcessTools
+  tools?: (ports: Ports) => ToolRunners;          // main() passes inProcessTools
 }
+export interface RunningApp { app: Hono<AppEnv>; ports: Ports; engine: Engine; port: number | null; close(): Promise<void> }
 export const HEARTBEAT_MS = 30_000;
 export class BootError extends Error {}
-export interface RunningApp { app: Hono<AppEnv>; ports: Ports; engine: Engine; port: number | null; close(): Promise<void> }
 export function bootApp(deps: BootDeps): Promise<RunningApp>;
 export function main(env: NodeJS.ProcessEnv): Promise<void>;
 
-// apps/api/src/bootstrap/lock.ts
+// apps/api/src/bootstrap/lock.ts, backup.ts, paths.ts
 export function acquireAppLockWithWaits(p: { lock: AppLock; inspect: () => { holder: 'app' | 'tool'; heartbeatAt: IsoDateTime } | null; clock: Clock; sleep: (ms: number) => Promise<void>; log: Logger }): Promise<void>;
-export const TOOL_LOCK_WAIT_MS = 60_000;
-export const APP_LOCK_WAIT_MS = 90_000;
-
-// apps/api/src/bootstrap/migrations.ts
-export function pendingMigrations(dbPath: string, migrationsDir: string): { fresh: boolean; pending: string[] };
-
-// apps/api/src/bootstrap/backup.ts, paths.ts
+export const TOOL_LOCK_WAIT_MS = 60_000; export const APP_LOCK_WAIT_MS = 90_000;
+export function hasPendingMigrations(dbPath: string, migrationsDir: string): string[];   // [] when the file does not exist
 export function loadBackup(modulePath: string): (dbPath: string) => Promise<void>;
-export interface AssetPaths { migrationsDir: string; airportsDataDir: string; webRoot: string | null; backupModule: string }
+export interface AssetPaths { migrationsDir: string; airportsDataDir: string; webRoot: string | null; backupModule: string; fixtureRoot: string }
 export function assetPaths(): AssetPaths;
-export function loadAirportsDataset(dir: string): AirportsDataset;
+
+// apps/api/src/defaults.ts
+export const DEFAULT_REFRESH_HOURS = 168; export const DEFAULT_CRON = '0 5 * * 1';
+export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput;
 
 // apps/api/src/tools/inProcess.ts
 export function inProcessTools(ports: Ports): ToolRunners;
-
-// apps/api/src/defaults.ts
-export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput;
 ```
-
-The HTTP surface is `ROUTES` from `@gmt/core` under `/api`; WP9's client and WP12's `HEALTHCHECK` (`GET /api/health`) depend on that prefix.
 
 ## 6. Library notes
 
@@ -231,89 +208,88 @@ All versions from the plan's Task 0.1 list. Verified on 2026-10-14 with context7
 
 | Library | Version | Calls used | Source verified |
 |---|---|---|---|
-| `hono` | 4.13.13 | `new Hono<AppEnv>()`, `app.route('/api', api)`, `api.on(method, path, mw, handler)`, `app.use('*', mw)`, `app.onError`, `app.notFound`, `app.request(path, init)` for tests, `c.json(body, status)`, `c.header()`, `c.req.header()`, `c.req.path`, `c.req.method`, `c.req.param()`, `c.req.text()`, `c.req.addValidatedData(target, data)`, `c.req.valid(target)`; `secureHeaders` from `hono/secure-headers` with `contentSecurityPolicy: { defaultSrc: ["'self'"], frameAncestors: ["'none'"] }`, `referrerPolicy: 'no-referrer'`, `xContentTypeOptions: 'nosniff'`; `every` from `hono/combine`; `HTTPException` not used (own `ApiError`) | context7 `/websites/hono_dev` (secure-headers options table; `app.request` API) |
-| `@hono/node-server` | 2.1.5 | `serve({ fetch: app.fetch, port, hostname }, (info) => …)` returns the `node:http` server; `serveStatic({ root })` from `@hono/node-server/serve-static` (rejects `..`, calls `next()` when not found); `serveStatic({ path })` for the SPA fallback; `getConnInfo(c)` from `@hono/node-server/conninfo` (`info.remote.address`) | context7 `/honojs/node-server` (`serve`, `serveStatic` options and behaviour, `conninfo`) |
-| `@hono/zod-validator` | 0.9.1 | `zValidator('json' \| 'query', schema, hook)` with `hook(result, c)` returning the 400 envelope when `!result.success`; peer range `zod ^3.25.0 \|\| ^4.0.0`, so zod 4.6.7 is supported | context7 `/honojs/middleware` (README hook; `package.json` peerDependencies) |
-| `zod` | 4.6.7 | `z.infer`, `schema.safeParse`, `ZodError.issues` | WP0 already uses it; added to `@gmt/api` dependencies as the validator's peer |
-| `pino` | 10.4.0 | `pino({ level, redact: { paths, censor: '[redacted]' }, formatters: { log } }, destination)`; `logger.child()` | context7 `/pinojs/pino` (`redact` option: paths, censor, remove) |
-| `drizzle-orm` | 0.45.4 (through `@gmt/db`) | not called directly; `pendingMigrations` reads `meta/_journal.json` (`entries[].when`, `entries[].tag`) and `__drizzle_migrations.created_at`, mirroring the migrator, which applies entries whose `when` is greater than the last `created_at` | context7 `/drizzle-team/drizzle-orm` (`readMigrationFiles`, journal format) |
-| `msw` | 3.0.3 (dev) | `setupServer(...fixtureHandlers(root))`, `server.listen({ onUnhandledRequest: 'error' })`, `server.close()` | used exactly as WP4/WP7 tests use it |
+| `hono` | 4.13.13 | `new Hono<AppEnv>()`, `app.on(method, path, mw, handler)`, `app.use(path, mw)`, `app.onError`, `app.notFound`, `app.request(url, init)` for tests, `c.json(body, status)`, `c.header()`, `c.req.header()`, `c.req.path`, `c.req.method`, `c.req.param()`, `c.req.query()`, `c.req.text()`, `c.req.valid(target)`; `secureHeaders` from `hono/secure-headers` with `contentSecurityPolicy: { defaultSrc: ["'self'"], frameAncestors: ["'none'"] }`, `referrerPolicy: 'no-referrer'`, `xContentTypeOptions: 'nosniff'`, `xFrameOptions: 'DENY'`; `every` from `hono/combine` | context7 `/websites/hono_dev` (secure-headers options table; `app.request` API) |
+| `@hono/node-server` | 2.1.5 | `serve({ fetch: app.fetch, port, hostname }, (info) => …)` returns the `node:http` server; `serveStatic({ root })` from `@hono/node-server/serve-static` (rejects `..`, `//` and backslashes; calls `next()` when not found); `serveStatic({ path })` for the SPA fallback; `getConnInfo(c)` from `@hono/node-server/conninfo` (`info.remote.address`) | context7 `/honojs/node-server` (`serve`, `serveStatic` options and behaviour, `conninfo`) |
+| `@hono/zod-validator` | 0.9.1 | `zValidator('json' \| 'query' \| 'param', schema, hook)` with `hook(result, c)` returning the 400 envelope when `!result.success`; peer range `zod ^3.25.0 \|\| ^4.0.0`, so zod 4.6.7 is supported | context7 `/honojs/middleware` (README hook; `package.json` peerDependencies) |
+| `zod` | 4.6.7 | `z.infer`, `schema.safeParse`, `ZodError.issues` | added to `@gmt/api` dependencies as the validator's peer |
+| `pino` | 10.4.0 (through WP4b's `createLogger`) | not configured here; tests pass a `Writable` as `opts.destination` to capture lines | context7 `/pinojs/pino` (`redact`) |
 | `tsx` | 4.23.15 (dev) | `node --import tsx src/bootstrap/start.ts` for the spawn test and `pnpm dev` | tsx docs: `--import tsx` is the Node ≥ 20.6 loader form |
-| `vitest` | 5.0.4 | `describe/it/expect`, `vi.spyOn`, `beforeAll/afterAll`, per-test `timeout` | — |
-| `node:crypto` | Node 22 | `createHash('sha256')`, `timingSafeEqual` | Node docs |
-| `node:child_process` | Node 22 | `spawn(process.execPath, ['--import', 'tsx', …], { env, cwd })` | Node docs |
+| `vitest` | 5.0.4 | `describe/it/expect`, `vi.spyOn`, `vi.waitFor`, `afterEach`; per-task runs use `pnpm --filter @gmt/api exec vitest run <file>` (plan decision 8) | — |
+| `node:crypto`, `node:child_process`, `node:stream` | Node 22 | `createHash('sha256')`, `timingSafeEqual`; `spawn(process.execPath, ['--import', 'tsx', …], { env, cwd })`; `new Writable({ write })` | Node docs |
 
 ## 7. Files
 
 **Create** (all under `apps/api/`)
 
 ```
-src/app.ts                     createApp, API_PREFIX, AppEnv, mounting from ROUTES
-src/errors.ts                  ApiError, envelope, scrubDetails, onError/notFound handlers
-src/logger.ts                  createLogger, REDACT_PATHS
+src/app.ts                     createApp, mounting from ROUTES
+src/errors.ts                  ApiError, envelope, fieldsDetail, scrubDetails, onError/notFound
 src/text.ts                    API_TEXT: every fixed user-facing string the api emits
 src/defaults.ts                defaultDefinitionInput (spec §8.2 preset, §11 form defaults)
-src/static.ts                  mountStatic(app, webRoot): serveStatic + SPA fallback
-src/tools/inProcess.ts         inProcessTools(ports): the record runner (WP13 adds smoke)
+src/static.ts                  mountStatic(app, webRoot): serveStatic + SPA fallback outside /api
+src/tools/inProcess.ts         inProcessTools(ports): the record runner over recordFixtures
 src/middleware/headers.ts      securityHeaders()
 src/middleware/hardening.ts    hostAllowlist, originCheck, mutatingRequestCheck
-src/middleware/auth.ts         FailedAuthLimiter, basicAuthGate, clientIpFrom
+src/middleware/auth.ts         credentialsMatch, FailedAuthLimiter, basicAuthGate, clientIpFrom
 src/middleware/validate.ts     validatorsFor(route), readInput
-src/routes/types.ts            API_PREFIX, AppEnv, RouteHandler, RouteInput, RouteContext, HandlerTable, ToolRunners
+src/routes/types.ts            API_PREFIX, AppEnv, RouteKey, RouteHandler, RouteInput, RouteContext, HandlerTable, ToolRunners, OWNED_ELSEWHERE
 src/routes/shared.ts           param, getLiveDefinition
 src/routes/index.ts            HANDLERS (merge of every table below)
-src/routes/system.ts           /health, /providers, /budget, /scheduler/jobs
-src/routes/definitions.ts      /definitions CRUD, /estimate, /coverage-check
-src/routes/executions.ts       /definitions/:id/executions, /executions/:id[/cancel|/resume], /cells/verify
+src/routes/system.ts           /api/health, /api/airports, /api/providers, /api/budget, /api/scheduler/jobs
+src/routes/definitions.ts      /api/definitions CRUD, both estimate routes, /api/definitions/coverage-check
+src/routes/executions.ts       /api/definitions/:id/executions, /api/executions/:id[/cancel|/resume], /api/cells/verify
 src/routes/results.ts          /results, /calendar, /duration-analysis, /coverage, /calendar-gap, /cells/…
-src/routes/history.ts          /itineraries/:hash/history, /routes/:origin/:destination/history
-src/routes/alerts.ts           /alerts CRUD, /alerts/events
-src/routes/tools.ts            /tools/smoke, /tools/record
+src/routes/history.ts          /api/itineraries/:hash/history, /api/routes/:origin/:destination/history
+src/routes/alerts.ts           /api/alerts CRUD, /api/alerts/events
+src/routes/tools.ts            /api/tools/record
 src/read/space.ts              currentSpace, cellInSpace, airportLookup, isDraft
-src/read/rows.ts               verifiedRow, calendarRow, datedPrice, staleness, latestPerOffer, notSeenResolver, cheapest
+src/read/usage.ts              usageOf, providerScopes, budgetScopes, scopeLabel, providerLimits
+src/read/rows.ts               verifiedRow, calendarRow, priceCell, staleness, latestPerOffer, notSeenResolver, cheapest, executionSummary
 src/read/results.ts            loadRows, chooseBasis, assembleResults
-src/read/calendar.ts           assembleCalendar
+src/read/calendar.ts           assembleCalendar, assembleCalendarGap
 src/read/duration.ts           assembleDuration
 src/read/coverage.ts           coverageSummaryFor, zeroBuckets, SEARCHED
-src/read/coverageView.ts       assembleCoverage, ledgerByProvider, retryable
-src/read/history.ts            historySeries
+src/read/coverageView.ts       assembleCoverage, retryable
 src/read/cell.ts               assembleCellDetail
-src/read/executions.ts         executionResponse, budgetScopes, scopeLabel
-src/read/definitions.ts        definitionResponse, needsConfirmation
-src/bootstrap/paths.ts         assetPaths(): migrationsDir, airportsDataDir, webRoot, backupModule
-src/bootstrap/migrations.ts    pendingMigrations
+src/read/executions.ts         executionResponse
+src/read/definitions.ts        definitionResponse, needsConfirmation, ZERO_BUDGET_FIT
+src/bootstrap/paths.ts         assetPaths()
+src/bootstrap/migrations.ts    hasPendingMigrations (file-exists check around @gmt/db pendingMigrations)
 src/bootstrap/backup.ts        loadBackup (scripts/backup.mjs, WP12)
-src/bootstrap/app.ts           bootApp, main, BootError, HEARTBEAT_MS
 src/bootstrap/lock.ts          acquireAppLockWithWaits, LockRefusedError
-src/bootstrap/start.ts         `await main(process.env)`
-test/harness.ts                in-memory ports + engine + app; msw fixture server; request helpers
-test/seed.ts                   SQL seeder over the spec §7 column names
-test/contract.ts               expectContract(res, route)
+src/bootstrap/app.ts           bootApp, main, BootError, HEARTBEAT_MS
+src/bootstrap/start.ts         the process entry
+test/harness.ts                in-memory ports + engine + app; request helpers; captureLines
+test/seed.ts                   SQL seeder over the spec §7 column names (rev 10 additions included)
+test/contract.ts               expectContract(res, method, path)
 test/examples.ts               exampleDefinitionInput (the worked example, sized for tests)
 test/*.test.ts                 one file per task below
 ```
 
 **Modify**
 
-- `apps/api/package.json`: add dependency `zod@4.6.7`; dev dependency `msw@3.0.3`; scripts `"dev": "tsx watch src/bootstrap/start.ts"`, `"start": "node dist/bootstrap/start.js"`. Keep WP4b's `tool` script.
+- `apps/api/package.json`: add dependency `zod@4.6.7`; scripts `"dev": "tsx watch src/bootstrap/start.ts"`, `"start": "node dist/bootstrap/start.js"`. Keep WP4b's `tool` script.
 - `apps/api/vitest.config.ts`: `testTimeout: 20_000` (the spawn test boots a real process).
+- `src/logger.ts`, `src/wiring.ts`, `src/tools/record.ts` are WP4b's and are not changed here.
 
 ## 8. Tasks
 
-Every "Run" step assumes the workspace dependencies of `@gmt/api` are built, because workspace packages export `dist/`: run `pnpm --filter "@gmt/api^..." build` once per session and after pulling a dependency change. Test files live in `apps/api/test/`; the filter argument after `--` is a file-name substring.
+Every "Run" step assumes the workspace dependencies of `@gmt/api` are built, because workspace packages export `dist/`: run `pnpm --filter "@gmt/api^..." build` once per session and after pulling a dependency change. Per-task runs use `pnpm --filter @gmt/api exec vitest run <file>` (no coverage threshold on a partial run, plan decision 8); the full `pnpm --filter @gmt/api test` enforces thresholds.
 
 ### Task 8.1: Production boot lacks `fixture` (first failing test)
 
 **Files:**
-- Create: `src/text.ts`, `src/errors.ts`, `src/logger.ts`, `src/routes/types.ts`, `src/routes/system.ts`, `src/routes/index.ts`, `src/middleware/auth.ts`, `src/middleware/validate.ts`, `src/read/executions.ts`, `src/app.ts`, `src/bootstrap/paths.ts`, `src/bootstrap/app.ts`, `src/bootstrap/start.ts`
-- Modify: `apps/api/package.json` (dependencies and scripts listed in §7), `apps/api/vitest.config.ts` (`testTimeout: 20_000`)
-- Test: `test/boot.spawn.test.ts`
+- Create: `src/text.ts`, `src/errors.ts`, `src/defaults.ts`, `src/routes/types.ts`, `src/routes/system.ts`, `src/routes/index.ts`, `src/middleware/auth.ts`, `src/middleware/validate.ts`, `src/read/usage.ts`, `src/app.ts`, `src/bootstrap/paths.ts`, `src/bootstrap/app.ts`, `src/bootstrap/start.ts`
+- Modify: `apps/api/package.json`, `apps/api/vitest.config.ts`
+- Test: `test/boot.spawn.test.ts`, `test/defaults.test.ts`
 
 **Interfaces:**
-- Consumes: `loadConfigFromEnv`, `buildPorts`, `Ports` (WP4b); `fixtureProvider` (WP4); `AppLock`, `seedAirports`, `CalendarPriceRow` (WP3); `createEngine`, `LogNotifier` (WP7); `apiContract.ROUTES`, `FIXTURE_OPT_IN_PHRASE`, `systemClock`, `stripUrlsInText` (WP0).
-- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `API_PREFIX`, `ApiError`, `envelope`, `createLogger` (no redaction yet; Task 8.5), `API_TEXT`, `bootApp`, `main`, `assetPaths`, `loadAirportsDataset`, `GET /api/health` (public shape), `GET /api/providers`.
+- Consumes: `loadConfigFromEnv`, `buildPorts`, `createLogger`, `Ports` (WP4b); `fixtureProvider` (WP4); `AppLock`, `seedAirports`, `loadAirportsDataset`, `CalendarPriceInsert` (WP3); `createEngine`, `LogNotifier` (WP7); `apiContract.ROUTES`, `FIXTURE_OPT_IN_PHRASE`, `PENCE_TO_MICRO`, `stripUrlsInText` (WP0).
+- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `ApiError`, `envelope`, `fieldsDetail`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `budgetScopes`, `bootApp`, `main`, `assetPaths`; routes `GET /api/health` (public shape), `GET /api/providers`.
 
-- [ ] **Step 1: Write the failing test**
+**Plan preset** (spec §8.2, §11), used by `GET /api/providers` `presets` and by `POST /api/definitions` with no body (Task 8.9): Travelpayouts discovery when configured; SearchApi in both stages only on the `40usd` plan (the `trial` credits are for the spike and smoke, spec §2 fact 7); the fixture provider in both stages when the gate admits it; `maxCells 10, topN 10, expandTop 2, bookingLinks true`; budget from `EXECUTION_MAX_*`; `discoveryRefreshHours` 168; no airports; `enabled: false`; schedule `0 5 * * 1` in `SCHEDULER_TIMEZONE`.
+
+- [ ] **Step 1: Write the failing tests**
 
 `test/boot.spawn.test.ts`:
 
@@ -325,7 +301,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_OPT_IN_PHRASE, asIata, asIsoDate, asIsoDateTime, systemClock } from '@gmt/core';
-import type { CalendarPriceRow } from '@gmt/db';
+import type { CalendarPriceInsert } from '@gmt/db';
 import { fixtureProvider } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
 import { assetPaths } from '../src/bootstrap/paths.js';
@@ -354,15 +330,14 @@ function waitForLine(child: ChildProcess, pattern: RegExp, timeoutMs: number): P
   return new Promise((resolve, reject) => {
     let out = '';
     const timer = setTimeout(() => reject(new Error(`timed out waiting for ${pattern}:\n${out}`)), timeoutMs);
-    const onData = (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       out += chunk.toString('utf8');
       const line = out.split('\n').find((l) => pattern.test(l));
       if (line !== undefined) {
         clearTimeout(timer);
         resolve(line);
       }
-    };
-    child.stdout?.on('data', onData);
+    });
     child.stderr?.on('data', (chunk: Buffer) => {
       out += chunk.toString('utf8');
     });
@@ -379,17 +354,15 @@ function waitForExit(child: ChildProcess): Promise<number | null> {
 }
 
 /** A synthetic row the repository must refuse outside the gate (spec §5.5). */
-function syntheticCalendarRow(): Omit<CalendarPriceRow, 'id'> {
+function syntheticCalendarRow(): CalendarPriceInsert {
   return {
-    executionId: 'spawn-test',
     providerId: 'fixture',
     sourceKind: 'synthetic',
     cabin: 'economy',
-    origin: asIata('LHR'),
-    destination: asIata('JFK'),
-    departureDate: asIsoDate('2027-03-14'),
-    returnDate: asIsoDate('2027-03-28'),
+    cell: { origin: asIata('LHR'), destination: asIata('JFK'), departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-28') },
     pricePence: 41_200,
+    priceNativeMinor: 41_200,
+    currencyNative: 'GBP',
     fx: { converted: false },
     pointOfSale: 'unknown',
     fetchedAt: asIsoDateTime('2026-10-14T09:00:00.000Z'),
@@ -417,18 +390,15 @@ describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
       ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
       LOG_LEVEL: 'info',
     };
-    const child = spawn(process.execPath, ['--import', 'tsx', 'src/bootstrap/start.ts'], {
-      cwd: apiRoot,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(process.execPath, ['--import', 'tsx', 'src/bootstrap/start.ts'], { cwd: apiRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       await waitForLine(child, /"msg":"listening"/, 45_000);
       const auth = Buffer.from(`${env.APP_BASIC_AUTH_USER}:${env.APP_BASIC_AUTH_PASS}`).toString('base64');
       const res = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { authorization: `Basic ${auth}` } });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { providers: Array<{ id: string }> };
-      expect(body.providers.map((p) => p.id)).not.toContain('fixture');
+      const body = (await res.json()) as { providers: Array<{ providerId: string }>; synthetic: boolean };
+      expect(body.providers.map((p) => p.providerId)).not.toContain('fixture');
+      expect(body.synthetic).toBe(false);
     } finally {
       child.kill('SIGTERM');
     }
@@ -436,13 +406,13 @@ describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
 
     // Same environment and file, in this process: the gates hold outside the server too.
     const config = loadConfigFromEnv(env);
-    const log = createLogger('error');
-    const ports = buildPorts(config, { log, migrationsDir: assetPaths().migrationsDir });
+    const log = createLogger({ logLevel: 'error' });
+    const ports = buildPorts(config, { log, migrationsDir: assetPaths().migrationsDir, fixtureRoot: assetPaths().fixtureRoot });
     try {
       expect(ports.providers.map((p) => p.id)).not.toContain('fixture');
       expect(() => fixtureProvider({ http: ports.http, log, clock: systemClock, config, costMicroGbp: 0 })).toThrow();
       // why: match the message so a foreign-key failure cannot satisfy the assertion by accident.
-      expect(() => ports.repos.calendarPrices.insert([syntheticCalendarRow()])).toThrow(/synthetic/i);
+      expect(() => ports.repos.calendarPrices.insert('spawn-test', [syntheticCalendarRow()])).toThrow(/synthetic/i);
     } finally {
       ports.db.close();
     }
@@ -450,10 +420,57 @@ describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+`test/defaults.test.ts`:
 
-Run: `pnpm --filter @gmt/api test -- boot.spawn`
-Expected: FAIL, `Cannot find module '../src/bootstrap/paths.js'` (or `../src/logger.js`).
+```ts
+import { type Config, type FlightProvider, type ProviderId, parseConfig } from '@gmt/core';
+import { describe, expect, it } from 'vitest';
+import { defaultDefinitionInput } from '../src/defaults.js';
+
+function config(env: Record<string, string>): Config {
+  const r = parseConfig(
+    { NODE_ENV: 'production', DATABASE_PATH: '/data/x.db', APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: 'test-basic-auth-pass-0123456789', ...env },
+    { realpath: (p) => p },
+  );
+  if (!r.ok) throw new Error(JSON.stringify(r.errors));
+  return r.config;
+}
+const stub = (id: ProviderId): FlightProvider => ({ id, displayName: id, suppliedFields: [], cabins: ['economy'], healthcheck: async () => ({ ok: true, detail: '' }) });
+
+describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', () => {
+  it('£0: Travelpayouts discovery only, no verification', () => {
+    const d = defaultDefinitionInput(config({ TRAVELPAYOUTS_TOKEN: 't'.repeat(32) }), [stub('travelpayouts')]);
+    expect(d.providers).toEqual({ discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } });
+  });
+  it('trial SearchApi plus Travelpayouts: still no verification provider', () => {
+    const c = config({ TRAVELPAYOUTS_TOKEN: 't'.repeat(32), SEARCHAPI_KEY: 'k'.repeat(32) });
+    expect(defaultDefinitionInput(c, [stub('travelpayouts'), stub('searchapi')]).providers.verification).toEqual([]);
+  });
+  it('40usd: both providers discover, SearchApi verifies, maxCells 10 / expandTop 2', () => {
+    const c = config({ TRAVELPAYOUTS_TOKEN: 't'.repeat(32), SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });
+    const d = defaultDefinitionInput(c, [stub('travelpayouts'), stub('searchapi')]);
+    expect(d.providers.discovery).toEqual(['travelpayouts', 'searchapi']);
+    expect(d.providers.verification).toEqual(['searchapi']);
+    expect(d.verification).toEqual({ maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true });
+    expect(d.budget).toEqual({ maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 });
+  });
+  it('no providers: empty stages; no airports; disabled; weekly schedule in SCHEDULER_TIMEZONE; form defaults', () => {
+    const d = defaultDefinitionInput(config({ SCHEDULER_TIMEZONE: 'Europe/London' }), []);
+    expect(d.providers.discovery).toEqual([]);
+    expect([d.origins, d.destinations, d.enabled]).toEqual([[], [], false]);
+    expect([d.scheduleCron, d.scheduleTz]).toEqual(['0 5 * * 1', 'Europe/London']);
+    expect(d.window).toEqual({ kind: 'relative', startOffsetDays: 7, lengthDays: 182 });
+    expect([d.minNights, d.maxNights, d.cabin]).toEqual([10, 21, 'economy']);
+    expect(d.constraints).toEqual({ maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } });
+    expect(d).not.toHaveProperty('confirmedCostPence');
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/boot.spawn.test.ts test/defaults.test.ts`
+Expected: FAIL, `Cannot find module '../src/bootstrap/paths.js'` and `'../src/defaults.js'`.
 
 - [ ] **Step 3: Implement**
 
@@ -462,8 +479,7 @@ Expected: FAIL, `Cannot find module '../src/bootstrap/paths.js'` (or `../src/log
 ```json
 {
   "scripts": { "dev": "tsx watch src/bootstrap/start.ts", "start": "node dist/bootstrap/start.js" },
-  "dependencies": { "zod": "4.6.7" },
-  "devDependencies": { "msw": "3.0.3" }
+  "dependencies": { "zod": "4.6.7" }
 }
 ```
 
@@ -471,9 +487,10 @@ Expected: FAIL, `Cannot find module '../src/bootstrap/paths.js'` (or `../src/log
 
 ```ts
 /**
- * Every fixed user-facing string the api emits: error messages, basis reasons, notices and
- * series labels. One table so the banned-word test (spec §11, §8.3) can scan all of them.
- * Rule: no banned word; "verified" never appears here because it is reserved for class values.
+ * Every fixed user-facing string the api emits: error messages, basis reasons, notices.
+ * One table so the banned-word test (spec §11, §8.3) can scan all of them.
+ * Rule: no banned word; "verified" never appears here because it is reserved for class values;
+ * the verified basis is called the "itinerary-search basis" (plan reconciliation, spec §11).
  */
 export const API_TEXT = {
   internal: 'internal error; see the server log',
@@ -481,8 +498,7 @@ export const API_TEXT = {
   unauthenticated: 'authentication required',
   rateLimited: (seconds: number) => `too many failed sign-in attempts; retry in ${seconds}s`,
   hostRejected: (host: string, allowed: readonly string[]) => `Host "${host}" is not in ALLOWED_HOSTS (${allowed.join(', ')})`,
-  originRejected: (origin: string, allowed: readonly string[]) =>
-    `Origin "${origin}" does not match ALLOWED_HOSTS (${allowed.join(', ')})`,
+  originRejected: (origin: string, allowed: readonly string[]) => `Origin "${origin}" does not match ALLOWED_HOSTS (${allowed.join(', ')})`,
   contentType: 'requests that change data need Content-Type: application/json',
   requestedWith: 'requests that change data need X-Requested-With: get-me-there',
   validation: (target: string) => `invalid request ${target}`,
@@ -499,39 +515,40 @@ export const API_TEXT = {
   invalidCron: (reason: string) => `schedule rejected: ${reason}`,
   coverageCheckUnavailable: 'the coverage check reads the free Travelpayouts cache; set TRAVELPAYOUTS_TOKEN to enable it',
   zeroCapVerification: 'verification will not run: spend cap is 0',
+  ceilingNote: (capPence: number, feesPence: number) =>
+    `monthly spend cap £${(capPence / 100).toFixed(2)}, of which £${(feesPence / 100).toFixed(2)} is subscription fees counted once`,
   notCancellable: (status: string) => `execution is ${status} and cannot be cancelled`,
   cellNotInSpace: 'that cell is outside the current window, nights range or airports of this definition',
   unknownAirport: (iata: string) => `airport ${iata} is not in the airports table`,
   noVerificationProvider: 'this definition has no verification provider, so single-cell verify is unavailable',
   basisNoVerificationProvider: 'calendar basis: no verification provider is configured, so constraints are not checked',
   basisNoObservations: 'calendar basis: no itinerary-searched observations yet, so constraints are not checked',
-  basisItinerarySearched: 'itinerary-searched basis: constraints checked against the current definition at read time',
+  basisItinerarySearch: 'itinerary-search basis: constraints checked against the current definition at read time',
   basisRequestedCalendar: 'calendar basis as requested: constraints are not checked',
   insideSpace: (inside: number, total: number) => `${inside} of ${total} rows are inside the current window and nights range`,
-  routeLowestLabel: "Google's route-level lowest price, cabin unknown",
-  observationSeries: (name: string) => `${name} · itinerary-searched offers`,
-  calendarSeries: (name: string) => `${name} · calendar prices, constraints not checked`,
   toolUnavailable: (name: string) => `the ${name} tool is not available in this build`,
   toolBusy: (name: string) => `the ${name} tool is already running`,
   toolFailed: (name: string) => `the ${name} tool failed; see the server log`,
+  recordSummary: (calls: number, credits: number, free: number) => `${calls} calls recorded: ${credits} SearchApi credits, ${free} free calls`,
 } as const;
 ```
 
 `src/errors.ts`:
 
 ```ts
-import { stripUrlsInText } from '@gmt/core';
-import type { Logger } from '@gmt/core';
+import { type Logger, stripUrlsInText } from '@gmt/core';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { API_TEXT } from './text.js';
+
+export type FieldError = { field: string; message: string };
 
 /** Thrown by handlers; rendered as the spec §10 error envelope with its status. */
 export class ApiError extends Error {
   readonly status: ContentfulStatusCode;
   readonly code: string;
-  readonly details: unknown;
-  constructor(status: ContentfulStatusCode, code: string, message: string, details?: unknown) {
+  readonly details: Record<string, unknown> | undefined;
+  constructor(status: ContentfulStatusCode, code: string, message: string, details?: Record<string, unknown>) {
     super(stripUrlsInText(message));
     this.name = 'ApiError';
     this.status = status;
@@ -540,19 +557,29 @@ export class ApiError extends Error {
   }
 }
 
+/** Spec §10 rev 10: a 422 (and a 400 from validation) carries `details.fields`. */
+export function fieldsDetail(fields: readonly FieldError[]): { fields: FieldError[] } {
+  return { fields: [...fields] };
+}
+
+/** zod issues → field errors, the path joined with dots. */
+export function issuesToFields(issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>): FieldError[] {
+  return issues.map((i) => ({ field: i.path.map(String).join('.'), message: i.message }));
+}
+
 /** Deep copy with every string URL-stripped. Spec §5.3: API `error.details` never holds a query string or userinfo. */
 export function scrubDetails(value: unknown): unknown {
   if (typeof value === 'string') return stripUrlsInText(value);
   if (Array.isArray(value)) return value.map(scrubDetails);
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDetails(v)]));
-  }
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDetails(v)]));
   return value;
 }
 
 /** Spec §10: `{ error: { code, message, details? } }`. */
-export function envelope(code: string, message: string, details?: unknown): { error: { code: string; message: string; details?: unknown } } {
-  return { error: { code, message: stripUrlsInText(message), ...(details === undefined ? {} : { details: scrubDetails(details) }) } };
+export function envelope(code: string, message: string, details?: Record<string, unknown>) {
+  return {
+    error: { code, message: stripUrlsInText(message), ...(details === undefined ? {} : { details: scrubDetails(details) as Record<string, unknown> }) },
+  };
 }
 
 /** `app.onError`: ApiError → its envelope; anything else → 500 without internals, logged URL-free. */
@@ -570,30 +597,63 @@ export function notFound(c: Context) {
 }
 ```
 
-`src/logger.ts` (redaction lands in Task 8.5, with its failing test):
+`src/defaults.ts`:
 
 ```ts
-import type { Config, Logger } from '@gmt/core';
-import pino from 'pino';
+import type { Config, DefinitionInput, FlightProvider, ProviderId } from '@gmt/core';
 
-/** pino JSON to stdout (spec §14). `destination` is injected by tests to capture lines. */
-export function createLogger(level: Config['logLevel'], destination?: pino.DestinationStream): Logger {
-  const logger: Logger = destination === undefined ? pino({ level }) : pino({ level }, destination);
-  return logger;
+export const DEFAULT_REFRESH_HOURS = 168;
+export const DEFAULT_CRON = '0 5 * * 1';
+
+/**
+ * The default definition for the configured plan (spec §8.2 policy preset, §11 form defaults).
+ * No airports (spec §1, §15). Disabled, so no schedule fires on a draft. No confirmedCostPence:
+ * that field is not part of DefinitionInput and is set only from an explicit confirmation (spec §7).
+ */
+export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput {
+  const configured = new Set(providers.map((p) => p.id));
+  const paid = config.providers.searchapi?.plan === '40usd' && configured.has('searchapi');
+  const fixture = configured.has('fixture');
+  const discovery: ProviderId[] = [
+    ...(configured.has('travelpayouts') ? (['travelpayouts'] as const) : []),
+    ...(paid ? (['searchapi'] as const) : []),
+    ...(fixture ? (['fixture'] as const) : []),
+  ];
+  // why: on trial the 100 credits are for the spike and smoke (spec §2 fact 7), so the preset never verifies with them.
+  const verification: ProviderId[] = [...(paid ? (['searchapi'] as const) : []), ...(fixture ? (['fixture'] as const) : [])];
+  return {
+    name: 'New search',
+    origins: [],
+    destinations: [],
+    window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
+    minNights: 10,
+    maxNights: 21,
+    cabin: 'economy',
+    constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
+    verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
+    budget: { maxCalls: config.spend.executionMaxCalls, maxFreeCalls: config.spend.executionMaxFreeCalls, maxCostMicroGbp: config.spend.executionMaxCostMicroGbp },
+    providers: { discovery, verification, discoveryRefreshHours: Object.fromEntries(discovery.map((id) => [id, DEFAULT_REFRESH_HOURS])) },
+    destinationNotes: {},
+    onwardCostPence: {},
+    scheduleCron: DEFAULT_CRON,
+    scheduleTz: config.schedulerTimezone,
+    enabled: false,
+  };
 }
 ```
 
 `src/routes/types.ts`:
 
 ```ts
+import type { apiContract } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import type { Context } from 'hono';
+import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 
-/** Every ROUTES path is mounted under this prefix so SPA paths never collide with API paths (Open question 1). */
+/** Every ROUTES path starts with this (spec §10 rev 10); static files and the SPA fallback own everything else. */
 export const API_PREFIX = '/api';
 
-/** Request-scoped variables set by middleware. */
 export interface AppVariables {
   /** True when the request carried valid basic-auth credentials, or auth is disabled by config. */
   authenticated: boolean;
@@ -601,15 +661,17 @@ export interface AppVariables {
   optionalBody?: { present: boolean; value: unknown };
 }
 export type AppEnv = { Variables: AppVariables };
-export type RouteKey = `${'GET' | 'POST' | 'PUT' | 'DELETE'} ${string}`;
+export type RouteKey = `${'GET' | 'POST' | 'PUT' | 'DELETE'} /api/${string}`;
 
-/** Result of an in-process tool run (spec §10 `/tools/*`). */
-export interface ToolRunResult { ok: boolean; exitCode: number; lines: string[] }
-/** In-process tool entry points; absent means the route answers 503 tool_unavailable. */
+export type ToolRunResponse = z.infer<typeof apiContract.toolRunResponseSchema>;
+export type ToolRecordRequest = z.infer<typeof apiContract.toolRecordRequestSchema>;
+/** In-process tool entry points; an absent runner answers 503 tool_unavailable. */
 export interface ToolRunners {
-  smoke?: (args: Record<string, never>) => Promise<ToolRunResult>;
-  record?: (args: { budget: number }) => Promise<ToolRunResult>;
+  record?: (args: ToolRecordRequest, signal: AbortSignal) => Promise<ToolRunResponse>;
 }
+
+/** ROUTES entries another package mounts (plan reconciliation 4). WP13 adds the smoke handler and removes its key. */
+export const OWNED_ELSEWHERE: ReadonlySet<string> = new Set(['POST /api/tools/smoke']);
 
 export interface RouteInput { body: unknown; query: unknown; params: Record<string, string> }
 export interface RouteContext { ports: Ports; engine: Engine; tools: ToolRunners; toolInFlight: { name: string | null } }
@@ -618,22 +680,20 @@ export type RouteHandler = (c: Context<AppEnv>, input: RouteInput, ctx: RouteCon
 export type HandlerTable = Partial<Record<RouteKey, RouteHandler>>;
 ```
 
-`src/read/executions.ts` (scope helpers; `executionResponse` joins in Task 8.10):
+`src/read/usage.ts`:
 
 ```ts
-import type { BudgetScope, Config, ProviderId, ProviderLimits } from '@gmt/core';
+import { type BudgetScope, type Config, PENCE_TO_MICRO, type ProviderId, type ProviderLimits, type apiContract } from '@gmt/core';
+import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 
-/** The configured limits for a provider; the fixture provider has none (test cost rule lives in the guard). */
+export type ApiUsage = z.infer<typeof apiContract.usageSchema>;
+
+/** The configured limits for a provider; the fixture provider has none (its test cost lives in the guard). */
 export function providerLimits(config: Config, id: ProviderId): ProviderLimits | null {
   if (id === 'travelpayouts') return config.providers.travelpayouts?.limits ?? null;
   if (id === 'searchapi') return config.providers.searchapi?.limits ?? null;
   return null;
-}
-
-/** Spec §7 "Budget windows": a `trial` plan is a lifetime window, everything else monthly. */
-export function providerScope(config: Config, providerId: ProviderId): BudgetScope {
-  return { kind: providerLimits(config, providerId)?.window === 'lifetime' ? 'provider-lifetime' : 'provider-month', providerId };
 }
 
 /** Stable wire label for a scope, e.g. `provider-month:searchapi`, `execution-calls`, `global-month`. */
@@ -641,24 +701,33 @@ export function scopeLabel(s: BudgetScope): string {
   return 'providerId' in s ? `${s.kind}:${s.providerId}` : s.kind;
 }
 
-/** Every scope the spec §8.1 pre-start check uses: execution scopes (when an execution is given), each provider, global. */
+/** Both provider windows; the guard reports `cap: null` for the one the plan does not use (plan, Budget port). */
+export function providerScopes(providerId: ProviderId): BudgetScope[] {
+  return [{ kind: 'provider-month', providerId }, { kind: 'provider-lifetime', providerId }];
+}
+
+/** Every scope of the spec §8.1 pre-start check: execution scopes (when given), each provider, global. */
 export function budgetScopes(ports: Ports, executionId: string | null): BudgetScope[] {
-  const scopes: BudgetScope[] = [];
-  if (executionId !== null) {
-    for (const kind of ['execution-calls', 'execution-free-calls', 'execution-cost'] as const) scopes.push({ kind, executionId });
-  }
-  for (const p of ports.providers) scopes.push(providerScope(ports.config, p.id));
-  scopes.push({ kind: 'global-month' });
-  return scopes;
+  const execution: BudgetScope[] =
+    executionId === null ? [] : (['execution-calls', 'execution-free-calls', 'execution-cost'] as const).map((kind) => ({ kind, executionId }));
+  return [...execution, ...ports.providers.flatMap((p) => providerScopes(p.id)), { kind: 'global-month' }];
+}
+
+/** The api-contract `Usage`: the guard's usage plus its scope label and pence (rounded up: spend is never understated). */
+export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
+  const u = ports.budget.usage(scope);
+  return { scope: scopeLabel(scope), calls: u.calls, costMicroGbp: u.costMicroGbp, costPence: Math.ceil(u.costMicroGbp / PENCE_TO_MICRO), cap: u.cap, windowStart: u.windowStart, windowEnd: u.windowEnd };
 }
 ```
 
-`src/routes/system.ts` (health detail, budget and scheduler jobs join in Task 8.8):
+`src/routes/system.ts` (health detail, airports, budget and scheduler jobs join in Task 8.8):
 
 ```ts
-import type { Ports } from '../wiring.js';
-import { providerLimits, providerScope, scopeLabel } from '../read/executions.js';
+import type { Config, ProviderId } from '@gmt/core';
+import { DEFAULT_REFRESH_HOURS, defaultDefinitionInput } from '../defaults.js';
+import { providerLimits, providerScopes, usageOf } from '../read/usage.js';
 import { API_TEXT } from '../text.js';
+import type { Ports } from '../wiring.js';
 import type { HandlerTable, RouteContext } from './types.js';
 
 function dbOk(ports: Ports): boolean {
@@ -675,34 +744,42 @@ export function healthPublic(ctx: RouteContext): { ok: boolean; degraded: boolea
   return { ok: dbOk(ctx.ports), degraded: ctx.engine.status().degraded };
 }
 
-/** Spec §10 `GET /providers`: capabilities, plan, usage vs caps with window bounds, zero-cap message. */
+function planOf(config: Config, id: ProviderId) {
+  if (id === 'searchapi') return config.providers.searchapi?.plan ?? 'trial';
+  return id === 'fixture' ? ('synthetic' as const) : ('free' as const);
+}
+
+/** Spec §10 `GET /providers`: capabilities, plan, usage with window bounds, the zero-cap notice, the plan presets. */
 export function providersResponse(ctx: RouteContext) {
-  const { config, budget } = ctx.ports;
-  const providers = ctx.ports.providers.map((p) => {
-    const scope = providerScope(config, p.id);
-    return {
-      id: p.id,
-      displayName: p.displayName,
-      plan: p.id === 'searchapi' ? (config.providers.searchapi?.plan ?? null) : null,
-      // why: travelpayouts is never billable (spec §5.3); fixture is billable at its test cost.
-      billed: p.id !== 'travelpayouts',
-      capabilities: { discovery: p.discovery?.info ?? null, verification: p.verification?.info ?? null },
-      cabins: [...p.cabins],
-      usage: { scope: scopeLabel(scope), usage: budget.usage(scope) },
-      excludedFromSchedule: providerLimits(config, p.id)?.excludedFromSchedule ?? false,
-    };
-  });
-  const searchapiEnabled = ctx.ports.providers.some((p) => p.id === 'searchapi');
+  const { config } = ctx.ports;
+  const preset = defaultDefinitionInput(config, ctx.ports.providers);
   return {
-    providers,
-    global: budget.usage({ kind: 'global-month' }),
-    messages: searchapiEnabled && config.spend.monthlyCapMicroGbp === 0 ? [API_TEXT.zeroCapVerification] : [],
+    providers: ctx.ports.providers.map((p) => ({
+      providerId: p.id,
+      displayName: p.displayName,
+      enabled: true,
+      capabilities: { discovery: p.discovery?.info ?? null, verification: p.verification?.info ?? null },
+      plan: planOf(config, p.id),
+      usage: providerScopes(p.id).map((s) => usageOf(ctx.ports, s)),
+      excludedFromSchedule: providerLimits(config, p.id)?.excludedFromSchedule ?? false,
+      // why: spec §10/§12: a billed provider enabled under a zero cap cannot verify; say so where the operator looks.
+      notices: p.id === 'searchapi' && config.spend.monthlyCapMicroGbp === 0 ? [API_TEXT.zeroCapVerification] : [],
+    })),
+    synthetic: ctx.ports.providers.some((p) => p.id === 'fixture'),
+    presets: {
+      policy: { maxCells: preset.verification.maxCells, topN: preset.verification.topN, expandTop: preset.verification.expandTop, bookingLinks: preset.verification.bookingLinks },
+      providers: preset.providers,
+      budget: preset.budget,
+      discoveryRefreshHours: DEFAULT_REFRESH_HOURS,
+      schedulerTimezone: config.schedulerTimezone,
+    },
+    pointOfSale: config.pointOfSale,
   };
 }
 
 export const systemHandlers: HandlerTable = {
-  'GET /health': (c, _input, ctx) => c.json(healthPublic(ctx)),
-  'GET /providers': (c, _input, ctx) => c.json(providersResponse(ctx)),
+  'GET /api/health': (c, _input, ctx) => c.json(healthPublic(ctx)),
+  'GET /api/providers': (c, _input, ctx) => c.json(providersResponse(ctx)),
 };
 ```
 
@@ -749,14 +826,11 @@ export function credentialsMatch(header: string | undefined, expected: { user: s
 
 export interface AuthGateOptions {
   config: Config;
-  /** `${method} ${fullPath}` of every ROUTES entry whose auth flag is `public`. */
+  /** `${method} ${path}` of every ROUTES entry whose auth flag is `public`. */
   publicKeys: ReadonlySet<string>;
 }
 
-/**
- * Spec §4: everything except the public `GET /health` needs auth, static files included.
- * Sets `authenticated` so the public route can return its authenticated detail.
- */
+/** Spec §4: everything except the public `GET /api/health` needs auth, static files included. */
 export function basicAuthGate(o: AuthGateOptions): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const auth = o.config.auth;
@@ -766,8 +840,7 @@ export function basicAuthGate(o: AuthGateOptions): MiddlewareHandler<AppEnv> {
       return next();
     }
     const isPublic = o.publicKeys.has(`${c.req.method} ${c.req.path}`);
-    const result = credentialsMatch(c.req.header('authorization'), auth);
-    if (result === 'valid') {
+    if (credentialsMatch(c.req.header('authorization'), auth) === 'valid') {
       c.set('authenticated', true);
       return next();
     }
@@ -786,34 +859,29 @@ import type { apiContract } from '@gmt/core';
 import { zValidator } from '@hono/zod-validator';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { z } from 'zod';
-import { envelope } from '../errors.js';
+import { envelope, fieldsDetail, issuesToFields } from '../errors.js';
 import type { AppEnv, RouteInput } from '../routes/types.js';
 import { API_TEXT } from '../text.js';
 
 type RouteDef = apiContract.RouteDef;
+type Target = 'json' | 'query' | 'param';
+const TARGET_LABEL: Record<Target, string> = { json: 'body', query: 'query', param: 'path' };
 
-function issuesOf(error: z.ZodError): Array<{ path: string; message: string }> {
-  return error.issues.map((i) => ({ path: i.path.map(String).join('.'), message: i.message }));
-}
-
-function hook(target: 'json' | 'query') {
+function hook(target: Target) {
   return (result: { success: boolean; error?: z.ZodError }, c: Context<AppEnv>) => {
     if (!result.success && result.error !== undefined) {
-      return c.json(envelope('validation', API_TEXT.validation(target === 'json' ? 'body' : 'query'), issuesOf(result.error)), 400);
+      return c.json(envelope('validation', API_TEXT.validation(TARGET_LABEL[target]), fieldsDetail(issuesToFields(result.error.issues))), 400);
     }
     return undefined;
   };
 }
 
-/** True for request schemas that accept a missing body (only `POST /definitions`, spec §10). */
+/** True for request schemas that accept a missing body (only `POST /api/definitions`, spec §10). */
 export function acceptsUndefined(schema: z.ZodTypeAny): boolean {
   return schema.safeParse(undefined).success;
 }
 
-/**
- * Body validator for schemas that accept "no body". zValidator('json') rejects an empty body as
- * malformed JSON, so this reads the text itself; a present body is validated by the same schema.
- */
+/** Body validator for schemas that accept "no body": zValidator('json') would reject an empty body as malformed. */
 function optionalJson(schema: z.ZodTypeAny): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const text = await c.req.text();
@@ -828,7 +896,7 @@ function optionalJson(schema: z.ZodTypeAny): MiddlewareHandler<AppEnv> {
       return c.json(envelope('validation', API_TEXT.malformedJson), 400);
     }
     const r = schema.safeParse(parsed);
-    if (!r.success) return c.json(envelope('validation', API_TEXT.validation('body'), issuesOf(r.error)), 400);
+    if (!r.success) return c.json(envelope('validation', API_TEXT.validation('body'), fieldsDetail(issuesToFields(r.error.issues))), 400);
     c.set('optionalBody', { present: true, value: r.data });
     return next();
   };
@@ -838,25 +906,24 @@ const passThrough: MiddlewareHandler<AppEnv> = async (_c, next) => {
   await next();
 };
 
-/** The validators a ROUTES entry needs: query, then body. Always at least one middleware. */
+/** The validators a ROUTES entry needs: path params, query, body. Always at least one middleware. */
 export function validatorsFor(route: RouteDef): MiddlewareHandler<AppEnv>[] {
   const mws: MiddlewareHandler<AppEnv>[] = [passThrough];
+  if (route.params !== undefined) mws.push(zValidator('param', route.params, hook('param')));
   if (route.query !== undefined) mws.push(zValidator('query', route.query, hook('query')));
-  if (route.request !== undefined) {
-    mws.push(acceptsUndefined(route.request) ? optionalJson(route.request) : zValidator('json', route.request, hook('json')));
-  }
+  if (route.request !== undefined) mws.push(acceptsUndefined(route.request) ? optionalJson(route.request) : zValidator('json', route.request, hook('json')));
   return mws;
 }
 
 /** Validated inputs for a handler. The route table is dynamic, so the typed `valid()` overloads cannot apply. */
 export function readInput(c: Context<AppEnv>, route: RouteDef): RouteInput {
   // why: Hono types `valid()` from the route's static input; with a table-driven mount that type is
-  // empty, so the validated values are read as `unknown` and each handler narrows with its schema type.
-  const req = c.req as unknown as { valid(target: 'json' | 'query'): unknown };
-  const body =
-    route.request === undefined ? undefined : acceptsUndefined(route.request) ? c.get('optionalBody')?.value : req.valid('json');
+  // empty, so validated values are read as `unknown` and each handler narrows to its schema's type.
+  const req = c.req as unknown as { valid(target: Target): unknown };
+  const body = route.request === undefined ? undefined : acceptsUndefined(route.request) ? c.get('optionalBody')?.value : req.valid('json');
   const query = route.query === undefined ? undefined : req.valid('query');
-  return { body, query, params: c.req.param() as Record<string, string> };
+  const params = (route.params === undefined ? c.req.param() : req.valid('param')) as Record<string, string>;
+  return { body, query, params };
 }
 ```
 
@@ -871,7 +938,7 @@ import { notFound, onError } from './errors.js';
 import { basicAuthGate } from './middleware/auth.js';
 import { readInput, validatorsFor } from './middleware/validate.js';
 import { HANDLERS } from './routes/index.js';
-import { API_PREFIX, type AppEnv, type RouteContext, type RouteKey, type ToolRunners } from './routes/types.js';
+import { API_PREFIX, type AppEnv, OWNED_ELSEWHERE, type RouteContext, type RouteKey, type ToolRunners } from './routes/types.js';
 import type { Ports } from './wiring.js';
 
 export { API_PREFIX };
@@ -887,12 +954,12 @@ export interface AppOptions {
 }
 
 export function publicRouteKeys(routes: readonly apiContract.RouteDef[]): Set<string> {
-  return new Set(routes.filter((r) => r.auth === 'public').map((r) => `${r.method} ${API_PREFIX}${r.path}`));
+  return new Set(routes.filter((r) => r.auth === 'public').map((r) => `${r.method} ${r.path}`));
 }
 
 /**
  * The single HTTP surface (spec §10): one Hono app mounting every ROUTES entry from
- * `@gmt/core` api-contract with zod validation, the error envelope and the auth gate.
+ * `@gmt/core` api-contract (paths carry `/api`) with zod validation, the error envelope and the auth gate.
  */
 export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}): Hono<AppEnv> {
   const routes = options.routes ?? apiContract.ROUTES;
@@ -901,15 +968,12 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
   app.onError(onError(ports.log));
   app.notFound(notFound);
   app.use('*', basicAuthGate({ config: ports.config, publicKeys: publicRouteKeys(routes) }));
-
-  const api = new Hono<AppEnv>();
-  api.onError(onError(ports.log));
   for (const route of routes) {
-    const handler = HANDLERS[`${route.method} ${route.path}` as RouteKey];
-    if (handler === undefined) continue;
-    api.on(route.method, route.path, every(...validatorsFor(route)), async (c) => handler(c, readInput(c, route), ctx));
+    const key = `${route.method} ${route.path}`;
+    const handler = HANDLERS[key as RouteKey];
+    if (handler === undefined || OWNED_ELSEWHERE.has(key)) continue;
+    app.on(route.method, route.path, every(...validatorsFor(route)), async (c) => handler(c, readInput(c, route), ctx));
   }
-  app.route(API_PREFIX, api);
   return app;
 }
 ```
@@ -917,18 +981,17 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
 `src/bootstrap/paths.ts`:
 
 ```ts
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AirportsDataset } from '@gmt/db';
 
-export interface AssetPaths { migrationsDir: string; airportsDataDir: string; webRoot: string | null; backupModule: string }
+export interface AssetPaths { migrationsDir: string; airportsDataDir: string; webRoot: string | null; backupModule: string; fixtureRoot: string }
 
 // why: src/bootstrap (tsx) and dist/bootstrap (build) are both four levels below the repository root,
 // so one set of relative URLs serves dev, tests and the image (WP12 keeps the layout).
 const fromHere = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 
-/** Where the bootstrap finds migrations, the vendored airports dataset, the SPA and the backup script. */
+/** Where the bootstrap finds migrations, the vendored airports data, the SPA, the backup script and the fixture tree. */
 export function assetPaths(): AssetPaths {
   const web = fromHere('../../../web/dist/');
   return {
@@ -936,15 +999,9 @@ export function assetPaths(): AssetPaths {
     airportsDataDir: fromHere('../../../../packages/db/data'),
     webRoot: existsSync(join(web, 'index.html')) ? web : null,
     backupModule: fromHere('../../../../scripts/backup.mjs'),
+    // why: buildPorts only wires the fixture host when syntheticAllowed holds; passing the path is harmless otherwise.
+    fixtureRoot: fromHere('../../../../packages/providers/fixtures/synthetic/fixture'),
   };
-}
-
-/** Loads the single vendored `airports.<version>.json` (spec §7: no network at seed). */
-export function loadAirportsDataset(dir: string): AirportsDataset {
-  const files = readdirSync(dir).filter((f) => /^airports\..+\.json$/.test(f));
-  const [file, ...rest] = files;
-  if (file === undefined || rest.length > 0) throw new Error(`expected exactly one airports.<version>.json in ${dir}, found ${files.length}`);
-  return JSON.parse(readFileSync(join(dir, file), 'utf8')) as AirportsDataset;
 }
 ```
 
@@ -952,7 +1009,7 @@ export function loadAirportsDataset(dir: string): AirportsDataset {
 
 ```ts
 import { type Clock, type Config, type Logger, stripUrlsInText, systemClock } from '@gmt/core';
-import { AppLock, seedAirports } from '@gmt/db';
+import { AppLock, loadAirportsDataset, seedAirports } from '@gmt/db';
 import { type Engine, LogNotifier, createEngine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
@@ -960,7 +1017,7 @@ import { createApp } from '../app.js';
 import { createLogger } from '../logger.js';
 import type { AppEnv, ToolRunners } from '../routes/types.js';
 import { type Ports, buildPorts, loadConfigFromEnv } from '../wiring.js';
-import { type AssetPaths, assetPaths, loadAirportsDataset } from './paths.js';
+import { type AssetPaths, assetPaths } from './paths.js';
 
 /** A boot refusal: logged with its message and the process exits 1. */
 export class BootError extends Error {
@@ -984,21 +1041,11 @@ export interface BootDeps {
   tools?: (ports: Ports) => ToolRunners;
 }
 
-export interface RunningApp {
-  app: Hono<AppEnv>;
-  ports: Ports;
-  engine: Engine;
-  /** The bound port when listening, else null. */
-  port: number | null;
-  /** Graceful shutdown (spec §13); idempotent. */
-  close(): Promise<void>;
-}
+export interface RunningApp { app: Hono<AppEnv>; ports: Ports; engine: Engine; port: number | null; close(): Promise<void> }
 
 function listen(app: Hono<AppEnv>, config: Config): Promise<{ server: ServerType; port: number }> {
   return new Promise((resolve, reject) => {
-    const server = serve({ fetch: app.fetch, port: config.port, hostname: config.bindAddress }, (info) =>
-      resolve({ server, port: info.port }),
-    );
+    const server = serve({ fetch: app.fetch, port: config.port, hostname: config.bindAddress }, (info) => resolve({ server, port: info.port }));
     server.once('error', reject);
   });
 }
@@ -1007,25 +1054,30 @@ function closeServer(server: ServerType | null): Promise<void> {
   return new Promise((resolve) => (server === null ? resolve() : server.close(() => resolve())));
 }
 
-function messageOf(err: unknown): string {
+export function messageOf(err: unknown): string {
   return stripUrlsInText(err instanceof Error ? err.message : String(err));
 }
 
 /**
- * Everything the app process does at start, with config injected (spec §5.5 boot matrix):
- * ports → seed → app_lock → engine.boot → serve.
+ * Everything the app process does at start, with config injected (spec §5.5 boot matrix), in the
+ * plan's order: ports → seed → app_lock → engine → serve. Tasks 8.2–8.5 add the refusal, sanity
+ * check, lock waits, backup preflight and timers.
  */
 export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   const { config, log } = deps;
   const clock = deps.clock ?? systemClock;
-  const ports = buildPorts(config, { log, clock, migrationsDir: deps.assets.migrationsDir });
+  const ports = buildPorts(config, { log, clock, migrationsDir: deps.assets.migrationsDir, fixtureRoot: deps.assets.fixtureRoot });
   try {
     seedAirports(ports.db, loadAirportsDataset(deps.assets.airportsDataDir));
     const lock = new AppLock(ports.db, 'app', clock, log);
     if (lock.acquire({ waitMs: 0 }) !== 'acquired') throw new BootError('app_lock is held by another process; refusing to start');
     const heartbeat = setInterval(() => lock.heartbeat(), HEARTBEAT_MS);
     heartbeat.unref();
-    const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
+    // why: WP11 adds `alerts: runAlerts` to these options; until then the engine's default noAlerts step runs.
+    const engine = createEngine(
+      { ...ports, notifiers: [new LogNotifier(log)] },
+      config.providers.fixture === null ? {} : { fixtureCostMicroGbp: config.providers.fixture.costMicroGbp },
+    );
     await engine.boot();
     const app = createApp(ports, engine, { webRoot: deps.assets.webRoot, tools: deps.tools?.(ports) ?? {} });
     const bound = deps.listen ? await listen(app, config) : null;
@@ -1038,7 +1090,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       close: async () => {
         if (closed) return;
         closed = true;
-        await closeServer(bound?.server ?? null);
+        await closeServer(bound?.server ?? null); // stop accepting
         await engine.shutdown();
         clearInterval(heartbeat);
         // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
@@ -1057,7 +1109,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
 /** The app entrypoint: env parsed once (spec §12), boot, signals. Throws on refusal; start.ts exits 1. */
 export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const config = loadConfigFromEnv(env);
-  const log = createLogger(config.logLevel);
+  const log = createLogger(config);
   let running: RunningApp;
   try {
     running = await bootApp({ config, log, listen: true, assets: assetPaths() });
@@ -1093,15 +1145,17 @@ main(process.env).catch((err: unknown) => {
 });
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+`apps/api/vitest.config.ts`: add `testTimeout: 20_000` under `test`.
 
-Run: `pnpm --filter @gmt/api test -- boot.spawn && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 1 test; the child logs `"msg":"listening"`, `GET /api/providers` returns 200 without `fixture`, the child exits 0 on SIGTERM, the fixture constructor throws and the synthetic insert throws a message containing "synthetic"; typecheck clean.
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/boot.spawn.test.ts test/defaults.test.ts && pnpm --filter @gmt/api typecheck`
+Expected: PASS, 5 tests; the child logs `"msg":"listening"`, `GET /api/providers` returns 200 without `fixture` and `synthetic: false`, the child exits 0 on SIGTERM, the fixture constructor throws and the synthetic insert throws a message containing "synthetic"; typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp08: app bootstrap and production-boot-lacks-fixture spawn test"
+git add apps/api && git commit -m "wp08: app bootstrap, plan preset, and the production-boot-lacks-fixture spawn test"
 ```
 
 ### Task 8.2: Injected-config boot matrix, `NODE_ENV=test` refusal, password length, airport sanity check
@@ -1111,7 +1165,7 @@ git add apps/api && git commit -m "wp08: app bootstrap and production-boot-lacks
 - Test: `test/boot.matrix.test.ts`
 
 **Interfaces:**
-- Consumes: `sanityCheckAirports`, `DefinitionsRepo.list` (WP3); `loadConfigFromEnv` (WP4b).
+- Consumes: `sanityCheckAirports`, `loadAirportsDataset`, `DefinitionsRepo.list` (WP3); `loadConfigFromEnv`, `createLogger` (WP4b).
 - Produces: `bootApp` refuses `nodeEnv === 'test'` before opening the database; boot fails when `sanityCheckAirports` fails.
 
 - [ ] **Step 1: Write the failing test**
@@ -1121,9 +1175,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FIXTURE_OPT_IN_PHRASE } from '@gmt/core';
+import { loadAirportsDataset } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
 import { type RunningApp, bootApp } from '../src/bootstrap/app.js';
-import { type AssetPaths, assetPaths, loadAirportsDataset } from '../src/bootstrap/paths.js';
+import { type AssetPaths, assetPaths } from '../src/bootstrap/paths.js';
 import { createLogger } from '../src/logger.js';
 import { loadConfigFromEnv } from '../src/wiring.js';
 
@@ -1146,7 +1201,7 @@ function envFor(overrides: Record<string, string | undefined>): Record<string, s
 }
 
 async function bootWith(env: Record<string, string | undefined>, assets: AssetPaths = assetPaths()): Promise<RunningApp> {
-  return bootApp({ config: loadConfigFromEnv(env), log: createLogger('error'), listen: false, assets });
+  return bootApp({ config: loadConfigFromEnv(env), log: createLogger({ logLevel: 'error' }), listen: false, assets });
 }
 
 describe('injected-config boot matrix (spec §5.5)', () => {
@@ -1163,8 +1218,9 @@ describe('injected-config boot matrix (spec §5.5)', () => {
       expect(running.ports.providers.some((p) => p.id === 'fixture')).toBe(expected);
       const res = await running.app.request('http://localhost:3000/api/providers', { headers: { host: 'localhost:3000', authorization: authHeader } });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { providers: Array<{ id: string }> };
-      expect(body.providers.some((p) => p.id === 'fixture')).toBe(expected);
+      const body = (await res.json()) as { providers: Array<{ providerId: string }>; synthetic: boolean };
+      expect(body.providers.some((p) => p.providerId === 'fixture')).toBe(expected);
+      expect(body.synthetic).toBe(expected);
     } finally {
       await running.close();
     }
@@ -1190,14 +1246,11 @@ describe('injected-config boot matrix (spec §5.5)', () => {
   });
 
   it('a failed airport sanity check fails boot', async () => {
-    const real = loadAirportsDataset(assetPaths().airportsDataDir) as unknown;
-    // why: shape-agnostic truncation so this test does not depend on the dataset's field names.
-    const tiny = Array.isArray(real)
-      ? real.slice(0, 10)
-      : Object.fromEntries(Object.entries(real as Record<string, unknown>).map(([k, v]) => [k, Array.isArray(v) ? v.slice(0, 10) : v]));
+    const real = loadAirportsDataset(assetPaths().airportsDataDir);
     const dataDir = mkdtempSync(join(tmpdir(), 'gmt-airports-'));
     mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, 'airports.tiny.json'), JSON.stringify(tiny));
+    writeFileSync(join(dataDir, 'airports.tiny.json'), JSON.stringify({ ...real, airports: real.airports.slice(0, 10) }));
+    writeFileSync(join(dataDir, 'metros.json'), JSON.stringify(real.metros));
     await expect(bootWith(envFor({}), { ...assetPaths(), airportsDataDir: dataDir })).rejects.toThrow(/airport sanity check failed/);
   });
 });
@@ -1205,7 +1258,7 @@ describe('injected-config boot matrix (spec §5.5)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- boot.matrix`
+Run: `pnpm --filter @gmt/api exec vitest run test/boot.matrix.test.ts`
 Expected: FAIL on "refuses NODE_ENV=test" (boot proceeds) and "a failed airport sanity check fails boot" (resolves); the matrix rows and the password row pass already, because the gates live in WP0/WP4b and Task 8.1 wires them.
 
 - [ ] **Step 3: Implement**
@@ -1224,16 +1277,14 @@ Replace the line `seedAirports(ports.db, loadAirportsDataset(deps.assets.airport
 ```ts
     seedAirports(ports.db, loadAirportsDataset(deps.assets.airportsDataDir));
     // Spec §7: at least 5,000 airports with tz, and every airport an enabled definition references exists.
-    const referenced = [
-      ...new Set(ports.repos.definitions.list().filter((d) => d.enabled && d.deletedAt === null).flatMap((d) => [...d.origins, ...d.destinations])),
-    ];
+    const referenced = [...new Set(ports.repos.definitions.list().filter((d) => d.enabled).flatMap((d) => [...d.origins, ...d.destinations]))];
     const sanity = sanityCheckAirports(ports.db, referenced);
     if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`);
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- boot`
+Run: `pnpm --filter @gmt/api exec vitest run test/boot.matrix.test.ts test/boot.spawn.test.ts`
 Expected: PASS, the spawn test and 9 matrix tests.
 
 - [ ] **Step 5: Commit**
@@ -1253,11 +1304,12 @@ git add apps/api && git commit -m "wp08: boot matrix, NODE_ENV=test refusal, air
 - Consumes: `AppLock`, `AppLock.inspect` (WP3); `fixedClock` (WP0).
 - Produces: `acquireAppLockWithWaits`, `TOOL_LOCK_WAIT_MS`, `APP_LOCK_WAIT_MS`, `LOCK_POLL_MS`, `LockRefusedError`; `BootDeps.sleep?`.
 
-Rule implemented (spec §7): poll every second. A fresh `tool` lock: refuse once 60 s have passed. A fresh `app` lock: keep polling and take it over as soon as WP3's `acquire` judges it stale (three missed 30 s beats); if it is still heartbeating after 90 s, a second live app process holds it, so refuse rather than run two writers. The lock age is logged every 10 s while waiting.
+Rule implemented (spec §7; plan "Wiring and bootstraps"): poll every second. A fresh `tool` lock: refuse once 60 s have passed. A fresh `app` lock: wait up to 90 s, logging its age every 10 s; take it over at once whenever WP3's `acquire` judges it stale (three missed 30 s beats); if it is still being heartbeated after 90 s, refuse (two live apps).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
+import { Writable } from 'node:stream';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { AppLock } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
@@ -1270,7 +1322,13 @@ function setup(onSleep: (totalMs: number) => void = () => {}) {
   const config = loadConfigFromEnv({ NODE_ENV: 'test', DATABASE_PATH: ':memory:', BIND_ADDRESS: '127.0.0.1' });
   const clock = fixedClock(asIsoDateTime('2026-10-14T09:00:00.000Z'));
   const lines: string[] = [];
-  const log = createLogger('debug', { write: (s: string) => void lines.push(s) });
+  const destination = new Writable({
+    write(chunk: Buffer | string, _enc, cb) {
+      lines.push(String(chunk));
+      cb();
+    },
+  });
+  const log = createLogger({ logLevel: 'debug' }, { destination });
   const ports = buildPorts(config, { log, clock, migrationsDir: assetPaths().migrationsDir });
   let slept = 0;
   const sleep = async (ms: number) => {
@@ -1339,7 +1397,7 @@ describe('app_lock waits for the app holder (spec §7)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- lock`
+Run: `pnpm --filter @gmt/api exec vitest run test/lock.test.ts`
 Expected: FAIL, `Cannot find module '../src/bootstrap/lock.js'`.
 
 - [ ] **Step 3: Implement**
@@ -1432,7 +1490,7 @@ and replace the line `if (lock.acquire({ waitMs: 0 }) !== 'acquired') throw new 
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- lock boot`
+Run: `pnpm --filter @gmt/api exec vitest run test/lock.test.ts test/boot.matrix.test.ts`
 Expected: PASS, 5 lock tests and the boot tests.
 
 - [ ] **Step 5: Commit**
@@ -1441,7 +1499,7 @@ Expected: PASS, 5 lock tests and the boot tests.
 git add apps/api && git commit -m "wp08: app_lock waits: 60 s refuse on a tool lock, stale takeover of an app lock"
 ```
 
-### Task 8.4: Pre-migration backup when migrations are pending
+### Task 8.4: Backup preflight when migrations are pending
 
 **Files:**
 - Create: `src/bootstrap/migrations.ts`, `src/bootstrap/backup.ts`
@@ -1449,10 +1507,10 @@ git add apps/api && git commit -m "wp08: app_lock waits: 60 s refuse on a tool l
 - Test: `test/backup.test.ts`
 
 **Interfaces:**
-- Consumes: `openDatabase` (WP0); `backupDatabase` from `scripts/backup.mjs` (WP12, loaded at runtime).
-- Produces: `pendingMigrations(dbPath, migrationsDir): { fresh: boolean; pending: string[] }`, `loadBackup(modulePath)`, `BootDeps.backup?`.
+- Consumes: `openDatabase`, `pendingMigrations(db, migrationsDir): string[]` (WP0 `@gmt/db`); `backupDatabase({ dbPath, backupDir })` from `scripts/backup.mjs` (WP12, loaded at runtime).
+- Produces: `hasPendingMigrations(dbPath, migrationsDir): string[]`, `loadBackup(modulePath)`, `BootDeps.backup?`.
 
-Rule (spec §7, §13): when the database already holds applied migrations and the bundled journal has newer entries, call `backup(dbPath)` before `buildPorts` applies them; a backup failure refuses boot and leaves the schema untouched. A database with no applied migrations (new file, or no `__drizzle_migrations` table) has nothing to back up and is migrated directly.
+Rule (plan "Wiring and bootstraps", spec §7 Migrations, §13): when the database file exists and `pendingMigrations()` is non-empty, call `backup(dbPath)` before `buildPorts` applies them; a backup failure refuses boot and leaves the schema untouched. A database file that does not exist yet has nothing to back up. The production port writes to `<directory of the database>/backups` (`/data/backups` in the image).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1464,19 +1522,15 @@ import { openDatabase } from '@gmt/db';
 import { describe, expect, it, vi } from 'vitest';
 import { bootApp } from '../src/bootstrap/app.js';
 import { loadBackup } from '../src/bootstrap/backup.js';
-import { pendingMigrations } from '../src/bootstrap/migrations.js';
+import { hasPendingMigrations } from '../src/bootstrap/migrations.js';
 import { assetPaths } from '../src/bootstrap/paths.js';
 import { createLogger } from '../src/logger.js';
 import { loadConfigFromEnv } from '../src/wiring.js';
 
 function config(dbPath: string) {
   return loadConfigFromEnv({
-    NODE_ENV: 'production',
-    DATABASE_PATH: dbPath,
-    BIND_ADDRESS: '127.0.0.1',
-    APP_BASIC_AUTH_USER: 'operator',
-    APP_BASIC_AUTH_PASS: 'test-basic-auth-pass-0123456789',
-    LOG_LEVEL: 'error',
+    NODE_ENV: 'production', DATABASE_PATH: dbPath, BIND_ADDRESS: '127.0.0.1',
+    APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: 'test-basic-auth-pass-0123456789', LOG_LEVEL: 'error',
   });
 }
 
@@ -1503,17 +1557,17 @@ function hasProbe(dbPath: string): boolean {
 }
 
 async function bootOnce(dbPath: string, backup: (p: string) => Promise<void>, migrationsDir = assetPaths().migrationsDir) {
-  const running = await bootApp({ config: config(dbPath), log: createLogger('error'), listen: false, backup, assets: { ...assetPaths(), migrationsDir } });
+  const running = await bootApp({ config: config(dbPath), log: createLogger({ logLevel: 'error' }), listen: false, backup, assets: { ...assetPaths(), migrationsDir } });
   await running.close();
 }
 
-describe('pre-migration backup (spec §7 Migrations, §13 Backup)', () => {
-  it('a new database is migrated without a backup; an up-to-date one is not backed up either', async () => {
+describe('backup preflight (spec §7 Migrations, §13 Backup)', () => {
+  it('a database file that does not exist yet is migrated without a backup; an up-to-date one is not backed up', async () => {
     const dbPath = join(mkdtempSync(join(tmpdir(), 'gmt-bk-')), 'b.db');
-    expect(pendingMigrations(dbPath, assetPaths().migrationsDir).fresh).toBe(true);
+    expect(hasPendingMigrations(dbPath, assetPaths().migrationsDir)).toEqual([]);
     const backup = vi.fn(async (_p: string) => {});
     await bootOnce(dbPath, backup);
-    expect(pendingMigrations(dbPath, assetPaths().migrationsDir)).toEqual({ fresh: false, pending: [] });
+    expect(hasPendingMigrations(dbPath, assetPaths().migrationsDir)).toEqual([]);
     await bootOnce(dbPath, backup);
     expect(backup).not.toHaveBeenCalled();
   });
@@ -1522,7 +1576,7 @@ describe('pre-migration backup (spec §7 Migrations, §13 Backup)', () => {
     const dbPath = join(mkdtempSync(join(tmpdir(), 'gmt-bk-')), 'b.db');
     await bootOnce(dbPath, async () => {});
     const probeDir = migrationsWithProbe();
-    expect(pendingMigrations(dbPath, probeDir).pending).toEqual(['9999_wp8_probe']);
+    expect(hasPendingMigrations(dbPath, probeDir)).toHaveLength(1);
     const backup = vi.fn(async (p: string) => {
       expect(hasProbe(p)).toBe(false); // why: the backup must see the pre-migration schema
     });
@@ -1541,12 +1595,13 @@ describe('pre-migration backup (spec §7 Migrations, §13 Backup)', () => {
     expect(hasProbe(dbPath)).toBe(false);
   });
 
-  it('loadBackup fails closed when the WP12 module is missing and calls backupDatabase when present', async () => {
+  it('loadBackup fails closed when the WP12 module is missing and calls backupDatabase with <db dir>/backups when present', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'gmt-bkmod-'));
     await expect(loadBackup(join(dir, 'missing.mjs'))(join(dir, 'x.db'))).rejects.toThrow(/backup unavailable/);
     const mod = join(dir, 'backup.mjs');
-    writeFileSync(mod, "import { writeFileSync } from 'node:fs';\nexport async function backupDatabase(p) { writeFileSync(`${p}.marker`, 'ok'); return `${p}.bak`; }\n");
+    writeFileSync(mod, "import { writeFileSync } from 'node:fs';\nexport function backupDatabase(o) { writeFileSync(`${o.dbPath}.marker`, o.backupDir); return { path: `${o.backupDir}/x.db`, pruned: [] }; }\n");
     await loadBackup(mod)(join(dir, 'x.db'));
+    expect(readFileSync(join(dir, 'x.db.marker'), 'utf8')).toBe(join(dir, 'backups'));
     expect(existsSync(join(dir, 'x.db.marker'))).toBe(true);
   });
 });
@@ -1554,7 +1609,7 @@ describe('pre-migration backup (spec §7 Migrations, §13 Backup)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- backup`
+Run: `pnpm --filter @gmt/api exec vitest run test/backup.test.ts`
 Expected: FAIL, `Cannot find module '../src/bootstrap/backup.js'`.
 
 - [ ] **Step 3: Implement**
@@ -1562,30 +1617,19 @@ Expected: FAIL, `Cannot find module '../src/bootstrap/backup.js'`.
 `src/bootstrap/migrations.ts`:
 
 ```ts
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { openDatabase } from '@gmt/db';
-
-interface Journal { entries: Array<{ when: number; tag: string }> }
+import { existsSync } from 'node:fs';
+import { openDatabase, pendingMigrations } from '@gmt/db';
 
 /**
- * Which bundled migrations the database has not applied yet. Mirrors the Drizzle SQLite
- * migrator, which applies journal entries whose `when` exceeds the newest
- * `__drizzle_migrations.created_at`. `fresh` means nothing was ever applied, so there is
- * nothing to back up (spec §7: the backup protects existing data from a migration).
+ * Pending migration names for an existing database file; [] when the file does not exist, since a
+ * new database has nothing to back up (plan "Wiring and bootstraps": backup when pendingMigrations()
+ * is non-empty and the file exists).
  */
-export function pendingMigrations(dbPath: string, migrationsDir: string): { fresh: boolean; pending: string[] } {
-  const journal = JSON.parse(readFileSync(join(migrationsDir, 'meta', '_journal.json'), 'utf8')) as Journal;
-  const all = journal.entries.map((e) => e.tag);
-  if (dbPath === ':memory:' || !existsSync(dbPath)) return { fresh: true, pending: all };
+export function hasPendingMigrations(dbPath: string, migrationsDir: string): string[] {
+  if (dbPath === ':memory:' || !existsSync(dbPath)) return [];
   const db = openDatabase(dbPath);
   try {
-    const table = db.raw.prepare("select name from sqlite_master where type = 'table' and name = '__drizzle_migrations'").get();
-    if (table === undefined) return { fresh: true, pending: all };
-    const row = db.raw.prepare('select max(created_at) as last from __drizzle_migrations').get() as { last: number | null };
-    if (row.last === null) return { fresh: true, pending: all };
-    const last = Number(row.last);
-    return { fresh: false, pending: journal.entries.filter((e) => e.when > last).map((e) => e.tag) };
+    return pendingMigrations(db, migrationsDir);
   } finally {
     db.close();
   }
@@ -1595,11 +1639,15 @@ export function pendingMigrations(dbPath: string, migrationsDir: string): { fres
 `src/bootstrap/backup.ts`:
 
 ```ts
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+type BackupFn = (o: { dbPath: string; backupDir: string }) => unknown;
+
 /**
- * The production backup port: `backupDatabase` from `scripts/backup.mjs` (WP12), loaded when
- * needed so the api builds before WP12 merges. Fails closed: no module, no migration.
+ * The production backup port: WP12's `backupDatabase` from `scripts/backup.mjs` (VACUUM INTO +
+ * integrity check, refuses an existing target, keeps 5), loaded when needed so the api builds
+ * before WP12 merges. Fails closed: no module, no migration.
  */
 export function loadBackup(modulePath: string): (dbPath: string) => Promise<void> {
   return async (dbPath) => {
@@ -1610,24 +1658,24 @@ export function loadBackup(modulePath: string): (dbPath: string) => Promise<void
       throw new Error(`backup unavailable: ${modulePath} could not be loaded`);
     }
     if (typeof mod.backupDatabase !== 'function') throw new Error(`backup unavailable: ${modulePath} does not export backupDatabase`);
-    await (mod.backupDatabase as (p: string) => Promise<unknown>)(dbPath);
+    await (mod.backupDatabase as BackupFn)({ dbPath, backupDir: join(dirname(dbPath), 'backups') });
   };
 }
 ```
 
-In `src/bootstrap/app.ts`: import `pendingMigrations` from `./migrations.js` and `loadBackup` from `./backup.js`; add to `BootDeps`:
+In `src/bootstrap/app.ts`: import `hasPendingMigrations` from `./migrations.js` and `loadBackup` from `./backup.js`; add to `BootDeps`:
 
 ```ts
-  /** Pre-migration backup (spec §7); defaults to scripts/backup.mjs `backupDatabase`. */
+  /** Pre-migration backup (spec §7); defaults to WP12's scripts/backup.mjs `backupDatabase`. */
   backup?: (dbPath: string) => Promise<void>;
 ```
 
 and insert immediately before `const ports = buildPorts(`:
 
 ```ts
-  const migrations = pendingMigrations(config.databasePath, deps.assets.migrationsDir);
-  if (!migrations.fresh && migrations.pending.length > 0) {
-    log.info({ pending: migrations.pending }, 'migrations pending; backing up first');
+  const pending = hasPendingMigrations(config.databasePath, deps.assets.migrationsDir);
+  if (pending.length > 0) {
+    log.info({ pending }, 'migrations pending; backing up first');
     const backup = deps.backup ?? loadBackup(deps.assets.backupModule);
     try {
       await backup(config.databasePath);
@@ -1639,27 +1687,27 @@ and insert immediately before `const ports = buildPorts(`:
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- backup boot`
-Expected: PASS, 4 backup tests and the boot tests.
+Run: `pnpm --filter @gmt/api exec vitest run test/backup.test.ts test/boot.matrix.test.ts`
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp08: pre-migration backup port; a failed backup refuses migrations"
+git add apps/api && git commit -m "wp08: backup preflight before migrations; a failed backup refuses boot"
 ```
 
-### Task 8.5: Graceful shutdown order, heartbeat, and pino redaction
+### Task 8.5: Graceful shutdown order and heartbeat
 
 **Files:**
-- Modify: `src/bootstrap/app.ts`, `src/logger.ts`
-- Test: `test/shutdown.test.ts`, `test/logger.test.ts`
+- Modify: `src/bootstrap/app.ts`
+- Test: `test/shutdown.test.ts`
 
 **Interfaces:**
-- Produces: `BootDeps.timers?`; `REDACT_PATHS`; `createLogger` with redaction and URL stripping.
+- Produces: `BootDeps.timers?`.
 
-- [ ] **Step 1: Write the failing tests**
+pino redaction (spec §14) is WP4b's `createLogger` and is tested there; this task pins the spec §7 shutdown order: stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close.
 
-`test/shutdown.test.ts`:
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 import { existsSync, mkdtempSync, statSync } from 'node:fs';
@@ -1694,7 +1742,7 @@ describe('graceful shutdown (spec §7, §13)', () => {
       },
       clearInterval: (h: unknown) => void cleared.push(h),
     };
-    const running = await bootApp({ config, log: createLogger('error'), listen: false, assets: assetPaths(), timers });
+    const running = await bootApp({ config, log: createLogger({ logLevel: 'error' }), listen: false, assets: assetPaths(), timers });
     expect(intervalMs).toBe(HEARTBEAT_MS);
     const heartbeat = vi.spyOn(AppLock.prototype, 'heartbeat');
     tick?.();
@@ -1726,89 +1774,12 @@ describe('graceful shutdown (spec §7, §13)', () => {
 });
 ```
 
-`test/logger.test.ts`:
+- [ ] **Step 2: Run to verify it fails**
 
-```ts
-import { describe, expect, it } from 'vitest';
-import { REDACT_PATHS, createLogger } from '../src/logger.js';
-
-function capture() {
-  const lines: string[] = [];
-  return { lines, log: createLogger('debug', { write: (s: string) => void lines.push(s) }) };
-}
-
-describe('pino setup (spec §14, §5.3)', () => {
-  it('redacts exactly the spec paths', () => {
-    expect(REDACT_PATHS).toEqual(['apiKey', 'token', 'authorization', 'url.query', 'req.headers.authorization']);
-    const { lines, log } = capture();
-    log.info({ apiKey: 'sentinel-1', token: 'sentinel-2', authorization: 'sentinel-3', url: { query: 'sentinel-4', path: '/x' }, req: { headers: { authorization: 'sentinel-5' } } }, 'probe');
-    const text = lines.join('');
-    for (const n of [1, 2, 3, 4, 5]) expect(text).not.toContain(`sentinel-${n}`);
-    expect(text).toContain('[redacted]');
-    expect(text).toContain('"path":"/x"');
-  });
-
-  it('strips query strings and userinfo from every logged string, in fields and messages', () => {
-    const { lines, log } = capture();
-    log.warn({ note: 'GET https://user:pw@api.example.com/v1/x?api_key=SENTINEL failed', nested: { list: ['https://a.example/p?token=SENTINEL2'] } }, 'see https://b.example/q?key=SENTINEL3');
-    const text = lines.join('');
-    expect(text).not.toContain('SENTINEL');
-    expect(text).not.toContain('pw@');
-    expect(text).toContain('https://api.example.com/v1/x');
-  });
-
-  it('child loggers keep the rules', () => {
-    const { lines, log } = capture();
-    log.child({ executionId: 'e1' }).info({ token: 'sentinel-6' }, 'child');
-    expect(lines.join('')).not.toContain('sentinel-6');
-    expect(lines.join('')).toContain('"executionId":"e1"');
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `pnpm --filter @gmt/api test -- shutdown logger`
-Expected: FAIL: `REDACT_PATHS` is not exported; `bootApp` ignores `timers` (`intervalMs` stays 0).
+Run: `pnpm --filter @gmt/api exec vitest run test/shutdown.test.ts`
+Expected: FAIL: `bootApp` ignores `timers`, so `intervalMs` stays 0.
 
 - [ ] **Step 3: Implement**
-
-`src/logger.ts` (replaces the Task 8.1 file):
-
-```ts
-import { type Config, type Logger, stripUrlsInText } from '@gmt/core';
-import pino from 'pino';
-
-/** Spec §14: exactly these paths, censored. */
-export const REDACT_PATHS = ['apiKey', 'token', 'authorization', 'url.query', 'req.headers.authorization'] as const;
-
-/** Deep copy with every string URL-stripped (spec §5.3: no sink holds a query string or userinfo). */
-function stripDeep(value: unknown, depth: number): unknown {
-  if (typeof value === 'string') return stripUrlsInText(value);
-  if (depth > 8 || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((v) => stripDeep(v, depth + 1));
-  // why: objects with toJSON (Secret, Date) serialise themselves; leave them to pino.
-  if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return value;
-  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stripDeep(v, depth + 1)]));
-}
-
-/** pino JSON to stdout with the spec §14 redaction and URL stripping. `destination` is for tests. */
-export function createLogger(level: Config['logLevel'], destination?: pino.DestinationStream): Logger {
-  const options: pino.LoggerOptions = {
-    level,
-    redact: { paths: [...REDACT_PATHS], censor: '[redacted]' },
-    formatters: { log: (obj) => stripDeep(obj, 0) as Record<string, unknown> },
-    hooks: {
-      logMethod(args, method) {
-        const cleaned = args.map((a) => (typeof a === 'string' ? stripUrlsInText(a) : a)) as Parameters<typeof method>;
-        method.apply(this, cleaned);
-      },
-    },
-  };
-  const logger: Logger = destination === undefined ? pino(options) : pino(options, destination);
-  return logger;
-}
-```
 
 `src/bootstrap/app.ts`: add to `BootDeps`:
 
@@ -1828,15 +1799,15 @@ add after `const clock = deps.clock ?? systemClock;`:
 
 and replace the two lines `const heartbeat = setInterval(() => lock.heartbeat(), HEARTBEAT_MS);` / `heartbeat.unref();` with `const heartbeat = timers.setInterval(() => lock.heartbeat(), HEARTBEAT_MS);`, and `clearInterval(heartbeat);` in `close` with `timers.clearInterval(heartbeat);`.
 
-- [ ] **Step 4: Run to verify they pass**
+- [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- shutdown logger boot lock backup`
+Run: `pnpm --filter @gmt/api exec vitest run test/shutdown.test.ts test/boot.matrix.test.ts test/lock.test.ts test/backup.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp08: shutdown order (checkpoint before lock release), heartbeat, pino redaction"
+git add apps/api && git commit -m "wp08: shutdown order (checkpoint before lock release) and heartbeat"
 ```
 
 ### Task 8.6: Test harness, security headers, Host/Origin/Content-Type/X-Requested-With
@@ -1847,25 +1818,23 @@ git add apps/api && git commit -m "wp08: shutdown order (checkpoint before lock 
 - Test: `test/hardening.test.ts`
 
 **Interfaces:**
-- Consumes: `fixtureHandlers` (WP4), `buildPorts` under `NODE_ENV=test` with `:memory:` (WP4b), `createEngine`, `LogNotifier` (WP7), `secureHeaders` (hono).
-- Produces: `createHarness`, `Harness`, `stopMsw`, `basic`, `T0`, `HOST`, `AUTH_USER`, `SENTINELS` (test-only); `expectContract` (test-only); `securityHeaders`, `hostAllowlist`, `originCheck`, `mutatingRequestCheck`.
+- Consumes: `buildPorts` under `NODE_ENV=test` with `:memory:` and `fixtureRoot` (WP4b; the fixture host is served through http-kit's gated `inProcessHosts`), `createLogger` (WP4b), `createEngine`, `LogNotifier` (WP7), `secureHeaders` (hono).
+- Produces: `createHarness`, `Harness`, `captureLines`, `basic`, `T0`, `HOST`, `AUTH_USER`, `SENTINELS` (test-only); `expectContract` (test-only); `securityHeaders`, `hostAllowlist`, `originCheck`, `mutatingRequestCheck`.
 
-The harness is the route-test engine: real ports over an in-memory database (`buildPorts` from WP4b under `NODE_ENV=test` and `:memory:`, which `syntheticAllowed` permits), the real engine, the fixture provider served by `msw` at `http://fixture.local`, and the app driven with `app.request()`. It does not import any other package's test files.
+The harness is the route-test engine: real ports over an in-memory database (`buildPorts` from WP4b under `NODE_ENV=test` and `:memory:`, which `syntheticAllowed` permits), the real engine, the fixture provider reached in-process through http-kit's gated seam, and the app driven with `app.request()`. It imports no other package's test files and needs no `msw`.
 
 - [ ] **Step 1: Write the harness and the failing test**
 
 `test/harness.ts`:
 
 ```ts
-import { fileURLToPath } from 'node:url';
+import { Writable } from 'node:stream';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
-import { seedAirports } from '@gmt/db';
+import { loadAirportsDataset, seedAirports } from '@gmt/db';
 import { type Engine, LogNotifier, createEngine } from '@gmt/engine';
-import { fixtureHandlers } from '@gmt/providers';
 import type { Hono } from 'hono';
-import { setupServer } from 'msw/node';
 import { type AppOptions, createApp } from '../src/app.js';
-import { assetPaths, loadAirportsDataset } from '../src/bootstrap/paths.js';
+import { assetPaths } from '../src/bootstrap/paths.js';
 import { createLogger } from '../src/logger.js';
 import type { AppEnv } from '../src/routes/types.js';
 import { type Ports, buildPorts, loadConfigFromEnv } from '../src/wiring.js';
@@ -1881,15 +1850,14 @@ export const SENTINELS = {
   searchapi: 'test-searchapi-key-0123456789abcdef',
 } as const;
 
-const fixtureRoot = fileURLToPath(new URL('../../../packages/providers/fixtures/synthetic/fixture', import.meta.url));
-// why: one msw server per test file; onUnhandledRequest 'error' proves no request leaves the process.
-const msw = setupServer(...fixtureHandlers(fixtureRoot));
-let mswListening = false;
-export function stopMsw(): void {
-  if (mswListening) {
-    msw.close();
-    mswListening = false;
-  }
+/** A stream that appends every written chunk to `lines` (the logger's destination in tests). */
+export function captureLines(lines: string[]): Writable {
+  return new Writable({
+    write(chunk: Buffer | string, _enc, cb) {
+      lines.push(String(chunk));
+      cb();
+    },
+  });
 }
 
 export function basic(user: string, pass: string): string {
@@ -1917,11 +1885,12 @@ export interface Harness {
   close(): Promise<void>;
 }
 
+/**
+ * Real ports over an in-memory database (NODE_ENV=test + :memory:, which syntheticAllowed admits),
+ * the real engine, and the fixture provider reached through http-kit's gated inProcessHosts seam
+ * (buildPorts wires it from `fixtureRoot`), so no request leaves the process and no msw is needed.
+ */
 export async function createHarness(opts: { env?: Record<string, string>; app?: AppOptions } = {}): Promise<Harness> {
-  if (!mswListening) {
-    msw.listen({ onUnhandledRequest: 'error' });
-    mswListening = true;
-  }
   const config = loadConfigFromEnv({
     NODE_ENV: 'test',
     DATABASE_PATH: ':memory:',
@@ -1936,10 +1905,10 @@ export async function createHarness(opts: { env?: Record<string, string>; app?: 
     ...opts.env,
   });
   const logLines: string[] = [];
-  const log = createLogger('debug', { write: (s: string) => void logLines.push(s) });
+  const log = createLogger(config, { destination: captureLines(logLines) });
   const clock = fixedClock(T0);
   const assets = assetPaths();
-  const ports = buildPorts(config, { log, clock, migrationsDir: assets.migrationsDir });
+  const ports = buildPorts(config, { log, clock, migrationsDir: assets.migrationsDir, fixtureRoot: assets.fixtureRoot });
   seedAirports(ports.db, loadAirportsDataset(assets.airportsDataDir));
   const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
   await engine.boot();
@@ -1997,7 +1966,7 @@ export async function expectContract(res: Response, method: string, path: string
 ```ts
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { API_TEXT } from '../src/text.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -2005,7 +1974,6 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await h.close();
-  stopMsw();
 });
 
 async function errorOf(res: Response): Promise<{ code: string; message: string }> {
@@ -2044,7 +2012,7 @@ describe('Host allowlist (spec §4)', () => {
   it('matches case-insensitively', async () => {
     expect((await h.request('/api/providers', { headers: { host: 'LOCALHOST:3000' } })).status).toBe(200);
   });
-  it('exempts the public GET /health', async () => {
+  it('exempts the public GET /api/health', async () => {
     expect((await h.request('/api/health', { auth: false, headers: { host: 'healthcheck.internal' } })).status).toBe(200);
   });
 });
@@ -2092,7 +2060,7 @@ describe('mutating requests (spec §4)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- hardening`
+Run: `pnpm --filter @gmt/api exec vitest run test/hardening.test.ts`
 Expected: FAIL: no `content-security-policy` header; the evil Host returns 401; POST without Content-Type returns 404.
 
 - [ ] **Step 3: Implement**
@@ -2175,6 +2143,7 @@ export function mutatingRequestCheck(): MiddlewareHandler<AppEnv> {
 ```ts
   const publicKeys = publicRouteKeys(routes);
   const isPublic = (c: Context<AppEnv>) => publicKeys.has(`${c.req.method} ${c.req.path}`);
+  // why: ROUTES paths carry /api, so the public key is e.g. 'GET /api/health'.
   // Order (spec §4): headers on everything → Host → Origin → auth → JSON + X-Requested-With on mutating API calls.
   app.use('*', securityHeaders());
   app.use('*', hostAllowlist(ports.config, isPublic));
@@ -2185,7 +2154,7 @@ export function mutatingRequestCheck(): MiddlewareHandler<AppEnv> {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- hardening`
+Run: `pnpm --filter @gmt/api exec vitest run test/hardening.test.ts`
 Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
@@ -2215,8 +2184,8 @@ Rules (spec §4): a request that presents credentials is refused with 429 while 
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { AUTH_USER, type Harness, SENTINELS, basic, createHarness, stopMsw } from './harness.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { AUTH_USER, type Harness, SENTINELS, basic, createHarness } from './harness.js';
 
 const WRONG = basic(AUTH_USER, 'wrong-password-000');
 const RIGHT = basic(AUTH_USER, SENTINELS.authPass);
@@ -2225,7 +2194,6 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
 const byTestIp = { clientIp: (c: { req: { header(n: string): string | undefined } }) => c.req.header('x-test-ip') ?? null };
 
@@ -2239,7 +2207,7 @@ describe('basic auth gate (spec §4)', () => {
     expect((await h.request('/api/providers', { headers: { authorization: RIGHT } })).status).toBe(200);
   });
 
-  it('GET /health is public and minimal without credentials', async () => {
+  it('GET /api/health is public and minimal without credentials', async () => {
     h = await createHarness();
     const res = await h.request('/api/health', { auth: false });
     expect(res.status).toBe(200);
@@ -2264,7 +2232,7 @@ describe('failed-auth rate limit (spec §4)', () => {
     expect((await h.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '203.0.113.7' } })).status).toBe(200);
   });
 
-  it('wrong credentials on the public /health still count', async () => {
+  it('wrong credentials on the public /api/health still count', async () => {
     h = await createHarness({ app: byTestIp });
     for (let i = 0; i < 5; i++) expect((await h.request('/api/health', { headers: { authorization: WRONG, 'x-test-ip': '203.0.113.9' } })).status).toBe(200);
     expect((await h.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '203.0.113.9' } })).status).toBe(429);
@@ -2327,7 +2295,7 @@ describe('static files and SPA fallback (spec §4, §13)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- auth`
+Run: `pnpm --filter @gmt/api exec vitest run test/auth.test.ts`
 Expected: FAIL: the rate-limit tests get 200 instead of 429; the static tests get 404 for `/`.
 
 - [ ] **Step 3: Implement**
@@ -2476,7 +2444,7 @@ export function mountStatic(app: Hono<AppEnv>, webRoot: string): void {
   app.use('*', basicAuthGate({ config: ports.config, publicKeys, limiter: new FailedAuthLimiter(ports.clock), clientIp: options.clientIp ?? clientIpFrom(ports.config) }));
 ```
 
-and after `app.route(API_PREFIX, api);` add:
+and after the route-mounting loop add:
 
 ```ts
   if (options.webRoot) mountStatic(app, options.webRoot);
@@ -2484,7 +2452,7 @@ and after `app.route(API_PREFIX, api);` add:
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- auth hardening`
+Run: `pnpm --filter @gmt/api exec vitest run test/auth.test.ts test/hardening.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2493,99 +2461,25 @@ Expected: PASS.
 git add apps/api && git commit -m "wp08: failed-auth rate limit, auth over static files, SPA fallback"
 ```
 
-### Task 8.8: Health detail, providers zero-cap message, budget, scheduler jobs
+### Task 8.8: Health detail, airports autocomplete, providers, budget, scheduler jobs
 
 **Files:**
-- Create: `test/examples.ts`, `src/defaults.ts` (type only; Task 8.9 fills it)
+- Create: `test/examples.ts`
 - Modify: `src/routes/system.ts`
 - Test: `test/system.test.ts`
 
 **Interfaces:**
-- Consumes: `engine.status()`, `engine.scheduler.jobs()`, `BudgetGuard.usage` (WP7, WP3); `healthDetailSchema`, `budgetResponseSchema`, `schedulerJobsResponseSchema` (WP0, shapes in Open question 2).
-- Produces: `GET /api/health` authenticated detail; `GET /api/budget`; `GET /api/scheduler/jobs`.
+- Consumes: `engine.status()`, `engine.scheduler.jobs()`, `engine.scheduler.blockedSince()` (WP7); `AirportsRepo.search` (WP3); `healthResponseSchema`, `airportsResponseSchema`, `providersResponseSchema`, `budgetResponseSchema`, `schedulerJobsResponseSchema` (WP0).
+- Produces: routes `GET /api/health` (authenticated detail), `GET /api/airports`, `GET /api/budget`, `GET /api/scheduler/jobs`.
+
+Rules: one public health route with two shapes (`healthResponseSchema` is the union): the `HEALTHCHECK` gets `{ ok, degraded }`; an authenticated caller gets the detail, which never includes the database path. Airports: up to 20 rows, the repository's prefix-on-IATA-then-city/name ordering. Budget: every provider window and the global window, the monthly cap, the subscription fees counted once in it (spec §5.3) and a one-line ceiling note.
 
 - [ ] **Step 1: Write the failing test**
 
-```ts
-import { apiContract } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { API_TEXT } from '../src/text.js';
-import { expectContract } from './contract.js';
-import { exampleDefinitionInput } from './examples.js';
-import { type Harness, SENTINELS, createHarness, stopMsw } from './harness.js';
-
-let h: Harness | undefined;
-afterEach(async () => {
-  await h?.close();
-  h = undefined;
-});
-afterAll(() => stopMsw());
-
-describe('GET /health (spec §10, §13)', () => {
-  it('public shape without auth; detail with auth', async () => {
-    h = await createHarness();
-    const pub = (await expectContract(await h.request('/api/health', { auth: false }), 'GET', '/health')) as object;
-    expect(pub).toEqual({ ok: true, degraded: false });
-    const detail = (await expectContract(await h.request('/api/health'), 'GET', '/health', apiContract.healthDetailSchema)) as {
-      db: { ok: boolean }; providers: Array<{ id: string }>; scheduler: { jobCount: number };
-    };
-    expect(detail.db.ok).toBe(true);
-    expect(detail.providers.map((p) => p.id)).toContain('fixture');
-    expect(detail.scheduler.jobCount).toBe(0);
-  });
-  it('reports degraded from the engine without detail', async () => {
-    h = await createHarness();
-    vi.spyOn(h.engine, 'status').mockReturnValue({ running: [], degraded: true, nextRun: null, lastExecutionAt: null });
-    expect(await (await h.request('/api/health', { auth: false })).json()).toEqual({ ok: true, degraded: true });
-  });
-});
-
-describe('GET /providers (spec §10)', () => {
-  it('lists capabilities and usage with window bounds', async () => {
-    h = await createHarness();
-    const body = (await expectContract(await h.request('/api/providers'), 'GET', '/providers')) as {
-      providers: Array<{ id: string; usage: { scope: string; usage: Record<string, unknown> } }>; messages: string[];
-    };
-    const fixture = body.providers.find((p) => p.id === 'fixture');
-    expect(fixture?.usage.scope).toBe('provider-month:fixture');
-    expect(fixture?.usage.usage).toHaveProperty('windowStart');
-    expect(fixture?.usage.usage).toHaveProperty('windowEnd');
-    expect(body.messages).toEqual([]);
-  });
-  it('says verification will not run when a billed provider is enabled under a zero cap', async () => {
-    h = await createHarness({ env: { SEARCHAPI_KEY: SENTINELS.searchapi, SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: '0' } });
-    const body = (await expectContract(await h.request('/api/providers'), 'GET', '/providers')) as { messages: string[] };
-    expect(body.messages).toContain(API_TEXT.zeroCapVerification);
-  });
-});
-
-describe('GET /budget and GET /scheduler/jobs (spec §7 budget windows, §8.2)', () => {
-  it('reports every provider and the global window with bounds', async () => {
-    h = await createHarness();
-    const body = (await expectContract(await h.request('/api/budget'), 'GET', '/budget')) as {
-      scopes: Array<{ scope: string; usage: Record<string, unknown> }>;
-    };
-    expect(body.scopes.map((s) => s.scope)).toEqual(expect.arrayContaining(['provider-month:fixture', 'global-month']));
-    for (const s of body.scopes) {
-      expect(s.usage).toHaveProperty('windowStart');
-      expect(s.usage).toHaveProperty('cap');
-    }
-  });
-  it('lists registered jobs', async () => {
-    h = await createHarness();
-    const def = h.ports.repos.definitions.create(exampleDefinitionInput({ scheduleCron: '0 5 * * 1' }));
-    h.engine.scheduler.register(def);
-    const body = (await expectContract(await h.request('/api/scheduler/jobs'), 'GET', '/scheduler/jobs')) as { jobs: Array<{ definitionId: string }> };
-    expect(body.jobs.map((j) => j.definitionId)).toContain(def.id);
-  });
-});
-```
-
-`test/examples.ts` (used from here on):
+`test/examples.ts`:
 
 ```ts
-import { asIata } from '@gmt/core';
-import type { DefinitionInput } from '../src/defaults.js';
+import { type DefinitionInput, asIata } from '@gmt/core';
 
 /** The worked example (London → New York), sized small for tests; fixture providers for both stages. */
 export function exampleDefinitionInput(overrides: Partial<DefinitionInput> = {}): DefinitionInput {
@@ -2605,33 +2499,111 @@ export function exampleDefinitionInput(overrides: Partial<DefinitionInput> = {})
     onwardCostPence: {},
     scheduleCron: null,
     scheduleTz: 'Europe/London',
-    confirmedCostPence: null,
     enabled: true,
     ...overrides,
   };
 }
 ```
 
-`DefinitionInput` is defined in `src/defaults.ts` in Task 8.9; create that file now with only the type so this task compiles:
+`test/system.test.ts`:
 
 ```ts
-import type { apiContract } from '@gmt/core';
+import { apiContract } from '@gmt/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
+import { API_TEXT } from '../src/text.js';
+import { expectContract } from './contract.js';
+import { exampleDefinitionInput } from './examples.js';
+import { type Harness, SENTINELS, createHarness } from './harness.js';
 
-/** A definition as the create route accepts it (spec §10): every SearchDefinition field except id and timestamps. */
-export type DefinitionInput = z.infer<typeof apiContract.definitionCreateRequestSchema>;
+let h: Harness | undefined;
+afterEach(async () => {
+  await h?.close();
+  h = undefined;
+});
+
+describe('GET /api/health (spec §10, §13)', () => {
+  it('public shape without auth; detail with auth, no database path', async () => {
+    h = await createHarness();
+    const pub = await expectContract(await h.request('/api/health', { auth: false }), 'GET', '/api/health');
+    expect(pub).toEqual({ ok: true, degraded: false });
+    const detail = (await expectContract(await h.request('/api/health'), 'GET', '/api/health', apiContract.healthDetailSchema)) as z.infer<typeof apiContract.healthDetailSchema>;
+    expect(detail.db.ok).toBe(true);
+    expect(detail.db).not.toHaveProperty('path');
+    expect(detail.providers.map((p) => p.providerId)).toContain('fixture');
+    expect(detail.scheduler).toMatchObject({ jobCount: 0, blockedSince: null });
+  });
+  it('reports degraded from the engine without detail', async () => {
+    h = await createHarness();
+    vi.spyOn(h.engine, 'status').mockReturnValue({ running: [], degraded: true, nextRun: null, lastExecutionAt: null });
+    expect(await (await h.request('/api/health', { auth: false })).json()).toEqual({ ok: true, degraded: true });
+  });
+});
+
+describe('GET /api/airports?q= (spec §10, §11 autocomplete)', () => {
+  it('returns at most 20 airports, IATA prefix first', async () => {
+    h = await createHarness();
+    const rows = (await expectContract(await h.request('/api/airports?q=LHR'), 'GET', '/api/airports')) as Array<{ iata: string }>;
+    expect(rows[0]?.iata).toBe('LHR');
+    const london = (await expectContract(await h.request('/api/airports?q=London'), 'GET', '/api/airports')) as Array<{ iata: string }>;
+    expect(london.map((a) => a.iata)).toEqual(expect.arrayContaining(['LHR', 'LGW']));
+    expect(london.length).toBeLessThanOrEqual(20);
+  });
+  it('400 without q', async () => {
+    h = await createHarness();
+    expect((await h.request('/api/airports')).status).toBe(400);
+  });
+});
+
+describe('GET /api/providers (spec §10)', () => {
+  it('lists capabilities, plan, usage with window bounds, the synthetic flag and the plan presets', async () => {
+    h = await createHarness();
+    const body = (await expectContract(await h.request('/api/providers'), 'GET', '/api/providers')) as z.infer<typeof apiContract.providersResponseSchema>;
+    const fixture = body.providers.find((p) => p.providerId === 'fixture');
+    expect(fixture?.plan).toBe('synthetic');
+    expect(fixture?.usage.map((u) => u.scope)).toEqual(['provider-month:fixture', 'provider-lifetime:fixture']);
+    expect(fixture?.notices).toEqual([]);
+    expect(body.synthetic).toBe(true);
+    expect(body.presets).toMatchObject({ policy: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true }, discoveryRefreshHours: 168, schedulerTimezone: 'Europe/London' });
+  });
+  it('says verification will not run when a billed provider is enabled under a zero cap', async () => {
+    h = await createHarness({ env: { SEARCHAPI_KEY: SENTINELS.searchapi, SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: '0' } });
+    const body = (await expectContract(await h.request('/api/providers'), 'GET', '/api/providers')) as z.infer<typeof apiContract.providersResponseSchema>;
+    expect(body.providers.find((p) => p.providerId === 'searchapi')?.notices).toContain(API_TEXT.zeroCapVerification);
+  });
+});
+
+describe('GET /api/budget and GET /api/scheduler/jobs (spec §7 budget windows, §8.2)', () => {
+  it('reports every window with bounds, the cap and the subscription fees counted once', async () => {
+    h = await createHarness({ env: { SEARCHAPI_KEY: SENTINELS.searchapi, SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: '3500' } });
+    const body = (await expectContract(await h.request('/api/budget'), 'GET', '/api/budget')) as z.infer<typeof apiContract.budgetResponseSchema>;
+    expect(body.scopes.map((s) => s.scope)).toEqual(expect.arrayContaining(['provider-month:searchapi', 'global-month']));
+    for (const s of body.scopes) expect(s).toHaveProperty('windowStart');
+    expect([body.monthlyCapPence, body.fixedFeesMicroGbp]).toEqual([3500, 32_000_000]);
+    expect(body.ceilingNote).toBe(API_TEXT.ceilingNote(3500, 3200));
+  });
+  it('lists registered jobs', async () => {
+    h = await createHarness();
+    const def = h.ports.repos.definitions.create(exampleDefinitionInput({ scheduleCron: '0 5 * * 1' }));
+    h.engine.scheduler.register(def);
+    const body = (await expectContract(await h.request('/api/scheduler/jobs'), 'GET', '/api/scheduler/jobs')) as { jobs: Array<{ definitionId: string }> };
+    expect(body.jobs.map((j) => j.definitionId)).toContain(def.id);
+  });
+});
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- system`
-Expected: FAIL: the authenticated health body lacks `db`; `/api/budget` and `/api/scheduler/jobs` return 404.
+Run: `pnpm --filter @gmt/api exec vitest run test/system.test.ts`
+Expected: FAIL: the authenticated health body lacks `db`; `/api/airports`, `/api/budget` and `/api/scheduler/jobs` return 404.
 
 - [ ] **Step 3: Implement**
 
-In `src/routes/system.ts` add `import { statSync } from 'node:fs';` and `budgetScopes` to the `../read/executions.js` import, then add:
+In `src/routes/system.ts` add `import { statSync } from 'node:fs';`, `PENCE_TO_MICRO` and `type apiContract` to the `@gmt/core` import, `budgetScopes` to the `../read/usage.js` import, `import type { z } from 'zod';`, then add:
 
 ```ts
+type AirportsQuery = { q: string };
+
 function dbSizeBytes(path: string): number | null {
   if (path === ':memory:') return null;
   try {
@@ -2641,15 +2613,31 @@ function dbSizeBytes(path: string): number | null {
   }
 }
 
-/** Spec §10 authenticated `/health` detail: `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }`. */
+/** Spec §10 authenticated `/health` detail. No database path (plan: `path: never`). */
 export function healthDetail(ctx: RouteContext) {
   const base = healthPublic(ctx);
   const s = ctx.engine.status();
   return {
     ...base,
     db: { ok: base.ok, sizeBytes: dbSizeBytes(ctx.ports.config.databasePath) },
-    providers: ctx.ports.providers.map((p) => ({ id: p.id, enabled: true })),
-    scheduler: { jobCount: ctx.engine.scheduler.jobs().length, nextRun: s.nextRun, lastExecutionAt: s.lastExecutionAt, degraded: s.degraded },
+    // why: `healthy` would need a provider call; health never spends or waits, so it reports null (not checked).
+    providers: ctx.ports.providers.map((p) => ({ providerId: p.id, configured: true, healthy: null })),
+    scheduler: { jobCount: ctx.engine.scheduler.jobs().length, nextRun: s.nextRun, lastExecutionAt: s.lastExecutionAt, degraded: s.degraded, blockedSince: ctx.engine.scheduler.blockedSince() },
+  };
+}
+
+/** Spec §10 `GET /budget`: every window with bounds; the cap includes subscription fees once (spec §5.3, §12). */
+export function budgetResponse(ctx: RouteContext): z.infer<typeof apiContract.budgetResponseSchema> {
+  const { config } = ctx.ports;
+  const sa = config.providers.searchapi;
+  const fixedFeesMicroGbp = sa !== null && sa.limits.window === 'month' ? sa.limits.planFixedMicroGbp : 0;
+  const monthlyCapPence = Math.floor(config.spend.monthlyCapMicroGbp / PENCE_TO_MICRO);
+  return {
+    scopes: budgetScopes(ctx.ports, null).map((s) => usageOf(ctx.ports, s)),
+    monthlyCapMicroGbp: config.spend.monthlyCapMicroGbp,
+    monthlyCapPence,
+    fixedFeesMicroGbp,
+    ceilingNote: API_TEXT.ceilingNote(monthlyCapPence, Math.floor(fixedFeesMicroGbp / PENCE_TO_MICRO)),
   };
 }
 ```
@@ -2659,125 +2647,83 @@ and replace `systemHandlers` with:
 ```ts
 export const systemHandlers: HandlerTable = {
   // why: one public route with two shapes: the HEALTHCHECK gets the minimal one, an authenticated caller the detail.
-  'GET /health': (c, _input, ctx) => c.json(c.get('authenticated') ? healthDetail(ctx) : healthPublic(ctx)),
-  'GET /providers': (c, _input, ctx) => c.json(providersResponse(ctx)),
-  'GET /budget': (c, _input, ctx) =>
-    c.json({ scopes: budgetScopes(ctx.ports, null).map((s) => ({ scope: scopeLabel(s), usage: ctx.ports.budget.usage(s) })) }),
-  'GET /scheduler/jobs': (c, _input, ctx) => c.json({ jobs: ctx.engine.scheduler.jobs() }),
+  'GET /api/health': (c, _input, ctx) => c.json(c.get('authenticated') ? healthDetail(ctx) : healthPublic(ctx)),
+  'GET /api/airports': (c, input, ctx) =>
+    c.json(
+      ctx.ports.repos.airports
+        .search((input.query as AirportsQuery).q, 20)
+        .map((a) => ({ iata: a.iata, name: a.name, city: a.city, country: a.country, tz: a.tz, metro: a.metro })),
+    ),
+  'GET /api/providers': (c, _input, ctx) => c.json(providersResponse(ctx)),
+  'GET /api/budget': (c, _input, ctx) => c.json(budgetResponse(ctx)),
+  'GET /api/scheduler/jobs': (c, _input, ctx) => c.json({ jobs: ctx.engine.scheduler.jobs() }),
 };
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- system auth`
+Run: `pnpm --filter @gmt/api exec vitest run test/system.test.ts test/auth.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp08: health detail, providers zero-cap message, budget windows, scheduler jobs"
+git add apps/api && git commit -m "wp08: health detail, airports autocomplete, providers presets, budget, scheduler jobs"
 ```
 
-### Task 8.9: Definitions CRUD, the plan-aware default definition, cron validation, schedule sync, estimate, coverage check
+### Task 8.9: Definitions CRUD, the plan-preset draft, cron validation, schedule sync, both estimate routes, coverage check
 
 **Files:**
 - Create: `src/read/space.ts`, `src/read/definitions.ts`, `src/routes/shared.ts`, `src/routes/definitions.ts`
-- Modify: `src/defaults.ts`, `src/routes/index.ts`
-- Test: `test/definitions.test.ts`, `test/defaults.test.ts`
+- Modify: `src/routes/index.ts`
+- Test: `test/definitions.test.ts`
 
 **Interfaces:**
-- Consumes: `DefinitionsRepo` (WP3); `engine.estimate`, `engine.budgetFit`, `engine.coverageCheck`, `engine.scheduler.register/unregister`, `parseCron` (WP7); `resolveWindow`, `countCells`, `validateSearchSpace`, `PENCE_TO_MICRO` (WP0/WP1).
-- Produces: `defaultDefinitionInput`, `isDraft`, `currentSpace`, `cellInSpace`, `airportLookup`, `definitionResponse`, `needsConfirmation`, `ZERO_ESTIMATE`, `ZERO_BUDGET_FIT`, `getLiveDefinition`, `param`, `syncSchedule`, `validateForSave`; routes `GET/POST /definitions`, `GET/PUT/DELETE /definitions/:id`, `POST /definitions/:id/estimate`, `POST /definitions/coverage-check`.
+- Consumes: `DefinitionsRepo` (WP3); `engine.estimate`, `engine.budgetFit`, `engine.coverageCheck`, `engine.scheduler.register/unregister`, `parseCron` (WP7); `resolveWindow`, `countCells`, `daysBetween`, `validateSearchSpace` (WP1); `DefinitionInput`, `PENCE_TO_MICRO` (WP0).
+- Produces: `isDraft`, `currentSpace`, `cellInSpace`, `airportLookup`, `definitionResponse`, `needsConfirmation`, `ZERO_BUDGET_FIT`, `getLiveDefinition`, `param`, `syncSchedule`, `validateForSave`; routes `GET/POST /api/definitions`, `GET/PUT/DELETE /api/definitions/:id`, `POST /api/definitions/estimate`, `POST /api/definitions/:id/estimate`, `POST /api/definitions/coverage-check`.
 
-**What `POST /definitions` with no body returns (spec §10, §8.2, §11).** `201` with a `definitionResponse` for a newly persisted **draft**: `name: 'New search'`, `origins: []`, `destinations: []`, relative window offset 7 / length 182, nights 10–21, economy, constraints `{ maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } }`, verification `{ maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true }`, budget from `EXECUTION_MAX_CALLS` / `EXECUTION_MAX_FREE_CALLS` / `EXECUTION_MAX_COST_PENCE`, providers from the plan preset (below) with `discoveryRefreshHours` 168 per discovery provider, `scheduleCron: '0 5 * * 1'`, `scheduleTz: SCHEDULER_TIMEZONE`, `confirmedCostPence: null`, **`enabled: false`**; plus `estimate: ZERO_ESTIMATE`, `budgetFit: { fits: true, runsPerMonth: 0, perScope: [] }`, `needsConfirmation: false`, `notices: ["Set at least one origin and one destination before running or scheduling this search."]`. No cron job is registered for it. A draft (no origins or no destinations) can be renamed or edited but not enabled (`422 draft_cannot_enable`), estimated (`422 draft_definition`) or run (the engine refuses). Plan preset (spec §8.2): Travelpayouts discovery when configured; SearchApi in both stages only on the `40usd` plan; on `trial` or £0 there is no verification provider; the fixture provider, when the gate admits it, in both stages.
+**What `POST /api/definitions` with no body returns** (spec §10, §8.2, §11; plan reconciliation): `201` with a `definitionResponse` for a newly persisted **draft** built by `defaultDefinitionInput` (Task 8.1): no airports, `enabled: false`, `confirmedCostPence: null`, `estimate: null`, `budgetFit: { fits: true, runsPerMonth: 0, perScope: [] }`, `needsConfirmation: null`, `notices: ["Set at least one origin and one destination before running or scheduling this search."]`. No cron job is registered. A draft can be renamed or edited but not enabled (`422 draft_cannot_enable`), estimated (`422 draft_definition`) or run. `needsConfirmation` is `{ estimateMicroGbp, confirmedCostPence }` when the estimate exceeds `SOFT_CONFIRM` and the stored confirmation (`confirmedCostPence × 10 000`) does not cover it, else `null`; the confirmation itself is never written by these routes (spec §7: set only from an explicit operator confirmation).
 
-- [ ] **Step 1: Write the failing tests**
-
-`test/defaults.test.ts`:
-
-```ts
-import { type Config, type FlightProvider, type ProviderId, parseConfig } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
-import { defaultDefinitionInput } from '../src/defaults.js';
-
-function config(env: Record<string, string>): Config {
-  const r = parseConfig(
-    { NODE_ENV: 'production', DATABASE_PATH: '/data/x.db', APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: 'test-basic-auth-pass-0123456789', ...env },
-    { realpath: (p) => p },
-  );
-  if (!r.ok) throw new Error(JSON.stringify(r.errors));
-  return r.config;
-}
-const stub = (id: ProviderId): FlightProvider => ({ id, displayName: id, suppliedFields: [], cabins: ['economy'], healthcheck: async () => ({ ok: true, detail: '' }) });
-
-describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', () => {
-  it('£0: Travelpayouts discovery only, no verification', () => {
-    const d = defaultDefinitionInput(config({ TRAVELPAYOUTS_TOKEN: 't'.repeat(32) }), [stub('travelpayouts')]);
-    expect(d.providers).toEqual({ discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } });
-  });
-  it('trial SearchApi plus Travelpayouts: still Travelpayouts discovery only', () => {
-    const c = config({ TRAVELPAYOUTS_TOKEN: 't'.repeat(32), SEARCHAPI_KEY: 'k'.repeat(32) });
-    expect(defaultDefinitionInput(c, [stub('travelpayouts'), stub('searchapi')]).providers.verification).toEqual([]);
-  });
-  it('40usd: both providers discover, SearchApi verifies, maxCells 10 / expandTop 2', () => {
-    const c = config({ TRAVELPAYOUTS_TOKEN: 't'.repeat(32), SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });
-    const d = defaultDefinitionInput(c, [stub('travelpayouts'), stub('searchapi')]);
-    expect(d.providers.discovery).toEqual(['travelpayouts', 'searchapi']);
-    expect(d.providers.verification).toEqual(['searchapi']);
-    expect(d.verification).toEqual({ maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true });
-    expect(d.budget).toEqual({ maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 });
-  });
-  it('no providers: empty stages; airports always empty; disabled; weekly schedule in SCHEDULER_TIMEZONE', () => {
-    const d = defaultDefinitionInput(config({ SCHEDULER_TIMEZONE: 'Europe/London' }), []);
-    expect(d.providers.discovery).toEqual([]);
-    expect(d.origins).toEqual([]);
-    expect(d.destinations).toEqual([]);
-    expect(d.enabled).toBe(false);
-    expect(d.scheduleCron).toBe('0 5 * * 1');
-    expect(d.scheduleTz).toBe('Europe/London');
-    expect(d.window).toEqual({ kind: 'relative', startOffsetDays: 7, lengthDays: 182 });
-    expect([d.minNights, d.maxNights, d.cabin]).toEqual([10, 21, 'economy']);
-    expect(d.constraints).toEqual({ maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } });
-  });
-});
-```
+- [ ] **Step 1: Write the failing test**
 
 `test/definitions.test.ts`:
 
 ```ts
-import { asIsoDate } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { ZERO_ESTIMATE } from '../src/read/definitions.js';
+import { apiContract, asIsoDate } from '@gmt/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { z } from 'zod';
 import { API_TEXT } from '../src/text.js';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, SENTINELS, createHarness, stopMsw } from './harness.js';
+import { type Harness, SENTINELS, createHarness } from './harness.js';
 
 let h: Harness | undefined;
 afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
-type Def = { id: string; origins: string[]; enabled: boolean; confirmedCostPence: number | null; needsConfirmation: boolean; notices: string[]; budgetFit: { fits: boolean; runsPerMonth: number; perScope: unknown[] } };
-async function errorCode(res: Response): Promise<string> {
-  return ((await res.json()) as { error: { code: string } }).error.code;
+type Def = z.infer<typeof apiContract.definitionResponseSchema>;
+type Estimate = z.infer<typeof apiContract.estimateSchema>;
+const estimateOf = (totalCostMicroGbp: number): Estimate => ({
+  cells: 10, perProvider: [], totalCalls: 10, totalPlanCalls: 9, totalCostMicroGbp, totalCostPence: Math.ceil(totalCostMicroGbp / 10_000),
+  seconds: 1, assumptions: [], windowClamped: false, retryFactor: 1.2,
+});
+async function errorOf(res: Response): Promise<{ code: string; details?: { fields?: Array<{ field: string }> } }> {
+  return ((await res.json()) as { error: { code: string } }).error;
 }
 const jobIds = (x: Harness) => x.engine.scheduler.jobs().map((j) => j.definitionId);
 
-describe('POST /definitions', () => {
+describe('POST /api/definitions', () => {
   it('with no body creates the disabled draft default definition for the configured plan', async () => {
     h = await createHarness();
     const res = await h.request('/api/definitions', { method: 'POST' });
     expect(res.status).toBe(201);
-    const d = (await expectContract(res, 'POST', '/definitions')) as Def & { providers: { discovery: string[]; verification: string[] } };
-    expect(d.origins).toEqual([]);
-    expect(d.enabled).toBe(false);
+    const d = (await expectContract(res, 'POST', '/api/definitions')) as Def;
+    expect([d.origins, d.enabled, d.confirmedCostPence, d.estimate, d.needsConfirmation]).toEqual([[], false, null, null, null]);
     expect(d.providers).toMatchObject({ discovery: ['fixture'], verification: ['fixture'] });
     expect(d.budgetFit).toEqual({ fits: true, runsPerMonth: 0, perScope: [] });
     expect(d.notices).toEqual([API_TEXT.draftNotice]);
-    expect(d.needsConfirmation).toBe(false);
     expect(jobIds(h)).not.toContain(d.id);
   });
 
@@ -2785,34 +2731,36 @@ describe('POST /definitions', () => {
     h = await createHarness();
     const res = await h.request('/api/definitions', { json: exampleDefinitionInput({ scheduleCron: '0 5 * * 1' }) });
     expect(res.status).toBe(201);
-    const d = (await expectContract(res, 'POST', '/definitions')) as Def & { estimate: { cells: number } };
-    expect(d.estimate.cells).toBeGreaterThan(0);
+    const d = (await expectContract(res, 'POST', '/api/definitions')) as Def;
+    expect(d.estimate?.cells).toBeGreaterThan(0);
     expect(jobIds(h)).toContain(d.id);
   });
 
-  it('rejects a sub-hourly cron through engine.parseCron', async () => {
+  it('rejects a sub-hourly cron through engine.parseCron with details.fields', async () => {
     h = await createHarness();
     const res = await h.request('/api/definitions', { json: exampleDefinitionInput({ scheduleCron: '*/15 * * * *' }) });
     expect(res.status).toBe(422);
-    expect(await errorCode(res)).toBe('invalid_cron');
+    const e = await errorOf(res);
+    expect(e.code).toBe('invalid_cron');
+    expect(e.details?.fields?.[0]?.field).toBe('scheduleCron');
   });
 
   it('returns 422 for a window that resolves to zero cells', async () => {
     h = await createHarness();
     const res = await h.request('/api/definitions', { json: exampleDefinitionInput({ window: { kind: 'absolute', from: asIsoDate('2026-01-01'), to: asIsoDate('2026-01-10') } }) });
     expect(res.status).toBe(422);
-    expect(await errorCode(res)).toBe('zero_cells');
+    expect((await errorOf(res)).code).toBe('zero_cells');
   });
 
   it('rejects a malformed body with the validation envelope', async () => {
     h = await createHarness();
     const res = await h.request('/api/definitions', { json: { name: 'x' } });
     expect(res.status).toBe(400);
-    expect(await errorCode(res)).toBe('validation');
+    expect((await errorOf(res)).code).toBe('validation');
   });
 });
 
-describe('PUT / DELETE /definitions/:id and the schedule (spec §8.2)', () => {
+describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () => {
   it('disable, enable and delete each (re)register the job in the same request', async () => {
     h = await createHarness();
     const d = (await (await h.request('/api/definitions', { json: exampleDefinitionInput({ scheduleCron: '0 5 * * 1' }) })).json()) as Def;
@@ -2822,7 +2770,7 @@ describe('PUT / DELETE /definitions/:id and the schedule (spec §8.2)', () => {
     expect(jobIds(h)).toContain(d.id);
     const del = await h.request(`/api/definitions/${d.id}`, { method: 'DELETE' });
     expect(del.status).toBe(200);
-    expect(((await expectContract(del, 'DELETE', '/definitions/:id')) as { deletedAt: string | null }).deletedAt).not.toBeNull();
+    expect(((await expectContract(del, 'DELETE', '/api/definitions/:id')) as Def).deletedAt).not.toBeNull();
     expect(jobIds(h)).not.toContain(d.id);
     expect((await h.request(`/api/definitions/${d.id}`)).status).toBe(404);
     expect(((await (await h.request('/api/definitions')).json()) as Def[]).map((x) => x.id)).not.toContain(d.id);
@@ -2834,43 +2782,56 @@ describe('PUT / DELETE /definitions/:id and the schedule (spec §8.2)', () => {
     expect((await h.request(`/api/definitions/${d.id}`, { method: 'PUT', json: { name: 'renamed' } })).status).toBe(200);
     const res = await h.request(`/api/definitions/${d.id}`, { method: 'PUT', json: { enabled: true } });
     expect(res.status).toBe(422);
-    expect(await errorCode(res)).toBe('draft_cannot_enable');
-    const ok = await h.request(`/api/definitions/${d.id}`, { method: 'PUT', json: { origins: ['LHR'], destinations: ['JFK'], enabled: true } });
+    expect((await errorOf(res)).code).toBe('draft_cannot_enable');
+    const ok = await h.request(`/api/definitions/${d.id}`, { method: 'PUT', json: { origins: ['lhr'], destinations: ['JFK'], enabled: true } });
     expect(ok.status).toBe(200);
+    expect(((await ok.json()) as Def).origins).toEqual(['LHR']); // iataSchema upper-cases
     expect(jobIds(h)).toContain(d.id);
   });
 
-  it('returns needsConfirmation when the estimate rises above the stored confirmation, never rewriting it', async () => {
+  it('reports needsConfirmation when the estimate exceeds the stored confirmation, never rewriting it', async () => {
     h = await createHarness();
-    vi.spyOn(h.engine, 'estimate').mockReturnValue({ ...ZERO_ESTIMATE, cells: 10, totalCostMicroGbp: 5_000_000, totalCostPence: 500 });
-    const created = (await (await h.request('/api/definitions', { json: exampleDefinitionInput({ confirmedCostPence: 100 }) })).json()) as Def;
-    expect(created.needsConfirmation).toBe(true);
-    expect(created.confirmedCostPence).toBe(100);
-    const confirmed = (await (await h.request(`/api/definitions/${created.id}`, { method: 'PUT', json: { confirmedCostPence: 500 } })).json()) as Def;
-    expect(confirmed.needsConfirmation).toBe(false);
-    const renamed = (await (await h.request(`/api/definitions/${created.id}`, { method: 'PUT', json: { name: 'again' } })).json()) as Def;
-    expect(renamed.confirmedCostPence).toBe(500);
+    vi.spyOn(h.engine, 'estimate').mockReturnValue(estimateOf(5_000_000)); // 500p > SOFT_CONFIRM 100p
+    const created = (await (await h.request('/api/definitions', { json: exampleDefinitionInput() })).json()) as Def;
+    expect(created.needsConfirmation).toEqual({ estimateMicroGbp: 5_000_000, confirmedCostPence: null });
+    h.ports.repos.definitions.setConfirmedCost(created.id, 100);
+    const raised = (await (await h.request(`/api/definitions/${created.id}`, { method: 'PUT', json: { name: 'again' } })).json()) as Def;
+    expect(raised.needsConfirmation).toEqual({ estimateMicroGbp: 5_000_000, confirmedCostPence: 100 });
+    expect(raised.confirmedCostPence).toBe(100);
+    h.ports.repos.definitions.setConfirmedCost(created.id, 500);
+    expect(((await (await h.request(`/api/definitions/${created.id}`)).json()) as Def).needsConfirmation).toBeNull();
   });
 
   it('404 for an unknown definition', async () => {
     h = await createHarness();
     const res = await h.request('/api/definitions/nope');
     expect(res.status).toBe(404);
-    expect(await errorCode(res)).toBe('definition_not_found');
+    expect((await errorOf(res)).code).toBe('definition_not_found');
   });
 });
 
-describe('POST /definitions/:id/estimate and /definitions/coverage-check', () => {
-  it('estimates a saved definition; refuses a draft', async () => {
+describe('estimates and the coverage check', () => {
+  it('POST /api/definitions/estimate estimates an unsaved body without persisting it; refuses a draft body', async () => {
+    h = await createHarness();
+    const before = h.ports.repos.definitions.list().length;
+    const res = await h.request('/api/definitions/estimate', { json: exampleDefinitionInput() });
+    expect(res.status).toBe(200);
+    expect(((await expectContract(res, 'POST', '/api/definitions/estimate')) as Estimate).cells).toBeGreaterThan(0);
+    expect(h.ports.repos.definitions.list()).toHaveLength(before);
+    const zero = await h.request('/api/definitions/estimate', { json: exampleDefinitionInput({ window: { kind: 'absolute', from: asIsoDate('2026-01-01'), to: asIsoDate('2026-01-10') } }) });
+    expect((await errorOf(zero)).code).toBe('zero_cells');
+  });
+
+  it('POST /api/definitions/:id/estimate estimates a saved definition; refuses a draft', async () => {
     h = await createHarness();
     const d = (await (await h.request('/api/definitions', { json: exampleDefinitionInput() })).json()) as Def;
     const res = await h.request(`/api/definitions/${d.id}/estimate`, { method: 'POST', json: {} });
     expect(res.status).toBe(200);
-    await expectContract(res, 'POST', '/definitions/:id/estimate');
+    await expectContract(res, 'POST', '/api/definitions/:id/estimate');
     const draft = (await (await h.request('/api/definitions', { method: 'POST' })).json()) as Def;
     const refused = await h.request(`/api/definitions/${draft.id}/estimate`, { method: 'POST', json: {} });
     expect(refused.status).toBe(422);
-    expect(await errorCode(refused)).toBe('draft_definition');
+    expect((await errorOf(refused)).code).toBe('draft_definition');
   });
 
   const coverageBody = { origins: ['LHR'], destinations: ['JFK'], window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 }, minNights: 10, maxNights: 21 };
@@ -2880,82 +2841,32 @@ describe('POST /definitions/:id/estimate and /definitions/coverage-check', () =>
     const spy = vi.spyOn(h.engine, 'coverageCheck');
     const res = await h.request('/api/definitions/coverage-check', { json: coverageBody });
     expect(res.status).toBe(409);
-    expect(await errorCode(res)).toBe('coverage_check_unavailable');
+    expect((await errorOf(res)).code).toBe('coverage_check_unavailable');
     expect(spy).not.toHaveBeenCalled();
   });
 
   it('delegates to engine.coverageCheck when Travelpayouts is configured', async () => {
     h = await createHarness({ env: { TRAVELPAYOUTS_TOKEN: SENTINELS.travelpayouts } });
-    const spy = vi.spyOn(h.engine, 'coverageCheck').mockResolvedValue({ pairs: [], calls: 0, notes: [] } as never);
+    const spy = vi.spyOn(h.engine, 'coverageCheck').mockResolvedValue({ pairs: [], calls: 0, notes: [] });
     const res = await h.request('/api/definitions/coverage-check', { json: coverageBody });
     expect(res.status).toBe(200);
-    await expectContract(res, 'POST', '/definitions/coverage-check');
+    await expectContract(res, 'POST', '/api/definitions/coverage-check');
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- definitions defaults`
-Expected: FAIL: `defaultDefinitionInput` is not exported; `POST /api/definitions` returns 404.
+Run: `pnpm --filter @gmt/api exec vitest run test/definitions.test.ts`
+Expected: FAIL: `POST /api/definitions` returns 404 `not_found`.
 
 - [ ] **Step 3: Implement**
-
-`src/defaults.ts` (replaces the type-only file):
-
-```ts
-import type { Config, FlightProvider, ProviderId, apiContract } from '@gmt/core';
-import type { z } from 'zod';
-
-/** A definition as the create route accepts it (spec §10): every SearchDefinition field except id and timestamps. */
-export type DefinitionInput = z.infer<typeof apiContract.definitionCreateRequestSchema>;
-
-/** Spec §11 Definitions-form defaults. */
-export const DEFAULT_REFRESH_HOURS = 168;
-export const DEFAULT_CRON = '0 5 * * 1';
-
-/**
- * The default definition for the configured plan (spec §8.2 policy preset, §11 form defaults).
- * No airports: the operator enters them (spec §1, §15). Disabled, so no schedule fires on a draft.
- */
-export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput {
-  const configured = new Set(providers.map((p) => p.id));
-  const paid = config.providers.searchapi?.plan === '40usd' && configured.has('searchapi');
-  const fixture = configured.has('fixture');
-  const discovery: ProviderId[] = [
-    ...(configured.has('travelpayouts') ? (['travelpayouts'] as const) : []),
-    ...(paid ? (['searchapi'] as const) : []),
-    ...(fixture ? (['fixture'] as const) : []),
-  ];
-  // why: on trial the 100 credits are for the spike and smoke (spec §2 fact 7), so the preset never verifies with them.
-  const verification: ProviderId[] = [...(paid ? (['searchapi'] as const) : []), ...(fixture ? (['fixture'] as const) : [])];
-  return {
-    name: 'New search',
-    origins: [],
-    destinations: [],
-    window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
-    minNights: 10,
-    maxNights: 21,
-    cabin: 'economy',
-    constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
-    verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
-    budget: { maxCalls: config.spend.executionMaxCalls, maxFreeCalls: config.spend.executionMaxFreeCalls, maxCostMicroGbp: config.spend.executionMaxCostMicroGbp },
-    providers: { discovery, verification, discoveryRefreshHours: Object.fromEntries(discovery.map((id) => [id, DEFAULT_REFRESH_HOURS])) },
-    destinationNotes: {},
-    onwardCostPence: {},
-    scheduleCron: DEFAULT_CRON,
-    scheduleTz: config.schedulerTimezone,
-    confirmedCostPence: null,
-    enabled: false,
-  } as DefinitionInput;
-}
-```
 
 `src/read/space.ts`:
 
 ```ts
-import { type CellKey, type Iata, type IsoDate, type ResolvedSpace, type SearchDefinition, daysBetween, resolveWindow } from '@gmt/core';
+import { type AirportLookup, type CellKey, type IsoDate, type ResolvedSpace, type SearchDefinition, daysBetween, resolveWindow } from '@gmt/core';
 import type { AirportsRepo } from '@gmt/db';
 
 type SpaceFields = Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights'>;
@@ -2965,16 +2876,15 @@ export function isDraft(def: Pick<SearchDefinition, 'origins' | 'destinations'>)
   return def.origins.length === 0 || def.destinations.length === 0;
 }
 
-/** The definition's current resolved space (spec §6.1), as results filter to it (spec §6.2, §10). */
+/** The definition's current resolved space (spec §6.1); results filter to it (spec §6.2, §10). */
 export function currentSpace(def: SpaceFields, today: IsoDate): ResolvedSpace {
   const w = resolveWindow(def.window, today);
   return { origins: def.origins, destinations: def.destinations, departureFrom: w.departureFrom, departureTo: w.departureTo, minNights: def.minNights, maxNights: def.maxNights };
 }
 
 /**
- * Membership in `generateCells(space)` without generating it (spec §8.1 single-cell verify).
- * Equivalent by construction: a cell is generated iff its airports are in the lists, its
- * departure is inside the inclusive window and its nights are inside the inclusive range.
+ * Membership in `generateCells(space)` without generating it (spec §8.1 single-cell verify):
+ * airports in the lists, departure inside the inclusive window, nights inside the inclusive range.
  * Task 8.10 asserts the equivalence against `generateCells` on a small space.
  */
 export function cellInSpace(space: ResolvedSpace, cell: CellKey): boolean {
@@ -2984,52 +2894,54 @@ export function cellInSpace(space: ResolvedSpace, cell: CellKey): boolean {
   return nights >= space.minNights && nights <= space.maxNights;
 }
 
-/** The lookup `validateSearchSpace` needs (plan WP1), backed by the airports table. */
-export function airportLookup(repo: AirportsRepo) {
-  return {
-    exists: (iata: Iata) => repo.exists(iata),
-    metroOf: (iata: Iata) => repo.metroOf(iata),
-    airportsOfMetro: (code: string) => repo.airportsOfMetro(code),
-  };
+/** WP1's `AirportLookup`, backed by the airports table. */
+export function airportLookup(repo: AirportsRepo): AirportLookup {
+  return { exists: (iata) => repo.exists(iata), metroOf: (iata) => repo.metroOf(iata), airportsOfMetro: (code) => repo.airportsOfMetro(code) };
 }
 ```
 
 `src/read/definitions.ts`:
 
 ```ts
-import { type Config, PENCE_TO_MICRO, type SearchDefinition, type apiContract } from '@gmt/core';
+import { type Config, type DefinitionInput, PENCE_TO_MICRO, type SearchDefinition, type apiContract } from '@gmt/core';
 import type { z } from 'zod';
 import type { RouteContext } from '../routes/types.js';
 import { API_TEXT } from '../text.js';
 import { isDraft } from './space.js';
 
 export type DefinitionResponse = z.infer<typeof apiContract.definitionResponseSchema>;
-export type Estimate = z.infer<typeof apiContract.estimateResponseSchema>;
-export type BudgetFit = DefinitionResponse['budgetFit'];
+export type Estimate = z.infer<typeof apiContract.estimateSchema>;
+export type BudgetFit = z.infer<typeof apiContract.budgetFitSchema>;
 
-/** The estimate of a draft: nothing to search yet. */
-export const ZERO_ESTIMATE: Estimate = { cells: 0, perProvider: [], totalCostMicroGbp: 0, totalCostPence: 0, seconds: 0, assumptions: [], windowClamped: false };
+/** The budgetFit of a draft: nothing to search, nothing to fit. */
 export const ZERO_BUDGET_FIT: BudgetFit = { fits: true, runsPerMonth: 0, perScope: [] };
 
 /**
  * Spec §8.1: above SOFT_CONFIRM a run needs `confirmedCostPence × 10 000 ≥ estimateMicroGbp`;
- * a PUT that raises the estimate past the stored confirmation says so. Never recomputes the confirmation (spec §7).
+ * a PUT whose estimate exceeds the stored confirmation says so. Never writes the confirmation (spec §7).
  */
-export function needsConfirmation(def: Pick<SearchDefinition, 'confirmedCostPence'>, estimate: Estimate, config: Config): boolean {
-  if (estimate.totalCostMicroGbp <= config.spend.softConfirmMicroGbp) return false;
-  return def.confirmedCostPence === null || def.confirmedCostPence * PENCE_TO_MICRO < estimate.totalCostMicroGbp;
+export function needsConfirmation(def: Pick<SearchDefinition, 'confirmedCostPence'>, estimate: Estimate, config: Config): DefinitionResponse['needsConfirmation'] {
+  if (estimate.totalCostMicroGbp <= config.spend.softConfirmMicroGbp) return null;
+  if (def.confirmedCostPence !== null && def.confirmedCostPence * PENCE_TO_MICRO >= estimate.totalCostMicroGbp) return null;
+  return { estimateMicroGbp: estimate.totalCostMicroGbp, confirmedCostPence: def.confirmedCostPence };
 }
 
 /** Spec §10 definition response: the definition, its estimate and `budgetFit`, `needsConfirmation`, `notices`. */
 export function definitionResponse(def: SearchDefinition, ctx: RouteContext): DefinitionResponse {
-  if (isDraft(def)) return { ...def, estimate: ZERO_ESTIMATE, budgetFit: ZERO_BUDGET_FIT, needsConfirmation: false, notices: [API_TEXT.draftNotice] };
+  if (isDraft(def)) return { ...def, estimate: null, budgetFit: ZERO_BUDGET_FIT, needsConfirmation: null, notices: [API_TEXT.draftNotice] };
   const estimate = ctx.engine.estimate(def, ctx.ports.clock.todayLondon());
   return { ...def, estimate, budgetFit: ctx.engine.budgetFit(def), needsConfirmation: needsConfirmation(def, estimate, ctx.ports.config), notices: [] };
 }
 
 /** The response for a soft-deleted definition: its last state, marked deleted, nothing estimated. */
 export function deletedResponse(def: SearchDefinition, ctx: RouteContext): DefinitionResponse {
-  return { ...def, enabled: false, deletedAt: ctx.ports.clock.now(), estimate: ZERO_ESTIMATE, budgetFit: ZERO_BUDGET_FIT, needsConfirmation: false, notices: [API_TEXT.deletedNotice] };
+  return { ...def, enabled: false, deletedAt: ctx.ports.clock.now(), estimate: null, budgetFit: ZERO_BUDGET_FIT, needsConfirmation: null, notices: [API_TEXT.deletedNotice] };
+}
+
+/** The editable part of a stored definition (DefinitionInput), for merging a partial update. */
+export function inputOf(def: SearchDefinition): DefinitionInput {
+  const { id: _id, confirmedCostPence: _c, createdAt: _ca, updatedAt: _u, deletedAt: _d, ...rest } = def;
+  return rest;
 }
 ```
 
@@ -3059,23 +2971,18 @@ export function getLiveDefinition(ctx: RouteContext, id: string): SearchDefiniti
 `src/routes/definitions.ts`:
 
 ```ts
-import { apiContract, countCells, type SearchDefinition, validateSearchSpace } from '@gmt/core';
+import { type DefinitionInput, type SearchDefinition, apiContract, countCells, validateSearchSpace } from '@gmt/core';
 import { parseCron } from '@gmt/engine';
 import type { z } from 'zod';
-import { type DefinitionInput, defaultDefinitionInput } from '../defaults.js';
-import { ApiError } from '../errors.js';
-import { definitionResponse, deletedResponse } from '../read/definitions.js';
+import { defaultDefinitionInput } from '../defaults.js';
+import { ApiError, fieldsDetail, issuesToFields } from '../errors.js';
+import { definitionResponse, deletedResponse, inputOf } from '../read/definitions.js';
 import { airportLookup, currentSpace, isDraft } from '../read/space.js';
 import { API_TEXT } from '../text.js';
 import { getLiveDefinition, param } from './shared.js';
 import type { HandlerTable, RouteContext } from './types.js';
 
 type CoverageCheckRequest = z.infer<typeof apiContract.coverageCheckRequestSchema>;
-
-function inputOf(def: SearchDefinition): DefinitionInput {
-  const { id: _id, createdAt: _c, updatedAt: _u, deletedAt: _d, ...rest } = def;
-  return rest as DefinitionInput;
-}
 
 /** Spec §8.2: register when enabled with a cron, otherwise unregister, in the same request. */
 export function syncSchedule(def: SearchDefinition, ctx: RouteContext): void {
@@ -3084,34 +2991,31 @@ export function syncSchedule(def: SearchDefinition, ctx: RouteContext): void {
 }
 
 /**
- * Save-time validation of the whole (merged) definition: cron through the scheduler's
- * `parseCron` (spec §8.2, sole validator), drafts may not be enabled, then the contract shape,
- * zero-cell windows (422, spec §6.1) and `validateSearchSpace` (airports, nights, caps, alwaysInclude).
+ * Save-time validation of the whole (merged) definition: cron through the scheduler's `parseCron`
+ * (spec §8.2, the sole validator), drafts may not be enabled, then the contract shape, zero-cell
+ * windows (422, spec §6.1) and `validateSearchSpace` (airports, metro codes, nights, caps, alwaysInclude).
  */
 export function validateForSave(def: DefinitionInput, ctx: RouteContext): void {
   if (def.scheduleCron !== null) {
     const cron = parseCron(def.scheduleCron, def.scheduleTz);
-    if (!cron.ok) throw new ApiError(422, 'invalid_cron', API_TEXT.invalidCron(cron.reason));
+    if (!cron.ok) throw new ApiError(422, 'invalid_cron', API_TEXT.invalidCron(cron.reason), fieldsDetail([{ field: 'scheduleCron', message: cron.reason }]));
   }
   if (isDraft(def)) {
-    if (def.enabled) throw new ApiError(422, 'draft_cannot_enable', API_TEXT.draftCannotEnable);
+    if (def.enabled) throw new ApiError(422, 'draft_cannot_enable', API_TEXT.draftCannotEnable, fieldsDetail([{ field: 'enabled', message: API_TEXT.draftCannotEnable }]));
     return;
   }
   const shape = apiContract.definitionCreateRequestSchema.safeParse(def);
-  if (!shape.success) {
-    throw new ApiError(422, 'invalid_definition', API_TEXT.invalidDefinition, shape.error.issues.map((i) => ({ path: i.path.map(String).join('.'), message: i.message })));
-  }
+  if (!shape.success) throw new ApiError(422, 'invalid_definition', API_TEXT.invalidDefinition, fieldsDetail(issuesToFields(shape.error.issues)));
   const today = ctx.ports.clock.todayLondon();
-  if (countCells(currentSpace(def, today)) <= 0) throw new ApiError(422, 'zero_cells', API_TEXT.zeroCells);
+  if (countCells(currentSpace(def, today)) <= 0) throw new ApiError(422, 'zero_cells', API_TEXT.zeroCells, fieldsDetail([{ field: 'window', message: API_TEXT.zeroCells }]));
   const v = validateSearchSpace(def, today, airportLookup(ctx.ports.repos.airports), ctx.ports.config.maxCellsPerDefinition);
-  if (!v.ok) throw new ApiError(422, 'invalid_definition', API_TEXT.invalidDefinition, v.errors);
+  if (!v.ok) throw new ApiError(422, 'invalid_definition', API_TEXT.invalidDefinition, fieldsDetail(v.errors));
 }
 
 export const definitionHandlers: HandlerTable = {
-  'GET /definitions': (c, _input, ctx) =>
-    c.json(ctx.ports.repos.definitions.list().filter((d) => d.deletedAt === null).map((d) => definitionResponse(d, ctx))),
+  'GET /api/definitions': (c, _input, ctx) => c.json(ctx.ports.repos.definitions.list().map((d) => definitionResponse(d, ctx))),
 
-  'POST /definitions': (c, input, ctx) => {
+  'POST /api/definitions': (c, input, ctx) => {
     const sent = c.get('optionalBody')?.present === true;
     const def = sent ? (input.body as DefinitionInput) : defaultDefinitionInput(ctx.ports.config, ctx.ports.providers);
     validateForSave(def, ctx);
@@ -3120,32 +3024,38 @@ export const definitionHandlers: HandlerTable = {
     return c.json(definitionResponse(created, ctx), 201);
   },
 
-  'GET /definitions/:id': (c, input, ctx) => c.json(definitionResponse(getLiveDefinition(ctx, param(input, 'id')), ctx)),
+  'POST /api/definitions/estimate': (c, input, ctx) => {
+    const def = input.body as DefinitionInput;
+    if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
+    validateForSave({ ...def, enabled: false }, ctx); // why: the unsaved body is estimated, not scheduled; enabled does not matter here
+    return c.json(ctx.engine.estimate(def, ctx.ports.clock.todayLondon()));
+  },
 
-  'PUT /definitions/:id': (c, input, ctx) => {
+  'GET /api/definitions/:id': (c, input, ctx) => c.json(definitionResponse(getLiveDefinition(ctx, param(input, 'id')), ctx)),
+
+  'PUT /api/definitions/:id': (c, input, ctx) => {
     const existing = getLiveDefinition(ctx, param(input, 'id'));
     const patch = input.body as Partial<DefinitionInput>;
     validateForSave({ ...inputOf(existing), ...patch }, ctx);
-    // why: the confirmation is stored only when the operator sends it (spec §7); a PUT without it leaves it alone.
     const updated = ctx.ports.repos.definitions.update(existing.id, patch);
     syncSchedule(updated, ctx);
     return c.json(definitionResponse(updated, ctx));
   },
 
-  'DELETE /definitions/:id': (c, input, ctx) => {
+  'DELETE /api/definitions/:id': (c, input, ctx) => {
     const existing = getLiveDefinition(ctx, param(input, 'id'));
     ctx.ports.repos.definitions.softDelete(existing.id);
     ctx.engine.scheduler.unregister(existing.id);
     return c.json(deletedResponse(existing, ctx));
   },
 
-  'POST /definitions/:id/estimate': (c, input, ctx) => {
+  'POST /api/definitions/:id/estimate': (c, input, ctx) => {
     const def = getLiveDefinition(ctx, param(input, 'id'));
     if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
     return c.json(ctx.engine.estimate(def, ctx.ports.clock.todayLondon()));
   },
 
-  'POST /definitions/coverage-check': async (c, input, ctx) => {
+  'POST /api/definitions/coverage-check': async (c, input, ctx) => {
     // why: spec §10: the check runs free Travelpayouts month tiles and never calls a billed provider.
     if (!ctx.ports.providers.some((p) => p.id === 'travelpayouts')) throw new ApiError(409, 'coverage_check_unavailable', API_TEXT.coverageCheckUnavailable);
     return c.json(await ctx.engine.coverageCheck(input.body as CoverageCheckRequest));
@@ -3153,33 +3063,33 @@ export const definitionHandlers: HandlerTable = {
 };
 ```
 
-`src/routes/index.ts`: add `import { definitionHandlers } from './definitions.js';` and the line `...definitionHandlers,` to `HANDLERS`.
+`src/routes/index.ts`: add `import { definitionHandlers } from './definitions.js';` and `...definitionHandlers,`.
 
-- [ ] **Step 4: Run to verify they pass**
+- [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- definitions defaults`
-Expected: PASS, 4 + 13 tests.
+Run: `pnpm --filter @gmt/api exec vitest run test/definitions.test.ts test/defaults.test.ts`
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp08: definitions CRUD, plan-aware draft default, cron validation, schedule sync"
+git add apps/api && git commit -m "wp08: definitions CRUD, plan-preset draft, both estimate routes, cron validation, schedule sync"
 ```
 
 ### Task 8.10: Executions: start, read, cancel, resume; single-cell verify with membership validation
 
 **Files:**
-- Create: `test/seed.ts`, `src/routes/executions.ts`
-- Modify: `src/read/executions.ts`, `src/routes/index.ts`
+- Create: `test/seed.ts`, `src/read/executions.ts`, `src/routes/executions.ts`
+- Modify: `src/routes/index.ts`
 - Test: `test/executions.test.ts`
 
 **Interfaces:**
-- Consumes: `engine.start/resume/cancel/verifyCell`, `StartResult` (WP7); `ExecutionsRepo.get`, `CellsRepo.buckets`, `LedgerRepo.countsFor` (WP3); `generateCells` (WP1).
-- Produces: `executionResponse(ports, execution)`, `startError(result)`; routes `POST /definitions/:id/executions`, `GET /executions/:id`, `POST /executions/:id/cancel`, `POST /executions/:id/resume`, `POST /cells/verify`; test-only `seedExecution`, `seedCell`, `seedOutcome`, `seedCalendarPrice`, `seedObservation`, `cell`, `at`.
+- Consumes: `engine.start/resume/cancel/verifyCell`, `StartResult` (WP7); `ExecutionsRepo.get`, `CellsRepo.buckets/outcomes`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent` (WP3); `generateCells`, `cellKeyString` (WP0/WP1); `executionResponseSchema`, `startExecutionResponseSchema` (WP0).
+- Produces: `executionResponse(ports, execution)`, `executionSummary`, `startError(result)`; routes `POST /api/definitions/:id/executions`, `GET /api/executions/:id`, `POST /api/executions/:id/cancel`, `POST /api/executions/:id/resume`, `POST /api/cells/verify`; test-only `seedExecution`, `seedCell`, `seedOutcome`, `seedCalendarPrice`, `seedObservation`, `cell`, `at`.
 
-HTTP mapping of `StartResult` (spec §8.1, §10): `ok` → `202` with the execution; `active`, `cap`, `confirm` → `409` with `code` equal to the engine's code and its message and details (the cap message names the cap and the numbers); `window` → `422`. `/resume` always passes `{ manual: true }` (spec §8.1: manual resume re-enables disabled providers and retries errors on a completed run). `/cells/verify` checks, in order: definition exists (404), it has a verification provider (422 `no_verification_provider`, spec §8.1 "hidden when the definition has no verification provider"), the cell is in the current resolved space (422 `cell_not_in_space`), both airports exist (422 `unknown_airport`); then the engine enforces one active child per cell (409 `active`).
+HTTP mapping of `StartResult` (spec §8.1, §10): `ok` → `202 { executionId }` (`startExecutionResponseSchema`) for start and verify, `200` with the execution for resume; `not_found` → 404; `active`, `cap`, `confirm`, `disabled` → 409 with `code` equal to the engine's code and its message and details (the cap message names the cap and the numbers); `window` → 422. `/resume` always passes `{ manual: true }`. `/api/cells/verify` checks, in order: definition exists (404), it has a verification provider (422 `no_verification_provider`), the cell is in the current resolved space (422 `cell_not_in_space`), both airports exist (422 `unknown_airport`); the engine enforces one active child per cell (409 `active`). Execution reads add `overrun` (ledger calls more than 10% above the estimate's pre-factor `totalPlanCalls`, spec §8.1), `parityBreak` (the operator notification was sent) and `disabledProviders` (providers with `skipped:provider_disabled` outcomes).
 
-`test/seed.ts` writes rows with SQL over the spec §7 column names so route tests control every value (prices, ages, classes) without depending on what the synthetic fixture tree happens to contain; the engine-driven tests use the real fixture provider instead.
+`test/seed.ts` writes rows with SQL over the spec §7 column names (plus the rev 10 additions it needs: `search_executions.trigger`) so route tests control every value without depending on what the synthetic fixture tree contains; engine-driven tests use the real fixture provider.
 
 - [ ] **Step 1: Write the seeder and the failing test**
 
@@ -3197,17 +3107,16 @@ import { T0 } from './harness.js';
 const HOUR = 3_600_000;
 /** An instant `hours` after the harness T0 (negative = before). */
 export const at = (hours: number): IsoDateTime => asIsoDateTime(new Date(Date.parse(T0) + hours * HOUR).toISOString());
-export const cell = (o: string, d: string, dep: string, ret: string): CellKey => ({
-  origin: asIata(o), destination: asIata(d), departureDate: asIsoDate(dep), returnDate: asIsoDate(ret),
-});
+export const cell = (o: string, d: string, dep: string, ret: string): CellKey => ({ origin: asIata(o), destination: asIata(d), departureDate: asIsoDate(dep), returnDate: asIsoDate(ret) });
 
-function snapshotOf(def: SearchDefinition, resolvedAt: IsoDateTime, today: IsoDate): DefinitionSnapshot {
-  const w = resolveWindow(def.window, today);
+function snapshotOf(def: SearchDefinition, resolvedAt: IsoDateTime): DefinitionSnapshot {
+  const w = resolveWindow(def.window, resolvedAt.slice(0, 10) as IsoDate);
   return {
     ...def,
     resolved: { origins: def.origins, destinations: def.destinations, departureFrom: w.departureFrom, departureTo: w.departureTo, minNights: def.minNights, maxNights: def.maxNights },
     resolvedAt,
     windowClamped: w.clamped,
+    droppedAlwaysInclude: [],
   };
 }
 
@@ -3216,13 +3125,11 @@ export function seedExecution(db: Db, s: SeedExecution): void {
   db.raw
     .prepare(
       `insert into search_executions (id, definition_id, is_child, child_origin, child_destination, child_departure_date, child_return_date,
-        definition_snapshot_json, status, stage, estimate_json, cancel_requested, resume_after, auto_resume_count, started_at, finished_at, error_text)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, null, 0, ?, ?, null)`,
+        definition_snapshot_json, status, stage, estimate_json, cancel_requested, resume_after, auto_resume_count, started_at, finished_at, error_text, trigger)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, null, 0, ?, ?, null, 'manual')`,
     )
-    .run(
-      s.id, s.def.id, s.child ? 1 : 0, s.child?.origin ?? null, s.child?.destination ?? null, s.child?.departureDate ?? null, s.child?.returnDate ?? null,
-      JSON.stringify(snapshotOf(s.def, s.startedAt, s.startedAt.slice(0, 10) as IsoDate)), s.status, s.stage ?? null, s.startedAt, s.finishedAt ?? null,
-    );
+    .run(s.id, s.def.id, s.child ? 1 : 0, s.child?.origin ?? null, s.child?.destination ?? null, s.child?.departureDate ?? null, s.child?.returnDate ?? null,
+      JSON.stringify(snapshotOf(s.def, s.startedAt)), s.status, s.stage ?? null, s.startedAt, s.finishedAt ?? null);
 }
 
 export interface SeedCell { discoveryStatus?: string | null; discoveryMinPence?: number | null; selected?: boolean; selectionReason?: string | null; verificationStatus?: string | null }
@@ -3240,21 +3147,19 @@ export function seedCell(db: Db, executionId: string, c: CellKey, s: SeedCell = 
     .run(executionId, c.origin, c.destination, c.departureDate, c.returnDate, s.discoveryStatus ?? null, s.discoveryMinPence ?? null, s.selected ? 1 : 0, s.selectionReason ?? null, s.verificationStatus ?? null);
 }
 
-export interface SeedOutcome { status: string; reason?: string | null; attempts?: number; fetchedAt?: IsoDateTime | null; minPence?: number | null; cabin?: Cabin; sourceKind?: SourceKind; reusedFrom?: string | null }
+export interface SeedOutcome { status: string; reason?: string | null; attempts?: number; lastError?: string | null; fetchedAt?: IsoDateTime | null; minPence?: number | null; cabin?: Cabin; sourceKind?: SourceKind; reusedFrom?: string | null }
 export function seedOutcome(db: Db, executionId: string, c: CellKey, stage: Stage, providerId: ProviderId, s: SeedOutcome): void {
   db.raw
-    .prepare(
-      `insert or ignore into search_cells (execution_id, origin, destination, departure_date, return_date, verification_selected) values (?, ?, ?, ?, ?, 0)`,
-    )
+    .prepare('insert or ignore into search_cells (execution_id, origin, destination, departure_date, return_date, verification_selected) values (?, ?, ?, ?, ?, 0)')
     .run(executionId, c.origin, c.destination, c.departureDate, c.returnDate);
   db.raw
     .prepare(
       `insert into cell_outcomes (execution_id, origin, destination, departure_date, return_date, stage, provider_id, status, reason, attempts,
         last_error, fetched_at, min_pence, cabin, point_of_sale, source_kind, reused_from_execution_id)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, 'GB', ?, ?)`,
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'GB', ?, ?)`,
     )
     .run(executionId, c.origin, c.destination, c.departureDate, c.returnDate, stage, providerId, s.status, s.reason ?? null, s.attempts ?? 0,
-      s.fetchedAt ?? null, s.minPence ?? null, s.cabin ?? 'economy', s.sourceKind ?? 'synthetic', s.reusedFrom ?? null);
+      s.lastError ?? null, s.fetchedAt ?? null, s.minPence ?? null, s.cabin ?? 'economy', s.sourceKind ?? 'synthetic', s.reusedFrom ?? null);
 }
 
 export interface SeedCalendarPrice { executionId: string; cell: CellKey; pricePence: number; fetchedAt: IsoDateTime; providerId?: ProviderId; sourceKind?: SourceKind; cabin?: Cabin; maxAgeHours?: number | null; reusedFrom?: string | null }
@@ -3280,10 +3185,8 @@ export interface SeedObservation {
 /** One itinerary (insert-or-ignore), its segments, its offer (insert-or-ignore) and one observation. */
 export function seedObservation(db: Db, s: SeedObservation): { offerId: number; observationId: number } {
   const c = s.cell;
-  const nights = daysBetween(c.departureDate, c.returnDate);
   const stopsOut = s.stopsOut ?? 0;
-  const via = ['AAA', 'BBB', 'CCC'].slice(0, stopsOut); // why: clearly synthetic connection points
-  const outPath = [c.origin, ...via, c.destination];
+  const outPath = [c.origin, ...['AAA', 'BBB', 'CCC'].slice(0, stopsOut), c.destination]; // why: clearly synthetic connection points
   const providerId = s.providerId ?? 'fixture';
   const cabin = s.cabin ?? 'economy';
   db.raw
@@ -3291,15 +3194,15 @@ export function seedObservation(db: Db, s: SeedObservation): { offerId: number; 
       `insert or ignore into itineraries (hash, kind, origin, destination, departure_date, return_date, nights, outbound_minutes, inbound_minutes,
         stops_out, stops_in, airport_change, carriers_json, first_seen_at) values (?, 'flight', ?, ?, ?, ?, ?, 480, 480, ?, 0, 0, '["BA"]', ?)`,
     )
-    .run(s.hash, c.origin, c.destination, c.departureDate, c.returnDate, nights, stopsOut, s.fetchedAt);
+    .run(s.hash, c.origin, c.destination, c.departureDate, c.returnDate, daysBetween(c.departureDate, c.returnDate), stopsOut, s.fetchedAt);
   const seg = db.raw.prepare(
     `insert or ignore into segments (itinerary_hash, direction, position, mode, marketing_carrier, operating_carrier, flight_number, from_iata, to_iata,
       depart_local, arrive_local, depart_utc, arrive_utc, duration_minutes, aircraft) values (?, ?, ?, 'air', 'BA', null, ?, ?, ?, ?, ?, null, null, 120, null)`,
   );
   for (let i = 0; i < outPath.length - 1; i++) {
-    const hh = String(8 + i * 3).padStart(2, '0');
-    const hh2 = String(10 + i * 3).padStart(2, '0');
-    seg.run(s.hash, 'outbound', i, 100 + i, outPath[i], outPath[i + 1], `${c.departureDate}T${hh}:00`, `${c.departureDate}T${hh2}:00`);
+    const dep = String(8 + i * 3).padStart(2, '0');
+    const arr = String(10 + i * 3).padStart(2, '0');
+    seg.run(s.hash, 'outbound', i, 100 + i, outPath[i], outPath[i + 1], `${c.departureDate}T${dep}:00`, `${c.departureDate}T${arr}:00`);
   }
   seg.run(s.hash, 'inbound', 0, 200, c.destination, c.origin, `${c.returnDate}T10:00`, `${c.returnDate}T18:00`);
   const seller = s.seller ?? 'BA';
@@ -3309,12 +3212,9 @@ export function seedObservation(db: Db, s: SeedObservation): { offerId: number; 
         highest_price_pence, latest_price_pence) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(s.hash, providerId, seller, cabin, s.fetchedAt, s.fetchedAt, s.pricePence, s.pricePence, s.pricePence, s.pricePence);
-  const offer = db.raw
-    .prepare('select id from fare_offers where itinerary_hash = ? and provider_id = ? and seller = ? and cabin = ?')
-    .get(s.hash, providerId, seller, cabin) as { id: number };
+  const offer = db.raw.prepare('select id from fare_offers where itinerary_hash = ? and provider_id = ? and seller = ? and cabin = ?').get(s.hash, providerId, seller, cabin) as { id: number };
   const baggage = s.baggage === undefined ? { checkedBags: 1 } : s.baggage;
   const supplied: SuppliedField[] = ['segments', 'segmentTimes', 'segmentCabins', 'selfTransfer', 'seller', 'price', ...(baggage === null ? [] : (['baggage'] as const))];
-  const segmentCabins = Array.from({ length: outPath.length }, () => cabin);
   const r = db.raw
     .prepare(
       `insert into price_observations (offer_id, execution_id, source_kind, cabin, fetched_at, provider_observed_at, price_pence, price_native_minor,
@@ -3323,7 +3223,7 @@ export function seedObservation(db: Db, s: SeedObservation): { offerId: number; 
        values (?, ?, ?, ?, ?, null, ?, ?, 'GBP', null, null, null, 0, 'GB', ?, 1, 0, ?, ?, null, '{"kind":"none"}', null, ?, 0)`,
     )
     .run(offer.id, s.executionId, s.sourceKind ?? 'synthetic', cabin, s.fetchedAt, s.pricePence, s.pricePence, s.maxAgeHours ?? 0,
-      JSON.stringify(segmentCabins), baggage === null ? null : JSON.stringify(baggage), JSON.stringify(supplied));
+      JSON.stringify(Array.from({ length: outPath.length }, () => cabin)), baggage === null ? null : JSON.stringify(baggage), JSON.stringify(supplied));
   return { offerId: offer.id, observationId: Number(r.lastInsertRowid) };
 }
 ```
@@ -3331,12 +3231,13 @@ export function seedObservation(db: Db, s: SeedObservation): { offerId: number; 
 `test/executions.test.ts`:
 
 ```ts
-import { asIata, asIsoDate, cellKeyString, generateCells } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { apiContract, asIata, asIsoDate, cellKeyString, generateCells } from '@gmt/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { z } from 'zod';
 import { cellInSpace } from '../src/read/space.js';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 import { at, cell, seedExecution } from './seed.js';
 
 let h: Harness | undefined;
@@ -3344,14 +3245,12 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
-type Exec = { id: string; status: string; isChild: boolean; progress: Array<{ stage: string; providerId: string; total: number }>; budget: Array<{ scope: string; usage: object }> };
+type Exec = z.infer<typeof apiContract.executionResponseSchema>;
 async function code(res: Response): Promise<string> {
   return ((await res.json()) as { error: { code: string } }).error.code;
 }
-const small = () =>
-  exampleDefinitionInput({ window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-03') }, minNights: 10, maxNights: 10 });
+const small = () => exampleDefinitionInput({ window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-03') }, minNights: 10, maxNights: 10 });
 
 async function waitTerminal(x: Harness, id: string): Promise<Exec> {
   for (let i = 0; i < 200; i++) {
@@ -3362,21 +3261,23 @@ async function waitTerminal(x: Harness, id: string): Promise<Exec> {
   throw new Error(`execution ${id} did not finish`);
 }
 
-describe('POST /definitions/:id/executions and GET /executions/:id (spec §8.1, §10)', () => {
-  it('starts a run through the engine and reports progress per stage × provider and every budget scope', async () => {
+describe('POST /api/definitions/:id/executions and GET /api/executions/:id (spec §8.1, §10)', () => {
+  it('starts a run through the engine and reports progress per stage × provider, every budget scope and the ledger', async () => {
     h = await createHarness();
     const def = h.ports.repos.definitions.create(small());
     const res = await h.request(`/api/definitions/${def.id}/executions`, { json: { confirmCostPence: 100_000 } });
     expect(res.status).toBe(202);
-    const started = (await expectContract(res, 'POST', '/definitions/:id/executions')) as Exec;
-    const done = await waitTerminal(h, started.id);
-    await expectContract(await h.request(`/api/executions/${started.id}`), 'GET', '/executions/:id');
+    const { executionId } = (await expectContract(res, 'POST', '/api/definitions/:id/executions')) as { executionId: string };
+    const done = await waitTerminal(h, executionId);
+    await expectContract(await h.request(`/api/executions/${executionId}`), 'GET', '/api/executions/:id');
+    expect(done.trigger).toBe('manual');
     expect(done.progress.find((p) => p.stage === 'discovery' && p.providerId === 'fixture')?.total).toBe(2);
     expect(done.progress.some((p) => p.stage === 'verification' && p.providerId === 'fixture')).toBe(true);
     expect(done.budget.map((b) => b.scope)).toEqual(
-      expect.arrayContaining(['execution-calls', 'execution-free-calls', 'execution-cost', 'provider-month:fixture', 'global-month']),
+      expect.arrayContaining(['execution-calls', 'execution-free-calls', 'execution-cost', 'provider-month:fixture', 'provider-lifetime:fixture', 'global-month']),
     );
-    for (const b of done.budget) expect(b.usage).toHaveProperty('windowEnd');
+    expect(done.ledger.perProvider.every((p) => p.providerId === 'fixture')).toBe(true);
+    expect([done.parityBreak, done.disabledProviders]).toEqual([false, []]);
   });
 
   it('409 active when an execution is already active for the definition', async () => {
@@ -3392,14 +3293,16 @@ describe('POST /definitions/:id/executions and GET /executions/:id (spec §8.1, 
     ['active', 409],
     ['cap', 409],
     ['confirm', 409],
+    ['disabled', 409],
     ['window', 422],
+    ['not_found', 404],
   ] as const)('maps StartResult %s to %i with the engine message', async (c, status) => {
     h = await createHarness();
     const def = h.ports.repos.definitions.create(small());
     vi.spyOn(h.engine, 'start').mockResolvedValue({ ok: false, code: c, message: `refused: ${c} execution-calls cap 10, current 9, requested 5`, details: { scope: 'execution-calls' } });
     const res = await h.request(`/api/definitions/${def.id}/executions`, { json: {} });
     expect(res.status).toBe(status);
-    const body = (await expectContract(res, 'POST', '/definitions/:id/executions')) as { error: { code: string; message: string } };
+    const body = (await expectContract(res, 'POST', '/api/definitions/:id/executions')) as { error: { code: string; message: string } };
     expect(body.error.code).toBe(c);
     expect(body.error.message).toContain('cap 10');
   });
@@ -3439,7 +3342,7 @@ describe('cancel and resume (spec §8.1 Resume, §10)', () => {
   });
 });
 
-describe('POST /cells/verify (spec §8.1 Single-cell verification)', () => {
+describe('POST /api/cells/verify (spec §8.1 Single-cell verification)', () => {
   const inside = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
 
   it.each([
@@ -3469,10 +3372,10 @@ describe('POST /cells/verify (spec §8.1 Single-cell verification)', () => {
     const def = h.ports.repos.definitions.create(exampleDefinitionInput());
     const res = await h.request('/api/cells/verify', { json: { definitionId: def.id, cell: inside } });
     expect(res.status).toBe(202);
-    expect(((await expectContract(res, 'POST', '/cells/verify')) as Exec).isChild).toBe(true);
+    const { executionId } = (await expectContract(res, 'POST', '/api/cells/verify')) as { executionId: string };
+    expect(((await (await h.request(`/api/executions/${executionId}`)).json()) as Exec).isChild).toBe(true);
     vi.spyOn(h.engine, 'verifyCell').mockResolvedValue({ ok: false, code: 'active', message: 'a child is active for this cell', details: null });
-    const again = await h.request('/api/cells/verify', { json: { definitionId: def.id, cell: inside } });
-    expect(again.status).toBe(409);
+    expect((await h.request('/api/cells/verify', { json: { definitionId: def.id, cell: inside } })).status).toBe(409);
   });
 
   it('cellInSpace agrees with generateCells on a small space and its neighbours', () => {
@@ -3485,31 +3388,44 @@ describe('POST /cells/verify (spec §8.1 Single-cell verification)', () => {
       expect(cellInSpace(space, c)).toBe(members.has(cellKeyString(c)));
       checked++;
     }
-    expect(checked).toBe(80);
-    expect(members.size).toBe(6);
+    expect([checked, members.size]).toEqual([80, 6]);
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- executions`
+Run: `pnpm --filter @gmt/api exec vitest run test/executions.test.ts`
 Expected: FAIL: the route tests get 404 `not_found`; the `cellInSpace` property test passes already (Task 8.9).
 
 - [ ] **Step 3: Implement**
 
-Append to `src/read/executions.ts`:
+`src/read/executions.ts`:
 
 ```ts
-import { PENCE_TO_MICRO, type apiContract } from '@gmt/core';
-import type { Execution } from '@gmt/db';
+import { type Execution, type IsoDateTime, PENCE_TO_MICRO, type ProviderId, type apiContract } from '@gmt/core';
 import type { z } from 'zod';
+import type { Ports } from '../wiring.js';
+import { budgetScopes, usageOf } from './usage.js';
 
 export type ExecutionResponse = z.infer<typeof apiContract.executionResponseSchema>;
+export type ExecutionSummary = z.infer<typeof apiContract.executionSummarySchema>;
+const OVERRUN_TOLERANCE = 1.1;
+const STATUSES_WITH_REASON = new Set(['paused_budget', 'paused_error', 'skipped_budget', 'skipped_confirm', 'skipped_window', 'skipped_missed', 'interrupted', 'cancelled']);
+
+const HOUR = 3_600_000;
+export function hoursSince(from: IsoDateTime, now: IsoDateTime): number {
+  return Math.max(0, Math.floor((Date.parse(now) - Date.parse(from)) / HOUR));
+}
+
+/** The api-contract `ExecutionSummary` used by every view's `executions` list (newest first). */
+export function executionSummary(e: Execution, now: IsoDateTime): ExecutionSummary {
+  return { id: e.id, status: e.status, isChild: e.isChild, startedAt: e.startedAt, finishedAt: e.finishedAt, ageHours: hoursSince(e.startedAt ?? e.createdAt, now) };
+}
 
 /**
- * Spec §10 `GET /executions/:id`: status, stage, reason, resumeAfter, progress per stage ×
- * provider (six buckets + reused), budget usage for every scope, estimate vs ledger.
+ * Spec §10 `GET /api/executions/:id`: status, stage, reason, resumeAfter, progress per stage ×
+ * provider, budget usage for every scope, estimate vs ledger, overrun and parity flags, disabled providers.
  * A stage with no provider has no progress rows (spec §3 `not_applicable`).
  */
 export function executionResponse(ports: Ports, e: Execution): ExecutionResponse {
@@ -3520,27 +3436,37 @@ export function executionResponse(ports: Ports, e: Execution): ExecutionResponse
     }),
   );
   const counts = ports.repos.ledger.countsFor(e.id);
+  const disabled = new Set<ProviderId>(
+    ports.repos.cells.outcomes(e.id).filter((o) => o.status === 'skipped' && o.reason === 'provider_disabled').map((o) => o.providerId),
+  );
   return {
     id: e.id,
     definitionId: e.definitionId,
     isChild: e.isChild,
-    ...(e.cell === null ? {} : { cell: e.cell }),
+    cell: e.cell,
     status: e.status,
     stage: e.stage,
-    reason: e.errorText,
+    reason: STATUSES_WITH_REASON.has(e.status) ? e.errorText : null,
     resumeAfter: e.resumeAfter,
+    trigger: e.trigger,
     startedAt: e.startedAt,
     finishedAt: e.finishedAt,
+    errorText: e.errorText,
     progress,
-    budget: budgetScopes(ports, e.id).map((s) => ({ scope: scopeLabel(s), usage: ports.budget.usage(s) })),
+    budget: budgetScopes(ports, e.id).map((s) => usageOf(ports, s)),
     estimate: e.estimate,
     // why: "ledger cost, from configured rates" (spec §8.1); pence rounded up so spend is never understated.
-    ledger: { calls: counts.calls, costMicroGbp: counts.costMicroGbp, costPence: Math.ceil(counts.costMicroGbp / PENCE_TO_MICRO) },
+    ledger: {
+      calls: counts.calls, costMicroGbp: counts.costMicroGbp, costPence: Math.ceil(counts.costMicroGbp / PENCE_TO_MICRO), tiles: counts.tiles, cacheHits: counts.cacheHits,
+      perProvider: counts.perProvider.map((p) => ({ providerId: p.providerId, stage: p.stage, calls: p.calls, costMicroGbp: p.costMicroGbp })),
+    },
+    parityBreak: ports.repos.notifications.wasSent('parity_break', e.id, e.definitionId),
+    // why: spec §8.1 flags overruns against the pre-factor plan, which the estimate carries as totalPlanCalls.
+    overrun: e.estimate !== null && e.estimate.totalPlanCalls > 0 && counts.calls > e.estimate.totalPlanCalls * OVERRUN_TOLERANCE,
+    disabledProviders: [...disabled].sort(),
   };
 }
 ```
-
-(merge the new imports into the file's existing import lines.)
 
 `src/routes/executions.ts`:
 
@@ -3548,6 +3474,7 @@ export function executionResponse(ports: Ports, e: Execution): ExecutionResponse
 import type { CellKey, apiContract } from '@gmt/core';
 import type { StartResult } from '@gmt/engine';
 import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { executionResponse } from '../read/executions.js';
@@ -3559,9 +3486,13 @@ import type { AppEnv, HandlerTable, RouteContext } from './types.js';
 type StartRequest = z.infer<typeof apiContract.startExecutionRequestSchema>;
 type VerifyRequest = z.infer<typeof apiContract.verifyCellRequestSchema>;
 
+const START_STATUS: Record<Extract<StartResult, { ok: false }>['code'], ContentfulStatusCode> = {
+  active: 409, cap: 409, confirm: 409, disabled: 409, window: 422, not_found: 404,
+};
+
 /** Spec §10: 409 on an active execution or a cap breach naming the cap; 422 for a zero-cell window. */
 export function startError(r: Extract<StartResult, { ok: false }>): ApiError {
-  return new ApiError(r.code === 'window' ? 422 : 409, r.code, r.message, r.details);
+  return new ApiError(START_STATUS[r.code], r.code, r.message, r.details !== null && typeof r.details === 'object' ? (r.details as Record<string, unknown>) : undefined);
 }
 
 function getExecution(ctx: RouteContext, id: string) {
@@ -3570,34 +3501,36 @@ function getExecution(ctx: RouteContext, id: string) {
   return e;
 }
 
-function started(c: Context<AppEnv>, r: StartResult, ctx: RouteContext, status: 200 | 202) {
+/** `startExecutionResponseSchema` for start and verify (202). */
+function accepted(c: Context<AppEnv>, r: StartResult) {
   if (!r.ok) throw startError(r);
-  return c.json(executionResponse(ctx.ports, getExecution(ctx, r.executionId)), status);
+  return c.json({ executionId: r.executionId }, 202);
 }
 
 export const executionHandlers: HandlerTable = {
-  'POST /definitions/:id/executions': async (c, input, ctx) => {
+  'POST /api/definitions/:id/executions': async (c, input, ctx) => {
     const def = getLiveDefinition(ctx, param(input, 'id'));
     const body = (input.body ?? {}) as StartRequest;
-    const r = await ctx.engine.start(def.id, { trigger: 'manual', ...(body.confirmCostPence === undefined ? {} : { confirmCostPence: body.confirmCostPence }) });
-    return started(c, r, ctx, 202);
+    return accepted(c, await ctx.engine.start(def.id, { trigger: 'manual', ...(body.confirmCostPence === undefined ? {} : { confirmCostPence: body.confirmCostPence }) }));
   },
 
-  'GET /executions/:id': (c, input, ctx) => c.json(executionResponse(ctx.ports, getExecution(ctx, param(input, 'id')))),
+  'GET /api/executions/:id': (c, input, ctx) => c.json(executionResponse(ctx.ports, getExecution(ctx, param(input, 'id')))),
 
-  'POST /executions/:id/cancel': async (c, input, ctx) => {
+  'POST /api/executions/:id/cancel': async (c, input, ctx) => {
     const e = getExecution(ctx, param(input, 'id'));
     if (!(await ctx.engine.cancel(e.id))) throw new ApiError(409, 'not_cancellable', API_TEXT.notCancellable(e.status));
     return c.json(executionResponse(ctx.ports, getExecution(ctx, e.id)));
   },
 
-  'POST /executions/:id/resume': async (c, input, ctx) => {
+  'POST /api/executions/:id/resume': async (c, input, ctx) => {
     const e = getExecution(ctx, param(input, 'id'));
     // why: the API's resume is the operator's manual resume (spec §8.1): it re-enables disabled providers.
-    return started(c, await ctx.engine.resume(e.id, { manual: true }), ctx, 200);
+    const r = await ctx.engine.resume(e.id, { manual: true });
+    if (!r.ok) throw startError(r);
+    return c.json(executionResponse(ctx.ports, getExecution(ctx, r.executionId)));
   },
 
-  'POST /cells/verify': async (c, input, ctx) => {
+  'POST /api/cells/verify': async (c, input, ctx) => {
     const body = input.body as VerifyRequest;
     const def = getLiveDefinition(ctx, body.definitionId);
     if (def.providers.verification.length === 0) throw new ApiError(422, 'no_verification_provider', API_TEXT.noVerificationProvider);
@@ -3606,7 +3539,7 @@ export const executionHandlers: HandlerTable = {
     for (const iata of [target.origin, target.destination]) {
       if (!ctx.ports.repos.airports.exists(iata)) throw new ApiError(422, 'unknown_airport', API_TEXT.unknownAirport(iata));
     }
-    return started(c, await ctx.engine.verifyCell(def.id, target), ctx, 202);
+    return accepted(c, await ctx.engine.verifyCell(def.id, target));
   },
 };
 ```
@@ -3615,8 +3548,8 @@ export const executionHandlers: HandlerTable = {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- executions`
-Expected: PASS, 15 tests.
+Run: `pnpm --filter @gmt/api exec vitest run test/executions.test.ts`
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3632,16 +3565,16 @@ git add apps/api && git commit -m "wp08: executions start/read/cancel/resume and
 - Test: `test/results.test.ts`
 
 **Interfaces:**
-- Consumes: `ItinerariesRepo.observationsForDefinition`, `ItinerariesRepo.latestVerificationOutcomeForCell`, `CalendarPricesRepo.latestPerCell`, `ExecutionsRepo.listForDefinition`, `CellsRepo.rollUps/outcomes/selected` (WP3); `evaluateConstraints`, `verdictClass`, `dedupByItinerary`, `rankRows`, `bandCheapest`, `searchLinkFor` (WP2); `effectiveAge`, `worstCaseAgeHours` (WP0).
-- Produces: `loadRows`, `assembleResults`, `RESULTS_CAP = 1000`, `BAND_HOURS = 6`, `verifiedRow`, `calendarRow`, `datedPrice`, `staleness`, `latestPerOffer`, `notSeenResolver`, `coverageSummaryFor`, `hoursSince`; route `GET /definitions/:id/results`.
+- Consumes: `ItinerariesRepo.observationsForDefinition(definitionId, { executionIds, space, cabin, includeChildren })`, `ItinerariesRepo.latestVerificationOutcomeForCell`, `CalendarPricesRepo.latestPerCell(definitionId, cabin, space | null)`, `ExecutionsRepo.listForDefinition(definitionId, { limit, includeChildren })`, `CellsRepo.rollUps/outcomes/selected` (WP3); `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `dedupByItinerary`, `rankRows(rows, now)`, `searchLinkFor` (WP2); `effectiveAge`, `worstCaseAgeHours`, `cellKeyString` (WP0).
+- Produces: `loadRows`, `chooseBasis`, `assembleResults`, `RESULTS_CAP = 1000`, `EXECUTIONS_LIMIT = 500`, `verifiedRow`, `calendarRow`, `priceCell`, `staleness`, `latestPerOffer`, `notSeenResolver`, `coverageSummaryFor`; route `GET /api/definitions/:id/results`.
 
 Assembly rules, each pinned by a test below:
 
 1. Rows come from **every** execution of the definition, children included (spec §8.1), or from one execution when `executionId` is given; observations and calendar prices are read in the definition's current cabin.
-2. Each offer contributes its latest observation (max `fetchedAt`, tie on id); verdicts are evaluated now against the **current** constraints and the observation's stored supplied fields (spec §6.2).
-3. Rows outside the current resolved space are dropped and counted in `excludedByCurrentSpace`; when that count is non-zero, `basisReason` ends with "· I of N rows are inside the current window and nights range" (review focus 4).
-4. Default basis (spec §6.9): `calendar` when the latest parent execution's snapshot (or, with none, the definition) has no verification provider, or no observation is inside the space; otherwise `verified`. `basisReason` says which.
-5. Verified basis: `dedupByItinerary` (one row per hash, cheapest offer, the rest in `otherOffers`), then `rankRows` (class, seen before `notSeenInLatest`, price, age), then `bandCheapest(rows, 6)`. **All classes are returned**; `failed` ranks last and so never consumes the cap ahead of better rows.
+2. Each offer contributes its latest observation (max `fetchedAt`, tie on id); verdicts are evaluated now against the **current** constraints and requested cabin with the observation's stored supplied fields (spec §6.2).
+3. Rows outside the current resolved space are dropped and counted in `excludedByCurrentSpace` (the repositories are read with `space: null` so the count is possible); when that count is non-zero, `basisReason` ends with "· I of N rows are inside the current window and nights range" (review focus 4).
+4. Default basis (spec §6.9): `calendar` when the latest parent execution's snapshot (or, with none, the definition) has no verification provider, or no observation is inside the space; otherwise `verified`. `basisReason` says which; `verificationProviderConfigured` reports the current definition.
+5. Verified basis: `dedupByItinerary` (one row per hash, cheapest offer, the rest in `otherOffers`), then `rankRows(rows, now)` (class, seen before `notSeenInLatest`, price, age). **All classes are returned**; `failed` ranks last. `cheapest` is the first ranked row (the Results headline).
 6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked`, `notApplied` = every configured constraint, `booking: none`, a search link.
 7. `stale` per spec §8.1: verified basis against `STALE_AFTER_HOURS`; calendar basis against `CALENDAR_STALE_AFTER_HOURS` or the provider's `discoveryRefreshHours + maxAgeHours`; unknown age is stale. Stale rows are returned, never hidden.
 8. `notSeenInLatest`: the cell's newest `priced | empty` verification outcome is from another execution in which this offer has no observation → `{ ageHours }` of that newer search.
@@ -3653,12 +3586,12 @@ Assembly rules, each pinned by a test below:
 
 ```ts
 import { type Constraints, apiContract } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { API_TEXT } from '../src/text.js';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 import { at, cell, seedCalendarPrice, seedExecution, seedObservation, seedOutcome } from './seed.js';
 
 type Results = z.infer<typeof apiContract.resultsResponseSchema>;
@@ -3671,7 +3604,6 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
 /**
  * Three itinerary-searched rows in one parent execution, one per class under
@@ -3692,7 +3624,7 @@ async function world(constraints: Constraints = { maxStops: 1, checkedBagRequire
 async function results(x: Harness, defId: string, query = ''): Promise<Results> {
   const res = await x.request(`/api/definitions/${defId}/results${query}`);
   expect(res.status).toBe(200);
-  return (await expectContract(res, 'GET', '/definitions/:id/results')) as Results;
+  return (await expectContract(res, 'GET', '/api/definitions/:id/results')) as Results;
 }
 
 describe('GET /definitions/:id/results, verified basis', () => {
@@ -3701,11 +3633,14 @@ describe('GET /definitions/:id/results, verified basis', () => {
     h = x;
     const r = await results(x, def.id);
     expect(r.basis).toBe('verified');
-    expect(r.basisReason).toBe(API_TEXT.basisItinerarySearched);
+    expect(r.basisReason).toBe(API_TEXT.basisItinerarySearch);
     expect(r.rows.map((row) => row.itineraryHash)).toEqual(['hV', 'hP', 'hF']);
     expect(r.rows.map((row) => row.verdictClass)).toEqual(['verified', 'partially-verified', 'failed']);
     expect(r.rows[1]?.unverified).toContain('checkedBagRequired');
-    expect([r.total, r.truncated, r.excludedByCurrentSpace]).toEqual([3, false, 0]);
+    expect([r.total, r.truncated, r.excludedByCurrentSpace, r.verificationProviderConfigured]).toEqual([3, false, 0, true]);
+    expect(r.cheapest?.itineraryHash).toBe('hV'); // the headline row: best class first, then price
+    expect(r.rows.map((row) => row.executionId)).toEqual(['E1', 'E1', 'E1']);
+    expect(r.rows[0]?.observationId).not.toBeNull();
     for (const row of r.rows) {
       expect(row.provenance.fetchedAt).toBe(at(-1));
       expect([row.stale, row.ageHours]).toEqual([false, 1]);
@@ -3767,6 +3702,7 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(r.rows.find((row) => row.itineraryHash === 'hV')?.notSeenInLatest).toEqual({ ageHours: 0 });
     expect(r.rows.find((row) => row.itineraryHash === 'hP')?.notSeenInLatest).toBeNull();
     expect(r.coverage.onDemand).toBe(1);
+    expect(r.executions.map((e) => e.id)).toEqual(['E2', 'E1']); // newest first
   });
 
   it('scopes to one execution with executionId; 404 for a foreign one', async () => {
@@ -3788,12 +3724,14 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     const r = await results(h, def.id);
     expect(r.basis).toBe('calendar');
     expect(r.basisReason).toBe(API_TEXT.basisNoVerificationProvider);
+    expect(r.verificationProviderConfigured).toBe(false);
     const row = r.rows[0];
     expect(row?.verdictClass).toBe('unchecked');
     expect(row?.notApplied).toEqual(['maxJourneyMinutes']);
     expect(row?.booking).toEqual({ kind: 'none' });
     expect(row?.searchLink.url).toMatch(/^https:\/\//);
     expect(row?.outbound).toBeNull();
+    expect([row?.calendarPriceId === null, row?.observationId, row?.seller, row?.layovers]).toEqual([false, null, null, []]);
     expect([row?.stale, row?.ageHours]).toEqual([false, 3 + 24]);
   });
 
@@ -3837,7 +3775,7 @@ describe('review focus 4: the definition is edited after the rows were written',
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- results`
+Run: `pnpm --filter @gmt/api exec vitest run test/results.test.ts`
 Expected: FAIL: every results request returns 404 `not_found`.
 
 - [ ] **Step 3: Implement**
@@ -3846,57 +3784,43 @@ Expected: FAIL: every results request returns 404 `not_found`.
 
 ```ts
 import {
-  type CellKey, type CellOutcome, type Config, type ConstraintName, type Constraints, type IsoDateTime, type Provenance,
-  type ProviderId, type SearchDefinition, type Verdict, type apiContract,
-  cellKeyString, daysBetween, effectiveAge, evaluateConstraints, searchLinkFor, verdictClass, worstCaseAgeHours,
+  type CellKey, type CellOutcome, type Config, type ConstraintName, type Constraints, type IsoDateTime, type Provenance, type ProviderId,
+  type SearchDefinition, type apiContract, cellKeyString, daysBetween, effectiveAge, evaluateConstraints, searchLinkFor, unverifiedNames,
+  verdictClass, worstCaseAgeHours,
 } from '@gmt/core';
 import type { CalendarPriceRow, ObservationRow } from '@gmt/db';
 import type { z } from 'zod';
 import { DEFAULT_REFRESH_HOURS } from '../defaults.js';
+import { hoursSince } from './executions.js';
 
 export type ResultRow = z.infer<typeof apiContract.resultRowSchema>;
 export type PriceCell = z.infer<typeof apiContract.priceCellSchema>;
-/** A price with its cell: the unit of every calendar, duration, gap and cell-detail shape. */
-export type DatedPrice = PriceCell & { cell: ResultRow['cell'] };
 export type Basis = 'verified' | 'calendar';
 export interface RowContext { def: SearchDefinition; now: IsoDateTime; config: Config }
-
-const HOUR = 3_600_000;
-export function hoursSince(from: IsoDateTime, now: IsoDateTime): number {
-  return Math.max(0, Math.floor((Date.parse(now) - Date.parse(from)) / HOUR));
-}
 
 export function refreshHoursFor(def: SearchDefinition, providerId: ProviderId): number {
   return def.providers.discoveryRefreshHours[providerId] ?? DEFAULT_REFRESH_HOURS;
 }
 
+/** The calendar-basis stale threshold of a provider (spec §8.1), also reported by the calendar route. */
+export function calendarStaleAfterHours(rc: RowContext, providerId: ProviderId, maxAgeHours: number | 'unknown'): number {
+  return rc.config.calendarStaleAfterHours ?? refreshHoursFor(rc.def, providerId) + (maxAgeHours === 'unknown' ? 0 : maxAgeHours);
+}
+
 /**
  * Spec §8.1 "Staleness per price". `ageHours` is the worst-case effective age (spec §3); unknown is stale.
- * Verified basis: > STALE_AFTER_HOURS. Calendar basis: > CALENDAR_STALE_AFTER_HOURS, else
- * > discoveryRefreshHours + maxAgeHours of the provider.
+ * Verified basis: > STALE_AFTER_HOURS. Calendar basis: > the provider's calendar threshold.
  */
 export function staleness(p: Provenance, basis: Basis, rc: RowContext): { ageHours: number | 'unknown'; stale: boolean } {
   const worst = worstCaseAgeHours(effectiveAge(p, rc.now));
   if (worst === 'unknown') return { ageHours: 'unknown', stale: true };
-  const threshold =
-    basis === 'verified'
-      ? rc.config.staleAfterHours
-      : (rc.config.calendarStaleAfterHours ?? refreshHoursFor(rc.def, p.providerId) + (p.maxAgeHours === 'unknown' ? 0 : p.maxAgeHours));
+  const threshold = basis === 'verified' ? rc.config.staleAfterHours : calendarStaleAfterHours(rc, p.providerId, p.maxAgeHours);
   return { ageHours: worst, stale: worst > threshold };
 }
 
-/** Spec §3 provenance of a calendar row; `max_age_hours` NULL means unknown (spec §7). Nothing defaulted. */
-export function calendarProvenance(r: CalendarPriceRow): Provenance {
-  return {
-    providerId: r.providerId,
-    sourceKind: r.sourceKind,
-    fetchedAt: r.fetchedAt,
-    ...(r.providerObservedAt === null ? {} : { providerObservedAt: r.providerObservedAt }),
-    maxAgeHours: r.maxAgeHours ?? 'unknown',
-    fx: r.fx,
-    pointOfSale: r.pointOfSale,
-    cabin: r.cabin,
-  };
+export function priceCell(pricePence: number, provenance: Provenance, basis: Basis, rc: RowContext): PriceCell {
+  const s = staleness(provenance, basis, rc);
+  return { pricePence, provenance, stale: s.stale, ageHours: s.ageHours };
 }
 
 export function withNights(c: CellKey): ResultRow['cell'] {
@@ -3915,42 +3839,41 @@ function adjusted(def: SearchDefinition, destination: CellKey['destination'], pr
 
 /** Spec §6.9 calendar-basis row. */
 export function calendarRow(r: CalendarPriceRow, rc: RowContext): ResultRow {
-  const provenance = calendarProvenance(r);
-  const s = staleness(provenance, 'calendar', rc);
+  const s = staleness(r.provenance, 'calendar', rc);
   return {
-    itineraryHash: null, basis: 'calendar', verdictClass: 'unchecked', pricePence: r.pricePence, provenance, stale: s.stale, ageHours: s.ageHours,
-    cell: withNights(r), outbound: null, inbound: null, totalMinutes: null, stopsOut: null, stopsIn: null, carriers: [], verdicts: {}, unverified: [],
-    notApplied: configuredConstraints(rc.def.constraints), booking: { kind: 'none' }, searchLink: searchLinkFor(r.providerId, r, rc.def.cabin),
-    otherOffers: [], notSeenInLatest: null, adjustedPence: adjusted(rc.def, r.destination, r.pricePence),
-    destinationNote: rc.def.destinationNotes[r.destination] ?? null, bandCheapest: false,
+    itineraryHash: null, basis: 'calendar', verdictClass: 'unchecked', pricePence: r.pricePence, provenance: r.provenance, stale: s.stale, ageHours: s.ageHours,
+    cell: withNights(r.cell), outbound: null, inbound: null, totalMinutes: null, outboundMinutes: null, inboundMinutes: null, stopsOut: null, stopsIn: null,
+    layovers: [], carriers: [], verdicts: {}, unverified: [], notApplied: configuredConstraints(rc.def.constraints),
+    seller: null, baggage: null, fareConditions: null, selfTransfer: null, booking: { kind: 'none' },
+    searchLink: searchLinkFor(r.providerId, r.cell, rc.def.cabin), otherOffers: [], notSeenInLatest: null,
+    adjustedPence: adjusted(rc.def, r.cell.destination, r.pricePence), destinationNote: rc.def.destinationNotes[r.cell.destination] ?? null,
+    executionId: r.executionId, calendarPriceId: r.id, observationId: null,
   };
 }
 
 /** Spec §6.2/§6.9 verified-basis row: verdicts evaluated now, against the current definition. */
 export function verifiedRow(o: ObservationRow, rc: RowContext, notSeenInLatest: { ageHours: number } | null): ResultRow {
-  const obs = o.observation;
   const it = o.itinerary;
-  const verdicts = evaluateConstraints(
-    it,
-    { requestedCabin: rc.def.cabin, pricePence: obs.pricePence, segmentCabins: obs.segmentCabins, selfTransfer: obs.selfTransfer, baggage: obs.baggage },
-    rc.def.constraints,
-    obs.suppliedFields,
-  );
-  const s = staleness(obs.provenance, 'verified', rc);
-  const unverified = (Object.entries(verdicts) as Array<[ConstraintName, Verdict | undefined]>).filter(([, v]) => v === 'unverified').map(([k]) => k);
+  const verdicts = evaluateConstraints(it, o, rc.def.constraints, rc.def.cabin, o.suppliedFields);
+  const s = staleness(o.provenance, 'verified', rc);
   return {
-    itineraryHash: it.hash, basis: 'verified', verdictClass: verdictClass(verdicts), pricePence: obs.pricePence, provenance: obs.provenance,
-    stale: s.stale, ageHours: s.ageHours, cell: withNights(it), outbound: it.outbound, inbound: it.inbound,
+    itineraryHash: it.hash, basis: 'verified', verdictClass: verdictClass(verdicts), pricePence: o.pricePence, provenance: o.provenance, stale: s.stale, ageHours: s.ageHours,
+    cell: o.cell, outbound: it.outbound, inbound: it.inbound,
     totalMinutes: it.outboundMinutes !== undefined && it.inboundMinutes !== undefined ? it.outboundMinutes + it.inboundMinutes : null,
-    stopsOut: it.stopsOut, stopsIn: it.stopsIn, carriers: it.marketingCarriers, verdicts, unverified, notApplied: [],
-    // why: offers carry their seller in otherOffers after dedup; booking is the observation's validated booking (spec §5.2).
-    booking: obs.booking, searchLink: searchLinkFor(o.offer.providerId, it, rc.def.cabin), otherOffers: [], notSeenInLatest,
-    adjustedPence: adjusted(rc.def, it.destination, obs.pricePence), destinationNote: rc.def.destinationNotes[it.destination] ?? null, bandCheapest: false,
+    outboundMinutes: it.outboundMinutes ?? null, inboundMinutes: it.inboundMinutes ?? null, stopsOut: it.stopsOut, stopsIn: it.stopsIn, layovers: it.layovers,
+    carriers: it.marketingCarriers, verdicts, unverified: unverifiedNames(verdicts), notApplied: [],
+    seller: o.seller, baggage: o.baggage, fareConditions: o.fareConditions, selfTransfer: o.selfTransfer, booking: o.booking,
+    searchLink: searchLinkFor(o.offer.providerId, o.cell, rc.def.cabin), otherOffers: [], notSeenInLatest,
+    adjustedPence: adjusted(rc.def, it.destination, o.pricePence), destinationNote: rc.def.destinationNotes[it.destination] ?? null,
+    executionId: o.executionId, calendarPriceId: null, observationId: o.id,
   };
 }
 
-export function datedPrice(row: ResultRow): DatedPrice {
-  return { pricePence: row.pricePence, provenance: row.provenance, stale: row.stale, ageHours: row.ageHours, cell: row.cell };
+/** The cheapest row, or null. */
+export function cheapest(rows: readonly ResultRow[]): ResultRow | null {
+  let best: ResultRow | null = null;
+  for (const r of rows) if (best === null || r.pricePence < best.pricePence) best = r;
+  return best;
 }
 
 /** An offer's current price is its latest observation (spec §7 `latest` = max fetchedAt, tie id). */
@@ -3958,9 +3881,8 @@ export function latestPerOffer(rows: readonly ObservationRow[]): ObservationRow[
   const best = new Map<number, ObservationRow>();
   for (const r of rows) {
     const cur = best.get(r.offer.id);
-    const a = r.observation.provenance.fetchedAt;
-    const b = cur?.observation.provenance.fetchedAt;
-    if (cur === undefined || b === undefined || a > b || (a === b && r.observation.id > cur.observation.id)) best.set(r.offer.id, r);
+    const a = r.provenance.fetchedAt;
+    if (cur === undefined || a > cur.provenance.fetchedAt || (a === cur.provenance.fetchedAt && r.id > cur.id)) best.set(r.offer.id, r);
   }
   return [...best.values()];
 }
@@ -3973,10 +3895,10 @@ export function notSeenResolver(rows: readonly ObservationRow[], latestOutcome: 
   const seen = new Set(rows.map((r) => `${r.executionId}|${r.offer.id}`));
   const cache = new Map<string, CellOutcome | null>();
   return (r: ObservationRow): { ageHours: number } | null => {
-    const key = cellKeyString(r.itinerary);
+    const key = cellKeyString(r.cell);
     let latest = cache.get(key);
     if (latest === undefined) {
-      latest = latestOutcome(r.itinerary);
+      latest = latestOutcome(r.cell);
       cache.set(key, latest);
     }
     if (latest === null || (latest.status !== 'priced' && latest.status !== 'empty')) return null;
@@ -3986,17 +3908,16 @@ export function notSeenResolver(rows: readonly ObservationRow[], latestOutcome: 
 }
 ```
 
-`src/read/coverage.ts` (the summary; the full View D route joins in Task 8.12):
+`src/read/coverage.ts` (the summary; the View D route joins in Task 8.12):
 
 ```ts
-import { type CellOutcomeStatus, type apiContract, cellKeyString } from '@gmt/core';
-import type { Execution } from '@gmt/db';
+import { type CellOutcomeStatus, type Execution, type apiContract, cellKeyString } from '@gmt/core';
 import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 
 export type Buckets = z.infer<typeof apiContract.bucketsSchema>;
 export type CoverageSummary = z.infer<typeof apiContract.coverageSummarySchema>;
-const SEARCHED: ReadonlySet<CellOutcomeStatus> = new Set(['priced', 'empty', 'no_data']);
+export const SEARCHED: ReadonlySet<CellOutcomeStatus> = new Set(['priced', 'empty', 'no_data']);
 
 export function zeroBuckets(): Buckets {
   return { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 };
@@ -4009,46 +3930,46 @@ export function zeroBuckets(): Buckets {
  */
 export function coverageSummaryFor(latestParent: Execution | null, executions: readonly Execution[], ports: Ports): CoverageSummary {
   const onDemand = executions.filter((e) => e.isChild && e.status === 'completed').length;
-  if (latestParent === null) return { buckets: zeroBuckets(), total: 0, selected: 0, itinerarySearched: 0, onDemand };
+  if (latestParent === null) return { buckets: zeroBuckets(), total: 0, selected: 0, itinerarySearched: 0, onDemand, reused: 0 };
   const rollUps = ports.repos.cells.rollUps(latestParent.id);
   const buckets = zeroBuckets();
   for (const r of rollUps.values()) if (r.discovery.status !== null) buckets[r.discovery.status] += 1;
-  buckets.reused = new Set(
-    ports.repos.cells.outcomes(latestParent.id).filter((o) => o.stage === 'discovery' && o.reusedFromExecutionId !== null).map(cellKeyString),
-  ).size;
+  const reused = new Set(ports.repos.cells.outcomes(latestParent.id, { stage: 'discovery' }).filter((o) => o.reusedFromExecutionId !== null).map(cellKeyString)).size;
+  buckets.reused = reused;
   const selected = ports.repos.cells.selected(latestParent.id);
-  const itinerarySearched = selected.filter((c) => {
-    const status = rollUps.get(cellKeyString(c))?.verification.status ?? null;
+  const itinerarySearched = selected.filter(({ cell }) => {
+    const status = rollUps.get(cellKeyString(cell))?.verification.status ?? null;
     return status !== null && SEARCHED.has(status);
   }).length;
-  return { buckets, total: rollUps.size, selected: selected.length, itinerarySearched, onDemand };
+  return { buckets, total: rollUps.size, selected: selected.length, itinerarySearched, onDemand, reused };
 }
 ```
 
 `src/read/results.ts`:
 
 ```ts
-import { type ResolvedSpace, type SearchDefinition, type apiContract, bandCheapest, dedupByItinerary, rankRows } from '@gmt/core';
-import type { Execution, ObservationRow } from '@gmt/db';
+import { type Execution, type ResolvedSpace, type SearchDefinition, type apiContract, dedupByItinerary, rankRows } from '@gmt/core';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { coverageSummaryFor } from './coverage.js';
-import { type Basis, type ResultRow, type RowContext, calendarRow, hoursSince, latestPerOffer, notSeenResolver, verifiedRow } from './rows.js';
+import { executionSummary } from './executions.js';
+import { type Basis, type ResultRow, type RowContext, calendarRow, latestPerOffer, notSeenResolver, verifiedRow } from './rows.js';
 import { cellInSpace, currentSpace } from './space.js';
 
 export type ResultsResponse = z.infer<typeof apiContract.resultsResponseSchema>;
 export type ResultsQuery = z.infer<typeof apiContract.resultsQuerySchema>;
 /** Spec §6.5: at most 1000 rows per response. */
 export const RESULTS_CAP = 1000;
-/** Spec §6.5: `bandCheapest(rows, 6h)`. */
-export const BAND_HOURS = 6;
+/** Executions read per definition (newest first); far above a year of weekly runs plus children. */
+export const EXECUTIONS_LIMIT = 500;
 
 export interface Loaded {
   def: SearchDefinition;
   space: ResolvedSpace;
-  /** All executions of the definition (children included), newest first by start. */
+  rc: RowContext;
+  /** All executions of the definition (children included), newest first. */
   all: Execution[];
   /** The executions the rows come from (all, or the one `executionId`). */
   scoped: Execution[];
@@ -4065,27 +3986,25 @@ export interface Loaded {
 export function loadRows(def: SearchDefinition, ports: Ports, executionId?: string): Loaded {
   const now = ports.clock.now();
   const space = currentSpace(def, ports.clock.todayLondon());
-  const all = [...ports.repos.executions.listForDefinition(def.id, { includeChildren: true })].sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+  const all = ports.repos.executions.listForDefinition(def.id, { limit: EXECUTIONS_LIMIT, includeChildren: true });
   const scoped = executionId === undefined ? all : all.filter((e) => e.id === executionId);
   if (executionId !== undefined && scoped.length === 0) throw new ApiError(404, 'execution_not_found', API_TEXT.executionNotFound(executionId));
   const ids = new Set(scoped.map((e) => e.id));
   const rc: RowContext = { def, now, config: ports.config };
 
-  const raw = ports.repos.itineraries.observationsForDefinition(def.id, [...ids], null, def.cabin);
+  // why: space null reads every cell, so rows outside the current space can be counted (review focus 4).
+  const raw = ports.repos.itineraries.observationsForDefinition(def.id, { executionIds: [...ids], space: null, cabin: def.cabin, includeChildren: true });
   // why: "seen in execution X" must consider every observation, not only each offer's latest one.
   const notSeen = notSeenResolver(raw, (c) => ports.repos.itineraries.latestVerificationOutcomeForCell(def.id, c), now);
   const latest = latestPerOffer(raw);
-  const inSpace = latest.filter((o) => cellInSpace(space, o.itinerary));
-  const hashes = (xs: readonly ObservationRow[]) => new Set(xs.map((o) => o.itinerary.hash)).size;
+  const inSpace = latest.filter((o) => cellInSpace(space, o.cell));
+  const hashes = (xs: readonly { itinerary: { hash: string } }[]) => new Set(xs.map((o) => o.itinerary.hash)).size;
 
   const calendarAll = ports.repos.calendarPrices.latestPerCell(def.id, def.cabin, null).filter((r) => ids.has(r.executionId) && r.reusedFromExecutionId === null);
-  const calendarIn = calendarAll.filter((r) => cellInSpace(space, r));
+  const calendarIn = calendarAll.filter((r) => cellInSpace(space, r.cell));
 
   return {
-    def,
-    space,
-    all,
-    scoped,
+    def, space, rc, all, scoped,
     latestParent: all.find((e) => !e.isChild) ?? null,
     verified: inSpace.map((o) => verifiedRow(o, rc, notSeen(o))),
     calendar: calendarIn.map((r) => calendarRow(r, rc)),
@@ -4094,23 +4013,20 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionId?: stri
 }
 
 /** Spec §6.9 default basis and its reason. */
-function chooseBasis(loaded: Loaded, requested: Basis | undefined): { basis: Basis; reason: string } {
-  const providers = (loaded.latestParent?.snapshot ?? loaded.def).providers;
-  const hasVerification = providers.verification.length > 0;
+export function chooseBasis(loaded: Loaded, requested: Basis | undefined): { basis: Basis; reason: string } {
+  const hasVerification = (loaded.latestParent?.snapshot ?? loaded.def).providers.verification.length > 0;
   if (requested === 'calendar') return { basis: 'calendar', reason: API_TEXT.basisRequestedCalendar };
-  if (requested === 'verified') return { basis: 'verified', reason: API_TEXT.basisItinerarySearched };
+  if (requested === 'verified') return { basis: 'verified', reason: API_TEXT.basisItinerarySearch };
   if (!hasVerification) return { basis: 'calendar', reason: API_TEXT.basisNoVerificationProvider };
   if (loaded.verified.length === 0) return { basis: 'calendar', reason: API_TEXT.basisNoObservations };
-  return { basis: 'verified', reason: API_TEXT.basisItinerarySearched };
+  return { basis: 'verified', reason: API_TEXT.basisItinerarySearch };
 }
 
-/** Spec §10 `GET /definitions/:id/results`. No sort or filter parameters: the client sorts and filters (spec §6.5). */
+/** Spec §10 `GET /api/definitions/:id/results`. No sort or filter parameters: the client sorts and filters (spec §6.5). */
 export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: Ports): ResultsResponse {
-  const now = ports.clock.now();
   const loaded = loadRows(def, ports, q.executionId);
   const { basis, reason } = chooseBasis(loaded, q.basis);
-  const rows = basis === 'verified' ? dedupByItinerary(loaded.verified) : loaded.calendar;
-  const ranked = bandCheapest(rankRows(rows), BAND_HOURS);
+  const ranked = rankRows(basis === 'verified' ? dedupByItinerary(loaded.verified) : loaded.calendar, loaded.rc.now);
   const excluded = basis === 'verified' ? loaded.excluded.verified : loaded.excluded.calendar;
   const total = ranked.length;
   const limit = Math.min(q.limit ?? RESULTS_CAP, RESULTS_CAP);
@@ -4120,9 +4036,11 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
     truncated: total > limit,
     basis,
     basisReason: excluded > 0 ? `${reason} · ${API_TEXT.insideSpace(total, total + excluded)}` : reason,
-    executions: loaded.scoped.map((e) => ({ id: e.id, status: e.status, ageHours: hoursSince(e.startedAt ?? now, now) })),
+    executions: loaded.scoped.map((e) => executionSummary(e, loaded.rc.now)),
     coverage: coverageSummaryFor(loaded.latestParent, loaded.all, ports),
     excludedByCurrentSpace: excluded,
+    verificationProviderConfigured: def.providers.verification.length > 0,
+    cheapest: ranked[0] ?? null,
   };
 }
 ```
@@ -4130,12 +4048,12 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
 `src/routes/results.ts` (Task 8.12 adds the other view routes to this table):
 
 ```ts
-import { assembleResults, type ResultsQuery } from '../read/results.js';
+import { type ResultsQuery, assembleResults } from '../read/results.js';
 import { getLiveDefinition, param } from './shared.js';
 import type { HandlerTable } from './types.js';
 
 export const resultHandlers: HandlerTable = {
-  'GET /definitions/:id/results': (c, input, ctx) =>
+  'GET /api/definitions/:id/results': (c, input, ctx) =>
     c.json(assembleResults(getLiveDefinition(ctx, param(input, 'id')), (input.query ?? {}) as ResultsQuery, ctx.ports)),
 };
 ```
@@ -4144,7 +4062,7 @@ export const resultHandlers: HandlerTable = {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- results`
+Run: `pnpm --filter @gmt/api exec vitest run test/results.test.ts`
 Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Commit**
@@ -4157,14 +4075,14 @@ git add apps/api && git commit -m "wp08: results: basis, dedup, class-then-price
 
 **Files:**
 - Create: `src/read/calendar.ts`, `src/read/duration.ts`, `src/read/cell.ts`, `src/read/coverageView.ts`
-- Modify: `src/read/coverage.ts`, `src/read/rows.ts`, `src/read/results.ts` (export `chooseBasis`), `src/routes/results.ts`
+- Modify: `src/routes/results.ts`
 - Test: `test/views.test.ts`
 
 **Interfaces:**
-- Consumes: `loadRows`, `datedPrice`, `withNights` (Task 8.11); `CellsRepo.outcomes/rollUps/selected`, `LedgerRepo.overrun`, `NotificationsRepo.wasSent` (WP3); `addDays`, `iataSchema`, `isoDateSchema` (WP0/WP1).
-- Produces: `assembleCalendar`, `assembleDuration`, `assembleCoverage`, `assembleCalendarGap`, `assembleCellDetail`, `ledgerByProvider`; routes `GET /definitions/:id/calendar`, `/duration-analysis`, `/coverage`, `/calendar-gap`, `/cells/:origin/:destination/:departureDate/:returnDate`.
+- Consumes: `loadRows`, `priceCell`, `withNights`, `cheapest`, `calendarStaleAfterHours` (Task 8.11); `CellsRepo.bucketsPerDay/outcomes/rollUps/selected`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent` (WP3); `engine.scheduler.blockedSince()` (WP7); `selectedNotReached`, `addDays`, `daysBetween`, `dedupByItinerary` (WP1/WP2).
+- Produces: `assembleCalendar`, `assembleCalendarGap`, `assembleDuration`, `assembleCoverage`, `assembleCellDetail`, `retryable`; routes `GET /api/definitions/:id/calendar`, `/duration-analysis`, `/coverage`, `/calendar-gap`, `/cells/:origin/:destination/:departureDate/:returnDate`.
 
-Rules: every view reads the same rows as `/results` (Task 8.11: current space and cabin, children included, verdicts recomputed now) and dedups itinerary-searched rows per itinerary before counting. Calendar days cover every departure date of the current window. Six-bucket counts, selection and coverage come from the **latest parent** execution (children are excluded from "latest execution", spec §8.1) and count completed children per day as "on demand". `cheapestVerified` uses class `verified` only; `cheapestPartiallyVerified` carries its `count`. Calendar gap is `{ hidden: true }` when the definition has no verification provider (spec §6.9). Coverage `errors[].retryable` is what a manual resume would pick up (spec §7 Resume): reasons `auth`, `quota`, `parse` always; other reasons while `attempts < 3`, except the deterministic `no-return-legs`, `fx-unavailable`, `currency-unsupported`, `unknown-airport-tz`.
+Rules: every view reads the same rows as `/results` (current space and cabin, children included, verdicts recomputed now) and dedups itinerary-searched rows per itinerary before counting. Calendar days cover every departure date of the current window; six-bucket counts, selection and coverage come from the **latest parent** execution (children are excluded from "latest execution", spec §8.1), with completed children counted per day as "on demand". `cheapestVerified` uses class `verified` only; `cheapestPartiallyVerified` carries its `count`. The calendar response reports the stale thresholds the client colours by (`staleAfterHours`, and per provider `calendarStaleAfterHours`). Calendar gap lists calendar prices below the cheapest class-verified price and is empty when the definition has no verification provider (spec §6.9). Coverage `perStage` rows carry their ledger counts, the pre-factor `planCalls` from the stored estimate, `overrun` (calls > planCalls × 1.1) and `parityBreak`; `errors[].retryable` is what a manual resume would pick up (spec §7 Resume): reasons `auth`, `quota`, `parse` always; other reasons while `attempts < 3`, except the deterministic `no-return-legs`, `fx-unavailable`, `currency-unsupported`, `unknown-airport-tz`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4172,12 +4090,12 @@ Rules: every view reads the same rows as `/results` (Task 8.11: current space an
 
 ```ts
 import { apiContract, daysBetween } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { currentSpace } from '../src/read/space.js';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 import { at, cell, seedCalendarPrice, seedCell, seedExecution, seedObservation, seedOutcome } from './seed.js';
 
 const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
@@ -4190,7 +4108,6 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
 /** Discovery: C1 priced £450, C2 no data, C3 no fares, C4 error. Selection: all four; C4 not reached. Observations as in Task 8.11. */
 async function world() {
@@ -4205,7 +4122,7 @@ async function world() {
   seedOutcome(db, 'E1', C1, 'discovery', 'fixture', { status: 'priced', fetchedAt: at(-1), minPence: 45_000 });
   seedOutcome(db, 'E1', C2, 'discovery', 'fixture', { status: 'no_data', fetchedAt: at(-1) });
   seedOutcome(db, 'E1', C3, 'discovery', 'fixture', { status: 'empty', fetchedAt: at(-1) });
-  seedOutcome(db, 'E1', C4, 'discovery', 'fixture', { status: 'error', reason: 'upstream', attempts: 1 });
+  seedOutcome(db, 'E1', C4, 'discovery', 'fixture', { status: 'error', reason: 'upstream', lastError: 'HTTP 503', attempts: 1 });
   for (const c of [C1, C2, C3]) seedOutcome(db, 'E1', c, 'verification', 'fixture', { status: 'priced', fetchedAt: at(-1) });
   seedOutcome(db, 'E1', C4, 'verification', 'fixture', { status: 'not_run' });
   seedCalendarPrice(db, { executionId: 'E1', cell: C1, pricePence: 45_000, fetchedAt: at(-1) });
@@ -4221,23 +4138,25 @@ async function view<T>(x: Harness, path: string, routePath: string): Promise<T> 
   return (await expectContract(res, 'GET', routePath)) as T;
 }
 
-describe('GET /definitions/:id/calendar (spec §10, View B)', () => {
-  it('per day: six buckets per provider, selection, the three cheapest and byDestination', async () => {
+describe('GET /api/definitions/:id/calendar (spec §10, View B)', () => {
+  it('per day: six buckets per provider, selection, the three cheapest, byDestination, stale thresholds', async () => {
     const { x, def } = await world();
     h = x;
     type Calendar = z.infer<typeof apiContract.calendarResponseSchema>;
-    const cal = await view<Calendar>(x, `/api/definitions/${def.id}/calendar`, '/definitions/:id/calendar');
+    const cal = await view<Calendar>(x, `/api/definitions/${def.id}/calendar`, '/api/definitions/:id/calendar');
     const space = currentSpace(def, x.clock.todayLondon());
     expect(cal.days).toHaveLength(daysBetween(space.departureFrom, space.departureTo) + 1);
+    expect(cal.staleAfterHours).toBe(192);
+    expect(cal.calendarStaleAfterHours.fixture).toBeGreaterThanOrEqual(168);
     const day = (d: string) => cal.days.find((x2) => x2.date === d);
-    expect(day('2026-11-02')?.discovery).toEqual([{ providerId: 'fixture', buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 } }]);
+    expect(day('2026-11-02')?.discovery).toEqual([{ providerId: 'fixture', buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 }, total: 1 }]);
     expect(day('2026-11-02')?.verification).toEqual({ selected: 1, itinerarySearched: 1, onDemand: 0 });
-    expect(day('2026-11-02')?.cheapestVerified?.pricePence).toBe(60_000);
+    expect(day('2026-11-02')?.cheapestVerified).toMatchObject({ pricePence: 60_000, itineraryHash: 'hV' });
     expect(day('2026-11-02')?.cheapestCalendar?.pricePence).toBe(45_000);
     expect(day('2026-11-02')?.cheapestPartiallyVerified).toBeNull();
-    expect(day('2026-11-02')?.byDestination.map((b) => [b.destination, b.cheapestVerified?.pricePence])).toEqual([['JFK', 60_000]]);
+    expect(day('2026-11-02')?.byDestination.map((b) => [b.destination, b.cheapestVerified?.pricePence, b.cheapestCalendar?.pricePence])).toEqual([['JFK', 60_000, 45_000]]);
     expect(day('2026-11-03')?.discovery[0]?.buckets.no_data).toBe(1);
-    expect(day('2026-11-03')?.cheapestPartiallyVerified).toMatchObject({ pricePence: 40_000, count: 1 });
+    expect(day('2026-11-03')?.cheapestPartiallyVerified).toMatchObject({ pricePence: 40_000, count: 1, itineraryHash: 'hP' });
     expect(day('2026-11-04')?.discovery[0]?.buckets.empty).toBe(1);
     expect(day('2026-11-04')?.cheapestVerified).toBeNull(); // why: hF is class failed
     expect(day('2026-11-05')?.discovery[0]?.buckets.error).toBe(1);
@@ -4245,97 +4164,209 @@ describe('GET /definitions/:id/calendar (spec §10, View B)', () => {
   });
 });
 
-describe('GET /definitions/:id/duration-analysis (spec §10, View C)', () => {
-  it('per nights: min among class verified with n, calendar per provider with n, gaps as null / empty', async () => {
+describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () => {
+  it('per nights: min among class verified with n, calendar per provider with n, searched flag, gaps as null / empty', async () => {
     const { x, def } = await world();
     h = x;
     type Duration = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
-    const d = await view<Duration>(x, `/api/definitions/${def.id}/duration-analysis`, '/definitions/:id/duration-analysis');
-    expect(d.nights.map((n) => n.nights)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-    const ten = d.nights[0];
-    expect(ten?.minVerified).toMatchObject({ n: 1, price: { pricePence: 60_000 } });
+    const d = await view<Duration>(x, `/api/definitions/${def.id}/duration-analysis`, '/api/definitions/:id/duration-analysis');
+    expect(d.byNights.map((n) => n.nights)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    const ten = d.byNights[0];
+    expect(ten?.minVerified).toMatchObject({ n: 1, pricePence: 60_000 });
     expect(ten?.minCalendar).toEqual([expect.objectContaining({ providerId: 'fixture', n: 1, price: expect.objectContaining({ pricePence: 45_000 }) })]);
-    expect(d.nights[1]).toMatchObject({ nights: 11, minVerified: null, minCalendar: [] });
+    expect(ten?.searched).toBe(true);
+    expect(d.byNights[1]).toMatchObject({ nights: 11, minVerified: null, minCalendar: [], searched: false });
   });
 });
 
-describe('GET /definitions/:id/coverage (spec §10, View D)', () => {
-  it('summary, per stage × provider, selected-but-not-reached, errors with retry, flags', async () => {
+describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
+  it('summary, per stage × provider with requests, selected-but-not-reached, errors with retry, blocked schedule', async () => {
     const { x, def } = await world();
     h = x;
     type Coverage = z.infer<typeof apiContract.coverageResponseSchema>;
-    const cov = await view<Coverage>(x, `/api/definitions/${def.id}/coverage`, '/definitions/:id/coverage');
+    const cov = await view<Coverage>(x, `/api/definitions/${def.id}/coverage`, '/api/definitions/:id/coverage');
     expect(cov.executionId).toBe('E1');
-    expect(cov.summary).toEqual({ buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 0, reused: 0 }, total: 4, selected: 4, itinerarySearched: 3, onDemand: 0 });
-    expect(cov.perStageProvider.find((p) => p.stage === 'discovery')?.total).toBe(4);
-    expect(cov.selectedNotReached).toEqual([{ cell: { ...C4, nights: 10 }, reason: 'not_run' }]);
-    expect(cov.errors).toEqual([expect.objectContaining({ stage: 'discovery', providerId: 'fixture', reason: 'upstream', attempts: 1, retryable: true })]);
-    expect(cov.flags).toEqual({ overrun: false, parityBreak: false });
-    expect(cov.requests).toEqual([]);
+    expect(cov.summary).toEqual({ buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 0, reused: 0 }, total: 4, selected: 4, itinerarySearched: 3, onDemand: 0, reused: 0 });
+    const discovery = cov.perStage.find((p) => p.stage === 'discovery');
+    expect(discovery).toMatchObject({ providerId: 'fixture', total: 4, requests: { calls: 0, cacheHits: 0, costMicroGbp: 0, planCalls: null }, overrun: false, parityBreak: false });
+    expect(cov.selectedNotReached.map((s) => s.cell)).toEqual([{ ...C4, nights: 10 }]);
+    expect(cov.errors).toEqual([expect.objectContaining({ stage: 'discovery', providerId: 'fixture', reason: 'upstream', lastError: 'HTTP 503', attempts: 1, retryable: true })]);
+    expect(cov.scheduleBlockedSince).toBeNull();
   });
 });
 
-describe('GET /definitions/:id/calendar-gap (spec §10, §6.9)', () => {
+describe('GET /api/definitions/:id/calendar-gap (spec §10, §6.9)', () => {
   it('lists calendar prices below the cheapest class-verified price', async () => {
     const { x, def } = await world();
     h = x;
     seedCalendarPrice(x.ports.db, { executionId: 'E1', cell: C2, pricePence: 70_000, fetchedAt: at(-1) });
     type Gap = z.infer<typeof apiContract.calendarGapResponseSchema>;
-    const gap = await view<Gap>(x, `/api/definitions/${def.id}/calendar-gap`, '/definitions/:id/calendar-gap');
-    expect(gap.hidden).toBe(false);
-    expect(gap.cheapestVerified?.pricePence).toBe(60_000);
-    expect(gap.cells.map((c) => [c.cell.departureDate, c.pricePence])).toEqual([['2026-11-02', 45_000]]);
+    const gap = await view<Gap>(x, `/api/definitions/${def.id}/calendar-gap`, '/api/definitions/:id/calendar-gap');
+    expect(gap.cheapestVerifiedPence).toBe(60_000);
+    expect(gap.cells.map((c) => [c.cell.departureDate, c.calendar.pricePence, c.verifyAvailable])).toEqual([['2026-11-02', 45_000, true]]);
   });
-  it('is hidden when the definition has no verification provider', async () => {
+  it('is empty when the definition has no verification provider', async () => {
     h = await createHarness();
     const def = h.ports.repos.definitions.create(exampleDefinitionInput({ providers: { discovery: ['fixture'], verification: [], discoveryRefreshHours: {} } }));
     type Gap = z.infer<typeof apiContract.calendarGapResponseSchema>;
-    expect(await view<Gap>(h, `/api/definitions/${def.id}/calendar-gap`, '/definitions/:id/calendar-gap')).toEqual({ hidden: true, cheapestVerified: null, cells: [] });
+    expect(await view<Gap>(h, `/api/definitions/${def.id}/calendar-gap`, '/api/definitions/:id/calendar-gap')).toEqual({ cheapestVerifiedPence: null, cells: [] });
   });
 });
 
-describe('GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate (spec §10, View B side panel)', () => {
-  const route = '/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate';
+describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate (spec §10, View B side panel)', () => {
+  const route = '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate';
   it("returns the cell's outcomes per stage and provider and its prices with provenance", async () => {
     const { x, def } = await world();
     h = x;
     type Detail = z.infer<typeof apiContract.cellDetailResponseSchema>;
     const d = await view<Detail>(x, `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`, route);
     expect(d.outcomes.map((o) => [o.executionId, o.stage, o.status]).sort()).toEqual([['E1', 'discovery', 'priced'], ['E1', 'verification', 'priced']]);
-    expect(d.calendarPrices.map((p) => [p.pricePence, p.provenance.providerId])).toEqual([[45_000, 'fixture']]);
-    expect(d.observations.map((o) => [o.itineraryHash, o.price.pricePence, o.verdictClass])).toEqual([['hV', 60_000, 'verified']]);
+    expect(d.calendarPrices.map((p) => [p.pricePence, p.provenance.providerId, p.executionId])).toEqual([[45_000, 'fixture', 'E1']]);
+    expect(d.observations.map((o) => [o.itineraryHash, o.pricePence, o.verdictClass])).toEqual([['hV', 60_000, 'verified']]);
   });
   it('400 on a malformed path parameter', async () => {
     const { x, def } = await world();
     h = x;
     expect((await x.request(`/api/definitions/${def.id}/cells/LHR/JFK/2026-02-30/2026-03-10`)).status).toBe(400);
-    expect((await x.request(`/api/definitions/${def.id}/cells/lhr/JFK/2026-11-02/2026-11-12`)).status).toBe(400);
+    expect((await x.request(`/api/definitions/${def.id}/cells/LHRX/JFK/2026-11-02/2026-11-12`)).status).toBe(400);
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- views`
+Run: `pnpm --filter @gmt/api exec vitest run test/views.test.ts`
 Expected: FAIL: every view route returns 404 `not_found`.
 
 - [ ] **Step 3: Implement**
 
-In `src/read/results.ts` add `export` to `function chooseBasis`. In `src/read/rows.ts` add:
+`src/read/calendar.ts`:
 
 ```ts
-/** The cheapest row, or null. */
-export function cheapest(rows: readonly ResultRow[]): ResultRow | null {
-  let best: ResultRow | null = null;
-  for (const r of rows) if (best === null || r.pricePence < best.pricePence) best = r;
-  return best;
+import { type IsoDate, type ProviderId, type RollUp, type Stage, type SearchDefinition, type apiContract, addDays, cellKeyString, dedupByItinerary } from '@gmt/core';
+import type { z } from 'zod';
+import type { Ports } from '../wiring.js';
+import { type Buckets, SEARCHED } from './coverage.js';
+import { executionSummary } from './executions.js';
+import { loadRows } from './results.js';
+import { type PriceCell, type ResultRow, calendarStaleAfterHours, cheapest } from './rows.js';
+
+type DayBuckets = Array<{ stage: Stage; providerId: ProviderId; buckets: Buckets; total: number }>;
+
+export type CalendarResponse = z.infer<typeof apiContract.calendarResponseSchema>;
+export type CalendarGapResponse = z.infer<typeof apiContract.calendarGapResponseSchema>;
+const PROVIDER_IDS: readonly ProviderId[] = ['travelpayouts', 'searchapi', 'fixture'];
+
+const priceOf = (r: ResultRow): PriceCell => ({ pricePence: r.pricePence, provenance: r.provenance, stale: r.stale, ageHours: r.ageHours });
+
+/** Spec §10 `GET /calendar`: one entry per departure date of the current window. */
+export function assembleCalendar(def: SearchDefinition, ports: Ports): CalendarResponse {
+  const loaded = loadRows(def, ports);
+  const parent = loaded.latestParent;
+  const perDay = parent === null ? new Map<IsoDate, DayBuckets>() : ports.repos.cells.bucketsPerDay(parent.id);
+  const rollUps = parent === null ? new Map<string, { discovery: RollUp; verification: RollUp }>() : ports.repos.cells.rollUps(parent.id);
+  const selected = parent === null ? [] : ports.repos.cells.selected(parent.id);
+  const children = loaded.all.filter((e) => e.isChild && e.status === 'completed');
+  const verified = dedupByItinerary(loaded.verified);
+  const days: CalendarResponse['days'] = [];
+  for (let d = loaded.space.departureFrom; d <= loaded.space.departureTo; d = addDays(d, 1)) {
+    const onDay = (r: ResultRow) => r.cell.departureDate === d;
+    const v = verified.filter(onDay);
+    const cal = loaded.calendar.filter(onDay);
+    const partial = v.filter((r) => r.verdictClass === 'partially-verified');
+    const best = cheapest(v.filter((r) => r.verdictClass === 'verified'));
+    const bestPartial = cheapest(partial);
+    const bestCal = cheapest(cal);
+    const sel = selected.filter(({ cell }) => cell.departureDate === d);
+    days.push({
+      date: d,
+      discovery: (perDay.get(d) ?? []).filter((p) => p.stage === 'discovery').map(({ providerId, buckets, total }) => ({ providerId, buckets, total })),
+      verification: {
+        selected: sel.length,
+        itinerarySearched: sel.filter(({ cell }) => {
+          const s = rollUps.get(cellKeyString(cell))?.verification.status ?? null;
+          return s !== null && SEARCHED.has(s);
+        }).length,
+        onDemand: children.filter((e) => e.cell?.departureDate === d).length,
+      },
+      cheapestVerified: best === null || best.itineraryHash === null ? null : { ...priceOf(best), cell: best.cell, itineraryHash: best.itineraryHash },
+      cheapestPartiallyVerified: bestPartial === null || bestPartial.itineraryHash === null ? null : { ...priceOf(bestPartial), cell: bestPartial.cell, itineraryHash: bestPartial.itineraryHash, count: partial.length },
+      cheapestCalendar: bestCal === null ? null : { ...priceOf(bestCal), cell: bestCal.cell },
+      byDestination: def.destinations.map((destination) => {
+        const dv = cheapest(v.filter((r) => r.verdictClass === 'verified' && r.cell.destination === destination));
+        const dc = cheapest(cal.filter((r) => r.cell.destination === destination));
+        return { destination, cheapestVerified: dv === null ? null : priceOf(dv), cheapestCalendar: dc === null ? null : priceOf(dc) };
+      }),
+    });
+  }
+  return {
+    days,
+    executions: loaded.scoped.map((e) => executionSummary(e, loaded.rc.now)),
+    staleAfterHours: ports.config.staleAfterHours,
+    calendarStaleAfterHours: Object.fromEntries(
+      PROVIDER_IDS.map((id) => [id, calendarStaleAfterHours(loaded.rc, id, ports.providers.find((p) => p.id === id)?.discovery?.info.maxAgeHours ?? 0)]),
+    ) as Record<ProviderId, number>,
+  };
+}
+
+/** Spec §10 `GET /calendar-gap`: calendar prices below the cheapest class-verified price; empty without a verification provider. */
+export function assembleCalendarGap(def: SearchDefinition, ports: Ports): CalendarGapResponse {
+  if (def.providers.verification.length === 0) return { cheapestVerifiedPence: null, cells: [] };
+  const loaded = loadRows(def, ports);
+  const best = cheapest(loaded.verified.filter((r) => r.verdictClass === 'verified'));
+  if (best === null) return { cheapestVerifiedPence: null, cells: [] };
+  const below = loaded.calendar.filter((r) => r.pricePence < best.pricePence).sort((a, b) => a.pricePence - b.pricePence);
+  return { cheapestVerifiedPence: best.pricePence, cells: below.map((r) => ({ cell: r.cell, calendar: priceOf(r), verifyAvailable: true })) };
 }
 ```
 
-In `src/read/coverage.ts` change `const SEARCHED` to `export const SEARCHED`. Create `src/read/coverageView.ts` (a separate file so `results.ts` → `coverage.ts` stays acyclic):
+`src/read/duration.ts`:
 
 ```ts
-import { type CellOutcome, PENCE_TO_MICRO, type SearchDefinition, type apiContract, cellKeyString } from '@gmt/core';
+import { type ProviderId, type SearchDefinition, type apiContract, daysBetween, dedupByItinerary } from '@gmt/core';
+import type { z } from 'zod';
+import type { Ports } from '../wiring.js';
+import { SEARCHED } from './coverage.js';
+import { executionSummary } from './executions.js';
+import { loadRows } from './results.js';
+import { cheapest } from './rows.js';
+
+export type DurationResponse = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
+
+/** Spec §10 `GET /duration-analysis`: per nights, no interpolation (absent → null / []), `searched` marks unsearched gaps. */
+export function assembleDuration(def: SearchDefinition, ports: Ports): DurationResponse {
+  const loaded = loadRows(def, ports);
+  const verified = dedupByItinerary(loaded.verified).filter((r) => r.verdictClass === 'verified');
+  const providers = [...new Set(loaded.calendar.map((r) => r.provenance.providerId))].sort() as ProviderId[];
+  const searchedNights = new Set(
+    loaded.latestParent === null
+      ? []
+      : ports.repos.cells.outcomes(loaded.latestParent.id).filter((o) => SEARCHED.has(o.status)).map((o) => daysBetween(o.departureDate, o.returnDate)),
+  );
+  const byNights: DurationResponse['byNights'] = [];
+  for (let n = def.minNights; n <= def.maxNights; n++) {
+    const v = verified.filter((r) => r.cell.nights === n);
+    const best = cheapest(v);
+    byNights.push({
+      nights: n,
+      minVerified: best === null ? null : { pricePence: best.pricePence, provenance: best.provenance, stale: best.stale, ageHours: best.ageHours, n: v.length },
+      minCalendar: providers.flatMap((providerId) => {
+        const rows = loaded.calendar.filter((r) => r.cell.nights === n && r.provenance.providerId === providerId);
+        const b = cheapest(rows);
+        return b === null ? [] : [{ providerId, price: { pricePence: b.pricePence, provenance: b.provenance, stale: b.stale, ageHours: b.ageHours }, n: rows.length }];
+      }),
+      searched: searchedNights.has(n) || v.length > 0,
+    });
+  }
+  return { byNights, executions: loaded.scoped.map((e) => executionSummary(e, loaded.rc.now)) };
+}
+```
+
+`src/read/coverageView.ts` (separate from `coverage.ts` so `results.ts` → `coverage.ts` stays acyclic):
+
+```ts
+import { type CellOutcome, type SearchDefinition, type apiContract, selectedNotReached } from '@gmt/core';
+import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import { coverageSummaryFor } from './coverage.js';
@@ -4344,6 +4375,7 @@ import { loadRows } from './results.js';
 import { withNights } from './rows.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
+const OVERRUN_TOLERANCE = 1.1;
 /** Reasons a manual resume always retries (spec §7 Resume). */
 const MANUAL_RETRY = new Set(['auth', 'quota', 'parse']);
 /** Deterministic failures no resume retries (spec §7 Resume). */
@@ -4355,173 +4387,39 @@ export function retryable(o: Pick<CellOutcome, 'reason' | 'attempts'>): boolean 
   return o.attempts < 3 && !NEVER_RETRY.has(reason);
 }
 
-/** Per-provider request counts for one execution (spec §10 coverage). Reads the ledger table by its spec §7 columns. */
-export function ledgerByProvider(ports: Ports, executionId: string) {
-  const rows = ports.db.raw
-    .prepare(
-      `select provider_id as providerId,
-              sum(case when outcome = 'cache_hit' then 0 else 1 end) as calls,
-              sum(case when outcome = 'cache_hit' then 1 else 0 end) as cacheHits,
-              coalesce(sum(cost_micro_gbp), 0) as costMicroGbp
-         from provider_requests where execution_id = ? group by provider_id order by provider_id`,
-    )
-    .all(executionId) as Array<{ providerId: string; calls: number; cacheHits: number; costMicroGbp: number }>;
-  return rows.map((r) => ({ ...r, costPence: Math.ceil(r.costMicroGbp / PENCE_TO_MICRO) }));
-}
-
-/** Spec §10 `GET /definitions/:id/coverage` (View D). */
-export function assembleCoverage(def: SearchDefinition, ports: Ports): CoverageResponse {
+/** Spec §10 `GET /coverage` (View D): six buckets per stage × provider with request counts, flags, not-reached cells, errors. */
+export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: Engine): CoverageResponse {
   const loaded = loadRows(def, ports);
   const parent = loaded.latestParent;
   const summary = coverageSummaryFor(parent, loaded.all, ports);
-  if (parent === null) {
-    return { executionId: null, summary, perStageProvider: [], requests: [], flags: { overrun: false, parityBreak: false }, selectedNotReached: [], errors: [] };
-  }
-  const outcomes = ports.repos.cells.outcomes(parent.id);
-  const verification = outcomes.filter((o) => o.stage === 'verification');
-  // why: the stored estimate carries ESTIMATE_RETRY_FACTOR; overruns compare with the pre-factor plan (spec §8.1).
-  const planLength = parent.estimate === null ? null : Math.round(parent.estimate.perProvider.reduce((n, p) => n + p.calls, 0) / ports.config.estimateRetryFactor);
-  const selectedNotReached = ports.repos.cells.selected(parent.id).flatMap((c) => {
-    const mine = verification.filter((o) => cellKeyString(o) === cellKeyString(c));
-    const budget = mine.some((o) => o.status === 'skipped' && o.reason === 'budget');
-    const notRun = mine.some((o) => o.status === 'not_run');
-    return budget || notRun ? [{ cell: withNights(c), reason: budget ? ('budget' as const) : ('not_run' as const) }] : [];
+  const scheduleBlockedSince = engine.scheduler.blockedSince();
+  if (parent === null) return { executionId: null, summary, perStage: [], selectedNotReached: [], errors: [], scheduleBlockedSince };
+  const counts = ports.repos.ledger.countsFor(parent.id);
+  const parityBreak = ports.repos.notifications.wasSent('parity_break', parent.id, def.id);
+  const perStage = executionResponse(ports, parent).progress.map((p) => {
+    const ledger = counts.perProvider.find((c) => c.providerId === p.providerId && c.stage === p.stage);
+    const planCalls = parent.estimate?.perProvider.find((e) => e.providerId === p.providerId && e.stage === p.stage)?.planCalls ?? null;
+    const calls = ledger?.calls ?? 0;
+    return {
+      ...p,
+      requests: { calls, cacheHits: ledger?.cacheHits ?? 0, costMicroGbp: ledger?.costMicroGbp ?? 0, planCalls },
+      // why: spec §8.1: overruns compare with the pre-factor plan, not the factored estimate.
+      overrun: planCalls !== null && planCalls > 0 && calls > planCalls * OVERRUN_TOLERANCE,
+      parityBreak,
+    };
   });
+  const outcomes = ports.repos.cells.outcomes(parent.id);
+  const notReached = selectedNotReached(ports.repos.cells.selected(parent.id).map((s) => s.cell), outcomes.filter((o) => o.stage === 'verification'));
   return {
     executionId: parent.id,
     summary,
-    perStageProvider: executionResponse(ports, parent).progress,
-    requests: ledgerByProvider(ports, parent.id),
-    flags: {
-      overrun: planLength === null ? false : ports.repos.ledger.overrun(parent.id, planLength),
-      parityBreak: ports.repos.notifications.wasSent('parity_break', parent.id),
-    },
-    selectedNotReached,
+    perStage,
+    selectedNotReached: notReached.map((s) => ({ cell: withNights(s.cell), reason: s.reason })),
     errors: outcomes
       .filter((o) => o.status === 'error')
-      .map((o) => ({ cell: withNights(o), stage: o.stage, providerId: o.providerId, reason: o.reason, attempts: o.attempts, retryable: retryable(o) })),
+      .map((o) => ({ cell: withNights(o), stage: o.stage, providerId: o.providerId, reason: o.reason, lastError: o.lastError, attempts: o.attempts, retryable: retryable(o) })),
+    scheduleBlockedSince,
   };
-}
-```
-
-`src/read/calendar.ts`:
-
-```ts
-import { type CellOutcome, type SearchDefinition, type apiContract, addDays, cellKeyString, dedupByItinerary } from '@gmt/core';
-import type { z } from 'zod';
-import type { Ports } from '../wiring.js';
-import { SEARCHED, zeroBuckets, type Buckets } from './coverage.js';
-import { chooseBasis, loadRows } from './results.js';
-import { type Basis, type ResultRow, cheapest, datedPrice, hoursSince } from './rows.js';
-
-export type CalendarResponse = z.infer<typeof apiContract.calendarResponseSchema>;
-
-function bucketsOf(outcomes: readonly CellOutcome[]): Buckets {
-  const b = zeroBuckets();
-  for (const o of outcomes) {
-    b[o.status] += 1;
-    if (o.reusedFromExecutionId !== null) b.reused += 1;
-  }
-  return b;
-}
-
-/** The three day prices of spec §10: class verified only, partially verified with its count, calendar. */
-function cheapestOf(itinerarySearched: readonly ResultRow[], calendar: readonly ResultRow[]) {
-  const partial = itinerarySearched.filter((r) => r.verdictClass === 'partially-verified');
-  const v = cheapest(itinerarySearched.filter((r) => r.verdictClass === 'verified'));
-  const p = cheapest(partial);
-  const c = cheapest(calendar);
-  return {
-    cheapestVerified: v === null ? null : datedPrice(v),
-    cheapestPartiallyVerified: p === null ? null : { ...datedPrice(p), count: partial.length },
-    cheapestCalendar: c === null ? null : datedPrice(c),
-  };
-}
-
-/** Spec §10 `GET /definitions/:id/calendar`: one entry per departure date of the current window. */
-export function assembleCalendar(def: SearchDefinition, requested: Basis | undefined, ports: Ports): CalendarResponse {
-  const now = ports.clock.now();
-  const loaded = loadRows(def, ports);
-  const parent = loaded.latestParent;
-  const providers = (parent?.snapshot ?? def).providers.discovery;
-  const discovery = parent === null ? [] : ports.repos.cells.outcomes(parent.id).filter((o) => o.stage === 'discovery');
-  const rollUps = parent === null ? new Map() : ports.repos.cells.rollUps(parent.id);
-  const selected = parent === null ? [] : ports.repos.cells.selected(parent.id);
-  const children = loaded.all.filter((e) => e.isChild && e.status === 'completed');
-  const verified = dedupByItinerary(loaded.verified);
-  const days: CalendarResponse['days'] = [];
-  for (let d = loaded.space.departureFrom; d <= loaded.space.departureTo; d = addDays(d, 1)) {
-    const onDay = (r: ResultRow) => r.cell.departureDate === d;
-    const v = verified.filter(onDay);
-    const cal = loaded.calendar.filter(onDay);
-    const sel = selected.filter((c) => c.departureDate === d);
-    days.push({
-      date: d,
-      discovery: providers.map((providerId) => ({ providerId, buckets: bucketsOf(discovery.filter((o) => o.providerId === providerId && o.departureDate === d)) })),
-      verification: {
-        selected: sel.length,
-        itinerarySearched: sel.filter((c) => {
-          const s = rollUps.get(cellKeyString(c))?.verification.status ?? null;
-          return s !== null && SEARCHED.has(s);
-        }).length,
-        onDemand: children.filter((e) => e.cell?.departureDate === d).length,
-      },
-      ...cheapestOf(v, cal),
-      byDestination: def.destinations.map((destination) => ({
-        destination,
-        ...cheapestOf(v.filter((r) => r.cell.destination === destination), cal.filter((r) => r.cell.destination === destination)),
-      })),
-    });
-  }
-  return {
-    basis: chooseBasis(loaded, requested).basis,
-    days,
-    executions: loaded.scoped.map((e) => ({ id: e.id, status: e.status, ageHours: hoursSince(e.startedAt ?? now, now) })),
-  };
-}
-
-/** Spec §10 `GET /definitions/:id/calendar-gap`: calendar prices below the cheapest class-verified price. */
-export function assembleCalendarGap(def: SearchDefinition, ports: Ports) {
-  if (def.providers.verification.length === 0) return { hidden: true, cheapestVerified: null, cells: [] };
-  const loaded = loadRows(def, ports);
-  const best = cheapest(loaded.verified.filter((r) => r.verdictClass === 'verified'));
-  if (best === null) return { hidden: false, cheapestVerified: null, cells: [] };
-  const below = loaded.calendar.filter((r) => r.pricePence < best.pricePence).sort((a, b) => a.pricePence - b.pricePence);
-  return { hidden: false, cheapestVerified: datedPrice(best), cells: below.map(datedPrice) };
-}
-```
-
-`src/read/duration.ts`:
-
-```ts
-import { type SearchDefinition, type apiContract, dedupByItinerary } from '@gmt/core';
-import type { z } from 'zod';
-import type { Ports } from '../wiring.js';
-import { loadRows } from './results.js';
-import { cheapest, datedPrice } from './rows.js';
-
-export type DurationResponse = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
-
-/** Spec §10 `GET /definitions/:id/duration-analysis`: per nights, no interpolation (absent → null / []). */
-export function assembleDuration(def: SearchDefinition, ports: Ports): DurationResponse {
-  const loaded = loadRows(def, ports);
-  const verified = dedupByItinerary(loaded.verified).filter((r) => r.verdictClass === 'verified');
-  const providers = [...new Set(loaded.calendar.map((r) => r.provenance.providerId))].sort();
-  const nights: DurationResponse['nights'] = [];
-  for (let n = def.minNights; n <= def.maxNights; n++) {
-    const v = verified.filter((r) => r.cell.nights === n);
-    const best = cheapest(v);
-    nights.push({
-      nights: n,
-      minVerified: best === null ? null : { price: datedPrice(best), n: v.length },
-      minCalendar: providers.flatMap((providerId) => {
-        const rows = loaded.calendar.filter((r) => r.cell.nights === n && r.provenance.providerId === providerId);
-        const b = cheapest(rows);
-        return b === null ? [] : [{ providerId, price: datedPrice(b), n: rows.length }];
-      }),
-    });
-  }
-  return { nights };
 }
 ```
 
@@ -4532,28 +4430,22 @@ import { type CellKey, type SearchDefinition, type apiContract, cellKeyString } 
 import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import { loadRows } from './results.js';
-import { type ResultRow, datedPrice, withNights } from './rows.js';
+import { type ResultRow, withNights } from './rows.js';
 
 export type CellDetailResponse = z.infer<typeof apiContract.cellDetailResponseSchema>;
 
-/** Spec §10 cell route (View B side panel): outcomes per execution × stage × provider, and prices with provenance. */
+/** Spec §10 cell route (View B side panel): outcomes per execution × stage × provider, prices with provenance. */
 export function assembleCellDetail(def: SearchDefinition, target: CellKey, ports: Ports): CellDetailResponse {
   const key = cellKeyString(target);
   const loaded = loadRows(def, ports);
   const onCell = (r: ResultRow) => cellKeyString(r.cell) === key;
   return {
     cell: withNights(target),
-    outcomes: loaded.all.flatMap((e) =>
-      ports.repos.cells
-        .outcomes(e.id)
-        .filter((o) => cellKeyString(o) === key)
-        .map((o) => ({
-          executionId: e.id, isChild: e.isChild, stage: o.stage, providerId: o.providerId, status: o.status, reason: o.reason,
-          attempts: o.attempts, fetchedAt: o.fetchedAt, minPence: o.minPence, reusedFromExecutionId: o.reusedFromExecutionId,
-        })),
-    ),
-    calendarPrices: loaded.calendar.filter(onCell).map(datedPrice),
-    observations: loaded.verified.filter(onCell).map((r) => ({ itineraryHash: r.itineraryHash, verdictClass: r.verdictClass, unverified: r.unverified, price: datedPrice(r), booking: r.booking })),
+    outcomes: loaded.all.flatMap((e) => ports.repos.cells.outcomes(e.id, { cells: [target] })),
+    calendarPrices: loaded.calendar
+      .filter(onCell)
+      .flatMap((r) => (r.calendarPriceId === null ? [] : [{ pricePence: r.pricePence, provenance: r.provenance, stale: r.stale, ageHours: r.ageHours, executionId: r.executionId, calendarPriceId: r.calendarPriceId }])),
+    observations: loaded.verified.filter(onCell),
   };
 }
 ```
@@ -4561,8 +4453,7 @@ export function assembleCellDetail(def: SearchDefinition, target: CellKey, ports
 `src/routes/results.ts` (replace the file):
 
 ```ts
-import { type CellKey, type apiContract, iataSchema, isoDateSchema } from '@gmt/core';
-import type { z } from 'zod';
+import { type CellKey, iataSchema, isoDateSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
 import { assembleCalendar, assembleCalendarGap } from '../read/calendar.js';
 import { assembleCellDetail } from '../read/cell.js';
@@ -4573,9 +4464,7 @@ import { API_TEXT } from '../text.js';
 import { getLiveDefinition, param } from './shared.js';
 import type { HandlerTable, RouteInput } from './types.js';
 
-type CalendarQuery = z.infer<typeof apiContract.calendarQuerySchema>;
-
-/** Path parameters of the cell route, validated like a body (400 on a bad code or date). */
+/** Path parameters of the cell route; validated here as well, whatever `params` schema the route carries. */
 function cellFromPath(input: RouteInput): CellKey {
   const o = iataSchema.safeParse(param(input, 'origin'));
   const d = iataSchema.safeParse(param(input, 'destination'));
@@ -4586,21 +4475,21 @@ function cellFromPath(input: RouteInput): CellKey {
 }
 
 export const resultHandlers: HandlerTable = {
-  'GET /definitions/:id/results': (c, input, ctx) =>
+  'GET /api/definitions/:id/results': (c, input, ctx) =>
     c.json(assembleResults(getLiveDefinition(ctx, param(input, 'id')), (input.query ?? {}) as ResultsQuery, ctx.ports)),
-  'GET /definitions/:id/calendar': (c, input, ctx) =>
-    c.json(assembleCalendar(getLiveDefinition(ctx, param(input, 'id')), ((input.query ?? {}) as CalendarQuery).basis, ctx.ports)),
-  'GET /definitions/:id/duration-analysis': (c, input, ctx) => c.json(assembleDuration(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
-  'GET /definitions/:id/coverage': (c, input, ctx) => c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
-  'GET /definitions/:id/calendar-gap': (c, input, ctx) => c.json(assembleCalendarGap(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
-  'GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate': (c, input, ctx) =>
+  // why: the calendar returns every price kind with its stale thresholds; the client colours by one basis (spec §11), so ?basis= changes nothing here.
+  'GET /api/definitions/:id/calendar': (c, input, ctx) => c.json(assembleCalendar(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
+  'GET /api/definitions/:id/duration-analysis': (c, input, ctx) => c.json(assembleDuration(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
+  'GET /api/definitions/:id/coverage': (c, input, ctx) => c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),
+  'GET /api/definitions/:id/calendar-gap': (c, input, ctx) => c.json(assembleCalendarGap(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
+  'GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate': (c, input, ctx) =>
     c.json(assembleCellDetail(getLiveDefinition(ctx, param(input, 'id')), cellFromPath(input), ctx.ports)),
 };
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- views results`
+Run: `pnpm --filter @gmt/api exec vitest run test/views.test.ts test/results.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -4612,15 +4501,15 @@ git add apps/api && git commit -m "wp08: calendar, duration analysis, coverage, 
 ### Task 8.13: History routes and alert rule storage
 
 **Files:**
-- Create: `src/read/history.ts`, `src/routes/history.ts`, `src/routes/alerts.ts`
+- Create: `src/routes/history.ts`, `src/routes/alerts.ts`
 - Modify: `src/routes/index.ts`
 - Test: `test/history.test.ts`, `test/alerts.test.ts`
 
 **Interfaces:**
-- Consumes: `ItinerariesRepo.offerHistory`, `CalendarPricesRepo.history`, `RoutePriceHistoryRepo.series`, `AlertsRepo` (WP3); `alertRuleRequestSchema`, `historyResponseSchema` (WP0, Open question 2).
-- Produces: `historySeries`; routes `GET /itineraries/:hash/history`, `GET /routes/:origin/:destination/history`, `GET/POST /alerts`, `PUT/DELETE /alerts/:id`, `GET /alerts/events`.
+- Consumes: `ItinerariesRepo.offerHistory`, `CalendarPricesRepo.history`, `RoutePriceHistoryRepo.series`, `AlertsRepo` (WP3); `itineraryHistoryResponseSchema`, `routeHistoryResponseSchema`, `alertRuleInputSchema`, `alertEventsQuerySchema`, `cabinSchema`, `iataSchema` (WP0).
+- Produces: routes `GET /api/itineraries/:hash/history`, `GET /api/routes/:origin/:destination/history`, `GET/POST /api/alerts`, `PUT/DELETE /api/alerts/:id`, `GET /api/alerts/events`.
 
-Rules: one series per (provider, kind), points ordered by `fetchedAt`, each point with provenance; reused calendar rows are excluded (spec §7, the repository reads `reused_from_execution_id IS NULL`, asserted here); the route series is read in the requested cabin (default economy) and SearchApi's route-level lowest price is its own labelled series (spec §7 `route_price_history`). Alert routes store and read rules and events only; evaluation and delivery are WP11. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
+Rules: itinerary history is one series per (provider, seller, cabin); route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy; reused rows excluded by the repository, asserted here) plus SearchApi's route-level lowest-price series per provider, plotted by `date` (spec §7 `route_price_history`, §11). Every point carries provenance except route-series points, which carry `providerId` and `sourceKind` because the vendor gives no cabin (plan contract). Alert routes store and read rules and events only; evaluation and delivery are WP11. `GET /api/alerts` accepts an optional `?definitionId=` filter. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4628,15 +4517,15 @@ Rules: one series per (provider, kind), points ordered by `fetchedAt`, each poin
 
 ```ts
 import { apiContract } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { z } from 'zod';
-import { API_TEXT } from '../src/text.js';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 import { at, cell, seedCalendarPrice, seedExecution, seedObservation } from './seed.js';
 
-type History = z.infer<typeof apiContract.historyResponseSchema>;
+type ItineraryHistory = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
+type RouteHistory = z.infer<typeof apiContract.routeHistoryResponseSchema>;
 const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
 const C2 = cell('LHR', 'JFK', '2026-11-03', '2026-11-13');
 
@@ -4645,7 +4534,6 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
 async function world() {
   const x = await createHarness();
@@ -4659,34 +4547,34 @@ async function world() {
   seedCalendarPrice(x.ports.db, { executionId: 'E2', cell: C2, pricePence: 47_000, fetchedAt: at(-1) });
   x.ports.db.raw
     .prepare('insert into route_price_history (origin, destination, cabin, provider_id, date, lowest_price_pence, fetched_at) values (?, ?, ?, ?, ?, ?, ?)')
-    .run('LHR', 'JFK', 'economy', 'fixture', '2026-10-13', 44_000, at(-1));
+    .run('LHR', 'JFK', 'unknown', 'fixture', '2026-10-13', 44_000, at(-1));
   return x;
 }
 
 describe('history routes (spec §10, §7)', () => {
-  it('itinerary history: one series per provider and kind, points in time order with provenance', async () => {
+  it('itinerary history: one series per provider, seller and cabin, points in time order with provenance', async () => {
     h = await world();
-    const res = await h.request('/api/itineraries/hV/history');
-    const body = (await expectContract(res, 'GET', '/itineraries/:hash/history')) as History;
+    const body = (await expectContract(await h.request('/api/itineraries/hV/history'), 'GET', '/api/itineraries/:hash/history')) as ItineraryHistory;
+    expect(body.itineraryHash).toBe('hV');
     expect(body.series).toHaveLength(1);
-    expect(body.series[0]).toMatchObject({ providerId: 'fixture', kind: 'observation' });
-    expect(body.series[0]?.label).toMatch(/· itinerary-searched offers$/);
+    expect(body.series[0]).toMatchObject({ providerId: 'fixture', seller: 'BA', cabin: 'economy' });
     expect(body.series[0]?.points.map((p) => p.pricePence)).toEqual([60_000, 59_000]);
     expect(body.series[0]?.points.every((p) => p.provenance.providerId === 'fixture')).toBe(true);
   });
 
-  it('route history excludes reused rows and carries the route-level lowest series', async () => {
+  it('route history excludes reused rows and carries the route-level series by date', async () => {
     h = await world();
-    const body = (await expectContract(await h.request('/api/routes/LHR/JFK/history'), 'GET', '/routes/:origin/:destination/history')) as History;
-    expect(body.series.find((s) => s.kind === 'calendar')?.points.map((p) => p.pricePence)).toEqual([45_000, 47_000]);
-    expect(body.series.find((s) => s.kind === 'route-lowest')?.label).toBe(API_TEXT.routeLowestLabel);
+    const body = (await expectContract(await h.request('/api/routes/LHR/JFK/history'), 'GET', '/api/routes/:origin/:destination/history')) as RouteHistory;
+    expect([body.origin, body.destination]).toEqual(['LHR', 'JFK']);
+    expect(body.calendarSeries.find((s) => s.providerId === 'fixture')?.points.map((p) => p.pricePence)).toEqual([45_000, 47_000]);
+    expect(body.routeSeries.find((s) => s.providerId === 'fixture')?.points.map((p) => [p.date, p.pricePence])).toEqual([['2026-10-13', 44_000]]);
   });
 
   it('reads the requested cabin and rejects a bad airport code', async () => {
     h = await world();
-    const business = (await expectContract(await h.request('/api/routes/LHR/JFK/history?cabin=business'), 'GET', '/routes/:origin/:destination/history')) as History;
-    expect(business.series.find((s) => s.kind === 'calendar')).toBeUndefined();
-    expect((await h.request('/api/routes/lhr/JFK/history')).status).toBe(400);
+    const business = (await expectContract(await h.request('/api/routes/LHR/JFK/history?cabin=business'), 'GET', '/api/routes/:origin/:destination/history')) as RouteHistory;
+    expect(business.calendarSeries.every((s) => s.points.length === 0)).toBe(true);
+    expect((await h.request('/api/routes/LHRX/JFK/history')).status).toBe(400);
   });
 });
 ```
@@ -4694,10 +4582,10 @@ describe('history routes (spec §10, §7)', () => {
 `test/alerts.test.ts`:
 
 ```ts
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 import { at } from './seed.js';
 
 let h: Harness | undefined;
@@ -4705,9 +4593,8 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
-const rule = (definitionId: string) => ({ definitionId, type: 'absolute', thresholdPence: 50_000, basis: 'verified', requireAllVerified: true, cooldownHours: 336, enabled: true });
+const rule = (definitionId: string) => ({ definitionId, type: 'absolute', thresholdPence: 50_000, pct: null, basis: 'verified', requireAllVerified: true, cooldownHours: 336, enabled: true });
 async function code(res: Response): Promise<string> {
   return ((await res.json()) as { error: { code: string } }).error.code;
 }
@@ -4718,10 +4605,10 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
     const def = h.ports.repos.definitions.create(exampleDefinitionInput());
     const created = await h.request('/api/alerts', { json: rule(def.id) });
     expect(created.status).toBe(201);
-    const r = (await expectContract(created, 'POST', '/alerts')) as { id: string };
-    expect(((await expectContract(await h.request(`/api/alerts?definitionId=${def.id}`), 'GET', '/alerts')) as unknown[]).length).toBe(1);
+    const r = (await expectContract(created, 'POST', '/api/alerts')) as { id: string };
+    expect(((await expectContract(await h.request(`/api/alerts?definitionId=${def.id}`), 'GET', '/api/alerts')) as unknown[]).length).toBe(1);
     const put = await h.request(`/api/alerts/${r.id}`, { method: 'PUT', json: { thresholdPence: 40_000 } });
-    expect(((await expectContract(put, 'PUT', '/alerts/:id')) as { thresholdPence: number }).thresholdPence).toBe(40_000);
+    expect(((await expectContract(put, 'PUT', '/api/alerts/:id')) as { thresholdPence: number }).thresholdPence).toBe(40_000);
     expect((await h.request(`/api/alerts/${r.id}`, { method: 'DELETE' })).status).toBe(200);
     expect(await (await h.request(`/api/alerts?definitionId=${def.id}`)).json()).toEqual([]);
     const gone = await h.request(`/api/alerts/${r.id}`, { method: 'DELETE' });
@@ -4753,10 +4640,10 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
     h.ports.db.raw
       .prepare(
         `insert into alert_events (rule_id, identity_key, observation_id, calendar_price_id, dedup_key, fired_at, status, reason, payload_json)
-         values (?, 'hV', null, null, 'hV|500', ?, 'sent', 'below £500', '{}')`,
+         values (?, ?, null, null, ?, ?, 'sent', 'below £500', '{}')`,
       )
-      .run(r.id, at(-1));
-    const events = (await expectContract(await h.request(`/api/alerts/events?ruleId=${r.id}`), 'GET', '/alerts/events')) as Array<{ status: string }>;
+      .run(r.id, `${r.id}|hV`, `${r.id}|hV|500`, at(-1));
+    const events = (await expectContract(await h.request(`/api/alerts/events?ruleId=${r.id}`), 'GET', '/api/alerts/events')) as Array<{ status: string }>;
     expect(events.map((e) => e.status)).toEqual(['sent']);
   });
 });
@@ -4764,77 +4651,40 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `pnpm --filter @gmt/api test -- history alerts`
+Run: `pnpm --filter @gmt/api exec vitest run test/history.test.ts test/alerts.test.ts`
 Expected: FAIL: the routes return 404 `not_found`.
 
 - [ ] **Step 3: Implement**
 
-`src/read/history.ts`:
-
-```ts
-import type { ProviderId, apiContract } from '@gmt/core';
-import type { HistoryPoint } from '@gmt/db';
-import type { z } from 'zod';
-import { API_TEXT } from '../text.js';
-import type { Ports } from '../wiring.js';
-
-export type HistoryResponse = z.infer<typeof apiContract.historyResponseSchema>;
-
-function labelFor(kind: HistoryPoint['kind'], name: string): string {
-  if (kind === 'route-lowest') return API_TEXT.routeLowestLabel;
-  return kind === 'observation' ? API_TEXT.observationSeries(name) : API_TEXT.calendarSeries(name);
-}
-
-/** Spec §11 History: one series per provider and kind; x = fetchedAt; gaps are left to the chart. */
-export function historySeries(points: readonly HistoryPoint[], ports: Ports): HistoryResponse {
-  const groups = new Map<string, { providerId: ProviderId; kind: HistoryPoint['kind']; points: HistoryPoint[] }>();
-  for (const p of points) {
-    const key = `${p.providerId}|${p.kind}`;
-    const g = groups.get(key) ?? { providerId: p.providerId, kind: p.kind, points: [] };
-    g.points.push(p);
-    groups.set(key, g);
-  }
-  return {
-    series: [...groups.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([, g]) => ({
-        providerId: g.providerId,
-        kind: g.kind,
-        label: labelFor(g.kind, ports.providers.find((p) => p.id === g.providerId)?.displayName ?? g.providerId),
-        points: [...g.points]
-          .sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt))
-          .map((p) => ({ fetchedAt: p.fetchedAt, pricePence: p.pricePence, provenance: p.provenance })),
-      })),
-  };
-}
-```
-
 `src/routes/history.ts`:
 
 ```ts
-import { type apiContract, iataSchema } from '@gmt/core';
-import type { z } from 'zod';
+import { cabinSchema, iataSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
-import { historySeries } from '../read/history.js';
 import { API_TEXT } from '../text.js';
 import { param } from './shared.js';
 import type { HandlerTable } from './types.js';
 
-type RouteHistoryQuery = z.infer<typeof apiContract.routeHistoryQuerySchema>;
-
 export const historyHandlers: HandlerTable = {
-  'GET /itineraries/:hash/history': (c, input, ctx) => c.json(historySeries(ctx.ports.repos.itineraries.offerHistory(param(input, 'hash')), ctx.ports)),
+  // why: the repository already groups per (provider, seller, cabin) with provenance on every point (spec §11 History).
+  'GET /api/itineraries/:hash/history': (c, input, ctx) => {
+    const hash = param(input, 'hash');
+    return c.json({ itineraryHash: hash, series: ctx.ports.repos.itineraries.offerHistory(hash) });
+  },
 
-  'GET /routes/:origin/:destination/history': (c, input, ctx) => {
+  'GET /api/routes/:origin/:destination/history': (c, input, ctx) => {
     const o = iataSchema.safeParse(param(input, 'origin'));
     const d = iataSchema.safeParse(param(input, 'destination'));
-    if (!o.success || !d.success) throw new ApiError(400, 'validation', API_TEXT.validation('path'));
-    const cabin = ((input.query ?? {}) as RouteHistoryQuery).cabin ?? 'economy';
-    const points = [
-      ...ctx.ports.repos.calendarPrices.history(o.data, d.data, cabin),
-      ...ctx.ports.providers.flatMap((p) => ctx.ports.repos.routeHistory.series(o.data, d.data, cabin, p.id)),
-    ];
-    return c.json(historySeries(points, ctx.ports));
+    const cabin = cabinSchema.safeParse(c.req.query('cabin') ?? 'economy');
+    if (!o.success || !d.success || !cabin.success) throw new ApiError(400, 'validation', API_TEXT.validation(o.success && d.success ? 'query' : 'path'));
+    return c.json({
+      origin: o.data,
+      destination: d.data,
+      calendarSeries: ctx.ports.repos.calendarPrices.history(o.data, d.data, cabin.data).map((s) => ({ providerId: s.providerId, cabin: cabin.data, points: s.points })),
+      routeSeries: ctx.ports.providers
+        .map((p) => ({ providerId: p.id, points: ctx.ports.repos.routeHistory.series(o.data, d.data, p.id) }))
+        .filter((s) => s.points.length > 0),
+    });
   },
 };
 ```
@@ -4842,20 +4692,18 @@ export const historyHandlers: HandlerTable = {
 `src/routes/alerts.ts`:
 
 ```ts
-import { apiContract } from '@gmt/core';
+import { type AlertRuleInput, apiContract } from '@gmt/core';
 import type { z } from 'zod';
-import { ApiError } from '../errors.js';
+import { ApiError, fieldsDetail, issuesToFields } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import { param } from './shared.js';
 import type { HandlerTable, RouteContext } from './types.js';
 
-type AlertRuleRequest = z.infer<typeof apiContract.alertRuleRequestSchema>;
-type AlertsQuery = z.infer<typeof apiContract.alertsQuerySchema>;
 type AlertEventsQuery = z.infer<typeof apiContract.alertEventsQuerySchema>;
 
 function requireDefinition(ctx: RouteContext, id: string): void {
   const def = ctx.ports.repos.definitions.get(id);
-  if (def === null || def.deletedAt !== null) throw new ApiError(422, 'definition_not_found', API_TEXT.definitionNotFound(id));
+  if (def === null || def.deletedAt !== null) throw new ApiError(422, 'definition_not_found', API_TEXT.definitionNotFound(id), fieldsDetail([{ field: 'definitionId', message: API_TEXT.definitionNotFound(id) }]));
 }
 
 function getRule(ctx: RouteContext, id: string) {
@@ -4865,34 +4713,33 @@ function getRule(ctx: RouteContext, id: string) {
 }
 
 export const alertHandlers: HandlerTable = {
-  'GET /alerts': (c, input, ctx) => c.json(ctx.ports.repos.alerts.rules(((input.query ?? {}) as AlertsQuery).definitionId)),
+  'GET /api/alerts': (c, _input, ctx) => c.json(ctx.ports.repos.alerts.rules(c.req.query('definitionId') || undefined)),
 
-  'POST /alerts': (c, input, ctx) => {
-    const body = input.body as AlertRuleRequest;
+  'POST /api/alerts': (c, input, ctx) => {
+    const body = input.body as AlertRuleInput;
     requireDefinition(ctx, body.definitionId);
     return c.json(ctx.ports.repos.alerts.create(body), 201);
   },
 
-  'PUT /alerts/:id': (c, input, ctx) => {
-    const existing = getRule(ctx, param(input, 'id'));
-    const patch = input.body as Partial<AlertRuleRequest>;
-    const { id: _id, ...current } = existing;
+  'PUT /api/alerts/:id': (c, input, ctx) => {
+    const { id, ...current } = getRule(ctx, param(input, 'id'));
+    const patch = input.body as Partial<AlertRuleInput>;
     // why: validate the merged rule, so a partial update cannot slip past the requireAllVerified refinement (spec §6.8).
-    const merged = apiContract.alertRuleRequestSchema.safeParse({ ...current, ...patch });
-    if (!merged.success) throw new ApiError(422, 'invalid_alert_rule', API_TEXT.validation('body'), merged.error.issues.map((i) => ({ path: i.path.map(String).join('.'), message: i.message })));
+    const merged = apiContract.alertRuleInputSchema.safeParse({ ...current, ...patch });
+    if (!merged.success) throw new ApiError(422, 'invalid_alert_rule', API_TEXT.validation('body'), fieldsDetail(issuesToFields(merged.error.issues)));
     if (patch.definitionId !== undefined) requireDefinition(ctx, patch.definitionId);
-    return c.json(ctx.ports.repos.alerts.update(existing.id, patch));
+    return c.json(ctx.ports.repos.alerts.update(id, patch));
   },
 
-  'DELETE /alerts/:id': (c, input, ctx) => {
+  'DELETE /api/alerts/:id': (c, input, ctx) => {
     const existing = getRule(ctx, param(input, 'id'));
     ctx.ports.repos.alerts.delete(existing.id);
     return c.json(existing);
   },
 
-  'GET /alerts/events': (c, input, ctx) => {
+  'GET /api/alerts/events': (c, input, ctx) => {
     const q = (input.query ?? {}) as AlertEventsQuery;
-    return c.json(ctx.ports.repos.alerts.events({ ...(q.ruleId === undefined ? {} : { ruleId: q.ruleId }), ...(q.definitionId === undefined ? {} : { definitionId: q.definitionId }), limit: q.limit ?? 100 }));
+    return c.json(ctx.ports.repos.alerts.events({ ...(q.ruleId === undefined ? {} : { ruleId: q.ruleId }), limit: q.limit ?? 100 }));
   },
 };
 ```
@@ -4901,7 +4748,7 @@ export const alertHandlers: HandlerTable = {
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `pnpm --filter @gmt/api test -- history alerts`
+Run: `pnpm --filter @gmt/api exec vitest run test/history.test.ts test/alerts.test.ts`
 Expected: PASS, 3 + 4 tests.
 
 - [ ] **Step 5: Commit**
@@ -4910,7 +4757,7 @@ Expected: PASS, 3 + 4 tests.
 git add apps/api && git commit -m "wp08: history routes and alert rule storage"
 ```
 
-### Task 8.14: `/tools/smoke` and `/tools/record` inside the app process
+### Task 8.14: `POST /api/tools/record` inside the app process
 
 **Files:**
 - Create: `src/routes/tools.ts`, `src/tools/inProcess.ts`
@@ -4918,125 +4765,118 @@ git add apps/api && git commit -m "wp08: history routes and alert rule storage"
 - Test: `test/tools.test.ts`
 
 **Interfaces:**
-- Consumes: `recordFixtures(ports, args, log)` from `src/tools/record.ts` (WP4b, Open question 4); `toolRunResponseSchema`, `toolSmokeRequestSchema`, `toolRecordRequestSchema` (WP0, Open question 2).
-- Produces: `inProcessTools(ports): ToolRunners`; routes `POST /tools/smoke`, `POST /tools/record`.
+- Consumes: `recordFixtures(ports, args, { signal }): Promise<RecordSummary>` (WP4b `src/tools/record.ts`); `toolRecordRequestSchema` `{ budget, origins, destinations, month }`, `toolRunResponseSchema` `{ exitCode, summary, lines, fixturesWritten }` (WP0).
+- Produces: `inProcessTools(ports): ToolRunners`, `recordResponse(summary)`; route `POST /api/tools/record`.
 
-Rules (spec §7, §10, §13): both routes need auth like every other route; they run the tool functions in this process (the app holds `app_lock`, so the tool bootstrap would refuse); one tool at a time (`409 tool_busy`); a runner that is not registered answers `503 tool_unavailable` (the smoke runner arrives with WP13, which adds `smoke` to `inProcessTools`); a runner that throws answers `500 tool_failed` and logs the URL-stripped message.
+Rules (spec §7, §10, §13): the route needs auth like every other; it runs the record tool in this process (the app holds `app_lock`, so the tool bootstrap would refuse) over the app's ports (`ports.recorder` from WP4b); one tool at a time (`409 tool_busy`); an unregistered runner answers `503 tool_unavailable`; a runner that throws answers `500 tool_failed` and logs the URL-stripped message. `POST /api/tools/smoke` is WP13's and stays unmounted here. `exitCode` is 0 when every planned call returned HTTP 200 or was skipped, else 1.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import type { ToolRunResult } from '../src/routes/types.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ToolRunResponse } from '../src/routes/types.js';
+import { recordResponse } from '../src/tools/inProcess.js';
 import { expectContract } from './contract.js';
-import { type Harness, createHarness, stopMsw } from './harness.js';
+import { type Harness, createHarness } from './harness.js';
 
 let h: Harness | undefined;
 afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
-const ok: ToolRunResult = { ok: true, exitCode: 0, lines: ['one tile per configured provider'] };
+const ok: ToolRunResponse = { exitCode: 0, summary: 'done', lines: ['1 call'], fixturesWritten: ['fixtures/recorded/x.json'] };
+const body = { budget: 3, origins: ['LHR'], destinations: ['JFK'], month: '2027-03' };
 async function code(res: Response): Promise<string> {
   return ((await res.json()) as { error: { code: string } }).error.code;
 }
 
-describe('/tools/* (spec §10, §7 app_lock)', () => {
-  it('both routes require auth', async () => {
-    h = await createHarness({ app: { tools: { smoke: async () => ok, record: async () => ok } } });
-    expect((await h.request('/api/tools/smoke', { method: 'POST', json: {}, auth: false })).status).toBe(401);
-    expect((await h.request('/api/tools/record', { method: 'POST', json: { budget: 3 }, auth: false })).status).toBe(401);
+describe('POST /api/tools/record (spec §10, §7 app_lock)', () => {
+  it('requires auth', async () => {
+    h = await createHarness({ app: { tools: { record: async () => ok } } });
+    expect((await h.request('/api/tools/record', { method: 'POST', json: body, auth: false })).status).toBe(401);
   });
 
-  it('503 when the runner is not registered', async () => {
+  it('503 when the runner is not registered; the smoke route is not mounted by WP8', async () => {
     h = await createHarness();
-    const res = await h.request('/api/tools/smoke', { method: 'POST', json: {} });
+    const res = await h.request('/api/tools/record', { method: 'POST', json: body });
     expect(res.status).toBe(503);
     expect(await code(res)).toBe('tool_unavailable');
+    expect(await code(await h.request('/api/tools/smoke', { method: 'POST', json: { origin: 'LHR', destination: 'JFK' } }))).toBe('not_found');
   });
 
-  it('runs the registered runner and passes the record budget', async () => {
-    const record = vi.fn(async (_args: { budget: number }) => ok);
-    h = await createHarness({ app: { tools: { smoke: async () => ok, record } } });
-    const smoke = await h.request('/api/tools/smoke', { method: 'POST', json: {} });
-    expect(smoke.status).toBe(200);
-    expect(await expectContract(smoke, 'POST', '/tools/smoke')).toEqual({ tool: 'smoke', ...ok });
-    expect((await h.request('/api/tools/record', { method: 'POST', json: { budget: 3 } })).status).toBe(200);
-    expect(record).toHaveBeenCalledWith({ budget: 3 });
-    expect((await h.request('/api/tools/record', { method: 'POST', json: { budget: 0 } })).status).toBe(400);
+  it('runs the registered runner with the validated arguments', async () => {
+    const record = vi.fn(async (_args: unknown, _signal: AbortSignal) => ok);
+    h = await createHarness({ app: { tools: { record } } });
+    const res = await h.request('/api/tools/record', { method: 'POST', json: body });
+    expect(res.status).toBe(200);
+    expect(await expectContract(res, 'POST', '/api/tools/record')).toEqual(ok);
+    expect(record.mock.calls[0]?.[0]).toEqual(body);
+    expect((await h.request('/api/tools/record', { method: 'POST', json: { ...body, budget: 0 } })).status).toBe(400);
   });
 
   it('one tool at a time', async () => {
     let release: (() => void) | undefined;
-    const slow = () => new Promise<ToolRunResult>((resolve) => (release = () => resolve(ok)));
-    h = await createHarness({ app: { tools: { smoke: slow, record: async () => ok } } });
-    const first = h.request('/api/tools/smoke', { method: 'POST', json: {} });
+    const slow = () => new Promise<ToolRunResponse>((resolve) => (release = () => resolve(ok)));
+    h = await createHarness({ app: { tools: { record: slow } } });
+    const first = h.request('/api/tools/record', { method: 'POST', json: body });
     await vi.waitFor(() => expect(release).toBeDefined());
-    const busy = await h.request('/api/tools/record', { method: 'POST', json: { budget: 1 } });
+    const busy = await h.request('/api/tools/record', { method: 'POST', json: body });
     expect(busy.status).toBe(409);
     expect(await code(busy)).toBe('tool_busy');
     release?.();
     expect((await first).status).toBe(200);
-    expect((await h.request('/api/tools/record', { method: 'POST', json: { budget: 1 } })).status).toBe(200);
   });
 
   it('a failing runner answers 500 tool_failed without leaking URLs', async () => {
-    h = await createHarness({ app: { tools: { smoke: async () => Promise.reject(new Error('GET https://example.test/x?api_key=SENTINEL-TOOL failed')) } } });
-    const res = await h.request('/api/tools/smoke', { method: 'POST', json: {} });
+    h = await createHarness({ app: { tools: { record: async () => Promise.reject(new Error('GET https://example.test/x?api_key=SENTINEL-TOOL failed')) } } });
+    const res = await h.request('/api/tools/record', { method: 'POST', json: body });
     expect(res.status).toBe(500);
     const text = await res.text();
     expect(text).toContain('tool_failed');
     expect(text).not.toContain('SENTINEL-TOOL');
     expect(h.logLines.join('')).not.toContain('SENTINEL-TOOL');
   });
+
+  it('maps a RecordSummary to the tool response', () => {
+    expect(recordResponse({ calls: [{ id: 'a', providerId: 'searchapi', status: 200, file: 'f1.json' }, { id: 'b', providerId: 'travelpayouts', status: 'skipped', file: null }], creditsUsed: 1, freeCalls: 0 }))
+      .toMatchObject({ exitCode: 0, fixturesWritten: ['f1.json'], lines: ['a searchapi 200 f1.json', 'b travelpayouts skipped'] });
+    expect(recordResponse({ calls: [{ id: 'a', providerId: 'searchapi', status: 429, file: null }], creditsUsed: 0, freeCalls: 0 }).exitCode).toBe(1);
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- tools`
-Expected: FAIL: the routes return 404 `not_found` (the auth test passes already).
+Run: `pnpm --filter @gmt/api exec vitest run test/tools.test.ts`
+Expected: FAIL: `Cannot find module '../src/tools/inProcess.js'`.
 
 - [ ] **Step 3: Implement**
 
 `src/routes/tools.ts`:
 
 ```ts
-import { type apiContract, stripUrlsInText } from '@gmt/core';
-import type { Context } from 'hono';
-import type { z } from 'zod';
+import { stripUrlsInText } from '@gmt/core';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
-import type { AppEnv, HandlerTable, RouteContext, ToolRunResult } from './types.js';
-
-type RecordRequest = z.infer<typeof apiContract.toolRecordRequestSchema>;
-
-/** Runs one tool in-process, one at a time (spec §10 `/tools/*`). */
-async function runTool(c: Context<AppEnv>, ctx: RouteContext, name: 'smoke' | 'record', run: (() => Promise<ToolRunResult>) | null) {
-  if (run === null) throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable(name));
-  if (ctx.toolInFlight.name !== null) throw new ApiError(409, 'tool_busy', API_TEXT.toolBusy(ctx.toolInFlight.name));
-  ctx.toolInFlight.name = name;
-  try {
-    return c.json({ tool: name, ...(await run()) });
-  } catch (err) {
-    ctx.ports.log.error({ tool: name, err: { message: stripUrlsInText(err instanceof Error ? err.message : String(err)) } }, 'tool failed');
-    throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed(name));
-  } finally {
-    ctx.toolInFlight.name = null;
-  }
-}
+import type { HandlerTable, ToolRecordRequest } from './types.js';
 
 export const toolHandlers: HandlerTable = {
-  'POST /tools/smoke': (c, _input, ctx) => {
-    const smoke = ctx.tools.smoke;
-    return runTool(c, ctx, 'smoke', smoke === undefined ? null : () => smoke({}));
-  },
-  'POST /tools/record': (c, input, ctx) => {
+  /** Spec §10 `/tools/record`: the recording script inside the app process, one tool at a time. */
+  'POST /api/tools/record': async (c, input, ctx) => {
     const record = ctx.tools.record;
-    const body = input.body as RecordRequest;
-    return runTool(c, ctx, 'record', record === undefined ? null : () => record({ budget: body.budget }));
+    if (record === undefined) throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable('record'));
+    if (ctx.toolInFlight.name !== null) throw new ApiError(409, 'tool_busy', API_TEXT.toolBusy(ctx.toolInFlight.name));
+    ctx.toolInFlight.name = 'record';
+    const abort = new AbortController();
+    try {
+      return c.json(await record(input.body as ToolRecordRequest, abort.signal));
+    } catch (err) {
+      ctx.ports.log.error({ tool: 'record', err: { message: stripUrlsInText(err instanceof Error ? err.message : String(err)) } }, 'tool failed');
+      throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed('record'));
+    } finally {
+      ctx.toolInFlight.name = null;
+    }
   },
 };
 ```
@@ -5044,16 +4884,28 @@ export const toolHandlers: HandlerTable = {
 `src/tools/inProcess.ts`:
 
 ```ts
-import type { ToolRunners } from '../routes/types.js';
+import { API_TEXT } from '../text.js';
+import type { ToolRunResponse, ToolRunners } from '../routes/types.js';
 import type { Ports } from '../wiring.js';
-import { recordFixtures } from './record.js';
+import { type RecordSummary, recordFixtures } from './record.js';
+
+/** WP4b's RecordSummary → the api-contract tool response. Exit 0 when every call returned 200 or was skipped. */
+export function recordResponse(s: RecordSummary): ToolRunResponse {
+  const failed = s.calls.some((c) => c.status !== 'skipped' && c.status !== 200);
+  return {
+    exitCode: failed ? 1 : 0,
+    summary: API_TEXT.recordSummary(s.calls.length, s.creditsUsed, s.freeCalls),
+    lines: s.calls.map((c) => [c.id, c.providerId, String(c.status), ...(c.file === null ? [] : [c.file])].join(' ')),
+    fixturesWritten: s.calls.flatMap((c) => (c.file === null ? [] : [c.file])),
+  };
+}
 
 /**
  * The tools reachable while the app holds app_lock (spec §7): the same functions the tool
- * bootstrap runs, over the app's own ports. WP13 adds `smoke` here.
+ * bootstrap runs, over the app's own ports (including `ports.recorder`). WP13 owns smoke.
  */
 export function inProcessTools(ports: Ports): ToolRunners {
-  return { record: (args) => recordFixtures(ports, args, ports.log) };
+  return { record: async (args, signal) => recordResponse(await recordFixtures(ports, args, { signal })) };
 }
 ```
 
@@ -5061,13 +4913,13 @@ export function inProcessTools(ports: Ports): ToolRunners {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api test -- tools`
-Expected: PASS, 5 tests.
+Run: `pnpm --filter @gmt/api exec vitest run test/tools.test.ts`
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp08: /tools/smoke and /tools/record in-process, one at a time"
+git add apps/api && git commit -m "wp08: POST /api/tools/record in-process over recordFixtures"
 ```
 
 ### Task 8.15: Contract sweep: strict mounting, auth flags, every response against `core/api-contract`, provenance, banned words, sentinels
@@ -5077,20 +4929,21 @@ git add apps/api && git commit -m "wp08: /tools/smoke and /tools/record in-proce
 - Test: `test/contract-sweep.test.ts`
 
 **Interfaces:**
-- Consumes: `apiContract.ROUTES`, `findBannedWords` (WP0).
-- Produces: `createApp` throws when a ROUTES entry has no handler or a handler has no ROUTES entry.
+- Consumes: `apiContract.ROUTES`, `findBannedWords`, `BANNED_WORD_ALLOWLIST` (WP0).
+- Produces: `createApp` throws when a ROUTES entry has no handler (unless listed in `OWNED_ELSEWHERE`) or a handler has no ROUTES entry.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-import { apiContract, findBannedWords } from '@gmt/core';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { BANNED_WORD_ALLOWLIST, apiContract, findBannedWords } from '@gmt/core';
+import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp } from '../src/app.js';
+import { OWNED_ELSEWHERE } from '../src/routes/types.js';
 import { API_TEXT } from '../src/text.js';
 import { expectContract } from './contract.js';
 import { exampleDefinitionInput } from './examples.js';
-import { type Harness, SENTINELS, basic, createHarness, stopMsw } from './harness.js';
+import { type Harness, SENTINELS, basic, createHarness } from './harness.js';
 import { at, cell, seedCalendarPrice, seedCell, seedExecution, seedObservation, seedOutcome } from './seed.js';
 
 let h: Harness | undefined;
@@ -5098,9 +4951,9 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-afterAll(() => stopMsw());
 
 const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+const mounted = apiContract.ROUTES.filter((r) => !OWNED_ELSEWHERE.has(`${r.method} ${r.path}`));
 
 /** A small world touching every read route: one parent execution, a calendar price, an observation, an alert rule. */
 async function seedWorld(x: Harness): Promise<{ def: string; exec: string; alert: string }> {
@@ -5111,20 +4964,21 @@ async function seedWorld(x: Harness): Promise<{ def: string; exec: string; alert
   seedOutcome(x.ports.db, 'E1', C1, 'verification', 'fixture', { status: 'priced', fetchedAt: at(-1) });
   seedCalendarPrice(x.ports.db, { executionId: 'E1', cell: C1, pricePence: 45_000, fetchedAt: at(-1) });
   seedObservation(x.ports.db, { executionId: 'E1', cell: C1, hash: 'hV', pricePence: 60_000, fetchedAt: at(-1) });
-  const alert = x.ports.repos.alerts.create({ definitionId: def.id, type: 'absolute', thresholdPence: 50_000, basis: 'verified', requireAllVerified: true, cooldownHours: 336, enabled: true });
+  const alert = x.ports.repos.alerts.create({ definitionId: def.id, type: 'absolute', thresholdPence: 50_000, pct: null, basis: 'verified', requireAllVerified: true, cooldownHours: 336, enabled: true });
   return { def: def.id, exec: 'E1', alert: alert.id };
 }
 
 function fill(path: string, ids: { def: string; exec: string; alert: string }): string {
-  return path
-    .replace(/^\/definitions\/:id/, `/definitions/${ids.def}`)
-    .replace(/^\/executions\/:id/, `/executions/${ids.exec}`)
-    .replace(/^\/alerts\/:id/, `/alerts/${ids.alert}`)
+  const p = path
+    .replace(/^\/api\/definitions\/:id/, `/api/definitions/${ids.def}`)
+    .replace(/^\/api\/executions\/:id/, `/api/executions/${ids.exec}`)
+    .replace(/^\/api\/alerts\/:id/, `/api/alerts/${ids.alert}`)
     .replace(':hash', 'hV')
     .replace(':origin', 'LHR')
     .replace(':destination', 'JFK')
     .replace(':departureDate', '2026-11-02')
     .replace(':returnDate', '2026-11-12');
+  return p === '/api/airports' ? `${p}?q=LHR` : p;
 }
 const missing = { def: 'zz-missing', exec: 'zz-missing', alert: 'zz-missing' };
 
@@ -5132,16 +4986,16 @@ const missing = { def: 'zz-missing', exec: 'zz-missing', alert: 'zz-missing' };
 function pricesWithoutProvenance(v: unknown, path = '$'): string[] {
   if (Array.isArray(v)) return v.flatMap((x, i) => pricesWithoutProvenance(x, `${path}[${i}]`));
   if (v === null || typeof v !== 'object') return [];
-  const here = 'pricePence' in v && !('provenance' in v) ? [path] : [];
+  const here = 'pricePence' in v && !('provenance' in v) && !('sourceKind' in v) ? [path] : []; // why: route-series points carry providerId + sourceKind by contract
   return [...here, ...Object.entries(v).flatMap(([k, x]) => pricesWithoutProvenance(x, `${path}.${k}`))];
 }
 
-/** Every user-facing string in a response: reasons, notices, messages, labels, assumptions. */
+/** Every user-facing string in a response: reasons, notices, messages, labels, notes, summaries, assumptions. */
 function userStrings(v: unknown): string[] {
   if (Array.isArray(v)) return v.flatMap(userStrings);
   if (v === null || typeof v !== 'object') return [];
   return Object.entries(v).flatMap(([k, x]) => {
-    if (['basisReason', 'message', 'label'].includes(k) && typeof x === 'string') return [x];
+    if (['basisReason', 'message', 'label', 'ceilingNote', 'summary'].includes(k) && typeof x === 'string') return [x];
     if (['messages', 'notices', 'assumptions'].includes(k) && Array.isArray(x)) return x.filter((s): s is string => typeof s === 'string');
     return userStrings(x);
   });
@@ -5150,23 +5004,23 @@ function userStrings(v: unknown): string[] {
 const SAMPLE_ARGS: Record<string, unknown[]> = {
   rateLimited: [42], hostRejected: ['evil.example:3000', ['localhost:3000']], originRejected: ['https://evil.example', ['localhost:3000']],
   validation: ['body'], definitionNotFound: ['d1'], executionNotFound: ['e1'], alertNotFound: ['a1'], invalidCron: ['sub-hourly schedules are not allowed'],
-  notCancellable: ['completed'], unknownAirport: ['AAA'], insideSpace: [0, 3], observationSeries: ['Fixture provider'], calendarSeries: ['Fixture provider'],
-  toolUnavailable: ['smoke'], toolBusy: ['record'], toolFailed: ['smoke'],
+  ceilingNote: [3500, 3200], notCancellable: ['completed'], unknownAirport: ['AAA'], insideSpace: [0, 3],
+  toolUnavailable: ['record'], toolBusy: ['record'], toolFailed: ['record'], recordSummary: [3, 1, 2],
 };
 
 describe('ROUTES mounting (spec §10)', () => {
   it('refuses a ROUTES entry without a handler and a handler without a ROUTES entry', async () => {
     const x = await createHarness();
     h = x;
-    const extra = { method: 'GET', path: '/unmapped', response: z.object({}), auth: 'required' } as const;
-    expect(() => createApp(x.ports, x.engine, { routes: [...apiContract.ROUTES, extra] })).toThrow(/no handler for GET \/unmapped/);
-    expect(() => createApp(x.ports, x.engine, { routes: apiContract.ROUTES.filter((r) => r.path !== '/budget') })).toThrow(/no route for handler GET \/budget/);
+    const extra = { method: 'GET', path: '/api/unmapped', response: z.object({}), auth: 'required' } as const;
+    expect(() => createApp(x.ports, x.engine, { routes: [...apiContract.ROUTES, extra] })).toThrow(/no handler for GET \/api\/unmapped/);
+    expect(() => createApp(x.ports, x.engine, { routes: apiContract.ROUTES.filter((r) => r.path !== '/api/budget') })).toThrow(/no route for handler GET \/api\/budget/);
   });
 
-  it('every entry is mounted with its method and auth flag', async () => {
+  it('every entry WP8 owns is mounted with its method and auth flag', async () => {
     h = await createHarness();
-    for (const route of apiContract.ROUTES) {
-      const path = `/api${fill(route.path, missing)}`;
+    for (const route of mounted) {
+      const path = fill(route.path, missing);
       const json = route.method === 'GET' ? undefined : {};
       const anonymous = await h.request(path, { method: route.method, auth: false, ...(json === undefined ? {} : { json }) });
       if (route.auth === 'required') expect(anonymous.status, `${route.method} ${route.path} without auth`).toBe(401);
@@ -5182,10 +5036,10 @@ describe('every GET route against the contract, with provenance on every price (
   it('validates each response and finds no price without provenance', async () => {
     h = await createHarness();
     const ids = await seedWorld(h);
-    for (const route of apiContract.ROUTES.filter((r) => r.method === 'GET')) {
-      const res = await h.request(`/api${fill(route.path, ids)}`);
-      expect(res.status, `${route.path}`).toBe(200);
-      const body = await expectContract(res, 'GET', route.path, route.path === '/health' ? apiContract.healthDetailSchema : undefined);
+    for (const route of mounted.filter((r) => r.method === 'GET')) {
+      const res = await h.request(fill(route.path, ids));
+      expect(res.status, route.path).toBe(200);
+      const body = await expectContract(res, 'GET', route.path);
       expect(pricesWithoutProvenance(body), route.path).toEqual([]);
     }
   });
@@ -5197,19 +5051,19 @@ describe('banned words in API strings (spec §11, §8.3)', () => {
       const args = SAMPLE_ARGS[key];
       if (typeof value !== 'string' && args === undefined) throw new Error(`add sample args for API_TEXT.${key}`);
       const text = typeof value === 'string' ? value : (value as (...a: unknown[]) => string)(...(args ?? []));
-      expect(findBannedWords(text), `API_TEXT.${key}: ${text}`).toEqual([]);
+      expect(findBannedWords(text, BANNED_WORD_ALLOWLIST), `API_TEXT.${key}: ${text}`).toEqual([]);
     }
   });
 
-  it('no reason, notice, message or label in any response contains a banned word', async () => {
+  it('no reason, notice, message, label or summary in any response contains a banned word', async () => {
     h = await createHarness();
     const ids = await seedWorld(h);
     const texts: string[] = [];
-    for (const route of apiContract.ROUTES.filter((r) => r.method === 'GET')) texts.push(...userStrings(await (await h.request(`/api${fill(route.path, ids)}`)).json()));
+    for (const route of mounted.filter((r) => r.method === 'GET')) texts.push(...userStrings(await (await h.request(fill(route.path, ids))).json()));
     texts.push(...userStrings(await (await h.request('/api/definitions', { method: 'POST' })).json()));
     texts.push(...userStrings(await (await h.request('/api/providers', { auth: false })).json()));
     expect(texts.length).toBeGreaterThan(3);
-    for (const t of texts) expect(findBannedWords(t), t).toEqual([]);
+    for (const t of texts) expect(findBannedWords(t, BANNED_WORD_ALLOWLIST), t).toEqual([]);
   });
 });
 
@@ -5218,7 +5072,7 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
     h = await createHarness({ env: { TRAVELPAYOUTS_TOKEN: SENTINELS.travelpayouts, SEARCHAPI_KEY: SENTINELS.searchapi, SEARCHAPI_PLAN: '40usd' } });
     const ids = await seedWorld(h);
     const bodies: string[] = [];
-    for (const route of apiContract.ROUTES.filter((r) => r.method === 'GET')) bodies.push(await (await h.request(`/api${fill(route.path, ids)}`)).text());
+    for (const route of mounted.filter((r) => r.method === 'GET')) bodies.push(await (await h.request(fill(route.path, ids))).text());
     bodies.push(await (await h.request('/api/providers', { headers: { authorization: basic(SENTINELS.searchapi, SENTINELS.travelpayouts) } })).text());
     bodies.push(await (await h.request('/api/definitions', { json: { name: SENTINELS.searchapi } })).text());
     const everything = [...bodies, ...h.logLines].join('\n');
@@ -5229,7 +5083,7 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api test -- contract-sweep`
+Run: `pnpm --filter @gmt/api exec vitest run test/contract-sweep.test.ts`
 Expected: FAIL on "refuses a ROUTES entry without a handler…" (createApp skips silently); the other sweeps pass if Tasks 8.8–8.14 are complete, and any failure there names the offending route.
 
 - [ ] **Step 3: Implement**
@@ -5243,10 +5097,12 @@ In `src/app.ts` `createApp`, replace the mounting loop with:
     if (!routeKeys.has(key)) throw new Error(`no route for handler ${key}`);
   }
   for (const route of routes) {
-    const handler = HANDLERS[`${route.method} ${route.path}` as RouteKey];
+    const key = `${route.method} ${route.path}`;
+    if (OWNED_ELSEWHERE.has(key)) continue; // why: another package mounts it (plan reconciliation 4: smoke is WP13's)
+    const handler = HANDLERS[key as RouteKey];
     // why: spec §10 is the route table; an entry without a handler is a contract the api does not honour.
-    if (handler === undefined) throw new Error(`no handler for ${route.method} ${route.path}`);
-    api.on(route.method, route.path, every(...validatorsFor(route)), async (c) => handler(c, readInput(c, route), ctx));
+    if (handler === undefined) throw new Error(`no handler for ${key}`);
+    app.on(route.method, route.path, every(...validatorsFor(route)), async (c) => handler(c, readInput(c, route), ctx));
   }
 ```
 
@@ -5267,7 +5123,7 @@ git add apps/api && git commit -m "wp08: strict ROUTES mounting and the contract
 |---|---|---|
 | 4. The definition is edited while an execution is running: results filter to the current resolved space and may be empty; the header says "0 of N rows are inside the current window and nights range" rather than "no results" (WP8: `/results` reports the excluded count in `basisReason`) | yes | Task 8.11, `test/results.test.ts` › "review focus 4: the definition is edited after the rows were written" (both bases; `excludedByCurrentSpace` 3, `basisReason` contains `API_TEXT.insideSpace(0, 3)`) |
 
-Lines 1, 2, 3 and 5 belong to other packages. Line 2 (future timestamps clamp to "just now") is exercised indirectly: `ageHours` comes from WP0's clamped `effectiveAge`.
+Lines 1, 2, 3 and 5 belong to other packages. Line 1's server side (lower-case IATA upper-cased) is exercised in Task 8.9 (`origins: ['lhr']` → `LHR`, via WP0's `iataSchema`); line 2 (future timestamps clamp) indirectly through WP0's `effectiveAge`.
 
 ## 10. Definition of done
 
@@ -5276,72 +5132,17 @@ Run from the repository root:
 | Command | Expected |
 |---|---|
 | `pnpm --filter "@gmt/api^..." build` | exit 0 |
-| `pnpm --filter @gmt/api test` | every test passes, including `boot.spawn` (a real production bootstrap); coverage report ≥ 85% lines, functions, statements and ≥ 70% branches for `apps/api/src` (thresholds enforced by `apps/api/vitest.config.ts`) |
+| `pnpm --filter @gmt/api test` | every test passes, including `boot.spawn` (a real production bootstrap); coverage ≥ 85% lines, functions, statements and ≥ 70% branches for `apps/api/src` (thresholds in `apps/api/vitest.config.ts`) |
 | `pnpm --filter @gmt/api typecheck` and `pnpm -r typecheck` | exit 0 |
 | `pnpm lint` | exit 0, no diagnostics |
-| `node scripts/check-boundaries.mjs` | exit 0 (`@gmt/api` reads `process.env` only under `src/bootstrap/`) |
-| `grep -rn "process.env" apps/api/src \| grep -v "apps/api/src/bootstrap/"` | no output |
+| `node scripts/check-boundaries.mjs` | exit 0 (`@gmt/api` reads `process.env` only in `src/bootstrap/`, `src/wiring.ts`, `src/logger.ts`) |
+| `grep -rn "process.env" apps/api/src \| grep -vE "apps/api/src/(bootstrap/\|wiring.ts\|logger.ts)"` | no output |
 | `grep -rnE "\\b(LHR\|LGW\|JFK\|EWR\|LON\|NYC)\\b" apps/api/src` | no output (no airports in application code; the worked example appears in `apps/api/test` only) |
 | Manual: `NODE_ENV=development DATABASE_PATH=./data/dev.db BIND_ADDRESS=127.0.0.1 pnpm --filter @gmt/api dev`, then `curl -s -H 'Host: localhost:3000' localhost:3000/api/health` | the log shows `"msg":"listening"`; curl prints `{"ok":true,"degraded":false}`; Ctrl-C logs `shutdown complete` and exits 0 |
 
 ## 11. Open questions
 
-All seven are contract questions for **Fable** (the plan's contract owner), not operator decisions; none is `requires_human_judgment`. Each must be closed in the plan (and, for 2, in WP0's `api-contract`) before this brief is dispatched, and the brief's code adjusted if the answer differs from the proposal.
+None blocking. Every question this brief raised against plan revision 1 was closed in the plan's reconciled contracts and spec revision 10. Two points remain for Fable to note, neither of which changes this brief's code:
 
-1. **API prefix.** Spec §10 and the plan mount routes at the root (`/definitions`, `/health`), but the SPA's client-side paths (`/definitions`, `/results`) would then collide with API `GET` routes on refresh. This brief mounts every `ROUTES` entry under **`/api`** (static and SPA fallback everywhere else). Consequences: WP9's client prefixes `/api`; WP12's `HEALTHCHECK` fetches `/api/health`.
-2. **Contract shapes the plan names but does not field-list.** WP8 produces these; proposed exact fields (WP0 writes them as zod, reusing `priceCellSchema`, `bucketsSchema`, `coverageSummarySchema`, `bookingSchema`, `provenanceSchema`; `DatedPrice = priceCell & { cell: CellKey & { nights } }`):
-
-   ```ts
-   // definitions.ts
-   definitionResponseSchema   = SearchDefinition & { estimate: Estimate; budgetFit: BudgetFit; needsConfirmation: boolean; notices: string[] }  // adds the last two
-   // results.ts
-   resultsQuerySchema         = { basis?: 'verified' | 'calendar'; executionId?: string; limit?: int 1..1000 (coerced from the query string) }
-   calendarQuerySchema        = { basis?: 'verified' | 'calendar' }
-   routeHistoryQuerySchema    = { cabin?: Cabin }
-   calendarResponseSchema     = { basis; days: Array<{ date: IsoDate; discovery: Array<{ providerId; buckets: Buckets }>; verification: { selected; itinerarySearched; onDemand };
-                                  cheapestVerified: DatedPrice | null; cheapestPartiallyVerified: (DatedPrice & { count: int }) | null; cheapestCalendar: DatedPrice | null;
-                                  byDestination: Array<{ destination: Iata; cheapestVerified; cheapestPartiallyVerified; cheapestCalendar }> }>;
-                                  executions: Array<{ id; status; ageHours }> }
-   durationAnalysisResponseSchema = { nights: Array<{ nights: int; minVerified: { price: DatedPrice; n: int } | null; minCalendar: Array<{ providerId; price: DatedPrice; n: int }> }> }
-   coverageResponseSchema     = { executionId: string | null; summary: CoverageSummary; perStageProvider: Array<{ stage; providerId; buckets; total }>;
-                                  requests: Array<{ providerId; calls; cacheHits; costMicroGbp; costPence }>; flags: { overrun: boolean; parityBreak: boolean };
-                                  selectedNotReached: Array<{ cell: CellKey & { nights }; reason: 'not_run' | 'budget' }>;
-                                  errors: Array<{ cell; stage; providerId; reason: string | null; attempts: int; retryable: boolean }> }
-   calendarGapResponseSchema  = { hidden: boolean; cheapestVerified: DatedPrice | null; cells: DatedPrice[] }
-   cellDetailResponseSchema   = { cell: CellKey & { nights }; outcomes: Array<{ executionId; isChild; stage; providerId; status; reason; attempts; fetchedAt: IsoDateTime | null;
-                                  minPence: int | null; reusedFromExecutionId: string | null }>; calendarPrices: DatedPrice[];
-                                  observations: Array<{ itineraryHash: string | null; verdictClass; unverified: ConstraintName[]; price: DatedPrice; booking: Booking }> }
-   historyResponseSchema      = { series: Array<{ providerId; kind: 'observation' | 'calendar' | 'route-lowest'; label: string; points: Array<{ fetchedAt; pricePence; provenance }> }> }
-   // system.ts
-   healthDetailSchema         = { ok; degraded; db: { ok: boolean; sizeBytes: int | null }; providers: Array<{ id; enabled: boolean }>;
-                                  scheduler: { jobCount: int; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null; degraded: boolean } }
-   ROUTES 'GET /health'.response = z.union([healthDetailSchema, healthPublicSchema])   // one route, two shapes (spec §10)
-   providersResponseSchema    = { providers: Array<{ id; displayName; plan: PlanId | null; billed: boolean; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null };
-                                  cabins: Cabin[]; usage: { scope: string; usage: Usage }; excludedFromSchedule: boolean }>; global: Usage; messages: string[] }
-   budgetResponseSchema       = { scopes: Array<{ scope: string; usage: Usage }> }            // scope labels: 'execution-calls', 'provider-month:searchapi', 'global-month'
-   schedulerJobsResponseSchema = { jobs: SchedulerJob[] }
-   toolSmokeRequestSchema     = {} ; toolRecordRequestSchema = { budget: int ≥ 1 } ; toolRunResponseSchema = { tool: 'smoke' | 'record'; ok: boolean; exitCode: int; lines: string[] }
-   // alerts.ts
-   alertRuleRequestSchema     = { definitionId; type; thresholdPence?; pct?; basis; requireAllVerified?; cooldownHours; enabled }  + the spec §6.8 refinement
-   alertRuleSchema            = alertRuleRequestSchema & { id: string }
-   alertsQuerySchema          = { definitionId?: string } ; alertEventsQuerySchema = { ruleId?: string; definitionId?: string; limit?: int 1..1000 }
-   executionResponseSchema    : as the plan, with estimate: Estimate | null (a seeded or skipped execution has none) and cell optional
-   // ROUTES request/response pairs WP8 relies on
-   POST /definitions                request definitionCreateRequestSchema.optional() → definitionResponseSchema (201)
-   PUT /definitions/:id             request definitionUpdateRequestSchema            → definitionResponseSchema
-   DELETE /definitions/:id                                                           → definitionResponseSchema (deletedAt set)
-   POST /definitions/:id/estimate   no request schema                                → estimateResponseSchema
-   POST /definitions/:id/executions request startExecutionRequestSchema              → executionResponseSchema (202)
-   POST /executions/:id/cancel|resume no request schema                              → executionResponseSchema
-   POST /cells/verify               request verifyCellRequestSchema                  → executionResponseSchema (202)
-   GET /alerts query alertsQuerySchema → z.array(alertRuleSchema); POST /alerts → alertRuleSchema (201);
-   PUT /alerts/:id request alertRuleRequestSchema without the refinement, partial (the handler validates the merge) → alertRuleSchema; DELETE /alerts/:id → alertRuleSchema;
-   GET /alerts/events query alertEventsQuerySchema → z.array(alertEventSchema)
-   ```
-
-   Also: zod 4 may refuse `.partial()` on an object schema that carries refinements; WP0's `definitionUpdateRequestSchema = definitionCreateRequestSchema.partial()` must be built from the unrefined object (this brief re-validates the merged definition with the refined create schema in `validateForSave`).
-3. **WP3 repository gaps.** (a) `AirportsRepo.airportsOfMetro(code): Iata[]`, required by WP1's `validateSearchSpace` lookup and review focus 1, is absent from the plan's `AirportsRepo`. (b) `CalendarPricesRepo.latestPerCell` and `ItinerariesRepo.observationsForDefinition` take a `space`; WP8 needs `space: null` (all cells) to count `excludedByCurrentSpace`. (c) Row types named but not field-listed: `Execution`, `CalendarPriceRow`, `ObservationRow`, `HistoryPoint` (with `provenance` required, since every history point is a price), `AlertRule`, `AlertRuleInput`, `AlertEvent`, `AirportsDataset`; this brief uses the fields listed in §4. (d) Method signatures: `ExecutionsRepo.listForDefinition(id, { includeChildren })`, `AlertsRepo.get/create/update/delete/events`. (e) No per-provider ledger count exists; WP8 reads `provider_requests` by its spec §7 columns in `ledgerByProvider` (alternatively WP3 adds `LedgerRepo.countsByProvider(executionId)`). (f) Enum spellings the SQL seeder assumes: `segments.direction ∈ { 'outbound', 'inbound' }`; integer autoincrement ids for `calendar_prices`, `fare_offers`, `price_observations`, `alert_events`; text ids for `search_executions` and `alert_rules`. (g) `applyMigrations` returns `{ applied }` in the contract block but `void` in Task 0.10. (h) Whether `seedAirports` itself skips when the dataset version is unchanged (spec §7); the bootstrap calls it on every boot.
-4. **Runtime entry points from other packages.** (a) WP4b must export the in-process record entry `recordFixtures(ports, { budget }, log): Promise<ToolRunResult>`; the app's `Ports` are built without a `FixtureRecorder`, so either `buildPorts` always attaches an inert recorder (http-kit records only when the request sets `recordFixtures: true`) or `recordFixtures` builds its own http-kit over the same budget and cache. (b) WP12's `scripts/backup.mjs` must export `backupDatabase(dbPath: string): Promise<string>`; until it does, a boot with pending migrations on an existing database fails closed. (c) WP4b's tool bootstrap should reuse `assetPaths()` from `src/bootstrap/paths.ts` (or WP8 reuses WP4b's equivalent) so the migrations directory is resolved in one place.
-5. **WP7 exports.** `LogNotifier` (plan file map `src/notifiers/log.ts`) and the fields of `SchedulerJob`, `Estimate`, `BudgetFit`, `CoverageCheckRequest/Response` are not in the engine contract; this brief assumes the §4 shapes and that `Estimate`/`BudgetFit` are the api-contract `z.infer` types. Overruns are measured against the pre-factor plan (spec §8.1) but only the factored estimate is stored; WP8 divides by `ESTIMATE_RETRY_FACTOR` as an approximation, and the engine should store the pre-factor plan length with the estimate. `engine.boot()` must make no network request when it starts with no due work (the spawn test runs it, and the harness runs it under `msw` with `onUnhandledRequest: 'error'`), so a daily FX refresh must not fire at boot.
-6. **WP1/WP2 signatures this brief calls.** `daysBetween(a, b)` direction (`b − a` assumed); the second parameter of `evaluateConstraints` (`EvaluatedOffer` in §4); `dedupByItinerary`, `rankRows` and `bandCheapest` operating on `ResultRow` arrays, with `rankRows` implementing class → seen-before-`notSeenInLatest` (spec §8.1) → price → `compareAges`.
-7. **`app_lock` takeover wording.** Spec §7 says a fresh app lock makes the app "wait up to 90 s, logging the lock age, then take over". This brief takes over as soon as WP3's `acquire` judges the lock stale (three missed beats, which an ungracefully stopped process reaches within 90 s) and **refuses** if the lock is still heartbeating after 90 s, because that can only be a second live app and two writers would break the single-writer rule (spec §7 SQLite settings). Confirm, or change Task 8.3 to force the takeover.
+1. **Confirmation write path.** `DefinitionInput` excludes `confirmedCostPence` and `definitionUpdateRequestSchema` is its partial, so no route defined by the contract can set the stored confirmation; WP9's draft brief sends it in a PUT, which zod would strip. This brief reads it (`needsConfirmation`) and never writes it (spec §7); the write path (a field on the update schema handled by `DefinitionsRepo.setConfirmedCost`, or a dedicated route) is a contract decision.
+2. **Unnamed request/query schemas.** The plan names the response schema of every route but leaves some request/query schemas implicit ("every remaining row in the same form"): the calendar `?basis=`, the route-history `?cabin=` and the alerts `?definitionId=` filter. This brief reads `?cabin=` and `?definitionId=` with `c.req.query()` and ignores `?basis=` on the calendar (its response carries every price kind and no basis), so it works whether or not WP0 declares those query schemas.

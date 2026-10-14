@@ -3,7 +3,7 @@ wp: 4
 title: "providers: http-kit, recorder, scrubbing, egress, fixture provider"
 owner: opus
 depends_on: [0]
-spec_sections: ["§5.3", "§5.5", "§5.2 Errors", "§9 item 2", "§14"]
+spec_sections: ["§4", "§5.3", "§5.5", "§5.2 Errors", "§9 item 2", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, cost-and-budget-reviewer, security-reviewer, provenance-auditor, provider-integration-expert]
 status: draft
 ---
@@ -20,44 +20,50 @@ Build `@gmt/providers`' HTTP layer — the one path by which any provider reache
 
 **In**
 
-- `createHttpKit` and every type in the plan's "http-kit" contract block, over `globalThis.fetch` (no injectable transport, spec §5.3).
+- `createHttpKit` and every type in the plan's "http-kit" contract block (plan contracts v2, spec revision 10), over `globalThis.fetch`, with the one gated transport seam `HttpKitDeps.inProcessHosts` (spec §4 rev 10: requests to a hostname listed there are dispatched in process; every other pipeline step still runs).
 - The default status → `ProviderError` classification (spec §5.2 "Errors"), `Retry-After`, per-request timeout, abort, socket errors, the redirect refusal.
 - Per-provider limiter: bottleneck per-minute reservoir chained to a per-hour reservoir, `maxConcurrent`, queue deadline `maxWaitSeconds`.
-- In-flight dedup and the response cache path (`recordCacheHit`, original `storedAt` as `fetchedAt`, scrubbed bodies, `cache: 'never'`).
+- In-flight dedup and the response cache path (`recordCacheHit` with `tileIndex`, original `storedAt` as `fetchedAt`, scrubbed bodies, `cache: 'never'`).
 - Egress: hostname allowlist per provider, `https:` only (plain `http:` for `fixture.local` only), no userinfo, no credential in any URL, `redirect: 'error'`.
+- `'fx'` requests: limiter, allowlist, timeout, retry and cache as for any provider, but **never ledgered** (no `reserve`, `finalise` or `recordCacheHit`; spec §5.3 and §5.6 rev 10).
 - `scrubSecrets`, `stripUrl`, `canonicalCacheKey`.
-- `createRecorder` (fails closed, deterministic token placeholders, `recordedAt`/`recordedBy`/content hash) and the recorded-tree loaders `loadRecordedJson`, `loadRecordedFixture`, `verifyContentHash`, `withContentHash`.
-- The fixture tree under `packages/providers/fixtures/synthetic/fixture/`, the fixture server (one routing core served by msw via `fixtureHandlers` and by Hono via `fixtureRouter`), its scenario control for every §8.1 error row, and `fixtureProvider` with its gate.
+- `createRecorder` writing the pinned `RecordedFixture` format (fails closed, deterministic token placeholders, `recordedAt`/`recordedBy`/`contentSha256`, raw body beside it as `.raw.json`), `contentHash`, and the recorded-tree loaders.
+- The `@gmt/providers/testing` subpath: `fixtureHandlers(root)`, `replayHandlers(recordedRoot)`, `loadRecorded(root, providerId, endpointPath)` — the only module that imports msw.
+- The fixture tree under `packages/providers/fixtures/synthetic/fixture/`, the fixture server (one routing core served by msw via `fixtureHandlers` and in process via `fixtureRouter`), its scenario-control contract for every §8.1 error row (`POST /__fixture/scenario`, `x-fixture-scenario` header), and `fixtureProvider` with its gate.
 - The http-kit and fixture rows of spec §9 item 2, the sentinel-key test over every sink reachable from this package, the fixture-tree test.
 
 **Out**
 
 - `SqliteBudgetGuard`, `SqliteResponseCache`, cap predicates, the ledger schema, `billable` computation at finalise: **WP3** (`@gmt/db`). Tests here use the in-memory fakes defined in Task 4.1 (`test/fakes.ts`).
-- SearchApi and Travelpayouts adapters, their `classifyError` overrides for recorded quota bodies, dated parameter allowlists: **WP5**, **WP6**.
-- Recording real fixtures and `apps/api/src/wiring.ts` (which builds `HttpKitDeps.limits` from `Config`, constructs the recorder with `recordedBy`, and installs the fixture transport in fixture mode): **WP4b**.
-- Mounting `fixtureRouter` under the api, the fixture-mode boot matrix, pino setup and `redact` paths: **WP8** (spec §14 rule; this package only guarantees that nothing it logs carries a URL query or a credential).
-- Engine use of the scenario rules (every §8.1 row in both stages): **WP7**. This brief provides the rules and documents which rule drives which row.
-- FX refresh through http-kit under id `fx`: **WP7** (this brief makes `fx` a valid `HttpKitRequest.providerId` with its own allowlist and no ledger row; see mismatch M2 in Open questions).
+- SearchApi and Travelpayouts adapters, `searchApiHttpLimits`/`travelpayoutsHttpLimits` with their `classifyError` overrides, the `ParamsAllowlist` constants and files: **WP5**, **WP6** (this package only guarantees that a hashed allowlist file passes the fixture-tree test).
+- Recording real fixtures and `apps/api/src/wiring.ts` (`httpLimitsFor`, `providersFor`, the recorder with `recordedBy`, and `inProcessHosts: { 'fixture.local': … }` passed only under `syntheticAllowed`): **WP4b**.
+- The fixture-mode boot matrix, pino setup and `redact` paths: **WP8**/**WP4b** (spec §14 rule; this package only guarantees that nothing it logs carries a URL query or a credential).
+- Engine use of the scenario rules (every §8.1 row in both stages): **WP7**; replay of recorded fixtures in layer-B tests: **WP13**. This brief provides both and documents which rule drives which row.
+- FX refresh itself (`engine/src/fx/refresh.ts`): **WP7**.
+- The boundary script's "no msw outside `src/testing/`" rule: **WP0** (`scripts/check-boundaries.mjs`); this brief's definition of done runs it.
 
 ## Spec sections
 
-- **§5.3 (entire)** — the fixed pipeline; billable rule (`fixture` iff HTTP 200 at the configured test cost); reserve before every attempt; aborted attempts finalise `unknown` before `AbortedError` propagates; cache key sha256 over the credential-free canonical request, bodies scrubbed, token-bearing responses never cached; egress allowlist and `redirect: 'error'` with the 302 test; one scrubbing rule for every sink; recorder layout, fail-closed credentials, `search_metadata` URLs stripped, deterministic token placeholders.
+- **§5.3 (entire)** — the fixed pipeline; billable rule (`fixture` iff HTTP 200 at the configured test cost); reserve before every attempt; aborted attempts finalise `unknown` before `AbortedError` propagates; every ledger row carries `tile_index`; cache key sha256 over the credential-free canonical request, bodies scrubbed, token-bearing responses never cached; FX through http-kit, never ledgered; egress allowlist and `redirect: 'error'` with the 302 test; one scrubbing rule for every sink; recorder layout, fail-closed credentials, `search_metadata` URLs stripped, deterministic token placeholders.
+- **§4 (rev 10, `providers` row)** — the fixture provider is served by msw in tests and, in fixture mode, by an in-process router that http-kit dispatches to for that one hostname, a seam gated by `syntheticAllowed`.
 - **§5.5 (fixture provider and gates)** — `syntheticAllowed`; the fixture provider's constructor throws when it is false; every fixture price is `synthetic`; the recorder writes only under `fixtures/recorded/` with a content hash and `recordedBy` the fixture-tree test verifies.
-- **§5.2 "Errors"** — 401/403 → `auth`; 402 → `quota`; 400 → `parse` with the vendor message as `reason`, non-retryable; 404 → `upstream` non-retryable; 429 → `rate-limit` unless the ledger shows the provider at its plan cap, then `quota`; other 5xx → `upstream`; malformed → `parse`; socket → `network`; per-request timeout → `network` finalised `unknown`, not retried for billed vendors; limiter deadline → `limiter-timeout`; `signal.aborted` → `AbortedError`; no adapter-level retries. The default table lives in `src/http/classify.ts`.
+- **§5.2 "Errors"** — 401/403 → `auth`; 402 → `quota`; 400 → `parse` (non-retryable) with the vendor's message in `last_error` (so in `ProviderError.message`, never `reason`); 404 → `upstream` non-retryable; 429 → `rate-limit` unless the ledger shows the provider at its plan cap or the body matches the recorded quota shape (adapter `classifyError`), then `quota`; other 5xx → `upstream`; malformed → `parse`; socket → `network`; per-request timeout → `network` finalised `unknown`, not retried for billed vendors; limiter deadline → `limiter-timeout`; `signal.aborted` → `AbortedError`; no adapter-level retries. The default table lives in `src/http/classify.ts`.
+- **§3 (rev 10) outcome `reason`** — `reason` is the kind or a named normalisation reason; since §8.1 writes `reason = error.reason ?? kind`, http-kit never sets `ProviderError.reason` (diagnostic codes such as `[timeout]` end the message instead); only `no-return-legs` is set, by the fixture provider.
 - **§9 item 2 (http-kit, recorder, fixture rows)** — every test listed there that is not adapter-specific, with msw on global fetch.
 - **§14 (scrubbing rule)** — no secrets and no full URLs in any log line; URL query and userinfo stripped as in §5.3.
 
 ## Interfaces consumed
 
-From `@gmt/core` (WP0), copied from spec §5.1 and the plan's contracts:
+From `@gmt/core` (WP0), copied from spec §5.1 (revision 10) and the plan's contracts v2. `ProviderId`, `SourceKind`, `Cabin`, `PointOfSale` live in `types/provenance.ts`; `CellKey` is defined once in `types/definition.ts`; `ports/provider.ts` imports and re-exports them.
 
 ```ts
-export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';   // types/provenance.ts
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
+export type PointOfSale = string | 'unknown';   // ISO 3166-1 alpha-2 upper-case, or 'unknown'
+export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }   // types/definition.ts, the ONLY definition
 
 export interface CapabilityInfo { sourceKind: SourceKind; provenanceNote: string; maxAgeHours: number | 'unknown' }
-export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
 
 export interface DiscoveryQuery {
   origin: Iata; destination: Iata;
@@ -67,6 +73,7 @@ export interface DiscoveryQuery {
 }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
+  | { kind: 'month'; month: IsoMonth }
   | { kind: 'length-month'; length: number; month: IsoMonth }
   | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
   | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
@@ -75,7 +82,7 @@ export interface RawCalendarPrice extends CellKey {
   amountMinor: number; currency: string; providerObservedAt?: IsoDateTime; vendorLink?: string;
 }
 export type DiscoveryTileResult =
-  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
+  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
   | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: ProviderError };
 
 export interface ItineraryQuery extends CellKey { cabin: Cabin; adults: 1; currency: 'GBP'; maxStops?: number; expandTop: number; bookingLinks: boolean }
@@ -87,7 +94,10 @@ export interface RawOffer {
   booking: { kind: 'get'; url: string } | { kind: 'post'; url: string; postData: string } | { kind: 'none' };
   bookingExpiresAt?: IsoDateTime;
 }
-export interface ItinerarySearchResult { offers: RawOffer[]; coverage: 'priced' | 'empty'; fetchedAt: IsoDateTime; partial: boolean; failedExpansions: number; notes: string[] }
+export interface ItinerarySearchResult {
+  offers: RawOffer[]; coverage: 'priced' | 'empty'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; partial: boolean; failedExpansions: number; notes: string[];
+  routeHistory?: Array<{ date: IsoDate; lowestPriceMinor: number; currency: string }>;
+}
 
 export interface ProviderContext { executionId: string | null; signal: AbortSignal; recordFixtures: boolean }
 
@@ -103,107 +113,105 @@ export interface CostEstimate { calls: number; costMicroGbp: number; seconds: nu
 
 export interface Reservation { id: string; finalise(r: { outcome: 'ok' | 'error' | 'unknown'; httpStatus?: number; durationMs: number }): void }
 export interface BudgetGuard {
-  reserve(p: { providerId: ProviderId; executionId: string | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
-  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; endpointPath: string }): void;
+  reserve(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
+  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
   usage(scope: BudgetScope): Usage;
 }
 export interface ResponseCache { get(key: string): { body: unknown; storedAt: IsoDateTime } | undefined; set(key: string, body: unknown, ttlSeconds: number, storedAt: IsoDateTime): void }
-```
 
-> **Contract amendment this brief depends on (Open question Q1):** `BudgetGuard.reserve` gains `tileIndex: number | null`, so that "every ledger row carries `tile_index`" (spec §5.3) is satisfiable. The code below passes `tileIndex: r.tileIndex` to `reserve`; it typechecks only once WP0's `ports/provider.ts` carries the amended signature.
-
-```ts
-// Budget port (plan, ports/budget.ts)
+// Budget port (ports/budget.ts)
 export type BudgetScope =
   | { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string }
   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
   | { kind: 'global-month' };
 export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
+// cap is null for a window the plan does not use (a month scope on a lifetime plan, and vice versa) and for a scope with no cap configured.
 
-// Logger and clock (plan)
+// Logger and clock
 export interface Logger { debug(o: object, msg?: string): void; info(o: object, msg?: string): void; warn(o: object, msg?: string): void; error(o: object, msg?: string): void; child(bindings: object): Logger }
 export interface Clock { now(): IsoDateTime; todayLondon(): IsoDate }
-export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void };   // tests
+export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void; set(at: IsoDateTime): void };
 
-// Identifiers (plan)
+// Identifiers
 export type Iata = string & { readonly __brand: 'Iata' };
 export type IsoDate = string & { readonly __brand: 'IsoDate' };
+export type IsoMonth = string & { readonly __brand: 'IsoMonth' };
 export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' };
 export function asIata(s: string): Iata;
 export function asIsoDate(s: string): IsoDate;
 export function asIsoDateTime(s: string): IsoDateTime;
 
-// Itinerary types (plan)
+// Itinerary types
 export type SuppliedField = 'segments' | 'segmentTimes' | 'segmentCabins' | 'selfTransfer' | 'baggage' | 'fareConditions' | 'seller' | 'price';
 export interface BaggageSnapshot { cabinBag?: 'included' | 'not-included'; checkedBags?: number; notes?: string[] }
 
-// Errors (plan): constructed as new ProviderError({ kind, reason?, retryable, httpStatus?, retryAfterSeconds?, message })
-// WP0 Task 0.4 adds providerId?: ProviderId | 'fx' and exports ProviderErrorKind and stripUrlsInText(text).
-export class ProviderError extends Error { kind: 'auth' | 'rate-limit' | 'quota' | 'upstream' | 'parse' | 'network' | 'limiter-timeout'; reason?: string; retryable: boolean; httpStatus?: number; retryAfterSeconds?: number }
-export class BudgetExceeded extends Error { scope: 'execution-calls' | 'execution-free-calls' | 'execution-cost' | 'provider-month' | 'provider-lifetime' | 'global-month' }
-export class AbortedError extends Error {}
+// Errors (errors.ts): `ProviderError`, `BudgetExceeded`, `AbortedError`, `NormalisationError`, `stripUrlsInText`; `ProviderErrorKind` exported.
+// new ProviderError({ kind, retryable, message, reason?, httpStatus?, retryAfterSeconds?, providerId? }); new BudgetExceeded({ scope, cap, current, requested, providerId? })
 
-// Config (plan)
+// Config
 export class Secret { constructor(value: string); reveal(): string; toString(): '[redacted]'; toJSON(): '[redacted]' }
-export function syntheticAllowed(c: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>): boolean;
+export interface SyntheticGateInput { nodeEnv: 'production' | 'development' | 'test'; databasePath: string; allowFixtureProvider: string | null; inContainer: boolean }
+export function syntheticAllowed(c: SyntheticGateInput): boolean;
 ```
 
 ## Interfaces produced
 
-The plan's "http-kit" block, with these exact names (later packages rely on them):
+The plan's "http-kit" block (contracts v2), with these exact names; later packages rely on them:
 
 ```ts
 export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never'; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; classifyError?: (status: number, body: unknown, ledgerAtCap: boolean) => ProviderError }
-export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Record<ProviderId | 'fx', ProviderHttpLimits>; clock: Clock; log: Logger; secrets: Secret[] /* for scrubbing */; recorder?: FixtureRecorder }
-export interface HttpKitRequest {
-  providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string;
-  method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string;
-  cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean;
-}
+export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
+export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean }
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
 export function createHttpKit(deps: HttpKitDeps): HttpKit;
-export interface FixtureRecorder { record(r: { providerId; endpointPath; request: HttpKitRequest; status; body }): Promise<void> }
+export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* scrubbed */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string>; contentSha256: string }
+export interface FixtureRecorder { record(r: { providerId: ProviderId | 'fx'; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }): Promise<string /* path written */> }
 export function createRecorder(opts: { root: string; secrets: Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;
-export function scrubSecrets<T>(value: T, secrets: Secret[]): T;       // deep; throws if a secret survives
-export function stripUrl(url: string): string;                          // origin + path only
-export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 hex
-export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>; costMicroGbp: number }): FlightProvider;  // throws unless syntheticAllowed
-export function fixtureHandlers(root: string): RequestHandler[];        // msw handlers for http://fixture.local
-export function fixtureRouter(root: string): Hono;                      // the same tree as a Hono router for fixture mode
+export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string;
+export function scrubSecrets<T>(value: T, secrets: Secret[]): T;
+export function stripUrl(url: string): string;
+export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;
+export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
+export function fixtureRouter(root: string): Hono;
+// '@gmt/providers/testing' (src/testing/index.ts):
+export function fixtureHandlers(root: string): RequestHandler[];
+export function replayHandlers(recordedRoot: string): RequestHandler[];
+export function loadRecorded(root: string, providerId: string, endpointPath: string): RecordedFixture[];
 ```
 
-Precisions this brief adds (no name changes):
+Precisions this brief settles (no name changes):
 
-- `FixtureRecorder.record`'s fields are typed `{ providerId: ProviderId | 'fx'; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }`.
-- `scrubSecrets`, `canonicalCacheKey` and `createRecorder` accept `readonly Secret[]` (a `Secret[]` is assignable).
-- `fixtureHandlers` is exported from the subpath **`@gmt/providers/testing`**, not the main barrel, so production code never loads msw (a devDependency). Its return type is written `Array<ReturnType<typeof http.all>>`, which is msw 3's HTTP handler type; the msw 3 docs verified on 2026-10-14 do not name the entrypoint that exports `RequestHandler`, so the brief does not import it.
+- `createHttpKit` throws at construction when `inProcessHosts` names any host other than `fixture.local`, so the seam cannot be widened by mistake; wiring decides *whether* to pass it (only under `syntheticAllowed`).
+- The recorded-file path is `<root>/<providerId>/<endpointPath with every / replaced by _>/<yyyy-mm-dd>-<first 12 hex of contentSha256>.json` (`/api/v1/search` → `_api_v1_search`); the unmodified vendor body goes to the same name with `.raw.json`, gitignored. `placeholders` maps each placeholder used in the file to its token key (`{ "<departure_token:0>": "departure_token" }`). `request.url` keeps the query (with placeholders); `request.headers` keeps every header, credential header values replaced by `[redacted]`.
+- `contentHash` is sha256 hex over `canonicalJson` (keys sorted at every level). The same function verifies any recorded-tree JSON carrying `contentSha256`, including WP5/WP6's `ParamsAllowlist` files.
+- `scrubSecrets`, `canonicalCacheKey`, `createRecorder` accept `readonly Secret[]`.
+- msw 3 exports no `RequestHandler` from a documented entrypoint (docs verified 2026-10-14); `src/testing/` types it locally as `export type RequestHandler = ReturnType<typeof http.all>`.
 
-Additional exports (used by WP4b, WP5, WP6, WP7, WP8):
+**Scenario-control contract** (consumed by WP7 and WP13; also the constants below): `POST http://fixture.local/__fixture/scenario` with JSON body `{ "rules": FixtureRule[] }` replaces the rules and answers `{ synthetic: true, rules: n }`; `DELETE` on the same path clears them (204). A single request may instead carry header `x-fixture-scenario: <FixtureResponse as JSON>`. `scenarioRequest(rules)` builds the POST as a `Request`, so a test sends it with `fetch(scenarioRequest(rules))` under msw or `router.fetch(scenarioRequest(rules))` against the router instance passed in `inProcessHosts`. `FixtureRule` and `FixtureResponse` are defined in Task 4.9 and the section "Fixture tree and request routing".
+
+Additional exports (used by WP4b, WP5, WP6, WP7, WP8, WP13):
 
 ```ts
 // @gmt/providers
 export type HttpProviderId = ProviderId | 'fx';
 export const MAX_ATTEMPTS = 3; export const BACKOFF_BASE_MS = 1000;
-export function classifyResponse(f: ResponseFacts): ProviderError;      // the default table; adapters' classifyError may delegate to it
+export interface ResponseFacts; export function classifyResponse(f: ResponseFacts): ProviderError;   // default table; adapters' classifyError may delegate
 export function parseRetryAfter(value: string | null, now: IsoDateTime): number | undefined;
 export function containsSecret(text: string, secrets: readonly Secret[]): boolean;
+export const CREDENTIAL_HEADERS: ReadonlySet<string>;
 export class RecorderRefusedError extends Error {}
-export interface RecordedFixture { recordedAt; recordedBy; providerId; endpointPath; request: { method; url; params; body }; status; body; contentSha256 }
-export function canonicalJson(v: unknown): string;                    // sorted-key JSON, the content-hash input
-export function withContentHash<T extends Record<string, unknown>>(file: T): T & { contentSha256: string };
+export function canonicalJson(v: unknown): string;
 export function verifyContentHash(file: unknown): boolean;
-export function loadRecordedJson(path: string): Record<string, unknown>;   // any file under fixtures/recorded/ (e.g. WP4b's params-<date>.json)
+export function loadRecordedJson(path: string): Record<string, unknown>;   // any hashed file under fixtures/recorded/ (recordings, ParamsAllowlist)
 export function loadRecordedFixture(path: string): RecordedFixture;
 export function fixtureHttpLimits(o: { costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number }): ProviderHttpLimits;
-export function planFixtureTiles(q: DiscoveryQuery): TilePlan[];
-export function defaultFixtureRoot(): string;                          // absolute path of packages/providers/fixtures/synthetic/fixture
-export function loadFixtureTree(root: string): FixtureTree;
-export function createFixtureServer(root: string): FixtureServer;      // the routing core both transports share
-export type FixtureResponse; export interface FixtureRule; export const FIXTURE_HOST = 'fixture.local'; export const FIXTURE_ORIGIN = 'http://fixture.local';
-export const SCENARIO_PATH = '/__fixture/scenario'; export const RESPONSE_HEADER = 'x-fixture-response';
-// @gmt/providers/testing
-export function fixtureHandlers(root: string): Array<ReturnType<typeof http.all>>;
+export function planFixtureTiles(q: DiscoveryQuery): TilePlan[]; export const FIXTURE_TILE_DAYS = 7;
+export function defaultFixtureRoot(): string; export function loadFixtureTree(root: string): FixtureTree; export function calendarPriceMinor(...): number;
+export function createFixtureServer(root: string): FixtureServer;
+export type FixtureResponse; export interface FixtureRule; export function scenarioRequest(rules: FixtureRule[]): Request;
+export const FIXTURE_HOST = 'fixture.local'; export const FIXTURE_ORIGIN = 'http://fixture.local';
+export const SCENARIO_PATH = '/__fixture/scenario'; export const SCENARIO_HEADER = 'x-fixture-scenario';
 ```
 
 ## Library notes
@@ -212,8 +220,8 @@ All versions from plan Task 0.1. Verified with context7 on 2026-10-14.
 
 - **bottleneck 2.19.5** (`/sgrondin/bottleneck`, README "Reservoir Intervals", "chain()", `_autodocs/configuration.md` "Job Options" and "Limiter constructor options"). Used: `new Bottleneck({ maxConcurrent, reservoir, reservoirRefreshAmount, reservoirRefreshInterval })`, `limiter.chain(other)`, `limiter.schedule(fn)`. Facts relied on: `reservoirRefreshInterval` resets the reservoir to `reservoirRefreshAmount` every N ms and must be a multiple of 250 (60 000 and 3 600 000 are); the reservoir window starts at limiter creation, so it is a fixed window, not a sliding one; a chained job must satisfy both limiters; the local datastore runs a 250 ms heartbeat when reservoir intervals are set. **The job option `expiration` is a deadline on a running job, not on queue time**, so the queue deadline (`maxWaitSeconds`) is enforced in `limiter.ts` with our own timer plus an age check when the job starts. Default import: `import Bottleneck from 'bottleneck'`.
 - **p-retry 8.0.1** (`/sindresorhus/p-retry`, `_autodocs/types.md`, `_autodocs/configuration.md` "Callback ordering", `_autodocs/api-reference/p-retry.md`). Used: `pRetry(input, { retries, minTimeout, factor, randomize, signal, shouldRetry, onFailedAttempt })`. Facts relied on: `input` receives the attempt number (1-based); callbacks receive a frozen `RetryContext { error, attemptNumber, retriesLeft, retriesConsumed, retryDelay }`; per failure the order is `shouldConsumeRetry` → `onFailedAttempt` → `shouldRetry`, and **`onFailedAttempt` runs even when `shouldRetry` will refuse**, so the `Retry-After` sleep inside it checks `retryable` and `retriesLeft` itself; `onFailedAttempt` may be async and is awaited before the backoff sleep (the docs' 429 example does exactly this); a thrown `AbortError` bypasses all callbacks; a non-network `TypeError` is never retried (http-kit never lets a raw `TypeError` escape an attempt); with `signal`, abort rethrows the signal's reason, which http-kit maps to `AbortedError`. `retries: 2` gives the spec's three attempts.
-- **msw 3.0.3** (`/websites/mswjs_io`, "Migrations 2.x → 3.x", "Network errors", "Quick start", "Runbook"). Used: `setupServer` from `msw/node`; `http`, `HttpResponse` from `msw/http` (v3 moved them off the root); `HttpResponse.json(body, { status, headers })`, `new HttpResponse(null, { status: 302, headers })`, `HttpResponse.error()` (network error: the client sees `TypeError: Failed to fetch`); `server.listen({ onUnhandledFrame: 'error' })` (**v3 renamed `onUnhandledRequest` to `onUnhandledFrame`**); `server.use`, `server.resetHandlers`, `server.close`; `server.events.on('request:start', ({ request }) => …)` and `server.events.removeAllListeners()`. `passthrough` (now `msw/utils/passthrough`) is not used. A resolver may return a plain Fetch `Response`, including `Response.error()`.
-- **hono 4.13.13** (`/honojs/hono/v4.13.0`, `_autodocs/api-reference/hono.md`, `docs/MIGRATION.md`). Used: `new Hono()`, `app.all('*', (c) => …)` returning a standard `Response`, `c.req.raw` (the Fetch `Request`), `app.request(url, init)` in tests. WP8 mounts the router with `app.mount('/fixture', fixtureRouter(root).fetch)`, which strips the prefix (documented under `mount(path, applicationHandler)`).
+- **msw 3.0.3** (`/websites/mswjs_io`, "Migrations 2.x → 3.x", "Network errors", "Quick start", "Runbook"). Used: `setupServer` from `msw/node`; `http`, `HttpResponse` from `msw/http` (v3 moved them off the root); `HttpResponse.json(body, { status, headers })`, `new HttpResponse(null, { status: 302, headers })`, `HttpResponse.error()` (network error: the client sees `TypeError: Failed to fetch`); `server.listen({ onUnhandledFrame: 'error' })` (**v3 renamed `onUnhandledRequest` to `onUnhandledFrame`**); `server.use`, `server.resetHandlers`, `server.close`; `server.events.on('request:start', ({ request }) => …)` and `server.events.removeAllListeners()`. `passthrough` (now `msw/utils/passthrough`) is not used. A resolver may return a plain Fetch `Response`, including `Response.error()`, and returning `undefined` falls through to the next handler (used by `replayHandlers` for an unrecorded request, which then fails as unhandled). msw is a **runtime dependency** of `@gmt/providers` (plan decision 7) imported only under `src/testing/`.
+- **hono 4.13.13** (`/honojs/hono/v4.13.0`, `_autodocs/api-reference/hono.md`, `docs/MIGRATION.md`). Used: `new Hono()`, `app.all('*', (c) => …)` returning a standard `Response`, `c.req.raw` (the Fetch `Request`), `app.request(url, init)` in tests. `app.fetch(request)` is the Fetch-standard handler (`Response | Promise<Response>`); WP4b passes it to http-kit as `inProcessHosts['fixture.local'] = async (req) => router.fetch(req)`.
 - **vitest 5.0.4** (`/vitest-dev/vitest/v5.0.3`, `docs/api/vi.md`; 5.0.3 is the closest indexed version). Used: `vi.useFakeTimers({ toFake: [...] })`, `vi.advanceTimersByTimeAsync(ms)`, `vi.useRealTimers()`. Fact relied on: `process.nextTick` and `queueMicrotask` are never faked by default; this brief also leaves `setImmediate` real so fetch and stream internals progress, and fakes `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval` and `Date`.
 - **Node 22 built-ins** (no context7 entry; Node docs): `fetch` (undici) with `redirect: 'error'` rejects with a `TypeError` whose `cause` mentions the redirect; `AbortSignal.any([...])` (Node ≥ 20.3); `node:crypto` `createHash('sha256')`; `node:fs` `realpathSync`, `mkdirSync`, `writeFileSync(…, { flag: 'wx' })`. The per-request timeout uses a `setTimeout` + `AbortController` rather than `AbortSignal.timeout`, because `AbortSignal.timeout` runs on Node-internal timers that vitest cannot fake; behaviour is identical.
 
@@ -221,15 +229,16 @@ All versions from plan Task 0.1. Verified with context7 on 2026-10-14.
 
 Create (all paths under `packages/providers/`):
 
-- `src/index.ts` (replace WP0's empty barrel), `src/testing.ts`, `src/util.ts`
+- `src/index.ts` (replace WP0's empty barrel), `src/util.ts`
 - `src/http/types.ts`, `src/http/httpKit.ts`, `src/http/attempt.ts`, `src/http/classify.ts`, `src/http/sleep.ts`, `src/http/limiter.ts`, `src/http/cacheKey.ts`, `src/http/scrub.ts`, `src/http/egress.ts`, `src/http/recorder.ts`
-- `src/fixture/constants.ts`, `src/fixture/dates.ts`, `src/fixture/tree.ts`, `src/fixture/server.ts`, `src/fixture/handlers.ts`, `src/fixture/router.ts`, `src/fixture/provider.ts`
+- `src/fixture/constants.ts`, `src/fixture/dates.ts`, `src/fixture/tree.ts`, `src/fixture/server.ts`, `src/fixture/router.ts`, `src/fixture/provider.ts`
+- `src/testing/index.ts`, `src/testing/handlers.ts`, `src/testing/replay.ts` (the only files that import msw)
 - `fixtures/synthetic/fixture/calendar/{LHR-JFK,LHR-EWR,LGW-JFK,LGW-EWR}.json`, `fixtures/synthetic/fixture/itinerary/{LHR-JFK,LHR-EWR,LGW-JFK,LGW-EWR}.json`, `fixtures/recorded/.gitkeep`
-- Tests: `test/fakes.ts`, `test/support/msw.ts`, `test/support/setup.ts`, `test/support/time.ts`, `test/http/pipeline.test.ts`, `test/http/scrub.test.ts`, `test/http/cacheKey.test.ts`, `test/http/errors.test.ts`, `test/http/egress.test.ts`, `test/http/limiter.test.ts`, `test/http/cache.test.ts`, `test/http/recorder.test.ts`, `test/http/sentinel.test.ts`, `test/fixture/server.test.ts`, `test/fixture/provider.test.ts`, `test/fixture/tree.test.ts`
+- Tests: `test/fakes.ts`, `test/support/msw.ts`, `test/support/setup.ts`, `test/support/time.ts`, `test/http/pipeline.test.ts`, `test/http/scrub.test.ts`, `test/http/cacheKey.test.ts`, `test/http/errors.test.ts`, `test/http/egress.test.ts`, `test/http/inProcess.test.ts`, `test/http/limiter.test.ts`, `test/http/cache.test.ts`, `test/http/recorder.test.ts`, `test/http/sentinel.test.ts`, `test/fixture/server.test.ts`, `test/fixture/provider.test.ts`, `test/testing/replay.test.ts`, `test/fixture/tree.test.ts`, `test/barrel.test.ts`
 
-Modify: `packages/providers/package.json` (subpath export), `packages/providers/vitest.config.ts` (setup file), delete `packages/providers/test/smoke.test.ts` in Task 4.11 (superseded).
+Modify: `packages/providers/package.json` (msw as a dependency, `./testing` subpath), `packages/providers/vitest.config.ts` (setup file), the repository `.gitignore` (`packages/providers/fixtures/recorded/**/*.raw.json`, Task 4.7); delete `packages/providers/test/smoke.test.ts` in Task 4.12 (superseded).
 
-The plan's file map names `src/fixture/handlers.ts` as "msw handlers + a Hono router"; this brief splits it into `server.ts` (shared routing core), `handlers.ts` (msw) and `router.ts` (Hono) so the main barrel never imports msw. `attempt.ts`, `sleep.ts`, `types.ts`, `constants.ts`, `dates.ts`, `tree.ts` and `util.ts` are new single-responsibility files under the same directories.
+The plan's file map names `src/fixture/handlers.ts` as "msw handlers + a Hono router"; per plan contracts v2 the msw side lives in `src/testing/` and the shared routing core in `src/fixture/server.ts`, with `router.ts` the Hono wrapper. `attempt.ts`, `sleep.ts`, `types.ts`, `constants.ts`, `dates.ts`, `tree.ts` and `util.ts` are new single-responsibility files under the same directories.
 
 ## Fixture tree and request routing (design for WP7)
 
@@ -238,17 +247,19 @@ The plan's file map names `src/fixture/handlers.ts` as "msw handlers + a Hono ro
 - `calendar/<O>-<D>.json`: `{ synthetic, currency, baseMinor, weekdayStepMinor, perNightMinor, noFaresNights, noDataNights }`. Prices are a formula, so any window works without regenerating files: `amountMinor = baseMinor + (epochDay(departureDate) mod 7) × weekdayStepMinor + nights × perNightMinor`. A night count in `noFaresNights` is answered as `noFares`; one in `noDataNights` is omitted (the engine sees `no_data`).
 - `itinerary/<O>-<D>.json`: `{ synthetic, options: [{ seller, carrier, outbound: { flightNumber, depart, arrive, arriveDayOffset }, inbound: {…}, priceDeltaMinor, cabinBagIncluded, checkedBags }] }`. Each offer's price is the calendar price for its cell plus `priceDeltaMinor`; times are local wall-clock templates placed on the cell's dates. Carriers `ZZ` and `ZX` are synthetic designators. No offer ever carries a booking link (`booking: { kind: 'none' }`).
 
-**Routes** (`http://fixture.local`, the same in msw and Hono):
+**Transports.** The same routing core answers in two places: msw's `fixtureHandlers(root)` on global fetch (unit, provider and WP7 layer-A tests), and `fixtureRouter(root)` reached through `HttpKitDeps.inProcessHosts['fixture.local']` (fixture mode, wired by WP4b under `syntheticAllowed`; WP7 may use it too). Each router or handler set holds its own scenario state, so a test sends scenario control to the instance its kit uses.
+
+**Routes** (`http://fixture.local`):
 
 | Request | Meaning |
 |---|---|
 | `GET /calendar?origin&destination&departFrom&departTo&returnFrom&returnTo&cabin&currency` | one discovery tile (a `rectangle`): every `(dep, ret)` in the rectangle with 0 ≤ nights ≤ 90, so entries outside the tile's band come back and the adapter drops them (`dropped-out-of-band:n`). Unknown pair → 404; missing or malformed parameter → 400 |
 | `GET /itinerary?origin&destination&departureDate&returnDate&cabin&currency&expandTop` | one verification search for a cell: `{ outboundOptions, failedExpansions, offers }`, the first `expandTop` options |
 | `GET /health` | `{ synthetic: true, ok: true }` |
-| `POST /__fixture/scenario` body `{ rules: FixtureRule[] }` | replaces the scenario rules (test control; never called by the adapter) |
+| `POST /__fixture/scenario` body `{ rules: FixtureRule[] }` | replaces the scenario rules (test control; never called by the adapter); build it with `scenarioRequest(rules)` |
 | `DELETE /__fixture/scenario` | clears the rules |
 
-**Scenario rules.** A `FixtureRule` is `{ match: { path?, params? }, respond: FixtureResponse, times? }`. For each request the first rule whose `path` equals the request path and whose `params` all equal the query values, with `times` remaining (default unlimited), answers it and decrements `times`; otherwise the normal response is generated. A single request can also carry header `x-fixture-response: <FixtureResponse JSON>` (direct http-kit tests only; the adapter never sends it). `FixtureResponse` kinds: `normal`, `status` (any status, optional body and headers), `malformed` (200 with truncated JSON), `network` (socket error), `hang` (never answers until aborted), `empty`, `no-fares`, `no-currency`, `no-return-legs`, `partial` (`failedExpansions`), `variant` (`currency`, `carrier`, `connectVia`, `scope: 'first-offer' | 'all-offers'`).
+**Scenario rules.** A `FixtureRule` is `{ match: { path?, params? }, respond: FixtureResponse, times? }`. For each request the first rule whose `path` equals the request path and whose `params` all equal the query values, with `times` remaining (default unlimited), answers it and decrements `times`; otherwise the normal response is generated. A single request can also carry header `x-fixture-scenario: <FixtureResponse JSON>` (direct http-kit tests only; the adapter never sends it). `FixtureResponse` kinds: `normal`, `status` (any status, optional body and headers), `malformed` (200 with truncated JSON), `network` (socket error), `hang` (never answers until aborted), `empty`, `no-fares`, `no-currency`, `no-return-legs`, `partial` (`failedExpansions`), `variant` (`currency`, `carrier`, `connectVia`, `scope: 'first-offer' | 'all-offers'`).
 
 **Which rule drives which spec §8.1 row** (WP7 uses these; times count http-kit attempts, three per call):
 
@@ -299,19 +310,18 @@ Test commands run a single file without coverage (the package `test` script enfo
   "type": "module",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./testing": { "types": "./dist/testing.d.ts", "default": "./dist/testing.js" }
+    "./testing": { "types": "./dist/testing/index.d.ts", "default": "./dist/testing/index.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage"
   },
-  "dependencies": { "@gmt/core": "workspace:*", "bottleneck": "2.19.5", "hono": "4.13.13", "p-retry": "8.0.1" },
-  "devDependencies": { "msw": "3.0.3" }
+  "dependencies": { "@gmt/core": "workspace:*", "bottleneck": "2.19.5", "hono": "4.13.13", "msw": "3.0.3", "p-retry": "8.0.1" }
 }
 ```
 
-`// why:` `./testing` is a separate entrypoint because it imports msw, a devDependency; the main barrel must load in the production image. Consumers of `./testing` (WP7 engine tests) add `msw@3.0.3` to their own devDependencies.
+`// why:` msw is a runtime dependency (plan decision 7) because the `./testing` subpath imports it and other packages' tests consume that subpath; production code never imports `./testing`, and the WP0 boundary script rejects any msw import outside `packages/providers/src/testing/`.
 
 `packages/providers/vitest.config.ts`:
 
@@ -326,7 +336,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/index.ts', 'src/testing.ts', 'src/http/types.ts'],
+      exclude: ['src/index.ts', 'src/testing/index.ts', 'src/http/types.ts'],
       thresholds: { lines: 85, branches: 70, functions: 85, statements: 85 },
     },
   },
@@ -439,7 +449,7 @@ type FinaliseParams = Parameters<Reservation['finalise']>[0];
 export type LedgerEvent =
   | ({ type: 'reserve'; at: number } & ReserveParams)
   | ({ type: 'finalise'; at: number } & FinaliseParams)
-  | { type: 'cache-hit'; at: number; providerId: ProviderId; executionId: string | null; endpointPath: string }
+  | { type: 'cache-hit'; at: number; providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }
   | { type: 'fetch'; at: number; url: string; method: string; headers: Record<string, string> };
 
 /**
@@ -466,7 +476,7 @@ export class FakeBudget implements BudgetGuard {
     };
   }
 
-  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; endpointPath: string }): void {
+  recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void {
     this.events.push({ type: 'cache-hit', at: Date.now(), ...p });
   }
 
@@ -544,7 +554,7 @@ export const TP = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
 export type LimitOverrides = Partial<Record<HttpProviderId, Partial<ProviderHttpLimits>>>;
 
 /** Limits for every id; generous rates so only tests that target the limiter ever queue. */
-export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, ProviderHttpLimits> {
+export function testLimits(over: LimitOverrides = {}): Partial<Record<HttpProviderId, ProviderHttpLimits>> {
   const base = { ratePerMinute: 600, ratePerHour: 36_000, concurrency: 4, maxWaitSeconds: 3900, requestTimeoutSeconds: 60 };
   return {
     searchapi: { ...base, hosts: ['www.searchapi.io'], billable: 'http-200', costPerCallMicroGbp: 0, ...over.searchapi },
@@ -555,7 +565,9 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
 }
 
 /** A kit wired to the fakes; every upstream request msw sees is appended to `events` as 'fetch'. */
-export function makeKit(o: { limits?: LimitOverrides; secrets?: Secret[]; recorder?: FixtureRecorder } = {}) {
+export function makeKit(
+  o: { limits?: LimitOverrides; secrets?: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> } = {},
+) {
   const events: LedgerEvent[] = [];
   const budget = new FakeBudget(events);
   const cache = new FakeCache();
@@ -572,6 +584,7 @@ export function makeKit(o: { limits?: LimitOverrides; secrets?: Secret[]; record
     log,
     secrets: o.secrets ?? ALL_SECRETS,
     ...(o.recorder ? { recorder: o.recorder } : {}),
+    ...(o.inProcessHosts ? { inProcessHosts: o.inProcessHosts } : {}),
   });
   return { kit, budget, cache, log, clock, events };
 }
@@ -672,12 +685,19 @@ export interface ProviderHttpLimits {
 export interface HttpKitDeps {
   budget: BudgetGuard;
   cache: ResponseCache;
-  limits: Record<HttpProviderId, ProviderHttpLimits>;
+  /** Limits per enabled id; a request for an id without limits is refused by egress. */
+  limits: Partial<Record<HttpProviderId, ProviderHttpLimits>>;
   clock: Clock;
   log: Logger;
   /** Every configured secret; used for scrubbing and fail-closed checks (spec §5.3). */
   secrets: Secret[];
   recorder?: FixtureRecorder;
+  /**
+   * Spec §4 rev 10: the one transport seam. A request whose hostname is a key here is dispatched to that
+   * function instead of globalThis.fetch; limiter, reserve, finalise, cache and recorder still run.
+   * Wiring passes `{ 'fixture.local': … }` only under syntheticAllowed; createHttpKit refuses any other key.
+   */
+  inProcessHosts?: Record<string, (req: Request) => Promise<Response>>;
 }
 
 /** One logical request. Credentials travel only in `headers` (spec §2 fact 8); `endpointPath` is the path, never a query. */
@@ -710,9 +730,9 @@ export interface HttpKit {
   stats(): { inFlight: number };
 }
 
-/** Writes one attempt's request and response as a dated, hashed, redacted fixture (spec §5.3 "Recorder"). */
+/** Writes one attempt's request and response as a dated, hashed, redacted fixture (spec §5.3 "Recorder"); resolves to the path written. */
 export interface FixtureRecorder {
-  record(r: { providerId: HttpProviderId; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }): Promise<void>;
+  record(r: { providerId: HttpProviderId; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }): Promise<string>;
 }
 ```
 
@@ -813,6 +833,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
   let inFlight = 0;
   async function request(r: HttpKitRequest): Promise<HttpKitResponse> {
     const limits = deps.limits[r.providerId];
+    if (limits === undefined) throw new ProviderError({ kind: 'upstream', retryable: false, providerId: r.providerId, message: `${r.providerId}: no HTTP limits configured [egress-denied]` });
     inFlight += 1;
     try {
       const result = await pRetry((attempt) => runAttempt(deps, r, limits, attempt), {
@@ -1039,7 +1060,7 @@ import { containsSecret, scrubSecrets } from './scrub.js';
 import type { HttpKitRequest } from './types.js';
 
 /** Header names that carry credentials for any vendor this app talks to; never part of a cache key. */
-const CREDENTIAL_HEADERS = new Set(['authorization', 'proxy-authorization', 'x-access-token', 'x-api-key', 'cookie']);
+export const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization', 'x-access-token', 'x-api-key', 'cookie']);
 
 const byPair = (a: [string, string], b: [string, string]): number =>
   a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
@@ -1128,11 +1149,11 @@ describe('default error mapping (spec §5.2 "Errors", §9 item 2)', () => {
     expect(budget.sequence()).toEqual(['reserve', 'fetch', 'finalise:error']);
   });
 
-  it('HTTP 400 → parse with the vendor message as reason, never retried', async () => {
+  it('HTTP 400 → parse with the vendor message in the error message (→ last_error), never in reason; never retried', async () => {
     const { kit, budget } = makeKit();
     reply(400, { error: 'Too many combinations: 240 > 200' });
     const err = await driveError(kit.request(req({ url: SEARCH })));
-    expect(err).toMatchObject({ kind: 'parse', retryable: false, reason: 'Too many combinations: 240 > 200' });
+    expect(err).toMatchObject({ kind: 'parse', retryable: false, reason: undefined, message: expect.stringContaining('Too many combinations: 240 > 200') });
     expect(budget.count('fetch')).toBe(1);
   });
 
@@ -1150,7 +1171,7 @@ describe('default error mapping (spec §5.2 "Errors", §9 item 2)', () => {
     budget.caps.set('provider-month:searchapi', 1);
     reply(429);
     const err = await driveError(kit.request(req({ url: SEARCH })));
-    expect(err).toMatchObject({ kind: 'quota', retryable: false, reason: 'ledger-at-cap' });
+    expect(err).toMatchObject({ kind: 'quota', retryable: false, message: expect.stringContaining('[ledger-at-cap]') });
     expect(budget.count('fetch')).toBe(1);
   });
 
@@ -1180,7 +1201,7 @@ describe('default error mapping (spec §5.2 "Errors", §9 item 2)', () => {
     const { kit, budget } = makeKit();
     server.use(http.get(SEARCH, () => new HttpResponse('{"calendar": [', { status: 200, headers: { 'content-type': 'application/json' } })));
     const err = await driveError(kit.request(req({ url: SEARCH })));
-    expect(err).toMatchObject({ kind: 'parse', retryable: false, reason: 'malformed-json' });
+    expect(err).toMatchObject({ kind: 'parse', retryable: false, message: expect.stringContaining('[malformed-json]') });
     expect(budget.sequence()).toEqual(['reserve', 'fetch', 'finalise:ok']);
     expect(budget.events.find((e) => e.type === 'finalise')).toMatchObject({ httpStatus: 200 });
   });
@@ -1189,7 +1210,7 @@ describe('default error mapping (spec §5.2 "Errors", §9 item 2)', () => {
     const { kit, budget } = makeKit();
     server.use(http.get(SEARCH, () => HttpResponse.error()));
     const err = await driveError(kit.request(req({ url: SEARCH })));
-    expect(err).toMatchObject({ kind: 'network', retryable: true, reason: 'socket' });
+    expect(err).toMatchObject({ kind: 'network', retryable: true, message: expect.stringContaining('[socket]') });
     expect(budget.count('fetch')).toBe(3);
     const finals = budget.events.filter((e) => e.type === 'finalise');
     expect(finals.every((e) => e.outcome === 'error' && e.httpStatus === undefined)).toBe(true);
@@ -1265,7 +1286,7 @@ describe('per-request timeout, abort and redirect', () => {
     const { kit, budget } = makeKit({ limits: { searchapi: { requestTimeoutSeconds: 5 } } });
     hang(SEARCH);
     const err = await driveError(kit.request(req({ url: SEARCH })));
-    expect(err).toMatchObject({ kind: 'network', reason: 'timeout', retryable: false });
+    expect(err).toMatchObject({ kind: 'network', message: expect.stringContaining('[timeout]'), retryable: false });
     expect(budget.sequence()).toEqual(['reserve', 'fetch', 'finalise:unknown']);
   });
 
@@ -1274,7 +1295,7 @@ describe('per-request timeout, abort and redirect', () => {
     hang(TP);
     const r = req({ url: TP, providerId: 'travelpayouts', headers: { 'x-access-token': SENTINELS.travelpayouts.reveal() } });
     const err = await driveError(kit.request(r));
-    expect(err).toMatchObject({ kind: 'network', reason: 'timeout', retryable: true });
+    expect(err).toMatchObject({ kind: 'network', message: expect.stringContaining('[timeout]'), retryable: true });
     expect(budget.sequence().filter((s) => s.startsWith('finalise'))).toEqual(['finalise:unknown', 'finalise:unknown', 'finalise:unknown']);
   });
 
@@ -1319,7 +1340,7 @@ describe('per-request timeout, abort and redirect', () => {
       }),
     );
     const err = await driveError(kit.request(req({ url: SEARCH })));
-    expect(err).toMatchObject({ kind: 'upstream', reason: 'redirect-refused', retryable: false });
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringContaining('[redirect-refused]'), retryable: false });
     expect(evilHits).toBe(0);
     const fetches = budget.events.filter((e) => e.type === 'fetch');
     expect(fetches).toHaveLength(1);
@@ -1358,18 +1379,23 @@ export interface ResponseFacts {
 
 type Where = { providerId: HttpProviderId; endpointPath: string };
 
-/** Builds a ProviderError whose message names provider and path only, never a URL. */
+/**
+ * Builds a ProviderError whose message names provider and path only, never a URL, ending in a bracketed
+ * diagnostic code (`[timeout]`, `[redirect-refused]`, …) that tests and logs can match.
+ * why: `ProviderError.reason` becomes `cell_outcomes.reason` (spec §8.1 `reason = error.reason ?? kind`),
+ * which holds the kind or a spec-named reason only (spec §3 rev 10), so http-kit never sets `reason`;
+ * the vendor's message travels in `message`, which the engine writes to `last_error`.
+ */
 function providerError(
   w: Where,
-  p: { kind: ProviderErrorKind; retryable: boolean; detail: string; httpStatus?: number; reason?: string; retryAfterSeconds?: number },
+  p: { kind: ProviderErrorKind; retryable: boolean; detail: string; httpStatus?: number; code?: string; retryAfterSeconds?: number },
 ): ProviderError {
   return new ProviderError({
     kind: p.kind,
     retryable: p.retryable,
     providerId: w.providerId,
-    message: `${w.providerId} ${w.endpointPath}: ${p.detail}`,
+    message: `${w.providerId} ${w.endpointPath}: ${p.detail}${p.code === undefined ? '' : ` [${p.code}]`}`,
     ...(p.httpStatus === undefined ? {} : { httpStatus: p.httpStatus }),
-    ...(p.reason === undefined ? {} : { reason: p.reason }),
     ...(p.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: p.retryAfterSeconds }),
   });
 }
@@ -1384,7 +1410,7 @@ export function parseRetryAfter(value: string | null, now: IsoDateTime): number 
   return Math.max(0, Math.ceil((at - Date.parse(now)) / 1000));
 }
 
-/** A vendor's own message (`error` or `message` field, or a text body), scrubbed, URL-free, ≤ 200 chars. */
+/** A vendor's own message (`error` or `message` field, or a text body), scrubbed, URL-free, ≤ 200 chars; it goes into the error message (→ `last_error`), never `reason`. */
 export function vendorMessage(body: unknown, secrets: readonly Secret[]): string | undefined {
   let raw: string | undefined;
   if (typeof body === 'string') raw = body;
@@ -1398,7 +1424,7 @@ export function vendorMessage(body: unknown, secrets: readonly Secret[]): string
 
 /**
  * The default status → ProviderError table, spec §5.2 "Errors":
- * 401/403 auth · 402 quota · 400 parse (vendor message as reason) · 404 upstream · 429 rate-limit, or
+ * 401/403 auth · 402 quota · 400 parse (vendor message in the error message, spec rev 10) · 404 upstream · 429 rate-limit, or
  * quota when the ledger shows the plan cap · 5xx upstream (retryable) · any other status upstream
  * (non-retryable). A Retry-After above maxWaitSeconds on a retryable status becomes limiter-timeout.
  */
@@ -1412,7 +1438,7 @@ export function classifyResponse(f: ResponseFacts): ProviderError {
       kind: 'limiter-timeout',
       retryable: false,
       httpStatus,
-      reason: 'retry-after-exceeds-max-wait',
+      code: 'retry-after-exceeds-max-wait',
       retryAfterSeconds: wait ?? 0,
       detail: `HTTP ${httpStatus} asks to wait ${wait}s, beyond MAX_WAIT_SECONDS ${f.maxWaitSeconds}`,
     });
@@ -1420,13 +1446,13 @@ export function classifyResponse(f: ResponseFacts): ProviderError {
   if (httpStatus === 401 || httpStatus === 403) return providerError(w, { kind: 'auth', retryable: false, httpStatus, detail: `HTTP ${httpStatus} (credentials refused)` });
   if (httpStatus === 402) return providerError(w, { kind: 'quota', retryable: false, httpStatus, detail: 'HTTP 402 (plan quota)' });
   if (httpStatus === 400) {
-    const reason = vendorMessage(f.body, f.secrets);
-    return providerError(w, { kind: 'parse', retryable: false, httpStatus, ...(reason === undefined ? {} : { reason }), detail: `HTTP 400${reason ? ` (${reason})` : ''}` });
+    const vendor = vendorMessage(f.body, f.secrets);
+    return providerError(w, { kind: 'parse', retryable: false, httpStatus, code: 'bad-request', detail: `HTTP 400${vendor ? ` (${vendor})` : ''}` });
   }
   if (httpStatus === 404) return providerError(w, { kind: 'upstream', retryable: false, httpStatus, detail: 'HTTP 404' });
   if (httpStatus === 429) {
     // why: spec §5.2 — a 429 at the plan cap is the quota, and retrying it only burns attempts.
-    if (f.ledgerAtCap) return providerError(w, { kind: 'quota', retryable: false, httpStatus, reason: 'ledger-at-cap', detail: 'HTTP 429 at the plan cap' });
+    if (f.ledgerAtCap) return providerError(w, { kind: 'quota', retryable: false, httpStatus, code: 'ledger-at-cap', detail: 'HTTP 429 at the plan cap' });
     if (wait !== undefined && wait > f.maxWaitSeconds) return tooLong();
     return providerError(w, { kind: 'rate-limit', retryable: true, httpStatus, ...waitFields, detail: 'HTTP 429' });
   }
@@ -1439,7 +1465,7 @@ export function classifyResponse(f: ResponseFacts): ProviderError {
 
 /** A 2xx whose body is not JSON. Spec §5.2: malformed → parse. */
 export function malformedBody(w: Where, httpStatus: number): ProviderError {
-  return providerError(w, { kind: 'parse', retryable: false, httpStatus, reason: 'malformed-json', detail: `HTTP ${httpStatus} with a body that is not JSON` });
+  return providerError(w, { kind: 'parse', retryable: false, httpStatus, code: 'malformed-json', detail: `HTTP ${httpStatus} with a body that is not JSON` });
 }
 
 /** A 3xx reached us, or fetch refused to follow one (`redirect: 'error'`). Spec §5.3 egress. */
@@ -1447,7 +1473,7 @@ export function redirectRefused(w: Where, httpStatus?: number): ProviderError {
   return providerError(w, {
     kind: 'upstream',
     retryable: false,
-    reason: 'redirect-refused',
+    code: 'redirect-refused',
     ...(httpStatus === undefined ? {} : { httpStatus }),
     detail: 'redirect refused (redirect: error)',
   });
@@ -1455,7 +1481,7 @@ export function redirectRefused(w: Where, httpStatus?: number): ProviderError {
 
 /** Per-request timeout. Spec §5.2: network, finalised unknown, not retried for billed vendors. */
 export function requestTimeout(w: Where, billable: 'http-200' | 'never'): ProviderError {
-  return providerError(w, { kind: 'network', retryable: billable === 'never', reason: 'timeout', detail: 'request timed out (REQUEST_TIMEOUT_SECONDS)' });
+  return providerError(w, { kind: 'network', retryable: billable === 'never', code: 'timeout', detail: 'request timed out (REQUEST_TIMEOUT_SECONDS)' });
 }
 
 /** A rejection from fetch itself: a refused redirect, or a socket-level failure (network, retryable). */
@@ -1463,7 +1489,7 @@ export function classifyThrown(err: unknown, w: Where): ProviderError {
   const cause = err instanceof Error && err.cause !== undefined ? err.cause : undefined;
   const text = [err instanceof Error ? err.message : String(err), cause instanceof Error ? cause.message : String(cause ?? '')].join(' ');
   if (/redirect/i.test(text)) return redirectRefused(w);
-  return providerError(w, { kind: 'network', retryable: true, reason: 'socket', detail: 'network error' });
+  return providerError(w, { kind: 'network', retryable: true, code: 'socket', detail: 'network error' });
 }
 ```
 
@@ -1653,6 +1679,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
   async function request(r: HttpKitRequest): Promise<HttpKitResponse> {
     if (r.signal.aborted) throw new AbortedError();
     const limits = deps.limits[r.providerId];
+    if (limits === undefined) throw new ProviderError({ kind: 'upstream', retryable: false, providerId: r.providerId, message: `${r.providerId}: no HTTP limits configured [egress-denied]` });
     inFlight += 1;
     try {
       const result = await pRetry((attempt) => runAttempt(deps, r, limits, attempt), {
@@ -1694,15 +1721,15 @@ Expected: PASS, 24 tests. If the redirect case fails because the runtime reports
 git add packages/providers && git commit -m "wp04: default error table, Retry-After, backoff, timeout, abort and redirect refusal (spec §5.2, §5.3)"
 ```
 
-### Task 4.4: Egress allowlist
+### Task 4.4: Egress allowlist and the gated in-process seam
 
 **Files:**
-- Create: `src/http/egress.ts`
-- Modify: `src/http/httpKit.ts`
-- Test: `test/http/egress.test.ts`
+- Create: `src/http/egress.ts`, `src/fixture/constants.ts`
+- Modify: `src/http/httpKit.ts`, `src/http/attempt.ts`
+- Test: `test/http/egress.test.ts`, `test/http/inProcess.test.ts`
 
 **Interfaces:**
-- Produces: `assertEgress(r, limits, secrets): asserts limits is ProviderHttpLimits`.
+- Produces: `assertEgress(r, limits, secrets): asserts limits is ProviderHttpLimits`, `assertInProcessHosts(hosts)`; `HttpKitDeps.inProcessHosts` dispatch (spec §4 rev 10).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1724,7 +1751,7 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
     const { kit, budget } = makeKit();
     const err = await driveError(kit.request(req(r)));
     expect(err).toBeInstanceOf(ProviderError);
-    expect(err).toMatchObject({ kind: 'upstream', reason: 'egress-denied', retryable: false });
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringContaining('[egress-denied]'), retryable: false });
     expect(budget.reserveCalls).toBe(0);
     expect(budget.count('fetch')).toBe(0);
     return err as ProviderError;
@@ -1752,7 +1779,7 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
     const { kit, budget } = makeKit();
     const r = req({ url: SEARCH });
     const err = await driveError(kit.request({ ...r, providerId: 'nope' as never }));
-    expect(err).toMatchObject({ reason: 'egress-denied' });
+    expect(err).toMatchObject({ message: expect.stringContaining('[egress-denied]') });
     expect(budget.reserveCalls).toBe(0);
   });
   it('allows plain http only for the fixture host', async () => {
@@ -1765,10 +1792,70 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+`test/http/inProcess.test.ts`:
 
-Run: `pnpm --filter @gmt/providers exec vitest run test/http/egress.test.ts`
-Expected: FAIL — requests to non-allowlisted hosts reach `reserve` ("expected 1 to be 0") and msw reports the unhandled request.
+```ts
+import { AbortedError } from '@gmt/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeKit, req } from '../fakes.js';
+import { drive, driveError, useFakeTime } from '../support/time.js';
+
+const HEALTH = 'http://fixture.local/health';
+const fixtureReq = (over: Partial<Parameters<typeof req>[0]> = {}) => req({ url: HEALTH, providerId: 'fixture', headers: {}, tileIndex: null, ...over });
+
+describe('in-process transport seam (spec §4 rev 10)', () => {
+  beforeEach(useFakeTime);
+  afterEach(() => vi.useRealTimers());
+
+  it('dispatches fixture.local to the in-process function; reserve and finalise still run; msw sees nothing', async () => {
+    const seen: string[] = [];
+    const { kit, budget } = makeKit({
+      inProcessHosts: {
+        'fixture.local': async (r) => {
+          seen.push(`${r.method} ${r.url}`);
+          return Response.json({ synthetic: true, ok: true });
+        },
+      },
+    });
+    const res = await drive(kit.request(fixtureReq()));
+    expect(res.body).toEqual({ synthetic: true, ok: true });
+    expect(seen).toEqual([`GET ${HEALTH}`]);
+    expect(budget.sequence()).toEqual(['reserve', 'finalise:ok']);
+  });
+
+  it('the per-request timeout and abort apply to an in-process call', async () => {
+    const hang = { 'fixture.local': () => new Promise<Response>(() => undefined) };
+    const timed = makeKit({ inProcessHosts: hang, limits: { fixture: { requestTimeoutSeconds: 5 } } });
+    expect(await driveError(timed.kit.request(fixtureReq()))).toMatchObject({ kind: 'network', message: expect.stringContaining('[timeout]') });
+    expect(timed.budget.sequence()).toEqual(['reserve', 'finalise:unknown']);
+    const aborted = makeKit({ inProcessHosts: hang });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 1000);
+    expect(await driveError(aborted.kit.request(fixtureReq({ signal: ac.signal })))).toBeInstanceOf(AbortedError);
+  });
+
+  it('an in-process Response.error() is a socket error: network, retried to 3 attempts', async () => {
+    const { kit, budget } = makeKit({ inProcessHosts: { 'fixture.local': async () => Response.error() } });
+    expect(await driveError(kit.request(fixtureReq()))).toMatchObject({ kind: 'network', retryable: true, message: expect.stringContaining('[socket]') });
+    expect(budget.sequence().filter((x) => x.startsWith('finalise'))).toEqual(['finalise:error', 'finalise:error', 'finalise:error']);
+  });
+
+  it('egress still applies: a provider whose allowlist lacks fixture.local cannot reach it in process', async () => {
+    const { kit, budget } = makeKit({ inProcessHosts: { 'fixture.local': async () => Response.json({}) } });
+    expect(await driveError(kit.request(fixtureReq({ providerId: 'searchapi' })))).toMatchObject({ message: expect.stringContaining('[egress-denied]') });
+    expect(budget.reserveCalls).toBe(0);
+  });
+
+  it('createHttpKit refuses an in-process host other than fixture.local', () => {
+    expect(() => makeKit({ inProcessHosts: { 'www.searchapi.io': async () => Response.json({}) } })).toThrow(/fixture\.local/);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `pnpm --filter @gmt/providers exec vitest run test/http/egress.test.ts test/http/inProcess.test.ts`
+Expected: FAIL — requests to non-allowlisted hosts reach `reserve` ("expected 1 to be 0") and msw reports the unhandled request; the in-process cases reach msw (unhandled `fixture.local`) instead of the function.
 
 - [ ] **Step 3: Implement**
 
@@ -1783,6 +1870,16 @@ import type { HttpKitRequest, ProviderHttpLimits } from './types.js';
 const PATH_ONLY = /^\/[^?#]*$/;
 
 /**
+ * Spec §4 rev 10: the in-process seam exists for the synthetic fixture host only. Wiring decides whether
+ * to pass it (only under syntheticAllowed); this refuses any other hostname so the seam cannot widen.
+ */
+export function assertInProcessHosts(hosts: Record<string, unknown> | undefined): void {
+  for (const host of Object.keys(hosts ?? {})) {
+    if (host !== FIXTURE_HOST) throw new Error(`inProcessHosts may name only ${FIXTURE_HOST}, got ${host}`);
+  }
+}
+
+/**
  * Spec §5.3 "Egress", checked before the cache, the ledger or the network: the provider has limits;
  * the scheme is https (plain http only for the fixture provider at fixture.local); no userinfo; the
  * hostname is in the provider's allowlist; `endpointPath` is exactly the URL path; no secret appears
@@ -1791,7 +1888,7 @@ const PATH_ONLY = /^\/[^?#]*$/;
 export function assertEgress(r: HttpKitRequest, limits: ProviderHttpLimits | undefined, secrets: readonly Secret[]): asserts limits is ProviderHttpLimits {
   const safePath = PATH_ONLY.test(r.endpointPath) && !containsSecret(r.endpointPath, secrets) ? r.endpointPath : '<invalid endpointPath>';
   function deny(why: string): never {
-    throw new ProviderError({ kind: 'upstream', retryable: false, reason: 'egress-denied', providerId: r.providerId, message: `${r.providerId} ${safePath}: egress denied (${why})` });
+    throw new ProviderError({ kind: 'upstream', retryable: false, providerId: r.providerId, message: `${r.providerId} ${safePath}: egress denied (${why}) [egress-denied]` });
   }
   if (limits === undefined) deny('no HTTP limits configured for this provider');
   const u = r.url;
@@ -1813,19 +1910,35 @@ export const FIXTURE_ORIGIN = `http://${FIXTURE_HOST}`;
 /** Test control route of the fixture server: POST { rules } replaces the scenario, DELETE clears it. */
 export const SCENARIO_PATH = '/__fixture/scenario';
 /** Per-request override header carrying a FixtureResponse as JSON (direct http-kit tests only). */
-export const RESPONSE_HEADER = 'x-fixture-response';
+export const SCENARIO_HEADER = 'x-fixture-scenario';
 ```
 
-`src/http/httpKit.ts`: add the import and one line.
+`src/http/httpKit.ts`: add the import, check the seam at construction, and check egress per request.
 
 ```ts
-import { assertEgress } from './egress.js';
+import { assertEgress, assertInProcessHosts } from './egress.js';
+```
+
+Replace
+
+```ts
+export function createHttpKit(deps: HttpKitDeps): HttpKit {
+  let inFlight = 0;
+```
+
+with
+
+```ts
+export function createHttpKit(deps: HttpKitDeps): HttpKit {
+  let inFlight = 0;
+  assertInProcessHosts(deps.inProcessHosts);
 ```
 
 Replace
 
 ```ts
     const limits = deps.limits[r.providerId];
+    if (limits === undefined) throw new ProviderError({ kind: 'upstream', retryable: false, providerId: r.providerId, message: `${r.providerId}: no HTTP limits configured [egress-denied]` });
     inFlight += 1;
 ```
 
@@ -1839,13 +1952,33 @@ with
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/providers exec vitest run test/http/egress.test.ts test/http/errors.test.ts test/http/pipeline.test.ts`
-Expected: PASS, 31 tests.
+`src/http/attempt.ts`: dispatch through the seam. Replace
+
+```ts
+    const res = await raceAbort(
+      fetch(r.url, { method: r.method, headers: r.headers, ...(r.body === undefined ? {} : { body: r.body }), redirect: 'error', signal }),
+      signal,
+    );
+```
+
+with
+
+```ts
+    const init: RequestInit = { method: r.method, headers: r.headers, ...(r.body === undefined ? {} : { body: r.body }), redirect: 'error', signal };
+    // why: spec §4 rev 10 — the gated in-process seam (fixture.local only); every other host goes to globalThis.fetch.
+    const inProcess = deps.inProcessHosts?.[r.url.hostname];
+    const res = await raceAbort(inProcess ? inProcess(new Request(r.url, init)) : fetch(r.url, init), signal);
+    // why: an in-process Response.error() (fixture 'network') is a socket-level failure, exactly like fetch rejecting.
+    if (res.type === 'error') throw new TypeError('network error');
+```
+
+Run: `pnpm --filter @gmt/providers exec vitest run test/http/egress.test.ts test/http/inProcess.test.ts test/http/errors.test.ts test/http/pipeline.test.ts`
+Expected: PASS, 36 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp04: egress allowlist before cache, ledger and network (spec §5.3)"
+git add packages/providers && git commit -m "wp04: egress allowlist and the gated in-process fixture seam (spec §4, §5.3)"
 ```
 
 ### Task 4.5: Limiter — chained per-minute and per-hour reservoirs, concurrency, queue deadline
@@ -1921,7 +2054,7 @@ describe('limiter (spec §5.3: chained per-minute + per-hour reservoirs, maxConc
     await drive(first);
     const err = await driveError(second);
     expect(err).toBeInstanceOf(ProviderError);
-    expect(err).toMatchObject({ kind: 'limiter-timeout', retryable: false, reason: 'queue-wait-exceeded' });
+    expect(err).toMatchObject({ kind: 'limiter-timeout', retryable: false, message: expect.stringContaining('[queue-wait-exceeded]') });
     expect(budget.reserveCalls).toBe(1);
     expect(budget.count('fetch')).toBe(1);
   });
@@ -2010,8 +2143,7 @@ export function createLimiter(l: ProviderHttpLimits): ProviderLimiter {
             kind: 'limiter-timeout',
             retryable: false,
             providerId: o.providerId,
-            reason: 'queue-wait-exceeded',
-            message: `${o.providerId} ${o.endpointPath}: waited more than ${Math.round(o.maxWaitMs / 1000)}s for a rate-limit slot`,
+            message: `${o.providerId} ${o.endpointPath}: waited more than ${Math.round(o.maxWaitMs / 1000)}s for a rate-limit slot [queue-wait-exceeded]`,
           });
         const giveUp = (e: Error): void => {
           if (state !== 'queued') return;
@@ -2099,8 +2231,8 @@ with
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/providers exec vitest run test/http/limiter.test.ts test/http/errors.test.ts test/http/pipeline.test.ts test/http/egress.test.ts`
-Expected: PASS, 37 tests.
+Run: `pnpm --filter @gmt/providers exec vitest run test/http/limiter.test.ts test/http/errors.test.ts test/http/pipeline.test.ts test/http/egress.test.ts test/http/inProcess.test.ts`
+Expected: PASS, 42 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2150,7 +2282,7 @@ describe('cache path (spec §5.3 pipeline)', () => {
     expect(second.body).toEqual({ calendar: [1] });
     expect(second.cacheKey).toBe(first.cacheKey);
     expect(budget.events.filter((e) => e.type === 'cache-hit')).toEqual([
-      expect.objectContaining({ providerId: 'searchapi', executionId: 'exec-2', endpointPath: '/api/v1/search' }),
+      expect.objectContaining({ providerId: 'searchapi', executionId: 'exec-2', tileIndex: 0, endpointPath: '/api/v1/search' }),
     ]);
     expect(cache.sets).toHaveLength(1);
   });
@@ -2212,7 +2344,7 @@ describe('cache path (spec §5.3 pipeline)', () => {
   it("'fx' requests are never ledgered: no reserve, no cache-hit row", async () => {
     const { kit, budget } = makeKit();
     server.use(http.get('https://api.frankfurter.dev/v1/latest', () => HttpResponse.json({ rates: { USD: 1.3 } })));
-    const r = req({ url: 'https://api.frankfurter.dev/v1/latest?base=GBP', providerId: 'fx', headers: {}, cache: { ttlSeconds: 3600 } });
+    const r = req({ url: 'https://api.frankfurter.dev/v1/latest?from=GBP', providerId: 'fx', headers: {}, cache: { ttlSeconds: 3600 } });
     await drive(kit.request(r));
     await drive(kit.request(r));
     expect(budget.reserveCalls).toBe(0);
@@ -2236,7 +2368,7 @@ import { AbortedError, ProviderError } from '@gmt/core';
 import pRetry from 'p-retry';
 import { type AttemptResult, runAttempt } from './attempt.js';
 import { canonicalCacheKey } from './cacheKey.js';
-import { assertEgress } from './egress.js';
+import { assertEgress, assertInProcessHosts } from './egress.js';
 import { createLimiter, type ProviderLimiter } from './limiter.js';
 import { sleep } from './sleep.js';
 import type { HttpKit, HttpKitDeps, HttpKitRequest, HttpKitResponse, HttpProviderId, ProviderHttpLimits } from './types.js';
@@ -2262,7 +2394,8 @@ export function isRetryable(e: unknown): e is ProviderError {
 }
 
 /**
- * Spec §5.3 http-kit over globalThis.fetch (no injectable transport; tests use msw on global fetch):
+ * Spec §5.3 http-kit over globalThis.fetch (tests use msw on global fetch; the only other transport is the
+ * gated `inProcessHosts` seam for fixture.local, spec §4 rev 10). 'fx' is never ledgered (spec §5.6 rev 10):
  *
  *   egress check → cache lookup ─hit─▶ recordCacheHit → { body, fetchedAt: storedAt }
  *     │miss
@@ -2273,6 +2406,7 @@ export function isRetryable(e: unknown): e is ProviderError {
  * Throws ProviderError (classified), BudgetExceeded (from reserve, before any fetch), AbortedError.
  */
 export function createHttpKit(deps: HttpKitDeps): HttpKit {
+  assertInProcessHosts(deps.inProcessHosts);
   const limiters = new Map<HttpProviderId, ProviderLimiter>();
   const inFlight = new Map<string, Promise<HttpKitResponse>>();
 
@@ -2325,7 +2459,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
       const hit = deps.cache.get(key);
       if (hit !== undefined) {
         // why: spec §5.3 — cache hits are ledgered as non-billable rows so parity counts them; 'fx' is not ledgered.
-        if (r.providerId !== 'fx') deps.budget.recordCacheHit({ providerId: r.providerId, executionId: r.executionId, endpointPath: r.endpointPath });
+        if (r.providerId !== 'fx') deps.budget.recordCacheHit({ providerId: r.providerId, executionId: r.executionId, tileIndex: r.tileIndex, endpointPath: r.endpointPath });
         return { status: 200, body: hit.body, fetchedAt: hit.storedAt, fromCache: true, cacheKey: key };
       }
     }
@@ -2346,7 +2480,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http`
-Expected: PASS, every file under `test/http` (57 tests).
+Expected: PASS, every file under `test/http` (62 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -2354,18 +2488,18 @@ Expected: PASS, every file under `test/http` (57 tests).
 git add packages/providers && git commit -m "wp04: cache path with recordCacheHit and original fetchedAt, in-flight dedup (spec §5.3)"
 ```
 
-### Task 4.7: Recorder — fails closed, deterministic token placeholders, content hash
+### Task 4.7: Recorder — the pinned `RecordedFixture` format, fails closed, token placeholders, content hash
 
 **Files:**
 - Create: `src/http/recorder.ts`, `fixtures/recorded/.gitkeep`
-- Modify: `src/http/attempt.ts`
+- Modify: `src/http/attempt.ts`, the repository `.gitignore`
 - Test: `test/http/recorder.test.ts`
 
 **Interfaces:**
-- Consumes: `Clock`, `Secret` (WP0); `containsSecret`, `stripUrl` (Task 4.2).
-- Produces: `createRecorder`, `RecorderRefusedError`, `RecordedFixture`, `canonicalJson`, `withContentHash`, `verifyContentHash`, `loadRecordedJson`, `loadRecordedFixture`; http-kit calls `deps.recorder.record` for every attempt that received an HTTP response when `r.recordFixtures` is true.
+- Consumes: `Clock`, `Secret` (WP0); `containsSecret`, `scrubSecrets`, `stripUrl`, `CREDENTIAL_HEADERS` (Task 4.2).
+- Produces: `createRecorder`, `RecorderRefusedError`, `RecordedFixture`, `contentHash`, `canonicalJson`, `withContentHash`, `verifyContentHash`, `loadRecordedJson`, `loadRecordedFixture`; http-kit calls `deps.recorder.record` for every attempt that received an HTTP response when `r.recordFixtures` is true.
 
-Recorded file layout (spec §5.3): `<root>/<providerId>/<endpointDir>/<yyyy-mm-dd>-<first 12 hex of contentSha256>.json`, where `<root>` must end in `fixtures/recorded` and `endpointDir` is `endpointPath` without its leading `/`, every other character outside `[A-Za-z0-9._-]` replaced by `_` (`/api/v1/search` → `api_v1_search`). File body:
+Recorded file layout (plan contracts v2): `<root>/<providerId>/<endpointPath with every / replaced by _>/<yyyy-mm-dd>-<first 12 hex of contentSha256>.json`, where `<root>` must end in `fixtures/recorded` (`/api/v1/search` → `_api_v1_search`). Beside it, `<same name>.raw.json` holds the unmodified vendor body for local debugging; it is gitignored and subject to the same fail-closed credential check. File body (`RecordedFixture`):
 
 ```json
 {
@@ -2373,30 +2507,38 @@ Recorded file layout (spec §5.3): `<root>/<providerId>/<endpointDir>/<yyyy-mm-d
   "recordedBy": "<who ran record:fixtures, set by WP4b>",
   "providerId": "searchapi",
   "endpointPath": "/api/v1/search",
-  "request": { "method": "GET", "url": "https://www.searchapi.io/api/v1/search", "params": { "engine": "google_flights" }, "body": null },
+  "request": {
+    "method": "GET",
+    "url": "https://www.searchapi.io/api/v1/search?engine=google_flights&departure_token=%3Cdeparture_token%3A1%3E",
+    "headers": { "accept": "application/json", "authorization": "[redacted]" },
+    "body": null
+  },
   "status": 200,
   "body": { "…": "response, tokens replaced by <name:n>, search_metadata URLs stripped" },
-  "contentSha256": "<sha256 hex of canonicalJson(file without contentSha256)>"
+  "placeholders": { "<booking_token:0>": "booking_token", "<departure_token:1>": "departure_token" },
+  "contentSha256": "<contentHash(file without contentSha256)>"
 }
 ```
 
-Headers are never recorded. Opaque vendor tokens are any string value under a key matching `/^[a-z0-9]+(?:_[a-z0-9]+)*_token$/` (`departure_token`, `booking_token`, `next_page_token`); each distinct raw value becomes `<key:n>` in order of first appearance, and the recorder instance keeps the table, so a token returned in one response and sent in the next request carries the same placeholder in both files (chains replay).
+Opaque vendor tokens are any string value under a key matching `/^[a-z0-9]+(?:_[a-z0-9]+)*_token$/` (`departure_token`, `booking_token`, `next_page_token`), in the response body, the request's query or its JSON body; each distinct raw value becomes `<key:n>` in order of first appearance, and the recorder instance keeps the table, so a token returned in one response and sent in the next request carries the same placeholder in both files. `placeholders` lists the placeholders used in that file with their token key. Replay (Task 4.11) matches requests on the recorded URL, placeholders included, so a replayed chain sends back exactly the placeholder it was served.
 
 - [ ] **Step 1: Write the failing test**
 
 `test/http/recorder.test.ts`:
 
 ```ts
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { http, HttpResponse } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  contentHash,
   createRecorder,
   loadRecordedFixture,
   loadRecordedJson,
+  type RecordedFixture,
   RecorderRefusedError,
   verifyContentHash,
   withContentHash,
@@ -2416,87 +2558,90 @@ function files(dir: string): string[] {
   const walk = (d: string): void => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       if (e.isDirectory()) walk(join(d, e.name));
-      else out.push(join(d, e.name));
+      else if (!e.name.endsWith('.raw.json')) out.push(join(d, e.name));
     }
   };
   walk(dir);
   return out.sort();
 }
+const read = (f: string): RecordedFixture => JSON.parse(readFileSync(f, 'utf8'));
 const recorder = (root: string) => createRecorder({ root, secrets: ALL_SECRETS, clock, recordedBy: 'wp04-test' });
 const call = (url: string, body: unknown, status = 200) => ({
   providerId: 'searchapi' as const,
   endpointPath: '/api/v1/search',
-  request: req({ url }),
+  request: req({ url, headers: { accept: 'application/json', authorization: `Bearer ${SENTINELS.searchapi.reveal()}` } }),
   status,
   body,
 });
 
-describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
-  it('writes <root>/<provider>/<endpoint>/<date>-<hash>.json with recordedAt, recordedBy and a verifiable hash', async () => {
+describe('createRecorder (spec §5.3 "Recorder", §5.5; plan RecordedFixture)', () => {
+  it('writes <root>/<provider>/<endpointPath with / → _>/<date>-<sha12>.json plus a .raw.json, and returns the path', async () => {
     const root = tree();
-    await recorder(root).record(call(`${SEARCH}?engine=google_flights&departure_id=LHR`, { price: 41200 }));
-    const [file] = files(root);
-    expect(file).toMatch(/searchapi\/api_v1_search\/2026-10-14-[0-9a-f]{12}\.json$/);
-    const json = JSON.parse(readFileSync(file ?? '', 'utf8'));
-    expect(json).toMatchObject({
+    const path = await recorder(root).record(call(`${SEARCH}?engine=google_flights&departure_id=LHR`, { price: 41200 }));
+    expect(path).toMatch(/searchapi\/_api_v1_search\/2026-10-14-[0-9a-f]{12}\.json$/);
+    expect(files(root)).toEqual([path]);
+    expect(existsSync(path.replace(/\.json$/, '.raw.json'))).toBe(true);
+    const json = read(path);
+    expect(json).toEqual({
       recordedAt: '2026-10-14T15:00:00.000Z',
       recordedBy: 'wp04-test',
       providerId: 'searchapi',
       endpointPath: '/api/v1/search',
-      request: { method: 'GET', url: 'https://www.searchapi.io/api/v1/search', params: { engine: 'google_flights', departure_id: 'LHR' }, body: null },
+      request: { method: 'GET', url: `${SEARCH}?engine=google_flights&departure_id=LHR`, headers: { accept: 'application/json', authorization: '[redacted]' }, body: null },
       status: 200,
       body: { price: 41200 },
+      placeholders: {},
+      contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
-    expect(verifyContentHash(json)).toBe(true);
-    expect(JSON.stringify(json)).not.toContain('authorization');
+    const { contentSha256, ...rest } = json;
+    expect(contentHash(rest)).toBe(contentSha256);
+    expect(path).toContain(`-${contentSha256.slice(0, 12)}.json`);
   });
 
-  it('fails closed on a secret substring: throws and writes nothing', async () => {
+  it('fails closed on a secret substring: throws and writes nothing (neither file)', async () => {
     const root = tree();
     const err = await recorder(root)
       .record(call(SEARCH, { echo: `Invalid key ${SENTINELS.searchapi.reveal()}` }))
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RecorderRefusedError);
-    expect(files(root)).toEqual([]);
+    expect(readdirSync(root)).toEqual([]);
   });
 
   it('fails closed on a URL-encoded secret too', async () => {
-    const root = tree();
-    const err = await recorder(root)
+    const err = await recorder(tree())
       .record(call(SEARCH, { next: `https://x.example/?k=${encodeURIComponent(SENTINELS.smtp.reveal())}` }))
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RecorderRefusedError);
   });
 
-  it('strips search_metadata URLs to origin + path', async () => {
+  it('strips search_metadata URLs to origin + path (and the raw body that carried the key is refused, not written)', async () => {
     const root = tree();
-    await recorder(root).record(
-      call(SEARCH, { search_metadata: { request_url: `${SEARCH}?engine=google_flights&api_key=${SENTINELS.searchapi.reveal()}`, id: 's1' } }),
-    );
-    const json = JSON.parse(readFileSync(files(root)[0] ?? '', 'utf8'));
-    expect(json.body.search_metadata).toEqual({ request_url: SEARCH, id: 's1' });
+    const path = await recorder(root).record(call(SEARCH, { search_metadata: { request_url: `${SEARCH}?engine=google_flights&id=s1`, id: 's1' } }));
+    expect((read(path).body as { search_metadata: unknown }).search_metadata).toEqual({ request_url: SEARCH, id: 's1' });
+    const err = await recorder(tree())
+      .record(call(SEARCH, { search_metadata: { request_url: `${SEARCH}?api_key=${SENTINELS.searchapi.reveal()}` } }))
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RecorderRefusedError);
   });
 
   it('replaces opaque tokens with deterministic placeholders, consistent from a response to the next request', async () => {
     const root = tree();
     const rec = recorder(root);
-    await rec.record(call(`${SEARCH}?engine=google_flights`, { best_flights: [{ departure_token: 'RAW-A' }, { departure_token: 'RAW-B' }] }));
-    await rec.record(call(`${SEARCH}?engine=google_flights&departure_token=RAW-B`, { booking_options: [{ booking_token: 'RAW-C' }] }));
-    const [one, two] = files(root).map((f) => JSON.parse(readFileSync(f, 'utf8')));
-    const all = JSON.stringify([one, two]);
-    expect(all).not.toMatch(/RAW-[ABC]/);
-    const step1 = [one, two].find((j) => j.body.best_flights);
-    const step2 = [one, two].find((j) => j.body.booking_options);
-    expect(step1.body.best_flights).toEqual([{ departure_token: '<departure_token:0>' }, { departure_token: '<departure_token:1>' }]);
-    expect(step2.request.params.departure_token).toBe('<departure_token:1>');
-    expect(step2.body.booking_options).toEqual([{ booking_token: '<booking_token:0>' }]);
+    const p1 = await rec.record(call(`${SEARCH}?engine=google_flights`, { best_flights: [{ departure_token: 'RAW-A' }, { departure_token: 'RAW-B' }] }));
+    const p2 = await rec.record(call(`${SEARCH}?engine=google_flights&departure_token=RAW-B`, { booking_options: [{ booking_token: 'RAW-C' }] }));
+    const [one, two] = [read(p1), read(p2)];
+    expect(JSON.stringify([one, two])).not.toMatch(/RAW-[ABC]/);
+    expect(one.body).toEqual({ best_flights: [{ departure_token: '<departure_token:0>' }, { departure_token: '<departure_token:1>' }] });
+    expect(one.placeholders).toEqual({ '<departure_token:0>': 'departure_token', '<departure_token:1>': 'departure_token' });
+    expect(new URL(two.request.url).searchParams.get('departure_token')).toBe('<departure_token:1>');
+    expect(two.body).toEqual({ booking_options: [{ booking_token: '<booking_token:0>' }] });
+    expect(two.placeholders).toEqual({ '<booking_token:0>': 'booking_token', '<departure_token:1>': 'departure_token' });
   });
 
   it('is deterministic: a fresh recorder over the same calls writes the same files', async () => {
     const run = async () => {
       const root = tree();
-      const rec = recorder(root);
-      await rec.record(call(SEARCH, { best_flights: [{ departure_token: 'RAW-A' }] }));
+      await recorder(root).record(call(SEARCH, { best_flights: [{ departure_token: 'RAW-A' }] }));
       return files(root).map((f) => readFileSync(f, 'utf8'));
     };
     expect(await run()).toEqual(await run());
@@ -2514,31 +2659,30 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
 
 describe('recorded-tree loaders (spec §9 item 2 fixture-tree rules)', () => {
   it('round-trips a recording and refuses it once hand-edited', async () => {
-    const root = tree();
-    await recorder(root).record(call(SEARCH, { price: 41200 }));
-    const file = files(root)[0] ?? '';
-    expect(loadRecordedFixture(file).body).toEqual({ price: 41200 });
-    const edited = JSON.parse(readFileSync(file, 'utf8'));
-    edited.body.price = 1;
-    writeFileSync(file, JSON.stringify(edited));
-    expect(() => loadRecordedFixture(file)).toThrow(/content hash mismatch/);
+    const path = await recorder(tree()).record(call(SEARCH, { price: 41200 }));
+    expect(loadRecordedFixture(path).body).toEqual({ price: 41200 });
+    const edited = read(path);
+    (edited.body as { price: number }).price = 1;
+    writeFileSync(path, JSON.stringify(edited));
+    expect(() => loadRecordedFixture(path)).toThrow(/content hash mismatch/);
   });
 
   it('refuses a file outside fixtures/recorded and a synthetic file inside it', () => {
     const outside = join(mkdtempSync(join(tmpdir(), 'gmt-o-')), 'x.json');
     writeFileSync(outside, JSON.stringify(withContentHash({ recordedAt: '2026-10-14T15:00:00.000Z', recordedBy: 'x' })));
     expect(() => loadRecordedJson(outside)).toThrow(/fixtures\/recorded/);
-    const root = tree();
-    const syn = join(root, 'syn.json');
-    writeFileSync(syn, JSON.stringify(withContentHash({ synthetic: true, recordedAt: '2026-10-14T15:00:00.000Z', recordedBy: 'x' })));
+    const syn = join(tree(), 'syn.json');
+    writeFileSync(syn, JSON.stringify(withContentHash({ synthetic: true, recordedAt: '2026-10-14T15:00:00.000Z' })));
     expect(() => loadRecordedJson(syn)).toThrow(/synthetic/);
   });
 
-  it('loadRecordedJson accepts any hashed recorded-tree file (e.g. a params allowlist)', () => {
-    const root = tree();
-    const p = join(root, 'params-2026-10-14.json');
-    writeFileSync(p, JSON.stringify(withContentHash({ recordedAt: '2026-10-14T15:00:00.000Z', recordedBy: 'x', params: { gl: ['gb'] } })));
-    expect(loadRecordedJson(p)).toMatchObject({ params: { gl: ['gb'] } });
+  it('accepts a hashed ParamsAllowlist file (recordedAt is a date, no recordedBy), and verifyContentHash rejects an unhashed one', () => {
+    const p = join(tree(), 'params-2026-10-14.json');
+    const allowlist = withContentHash({ provider: 'searchapi', recordedAt: '2026-10-14', endpoints: { '/api/v1/search': { names: ['gl'], values: { gl: ['gb'] } } } });
+    writeFileSync(p, JSON.stringify(allowlist));
+    expect(loadRecordedJson(p)).toMatchObject({ provider: 'searchapi' });
+    expect(verifyContentHash({ provider: 'searchapi' })).toBe(false);
+    expect(() => loadRecordedFixture(p)).toThrow(/not a recorded HTTP attempt/);
   });
 });
 
@@ -2553,8 +2697,7 @@ describe('http-kit recording hook', () => {
     server.use(http.get(SEARCH, () => (++n === 1 ? HttpResponse.json({ error: 'slow down' }, { status: 429 }) : HttpResponse.json({ ok: n }))));
     await drive(kit.request(req({ url: `${SEARCH}?engine=a`, recordFixtures: true })));
     await drive(kit.request(req({ url: `${SEARCH}?engine=b`, recordFixtures: false })));
-    const recorded = files(root).map((f) => JSON.parse(readFileSync(f, 'utf8')));
-    expect(recorded.map((j) => j.status).sort()).toEqual([200, 429]);
+    expect(files(root).map((f) => read(f).status).sort()).toEqual([200, 429]);
   });
 
   it('a recorder refusal fails the request loudly', async () => {
@@ -2580,8 +2723,9 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import type { Clock, IsoDateTime, Secret } from '@gmt/core';
 import { isRecord, parseMaybeJson } from '../util.js';
-import { containsSecret, stripUrl } from './scrub.js';
-import type { FixtureRecorder, HttpProviderId } from './types.js';
+import { CREDENTIAL_HEADERS } from './cacheKey.js';
+import { containsSecret, scrubSecrets, stripUrl } from './scrub.js';
+import type { FixtureRecorder } from './types.js';
 
 /** The recorder refused to write (credential present, wrong tree, synthetic provider). Spec §5.3: fails closed. */
 export class RecorderRefusedError extends Error {
@@ -2591,20 +2735,22 @@ export class RecorderRefusedError extends Error {
   }
 }
 
-/** One recorded HTTP attempt. Spec §5.3 layout; §5.5 content hash and recordedBy. */
+/** One recorded HTTP attempt; the format pinned in the plan's http-kit contract. */
 export interface RecordedFixture {
   recordedAt: IsoDateTime;
   recordedBy: string;
-  providerId: HttpProviderId;
+  providerId: string;
   endpointPath: string;
-  request: { method: 'GET' | 'POST'; url: string; params: Record<string, string>; body: unknown };
+  request: { method: string; url: string; headers: Record<string, string>; body: string | null };
   status: number;
   body: unknown;
+  placeholders: Record<string, string>;
   contentSha256: string;
 }
 
 const TOKEN_KEY = /^[a-z0-9]+(?:_[a-z0-9]+)*_token$/;
 const RECORDED_DIR = `${sep}fixtures${sep}recorded`;
+const SAFE_PATH = /^\/[A-Za-z0-9._\/-]*$/;
 
 /** JSON with object keys sorted at every level and undefined members dropped: the hash input. */
 export function canonicalJson(v: unknown): string {
@@ -2618,30 +2764,35 @@ export function canonicalJson(v: unknown): string {
   return JSON.stringify(v) ?? 'null';
 }
 
-function contentHashOf(file: Record<string, unknown>): string {
+function hashOf(file: Record<string, unknown>): string {
   const { contentSha256: _excluded, ...rest } = file;
   return createHash('sha256').update(canonicalJson(rest)).digest('hex');
 }
 
-/** Adds `contentSha256` over everything else in the file. WP4b uses it for params allowlists too. */
-export function withContentHash<T extends Record<string, unknown>>(file: T): T & { contentSha256: string } {
-  return { ...file, contentSha256: contentHashOf(file) };
+/** sha256 hex over canonicalJson of a recording without its hash field (plan contract). */
+export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string {
+  return hashOf(f as unknown as Record<string, unknown>);
 }
 
-/** Recomputes the content hash; false for anything hand-edited after recording. */
+/** Adds `contentSha256` over everything else; WP5/WP6 write their ParamsAllowlist files with it. */
+export function withContentHash<T extends Record<string, unknown>>(file: T): T & { contentSha256: string } {
+  return { ...file, contentSha256: hashOf(file) };
+}
+
+/** Recomputes the content hash of any recorded-tree JSON; false for anything edited after recording. */
 export function verifyContentHash(file: unknown): boolean {
-  return isRecord(file) && typeof file.contentSha256 === 'string' && contentHashOf(file) === file.contentSha256;
+  return isRecord(file) && typeof file.contentSha256 === 'string' && hashOf(file) === file.contentSha256;
 }
 
 /** Placeholder table for opaque vendor tokens, shared across one recorder's lifetime. */
 function tokenTable() {
-  const byRaw = new Map<string, string>();
+  const byRaw = new Map<string, { placeholder: string; key: string }>();
   const counters = new Map<string, number>();
   const register = (key: string, raw: string): void => {
     if (raw === '' || byRaw.has(raw)) return;
     const n = counters.get(key) ?? 0;
     counters.set(key, n + 1);
-    byRaw.set(raw, `<${key}:${n}>`);
+    byRaw.set(raw, { placeholder: `<${key}:${n}>`, key });
   };
   const collect = (v: unknown): void => {
     if (Array.isArray(v)) v.forEach(collect);
@@ -2652,17 +2803,25 @@ function tokenTable() {
       }
     }
   };
-  const replace = (v: unknown): unknown => {
-    if (typeof v === 'string') {
-      // why: longest raw value first so a token that contains another is replaced whole.
-      const raws = [...byRaw.keys()].sort((a, b) => b.length - a.length);
-      return raws.reduce((s, raw) => s.split(raw).join(byRaw.get(raw) ?? raw), v);
-    }
-    if (Array.isArray(v)) return v.map(replace);
-    if (isRecord(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, replace(x)]));
+  /** Replaces every known raw token in a string, noting each placeholder used in `used`. */
+  const text = (s: string, used: Map<string, string>): string => {
+    // why: longest raw value first so a token that contains another is replaced whole.
+    const raws = [...byRaw.keys()].sort((a, b) => b.length - a.length);
+    return raws.reduce((acc, raw) => {
+      if (!acc.includes(raw)) return acc;
+      const t = byRaw.get(raw);
+      if (t === undefined) return acc;
+      used.set(t.placeholder, t.key);
+      return acc.split(raw).join(t.placeholder);
+    }, s);
+  };
+  const deep = (v: unknown, used: Map<string, string>): unknown => {
+    if (typeof v === 'string') return text(v, used);
+    if (Array.isArray(v)) return v.map((x) => deep(x, used));
+    if (isRecord(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x, used)]));
     return v;
   };
-  return { collect, replace };
+  return { register, collect, text, deep };
 }
 
 /** Strips query and userinfo from every URL string under a `search_metadata` key (spec §5.3). */
@@ -2673,16 +2832,22 @@ function stripMetadataUrls(v: unknown, inside: boolean): unknown {
   return v;
 }
 
-function endpointDir(endpointPath: string): string {
-  const d = endpointPath.replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]+/g, '_');
-  return d === '' || /^\.+$/.test(d) ? '_root' : d;
+/** Writes `text` unless the file exists (same content on the same day hashes to the same name). */
+function writeOnce(path: string, text: string): void {
+  try {
+    writeFileSync(path, text, { flag: 'wx' });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+  }
 }
 
 /**
- * Fixture recorder, spec §5.3 "Recorder": writes under `<root>` (which must end in fixtures/recorded),
- * replaces opaque tokens with deterministic placeholders, strips search_metadata URLs, records no
- * headers, adds `recordedAt`, `recordedBy` and `contentSha256`, and **fails closed**: if any configured
- * secret (raw or URL-encoded) would be written, it throws RecorderRefusedError and writes nothing.
+ * Fixture recorder, spec §5.3 "Recorder": writes `RecordedFixture` files under `<root>` (which must end
+ * in fixtures/recorded) at `<providerId>/<endpointPath with / → _>/<date>-<sha12>.json`, with the raw
+ * vendor body beside it as `.raw.json` (gitignored). Tokens become deterministic placeholders,
+ * search_metadata URLs are stripped, credential header values are `[redacted]`, and it **fails closed**:
+ * if any configured secret (raw or URL-encoded) would be written to either file, it throws
+ * RecorderRefusedError and writes nothing.
  */
 export function createRecorder(opts: { root: string; secrets: readonly Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder {
   const root = resolve(opts.root);
@@ -2693,47 +2858,61 @@ export function createRecorder(opts: { root: string; secrets: readonly Secret[];
   return {
     async record(r) {
       if (r.providerId === 'fixture') throw new RecorderRefusedError('the fixture provider is synthetic and is never recorded (spec §5.5)');
-      const params = Object.fromEntries(r.request.url.searchParams.entries());
-      const requestBody = parseMaybeJson(r.request.body);
-      tokens.collect(params);
-      tokens.collect(requestBody);
+      if (!SAFE_PATH.test(r.endpointPath)) throw new RecorderRefusedError(`refusing to record an unsafe endpointPath for ${r.providerId}`);
+      const params = [...r.request.url.searchParams.entries()];
+      for (const [k, v] of params) if (TOKEN_KEY.test(k)) tokens.register(k, v);
+      if (r.request.body !== undefined) tokens.collect(parseMaybeJson(r.request.body));
       tokens.collect(r.body);
-      const file = withContentHash({
+
+      const used = new Map<string, string>();
+      const url = new URL(r.request.url.href);
+      url.username = '';
+      url.password = '';
+      url.hash = '';
+      const query = new URLSearchParams();
+      for (const [k, v] of params) query.append(k, tokens.text(v, used));
+      url.search = query.toString();
+      const headers = scrubSecrets(
+        Object.fromEntries(Object.entries(r.request.headers).map(([k, v]) => [k.toLowerCase(), CREDENTIAL_HEADERS.has(k.toLowerCase()) ? '[redacted]' : v])),
+        opts.secrets,
+      );
+      const unhashed: Omit<RecordedFixture, 'contentSha256'> = {
         recordedAt: opts.clock.now(),
         recordedBy: opts.recordedBy,
         providerId: r.providerId,
         endpointPath: r.endpointPath,
-        request: { method: r.request.method, url: stripUrl(r.request.url.href), params: tokens.replace(params), body: tokens.replace(requestBody) },
+        request: { method: r.request.method, url: url.href, headers, body: r.request.body === undefined ? null : tokens.text(r.request.body, used) },
         status: r.status,
-        body: tokens.replace(stripMetadataUrls(r.body, false)),
-      });
+        body: tokens.deep(stripMetadataUrls(r.body, false), used),
+        placeholders: {},
+      };
+      unhashed.placeholders = Object.fromEntries([...used].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+      const file: RecordedFixture = { ...unhashed, contentSha256: contentHash(unhashed) };
       const text = `${JSON.stringify(file, null, 2)}\n`;
-      if (containsSecret(text, opts.secrets)) {
+      const raw = `${JSON.stringify(r.body, null, 2) ?? 'null'}\n`;
+      if (containsSecret(text, opts.secrets) || containsSecret(raw, opts.secrets)) {
         throw new RecorderRefusedError(`refusing to record ${r.providerId} ${r.endpointPath}: a credential would be written (spec §5.3)`);
       }
-      const dir = join(root, r.providerId, endpointDir(r.endpointPath));
+      const dir = join(root, r.providerId, r.endpointPath.replaceAll('/', '_'));
       mkdirSync(dir, { recursive: true });
       // why: a symlinked provider directory must not redirect the write outside the recorded tree.
       if (!realpathSync(dir).startsWith(`${realpathSync(root)}${sep}`)) throw new RecorderRefusedError(`refusing to write outside ${root}`);
       const target = join(dir, `${file.recordedAt.slice(0, 10)}-${file.contentSha256.slice(0, 12)}.json`);
-      try {
-        writeFileSync(target, text, { flag: 'wx' });
-      } catch (e) {
-        // why: same content on the same day hashes to the same name; the file is already recorded.
-        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      }
+      writeOnce(target, text);
+      writeOnce(target.replace(/\.json$/, '.raw.json'), raw);
+      return target;
     },
   };
 }
 
-/** Loads any file of the recorded tree (recording or params allowlist) after the §5.5 checks. */
+/** Loads any hashed file of the recorded tree (recording or ParamsAllowlist) after the §5.5 checks. */
 export function loadRecordedJson(path: string): Record<string, unknown> {
   const real = realpathSync(path);
   if (!real.includes(`${RECORDED_DIR}${sep}`)) throw new Error(`refusing ${path}: recorded files load only from fixtures/recorded/ (spec §5.5)`);
   const json: unknown = JSON.parse(readFileSync(real, 'utf8'));
   if (!isRecord(json)) throw new Error(`refusing ${path}: not a JSON object`);
   if ('synthetic' in json) throw new Error(`refusing ${path}: a synthetic file inside the recorded tree`);
-  if (typeof json.recordedAt !== 'string' || typeof json.recordedBy !== 'string') throw new Error(`refusing ${path}: recordedAt and recordedBy are required`);
+  if (typeof json.recordedAt !== 'string') throw new Error(`refusing ${path}: recordedAt is required`);
   if (!verifyContentHash(json)) throw new Error(`refusing ${path}: content hash mismatch (edited after recording?)`);
   return json;
 }
@@ -2741,7 +2920,17 @@ export function loadRecordedJson(path: string): Record<string, unknown> {
 /** Loads one recorded HTTP attempt (WP5/WP6 replay tests, WP13 layer B). */
 export function loadRecordedFixture(path: string): RecordedFixture {
   const json = loadRecordedJson(path);
-  if (typeof json.providerId !== 'string' || typeof json.endpointPath !== 'string' || typeof json.status !== 'number' || !isRecord(json.request)) {
+  const req = json.request;
+  if (
+    typeof json.recordedBy !== 'string' ||
+    typeof json.providerId !== 'string' ||
+    typeof json.endpointPath !== 'string' ||
+    typeof json.status !== 'number' ||
+    !isRecord(json.placeholders) ||
+    !isRecord(req) ||
+    typeof req.url !== 'string' ||
+    typeof req.method !== 'string'
+  ) {
     throw new Error(`refusing ${path}: not a recorded HTTP attempt`);
   }
   return json as unknown as RecordedFixture;
@@ -2749,6 +2938,13 @@ export function loadRecordedFixture(path: string): RecordedFixture {
 ```
 
 `fixtures/recorded/.gitkeep`: empty file (WP4b fills the tree).
+
+Repository `.gitignore`: append
+
+```gitignore
+# raw vendor bodies written beside recorded fixtures (plan contracts v2); never committed
+packages/providers/fixtures/recorded/**/*.raw.json
+```
 
 `src/http/attempt.ts`: record after the body is parsed and before classification, so error bodies (429, 400, quota) are recorded too. Replace
 
@@ -2772,12 +2968,12 @@ with
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http`
-Expected: PASS, 69 tests.
+Expected: PASS, 74 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp04: fixture recorder that fails closed, with token placeholders and content hash (spec §5.3, §5.5)"
+git add .gitignore packages/providers && git commit -m "wp04: recorder writing the pinned RecordedFixture format, failing closed, with placeholders and content hash (spec §5.3, §5.5)"
 ```
 
 ### Task 4.8: Sentinel-key test over every sink this package reaches; attempt logging
@@ -2789,7 +2985,7 @@ git add packages/providers && git commit -m "wp04: fixture recorder that fails c
 **Interfaces:**
 - Produces: http-kit log lines — `debug 'http attempt'` `{ providerId, endpointPath, attempt, httpStatus, durationMs }`, `warn 'http attempt failed'` `{ providerId, endpointPath, attempt, failure: 'aborted' | 'timeout' | 'network' }`, `debug 'http cache hit'` `{ providerId, endpointPath }`, `warn 'http request failed'` `{ providerId, endpointPath, error }` (the error's message, which never holds a URL or a secret). No line carries a URL, a header or a body.
 
-The test exercises every path that can carry a credential (success with the key echoed, a `search_metadata` URL carrying it, 401 and 400 bodies quoting it, socket error, timeout, abort, a credential in the URL, a recorder refusal, both vendor header styles) and asserts that no sentinel appears in any sink this package writes: ledger `endpointPath` (reserve and cache-hit), cache keys and bodies, returned bodies, error messages and fields, recorder output, log lines. The positive controls (every sentinel reached msw in a request header; at least one log line per attempt) keep the guard from passing vacuously: the log control fails until the logging below exists.
+The test exercises every path that can carry a credential (success with the key echoed, a `search_metadata` URL carrying it, 401 and 400 bodies quoting it, socket error, timeout, abort, a credential in the URL, a recorder refusal, both vendor header styles) and asserts that no sentinel appears in any sink this package writes: ledger `endpointPath` (reserve and cache-hit), cache keys and bodies, returned bodies, error messages and fields, recorder output (both the `.json` and the `.raw.json`), log lines. The positive controls (every sentinel reached msw in a request header; at least one log line per attempt) keep the guard from passing vacuously: the log control fails until the logging below exists.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2825,7 +3021,7 @@ describe('sentinel-key test (spec §5.3 secret scrubbing, §14)', () => {
       http.get(SEARCH, ({ request }) => {
         const scenario = new URL(request.url).searchParams.get('s');
         if (scenario === 'echo') return HttpResponse.json({ echo: `your key is ${key}`, search_metadata: { request_url: `${SEARCH}?api_key=${key}` } });
-        if (scenario === 'meta') return HttpResponse.json({ search_metadata: { request_url: `${SEARCH}?engine=x&api_key=${key}` }, price: 1 });
+        if (scenario === 'meta') return HttpResponse.json({ search_metadata: { request_url: `${SEARCH}?engine=x&id=s1` }, price: 1 });
         if (scenario === '401') return HttpResponse.json({ error: `Invalid API key ${key}` }, { status: 401 });
         if (scenario === '400') return HttpResponse.json({ error: `bad request for ${key}` }, { status: 400 });
         if (scenario === 'socket') return HttpResponse.error();
@@ -2845,7 +3041,7 @@ describe('sentinel-key test (spec §5.3 secret scrubbing, §14)', () => {
     };
     await run(kit.request(req({ url: `${SEARCH}?s=echo`, cache: { ttlSeconds: 600 } })));
     await run(kit.request(req({ url: `${SEARCH}?s=echo`, cache: { ttlSeconds: 600 } })));      // cache hit
-    await run(kit.request(req({ url: `${SEARCH}?s=meta`, recordFixtures: true })));            // recorded
+    await run(kit.request(req({ url: `${SEARCH}?s=meta`, recordFixtures: true })));            // recorded (+ .raw.json)
     await run(kit.request(req({ url: `${SEARCH}?s=echo`, recordFixtures: true })));            // recorder refuses
     await run(kit.request(req({ url: `${SEARCH}?s=401` })));
     await run(kit.request(req({ url: `${SEARCH}?s=400` })));
@@ -2947,13 +3143,13 @@ with
 and in `request`, replace
 
 ```ts
-        if (r.providerId !== 'fx') deps.budget.recordCacheHit({ providerId: r.providerId, executionId: r.executionId, endpointPath: r.endpointPath });
+        if (r.providerId !== 'fx') deps.budget.recordCacheHit({ providerId: r.providerId, executionId: r.executionId, tileIndex: r.tileIndex, endpointPath: r.endpointPath });
 ```
 
 with
 
 ```ts
-        if (r.providerId !== 'fx') deps.budget.recordCacheHit({ providerId: r.providerId, executionId: r.executionId, endpointPath: r.endpointPath });
+        if (r.providerId !== 'fx') deps.budget.recordCacheHit({ providerId: r.providerId, executionId: r.executionId, tileIndex: r.tileIndex, endpointPath: r.endpointPath });
         deps.log.debug({ providerId: r.providerId, endpointPath: r.endpointPath }, 'http cache hit');
 ```
 
@@ -2962,7 +3158,7 @@ Egress refusals happen before `upstream` and are not logged by http-kit; the eng
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http`
-Expected: PASS, 70 tests. If a sink check fails, the assertion names the sink; fix the code that writes it, never the test.
+Expected: PASS, 75 tests. If a sink check fails, the assertion names the sink; fix the code that writes it, never the test.
 
 - [ ] **Step 5: Commit**
 
@@ -2974,12 +3170,12 @@ git add packages/providers && git commit -m "wp04: sentinel-key test over every 
 
 **Files:**
 - Create: `fixtures/synthetic/fixture/calendar/{LHR-JFK,LHR-EWR,LGW-JFK,LGW-EWR}.json`, `fixtures/synthetic/fixture/itinerary/{LHR-JFK,LHR-EWR,LGW-JFK,LGW-EWR}.json`
-- Create: `src/fixture/dates.ts`, `src/fixture/tree.ts`, `src/fixture/server.ts`, `src/fixture/handlers.ts`, `src/fixture/router.ts`, `src/testing.ts`
+- Create: `src/fixture/dates.ts`, `src/fixture/tree.ts`, `src/fixture/server.ts`, `src/fixture/router.ts`, `src/testing/handlers.ts`, `src/testing/index.ts`
 - Test: `test/fixture/server.test.ts`
 
 **Interfaces:**
 - Consumes: hono 4.13.13 (`Hono`, `app.all`, `c.req.raw`), msw 3.0.3 (`http.all`).
-- Produces: `defaultFixtureRoot`, `loadFixtureTree`, `FixtureTree`, `calendarPriceMinor`, `createFixtureServer`, `FixtureServer`, `FixtureResponse`, `FixtureRule`, `fixtureHandlers` (from `@gmt/providers/testing`), `fixtureRouter`.
+- Produces: `defaultFixtureRoot`, `loadFixtureTree`, `FixtureTree`, `calendarPriceMinor`, `createFixtureServer`, `FixtureServer`, `FixtureResponse`, `FixtureRule`, `scenarioRequest`, `fixtureHandlers` and `RequestHandler` (from `@gmt/providers/testing`), `fixtureRouter`.
 
 - [ ] **Step 1: Write the fixture tree**
 
@@ -3046,9 +3242,10 @@ import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { FIXTURE_ORIGIN, RESPONSE_HEADER, SCENARIO_PATH } from '../../src/fixture/constants.js';
-import { fixtureHandlers } from '../../src/fixture/handlers.js';
+import { FIXTURE_ORIGIN, SCENARIO_HEADER, SCENARIO_PATH } from '../../src/fixture/constants.js';
+import { fixtureHandlers } from '../../src/testing/handlers.js';
 import { fixtureRouter } from '../../src/fixture/router.js';
+import { scenarioRequest } from '../../src/fixture/server.js';
 import { calendarPriceMinor, defaultFixtureRoot, loadFixtureTree } from '../../src/fixture/tree.js';
 import { server } from '../support/msw.js';
 
@@ -3139,7 +3336,7 @@ describe('fixture server via msw (http://fixture.local)', () => {
   });
 
   it('serves every FixtureResponse kind', async () => {
-    const as = (respond: unknown) => ({ headers: { [RESPONSE_HEADER]: JSON.stringify(respond) } });
+    const as = (respond: unknown) => ({ headers: { [SCENARIO_HEADER]: JSON.stringify(respond) } });
     const r429 = await fetch(cal(tile), as({ kind: 'status', status: 429, headers: { 'retry-after': '7200' } }));
     expect([r429.status, r429.headers.get('retry-after')]).toEqual([429, '7200']);
     expect(await (await fetch(cal(tile), as({ kind: 'malformed' }))).text()).toBe('{"synthetic": true, "prices": [');
@@ -3172,13 +3369,10 @@ describe('fixtureRouter (Hono) serves the same tree', () => {
       expect(viaHono).toBe(viaMsw);
     }
   });
-  it('honours scenario rules on its own state', async () => {
+  it('honours scenario rules on its own state, sent with scenarioRequest', async () => {
     const router = fixtureRouter(ROOT);
-    await router.request(`${FIXTURE_ORIGIN}${SCENARIO_PATH}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rules: [{ match: { path: '/calendar' }, respond: { kind: 'status', status: 402 } }] }),
-    });
+    const ack = await router.fetch(scenarioRequest([{ match: { path: '/calendar' }, respond: { kind: 'status', status: 402 } }]));
+    expect(await ack.json()).toEqual({ synthetic: true, rules: 1 });
     expect((await router.request(cal(tile))).status).toBe(402);
     expect((await router.request(`${FIXTURE_ORIGIN}/health`)).status).toBe(200);
   });
@@ -3188,7 +3382,7 @@ describe('fixtureRouter (Hono) serves the same tree', () => {
 - [ ] **Step 3: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/fixture/server.test.ts`
-Expected: FAIL — `Failed to load url ../../src/fixture/handlers.js`.
+Expected: FAIL — `Failed to load url ../../src/testing/handlers.js`.
 
 - [ ] **Step 4: Implement**
 
@@ -3367,7 +3561,7 @@ export function loadFixtureTree(root: string): FixtureTree {
 
 ```ts
 import { isRecord } from '../util.js';
-import { RESPONSE_HEADER, SCENARIO_PATH } from './constants.js';
+import { FIXTURE_ORIGIN, SCENARIO_HEADER, SCENARIO_PATH } from './constants.js';
 import { addDaysIso, daysBetweenIso, isIsoDateString, localPlusMinutes } from './dates.js';
 import { type CalendarPairFile, calendarPriceMinor, type FixtureTree, type LegTemplate, loadFixtureTree, type OptionTemplate } from './tree.js';
 
@@ -3398,6 +3592,15 @@ export interface FixtureServer {
   handle(request: Request): Promise<Response>;
   setRules(rules: FixtureRule[]): void;
   reset(): void;
+}
+
+/**
+ * The scenario-control request (contract consumed by WP7 and WP13): `POST http://fixture.local/__fixture/scenario`
+ * with `{ rules }`. Send it with `fetch(scenarioRequest(rules))` under msw, or `router.fetch(scenarioRequest(rules))`
+ * against the router instance wired into `inProcessHosts`.
+ */
+export function scenarioRequest(rules: FixtureRule[]): Request {
+  return new Request(`${FIXTURE_ORIGIN}${SCENARIO_PATH}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rules }) });
 }
 
 const MAX_NIGHTS = 90;
@@ -3553,7 +3756,7 @@ export function createFixtureServer(root: string): FixtureServer {
       }
       return json({ synthetic: true, error: 'synthetic: use POST or DELETE' }, 405);
     }
-    const inline = request.headers.get(RESPONSE_HEADER);
+    const inline = request.headers.get(SCENARIO_HEADER);
     const respond = inline !== null ? (JSON.parse(inline) as FixtureResponse) : pick(url);
     return render(respond, url);
   }
@@ -3562,18 +3765,21 @@ export function createFixtureServer(root: string): FixtureServer {
 }
 ```
 
-`src/fixture/handlers.ts`:
+`src/testing/handlers.ts`:
 
 ```ts
 import { http } from 'msw/http';
-import { FIXTURE_ORIGIN } from './constants.js';
-import { createFixtureServer } from './server.js';
+import { FIXTURE_ORIGIN } from '../fixture/constants.js';
+import { createFixtureServer } from '../fixture/server.js';
+
+/** msw 3's HTTP handler type (no documented entrypoint exports `RequestHandler`; verified 2026-10-14). */
+export type RequestHandler = ReturnType<typeof http.all>;
 
 /**
  * msw handlers serving the synthetic tree at http://fixture.local on global fetch (spec §5.5, §9 item 4
- * layer A). Exported from `@gmt/providers/testing` only, so production code never loads msw.
+ * layer A). Exported from `@gmt/providers/testing` only; production code never imports that subpath.
  */
-export function fixtureHandlers(root: string): Array<ReturnType<typeof http.all>> {
+export function fixtureHandlers(root: string): RequestHandler[] {
   const fixture = createFixtureServer(root);
   return [http.all(`${FIXTURE_ORIGIN}/*`, ({ request }) => fixture.handle(request))];
 }
@@ -3586,8 +3792,8 @@ import { Hono } from 'hono';
 import { createFixtureServer } from './server.js';
 
 /**
- * The same tree as a Hono router for fixture mode (spec §4). WP8 mounts it only under
- * syntheticAllowed, e.g. `app.mount('/fixture', fixtureRouter(root).fetch)` (mount strips the prefix).
+ * The same tree as a Hono router for fixture mode (spec §4 rev 10). WP4b's wiring reaches it through
+ * http-kit's gated seam, only under syntheticAllowed: `inProcessHosts: { 'fixture.local': async (req) => router.fetch(req) }`.
  */
 export function fixtureRouter(root: string): Hono {
   const fixture = createFixtureServer(root);
@@ -3597,11 +3803,11 @@ export function fixtureRouter(root: string): Hono {
 }
 ```
 
-`src/testing.ts`:
+`src/testing/index.ts` (Task 4.11 adds the replay exports):
 
 ```ts
-// Test-only entrypoint (`@gmt/providers/testing`): imports msw, a devDependency.
-export { fixtureHandlers } from './fixture/handlers.js';
+// `@gmt/providers/testing`: the only module tree that imports msw (plan decision 7). Production code never imports it.
+export { fixtureHandlers, type RequestHandler } from './handlers.js';
 ```
 
 - [ ] **Step 5: Run to verify it passes**
@@ -3612,7 +3818,7 @@ Expected: PASS, 11 tests.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp04: synthetic fixture tree, fixture server with scenario rules, msw handlers and Hono router (spec §5.5)"
+git add packages/providers && git commit -m "wp04: synthetic fixture tree, fixture server with scenario control, msw handlers and Hono router (spec §4, §5.5)"
 ```
 
 ### Task 4.10: Fixture provider — gate, tiling, discovery and verification through http-kit
@@ -3625,7 +3831,7 @@ git add packages/providers && git commit -m "wp04: synthetic fixture tree, fixtu
 - Consumes: `syntheticAllowed`, `FlightProvider` and the §5.1 types (WP0); `HttpKit` (Tasks 4.1–4.8); the fixture server (Task 4.9).
 - Produces: `fixtureProvider`, `fixtureHttpLimits`, `planFixtureTiles`, `FIXTURE_TILE_DAYS`.
 
-Rules (spec §5.5, §5.3 billable rule, §5.2): the constructor throws unless `syntheticAllowed(config)`; `discovery.info` and `verification.info` both carry `sourceKind: 'synthetic'`, so every price this provider returns is synthetic; the HTTP limits allow host `fixture.local` only, `billable: 'http-200'`, `costPerCallMicroGbp` = the configured test cost; responses are never cached (`cache: 'never'`, so layer-A scenarios are never masked; caching is covered by Task 4.6) and never recorded (`recordFixtures: false` whatever `ctx` says); a response without `synthetic: true` is a `parse` error, so the provider cannot carry real data; booking is always `{ kind: 'none' }`; `healthcheck` makes no call. Tiles are `rectangle`s of up to `FIXTURE_TILE_DAYS` (7) departure days, partitioning the query's cells (or `q.cells`, re-planned).
+Rules (spec §5.5, §5.3 billable rule, §5.2, §5.1 rev 10): the constructor throws unless `syntheticAllowed(config)`; every tile and search result carries `pointOfSale: 'unknown'` (synthetic data has no market) and no `routeHistory`; `discovery.info` and `verification.info` both carry `sourceKind: 'synthetic'`, so every price this provider returns is synthetic; the HTTP limits allow host `fixture.local` only, `billable: 'http-200'`, `costPerCallMicroGbp` = the configured test cost; responses are never cached (`cache: 'never'`, so layer-A scenarios are never masked; caching is covered by Task 4.6) and never recorded (`recordFixtures: false` whatever `ctx` says); a response without `synthetic: true` is a `parse` error, so the provider cannot carry real data; booking is always `{ kind: 'none' }`; `healthcheck` makes no call. Tiles are `rectangle`s of up to `FIXTURE_TILE_DAYS` (7) departure days, partitioning the query's cells (or `q.cells`, re-planned).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3634,10 +3840,11 @@ Rules (spec §5.5, §5.3 billable rule, §5.2): the constructor throws unless `s
 ```ts
 import { AbortedError, asIata, asIsoDate, type CellKey, type DiscoveryQuery, type ItineraryQuery, type ProviderContext, ProviderError } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FIXTURE_ORIGIN, SCENARIO_PATH } from '../../src/fixture/constants.js';
-import { fixtureHandlers } from '../../src/fixture/handlers.js';
 import { fixtureHttpLimits, fixtureProvider, planFixtureTiles } from '../../src/fixture/provider.js';
+import { fixtureRouter } from '../../src/fixture/router.js';
+import { type FixtureRule, scenarioRequest } from '../../src/fixture/server.js';
 import { defaultFixtureRoot } from '../../src/fixture/tree.js';
+import { fixtureHandlers } from '../../src/testing/handlers.js';
 import { CapturingLogger, makeKit } from '../fakes.js';
 import { server } from '../support/msw.js';
 import { drive, driveError, useFakeTime } from '../support/time.js';
@@ -3667,8 +3874,7 @@ const iq: ItineraryQuery = {
 };
 const ctx = (over: Partial<ProviderContext> = {}): ProviderContext => ({ executionId: 'exec-1', signal: new AbortController().signal, recordFixtures: true, ...over });
 const key = (c: CellKey) => `${c.origin}|${c.destination}|${c.departureDate}|${c.returnDate}`;
-const scenario = (rules: unknown[]) =>
-  fetch(`${FIXTURE_ORIGIN}${SCENARIO_PATH}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rules }) });
+const scenario = (rules: FixtureRule[]) => fetch(scenarioRequest(rules));
 
 function setup() {
   const k = makeKit({ limits: { fixture: fixtureHttpLimits({ costPerCallMicroGbp: COST, maxWaitSeconds: 3900, requestTimeoutSeconds: 60 }) } });
@@ -3741,6 +3947,7 @@ describe('fixture discovery and verification through the real http-kit and msw',
     expect(result.prices.find((p) => p.returnDate === '2026-11-16' && p.departureDate === '2026-11-02')?.amountMinor).toBe(59_800);
     expect(result.notes).toEqual(['dropped-out-of-band:42']);
     expect(result.fetchedAt).toBe('2026-10-14T15:00:00.000Z');
+    expect(result.pointOfSale).toBe('unknown');
     expect(budget.events.filter((e) => e.type === 'reserve')).toEqual([
       expect.objectContaining({ providerId: 'fixture', costMicroGbp: COST, tileIndex: 0, endpointPath: '/calendar', httpAttempt: 1 }),
     ]);
@@ -3775,13 +3982,13 @@ describe('fixture discovery and verification through the real http-kit and msw',
     [{ kind: 'no-currency' }, 'missing-currency'],
     [{ kind: 'status', status: 200, body: { currency: 'GBP', origin: 'LHR', destination: 'JFK', prices: [], noFares: [] } }, 'not-synthetic'],
     [{ kind: 'malformed' }, 'malformed-json'],
-  ])('a %j response is a parse tile-error (%s)', async (respond, reason) => {
+  ])('a %j response is a parse tile-error ([%s])', async (respond, code) => {
     await scenario([{ match: { path: '/calendar' }, respond }]);
     const { provider } = setup();
     const plan = planFixtureTiles(q)[0];
     if (!plan || !provider.discovery) throw new Error('no plan');
     const r = await drive(provider.discovery.fetchTile(plan, q, ctx()));
-    expect(r).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', reason } });
+    expect(r).toMatchObject({ kind: 'tile-error', error: { kind: 'parse', reason: undefined, message: expect.stringContaining(`[${code}]`) } });
   });
 
   it('AbortedError propagates out of fetchTile (it is not a tile-error)', async () => {
@@ -3798,7 +4005,8 @@ describe('fixture discovery and verification through the real http-kit and msw',
     const { provider, budget } = setup();
     if (!provider.verification) throw new Error('no verification');
     const r = await drive(provider.verification.search(iq, ctx()));
-    expect(r).toMatchObject({ coverage: 'priced', partial: false, failedExpansions: 0, fetchedAt: '2026-10-14T15:00:00.000Z' });
+    expect(r).toMatchObject({ coverage: 'priced', partial: false, failedExpansions: 0, fetchedAt: '2026-10-14T15:00:00.000Z', pointOfSale: 'unknown' });
+    expect(r.routeHistory).toBeUndefined();
     expect(r.offers).toHaveLength(2);
     expect(r.offers[0]).toMatchObject({
       seller: 'Synthetic Air',
@@ -3826,6 +4034,23 @@ describe('fixture discovery and verification through the real http-kit and msw',
     expect(await drive(v.search(iq, ctx()))).toMatchObject({ coverage: 'priced', partial: true, failedExpansions: 1 });
   });
 
+  it('works over the gated in-process seam (fixture mode) with no msw handler, scenarios sent to that router', async () => {
+    server.resetHandlers();
+    const router = fixtureRouter(defaultFixtureRoot());
+    const k = makeKit({
+      inProcessHosts: { 'fixture.local': async (req) => router.fetch(req) },
+      limits: { fixture: fixtureHttpLimits({ costPerCallMicroGbp: COST, maxWaitSeconds: 3900, requestTimeoutSeconds: 60 }) },
+    });
+    const provider = fixtureProvider({ http: k.kit, log: new CapturingLogger(), clock: k.clock, config: TEST_GATE, costMicroGbp: COST });
+    const plan = planFixtureTiles(q)[0];
+    if (!plan || !provider.discovery) throw new Error('no plan');
+    expect(await drive(provider.discovery.fetchTile(plan, q, ctx()))).toMatchObject({ kind: 'tile', pointOfSale: 'unknown' });
+    await router.fetch(scenarioRequest([{ match: { path: '/calendar' }, respond: { kind: 'status', status: 401 } }]));
+    expect(await drive(provider.discovery.fetchTile(plan, q, ctx()))).toMatchObject({ kind: 'tile-error', error: { kind: 'auth' } });
+    expect(k.budget.count('fetch')).toBe(0);
+    expect(k.budget.count('reserve')).toBe(2);
+  });
+
   it('never records, even when ctx.recordFixtures is true, and healthcheck makes no call', async () => {
     const { provider, budget } = setup();
     expect(await provider.healthcheck(ctx())).toEqual({ ok: true, detail: 'synthetic fixture provider; no upstream call' });
@@ -3851,7 +4076,6 @@ import {
   type CapabilityInfo,
   type CellKey,
   type Clock,
-  type Config,
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type FlightProvider,
@@ -3859,12 +4083,14 @@ import {
   type ItineraryQuery,
   type ItinerarySearchResult,
   type Logger,
+  type PointOfSale,
   type ProviderContext,
   ProviderError,
   type RawCalendarPrice,
   type RawOffer,
   type RawSegment,
   type SuppliedField,
+  type SyntheticGateInput,
   syntheticAllowed,
   type TilePlan,
 } from '@gmt/core';
@@ -3884,6 +4110,8 @@ const INFO: CapabilityInfo = {
   maxAgeHours: 0,
 };
 const IATA = /^[A-Z]{3}$/;
+/** Synthetic data has no market; spec §5.1 rev 10 requires pointOfSale on every result. */
+const FIXTURE_POINT_OF_SALE: PointOfSale = 'unknown';
 
 /**
  * HTTP limits for the fixture provider (spec §5.3 billable rule: `fixture` iff HTTP 200 at the
@@ -3942,8 +4170,9 @@ export function planFixtureTiles(q: DiscoveryQuery): TilePlan[] {
     });
 }
 
-function parseError(endpointPath: string, reason: string): ProviderError {
-  return new ProviderError({ kind: 'parse', retryable: false, providerId: 'fixture', reason, message: `fixture ${endpointPath}: ${reason}` });
+/** Parse failure with a bracketed diagnostic code in the message; `reason` stays unset (it feeds cell_outcomes.reason). */
+function parseError(endpointPath: string, code: string): ProviderError {
+  return new ProviderError({ kind: 'parse', retryable: false, providerId: 'fixture', message: `fixture ${endpointPath}: ${code} [${code}]` });
 }
 
 /** Envelope checks shared by both endpoints: synthetic marker, currency read from the response, pair echo. */
@@ -4006,7 +4235,7 @@ export function fixtureProvider(opts: {
   http: HttpKit;
   log: Logger;
   clock: Clock;
-  config: Pick<Config, 'nodeEnv' | 'databasePath' | 'allowFixtureProvider' | 'inContainer'>;
+  config: SyntheticGateInput;
   costMicroGbp: number;
 }): FlightProvider {
   if (!syntheticAllowed(opts.config)) throw new Error('fixture provider refused: syntheticAllowed(config) is false (spec §5.5)');
@@ -4050,7 +4279,7 @@ export function fixtureProvider(opts: {
         else noFares.push(cell);
       }
       log.debug({ tileIndex: plan.index, prices: prices.length, noFares: noFares.length, dropped }, 'fixture tile');
-      return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt: res.fetchedAt, prices, noFares, notes: dropped > 0 ? [`dropped-out-of-band:${dropped}`] : [] };
+      return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt: res.fetchedAt, pointOfSale: FIXTURE_POINT_OF_SALE, prices, noFares, notes: dropped > 0 ? [`dropped-out-of-band:${dropped}`] : [] };
     } catch (e) {
       // why: spec §8.1 — a ProviderError marks exactly this tile's cells; AbortedError and BudgetExceeded propagate.
       if (e instanceof ProviderError) return fail(e);
@@ -4073,7 +4302,7 @@ export function fixtureProvider(opts: {
       // why: spec §5.4 outcome rule, vendor-agnostic: outbound options but no return legs is non-retryable upstream.
       throw new ProviderError({ kind: 'upstream', retryable: false, providerId: 'fixture', reason: 'no-return-legs', message: 'fixture /itinerary: outbound options but no return legs' });
     }
-    return { offers: parsed, coverage: parsed.length > 0 ? 'priced' : 'empty', fetchedAt: res.fetchedAt, partial: failedExpansions > 0, failedExpansions, notes: [] };
+    return { offers: parsed, coverage: parsed.length > 0 ? 'priced' : 'empty', fetchedAt: res.fetchedAt, pointOfSale: FIXTURE_POINT_OF_SALE, partial: failedExpansions > 0, failedExpansions, notes: [] };
   }
 
   return {
@@ -4095,7 +4324,7 @@ export function fixtureProvider(opts: {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/fixture`
-Expected: PASS, 31 tests (11 server, 20 provider).
+Expected: PASS, 32 tests (11 server, 21 provider).
 
 - [ ] **Step 5: Commit**
 
@@ -4103,7 +4332,169 @@ Expected: PASS, 31 tests (11 server, 20 provider).
 git add packages/providers && git commit -m "wp04: fixture provider behind syntheticAllowed, synthetic tiles and offers through http-kit (spec §5.5)"
 ```
 
-### Task 4.11: Fixture-tree test, barrel, and the package definition of done
+### Task 4.11: Replay of recorded fixtures — `replayHandlers` and `loadRecorded`
+
+**Files:**
+- Create: `src/testing/replay.ts`
+- Modify: `src/testing/index.ts`
+- Test: `test/testing/replay.test.ts`
+
+**Interfaces:**
+- Consumes: `loadRecordedFixture`, `RecordedFixture` (Task 4.7); msw 3.0.3 (`http.all`, `HttpResponse`).
+- Produces (from `@gmt/providers/testing`): `replayHandlers(recordedRoot): RequestHandler[]`, `loadRecorded(root, providerId, endpointPath): RecordedFixture[]` — consumed by WP5/WP6 adapter tests and WP13's layer-B engine tests.
+
+Matching rule: a request is answered by the recordings whose `request.method`, origin, path and query (sorted name/value pairs, decoded) equal the request's; credentials never appear in a recorded URL (egress refuses them), so the comparison is credential-free by construction. Placeholders are compared verbatim: a replayed response hands the adapter `<departure_token:0>`, the adapter sends that string back, and it equals the recorded request's query value, so chains replay without the raw token. Identical requests are answered by the matching recordings in file-name (date) order, then the last one repeatedly. An unmatched request falls through (resolver returns `undefined`), so msw's `onUnhandledFrame: 'error'` fails the test rather than inventing a response. Every recording is loaded through `loadRecordedFixture`, so a hand-edited file fails the hash check before any test uses it. `.raw.json` files and `params-*.json` allowlists are skipped.
+
+- [ ] **Step 1: Write the failing test**
+
+`test/testing/replay.test.ts`:
+
+```ts
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { asIsoDateTime, fixedClock } from '@gmt/core';
+import { describe, expect, it } from 'vitest';
+import { createRecorder } from '../../src/http/recorder.js';
+import { loadRecorded, replayHandlers } from '../../src/testing/replay.js';
+import { ALL_SECRETS, req, SEARCH } from '../fakes.js';
+import { server } from '../support/msw.js';
+
+async function recordChain(): Promise<string> {
+  const root = join(mkdtempSync(join(tmpdir(), 'gmt-rep-')), 'fixtures', 'recorded');
+  mkdirSync(root, { recursive: true });
+  const rec = createRecorder({ root, secrets: ALL_SECRETS, clock: fixedClock(asIsoDateTime('2026-10-14T15:00:00.000Z')), recordedBy: 'wp04-test' });
+  const at = (url: string, body: unknown, status = 200) => ({ providerId: 'searchapi' as const, endpointPath: '/api/v1/search', request: req({ url }), status, body });
+  await rec.record(at(`${SEARCH}?engine=google_flights&departure_id=LHR`, { best_flights: [{ departure_token: 'RAW-A', price: 603 }] }));
+  await rec.record(at(`${SEARCH}?engine=google_flights&departure_token=RAW-A`, { best_flights: [{ booking_token: 'RAW-B', price: 573 }] }));
+  await rec.record(at(`${SEARCH}?engine=google_flights_calendar&departure_id=LGW`, { error: 'Too many combinations' }, 400));
+  writeFileSync(join(root, 'searchapi', 'params-2026-10-14.json'), '{"not":"a recording"}');
+  return root;
+}
+
+describe('replayHandlers and loadRecorded (WP5/WP6 adapter tests, WP13 layer B)', () => {
+  it('replays a recorded chain: the served placeholder, sent back, matches the next recorded request', async () => {
+    server.use(...replayHandlers(await recordChain()));
+    const step1 = (await (await fetch(`${SEARCH}?departure_id=LHR&engine=google_flights`)).json()) as { best_flights: Array<{ departure_token: string }> };
+    const token = step1.best_flights[0]?.departure_token ?? '';
+    expect(token).toBe('<departure_token:0>');
+    const step2 = await fetch(`${SEARCH}?engine=google_flights&departure_token=${encodeURIComponent(token)}`, { headers: { authorization: 'Bearer anything' } });
+    expect(await step2.json()).toEqual({ best_flights: [{ booking_token: '<booking_token:0>', price: 573 }] });
+  });
+
+  it('replays the recorded status and body of an error response', async () => {
+    server.use(...replayHandlers(await recordChain()));
+    const res = await fetch(`${SEARCH}?engine=google_flights_calendar&departure_id=LGW`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Too many combinations' });
+  });
+
+  it('an unrecorded request is not invented: it falls through and fails as unhandled', async () => {
+    server.use(...replayHandlers(await recordChain()));
+    await expect(fetch(`${SEARCH}?engine=google_flights&departure_id=EWR`)).rejects.toThrow();
+  });
+
+  it('loadRecorded lists one endpoint’s recordings in file order, skipping raw bodies and allowlists', async () => {
+    const root = await recordChain();
+    const list = loadRecorded(root, 'searchapi', '/api/v1/search');
+    expect(list).toHaveLength(3);
+    expect(list.every((f) => f.providerId === 'searchapi' && f.endpointPath === '/api/v1/search')).toBe(true);
+    expect(loadRecorded(root, 'travelpayouts', '/aviasales/v3/prices_for_dates')).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pnpm --filter @gmt/providers exec vitest run test/testing/replay.test.ts`
+Expected: FAIL — `Failed to load url ../../src/testing/replay.js`.
+
+- [ ] **Step 3: Implement**
+
+`src/testing/replay.ts`:
+
+```ts
+import { type Dirent, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { HttpResponse, http } from 'msw/http';
+import { loadRecordedFixture, type RecordedFixture } from '../http/recorder.js';
+import type { RequestHandler } from './handlers.js';
+
+const RECORDING = (name: string): boolean => name.endsWith('.json') && !name.endsWith('.raw.json') && !name.startsWith('params-');
+const byPair = (a: [string, string], b: [string, string]): number => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+
+/** Match key: method, origin, path and the sorted, decoded query pairs. */
+function keyOf(method: string, url: URL): string {
+  return `${method.toUpperCase()} ${url.origin}${url.pathname} ${JSON.stringify([...url.searchParams.entries()].sort(byPair))}`;
+}
+
+function walk(dir: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : RECORDING(e.name) ? [join(dir, e.name)] : []))
+    .sort();
+}
+
+/** Recordings for one provider endpoint, in file-name (date) order. `endpointPath` uses the recorder's layout (/ → _). */
+export function loadRecorded(root: string, providerId: string, endpointPath: string): RecordedFixture[] {
+  return walk(join(root, providerId, endpointPath.replaceAll('/', '_'))).map(loadRecordedFixture);
+}
+
+/**
+ * msw handlers that answer requests from the recorded tree (plan contracts v2): match on method, origin,
+ * path and query; serve the recorded status and body; identical requests take the recordings in order,
+ * then the last; anything unrecorded falls through to msw's unhandled-request error.
+ */
+export function replayHandlers(recordedRoot: string): RequestHandler[] {
+  const byKey = new Map<string, RecordedFixture[]>();
+  for (const f of walk(recordedRoot).map(loadRecordedFixture)) {
+    const k = keyOf(f.request.method, new URL(f.request.url));
+    byKey.set(k, [...(byKey.get(k) ?? []), f]);
+  }
+  const served = new Map<string, number>();
+  const origins = [...new Set([...byKey.values()].flat().map((f) => new URL(f.request.url).origin))].sort();
+  return origins.map((origin) =>
+    http.all(`${origin}/*`, ({ request }) => {
+      const k = keyOf(request.method, new URL(request.url));
+      const list = byKey.get(k);
+      if (list === undefined) return undefined;
+      const n = served.get(k) ?? 0;
+      served.set(k, n + 1);
+      const f = list[Math.min(n, list.length - 1)];
+      if (f === undefined) return undefined;
+      // why: a malformed vendor body was recorded as text; replay it byte for byte so the parse path is exercised.
+      const text = typeof f.body === 'string' ? f.body : JSON.stringify(f.body);
+      return new HttpResponse(text, { status: f.status, headers: { 'content-type': 'application/json' } });
+    }),
+  );
+}
+```
+
+`src/testing/index.ts` (replace):
+
+```ts
+// `@gmt/providers/testing`: the only module tree that imports msw (plan decision 7). Production code never imports it.
+export { fixtureHandlers, type RequestHandler } from './handlers.js';
+export { loadRecorded, replayHandlers } from './replay.js';
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/providers exec vitest run test/testing/replay.test.ts`
+Expected: PASS, 4 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/providers && git commit -m "wp04: replayHandlers and loadRecorded over the recorded tree (@gmt/providers/testing)"
+```
+
+### Task 4.12: Fixture-tree test, barrel, and the package definition of done
 
 **Files:**
 - Replace: `src/index.ts`
@@ -4130,7 +4521,8 @@ const FIXTURES = fileURLToPath(new URL('../../fixtures', import.meta.url));
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
 }
-const committed = walk(FIXTURES).filter((f) => !f.endsWith('.gitkeep'));
+// why: .raw.json files are local, gitignored debugging copies; only committed files are scanned.
+const committed = walk(FIXTURES).filter((f) => !f.endsWith('.gitkeep') && !f.endsWith('.raw.json'));
 
 describe('fixture-tree test (spec §9 item 2: every committed fixture scanned)', () => {
   it('finds the synthetic tree', () => {
@@ -4179,7 +4571,7 @@ describe('fixture-tree test (spec §9 item 2: every committed fixture scanned)',
 ```ts
 import { describe, expect, it } from 'vitest';
 import * as providers from '../src/index.js';
-import * as testing from '../src/testing.js';
+import * as testing from '../src/testing/index.js';
 
 describe('@gmt/providers public surface (plan "http-kit" contract)', () => {
   it('exports every contract function by its exact name', () => {
@@ -4203,15 +4595,22 @@ describe('@gmt/providers public surface (plan "http-kit" contract)', () => {
       'defaultFixtureRoot',
       'loadFixtureTree',
       'createFixtureServer',
+      'contentHash',
+      'scenarioRequest',
     ]) {
       expect(typeof (providers as Record<string, unknown>)[name], name).toBe('function');
     }
     expect(providers.MAX_ATTEMPTS).toBe(3);
     expect(providers.FIXTURE_HOST).toBe('fixture.local');
+    expect(providers.SCENARIO_PATH).toBe('/__fixture/scenario');
+    expect(providers.SCENARIO_HEADER).toBe('x-fixture-scenario');
+    expect(providers.CREDENTIAL_HEADERS.has('authorization')).toBe(true);
   });
-  it('keeps msw out of the main barrel and exposes fixtureHandlers from ./testing', () => {
-    expect('fixtureHandlers' in providers).toBe(false);
-    expect(typeof testing.fixtureHandlers).toBe('function');
+  it('keeps msw out of the main barrel and exposes fixtureHandlers, replayHandlers and loadRecorded from ./testing', () => {
+    for (const name of ['fixtureHandlers', 'replayHandlers', 'loadRecorded']) {
+      expect(name in providers, name).toBe(false);
+      expect(typeof (testing as Record<string, unknown>)[name], name).toBe('function');
+    }
   });
 });
 ```
@@ -4219,7 +4618,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract)', () => {
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/fixture/tree.test.ts test/barrel.test.ts`
-Expected: `tree.test.ts` PASS (it guards files committed in Tasks 4.7 and 4.9; its negative cases are proven by `server.test.ts` and `recorder.test.ts`); `barrel.test.ts` FAIL — `expected 'undefined' to be 'function'` for `createHttpKit` (WP0's barrel is empty).
+Expected: `tree.test.ts` PASS (it guards files committed in Tasks 4.7 and 4.9; its negative cases are proven by `server.test.ts` and `recorder.test.ts`; WP5/WP6 hashed `ParamsAllowlist` files will pass it through `loadRecordedJson`); `barrel.test.ts` FAIL — `expected 'undefined' to be 'function'` for `createHttpKit` (WP0's barrel is empty).
 
 - [ ] **Step 3: Implement**
 
@@ -4227,14 +4626,15 @@ Expected: `tree.test.ts` PASS (it guards files committed in Tasks 4.7 and 4.9; i
 
 ```ts
 // Barrel for @gmt/providers (spec §4: imports @gmt/core only; no SQLite, no process.env).
-// fixtureHandlers lives in ./testing.ts because it imports msw, a devDependency.
+// fixtureHandlers, replayHandlers and loadRecorded live in ./testing/ (the only msw importer, plan decision 7).
 export { BACKOFF_BASE_MS, createHttpKit, isRetryable, MAX_ATTEMPTS } from './http/httpKit.js';
 export type { FixtureRecorder, HttpKit, HttpKitDeps, HttpKitRequest, HttpKitResponse, HttpProviderId, ProviderHttpLimits } from './http/types.js';
 export { classifyResponse, parseRetryAfter, type ResponseFacts } from './http/classify.js';
-export { canonicalCacheKey } from './http/cacheKey.js';
+export { CREDENTIAL_HEADERS, canonicalCacheKey } from './http/cacheKey.js';
 export { containsSecret, scrubSecrets, stripUrl } from './http/scrub.js';
 export {
   canonicalJson,
+  contentHash,
   createRecorder,
   loadRecordedFixture,
   loadRecordedJson,
@@ -4243,9 +4643,9 @@ export {
   verifyContentHash,
   withContentHash,
 } from './http/recorder.js';
-export { FIXTURE_HOST, FIXTURE_ORIGIN, RESPONSE_HEADER, SCENARIO_PATH } from './fixture/constants.js';
+export { FIXTURE_HOST, FIXTURE_ORIGIN, SCENARIO_HEADER, SCENARIO_PATH } from './fixture/constants.js';
 export { FIXTURE_TILE_DAYS, fixtureHttpLimits, fixtureProvider, planFixtureTiles } from './fixture/provider.js';
-export { createFixtureServer, type FixtureResponse, type FixtureRule, type FixtureServer } from './fixture/server.js';
+export { createFixtureServer, type FixtureResponse, type FixtureRule, type FixtureServer, scenarioRequest } from './fixture/server.js';
 export { fixtureRouter } from './fixture/router.js';
 export { calendarPriceMinor, defaultFixtureRoot, type FixtureTree, loadFixtureTree } from './fixture/tree.js';
 ```
@@ -4255,12 +4655,12 @@ Delete `packages/providers/test/smoke.test.ts`.
 - [ ] **Step 4: Run the whole package**
 
 Run: `pnpm --filter @gmt/providers test`
-Expected: PASS, 109 tests in 13 files; coverage table at or above 85% lines, 70% branches, 85% functions, 85% statements, no threshold error.
+Expected: PASS, 119 tests in 15 files; coverage table at or above 85% lines, 70% branches, 85% functions, 85% statements, no threshold error.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A packages/providers && git commit -m "wp04: providers barrel, ./testing entrypoint and the fixture-tree test (spec §9 item 2)"
+git add -A packages/providers && git commit -m "wp04: providers barrel and the fixture-tree test (spec §9 item 2)"
 ```
 
 ## Pinned review-focus tests
@@ -4271,25 +4671,17 @@ None. The plan's five Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, W
 
 Run from the repository root; each must hold exactly:
 
-1. `pnpm --filter @gmt/providers test` → all 109 tests pass; coverage ≥ 85% lines, ≥ 70% branches, ≥ 85% functions and statements; exit 0.
+1. `pnpm --filter @gmt/providers test` → all 119 tests pass; coverage ≥ 85% lines, ≥ 70% branches, ≥ 85% functions and statements; exit 0.
 2. `pnpm lint` → `Checked … files … No fixes applied.` with zero errors; exit 0.
-3. `pnpm -r typecheck` → exit 0 (needs WP0 carrying the Q1 amendment).
-4. `node scripts/check-boundaries.mjs` → exit 0, no output (providers depends on `@gmt/core` only and reads no `process.env`).
+3. `pnpm -r typecheck` → exit 0.
+4. `node scripts/check-boundaries.mjs` → exit 0, no output (providers depends on `@gmt/core` only, reads no `process.env`, and imports msw only under `src/testing/`).
 5. `pnpm secret-scan` → `secret scan: clean`.
 6. `grep -rnE "process\.env|better-sqlite3|drizzle" packages/providers/src` → no output.
 7. `grep -rnwE "LHR|LGW|JFK|EWR|LON|NYC" packages/providers/src` → no output (airports appear only in `fixtures/` and `test/`).
-8. `grep -rn "from 'msw" packages/providers/src | grep -v "src/fixture/handlers.ts"` → no output.
+8. `grep -rn "from 'msw" packages/providers/src | grep -v "src/testing/"` → no output.
 9. `pnpm --filter "@gmt/providers..." build && node --input-type=module -e "const m = await import('./packages/providers/dist/index.js'); console.log(typeof m.createHttpKit, 'fixtureHandlers' in m)"` → prints `function false` (the production barrel loads without msw).
+10. `git check-ignore packages/providers/fixtures/recorded/searchapi/_api_v1_search/2026-10-14-000000000000.raw.json` → prints the path (raw bodies are never committed).
 
 ## Open questions
 
-- **Q1 (`requires_human_judgment`, blocks dispatch): `BudgetGuard.reserve` has no `tileIndex`.** Spec §5.3 says "Every ledger row carries `tile_index` (NULL for verification) so parity can count tiles", and §5.2 says each page of a paginated tile is "ledgered with the tile's `tile_index`", but the spec §5.1 port (copied verbatim into WP0's `ports/provider.ts`) is `reserve(p: { providerId; executionId; costMicroGbp; httpAttempt; endpointPath })`, so http-kit cannot hand the tile index to the ledger. `HttpKitRequest.tileIndex` exists in the plan contract with nowhere to go. Recommended resolution: amend spec §5.1 and the plan's Budget port to `reserve(p: { providerId; executionId; tileIndex: number | null; costMicroGbp; httpAttempt; endpointPath })`, which WP3's `SqliteBudgetGuard` writes to `provider_requests.tile_index`. This brief's code already passes `tileIndex: r.tileIndex`; nothing else changes. The operator (or Fable, as contract owner) decides.
-
-Noted mismatches, resolved in this brief as stated (not blocking; for the contract owner to fold into spec or plan):
-
-- **M2 — FX through http-kit.** Spec §4 and §5.3 route FX refresh through http-kit under id `fx` ("never billable, no caps, its own host allowlist"); spec §5.6 says FX uses "plain `fetch` + `p-retry` (host-allowlisted, not ledgered)"; and `ProviderId` excludes `'fx'`, so `BudgetGuard.reserve` cannot take it. This brief serves `fx` through http-kit (allowlist, retries, timeout, scrubbing, cache) and skips `reserve`, `finalise` and `recordCacheHit` for it, satisfying both "through http-kit" and "not ledgered".
-- **M3 — fixture mode transport.** Spec §4 says the fixture provider is "served by `msw` in tests and by an api route in fixture mode", but the provider fetches `http://fixture.local` (its allowlist is `fixture.local` only), which an api route cannot receive without an interceptor. This brief ships `fixtureRouter` as specified; WP4b's wiring or WP8 must also intercept `fixture.local` in fixture mode (e.g. msw `setupServer(...fixtureHandlers(root))` under `syntheticAllowed`, development only), or the spec should name another mechanism.
-- **M4 — msw is a devDependency** (plan Task 0.1) while `fixtureHandlers` lives in `src/`; it is therefore exported from `@gmt/providers/testing` and the plan's single `src/fixture/handlers.ts` is split into `server.ts`, `handlers.ts` and `router.ts`.
-- **M5 — `AbortSignal.timeout`.** The per-request timeout uses `setTimeout` + `AbortController` combined with the caller's signal by `AbortSignal.any`, because vitest cannot fake `AbortSignal.timeout`'s internal timer; behaviour is identical.
-- **M6 — ledger-at-cap.** Spec §5.2's "ledger shows the provider at its plan cap" is computed as `usage({ kind: 'provider-month' | 'provider-lifetime', providerId })` with `cap !== null && calls >= cap`; WP3's `usage` must return `cap: null` for the window a plan does not use.
-- **M7 — recorded layout.** SearchApi's calendar and itinerary engines share the path `/api/v1/search`, so their recordings share `<endpointDir>` (`api_v1_search`); WP4b and WP5 select by `request.params.engine`. WP4b's `params-<date>.json` allowlists must be written with `withContentHash` and carry `recordedAt`/`recordedBy`, or the fixture-tree test refuses them.
+None. The first draft's Q1 (`tileIndex` on `reserve`/`recordCacheHit`) and its noted mismatches (FX ledgering, the fixture-mode transport, msw as a dependency, the per-request timeout, the meaning of `cap: null`, the recorded layout and allowlist hashing) were all settled by spec revision 10 and the plan's "Decisions taken at reconciliation"; this brief follows those decisions.

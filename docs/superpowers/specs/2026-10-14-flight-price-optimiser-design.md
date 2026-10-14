@@ -547,8 +547,12 @@ on the probe), so `bookingLinks` is **forced `true` for SearchApi**
 (enforced in zod), every step-3 option is persisted as an offer with its
 `book_with` seller, `baggage_prices` and booking POST, and the step-2
 price is kept only as the airline-direct offer when no step-3 option names
-the airline. Calls per cell: `1 + expandTop × 2`; the default
-`expandTop 2` costs 5.
+the airline. Three cases the vendor can produce: every step-1 option
+unpriced → throw `upstream` with `reason = 'no-priced-options'`
+(non-retryable on resume); a failed step 3 keeps the step-2 airline offer
+and the cell is `priced` with `partial: true`; split bookings
+(`is_split_booking`) are skipped and counted in `notes`. Calls per cell:
+`1 + expandTop × 2`; the default `expandTop 2` costs 5.
 
 ### 5.5 Fixture provider and the synthetic gates
 
@@ -605,7 +609,7 @@ scheduled job that runs after boot.
 resolveWindow(def: WindowSpec, todayLondon: IsoDate): { departureFrom: IsoDate; departureTo: IsoDate; clamped: boolean }
 generateCells(space: ResolvedSpace): Cell[]      // deterministic order: origin, destination, departureDate, nights
 countCells(space): number                         // closed form, no allocation; the estimate and caps use it
-validateSearchSpace(def, todayLondon: IsoDate, airportExists: (iata) => boolean): ValidationResult
+validateSearchSpace(def, todayLondon: IsoDate, lookup: { exists(iata): boolean; metroOf(iata): string | null; airportsOfMetro(code): Iata[] }, maxCells: number): ValidationResult   // a metropolitan code is rejected naming its airports
 ```
 
 Windows are **absolute** `{ from, to }` or **relative** `{ startOffsetDays ≥ 1,
@@ -847,8 +851,8 @@ are `toISOString()` text; booleans are integers 0/1.
   window), trigger ∈ manual | schedule | tool, status ∈ pending | running | paused_budget | paused_error |
   interrupted | cancelled | completed | skipped_budget | skipped_confirm |
   skipped_window | skipped_missed, stage, estimate_json, cancel_requested, resume_after NULL,
-  auto_resume_count NOT NULL default 0, started_at, finished_at,
-  error_text). **Parent partial unique index** `(definition_id) WHERE
+  auto_resume_count NOT NULL default 0, created_at, started_at,
+  finished_at, error_text). **Parent partial unique index** `(definition_id) WHERE
   is_child = 0 AND status IN (pending, running, paused_budget, paused_error,
   interrupted)`; **child partial unique index** `(definition_id,
   child_origin, child_destination, child_departure_date, child_return_date)
@@ -862,7 +866,9 @@ are `toISOString()` text; booleans are integers 0/1.
   discovery_min_pence, verification_selected, selection_reason,
   verification_status NULL, verification_reason NULL,
   verification_min_pence NULL, best_observation_id NULL FK
-  `price_observations.id`) PK five keys.
+  `price_observations.id`, the cheapest observation written for the cell;
+  "cheapest verified" is a read-time query because verdicts are read-time)
+  PK five keys.
   A `NULL` status means the stage has no provider or no outcome rows yet.
 - `cell_outcomes` PK **(execution_id, origin, destination, departure_date,
   return_date, stage, provider_id)** with status, reason, attempts NOT NULL
@@ -890,8 +896,8 @@ are `toISOString()` text; booleans are integers 0/1.
   only `reused_from_execution_id IS NULL`.
 - `itineraries` (hash PK, kind default 'flight', origin, destination,
   departure_date, return_date, nights, outbound_minutes, inbound_minutes,
-  stops_out, stops_in, airport_change NULL, carriers_json, first_seen_at).
-  Insert-or-ignore on hash.
+  stops_out, stops_in, airport_change NULL, carriers_json, layovers_json,
+  first_seen_at). Insert-or-ignore on hash.
 - `segments` (itinerary_hash, direction, position, mode default 'air',
   marketing_carrier, operating_carrier, flight_number, from_iata, to_iata,
   depart_local, arrive_local, depart_utc, arrive_utc, duration_minutes,
@@ -927,7 +933,7 @@ are `toISOString()` text; booleans are integers 0/1.
   Index (provider_id, started_at, outcome, billable), (execution_id).
 - `provider_cache` (key PK, provider_id NULL, body_json, stored_at,
   expires_at).
-- `fx_rates` (date, currency, rate_nano) PK (date, currency).
+- `fx_rates` (date, currency, rate_nano, source) PK (date, currency).
 - `alert_rules` (id, definition_id, type, threshold_pence NULL, pct NULL,
   basis, require_all_verified NULL, cooldown_hours NOT NULL default 336,
   enabled).
@@ -935,7 +941,8 @@ are `toISOString()` text; booleans are integers 0/1.
   calendar_price_id NULL, dedup_key, fired_at, status ∈ sent | failed |
   suppressed, reason, payload_json). Index (rule_id, dedup_key, fired_at),
   (rule_id, identity_key, fired_at).
-- `operator_notifications` (id, kind, execution_id, sent_at, status).
+- `operator_notifications` (id, kind, execution_id NULL, definition_id,
+  sent_at, status).
 - `route_price_history` (origin, destination, cabin (a cabin or
   'unknown'), provider_id, date, lowest_price_pence, fetched_at) PK (origin, destination, cabin,
   provider_id, date): the 60-day `price_insights.price_history` series
@@ -1100,9 +1107,9 @@ completed
 - **Single-cell verification** (`POST /cells/verify`): needs no parent;
   validates the cell ∈ `generateCells(current resolved space)` and airports
   exist; creates a child execution (`is_child = 1`, cell columns set) that
-  skips discovery, `alwaysInclude = [cell]`, `maxCells = 1`, its own
-  execution caps (`CHILD_MAX_CALLS` default 6), shares the provider/global
-  caps; at most one active child per cell; the action is hidden when the
+  skips discovery, `alwaysInclude = [cell]`, `maxCells = 1`, its own call
+  cap (`CHILD_MAX_CALLS` default 6; the other budget fields are inherited
+  from the definition), shares the provider/global caps; at most one active child per cell; the action is hidden when the
   definition has no verification provider. Child observations are
   **included** in results, calendar-gap, View B counts and duration
   analysis (filtered to the current resolved space), counted separately as
@@ -1154,7 +1161,7 @@ a DST-shortened interval.
 permitted only for the dev Mailpit profile or a loopback host, else boot
 refuses) and `LogNotifier`. Plain text only. Alerts are sent as digests
 (§6.8). Subject:
-`[get-me-there] £412 LHR→JFK 14 Mar–28 Mar (14n) · Google via SearchApi · fetched 5h ago · 1 constraint unverified`
+`[get-me-there] £412 LHR→JFK 14 Mar–28 Mar (14n) · Google Flights via SearchApi · fetched 5h ago · 1 constraint unverified`
 or, calendar basis, `… · Aviasales cache · fetched 2h ago · provider age unknown (≤7d before that) · constraints not checked`.
 Body: segments (or "calendar price, no itinerary"), verdicts naming every
 unverified constraint, provenance line with effective age, link (validated
@@ -1500,8 +1507,9 @@ is not writable; `mailpit` under the `dev` profile serves the host-side
 `pnpm dev` process (`SMTP_HOST=127.0.0.1`, `SMTP_TLS=none`); the container
 always uses real SMTP.
 
-**Backup**: `scripts/backup.mjs` (`VACUUM INTO` + `PRAGMA integrity_check`
-on the output, refusing an existing target; a failure refuses migrations)
+**Backup**: the `db` package's backup routine, exposed as
+`scripts/backup.mjs` (`VACUUM INTO` + `PRAGMA integrity_check` on the
+output, refusing an existing target; a failure refuses migrations)
 runs pre-migration when migrations are pending and on demand via `docker
 compose exec`; the live smoke and recording are invoked from the host with
 `curl -u … -X POST http://127.0.0.1:3000/api/tools/smoke` (the image has no
@@ -1598,7 +1606,10 @@ worked example's 4 pairs and §1's numbers now match it; the API lives under
 for the calendar source and the basis label, six buckets in View D, History
 x-axis for the route series (§11); `APP_BASE_URL` (§12); no curl in the
 image, no `env_file`, Mailpit for host dev only (§13); React 19 and the gated
-in-process fixture seam (§4); WP dependencies (§16).
+in-process fixture seam (§4); WP dependencies (§16). A second pass added
+the §6.1 lookup signature, the three silent §5.4 cases, four §7 columns and
+the `best_observation_id` semantics, the child budget rule (§8.1), the
+§8.3 subject wording and the backup routine's home (§13).
 
 ### Revision 9: decisions taken at approval (2026-10-14)
 

@@ -10,292 +10,364 @@ status: draft
 
 # WP10 — web: Calendar (View B), Duration (View C), History, Playwright smoke
 
+Reconciled on 2026-10-14 against spec revision 10, the plan's contracts v2 ("API contract", "Web", "Decisions taken at reconciliation") and the WP9 draft brief (`docs/briefs/wp09-web-shell-definitions-results.md`).
+
 ## 1. Goal
 
-Add the calendar heatmap, the price-by-stay-length chart and the price history view to `@gmt/web`. Every price on them carries provenance, unsearched never looks like "no flights", and the browser's timezone never shifts a date. Add one Playwright smoke that drives the real api in fixture mode.
+Replace WP9's three WP10 placeholders with:
+
+- the calendar heatmap (View B),
+- the price-by-stay-length chart (View C),
+- the price history view.
+
+On all three, every price carries provenance (except the route-level series that spec §11 exempts), unsearched never looks like "no flights", and the browser's timezone never shifts a date. WP10 also adds one Playwright smoke that drives the real api in fixture mode.
 
 ## 2. Scope
 
 **In**
 
-- View B Calendar (`apps/web/src/views/Calendar/*`). Each day shows one price, chosen by the §11 precedence with the §8.1 staleness rules and `compareAges` from core. Days are coloured by one basis at a time on a quintile scale; days showing the other basis are hatched. The legend is numeric. Days without a price show distinct glyphs with text alternatives. Each day carries the five-way discovery marker and the separate itinerary-search line; the header shows the reused count. The view has a per-destination filter, a keyboard-operable grid with visible focus, and a side panel. The panel shows one cell's outcomes and prices with full provenance and the per-cell verify action, which is hidden when the definition has no verification provider.
-- View C Duration (`apps/web/src/views/Duration/*`): Recharts 3 bar chart per nights, the verified series and one calendar series per provider, `n` in the legend label and the tooltip, gaps with no interpolation, axis titles, explicit loading, empty and error states, and an accessible data table.
-- History (`apps/web/src/views/History/*`): route history (`GET /routes/:o/:d/history`) and itinerary history (`GET /itineraries/:hash/history`), one line per provider and kind, x = `fetchedAt`, gaps, axis titles, an empty state, and the route series labelled "Google's route-level lowest price, cabin unknown".
-- Date handling for review focus 3. `src/lib/isoDate.ts` renders `YYYY-MM-DD` strings with no `Date`. `src/lib/time.ts` is the only file allowed to construct a `Date`. A grep test enforces that rule over all of `apps/web/src` (WP9 code included). A TZ suite runs under `America/Los_Angeles` and `Asia/Tokyo`.
-- The string catalogue additions for the three views, plus a banned-word test and a reserved-"verified" test over them.
-- Registering the three views in WP9's view registry, and a link from WP9's Results expanded row to itinerary history.
-- The Playwright smoke in fixture mode: `apps/web/playwright.config.ts`, `apps/web/e2e/*`, and the `e2e` script. The smoke is excluded from `pnpm test`.
+- **View B Calendar** (`apps/web/src/views/Calendar/*`):
+  - Each day shows one price, chosen by the §11 precedence with the §8.1 staleness flags and core's `compareAges`.
+  - Days are coloured client-side by one basis at a time on a quintile scale; days showing the other basis are hatched. The legend is numeric.
+  - Days without a price show distinct glyphs with text.
+  - Each day shows the five-way discovery marker and the itinerary-search line; the header shows the reused count.
+  - A per-destination filter.
+  - Keyboard: an APG grid with arrows, Enter and visible focus.
+  - A side panel shows one cell's outcomes and prices and the per-cell verify action. Verify is hidden without a verification provider.
+- **View C Duration** (`apps/web/src/views/Duration/*`):
+  - Recharts 3 bars per nights: the verified series and one calendar series per provider.
+  - `n` appears in the legend label and in the tooltip.
+  - Nights the api flags as not searched are gaps (no interpolation) and are labelled "not searched". Nights that were searched but have no price are labelled differently.
+  - Axis titles; loading, empty and error states; a data table with provenance.
+- **History** (`apps/web/src/views/History/*`):
+  - Route history (`GET /api/routes/:origin/:destination/history`): calendar series plotted by `at` (fetchedAt), plus the route-level series plotted by its own `date` and labelled "Google's route-level lowest price, cabin unknown".
+  - Itinerary history (`GET /api/itineraries/:hash/history`): one offer series per provider and seller.
+  - Gaps, axis titles, an empty state, and tables with provenance.
+- **Review focus 3** (dates):
+  - `src/lib/isoDate.ts` renders `YYYY-MM-DD` with no `Date`.
+  - `src/lib/time.ts` holds the instant helpers.
+  - A grep guard over `apps/web/src`.
+  - A TZ suite under `America/Los_Angeles` and `Asia/Tokyo`, covering the calendar grid and WP9's Results date columns.
+- **Copy:** `COPY.calendarView`, `COPY.durationView` and `COPY.historyView` in WP9's `src/copy.ts`, with their entries in WP9's catalogue test.
+- **API wiring:** typed endpoints and query keys for the five WP10 routes, added to WP9's `api/types.ts`, `api/endpoints.ts` and `api/queries.ts`.
+- **Shell wiring:** the three views go into WP9's `App.tsx` in place of `<Placeholder wp="WP10" />`, and a "price history" link goes into WP9's `ExpandedRow`.
+- **Playwright smoke in fixture mode:** `apps/web/playwright.config.ts`, `apps/web/e2e/*` and the `e2e` script. It is excluded from `pnpm test`.
 
 **Out**
 
-- The shell, nav, definition selector, status bar, view header, `Provenance` component, typed api client, `src/strings.ts` base catalogue, Definitions form, Results (View A), Coverage (View D) and Providers belong to **WP9**. WP10 only adds entries and edits two WP9 files, both named in §7.
-- Every api route, its SQL and the `stale`/`ageHours` computation belong to **WP8**. The view uses `stale` as the api sends it and never recomputes staleness thresholds.
-- The response schemas in `core/api-contract/results.ts` belong to **WP0**. Fields WP10 needs that the plan does not list are reported in §11 and are not added here.
-- `effectiveAge`, `compareAges` and `formatAge*` belong to **WP0**. `toEpochDay`, `fromEpochDay`, `addDays`, `monthOf` and `monthsSpanned` belong to **WP1**.
-- The fixture provider and the fixture-mode api route that serves `http://fixture.local` belong to **WP4** and **WP8**. The example JSON in `docs/setup.md` belongs to **WP12**.
-- The Alerts UI belongs to **WP11**.
+- **WP9:** shell, nav, definition selector, status bar, `ViewHeader`, `Provenance`, `PriceCell`, `PriceBoundary`, `call`/`findRoute`/`api`, `COPY` base entries, `NowContext`/`useNow`, `format.ts`, URL state, Definitions form, Results (View A), Coverage (View D), Providers, and the msw test API (`test/msw/*`, `test/fixtures.ts`, `test/render.tsx`). WP10 edits only the WP9 files named in §7.
+- **WP8:** every route, the `stale` and `ageHours` computation, the `searched` flag, and the in-process fixture host (wired by WP4b in fixture mode).
+- **WP0:** response schemas in `core/api-contract/results.ts`. **WP0/WP1:** `effectiveAge`, `compareAges`, `formatAge*`, `formatDuration`, `toEpochDay`, `addDays`, `daysBetween`, `monthOf` and `cellKeyString`.
+- **WP11:** the Alerts view.
 
 ## 3. Spec sections
 
-- **§11 View B**: the day shows, by precedence, the cheapest class-verified price under `STALE_AFTER_HOURS`; otherwise the fresher of a stale verified price and the cheapest calendar price (labelled, with unknown age losing to known); otherwise glyphs. Colour uses one basis at a time on a quintile scale over the visible days of that basis. Fallback days are hatched and excluded from the scale, and the legend says which basis each day uses. The marker reads "P priced · E no fares · X no cached data · R error · S skipped · U not searched of M", and "itinerary-searched 1 of 10 selected +C on demand" appears separately. `empty`, `no_data`, `error` and `not_run` each get a distinct glyph. The legend is numeric. The view has a per-destination filter and a side panel with cells, outcomes and verify.
-- **§11 View C**: bars per nights with axis titles (nights, £). The series are "min among verified (class verified, n=…)" and calendar per provider. `n` appears in the label and the tooltip. Loading and empty states are explicit. Unsearched nights leave gaps, with no interpolation.
-- **§11 History**: one series per provider and kind, x = `fetchedAt`, gaps, reused rows excluded (the api excludes them), axis titles, an empty state.
-- **§11 Accessibility**: the calendar is keyboard-operable with visible focus, controls are labelled, no meaning is carried by colour alone, and the heatmap has a numeric legend. Provenance on every price is visible without hover. Calendar prices get a dashed outline and "constraints not checked". "≈" marks an FX-converted price.
-- **§8.1 Staleness per price**: verified-basis staleness uses `STALE_AFTER_HOURS` and calendar-basis staleness uses `discoveryRefreshHours + maxAgeHours`. Both arrive as `stale` on each price cell. Stale prices are returned and labelled, never hidden. Unknown age loses to any known age, and ties go to verified.
-- **§3**: the six buckets, which sum to the cell count. Reused outcomes count in their own bucket, and the header adds "(R reused from earlier runs)". The word "verified" is reserved for the class, and stage counts say "itinerary-searched". The compact and full age label formats come from core.
-- **§10**: `GET /definitions/:id/calendar`, `GET /definitions/:id/duration-analysis`, `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`, `POST /cells/verify`, `GET /itineraries/:hash/history` and `GET /routes/:o/:d/history`.
-- **§9 item 6**: View B states, including the partial-day five-way marker and the per-basis colour scale with hatched fallback days. Chart empty and loading states. Keyboard operation. A banned-word test with word boundaries. A price lacking provenance fails to render. One Playwright smoke in fixture mode.
+- **§11 View B:**
+  - Precedence: a fresh class-verified price, else the fresher of a stale verified price and the cheapest calendar price (unknown age loses), else glyphs.
+  - Colour by one basis at a time on a quintile scale over the visible days of that basis. Fallback days are hatched, excluded from the scale, and named in the legend.
+  - Marker text "P priced · E no fares · X no cached data · R error · S skipped · U not searched of M", and "itinerary-searched K of N selected +C on demand" separately.
+  - Distinct glyphs for `empty`, `no_data`, `error` and `not_run`; a numeric legend; a per-destination filter; a side panel with cells, outcomes and verify.
+- **§11 View C:** bars per nights with axis titles (nights, £); the series "min among verified (class verified, n=…)" and calendar per provider; `n` in label and tooltip; explicit empty and loading states; gaps for unsearched nights; no interpolation.
+- **§11 History:** one series per provider and kind. x is `fetchedAt` for provider series and the point's own `date` for the route-level series. Gaps, reused rows excluded (by the api), axis titles, empty state.
+- **§11 vocabulary and provenance:**
+  - Calendar source names: "Google date grid via SearchApi" and "Aviasales cache"; the verified basis is labelled "itinerary-search basis".
+  - Provenance on every price is visible without hover. Calendar prices get a dashed outline and "constraints not checked". The destination and the operator's note are shown.
+  - Accessibility: keyboard-operable calendar, visible focus, no colour-only meaning.
+- **§8.1 staleness:** `stale` per price comes from the api (`STALE_AFTER_HOURS` for verified, `discoveryRefreshHours + maxAgeHours` for calendar). Stale prices are labelled, never hidden. Unknown age loses to known; ties go to verified.
+- **§3:** six buckets summing to M; reused counted inside its bucket with "(R reused from earlier runs)"; "verified" reserved for the class; stage counts say "itinerary-searched".
+- **§10:** calendar, duration-analysis, cells, `/cells/verify`, itinerary history and route history, all under `/api`.
+- **§9 item 6:**
+  - View B states, including the partial-day five-way marker and the per-basis colour scale with hatched fallback days.
+  - Chart empty and loading states, the numeric legend, and keyboard operation.
+  - Banned words via the catalogue; a price lacking provenance fails to render.
+  - One Playwright smoke in fixture mode.
 
 ## 4. Interfaces consumed
 
 ### From the plan's "Cross-package contracts" (verbatim)
 
 ```ts
-// types/ids.ts (WP0)
-export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$, upper-case
+// types/ids.ts
+export type Iata = string & { readonly __brand: 'Iata' };          // ^[A-Z]{3}$ after upper-casing
 export type IsoDate = string & { readonly __brand: 'IsoDate' };    // YYYY-MM-DD
 export type IsoMonth = string & { readonly __brand: 'IsoMonth' };  // YYYY-MM
 export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' }; // Date#toISOString() form only
-export const isoDateTimeSchema: z.ZodType<IsoDateTime>; // /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/ and Date.parse round-trips
-export function asIata(s: string): Iata;           // throws on mismatch; used by tests and seeds, never on user input (zod does that)
+export const isoDateTimeSchema: z.ZodType<IsoDateTime, string>; // /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/ and Date.parse round-trips
+export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
 export function asIsoDate(s: string): IsoDate;
+export function asIsoMonth(s: string): IsoMonth;
 export function asIsoDateTime(s: string): IsoDateTime;
-
-// types/provenance.ts (WP0)
+// types/provenance.ts
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
+export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export interface Provenance {
   providerId: ProviderId; sourceKind: SourceKind; fetchedAt: IsoDateTime; providerObservedAt?: IsoDateTime;
   maxAgeHours: number | 'unknown'; fx: FxInfo; pointOfSale: PointOfSale; cabin: Cabin;
 }
-
-// types/definition.ts (WP0)
+// types/definition.ts
 export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
-export interface ProvidersConfig { discovery: ProviderId[]; verification: ProviderId[]; discoveryRefreshHours: Partial<Record<ProviderId, number>> }
-
-// labels/age.ts (WP0)
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // hours as non-negative numbers, clamped at 0
-export function formatAgeFull(a: EffectiveAge): string;
-export function formatAgeCompact(a: EffectiveAge): string;
-export function compareAges(a: EffectiveAge, b: EffectiveAge): number;  // unknown loses to any known; otherwise by worst-case hours
-
-// text/bannedWords.ts (WP0)
-export const BANNED_WORDS: readonly string[] = ['exhaustive', 'all combinations', 'every combination', 'live', 'bookable', 'guaranteed', 'real-time'];
-export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
-
-// WP1 (plan "WP1 — Produces")
-toEpochDay(IsoDate): number, fromEpochDay(number): IsoDate, addDays(IsoDate, n): IsoDate, monthOf(IsoDate): IsoMonth
+export interface Cell extends CellKey { nights: number }
+// types/execution.ts
+export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }
+// core domain (WP1)
+export function toEpochDay(d: IsoDate): number; export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number /* b − a */; export function monthOf(d: IsoDate): IsoMonth;
+// labels/age.ts (Task 0.7 + the settled maxAgeHours-0 rule)
+export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;
+export function formatAgeFull(a: EffectiveAge): string;   // bounded with maxAgeHours 0 → "fetched 5h ago"
+export function compareAges(a: EffectiveAge, b: EffectiveAge): number;  // < 0 when a is fresher; unknown loses to any known
 ```
 
-WP0's Task 0.7 tests fix the sign of `compareAges`: `compareAges(a, b) < 0` when `a` is fresher, and an unknown age compares greater than any known one.
-
-From the plan's API contract block (`api-contract/common.ts`, WP0, verbatim from Task 0.8):
+API contract (`results.ts`, contracts v2, verbatim):
 
 ```ts
-export const priceCellSchema = z.object({ pricePence: moneyPenceSchema, provenance: provenanceSchema, stale: z.boolean(), ageHours: ageHoursSchema });
-export const bucketsSchema = z.object({ priced: …, empty: …, no_data: …, error: …, skipped: …, not_run: …, reused: … });   // all z.number().int().min(0)
-export const bookingSchema = z.discriminatedUnion('kind', [ /* get | post | none, host on get/post */ ]);
+calendarDaySchema { date: IsoDate /* departure date */; discovery: Array<{ providerId; buckets: Buckets; total }>; verification: { selected; itinerarySearched; onDemand };
+  cheapestVerified: (PriceCell & { cell: Cell; itineraryHash: string }) | null; cheapestPartiallyVerified: (PriceCell & { cell: Cell; itineraryHash: string; count: number }) | null;
+  cheapestCalendar: (PriceCell & { cell: Cell }) | null; byDestination: Array<{ destination: Iata; cheapestVerified: PriceCell | null; cheapestCalendar: PriceCell | null }> }
+calendarResponseSchema { days: CalendarDay[]; executions: ExecutionSummary[]; staleAfterHours: number; calendarStaleAfterHours: Record<ProviderId, number> }
+durationAnalysisResponseSchema { byNights: Array<{ nights: number; minVerified: (PriceCell & { n: number }) | null; minCalendar: Array<{ providerId; price: PriceCell; n: number }>; searched: boolean }>; executions: ExecutionSummary[] }
+cellDetailResponseSchema { cell: Cell; outcomes: CellOutcome[]; calendarPrices: Array<PriceCell & { executionId; calendarPriceId }>; observations: Array<ResultRow> }
+historyPointSchema { at: IsoDateTime; pricePence; provenance: Provenance }
+routeSeriesPointSchema { date: IsoDate; pricePence; fetchedAt: IsoDateTime; providerId; sourceKind }   // no cabin, so no full provenance; plotted by date
+itineraryHistoryResponseSchema { itineraryHash; series: Array<{ providerId; seller; cabin; points: HistoryPoint[] }> }
+routeHistoryResponseSchema { origin; destination; calendarSeries: Array<{ providerId; cabin; points: HistoryPoint[] }>; routeSeries: Array<{ providerId; points: RouteSeriesPoint[] }> }
+executionSummarySchema { id, status, isChild, startedAt, finishedAt, ageHours }   // newest first
+verifyCellRequestSchema { definitionId, cell: CellKey } → startExecutionResponseSchema { executionId }
 ```
 
-The plan names these `results.ts` schemas but does not list their fields: `calendarResponseSchema` ("per day as spec §10"), `durationAnalysisResponseSchema`, `cellDetailResponseSchema` and `historyResponseSchema`. `definitionResponseSchema` is `SearchDefinition` plus `budgetFit` plus `estimate`, and `ROUTES` is `readonly RouteDef[]`.
+Every route lives under `/api`, and `ROUTES` paths include the prefix. `byDestination` carries only prices. The discovery counts and the itinerary-search line stay day-level for every destination, so a filtered day says "counts cover all destinations".
 
-### Fields this brief needs from those four unlisted schemas
-
-The four schemas are WP0's to define. WP10 reads only the fields below, all derived from spec §10. Fields marked **(not in spec/plan)** are needed by a view and are reported in §11. If WP0's merged schema differs, that is a finding against the plan, not something WP10 papers over.
+### From WP9 (`docs/briefs/wp09-web-shell-definitions-results.md` §5, real names)
 
 ```ts
-// calendarResponseSchema
-{
-  days: Array<{
-    date: IsoDate;                                    // the departure date (not in spec/plan: spec §10 says "per day" without naming which date)
-    discovery: Array<{ providerId: ProviderId; buckets: Buckets }>;   // spec §10 "discovery counts per provider in the six buckets"
-    verification: { selected: number; itinerarySearched: number; onDemand: number } | null;  // null = no verification provider (not_applicable)
-    cheapestVerified: (PriceCell & { cell: CellKey }) | null;                   // class verified only, incl. children; `cell` (not in spec/plan)
-    cheapestPartiallyVerified: (PriceCell & { cell: CellKey; count: number }) | null;
-    cheapestCalendar: (PriceCell & { cell: CellKey }) | null;
-    byDestination: Array<{ destination: Iata } & Omit<Day, 'date' | 'byDestination'>>;  // the same fields per destination
-  }>;
-  executions: Array<{ id: string; status: ExecutionStatus; ageHours: number | 'unknown' }>;   // (not in spec/plan) for the view header
-}
-// durationAnalysisResponseSchema
-{
-  nights: Array<{ nights: number; minVerified: (PriceCell & { n: number }) | null; minCalendar: Array<{ providerId: ProviderId; price: PriceCell | null; n: number }> }>;
-  executions: Array<{ id: string; status: ExecutionStatus; ageHours: number | 'unknown' }>;   // (not in spec/plan)
-}
-// cellDetailResponseSchema
-{
-  cell: CellKey;
-  outcomes: Array<{ executionId: string; stage: Stage; providerId: ProviderId; status: CellOutcomeStatus; reason: string | null; attempts: number; fetchedAt: IsoDateTime | null; reusedFromExecutionId: string | null }>;
-  calendarPrices: Array<PriceCell & { executionId: string; reusedFromExecutionId: string | null }>;
-  observations: Array<PriceCell & { itineraryHash: string; seller: string; verdictClass: VerdictClass; booking: Booking }>;
-}
-// historyResponseSchema
-{
-  series: Array<{
-    providerId: ProviderId;
-    kind: 'offer' | 'calendar' | 'route-lowest';      // (not in spec/plan: spec §10 says "series per provider and kind")
-    points: Array<{ fetchedAt: IsoDateTime; pricePence: number; provenance: Provenance | null }>;   // provenance null only for 'route-lowest' (see §11)
-  }>;
-}
+// src/copy.ts
+export const COPY = { /* … */ loading: 'Loading…', loadFailed: (message) => …, actionFailed: (message) => …, priceWithheld, source: Record<SourceKind, string>,
+  classLabel: Record<VerdictClass | 'unchecked', string>, basisName: { verified: 'itinerary-search basis', calendar: 'calendar basis' },
+  bucket: { priced, empty, no_data, error, skipped, not_run }, reusedNote: (n) => `(${n} reused from earlier runs)`, stageName, statusName,
+  verifyCell: 'Search this cell for itineraries', verifyStarted, none, nav: { … }, importExample, runNow, createConfirm: (amount) => …, syntheticBanner };
+// src/api/client.ts
+export class ApiError extends Error { readonly status: number; readonly code: string; readonly details: unknown }
+export function findRoute(method: Method, path: string): RouteDef;
+export async function call<T>(method: Method, path: string, opts?: { params?: Record<string, string>; query?: Record<string, string | undefined>; body?: unknown }): Promise<T>;
+// src/api/endpoints.ts, src/api/types.ts, src/api/queries.ts
+export const api: { …; verifyCell(body: { definitionId: string; cell: CellKey }) };   export type PriceCellData; export type DefinitionResponse; export type ResultRow;
+export const qk: { … };
+// src/components
+export function PriceCell(props: { pricePence: number; provenance: Provenance | undefined; calendar: boolean; stale: boolean; destination?: string | undefined; destinationNote?: string | null | undefined }): JSX.Element;  // throws without valid provenance; renders data-testid="provenance"
+export class PriceBoundary;     // renders COPY.priceWithheld (role="alert") instead of a broken price
+export function ViewHeader(props: { title: string; executions: ExecutionSummary[]; stale: boolean }): JSX.Element;
+export function ExpandedRow(props: { row: ResultRow; extras: boolean; verificationConfigured: boolean; definitionId: string }): JSX.Element;
+export function ResultsView(props: { definition: DefinitionResponse }): JSX.Element;   // date columns via format.ts formatIsoDate
+export function SyntheticBanner(): JSX.Element;   // role="alert", class bg-red-700, text COPY.syntheticBanner
+// src/now.tsx, src/format.ts, src/state/urlState.ts
+export const NowContext; export function useNow(): IsoDateTime;
+export function formatPence(pence: number): string;   export function formatIsoDate(d: string): string;   // "2027-03-14" → "14 Mar 2027" by string slicing
+export function useSearchParams(): URLSearchParams; export function hrefWith(patch: Record<string, string | null>): string; export function navigateTo(patch): (e) => void;
+// test/
+export const NOW: IsoDateTime;                          // test/render.tsx: '2026-10-14T15:00:00.000Z'
+export function renderWithProviders(ui, opts?: { search?: string });   // QueryClient (no retry), NowContext pinned to NOW; returns { user, client, … }
+export const server;                                    // test/msw/server.ts, started by test/setup.ts with onUnhandledRequest 'error'
+export const API = 'http://localhost:3000'; export function definition(over?); export function resultsResponse(over?); export function calendarRow(over?); export function verifiedRow(over?);   // test/fixtures.ts
 ```
 
-The view modules derive their types from the schemas with `z.infer` (Task 10.1 `types.ts`), so a schema that lacks one of these fields fails `pnpm -r typecheck` in WP10. It cannot fail silently at runtime.
+The guards that WP9 runs and WP10 must pass:
 
-### From WP9 (no WP9 brief existed when this brief was written; these names are assumed)
+- **Source guard:** no literal JSX text or literal `aria-label`/`title`/`placeholder`/`alt`/`label` containing a letter in any `.tsx`.
+- **Catalogue test:** every function in `COPY` has an entry in `SAMPLES`; no banned word; "verified" appears only on allowed paths.
+- **Rendered-DOM sweep:** Task 9.14.
 
-`docs/briefs/wp09-web-shell-definitions-results.md` did not exist on 2026-10-14. The plan's dispatch process re-reviews a later wave's brief against the merged code before dispatch. At that review, Fable replaces any name below that differs and changes nothing else.
-
-```ts
-// apps/web/src/api/client.ts (WP9): typed fetch over core/api-contract; validates every response with the schema; relative URLs under WP9's API base
-export class ApiError extends Error { status: number; code: string }
-export function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>>;            // path without the API base, e.g. '/definitions/abc/calendar'
-export function apiPost<S extends z.ZodTypeAny>(path: string, body: unknown, schema: S): Promise<z.infer<S>>;  // sends Content-Type: application/json and X-Requested-With: get-me-there
-// apps/web/src/components/Provenance.tsx (WP9): badge, source in words, compact age (full on hover), "≈" when FX-converted
-export function Provenance(props: { provenance: Provenance; now: IsoDateTime }): JSX.Element;
-// apps/web/src/components/ViewHeader.tsx (WP9): execution(s) shown, status, age, stale label, banner when not completed
-export function ViewHeader(props: { title: string; executions: Array<{ id: string; status: ExecutionStatus; ageHours: number | 'unknown' }>; children?: ReactNode }): JSX.Element;
-// apps/web/src/lib/money.ts (WP9)
-export function formatPence(pence: number): string;     // 41200 → "£412"
-// apps/web/src/strings.ts (WP9): the string catalogue
-export const strings: { nav: { definitions: string; results: string }; definitions: { importExample: string; create: string; runNow: string; discoveryProviders: string; verificationProviders: string }; syntheticBanner: string; /* … */ };
-export function providerLabel(id: ProviderId): string;  // "Google Flights via SearchApi" | "Aviasales cache" | the fixture's synthetic label
-// apps/web/src/views/registry.tsx (WP9): the views the shell's nav renders, in order
-export interface ViewDef { id: string; label: string; render(p: { definition: DefinitionResponse }): ReactNode }
-export const VIEWS: ViewDef[];
-// apps/web/src/views/Results/ResultsView.tsx and ExpandedRow.tsx (WP9)
-export function ResultsView(props: { definition: DefinitionResponse; now?: IsoDateTime }): JSX.Element;
-export function ExpandedRow(props: { row: ResultRow; now: IsoDateTime }): JSX.Element;
-// apps/web/src/views/Results/columns.tsx (WP9): the Results column definitions, including the departure and return date cells
-// test/setup.ts (WP9): imports '@testing-library/jest-dom/vitest'
-// DOM hooks WP9 renders: data-testid="results-headline" on the Results header's first line; data-testid="provenance" on every Provenance;
-// the synthetic banner is role="alert" with class bg-red-700 and the text strings.syntheticBanner
-// view selection by URL: ?view=<ViewDef.id>
-```
-
-### From WP8 (api)
-
-The package script `pnpm --filter @gmt/api start` runs the built app bootstrap (`node dist/bootstrap/app.js`). Fixture mode follows spec §5.5: the fixture provider is constructed when `syntheticAllowed(config)` holds, and the api serves the fixture tree so that `http://fixture.local` resolves inside the process. `/providers` lists `fixture` in fixture mode.
+The Definitions form's provider checkboxes have ids `p-d-<providerId>` (discovery) and `p-v-<providerId>` (itinerary search). The Results headline is a paragraph starting "cheapest found £…" that names the source in words and the age.
 
 ## 5. Interfaces produced
 
 ```ts
-// apps/web/src/lib/isoDate.ts
+// src/lib/isoDate.ts (no Date anywhere)
+export const WEEKDAYS: readonly ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export function isoDateParts(d: IsoDate): { year: number; month: number; day: number };
-export function weekdayIndex(d: IsoDate): 0 | 1 | 2 | 3 | 4 | 5 | 6;   // Monday = 0, from the epoch day; no Date
-export function formatIsoDate(d: IsoDate): string;                      // '2027-03-14' → 'Sun 14 Mar 2027'
-export function formatIsoDateShort(d: IsoDate): string;                 // '2027-03-14' → 'Sun 14 Mar'
-export function formatIsoMonth(m: IsoMonth): string;                    // '2027-03' → 'March 2027'
+export function weekdayIndex(d: IsoDate): 0 | 1 | 2 | 3 | 4 | 5 | 6;     // Monday = 0, from the epoch day
+export function formatDayShort(d: IsoDate): string;                       // 'Sun 14 Mar'
+export function formatDayLong(d: IsoDate): string;                        // 'Sun 14 Mar 2027'
+export function formatIsoMonth(m: IsoMonth): string;                      // 'March 2027'
 export function monthDays(m: IsoMonth): IsoDate[];
-// apps/web/src/lib/time.ts — the only file in apps/web/src allowed to construct or parse a Date
-export function nowIso(): IsoDateTime;
-export function instantMs(t: IsoDateTime): number;                      // throws on anything but the toISOString form (rejects '2027-03-14')
-export function formatInstantLondon(ms: number): string;                // '14 Mar 15:00' in Europe/London
-// apps/web/src/api/views.ts
-export function fetchCalendar(definitionId: string): Promise<CalendarResponse>;
-export function fetchDuration(definitionId: string): Promise<DurationResponse>;
-export function fetchCellDetail(definitionId: string, cell: CellKey): Promise<CellDetailResponse>;
-export function fetchRouteHistory(origin: Iata, destination: Iata): Promise<HistoryResponse>;
-export function fetchItineraryHistory(hash: string): Promise<HistoryResponse>;
-export function verifyCell(definitionId: string, cell: CellKey): Promise<unknown>;
-// apps/web/src/views/Calendar/*
-export function bucketTotal(b: Buckets): number;
-export function formatDiscoveryMarker(b: Buckets): string;
-export function formatVerificationMarker(v: DaySlice['verification']): string;
-export function totalReused(slices: readonly DaySlice[]): number;
+// src/lib/time.ts (with src/now.tsx, the only files that may construct a Date)
+export function instantMs(t: IsoDateTime): number;                        // refuses a date-only string
+export function dateMs(d: IsoDate): number;                               // toEpochDay(d) × 86 400 000, no Date
+export function formatInstantLondon(ms: number): string;                  // '14 Mar 15:00' in Europe/London
+// src/lib/sources.ts
+export function discoverySourceLabel(providerId: ProviderId): string;     // COPY.source of the provider's calendar capability
+// src/api additions
+export type CalendarResponse, CalendarDay, DurationResponse, CellDetailResponse, ItineraryHistoryResponse, RouteHistoryResponse;
+api.calendar(id); api.durationAnalysis(id); api.cellDetail(id, cell); api.itineraryHistory(hash); api.routeHistory(origin, destination);
+qk.calendar(id); qk.duration(id); qk.cell(id, key); qk.itineraryHistory(hash); qk.routeHistory(origin, destination);
+// src/views/Calendar
+export type DaySlice; export type DayPrice; export type GlyphStatus; export type DayBasis;
+export function bucketTotal(b: Buckets): number; export function formatDiscoveryMarker(b: Buckets): string;
+export function formatVerificationMarker(v: DaySlice['verification']): string; export function totalReused(slices: readonly DaySlice[]): number;
+export function sliceForDestination(day: CalendarDay, destination: Iata | 'all', verificationConfigured: boolean): DaySlice | null;
+export function DayMarker(props: { slice: DaySlice }): JSX.Element; export function ReusedNote(props: { count: number }): JSX.Element | null;
 export function resolveDayDisplay(slice: DaySlice, now: IsoDateTime): DayDisplay;
-export function buildScale(values: readonly number[]): QuintileScale;
-export function quintileBand(sorted: readonly number[], v: number): Band;
-export function CalendarGrid(props: { days: readonly GridDay[]; model: CalendarModel; now: IsoDateTime; destinationNotes: Partial<Record<Iata, string>>; onOpen(date: IsoDate, cell: CellKey | null): void }): JSX.Element;
-export function CalendarLegend(props: { model: CalendarModel }): JSX.Element;
+export function quintileBand(sorted: readonly number[], v: number): Band; export function buildScale(values: readonly number[]): QuintileScale;
 export function buildCalendarModel(days: readonly GridDay[], colourBasis: DayBasis, now: IsoDateTime): CalendarModel;
-export function cellsForDay(definition: Pick<DefinitionResponse, 'origins' | 'destinations' | 'minNights' | 'maxNights'>, date: IsoDate): CellKey[];
-export function CellPanel(props: { definition: DefinitionResponse; date: IsoDate; initialCell: CellKey | null; now: IsoDateTime; onClose(): void }): JSX.Element;
-export function PanelPrice(props: { price: unknown; kind: 'calendar' | 'observation'; label: string; now: IsoDateTime }): JSX.Element;
-export function CalendarView(props: { definition: DefinitionResponse; now?: IsoDateTime }): JSX.Element;
-// apps/web/src/views/Duration/*
+export function CalendarGrid(props: { days: readonly GridDay[]; model: CalendarModel; destinationNotes: Partial<Record<Iata, string>>; onOpen(date: IsoDate, cell: CellKey | null): void }): JSX.Element;
+export function CalendarLegend(props: { model: CalendarModel }): JSX.Element;
+export function cellsForDay(def: Pick<DefinitionResponse, 'origins' | 'destinations' | 'minNights' | 'maxNights'>, date: IsoDate): CellKey[];
+export function CellPanel(props: { definition: DefinitionResponse; date: IsoDate; initialCell: CellKey | null; onClose(): void }): JSX.Element;
+export function CalendarView(props: { definition: DefinitionResponse }): JSX.Element;
+// src/views/Duration
 export function buildDurationData(resp: DurationResponse, minNights: number, maxNights: number, hasVerification: boolean): DurationData;
 export function DurationTooltip(props: { active?: boolean | undefined; payload?: ReadonlyArray<{ payload?: unknown }> | undefined; series: readonly DurationSeries[] }): JSX.Element | null;
-export function DurationView(props: { definition: DefinitionResponse; now?: IsoDateTime }): JSX.Element;
-// apps/web/src/views/History/*
-export function buildHistoryLines(resp: HistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[];
-export function HistoryView(props: { definition: DefinitionResponse; itineraryHash?: string; now?: IsoDateTime }): JSX.Element;
-export function itineraryHashFromLocation(): { itineraryHash?: string };
-export function historyHref(itineraryHash: string): string;            // '?view=history&hash=<hash>'
-// apps/web/src/strings.ts additions
-export const calendarStrings: { … };  export const durationStrings: { … };  export const historyStrings: { … };
+export function DurationView(props: { definition: DefinitionResponse }): JSX.Element;
+// src/views/History
+export function linesFromRoute(resp: RouteHistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[];
+export function linesFromItinerary(resp: ItineraryHistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[];
+export function HistoryView(props: { definition: DefinitionResponse }): JSX.Element;     // reads ?hash= for itinerary mode
+// src/copy.ts additions
+COPY.calendarView, COPY.durationView, COPY.historyView
 ```
 
 ## 6. Library notes
 
-All versions come from plan Task 0.1. The docs were verified on 2026-10-14 with context7.
+Versions are from plan Task 0.1. Everything below was verified on 2026-10-14 with context7.
 
-- **recharts 3.10.1** (context7 `/recharts/recharts`, versions v3.x; storybook `API/ResponsiveContainer.mdx`, `Customise.mdx`, `API/Accessibility.mdx`, wiki "3.0 migration guide", `src/component/ResponsiveContainer.tsx`, `src/component/Tooltip.tsx`):
-  - `BarChart`, `Bar` (`dataKey` accepts a function; `name` sets the legend entry; `isAnimationActive={false}`), `XAxis`/`YAxis` (`label={{ value, position: 'insideBottom' | 'insideLeft', angle, offset }}`, `tickFormatter`, `type="number"`, `scale="time"`, `domain={['dataMin', 'dataMax']}`), `Tooltip` (`content={<Custom />}`, typed with **`TooltipContentProps`**, which the v3 migration guide names as the replacement for `TooltipProps` on custom content; `filterNull` defaults to `true`), `Legend`, `LineChart`, `Line` (`data` per line, `connectNulls={false}`, so a `null` point breaks the line and nothing is interpolated), and `ResponsiveContainer`.
-  - v3 enables `accessibilityLayer` by default, so a chart is tab-focusable with arrow-key point navigation. `title` sets the SVG title.
-  - **jsdom.** `ResponsiveContainer` reads `getBoundingClientRect()` of its container on mount, then subscribes a `ResizeObserver`. It renders **no children** while width or height is ≤ 0 (`ResponsiveContainerContextProvider` returns `null`). jsdom has no `ResizeObserver` and reports 0×0 rects, so `test/setup-charts.ts` (Task 10.9) installs a no-op `ResizeObserver` and returns 800×320 from `getBoundingClientRect` for `.recharts-responsive-container`. The parent `div` in production has an explicit height (`h-80`), which the source comment says is required for percentage sizes.
-- **@playwright/test 1.64.1** (context7 `/microsoft/playwright`, `docs/src/test-webserver-js.md`, `class-testconfig.md`, `test-projects-js.md`): `defineConfig`, `devices['Desktop Chrome']`, and `webServer` as an **array** of `{ name, command, url, env, cwd, timeout, reuseExistingServer, stdout }`. `env` is merged over `process.env`. `url` readiness accepts 2xx–403. `cwd` defaults to the config's directory. `globalSetup` ordering against `webServer` is not relied on, because the api command prepares its own DB directory (`e2e/prepare-db.mjs`). Locators used: `getByRole`, `getByTestId`, `toContainText`, `toBeVisible`, `toHaveClass`, and `expect(fn).toPass({ timeout })`.
-- **react 19.3.1, react-dom 19.3.1**: function components, `useState`, `useRef`, `useEffect`, `useMemo`, `useId`.
-- **@tanstack/react-query 5.104.2**: `useQuery({ queryKey, queryFn })`, `useMutation({ mutationFn, onSuccess })`, `useQueryClient().invalidateQueries({ queryKey })`, `QueryClientProvider`, and `new QueryClient({ defaultOptions: { queries: { retry: false } } })` in tests.
-- **@testing-library/react 16.3.3**: `render`, `screen`, `within`, `waitFor`. **@testing-library/user-event 14.6.8**: `userEvent.setup()`, `user.keyboard('{ArrowRight}')`, `user.click`, `user.selectOptions`. **@testing-library/jest-dom 7.0.1** matchers come in through WP9's `test/setup.ts`.
-- **vitest 5.0.4** (`environment: 'jsdom'`, jsdom 30.1.2): `setupFiles` run in each worker before the test file is imported, which is where `test/setup-tz.ts` sets `process.env.TZ`. `pool: 'forks'` keeps each worker a child process, where Node honours an assignment to `process.env.TZ` for `Date` and `Intl`. Also used: `describe.each`, `beforeAll`/`afterAll`, and the positional file filters in `vitest run test/tz test/views/Calendar`.
-- **msw 3.0.3** (context7 `/mswjs/msw`, `_autodocs/api-reference/setup-server.md`, `src/core/shared-options.ts`): `setupServer(...handlers)` from `msw/node`, `http.get`/`http.post`, `HttpResponse.json(body, { status })`, `server.listen`, `server.use`, `server.resetHandlers`, `server.close`. Version 3 names the unhandled-traffic option `onUnhandledFrame`; the legacy `onUnhandledRequest` is adapted by `fromLegacyOnUnhandledRequest`. This brief uses `onUnhandledFrame: 'error'`. Handlers use the `*/definitions/...` wildcard prefix so they match whatever API base WP9's client uses. The plan's Task 0.1 lists `msw` only under `@gmt/providers`, so Task 10.1 adds `msw@3.0.3` to `@gmt/web` devDependencies.
-- **zod 4.6.7**: `import type { z } from 'zod'` for `z.infer`. Task 10.1 adds `zod@4.6.7` to `@gmt/web` dependencies if WP9 has not already added it (pnpm's strict layout does not expose core's copy).
-- **vite 8.3.4** (context7 `/vitejs/vite`, `packages/vite/src/node/preview.ts`, `docs/config/preview-options.md`): `vite preview --host 127.0.0.1 --port 4173 --strictPort`. `resolvePreviewOptions` sets `proxy: preview?.proxy ?? server.proxy`, so the preview reuses WP9's dev proxy.
-- **Intl** (no library): `new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })`. It is used only in `src/lib/time.ts` for instants, never for date-only strings.
-- **dataviz skill** (spec §11, "Charts follow the `dataviz` skill"): axis titles with units, one legend, no 3D, no dual axes, a sequential single-hue scale for the heatmap, and a categorical palette for series. Colour is always backed by text.
+- **recharts 3.10.1** (context7 `/recharts/recharts` v3.x: storybook `API/ResponsiveContainer.mdx`, `Customise.mdx`, `API/Accessibility.mdx`; wiki "3.0 migration guide"; `src/component/ResponsiveContainer.tsx`, `src/component/Tooltip.tsx`):
+  - Components used: `BarChart`, `Bar` (function `dataKey`, `name`, `isAnimationActive={false}`), `XAxis`/`YAxis` (`label={{ value, position, angle, offset }}`, `tickFormatter`, `type="number"`, `scale="time"`, `domain={['dataMin', 'dataMax']}`), `Tooltip` (`content` as a function receiving `TooltipContentProps`, the v3 rename of `TooltipProps`; `labelFormatter`, `formatter`), `Legend`, `LineChart`, `Line` (per-line `data`; `connectNulls={false}`, so a `null` point breaks the line and nothing is interpolated), `ResponsiveContainer`, `CartesianGrid`.
+  - v3 enables `accessibilityLayer` by default.
+  - **jsdom.** `ResponsiveContainer` reads its container's `getBoundingClientRect()` on mount, then observes it with `ResizeObserver`. It renders no children while width or height is ≤ 0. `test/setup-charts.ts` therefore installs a no-op `ResizeObserver` and returns 800×320 for `.recharts-responsive-container`. In production the parent `div` has an explicit height (`h-80`).
+- **@playwright/test 1.64.1** (context7 `/microsoft/playwright`, `test-webserver-js.md`, `class-testconfig.md`, `test-projects-js.md`):
+  - `defineConfig`, `devices['Desktop Chrome']`, `webServer` as an array of `{ name, command, url, env, timeout, reuseExistingServer, stdout }`. `env` merges over `process.env`; `cwd` defaults to the config's directory.
+  - Locators used: `getByRole`, `getByText`, `locator('#id')`, `toContainText`, `toBeVisible`, `toHaveClass`, `expect(fn).toPass({ timeout })`.
+  - The DB directory is prepared by the api command, not by `globalSetup`.
+- **vite 8.3.4** (context7 `/vitejs/vite`, `packages/vite/src/node/preview.ts`): `resolvePreviewOptions` sets `proxy: preview?.proxy ?? server.proxy`, so `vite preview --host 127.0.0.1 --port 4173 --strictPort` reuses WP9's dev proxy.
+- **react 19.3.1:** `useState`, `useRef`, `useEffect`, `useMemo`, `useId`.
+- **@tanstack/react-query 5.104.2:** `useQuery({ queryKey, queryFn, enabled })`, `useMutation`, `useQueryClient().invalidateQueries`.
+- **Testing libraries:** `@testing-library/react 16.3.3` (peer `@testing-library/dom`, added by WP9), `@testing-library/user-event 14.6.8`, `@testing-library/jest-dom 7.0.1`, all set up by WP9's `test/setup.ts`.
+- **vitest 5.0.4:**
+  - `setupFiles` run in each worker before the test file is imported, which is where `test/setup-tz.ts` sets `process.env.TZ`.
+  - `pool: 'forks'` makes each worker a Node child process, where assigning `process.env.TZ` re-detects the zone for `Date` and `Intl`.
+  - Also used: `describe.each`, `it.each`, positional file filters.
+- **msw 3.0.3:** WP9's single `server` (`test/msw/server.ts`, started in `test/setup.ts` with `onUnhandledRequest: 'error'`). Tests add `server.use(http.get(\`${API}/api/…\`, …))` and `HttpResponse.json(body, { status })`, plus `delay('infinite')` for loading states. Requests are absolute (`window.location.origin` = `http://localhost:3000`).
+- **zod 4.6.7** (added by WP9): `import type { z } from 'zod'`.
+- **Intl:** `new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })`, in `src/lib/time.ts` only.
+- **dataviz skill** (spec §11): axis titles with units, one legend, no 3D, no dual axes, a sequential single hue for the heatmap, a categorical palette for series, and line or outline style backing every colour.
 
 ## 7. Files
 
 **Create**
 
-- `apps/web/src/lib/isoDate.ts`, `apps/web/src/lib/time.ts`
-- `apps/web/src/api/views.ts`
-- `apps/web/src/views/Calendar/{types.ts,marker.ts,DayMarker.tsx,display.ts,scale.ts,CalendarGrid.tsx,CalendarLegend.tsx,CalendarView.tsx,CellPanel.tsx,PanelPrice.tsx,calendar.css}`
+- `apps/web/src/lib/{isoDate.ts,time.ts,sources.ts}`
+- `apps/web/src/views/Calendar/{types.ts,marker.ts,DayMarker.tsx,display.ts,scale.ts,CalendarGrid.tsx,CalendarLegend.tsx,CellPanel.tsx,CalendarView.tsx,calendar.css}`
 - `apps/web/src/views/Duration/{data.ts,DurationChart.tsx,DurationView.tsx}`
 - `apps/web/src/views/History/{lines.ts,HistoryChart.tsx,HistoryView.tsx}`
-- `apps/web/test/support/{fixtures.ts,server.ts,render.tsx}`
-- `apps/web/test/setup-tz.ts`, `apps/web/test/setup-charts.ts`
-- `apps/web/test/views/Calendar/{marker.test.tsx,display.test.ts,scale.test.ts,grid.test.tsx,view.test.tsx,panel.test.tsx}`
-- `apps/web/test/views/Duration/duration.test.tsx`, `apps/web/test/views/History/history.test.tsx`
-- `apps/web/test/lib/{isoDate.test.ts,time.test.ts,noDateParsing.test.ts}`
-- `apps/web/test/tz/dates.tz.test.tsx`
-- `apps/web/test/strings.wp10.test.ts`, `apps/web/test/views/registry.wp10.test.tsx`
+- `apps/web/test/fixtures.wp10.ts`, `apps/web/test/setup-tz.ts`, `apps/web/test/setup-charts.ts`
+- `apps/web/test/views/calendar/{marker,display,scale,grid,panel,view}.test.tsx`
+- `apps/web/test/views/duration.test.tsx`, `apps/web/test/views/history.test.tsx`, `apps/web/test/app/wp10Wiring.test.tsx`
+- `apps/web/test/lib/{isoDate,time,noDateParsing}.test.ts`, `apps/web/test/tz/dates.tz.test.tsx`
 - `apps/web/playwright.config.ts`, `apps/web/e2e/smoke.spec.ts`, `apps/web/e2e/prepare-db.mjs`
 
-**Modify**
+**Modify (WP9 files)**
 
-- `apps/web/src/strings.ts` (WP9): append `calendarStrings`, `durationStrings`, `historyStrings`.
-- `apps/web/src/views/registry.tsx` (WP9): three `VIEWS` entries.
-- `apps/web/src/views/Results/ExpandedRow.tsx` (WP9): a "price history" link.
-- `apps/web/src/views/Results/columns.tsx` (WP9): departure and return cells render with `formatIsoDateShort` (review focus 3).
-- `apps/web/vitest.config.ts` (WP0/WP9): setup files, `pool: 'forks'`, `exclude: ['e2e/**']`.
-- `apps/web/vite.config.ts` (WP9): the proxy target reads `GMT_API_ORIGIN`.
-- `apps/web/package.json`: `msw`, `zod`, and the scripts `test`, `test:tz`, `e2e`, `e2e:install`.
-- Any WP9 file under `apps/web/src` that constructs a `Date` outside `src/lib/time.ts` (Task 10.2 finds them).
-- Root `.gitignore`: `apps/web/test-results/`, `apps/web/playwright-report/`, `apps/web/e2e/.tmp/`.
+- `src/copy.ts`: append `calendarView`, `durationView`, `historyView`.
+- `test/copy/catalogue.test.ts`: SAMPLES entries for the new functions; extend the "verified" allowlist.
+- `src/api/types.ts`, `src/api/endpoints.ts`, `src/api/queries.ts`: the five WP10 routes.
+- `src/App.tsx`: render the three views in place of `<Placeholder wp="WP10" />`.
+- `src/views/Results/ExpandedRow.tsx`: the history link.
+- `vitest.config.ts`: `pool`, `exclude`, `setupFiles`.
+- `vite.config.ts`: the proxy target reads `GMT_API_ORIGIN`.
+- `package.json`: scripts `test`, `test:tz`, `e2e`, `e2e:install`.
+- Root `.gitignore`: Playwright output and `e2e/.tmp/`.
 
 ## 8. Tasks
 
-Every command runs from the repository root. `W` stands for `pnpm --filter @gmt/web exec vitest run`.
+Every command runs from the repository root. Focused runs use `pnpm --filter @gmt/web exec vitest run <files>`, which skips the coverage thresholds (plan decision 8). In the tests, `API`, `definition`, `verifiedRow`, `calendarRow` and `resultsResponse` come from WP9's `test/fixtures.ts`, `NOW` and `renderWithProviders` come from `test/render.tsx`, and `server` comes from `test/msw/server.ts`.
 
 ### Task 10.1: Five-way day counts (first failing test)
 
 **Files:**
-- Create: `apps/web/src/api/views.ts`, `apps/web/src/views/Calendar/{types.ts,marker.ts,DayMarker.tsx}`, `apps/web/test/support/{fixtures.ts,server.ts,render.tsx}`, `apps/web/test/views/Calendar/marker.test.tsx`
-- Modify: `apps/web/src/strings.ts` (append `calendarStrings`), `apps/web/package.json` (devDependency `msw@3.0.3`; dependency `zod@4.6.7` unless WP9 added it)
+- Create: `apps/web/src/lib/sources.ts`, `apps/web/src/views/Calendar/{types.ts,marker.ts,DayMarker.tsx}`, `apps/web/test/fixtures.wp10.ts`, `apps/web/test/views/calendar/marker.test.tsx`
+- Modify: `apps/web/src/copy.ts` (append `calendarView`), `apps/web/test/copy/catalogue.test.ts` (SAMPLES, "verified" allowlist), `apps/web/src/api/{types.ts,endpoints.ts,queries.ts}` (the five WP10 routes)
 
 **Interfaces:**
-- Consumes: `bucketsSchema` fields, `calendarResponseSchema` (via `z.infer`), `apiGet`/`apiPost` and `providerLabel` (WP9).
-- Produces: `bucketTotal`, `formatDiscoveryMarker`, `formatVerificationMarker`, `totalReused`, `DayMarker`, `ReusedNote`, the `api/views.ts` fetchers and types, and `calendarStrings`.
+- Consumes: `calendarDaySchema` (via `z.infer`), `Buckets`, `COPY.source`, `COPY.reusedNote`, `call`.
+- Produces: `DaySlice`, `DayPrice`, `GridDay`, `GlyphStatus`, `DayBasis`, `bucketTotal`, `formatDiscoveryMarker`, `formatVerificationMarker`, `totalReused`, `sliceForDestination`, `DayMarker`, `ReusedNote`, `discoverySourceLabel`, `COPY.calendarView`, the `api.*` and `qk.*` additions.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/Calendar/marker.test.tsx`:
+`apps/web/test/fixtures.wp10.ts` (WP10's builders, dated relative to WP9's `NOW` = `2026-10-14T15:00:00.000Z`):
+
+```ts
+import { addDays, asIata, asIsoDate, asIsoDateTime, type Buckets, type Cell, type CellKey, type IsoDateTime, type ProviderId, type Provenance } from '@gmt/core';
+import type { CalendarDay, PriceCellData } from '../src/api/types.js';
+import { sliceForDestination } from '../src/views/Calendar/marker.js';
+import type { DaySlice, GridDay } from '../src/views/Calendar/types.js';
+import { NOW } from './render.js';
+
+/** An instant h hours before NOW. Tests may build Dates; apps/web/src may not (Task 10.2). */
+export function hoursBefore(h: number): IsoDateTime {
+  return asIsoDateTime(new Date(Date.parse(NOW) - h * 3_600_000).toISOString());
+}
+
+/** A worked-example cell (LHR → JFK unless given). */
+export function cellAt(departure: string, nights: number, origin = 'LHR', destination = 'JFK'): Cell {
+  const dep = asIsoDate(departure);
+  return { origin: asIata(origin), destination: asIata(destination), departureDate: dep, returnDate: addDays(dep, nights), nights };
+}
+
+export function keyOf(c: Cell): CellKey {
+  return { origin: c.origin, destination: c.destination, departureDate: c.departureDate, returnDate: c.returnDate };
+}
+
+/** SearchApi itinerary provenance (maxAgeHours 0), fetched h hours before NOW. */
+export function provenanceVerified(h: number): Provenance {
+  return { providerId: 'searchapi', sourceKind: 'scraped-search', fetchedAt: hoursBefore(h), maxAgeHours: 0, fx: { converted: false }, pointOfSale: 'GB', cabin: 'economy' };
+}
+
+/** Travelpayouts calendar provenance, fetched h hours before NOW. */
+export function provenanceCalendar(h: number, maxAgeHours: number | 'unknown' = 48): Provenance {
+  return { providerId: 'travelpayouts', sourceKind: 'authorised-cached', fetchedAt: hoursBefore(h), maxAgeHours, fx: { converted: false }, pointOfSale: 'unknown', cabin: 'economy' };
+}
+
+/** A day price as calendarDaySchema sends it: a price cell plus its cell and (for verified prices) the itinerary hash. */
+export function priceAt(pricePence: number, provenance: Provenance, stale: boolean, at: Cell): PriceCellData & { cell: Cell; itineraryHash: string } {
+  const fetchedHours = Math.floor((Date.parse(NOW) - Date.parse(provenance.fetchedAt)) / 3_600_000);
+  const ageHours = provenance.maxAgeHours === 'unknown' ? 'unknown' : fetchedHours + provenance.maxAgeHours;
+  return { pricePence, provenance, stale, ageHours, cell: at, itineraryHash: `it-${at.departureDate}-${pricePence}` };
+}
+
+export function buckets(partial: Partial<Buckets>): Buckets {
+  return { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0, ...partial };
+}
+
+/** One provider's discovery entry with its total (the six buckets' sum). */
+export function disc(providerId: ProviderId, partial: Partial<Buckets>) {
+  const b = buckets(partial);
+  return { providerId, buckets: b, total: b.priced + b.empty + b.no_data + b.error + b.skipped + b.not_run };
+}
+
+export function slice(partial: Partial<DaySlice>): DaySlice {
+  return { discovery: [], verification: null, cheapestVerified: null, cheapestPartiallyVerified: null, cheapestCalendar: null, destination: null, ...partial };
+}
+
+export function day(date: string, partial: Partial<Omit<CalendarDay, 'date'>> = {}): CalendarDay {
+  return {
+    date: asIsoDate(date), discovery: [], verification: { selected: 0, itinerarySearched: 0, onDemand: 0 },
+    cheapestVerified: null, cheapestPartiallyVerified: null, cheapestCalendar: null, byDestination: [], ...partial,
+  };
+}
+
+/** A grid day for "all destinations". */
+export function gridDay(date: string, partial: Partial<Omit<CalendarDay, 'date'>> = {}, verificationConfigured = true): GridDay {
+  return { date: asIsoDate(date), slice: sliceForDestination(day(date, partial), 'all', verificationConfigured) };
+}
+```
+
+`apps/web/test/views/calendar/marker.test.tsx`:
 
 ```tsx
+import { asIata } from '@gmt/core';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DayMarker, ReusedNote } from '../../../src/views/Calendar/DayMarker.js';
-import { bucketTotal, formatDiscoveryMarker, formatVerificationMarker, totalReused } from '../../../src/views/Calendar/marker.js';
-import { buckets, slice } from '../../support/fixtures.js';
+import { bucketTotal, formatDiscoveryMarker, formatVerificationMarker, sliceForDestination, totalReused } from '../../../src/views/Calendar/marker.js';
+import { buckets, cellAt, day, disc, priceAt, provenanceCalendar, slice } from '../../fixtures.wp10.js';
 
 describe('five-way day counts (spec §11 View B, §3)', () => {
   const partial = buckets({ priced: 3, empty: 1, no_data: 2, error: 1, skipped: 0, not_run: 5, reused: 2 });
@@ -305,38 +377,27 @@ describe('five-way day counts (spec §11 View B, §3)', () => {
   });
 
   it('formats the discovery marker from the six-bucket counts', () => {
-    expect(formatDiscoveryMarker(partial)).toBe(
-      '3 priced · 1 no fares · 2 no cached data · 1 error · 0 skipped · 5 not searched of 12',
-    );
+    expect(formatDiscoveryMarker(partial)).toBe('3 priced · 1 no fares · 2 no cached data · 1 error · 0 skipped · 5 not searched of 12');
   });
 
-  it('formats the itinerary-search line separately, and says so when no verification provider exists', () => {
-    expect(formatVerificationMarker({ selected: 10, itinerarySearched: 1, onDemand: 2 })).toBe(
-      'itinerary-searched 1 of 10 selected +2 on demand',
-    );
+  it('formats the itinerary-search line separately, and says when no verification provider exists', () => {
+    expect(formatVerificationMarker({ selected: 10, itinerarySearched: 1, onDemand: 2 })).toBe('itinerary-searched 1 of 10 selected +2 on demand');
     expect(formatVerificationMarker(null)).toBe('itinerary search: no verification provider configured');
   });
 
-  it('renders one discovery line per provider and the itinerary-search line on a partial day', () => {
+  it('renders one discovery line per provider, named by its calendar source, and the itinerary-search line', () => {
     render(
       <DayMarker
         slice={slice({
-          discovery: [
-            { providerId: 'travelpayouts', buckets: partial },
-            { providerId: 'searchapi', buckets: buckets({ priced: 12 }) },
-          ],
+          discovery: [disc('travelpayouts', partial), disc('searchapi', { priced: 12 })],
           verification: { selected: 10, itinerarySearched: 1, onDemand: 2 },
         })}
       />,
     );
     const lines = screen.getAllByRole('listitem');
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toHaveTextContent(
-      'Aviasales cache: 3 priced · 1 no fares · 2 no cached data · 1 error · 0 skipped · 5 not searched of 12',
-    );
-    expect(lines[1]).toHaveTextContent(
-      'Google Flights via SearchApi: 12 priced · 0 no fares · 0 no cached data · 0 error · 0 skipped · 0 not searched of 12',
-    );
+    expect(lines[0]).toHaveTextContent('Aviasales cache: 3 priced · 1 no fares · 2 no cached data · 1 error · 0 skipped · 5 not searched of 12');
+    expect(lines[1]).toHaveTextContent('Google date grid via SearchApi: 12 priced · 0 no fares · 0 no cached data · 0 error · 0 skipped · 0 not searched of 12');
     expect(screen.getByTestId('day-marker')).toHaveTextContent('itinerary-searched 1 of 10 selected +2 on demand');
   });
 
@@ -346,16 +407,26 @@ describe('five-way day counts (spec §11 View B, §3)', () => {
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
   });
 
+  it('a destination-filtered day keeps day-level counts and says they cover all destinations', () => {
+    const c = cellAt('2027-03-14', 14);
+    const d = day('2027-03-14', {
+      discovery: [disc('travelpayouts', partial)],
+      cheapestCalendar: priceAt(39900, provenanceCalendar(2), false, cellAt('2027-03-14', 14, 'LHR', 'EWR')),
+      byDestination: [{ destination: asIata('JFK'), cheapestVerified: null, cheapestCalendar: priceAt(41200, provenanceCalendar(2), false, c) }],
+    });
+    const jfk = sliceForDestination(d, asIata('JFK'), true);
+    expect(jfk?.destination).toBe('JFK');
+    expect(jfk?.cheapestCalendar?.pricePence).toBe(41200);
+    expect(jfk?.cheapestCalendar?.cell).toBeNull();
+    expect(jfk?.discovery).toBe(d.discovery);
+    expect(sliceForDestination(d, asIata('EWR'), true)).toBeNull();
+    expect(sliceForDestination(d, 'all', false)?.verification).toBeNull();
+    render(<DayMarker slice={jfk ?? slice({})} />);
+    expect(screen.getByTestId('day-marker')).toHaveTextContent('counts cover all destinations');
+  });
+
   it('the header shows the reused count summed over days and providers', () => {
-    const days = [
-      slice({ discovery: [{ providerId: 'travelpayouts', buckets: partial }] }),
-      slice({
-        discovery: [
-          { providerId: 'travelpayouts', buckets: buckets({ priced: 4, reused: 3 }) },
-          { providerId: 'searchapi', buckets: buckets({ priced: 4, reused: 1 }) },
-        ],
-      }),
-    ];
+    const days = [slice({ discovery: [disc('travelpayouts', partial)] }), slice({ discovery: [disc('travelpayouts', { priced: 4, reused: 3 }), disc('searchapi', { priced: 4, reused: 1 })] })];
     expect(totalReused(days)).toBe(6);
     render(<ReusedNote count={totalReused(days)} />);
     expect(screen.getByText('(6 reused from earlier runs)')).toBeInTheDocument();
@@ -368,185 +439,91 @@ describe('five-way day counts (spec §11 View B, §3)', () => {
 });
 ```
 
-`apps/web/test/support/fixtures.ts` (shared by every WP10 test):
-
-```ts
-import { addDays, asIata, asIsoDate, asIsoDateTime, type CellKey, type IsoDateTime, type Provenance } from '@gmt/core';
-import type { DefinitionResponse } from '../../src/api/views.js';
-import type { Buckets, CalendarDay, DayPrice, DaySlice } from '../../src/views/Calendar/types.js';
-
-/** The fixed "now" every WP10 test renders against. */
-export const NOW: IsoDateTime = asIsoDateTime('2027-03-01T12:00:00.000Z');
-export const LHR = asIata('LHR');
-export const LGW = asIata('LGW');
-export const JFK = asIata('JFK');
-export const EWR = asIata('EWR');
-
-/** An instant h hours before `now`, in toISOString form. Tests may use Date; apps/web/src may not (Task 10.2). */
-export function hoursBefore(now: IsoDateTime, h: number): IsoDateTime {
-  return asIsoDateTime(new Date(Date.parse(now) - h * 3_600_000).toISOString());
-}
-
-export function cell(departure: string, nights: number, origin = LHR, destination = JFK): CellKey {
-  const dep = asIsoDate(departure);
-  return { origin, destination, departureDate: dep, returnDate: addDays(dep, nights) };
-}
-
-/** SearchApi itinerary provenance (scraped-search, maxAgeHours 0), fetched h hours before NOW. */
-export function provenanceVerified(h: number): Provenance {
-  return { providerId: 'searchapi', sourceKind: 'scraped-search', fetchedAt: hoursBefore(NOW, h), maxAgeHours: 0, fx: { converted: false }, pointOfSale: 'GB', cabin: 'economy' };
-}
-
-/** Travelpayouts calendar provenance (authorised-cached), fetched h hours before NOW. */
-export function provenanceCalendar(h: number, maxAgeHours: number | 'unknown' = 48): Provenance {
-  return { providerId: 'travelpayouts', sourceKind: 'authorised-cached', fetchedAt: hoursBefore(NOW, h), maxAgeHours, fx: { converted: false }, pointOfSale: 'unknown', cabin: 'economy' };
-}
-
-export function price(pricePence: number, provenance: Provenance, stale: boolean, at: CellKey): DayPrice {
-  const fetchedHours = Math.floor((Date.parse(NOW) - Date.parse(provenance.fetchedAt)) / 3_600_000);
-  const ageHours = provenance.maxAgeHours === 'unknown' ? 'unknown' : fetchedHours + provenance.maxAgeHours;
-  return { pricePence, provenance, stale, ageHours, cell: at };
-}
-
-export function buckets(partial: Partial<Buckets>): Buckets {
-  return { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0, ...partial };
-}
-
-export function slice(partial: Partial<DaySlice>): DaySlice {
-  return { discovery: [], verification: null, cheapestVerified: null, cheapestPartiallyVerified: null, cheapestCalendar: null, ...partial };
-}
-
-export function day(date: string, partial: Partial<DaySlice> & { byDestination?: CalendarDay['byDestination'] } = {}): CalendarDay {
-  const { byDestination = [], ...rest } = partial;
-  return { date: asIsoDate(date), byDestination, ...slice(rest) };
-}
-
-/** The worked-example definition (London → New York, 10–21 nights) as the api returns it. */
-export function definitionFixture(partial: Partial<DefinitionResponse> = {}): DefinitionResponse {
-  return {
-    id: 'def-1', name: 'London to New York (example)', origins: [LHR, LGW], destinations: [JFK, EWR],
-    window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 }, minNights: 10, maxNights: 21, cabin: 'economy',
-    constraints: { maxJourneyMinutes: 1500 },
-    verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
-    budget: { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 },
-    providers: { discovery: ['travelpayouts', 'searchapi'], verification: ['searchapi'], discoveryRefreshHours: { travelpayouts: 168, searchapi: 168 } },
-    destinationNotes: {}, onwardCostPence: {}, scheduleCron: '0 5 * * 1', scheduleTz: 'Europe/London', confirmedCostPence: 0, enabled: true,
-    createdAt: NOW, updatedAt: NOW, deletedAt: null,
-    budgetFit: { fits: true, runsPerMonth: 4, perScope: [] },
-    estimate: { cells: 13104, perProvider: [], totalCostMicroGbp: 0, totalCostPence: 0, seconds: 0, assumptions: [], windowClamped: false },
-    ...partial,
-  };
-}
-```
-
-`apps/web/test/support/server.ts`:
-
-```ts
-import { setupServer } from 'msw/node';
-import { afterAll, afterEach, beforeAll } from 'vitest';
-
-/** One msw server per test file; handlers use the "*\/…" prefix so they match whatever API base WP9's client uses. */
-export const server = setupServer();
-
-export function useMswServer(): void {
-  // why: an unmatched request is a test bug, never a silent pass (msw 3 option name; see Library notes).
-  beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
-  afterEach(() => server.resetHandlers());
-  afterAll(() => server.close());
-}
-```
-
-`apps/web/test/support/render.tsx`:
-
-```tsx
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
-import type { ReactElement } from 'react';
-
-/** Renders under a fresh QueryClient with retries off, so error states appear on the first failure. */
-export function renderWithQuery(ui: ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return { client, ...render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>) };
-}
-```
-
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/marker.test.tsx`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/marker.test.tsx`
 Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/DayMarker.js"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/package.json`: add `"msw": "3.0.3"` to `devDependencies`, and `"zod": "4.6.7"` to `dependencies` if absent. Then run `pnpm install`.
-
-`apps/web/src/api/views.ts`:
+`apps/web/src/api/types.ts`: append
 
 ```ts
-import {
-  calendarResponseSchema, cellDetailResponseSchema, definitionResponseSchema, durationAnalysisResponseSchema,
-  historyResponseSchema, ROUTES, type CellKey, type Iata,
-} from '@gmt/core';
-import type { z } from 'zod';
-import { apiGet, apiPost } from './client.js';
+/** WP10 route types (plan contracts v2, results.ts). */
+export type CalendarResponse = z.infer<typeof apiContract.calendarResponseSchema>;
+export type CalendarDay = z.infer<typeof apiContract.calendarDaySchema>;
+export type DurationResponse = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
+export type CellDetailResponse = z.infer<typeof apiContract.cellDetailResponseSchema>;
+export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
+export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
+```
 
-/** Response types of the WP10 routes, inferred from the WP0 contract so a missing field fails typecheck (spec §10). */
-export type CalendarResponse = z.infer<typeof calendarResponseSchema>;
-export type DurationResponse = z.infer<typeof durationAnalysisResponseSchema>;
-export type CellDetailResponse = z.infer<typeof cellDetailResponseSchema>;
-export type HistoryResponse = z.infer<typeof historyResponseSchema>;
-export type DefinitionResponse = z.infer<typeof definitionResponseSchema>;
+`apps/web/src/api/endpoints.ts`: add the type imports and these members to `api`. The paths are `ROUTES` templates under `/api`, checked by `findRoute`.
 
-const enc = encodeURIComponent;
+```ts
+  calendar: (id: string) => call<CalendarResponse>('GET', '/api/definitions/:id/calendar', { params: { id } }),
+  durationAnalysis: (id: string) => call<DurationResponse>('GET', '/api/definitions/:id/duration-analysis', { params: { id } }),
+  cellDetail: (id: string, c: CellKey) =>
+    call<CellDetailResponse>('GET', '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate', {
+      params: { id, origin: c.origin, destination: c.destination, departureDate: c.departureDate, returnDate: c.returnDate },
+    }),
+  itineraryHistory: (hash: string) => call<ItineraryHistoryResponse>('GET', '/api/itineraries/:hash/history', { params: { hash } }),
+  routeHistory: (origin: string, destination: string) =>
+    call<RouteHistoryResponse>('GET', '/api/routes/:origin/:destination/history', { params: { origin, destination } }),
+```
 
-/** GET /definitions/:id/calendar (spec §10). */
-export function fetchCalendar(definitionId: string): Promise<CalendarResponse> {
-  return apiGet(`/definitions/${enc(definitionId)}/calendar`, calendarResponseSchema);
-}
+`apps/web/src/api/queries.ts`: add to `qk`
 
-/** GET /definitions/:id/duration-analysis (spec §10). */
-export function fetchDuration(definitionId: string): Promise<DurationResponse> {
-  return apiGet(`/definitions/${enc(definitionId)}/duration-analysis`, durationAnalysisResponseSchema);
-}
+```ts
+  calendar: (id: string) => ['calendar', id] as const,
+  duration: (id: string) => ['duration', id] as const,
+  cell: (id: string, key: string) => ['cell', id, key] as const,
+  itineraryHistory: (hash: string) => ['history', 'itinerary', hash] as const,
+  routeHistory: (origin: string, destination: string) => ['history', 'route', origin, destination] as const,
+```
 
-/** GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate, the View B side panel source (spec §10). */
-export function fetchCellDetail(definitionId: string, cell: CellKey): Promise<CellDetailResponse> {
-  const path = [cell.origin, cell.destination, cell.departureDate, cell.returnDate].map(enc).join('/');
-  return apiGet(`/definitions/${enc(definitionId)}/cells/${path}`, cellDetailResponseSchema);
-}
+`apps/web/src/lib/sources.ts`:
 
-/** GET /routes/:o/:d/history (spec §10, §11 History). */
-export function fetchRouteHistory(origin: Iata, destination: Iata): Promise<HistoryResponse> {
-  return apiGet(`/routes/${enc(origin)}/${enc(destination)}/history`, historyResponseSchema);
-}
+```ts
+import type { ProviderId, SourceKind } from '@gmt/core';
+import { COPY } from '../copy.js';
 
-/** GET /itineraries/:hash/history (spec §10, §11 History). */
-export function fetchItineraryHistory(hash: string): Promise<HistoryResponse> {
-  return apiGet(`/itineraries/${enc(hash)}/history`, historyResponseSchema);
-}
+// why: discovery counts carry only a providerId; each provider's calendar capability has exactly one source kind (spec §2 table).
+const CALENDAR_SOURCE: Readonly<Record<ProviderId, SourceKind>> = {
+  travelpayouts: 'authorised-cached',
+  searchapi: 'scraped-aggregate',
+  fixture: 'synthetic',
+};
 
-// why: the plan does not name the /cells/verify response schema; ROUTES carries it, so look it up rather than guess a name.
-const verifyRoute = ROUTES.find((r) => r.method === 'POST' && r.path === '/cells/verify');
-
-/** POST /cells/verify: starts a child execution for one cell (spec §8.1 single-cell verification). */
-export function verifyCell(definitionId: string, cell: CellKey): Promise<unknown> {
-  if (verifyRoute === undefined) throw new Error('ROUTES lacks POST /cells/verify (WP0 contract)');
-  return apiPost('/cells/verify', { definitionId, cell }, verifyRoute.response);
+/** The source in words for a provider's discovery data: "Aviasales cache", "Google date grid via SearchApi" (spec §11 vocabulary). */
+export function discoverySourceLabel(providerId: ProviderId): string {
+  return COPY.source[CALENDAR_SOURCE[providerId]];
 }
 ```
 
 `apps/web/src/views/Calendar/types.ts`:
 
 ```ts
-import type { CalendarResponse } from '../../api/views.js';
+import type { Cell, Iata, IsoDate } from '@gmt/core';
+import type { CalendarDay, PriceCellData } from '../../api/types.js';
 
-/** One calendar day as the api sends it (spec §10 calendar route). */
-export type CalendarDay = CalendarResponse['days'][number];
-/** The fields a day and a per-destination entry share; the day itself is the "all destinations" slice. */
-export type DaySlice = Omit<CalendarDay, 'date' | 'byDestination'>;
-export type DestinationSlice = CalendarDay['byDestination'][number];
-/** A day's price: a priceCell (amount, provenance, stale, ageHours) plus the cell it belongs to. */
-export type DayPrice = NonNullable<DaySlice['cheapestCalendar']>;
-export type Buckets = DaySlice['discovery'][number]['buckets'];
+/** A price shown on a day; `cell` is null for a per-destination price (byDestination carries prices only). */
+export type DayPrice = PriceCellData & { cell: Cell | null };
+
+/** What one day renders, for all destinations or one (spec §11 View B, per-destination filter). */
+export interface DaySlice {
+  discovery: CalendarDay['discovery'];
+  /** null when the definition has no verification provider (spec §6.6 row 0: not applicable). */
+  verification: CalendarDay['verification'] | null;
+  cheapestVerified: DayPrice | null;
+  cheapestPartiallyVerified: (DayPrice & { count: number }) | null;
+  cheapestCalendar: DayPrice | null;
+  /** null for all destinations; otherwise the filtered destination (its counts are still day-level). */
+  destination: Iata | null;
+}
+
+/** A day as the grid renders it; `slice` is null when the filter leaves the day no cells. */
+export interface GridDay { date: IsoDate; slice: DaySlice | null }
 /** Statuses with their own glyph on a day without a price (spec §11 View B). */
 export type GlyphStatus = 'empty' | 'no_data' | 'error' | 'not_run';
 /** Which kind of price a day shows, and which kind the colour scale uses. */
@@ -556,166 +533,186 @@ export type DayBasis = 'verified' | 'calendar';
 `apps/web/src/views/Calendar/marker.ts`:
 
 ```ts
-import { calendarStrings } from '../../strings.js';
-import type { Buckets, DaySlice } from './types.js';
+import type { Buckets, Iata } from '@gmt/core';
+import type { CalendarDay } from '../../api/types.js';
+import { COPY } from '../../copy.js';
+import type { DaySlice } from './types.js';
 
-/** M in the marker: the six buckets sum to the cell count (spec §3); `reused` is already counted inside its bucket. */
+/** M in the marker: the six buckets sum to the cell count (spec §3); `reused` is already counted in its bucket. */
 export function bucketTotal(b: Buckets): number {
   return b.priced + b.empty + b.no_data + b.error + b.skipped + b.not_run;
 }
 
 /** "P priced · E no fares · X no cached data · R error · S skipped · U not searched of M" (spec §11 View B). */
 export function formatDiscoveryMarker(b: Buckets): string {
-  return calendarStrings.discoveryMarker(b, bucketTotal(b));
+  return COPY.calendarView.discoveryMarker(b, bucketTotal(b));
 }
 
-/** "itinerary-searched K of N selected +C on demand", or the not-configured note when the stage has no provider (spec §6.6 row 0). */
+/** "itinerary-searched K of N selected +C on demand", or the not-configured note (spec §6.6 row 0). */
 export function formatVerificationMarker(v: DaySlice['verification']): string {
-  return v === null ? calendarStrings.verificationNotConfigured : calendarStrings.verificationMarker(v.itinerarySearched, v.selected, v.onDemand);
+  return v === null ? COPY.calendarView.verificationNotConfigured : COPY.calendarView.verificationMarker(v.itinerarySearched, v.selected, v.onDemand);
 }
 
-/** R′ for the header: reused outcomes summed over the given slices and every discovery provider (spec §3). */
+/** R′ for the header: reused outcomes summed over the slices and every discovery provider (spec §3). */
 export function totalReused(slices: readonly DaySlice[]): number {
   return slices.reduce((sum, s) => sum + s.discovery.reduce((acc, d) => acc + d.buckets.reused, 0), 0);
+}
+
+/**
+ * The slice a day renders for "all" or one destination. byDestination carries prices only (plan contracts v2), so a
+ * filtered day keeps the day-level counts, and the marker says they cover all destinations; null when the destination has no entry.
+ */
+export function sliceForDestination(day: CalendarDay, destination: Iata | 'all', verificationConfigured: boolean): DaySlice | null {
+  const verification = verificationConfigured ? day.verification : null;
+  if (destination === 'all') {
+    return { discovery: day.discovery, verification, cheapestVerified: day.cheapestVerified, cheapestPartiallyVerified: day.cheapestPartiallyVerified, cheapestCalendar: day.cheapestCalendar, destination: null };
+  }
+  const e = day.byDestination.find((x) => x.destination === destination);
+  if (e === undefined) return null;
+  return {
+    discovery: day.discovery,
+    verification,
+    cheapestVerified: e.cheapestVerified === null ? null : { ...e.cheapestVerified, cell: null },
+    cheapestPartiallyVerified: null,
+    cheapestCalendar: e.cheapestCalendar === null ? null : { ...e.cheapestCalendar, cell: null },
+    destination,
+  };
 }
 ```
 
 `apps/web/src/views/Calendar/DayMarker.tsx`:
 
 ```tsx
-import { calendarStrings, providerLabel } from '../../strings.js';
+import { COPY } from '../../copy.js';
+import { discoverySourceLabel } from '../../lib/sources.js';
 import { formatDiscoveryMarker, formatVerificationMarker } from './marker.js';
 import type { DaySlice } from './types.js';
 
 /** The per-day coverage marker: one five-way discovery line per provider, then the itinerary-search line (spec §11 View B). */
 export function DayMarker({ slice }: { slice: DaySlice }) {
   return (
-    <div className="mt-1 text-[10px] leading-tight text-zinc-700" data-testid="day-marker">
+    <div className="mt-1 text-[10px] leading-tight text-slate-700" data-testid="day-marker">
       {slice.discovery.length === 0 ? (
-        <p>{calendarStrings.noDiscoveryProvider}</p>
+        <p>{COPY.calendarView.noDiscoveryProvider}</p>
       ) : (
         <ul>
           {slice.discovery.map((d) => (
-            <li key={d.providerId}>
-              <span className="font-medium">{providerLabel(d.providerId)}:</span> {formatDiscoveryMarker(d.buckets)}
-            </li>
+            <li key={d.providerId}>{COPY.calendarView.markerSource(discoverySourceLabel(d.providerId), formatDiscoveryMarker(d.buckets))}</li>
           ))}
         </ul>
       )}
       <p>{formatVerificationMarker(slice.verification)}</p>
+      {slice.destination !== null ? <p className="italic">{COPY.calendarView.markerAllDestinations}</p> : null}
     </div>
   );
 }
 
 /** "(R reused from earlier runs)" for the view header; nothing when R is 0 (spec §3). */
 export function ReusedNote({ count }: { count: number }) {
-  return count > 0 ? <span>{calendarStrings.reusedNote(count)}</span> : null;
+  return count > 0 ? <span>{COPY.reusedNote(count)}</span> : null;
 }
 ```
 
-`apps/web/src/strings.ts`: append this block. Task 10.4 adjusts three of its entries (`legendBand`, `legendHatched`, `partlyVerified`).
+`apps/web/src/copy.ts`: append inside `COPY` (Task 10.6 relies on `panel`):
 
 ```ts
-/** View B strings (spec §11 View B; §3 bucket names; "verified" only beside class-verified values). WP10. */
-export const calendarStrings = {
-  title: 'Calendar',
-  discoveryMarker: (
-    b: { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number },
-    total: number,
-  ): string =>
-    `${b.priced} priced · ${b.empty} no fares · ${b.no_data} no cached data · ${b.error} error · ${b.skipped} skipped · ${b.not_run} not searched of ${total}`,
-  verificationMarker: (searched: number, selected: number, onDemand: number): string =>
-    `itinerary-searched ${searched} of ${selected} selected +${onDemand} on demand`,
-  verificationNotConfigured: 'itinerary search: no verification provider configured',
-  noDiscoveryProvider: 'no discovery provider configured',
-  reusedNote: (n: number): string => `(${n} reused from earlier runs)`,
-  glyphs: {
-    empty: { symbol: '∅', text: 'no fares' },
-    no_data: { symbol: '?', text: 'no cached data' },
-    error: { symbol: '!', text: 'error' },
-    not_run: { symbol: '○', text: 'not searched' },
-  },
-  basisName: { verified: 'verified', calendar: 'calendar price' },
-  constraintsNotChecked: 'constraints not checked',
-  stale: 'stale',
-  partlyVerified: (count: number): string => `${count} partially-verified`,
-  colourBy: 'Colour by',
-  colourByOption: { verified: 'verified prices', calendar: 'calendar prices' },
-  legendTitle: 'Legend',
-  legendScale: (basis: 'verified' | 'calendar', days: number): string =>
-    `Colour: ${basis === 'verified' ? 'verified' : 'calendar'} prices on ${days} days, in five price bands (quintiles of the days shown)`,
-  legendBand: (band: number, min: string, max: string, days: number): string => `band ${band + 1}: ${min}–${max} (${days} days)`,
-  legendHatched: (shown: 'verified' | 'calendar', days: number): string =>
-    `hatched: ${days} days show a ${shown === 'verified' ? 'verified' : 'calendar'} price instead and are not on this scale`,
-  legendGlyphs: 'Days without a price show:',
-  bandAria: (band: number): string => `price band ${band + 1} of 5${band === 0 ? ', cheapest' : ''}`,
-  hatchedAria: 'not on the colour scale',
-  destinationFilter: 'Destination',
-  allDestinations: 'All destinations',
-  noCellsForDestination: 'no cells for this destination',
-  loading: 'Loading calendar…',
-  empty: 'No days to show yet. The calendar fills in as cells are searched.',
-  error: (message: string): string => `Could not load the calendar: ${message}`,
-  panel: {
-    title: (date: string): string => `Departing ${date}`,
-    close: 'Close',
-    cellPicker: 'Cell',
-    cellOption: (origin: string, destination: string, nights: number, back: string): string =>
-      `${origin}→${destination} · ${nights} nights · back ${back}`,
-    outcomes: 'Outcomes per stage and provider',
-    columns: { stage: 'Stage', provider: 'Provider', status: 'Outcome', reason: 'Reason', attempts: 'Attempts', fetched: 'Fetched', reused: 'Reused from' },
-    status: { not_run: 'not searched', priced: 'priced', empty: 'no fares', no_data: 'no cached data', error: 'error', skipped: 'skipped' },
-    stage: { discovery: 'discovery', verification: 'itinerary search' },
-    prices: 'Prices for this cell',
-    noPrices: 'No prices stored for this cell.',
+  // View B Calendar (WP10; spec §11 View B, §3)
+  calendarView: {
+    title: 'Calendar',
+    discoveryMarker: (b: { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number }, total: number) =>
+      `${b.priced} priced · ${b.empty} no fares · ${b.no_data} no cached data · ${b.error} error · ${b.skipped} skipped · ${b.not_run} not searched of ${total}`,
+    verificationMarker: (searched: number, selected: number, onDemand: number) => `itinerary-searched ${searched} of ${selected} selected +${onDemand} on demand`,
+    verificationNotConfigured: 'itinerary search: no verification provider configured',
+    noDiscoveryProvider: 'no discovery provider configured',
+    markerAllDestinations: 'counts cover all destinations',
+    markerSource: (source: string, marker: string) => `${source}: ${marker}`,
+    glyphSymbol: { empty: '∅', no_data: '?', error: '!', not_run: '○' },
     calendarPrice: 'calendar price',
-    observation: (seller: string, verdictClass: string): string => `itinerary offer · ${seller} · ${verdictClass}`,
-    verify: 'Run itinerary search for this cell',
-    verifyStarted: 'Itinerary search started for this cell; results appear when it finishes.',
-    verifyConflict: 'An itinerary search for this cell is already running.',
-    verifyFailed: (message: string): string => `Could not start the itinerary search: ${message}`,
-    provenanceMissing: 'price withheld: provenance missing',
-    loading: 'Loading cell…',
-    error: (message: string): string => `Could not load the cell: ${message}`,
-    reusedFrom: (executionId: string): string => `run ${executionId}`,
-    notReused: '—',
-    note: 'Note',
+    partlyVerified: (count: number) => `${count} partially-verified`,
+    colourBy: 'Colour by',
+    legendTitle: 'Legend',
+    legendScale: (basis: string, days: number) =>
+      `Colour: ${basis} prices on ${days} ${days === 1 ? 'day' : 'days'}, in five price bands (quintiles of the days shown)`,
+    legendBand: (band: number, min: string, max: string, days: number) => `band ${band + 1}: ${min}–${max} (${days} ${days === 1 ? 'day' : 'days'})`,
+    legendHatched: (shown: 'verified' | 'calendar', days: number) =>
+      `hatched: ${days} ${days === 1 ? 'day shows' : 'days show'} a ${shown === 'verified' ? 'class-verified' : 'calendar'} price instead and ${days === 1 ? 'is' : 'are'} not on this scale`,
+    legendGlyphs: 'Days without a price show:',
+    bandAria: (band: number) => `price band ${band + 1} of 5${band === 0 ? ', cheapest' : ''}`,
+    hatchedAria: 'not on the colour scale',
+    destinationFilter: 'Destination',
+    allDestinations: 'All destinations',
+    noCellsForDestination: 'no cells for this destination',
+    empty: 'No days to show yet. The calendar fills in as cells are searched.',
+    panel: {
+      title: (date: string) => `Departing ${date}`,
+      close: 'Close',
+      cellPicker: 'Cell',
+      cellOption: (origin: string, destination: string, nights: number, back: string) => `${origin}→${destination} · ${nights} nights · back ${back}`,
+      outcomes: 'Outcomes per stage and provider',
+      columns: { stage: 'Stage', provider: 'Provider', status: 'Outcome', reason: 'Reason', attempts: 'Attempts', fetched: 'Fetched (Europe/London)', reused: 'Reused from' },
+      prices: 'Prices for this cell',
+      noPrices: 'No prices stored for this cell.',
+      observation: (seller: string, cls: string) => `itinerary offer · ${seller} · ${cls}`,
+      verifyConflict: 'An itinerary search for this cell is already running.',
+      reusedFrom: (executionId: string) => `run ${executionId}`,
+      dash: '—',
+    },
   },
-} as const;
 ```
+
+`apps/web/test/copy/catalogue.test.ts`: add to `SAMPLES`
+
+```ts
+  'calendarView.discoveryMarker': [{ priced: 1, empty: 2, no_data: 3, error: 4, skipped: 5, not_run: 6 }, 21],
+  'calendarView.verificationMarker': [1, 10, 2],
+  'calendarView.markerSource': ['Aviasales cache', '1 priced · 0 no fares · 0 no cached data · 0 error · 0 skipped · 0 not searched of 1'],
+  'calendarView.partlyVerified': [2],
+  'calendarView.legendScale': ['itinerary-search basis', 5],
+  'calendarView.legendBand': [0, '£400', '£450', 2],
+  'calendarView.legendHatched': ['verified', 1],
+  'calendarView.bandAria': [0],
+  'calendarView.panel.title': ['Sun 14 Mar 2027'],
+  'calendarView.panel.cellOption': ['LHR', 'JFK', 14, 'Sun 28 Mar'],
+  'calendarView.panel.observation': ['Example Air', 'verified'],
+  'calendarView.panel.reusedFrom': ['exec-0'],
+```
+
+and extend the "verified" test's `allowed` set with `'calendarView.partlyVerified', 'calendarView.legendHatched', 'calendarView.panel.observation'`. Each of these sits beside a class-verified value or names the class.
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/marker.test.tsx`
-Expected: PASS, 7 tests.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/marker.test.tsx test/copy`
+Expected: PASS. The marker file passes 8 tests. In the copy files, the catalogue and source-guard tests pass with the new entries. The searchapi line needs WP9's `COPY.source['scraped-aggregate']` to read "Google date grid via SearchApi" (spec rev 10 §11). If it does not, fix that WP9 entry; that change is the spec's vocabulary, not a WP10 choice.
 
 Run: `pnpm -r typecheck`
-Expected: clean. If `calendarResponseSchema` lacks a field from §4, it fails here naming that field; raise it as a finding against the plan.
+Expected: clean. A missing schema field fails here; report it to Fable.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web pnpm-lock.yaml && git commit -m "wp10: five-way day marker and itinerary-search line (spec §11 View B)"
+git add apps/web && git commit -m "wp10: five-way day marker, per-destination slices, calendar copy and WP10 endpoints"
 ```
 
-### Task 10.2: Date-only rendering helpers and the no-Date guard (review focus 3, part 1)
+### Task 10.2: Date-only helpers and the no-Date guard (review focus 3, part 1)
 
 **Files:**
 - Create: `apps/web/src/lib/isoDate.ts`, `apps/web/src/lib/time.ts`, `apps/web/test/lib/{isoDate.test.ts,time.test.ts,noDateParsing.test.ts}`
-- Modify: any WP9 file in `apps/web/src` that the guard flags (expected: the status bar's and `Provenance`'s "now", replaced by `nowIso()`)
+- Modify: any WP9 file under `apps/web/src` that the guard flags, other than `now.tsx`
 
 **Interfaces:**
-- Consumes: `toEpochDay`, `addDays`, `monthOf`, `asIsoDate`, `asIsoDateTime`, `isoDateTimeSchema`.
-- Produces: `isoDateParts`, `weekdayIndex`, `formatIsoDate`, `formatIsoDateShort`, `formatIsoMonth`, `monthDays`, `WEEKDAY_HEADERS`, `nowIso`, `instantMs`, `formatInstantLondon`.
+- Consumes: `toEpochDay`, `addDays`, `monthOf`, `asIsoDate`, `isoDateTimeSchema`.
+- Produces: `WEEKDAYS`, `isoDateParts`, `weekdayIndex`, `formatDayShort`, `formatDayLong`, `formatIsoMonth`, `monthDays`, `instantMs`, `dateMs`, `formatInstantLondon`.
+
+WP9's `format.ts` `formatIsoDate` ("14 Mar 2027", string slicing) stays the Results formatter. The calendar needs a weekday, which only the epoch day can give without `Date`, so it uses the helpers below.
 
 - [ ] **Step 1: Write the failing tests**
 
 `apps/web/test/lib/isoDate.test.ts`:
 
 ```ts
-import { asIsoDate } from '@gmt/core';
+import { asIsoDate, asIsoMonth } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { formatIsoDate, formatIsoDateShort, formatIsoMonth, isoDateParts, monthDays, weekdayIndex } from '../../src/lib/isoDate.js';
+import { formatDayLong, formatDayShort, formatIsoMonth, isoDateParts, monthDays, weekdayIndex } from '../../src/lib/isoDate.js';
 
 const d = asIsoDate;
 
@@ -724,23 +721,22 @@ describe('date-only rendering from YYYY-MM-DD strings (spec §6.1, review focus 
     expect(isoDateParts(d('2027-03-14'))).toEqual({ year: 2027, month: 3, day: 14 });
   });
   it('weekday from the epoch day, Monday = 0', () => {
-    expect(weekdayIndex(d('1970-01-01'))).toBe(3); // a Thursday
+    expect(weekdayIndex(d('1970-01-01'))).toBe(3); // Thursday
     expect(weekdayIndex(d('2027-03-01'))).toBe(0); // Monday
-    expect(weekdayIndex(d('2027-03-14'))).toBe(6); // Sunday (the US DST change day)
-    expect(weekdayIndex(d('2027-03-28'))).toBe(6); // Sunday (the UK DST change day)
-    expect(weekdayIndex(d('1969-12-31'))).toBe(2); // negative epoch day still lands on Wednesday
+    expect(weekdayIndex(d('2027-03-14'))).toBe(6); // Sunday, the US DST change
+    expect(weekdayIndex(d('2027-03-28'))).toBe(6); // Sunday, the UK DST change
+    expect(weekdayIndex(d('1969-12-31'))).toBe(2); // a negative epoch day is still Wednesday
   });
-  it('formats long and short forms', () => {
-    expect(formatIsoDate(d('2027-03-14'))).toBe('Sun 14 Mar 2027');
-    expect(formatIsoDateShort(d('2027-03-14'))).toBe('Sun 14 Mar');
-    expect(formatIsoDate(d('2028-02-29'))).toBe('Tue 29 Feb 2028');
-    expect(formatIsoMonth('2027-03' as never)).toBe('March 2027');
+  it('formats short and long forms', () => {
+    expect(formatDayShort(d('2027-03-14'))).toBe('Sun 14 Mar');
+    expect(formatDayLong(d('2027-03-14'))).toBe('Sun 14 Mar 2027');
+    expect(formatDayLong(d('2028-02-29'))).toBe('Tue 29 Feb 2028');
+    expect(formatIsoMonth(asIsoMonth('2027-03'))).toBe('March 2027');
   });
   it('lists the days of a month, leap February included', () => {
-    expect(monthDays('2027-02' as never)).toHaveLength(28);
-    const leap = monthDays('2028-02' as never);
+    expect(monthDays(asIsoMonth('2027-02'))).toHaveLength(28);
+    const leap = monthDays(asIsoMonth('2028-02'));
     expect(leap).toHaveLength(29);
-    expect(leap[0]).toBe('2028-02-01');
     expect(leap[28]).toBe('2028-02-29');
   });
 });
@@ -749,17 +745,17 @@ describe('date-only rendering from YYYY-MM-DD strings (spec §6.1, review focus 
 `apps/web/test/lib/time.test.ts`:
 
 ```ts
-import { asIsoDateTime } from '@gmt/core';
+import { asIsoDate, asIsoDateTime } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { formatInstantLondon, instantMs, nowIso } from '../../src/lib/time.js';
+import { dateMs, formatInstantLondon, instantMs } from '../../src/lib/time.js';
 
 describe('src/lib/time.ts: instants only (review focus 3)', () => {
-  it('nowIso is in toISOString form', () => {
-    expect(nowIso()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-  });
   it('instantMs accepts an instant and refuses a date-only string', () => {
     expect(instantMs(asIsoDateTime('2027-03-14T15:00:00.000Z'))).toBe(Date.UTC(2027, 2, 14, 15));
     expect(() => instantMs('2027-03-14' as never)).toThrow(RangeError);
+  });
+  it('dateMs is epoch-day arithmetic, equal to UTC midnight', () => {
+    expect(dateMs(asIsoDate('2027-03-14'))).toBe(Date.UTC(2027, 2, 14));
   });
   it('formats instants in Europe/London whatever the process zone', () => {
     expect(formatInstantLondon(Date.UTC(2027, 2, 14, 15))).toMatch(/^14 Mar,? 15:00$/); // GMT
@@ -778,8 +774,9 @@ import { describe, expect, it } from 'vitest';
 
 const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 // why: a Date built from 'YYYY-MM-DD' is UTC midnight and renders as the previous day west of Greenwich; local getters
-// shift instants the same way. Only src/lib/time.ts may touch Date, and its helpers accept toISOString instants only.
-const ALLOWLIST = new Set(['lib/time.ts']);
+// shift instants the same way. Only these two files may touch Date, and neither ever receives a date-only string:
+// time.ts takes toISOString instants or epoch-day integers; now.tsx (WP9) builds the current instant.
+const ALLOWLIST = new Set(['lib/time.ts', 'now.tsx']);
 const FORBIDDEN: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'new Date(', re: /\bnew\s+Date\s*\(/ },
   { name: 'Date.parse(', re: /\bDate\.parse\s*\(/ },
@@ -803,25 +800,25 @@ function walk(dir: string): string[] {
   });
 }
 
-describe('no Date parsing outside src/lib/time.ts (review focus 3)', () => {
+describe('no Date parsing outside the allowlisted helpers (review focus 3)', () => {
   it('the scanner flags a date-only string fed to Date, and leaves string helpers alone', () => {
     expect(scan(`const d = new Date('2027-03-14');`)).toEqual(['1: new Date(']);
     expect(scan(`const t = Date.parse(day.date);`)).toEqual(['1: Date.parse(']);
     expect(scan(`const n = when.getDate();`)).toEqual(['1: local date getter']);
     expect(scan(`label = x.toLocaleDateString('en-GB');`)).toEqual(['1: toLocaleDateString(']);
-    expect(scan(`const ok = formatIsoDate(day.date);`)).toEqual([]);
+    expect(scan(`const ok = formatDayShort(day.date);`)).toEqual([]);
   });
   it('finds no Date construction in apps/web/src outside the allowlist', () => {
     const files = walk(SRC);
-    expect(files.length).toBeGreaterThan(10); // why: a wrong SRC path must not make this test vacuous
+    expect(files.length).toBeGreaterThan(20); // why: a wrong SRC path must not make this vacuous
     const hits = files
       .filter((f) => !ALLOWLIST.has(relative(SRC, f).split(sep).join('/')))
       .flatMap((f) => scan(readFileSync(f, 'utf8')).map((h) => `${relative(SRC, f)}:${h}`));
     expect(hits).toEqual([]);
   });
-  it('the allowlist is exactly the one helper, and it exists', () => {
-    expect([...ALLOWLIST]).toEqual(['lib/time.ts']);
-    expect(statSync(join(SRC, 'lib/time.ts')).isFile()).toBe(true);
+  it('the allowlist is exactly the two helpers, and both exist', () => {
+    expect([...ALLOWLIST]).toEqual(['lib/time.ts', 'now.tsx']);
+    for (const f of ALLOWLIST) expect(statSync(join(SRC, f)).isFile()).toBe(true);
   });
 });
 ```
@@ -829,22 +826,22 @@ describe('no Date parsing outside src/lib/time.ts (review focus 3)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/lib`
-Expected: FAIL. `isoDate.test.ts` and `time.test.ts` fail with `Failed to resolve import "../../src/lib/isoDate.js"` (or `time.js`). `noDateParsing.test.ts` fails on the missing `lib/time.ts` and lists any WP9 hits, for example `components/StatusBar.tsx:12: new Date(`.
+Expected: FAIL. `isoDate.test.ts` and `time.test.ts` fail with `Failed to resolve import`. `noDateParsing.test.ts` fails on the missing `lib/time.ts` and lists any WP9 hit outside `now.tsx`.
 
 - [ ] **Step 3: Implement**
 
 `apps/web/src/lib/isoDate.ts`:
 
 ```ts
-import { addDays, asIsoDate, monthOf, toEpochDay, type IsoDate, type IsoMonth } from '@gmt/core';
+import { addDays, asIsoDate, type IsoDate, type IsoMonth, monthOf, toEpochDay } from '@gmt/core';
 
-// Date-only values are rendered from their YYYY-MM-DD strings and epoch-day integers only (spec §6.1, review focus 3).
-// No Date object is ever built here, so no browser timezone can move a day.
+// Date-only values render from their YYYY-MM-DD strings and epoch-day integers only (spec §6.1, review focus 3).
+// No Date is built here, so no browser timezone can move a day.
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;
-/** Column headers for the Monday-first calendar grid. */
-export const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+/** Monday-first weekday abbreviations (grid headers and day labels). */
+export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 function monthName(table: readonly string[], month: number): string {
   const name = table[month - 1];
@@ -863,15 +860,15 @@ export function weekdayIndex(d: IsoDate): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
   return ((((toEpochDay(d) + 3) % 7) + 7) % 7) as 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
 
-/** '2027-03-14' → 'Sun 14 Mar' (calendar days, table cells). */
-export function formatIsoDateShort(d: IsoDate): string {
+/** '2027-03-14' → 'Sun 14 Mar'. */
+export function formatDayShort(d: IsoDate): string {
   const { month, day } = isoDateParts(d);
-  return `${WEEKDAY_HEADERS[weekdayIndex(d)]} ${day} ${monthName(MONTHS_SHORT, month)}`;
+  return `${WEEKDAYS[weekdayIndex(d)]} ${day} ${monthName(MONTHS_SHORT, month)}`;
 }
 
-/** '2027-03-14' → 'Sun 14 Mar 2027' (headers, panel titles). */
-export function formatIsoDate(d: IsoDate): string {
-  return `${formatIsoDateShort(d)} ${isoDateParts(d).year}`;
+/** '2027-03-14' → 'Sun 14 Mar 2027'. */
+export function formatDayLong(d: IsoDate): string {
+  return `${formatDayShort(d)} ${isoDateParts(d).year}`;
 }
 
 /** '2027-03' → 'March 2027'. */
@@ -890,15 +887,10 @@ export function monthDays(m: IsoMonth): IsoDate[] {
 `apps/web/src/lib/time.ts`:
 
 ```ts
-import { asIsoDateTime, isoDateTimeSchema, type IsoDateTime } from '@gmt/core';
+import { isoDateTimeSchema, type IsoDate, type IsoDateTime, toEpochDay } from '@gmt/core';
 
-// The only file in apps/web/src that constructs or parses a Date (review focus 3; guarded by test/lib/noDateParsing.test.ts).
-// Everything here takes or returns instants in toISOString form or epoch milliseconds; a date-only string is refused.
-
-/** The current instant, for effective-age labels (spec §3). */
-export function nowIso(): IsoDateTime {
-  return asIsoDateTime(new Date().toISOString());
-}
+// With src/now.tsx, the only file in apps/web/src that constructs or parses a Date (review focus 3; test/lib/noDateParsing).
+// Inputs are toISOString instants or epoch-day integers; a date-only string is refused.
 
 /** Epoch milliseconds of an instant; throws RangeError on anything but the toISOString form (spec §6.3). */
 export function instantMs(t: IsoDateTime): number {
@@ -906,21 +898,26 @@ export function instantMs(t: IsoDateTime): number {
   return Date.parse(t);
 }
 
+/** A calendar date on the same millisecond axis as instants (UTC midnight), by epoch-day arithmetic only. */
+export function dateMs(d: IsoDate): number {
+  return toEpochDay(d) * 86_400_000;
+}
+
 // why: an explicit zone keeps chart ticks identical in every browser; Europe/London is the app's reference zone (spec §6.1).
 const LONDON = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-/** '14 Mar 15:00' in Europe/London, for the History x axis and tooltips. */
+/** '14 Mar 15:00' in Europe/London, for the History axis, tooltips and the panel's fetched column. */
 export function formatInstantLondon(ms: number): string {
   return LONDON.format(new Date(ms));
 }
 ```
 
-For each WP9 hit the guard lists, replace the `Date` use with `nowIso()` (current instant) or `instantMs()` (instant to milliseconds). Replace any date-only formatting with `formatIsoDateShort()`. Make no other change to those files.
+For each WP9 hit outside `now.tsx`, read the current instant through `useNow()` and convert instants with `instantMs()`. Change nothing else in those files.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/lib`
-Expected: PASS, 10 tests. `noDateParsing` reports `hits: []`.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -931,94 +928,81 @@ git add apps/web && git commit -m "wp10: date-only helpers, instant helpers and 
 ### Task 10.3: Day price precedence (spec §11 View B, §8.1)
 
 **Files:**
-- Create: `apps/web/src/views/Calendar/display.ts`, `apps/web/test/views/Calendar/display.test.ts`
+- Create: `apps/web/src/views/Calendar/display.ts`, `apps/web/test/views/calendar/display.test.ts`
 
 **Interfaces:**
-- Consumes: `effectiveAge`, `compareAges` (WP0); `DaySlice`, `DayPrice`, `GlyphStatus`, `DayBasis`.
+- Consumes: `effectiveAge`, `compareAges`; `DaySlice`, `DayPrice`, `GlyphStatus`, `DayBasis`.
 - Produces: `DayDisplay`, `resolveDayDisplay`.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/Calendar/display.test.ts`:
+`apps/web/test/views/calendar/display.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
 import { resolveDayDisplay } from '../../../src/views/Calendar/display.js';
-import { buckets, cell, NOW, price, provenanceCalendar, provenanceVerified, slice } from '../../support/fixtures.js';
+import { NOW } from '../../render.js';
+import { buckets, cellAt, disc, priceAt, provenanceCalendar, provenanceVerified, slice } from '../../fixtures.wp10.js';
 
-const c14 = cell('2027-03-14', 14);
+const c14 = cellAt('2027-03-14', 14);
 
 describe('day precedence (spec §11 View B, §8.1)', () => {
   it('a fresh class-verified price wins even over a cheaper calendar price', () => {
-    const v = price(52000, provenanceVerified(5), false, c14);
-    const c = price(41200, provenanceCalendar(2), false, c14);
+    const v = priceAt(52000, provenanceVerified(5), false, c14);
+    const c = priceAt(41200, provenanceCalendar(2), false, c14);
     expect(resolveDayDisplay(slice({ cheapestVerified: v, cheapestCalendar: c }), NOW)).toEqual({ kind: 'price', basis: 'verified', price: v, stale: false, why: 'fresh-verified' });
   });
-
-  it('stale verified vs calendar: the fresher one wins (calendar 10h + ≤48h beats verified 200h)', () => {
-    const v = price(52000, provenanceVerified(200), true, c14);
-    const c = price(41200, provenanceCalendar(10), false, c14);
+  it('stale verified vs calendar: the fresher wins (calendar 10h + ≤48h beats verified 200h)', () => {
+    const v = priceAt(52000, provenanceVerified(200), true, c14);
+    const c = priceAt(41200, provenanceCalendar(10), false, c14);
     expect(resolveDayDisplay(slice({ cheapestVerified: v, cheapestCalendar: c }), NOW)).toEqual({ kind: 'price', basis: 'calendar', price: c, stale: false, why: 'calendar-fresher' });
   });
-
   it('stale verified vs calendar: a stale verified price fresher than the calendar one wins, labelled stale', () => {
-    const v = price(52000, provenanceVerified(200), true, c14);
-    const c = price(41200, provenanceCalendar(190), true, c14); // worst case 238h
+    const v = priceAt(52000, provenanceVerified(200), true, c14);
+    const c = priceAt(41200, provenanceCalendar(190), true, c14); // worst case 238h
     expect(resolveDayDisplay(slice({ cheapestVerified: v, cheapestCalendar: c }), NOW)).toEqual({ kind: 'price', basis: 'verified', price: v, stale: true, why: 'stale-verified-fresher' });
   });
-
   it('unknown age loses to any known age', () => {
-    const v = price(52000, provenanceVerified(300), true, c14);
-    const c = price(41200, provenanceCalendar(1, 'unknown'), false, c14);
+    const v = priceAt(52000, provenanceVerified(300), true, c14);
+    const c = priceAt(41200, provenanceCalendar(1, 'unknown'), false, c14);
     expect(resolveDayDisplay(slice({ cheapestVerified: v, cheapestCalendar: c }), NOW)).toMatchObject({ basis: 'verified', why: 'stale-verified-fresher' });
   });
-
   it('ties go to verified', () => {
-    const v = price(52000, provenanceVerified(58), true, c14); // worst case 58h
-    const c = price(41200, provenanceCalendar(10), false, c14); // worst case 10 + 48 = 58h
+    const v = priceAt(52000, provenanceVerified(58), true, c14); // 58h
+    const c = priceAt(41200, provenanceCalendar(10), false, c14); // 10 + 48 = 58h
     expect(resolveDayDisplay(slice({ cheapestVerified: v, cheapestCalendar: c }), NOW)).toMatchObject({ basis: 'verified' });
   });
-
   it('a stale calendar price still renders, labelled stale', () => {
-    const c = price(41200, provenanceCalendar(400), true, c14);
+    const c = priceAt(41200, provenanceCalendar(400), true, c14);
     expect(resolveDayDisplay(slice({ cheapestCalendar: c }), NOW)).toEqual({ kind: 'price', basis: 'calendar', price: c, stale: true, why: 'calendar-only' });
   });
-
   it('a stale verified price with no calendar price renders, labelled stale', () => {
-    const v = price(52000, provenanceVerified(300), true, c14);
+    const v = priceAt(52000, provenanceVerified(300), true, c14);
     expect(resolveDayDisplay(slice({ cheapestVerified: v }), NOW)).toEqual({ kind: 'price', basis: 'verified', price: v, stale: true, why: 'stale-verified-only' });
   });
-
   it('a partially-verified price never becomes the day price', () => {
-    const pv = { ...price(30000, provenanceVerified(1), false, c14), count: 3 };
+    const pv = { ...priceAt(30000, provenanceVerified(1), false, c14), count: 3 };
     expect(resolveDayDisplay(slice({ cheapestPartiallyVerified: pv }), NOW).kind).toBe('glyphs');
   });
-
   it('no price: one glyph per non-zero unpriced status across providers, in a fixed order', () => {
-    const s = slice({
-      discovery: [
-        { providerId: 'travelpayouts', buckets: buckets({ no_data: 3, not_run: 2 }) },
-        { providerId: 'searchapi', buckets: buckets({ error: 1, empty: 4 }) },
-      ],
-    });
+    const s = slice({ discovery: [disc('travelpayouts', { no_data: 3, not_run: 2 }), disc('searchapi', { error: 1, empty: 4 })] });
     expect(resolveDayDisplay(s, NOW)).toEqual({ kind: 'glyphs', glyphs: ['empty', 'no_data', 'error', 'not_run'] });
   });
-
   it('a day of only skipped cells shows no glyph (the marker carries the count)', () => {
-    const s = slice({ discovery: [{ providerId: 'travelpayouts', buckets: buckets({ skipped: 12 }) }] });
-    expect(resolveDayDisplay(s, NOW)).toEqual({ kind: 'glyphs', glyphs: [] });
+    expect(resolveDayDisplay(slice({ discovery: [disc('travelpayouts', { skipped: 12 })] }), NOW)).toEqual({ kind: 'glyphs', glyphs: [] });
+    expect(buckets({}).skipped).toBe(0);
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/display.test.ts`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/display.test.ts`
 Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/display.js"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/views/Calendar/display.ts` (Task 10.4 appends `buildCalendarModel` to this file):
+`apps/web/src/views/Calendar/display.ts` (Task 10.4 appends `buildCalendarModel`):
 
 ```ts
 import { compareAges, effectiveAge, type IsoDateTime } from '@gmt/core';
@@ -1032,16 +1016,16 @@ export type DayDisplay =
 const GLYPH_ORDER: readonly GlyphStatus[] = ['empty', 'no_data', 'error', 'not_run'];
 
 /**
- * The day's price by the spec §11 precedence: a class-verified price that is not stale (the api's `stale` uses
- * STALE_AFTER_HOURS, §8.1); else the fresher of a stale verified price and the cheapest calendar price; else glyphs.
- * Partially-verified prices never become the day price; the day shows only their count.
+ * Spec §11 precedence: a class-verified price that is not stale (the api's `stale` uses STALE_AFTER_HOURS, §8.1);
+ * else the fresher of a stale verified price and the cheapest calendar price; else glyphs. Partially-verified prices
+ * never become the day price; the day shows only their count.
  */
 export function resolveDayDisplay(slice: DaySlice, now: IsoDateTime): DayDisplay {
   const v = slice.cheapestVerified;
   const c = slice.cheapestCalendar;
   if (v !== null && !v.stale) return { kind: 'price', basis: 'verified', price: v, stale: false, why: 'fresh-verified' };
   if (v !== null && c !== null) {
-    // why: §8.1 — unknown age loses to any known age and ties go to verified; compareAges(a, b) < 0 means a is fresher (WP0 Task 0.7).
+    // why: §8.1 — unknown age loses to any known age and ties go to verified; compareAges(a, b) < 0 means a is fresher.
     const cmp = compareAges(effectiveAge(v.provenance, now), effectiveAge(c.provenance, now));
     return cmp <= 0
       ? { kind: 'price', basis: 'verified', price: v, stale: true, why: 'stale-verified-fresher' }
@@ -1055,7 +1039,7 @@ export function resolveDayDisplay(slice: DaySlice, now: IsoDateTime): DayDisplay
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/display.test.ts`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/display.test.ts`
 Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
@@ -1067,23 +1051,27 @@ git add apps/web && git commit -m "wp10: day price precedence with stale and unk
 ### Task 10.4: Quintile scale over one basis, and the calendar model
 
 **Files:**
-- Create: `apps/web/src/views/Calendar/scale.ts`, `apps/web/test/views/Calendar/scale.test.ts`
-- Modify: `apps/web/src/views/Calendar/display.ts` (append `GridDay`, `CalendarModel`, `buildCalendarModel`), `apps/web/src/strings.ts` (singular/plural day counts)
+- Create: `apps/web/src/views/Calendar/scale.ts`, `apps/web/test/views/calendar/scale.test.ts`
+- Modify: `apps/web/src/views/Calendar/display.ts` (append `CalendarModel`, `buildCalendarModel`)
 
 **Interfaces:**
-- Produces: `Band`, `QuintileScale`, `LegendEntry`, `BAND_CLASSES`, `quintileBand`, `buildScale`, `GridDay`, `CalendarModel`, `buildCalendarModel`.
+- Produces: `Band`, `LegendEntry`, `QuintileScale`, `BAND_CLASSES`, `quintileBand`, `buildScale`, `CalendarModel`, `buildCalendarModel`.
 
-The quintile function: sort the n values of the colour basis ascending. A value v gets band `min(4, floor(r × 5 / n))`, where r is the number of values strictly below v. Equal prices therefore share a band, bands never decrease as the price rises, and n < 5 leaves the upper bands empty instead of stretching them.
+The quintile function: sort the n prices of the colour basis ascending. A price v gets band `min(4, floor(r × 5 / n))`, where r is the number of prices strictly below v. Equal prices share a band, bands never decrease as the price rises, and n < 5 leaves the upper bands empty instead of stretching them.
+
+The colour basis is a client-side toggle. The calendar route returns both bases per day (plan reconciliation), so no request parameter is involved.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/Calendar/scale.test.ts`:
+`apps/web/test/views/calendar/scale.test.ts`:
 
 ```ts
+import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildCalendarModel } from '../../../src/views/Calendar/display.js';
 import { buildScale, quintileBand } from '../../../src/views/Calendar/scale.js';
-import { cell, day, NOW, price, provenanceCalendar, provenanceVerified } from '../../support/fixtures.js';
+import { NOW } from '../../render.js';
+import { cellAt, gridDay, priceAt, provenanceCalendar, provenanceVerified } from '../../fixtures.wp10.js';
 
 describe('quintile scale (spec §11 View B)', () => {
   it('five distinct values take one band each', () => {
@@ -1099,7 +1087,7 @@ describe('quintile scale (spec §11 View B)', () => {
     expect(quintileBand([100, 100, 200], 200)).toBe(3);
     expect(quintileBand([42], 42)).toBe(0);
   });
-  it('an empty scale refuses to band anything', () => {
+  it('an empty scale refuses to band anything and has an empty legend', () => {
     expect(() => quintileBand([], 1)).toThrow(RangeError);
     expect(buildScale([]).legend).toEqual([]);
   });
@@ -1114,26 +1102,26 @@ describe('quintile scale (spec §11 View B)', () => {
 });
 
 describe('calendar model: one basis at a time, other-basis days hatched and excluded (spec §11 View B)', () => {
-  const verifiedDay = (date: string, pence: number) => ({ date: day(date).date, slice: day(date, { cheapestVerified: price(pence, provenanceVerified(5), false, cell(date, 14)) }) });
-  const calendarDay = (date: string, pence: number) => ({ date: day(date).date, slice: day(date, { cheapestCalendar: price(pence, provenanceCalendar(5), false, cell(date, 14)) }) });
-  const days = [verifiedDay('2027-03-10', 40000), verifiedDay('2027-03-11', 50000), verifiedDay('2027-03-12', 60000), verifiedDay('2027-03-13', 70000), verifiedDay('2027-03-14', 80000), calendarDay('2027-03-15', 30000)];
+  const v = (date: string, pence: number) => gridDay(date, { cheapestVerified: priceAt(pence, provenanceVerified(5), false, cellAt(date, 14)) });
+  const c = (date: string, pence: number) => gridDay(date, { cheapestCalendar: priceAt(pence, provenanceCalendar(5), false, cellAt(date, 14)) });
+  const days = [v('2027-03-10', 40000), v('2027-03-11', 50000), v('2027-03-12', 60000), v('2027-03-13', 70000), v('2027-03-14', 80000), c('2027-03-15', 30000)];
 
   it('colouring by verified bands only the verified days; the cheaper calendar day is hatched and does not move the scale', () => {
     const m = buildCalendarModel(days, 'verified', NOW);
     expect(m.scale.count).toBe(5);
     expect(m.scale.band(40000)).toBe(0);
     expect(m.hatchedDays).toBe(1);
-    expect(m.bands.get(day('2027-03-15').date)).toBeUndefined();
+    expect(m.bands.get(asIsoDate('2027-03-15'))).toBeUndefined();
   });
   it('colouring by calendar bands the calendar day and hatches the five verified days', () => {
     const m = buildCalendarModel(days, 'calendar', NOW);
     expect(m.scale.count).toBe(1);
-    expect(m.bands.get(day('2027-03-15').date)).toBe(0);
+    expect(m.bands.get(asIsoDate('2027-03-15'))).toBe(0);
     expect(m.hatchedDays).toBe(5);
   });
-  it('a filtered-out destination day (slice null) has no price and is neither banded nor hatched', () => {
-    const m = buildCalendarModel([{ date: day('2027-03-16').date, slice: null }], 'verified', NOW);
-    expect(m.displays.get(day('2027-03-16').date)).toEqual({ kind: 'glyphs', glyphs: [] });
+  it('a day the filter leaves empty (slice null) is neither banded nor hatched', () => {
+    const m = buildCalendarModel([{ date: asIsoDate('2027-03-16'), slice: null }], 'verified', NOW);
+    expect(m.displays.get(asIsoDate('2027-03-16'))).toEqual({ kind: 'glyphs', glyphs: [] });
     expect(m.hatchedDays).toBe(0);
   });
 });
@@ -1141,7 +1129,7 @@ describe('calendar model: one basis at a time, other-basis days hatched and excl
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/scale.test.ts`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/scale.test.ts`
 Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/scale.js"`.
 
 - [ ] **Step 3: Implement**
@@ -1155,7 +1143,7 @@ export type Band = 0 | 1 | 2 | 3 | 4;
 export interface LegendEntry { band: Band; minPence: number; maxPence: number; count: number }
 export interface QuintileScale { count: number; band(v: number): Band; legend: LegendEntry[] }
 
-/** Sequential single-hue fills (dataviz skill); the price text and the sr-only band label carry the meaning, never the colour alone. */
+/** Sequential single-hue fills (dataviz skill); the price text and the sr-only band label carry the meaning, never colour alone. */
 export const BAND_CLASSES: Readonly<Record<Band, string>> = {
   0: 'bg-teal-700 text-white',
   1: 'bg-teal-500 text-white',
@@ -1164,7 +1152,7 @@ export const BAND_CLASSES: Readonly<Record<Band, string>> = {
   4: 'bg-teal-100 text-black',
 };
 
-/** Band of v within `sorted` (ascending): floor(r × 5 / n), where r counts values strictly below v. */
+/** Band of v within `sorted` (ascending): floor(r × 5 / n), r = count of values strictly below v. */
 export function quintileBand(sorted: readonly number[], v: number): Band {
   if (sorted.length === 0) throw new RangeError('quintileBand: empty scale');
   let lo = 0;
@@ -1185,7 +1173,7 @@ export function buildScale(values: readonly number[]): QuintileScale {
   for (const v of sorted) {
     const b = quintileBand(sorted, v);
     const last = legend[legend.length - 1];
-    // why: bands never decrease as price rises, so equal consecutive bands merge into one legend row.
+    // why: bands never decrease as price rises, so consecutive equal bands merge into one legend row.
     if (last !== undefined && last.band === b) {
       last.maxPence = v;
       last.count += 1;
@@ -1195,14 +1183,12 @@ export function buildScale(values: readonly number[]): QuintileScale {
 }
 ```
 
-Append to `apps/web/src/views/Calendar/display.ts`:
+Append to `apps/web/src/views/Calendar/display.ts`, merging the imports into the top block:
 
 ```ts
 import type { IsoDate } from '@gmt/core';
 import { type Band, buildScale, type QuintileScale } from './scale.js';
-
-/** A day as the grid renders it; `slice` is null when the destination filter leaves the day no cells. */
-export interface GridDay { date: IsoDate; slice: DaySlice | null }
+import type { GridDay } from './types.js';
 
 /** Per-day displays plus the one-basis colour scale (spec §11 View B). */
 export interface CalendarModel {
@@ -1213,7 +1199,7 @@ export interface CalendarModel {
   hatchedDays: number;
 }
 
-/** Resolves every day, builds the scale over the days whose shown price is of `colourBasis`, and counts the hatched rest. */
+/** Resolves every day, scales the days whose shown price is of `colourBasis`, and counts the hatched rest. */
 export function buildCalendarModel(days: readonly GridDay[], colourBasis: DayBasis, now: IsoDateTime): CalendarModel {
   const displays = new Map<IsoDate, DayDisplay>();
   for (const d of days) displays.set(d.date, d.slice === null ? { kind: 'glyphs', glyphs: [] } : resolveDayDisplay(d.slice, now));
@@ -1225,27 +1211,14 @@ export function buildCalendarModel(days: readonly GridDay[], colourBasis: DayBas
     else hatchedDays += 1; // why: spec §11 — days showing the other basis are hatched and excluded from the scale
   }
   const scale = buildScale(onBasis.map((x) => x.pence));
-  const bands = new Map<IsoDate, Band>(onBasis.map((x) => [x.date, scale.band(x.pence)]));
-  return { colourBasis, displays, bands, scale, hatchedDays };
+  return { colourBasis, displays, bands: new Map(onBasis.map((x) => [x.date, scale.band(x.pence)])), scale, hatchedDays };
 }
-```
-
-(Merge the two new `import` lines into the existing import block at the top of `display.ts`.)
-
-In `apps/web/src/strings.ts`, replace three `calendarStrings` entries so day counts read correctly:
-
-```ts
-  legendBand: (band: number, min: string, max: string, days: number): string => `band ${band + 1}: ${min}–${max} (${days} ${days === 1 ? 'day' : 'days'})`,
-  legendHatched: (shown: 'verified' | 'calendar', days: number): string =>
-    `hatched: ${days} ${days === 1 ? 'day shows' : 'days show'} a ${shown === 'verified' ? 'verified' : 'calendar'} price instead and ${days === 1 ? 'is' : 'are'} not on this scale`,
-  legendScale: (basis: 'verified' | 'calendar', days: number): string =>
-    `Colour: ${basis === 'verified' ? 'verified' : 'calendar'} prices on ${days} ${days === 1 ? 'day' : 'days'}, in five price bands (quintiles of the days shown)`,
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar`
-Expected: PASS (marker, display, scale; 25 tests).
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar`
+Expected: PASS (marker 8, display 10, scale 8).
 
 - [ ] **Step 5: Commit**
 
@@ -1256,45 +1229,41 @@ git add apps/web && git commit -m "wp10: quintile scale per basis with hatched f
 ### Task 10.5: Calendar grid, glyphs, legend and keyboard navigation
 
 **Files:**
-- Create: `apps/web/src/views/Calendar/{CalendarGrid.tsx,CalendarLegend.tsx,calendar.css}`, `apps/web/test/views/Calendar/grid.test.tsx`
+- Create: `apps/web/src/views/Calendar/{CalendarGrid.tsx,CalendarLegend.tsx,calendar.css}`, `apps/web/test/views/calendar/grid.test.tsx`
 
 **Interfaces:**
-- Consumes: `CalendarModel`, `GridDay`, `BAND_CLASSES`, `DayMarker`, `Provenance` and `formatPence` (WP9), the `isoDate` helpers, `addDays` and `monthOf`.
-- Produces: `CalendarGrid({ days, model, now, destinationNotes, onOpen })` and `CalendarLegend({ model })`.
+- Consumes: `CalendarModel`, `GridDay`, `BAND_CLASSES`, `DayMarker`, WP9's `PriceCell`, `PriceBoundary`, `formatPence` and `COPY`; the `isoDate` helpers; `addDays`, `monthOf`.
+- Produces: `CalendarGrid({ days, model, destinationNotes, onOpen })`, `CalendarLegend({ model })`.
 
-The grid follows the APG grid pattern: one `role="grid"` table per month, `role="gridcell"` days with a roving `tabIndex`, arrow keys to move by one day or one week (across months), and Enter or Space to open the side panel.
+The grid follows the APG grid pattern: one `role="grid"` table per month and `role="gridcell"` days with a roving `tabIndex`. Arrow keys move by a day or a week, across months; Enter or Space opens the panel. Every shown price goes through `PriceBoundary` and `PriceCell`. That puts provenance on the day without hover (badge, source, compact age, "≈", dashed outline and "constraints not checked" for calendar prices, destination, the operator's note), and withholds a price that lacks provenance.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/Calendar/grid.test.tsx`:
+`apps/web/test/views/calendar/grid.test.tsx`:
 
 ```tsx
-import { asIsoDate } from '@gmt/core';
-import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CalendarGrid } from '../../../src/views/Calendar/CalendarGrid.js';
 import { CalendarLegend } from '../../../src/views/Calendar/CalendarLegend.js';
-import { buildCalendarModel, type GridDay } from '../../../src/views/Calendar/display.js';
-import type { Buckets, DayBasis } from '../../../src/views/Calendar/types.js';
-import { buckets, cell, day, NOW, price, provenanceCalendar, provenanceVerified } from '../../support/fixtures.js';
+import { buildCalendarModel } from '../../../src/views/Calendar/display.js';
+import type { DayBasis, GridDay } from '../../../src/views/Calendar/types.js';
+import { NOW, renderWithProviders } from '../../render.js';
+import { cellAt, disc, gridDay, priceAt, provenanceCalendar, provenanceVerified } from '../../fixtures.wp10.js';
+import type { Buckets } from '@gmt/core';
 
-const vDay = (date: string, pence: number): GridDay => ({
-  date: asIsoDate(date),
-  slice: day(date, { cheapestVerified: price(pence, provenanceVerified(5), false, cell(date, 14)), discovery: [{ providerId: 'searchapi', buckets: buckets({ priced: 48 }) }] }),
-});
-const cDay = (date: string, pence: number, stale = false): GridDay => ({
-  date: asIsoDate(date),
-  slice: day(date, { cheapestCalendar: price(pence, provenanceCalendar(5), stale, cell(date, 14)), discovery: [{ providerId: 'travelpayouts', buckets: buckets({ priced: 20, no_data: 28 }) }] }),
-});
-const gDay = (date: string, b: Partial<Buckets>): GridDay => ({ date: asIsoDate(date), slice: day(date, { discovery: [{ providerId: 'travelpayouts', buckets: buckets(b) }] }) });
+const vDay = (date: string, pence: number): GridDay =>
+  gridDay(date, { cheapestVerified: priceAt(pence, provenanceVerified(5), false, cellAt(date, 14)), discovery: [disc('searchapi', { priced: 48 })] });
+const cDay = (date: string, pence: number, stale = false): GridDay =>
+  gridDay(date, { cheapestCalendar: priceAt(pence, provenanceCalendar(5), stale, cellAt(date, 14)), discovery: [disc('travelpayouts', { priced: 20, no_data: 28 })] });
+const gDay = (date: string, b: Partial<Buckets>): GridDay => gridDay(date, { discovery: [disc('travelpayouts', b)] });
 
 function renderGrid(days: GridDay[], basis: DayBasis = 'verified', notes: Record<string, string> = {}) {
   const onOpen = vi.fn();
   const model = buildCalendarModel(days, basis, NOW);
-  const r = render(
+  const r = renderWithProviders(
     <>
-      <CalendarGrid days={days} model={model} now={NOW} destinationNotes={notes} onOpen={onOpen} />
+      <CalendarGrid days={days} model={model} destinationNotes={notes} onOpen={onOpen} />
       <CalendarLegend model={model} />
     </>,
   );
@@ -1308,66 +1277,78 @@ function dayCell(date: string): HTMLTableCellElement {
 
 describe('calendar grid (spec §11 View B, Accessibility)', () => {
   it('places each day under its weekday in its own month grid', () => {
-    renderGrid([vDay('2027-03-14', 41200), vDay('2027-04-01', 41200)]);
-    expect(within(screen.getByRole('grid', { name: 'March 2027' })).getByText('14')).toBeInTheDocument();
+    const { getByRole } = renderGrid([vDay('2027-03-14', 41200), vDay('2027-04-01', 41200)]);
     expect(dayCell('2027-03-14').cellIndex).toBe(6); // Sunday
     expect(dayCell('2027-04-01').cellIndex).toBe(3); // Thursday
-    expect(screen.getByRole('grid', { name: 'April 2027' })).toContainElement(dayCell('2027-04-01'));
+    expect(getByRole('grid', { name: 'March 2027' })).toContainElement(dayCell('2027-03-14'));
+    expect(getByRole('grid', { name: 'April 2027' })).toContainElement(dayCell('2027-04-01'));
   });
 
   it('colours by one basis; other-basis days are hatched, excluded from the scale and named in the numeric legend', () => {
     const days = [vDay('2027-03-08', 40000), vDay('2027-03-09', 50000), vDay('2027-03-10', 60000), vDay('2027-03-11', 70000), vDay('2027-03-12', 80000), cDay('2027-03-13', 30000)];
-    const { unmount } = renderGrid(days, 'verified');
+    const first = renderGrid(days, 'verified');
     expect(['08', '09', '10', '11', '12'].map((d) => dayCell(`2027-03-${d}`).dataset.band)).toEqual(['0', '1', '2', '3', '4']);
     expect(dayCell('2027-03-13')).toHaveClass('day-hatched');
     expect(dayCell('2027-03-13').dataset.band).toBe('');
     expect(within(dayCell('2027-03-13')).getByText('not on the colour scale')).toBeInTheDocument();
     expect(within(dayCell('2027-03-08')).getByText('price band 1 of 5, cheapest')).toBeInTheDocument();
-    const legend = screen.getByTestId('calendar-legend');
-    expect(legend).toHaveTextContent('Colour: verified prices on 5 days, in five price bands (quintiles of the days shown)');
+    const legend = first.getByTestId('calendar-legend');
+    expect(legend).toHaveTextContent('Colour: itinerary-search basis prices on 5 days, in five price bands (quintiles of the days shown)');
     expect(legend).toHaveTextContent('band 1: £400–£400 (1 day)');
     expect(legend).toHaveTextContent('band 5: £800–£800 (1 day)');
     expect(legend).toHaveTextContent('hatched: 1 day shows a calendar price instead and is not on this scale');
-    unmount();
+    first.unmount();
 
-    renderGrid(days, 'calendar');
+    const second = renderGrid(days, 'calendar');
     expect(dayCell('2027-03-13').dataset.band).toBe('0');
     expect(['08', '09', '10', '11', '12'].every((d) => dayCell(`2027-03-${d}`).classList.contains('day-hatched'))).toBe(true);
-    expect(screen.getByTestId('calendar-legend')).toHaveTextContent('hatched: 5 days show a verified price instead and are not on this scale');
+    expect(second.getByTestId('calendar-legend')).toHaveTextContent('hatched: 5 days show a class-verified price instead and are not on this scale');
   });
 
   it('every shown price carries provenance; calendar prices are dashed and say constraints not checked; stale is labelled', () => {
     renderGrid([vDay('2027-03-08', 40000), cDay('2027-03-09', 30000, true)], 'verified');
     const v = dayCell('2027-03-08');
-    expect(within(v).getByTestId('provenance')).toBeInTheDocument();
-    expect(within(v).getByText('verified')).toBeInTheDocument();
-    expect(within(v).getByTestId('day-price-block')).toHaveClass('border-solid');
+    expect(within(v).getByTestId('provenance')).not.toHaveClass('border-dashed');
+    expect(within(v).getByTestId('day-price-block')).toHaveTextContent('verified');
     const c = dayCell('2027-03-09');
-    expect(within(c).getByTestId('provenance')).toBeInTheDocument();
-    expect(within(c).getByTestId('day-price-block')).toHaveClass('border-dashed');
+    expect(within(c).getByTestId('provenance')).toHaveClass('border-dashed');
     expect(c).toHaveTextContent('constraints not checked');
+    expect(c).toHaveTextContent('calendar price');
     expect(c).toHaveTextContent('stale');
-    expect(within(c).getByTestId('day-price')).toHaveTextContent('£300');
+    expect(c).toHaveTextContent('£300');
   });
 
-  it('shows the operator note for the destination of the shown price', () => {
+  it('shows the destination and the operator note for the destination of the shown price', () => {
     renderGrid([vDay('2027-03-08', 40000)], 'verified', { JFK: 'onward leg not included' });
+    expect(within(dayCell('2027-03-08')).getByTestId('provenance')).toHaveTextContent('JFK');
     expect(dayCell('2027-03-08')).toHaveTextContent('onward leg not included');
   });
 
-  it('days without a price show distinct glyphs, each with a text alternative', () => {
-    renderGrid([gDay('2027-03-08', { empty: 1, no_data: 1, error: 1, not_run: 1 })]);
+  it('withholds a day price that arrives without provenance', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const prevent = (e: ErrorEvent) => e.preventDefault();
+    window.addEventListener('error', prevent);
+    const broken = vDay('2027-03-08', 40000);
+    if (broken.slice?.cheapestVerified) Object.assign(broken.slice.cheapestVerified, { provenance: undefined });
+    renderGrid([broken]);
+    expect(dayCell('2027-03-08')).toHaveTextContent('price withheld: provenance missing');
+    expect(dayCell('2027-03-08')).not.toHaveTextContent('£400');
+    window.removeEventListener('error', prevent);
+    errors.mockRestore();
+  });
+
+  it('days without a price show distinct glyphs, each with its text', () => {
+    const r = renderGrid([gDay('2027-03-08', { empty: 1, no_data: 1, error: 1, not_run: 1 })]);
     const glyphs = [...dayCell('2027-03-08').querySelectorAll('[data-glyph]')];
     expect(glyphs.map((g) => g.getAttribute('data-glyph'))).toEqual(['empty', 'no_data', 'error', 'not_run']);
     expect(new Set(glyphs.map((g) => g.querySelector('[aria-hidden="true"]')?.textContent)).size).toBe(4);
     expect(glyphs.map((g) => g.textContent)).toEqual(['∅ no fares', '? no cached data', '! error', '○ not searched']);
-    expect(screen.getByTestId('calendar-legend')).toHaveTextContent('∅ no fares');
+    expect(r.getByTestId('calendar-legend')).toHaveTextContent('∅ no fares');
   });
 
-  it('is keyboard-operable: arrows move by day and week across months, Enter and Space open, one tab stop, visible focus', async () => {
-    const user = userEvent.setup();
+  it('is keyboard-operable: arrows by day and week across months, Enter and Space open, one tab stop, visible focus', async () => {
     const days = ['2027-03-30', '2027-03-31', '2027-04-01', '2027-04-02', '2027-04-03', '2027-04-04', '2027-04-05', '2027-04-06', '2027-04-07'].map((d) => vDay(d, 40000));
-    const { onOpen } = renderGrid(days);
+    const { onOpen, user } = renderGrid(days);
     await user.tab();
     expect(dayCell('2027-03-30')).toHaveFocus();
     expect(document.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(1);
@@ -1376,24 +1357,20 @@ describe('calendar grid (spec §11 View B, Accessibility)', () => {
     await user.keyboard('{ArrowRight}');
     expect(dayCell('2027-04-01')).toHaveFocus(); // across the month boundary
     await user.keyboard('{ArrowDown}');
-    expect(dayCell('2027-04-01')).toHaveFocus(); // 2027-04-08 is outside the data, focus stays
-    await user.keyboard('{ArrowUp}');
-    expect(dayCell('2027-04-01')).toHaveFocus();
+    expect(dayCell('2027-04-01')).toHaveFocus(); // 2027-04-08 has no data: focus stays
     await user.keyboard('{ArrowLeft}');
     expect(dayCell('2027-03-31')).toHaveFocus();
     await user.keyboard('{ArrowDown}');
     expect(dayCell('2027-04-07')).toHaveFocus();
     await user.keyboard('{Enter}');
-    expect(onOpen).toHaveBeenLastCalledWith('2027-04-07', cell('2027-04-07', 14));
+    expect(onOpen).toHaveBeenLastCalledWith('2027-04-07', cellAt('2027-04-07', 14));
     await user.keyboard(' ');
     expect(onOpen).toHaveBeenCalledTimes(2);
-    expect(document.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(1);
     expect(dayCell('2027-04-07').className).toContain('focus-visible:outline-2');
   });
 
   it('clicking a glyph day opens the panel with no preselected cell', async () => {
-    const user = userEvent.setup();
-    const { onOpen } = renderGrid([gDay('2027-03-08', { not_run: 48 })]);
+    const { onOpen, user } = renderGrid([gDay('2027-03-08', { not_run: 48 })]);
     await user.click(dayCell('2027-03-08'));
     expect(onOpen).toHaveBeenCalledWith('2027-03-08', null);
   });
@@ -1402,12 +1379,12 @@ describe('calendar grid (spec §11 View B, Accessibility)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/grid.test.tsx`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/grid.test.tsx`
 Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/CalendarGrid.js"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/views/Calendar/calendar.css`:
+`apps/web/src/views/Calendar/calendar.css` (a stylesheet, not an inline style: spec §4's CSP blocks inline styles):
 
 ```css
 /* Hatched days (spec §11 View B): a pattern, not a colour, so "not on this scale" survives greyscale and colour-blindness. */
@@ -1420,16 +1397,16 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/Calen
 `apps/web/src/views/Calendar/CalendarGrid.tsx`:
 
 ```tsx
-import { addDays, monthOf, type CellKey, type Iata, type IsoDate, type IsoDateTime, type IsoMonth } from '@gmt/core';
+import { addDays, type CellKey, type Iata, type IsoDate, type IsoMonth, monthOf } from '@gmt/core';
 import { type KeyboardEvent, useRef, useState } from 'react';
-import { Provenance } from '../../components/Provenance.js';
-import { formatIsoDate, formatIsoMonth, isoDateParts, monthDays, WEEKDAY_HEADERS, weekdayIndex } from '../../lib/isoDate.js';
-import { formatPence } from '../../lib/money.js';
-import { calendarStrings } from '../../strings.js';
+import { PriceBoundary } from '../../components/PriceBoundary.js';
+import { PriceCell } from '../../components/PriceCell.js';
+import { COPY } from '../../copy.js';
+import { formatDayLong, formatIsoMonth, isoDateParts, monthDays, WEEKDAYS, weekdayIndex } from '../../lib/isoDate.js';
 import { DayMarker } from './DayMarker.js';
-import type { CalendarModel, DayDisplay, GridDay } from './display.js';
+import type { CalendarModel, DayDisplay } from './display.js';
 import { type Band, BAND_CLASSES } from './scale.js';
-import type { DaySlice, GlyphStatus } from './types.js';
+import type { DaySlice, GlyphStatus, GridDay } from './types.js';
 import './calendar.css';
 
 const STEPS: Readonly<Record<string, number>> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
@@ -1439,12 +1416,11 @@ const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:
 export interface CalendarGridProps {
   days: readonly GridDay[];
   model: CalendarModel;
-  now: IsoDateTime;
   destinationNotes: Partial<Record<Iata, string>>;
   onOpen(date: IsoDate, cell: CellKey | null): void;
 }
 
-/** Monday-first weeks of one month, null for the padding cells. */
+/** Monday-first weeks of one month, null for padding. */
 function weeksOf(month: IsoMonth): Array<Array<IsoDate | null>> {
   const dates = monthDays(month);
   const first = dates[0];
@@ -1456,8 +1432,8 @@ function weeksOf(month: IsoMonth): Array<Array<IsoDate | null>> {
   return weeks;
 }
 
-/** View B heatmap: one APG grid per month, roving tabindex, arrows by day/week, Enter or Space opens the side panel (spec §11). */
-export function CalendarGrid({ days, model, now, destinationNotes, onOpen }: CalendarGridProps) {
+/** View B heatmap: one APG grid per month, roving tabindex, arrows by day and week, Enter or Space opens the side panel (spec §11). */
+export function CalendarGrid({ days, model, destinationNotes, onOpen }: CalendarGridProps) {
   const byDate = new Map(days.map((d) => [d.date, d]));
   const months = [...new Set(days.map((d) => monthOf(d.date)))];
   const [focusDate, setFocusDate] = useState<IsoDate | null>(days[0]?.date ?? null);
@@ -1491,7 +1467,7 @@ export function CalendarGrid({ days, model, now, destinationNotes, onOpen }: Cal
           <caption className="text-left font-semibold">{formatIsoMonth(m)}</caption>
           <thead className="max-sm:hidden">
             <tr role="row">
-              {WEEKDAY_HEADERS.map((w) => (
+              {WEEKDAYS.map((w) => (
                 <th key={w} role="columnheader" scope="col" className="text-xs font-medium">{w}</th>
               ))}
             </tr>
@@ -1504,15 +1480,15 @@ export function CalendarGrid({ days, model, now, destinationNotes, onOpen }: Cal
                   const gd = byDate.get(date);
                   if (gd === undefined) {
                     return (
-                      <td key={date} role="gridcell" aria-disabled="true" className="align-top text-xs text-zinc-400 max-sm:hidden">
+                      <td key={date} role="gridcell" aria-disabled="true" className="align-top text-xs text-slate-400 max-sm:hidden">
                         {isoDateParts(date).day}
                       </td>
                     );
                   }
-                  const disp = model.displays.get(date) ?? { kind: 'glyphs', glyphs: [] };
+                  const disp: DayDisplay = model.displays.get(date) ?? { kind: 'glyphs', glyphs: [] };
                   const band = model.bands.get(date);
                   const hatched = disp.kind === 'price' && disp.basis !== model.colourBasis;
-                  const fill = band !== undefined ? BAND_CLASSES[band] : hatched ? 'day-hatched' : 'bg-white border border-zinc-200';
+                  const fill = band !== undefined ? BAND_CLASSES[band] : hatched ? 'day-hatched' : 'border border-slate-200 bg-white';
                   return (
                     <td
                       key={date}
@@ -1531,13 +1507,13 @@ export function CalendarGrid({ days, model, now, destinationNotes, onOpen }: Cal
                         setFocusDate(date);
                         open(date);
                       }}
-                      className={`cursor-pointer rounded p-1 text-left align-top max-sm:block max-sm:mb-1 ${FOCUS_RING} ${fill}`}
+                      className={`cursor-pointer rounded p-1 text-left align-top max-sm:mb-1 max-sm:block ${FOCUS_RING} ${fill}`}
                     >
                       <span className="block text-xs font-semibold">
                         <span aria-hidden="true">{isoDateParts(date).day}</span>
-                        <span className="sr-only">{formatIsoDate(date)}</span>
+                        <span className="sr-only">{formatDayLong(date)}</span>
                       </span>
-                      <DayBody display={disp} band={band} hatched={hatched} slice={gd.slice} notes={destinationNotes} now={now} />
+                      <DayBody display={disp} band={band} hatched={hatched} slice={gd.slice} notes={destinationNotes} />
                     </td>
                   );
                 })}
@@ -1550,33 +1526,33 @@ export function CalendarGrid({ days, model, now, destinationNotes, onOpen }: Cal
   );
 }
 
-function DayBody(props: { display: DayDisplay; band: Band | undefined; hatched: boolean; slice: DaySlice | null; notes: Partial<Record<Iata, string>>; now: IsoDateTime }) {
-  const { display, band, hatched, slice, notes, now } = props;
-  if (slice === null) return <p className="text-[10px]">{calendarStrings.noCellsForDestination}</p>;
+function DayBody(props: { display: DayDisplay; band: Band | undefined; hatched: boolean; slice: DaySlice | null; notes: Partial<Record<Iata, string>> }) {
+  const { display, band, hatched, slice, notes } = props;
+  if (slice === null) return <p className="text-[10px]">{COPY.calendarView.noCellsForDestination}</p>;
   return (
     <>
-      {display.kind === 'price' ? <DayPriceBlock display={display} notes={notes} now={now} /> : <GlyphList glyphs={display.glyphs} />}
-      {band !== undefined && <span className="sr-only">{calendarStrings.bandAria(band)}</span>}
-      {hatched && <span className="sr-only">{calendarStrings.hatchedAria}</span>}
-      {slice.cheapestPartiallyVerified !== null && <p className="text-[10px]">{calendarStrings.partlyVerified(slice.cheapestPartiallyVerified.count)}</p>}
+      {display.kind === 'price' ? <DayPriceBlock display={display} sliceDestination={slice.destination} notes={notes} /> : <GlyphList glyphs={display.glyphs} />}
+      {band !== undefined ? <span className="sr-only">{COPY.calendarView.bandAria(band)}</span> : null}
+      {hatched ? <span className="sr-only">{COPY.calendarView.hatchedAria}</span> : null}
+      {slice.cheapestPartiallyVerified !== null ? <p className="text-[10px]">{COPY.calendarView.partlyVerified(slice.cheapestPartiallyVerified.count)}</p> : null}
       <DayMarker slice={slice} />
     </>
   );
 }
 
-/** The day's price with its provenance visible without hover (spec §11): amount, destination, basis, staleness, badge and age. */
-function DayPriceBlock({ display, notes, now }: { display: Extract<DayDisplay, { kind: 'price' }>; notes: Partial<Record<Iata, string>>; now: IsoDateTime }) {
-  const p = display.price;
-  const isCalendar = display.basis === 'calendar';
-  const note = notes[p.cell.destination];
+/** The day's price via PriceCell: provenance visible without hover, withheld without provenance (spec §11, §9 item 6). */
+function DayPriceBlock(props: { display: Extract<DayDisplay, { kind: 'price' }>; sliceDestination: Iata | null; notes: Partial<Record<Iata, string>> }) {
+  const p = props.display.price;
+  const isCalendar = props.display.basis === 'calendar';
+  // why: a per-destination price has no cell; the filtered destination is its destination.
+  const destination = p.cell?.destination ?? props.sliceDestination ?? undefined;
+  const note = destination === undefined ? null : (props.notes[destination] ?? null);
   return (
-    <div data-testid="day-price-block" className={`rounded border border-current px-1 ${isCalendar ? 'border-dashed' : 'border-solid'}`}>
-      <span data-testid="day-price" className="font-semibold">{formatPence(p.pricePence)}</span> <span>{p.cell.destination}</span>{' '}
-      <span>{calendarStrings.basisName[display.basis]}</span>
-      {isCalendar && <span> · {calendarStrings.constraintsNotChecked}</span>}
-      {display.stale && <span> · {calendarStrings.stale}</span>}
-      <Provenance provenance={p.provenance} now={now} />
-      {note !== undefined && <span className="block text-[10px]">{note}</span>}
+    <div data-testid="day-price-block" className="text-xs">
+      <span className="block text-[10px] font-medium">{isCalendar ? COPY.calendarView.calendarPrice : COPY.classLabel.verified}</span>
+      <PriceBoundary>
+        <PriceCell pricePence={p.pricePence} provenance={p.provenance} calendar={isCalendar} stale={props.display.stale} destination={destination} destinationNote={note} />
+      </PriceBoundary>
     </div>
   );
 }
@@ -1587,7 +1563,7 @@ function GlyphList({ glyphs }: { glyphs: readonly GlyphStatus[] }) {
     <ul className="flex flex-wrap gap-1 text-[10px]">
       {glyphs.map((g) => (
         <li key={g} data-glyph={g}>
-          <span aria-hidden="true" className="font-bold">{calendarStrings.glyphs[g].symbol}</span> {calendarStrings.glyphs[g].text}
+          <span aria-hidden="true" className="font-bold">{COPY.calendarView.glyphSymbol[g]}</span> {COPY.bucket[g]}
         </li>
       ))}
     </ul>
@@ -1598,8 +1574,8 @@ function GlyphList({ glyphs }: { glyphs: readonly GlyphStatus[] }) {
 `apps/web/src/views/Calendar/CalendarLegend.tsx`:
 
 ```tsx
-import { formatPence } from '../../lib/money.js';
-import { calendarStrings } from '../../strings.js';
+import { COPY } from '../../copy.js';
+import { formatPence } from '../../format.js';
 import type { CalendarModel } from './display.js';
 import { BAND_CLASSES } from './scale.js';
 import type { DayBasis } from './types.js';
@@ -1608,27 +1584,27 @@ import type { DayBasis } from './types.js';
 export function CalendarLegend({ model }: { model: CalendarModel }) {
   const other: DayBasis = model.colourBasis === 'verified' ? 'calendar' : 'verified';
   return (
-    <section aria-label={calendarStrings.legendTitle} data-testid="calendar-legend" className="text-sm">
-      <p>{calendarStrings.legendScale(model.colourBasis, model.scale.count)}</p>
+    <section aria-label={COPY.calendarView.legendTitle} data-testid="calendar-legend" className="text-sm">
+      <p>{COPY.calendarView.legendScale(COPY.basisName[model.colourBasis], model.scale.count)}</p>
       <ul>
         {model.scale.legend.map((e) => (
           <li key={e.band}>
             <span aria-hidden="true" className={`mr-1 inline-block h-3 w-3 align-middle ${BAND_CLASSES[e.band]}`} />
-            {calendarStrings.legendBand(e.band, formatPence(e.minPence), formatPence(e.maxPence), e.count)}
+            {COPY.calendarView.legendBand(e.band, formatPence(e.minPence), formatPence(e.maxPence), e.count)}
           </li>
         ))}
-        {model.hatchedDays > 0 && (
+        {model.hatchedDays > 0 ? (
           <li>
             <span aria-hidden="true" className="day-hatched mr-1 inline-block h-3 w-3 align-middle" />
-            {calendarStrings.legendHatched(other, model.hatchedDays)}
+            {COPY.calendarView.legendHatched(other, model.hatchedDays)}
           </li>
-        )}
+        ) : null}
       </ul>
-      <p>{calendarStrings.legendGlyphs}</p>
+      <p>{COPY.calendarView.legendGlyphs}</p>
       <ul>
         {(['empty', 'no_data', 'error', 'not_run'] as const).map((g) => (
           <li key={g}>
-            <span aria-hidden="true">{calendarStrings.glyphs[g].symbol}</span> {calendarStrings.glyphs[g].text}
+            <span aria-hidden="true">{COPY.calendarView.glyphSymbol[g]}</span> {COPY.bucket[g]}
           </li>
         ))}
       </ul>
@@ -1639,8 +1615,8 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/grid.test.tsx`
-Expected: PASS, 7 tests.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/grid.test.tsx test/copy`
+Expected: PASS. The grid file passes 8 tests. The source guard passes: no literal JSX text with a letter.
 
 - [ ] **Step 5: Commit**
 
@@ -1651,149 +1627,138 @@ git add apps/web && git commit -m "wp10: calendar grid with hatched days, glyphs
 ### Task 10.6: Side panel: outcomes, prices with full provenance, per-cell verify
 
 **Files:**
-- Create: `apps/web/src/views/Calendar/{CellPanel.tsx,PanelPrice.tsx}`, `apps/web/test/views/Calendar/panel.test.tsx`
-- Modify: `apps/web/test/support/fixtures.ts` (add `verifyResponseFixture`)
+- Create: `apps/web/src/views/Calendar/CellPanel.tsx`, `apps/web/test/views/calendar/panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `fetchCellDetail`, `verifyCell`, `ApiError` (WP9), `priceCellSchema`, `effectiveAge`, `formatAgeFull`, `cellKeyString`, `addDays`, `daysBetween`, `Provenance` (WP9).
-- Produces: `CellPanel({ definition, date, initialCell, now, onClose })`, `cellsForDay(definition, date)`, `PanelPrice({ price, kind, label, now })`.
+- Consumes: `api.cellDetail`, `api.verifyCell`, `qk.cell`, `qk.calendar`, `ApiError`, `PriceCell`, `PriceBoundary`, `COPY`, `formatInstantLondon`, `instantMs`, `cellKeyString`, `addDays`, `daysBetween`.
+- Produces: `cellsForDay(definition, date)`, `CellPanel({ definition, date, initialCell, onClose })`.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `apps/web/test/support/fixtures.ts` a body for `POST /cells/verify` shaped by the plan's `executionResponseSchema` fields (a child execution just created):
-
-```ts
-export function verifyResponseFixture(at: CellKey) {
-  return {
-    id: 'child-1', definitionId: 'def-1', isChild: true, cell: at, status: 'pending', stage: 'verification', reason: null, resumeAfter: null,
-    startedAt: NOW, finishedAt: null, progress: [], budget: [],
-    estimate: { cells: 1, perProvider: [], totalCostMicroGbp: 0, totalCostPence: 0, seconds: 0, assumptions: [], windowClamped: false },
-    ledger: { calls: 0, costMicroGbp: 0, costPence: 0 },
-  };
-}
-```
-
-`apps/web/test/views/Calendar/panel.test.tsx`:
+`apps/web/test/views/calendar/panel.test.tsx`:
 
 ```tsx
 import { asIsoDate } from '@gmt/core';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CellPanel, cellsForDay } from '../../../src/views/Calendar/CellPanel.js';
-import { PanelPrice } from '../../../src/views/Calendar/PanelPrice.js';
-import { cell, definitionFixture, EWR, hoursBefore, LGW, NOW, price, provenanceCalendar, provenanceVerified, verifyResponseFixture } from '../../support/fixtures.js';
-import { renderWithQuery } from '../../support/render.js';
-import { server, useMswServer } from '../../support/server.js';
+import { API, definition, verifiedRow } from '../../fixtures.js';
+import { server } from '../../msw/server.js';
+import { renderWithProviders } from '../../render.js';
+import { cellAt, hoursBefore, keyOf, priceAt, provenanceCalendar } from '../../fixtures.wp10.js';
 
-useMswServer();
-
-const c = cell('2027-03-14', 14);
+const c = cellAt('2027-03-14', 14);
 const date = asIsoDate('2027-03-14');
+const outcome = (stage: 'discovery' | 'verification', providerId: 'travelpayouts' | 'searchapi', status: 'priced' | 'not_run', extra: Record<string, unknown> = {}) => ({
+  ...keyOf(c), executionId: 'exec-1', stage, providerId, status, reason: null, attempts: status === 'priced' ? 1 : 0, lastError: null,
+  fetchedAt: status === 'priced' ? hoursBefore(2) : null, minPence: status === 'priced' ? 41200 : null, cabin: 'economy',
+  pointOfSale: status === 'priced' ? 'unknown' : null, sourceKind: status === 'priced' ? 'authorised-cached' : null, reusedFromExecutionId: null, ...extra,
+});
+const { cell: _cell, itineraryHash: _hash, ...calendarPrice } = priceAt(41200, provenanceCalendar(2), false, c);
 const detail = {
   cell: c,
-  outcomes: [
-    { executionId: 'exec-1', stage: 'discovery', providerId: 'travelpayouts', status: 'priced', reason: null, attempts: 1, fetchedAt: hoursBefore(NOW, 2), reusedFromExecutionId: 'exec-0' },
-    { executionId: 'exec-1', stage: 'verification', providerId: 'searchapi', status: 'not_run', reason: null, attempts: 0, fetchedAt: null, reusedFromExecutionId: null },
-  ],
-  calendarPrices: [{ ...price(41200, provenanceCalendar(2), false, c), executionId: 'exec-0', reusedFromExecutionId: 'exec-0' }],
-  observations: [{ ...price(52000, provenanceVerified(5), false, c), itineraryHash: 'abc123', seller: 'Example Air', verdictClass: 'verified', booking: { kind: 'none' } }],
+  outcomes: [outcome('discovery', 'travelpayouts', 'priced', { reusedFromExecutionId: 'exec-0' }), outcome('verification', 'searchapi', 'not_run')],
+  calendarPrices: [{ ...calendarPrice, executionId: 'exec-0', calendarPriceId: 7 }],
+  observations: [verifiedRow({ cell: c, seller: 'Example Air', pricePence: 52000 })],
 };
-const cellRoute = '*/definitions/:id/cells/:o/:d/:dep/:ret';
+const cellRoute = `${API}/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`;
 
-function renderPanel(def = definitionFixture(), onClose = vi.fn()) {
-  renderWithQuery(<CellPanel definition={def} date={date} initialCell={c} now={NOW} onClose={onClose} />);
-  return { onClose };
+function renderPanel(def = definition(), onClose = vi.fn()) {
+  const r = renderWithProviders(<CellPanel definition={def} date={date} initialCell={c} onClose={onClose} />);
+  return { onClose, ...r };
 }
 
 describe('View B side panel (spec §11, §10 cells route)', () => {
+  let errors: ReturnType<typeof vi.spyOn>;
+  const prevent = (e: ErrorEvent) => e.preventDefault();
+  beforeEach(() => {
+    errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    window.addEventListener('error', prevent);
+  });
+  afterEach(() => {
+    window.removeEventListener('error', prevent);
+    errors.mockRestore();
+  });
+
   it('lists the cell outcomes per stage and provider, including reuse', async () => {
     server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    renderPanel();
-    const table = await screen.findByRole('table');
+    const { findByRole } = renderPanel();
+    const table = await findByRole('table');
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(rows[0]).toHaveTextContent(/discovery.*Aviasales cache.*priced.*run exec-0/);
-    expect(rows[1]).toHaveTextContent(/itinerary search.*Google Flights via SearchApi.*not searched/);
+    expect(rows[0]).toHaveTextContent(/discovery.*Travelpayouts.*priced.*run exec-0/);
+    expect(rows[1]).toHaveTextContent(/itinerary search.*SearchApi.*not searched/);
   });
 
-  it('shows every price with full provenance; the calendar price is dashed and says constraints not checked', async () => {
+  it('shows every price with its provenance; the calendar price is dashed and says constraints not checked', async () => {
     server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    renderPanel();
-    const dialog = await screen.findByRole('dialog');
+    const { findByRole } = renderPanel();
+    const dialog = await findByRole('dialog');
     await within(dialog).findByText('£412');
-    expect(within(dialog).getAllByTestId('provenance')).toHaveLength(2);
-    expect(dialog).toHaveTextContent('fetched 2h ago · provider age unknown (≤2d before that)');
+    const provs = within(dialog).getAllByTestId('provenance');
+    expect(provs).toHaveLength(2);
+    expect(provs[0]).toHaveClass('border-dashed');
+    expect(provs[0]).toHaveTextContent('constraints not checked');
+    expect(within(provs[0] as HTMLElement).getByTitle('fetched 2h ago · provider age unknown (≤2d before that)')).toBeInTheDocument();
     expect(dialog).toHaveTextContent('itinerary offer · Example Air · verified');
-    const calendarBlock = within(dialog).getByText('£412').closest('[data-testid="panel-price"]');
-    expect(calendarBlock).toHaveClass('border-dashed');
-    expect(calendarBlock).toHaveTextContent('constraints not checked');
   });
 
-  it('a price lacking provenance fails to render (component guard)', () => {
-    render(<PanelPrice price={{ pricePence: 41200, stale: false, ageHours: 2 }} kind="calendar" label="calendar price" now={NOW} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('price withheld: provenance missing');
-    expect(screen.queryByText(/£412/)).toBeNull();
-  });
-
-  it('a price lacking provenance fails to render (api response refused, no amount shown)', async () => {
+  it('a price lacking provenance fails to render: the contract parse refuses the response and no amount appears', async () => {
     const { provenance: _dropped, ...bare } = detail.calendarPrices[0] as (typeof detail.calendarPrices)[number];
     server.use(http.get(cellRoute, () => HttpResponse.json({ ...detail, calendarPrices: [bare], observations: [] })));
-    renderPanel();
-    expect(await screen.findByRole('alert')).toHaveTextContent(/^Could not load the cell/);
-    expect(screen.getByRole('dialog')).not.toHaveTextContent('£');
+    const { findByRole, getByRole } = renderPanel();
+    expect(await findByRole('alert')).toHaveTextContent(/^Could not load:/);
+    expect(getByRole('dialog')).not.toHaveTextContent('£');
   });
 
   it('hides the verify action when the definition has no verification provider', async () => {
     server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    renderPanel(definitionFixture({ providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } } }));
-    await screen.findByRole('table');
-    expect(screen.queryByRole('button', { name: 'Run itinerary search for this cell' })).toBeNull();
+    const { findByRole, queryByRole } = renderPanel(definition({ providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } } }));
+    await findByRole('table');
+    expect(queryByRole('button', { name: 'Search this cell for itineraries' })).toBeNull();
   });
 
-  it('verify posts the definition and cell, then confirms; a 409 says a search is already running', async () => {
-    const user = userEvent.setup();
+  it('verify posts the definition and cell key, then confirms; a 409 says a search is already running', async () => {
     let posted: unknown = null;
     server.use(
       http.get(cellRoute, () => HttpResponse.json(detail)),
-      http.post('*/cells/verify', async ({ request }) => {
+      http.post(`${API}/api/cells/verify`, async ({ request }) => {
         posted = await request.json();
-        return HttpResponse.json(verifyResponseFixture(c));
+        return HttpResponse.json({ executionId: 'child-1' });
       }),
     );
-    renderPanel();
-    await user.click(await screen.findByRole('button', { name: 'Run itinerary search for this cell' }));
-    expect(await screen.findByText('Itinerary search started for this cell; results appear when it finishes.')).toBeInTheDocument();
-    expect(posted).toEqual({ definitionId: 'def-1', cell: c });
+    const { findByRole, findByText, getByRole, user } = renderPanel();
+    await user.click(await findByRole('button', { name: 'Search this cell for itineraries' }));
+    expect(await findByText('Itinerary search started for this cell.')).toBeInTheDocument();
+    expect(posted).toEqual({ definitionId: 'def-0001', cell: keyOf(c) });
 
-    server.use(http.post('*/cells/verify', () => HttpResponse.json({ error: { code: 'conflict', message: 'child active' } }, { status: 409 })));
-    await user.click(screen.getByRole('button', { name: 'Run itinerary search for this cell' }));
-    expect(await screen.findByText('An itinerary search for this cell is already running.')).toBeInTheDocument();
+    server.use(http.post(`${API}/api/cells/verify`, () => HttpResponse.json({ error: { code: 'conflict', message: 'child active' } }, { status: 409 })));
+    await user.click(getByRole('button', { name: 'Search this cell for itineraries' }));
+    expect(await findByText('An itinerary search for this cell is already running.')).toBeInTheDocument();
   });
 
   it('the cell picker lists origins × destinations × nights for the day and fetches the chosen cell', async () => {
-    const user = userEvent.setup();
     const paths: string[] = [];
     server.use(
       http.get(cellRoute, ({ request, params }) => {
         paths.push(new URL(request.url).pathname);
-        return HttpResponse.json({ ...detail, cell: { origin: params.o, destination: params.d, departureDate: params.dep, returnDate: params.ret }, calendarPrices: [], observations: [] });
+        const key = { origin: params.origin, destination: params.destination, departureDate: params.departureDate, returnDate: params.returnDate };
+        return HttpResponse.json({ ...detail, cell: { ...key, nights: 14 }, outcomes: [], calendarPrices: [], observations: [] });
       }),
     );
-    expect(cellsForDay(definitionFixture(), date)).toHaveLength(2 * 2 * 12);
-    renderPanel();
-    const picker = await screen.findByLabelText('Cell');
-    const target = cellsForDay(definitionFixture(), date).findIndex((k) => k.origin === LGW && k.destination === EWR && k.returnDate === '2027-04-04');
+    expect(cellsForDay(definition(), date)).toHaveLength(2 * 2 * 12);
+    const { findByLabelText, getByRole, user } = renderPanel();
+    const picker = await findByLabelText('Cell');
+    const target = cellsForDay(definition(), date).findIndex((k) => k.origin === 'LGW' && k.destination === 'EWR' && k.returnDate === '2027-04-04');
     await user.selectOptions(picker, String(target));
-    await waitFor(() => expect(paths.at(-1)).toMatch(/\/cells\/LGW\/EWR\/2027-03-14\/2027-04-04$/));
-    expect(screen.getByRole('option', { name: 'LGW→EWR · 21 nights · back Sun 4 Apr' })).toBeInTheDocument();
+    await waitFor(() => expect(paths.at(-1)).toMatch(/\/api\/definitions\/def-0001\/cells\/LGW\/EWR\/2027-03-14\/2027-04-04$/));
+    expect(getByRole('option', { name: 'LGW→EWR · 21 nights · back Sun 4 Apr' })).toBeInTheDocument();
   });
 
   it('focuses its heading on open and closes on Escape', async () => {
-    const user = userEvent.setup();
     server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    const { onClose } = renderPanel();
-    expect(screen.getByRole('heading', { name: 'Departing Sun 14 Mar 2027' })).toHaveFocus();
+    const { getByRole, onClose, user } = renderPanel();
+    expect(getByRole('heading', { name: 'Departing Sun 14 Mar 2027' })).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -1802,90 +1767,67 @@ describe('View B side panel (spec §11, §10 cells route)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/panel.test.tsx`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/panel.test.tsx`
 Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/CellPanel.js"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/views/Calendar/PanelPrice.tsx`:
-
-```tsx
-import { effectiveAge, formatAgeFull, type IsoDateTime, priceCellSchema } from '@gmt/core';
-import { Provenance } from '../../components/Provenance.js';
-import { formatPence } from '../../lib/money.js';
-import { calendarStrings } from '../../strings.js';
-
-/**
- * One price in the side panel with its full provenance (spec §3, §11). It takes `unknown` and re-validates: a price without
- * provenance must never render an amount, even if a caller bypasses the api client's schema check (§9 item 6).
- */
-export function PanelPrice({ price, kind, label, now }: { price: unknown; kind: 'calendar' | 'observation'; label: string; now: IsoDateTime }) {
-  const parsed = priceCellSchema.safeParse(price);
-  if (!parsed.success) return <p role="alert" data-testid="price-withheld">{calendarStrings.panel.provenanceMissing}</p>;
-  const p = parsed.data;
-  return (
-    <div data-testid="panel-price" className={`rounded border border-current p-2 ${kind === 'calendar' ? 'border-dashed' : 'border-solid'}`}>
-      <span className="font-semibold">{formatPence(p.pricePence)}</span> <span>{label}</span>
-      {kind === 'calendar' && <span> · {calendarStrings.constraintsNotChecked}</span>}
-      {p.stale && <span> · {calendarStrings.stale}</span>}
-      <Provenance provenance={p.provenance} now={now} />
-      <p className="text-xs">{formatAgeFull(effectiveAge(p.provenance, now))}</p>
-    </div>
-  );
-}
-```
-
 `apps/web/src/views/Calendar/CellPanel.tsx`:
 
 ```tsx
-import { addDays, cellKeyString, type CellKey, daysBetween, type IsoDate, type IsoDateTime } from '@gmt/core';
+import { addDays, type CellKey, cellKeyString, daysBetween, type IsoDate } from '@gmt/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
-import { type CellDetailResponse, type DefinitionResponse, fetchCellDetail, verifyCell } from '../../api/views.js';
-import { formatIsoDate, formatIsoDateShort } from '../../lib/isoDate.js';
+import { api } from '../../api/endpoints.js';
+import { qk } from '../../api/queries.js';
+import type { CellDetailResponse, DefinitionResponse } from '../../api/types.js';
+import { PriceBoundary } from '../../components/PriceBoundary.js';
+import { PriceCell } from '../../components/PriceCell.js';
+import { COPY } from '../../copy.js';
+import { formatDayLong, formatDayShort } from '../../lib/isoDate.js';
 import { formatInstantLondon, instantMs } from '../../lib/time.js';
-import { calendarStrings, providerLabel } from '../../strings.js';
-import { PanelPrice } from './PanelPrice.js';
 
-const S = calendarStrings.panel;
+const P = COPY.calendarView.panel;
 
 /** Every cell departing on `date`: origins × destinations × nights, in generation order (spec §6.1). */
-export function cellsForDay(definition: Pick<DefinitionResponse, 'origins' | 'destinations' | 'minNights' | 'maxNights'>, date: IsoDate): CellKey[] {
+export function cellsForDay(def: Pick<DefinitionResponse, 'origins' | 'destinations' | 'minNights' | 'maxNights'>, date: IsoDate): CellKey[] {
   const out: CellKey[] = [];
-  for (const origin of definition.origins)
-    for (const destination of definition.destinations)
-      for (let n = definition.minNights; n <= definition.maxNights; n += 1) out.push({ origin, destination, departureDate: date, returnDate: addDays(date, n) });
+  for (const origin of def.origins)
+    for (const destination of def.destinations)
+      for (let n = def.minNights; n <= def.maxNights; n += 1) out.push({ origin, destination, departureDate: date, returnDate: addDays(date, n) });
   return out;
 }
 
-export interface CellPanelProps { definition: DefinitionResponse; date: IsoDate; initialCell: CellKey | null; now: IsoDateTime; onClose(): void }
+// why: a day price's cell carries `nights`; the verify request and the picker take the four-field key only.
+const toKey = (c: CellKey): CellKey => ({ origin: c.origin, destination: c.destination, departureDate: c.departureDate, returnDate: c.returnDate });
 
-/** View B side panel: pick a cell of the day, see its outcomes per stage and provider and its prices, and verify it (spec §11, §8.1). */
-export function CellPanel({ definition, date, initialCell, now, onClose }: CellPanelProps) {
+export interface CellPanelProps { definition: DefinitionResponse; date: IsoDate; initialCell: CellKey | null; onClose(): void }
+
+/** View B side panel: pick a cell of the day, see its outcomes per stage and provider and its prices, verify it (spec §11, §8.1). */
+export function CellPanel({ definition, date, initialCell, onClose }: CellPanelProps) {
   const cells = useMemo(() => cellsForDay(definition, date), [definition, date]);
-  const [selected, setSelected] = useState<CellKey | null>(initialCell ?? cells[0] ?? null);
+  const [selected, setSelected] = useState<CellKey | null>(initialCell === null ? (cells[0] ?? null) : toKey(initialCell));
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => headingRef.current?.focus(), []);
   const qc = useQueryClient();
   const key = selected === null ? '' : cellKeyString(selected);
   const detail = useQuery({
-    queryKey: ['cell', definition.id, key],
-    queryFn: () => (selected === null ? Promise.reject(new Error('no cell')) : fetchCellDetail(definition.id, selected)),
+    queryKey: qk.cell(definition.id, key),
+    queryFn: () => (selected === null ? Promise.reject(new Error('no cell')) : api.cellDetail(definition.id, selected)),
     enabled: selected !== null,
   });
   const verify = useMutation({
-    mutationFn: (c: CellKey) => verifyCell(definition.id, c),
+    mutationFn: (c: CellKey) => api.verifyCell({ definitionId: definition.id, cell: c }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['cell', definition.id] });
-      void qc.invalidateQueries({ queryKey: ['calendar', definition.id] });
+      void qc.invalidateQueries({ queryKey: qk.calendar(definition.id) });
     },
   });
   // why: spec §6.9 and §8.1 — the per-cell verify action is hidden when the definition has no verification provider.
   const canVerify = definition.providers.verification.length > 0;
-  const selectedIndex = selected === null ? -1 : cells.findIndex((c) => cellKeyString(c) === key);
-  const note = selected === null ? undefined : definition.destinationNotes[selected.destination];
+  const selectedIndex = cells.findIndex((c) => cellKeyString(c) === key);
 
   return (
     <aside
@@ -1901,76 +1843,83 @@ export function CellPanel({ definition, date, initialCell, now, onClose }: CellP
       className="fixed inset-y-0 right-0 z-10 w-full max-w-md overflow-y-auto border-l bg-white p-4 shadow-lg"
     >
       <div className="flex items-start justify-between gap-2">
-        <h2 id={headingId} ref={headingRef} tabIndex={-1} className="text-lg font-semibold">{S.title(formatIsoDate(date))}</h2>
-        <button type="button" onClick={onClose} className="rounded border px-2">{S.close}</button>
+        <h2 id={headingId} ref={headingRef} tabIndex={-1} className="text-lg font-semibold">{P.title(formatDayLong(date))}</h2>
+        <button type="button" onClick={onClose} className="rounded border px-2">{P.close}</button>
       </div>
       <label className="mt-3 flex flex-col text-sm">
-        {S.cellPicker}
+        {P.cellPicker}
         <select value={selectedIndex >= 0 ? String(selectedIndex) : ''} onChange={(e) => setSelected(cells[Number(e.target.value)] ?? null)} className="rounded border px-2 py-1">
           {cells.map((c, i) => (
             <option key={cellKeyString(c)} value={String(i)}>
-              {S.cellOption(c.origin, c.destination, daysBetween(c.departureDate, c.returnDate), formatIsoDateShort(c.returnDate))}
+              {P.cellOption(c.origin, c.destination, daysBetween(c.departureDate, c.returnDate), formatDayShort(c.returnDate))}
             </option>
           ))}
         </select>
       </label>
-      {note !== undefined && <p className="mt-2 text-sm">{S.note}: {note}</p>}
-      {selected !== null && detail.isPending && <p role="status">{S.loading}</p>}
-      {detail.isError && <p role="alert">{S.error(detail.error.message)}</p>}
-      {detail.data !== undefined && <CellDetailBody detail={detail.data} now={now} />}
-      {canVerify && selected !== null && (
+      {selected !== null && detail.isPending ? <p role="status">{COPY.loading}</p> : null}
+      {detail.isError ? <p role="alert">{COPY.loadFailed(detail.error.message)}</p> : null}
+      {detail.data !== undefined ? <CellDetailBody detail={detail.data} note={definition.destinationNotes[detail.data.cell.destination] ?? null} /> : null}
+      {canVerify && selected !== null ? (
         <div className="mt-4">
-          <button type="button" disabled={verify.isPending} onClick={() => verify.mutate(selected)} className="rounded bg-zinc-900 px-3 py-1 text-white">
-            {S.verify}
+          <button type="button" disabled={verify.isPending} onClick={() => verify.mutate(selected)} className="rounded bg-slate-900 px-3 py-1 text-white">
+            {COPY.verifyCell}
           </button>
-          {verify.isSuccess && <p role="status">{S.verifyStarted}</p>}
-          {verify.isError && <p role="alert">{verify.error instanceof ApiError && verify.error.status === 409 ? S.verifyConflict : S.verifyFailed(verify.error.message)}</p>}
+          {verify.isSuccess ? <p role="status">{COPY.verifyStarted}</p> : null}
+          {verify.isError ? (
+            <p role="alert">{verify.error instanceof ApiError && verify.error.status === 409 ? P.verifyConflict : COPY.actionFailed(verify.error.message)}</p>
+          ) : null}
         </div>
-      )}
+      ) : null}
     </aside>
   );
 }
 
-function CellDetailBody({ detail, now }: { detail: CellDetailResponse; now: IsoDateTime }) {
+function CellDetailBody({ detail, note }: { detail: CellDetailResponse; note: string | null }) {
   const empty = detail.calendarPrices.length + detail.observations.length === 0;
   return (
     <>
-      <h3 className="mt-4 font-medium">{S.outcomes}</h3>
+      <h3 className="mt-4 font-medium">{P.outcomes}</h3>
       <table className="w-full text-xs">
         <thead>
           <tr>
             {(['stage', 'provider', 'status', 'reason', 'attempts', 'fetched', 'reused'] as const).map((k) => (
-              <th key={k} scope="col" className="text-left">{S.columns[k]}</th>
+              <th key={k} scope="col" className="text-left">{P.columns[k]}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {detail.outcomes.map((o) => (
             <tr key={`${o.executionId}|${o.stage}|${o.providerId}`}>
-              <td>{S.stage[o.stage]}</td>
-              <td>{providerLabel(o.providerId)}</td>
-              <td>{S.status[o.status]}</td>
-              <td>{o.reason ?? '—'}</td>
+              <td>{COPY.stageName[o.stage]}</td>
+              <td>{COPY.provider[o.providerId]}</td>
+              <td>{COPY.bucket[o.status]}</td>
+              <td>{o.reason ?? P.dash}</td>
               <td>{o.attempts}</td>
-              <td>{o.fetchedAt === null ? '—' : formatInstantLondon(instantMs(o.fetchedAt))}</td>
-              <td>{o.reusedFromExecutionId === null ? S.notReused : S.reusedFrom(o.reusedFromExecutionId)}</td>
+              <td>{o.fetchedAt === null ? P.dash : formatInstantLondon(instantMs(o.fetchedAt))}</td>
+              <td>{o.reusedFromExecutionId === null ? P.dash : P.reusedFrom(o.reusedFromExecutionId)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <h3 className="mt-4 font-medium">{S.prices}</h3>
+      <h3 className="mt-4 font-medium">{P.prices}</h3>
       {empty ? (
-        <p>{S.noPrices}</p>
+        <p>{P.noPrices}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {detail.calendarPrices.map((p) => (
-            <li key={`cal-${p.executionId}-${p.provenance.providerId}`}>
-              <PanelPrice price={p} kind="calendar" label={S.calendarPrice} now={now} />
+            <li key={`cal-${p.calendarPriceId}`}>
+              <span className="text-xs">{COPY.calendarView.calendarPrice}</span>
+              <PriceBoundary>
+                <PriceCell pricePence={p.pricePence} provenance={p.provenance} calendar stale={p.stale} destination={detail.cell.destination} destinationNote={note} />
+              </PriceBoundary>
             </li>
           ))}
           {detail.observations.map((o) => (
-            <li key={`obs-${o.itineraryHash}-${o.seller}`}>
-              <PanelPrice price={o} kind="observation" label={S.observation(o.seller, o.verdictClass)} now={now} />
+            <li key={`obs-${o.observationId ?? o.itineraryHash}-${o.seller ?? ''}`}>
+              <span className="text-xs">{P.observation(o.seller ?? COPY.none, COPY.classLabel[o.verdictClass])}</span>
+              <PriceBoundary>
+                <PriceCell pricePence={o.pricePence} provenance={o.provenance} calendar={o.basis === 'calendar'} stale={o.stale} destination={o.cell.destination} destinationNote={note} />
+              </PriceBoundary>
             </li>
           ))}
         </ul>
@@ -1982,132 +1931,137 @@ function CellDetailBody({ detail, now }: { detail: CellDetailResponse; now: IsoD
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/panel.test.tsx`
-Expected: PASS, 8 tests.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/panel.test.tsx test/copy`
+Expected: PASS. The panel file passes 7 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp10: side panel with outcomes, provenance-guarded prices and per-cell verify"
+git add apps/web && git commit -m "wp10: side panel with outcomes, provenance-checked prices and per-cell verify"
 ```
 
 ### Task 10.7: Calendar view (data, destination filter, basis toggle, states)
 
 **Files:**
-- Create: `apps/web/src/views/Calendar/CalendarView.tsx`, `apps/web/test/views/Calendar/view.test.tsx`
+- Create: `apps/web/src/views/Calendar/CalendarView.tsx`, `apps/web/test/views/calendar/view.test.tsx`
 
 **Interfaces:**
-- Consumes: `fetchCalendar`, `ViewHeader` (WP9), `CalendarGrid`, `CalendarLegend`, `buildCalendarModel`, `totalReused`, `ReusedNote`, and `CellPanel` (Task 10.6).
-- Produces: `CalendarView({ definition, now? })`.
+- Consumes: `api.calendar`, `qk.calendar`, `ViewHeader`, `useNow`, `CalendarGrid`, `CalendarLegend`, `CellPanel`, `buildCalendarModel`, `sliceForDestination`, `totalReused`, `ReusedNote`.
+- Produces: `CalendarView({ definition })`.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/Calendar/view.test.tsx`:
+`apps/web/test/views/calendar/view.test.tsx`:
 
 ```tsx
-import { screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { asIata } from '@gmt/core';
+import { waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import type { CalendarDay } from '../../../src/api/types.js';
 import { CalendarView } from '../../../src/views/Calendar/CalendarView.js';
-import type { CalendarDay } from '../../../src/views/Calendar/types.js';
-import { buckets, cell, day, definitionFixture, EWR, JFK, NOW, price, provenanceCalendar } from '../../support/fixtures.js';
-import { renderWithQuery } from '../../support/render.js';
-import { server, useMswServer } from '../../support/server.js';
+import { API, definition } from '../../fixtures.js';
+import { server } from '../../msw/server.js';
+import { renderWithProviders } from '../../render.js';
+import { cellAt, day, disc, priceAt, provenanceCalendar } from '../../fixtures.wp10.js';
 
-useMswServer();
-
-const body = (days: CalendarDay[]) => ({ days, executions: [{ id: 'exec-1', status: 'completed', ageHours: 2 }] });
-const jfk = price(41200, provenanceCalendar(2), false, cell('2027-03-14', 14, undefined, JFK));
-const ewr = price(39900, provenanceCalendar(2), false, cell('2027-03-14', 14, undefined, EWR));
+const body = (days: CalendarDay[]) => ({
+  days,
+  executions: [{ id: 'exec-0001', status: 'completed', isChild: false, startedAt: '2026-10-14T12:00:00.000Z', finishedAt: '2026-10-14T13:00:00.000Z', ageHours: 2 }],
+  staleAfterHours: 192,
+  calendarStaleAfterHours: { travelpayouts: 216, searchapi: 192, fixture: 168 },
+});
+const jfk = priceAt(41200, provenanceCalendar(2), false, cellAt('2027-03-14', 14, 'LHR', 'JFK'));
+const ewr = priceAt(39900, provenanceCalendar(2), false, cellAt('2027-03-14', 14, 'LHR', 'EWR'));
+const { cell: _a, itineraryHash: _b, ...jfkBare } = jfk;
+const { cell: _c, itineraryHash: _d, ...ewrBare } = ewr;
 const mixedDay = day('2027-03-14', {
   cheapestCalendar: ewr,
-  discovery: [{ providerId: 'travelpayouts', buckets: buckets({ priced: 40, no_data: 8, reused: 3 }) }],
+  discovery: [disc('travelpayouts', { priced: 40, no_data: 8, reused: 3 })],
   byDestination: [
-    { destination: JFK, discovery: [{ providerId: 'travelpayouts', buckets: buckets({ priced: 20, no_data: 4, reused: 1 }) }], verification: null, cheapestVerified: null, cheapestPartiallyVerified: null, cheapestCalendar: jfk },
-    { destination: EWR, discovery: [{ providerId: 'travelpayouts', buckets: buckets({ priced: 20, no_data: 4, reused: 2 }) }], verification: null, cheapestVerified: null, cheapestPartiallyVerified: null, cheapestCalendar: ewr },
+    { destination: asIata('JFK'), cheapestVerified: null, cheapestCalendar: jfkBare },
+    { destination: asIata('EWR'), cheapestVerified: null, cheapestCalendar: ewrBare },
   ],
 });
 const ewrOnlyDay = day('2027-03-15', {
-  cheapestCalendar: price(45000, provenanceCalendar(2), false, cell('2027-03-15', 14, undefined, EWR)),
-  byDestination: [{ destination: EWR, discovery: [], verification: null, cheapestVerified: null, cheapestPartiallyVerified: null, cheapestCalendar: price(45000, provenanceCalendar(2), false, cell('2027-03-15', 14, undefined, EWR)) }],
+  cheapestCalendar: priceAt(45000, provenanceCalendar(2), false, cellAt('2027-03-15', 14, 'LHR', 'EWR')),
+  byDestination: [{ destination: asIata('EWR'), cheapestVerified: null, cheapestCalendar: ewrBare }],
 });
-const calendarRoute = '*/definitions/:id/calendar';
+const route = `${API}/api/definitions/:id/calendar`;
+const at = (d: string) => document.querySelector(`[data-date="${d}"]`) as HTMLElement;
 
 describe('Calendar view (spec §11 View B)', () => {
   it('shows an explicit loading state, then the grid', async () => {
-    server.use(http.get(calendarRoute, async () => { await delay(30); return HttpResponse.json(body([mixedDay])); }));
-    renderWithQuery(<CalendarView definition={definitionFixture()} now={NOW} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading calendar…');
-    expect(await screen.findByRole('grid', { name: 'March 2027' })).toBeInTheDocument();
+    server.use(http.get(route, async () => { await delay(30); return HttpResponse.json(body([mixedDay])); }));
+    const { getByRole, findByRole } = renderWithProviders(<CalendarView definition={definition()} />);
+    expect(getByRole('status')).toHaveTextContent('Loading…');
+    expect(await findByRole('grid', { name: 'March 2027' })).toBeInTheDocument();
   });
 
   it('shows an error state naming the failure', async () => {
-    server.use(http.get(calendarRoute, () => HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })));
-    renderWithQuery(<CalendarView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/^Could not load the calendar/);
+    server.use(http.get(route, () => HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })));
+    const { findByRole } = renderWithProviders(<CalendarView definition={definition()} />);
+    expect(await findByRole('alert')).toHaveTextContent('Could not load: boom');
   });
 
   it('shows the empty state when there are no days', async () => {
-    server.use(http.get(calendarRoute, () => HttpResponse.json(body([]))));
-    renderWithQuery(<CalendarView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByText('No days to show yet. The calendar fills in as cells are searched.')).toBeInTheDocument();
+    server.use(http.get(route, () => HttpResponse.json(body([]))));
+    const { findByText } = renderWithProviders(<CalendarView definition={definition()} />);
+    expect(await findByText('No days to show yet. The calendar fills in as cells are searched.')).toBeInTheDocument();
   });
 
-  it('the header carries the reused count for the visible slices', async () => {
-    server.use(http.get(calendarRoute, () => HttpResponse.json(body([mixedDay]))));
-    renderWithQuery(<CalendarView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByText('(3 reused from earlier runs)')).toBeInTheDocument();
+  it('the header names the run and carries the reused count', async () => {
+    server.use(http.get(route, () => HttpResponse.json(body([mixedDay]))));
+    const { findByText, getByText } = renderWithProviders(<CalendarView definition={definition()} />);
+    expect(await findByText('(3 reused from earlier runs)')).toBeInTheDocument();
+    expect(getByText(/run exec-000/)).toBeInTheDocument();
   });
 
   it('the destination filter swaps every day to that destination and says when a day has none', async () => {
-    const user = userEvent.setup();
-    server.use(http.get(calendarRoute, () => HttpResponse.json(body([mixedDay, ewrOnlyDay]))));
-    renderWithQuery(<CalendarView definition={definitionFixture()} now={NOW} />);
-    const d14 = () => document.querySelector('[data-date="2027-03-14"]') as HTMLElement;
-    const d15 = () => document.querySelector('[data-date="2027-03-15"]') as HTMLElement;
-    await screen.findByRole('grid', { name: 'March 2027' });
-    expect(within(d14()).getByTestId('day-price')).toHaveTextContent('£399');
-    await user.selectOptions(screen.getByLabelText('Destination'), 'JFK');
-    expect(within(d14()).getByTestId('day-price')).toHaveTextContent('£412');
-    expect(d15()).toHaveTextContent('no cells for this destination');
-    expect(screen.getByText('(1 reused from earlier runs)')).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText('Destination'), 'EWR');
-    expect(within(d14()).getByTestId('day-price')).toHaveTextContent('£399');
+    server.use(http.get(route, () => HttpResponse.json(body([mixedDay, ewrOnlyDay]))));
+    const { findByRole, getByLabelText, user } = renderWithProviders(<CalendarView definition={definition()} />);
+    await findByRole('grid', { name: 'March 2027' });
+    expect(within(at('2027-03-14')).getByTestId('day-price-block')).toHaveTextContent('£399');
+    await user.selectOptions(getByLabelText('Destination'), 'JFK');
+    expect(within(at('2027-03-14')).getByTestId('day-price-block')).toHaveTextContent('£412');
+    expect(at('2027-03-14')).toHaveTextContent('counts cover all destinations');
+    expect(at('2027-03-15')).toHaveTextContent('no cells for this destination');
+    await user.selectOptions(getByLabelText('Destination'), 'EWR');
+    expect(within(at('2027-03-14')).getByTestId('day-price-block')).toHaveTextContent('£399');
   });
 
-  it('defaults the colour basis to calendar and disables verified when the definition has no verification provider', async () => {
-    server.use(http.get(calendarRoute, () => HttpResponse.json(body([mixedDay]))));
-    const def = definitionFixture({ providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } } });
-    renderWithQuery(<CalendarView definition={def} now={NOW} />);
-    expect(await screen.findByRole('radio', { name: 'calendar prices' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'verified prices' })).toBeDisabled();
+  it('defaults the colour basis to calendar and disables the itinerary-search basis without a verification provider', async () => {
+    server.use(http.get(route, () => HttpResponse.json(body([mixedDay]))));
+    const def = definition({ providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: { travelpayouts: 168 } } });
+    const { findByRole, getByRole } = renderWithProviders(<CalendarView definition={def} />);
+    expect(await findByRole('radio', { name: 'calendar basis' })).toBeChecked();
+    expect(getByRole('radio', { name: 'itinerary-search basis' })).toBeDisabled();
+    expect(at('2027-03-14')).toHaveTextContent('itinerary search: no verification provider configured');
   });
 
   it('Enter opens the side panel for the day; Escape closes it and focus returns to the day', async () => {
-    const user = userEvent.setup();
     server.use(
-      http.get(calendarRoute, () => HttpResponse.json(body([mixedDay]))),
-      http.get('*/definitions/:id/cells/:o/:d/:dep/:ret', ({ params }) =>
-        HttpResponse.json({ cell: { origin: params.o, destination: params.d, departureDate: params.dep, returnDate: params.ret }, outcomes: [], calendarPrices: [], observations: [] }),
+      http.get(route, () => HttpResponse.json(body([mixedDay]))),
+      http.get(`${API}/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`, ({ params }) =>
+        HttpResponse.json({ cell: { origin: params.origin, destination: params.destination, departureDate: params.departureDate, returnDate: params.returnDate, nights: 14 }, outcomes: [], calendarPrices: [], observations: [] }),
       ),
     );
-    renderWithQuery(<CalendarView definition={definitionFixture()} now={NOW} />);
-    await screen.findByRole('grid', { name: 'March 2027' });
+    const { findByRole, queryByRole, user } = renderWithProviders(<CalendarView definition={definition()} />);
+    await findByRole('grid', { name: 'March 2027' });
     // why: focus the day directly; tabbing would first reach the filter controls above the grid.
-    (document.querySelector('[data-date="2027-03-14"]') as HTMLElement).focus();
+    at('2027-03-14').focus();
     await user.keyboard('{Enter}');
-    expect(await screen.findByRole('dialog', { name: 'Departing Sun 14 Mar 2027' })).toBeInTheDocument();
+    expect(await findByRole('dialog', { name: 'Departing Sun 14 Mar 2027' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(document.querySelector('[data-date="2027-03-14"]')).toHaveFocus();
+    await waitFor(() => expect(queryByRole('dialog')).toBeNull());
+    expect(at('2027-03-14')).toHaveFocus();
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar/view.test.tsx`
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/view.test.tsx`
 Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/CalendarView.js"`.
 
 - [ ] **Step 3: Implement**
@@ -2115,48 +2069,46 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/Calen
 `apps/web/src/views/Calendar/CalendarView.tsx`:
 
 ```tsx
-import { asIata, type CellKey, type Iata, type IsoDate, type IsoDateTime } from '@gmt/core';
+import { type CellKey, type Iata, type IsoDate } from '@gmt/core';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { type DefinitionResponse, fetchCalendar } from '../../api/views.js';
+import { api } from '../../api/endpoints.js';
+import { qk } from '../../api/queries.js';
+import type { DefinitionResponse } from '../../api/types.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
-import { nowIso } from '../../lib/time.js';
-import { calendarStrings } from '../../strings.js';
+import { COPY } from '../../copy.js';
+import { useNow } from '../../now.js';
 import { CalendarGrid } from './CalendarGrid.js';
 import { CalendarLegend } from './CalendarLegend.js';
 import { CellPanel } from './CellPanel.js';
 import { ReusedNote } from './DayMarker.js';
-import { buildCalendarModel, type GridDay } from './display.js';
-import { totalReused } from './marker.js';
-import type { DayBasis } from './types.js';
+import { buildCalendarModel } from './display.js';
+import { sliceForDestination, totalReused } from './marker.js';
+import type { DayBasis, GridDay } from './types.js';
 
 /** View B: the calendar heatmap for one definition (spec §11 View B, §10 calendar route). */
-export function CalendarView({ definition, now: nowProp }: { definition: DefinitionResponse; now?: IsoDateTime }) {
-  // why: one "now" per mount keeps ages and the colour model stable across re-renders.
-  const [now] = useState<IsoDateTime>(() => nowProp ?? nowIso());
-  const q = useQuery({ queryKey: ['calendar', definition.id], queryFn: () => fetchCalendar(definition.id) });
+export function CalendarView({ definition }: { definition: DefinitionResponse }) {
+  const now = useNow();
+  const q = useQuery({ queryKey: qk.calendar(definition.id), queryFn: () => api.calendar(definition.id) });
   const [destination, setDestination] = useState<Iata | 'all'>('all');
   const [chosenBasis, setChosenBasis] = useState<DayBasis | null>(null);
   const [open, setOpen] = useState<{ date: IsoDate; cell: CellKey | null } | null>(null);
   const hasVerification = definition.providers.verification.length > 0;
 
   const days = useMemo<GridDay[]>(
-    () =>
-      (q.data?.days ?? []).map((d) => ({
-        date: d.date,
-        slice: destination === 'all' ? d : (d.byDestination.find((x) => x.destination === destination) ?? null),
-      })),
-    [q.data, destination],
+    () => (q.data?.days ?? []).map((d) => ({ date: d.date, slice: sliceForDestination(d, destination, hasVerification) })),
+    [q.data, destination, hasVerification],
   );
-  // why: §6.9 — calendar is the default when there is no verification provider or nothing verified to colour by.
+  // why: §6.9 — calendar is the default when there is no verification provider or nothing class-verified to colour by.
   const defaultBasis: DayBasis = hasVerification && days.some((d) => d.slice?.cheapestVerified != null) ? 'verified' : 'calendar';
   const colourBasis = chosenBasis ?? defaultBasis;
   const model = useMemo(() => buildCalendarModel(days, colourBasis, now), [days, colourBasis, now]);
 
-  if (q.isPending) return <p role="status">{calendarStrings.loading}</p>;
-  if (q.isError) return <p role="alert">{calendarStrings.error(q.error.message)}</p>;
+  if (q.isPending) return <p role="status">{COPY.loading}</p>;
+  if (q.isError) return <p role="alert">{COPY.loadFailed(q.error.message)}</p>;
 
   const slices = days.flatMap((d) => (d.slice === null ? [] : [d.slice]));
+  const shown = [...model.displays.values()].filter((d) => d.kind === 'price');
   const closePanel = () => {
     const date = open?.date;
     setOpen(null);
@@ -2164,44 +2116,42 @@ export function CalendarView({ definition, now: nowProp }: { definition: Definit
   };
 
   return (
-    <section aria-label={calendarStrings.title} className="flex flex-col gap-4">
-      <ViewHeader title={calendarStrings.title} executions={q.data.executions}>
-        <ReusedNote count={totalReused(slices)} />
-      </ViewHeader>
+    <section aria-label={COPY.calendarView.title} className="flex flex-col gap-4">
+      <ViewHeader title={COPY.calendarView.title} executions={q.data.executions} stale={shown.length > 0 && shown.every((d) => d.kind === 'price' && d.stale)} />
+      <ReusedNote count={totalReused(slices)} />
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col text-sm">
-          {calendarStrings.destinationFilter}
+          {COPY.calendarView.destinationFilter}
           <select
             value={destination}
-            // why: option values come from the definition's own destinations, never free text, so asIata cannot throw here.
-            onChange={(e) => setDestination(e.target.value === 'all' ? 'all' : asIata(e.target.value))}
+            onChange={(e) => setDestination(definition.destinations.find((d) => d === e.target.value) ?? 'all')}
             className="rounded border px-2 py-1"
           >
-            <option value="all">{calendarStrings.allDestinations}</option>
+            <option value="all">{COPY.calendarView.allDestinations}</option>
             {definition.destinations.map((d) => (
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
         </label>
         <fieldset className="text-sm">
-          <legend>{calendarStrings.colourBy}</legend>
+          <legend>{COPY.calendarView.colourBy}</legend>
           {(['verified', 'calendar'] as const).map((b) => (
             <label key={b} className="mr-3">
               <input type="radio" name="colour-basis" value={b} checked={colourBasis === b} disabled={b === 'verified' && !hasVerification} onChange={() => setChosenBasis(b)} />{' '}
-              {calendarStrings.colourByOption[b]}
+              {COPY.basisName[b]}
             </label>
           ))}
         </fieldset>
       </div>
       {days.length === 0 ? (
-        <p>{calendarStrings.empty}</p>
+        <p>{COPY.calendarView.empty}</p>
       ) : (
         <>
-          <CalendarGrid days={days} model={model} now={now} destinationNotes={definition.destinationNotes} onOpen={(date, cell) => setOpen({ date, cell })} />
+          <CalendarGrid days={days} model={model} destinationNotes={definition.destinationNotes} onOpen={(date, cell) => setOpen({ date, cell })} />
           <CalendarLegend model={model} />
         </>
       )}
-      {open !== null && <CellPanel definition={definition} date={open.date} initialCell={open.cell} now={now} onClose={closePanel} />}
+      {open !== null ? <CellPanel definition={definition} date={open.date} initialCell={open.cell} onClose={closePanel} /> : null}
     </section>
   );
 }
@@ -2209,8 +2159,8 @@ export function CalendarView({ definition, now: nowProp }: { definition: Definit
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Calendar`
-Expected: PASS (marker, display, scale, grid, panel, view; 47 tests).
+Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar test/copy`
+Expected: PASS. The calendar files pass 48 tests (marker 8, display 10, scale 8, grid 8, panel 7, view 7).
 
 - [ ] **Step 5: Commit**
 
@@ -2221,63 +2171,42 @@ git add apps/web && git commit -m "wp10: calendar view with destination filter, 
 ### Task 10.8: The TZ suite (review focus 3, pinned)
 
 **Files:**
-- Create: `apps/web/test/setup-tz.ts`, `apps/web/test/tz/dates.tz.test.tsx`
-- Modify: `apps/web/test/support/fixtures.ts` (add `resultRowFixture`, `resultsBodyFixture`), `apps/web/vitest.config.ts`, `apps/web/package.json` (scripts), WP9's Results date columns (`apps/web/src/views/Results/columns.tsx`) to render with `formatIsoDateShort`
+- Create: `apps/web/test/setup-tz.ts`, `apps/web/test/setup-charts.ts` (empty module for now, `export {};`; Task 10.9 fills it), `apps/web/test/tz/dates.tz.test.tsx`
+- Modify: `apps/web/vitest.config.ts`, `apps/web/package.json` (scripts)
 
 **Interfaces:**
-- Consumes: `CalendarGrid`, `buildCalendarModel`, `formatIsoDate`, `ResultsView` (WP9).
-- Produces: the `test:tz` script; the `test` script that runs coverage, then `test:tz`.
+- Consumes: `CalendarGrid`, `buildCalendarModel`, `formatDayLong`, WP9's `ResultsView`, `formatIsoDate`, `resultsResponse`, `calendarRow`.
+- Produces: the `test:tz` script, and `test`, which runs coverage and then `test:tz`.
 
-The suite proves the zone in two ways. The `test:tz` script runs the TZ suite and the calendar tests twice, as whole processes with `GMT_TEST_TZ=America/Los_Angeles` and then `GMT_TEST_TZ=Asia/Tokyo`. `test/setup-tz.ts` copies that value into `process.env.TZ` before any test module is imported. Inside the TZ suite, `describe.each` also switches `process.env.TZ` per block, so the root `pnpm test` (one process, the machine's zone) still exercises both zones. Each block first asserts that the zone took effect (`Intl` resolved zone and the January UTC offset), so the suite cannot pass vacuously under UTC.
+The suite proves the zone two ways:
+
+- The `test:tz` script runs the TZ suite and the calendar tests as whole processes, twice: once with `GMT_TEST_TZ=America/Los_Angeles`, once with `GMT_TEST_TZ=Asia/Tokyo`. `test/setup-tz.ts` copies that value into `process.env.TZ` before any test module is imported.
+- Inside the suite, `describe.each` switches `process.env.TZ` per block, so the root `pnpm test` (one process, in the machine's zone) covers both zones too.
+
+Each block first asserts that the zone took effect (the resolved `Intl` zone and the January UTC offset), and runs a control showing that a naive `Date` would move the day. Neither half can pass vacuously.
 
 - [ ] **Step 1: Write the failing test**
-
-Append to `apps/web/test/support/fixtures.ts` a Results row and body (the row is the plan's Task 0.8 contract-test row with provenance added):
-
-```ts
-export function resultRowFixture(partial: Record<string, unknown> = {}) {
-  return {
-    itineraryHash: 'abc123', basis: 'calendar', verdictClass: 'unchecked', pricePence: 41200,
-    provenance: provenanceCalendar(2), stale: false, ageHours: 50,
-    cell: { origin: 'LHR', destination: 'JFK', departureDate: '2027-03-14', returnDate: '2027-03-28', nights: 14 },
-    outbound: null, inbound: null, totalMinutes: null, stopsOut: null, stopsIn: null, carriers: [], verdicts: {}, unverified: [],
-    notApplied: ['arrivalWindowLocal'], booking: { kind: 'none' },
-    searchLink: { url: 'https://www.aviasales.com/search/LON1403NYC28031', host: 'www.aviasales.com', label: 'search link, not a fare link' },
-    otherOffers: [], notSeenInLatest: null, adjustedPence: null, destinationNote: null, bandCheapest: true,
-    ...partial,
-  };
-}
-
-export function resultsBodyFixture() {
-  return {
-    rows: [resultRowFixture()], total: 1, truncated: false, basis: 'calendar', basisReason: 'no observations yet',
-    executions: [{ id: 'exec-1', status: 'completed', ageHours: 2 }],
-    coverage: { buckets: buckets({ priced: 1 }), total: 1, selected: 0, itinerarySearched: 0, onDemand: 0 }, excludedByCurrentSpace: 0,
-  };
-}
-```
 
 `apps/web/test/tz/dates.tz.test.tsx`:
 
 ```tsx
-import { asIsoDate } from '@gmt/core';
-import { render, screen } from '@testing-library/react';
+import { asIata, asIsoDate } from '@gmt/core';
 import { http, HttpResponse } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { formatIsoDate, formatIsoDateShort } from '../../src/lib/isoDate.js';
+import { formatIsoDate } from '../../src/format.js';
+import { formatDayLong } from '../../src/lib/isoDate.js';
 import { CalendarGrid } from '../../src/views/Calendar/CalendarGrid.js';
-import { buildCalendarModel, type GridDay } from '../../src/views/Calendar/display.js';
+import { buildCalendarModel } from '../../src/views/Calendar/display.js';
 import { ResultsView } from '../../src/views/Results/ResultsView.js';
-import { cell, day, definitionFixture, NOW, price, provenanceVerified, resultsBodyFixture } from '../support/fixtures.js';
-import { renderWithQuery } from '../support/render.js';
-import { server, useMswServer } from '../support/server.js';
-
-useMswServer();
+import { API, calendarRow, definition, resultsResponse } from '../fixtures.js';
+import { server } from '../msw/server.js';
+import { NOW, renderWithProviders } from '../render.js';
+import { cellAt, gridDay, priceAt, provenanceVerified } from '../fixtures.wp10.js';
 
 const ZONES = ['America/Los_Angeles', 'Asia/Tokyo'] as const;
 // why: the 2027-01-01 offsets prove the zone is in effect, so these tests cannot pass vacuously in UTC.
 const JAN_OFFSET_MINUTES = { 'America/Los_Angeles': 480, 'Asia/Tokyo': -540 } as const;
-// why: the control proves the bug this suite guards against is real in each zone (a naive Date moves the day).
+// why: the control proves the bug is real in each zone: a naive Date moves the day.
 const NAIVE_SHIFT = {
   'America/Los_Angeles': { input: '2027-03-14', localDay: 13 },
   'Asia/Tokyo': { input: '2027-03-14T20:00:00.000Z', localDay: 15 },
@@ -2304,18 +2233,18 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
   });
 
   it('formatting comes from the string: DST-change days and the leap day keep their date and weekday', () => {
-    expect(formatIsoDate(asIsoDate('2027-03-14'))).toBe('Sun 14 Mar 2027'); // US DST starts
-    expect(formatIsoDate(asIsoDate('2027-03-28'))).toBe('Sun 28 Mar 2027'); // UK DST starts
-    expect(formatIsoDate(asIsoDate('2027-10-31'))).toBe('Sun 31 Oct 2027'); // UK DST ends
-    expect(formatIsoDate(asIsoDate('2028-02-29'))).toBe('Tue 29 Feb 2028');
+    expect(formatDayLong(asIsoDate('2027-03-14'))).toBe('Sun 14 Mar 2027'); // US DST starts
+    expect(formatDayLong(asIsoDate('2027-03-28'))).toBe('Sun 28 Mar 2027'); // UK DST starts
+    expect(formatDayLong(asIsoDate('2027-10-31'))).toBe('Sun 31 Oct 2027'); // UK DST ends
+    expect(formatDayLong(asIsoDate('2028-02-29'))).toBe('Tue 29 Feb 2028');
+    expect(formatIsoDate('2027-03-14')).toBe('14 Mar 2027'); // WP9's Results formatter
   });
 
   it('the calendar grid renders each day under its own date and weekday', () => {
-    const days: GridDay[] = ['2027-03-13', '2027-03-14', '2027-03-15', '2027-03-28', '2027-03-31', '2027-04-01'].map((d) => ({
-      date: asIsoDate(d),
-      slice: day(d, { cheapestVerified: price(41200, provenanceVerified(5), false, cell(d, 14)) }),
-    }));
-    render(<CalendarGrid days={days} model={buildCalendarModel(days, 'verified', NOW)} now={NOW} destinationNotes={{}} onOpen={() => undefined} />);
+    const days = ['2027-03-13', '2027-03-14', '2027-03-15', '2027-03-28', '2027-04-01'].map((d) =>
+      gridDay(d, { cheapestVerified: priceAt(41200, provenanceVerified(5), false, cellAt(d, 14)) }),
+    );
+    renderWithProviders(<CalendarGrid days={days} model={buildCalendarModel(days, 'verified', NOW)} destinationNotes={{}} onOpen={() => undefined} />);
     const at = (d: string) => document.querySelector(`[data-date="${d}"]`) as HTMLTableCellElement;
     expect(at('2027-03-13').cellIndex).toBe(5);
     expect(at('2027-03-14').cellIndex).toBe(6);
@@ -2328,11 +2257,12 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
   });
 
   it('the Results date columns render departure and return from their strings', async () => {
-    server.use(http.get('*/definitions/:id/results', () => HttpResponse.json(resultsBodyFixture())));
-    renderWithQuery(<ResultsView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByText(formatIsoDateShort(asIsoDate('2027-03-14')))).toBeInTheDocument();
-    expect(screen.getByText(formatIsoDateShort(asIsoDate('2027-03-28')))).toBeInTheDocument();
-    expect(screen.queryByText(/\b13 Mar\b|\b15 Mar\b|\b27 Mar\b|\b29 Mar\b/)).toBeNull();
+    const row = calendarRow({ cell: { origin: asIata('LHR'), destination: asIata('JFK'), departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-28'), nights: 14 } });
+    server.use(http.get(`${API}/api/definitions/:id/results`, () => HttpResponse.json(resultsResponse({ rows: [row], total: 1 }))));
+    const { findAllByText, queryAllByText } = renderWithProviders(<ResultsView definition={definition()} />);
+    expect((await findAllByText(/14 Mar 2027/)).length).toBeGreaterThan(0);
+    expect((await findAllByText(/28 Mar 2027/)).length).toBeGreaterThan(0);
+    expect(queryAllByText(/\b(13|15) Mar 2027\b|\b(27|29) Mar 2027\b/)).toHaveLength(0);
   });
 });
 ```
@@ -2341,8 +2271,8 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
 
 ```ts
 // Review focus 3. Vitest runs setupFiles in each worker before importing the test file, so no Date exists yet.
-// The test:tz script sets GMT_TEST_TZ; Node applies an assignment to process.env.TZ to Date and Intl at once.
-// why: a separate variable (not TZ itself) lets the script name the zone explicitly without inheriting a stray shell TZ.
+// The test:tz script sets GMT_TEST_TZ; Node applies an assignment to process.env.TZ to Date and Intl immediately.
+// why: a separate variable (not TZ itself) makes the zone explicit and immune to a stray shell TZ.
 const forced = process.env.GMT_TEST_TZ;
 if (forced !== undefined && forced !== '') process.env.TZ = forced;
 ```
@@ -2350,55 +2280,34 @@ if (forced !== undefined && forced !== '') process.env.TZ = forced;
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/tz`
-Expected: FAIL on "the Results date columns render departure and return from their strings", because WP9's columns do not yet render `formatIsoDateShort` output ("Sun 14 Mar"). Under a worker-thread pool, "the zone is in effect" also fails; Step 3's `pool: 'forks'` fixes that.
+Expected: FAIL on "the zone is in effect" in both blocks under WP9's default worker pool (the zone does not re-detect in a worker thread). If WP9 already uses forks, this run passes, and the next run is the failing step.
 
 Run: `pnpm --filter @gmt/web run test:tz`
 Expected: FAIL with `Missing script: "test:tz"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/vitest.config.ts` (WP0 created it and WP9 may have extended it; keep WP9's plugins and add the marked lines):
+`apps/web/vitest.config.ts` (WP9's file): keep everything and add the marked lines under `test`:
 
 ```ts
-import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vitest/config';
-
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    name: 'web',
-    environment: 'jsdom',
     // why: forks keep each worker a separate Node process, where assigning process.env.TZ re-detects the zone (review focus 3).
     pool: 'forks',
-    include: ['test/**/*.test.{ts,tsx}'],
     // why: the Playwright smoke lives in e2e/ and runs only through `pnpm --filter @gmt/web e2e` (spec §9 item 6).
     exclude: ['e2e/**', 'node_modules/**'],
-    // why: setup-tz must run first so the zone is set before anything else touches Date.
+    // why: setup-tz runs first so the zone is set before anything touches Date; setup-charts sizes Recharts in jsdom.
     setupFiles: ['test/setup-tz.ts', 'test/setup.ts', 'test/setup-charts.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx'],
-      thresholds: { lines: 70, branches: 60, functions: 70, statements: 70 },
-    },
-  },
-});
 ```
 
-(`test/setup-charts.ts` is created in Task 10.9. Create it now as an empty module, `export {};`, so this config loads.)
-
-`apps/web/package.json` scripts (add or replace these four; keep WP9's `dev`, `build`, `preview` and `typecheck`):
+`apps/web/package.json` scripts (add or replace these four, keep WP9's others):
 
 ```json
 {
   "test": "vitest run --coverage && pnpm run test:tz",
-  "test:tz": "GMT_TEST_TZ=America/Los_Angeles vitest run test/tz test/views/Calendar && GMT_TEST_TZ=Asia/Tokyo vitest run test/tz test/views/Calendar",
+  "test:tz": "GMT_TEST_TZ=America/Los_Angeles vitest run test/tz test/views/calendar && GMT_TEST_TZ=Asia/Tokyo vitest run test/tz test/views/calendar",
   "e2e": "pnpm --workspace-root run build && playwright test",
   "e2e:install": "playwright install chromium"
 }
 ```
-
-WP9's Results date columns (the departure and return cells in `apps/web/src/views/Results/columns.tsx`) render `formatIsoDateShort(row.cell.departureDate)` and `formatIsoDateShort(row.cell.returnDate)`, importing `formatIsoDateShort` from `../../lib/isoDate.js`. Change nothing else in that file.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -2406,7 +2315,7 @@ Run: `pnpm --filter @gmt/web exec vitest run test/tz`
 Expected: PASS, 10 tests (5 per zone).
 
 Run: `pnpm --filter @gmt/web run test:tz`
-Expected: two passing runs, each listing `test/tz/dates.tz.test.tsx` and the six `test/views/Calendar/*` files with every test passing.
+Expected: two passing runs. Each lists `test/tz/dates.tz.test.tsx` and the six `test/views/calendar/*` files.
 
 - [ ] **Step 5: Commit**
 
@@ -2417,71 +2326,85 @@ git add apps/web && git commit -m "wp10: TZ suite under Los Angeles and Tokyo fo
 ### Task 10.9: View C Duration (Recharts 3)
 
 **Files:**
-- Create: `apps/web/src/views/Duration/{data.ts,DurationChart.tsx,DurationView.tsx}`, `apps/web/test/views/Duration/duration.test.tsx`
-- Modify: `apps/web/test/setup-charts.ts` (replace the empty module from Task 10.8), `apps/web/src/strings.ts` (append `durationStrings`)
+- Create: `apps/web/src/views/Duration/{data.ts,DurationChart.tsx,DurationView.tsx}`, `apps/web/test/views/duration.test.tsx`
+- Modify: `apps/web/test/setup-charts.ts`, `apps/web/src/copy.ts` (append `durationView`), `apps/web/test/copy/catalogue.test.ts`
 
 **Interfaces:**
-- Consumes: `fetchDuration`, `ViewHeader`, `Provenance`, `formatPence`, `providerLabel` (WP9); recharts `BarChart`, `Bar`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
-- Produces: `buildDurationData(resp, minNights, maxNights, hasVerification)`, `DurationChart`, `DurationTooltip`, `DurationTable`, `DurationView`, `durationStrings`.
+- Consumes: `api.durationAnalysis`, `qk.duration`, `ViewHeader`, `PriceCell`, `PriceBoundary`, `formatPence`, `discoverySourceLabel`, `useNow`; recharts `BarChart`, `Bar`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
+- Produces: `buildDurationData`, `DurationTooltip`, `DurationChart`, `DurationTable`, `DurationView`, `COPY.durationView`.
 
-There is one row per nights value in `[minNights, maxNights]`. A nights value the api did not return, or returned with no price, is `null`: Recharts draws no bar for it, and the data table says "no price". Nothing is interpolated and nothing becomes 0.
+There is one row per nights value in `[minNights, maxNights]`:
+
+- A nights value the api flags `searched: false`, or omits, is **not searched**.
+- A searched nights value with no price for a series is **searched, no price**.
+
+Both are `null` values that Recharts draws as gaps, never 0 and never interpolated. The table and tooltip name which case it is.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/Duration/duration.test.tsx`:
+`apps/web/test/views/duration.test.tsx`:
 
 ```tsx
-import { render, screen } from '@testing-library/react';
+import { render, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import type { DurationResponse } from '../../../src/api/views.js';
-import { buildDurationData } from '../../../src/views/Duration/data.js';
-import { DurationTooltip } from '../../../src/views/Duration/DurationChart.js';
-import { DurationView } from '../../../src/views/Duration/DurationView.js';
-import { cell, definitionFixture, NOW, price, provenanceCalendar, provenanceVerified } from '../../support/fixtures.js';
-import { renderWithQuery } from '../../support/render.js';
-import { server, useMswServer } from '../../support/server.js';
+import type { DurationResponse } from '../../src/api/types.js';
+import { buildDurationData } from '../../src/views/Duration/data.js';
+import { DurationTooltip } from '../../src/views/Duration/DurationChart.js';
+import { DurationView } from '../../src/views/Duration/DurationView.js';
+import { API, definition } from '../fixtures.js';
+import { server } from '../msw/server.js';
+import { renderWithProviders } from '../render.js';
+import { cellAt, priceAt, provenanceCalendar, provenanceVerified } from '../fixtures.wp10.js';
 
-useMswServer();
-
-const c = cell('2027-03-14', 14);
-function night(nights: number, verified: [number, number] | null, calendar: [number, number] | null): DurationResponse['nights'][number] {
+const c = cellAt('2027-03-14', 14);
+const bare = (p: ReturnType<typeof priceAt>) => {
+  const { cell: _c, itineraryHash: _h, ...rest } = p;
+  return rest;
+};
+function night(nights: number, verified: [number, number] | null, calendar: [number, number] | null, searched = true): DurationResponse['byNights'][number] {
   return {
-    nights,
-    minVerified: verified === null ? null : { ...price(verified[0], provenanceVerified(5), false, c), n: verified[1] },
-    minCalendar: [{ providerId: 'travelpayouts', price: calendar === null ? null : price(calendar[0], provenanceCalendar(2), false, c), n: calendar?.[1] ?? 0 }],
+    nights, searched,
+    minVerified: verified === null ? null : { ...bare(priceAt(verified[0], provenanceVerified(5), false, c)), n: verified[1] },
+    minCalendar: calendar === null ? [] : [{ providerId: 'travelpayouts', price: bare(priceAt(calendar[0], provenanceCalendar(2), false, c)), n: calendar[1] }],
   };
 }
-const resp: DurationResponse = { nights: [night(10, [52000, 3], [41200, 5]), night(12, null, [39900, 4])], executions: [{ id: 'exec-1', status: 'completed', ageHours: 2 }] };
-const route = '*/definitions/:id/duration-analysis';
-const def = definitionFixture({ minNights: 10, maxNights: 14 });
+const executions = [{ id: 'exec-0001', status: 'completed' as const, isChild: false, startedAt: '2026-10-14T12:00:00.000Z' as never, finishedAt: '2026-10-14T13:00:00.000Z' as never, ageHours: 2 }];
+const resp: DurationResponse = { byNights: [night(10, [52000, 3], [41200, 5]), night(11, null, null, true), night(12, null, [39900, 4]), night(13, null, null, false)], executions };
+const route = `${API}/api/definitions/:id/duration-analysis`;
+const def = definition({ minNights: 10, maxNights: 14 });
 
 describe('duration data (spec §11 View C)', () => {
-  it('one row per nights in range; unsearched nights are null gaps, never 0, never interpolated', () => {
+  it('one row per nights in range; missing prices are null gaps, never 0, never interpolated', () => {
     const d = buildDurationData(resp, 10, 14, true);
     expect(d.rows.map((r) => r.nights)).toEqual([10, 11, 12, 13, 14]);
     expect(d.rows.map((r) => r.cells.verified?.pricePence ?? null)).toEqual([52000, null, null, null, null]);
     expect(d.rows.map((r) => r.cells['calendar:travelpayouts']?.pricePence ?? null)).toEqual([41200, null, 39900, null, null]);
-    expect(d.isEmpty).toBe(false);
+  });
+  it('distinguishes not searched (flag false or absent) from searched with no price', () => {
+    expect(buildDurationData(resp, 10, 14, true).rows.map((r) => r.searched)).toEqual([true, true, true, false, false]);
   });
   it('names the series with n in the label', () => {
-    const d = buildDurationData(resp, 10, 14, true);
-    expect(d.series.map((s) => s.name)).toEqual(['min among verified (class verified, n=3)', 'calendar, Aviasales cache (constraints not checked, n=9)']);
+    expect(buildDurationData(resp, 10, 14, true).series.map((s) => s.name)).toEqual([
+      'min among verified (class verified, n=3)',
+      'calendar, Aviasales cache (constraints not checked, n=9)',
+    ]);
   });
   it('omits the verified series when there is no verification provider and nothing verified', () => {
-    const noV: DurationResponse = { ...resp, nights: [night(10, null, [41200, 5])] };
+    const noV: DurationResponse = { byNights: [night(10, null, [41200, 5])], executions };
     expect(buildDurationData(noV, 10, 14, false).series.map((s) => s.key)).toEqual(['calendar:travelpayouts']);
   });
   it('is empty when no nights has a price', () => {
-    expect(buildDurationData({ ...resp, nights: [night(10, null, null)] }, 10, 14, true).isEmpty).toBe(true);
+    expect(buildDurationData({ byNights: [night(10, null, null)], executions }, 10, 14, true).isEmpty).toBe(true);
   });
-  it('the tooltip shows the nights and n for every series', () => {
+  it('the tooltip shows the nights and each series with its n, naming the gap kind', () => {
     const d = buildDurationData(resp, 10, 14, true);
-    render(<DurationTooltip active payload={[{ payload: d.rows[0] }]} series={d.series} />);
-    const tip = screen.getByTestId('duration-tooltip');
+    const tip = render(<DurationTooltip active payload={[{ payload: d.rows[0] }]} series={d.series} />).getByTestId('duration-tooltip');
     expect(tip).toHaveTextContent('10 nights');
     expect(tip).toHaveTextContent('min among verified: £520 (n=3)');
     expect(tip).toHaveTextContent('calendar, Aviasales cache: £412 (n=5)');
+    const gap = render(<DurationTooltip active payload={[{ payload: d.rows[3] }]} series={d.series} />).getAllByTestId('duration-tooltip')[1];
+    expect(gap).toHaveTextContent('min among verified: not searched (n=0)');
   });
   it('the tooltip renders nothing when inactive', () => {
     const { container } = render(<DurationTooltip active={false} payload={[]} series={[]} />);
@@ -2492,49 +2415,49 @@ describe('duration data (spec §11 View C)', () => {
 describe('Duration view (spec §11 View C)', () => {
   it('shows an explicit loading state', () => {
     server.use(http.get(route, async () => { await delay('infinite'); return HttpResponse.json(resp); }));
-    renderWithQuery(<DurationView definition={def} now={NOW} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading duration analysis…');
+    const { getByRole } = renderWithProviders(<DurationView definition={def} />);
+    expect(getByRole('status')).toHaveTextContent('Loading…');
   });
   it('shows an error state', async () => {
     server.use(http.get(route, () => HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })));
-    renderWithQuery(<DurationView definition={def} now={NOW} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/^Could not load the duration analysis/);
+    const { findByRole } = renderWithProviders(<DurationView definition={def} />);
+    expect(await findByRole('alert')).toHaveTextContent('Could not load: boom');
   });
   it('shows an explicit empty state and no chart', async () => {
-    server.use(http.get(route, () => HttpResponse.json({ ...resp, nights: [] })));
-    renderWithQuery(<DurationView definition={def} now={NOW} />);
-    expect(await screen.findByText(/^No prices yet for any stay length/)).toBeInTheDocument();
+    server.use(http.get(route, () => HttpResponse.json({ byNights: [], executions })));
+    const { findByText } = renderWithProviders(<DurationView definition={def} />);
+    expect(await findByText(/^No prices yet for any stay length/)).toBeInTheDocument();
     expect(document.querySelector('.recharts-responsive-container')).toBeNull();
   });
-  it('draws the chart with axis titles, a legend carrying n, and a table where every price has provenance', async () => {
+  it('draws the chart with axis titles and a legend carrying n, and tables every price with provenance', async () => {
     server.use(http.get(route, () => HttpResponse.json(resp)));
-    renderWithQuery(<DurationView definition={def} now={NOW} />);
-    const table = await screen.findByRole('table', { name: 'Cheapest price per stay length, with provenance' });
+    const { findByRole } = renderWithProviders(<DurationView definition={def} />);
+    const table = await findByRole('table', { name: 'Cheapest price per stay length, with provenance' });
     const svg = document.querySelector('.recharts-responsive-container svg');
     expect(svg?.textContent).toContain('nights');
     expect(svg?.textContent).toContain('£');
-    const legend = document.querySelector('.recharts-legend-wrapper');
-    expect(legend?.textContent).toContain('min among verified (class verified, n=3)');
-    expect(legend?.textContent).toContain('calendar, Aviasales cache (constraints not checked, n=9)');
-    expect(table.querySelectorAll('[data-testid="provenance"]')).toHaveLength(3);
-    expect(table).toHaveTextContent('no price');
-    expect(screen.getByText(/not searched or was searched with no fares/)).toBeInTheDocument();
+    const legend = document.querySelector('.recharts-legend-wrapper')?.textContent ?? '';
+    expect(legend).toContain('min among verified (class verified, n=3)');
+    expect(legend).toContain('calendar, Aviasales cache (constraints not checked, n=9)');
+    expect(within(table).getAllByTestId('provenance')).toHaveLength(3);
+    expect(table).toHaveTextContent('searched, no price');
+    expect(table).toHaveTextContent('not searched');
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Duration`
-Expected: FAIL with `Failed to resolve import "../../../src/views/Duration/data.js"`.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/duration.test.tsx`
+Expected: FAIL with `Failed to resolve import "../../src/views/Duration/data.js"`.
 
 - [ ] **Step 3: Implement**
 
 `apps/web/test/setup-charts.ts`:
 
 ```ts
-// Recharts in jsdom (verified against recharts 3 ResponsiveContainer source, 2026-10-14):
-// ResponsiveContainer reads getBoundingClientRect() of its container on mount, then subscribes a ResizeObserver,
+// Recharts in jsdom (verified against the recharts 3 ResponsiveContainer source on 2026-10-14):
+// ResponsiveContainer reads getBoundingClientRect() of its container on mount, then observes it with ResizeObserver,
 // and renders no children while width or height is ≤ 0. jsdom has no ResizeObserver and reports 0×0 boxes.
 
 class ResizeObserverStub {
@@ -2554,7 +2477,7 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 
 const original = HTMLElement.prototype.getBoundingClientRect;
 HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect(this: HTMLElement): DOMRect {
-  // why: give only the chart container a size, so every other layout assertion still sees jsdom's real 0×0.
+  // why: size only the chart container, so every other layout assertion still sees jsdom's real 0×0.
   if (this.classList.contains('recharts-responsive-container')) {
     return { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 320, width: 800, height: 320, toJSON: () => ({}) } as DOMRect;
   }
@@ -2562,53 +2485,70 @@ HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect(thi
 };
 ```
 
-`apps/web/src/strings.ts`: append
+`apps/web/src/copy.ts`: append inside `COPY`
 
 ```ts
-/** View C strings (spec §11 View C; series labels as the spec words them). WP10. */
-export const durationStrings = {
-  title: 'Duration',
-  chartTitle: 'Cheapest price by stay length',
-  xAxis: 'nights',
-  yAxis: '£',
-  verifiedSeries: (n: number): string => `min among verified (class verified, n=${n})`,
-  verifiedShort: 'min among verified',
-  calendarSeries: (provider: string, n: number): string => `calendar, ${provider} (constraints not checked, n=${n})`,
-  calendarShort: (provider: string): string => `calendar, ${provider}`,
-  nightsLabel: (n: number): string => `${n} nights`,
-  tooltipValue: (price: string, n: number): string => `${price} (n=${n})`,
-  noPrice: 'no price',
-  noPriceNote: 'A stay length with no price was not searched or was searched with no fares; Coverage shows which.',
-  tableCaption: 'Cheapest price per stay length, with provenance',
-  loading: 'Loading duration analysis…',
-  empty: "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
-  error: (message: string): string => `Could not load the duration analysis: ${message}`,
-} as const;
+  // View C Duration (WP10; spec §11 View C wording)
+  durationView: {
+    title: 'Duration',
+    chartTitle: 'Cheapest price by stay length',
+    xAxis: 'nights',
+    yAxis: '£',
+    verifiedSeries: (n: number) => `min among verified (class verified, n=${n})`,
+    verifiedShort: 'min among verified',
+    calendarSeries: (source: string, n: number) => `calendar, ${source} (constraints not checked, n=${n})`,
+    calendarShort: (source: string) => `calendar, ${source}`,
+    nightsLabel: (n: number) => `${n} nights`,
+    tooltipValue: (price: string, n: number) => `${price} (n=${n})`,
+    tooltipEmpty: (state: string) => `${state} (n=0)`,
+    seriesLine: (series: string, value: string) => `${series}: ${value}`,
+    nLabel: (n: number) => `n=${n}`,
+    notSearched: 'not searched',
+    searchedNoPrice: 'searched, no price',
+    tableCaption: 'Cheapest price per stay length, with provenance',
+    empty: "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
+  },
 ```
+
+`apps/web/test/copy/catalogue.test.ts`: add to `SAMPLES`
+
+```ts
+  'durationView.verifiedSeries': [3],
+  'durationView.calendarSeries': ['Aviasales cache', 9],
+  'durationView.calendarShort': ['Aviasales cache'],
+  'durationView.nightsLabel': [14],
+  'durationView.tooltipValue': ['£412', 5],
+  'durationView.tooltipEmpty': ['not searched'],
+  'durationView.seriesLine': ['calendar, Aviasales cache', '£412 (n=5)'],
+  'durationView.nLabel': [5],
+```
+
+and add `'durationView.verifiedSeries', 'durationView.verifiedShort'` to the "verified" test's `allowed` set (the spec's own series label, beside class-verified values).
 
 `apps/web/src/views/Duration/data.ts`:
 
 ```ts
 import type { ProviderId } from '@gmt/core';
-import type { DurationResponse } from '../../api/views.js';
-import { durationStrings, providerLabel } from '../../strings.js';
+import type { DurationResponse } from '../../api/types.js';
+import { COPY } from '../../copy.js';
+import { discoverySourceLabel } from '../../lib/sources.js';
 
-type Night = DurationResponse['nights'][number];
-/** A price cell as the duration route sends it (amount, provenance, stale, ageHours). */
-export type DurationPrice = NonNullable<Night['minCalendar'][number]['price']>;
+type Night = DurationResponse['byNights'][number];
+/** A price cell as the duration route sends it. */
+export type DurationPrice = Night['minCalendar'][number]['price'];
 export interface DurationCell { pricePence: number | null; n: number; price: DurationPrice | null }
-export interface DurationRow { nights: number; cells: Record<string, DurationCell> }
+export interface DurationRow { nights: number; searched: boolean; cells: Record<string, DurationCell> }
 export interface DurationSeries { key: string; kind: 'verified' | 'calendar'; providerId: ProviderId | null; totalN: number; name: string; shortName: string }
 export interface DurationData { rows: DurationRow[]; series: DurationSeries[]; isEmpty: boolean }
 
 /**
  * Rows for every nights in [minNights, maxNights] and one series per basis and provider (spec §11 View C).
- * Missing nights stay null so the chart shows a gap (no interpolation); `n` is summed per series for the legend label.
+ * Missing values stay null so the chart shows a gap (no interpolation); `searched` says which kind of gap it is.
  */
 export function buildDurationData(resp: DurationResponse, minNights: number, maxNights: number, hasVerification: boolean): DurationData {
-  const byNights = new Map<number, Night>(resp.nights.map((r) => [r.nights, r]));
+  const byNights = new Map<number, Night>(resp.byNights.map((r) => [r.nights, r]));
   const providers: ProviderId[] = [];
-  for (const r of resp.nights) for (const m of r.minCalendar) if (!providers.includes(m.providerId)) providers.push(m.providerId);
+  for (const r of resp.byNights) for (const m of r.minCalendar) if (!providers.includes(m.providerId)) providers.push(m.providerId);
   const rows: DurationRow[] = [];
   for (let nights = minNights; nights <= maxNights; nights += 1) {
     const r = byNights.get(nights);
@@ -2616,39 +2556,46 @@ export function buildDurationData(resp: DurationResponse, minNights: number, max
     const cells: Record<string, DurationCell> = { verified: { pricePence: v?.pricePence ?? null, n: v?.n ?? 0, price: v } };
     for (const p of providers) {
       const m = r?.minCalendar.find((x) => x.providerId === p);
-      cells[`calendar:${p}`] = { pricePence: m?.price?.pricePence ?? null, n: m?.n ?? 0, price: m?.price ?? null };
+      cells[`calendar:${p}`] = { pricePence: m?.price.pricePence ?? null, n: m?.n ?? 0, price: m?.price ?? null };
     }
-    rows.push({ nights, cells });
+    // why: a nights value the api omits was not searched; never assume it was.
+    rows.push({ nights, searched: r?.searched ?? false, cells });
   }
   const totalN = (key: string) => rows.reduce((sum, r) => sum + (r.cells[key]?.n ?? 0), 0);
   const anyVerified = rows.some((r) => r.cells.verified?.pricePence != null);
   const series: DurationSeries[] = [];
   // why: a verified series with no provider and no data would be an empty promise in the legend.
   if (hasVerification || anyVerified) {
-    series.push({ key: 'verified', kind: 'verified', providerId: null, totalN: totalN('verified'), name: durationStrings.verifiedSeries(totalN('verified')), shortName: durationStrings.verifiedShort });
+    series.push({ key: 'verified', kind: 'verified', providerId: null, totalN: totalN('verified'), name: COPY.durationView.verifiedSeries(totalN('verified')), shortName: COPY.durationView.verifiedShort });
   }
   for (const p of providers) {
     const key = `calendar:${p}`;
-    series.push({ key, kind: 'calendar', providerId: p, totalN: totalN(key), name: durationStrings.calendarSeries(providerLabel(p), totalN(key)), shortName: durationStrings.calendarShort(providerLabel(p)) });
+    const source = discoverySourceLabel(p);
+    series.push({ key, kind: 'calendar', providerId: p, totalN: totalN(key), name: COPY.durationView.calendarSeries(source, totalN(key)), shortName: COPY.durationView.calendarShort(source) });
   }
-  const isEmpty = rows.every((r) => series.every((s) => r.cells[s.key]?.pricePence == null));
-  return { rows, series, isEmpty };
+  return { rows, series, isEmpty: rows.every((r) => series.every((s) => r.cells[s.key]?.pricePence == null)) };
+}
+
+/** "not searched" or "searched, no price" for a gap. */
+export function gapLabel(row: DurationRow): string {
+  return row.searched ? COPY.durationView.searchedNoPrice : COPY.durationView.notSearched;
 }
 ```
 
 `apps/web/src/views/Duration/DurationChart.tsx`:
 
 ```tsx
-import type { IsoDateTime } from '@gmt/core';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Provenance } from '../../components/Provenance.js';
-import { formatPence } from '../../lib/money.js';
-import { calendarStrings, durationStrings } from '../../strings.js';
-import type { DurationData, DurationRow, DurationSeries } from './data.js';
+import { PriceBoundary } from '../../components/PriceBoundary.js';
+import { PriceCell } from '../../components/PriceCell.js';
+import { COPY } from '../../copy.js';
+import { formatPence } from '../../format.js';
+import { type DurationData, type DurationRow, type DurationSeries, gapLabel } from './data.js';
 
 // why: categorical palette, one hue per series (dataviz skill); calendar series also get a dashed outline, so colour is never the only cue.
 const SERIES_COLOURS = ['#1d4ed8', '#c2410c', '#7c3aed', '#047857'] as const;
 const colourAt = (i: number): string => SERIES_COLOURS[i % SERIES_COLOURS.length] ?? '#1d4ed8';
+const D = COPY.durationView;
 
 /** Custom tooltip: nights, then each series' price and n (spec §11 View C: n in label and tooltip). */
 export function DurationTooltip(props: { active?: boolean | undefined; payload?: ReadonlyArray<{ payload?: unknown }> | undefined; series: readonly DurationSeries[] }) {
@@ -2656,15 +2603,12 @@ export function DurationTooltip(props: { active?: boolean | undefined; payload?:
   if (props.active !== true || row === undefined) return null;
   return (
     <div data-testid="duration-tooltip" className="rounded border bg-white p-2 text-xs shadow">
-      <p className="font-medium">{durationStrings.nightsLabel(row.nights)}</p>
+      <p className="font-medium">{D.nightsLabel(row.nights)}</p>
       <ul>
         {props.series.map((s) => {
           const c = row.cells[s.key];
-          return (
-            <li key={s.key}>
-              {s.shortName}: {c !== undefined && c.pricePence !== null ? durationStrings.tooltipValue(formatPence(c.pricePence), c.n) : `${durationStrings.noPrice} (n=0)`}
-            </li>
-          );
+          const value = c !== undefined && c.pricePence !== null ? D.tooltipValue(formatPence(c.pricePence), c.n) : D.tooltipEmpty(gapLabel(row));
+          return <li key={s.key}>{D.seriesLine(s.shortName, value)}</li>;
         })}
       </ul>
     </div>
@@ -2676,10 +2620,10 @@ export function DurationChart({ data }: { data: DurationData }) {
   return (
     <div className="h-80 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data.rows} margin={{ top: 8, right: 16, bottom: 28, left: 24 }} title={durationStrings.chartTitle}>
+        <BarChart data={data.rows} margin={{ top: 8, right: 16, bottom: 28, left: 24 }} title={D.chartTitle}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="nights" label={{ value: durationStrings.xAxis, position: 'insideBottom', offset: -16 }} />
-          <YAxis tickFormatter={(v: number) => formatPence(v)} label={{ value: durationStrings.yAxis, angle: -90, position: 'insideLeft' }} />
+          <XAxis dataKey="nights" label={{ value: D.xAxis, position: 'insideBottom', offset: -16 }} />
+          <YAxis tickFormatter={(v: number) => formatPence(v)} label={{ value: D.yAxis, angle: -90, position: 'insideLeft' }} />
           <Tooltip content={(p) => <DurationTooltip active={p.active} payload={p.payload} series={data.series} />} />
           <Legend verticalAlign="top" />
           {data.series.map((s, i) => (
@@ -2699,47 +2643,44 @@ export function DurationChart({ data }: { data: DurationData }) {
   );
 }
 
-/** The same numbers as a table, each price with its provenance visible (spec §11; accessibility). */
-export function DurationTable({ data, now }: { data: DurationData; now: IsoDateTime }) {
+/** The same numbers as a table, every price through PriceCell so its provenance is visible (spec §11). */
+export function DurationTable({ data }: { data: DurationData }) {
   return (
-    <>
-      <table className="mt-4 w-full text-xs">
-        <caption className="text-left font-medium">{durationStrings.tableCaption}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{durationStrings.xAxis}</th>
-            {data.series.map((s) => (
-              <th key={s.key} scope="col">{s.name}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((r) => (
-            <tr key={r.nights}>
-              <th scope="row">{r.nights}</th>
-              {data.series.map((s) => {
-                const c = r.cells[s.key];
-                return (
-                  <td key={s.key}>
-                    {c === undefined || c.price === null ? (
-                      durationStrings.noPrice
-                    ) : (
-                      <>
-                        <span>{durationStrings.tooltipValue(formatPence(c.price.pricePence), c.n)}</span>
-                        {c.price.stale && <span> · {calendarStrings.stale}</span>}
-                        {s.kind === 'calendar' && <span> · {calendarStrings.constraintsNotChecked}</span>}
-                        <Provenance provenance={c.price.provenance} now={now} />
-                      </>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+    <table className="mt-4 w-full text-xs">
+      <caption className="text-left font-medium">{D.tableCaption}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{D.xAxis}</th>
+          {data.series.map((s) => (
+            <th key={s.key} scope="col">{s.name}</th>
           ))}
-        </tbody>
-      </table>
-      <p className="text-xs">{durationStrings.noPriceNote}</p>
-    </>
+        </tr>
+      </thead>
+      <tbody>
+        {data.rows.map((r) => (
+          <tr key={r.nights}>
+            <th scope="row">{r.nights}</th>
+            {data.series.map((s) => {
+              const c = r.cells[s.key];
+              return (
+                <td key={s.key}>
+                  {c === undefined || c.price === null ? (
+                    gapLabel(r)
+                  ) : (
+                    <>
+                      <PriceBoundary>
+                        <PriceCell pricePence={c.price.pricePence} provenance={c.price.provenance} calendar={s.kind === 'calendar'} stale={c.price.stale} />
+                      </PriceBoundary>
+                      <span>{D.nLabel(c.n)}</span>
+                    </>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 ```
@@ -2747,35 +2688,35 @@ export function DurationTable({ data, now }: { data: DurationData; now: IsoDateT
 `apps/web/src/views/Duration/DurationView.tsx`:
 
 ```tsx
-import type { IsoDateTime } from '@gmt/core';
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { type DefinitionResponse, fetchDuration } from '../../api/views.js';
+import { useMemo } from 'react';
+import { api } from '../../api/endpoints.js';
+import { qk } from '../../api/queries.js';
+import type { DefinitionResponse } from '../../api/types.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
-import { nowIso } from '../../lib/time.js';
-import { durationStrings } from '../../strings.js';
+import { COPY } from '../../copy.js';
 import { buildDurationData } from './data.js';
 import { DurationChart, DurationTable } from './DurationChart.js';
 
 /** View C: cheapest price per stay length (spec §11 View C, §10 duration-analysis route). */
-export function DurationView({ definition, now: nowProp }: { definition: DefinitionResponse; now?: IsoDateTime }) {
-  const [now] = useState<IsoDateTime>(() => nowProp ?? nowIso());
-  const q = useQuery({ queryKey: ['duration', definition.id], queryFn: () => fetchDuration(definition.id) });
+export function DurationView({ definition }: { definition: DefinitionResponse }) {
+  const q = useQuery({ queryKey: qk.duration(definition.id), queryFn: () => api.durationAnalysis(definition.id) });
   const data = useMemo(
     () => (q.data === undefined ? null : buildDurationData(q.data, definition.minNights, definition.maxNights, definition.providers.verification.length > 0)),
     [q.data, definition],
   );
-  if (q.isPending) return <p role="status">{durationStrings.loading}</p>;
-  if (q.isError) return <p role="alert">{durationStrings.error(q.error.message)}</p>;
+  if (q.isPending) return <p role="status">{COPY.loading}</p>;
+  if (q.isError) return <p role="alert">{COPY.loadFailed(q.error.message)}</p>;
+  const prices = data === null ? [] : data.rows.flatMap((r) => Object.values(r.cells).flatMap((c) => (c.price === null ? [] : [c.price])));
   return (
-    <section aria-label={durationStrings.title} className="flex flex-col gap-4">
-      <ViewHeader title={durationStrings.title} executions={q.data.executions} />
+    <section aria-label={COPY.durationView.title} className="flex flex-col gap-4">
+      <ViewHeader title={COPY.durationView.title} executions={q.data.executions} stale={prices.length > 0 && prices.every((p) => p.stale)} />
       {data === null || data.isEmpty ? (
-        <p>{durationStrings.empty}</p>
+        <p>{COPY.durationView.empty}</p>
       ) : (
         <>
           <DurationChart data={data} />
-          <DurationTable data={data} now={now} />
+          <DurationTable data={data} />
         </>
       )}
     </section>
@@ -2785,223 +2726,257 @@ export function DurationView({ definition, now: nowProp }: { definition: Definit
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/Duration`
-Expected: PASS, 10 tests. If the chart test finds no `svg`, the `setup-charts.ts` stub is not loaded: check that `setupFiles` lists it (Task 10.8).
+Run: `pnpm --filter @gmt/web exec vitest run test/views/duration.test.tsx test/copy`
+Expected: PASS. The duration file passes 11 tests. If the chart test finds no `svg`, `setup-charts.ts` is not loaded; check `setupFiles` (Task 10.8).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp10: duration view with per-basis bars, n in label and tooltip, gaps and states (spec §11 View C)"
+git add apps/web && git commit -m "wp10: duration view with per-basis bars, n in label and tooltip, searched-aware gaps (spec §11 View C)"
 ```
 
 ### Task 10.10: History view
 
 **Files:**
-- Create: `apps/web/src/views/History/{lines.ts,HistoryChart.tsx,HistoryView.tsx}`, `apps/web/test/views/History/history.test.tsx`
-- Modify: `apps/web/src/strings.ts` (append `historyStrings`)
+- Create: `apps/web/src/views/History/{lines.ts,HistoryChart.tsx,HistoryView.tsx}`, `apps/web/test/views/history.test.tsx`
+- Modify: `apps/web/src/copy.ts` (append `historyView`), `apps/web/test/copy/catalogue.test.ts`
 
 **Interfaces:**
-- Consumes: `fetchRouteHistory`, `fetchItineraryHistory`, `instantMs`, `formatInstantLondon`, `effectiveAge`, `formatAgeFull`, `Provenance`, `formatPence`, `providerLabel`; recharts `LineChart`, `Line`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
-- Produces: `buildHistoryLines`, `HistoryChart`, `HistoryTable`, `HistoryView`, `historyHref`, `itineraryHashFromLocation`, `historyStrings`.
+- Consumes: `api.routeHistory`, `api.itineraryHistory`, `qk.routeHistory`, `qk.itineraryHistory`, `instantMs`, `dateMs`, `formatInstantLondon`, `formatDayLong`, `effectiveAge`, `formatAgeFull`, `PriceCell`, `PriceBoundary`, `formatPence`, `discoverySourceLabel`, `useNow`, `useSearchParams`, `hrefWith`, `navigateTo`; recharts `LineChart`, `Line`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
+- Produces: `linesFromRoute`, `linesFromItinerary`, `HistoryChart`, `HistoryTable`, `HistoryView`, `historyHref`, `COPY.historyView`.
 
-A gap is a null point inserted between two consecutive points of one series that lie more than 2 × that provider's `discoveryRefreshHours` apart (default 168 h). `connectNulls={false}` then breaks the line there. The rule's reason: a series with no point for two refresh cycles was not fetched, and a joined line would claim the price held steady.
+**x axis (spec §11 rev 10).** Provider series (calendar prices, itinerary offers) are plotted at `at` (fetchedAt). The route-level series is plotted at its own `date`, placed on the same millisecond axis by epoch-day arithmetic (`dateMs`), because its sixty points share one fetch time.
+
+**Gaps.** A null point goes between two consecutive points of one series when they are further apart than the series' threshold, and `connectNulls={false}` breaks the line there:
+- Provider series: 2 × that provider's `discoveryRefreshHours` (default 168 h).
+- The daily route series: 48 h.
+
+The reason for the rule: a series with no point for that long was not fetched, and a joined line would claim the price held steady.
+
+**Provenance.** Provider points carry full `Provenance` and render through `PriceCell`. Route-level points carry `{ date, pricePence, fetchedAt, providerId, sourceKind }` with no cabin, so spec §11 exempts them from full provenance. They render the amount with their source in words, "route-level series, cabin unknown", and their fetched age.
 
 - [ ] **Step 1: Write the failing test**
 
-`apps/web/test/views/History/history.test.tsx`:
+`apps/web/test/views/history.test.tsx`:
 
 ```tsx
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { asIata, asIsoDate } from '@gmt/core';
+import { waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import type { HistoryResponse } from '../../../src/api/views.js';
-import { historyHref, HistoryView, itineraryHashFromLocation } from '../../../src/views/History/HistoryView.js';
-import { buildHistoryLines } from '../../../src/views/History/lines.js';
-import { definitionFixture, hoursBefore, NOW, provenanceCalendar, provenanceVerified } from '../../support/fixtures.js';
-import { renderWithQuery } from '../../support/render.js';
-import { server, useMswServer } from '../../support/server.js';
+import type { ItineraryHistoryResponse, RouteHistoryResponse } from '../../src/api/types.js';
+import { historyHref, HistoryView } from '../../src/views/History/HistoryView.js';
+import { linesFromItinerary, linesFromRoute } from '../../src/views/History/lines.js';
+import { API, definition } from '../fixtures.js';
+import { server } from '../msw/server.js';
+import { renderWithProviders } from '../render.js';
+import { hoursBefore, provenanceCalendar, provenanceVerified } from '../fixtures.wp10.js';
 
-useMswServer();
-
-const pt = (h: number, pricePence: number, provenance: HistoryResponse['series'][number]['points'][number]['provenance']) => ({ fetchedAt: hoursBefore(NOW, h), pricePence, provenance });
-const history: HistoryResponse = {
-  series: [
-    { providerId: 'travelpayouts', kind: 'calendar', points: [pt(0, 39900, provenanceCalendar(0)), pt(1000, 45000, provenanceCalendar(1000)), pt(496, 42000, provenanceCalendar(496)), pt(664, 43000, provenanceCalendar(664))] },
-    { providerId: 'searchapi', kind: 'offer', points: [pt(5, 52000, provenanceVerified(5))] },
-    { providerId: 'searchapi', kind: 'route-lowest', points: [pt(2, 38000, null), pt(26, 38500, null)] },
-  ],
+const hp = (h: number, pricePence: number, provenance = provenanceCalendar(h)) => ({ at: hoursBefore(h), pricePence, provenance });
+const rp = (date: string, pricePence: number) => ({ date: asIsoDate(date), pricePence, fetchedAt: hoursBefore(2), providerId: 'searchapi' as const, sourceKind: 'scraped-search' as const });
+const routeHistory: RouteHistoryResponse = {
+  origin: asIata('LHR'), destination: asIata('JFK'),
+  calendarSeries: [{ providerId: 'travelpayouts', cabin: 'economy', points: [hp(0, 39900), hp(1000, 45000), hp(496, 42000), hp(664, 43000)] }],
+  routeSeries: [{ providerId: 'searchapi', points: [rp('2026-10-10', 38000), rp('2026-10-11', 38500), rp('2026-10-14', 37000)] }],
 };
-const routeRoute = '*/routes/:o/:d/history';
+const itineraryHistory: ItineraryHistoryResponse = {
+  itineraryHash: 'abc123',
+  series: [{ providerId: 'searchapi', seller: 'Example Air', cabin: 'economy', points: [hp(5, 52000, provenanceVerified(5)), hp(173, 54000, provenanceVerified(173))] }],
+};
+const routeRoute = `${API}/api/routes/:origin/:destination/history`;
 
 describe('history lines (spec §11 History)', () => {
-  it('sorts by fetchedAt and inserts a null break only where a gap exceeds the threshold', () => {
-    const [calendar] = buildHistoryLines(history, () => 336);
-    expect(calendar?.points.map((p) => p.pricePence)).toEqual([45000, 43000, 42000, null, 39900]); // 1000→664 is 336h: no break; 496→0 is 496h: break
-    expect(calendar?.points.every((p, i, a) => i === 0 || p.t > (a[i - 1]?.t ?? 0))).toBe(true);
+  it('provider series: sorted by fetchedAt, a null break only where a gap exceeds the threshold', () => {
+    const [calendar] = linesFromRoute(routeHistory, () => 336);
+    expect(calendar?.points.map((p) => p.pricePence)).toEqual([45000, 43000, 42000, null, 39900]); // 1000→664 is 336h: no break; 496→0: break
   });
-  it('labels each series by provider and kind, with the spec wording for the route series', () => {
-    expect(buildHistoryLines(history, () => 336).map((l) => l.name)).toEqual([
+  it('the route series is plotted by its own date, with a break after a missing day', () => {
+    const route = linesFromRoute(routeHistory, () => 336)[1];
+    expect(route?.points[0]?.t).toBe(Date.UTC(2026, 9, 10));
+    expect(route?.points.map((p) => p.pricePence)).toEqual([38000, 38500, null, 37000]);
+  });
+  it('labels each series by source and kind, with the spec wording for the route series', () => {
+    expect(linesFromRoute(routeHistory, () => 336).map((l) => l.name)).toEqual([
       'Aviasales cache · calendar price (constraints not checked)',
-      'Google Flights via SearchApi · itinerary offer',
       "Google's route-level lowest price, cabin unknown",
     ]);
+    expect(linesFromItinerary(itineraryHistory, () => 336).map((l) => l.name)).toEqual(['Google Flights via SearchApi · itinerary offer · Example Air']);
   });
   it('drops series with no points', () => {
-    expect(buildHistoryLines({ series: [{ providerId: 'searchapi', kind: 'offer', points: [] }] }, () => 336)).toEqual([]);
+    expect(linesFromRoute({ ...routeHistory, calendarSeries: [{ providerId: 'travelpayouts', cabin: 'economy', points: [] }], routeSeries: [] }, () => 336)).toEqual([]);
   });
 });
 
 describe('History view (spec §11 History, §10 history routes)', () => {
   it('shows an explicit loading state', () => {
-    server.use(http.get(routeRoute, async () => { await delay('infinite'); return HttpResponse.json(history); }));
-    renderWithQuery(<HistoryView definition={definitionFixture()} now={NOW} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading history…');
+    server.use(http.get(routeRoute, async () => { await delay('infinite'); return HttpResponse.json(routeHistory); }));
+    const { getByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(getByRole('status')).toHaveTextContent('Loading…');
   });
 
   it('route mode: picks among the definition pairs and fetches the chosen route', async () => {
-    const user = userEvent.setup();
     const paths: string[] = [];
-    server.use(http.get(routeRoute, ({ request }) => { paths.push(new URL(request.url).pathname); return HttpResponse.json(history); }));
-    renderWithQuery(<HistoryView definition={definitionFixture()} now={NOW} />);
-    const picker = await screen.findByLabelText('Route');
+    server.use(http.get(routeRoute, ({ request }) => { paths.push(new URL(request.url).pathname); return HttpResponse.json(routeHistory); }));
+    const { findByLabelText, user } = renderWithProviders(<HistoryView definition={definition()} />);
+    const picker = await findByLabelText('Route');
     expect([...(picker as HTMLSelectElement).options].map((o) => o.text)).toEqual(['LHR→JFK', 'LHR→EWR', 'LGW→JFK', 'LGW→EWR']);
-    await waitFor(() => expect(paths.at(-1)).toMatch(/\/routes\/LHR\/JFK\/history$/));
+    await waitFor(() => expect(paths.at(-1)).toBe('/api/routes/LHR/JFK/history'));
     await user.selectOptions(picker, '3');
-    await waitFor(() => expect(paths.at(-1)).toMatch(/\/routes\/LGW\/EWR\/history$/));
+    await waitFor(() => expect(paths.at(-1)).toBe('/api/routes/LGW/EWR/history'));
   });
 
-  it('draws one line per provider and kind with axis titles, and tables every price with its provenance', async () => {
-    server.use(http.get(routeRoute, () => HttpResponse.json(history)));
-    renderWithQuery(<HistoryView definition={definitionFixture()} now={NOW} />);
-    await screen.findByRole('table', { name: /Aviasales cache · calendar price/ });
+  it('draws one line per provider and kind with axis titles, and tables every price with its provenance or route label', async () => {
+    server.use(http.get(routeRoute, () => HttpResponse.json(routeHistory)));
+    const { findByRole, getByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    const calendarTable = await findByRole('table', { name: /Aviasales cache · calendar price/ });
     const svg = document.querySelector('.recharts-responsive-container svg');
-    expect(svg?.textContent).toContain('fetched (Europe/London time)');
+    expect(svg?.textContent).toContain('fetched, or price date for the route series (Europe/London)');
     expect(svg?.textContent).toContain('£');
-    const legend = document.querySelector('.recharts-legend-wrapper')?.textContent ?? '';
-    expect(legend).toContain("Google's route-level lowest price, cabin unknown");
-    expect(legend).toContain('Google Flights via SearchApi · itinerary offer');
-    expect(document.querySelectorAll('[data-testid="provenance"]')).toHaveLength(5); // 4 calendar + 1 offer
-    expect(screen.getAllByText('Google Flights via SearchApi · route-level series, cabin unknown · fetched 2h ago · provider age unknown')).toHaveLength(1);
-  });
-
-  it('withholds a non-route price that arrives without provenance', async () => {
-    server.use(http.get(routeRoute, () => HttpResponse.json({ series: [{ providerId: 'travelpayouts', kind: 'calendar', points: [pt(3, 41200, null)] }] })));
-    renderWithQuery(<HistoryView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByText('price withheld: provenance missing')).toBeInTheDocument();
-    expect(screen.queryByText('£412')).toBeNull();
+    expect(document.querySelector('.recharts-legend-wrapper')?.textContent).toContain("Google's route-level lowest price, cabin unknown");
+    expect(within(calendarTable).getAllByTestId('provenance')).toHaveLength(4);
+    const routeTable = getByRole('table', { name: /route-level lowest price/ });
+    expect(within(routeTable).getAllByText('Google Flights via SearchApi · route-level series, cabin unknown · fetched 2h ago · provider age unknown')).toHaveLength(3);
+    expect(routeTable).toHaveTextContent('Sat 10 Oct 2026');
+    expect(within(routeTable).queryAllByTestId('provenance')).toHaveLength(0);
   });
 
   it('shows the empty state when there is no history', async () => {
-    server.use(http.get(routeRoute, () => HttpResponse.json({ series: [] })));
-    renderWithQuery(<HistoryView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByText('No price history yet for this selection. Each run adds a point.')).toBeInTheDocument();
+    server.use(http.get(routeRoute, () => HttpResponse.json({ ...routeHistory, calendarSeries: [], routeSeries: [] })));
+    const { findByText } = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(await findByText('No price history yet for this selection. Each run adds a point.')).toBeInTheDocument();
     expect(document.querySelector('.recharts-responsive-container')).toBeNull();
   });
 
   it('shows an error state', async () => {
     server.use(http.get(routeRoute, () => HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })));
-    renderWithQuery(<HistoryView definition={definitionFixture()} now={NOW} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/^Could not load history/);
+    const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(await findByRole('alert')).toHaveTextContent('Could not load: boom');
   });
 
-  it('itinerary mode fetches the itinerary history', async () => {
+  it('itinerary mode (?hash=) fetches the itinerary history', async () => {
     const paths: string[] = [];
-    server.use(http.get('*/itineraries/:hash/history', ({ request }) => { paths.push(new URL(request.url).pathname); return HttpResponse.json(history); }));
-    renderWithQuery(<HistoryView definition={definitionFixture()} itineraryHash="abc123" now={NOW} />);
-    expect(await screen.findByText(/Itinerary abc123/)).toBeInTheDocument();
-    await waitFor(() => expect(paths.at(-1)).toMatch(/\/itineraries\/abc123\/history$/));
+    server.use(http.get(`${API}/api/itineraries/:hash/history`, ({ request }) => { paths.push(new URL(request.url).pathname); return HttpResponse.json(itineraryHistory); }));
+    const { findByText } = renderWithProviders(<HistoryView definition={definition()} />, { search: '?view=history&hash=abc123' });
+    expect(await findByText(/Itinerary abc123/)).toBeInTheDocument();
+    await waitFor(() => expect(paths.at(-1)).toBe('/api/itineraries/abc123/history'));
   });
 
-  it('links and location round-trip the itinerary hash', () => {
-    expect(historyHref('abc 123')).toBe('?view=history&hash=abc%20123');
-    window.history.pushState({}, '', '/?view=history&hash=abc123');
-    expect(itineraryHashFromLocation()).toEqual({ itineraryHash: 'abc123' });
-    window.history.pushState({}, '', '/?view=history');
-    expect(itineraryHashFromLocation()).toEqual({});
+  it('historyHref keeps the other URL parameters and sets view and hash', () => {
+    window.history.replaceState(null, '', '/?view=results&def=def-0001');
+    const href = historyHref('abc 123');
+    expect(new URLSearchParams(href.split('?')[1]).get('view')).toBe('history');
+    expect(new URLSearchParams(href.split('?')[1]).get('hash')).toBe('abc 123');
+    expect(new URLSearchParams(href.split('?')[1]).get('def')).toBe('def-0001');
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/History`
-Expected: FAIL with `Failed to resolve import "../../../src/views/History/HistoryView.js"`.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/history.test.tsx`
+Expected: FAIL with `Failed to resolve import "../../src/views/History/HistoryView.js"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/strings.ts`: append
+`apps/web/src/copy.ts`: append inside `COPY`
 
 ```ts
-/** History strings (spec §11 History; the route series label is the spec's §7 wording). WP10. */
-export const historyStrings = {
-  title: 'History',
-  chartTitle: 'Price history',
-  xAxis: 'fetched (Europe/London time)',
-  yAxis: '£',
-  routeLowestSeries: "Google's route-level lowest price, cabin unknown",
-  offerSeries: (provider: string): string => `${provider} · itinerary offer`,
-  calendarSeries: (provider: string): string => `${provider} · calendar price (constraints not checked)`,
-  routePicker: 'Route',
-  pairOption: (origin: string, destination: string): string => `${origin}→${destination}`,
-  itineraryHeading: (hash: string): string => `Itinerary ${hash}`,
-  backToRoute: 'Show route history',
-  tableCaption: (series: string): string => `${series}: prices with provenance`,
-  fetchedColumn: 'Fetched (Europe/London)',
-  priceColumn: 'Price',
-  provenanceColumn: 'Provenance',
-  routeLowestProvenance: (provider: string, age: string): string => `${provider} · route-level series, cabin unknown · ${age}`,
-  rowLink: 'price history',
-  loading: 'Loading history…',
-  empty: 'No price history yet for this selection. Each run adds a point.',
-  error: (message: string): string => `Could not load history: ${message}`,
-} as const;
+  // History (WP10; spec §11 History; the route label is spec §7's wording)
+  historyView: {
+    title: 'History',
+    chartTitle: 'Price history',
+    xAxis: 'fetched, or price date for the route series (Europe/London)',
+    yAxis: '£',
+    routeLowestSeries: "Google's route-level lowest price, cabin unknown",
+    offerSeries: (source: string, seller: string) => `${source} · itinerary offer · ${seller}`,
+    calendarSeries: (source: string) => `${source} · calendar price (constraints not checked)`,
+    routePicker: 'Route',
+    pairOption: (origin: string, destination: string) => `${origin}→${destination}`,
+    itineraryHeading: (hash: string) => `Itinerary ${hash}`,
+    backToRoute: 'Show route history',
+    tableCaption: (series: string) => `${series}: prices with provenance`,
+    whenColumn: 'When',
+    priceColumn: 'Price',
+    provenanceColumn: 'Provenance',
+    routeProvenance: (source: string, age: string) => `${source} · route-level series, cabin unknown · ${age}`,
+    rowLink: 'price history',
+    empty: 'No price history yet for this selection. Each run adds a point.',
+  },
+```
+
+`apps/web/test/copy/catalogue.test.ts`: add to `SAMPLES`
+
+```ts
+  'historyView.offerSeries': ['Google Flights via SearchApi', 'Example Air'],
+  'historyView.calendarSeries': ['Aviasales cache'],
+  'historyView.pairOption': ['LHR', 'JFK'],
+  'historyView.itineraryHeading': ['abc123'],
+  'historyView.tableCaption': ['Aviasales cache · calendar price (constraints not checked)'],
+  'historyView.routeProvenance': ['Google Flights via SearchApi', 'fetched 2h ago · provider age unknown'],
 ```
 
 `apps/web/src/views/History/lines.ts`:
 
 ```ts
-import type { IsoDateTime, Provenance, ProviderId } from '@gmt/core';
-import type { HistoryResponse } from '../../api/views.js';
-import { instantMs } from '../../lib/time.js';
-import { historyStrings, providerLabel } from '../../strings.js';
+import type { Provenance, ProviderId } from '@gmt/core';
+import type { ItineraryHistoryResponse, RouteHistoryResponse } from '../../api/types.js';
+import { COPY } from '../../copy.js';
+import { discoverySourceLabel } from '../../lib/sources.js';
+import { dateMs, instantMs } from '../../lib/time.js';
 
-type Series = HistoryResponse['series'][number];
-export interface HistoryPoint { t: number; pricePence: number | null; fetchedAt: IsoDateTime | null; provenance: Provenance | null }
-export interface HistoryLine { key: string; providerId: ProviderId; kind: Series['kind']; name: string; points: HistoryPoint[] }
+export type RoutePoint = RouteHistoryResponse['routeSeries'][number]['points'][number];
+type ProviderPoint = RouteHistoryResponse['calendarSeries'][number]['points'][number];
+/** One plotted point: provider points carry provenance, route points carry their own record; gap points carry neither. */
+export interface HistoryPoint { t: number; pricePence: number | null; provenance: Provenance | null; route: RoutePoint | null }
+export interface HistoryLine { key: string; kind: 'offer' | 'calendar' | 'route-lowest'; providerId: ProviderId; name: string; points: HistoryPoint[] }
 
-/** Series label by kind (spec §11 History; §7 route_price_history wording). */
-export function seriesName(s: Pick<Series, 'providerId' | 'kind'>): string {
-  switch (s.kind) {
-    case 'route-lowest':
-      return historyStrings.routeLowestSeries;
-    case 'offer':
-      return historyStrings.offerSeries(providerLabel(s.providerId));
-    case 'calendar':
-      return historyStrings.calendarSeries(providerLabel(s.providerId));
+const HOUR_MS = 3_600_000;
+// why: route_price_history is a daily series (spec §7); a missing day beyond one is a gap.
+const ROUTE_GAP_HOURS = 48;
+
+/** Sorts by t and inserts a null point wherever two neighbours are more than `limitMs` apart (connectNulls false breaks there). */
+function withGaps(points: HistoryPoint[], limitMs: number): HistoryPoint[] {
+  const sorted = [...points].sort((a, b) => a.t - b.t);
+  const out: HistoryPoint[] = [];
+  let prev: number | null = null;
+  for (const p of sorted) {
+    if (prev !== null && p.t - prev > limitMs) out.push({ t: prev + (p.t - prev) / 2, pricePence: null, provenance: null, route: null });
+    out.push(p);
+    prev = p.t;
   }
+  return out;
 }
 
-/**
- * One line per provider and kind, x = fetchedAt (spec §11 History). A null point between two points further apart than
- * gapHours(provider) makes Recharts break the line (connectNulls false), so a missing fetch is never drawn as a flat price.
- */
-export function buildHistoryLines(resp: HistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[] {
+const fromProvider = (p: ProviderPoint): HistoryPoint => ({ t: instantMs(p.at), pricePence: p.pricePence, provenance: p.provenance, route: null });
+
+/** Route history: calendar series at fetchedAt, the route-level series at its own date (spec §11 History). */
+export function linesFromRoute(resp: RouteHistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[] {
+  const calendar: HistoryLine[] = resp.calendarSeries
+    .filter((s) => s.points.length > 0)
+    .map((s) => ({
+      key: `calendar:${s.providerId}`, kind: 'calendar', providerId: s.providerId,
+      name: COPY.historyView.calendarSeries(discoverySourceLabel(s.providerId)),
+      points: withGaps(s.points.map(fromProvider), gapHours(s.providerId) * HOUR_MS),
+    }));
+  const route: HistoryLine[] = resp.routeSeries
+    .filter((s) => s.points.length > 0)
+    .map((s) => ({
+      key: `route:${s.providerId}`, kind: 'route-lowest', providerId: s.providerId, name: COPY.historyView.routeLowestSeries,
+      points: withGaps(s.points.map((p) => ({ t: dateMs(p.date), pricePence: p.pricePence, provenance: null, route: p })), ROUTE_GAP_HOURS * HOUR_MS),
+    }));
+  return [...calendar, ...route];
+}
+
+/** Itinerary history: one offer series per provider and seller, at fetchedAt. */
+export function linesFromItinerary(resp: ItineraryHistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[] {
   return resp.series
     .filter((s) => s.points.length > 0)
-    .map((s) => {
-      const sorted = [...s.points].sort((a, b) => instantMs(a.fetchedAt) - instantMs(b.fetchedAt));
-      const limitMs = gapHours(s.providerId) * 3_600_000;
-      const points: HistoryPoint[] = [];
-      let prev: number | null = null;
-      for (const p of sorted) {
-        const t = instantMs(p.fetchedAt);
-        if (prev !== null && t - prev > limitMs) points.push({ t: prev + (t - prev) / 2, pricePence: null, fetchedAt: null, provenance: null });
-        points.push({ t, pricePence: p.pricePence, fetchedAt: p.fetchedAt, provenance: p.provenance });
-        prev = t;
-      }
-      return { key: `${s.providerId}:${s.kind}`, providerId: s.providerId, kind: s.kind, name: seriesName(s), points };
-    });
+    .map((s) => ({
+      key: `offer:${s.providerId}:${s.seller}`, kind: 'offer', providerId: s.providerId,
+      // why: the series' own provenance names its source; every point of one series shares it.
+      name: COPY.historyView.offerSeries(COPY.source[s.points[0]?.provenance.sourceKind ?? 'scraped-search'], s.seller),
+      points: withGaps(s.points.map(fromProvider), gapHours(s.providerId) * HOUR_MS),
+    }));
 }
 ```
 
@@ -3010,12 +2985,15 @@ export function buildHistoryLines(resp: HistoryResponse, gapHours: (providerId: 
 ```tsx
 import { effectiveAge, formatAgeFull, type IsoDateTime } from '@gmt/core';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Provenance } from '../../components/Provenance.js';
-import { formatPence } from '../../lib/money.js';
+import { PriceBoundary } from '../../components/PriceBoundary.js';
+import { PriceCell } from '../../components/PriceCell.js';
+import { COPY } from '../../copy.js';
+import { formatPence } from '../../format.js';
+import { formatDayLong } from '../../lib/isoDate.js';
 import { formatInstantLondon } from '../../lib/time.js';
-import { calendarStrings, historyStrings, providerLabel } from '../../strings.js';
 import type { HistoryLine, HistoryPoint } from './lines.js';
 
+const H = COPY.historyView;
 const COLOURS = ['#1d4ed8', '#c2410c', '#7c3aed', '#047857'] as const;
 const colourAt = (i: number): string => COLOURS[i % COLOURS.length] ?? '#1d4ed8';
 // why: line style backs up colour (no colour-only meaning): calendar dashed, route-level dotted, offers solid.
@@ -3026,27 +3004,16 @@ export function HistoryChart({ lines }: { lines: readonly HistoryLine[] }) {
   return (
     <div className="h-80 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart margin={{ top: 8, right: 16, bottom: 28, left: 24 }} title={historyStrings.chartTitle}>
+        <LineChart margin={{ top: 8, right: 16, bottom: 28, left: 24 }} title={H.chartTitle}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(v: number) => formatInstantLondon(v)} label={{ value: historyStrings.xAxis, position: 'insideBottom', offset: -16 }} />
-          <YAxis tickFormatter={(v: number) => formatPence(v)} label={{ value: historyStrings.yAxis, angle: -90, position: 'insideLeft' }} />
+          <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(v: number) => formatInstantLondon(v)} label={{ value: H.xAxis, position: 'insideBottom', offset: -16 }} />
+          <YAxis tickFormatter={(v: number) => formatPence(v)} label={{ value: H.yAxis, angle: -90, position: 'insideLeft' }} />
           <Tooltip labelFormatter={(v) => (typeof v === 'number' ? formatInstantLondon(v) : String(v))} formatter={(v) => (typeof v === 'number' ? formatPence(v) : String(v))} />
           <Legend verticalAlign="top" />
           {lines.map((l, i) => {
             const dash = DASH[l.kind];
             return (
-              <Line
-                key={l.key}
-                data={l.points}
-                dataKey="pricePence"
-                name={l.name}
-                type="linear"
-                connectNulls={false}
-                stroke={colourAt(i)}
-                {...(dash === null ? {} : { strokeDasharray: dash })}
-                dot
-                isAnimationActive={false}
-              />
+              <Line key={l.key} data={l.points} dataKey="pricePence" name={l.name} type="linear" connectNulls={false} stroke={colourAt(i)} {...(dash === null ? {} : { strokeDasharray: dash })} dot isAnimationActive={false} />
             );
           })}
         </LineChart>
@@ -3055,41 +3022,42 @@ export function HistoryChart({ lines }: { lines: readonly HistoryLine[] }) {
   );
 }
 
-type Priced = HistoryPoint & { pricePence: number; fetchedAt: IsoDateTime };
+type Plotted = HistoryPoint & { pricePence: number };
 
-/** Every point of one line with its provenance visible; a non-route price without provenance is withheld (spec §3). */
+/** Every point of one line: provider prices through PriceCell; route-level prices with source, "cabin unknown" and fetched age (spec §11). */
 export function HistoryTable({ line, now }: { line: HistoryLine; now: IsoDateTime }) {
-  const priced = line.points.filter((p): p is Priced => p.pricePence !== null && p.fetchedAt !== null);
+  const points = line.points.filter((p): p is Plotted => p.pricePence !== null);
   return (
     <div className="max-h-64 overflow-auto">
       <table className="w-full text-xs">
-        <caption className="text-left font-medium">{historyStrings.tableCaption(line.name)}</caption>
+        <caption className="text-left font-medium">{H.tableCaption(line.name)}</caption>
         <thead>
           <tr>
-            <th scope="col">{historyStrings.fetchedColumn}</th>
-            <th scope="col">{historyStrings.priceColumn}</th>
-            <th scope="col">{historyStrings.provenanceColumn}</th>
+            <th scope="col">{H.whenColumn}</th>
+            <th scope="col">{H.priceColumn}</th>
+            <th scope="col">{H.provenanceColumn}</th>
           </tr>
         </thead>
         <tbody>
-          {priced.map((p) => {
-            const withheld = p.provenance === null && line.kind !== 'route-lowest';
-            return (
+          {points.map((p) =>
+            p.route !== null ? (
+              <tr key={p.t}>
+                <td>{formatDayLong(p.route.date)}</td>
+                {/* why: spec §11 rev 10 — the route-level series has no cabin, so no full provenance; it shows source and fetched age instead */}
+                <td>{formatPence(p.pricePence)}</td>
+                <td>{H.routeProvenance(COPY.source[p.route.sourceKind], formatAgeFull(effectiveAge({ fetchedAt: p.route.fetchedAt, maxAgeHours: 'unknown' }, now)))}</td>
+              </tr>
+            ) : (
               <tr key={p.t}>
                 <td>{formatInstantLondon(p.t)}</td>
-                <td>{withheld ? '—' : formatPence(p.pricePence)}</td>
-                <td>
-                  {withheld ? (
-                    <span role="alert">{calendarStrings.panel.provenanceMissing}</span>
-                  ) : p.provenance !== null ? (
-                    <Provenance provenance={p.provenance} now={now} />
-                  ) : (
-                    historyStrings.routeLowestProvenance(providerLabel(line.providerId), formatAgeFull(effectiveAge({ fetchedAt: p.fetchedAt, maxAgeHours: 'unknown' }, now)))
-                  )}
+                <td colSpan={2}>
+                  <PriceBoundary>
+                    <PriceCell pricePence={p.pricePence} provenance={p.provenance ?? undefined} calendar={line.kind === 'calendar'} stale={false} />
+                  </PriceBoundary>
                 </td>
               </tr>
-            );
-          })}
+            ),
+          )}
         </tbody>
       </table>
     </div>
@@ -3100,64 +3068,69 @@ export function HistoryTable({ line, now }: { line: HistoryLine; now: IsoDateTim
 `apps/web/src/views/History/HistoryView.tsx`:
 
 ```tsx
-import type { IsoDateTime } from '@gmt/core';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { type DefinitionResponse, fetchItineraryHistory, fetchRouteHistory } from '../../api/views.js';
-import { nowIso } from '../../lib/time.js';
-import { historyStrings } from '../../strings.js';
+import { api } from '../../api/endpoints.js';
+import { qk } from '../../api/queries.js';
+import type { DefinitionResponse } from '../../api/types.js';
+import { COPY } from '../../copy.js';
+import { useNow } from '../../now.js';
+import { hrefWith, navigateTo, useSearchParams } from '../../state/urlState.js';
 import { HistoryChart, HistoryTable } from './HistoryChart.js';
-import { buildHistoryLines } from './lines.js';
+import { type HistoryLine, linesFromItinerary, linesFromRoute } from './lines.js';
 
-/** Link to one itinerary's history from a Results row (WP9's expanded row). */
+const H = COPY.historyView;
+
+/** Link to one itinerary's history (WP9's expanded row); keeps every other URL parameter. */
 export function historyHref(itineraryHash: string): string {
-  return `?view=history&hash=${encodeURIComponent(itineraryHash)}`;
+  return hrefWith({ view: 'history', hash: itineraryHash });
 }
 
-/** The `hash` query parameter as an optional prop, so the registry can open itinerary mode from a link. */
-export function itineraryHashFromLocation(): { itineraryHash?: string } {
-  const h = new URLSearchParams(window.location.search).get('hash');
-  return h === null || h === '' ? {} : { itineraryHash: h };
-}
-
-/** History: route history by default, itinerary history when a hash is given (spec §11 History, §10). */
-export function HistoryView({ definition, itineraryHash, now: nowProp }: { definition: DefinitionResponse; itineraryHash?: string; now?: IsoDateTime }) {
-  const [now] = useState<IsoDateTime>(() => nowProp ?? nowIso());
+/** History: route history by default, itinerary history with ?hash= (spec §11 History, §10). */
+export function HistoryView({ definition }: { definition: DefinitionResponse }) {
+  const now = useNow();
+  const hash = useSearchParams().get('hash');
   const pairs = useMemo(() => definition.origins.flatMap((origin) => definition.destinations.map((destination) => ({ origin, destination }))), [definition]);
   const [pairIndex, setPairIndex] = useState(0);
   const pair = pairs[pairIndex] ?? null;
-  const q = useQuery({
-    queryKey: itineraryHash !== undefined ? ['history', 'itinerary', itineraryHash] : ['history', 'route', pair?.origin ?? '', pair?.destination ?? ''],
-    queryFn: () =>
-      itineraryHash !== undefined ? fetchItineraryHistory(itineraryHash) : pair === null ? Promise.reject(new Error('no route')) : fetchRouteHistory(pair.origin, pair.destination),
-    enabled: itineraryHash !== undefined || pair !== null,
-  });
   // why: two refresh cycles without a point is a gap, not a steady price (spec §11 "gaps"); default refresh is 168 h (§7).
-  const lines = useMemo(() => (q.data === undefined ? [] : buildHistoryLines(q.data, (id) => 2 * (definition.providers.discoveryRefreshHours[id] ?? 168))), [q.data, definition]);
+  const gap = (id: keyof typeof definition.providers.discoveryRefreshHours) => 2 * (definition.providers.discoveryRefreshHours[id] ?? 168);
+  const itinerary = useQuery({ queryKey: qk.itineraryHistory(hash ?? ''), queryFn: () => api.itineraryHistory(hash ?? ''), enabled: hash !== null && hash !== '' });
+  const route = useQuery({
+    queryKey: qk.routeHistory(pair?.origin ?? '', pair?.destination ?? ''),
+    queryFn: () => (pair === null ? Promise.reject(new Error('no route')) : api.routeHistory(pair.origin, pair.destination)),
+    enabled: (hash === null || hash === '') && pair !== null,
+  });
+  const q = hash !== null && hash !== '' ? itinerary : route;
+  const lines: HistoryLine[] = useMemo(() => {
+    if (hash !== null && hash !== '') return itinerary.data === undefined ? [] : linesFromItinerary(itinerary.data, gap);
+    return route.data === undefined ? [] : linesFromRoute(route.data, gap);
+  }, [hash, itinerary.data, route.data]);
 
   return (
-    <section aria-label={historyStrings.title} className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">{historyStrings.title}</h2>
-      {itineraryHash !== undefined ? (
+    <section aria-label={H.title} className="flex flex-col gap-4">
+      <h2 className="text-xl font-semibold">{H.title}</h2>
+      {hash !== null && hash !== '' ? (
         <p>
-          {historyStrings.itineraryHeading(itineraryHash)} · <a href="?view=history" className="underline">{historyStrings.backToRoute}</a>
+          {H.itineraryHeading(hash)}{' '}
+          <a href={hrefWith({ hash: null })} onClick={navigateTo({ hash: null })} className="underline">{H.backToRoute}</a>
         </p>
       ) : (
         <label className="flex flex-col text-sm">
-          {historyStrings.routePicker}
+          {H.routePicker}
           <select value={String(pairIndex)} onChange={(e) => setPairIndex(Number(e.target.value))} className="rounded border px-2 py-1">
             {pairs.map((p, i) => (
-              <option key={`${p.origin}-${p.destination}`} value={String(i)}>{historyStrings.pairOption(p.origin, p.destination)}</option>
+              <option key={`${p.origin}-${p.destination}`} value={String(i)}>{H.pairOption(p.origin, p.destination)}</option>
             ))}
           </select>
         </label>
       )}
       {q.isPending ? (
-        <p role="status">{historyStrings.loading}</p>
+        <p role="status">{COPY.loading}</p>
       ) : q.isError ? (
-        <p role="alert">{historyStrings.error(q.error.message)}</p>
+        <p role="alert">{COPY.loadFailed(q.error.message)}</p>
       ) : lines.length === 0 ? (
-        <p>{historyStrings.empty}</p>
+        <p>{H.empty}</p>
       ) : (
         <>
           <HistoryChart lines={lines} />
@@ -3171,201 +3144,127 @@ export function HistoryView({ definition, itineraryHash, now: nowProp }: { defin
 }
 ```
 
+(The `useMemo` dependency list leaves out `gap`, which depends only on `definition`. Add `definition` to the list if Biome's `useExhaustiveDependencies` asks.)
+
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/History`
-Expected: PASS, 11 tests.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/history.test.tsx test/copy`
+Expected: PASS. The history file passes 11 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp10: history view with one line per provider and kind, gaps and provenance tables"
+git add apps/web && git commit -m "wp10: history view, provider series by fetchedAt and route series by date, with gaps"
 ```
 
-### Task 10.11: Register the views, link Results to history, and scan the new strings
+### Task 10.11: Wire the views into WP9's shell, and link Results to history
 
 **Files:**
-- Create: `apps/web/test/strings.wp10.test.ts`, `apps/web/test/views/registry.wp10.test.tsx`
-- Modify: `apps/web/src/views/registry.tsx` (WP9), `apps/web/src/views/Results/ExpandedRow.tsx` (WP9)
+- Create: `apps/web/test/app/wp10Wiring.test.tsx`
+- Modify: `apps/web/src/App.tsx` (WP9), `apps/web/src/views/Results/ExpandedRow.tsx` (WP9)
 
 **Interfaces:**
-- Consumes: `VIEWS`, `ExpandedRow` (WP9), `findBannedWords`, `BANNED_WORDS`.
-- Produces: `VIEWS` entries `calendar`, `duration` and `history`, and the "price history" link on expanded rows that have an itinerary hash.
+- Consumes: `App`, `ExpandedRow`, `verifiedRow`, `calendarRow`, `hrefWith`, `navigateTo`.
+- Produces: the Calendar, Duration and History views behind WP9's nav; the "price history" link on expanded rows that have an itinerary hash.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test**
 
-`apps/web/test/strings.wp10.test.ts`:
-
-```ts
-import { BANNED_WORDS, findBannedWords } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
-import { calendarStrings, durationStrings, historyStrings } from '../src/strings.js';
-
-// Every function-valued string gets explicit sample arguments, so a new function cannot slip past the scan.
-const SAMPLES: Record<string, unknown[][]> = {
-  'calendar.discoveryMarker': [[{ priced: 1, empty: 2, no_data: 3, error: 4, skipped: 5, not_run: 6 }, 21]],
-  'calendar.verificationMarker': [[1, 10, 2]],
-  'calendar.reusedNote': [[3]],
-  'calendar.partlyVerified': [[2]],
-  'calendar.legendScale': [['verified', 5], ['calendar', 1]],
-  'calendar.legendBand': [[0, '£400', '£450', 2], [4, '£800', '£800', 1]],
-  'calendar.legendHatched': [['verified', 5], ['calendar', 1]],
-  'calendar.bandAria': [[0], [3]],
-  'calendar.error': [['boom']],
-  'calendar.panel.title': [['Sun 14 Mar 2027']],
-  'calendar.panel.cellOption': [['LHR', 'JFK', 14, 'Sun 28 Mar']],
-  'calendar.panel.observation': [['Example Air', 'verified'], ['Example Air', 'partially-verified'], ['Example Air', 'failed']],
-  'calendar.panel.verifyFailed': [['boom']],
-  'calendar.panel.error': [['boom']],
-  'calendar.panel.reusedFrom': [['exec-0']],
-  'duration.verifiedSeries': [[3]],
-  'duration.calendarSeries': [['Aviasales cache', 9]],
-  'duration.calendarShort': [['Aviasales cache']],
-  'duration.nightsLabel': [[14]],
-  'duration.tooltipValue': [['£412', 5]],
-  'duration.error': [['boom']],
-  'history.offerSeries': [['Google Flights via SearchApi']],
-  'history.calendarSeries': [['Aviasales cache']],
-  'history.pairOption': [['LHR', 'JFK']],
-  'history.itineraryHeading': [['abc123']],
-  'history.tableCaption': [['Aviasales cache · calendar price (constraints not checked)']],
-  'history.routeLowestProvenance': [['Google Flights via SearchApi', 'fetched 2h ago · provider age unknown']],
-  'history.error': [['boom']],
-};
-
-function collect(prefix: string, obj: object, out: Array<{ key: string; text: string }>): void {
-  for (const [k, v] of Object.entries(obj)) {
-    const key = `${prefix}.${k}`;
-    if (typeof v === 'string') out.push({ key, text: v });
-    else if (typeof v === 'function') {
-      const samples = SAMPLES[key];
-      if (samples === undefined) throw new Error(`no sample arguments for ${key}`);
-      for (const args of samples) out.push({ key, text: String((v as (...a: unknown[]) => unknown)(...args)) });
-    } else if (v !== null && typeof v === 'object') collect(key, v, out);
-  }
-}
-const ALL: Array<{ key: string; text: string }> = [];
-collect('calendar', calendarStrings, ALL);
-collect('duration', durationStrings, ALL);
-collect('history', historyStrings, ALL);
-
-// Keys whose text sits beside class-verified values or names the classes themselves (spec §3, §11).
-const VERIFIED_ALLOWED = new Set([
-  'calendar.basisName.verified', 'calendar.colourByOption.verified', 'calendar.legendScale', 'calendar.legendHatched',
-  'calendar.partlyVerified', 'calendar.panel.observation', 'duration.verifiedSeries', 'duration.verifiedShort',
-]);
-
-describe('WP10 strings (spec §11 banned words; §3 reserved "verified")', () => {
-  it('scans every string, functions included', () => {
-    expect(ALL.length).toBeGreaterThan(60);
-    expect(Object.keys(SAMPLES).every((k) => ALL.some((x) => x.key === k))).toBe(true);
-  });
-  it('contains no banned word (word boundaries, core list)', () => {
-    expect(BANNED_WORDS).toEqual(['exhaustive', 'all combinations', 'every combination', 'live', 'bookable', 'guaranteed', 'real-time']);
-    expect(ALL.flatMap(({ key, text }) => findBannedWords(text).map((h) => `${key}: ${h.word}`))).toEqual([]);
-  });
-  it('uses "verified" only beside class-verified values', () => {
-    const offenders = ALL.filter(({ text }) => /\bverified\b/i.test(text)).map((x) => x.key);
-    expect([...new Set(offenders)].filter((k) => !VERIFIED_ALLOWED.has(k))).toEqual([]);
-  });
-  it('stage counts say itinerary-searched', () => {
-    expect(calendarStrings.verificationMarker(1, 10, 0)).toMatch(/^itinerary-searched /);
-  });
-});
-```
-
-`apps/web/test/views/registry.wp10.test.tsx`:
+`apps/web/test/app/wp10Wiring.test.tsx`:
 
 ```tsx
-import { render, screen } from '@testing-library/react';
-import { delay, http, HttpResponse } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { VIEWS } from '../../src/views/registry.js';
+import { App } from '../../src/App.js';
 import { ExpandedRow } from '../../src/views/Results/ExpandedRow.js';
-import { definitionFixture, NOW, resultRowFixture } from '../support/fixtures.js';
-import { renderWithQuery } from '../support/render.js';
-import { server, useMswServer } from '../support/server.js';
+import { API, calendarRow, verifiedRow } from '../fixtures.js';
+import { server } from '../msw/server.js';
+import { renderWithProviders } from '../render.js';
+import { day, disc } from '../fixtures.wp10.js';
 
-useMswServer();
+const executions = [{ id: 'exec-0001', status: 'completed', isChild: false, startedAt: '2026-10-14T12:00:00.000Z', finishedAt: '2026-10-14T13:00:00.000Z', ageHours: 2 }];
 
-describe('WP10 views in the shell', () => {
-  it('registers Calendar and Duration between Results and Coverage, and History after Coverage', () => {
-    const ids = VIEWS.map((v) => v.id);
-    const at = (id: string) => ids.indexOf(id);
-    expect(at('results')).toBeLessThan(at('calendar'));
-    expect(at('calendar')).toBeLessThan(at('duration'));
-    expect(at('duration')).toBeLessThan(at('coverage'));
-    expect(at('coverage')).toBeLessThan(at('history'));
-    expect(VIEWS.filter((v) => ['calendar', 'duration', 'history'].includes(v.id)).map((v) => v.label)).toEqual(['Calendar', 'Duration', 'History']);
+describe('WP10 views in the shell (no placeholder left)', () => {
+  it('?view=calendar renders the calendar grid', async () => {
+    server.use(http.get(`${API}/api/definitions/:id/calendar`, () =>
+      HttpResponse.json({ days: [day('2027-03-14', { discovery: [disc('travelpayouts', { not_run: 48 })] })], executions, staleAfterHours: 192, calendarStaleAfterHours: { travelpayouts: 216, searchapi: 192, fixture: 168 } }),
+    ));
+    const { findByRole, queryByText } = renderWithProviders(<App />, { search: '?view=calendar&def=def-0001' });
+    expect(await findByRole('grid', { name: 'March 2027' })).toBeInTheDocument();
+    expect(queryByText('This view is coming in WP10.')).toBeNull();
   });
 
-  it.each([
-    ['calendar', 'Loading calendar…'],
-    ['duration', 'Loading duration analysis…'],
-    ['history', 'Loading history…'],
-  ])('the %s entry renders its view', (id, loading) => {
-    server.use(http.get('*', async () => { await delay('infinite'); return HttpResponse.json({}); }));
-    const view = VIEWS.find((v) => v.id === id);
-    if (view === undefined) throw new Error(`no view ${id}`);
-    renderWithQuery(<>{view.render({ definition: definitionFixture() })}</>);
-    expect(screen.getByRole('status')).toHaveTextContent(loading);
+  it('?view=duration renders the duration view', async () => {
+    server.use(http.get(`${API}/api/definitions/:id/duration-analysis`, () => HttpResponse.json({ byNights: [], executions })));
+    const { findByText } = renderWithProviders(<App />, { search: '?view=duration&def=def-0001' });
+    expect(await findByText(/^No prices yet for any stay length/)).toBeInTheDocument();
   });
 
-  it('a Results expanded row links to that itinerary history; a calendar row without a hash does not', () => {
-    const { unmount } = render(<ExpandedRow row={resultRowFixture({ itineraryHash: 'abc123', basis: 'verified', verdictClass: 'verified' }) as never} now={NOW} />);
-    expect(screen.getByRole('link', { name: 'price history' })).toHaveAttribute('href', '?view=history&hash=abc123');
-    unmount();
-    render(<ExpandedRow row={resultRowFixture({ itineraryHash: null }) as never} now={NOW} />);
-    expect(screen.queryByRole('link', { name: 'price history' })).toBeNull();
+  it('?view=history renders the history view', async () => {
+    server.use(http.get(`${API}/api/routes/:origin/:destination/history`, () => HttpResponse.json({ origin: 'LHR', destination: 'JFK', calendarSeries: [], routeSeries: [] })));
+    const { findByText } = renderWithProviders(<App />, { search: '?view=history&def=def-0001' });
+    expect(await findByText('No price history yet for this selection. Each run adds a point.')).toBeInTheDocument();
+  });
+
+  it('an expanded Results row with an itinerary links to its history; a calendar row does not', () => {
+    const first = renderWithProviders(<ExpandedRow row={verifiedRow({ itineraryHash: 'abc123' })} extras={false} verificationConfigured definitionId="def-0001" />, { search: '?view=results&def=def-0001' });
+    const href = first.getByRole('link', { name: 'price history' }).getAttribute('href') ?? '';
+    const params = new URLSearchParams(href.split('?')[1]);
+    expect(params.get('view')).toBe('history');
+    expect(params.get('hash')).toBe('abc123');
+    first.unmount();
+    const second = renderWithProviders(<ExpandedRow row={calendarRow()} extras={false} verificationConfigured definitionId="def-0001" />);
+    expect(second.queryByRole('link', { name: 'price history' })).toBeNull();
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/strings.wp10.test.ts test/views/registry.wp10.test.tsx`
-Expected: the strings test PASSES (the strings exist since Tasks 10.1, 10.9 and 10.10; it is a guard). The registry test FAILS: `expected -1 to be less than …` (no `calendar` entry), and `Unable to find an accessible element with the role "link" and name "price history"`.
+Run: `pnpm --filter @gmt/web exec vitest run test/app/wp10Wiring.test.tsx`
+Expected: FAIL. The three view tests time out on `findBy…`, because the placeholder "This view is coming in WP10." renders instead. The link test fails with `Unable to find an accessible element with the role "link" and name "price history"`.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/views/registry.tsx` (WP9): add the imports, insert the `calendar` and `duration` entries after WP9's `results` entry and the `history` entry after `coverage`:
+`apps/web/src/App.tsx` (WP9's final version): add the imports and replace the placeholder line.
 
 ```tsx
-import { calendarStrings, durationStrings, historyStrings } from '../strings.js';
-import { CalendarView } from './Calendar/CalendarView.js';
-import { DurationView } from './Duration/DurationView.js';
-import { HistoryView, itineraryHashFromLocation } from './History/HistoryView.js';
+import { CalendarView } from './views/Calendar/CalendarView.js';
+import { DurationView } from './views/Duration/DurationView.js';
+import { HistoryView } from './views/History/HistoryView.js';
 
-// after the 'results' entry:
-  { id: 'calendar', label: calendarStrings.title, render: ({ definition }) => <CalendarView definition={definition} /> },
-  { id: 'duration', label: durationStrings.title, render: ({ definition }) => <DurationView definition={definition} /> },
-// after the 'coverage' entry:
-  { id: 'history', label: historyStrings.title, render: ({ definition }) => <HistoryView definition={definition} {...itineraryHashFromLocation()} /> },
+// needsDefinition now covers the WP10 views too:
+const needsDefinition = view === 'results' || view === 'coverage' || view === 'calendar' || view === 'duration' || view === 'history';
+
+// replaces {view === 'calendar' || view === 'duration' || view === 'history' ? <Placeholder wp="WP10" /> : null}
+{view === 'calendar' && selected !== null ? <CalendarView definition={selected} /> : null}
+{view === 'duration' && selected !== null ? <DurationView definition={selected} /> : null}
+{view === 'history' && selected !== null ? <HistoryView definition={selected} /> : null}
 ```
 
 `apps/web/src/views/Results/ExpandedRow.tsx` (WP9): add the imports and, after the search link, the history link:
 
 ```tsx
-import { historyStrings } from '../../strings.js';
+import { navigateTo } from '../../state/urlState.js';
 import { historyHref } from '../History/HistoryView.js';
 
-// inside the expanded row, after the search link:
-{row.itineraryHash !== null && (
-  <a href={historyHref(row.itineraryHash)} className="underline">
-    {historyStrings.rowLink}
+{row.itineraryHash !== null ? (
+  <a href={historyHref(row.itineraryHash)} onClick={navigateTo({ view: 'history', hash: row.itineraryHash })} className="underline">
+    {COPY.historyView.rowLink}
   </a>
-)}
+) : null}
 ```
+
+If WP9's `Placeholder` is now used only for Alerts, keep it (WP11 replaces that one).
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/strings.wp10.test.ts test/views/registry.wp10.test.tsx`
-Expected: PASS, 9 tests.
+Run: `pnpm --filter @gmt/web exec vitest run test/app test/copy test/views`
+Expected: PASS: WP10's 4 wiring tests, WP9's shell, copy and rendered-sweep tests (the sweep now visits the real WP10 views), and every view test.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp10: register calendar, duration and history views; results link to history; string scan"
+git add apps/web && git commit -m "wp10: calendar, duration and history views in the shell; results link to itinerary history"
 ```
 
 ### Task 10.12: Playwright smoke in fixture mode (spec §9 item 6)
@@ -3375,10 +3274,10 @@ git add apps/web && git commit -m "wp10: register calendar, duration and history
 - Modify: `apps/web/vite.config.ts` (WP9: the proxy target), root `.gitignore`
 
 **Interfaces:**
-- Consumes: `pnpm --filter @gmt/api start` (WP8); fixture mode per spec §5.5; WP9's `strings` keys and DOM hooks (§4).
-- Produces: `pnpm --filter @gmt/web e2e`, which is excluded from `pnpm test` (vitest `exclude: ['e2e/**']`, and the root `pnpm test` runs vitest only).
+- Consumes: `pnpm --filter @gmt/api start` (WP8); fixture mode per spec §5.5 (the fixture host is reached through http-kit's gated `inProcessHosts`, installed by WP4b's wiring in fixture mode; plan decision 7); WP9's `COPY` and the Definitions form's provider checkbox ids `p-d-<id>` / `p-v-<id>`.
+- Produces: `pnpm --filter @gmt/web e2e`. It is excluded from `pnpm test`: vitest `exclude: ['e2e/**']`, and the root `pnpm test` runs vitest only.
 
-The smoke drives the real api in fixture mode and the built SPA through `vite preview`. Its proxy forwards api calls, and the preview reuses WP9's `server.proxy` (Vite's `preview.proxy` defaults to `server.proxy`). The api environment satisfies `syntheticAllowed` (spec §5.5): `NODE_ENV=development`, `ALLOW_FIXTURE_PROVIDER=i-understand-this-is-fake`, a `.fixture.db` path, and no `IN_CONTAINER`. It binds loopback, so no auth is needed (spec §4). It disables auto-resume and sets the confirmation threshold high, so the run starts without a cost prompt.
+The smoke drives the real api in fixture mode and the built SPA through `vite preview`, whose proxy is WP9's `server.proxy` (Vite's `preview.proxy` defaults to it). The api environment meets `syntheticAllowed` (spec §5.5): `NODE_ENV=development`, `ALLOW_FIXTURE_PROVIDER=i-understand-this-is-fake`, a `.fixture.db` path, and no `IN_CONTAINER`. It binds loopback, so no auth is needed (spec §4). It disables auto-resume and sets the confirmation threshold high, so the run starts without a cost prompt.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3386,31 +3285,31 @@ The smoke drives the real api in fixture mode and the built SPA through `vite pr
 
 ```ts
 import { expect, test } from '@playwright/test';
-import { strings } from '../src/strings.js';
+import { COPY } from '../src/copy.js';
 
 // Spec §9 item 6: one Playwright smoke in fixture mode. Every price here is synthetic, and the red banner must say so.
 test('fixture mode: import example, run, and the Results header shows a price with provenance under the synthetic banner', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('link', { name: strings.nav.definitions }).click();
-  await page.getByRole('button', { name: strings.definitions.importExample }).click();
+  await page.goto('/?view=definitions');
+  await page.getByRole('button', { name: COPY.importExample }).click();
 
   // why: the example JSON names the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
-  for (const groupName of [strings.definitions.discoveryProviders, strings.definitions.verificationProviders]) {
-    const group = page.getByRole('group', { name: groupName });
-    for (const box of await group.getByRole('checkbox').all()) await box.uncheck();
-    await group.getByRole('checkbox', { name: /fixture/i }).check();
+  for (const prefix of ['p-d-', 'p-v-']) {
+    for (const box of await page.locator(`input[type="checkbox"][id^="${prefix}"]`).all()) await box.uncheck();
+    await page.locator(`#${prefix}fixture`).check();
   }
-  await page.getByRole('button', { name: strings.definitions.create }).click();
-  await page.getByRole('button', { name: strings.definitions.runNow }).click();
+  await page.getByRole('button', { name: /^Create and confirm up to/ }).click();
+  await page.getByRole('button', { name: COPY.runNow }).click();
 
-  const headline = page.getByTestId('results-headline');
+  const headline = page.getByText(/^cheapest found £\d/);
   await expect(async () => {
-    await page.getByRole('link', { name: strings.nav.results }).click();
-    await expect(headline).toContainText(/cheapest found £\d/, { timeout: 2_000 });
+    await page.goto('/?view=results');
+    await expect(headline).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 90_000 });
-  await expect(headline.getByTestId('provenance')).toBeVisible();
+  // Provenance on the headline (spec §11): the source in words and the effective age.
+  await expect(headline).toContainText(COPY.source.synthetic);
+  await expect(headline).toContainText(/ago|just now/);
 
-  const banner = page.getByRole('alert').filter({ hasText: strings.syntheticBanner });
+  const banner = page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
   await expect(banner).toBeVisible();
   await expect(banner).toHaveClass(/bg-red-700/);
 });
@@ -3419,7 +3318,7 @@ test('fixture mode: import example, run, and the Results header shows a price wi
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/web e2e`
-Expected: FAIL with `Missing script: "e2e"` if Task 10.8's scripts are absent. Otherwise Playwright fails with `Error: No tests found` or a config load error, because `playwright.config.ts` does not exist yet.
+Expected: FAIL. Playwright reports `Error: No tests found` or a config load error, because `playwright.config.ts` does not exist yet.
 
 - [ ] **Step 3: Implement**
 
@@ -3427,7 +3326,7 @@ Expected: FAIL with `Missing script: "e2e"` if Task 10.8's scripts are absent. O
 
 ```js
 #!/usr/bin/env node
-// Prepares a fresh database for the fixture-mode smoke. Spec §5.5: fixture mode requires a path ending in .fixture.db,
+// Prepares a fresh database for the fixture-mode smoke. Spec §5.5: fixture mode needs a path ending in .fixture.db,
 // and the api realpath-resolves it at boot, so the directory must exist first. Run by the api webServer command.
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -3467,7 +3366,7 @@ export default defineConfig({
     {
       name: 'api',
       command: 'node e2e/prepare-db.mjs && pnpm --filter @gmt/api start',
-      url: `${API_ORIGIN}/health`,
+      url: `${API_ORIGIN}/api/health`,
       timeout: 120_000,
       reuseExistingServer: false,
       stdout: 'pipe',
@@ -3479,7 +3378,9 @@ export default defineConfig({
         IN_CONTAINER: '',
         PORT: String(API_PORT),
         BIND_ADDRESS: '127.0.0.1',
+        // why: the preview proxy keeps the browser's Host (no changeOrigin), so the api must allow the preview origin too.
         ALLOWED_HOSTS: `127.0.0.1:${API_PORT},127.0.0.1:${WEB_PORT}`,
+        APP_BASE_URL: WEB_ORIGIN,
         APP_BASIC_AUTH_USER: '',
         APP_BASIC_AUTH_PASS: '',
         TRAVELPAYOUTS_TOKEN: '',
@@ -3502,12 +3403,13 @@ export default defineConfig({
 });
 ```
 
-`apps/web/vite.config.ts` (WP9): change only the proxy target, so dev keeps its default and the smoke points the preview at its own api:
+`apps/web/vite.config.ts` (WP9): change only the proxy target, so dev keeps its default and the smoke points the preview at its own api.
 
 ```ts
 // why: the Playwright smoke runs its own fixture-mode api on another port; dev keeps the default. preview.proxy inherits server.proxy.
-const apiOrigin = process.env.GMT_API_ORIGIN ?? 'http://127.0.0.1:3000';
-// in defineConfig({ server: { proxy: { … } } }): every proxy entry's `target` becomes `apiOrigin`
+const API_ORIGIN = process.env.GMT_API_ORIGIN ?? 'http://localhost:3000';
+// in server.proxy, every entry's target becomes API_ORIGIN:
+proxy: Object.fromEntries(API_PREFIXES.map((p) => [p, { target: API_ORIGIN }])),
 ```
 
 Root `.gitignore`: add
@@ -3524,10 +3426,10 @@ Run: `pnpm --filter @gmt/web e2e:install` (once per machine)
 Expected: Chromium downloaded.
 
 Run: `pnpm --filter @gmt/web e2e`
-Expected: the workspace builds, both web servers start, and the reporter prints `1 passed`.
+Expected: the workspace builds, both servers start, and the reporter prints `1 passed`.
 
 Run: `pnpm test`
-Expected: the root vitest run lists no file under `apps/web/e2e/`.
+Expected: no file under `apps/web/e2e/` is listed.
 
 - [ ] **Step 5: Commit**
 
@@ -3538,34 +3440,32 @@ git add apps/web .gitignore && git commit -m "wp10: Playwright smoke in fixture 
 ## 9. Pinned review-focus tests
 
 - **Review focus 3** (plan: "The browser runs outside Europe/London … a day never shifts by one. Owner: WP10"):
-  - Task 10.8, `apps/web/test/tz/dates.tz.test.tsx`, runs under `America/Los_Angeles` and `Asia/Tokyo` in two ways: in-process per `describe.each` block, and as whole processes via `pnpm --filter @gmt/web run test:tz` (`GMT_TEST_TZ` → `process.env.TZ` in `test/setup-tz.ts` before any Date is built). It asserts the zone took effect and that a naive `Date` would shift the day (the control). It also checks that the US and UK DST-change days and the leap day keep their date and weekday, that the calendar grid puts each day under its own weekday and month, and that the Results date columns render departure and return from their strings.
-  - Task 10.2, `apps/web/test/lib/noDateParsing.test.ts`, fails on any `new Date(`, `Date.parse(`, local date getter or `toLocale*String(` in `apps/web/src` outside `src/lib/time.ts`, whose helpers refuse a date-only string. The scanner's own positive cases keep the test from being vacuous.
+  - **Task 10.8**, `test/tz/dates.tz.test.tsx`, runs under `America/Los_Angeles` and `Asia/Tokyo` in two ways: in-process per `describe.each` block, and as whole processes via `pnpm --filter @gmt/web run test:tz`, where `GMT_TEST_TZ` is copied to `process.env.TZ` in `test/setup-tz.ts` before any Date is built. In each zone it asserts:
+    - the zone took effect;
+    - a naive `Date` would shift the day (the control);
+    - the US and UK DST-change days and the leap day keep their date and weekday;
+    - the calendar grid puts each day under its own weekday and month;
+    - WP9's Results renders departure and return from their strings.
+  - **Task 10.2**, `test/lib/noDateParsing.test.ts`, fails on any `new Date(`, `Date.parse(`, local date getter or `toLocale*String(` in `apps/web/src` outside `lib/time.ts` and `now.tsx`. The scanner's own positive cases keep it from being vacuous.
 
 ## 10. Definition of done
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/web test` | Every web test passes. Coverage meets lines ≥ 70%, branches ≥ 60%, functions ≥ 70%, statements ≥ 70%, with no threshold error. Then `test:tz` prints two passing runs (Los Angeles, Tokyo). |
-| `pnpm test` | The root run passes, and no `e2e/` file is listed. |
-| `pnpm --filter @gmt/web exec vitest run test/lib/noDateParsing.test.ts` | PASS: no Date construction outside `src/lib/time.ts`. |
-| `pnpm --filter @gmt/web exec vitest run test/strings.wp10.test.ts` | PASS: no banned word, and "verified" only on allowed keys. |
+| `pnpm --filter @gmt/web test` | Every web test passes. Coverage meets lines ≥ 70%, branches ≥ 60%, functions ≥ 70%, statements ≥ 70%. Then `test:tz` prints two passing runs (Los Angeles, Tokyo). |
+| `pnpm test` | The root run passes and lists no `e2e/` file. |
+| `pnpm --filter @gmt/web exec vitest run test/copy` | PASS: catalogue (every new function sampled, no banned word, "verified" only on allowed paths), source guard, rendered sweep. |
+| `pnpm --filter @gmt/web exec vitest run test/lib/noDateParsing.test.ts` | PASS. |
 | `pnpm --filter @gmt/web e2e` | `1 passed`. |
 | `pnpm lint` | Biome reports no errors. |
-| `pnpm -r typecheck` | Clean, including the `z.infer` types over the WP0 response schemas. |
-| `node scripts/check-boundaries.mjs` | Exit 0: `@gmt/web` imports only `@gmt/core` among workspace packages. |
-| `grep -rn "process.env" apps/web/src` | No output. `process.env` appears only in `test/setup-tz.ts`, `playwright.config.ts`, `vite.config.ts` and `e2e/prepare-db.mjs`, which are test and build tooling. |
-| `grep -rnE "'(LHR\|LGW\|JFK\|EWR\|LON\|NYC)'" apps/web/src` | No output. No airport, city or metro literal appears in source; the worked-example codes appear only in tests. |
+| `pnpm -r typecheck` | Clean, including the `z.infer` types over the contract v2 schemas. |
+| `node scripts/check-boundaries.mjs` | Exit 0. `@gmt/web` imports only `@gmt/core` among workspace packages; no `process.env` under `apps/web/src`; no airport literal in `apps/web/src` outside the allowlisted `example.ts`. |
 
 ## 11. Open questions
 
-1. **`requires_human_judgment`: x axis of the route-level series.** Spec §11 says History plots x = `fetchedAt` for every series. Spec §7's `route_price_history` stores 60 **daily** points per verification, each with a `date`, and all of them share one `fetched_at`. Plotted literally, the route series collapses into a vertical stack at one instant. This brief implements the spec as written (x = `fetchedAt`). The proposed alternative: plot that series by its `date` on the same time axis, keep `fetchedAt` in its table, and add the x-axis note "route series: date of the lowest price". The operator decides. If the alternative is chosen, it touches `lines.ts` (one branch on `kind === 'route-lowest'`) and needs `date` added to `historyResponseSchema` points.
+None. The route-series x axis was decided at reconciliation (spec §11 rev 10: plotted by its own `date`, carrying `{ date, pricePence, fetchedAt, providerId, sourceKind }` instead of full provenance). The `/api` prefix, web dependencies, React 19, the `src/`-only `process.env` rule, the client-side colour toggle and the fixture host seam are settled by the plan's "Decisions taken at reconciliation".
 
-The brief does not paper over these findings against the plan; they are not design questions. Fable resolves them in the plan's contract before dispatch:
-
-- `calendarResponseSchema`, `durationAnalysisResponseSchema`, `cellDetailResponseSchema` and `historyResponseSchema` have no field lists in the plan. §4 lists the fields WP10 reads, derived from spec §10.
-- The calendar day needs `date` (the spec does not say which date keys a day; this brief assumes the departure date), and each day price needs its `cell`. Without the cell, a day cannot show the destination airport (spec §11 provenance list) and the side panel cannot open the priced cell.
-- The calendar and duration responses need `executions` for the view header (spec §11: "Every view header: execution(s) shown, status, age …").
-- `duration-analysis` gives per-nights `n` but no coverage, so View C cannot tell "not searched" from "searched, no fares". The view says "no price" with a pointer to Coverage instead of claiming either.
-- History points of `kind: 'route-lowest'` cannot carry `Provenance`, because `Provenance.cabin` is a `Cabin` and that series' cabin is unknown (spec §7). The api contract says every price-bearing shape carries provenance. This brief allows `provenance: null` for that kind only and renders provider, source and fetched age in its place. Any other kind without provenance is withheld.
-- Plan Task 0.1 lists `msw` only for `@gmt/providers`, but spec §9 item 6 web tests need it. This brief adds `msw@3.0.3` to `@gmt/web`, plus `zod@4.6.7` for `z.infer`.
-- Spec §4's tech line says "React 18"; the plan pins React 19.3.1. This brief follows the plan's pinned version; the spec line needs correcting.
+Items the WP9 reconciliation must carry, which this brief relies on:
+- `COPY.source['scraped-aggregate']` reads "Google date grid via SearchApi" (spec rev 10 §11).
+- `ViewHeader` accepts the contract's `ExecutionSummary`, whose `ageHours` may be `'unknown'`.
+- `test/fixtures.ts` and the msw handlers use the `/api` paths and the contract v2 shapes.
