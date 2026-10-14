@@ -1,10 +1,18 @@
-import { AbortedError, isoDateTimeOfEpochMs, ProviderError } from '@gmt/core';
+import { AbortedError, BudgetExceeded, isoDateTimeOfEpochMs, ProviderError } from '@gmt/core';
 import pRetry from 'p-retry';
-import { runAttempt } from './attempt.js';
+import { type AttemptResult, raceAbort, runAttempt } from './attempt.js';
+import { canonicalCacheKey } from './cacheKey.js';
 import { assertEgress, assertKitConfig } from './egress.js';
 import { createLimiter, HOUR_MS, type ProviderLimiter } from './limiter.js';
 import { sleep } from './sleep.js';
-import type { HttpKit, HttpKitDeps, HttpKitRequest, HttpKitResponse, HttpProviderId } from './types.js';
+import type {
+  HttpKit,
+  HttpKitDeps,
+  HttpKitRequest,
+  HttpKitResponse,
+  HttpProviderId,
+  ProviderHttpLimits,
+} from './types.js';
 
 export type {
   FixtureRecorder,
@@ -33,7 +41,29 @@ export function isRetryable(e: unknown): e is ProviderError {
   return e instanceof ProviderError && e.retryable;
 }
 
-/** Spec §5.3 http-kit over globalThis.fetch; the gated in-process seam for fixture.local arrives in Task 4.5. */
+/** A body worth caching: not null, not empty text, and admitted by the adapter's veto (spec §5.3 rev 11). */
+function shouldCache(cache: { accept?: (body: unknown) => boolean }, body: unknown): boolean {
+  if (body === null || body === '') return false;
+  return cache.accept === undefined ? true : cache.accept(body);
+}
+
+interface Flight {
+  promise: Promise<HttpKitResponse>;
+  leader: HttpKitRequest;
+}
+
+/**
+ * Spec §5.3 (rev 11) http-kit over globalThis.fetch; the only other transport is the gated `inProcessHosts` seam
+ * for fixture.local. 'fx' is never ledgered.
+ *
+ *   egress → cache lookup ─hit─▶ recordCacheHit → { body, fetchedAt: storedAt }
+ *     │miss
+ *   in-flight dedup (joiners ledger a cache hit, own their abort) → p-retry (3 attempts) {
+ *       limiter (queue age, abort) → budget.reserve → fetch → reservation.finalise → classify
+ *   } → cache.set when cacheable → { body, fetchedAt: now }
+ *
+ * Throws ProviderError (classified), BudgetExceeded (from reserve, before any fetch), AbortedError.
+ */
 export function createHttpKit(deps: HttpKitDeps): HttpKit {
   assertKitConfig(deps);
   const limiters = new Map<HttpProviderId, ProviderLimiter>();
@@ -47,24 +77,23 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
       createLimiter(l, { usedThisHour: id === 'fx' ? 0 : deps.budget.recentCalls(id, since) }),
     );
   }
-  let inFlight = 0;
+  const inFlight = new Map<string, Flight>();
 
-  async function request(r: HttpKitRequest): Promise<HttpKitResponse> {
-    if (r.signal.aborted) throw new AbortedError();
-    const limits = deps.limits[r.providerId];
-    assertEgress(r, limits, deps.secrets);
-    const limiter = limiters.get(r.providerId);
-    // why: unreachable after assertEgress (every configured id has a limiter); kept for type narrowing.
-    if (limiter === undefined) throw new Error(`no limiter for ${r.providerId}`);
+  async function upstream(
+    r: HttpKitRequest,
+    limits: ProviderHttpLimits,
+    limiter: ProviderLimiter,
+    key: string,
+  ): Promise<HttpKitResponse> {
     const run = {
       signal: r.signal,
       maxWaitMs: limits.maxWaitSeconds * 1000,
       providerId: r.providerId,
       endpointPath: r.endpointPath,
     };
-    inFlight += 1;
+    let result: AttemptResult;
     try {
-      const result = await pRetry(
+      result = await pRetry(
         (attempt) =>
           limiter.run(
             () =>
@@ -90,14 +119,81 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
           },
         },
       );
-      return { ...result, fromCache: false, cacheKey: '' };
     } catch (err) {
       // why: p-retry rethrows the signal's reason on abort; the engine contract is AbortedError (spec §5.2).
       if (r.signal.aborted && !(err instanceof AbortedError)) throw new AbortedError();
       throw err;
-    } finally {
-      inFlight -= 1;
     }
+    if (r.cache !== 'never' && shouldCache(r.cache, result.body))
+      deps.cache.set(key, result.body, r.cache.ttlSeconds, result.fetchedAt);
+    return {
+      status: result.status,
+      body: result.body,
+      fetchedAt: result.fetchedAt,
+      fromCache: false,
+      cacheKey: key,
+    };
   }
-  return { request, stats: () => ({ inFlight }) };
+
+  async function join(r: HttpKitRequest, flight: Flight): Promise<HttpKitResponse> {
+    let shared: HttpKitResponse;
+    try {
+      shared = await raceAbort(flight.promise, r.signal);
+    } catch (err) {
+      if (r.signal.aborted) throw new AbortedError();
+      const leaderAborted = err instanceof AbortedError;
+      const othersCap =
+        err instanceof BudgetExceeded &&
+        err.scope.startsWith('execution-') &&
+        flight.leader.executionId !== r.executionId;
+      // why: the leader's cancellation or its own execution cap says nothing about this caller (ruling 4);
+      // it re-issues under its own signal and its own scopes.
+      if (leaderAborted || othersCap) return request(r);
+      throw err;
+    }
+    // why: parity counts first-attempt rows plus cache hits per tile (spec §8.1), so a joiner leaves its own row.
+    if (r.providerId !== 'fx')
+      deps.budget.recordCacheHit({
+        providerId: r.providerId,
+        executionId: r.executionId,
+        tileIndex: r.tileIndex,
+        endpointPath: r.endpointPath,
+      });
+    return { ...shared, fromCache: true };
+  }
+
+  async function request(r: HttpKitRequest): Promise<HttpKitResponse> {
+    if (r.signal.aborted) throw new AbortedError();
+    const limits = deps.limits[r.providerId];
+    assertEgress(r, limits, deps.secrets);
+    const limiter = limiters.get(r.providerId);
+    // why: unreachable after assertEgress (every configured id has a limiter); kept for type narrowing.
+    if (limiter === undefined) throw new Error(`no limiter for ${r.providerId}`);
+    const key = canonicalCacheKey(r, deps.secrets);
+
+    if (r.cache !== 'never') {
+      const hit = deps.cache.get(key);
+      if (hit !== undefined) {
+        // why: spec §5.3 — cache hits are ledgered as non-billable rows so parity counts them; 'fx' is not ledgered.
+        if (r.providerId !== 'fx')
+          deps.budget.recordCacheHit({
+            providerId: r.providerId,
+            executionId: r.executionId,
+            tileIndex: r.tileIndex,
+            endpointPath: r.endpointPath,
+          });
+        return { status: 200, body: hit.body, fetchedAt: hit.storedAt, fromCache: true, cacheKey: key };
+      }
+    }
+
+    const flight = inFlight.get(key);
+    if (flight !== undefined) return join(r, flight);
+    const promise: Promise<HttpKitResponse> = upstream(r, limits, limiter, key).finally(() => {
+      if (inFlight.get(key)?.promise === promise) inFlight.delete(key);
+    });
+    inFlight.set(key, { promise, leader: r });
+    return promise;
+  }
+
+  return { request, stats: () => ({ inFlight: inFlight.size }) };
 }
