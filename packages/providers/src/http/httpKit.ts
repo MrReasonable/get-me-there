@@ -1,7 +1,8 @@
-import { isoDateTimeOfEpochMs, ProviderError } from '@gmt/core';
+import { AbortedError, isoDateTimeOfEpochMs, ProviderError } from '@gmt/core';
 import pRetry from 'p-retry';
 import { runAttempt } from './attempt.js';
 import { createLimiter, HOUR_MS, type ProviderLimiter } from './limiter.js';
+import { sleep } from './sleep.js';
 import type { HttpKit, HttpKitDeps, HttpKitRequest, HttpKitResponse, HttpProviderId } from './types.js';
 
 export type {
@@ -66,17 +67,36 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
     inFlight += 1;
     try {
       const result = await pRetry(
-        (attempt) => limiter.run(() => runAttempt(deps, r, limits, { attempt }), run),
+        (attempt) =>
+          limiter.run(
+            () =>
+              runAttempt(deps, r, limits, {
+                attempt,
+                secondsToHourRefresh: () => limiter.secondsToHourRefresh(),
+              }),
+            run,
+          ),
         {
           retries: MAX_ATTEMPTS - 1,
           minTimeout: BACKOFF_BASE_MS,
           factor: 2,
           // why: jitter keeps tiles that failed together from retrying in lockstep; tests assert ranges.
           randomize: true,
+          signal: r.signal,
           shouldRetry: ({ error }) => isRetryable(error),
+          // why: p-retry calls onFailedAttempt even when shouldRetry will refuse, so the wait checks retryability
+          // and remaining attempts itself; the sleep is abortable.
+          onFailedAttempt: async ({ error, retriesLeft }) => {
+            if (retriesLeft > 0 && isRetryable(error) && error.retryAfterSeconds !== undefined)
+              await sleep(error.retryAfterSeconds * 1000, r.signal);
+          },
         },
       );
       return { ...result, fromCache: false, cacheKey: '' };
+    } catch (err) {
+      // why: p-retry rethrows the signal's reason on abort; the engine contract is AbortedError (spec §5.2).
+      if (r.signal.aborted && !(err instanceof AbortedError)) throw new AbortedError();
+      throw err;
     } finally {
       inFlight -= 1;
     }
