@@ -7,6 +7,8 @@ dist/
 *.db-wal
 *.db-shm
 data/
+# why: the vendored airports and metro datasets are committed (WP3, spec §7); `data/` above is the runtime volume
+!packages/db/data/
 .memsearch/
 packages/providers/fixtures/recorded/**/*.raw.json
 backups/

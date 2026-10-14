@@ -1,0 +1,211 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { asIata } from '@gmt/core';
+import { describe, expect, it } from 'vitest';
+import { RowRejected } from '../src/internal/validate.js';
+import { AIRPORTS_DATA_DIR } from '../src/paths.js';
+import { AirportsRepo } from '../src/repositories/airports.js';
+import {
+  AIRPORTS_MIN_ROWS,
+  loadAirportsDataset,
+  sanityCheckAirports,
+  seedAirports,
+} from '../src/seed/airports.js';
+import type { AirportsDataset } from '../src/types.js';
+import { freshDb, tmpDir } from './helpers/db.js';
+import { EWR, JFK, LGW, LHR } from './helpers/factories.js';
+
+type Row = AirportsDataset['airports'][number];
+const A = 'A'.charCodeAt(0);
+/** Synthetic IATA-shaped codes AAA, AAB, …; their names say they are synthetic. */
+const syntheticCode = (i: number) =>
+  String.fromCharCode(A + Math.floor(i / 676), A + (Math.floor(i / 26) % 26), A + (i % 26));
+const row = (iata: string, over: Partial<Row> = {}): Row => ({
+  iata: asIata(iata),
+  icao: null,
+  name: `Synthetic ${iata}`,
+  city: 'Synthetic City',
+  country: 'ZZ',
+  tz: 'UTC',
+  lat: 0,
+  lon: 0,
+  metro: null,
+  ...over,
+});
+const dataset = (
+  airports: Row[],
+  version = 'synthetic-1',
+  metros: Record<string, string[]> = {},
+): AirportsDataset => ({ version, airports, metros });
+const many = (n: number, version?: string) =>
+  dataset(
+    Array.from({ length: n }, (_, i) => row(syntheticCode(i))),
+    version,
+  );
+
+describe('airports seed and sanity check (spec §7 airports)', () => {
+  it(`passes with ${AIRPORTS_MIN_ROWS} rows carrying IATA and tz and fails with one fewer`, {
+    timeout: 30_000,
+  }, () => {
+    const db = freshDb();
+    seedAirports(db, many(AIRPORTS_MIN_ROWS - 1));
+    expect(sanityCheckAirports(db, [])).toMatchObject({ ok: false, reason: expect.stringContaining('5000') });
+    seedAirports(db, many(AIRPORTS_MIN_ROWS, 'synthetic-2'));
+    expect(sanityCheckAirports(db, [asIata('AAA')])).toEqual({ ok: true });
+  });
+
+  it('fails naming every referenced airport that is missing', () => {
+    const db = freshDb();
+    seedAirports(db, many(AIRPORTS_MIN_ROWS));
+    expect(sanityCheckAirports(db, [asIata('AAA'), asIata('ZZZ'), asIata('ZZY'), asIata('ZZZ')])).toEqual({
+      ok: false,
+      reason: 'airports referenced by enabled definitions are missing: ZZY, ZZZ',
+    });
+  });
+
+  it('re-seeding the same version inserts nothing; a new version upserts by IATA and applies its metro list', () => {
+    const db = freshDb();
+    const rows = [row('AAA'), row('AAB'), row('AAC')];
+    expect(seedAirports(db, dataset(rows, 'v1'))).toEqual({ inserted: 3, datasetVersion: 'v1' });
+    expect(seedAirports(db, dataset(rows, 'v1'))).toEqual({ inserted: 0, datasetVersion: 'v1' });
+    expect(seedAirports(db, dataset(rows, 'v2', { AAX: ['AAA', 'AAB', 'QQQ'] }))).toEqual({
+      inserted: 3,
+      datasetVersion: 'v2',
+    });
+    const repo = new AirportsRepo(db);
+    expect(repo.get('AAA')).toMatchObject({ datasetVersion: 'v2', metro: 'AAX' });
+    expect(repo.get('AAC')?.metro).toBeNull();
+    expect(repo.datasetVersion()).toBe('v2');
+    expect(repo.count()).toBe(3);
+  });
+
+  it('the vendored data carries the worked example, the exact metro members, one country per metro, and passes the sanity check', () => {
+    const ds = loadAirportsDataset(AIRPORTS_DATA_DIR);
+    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633');
+    expect(
+      ds.airports.filter((a) => /^[A-Z]{3}$/.test(a.iata) && a.tz.length > 0).length,
+    ).toBeGreaterThanOrEqual(AIRPORTS_MIN_ROWS);
+    const db = freshDb();
+    seedAirports(db, ds);
+    expect(sanityCheckAirports(db, [LHR, LGW, JFK, EWR])).toEqual({ ok: true });
+    const repo = new AirportsRepo(db);
+    expect(repo.airportsOfMetro('LON')).toEqual(['LCY', 'LGW', 'LHR', 'LTN', 'SEN', 'STN']);
+    expect(repo.airportsOfMetro('NYC')).toEqual(['EWR', 'JFK', 'LGA']); // IDL (JFK's former code) is not a member (po-002)
+    for (const [code, members] of Object.entries(ds.metros)) {
+      const countries = members.map((m) => repo.get(m)?.country);
+      expect(countries, `every member of ${code} is a seeded airport`).not.toContain(undefined);
+      expect(new Set(countries).size, `metro ${code} spans one country`).toBe(1);
+    }
+    expect(repo.get('LHR')).toMatchObject({
+      icao: 'EGLL',
+      country: 'GB',
+      tz: 'Europe/London',
+      metro: 'LON',
+      source: expect.stringContaining('mwgg/Airports'),
+    });
+    expect(repo.tzOf('EWR')).toBe('America/New_York');
+    expect(repo.sharedMetro([LHR, LGW])).toBe('LON');
+    expect(repo.sharedMetro([JFK, EWR])).toBe('NYC');
+  });
+
+  it('seeding reads only local files: the seed module imports node:fs, node:path, @gmt/core and relative modules only (test-016)', () => {
+    const source = readFileSync(new URL('../src/seed/airports.ts', import.meta.url), 'utf8');
+    const imports = [...source.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
+    expect(
+      imports.every((i) => i === 'node:fs' || i === 'node:path' || i === '@gmt/core' || i?.startsWith('.')),
+    ).toBe(true);
+  });
+
+  it('the licence and attribution files sit beside the data', () => {
+    expect(readFileSync(join(AIRPORTS_DATA_DIR, 'airports.LICENSE'), 'utf8')).toMatch(
+      /MIT License[\s\S]*mwgg/,
+    );
+    const attribution = readFileSync(join(AIRPORTS_DATA_DIR, 'metros.ATTRIBUTION'), 'utf8');
+    expect(attribution).toContain('CC BY-SA 4.0');
+    expect(attribution).toContain('1378312633');
+    expect(existsSync(join(AIRPORTS_DATA_DIR, 'metros.json'))).toBe(true);
+  });
+
+  it('loadAirportsDataset rejects a malformed file naming the file and field (po-007)', () => {
+    const dir = tmpDir();
+    writeFileSync(
+      join(dir, 'airports.bad.json'),
+      JSON.stringify({
+        version: 'bad',
+        source: 's',
+        licence: 'l',
+        airports: [
+          { iata: 'AAA', icao: null, name: 'n', city: 'c', country: 'ZZ', tz: 'UTC', lat: 'north', lon: 0 },
+        ],
+      }),
+    );
+    writeFileSync(
+      join(dir, 'metros.json'),
+      JSON.stringify({ source: 's', revision: '1', licence: 'l', retrieved: '2026-10-14', metros: {} }),
+    );
+    expect(() => loadAirportsDataset(dir)).toThrow(/airports\.bad\.json.*airports\[0\]\.lat/);
+  });
+
+  it('a metro list that puts one airport in two metros is refused', () => {
+    expect(() =>
+      new AirportsRepo(freshDb()).upsertAll(dataset([row('AAA')], 'v', { AAX: ['AAA'], AAY: ['AAA'] })),
+    ).toThrow(expect.objectContaining({ rule: 'metro' }));
+  });
+});
+
+describe('AirportsRepo', () => {
+  const seeded = (rows: Row[], metros: Record<string, string[]> = {}) => {
+    const repo = new AirportsRepo(freshDb());
+    repo.upsertAll(dataset(rows, 'test', metros));
+    return repo;
+  };
+
+  it('exists, metroOf, airportsOfMetro, sharedMetro, tzOf', () => {
+    const repo = seeded([row('AAA'), row('AAB'), row('BBB'), row('CCC', { tz: 'Europe/London' })], {
+      AAX: ['AAA', 'AAB'],
+      BBX: ['BBB'],
+    });
+    expect([repo.exists('AAA'), repo.exists('ZZZ')]).toEqual([true, false]);
+    expect([repo.metroOf('AAA'), repo.metroOf('CCC')]).toEqual(['AAX', null]);
+    expect(repo.airportsOfMetro('AAX')).toEqual(['AAA', 'AAB']);
+    expect(repo.sharedMetro([asIata('AAA'), asIata('AAB')])).toBe('AAX');
+    expect(repo.sharedMetro([asIata('AAA'), asIata('BBB')])).toBeNull();
+    expect(repo.sharedMetro([asIata('AAA'), asIata('CCC')])).toBeNull();
+    expect(repo.sharedMetro([asIata('AAA'), asIata('ZZZ')])).toBeNull();
+    expect(repo.sharedMetro([])).toBeNull();
+    expect([repo.tzOf('CCC'), repo.tzOf('ZZZ')]).toEqual(['Europe/London', null]);
+  });
+
+  it('search ranks an exact code, then the members of a metro code, then a code prefix, then name or city; wildcards are literal', () => {
+    const repo = seeded(
+      [
+        row('AAB', { name: 'Alpha Field' }),
+        row('AAA', { name: 'Beta Field' }),
+        row('BAA', { name: 'Field AA' }),
+        row('CCC', { name: '100% Synthetic' }),
+        row('QQQ'),
+        row('QQR'),
+      ],
+      { QQX: ['QQQ', 'QQR'] },
+    );
+    expect(repo.search('aaa', 10).map((a) => a.iata)).toEqual(['AAA']);
+    expect(repo.search('QQX', 10).map((a) => a.iata)).toEqual(['QQQ', 'QQR']); // po-003: a metro code lists its airports
+    expect(repo.search('AA', 10).map((a) => a.iata)).toEqual(['AAA', 'AAB', 'BAA']);
+    expect(repo.search('alpha', 10).map((a) => a.iata)).toEqual(['AAB']);
+    expect(repo.search('%', 10).map((a) => a.iata)).toEqual(['CCC']);
+    expect(repo.search('  ', 10)).toEqual([]);
+    expect(repo.search('field', 1)).toHaveLength(1);
+  });
+
+  it('rejects a malformed country, an unknown time zone and a malformed metro code, writing nothing', () => {
+    // why: a malformed IATA code cannot be built without a cast (asIata throws), so the typed path proves the other rules.
+    const repo = new AirportsRepo(freshDb());
+    expect(() => repo.upsertAll(dataset([row('AAA'), { ...row('AAC'), country: 'zz' }]))).toThrow(
+      RowRejected,
+    );
+    expect(() => repo.upsertAll(dataset([row('AAA', { tz: 'Mars/Olympus_Mons' })]))).toThrow(/tz/);
+    expect(() => repo.upsertAll(dataset([row('AAA')], 'v', { x1: ['AAA'] }))).toThrow(/metro/);
+    expect(repo.count()).toBe(0);
+    expect(repo.datasetVersion()).toBeNull();
+  });
+});

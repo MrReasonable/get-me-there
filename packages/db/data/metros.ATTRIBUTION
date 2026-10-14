@@ -1,0 +1,7 @@
+metros.json: IATA metropolitan area codes extracted from the Wikipedia article "IATA airport code",
+section "Cities with multiple commercial airports", revision 1378312633
+(https://en.wikipedia.org/w/index.php?title=IATA_airport_code&oldid=1378312633), by Wikipedia contributors.
+Licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
+Changes: only the three-letter codes were kept, as a JSON map from metro code to airport codes; former codes
+and codes absent from airports.2026-10-01-a89e4e0.json or outside the metro's country were dropped, by
+packages/db/scripts/build-airports.mjs. This file and metros.json are distributed under the same licence.

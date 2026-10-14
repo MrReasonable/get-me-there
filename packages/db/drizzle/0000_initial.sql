@@ -94,4 +94,23 @@ CREATE TABLE `search_executions` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `search_executions_active_parent_uq` ON `search_executions` (`definition_id`) WHERE is_child = 0 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
 CREATE UNIQUE INDEX `search_executions_active_child_uq` ON `search_executions` (`definition_id`,`child_origin`,`child_destination`,`child_departure_date`,`child_return_date`) WHERE is_child = 1 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
-CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);
+CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);--> statement-breakpoint
+CREATE TABLE `airports` (
+	`iata` text PRIMARY KEY NOT NULL,
+	`icao` text,
+	`name` text NOT NULL,
+	`city` text NOT NULL,
+	`country` text NOT NULL,
+	`tz` text NOT NULL,
+	`lat` real NOT NULL,
+	`lon` real NOT NULL,
+	`metro` text,
+	`source` text NOT NULL,
+	`dataset_version` text NOT NULL,
+	CONSTRAINT "airports_iata_ck" CHECK(iata GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "airports_metro_ck" CHECK(metro IS NULL OR metro GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "airports_country_ck" CHECK(country GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "airports_tz_ck" CHECK(length(tz) > 0)
+);
+--> statement-breakpoint
+CREATE INDEX `airports_metro_idx` ON `airports` (`metro`);
