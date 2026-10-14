@@ -128,7 +128,9 @@ export async function runAttempt(
       redirect: 'error',
       signal,
     };
-    res = await raceAbort(fetch(r.url, init), signal);
+    // why: spec §5.3 rev 11 — the gated in-process seam (fixture.local only); every other host goes to globalThis.fetch.
+    const inProcess = deps.inProcessHosts?.[r.url.hostname];
+    res = await raceAbort(inProcess ? inProcess(new Request(r.url, init)) : fetch(r.url, init), signal);
     if (res.type === 'error') throw new TypeError('network error');
   } catch (err) {
     clearTimeout(timer);

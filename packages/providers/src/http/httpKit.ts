@@ -1,6 +1,7 @@
 import { AbortedError, isoDateTimeOfEpochMs, ProviderError } from '@gmt/core';
 import pRetry from 'p-retry';
 import { runAttempt } from './attempt.js';
+import { assertEgress, assertKitConfig } from './egress.js';
 import { createLimiter, HOUR_MS, type ProviderLimiter } from './limiter.js';
 import { sleep } from './sleep.js';
 import type { HttpKit, HttpKitDeps, HttpKitRequest, HttpKitResponse, HttpProviderId } from './types.js';
@@ -34,6 +35,7 @@ export function isRetryable(e: unknown): e is ProviderError {
 
 /** Spec §5.3 http-kit over globalThis.fetch; the gated in-process seam for fixture.local arrives in Task 4.5. */
 export function createHttpKit(deps: HttpKitDeps): HttpKit {
+  assertKitConfig(deps);
   const limiters = new Map<HttpProviderId, ProviderLimiter>();
   const since = isoDateTimeOfEpochMs(Date.parse(deps.clock.now()) - HOUR_MS);
   for (const id of HTTP_PROVIDER_IDS) {
@@ -48,16 +50,12 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
   let inFlight = 0;
 
   async function request(r: HttpKitRequest): Promise<HttpKitResponse> {
+    if (r.signal.aborted) throw new AbortedError();
     const limits = deps.limits[r.providerId];
+    assertEgress(r, limits, deps.secrets);
     const limiter = limiters.get(r.providerId);
-    if (limits === undefined || limiter === undefined) {
-      throw new ProviderError({
-        kind: 'upstream',
-        retryable: false,
-        providerId: r.providerId,
-        message: `${r.providerId}: no HTTP limits configured [egress-denied]`,
-      });
-    }
+    // why: unreachable after assertEgress (every configured id has a limiter); kept for type narrowing.
+    if (limiter === undefined) throw new Error(`no limiter for ${r.providerId}`);
     const run = {
       signal: r.signal,
       maxWaitMs: limits.maxWaitSeconds * 1000,
