@@ -3,6 +3,7 @@ import {
   type BudgetGuard,
   type BudgetScope,
   type Clock,
+  type ExecutionBudget,
   type IsoDateTime,
   type ProviderId,
   type Reservation,
@@ -199,6 +200,8 @@ export class SqliteBudgetGuard implements BudgetGuard {
     return this.sql.recentCalls.get(providerId, since)?.n ?? 0;
   }
 
+  // why: check order is provider (the vendor's hard stop), then global (total spend), then the execution's own caps;
+  // one breach is reported and the engine's error table (spec §8.1) acts on its scope.
   protected checkCaps(p: ReserveParams, budget: ProviderBudget, now: IsoDateTime): void {
     const prov = this.providerUsage(p.providerId, budget, now, budget.window);
     const callCap = effectiveCallCap(budget);
@@ -213,9 +216,21 @@ export class SqliteBudgetGuard implements BudgetGuard {
     if (budget.billable) {
       const g = this.globalUsage(now);
       const cap = this.config.spend.monthlyCapMicroGbp;
-      // why: spec §5.3 "A cap of 0 refuses when current + this > 0; zero-cost calls pass."
       if (p.costMicroGbp > 0 && g.cost + p.costMicroGbp > cap)
         throw this.exceeded('global-month', cap, g.cost, p.costMicroGbp, p.providerId);
+    }
+    if (p.executionId === null) return;
+    const caps = this.executionCaps(p.executionId);
+    if (budget.billable) {
+      const u = this.executionRows(p.executionId, this.providersWhere(true), true);
+      if (u.calls + 1 > caps.maxCalls)
+        throw this.exceeded('execution-calls', caps.maxCalls, u.calls, 1, p.providerId);
+      if (p.costMicroGbp > 0 && u.cost + p.costMicroGbp > caps.maxCostMicroGbp)
+        throw this.exceeded('execution-cost', caps.maxCostMicroGbp, u.cost, p.costMicroGbp, p.providerId);
+    } else {
+      const u = this.executionRows(p.executionId, this.providersWhere(false), false);
+      if (u.calls + 1 > caps.maxFreeCalls)
+        throw this.exceeded('execution-free-calls', caps.maxFreeCalls, u.calls, 1, p.providerId);
     }
   }
 
@@ -223,8 +238,38 @@ export class SqliteBudgetGuard implements BudgetGuard {
     kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost',
     executionId: string,
   ): Usage {
-    // why: Task 3.1 enforces provider and global scopes only; Task 3.2 replaces this method.
-    throw new RangeError(`scope ${kind} is not supported (execution ${executionId})`);
+    const caps = this.executionCaps(executionId);
+    const billed = kind !== 'execution-free-calls';
+    const u = this.executionRows(executionId, this.providersWhere(billed), billed);
+    const cap =
+      kind === 'execution-calls'
+        ? caps.maxCalls
+        : kind === 'execution-free-calls'
+          ? caps.maxFreeCalls
+          : caps.maxCostMicroGbp;
+    return { calls: u.calls, costMicroGbp: u.cost, cap, windowStart: null, windowEnd: null };
+  }
+
+  private executionRows(executionId: string, providers: ProviderId[], billed: boolean): CallsAndCost {
+    const row = this.sql.executionUsage.get({
+      executionId,
+      providers: JSON.stringify(providers),
+      billed: billed ? 1 : 0,
+    });
+    return { calls: row?.calls ?? 0, cost: row?.cost ?? 0 };
+  }
+
+  private executionCaps(executionId: string): ExecutionBudget {
+    const row = this.sql.executionCaps.get(executionId);
+    if (row === undefined) throw new Error(`execution ${executionId} does not exist; refusing to reserve`);
+    const { maxCalls, maxFreeCalls, maxCostMicroGbp } = row;
+    if (
+      typeof maxCalls !== 'number' ||
+      typeof maxFreeCalls !== 'number' ||
+      typeof maxCostMicroGbp !== 'number'
+    )
+      throw new Error(`execution ${executionId} snapshot has no budget; refusing to reserve`);
+    return { maxCalls, maxFreeCalls, maxCostMicroGbp };
   }
 
   protected providerUsage(
