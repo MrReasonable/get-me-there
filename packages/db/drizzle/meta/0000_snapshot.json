@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7db2717a-e17b-443b-8310-b7c6a1b51928",
+  "id": "4bd5d310-6139-45fa-aad0-b6a92b886996",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -2700,6 +2700,72 @@
         "segments_arrive_utc_ck": {
           "name": "segments_arrive_utc_ck",
           "value": "arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        }
+      }
+    },
+    "provider_cache": {
+      "name": "provider_cache",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "body_json": {
+          "name": "body_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stored_at": {
+          "name": "stored_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "provider_cache_expires_idx": {
+          "name": "provider_cache_expires_idx",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "provider_cache_key_ck": {
+          "name": "provider_cache_key_ck",
+          "value": "length(key) = 64 AND key NOT GLOB '*[^0-9a-f]*'"
+        },
+        "provider_cache_stored_ck": {
+          "name": "provider_cache_stored_ck",
+          "value": "stored_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "provider_cache_expires_ck": {
+          "name": "provider_cache_expires_ck",
+          "value": "expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     }

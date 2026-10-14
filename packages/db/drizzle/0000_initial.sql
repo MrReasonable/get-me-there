@@ -431,3 +431,16 @@ CREATE TABLE `segments` (
 	CONSTRAINT "segments_depart_utc_ck" CHECK(depart_utc IS NULL OR depart_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
 	CONSTRAINT "segments_arrive_utc_ck" CHECK(arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
+--> statement-breakpoint
+CREATE TABLE `provider_cache` (
+	`key` text PRIMARY KEY NOT NULL,
+	`provider_id` text,
+	`body_json` text NOT NULL,
+	`stored_at` text NOT NULL,
+	`expires_at` text NOT NULL,
+	CONSTRAINT "provider_cache_key_ck" CHECK(length(key) = 64 AND key NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "provider_cache_stored_ck" CHECK(stored_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "provider_cache_expires_ck" CHECK(expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `provider_cache_expires_idx` ON `provider_cache` (`expires_at`);

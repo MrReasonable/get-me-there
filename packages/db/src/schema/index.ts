@@ -10,6 +10,7 @@ export * from './fxRates.js';
 export * from './itineraries.js';
 export * from './operatorNotifications.js';
 export * from './priceObservations.js';
+export * from './providerCache.js';
 export * from './providerRequests.js';
 export * from './routePriceHistory.js';
 export * from './searchCells.js';
