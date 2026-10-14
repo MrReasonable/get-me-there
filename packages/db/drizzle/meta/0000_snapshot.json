@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cf629dc1-ee2d-404b-9d1d-fed1ad32c835",
+  "id": "074e44ba-bf4b-4787-a30a-002c4b46b356",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -389,6 +389,61 @@
         "alert_rules_deleted_ck": {
           "name": "alert_rules_deleted_ck",
           "value": "deleted_at IS NULL OR deleted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        }
+      }
+    },
+    "app_lock": {
+      "name": "app_lock",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "holder": {
+          "name": "holder",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "heartbeat_at": {
+          "name": "heartbeat_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "acquired_at": {
+          "name": "acquired_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "app_lock_singleton_ck": {
+          "name": "app_lock_singleton_ck",
+          "value": "id = 1"
+        },
+        "app_lock_holder_ck": {
+          "name": "app_lock_holder_ck",
+          "value": "holder IN ('app', 'tool')"
+        },
+        "app_lock_heartbeat_ck": {
+          "name": "app_lock_heartbeat_ck",
+          "value": "heartbeat_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "app_lock_acquired_ck": {
+          "name": "app_lock_acquired_ck",
+          "value": "acquired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     },
@@ -2766,61 +2821,6 @@
         "segments_arrive_utc_ck": {
           "name": "segments_arrive_utc_ck",
           "value": "arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        }
-      }
-    },
-    "app_lock": {
-      "name": "app_lock",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "holder": {
-          "name": "holder",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "heartbeat_at": {
-          "name": "heartbeat_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "acquired_at": {
-          "name": "acquired_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "app_lock_singleton_ck": {
-          "name": "app_lock_singleton_ck",
-          "value": "id = 1"
-        },
-        "app_lock_holder_ck": {
-          "name": "app_lock_holder_ck",
-          "value": "holder IN ('app', 'tool')"
-        },
-        "app_lock_heartbeat_ck": {
-          "name": "app_lock_heartbeat_ck",
-          "value": "heartbeat_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        },
-        "app_lock_acquired_ck": {
-          "name": "app_lock_acquired_ck",
-          "value": "acquired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     }

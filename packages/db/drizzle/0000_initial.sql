@@ -59,6 +59,17 @@ CREATE TABLE `alert_rules` (
 	CONSTRAINT "alert_rules_deleted_ck" CHECK(deleted_at IS NULL OR deleted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
 --> statement-breakpoint
+CREATE TABLE `app_lock` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`holder` text NOT NULL,
+	`heartbeat_at` text NOT NULL,
+	`acquired_at` text NOT NULL,
+	CONSTRAINT "app_lock_singleton_ck" CHECK(id = 1),
+	CONSTRAINT "app_lock_holder_ck" CHECK(holder IN ('app', 'tool')),
+	CONSTRAINT "app_lock_heartbeat_ck" CHECK(heartbeat_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "app_lock_acquired_ck" CHECK(acquired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
 CREATE TABLE `calendar_prices` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`execution_id` text NOT NULL,
@@ -442,15 +453,4 @@ CREATE TABLE `segments` (
 	CONSTRAINT "segments_duration_ck" CHECK(duration_minutes IS NULL OR (typeof(duration_minutes) = 'integer' AND duration_minutes >= 0)),
 	CONSTRAINT "segments_depart_utc_ck" CHECK(depart_utc IS NULL OR depart_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
 	CONSTRAINT "segments_arrive_utc_ck" CHECK(arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
-);
---> statement-breakpoint
-CREATE TABLE `app_lock` (
-	`id` integer PRIMARY KEY NOT NULL,
-	`holder` text NOT NULL,
-	`heartbeat_at` text NOT NULL,
-	`acquired_at` text NOT NULL,
-	CONSTRAINT "app_lock_singleton_ck" CHECK(id = 1),
-	CONSTRAINT "app_lock_holder_ck" CHECK(holder IN ('app', 'tool')),
-	CONSTRAINT "app_lock_heartbeat_ck" CHECK(heartbeat_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-	CONSTRAINT "app_lock_acquired_ck" CHECK(acquired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
