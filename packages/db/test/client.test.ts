@@ -61,6 +61,26 @@ describe('migrations (spec §7)', () => {
     expect(applyMigrations(db, dir)).toEqual({ applied: [] });
     db.close();
   });
+  it('applies a real migration once and reports nothing pending afterwards', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gmt-mig-'));
+    mkdirSync(join(dir, 'meta'));
+    writeFileSync(
+      join(dir, 'meta', '_journal.json'),
+      JSON.stringify({
+        version: '7',
+        dialect: 'sqlite',
+        entries: [{ idx: 0, version: '6', when: 1_760_000_000_000, tag: '0000_initial', breakpoints: true }],
+      }),
+    );
+    writeFileSync(join(dir, '0000_initial.sql'), 'CREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+    const db = openDatabase(':memory:');
+    expect(pendingMigrations(db, dir)).toEqual(['0000_initial']);
+    expect(applyMigrations(db, dir)).toEqual({ applied: ['0000_initial'] });
+    expect(pendingMigrations(db, dir)).toEqual([]);
+    expect(applyMigrations(db, dir)).toEqual({ applied: [] }); // idempotent
+    expect(db.raw.prepare("SELECT name FROM sqlite_master WHERE name = 't'").get()).toBeDefined();
+    db.close();
+  });
   it('names a failing migrations directory', () => {
     const db = openDatabase(':memory:');
     expect(() => applyMigrations(db, '/nonexistent/drizzle')).toThrow(/nonexistent/);

@@ -9,7 +9,7 @@ export const errorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
-    details: z.looseObject({ fields: z.array(fieldErrorSchema).optional() }).optional(),
+    details: z.looseObject({ fields: z.array(fieldErrorSchema).exactOptional() }).exactOptional(),
   }),
 });
 export const moneyPenceSchema = z.number().int().min(0);
@@ -92,16 +92,16 @@ export const cellKeySchema = z.object({
 export const cellSchema = cellKeySchema.extend({ nights: z.number().int().min(0) });
 export const segmentSchema = z.object({
   marketingCarrier: z.string(),
-  operatingCarrier: z.string().optional(),
+  operatingCarrier: z.string().exactOptional(),
   flightNumber: z.number().int().min(0),
   from: iataSchema,
   to: iataSchema,
   departLocal: z.string(),
   arriveLocal: z.string(),
-  departUtc: isoDateTimeSchema.optional(),
-  arriveUtc: isoDateTimeSchema.optional(),
-  durationMinutes: z.number().int().min(0).optional(),
-  aircraft: z.string().optional(),
+  departUtc: isoDateTimeSchema.exactOptional(),
+  arriveUtc: isoDateTimeSchema.exactOptional(),
+  durationMinutes: z.number().int().min(0).exactOptional(),
+  aircraft: z.string().exactOptional(),
 });
 export const layoverSchema = z.object({
   at: iataSchema,

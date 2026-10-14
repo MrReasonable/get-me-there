@@ -14,9 +14,8 @@ export function pendingMigrations(db: Db, migrationsDir: string): string[] {
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'")
     .get();
   if (hasTable === undefined) return journal.entries.map((e) => e.tag);
-  const last = db.raw.prepare('SELECT MAX(created_at) AS at FROM __drizzle_migrations').get() as {
-    at: number | null;
-  };
+  const last = db.raw.prepare<[], { at: number | null }>('SELECT MAX(created_at) AS at FROM __drizzle_migrations').get();
+  if (last === undefined) return journal.entries.map((e) => e.tag);
   // why: drizzle applies migrations in journal order and stores each folder timestamp as created_at,
   // so everything with a later `when` is pending.
   return journal.entries.filter((e) => last.at === null || e.when > last.at).map((e) => e.tag);

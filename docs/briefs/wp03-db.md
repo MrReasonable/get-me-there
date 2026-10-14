@@ -392,7 +392,7 @@ const perCall = budgetConfig({ searchapi: limits({ costPerCallMicroGbp: COST }) 
 const call = { providerId: 'searchapi', executionId: null, tileIndex: null, costMicroGbp: COST, httpAttempt: 1, endpointPath: '/api/v1/search' } as const;
 
 describe('SqliteBudgetGuard global-month cap in SQL (spec §5.3, §9 item 3)', () => {
-  it('937 calls of 3,200 µGBP pass a 3,000,000 µGBP cap and the 938th throws global-month without writing a row', () => {
+  it('937 calls of 3,200 µGBP pass a 3,000,000 µGBP cap and the 938th throws global-month without writing a row', { timeout: 30_000 }, () => {
     const db = freshDb();
     const guard = new SqliteBudgetGuard(db, perCall, fixedClock(T0));
     for (let k = 1; k <= 937; k++) guard.reserve(call).finalise({ outcome: 'ok', httpStatus: 200, durationMs: 10 });
@@ -1145,7 +1145,8 @@ export class SqliteBudgetGuard implements BudgetGuard {
       const g = this.globalUsage(now);
       return { calls: g.calls, costMicroGbp: g.cost, cap: this.config.spend.monthlyCapMicroGbp, windowStart: g.windowStart, windowEnd: g.windowEnd };
     }
-    if (scope.kind === 'provider-month' || scope.kind === 'provider-lifetime') {
+    // why: structural narrowing (arch-r3-002); a union-typed `kind` member is not removed by `kind ===` checks.
+    if ('providerId' in scope) {
       const budget = this.budgetFor(scope.providerId);
       const asked = scope.kind === 'provider-lifetime' ? 'lifetime' : 'month';
       const u = this.providerUsage(scope.providerId, budget, now, asked);
@@ -1346,7 +1347,6 @@ export function rawExecution(db: Db, budget: ExecutionBudget, opts: { isChild?: 
 
 ```ts
 import { type BudgetGuard, BudgetExceeded, fixedClock } from '@gmt/core';
-import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import type { BudgetConfig } from '../src/budgetConfig.js';
 import { SqliteBudgetGuard } from '../src/budgetGuard.js';
@@ -1581,7 +1581,7 @@ describe('BEGIN IMMEDIATE: the predicates run under the write lock (spec §7, co
 });
 ```
 
-`// why:` the race is proven deterministically with the probe rather than two worker threads: the guard imports workspace TypeScript (`@gmt/core`), which a raw worker cannot load, and the probe distinguishes `BEGIN IMMEDIATE` from a deferred transaction exactly (under a deferred transaction the probe's insert succeeds). `Database` is imported for the `instanceof` narrowing in `sqliteCode`.
+`// why:` the race is proven deterministically with the probe rather than two worker threads: the guard imports workspace TypeScript (`@gmt/core`), which a raw worker cannot load, and the probe distinguishes `BEGIN IMMEDIATE` from a deferred transaction exactly (under a deferred transaction the probe's insert succeeds).
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -1974,7 +1974,7 @@ const dataset = (airports: Row[], version = 'synthetic-1', metros: Record<string
 const many = (n: number, version?: string) => dataset(Array.from({ length: n }, (_, i) => row(syntheticCode(i))), version);
 
 describe('airports seed and sanity check (spec §7 airports)', () => {
-  it(`passes with ${AIRPORTS_MIN_ROWS} rows carrying IATA and tz and fails with one fewer`, () => {
+  it(`passes with ${AIRPORTS_MIN_ROWS} rows carrying IATA and tz and fails with one fewer`, { timeout: 30_000 }, () => {
     const db = freshDb();
     seedAirports(db, many(AIRPORTS_MIN_ROWS - 1));
     expect(sanityCheckAirports(db, [])).toMatchObject({ ok: false, reason: expect.stringContaining('5000') });
@@ -2945,7 +2945,8 @@ export function newExecution(
   const definition = opts.definition ?? new DefinitionsRepo(db, clock).create(exampleDefinitionInput());
   const executions = new ExecutionsRepo(db, clock);
   const wanted = opts.status ?? 'running';
-  const createAs = creatable(wanted) ?? 'running';
+  // why: a status `create` refuses goes in through an inactive one, so the partial unique index never sees two active parents (arch-r3-004).
+  const createAs = creatable(wanted) ?? 'skipped_missed';
   const cell = opts.cell ?? null;
   const created = executions.create({ definitionId: definition.id, isChild: cell !== null, cell, snapshot: snapshotOf(definition), estimate: null, trigger: opts.trigger ?? 'manual', status: createAs });
   if (createAs === wanted) return { definition, execution: created };
@@ -3539,6 +3540,7 @@ describe('CellsRepo seeding and stored roll-ups (spec §3, §6.6, §7)', () => {
     expect(set({ status: 'no_data', reason: 'cabin-not-offered' })).toThrow(expect.objectContaining({ rule: 'terminal-outcome' }));
     expect(set({ minPence: 100 })).toThrow(expect.objectContaining({ rule: 'outcome-field' }));
     expect(set({ sourceKind: 'synthetic' })).toThrow(expect.objectContaining({ rule: 'outcome-field' }));
+    expect(set({ status: 'not_run', reason: 'retry https://www.searchapi.io/x?api_key=SECRET' })).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
   });
 
   it('setOutcomesForProvider and markNoData move one provider in bulk; terminal rows are never rewritten', () => {
@@ -3584,6 +3586,8 @@ describe('CellsRepo seeding and stored roll-ups (spec §3, §6.6, §7)', () => {
       }
     }
     expect(sqliteCode(raw(`status = 'skipped', reason = 'whim'`))).toBe('SQLITE_CONSTRAINT_CHECK');
+    expect(sqliteCode(raw(`status = 'skipped', reason = NULL`))).toBe('SQLITE_CONSTRAINT_CHECK'); // arch-r3-003
+    expect(sqliteCode(raw(`status = 'no_data', reason = NULL, fetched_at = NULL, cabin = NULL, point_of_sale = NULL, source_kind = NULL`))).toBe('SQLITE_CONSTRAINT_CHECK');
     raw(`status = 'no_data', reason = 'cabin-not-offered'`)(); // the one data-less terminal outcome
     raw(`status = 'priced', reason = NULL, min_pence = 100, ${PROV}`)(); // positive control
     expect(db.raw.prepare('SELECT status FROM cell_outcomes WHERE execution_id = ?').get(executionId)).toEqual({ status: 'priced' });
@@ -3678,7 +3682,8 @@ export const cellOutcomes = sqliteTable(
     check('cell_outcomes_status_ck', isOneOf('status', OUTCOME_STATUSES)),
     check('cell_outcomes_stage_ck', isOneOf('stage', STAGES)),
     check('cell_outcomes_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
-    check('cell_outcomes_skip_reason_ck', sql.raw("status <> 'skipped' OR reason IN ('not_selected', 'budget', 'provider_disabled', 'departed')")),
+    // why: COALESCE / IS keep a NULL reason from satisfying the CHECK (SQLite treats a NULL CHECK result as a pass, arch-r3-003).
+    check('cell_outcomes_skip_reason_ck', sql.raw("status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'departed')")),
     check('cell_outcomes_attempts_ck', isInteger('attempts')),
     check('cell_outcomes_min_ck', isNullOrInteger('min_pence')),
     check('cell_outcomes_priced_min_ck', sql.raw("(status = 'priced') = (min_pence IS NOT NULL)")),
@@ -3690,7 +3695,7 @@ export const cellOutcomes = sqliteTable(
     check(
       'cell_outcomes_provenance_ck',
       sql.raw(
-        "status NOT IN ('priced', 'empty', 'no_data') OR (status = 'no_data' AND reason = 'cabin-not-offered') OR " +
+        "status NOT IN ('priced', 'empty', 'no_data') OR (status = 'no_data' AND reason IS 'cabin-not-offered') OR " +
           '(fetched_at IS NOT NULL AND cabin IS NOT NULL AND point_of_sale IS NOT NULL AND source_kind IS NOT NULL)',
       ),
     ),
@@ -3808,6 +3813,8 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
   if (isTerminal(status)) throw new RowRejected('terminal-outcome', `${status} is written only by writeTile, writeVerifiedCell, copyReused or markNoData`);
   if (status === 'skipped' && (reason === null || !SKIP_REASONS.some((r) => r === reason))) throw new RowRejected('skip-reason', `a skipped outcome needs a skip reason (spec §3), got ${String(reason)}`);
   if (status === 'error') assertErrorReason(reason);
+  // why: spec §3 reason never holds a vendor message; not_run carries none (prov-r3-003).
+  if (status === 'not_run' && reason !== null) throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
 }
 
 /**

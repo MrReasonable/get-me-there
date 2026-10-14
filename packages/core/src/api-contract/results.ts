@@ -49,16 +49,16 @@ export const resultRowSchema = z.object({
   seller: z.string().nullable(),
   baggage: z
     .object({
-      cabinBag: z.enum(['included', 'not-included']).optional(),
-      checkedBags: count.optional(),
-      notes: z.array(z.string()).optional(),
+      cabinBag: z.enum(['included', 'not-included']).exactOptional(),
+      checkedBags: count.exactOptional(),
+      notes: z.array(z.string()).exactOptional(),
     })
     .nullable(),
   fareConditions: z
     .object({
-      refundable: z.boolean().optional(),
-      changeable: z.boolean().optional(),
-      notes: z.array(z.string()).optional(),
+      refundable: z.boolean().exactOptional(),
+      changeable: z.boolean().exactOptional(),
+      notes: z.array(z.string()).exactOptional(),
     })
     .nullable(),
   selfTransfer: z.boolean().nullable(),
