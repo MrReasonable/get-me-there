@@ -20,7 +20,7 @@ Add to `@gmt/core` the pure functions that turn a raw vendor offer into a hashed
 
 - Carrier and flight-number canonicalisation, `departLocal` with the spec §5.6 DST rules, vendor timestamps to the `toISOString()` form (`packages/core/src/normalise/`).
 - `itineraryHash` (spec §6.4) with `@noble/hashes`.
-- `toGbp`, `MINOR_EXPONENT`, `ECB_CURRENCIES` (spec §6.3), and `formatPence`, the one money formatter every package uses (`src/text/money.ts`).
+- `toGbp`, `MINOR_EXPONENT`, `ECB_CURRENCIES` (spec §6.3), `formatPence`, the one money formatter every package uses (`src/text/money.ts`), and `hasControlChars`/`stripControlChars` (`src/text/control.ts`), which WP11 also imports.
 - `validateVendorUrl` and the per-provider `LINK_ALLOWLIST` (spec §5.2).
 - `normaliseOffer`: the pure half of the spec §5.6 step for one `RawOffer`.
 - `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `CONSTRAINT_LABELS` (spec §6.2).
@@ -159,7 +159,7 @@ export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in
 //   outbound: Segment[] | null; inbound: Segment[] | null; totalMinutes: number | null; outboundMinutes; inboundMinutes; stopsOut; stopsIn; layovers: Layover[];
 //   carriers: string[]; verdicts: Verdicts; unverified: ConstraintName[]; notApplied: ConstraintName[]; seller: string | null; baggage: BaggageSnapshot | null;
 //   fareConditions: FareConditions | null; selfTransfer: boolean | null; booking: Booking; searchLink: { url; host; label } | null /* round 3 */;
-//   otherOffers: Array<{ seller; pricePence; provenance; booking; stale; ageHours; verdictClass; unverified } /* round 3 adds the last two */>; notSeenInLatest: { ageHours } | null; adjustedPence: number | null;
+//   otherOffers: Array<{ seller; pricePence; provenance; booking; stale; ageHours; verdictClass: VerdictClass; unverified; notSeenInLatest: { ageHours } | null } /* round 3 adds verdictClass, unverified; round 4 adds notSeenInLatest (on main, 78338df) */>; notSeenInLatest: { ageHours } | null; adjustedPence: number | null;
 //   destinationNote: string | null; executionId: string; calendarPriceId: number | null; observationId: number | null }
 ```
 
@@ -173,6 +173,7 @@ export function canonicalCarrier(s: string): string; export function canonicalFl
 export function departLocal(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): string; export function toIsoDateTime(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): IsoDateTime;
 export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;   // implemented over Pick<Segment, hashed fields>, so every Segment[] caller compiles
 export const MINOR_EXPONENT: Record<string, number>; export const ECB_CURRENCIES: readonly string[]; export function toGbp(amountMinor: number, currency: string, rateNano: number): number;
+export function hasControlChars(s: string): boolean; export function stripControlChars(s: string): string;   // round 4 (arch-r2-003), src/text/control.ts: code-point scan of Unicode Cc (C0, DEL, C1); WP11 imports them
 export function formatPence(pence: number): string;   // round 3 (arch-004): the one money formatter, en-GB grouping, RangeError on non-integer or negative; WP9 and WP11 import it
 export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export const SEARCH_LINK_LABEL = 'search link, not a fare link'; export function validateVendorUrl(url: string, allowlist: string[]): Booking;
 export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string } | null;   // round 3: null for 'fixture'
@@ -182,7 +183,7 @@ export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFie
 export function verdictClass(v: Verdicts): VerdictClass;   // round 3 (prov-001): RangeError when v.cabin is absent
 export function unverifiedNames(v: Verdicts): ConstraintName[];
 export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // round 3 (pft-008), src/constraints/labels.ts
-export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
+export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
 export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string;
 export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow[];   // round 3: gains now
 export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* resultRowKey */>;
@@ -195,11 +196,11 @@ Settled details this brief pins, all inside those signatures:
 
 - **Zones.** `departLocal`, `toIsoDateTime` and `normaliseOffer` refuse any zone that `Intl.DateTimeFormat` rejects, and any offset-form string (`+05:30`, `Garbage-05`, `''`, `GMT`), with `unknown-airport-tz` (ruling 2). `tzOf(iata) === null` gives the same error.
 - **Cell guard.** `normaliseOffer` checks that the whole round trip flies `cell`: outbound origin and final destination, the inbound leaving that destination and landing at that origin, and both local dates. Anything else is `cell-mismatch` with the detail "offer flies …" or "inbound flies X→Y", and the offer is never re-keyed (review po-004, prov-004).
-- **Opaque POST bodies.** A POST booking's `postData` is opaque. Core keeps it only up to `MAX_POST_DATA_LENGTH` (4096) and without control characters, else the booking is `{ kind: 'none' }`. Core never parses, fetches, renders or logs it. Consumers link to the app's results row for POST bookings (spec §8.3).
+- **Opaque POST bodies.** A POST booking's `postData` is opaque. Core keeps it only up to `MAX_POST_DATA_LENGTH` (4096) and without control characters (`hasControlChars`, no regex and no lint suppression), else the booking is `{ kind: 'none' }`. Core never parses, fetches, renders or logs it. Consumers link to the app's results row for POST bookings (spec §8.3).
 - **Vendor URLs.** `validateVendorUrl` also refuses URLs longer than `MAX_URL_LENGTH` (2048) and an explicit non-default port.
-- **Raw vendor strings.** Seller, aircraft and baggage or fare notes are stored raw. WP11 strips control characters (spec §8.3) and the web escapes them (review sec-004).
+- **Raw vendor strings.** Seller, aircraft and baggage or fare notes are stored raw. WP11 strips control characters with core's `stripControlChars` (spec §8.3) and the web escapes them (review sec-004).
 - **Row order.** `rankRows` and `dedupByItinerary` share one comparator, `compareRows`: class (verified > partially-verified > failed > unchecked), then seen-in-latest before `notSeenInLatest`, then price, then fresher (`compareAges`), then seller, then identity. String ties use code-unit order, never `localeCompare` (ruling 3, review arch-012). Stale rows are not demoted (spec §8.1; pft-001's request is declined for that reason).
-- **Other offers.** Each element carries its own `verdictClass` and `unverified` (ruling 4).
+- **Other offers.** Each element carries its own `verdictClass`, `unverified` and `notSeenInLatest` (rulings 4 and prov-r2-002). Only classed rows group by itinerary hash. `unchecked` rows never share a hash, so `dedupByItinerary` passes them through untouched, narrowed with a type guard rather than a cast (ruling arch-r2-001). `ResultRow` itself is WP0's barrel export (`z.infer<typeof resultRowSchema>`); WP2 re-uses it and exports only `SortKey` and `ResultFilters` from `results/types.ts`.
 - **Row keys and bands.** `resultRowKey(row)` = `itineraryHash ?? \`calendar:${calendarPriceId}\``. `bandCheapest` skips rows without a travel time, `failed` rows and `notSeenInLatest` rows. `unchecked` rows are eligible (ruling 12).
 - **Alert eligibility.** `evaluateAlertRules` refuses calendar candidates whose `fetchedByExecutionId` differs from `ctx.executionId`, which covers reused rows (ruling 6). It settles each identity on its cheapest eligible candidate *before* judging (ruling 7). It returns suppressed firings with `suppressed: { reason }`. `isNew` firings are never suppressed.
 - **Reasons.** Every drop reason states the previous price and its age: "down £45 (10%) from £450 fetched 200h earlier" (ruling 9). A new cell reads "first price seen for this cell", or "last price £450 was fetched 337h earlier, outside the 336h comparison window; not compared" (ruling 10).
@@ -209,17 +210,19 @@ Settled details this brief pins, all inside those signatures:
 
 Module-internal helpers are not in the barrel. They are `parseVendorTime`, `requireZone`, `wallToInstant`, `localMinute` and `vendorInstant` (localTime.ts), `hoursSince` and `priceOf` (alerts/dedup.ts), `need` (alerts/evaluate.ts), `compareRows` and `compareText` (results/rank.ts) and `CONSTRAINT_NAMES` (constraints/labels.ts). The type `AlertEvalContext` (alerts/evaluate.ts) names the plan's inline `ctx` type.
 
-**Plan and WP0 items this brief relies on (ruling 18, Fable's edits; do not work around them):**
+**Plan and WP0 items this brief relies on (ruling 18):**
 
-- The plan's Task 0.4 text (old `AlertDigest` with subject/body) is being pointed at the contract block (arch-005).
-- WP0's Stryker mutate list becomes `src/constraints/*.ts` plus `src/normalise/carrier.ts` (arch-007).
-- WP0 adds `packages/core/tsconfig.test.json` so `typecheck` covers `test/` (arch-009).
-- The plan's file map gains `results/types.ts`, `results/rowKey.ts`, `results/searchLink.ts`, `constraints/labels.ts` and `text/money.ts` (arch-011).
-- WP13's integration review switches `nights` to WP1's `daysBetween` (arch-013) and opens one generated Google link to record what it prefills (pft-006).
+- Done on main: the plan's Task 0.4 text points at the contract block (arch-005).
+- Done on main: WP0's Stryker mutate list includes `src/constraints/*.ts` and `src/normalise/carrier.ts` (arch-007).
+- Done on main: `packages/core/tsconfig.test.json` is wired into `typecheck`, so typecheck covers `test/` (arch-009).
+- Done on main: `ports/notifier.ts` matches §4.
+- Done on main (78338df): `otherOffers[].notSeenInLatest` in `resultRowSchema` (prov-r2-002).
+- Done on main (78338df): the plan's file map lists the WP2 helper files (arch-011, arch-r2-007).
+- Later: WP13's integration review switches `nights` to WP1's `daysBetween` (arch-013) and opens one generated Google link to record what it prefills (pft-006).
 
 ## 6. Library notes
 
-Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-14 against context7 and run in a scratch install of the exact versions, under `TZ=UTC`, `Europe/London`, `America/Los_Angeles` and `Asia/Tokyo`.
+Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-14 against context7. The final verification ran this brief's code against current main's real `@gmt/core` (commit e7eebee, WP1 merged) in a scratch worktree with the lockfile's versions, under `TZ=UTC`, `Europe/London`, `America/Los_Angeles` and `Asia/Tokyo`.
 
 | Library | Version | Calls used | Verified against |
 |---|---|---|---|
@@ -228,7 +231,7 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 | `zod` | 4.6.7 | `z.infer<typeof resultRowSchema>` (type position); the test helper builds rows in `z.input<typeof resultRowSchema>` shape (plain strings, no casts) and parses them; WP2 defines no schemas | WP0's schemas (contracts v2 use `.exactOptional()` for `providerObservedAt`). |
 | `fast-check` | 4.10.2 | `fc.assert`, `fc.property`, `fc.integer({ min, max })`, `fc.record`, `fc.constantFrom`, `fc.array(arb, { minLength, maxLength })`, `fc.date({ min, max, noInvalidDate: true })` | Scratch run of every property in this brief. |
 | `vitest` | 5.0.4 | `describe`, `it`, `it.each`, `expect(...).toBe/toEqual/toMatchObject/toThrow/toHaveProperty`; a missing module fails with `Error: Cannot find module '<path>' imported from <test>` | Scratch run; that failure text is what the "verify it fails" steps expect. Per-task runs use `pnpm --filter @gmt/core exec vitest run <file>` (no coverage thresholds on a partial run; plan decision 8). |
-| Stryker | `@stryker-mutator/core` 10.0.0, command runner | `pnpm --filter @gmt/core mutate` with WP0's config (`"testRunner": "command"`, `pnpm exec vitest run --coverage.enabled=false`; plan decision 8). The break threshold applies to the aggregate, so §10 checks each WP2 file from the JSON report | Scratch run on this brief's code (2026-10-14): hashing 100, carrier 84.13, money 94.05, vendorUrl 96.08, constraints/evaluate 94.55, constraints/verdictClass 100, constraints/labels 100, alerts/dedup 97.22. |
+| Stryker | `@stryker-mutator/core` 10.0.0, command runner | `pnpm --filter @gmt/core mutate` with WP0's config (`"testRunner": "command"`, `pnpm exec vitest run --coverage.enabled=false`; plan decision 8). The break threshold applies to the aggregate, so §10 checks each WP2 file from the JSON report | Run in place on current main with this brief's code (2026-10-14, `--concurrency 2 --timeoutMS 30000`, zero timeouts): hashing 100, carrier 84.13, money 94.05, vendorUrl 98.04, constraints/evaluate 98.91, constraints/verdictClass 100, constraints/labels 100, alerts/dedup 97.22. At default concurrency on a loaded machine (load average above 40), timeouts reached 20% of mutants and hid survivors (review test-r2-007). |
 | frankfurter (data, not a dependency) | — | the `ECB_CURRENCIES` list | `GET https://api.frankfurter.dev/v1/currencies` on 2026-10-14: 30 codes, no BGN or RUB. |
 | Aviasales search URL (data) | — | `https://search.aviasales.com/flights/?origin_iata=&destination_iata=&depart_date=&return_date=&adults=&children=&infants=&trip_class=` | The Travelpayouts help-centre search-form example (`origin_iata=LON…&trip_class=0&depart_date=…&return_date=…`), found by web search on 2026-10-14; a direct fetch of the article returned 403. `trip_class` is 0 economy, 1 business, 2 first. |
 | Google Flights search URL (data) | — | `https://www.google.com/travel/flights?q=<words>&hl=en&curr=GBP` | Google publishes no documented deep-link format (spec §2: no public API). The natural-language `q` form is the search-box entry point and may not prefill every field. It is a convenience search link, labelled as such; WP13's manual check opens one (ruling 16). |
@@ -238,32 +241,32 @@ Versions from the plan's Task 0.1 list. Every call below was checked on 2026-10-
 **Create** (all under `packages/core/`):
 
 - `src/normalise/carrier.ts`, `src/normalise/localTime.ts`, `src/normalise/timestamps.ts`, `src/normalise/hashing.ts`, `src/normalise/money.ts`, `src/normalise/vendorUrl.ts`, `src/normalise/itinerary.ts`
-- `src/text/money.ts` (`formatPence`)
+- `src/text/money.ts` (`formatPence`), `src/text/control.ts` (`hasControlChars`, `stripControlChars`)
 - `src/constraints/evaluate.ts`, `src/constraints/verdictClass.ts`, `src/constraints/labels.ts`
 - `src/results/types.ts`, `src/results/dedup.ts`, `src/results/rank.ts`, `src/results/filter.ts`, `src/results/rowKey.ts`, `src/results/band.ts`, `src/results/searchLink.ts`
 - `src/alerts/dedup.ts`, `src/alerts/evaluate.ts`, `src/alerts/digest.ts` (the alert *types* are WP0's `types/alerts.ts`)
 
 **Modify:**
 
-- `packages/core/src/index.ts`: append the WP2 export block (Task 2.12). WP1 appends its own block in parallel, so keep WP2's lines contiguous under the `// --- WP2` comment and resolve any merge by keeping both blocks.
+- `packages/core/src/index.ts`: add the WP2 named exports (Task 2.12) and run `pnpm lint:fix`, which puts them at their sorted positions among WP0's lines (Biome's organizeImports sorts the whole file, so a separate block cannot survive). If WP1's exports collide in a merge, keep both sides and run `pnpm lint:fix` again.
 
 **Test** (mirroring `src`):
 
 - `test/helpers/offers.ts`, `test/helpers/rows.ts`, `test/helpers/alerts.ts` (helpers, not matched by `test/**/*.test.ts`)
 - `test/normalise/hashing.test.ts`, `localTime.test.ts`, `money.test.ts`, `vendorUrl.test.ts`, `itinerary.test.ts`
-- `test/text/money.test.ts`
+- `test/text/money.test.ts`, `test/text/control.test.ts`
 - `test/constraints/evaluate.test.ts`
 - `test/results/dedupRank.test.ts`, `test/results/filterBandLink.test.ts`
 - `test/alerts/dedup.test.ts`, `test/alerts/evaluate.test.ts`, `test/alerts/digest.test.ts`
 - `test/text/emitted.test.ts`, `test/wp2-barrel.test.ts`
 
-No other package and no WP0 file is touched. The plan's file map lists `src/results/rank.ts` for `rankRows` and `sortRows`. The files `results/types.ts`, `results/rowKey.ts`, `results/searchLink.ts`, `constraints/labels.ts` and `text/money.ts` are added here, one responsibility each; Fable adds them to the file map (arch-011).
+No other package and no WP0 file is touched. The plan's file map lists `src/results/rank.ts` for `rankRows` and `sortRows`. The files `results/types.ts`, `results/rowKey.ts`, `results/searchLink.ts`, `constraints/labels.ts`, `text/money.ts` and `text/control.ts` are added here, one responsibility each; Fable adds them to the file map (arch-011, arch-r2-007).
 
 ## 8. Tasks
 
 Every "Run" step runs **only that task's test file**, with `pnpm --filter @gmt/core exec vitest run <file>` (plan decision 8). `pnpm --filter @gmt/core test` enables coverage with the 100% thresholds over all of `src`, so a partial run would fail those thresholds even when every test passes. The full coverage run belongs in the definition of done. The code below is already formatted with the plan's `biome.json` (Biome 2.5.15). Run `pnpm lint:fix` if an edit reflows it.
 
-**No casts (round-3 ruling 1).** Neither `src` nor the tests use `as`, except `as const` and `satisfies`. Brands come from WP0's `asIata`, `asIsoDate`, `asIsoMonth`, `asIsoDateTime` and `isoDateTimeOfEpochMs`. Errors are narrowed with `instanceof`. Test fixtures that need plain strings are built in `z.input` shape and parsed. Before each commit, `grep -rnE "as (?!const)" packages/core/src/{normalise,constraints,results,alerts,text/money.ts} packages/core/test/{normalise,constraints,results,alerts,text,helpers}` (with `grep -P`) must print nothing outside comments and string literals.
+**No casts (round-3 ruling 1).** Neither `src` nor the tests use `as`, except `as const` and `satisfies`. Brands come from WP0's `asIata`, `asIsoDate`, `asIsoMonth`, `asIsoDateTime` and `isoDateTimeOfEpochMs`. Errors are narrowed with `instanceof`. Test fixtures that need plain strings are built in `z.input` shape and parsed. Before each commit, run the §10 cast check (the brief's only cast check): `grep -rnP "\bas (?!const\b)" packages/core/src/{normalise,constraints,results,alerts} packages/core/src/text/{money,control}.ts | grep -vP ":\d+:\s*(//|\*)"` prints nothing. No `biome-ignore` or other lint suppression appears anywhere in WP2 code.
 
 ### Task 2.1: Carrier canonicalisation and the itinerary hash (first failing test)
 
@@ -538,7 +541,7 @@ export function itineraryHash(outbound: readonly HashSegment[], inbound: readonl
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/normalise/hashing.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 21 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 21 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -877,7 +880,7 @@ export function toIsoDateTime(value: string, timeKind: TimeKind, tz: string): Is
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/normalise/localTime.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 19 tests (also run with `TZ=Asia/Tokyo` and `TZ=America/Los_Angeles` prefixed: same result); lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 19 tests (also run with `TZ=Asia/Tokyo` and `TZ=America/Los_Angeles` prefixed: same result); lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -1124,7 +1127,8 @@ export function toGbp(amountMinor: number, currency: string, rateNano: number): 
  * so a non-integer or negative input is a caller bug and throws RangeError.
  */
 export function formatPence(pence: number): string {
-  if (!Number.isSafeInteger(pence) || pence < 0) throw new RangeError(`pence must be a non-negative integer: ${pence}`);
+  if (!Number.isSafeInteger(pence) || pence < 0)
+    throw new RangeError(`pence must be a non-negative integer: ${pence}`);
   const pounds = String(Math.floor(pence / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const rest = pence % 100;
   return rest === 0 ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
@@ -1134,7 +1138,7 @@ export function formatPence(pence: number): string {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/normalise/money.test.ts test/text/money.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 29 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 29 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -1152,7 +1156,7 @@ git add packages/core && git commit -m "wp02: toGbp with half-up rounding, the E
 - Consumes: `ProviderId`, `Booking`
 - Produces: `LINK_ALLOWLIST`, `MAX_URL_LENGTH`, `validateVendorUrl`
 
-The rejection table covers the cases the guard exists for (review sec-001): `data:` and `file:` schemes, an explicit non-default port (refused, by decision), a trailing-dot host, a punycode look-alike, the backslash-userinfo trick and a URL one character over `MAX_URL_LENGTH`. An explicit `:443` is the default port and is kept.
+The rejection table covers the cases the guard exists for (review sec-001): `data:` and `file:` schemes, an explicit non-default port (refused, by decision), a trailing-dot host, a punycode look-alike, password-only userinfo (`https://:pw@…`), the backslash-userinfo trick and a URL one character over `MAX_URL_LENGTH`. An explicit `:443` is the default port and is kept.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1188,6 +1192,7 @@ describe('validateVendorUrl (spec §5.2 "Vendor links")', () => {
     'http://www.google.com/travel', // not https
     'https://user:pw@www.google.com/x', // userinfo
     'https://user@www.google.com/x', // username only
+    'https://:pw@www.google.com/x', // password only
     'https://google.com.evil.example/x', // allowlist entry as a prefix
     'https://evilgoogle.com/x', // suffix without the dot
     'https://www.aviasales.com/x', // another provider's host
@@ -1285,7 +1290,7 @@ export function validateVendorUrl(url: string, allowlist: readonly string[]): Bo
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/normalise/vendorUrl.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 23 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 24 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -1296,16 +1301,45 @@ git add packages/core && git commit -m "wp02: vendor URL validation against the 
 ### Task 2.5: `normaliseOffer`: the pure §5.6 step for one raw offer
 
 **Files:**
-- Create: `packages/core/src/normalise/itinerary.ts`
-- Test: `packages/core/test/helpers/offers.ts`, `packages/core/test/normalise/itinerary.test.ts`
+- Create: `packages/core/src/text/control.ts`, `packages/core/src/normalise/itinerary.ts`
+- Test: `packages/core/test/text/control.test.ts`, `packages/core/test/helpers/offers.ts`, `packages/core/test/normalise/itinerary.test.ts`
 
 **Interfaces:**
 - Consumes: Tasks 2.1–2.4; `RawOffer`, `RawSegment`, `NormalisedItinerary`, `Segment`, `Layover`, `ObservationFields`, `Offer`, `Booking`, `FxInfo`, `Cabin`, `ProviderId`, `CellKey`, `cellKeyString`, `asIata`, `asIsoDate`, `isoDateTimeOfEpochMs`
-- Produces: `NormaliseDeps`, `NormaliseResult` (the plan's inline result union, named), `MAX_POST_DATA_LENGTH`, `normaliseOffer(raw, cell, deps)`
+- Produces: `hasControlChars`, `stripControlChars`, `NormaliseDeps`, `NormaliseResult` (the plan's inline result union, named), `MAX_POST_DATA_LENGTH`, `normaliseOffer(raw, cell, deps)`
 
-`AAA` and `BBB` are clearly synthetic connection airports (README rule), zoned `Atlantic/Reykjavik` (UTC+0, no DST) so that layover arithmetic is easy to read. `ZZZ` is the unknown airport. A layover is overnight when the connection interval overlaps 00:00–05:00 local at the connecting airport on any date it touches. `normaliseOffer` *returns* `{ ok: false, error }` for every `NormalisationError` so that WP7 can count `offers-dropped:n`. Any other error is a caller bug and is thrown. Directions are carried as non-empty tuples (`NonEmpty<T>`), so first and last segments need no casts. The cell guard covers both directions' airports and both local dates; a mismatch is `cell-mismatch`. Test fixtures with connections therefore start at the outbound origin they return to. The helper `cellOf(raw)` reads the cell from the raw strings, and the guard tests pass a different cell explicitly.
+`AAA` and `BBB` are clearly synthetic connection airports (README rule), zoned `Atlantic/Reykjavik` (UTC+0, no DST) so that layover arithmetic is easy to read. `ZZZ` is the unknown airport. A layover is overnight when the connection interval overlaps 00:00–05:00 local at the connecting airport on any date it touches. `normaliseOffer` *returns* `{ ok: false, error }` for every `NormalisationError` so that WP7 can count `offers-dropped:n`. Any other error is a caller bug and is thrown. Directions are carried as non-empty tuples (`NonEmpty<T>`), so first and last segments need no casts. The cell guard covers both directions' airports and both local dates; a mismatch is `cell-mismatch`. Test fixtures with connections therefore start at the outbound origin they return to. The helper `cellOf(raw)` reads the cell from the raw strings, and the guard tests pass a different cell explicitly. `src/text/control.ts` scans code points for Unicode Cc (C0, DEL, C1) with no regex, so no lint suppression is needed; WP11 imports `stripControlChars` (ruling arch-r2-003). Edge rows pin the review test-r2-013 cases: a connection leaving exactly as the night window opens (22:00 → 00:00) is not overnight; a zero-minute connection is accepted; a zero-length or backwards segment is `bad-local-time`; a raw `none` booking stays exactly `{ kind: 'none' }`; both `no-return-legs` details; carriers listed out of order come back sorted.
 
 - [ ] **Step 1: Write the failing test**
+
+`packages/core/test/text/control.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { hasControlChars, stripControlChars } from '../../src/text/control.js';
+
+describe('control characters (spec §8.3; review arch-r2-003)', () => {
+  it.each([
+    ['plain text', false],
+    ['emoji 🛫 and accents é', false],
+    ['tab\there', true],
+    ['line\r\nbreak', true],
+    ['nul\u0000', true],
+    ['del\u007f', true],
+    ['c1\u0085', true],
+    ['c1 end\u009f', true],
+    ['just past C1 ', false],
+    ['space ', false],
+  ])('%j → %s', (s, expected) => {
+    expect(hasControlChars(s)).toBe(expected);
+  });
+
+  it('strips every control character and keeps everything else', () => {
+    expect(stripControlChars('Seller\r\nInjected\u0000 🛫\u0085 ')).toBe('SellerInjected 🛫 ');
+    expect(stripControlChars('clean')).toBe('clean');
+  });
+});
+```
 
 `packages/core/test/helpers/offers.ts`:
 
@@ -1615,6 +1649,10 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
   it('missing directions are no-return-legs; impossible times are bad-local-time', () => {
     expect(reason(offer({ inbound: [] }))).toBe('no-return-legs');
     expect(reason(offer({ outbound: [] }))).toBe('no-return-legs');
+    const noOut = normaliseOffer(offer({ outbound: [] }), cellOf(offer()), deps());
+    expect(noOut.ok ? '' : noOut.error.message).toBe('no-return-legs: no outbound segments');
+    const noIn = normaliseOffer(offer({ inbound: [] }), cellOf(offer()), deps());
+    expect(noIn.ok ? '' : noIn.error.message).toBe('no-return-legs: no inbound segments');
     expect(
       reason(
         offer({
@@ -1680,6 +1718,52 @@ describe('normaliseOffer: derived itinerary fields', () => {
       airportChange: false,
       marketingCarriers: ['VS'],
     });
+  });
+
+  it('marketing carriers are de-duplicated and sorted, whatever the segment order', () => {
+    const raw = offer({
+      outbound: [
+        seg({
+          marketingCarrier: 'VS',
+          flightNumber: '7',
+          from: iata('LHR'),
+          to: iata('AAA'),
+          depart: '2027-03-14T08:00',
+          arrive: '2027-03-14T11:00',
+        }),
+        seg({
+          marketingCarrier: '4U',
+          flightNumber: '8',
+          from: iata('AAA'),
+          to: iata('JFK'),
+          depart: '2027-03-14T12:00',
+          arrive: '2027-03-14T15:00',
+        }),
+      ],
+    });
+    expect(ok(raw).itinerary.marketingCarriers).toEqual(['4U', 'VS']);
+  });
+
+  it('a segment of zero length is bad-local-time; a raw "none" booking stays exactly { kind: "none" }', () => {
+    const raw = offer({
+      outbound: [
+        seg({ from: iata('LHR'), to: iata('JFK'), depart: '2027-03-14T10:05', arrive: '2027-03-14T05:05' }),
+      ],
+    });
+    expect(reason(raw)).toBe('bad-local-time'); // lands 09:05Z, before it leaves at 10:05Z
+    const zero = offer({
+      outbound: [
+        seg({
+          timeKind: 'utc',
+          from: iata('LHR'),
+          to: iata('JFK'),
+          depart: '2027-03-14T10:05Z',
+          arrive: '2027-03-14T10:05Z',
+        }),
+      ],
+    });
+    expect(reason(zero)).toBe('bad-local-time');
+    expect(ok(offer()).observation.booking).toEqual({ kind: 'none' });
   });
 
   it('optional vendor facts are copied only when stated', () => {
@@ -1761,6 +1845,8 @@ describe('normaliseOffer: derived itinerary fields', () => {
     ['2027-03-14T21:00', '2027-03-14T23:59', false], // evening only
     ['2027-03-14T23:00', '2027-03-15T00:30', true], // crosses midnight
     ['2027-03-14T04:00', '2027-03-14T06:00', true], // inside the window on the same day
+    ['2027-03-14T22:00', '2027-03-15T00:00', false], // leaves exactly as the window opens: no time inside it
+    ['2027-03-14T10:00', '2027-03-14T10:00', false], // a zero-minute connection is accepted
   ])('overnight boundary: arrive %s, depart %s → %s', (arrive, depart, overnight) => {
     const raw = offer({
       outbound: [
@@ -1915,16 +2001,47 @@ describe('normaliseOffer: booking links (spec §5.2)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/core exec vitest run test/normalise/itinerary.test.ts`
-Expected: FAIL, `Error: Cannot find module '../../src/normalise/itinerary.js' …`.
+Run: `pnpm --filter @gmt/core exec vitest run test/text/control.test.ts test/normalise/itinerary.test.ts`
+Expected: FAIL, `Error: Cannot find module '../../src/text/control.js' …` and `Error: Cannot find module '../../src/normalise/itinerary.js' …`.
 
 - [ ] **Step 3: Implement**
+
+`packages/core/src/text/control.ts`:
+
+```ts
+/**
+ * True for a Unicode general-category Cc code point: C0 controls U+0000–U+001F, DEL U+007F and C1
+ * controls U+0080–U+009F. CR and LF are controls, which is the point: they split headers and lines.
+ */
+function isControl(code: number): boolean {
+  // why: charCodeAt on an astral character gives its high surrogate (U+D800+), never a control.
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+}
+
+/**
+ * Whether a vendor string holds any control character. A code-point scan rather than a regex, so no
+ * lint suppression is needed (review arch-r2-003). Used by core to drop a POST body; WP11 imports
+ * it for email headers.
+ */
+export function hasControlChars(s: string): boolean {
+  for (const ch of s) if (isControl(ch.charCodeAt(0))) return true;
+  return false;
+}
+
+/** The string with every control character removed (spec §8.3: provider strings are control-stripped). */
+export function stripControlChars(s: string): string {
+  let out = '';
+  for (const ch of s) if (!isControl(ch.charCodeAt(0))) out += ch;
+  return out;
+}
+```
 
 `packages/core/src/normalise/itinerary.ts`:
 
 ```ts
 import { NormalisationError } from '../errors.js';
 import type { RawOffer, RawSegment } from '../ports/provider.js';
+import { hasControlChars } from '../text/control.js';
 import { type CellKey, cellKeyString } from '../types/definition.js';
 import { type Iata, type IsoDate, isoDateTimeOfEpochMs } from '../types/ids.js';
 import type {
@@ -2079,8 +2196,7 @@ function booking(raw: RawOffer, providerId: ProviderId): Booking {
   const checked = validateVendorUrl(raw.booking.url, LINK_ALLOWLIST[providerId]);
   if (checked.kind !== 'get' || raw.booking.kind === 'get') return checked;
   const body = raw.booking.postData;
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
-  if (body.length > MAX_POST_DATA_LENGTH || /[\u0000-\u001f\u007f]/.test(body)) return { kind: 'none' };
+  if (body.length > MAX_POST_DATA_LENGTH || hasControlChars(body)) return { kind: 'none' };
   return { kind: 'post', url: checked.url, postData: body, host: checked.host };
 }
 
@@ -2191,8 +2307,8 @@ export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core exec vitest run test/normalise/itinerary.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 28 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Run: `pnpm --filter @gmt/core exec vitest run test/text/control.test.ts test/normalise/itinerary.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
+Expected: PASS, 43 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -2227,7 +2343,7 @@ Rules per spec §6.2 row. "Absent" means the field is missing from `supplied`, o
 | cabinBagRequired / checkedBagRequired / minCheckedBags | `baggage` with the field present | `included` / `≥ 1` / `≥ n` |
 | maxPricePence | `price` | `pricePence ≤ n` |
 
-The table test pins exact boundaries (review test-002): journey 960 passes and 959 fails, with only the outbound violating. Windows are tested at both inclusive edges, with one-direction-only violations. noAirportChange has pass and unknown rows, and noOvernightLayover has a real daytime pass (test-003, prov-010). `verdictClass` throws `RangeError` when `cabin` is absent (ruling 5): `{}` is never "verified". `CONSTRAINT_LABELS` is a full `Record<ConstraintName, string>` with a completeness test (ruling 15).
+The table test pins exact boundaries (review test-002): journey 960 passes and 959 fails, with only the outbound violating. Windows are tested at both inclusive edges, with one-direction-only violations. noAirportChange has pass and unknown rows, and noOvernightLayover has a real daytime pass (test-003, prov-010). Review test-r2-004 and test-r2-009 add more rows: a mixed itinerary with one leg below `requestedCabin` fails; maxStops and maxJourneyMinutes have inbound-only violations and a missing `inboundMinutes`; minCheckedBags has absent-input rows; a midnight-wrapping window is tested at both edges; and malformed windows include `10:001`, `x10:00` and `24:00`. `verdictClass` throws `RangeError` when `cabin` is absent (ruling 5): `{}` is never "verified". `CONSTRAINT_LABELS` is a full `Record<ConstraintName, string>` with a completeness test (ruling 15).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2401,6 +2517,8 @@ const ROWS: Row[] = [
   ['minCheckedBags', { minCheckedBags: 1 }, {}, ALL, 'pass'],
   ['minCheckedBags', { minCheckedBags: 2 }, {}, ALL, 'fail'],
   ['minCheckedBags', { minCheckedBags: 1 }, { baggage: { cabinBag: 'included' } }, ALL, 'unverified'],
+  ['minCheckedBags', { minCheckedBags: 1 }, { baggage: null }, ALL, 'unverified'],
+  ['minCheckedBags', { minCheckedBags: 1 }, {}, without('baggage'), 'unverified'],
   ['maxPricePence', { maxPricePence: 41_200 }, {}, ALL, 'pass'],
   ['maxPricePence', { maxPricePence: 41_199 }, {}, ALL, 'fail'],
   ['maxPricePence', { maxPricePence: 50_000 }, {}, without('price'), 'unverified'],
@@ -2413,6 +2531,17 @@ const ROWS: Row[] = [
     ALL,
     'pass',
   ], // mixed, none below
+  // mixed: one leg below the requested cabin fails even though the others meet it
+  [
+    'cabin',
+    {},
+    {
+      cabin: 'premium_economy',
+      segmentCabins: ['premium_economy', 'economy', 'premium_economy', 'premium_economy'],
+    },
+    ALL,
+    'fail',
+  ],
   ['cabin', {}, { segmentCabins: null }, ALL, 'unverified'],
   ['cabin', {}, { segmentCabins: ['economy'] }, ALL, 'unverified'], // not every segment stated
   ['cabin', {}, {}, without('segmentCabins'), 'unverified'],
@@ -2450,10 +2579,40 @@ describe('evaluateConstraints (spec §6.2)', () => {
     ).toBe('unverified');
   });
 
-  it('a malformed time window is a caller error', () => {
+  it.each([
+    ['9:00', '21:00'],
+    ['10:001', '21:00'],
+    ['x10:00', '21:00'],
+    ['10:00', '24:00'],
+  ])('a malformed time window %s–%s is a caller error', (from, to) => {
     expect(() =>
-      evaluateConstraints(IT, OFFER, { departureWindowLocal: { from: '9:00', to: '21:00' } }, 'economy', ALL),
+      evaluateConstraints(IT, OFFER, { departureWindowLocal: { from, to } }, 'economy', ALL),
     ).toThrow(RangeError);
+  });
+
+  it('a window wrapping midnight includes both of its edges', () => {
+    // departures are exactly 20:00 (outbound) and 10:00 (inbound)
+    const w = { departureWindowLocal: { from: '20:00', to: '10:00' } };
+    expect(evaluateConstraints(IT, OFFER, w, 'economy', ALL).departureWindowLocal).toBe('pass');
+    const narrow = { departureWindowLocal: { from: '20:01', to: '10:00' } };
+    expect(evaluateConstraints(IT, OFFER, narrow, 'economy', ALL).departureWindowLocal).toBe('fail');
+  });
+
+  it('maxStops and maxJourneyMinutes judge the inbound direction too', () => {
+    expect(evaluateConstraints({ ...IT, stopsOut: 0 }, OFFER, { maxStops: 0 }, 'economy', ALL).maxStops).toBe(
+      'fail',
+    );
+    const inboundLong = { ...IT, outboundMinutes: 100, inboundMinutes: 960 };
+    expect(
+      evaluateConstraints(inboundLong, OFFER, { maxJourneyMinutes: 959 }, 'economy', ALL).maxJourneyMinutes,
+    ).toBe('fail');
+    expect(
+      evaluateConstraints(inboundLong, OFFER, { maxJourneyMinutes: 960 }, 'economy', ALL).maxJourneyMinutes,
+    ).toBe('pass');
+    const { inboundMinutes: _i, ...noInbound } = IT;
+    expect(
+      evaluateConstraints(noInbound, OFFER, { maxJourneyMinutes: 1500 }, 'economy', ALL).maxJourneyMinutes,
+    ).toBe('unverified');
   });
 
   it('a direct itinerary passes layover constraints vacuously', () => {
@@ -2773,7 +2932,7 @@ export function unverifiedNames(v: Verdicts): ConstraintName[] {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/constraints/evaluate.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 73 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 81 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -2791,7 +2950,7 @@ git add packages/core && git commit -m "wp02: evaluateConstraints, verdictClass,
 - Consumes: `resultRowSchema` (api-contract), `effectiveAge`, `compareAges`, `formatAgeCompact` (labels), `cellKeyString`, `asIsoDateTime`, `ProviderId`, `ConstraintName`, `VerdictClass`
 - Produces: `ResultRow`, `SortKey`, `ResultFilters`, `dedupByItinerary(rows, now)`, `rankRows(rows, now)`, `sortRows(rows, key, dir)`; module-internal `compareRows`, `compareText`
 
-One comparator, `compareRows`, orders rows for `rankRows` and picks the primary offer in `dedupByItinerary` (ruling 3). The order is class, then seen-in-latest, then price, then fresher, then seller (code units), then identity. A verified offer therefore heads its itinerary over a cheaper partially-verified or failed one, and those cheaper offers appear in `otherOffers` with their own class and unverified names (ruling 4). Stale rows are not demoted; a test pins that, recording pft-001 as declined under spec §8.1. `dedupByItinerary` takes no cabin, because WP8 reads only rows in the definition's cabin. `test/helpers/rows.ts` builds rows in `z.input<typeof resultRowSchema>` shape and parses them, so fixtures need no casts and a fixture that drifts from the contract fails loudly. Never loosen the schema from WP2.
+One comparator, `compareRows`, orders rows for `rankRows` and picks the primary offer in `dedupByItinerary` (ruling 3). The order is class, then seen-in-latest, then price, then fresher, then seller (code units), then identity. A verified offer therefore heads its itinerary over a cheaper partially-verified or failed one, and those cheaper offers appear in `otherOffers` with their own class and unverified names (ruling 4). Stale rows are not demoted; a test pins that, recording pft-001 as declined under spec §8.1. `otherOffers` elements carry `notSeenInLatest` too (prov-r2-002), so a cheaper offer that the latest search dropped is labelled as gone. Only classed rows group: an `unchecked` row passes through untouched, narrowed by the `isClassed` type guard with no cast (ruling arch-r2-001). `dedupByItinerary` takes no cabin, because WP8 reads only rows in the definition's cabin. `ResultRow` is WP0's export; `results/types.ts` re-uses it. The sortRows fixtures order differently by return date and by nights (test-r2-012). `test/helpers/rows.ts` builds rows in `z.input<typeof resultRowSchema>` shape and parses them, so fixtures need no casts and a fixture that drifts from the contract fails loudly. Never loosen the schema from WP2.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2969,6 +3128,15 @@ describe('dedupByItinerary (spec §6.5; ruling 3)', () => {
       NOW,
     );
     expect(out[0]?.seller).toBe('Seen');
+    // the offer that is gone stays visible as gone in the expanded row (review prov-r2-002)
+    expect(out[0]?.otherOffers[0]).toMatchObject({ seller: 'Gone', notSeenInLatest: { ageHours: 30 } });
+  });
+
+  it('unchecked rows never group, even with an itinerary hash; they pass through untouched (ruling arch-r2-001)', () => {
+    const u1 = row({ itineraryHash: 'h1', verdictClass: 'unchecked', seller: 'U1' });
+    const u2 = row({ itineraryHash: 'h1', verdictClass: 'unchecked', seller: 'U2' });
+    const out = dedupByItinerary([u1, u2], NOW);
+    expect(out).toEqual([u1, u2]);
   });
 
   it('at equal class and price, the fresher offer wins and known age beats unknown (compareAges)', () => {
@@ -3146,7 +3314,7 @@ describe('sortRows (spec §6.5 sort keys)', () => {
   });
   const cal = calendarRow({
     pricePence: 39_000,
-    cell: { departureDate: '2027-03-16', returnDate: '2027-03-27', nights: 11 },
+    cell: { departureDate: '2027-03-18', returnDate: '2027-03-27', nights: 9 }, // return and nights order differ
   });
 
   it.each<[SortKey, string[], string[]]>([
@@ -3154,7 +3322,7 @@ describe('sortRows (spec §6.5 sort keys)', () => {
     ['totalTime', ['b', 'a', 'cal'], ['a', 'b', 'cal']],
     ['departure', ['b', 'a', 'cal'], ['cal', 'a', 'b']],
     ['return', ['a', 'cal', 'b'], ['b', 'cal', 'a']],
-    ['nights', ['a', 'cal', 'b'], ['b', 'cal', 'a']],
+    ['nights', ['cal', 'a', 'b'], ['b', 'a', 'cal']],
     ['stops', ['b', 'a', 'cal'], ['a', 'b', 'cal']],
     ['adjusted', ['a', 'b', 'cal'], ['b', 'a', 'cal']],
   ])('%s asc %j, desc %j; missing keys last both ways', (key, asc, desc) => {
@@ -3186,14 +3354,14 @@ Expected: FAIL, `Error: Cannot find module '../../src/results/dedup.js' …`.
 `packages/core/src/results/types.ts`:
 
 ```ts
-import type { z } from 'zod';
-import type { resultRowSchema } from '../api-contract/results.js';
+import type { ResultRow } from '../api-contract/results.js';
 import type { Iata } from '../types/ids.js';
 import type { ConstraintName, VerdictClass } from '../types/itinerary.js';
 import type { ProviderId } from '../types/provenance.js';
 
-/** One `/results` row (spec §6.5, §10): the type of WP0's `resultRowSchema`. */
-export type ResultRow = z.infer<typeof resultRowSchema>;
+// why: WP0 already exports `ResultRow` (z.infer of resultRowSchema) from the barrel; WP2 re-uses
+// that one type rather than declaring a second name for it.
+export type { ResultRow };
 
 /** Spec §6.5 sort keys: price, total travel time, departure, return, nights, stops, adjusted. */
 export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted';
@@ -3307,25 +3475,35 @@ export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): 
 
 ```ts
 import type { IsoDateTime } from '../types/ids.js';
+import type { VerdictClass } from '../types/itinerary.js';
 import { compareRows } from './rank.js';
 import type { ResultRow } from './types.js';
 
-type Entry = { kind: 'row'; row: ResultRow } | { kind: 'group'; rows: [ResultRow, ...ResultRow[]] };
+/** A row with a constraint verdict class, i.e. an itinerary-search row (never a calendar row). */
+type ClassedRow = ResultRow & { verdictClass: VerdictClass };
+
+/** Type guard: only classed rows group by itinerary; `unchecked` rows never share a hash (ruling). */
+function isClassed(r: ResultRow): r is ClassedRow {
+  return r.verdictClass !== 'unchecked';
+}
+
+type Entry = { kind: 'row'; row: ResultRow } | { kind: 'group'; rows: [ClassedRow, ...ClassedRow[]] };
 
 /**
  * Spec §6.5 dedup: one row per itinerary hash. The primary offer is the first by `compareRows`
  * (class, seen-in-latest, price, age, seller), so a verified offer heads its itinerary even when a
  * partially-verified or failed one is cheaper, and a seen offer beats a cheaper one the latest
- * search no longer returned (review po-001, prov-003). Every other offer goes to `otherOffers`,
- * cheapest first, each with its own class and unverified names so the expanded row never shows a
- * cheaper price without saying it failed (review prov-002). Rows are already in the definition's
- * cabin (WP8 filters on read). Calendar rows pass through unchanged; first-appearance order is kept.
+ * search no longer returned. Every other offer goes to `otherOffers`, cheapest first, each with its
+ * own class, unverified names and `notSeenInLatest`, so the expanded row never shows a cheaper
+ * price without saying it failed or has gone (review prov-002, prov-r2-002). Rows are already in
+ * the definition's cabin (WP8 filters on read). Calendar rows (no hash) and `unchecked` rows pass
+ * through unchanged; first-appearance order is kept.
  */
 export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow[] {
   const groups = new Map<string, Entry & { kind: 'group' }>();
   const out: Entry[] = [];
   for (const row of rows) {
-    if (row.itineraryHash === null) {
+    if (row.itineraryHash === null || !isClassed(row)) {
       out.push({ kind: 'row', row });
       continue;
     }
@@ -3353,6 +3531,7 @@ export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow
         ageHours: r.ageHours,
         verdictClass: r.verdictClass,
         unverified: r.unverified,
+        notSeenInLatest: r.notSeenInLatest,
       }));
     return { ...primary, otherOffers };
   });
@@ -3362,7 +3541,7 @@ export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/results/dedupRank.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 23 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 24 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -3380,7 +3559,7 @@ git add packages/core && git commit -m "wp02: result dedup and ranking on one co
 - Consumes: Task 2.7 types and helpers; `validateVendorUrl`, `LINK_ALLOWLIST` (Task 2.4, test only); `CellKey`, `asIata`
 - Produces: `filterRows(rows, f)`, `resultRowKey(row)`, `bandCheapest(rows, bandHours): Set<string>` of `resultRowKey`s, `SEARCH_LINK_LABEL`, `searchLinkFor` (null for fixture)
 
-The filter table pins inclusive bounds for max price and nights, and `hideStale` over every class (review test-007). `bandCheapest` never marks `failed` or `notSeenInLatest` rows (ruling 12). `searchLinkFor` returns null for fixture rows (ruling 13), which agrees with `LINK_ALLOWLIST.fixture = []`. A premium-economy Aviasales link is labelled `search link, not a fare link; cabin not prefilled` (pft-009). The Google link's comment says it may not prefill every field (ruling 16).
+The filter table pins inclusive bounds for max price and nights, and `hideStale` over every class (review test-007). `bandCheapest` never marks `failed` or `notSeenInLatest` rows (ruling 12). Its tests list a dearer row first in every multi-row band, so keeping the first row per band fails them (test-r2-003). Each cabin's exact label, Aviasales `trip_class` and Google words are asserted (test-r2-012). `searchLinkFor` returns null for fixture rows (ruling 13), which agrees with `LINK_ALLOWLIST.fixture = []`. A premium-economy Aviasales link is labelled `search link, not a fare link; cabin not prefilled` (pft-009). The Google link's comment says it may not prefill every field (ruling 16).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3472,8 +3651,9 @@ describe('bandCheapest (spec §6.5, 6h bands)', () => {
   it('marks the cheapest row per 6h travel-time band; boundaries at whole multiples of 6h', () => {
     const rows = [
       row({ itineraryHash: 'b0', totalMinutes: 359, pricePence: 40_000 }), // 5h59 → band 0
-      row({ itineraryHash: 'b1a', totalMinutes: 360, pricePence: 38_000 }), // 6h00 → band 1
-      row({ itineraryHash: 'b1b', totalMinutes: 719, pricePence: 39_000 }), // 11h59 → band 1
+      row({ itineraryHash: 'b1b', totalMinutes: 719, pricePence: 39_000 }), // 11h59 → band 1, dearer and listed first
+      row({ itineraryHash: 'b1a', totalMinutes: 360, pricePence: 38_000 }), // 6h00 → band 1, the cheapest
+      row({ itineraryHash: 'b2dear', totalMinutes: 750, pricePence: 51_000 }), // band 2, dearer and listed first
       row({ itineraryHash: 'b2', totalMinutes: 720, pricePence: 50_000 }), // 12h00 → band 2
       row({ itineraryHash: 'b2tie', totalMinutes: 800, pricePence: 50_000 }), // tie: first wins
       calendarRow({ pricePence: 1 }), // no travel time: never marked
@@ -3485,6 +3665,7 @@ describe('bandCheapest (spec §6.5, 6h bands)', () => {
 
   it('failed and not-seen-in-latest rows are never the band winner; unchecked rows are eligible (review prov-007, pft-010)', () => {
     const rows = [
+      row({ itineraryHash: 'dearer', totalMinutes: 400, pricePence: 45_000 }), // eligible, dearer, listed first
       row({ itineraryHash: 'failed', verdictClass: 'failed', totalMinutes: 400, pricePence: 30_000 }),
       row({
         itineraryHash: 'gone',
@@ -3543,6 +3724,25 @@ describe('searchLinkFor (spec §6.9)', () => {
   it('fixture (synthetic) rows get no link (review sec-003)', () => {
     expect(searchLinkFor('fixture', cell, 'economy')).toBeNull();
   });
+
+  it.each([
+    ['economy', '0', 'economy', 'search link, not a fare link'],
+    ['premium_economy', '0', 'premium economy', 'search link, not a fare link; cabin not prefilled'],
+    ['business', '1', 'business class', 'search link, not a fare link'],
+    ['first', '2', 'first class', 'search link, not a fare link'],
+  ] as const)(
+    '%s: Aviasales trip_class %s, Google "%s", Aviasales label %j',
+    (cabin, tripClass, words, label) => {
+      const tp = searchLinkFor('travelpayouts', cell, cabin);
+      expect(new URL(tp?.url ?? '').searchParams.get('trip_class')).toBe(tripClass);
+      expect(tp?.label).toBe(label);
+      const sa = searchLinkFor('searchapi', cell, cabin);
+      expect(new URL(sa?.url ?? '').searchParams.get('q')).toBe(
+        `Flights from LHR to JFK on 2027-03-14 through 2027-03-28 ${words} 1 adult`,
+      );
+      expect(sa?.label).toBe('search link, not a fare link');
+    },
+  );
 
   it('every link carries the label and passes the vendor-link rule for its provider', () => {
     for (const cabin of ['economy', 'premium_economy', 'business', 'first'] as const) {
@@ -3718,7 +3918,7 @@ export function searchLinkFor(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/results/filterBandLink.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 26 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 30 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -4071,7 +4271,7 @@ export function isSuppressed(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/dedup.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 9 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 9 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -4093,7 +4293,7 @@ Decisions this task encodes (spec §6.8 and the round-3 rulings):
 
 - The sparse-cache window is `2 × ctx.discoveryRefreshHours[providerId]`, or 2 × 168 when absent, in whole hours, inclusive (ruling 17). The tests pin refresh 84 (167/168 compare, 169 does not) and the default (335/336 compare, 337 does not). `maxAgeHours` 168 on the row is deliberately present, to show that the provider's age bound does not enter the rule.
 - A calendar candidate with no previous price is `isNew` with "first price seen for this cell". One whose previous price is outside the window is `isNew` with "last price £X was fetched Nh earlier, outside the Mh comparison window; not compared" (ruling 10). Neither fires a drop or is suppressed, but an absolute rule still fires on either.
-- Every drop reason states the previous price and its age, on both bases; verified drops have no window (ruling 9).
+- Every drop reason states the previous price and its age, on both bases. Verified drops have no window (ruling 9); a test compares against an observation 400 h older (test-r2-005).
 - Each identity settles on its cheapest eligible candidate before judging (ruling 7). The two-offer test asserts no firing when the cheapest has no previous price.
 - Verified eligibility: same execution, definition cabin, class `verified`, or `partially-verified` when `requireAllVerified` is false. Calendar eligibility: `fetchedByExecutionId === ctx.executionId`, which refuses reused rows (ruling 6), plus the definition cabin. Synthetic rows are refused on both bases.
 - Every firing carries `suppressed`: `{ reason }` from `isSuppressed` against `prior`, or null. Suppressed firings are returned so the runner records them; `buildDigest` leaves them out.
@@ -4188,6 +4388,17 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
       previous: { pricePence: 45_000, fetchedAt: hoursAgo(6) },
     });
     expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 10 })], [short])).toEqual([]);
+  });
+
+  it('verified drops have no window: a previous observation 400h older still compares (ruling 9)', () => {
+    const c = verified({
+      observation: { pricePence: 40_000 },
+      previous: { pricePence: 45_000, fetchedAt: hoursAgo(405) },
+    });
+    expect(run([rule({ type: 'dropAbs', thresholdPence: 1_000 })], [c])[0]).toMatchObject({
+      isNew: false,
+      reason: 'down £50 (11%) from £450 fetched 400h earlier',
+    });
   });
 
   it('no previous observation, or a price that did not fall, never fires a drop', () => {
@@ -4445,7 +4656,7 @@ export function evaluateAlertRules(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/evaluate.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 20 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 21 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -4465,7 +4676,7 @@ git add packages/core && git commit -m "wp02: alert evaluation: identities, spar
 
 **Pre-flight (review arch-005):** before Step 1, open the merged `packages/core/src/ports/notifier.ts` and compare `AlertDigest` and `DigestItem` with §4. If they differ (for example the old subject/body shape from the plan's Task 0.4 text), stop and raise it against the plan. Do not edit WP0's file.
 
-Core returns the structure only; WP11 renders the subject and body (spec §8.3), with the coverage caveat it passes in as `ctx.coverageCaveat`. The tests feed candidates in a fixed shuffled order and reverse the firings, so removing the price sort fails them (review test-001). `restCount` counts firings beyond 10 and `newRestCount` new cells beyond 10 (ruling 11). Item provenance is asserted whole, including a calendar `providerObservedAt` much older than `fetchedAt`, so WP11 can render the current price's age (pft-005).
+Core returns the structure only; WP11 renders the subject and body (spec §8.3), with the coverage caveat it passes in as `ctx.coverageCaveat`. The tests feed candidates in a fixed shuffled order and reverse the firings for every digest, so removing either price sort, on firings or on new cells, fails them (review test-001, test-r2-006). `restCount` counts firings beyond 10 and `newRestCount` new cells beyond 10 (ruling 11). Item provenance is asserted whole, including a calendar `providerObservedAt` much older than `fetchedAt`, so WP11 can render the current price's age (pft-005).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4528,7 +4739,12 @@ describe('buildDigest (spec §6.8)', () => {
     const fresh = shuffled(12).map((i) =>
       calendar({ calendarPriceId: 100 + i, cell: cell(1 + i, 20), pricePence: 31_000 + i * 100 }),
     );
-    const d = buildDigest(drop, evaluateAlertRules([drop], [...fresh, ...dropping], [], CTX), DCTX);
+    // reversed, so both lists must be sorted inside buildDigest (review test-r2-006)
+    const d = buildDigest(
+      drop,
+      evaluateAlertRules([drop], [...fresh, ...dropping], [], CTX).toReversed(),
+      DCTX,
+    );
     expect(d?.items).toHaveLength(10);
     expect(d?.restCount).toBe(3);
     expect(d?.newItems).toHaveLength(10);
@@ -4642,7 +4858,7 @@ describe('buildDigest (spec §6.8)', () => {
       [],
       CTX,
     );
-    const d = buildDigest(drop, mixed, DCTX);
+    const d = buildDigest(drop, mixed.toReversed(), DCTX);
     expect(d?.items.map((i) => i.rowKey)).toEqual(['calendar:3']);
     expect(
       d?.newItems.map((i) => [i.rowKey, i.isNew, i.previousPricePence, i.previousAgeHours, i.firingReason]),
@@ -4810,7 +5026,7 @@ export function buildDigest(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/alerts/digest.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 9 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 9 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -4828,36 +5044,82 @@ git add packages/core && git commit -m "wp02: structured digest per rule per exe
 - Consumes: every WP2 module; `findBannedWords`, `BANNED_WORD_ALLOWLIST` (WP0)
 - Produces: the WP2 export block
 
-Append this block to the end of `packages/core/src/index.ts`. Keep WP0's lines unchanged and leave WP1's block alone if it has merged:
+Add the WP2 named exports to `packages/core/src/index.ts` and run `pnpm lint:fix`. Biome sorts every export in the file, so the WP2 lines land between WP0's (review arch-r2-002, test-r2-008). The resulting barrel on current main (commit e7eebee, WP1 merged):
 
 ```ts
-// --- WP2: normalisation, hashing, constraints, results, money, alerts (spec §5.6 pure parts, §6.2–§6.5, §6.8, §6.9) ---
-// why: named exports, not `export *`, so module-internal helpers (wallToInstant, vendorInstant,
-// hoursSince, priceOf, need, compareRows) stay private to core and the public surface is exactly the plan's.
-export { dedupKey, identityKey, isSuppressed } from './alerts/dedup.js';
+// Barrel for @gmt/core. Every public export of the package is re-exported from here;
+// consumers never deep-import. Extended by WP1 and WP2.
+
+export {
+  dedupKey,
+  identityKey,
+  isSuppressed,
+  MIN_REPEAT_DROP_PENCE,
+  MIN_REPEAT_DROP_PERCENT,
+} from './alerts/dedup.js';
 export { buildDigest } from './alerts/digest.js';
 export { evaluateAlertRules } from './alerts/evaluate.js';
+// Inferred contract types that other packages name in signatures (the schemas stay under `apiContract`).
+export type {
+  BudgetFit,
+  CalendarDay,
+  CoverageCheckRequest,
+  CoverageCheckResponse,
+  DefinitionResponse,
+  HistoryPoint,
+  ResultRow,
+  RouteSeriesPoint,
+  SchedulerJob,
+} from './api-contract/index.js';
+export * as apiContract from './api-contract/index.js';
+export * from './config/presets.js';
+export * from './config/schema.js';
+export * from './config/secret.js';
+export * from './config/synthetic.js';
 export { evaluateConstraints } from './constraints/evaluate.js';
 export { CONSTRAINT_LABELS } from './constraints/labels.js';
 export { unverifiedNames, verdictClass } from './constraints/verdictClass.js';
+export * from './coverage/buckets.js';
+export * from './coverage/rollUp.js';
+export * from './dates/epochDay.js';
+export * from './errors.js';
+export * from './labels/age.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
 export { itineraryHash } from './normalise/hashing.js';
-export { type NormaliseDeps, normaliseOffer } from './normalise/itinerary.js';
+export { MAX_POST_DATA_LENGTH, type NormaliseDeps, normaliseOffer } from './normalise/itinerary.js';
 export { departLocal } from './normalise/localTime.js';
 export { ECB_CURRENCIES, MINOR_EXPONENT, toGbp } from './normalise/money.js';
 export { toIsoDateTime } from './normalise/timestamps.js';
-export { LINK_ALLOWLIST, validateVendorUrl } from './normalise/vendorUrl.js';
+export { LINK_ALLOWLIST, MAX_URL_LENGTH, validateVendorUrl } from './normalise/vendorUrl.js';
+export * from './ports/budget.js';
+export * from './ports/cache.js';
+export * from './ports/clock.js';
+export * from './ports/logger.js';
+export * from './ports/notifier.js';
+export * from './ports/provider.js';
 export { bandCheapest } from './results/band.js';
 export { dedupByItinerary } from './results/dedup.js';
 export { filterRows } from './results/filter.js';
 export { rankRows, sortRows } from './results/rank.js';
 export { resultRowKey } from './results/rowKey.js';
 export { SEARCH_LINK_LABEL, searchLinkFor } from './results/searchLink.js';
-export type { ResultFilters, ResultRow, SortKey } from './results/types.js';
+export type { ResultFilters, SortKey } from './results/types.js';
+export * from './selection/select.js';
+export * from './space/generate.js';
+export * from './space/validate.js';
+export * from './space/window.js';
+export * from './text/bannedWords.js';
+export { hasControlChars, stripControlChars } from './text/control.js';
 export { formatPence } from './text/money.js';
+export * from './types/alerts.js';
+export * from './types/definition.js';
+export * from './types/execution.js';
+export * from './types/ids.js';
+export * from './types/itinerary.js';
+export * from './types/provenance.js';
 ```
 
-Named exports keep the module helpers private (`wallToInstant`, `vendorInstant`, `parseVendorTime`, `localMinute`, `requireZone`, `hoursSince`, `priceOf`, `need`, `compareRows`, `compareText`, `CONSTRAINT_NAMES`). The barrel test pins that. The emitted-strings test covers every firing, suppression, digest and normalisation reason, every label in `CONSTRAINT_LABELS` and the search-link labels, and passes WP0's `BANNED_WORD_ALLOWLIST`.
+The rationale for named exports lives in the barrel test's header comment, where Biome cannot move it. Named exports keep the module helpers private (`wallToInstant`, `vendorInstant`, `parseVendorTime`, `localMinute`, `requireZone`, `hoursSince`, `priceOf`, `need`, `compareRows`, `compareText`, `CONSTRAINT_NAMES`). The barrel test pins that. The emitted-strings test covers every firing, suppression, digest and normalisation reason, every label in `CONSTRAINT_LABELS` and the search-link labels, and passes WP0's `BANNED_WORD_ALLOWLIST`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4978,7 +5240,8 @@ describe('banned words (spec §11) in every string core emits', () => {
 import { describe, expect, it } from 'vitest';
 import * as core from '../src/index.js';
 
-// The WP2 public surface: the plan's "Core domain functions (WP2)" block.
+// The WP2 public surface: the plan's "Core domain functions (WP2)" block plus its named constants.
+// why: named exports, not `export *`, so module-internal helpers stay private; this test pins both lists.
 const WP2 = [
   'canonicalCarrier',
   'canonicalFlightNumber',
@@ -5009,6 +5272,12 @@ const WP2 = [
   'dedupKey',
   'isSuppressed',
   'buildDigest',
+  'hasControlChars',
+  'stripControlChars',
+  'MIN_REPEAT_DROP_PENCE',
+  'MIN_REPEAT_DROP_PERCENT',
+  'MAX_URL_LENGTH',
+  'MAX_POST_DATA_LENGTH',
 ];
 const PRIVATE = [
   'wallToInstant',
@@ -5037,16 +5306,16 @@ describe('@gmt/core barrel, WP2 exports', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/text/emitted.test.ts test/wp2-barrel.test.ts`
-Expected: FAIL, the barrel test fails on `exports canonicalCarrier` and the 28 other WP2 names (the emitted-strings test already passes, because it imports modules directly).
+Expected: FAIL, the barrel test fails on `exports canonicalCarrier` and the 34 other WP2 names (the emitted-strings test already passes, because it imports modules directly).
 
 - [ ] **Step 3: Implement**
 
-Append the export block shown above to `packages/core/src/index.ts`.
+Add the WP2 export lines shown above to `packages/core/src/index.ts`, then run `pnpm lint:fix` to place them.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/text/emitted.test.ts test/wp2-barrel.test.ts && pnpm --filter @gmt/core typecheck && pnpm lint`
-Expected: PASS, 41 tests; lint clean; typecheck clean over `src`, and over `test` too once WP0's `tsconfig.test.json` is wired in (review arch-009).
+Expected: PASS, 47 tests; lint clean; typecheck clean over `src` and `test` (WP0's `tsconfig.test.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -5067,15 +5336,14 @@ Run from the repository root, on the `wp/02-core-normalise-constraints-alerts` b
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/core test` | every test passes (WP0's, plus the 321 added here); coverage 100% lines, branches, functions and statements, with no threshold error |
-| `TZ=UTC pnpm --filter @gmt/core test`, `TZ=America/Los_Angeles pnpm --filter @gmt/core test`, `TZ=Asia/Tokyo pnpm --filter @gmt/core test` | identical result in each |
-| the same `pnpm --filter @gmt/core test` under Node 22 (the production image's `node:22-slim` major; CI's Node 22 job, or `nvm exec 22` locally) | identical result. Zone validation must not depend on the host ICU (review arch-001); the scratch run passed on Node 22.23.3 and 26.10.0 |
-| `pnpm --filter @gmt/core exec stryker run --reporters clear-text,json` | exits 0. That exit code covers only the **aggregate** score across every mutated file (review arch-008), so the per-file check below follows it |
+| `pnpm --filter @gmt/core test` | every test passes (WP0's and WP1's, plus the 357 added here; 697 in all on main e7eebee); coverage 100% lines, branches, functions and statements, with no threshold error. WP0's `test` script then reruns the suite under four `TZ` values (`test:tz`), all passing |
+| the same `pnpm --filter @gmt/core test` under Node 22 (the production image's `node:22-slim` major; CI's Node 22 job, or `nvm exec 22` locally) | identical result. Zone validation must not depend on the host ICU (review arch-001); the verification run passed on Node 22.23.3 and 26.10.0 |
+| `pnpm --filter @gmt/core exec stryker run --concurrency 2 --timeoutMS 30000 --reporters clear-text,json` | exits 0. Concurrency 2 and a 30 s timeout keep machine load from turning survivors into timeouts (review test-r2-007). The exit code covers only the **aggregate** score (review arch-008), so the per-file check below follows it |
 | `pnpm lint` | clean |
 | `pnpm -r typecheck` | clean |
 | `node scripts/check-boundaries.mjs` | exit 0: `@gmt/core` depends only on `zod`, `@noble/hashes` and `@date-fns/tz`, and nothing outside `apps/api/src/bootstrap/` reads `process.env` |
 
-Per-file mutation check: each WP2 file in the mutate set (`hashing`, `carrier`, `money`, `vendorUrl`, `constraints/*`, `alerts/dedup`) must score ≥ 80%. Run from `packages/core` after the Stryker run. Scratch scores: hashing 100, carrier 84.13, money 94.05, vendorUrl 96.08, constraints/evaluate 94.55, verdictClass 100, labels 100, alerts/dedup 97.22.
+Per-file mutation check: each WP2 file in the mutate set (`hashing`, `carrier`, `money`, `vendorUrl`, `constraints/*`, `alerts/dedup`) must score ≥ 80%, with timeouts at most 5% of its valid mutants. Run it from `packages/core` after the Stryker run. Verification scores (zero timeouts): hashing 100, carrier 84.13, money 94.05, vendorUrl 98.04, constraints/evaluate 98.91, verdictClass 100, labels 100, alerts/dedup 97.22.
 
 ```bash
 node --input-type=module -e "
@@ -5086,22 +5354,26 @@ let bad = 0;
 for (const [file, { mutants }] of Object.entries(report.files)) {
   if (!wanted.test(file)) continue;
   const valid = mutants.filter((m) => !['CompileError', 'RuntimeError', 'Ignored'].includes(m.status));
-  const score = (100 * valid.filter((m) => m.status === 'Killed' || m.status === 'Timeout').length) / valid.length;
-  console.log(file, score.toFixed(2));
-  if (score < 80) bad++;
+  const killed = valid.filter((m) => m.status === 'Killed').length;
+  const timeouts = valid.filter((m) => m.status === 'Timeout').length;
+  const score = (100 * (killed + timeouts)) / valid.length;
+  console.log(file, score.toFixed(2), 'timeouts', timeouts);
+  // why: a timeout counts as killed in Stryker's score, so many of them can hide survivors.
+  if (score < 80 || timeouts > 0.05 * valid.length) bad++;
 }
 process.exit(bad ? 1 : 0);
 "
 ```
 
-Expected: one line per file, each ≥ 80.00, exit 0.
+Expected: one line per file, each ≥ 80.00 with timeouts within 5%, exit 0.
 
-Purity, route and cast checks; each command prints nothing:
+Purity, route, cast and suppression checks; each command prints nothing:
 
 ```bash
-grep -rnE "'(LHR|LGW|JFK|EWR|LON|NYC)'" packages/core/src          # airport codes appear only in tests
+grep -rnE "'(LHR|LGW|JFK|EWR|LON|NYC)'" packages/core/src/{normalise,constraints,results,alerts} packages/core/src/text/{money,control}.ts   # airport codes appear only in tests
 grep -rnE "process\.env|Math\.random|new Date\(\)" packages/core/src/normalise packages/core/src/constraints packages/core/src/results packages/core/src/alerts   # every instant arrives as an argument
-grep -rnP "\bas (?!const\b)" packages/core/src/{normalise,constraints,results,alerts} packages/core/src/text/money.ts | grep -vP ":\d+:\s*(//|\*)"   # no casts in src (ruling 1)
+grep -rnP "\bas (?!const\b)" packages/core/src/{normalise,constraints,results,alerts} packages/core/src/text/{money,control}.ts | grep -vP ":\d+:\s*(//|\*)"   # no casts in src (ruling 1)
+grep -rn "biome-ignore" packages/core/src   # no lint suppressions (ruling arch-r2-003)
 ```
 
 The same cast grep over `packages/core/test/{normalise,constraints,results,alerts,text,helpers}` may print only comment or string-literal lines, which the reviewer confirms by eye.

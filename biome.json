@@ -11,9 +11,7 @@
       "!**/reports",
       "!**/.stryker-tmp",
       "!**/drizzle/meta",
-      "!**/pnpm-lock.yaml",
-      "!**/.worktrees",
-      "!**/.superpowers"
+      "!**/pnpm-lock.yaml"
     ]
   },
   "formatter": {
@@ -38,5 +36,10 @@
       "semicolons": "always",
       "trailingCommas": "all"
     }
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
   }
 }
