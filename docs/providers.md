@@ -21,6 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
+| Self-scraping: Google Flights in a Camoufox (anti-detection Firefox) browser via Playwright | Free software; residential proxies and selector upkeep are the real cost | Google's page | Yes (the date-grid page) | Yes | Yes | Yes | **Unauthorised; the operator carries the exposure directly** on their own server and IP | Phase 4 continuity fallback only (spec §2); not built |
 
 ## Key facts with sources
 
@@ -45,6 +46,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ### SearchApi.io (best scraping-derived option)
 - Pricing https://www.searchapi.io/pricing — 100 free; Developer $40/10k; Production $100/35k; ≤20% of plan per hour; only HTTP 200 billed.
+- Dashboard after the spike (2026-10-14): "Remaining free searches (credits) 91" after eleven HTTP 200 calls, one 400 and one 401, so the free allowance is a one-off credit balance (not monthly), errors are not billed, and a repeat answered from the vendor cache was not billed either. Ian is subscribing to the $40 plan.
 - `google_flights_calendar` https://www.searchapi.io/docs/google-flights-calendar-api — returns departure/return/price for up to 200 date pairs per call, comma-separated airports. Naive figure for a 181-day × 12-duration scan ≈ 11 calls assumes perfect packing; the API takes rectangular outbound×return ranges while the cell space is a diagonal nights band, so ~108 of 180 cells per call are useful and a realistic per-pair scan is ~20 calls. Spike to confirm.
 - `google_flights` https://www.searchapi.io/docs/google-flights-api — ≤10 airports per side; same two-step RT flow as SerpApi.
 
@@ -63,7 +65,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ## Spike results (2026-10-14)
 
-Measured with real tokens; see `docs/spike/2026-10-14-findings.md`. Travelpayouts holds no
+Measured with real tokens; the full record and redacted fixtures are the operator's private notes outside the repository. Travelpayouts holds no
 UK-market cached round trips to a thin long-haul destination over eight months (busy gateways of the
 same country: 4–6 a month); its `market` and `trip_class` parameters are ignored; `currency=gbp` works; rows carry
 `origin_airport`/`destination_airport` but no `found_at`; one `prices_for_dates` call per

@@ -1,10 +1,14 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 8.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: revised against
+**Design spec, revision 9.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
-revision 2) and the provider spike. Review summaries and the spike record
-live outside the repository (the operator's private notes), not in `docs/`. See the `.review-N.md` files beside this one and the changelog
-in §17. Awaiting Ian's approval before the implementation plan.
+revision 2) and the provider spike. Revision 9 folds in the three decisions
+taken at approval (the self-scraping fallback in §2, the dashboard readings in
+§2 facts 4 and 7, the $40 plan in §1) and changes no design rule. Review
+summaries and the spike record live outside the repository (the operator's
+private notes), not in `docs/`; the changelog in §17 maps every finding ID.
+The implementation plan under `docs/superpowers/plans/` and the work briefs
+under `docs/briefs/` derive from this revision.
 
 This document is the single source of truth for what gets built. The
 implementation plan and every per-package work brief derive from it. Where
@@ -41,9 +45,10 @@ its basis, verdict class, provider and age. Never "cheapest bookable". The
 banned-word list for all user-facing text is in §11 and is a single list.
 
 **Configurations the app must support.** The SearchApi free allowance is a
-one-off 100-request trial until spike fact 7 says otherwise, so the **£0
+one-off balance of 100 credits (dashboard wording, §2 fact 7), so the **£0
 configuration is Travelpayouts-only**, and SearchApi in practice means the
-$40/month plan, which is Ian's approved ceiling.
+$40/month plan, which is Ian's approved ceiling and the plan he is
+subscribing to (decision 2026-10-14).
 
 | Providers | Discovery | Verification | What the operator gets |
 |---|---|---|---|
@@ -75,7 +80,8 @@ run (~1,140 per run) or running daily (~5,700 a month) both fit.
 multimodal totals (§7 keeps two columns; the operator may enter an
 onward-cost estimate shown as a separate "adjusted" sort, never folded into
 a price); split-ticket optimisation; booking inside the app; multi-user;
-price prediction; any provider not in §2.
+price prediction; any provider not in §2 (the self-scraping fallback named
+in §2 is a Phase 4 option, not built).
 
 ---
 
@@ -92,7 +98,7 @@ Google has no public API.
 | Provider | Nature | Cost | Role | `sourceKind` | `maxAgeHours` |
 |---|---|---|---|---|---|
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is an airport code, or the metro code when the definition's origins share one, rows split by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, last 48h; **no** `found_at` on rows; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
-| SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (declared, conservative assumption: a repeat call answered in 3 s, so a vendor cache exists; its window is undocumented) |
+| SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (declared, conservative assumption: a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | 0 (interactive search at request time) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
@@ -100,6 +106,27 @@ on the understanding that its data is obtained in a way Google's terms
 prohibit, one step removed from this app; the realistic risk is continuity
 and the mitigation is the provider abstraction and labelling. SerpApi is not
 integrated.
+
+**Continuity fallback (Ian, 2026-10-14): self-scraping is a named Phase 4
+option, not built.** If SearchApi is withdrawn, re-priced above the ceiling
+or loses Google's date grid, the replacement is a `FlightProvider` adapter
+that drives Google Flights in a Camoufox browser (an anti-detection Firefox
+build) through Playwright, behind the same contract, ledger, caps and labels
+as every other provider. It is not built in Phases 1–3 because the original
+prompt excluded brittle scraping that violates provider terms and
+self-scraping moves that exposure from a vendor onto the operator's own
+server and IP address; because it needs residential proxies and selector
+maintenance against a frontend that changes without notice; because a page
+load takes 5–10 s and a CAPTCHA stalls an unattended 05:00 run; and because
+it adds a 400 MB browser and a second runtime to a one-process image, to
+save roughly £32 a month. The design keeps the door open and nothing more:
+`ProviderId` and `SourceKind` are **not** widened now. When the adapter is
+built it adds `'camoufox'` to `ProviderId`, a `SourceKind` of
+`'scraped-self'` with its own `maxAgeHours`, a `provenanceNote` naming the
+method, and its own hostname allowlist; every page load is a ledger row
+under the free-provider rules with its own per-execution call cap; its
+prices render under the same provenance and banned-word rules. No other
+package changes.
 
 **Consequences baked into the design:**
 
@@ -145,16 +172,23 @@ calls and ~175 free Travelpayouts calls settled every open fact:
    pairing (£603); step 3 showed an OTA at £573, so **the parity assertion
    fails** and `bookingLinks` is forced on (§5.4). Two of nine step-1
    options and one of three step-2 options carried no price.
-4. SearchApi caching: a repeat call answered in 3 s with a new search id;
-   whether it was billed is read from the dashboard (WP4b records it).
+4. SearchApi caching: a repeat call answered in 3 s with a new search id.
+   The dashboard read **91 remaining of 100** after eleven HTTP 200 calls,
+   one HTTP 400 and one HTTP 401, so at most nine were billed: error
+   responses are not billed and the cached repeat was not. The ledger
+   still counts every HTTP 200 attempt against the call cap (it may
+   overcount the vendor, never undercount), and `SEARCHAPI_CACHE_TTL_HOURS`
+   stays 1 as the local cache window; the vendor's window is undocumented.
 5. Error bodies recorded: SearchApi 401 `{"error":"Invalid API key."}` and
    400 with a descriptive message; Travelpayouts 401 plain `Unauthorized`.
    No 429 or quota body observed yet; the adapters map those by status and
    ledger state until one is recorded.
 6. Carriers: both providers returned the relevant national and
    connecting carriers for the probed country pair.
-7. Whether the 100-call allowance recurs is read from the dashboard
-   wording; until then it is a lifetime cap.
+7. The dashboard labels the allowance "Remaining free searches (credits)":
+   a one-off credit balance, not a recurring monthly allowance, so the
+   `trial` plan uses a **lifetime** window and the £0 configuration is
+   Travelpayouts-only. Ian is subscribing to the $40 plan (2026-10-14).
 8. Both vendors accept the key in a header (`Authorization: Bearer`,
    `X-Access-Token`); no key is ever sent in a URL.
 
@@ -1380,7 +1414,7 @@ SEARCHAPI_PLAN=trial                     # trial (100 lifetime, 20/h, 2/min, con
                                          # a per-call plan would set _COST_PER_CALL_MICRO_GBP > 0 and fixed 0; none is offered today
                                          # 100usd is above the approved ceiling and needs every value set explicitly
 SEARCHAPI_BILLING_DAY=1                  # 1–28
-SEARCHAPI_CACHE_TTL_HOURS=1              # provisional until spike fact 4
+SEARCHAPI_CACHE_TTL_HOURS=1              # local cache window; the vendor does not bill a cached repeat (spike fact 4) but its window is undocumented
 SEARCHAPI_TRIAL_USED=0                   # seed for the lifetime window when the trial was partly spent elsewhere
 # overrides: SEARCHAPI_MONTHLY_CALL_CAP, _RATE_PER_MINUTE, _RATE_PER_HOUR, _CONCURRENCY, _COST_PER_CALL_MICRO_GBP, _PLAN_FIXED_PENCE
 # --- email (all or nothing) ---
@@ -1461,6 +1495,7 @@ as specified in §5.3; no secrets, no full URLs.
 |---|---|---|
 | Research providers, pick one, integrate ≥1 | Two integrated; Amadeus/Duffel rejected | §2 |
 | "Documented, authorised interfaces" | SearchApi scraping-derived, opt-in, labelled | Ian's decision 2026-10-14 |
+| No brittle scraping that violates provider terms | Self-scraping via Camoufox is named in §2 as a Phase 4 continuity fallback only; not built; `ProviderId` and `SourceKind` not widened | Ian's decision 2026-10-14; SearchApi carries that exposure one step removed |
 | "Cheapest available / bookable" | "Cheapest round trip found"; provenance and age on every price | No path guarantees bookability |
 | Free to operate | £0 config is Travelpayouts-only; SearchApi means the $40 plan | Its free allowance is a one-off trial |
 | A specific set of origins and destinations as the initial set | No airports in code at all; every definition names its own, with autocomplete and a free coverage check; the docs example is London → New York | A personal tool should not need a code change to search a different route, and the operator's own route is private |
@@ -1490,7 +1525,7 @@ as specified in §5.3; no secrets, no full URLs.
 | 2 | `core`: normalisation helpers, hashing, constraints, classes, rank/filter/band, money, alerts | Sonnet | 0 | `VS 938` ≡ `VS938` hash |
 | 3 | `db`: schema, migrations, repositories, `BudgetGuard`, cache, lock, seed, maintenance | Opus | 0 | 1,000 × 3200 µGBP trips a 300p cap |
 | 4 | `providers`: http-kit, recorder, scrubbing, egress; fixture provider as an HTTP adapter | Opus | 0 | reserve happens before fetch on every attempt |
-| **4b** | `record:fixtures` (records the public example route, LHR/LGW → JFK/EWR, through the real recorder, incl. a 429 if one can be induced; ~12 trial calls), the dashboard readings for facts 4 and 7, and the minimal **wiring helper** (config parse + port construction) that WP8's bootstraps reuse | Fable | 3, 4 | recorded fixture carries a verifiable content hash |
+| **4b** | `record:fixtures` (records the public example route, LHR/LGW → JFK/EWR, through the real recorder, incl. a 429 if one can be induced; ~12 of the 91 remaining trial credits) and the minimal **wiring helper** (config parse + port construction) that WP8's bootstraps reuse | Fable | 3, 4 | recorded fixture carries a verifiable content hash |
 | 5 | SearchApi adapter | Opus | 4, 4b | tiles partition the band |
 | 6 | Travelpayouts adapter | Sonnet | 4, 4b | empty envelope → `no_data` |
 | 7 | `engine` with layer-A tests (fixture provider through http-kit) | Opus | 1, 2, 3, 4 | resume after k of n tiles issues n−k |
@@ -1504,6 +1539,18 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 9: decisions taken at approval (2026-10-14)
+
+Ian approved revision 8 and settled three open items, folded in without any
+change to a design rule: self-scraping via Camoufox is a named Phase 4
+continuity fallback in §2 (not built; types not widened; §1 non-goals and
+§15 updated); the SearchApi dashboard readings close spike facts 4 and 7
+(cached repeats and error responses are not billed; the free allowance is a
+one-off credit balance, so `trial` stays a lifetime window and
+`SEARCHAPI_CACHE_TTL_HOURS` is no longer provisional); the $40 plan is the
+plan Ian is subscribing to (§1, §2 fact 7); WP4b no longer carries the
+dashboard readings.
 
 ### Revision 8: operator's route removed from the repository (2026-10-14)
 
