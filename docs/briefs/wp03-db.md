@@ -5,7 +5,7 @@ owner: opus
 depends_on: [0, 1]
 spec_sections: ["§7", "§5.3 Cap predicates", "§5.3 Billable rule", "§5.3 Crash between reserve and finalise", "§5.5 repository rejections", "§6.6 (stored roll-ups via core)", "§9 item 3"]
 reviewers: [code-architect, test-strategy-reviewer, data-model-reviewer, cost-and-budget-reviewer, provenance-auditor, security-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP3: `@gmt/db`
@@ -246,7 +246,7 @@ packages/db/test/{budgetGuard.cap,budgetGuard.predicates,budgetGuard.windows,led
 
 ## 8. Tasks
 
-Conventions: run commands from the repository root; tests import from `../src/...js`; when a step says "Add to" a file, its `import` lines go to the top and merge with existing ones; commit messages end with `MrReasonable <4990954+MrReasonable@users.noreply.github.com>`. "Regenerate the migration" = `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate --name=initial`.
+Conventions: run commands from the repository root; tests import from `../src/...js`; when a step says "Add to" a file, its `import` lines go to the top and merge with existing ones; commit messages end with `MrReasonable <4990954+MrReasonable@users.noreply.github.com>`. "Regenerate the migration" = `rm -rf packages/db/drizzle && pnpm --filter @gmt/db db:generate --name=initial`. The code below is written for reading, not in Biome's layout: run `pnpm exec biome check --write packages/db` before each commit (in the scratch assembly of revision 4 that left `biome check` clean, with one size warning on the vendored airports JSON).
 
 ### Task 3.1: Ledger tables, the global-month cap in SQL, and the first migration (first failing test)
 
@@ -1061,6 +1061,7 @@ export function effectiveCallCap(b: ProviderLimits & { trialUsed: number }): num
 
 ```ts
 import { type BudgetGuard, BudgetExceeded, type BudgetScope, type Clock, type IsoDateTime, type ProviderId, type Reservation, type Usage } from '@gmt/core';
+import type Database from 'better-sqlite3';
 import { monthWindow } from './budget/window.js';
 import { type BudgetConfig, type ProviderBudget, effectiveCallCap } from './budgetConfig.js';
 import type { Db } from './client.js';
@@ -1098,6 +1099,48 @@ WHERE id = @id AND outcome = 'pending'`;
 const INSERT_CACHE_HIT_SQL = `
 INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at, duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt)
 VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @at, @at, 0, NULL, 'cache_hit', 0, 0, 0)`;
+const RECENT_CALLS_SQL = `SELECT COUNT(*) AS n FROM provider_requests WHERE provider_id = ? AND outcome <> 'cache_hit' AND started_at >= ?`;
+/** Spec §5.3 execution scopes: rows of this execution for the given providers, billed or free rule. */
+export const EXECUTION_USAGE_SQL = `
+SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
+FROM provider_requests
+WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_each(@providers)) AND outcome <> 'cache_hit'
+  AND (@billed = 0 OR outcome IN ('pending', 'unknown') OR billable = 1)`;
+
+/** Plan Budget port: per-execution caps come from the snapshot budget, never from config at reserve time. */
+const EXECUTION_CAPS_SQL = `
+SELECT json_extract(definition_snapshot_json, '$.budget.maxCalls') AS maxCalls,
+       json_extract(definition_snapshot_json, '$.budget.maxFreeCalls') AS maxFreeCalls,
+       json_extract(definition_snapshot_json, '$.budget.maxCostMicroGbp') AS maxCostMicroGbp
+FROM search_executions WHERE id = ?`;
+
+/**
+ * Every statement the guard runs, prepared once per guard (arch-r3-005): `reserve` sits on every upstream call's path,
+ * and re-preparing four statements per call made the 937-call test brush Vitest's timeout. Task 3.2's execution
+ * scopes use the last two.
+ */
+interface GuardStatements {
+  insertPending: Database.Statement<Record<string, unknown>>;
+  finalise: Database.Statement<Record<string, unknown>>;
+  insertCacheHit: Database.Statement<Record<string, unknown>>;
+  recentCalls: Database.Statement<[string, string], { n: number }>;
+  providerUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
+  globalUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
+  executionUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
+  executionCaps: Database.Statement<[string], { maxCalls: unknown; maxFreeCalls: unknown; maxCostMicroGbp: unknown }>;
+}
+function prepareStatements(db: Db): GuardStatements {
+  return {
+    insertPending: db.raw.prepare<Record<string, unknown>>(INSERT_PENDING_SQL),
+    finalise: db.raw.prepare<Record<string, unknown>>(FINALISE_SQL),
+    insertCacheHit: db.raw.prepare<Record<string, unknown>>(INSERT_CACHE_HIT_SQL),
+    recentCalls: db.raw.prepare<[string, string], { n: number }>(RECENT_CALLS_SQL),
+    providerUsage: db.raw.prepare<Record<string, unknown>, CallsAndCost>(PROVIDER_USAGE_SQL),
+    globalUsage: db.raw.prepare<Record<string, unknown>, CallsAndCost>(GLOBAL_USAGE_SQL),
+    executionUsage: db.raw.prepare<Record<string, unknown>, CallsAndCost>(EXECUTION_USAGE_SQL),
+    executionCaps: db.raw.prepare<[string], { maxCalls: unknown; maxFreeCalls: unknown; maxCostMicroGbp: unknown }>(EXECUTION_CAPS_SQL),
+  };
+}
 
 /**
  * The budget guard, enforced in SQL (spec §5.3). `reserve` runs every cap predicate and inserts the `pending`
@@ -1105,11 +1148,15 @@ VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @at, @at, 0, NULL,
  * both pass the same headroom. The billable decision happens at `finalise`.
  */
 export class SqliteBudgetGuard implements BudgetGuard {
+  protected readonly sql: GuardStatements;
+
   constructor(
     private readonly db: Db,
     private readonly config: BudgetConfig,
     private readonly clock: Clock,
-  ) {}
+  ) {
+    this.sql = prepareStatements(db);
+  }
 
   reserve(p: ReserveParams): Reservation {
     const budget = this.budgetFor(p.providerId);
@@ -1123,8 +1170,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
     const id = this.db.immediateTransaction(() => {
       this.checkCaps(p, budget, now);
       return Number(
-        this.db.raw
-          .prepare(INSERT_PENDING_SQL)
+        this.sql.insertPending
           .run({ providerId: p.providerId, executionId: p.executionId, endpointPath: p.endpointPath, tileIndex: p.tileIndex, startedAt: now, cost: p.costMicroGbp, httpAttempt: p.httpAttempt })
           .lastInsertRowid,
       );
@@ -1136,7 +1182,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
     this.budgetFor(p.providerId);
     if (p.tileIndex !== null) assertInt('tileIndex', p.tileIndex);
     assertEndpointPath(p.endpointPath);
-    this.db.raw.prepare(INSERT_CACHE_HIT_SQL).run({ providerId: p.providerId, executionId: p.executionId, endpointPath: p.endpointPath, tileIndex: p.tileIndex, at: this.clock.now() });
+    this.sql.insertCacheHit.run({ providerId: p.providerId, executionId: p.executionId, endpointPath: p.endpointPath, tileIndex: p.tileIndex, at: this.clock.now() });
   }
 
   usage(scope: BudgetScope): Usage {
@@ -1163,9 +1209,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
   recentCalls(providerId: ProviderId, since: IsoDateTime): number {
     assertIsoDateTime('since', since);
     this.budgetFor(providerId); // fail closed on an unconfigured provider
-    return this.db.raw
-      .prepare<[string, string], { n: number }>(`SELECT COUNT(*) AS n FROM provider_requests WHERE provider_id = ? AND outcome <> 'cache_hit' AND started_at >= ?`)
-      .get(providerId, since)?.n ?? 0;
+    return this.sql.recentCalls.get(providerId, since)?.n ?? 0;
   }
 
   protected checkCaps(p: ReserveParams, budget: ProviderBudget, now: IsoDateTime): void {
@@ -1187,14 +1231,14 @@ export class SqliteBudgetGuard implements BudgetGuard {
 
   protected providerUsage(providerId: ProviderId, budget: ProviderBudget, now: IsoDateTime, window: 'month' | 'lifetime'): CallsAndCost & Window {
     const w: Window = window === 'lifetime' ? { windowStart: null, windowEnd: null } : monthWindow(this.db, now, budget.billingDay);
-    const row = this.db.raw.prepare<Record<string, unknown>, CallsAndCost>(PROVIDER_USAGE_SQL).get({ providerId, billed: budget.billable ? 1 : 0, ...w });
+    const row = this.sql.providerUsage.get({ providerId, billed: budget.billable ? 1 : 0, ...w });
     return { calls: row?.calls ?? 0, cost: row?.cost ?? 0, ...w };
   }
 
   protected globalUsage(now: IsoDateTime): CallsAndCost & { windowStart: IsoDateTime; windowEnd: IsoDateTime } {
     const w = monthWindow(this.db, now, this.config.spend.globalBillingDay);
     const billed = this.providersWhere(true);
-    const row = this.db.raw.prepare<Record<string, unknown>, CallsAndCost>(GLOBAL_USAGE_SQL).get({ billedProviders: JSON.stringify(billed), ...w });
+    const row = this.sql.globalUsage.get({ billedProviders: JSON.stringify(billed), ...w });
     // why: spec §5.3 the subscription fee counts once per enabled subscription provider, not per row.
     const fixed = billed.reduce((sum, id) => sum + (this.config.providers[id]?.planFixedMicroGbp ?? 0), 0);
     return { calls: row?.calls ?? 0, cost: (row?.cost ?? 0) + fixed, ...w };
@@ -1225,8 +1269,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
         const billable = budget.billable && r.outcome === 'ok' && r.httpStatus === 200;
         // why: an `unknown` attempt may have been billed by the vendor, so it keeps its cost and stays counted.
         const zeroCost = !billable && r.outcome !== 'unknown';
-        const changes = this.db.raw
-          .prepare(FINALISE_SQL)
+        const changes = this.sql.finalise
           .run({ id, outcome: r.outcome, httpStatus: r.httpStatus ?? null, durationMs: r.durationMs, finishedAt: this.clock.now(), billable: billable ? 1 : 0, zeroCost: zeroCost ? 1 : 0 }).changes;
         if (changes !== 1) throw new Error(`reservation ${id} is no longer pending`);
         done = true;
@@ -1590,25 +1633,7 @@ Expected: FAIL; the execution-scope and child tests fail (reserve passes where `
 
 - [ ] **Step 3: Implement**
 
-In `src/budgetGuard.ts`, add (import `type ExecutionBudget` from `@gmt/core`):
-
-```ts
-/** Spec §5.3 execution scopes: rows of this execution for the given providers, billed or free rule. */
-export const EXECUTION_USAGE_SQL = `
-SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
-FROM provider_requests
-WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_each(@providers)) AND outcome <> 'cache_hit'
-  AND (@billed = 0 OR outcome IN ('pending', 'unknown') OR billable = 1)`;
-
-/** Plan Budget port: per-execution caps come from the snapshot budget, never from config at reserve time. */
-const EXECUTION_CAPS_SQL = `
-SELECT json_extract(definition_snapshot_json, '$.budget.maxCalls') AS maxCalls,
-       json_extract(definition_snapshot_json, '$.budget.maxFreeCalls') AS maxFreeCalls,
-       json_extract(definition_snapshot_json, '$.budget.maxCostMicroGbp') AS maxCostMicroGbp
-FROM search_executions WHERE id = ?`;
-```
-
-and replace `checkCaps` and `executionUsage`:
+In `src/budgetGuard.ts` (import `type ExecutionBudget` from `@gmt/core`), replace `checkCaps` and `executionUsage` and add the two execution helpers:
 
 ```ts
   // why: check order is provider (the vendor's hard stop), then global (total spend), then the execution's own caps;
@@ -1643,12 +1668,12 @@ and replace `checkCaps` and `executionUsage`:
   }
 
   private executionRows(executionId: string, providers: ProviderId[], billed: boolean): CallsAndCost {
-    const row = this.db.raw.prepare<Record<string, unknown>, CallsAndCost>(EXECUTION_USAGE_SQL).get({ executionId, providers: JSON.stringify(providers), billed: billed ? 1 : 0 });
+    const row = this.sql.executionUsage.get({ executionId, providers: JSON.stringify(providers), billed: billed ? 1 : 0 });
     return { calls: row?.calls ?? 0, cost: row?.cost ?? 0 };
   }
 
   private executionCaps(executionId: string): ExecutionBudget {
-    const row = this.db.raw.prepare<[string], { maxCalls: unknown; maxFreeCalls: unknown; maxCostMicroGbp: unknown }>(EXECUTION_CAPS_SQL).get(executionId);
+    const row = this.sql.executionCaps.get(executionId);
     if (row === undefined) throw new Error(`execution ${executionId} does not exist; refusing to reserve`);
     const { maxCalls, maxFreeCalls, maxCostMicroGbp } = row;
     if (typeof maxCalls !== 'number' || typeof maxFreeCalls !== 'number' || typeof maxCostMicroGbp !== 'number') throw new Error(`execution ${executionId} snapshot has no budget; refusing to reserve`);
@@ -2368,11 +2393,13 @@ if (values.wikitext) {
     // why: a code introduced by "formerly" (inline or in ''…'' italics) is a historical code, not a member.
     const rest = line.slice(line.indexOf(head[0]) + head[0].length).replace(/''[^']*''/g, '').replace(/formerly [A-Z]{3}/g, '');
     const codes = [...new Set([...rest.matchAll(/\(([A-Z]{3})[,)]/g)].map((m) => m[1]))].sort();
-    const present = codes.filter((c) => byIata.has(c) || (drops.push(`${head[1]}:${c} absent from the airports file`), false));
+    const present = codes.filter((c) => byIata.has(c));
+    for (const c of codes) if (!byIata.has(c)) drops.push(`${head[1]}:${c} absent from the airports file`);
     const countries = {};
     for (const c of present) countries[byIata.get(c).country] = (countries[byIata.get(c).country] ?? 0) + 1;
     const majority = Object.entries(countries).sort((a, b) => b[1] - a[1])[0]?.[0];
-    const kept = present.filter((c) => byIata.get(c).country === majority || (drops.push(`${head[1]}:${c} in ${byIata.get(c).country}, not ${majority}`), false));
+    const kept = present.filter((c) => byIata.get(c).country === majority);
+    for (const c of present) if (byIata.get(c).country !== majority) drops.push(`${head[1]}:${c} in ${byIata.get(c).country}, not ${majority}`);
     for (const c of kept) {
       if (owner.has(c) && owner.get(c) !== head[1]) throw new Error(`${c} is listed under both ${owner.get(c)} and ${head[1]}`);
       owner.set(c, head[1]);
