@@ -42,7 +42,13 @@ import {
 } from '../internal/priceRow.js';
 import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
 import { storeRollUps } from '../internal/rollUps.js';
-import { assertErrorReason, assertInt, RowRejected } from '../internal/validate.js';
+import {
+  assertErrorReason,
+  assertInt,
+  assertProviderAllowed,
+  assertProviderKind,
+  RowRejected,
+} from '../internal/validate.js';
 import type {
   CalendarPriceInsert,
   CalendarPriceRow,
@@ -222,7 +228,11 @@ WHERE execution_id = @executionId AND stage = @stage AND provider_id = @provider
 ORDER BY origin, destination, departure_date, return_date`;
 
 /** prov-005: every field a reused copy carries must agree before anything is written (rule reuse-source). */
-function assertReusable(providerId: ProviderId, { cell, outcome, price }: ReusedCopy): void {
+function assertReusable(
+  providerId: ProviderId,
+  { cell, outcome, price }: ReusedCopy,
+  allowSynthetic: boolean,
+): void {
   const key = cellKeyString(cell);
   const refuse = (why: string) => new RowRejected('reuse-source', `${key}: ${why} (spec §8.1)`);
   if (outcome.status !== 'priced' && outcome.status !== 'empty' && outcome.status !== 'no_data')
@@ -239,6 +249,7 @@ function assertReusable(providerId: ProviderId, { cell, outcome, price }: Reused
     outcome.sourceKind === null
   )
     throw refuse('the outcome carries no provenance');
+  assertProviderKind(providerId, outcome.sourceKind, allowSynthetic);
   if ((outcome.status === 'priced') !== (price !== null))
     throw refuse(`a ${outcome.status} outcome with${price === null ? 'out' : ''} a price`);
   if (price === null) return;
@@ -267,6 +278,7 @@ export class CellsRepo {
 
   /** Spec §7 atomic unit "seeding search_cells + discovery cell_outcomes at start". */
   seed(executionId: string, cells: Cell[], discoveryProviders: ProviderId[]): void {
+    for (const p of discoveryProviders) assertProviderAllowed(p, this.opts.allowSynthetic);
     const insertCell = this.db.raw.prepare(
       `INSERT INTO search_cells (execution_id, origin, destination, departure_date, return_date, discovery_status, verification_selected) VALUES (@executionId, @origin, @destination, @departureDate, @returnDate, @status, 0)`,
     );
@@ -313,6 +325,7 @@ export class CellsRepo {
     providerId: ProviderId,
     patch: Partial<CellOutcome> & { incrementAttempts?: boolean },
   ): void {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
     for (const f of DATA_FIELDS)
       if (f in patch && f !== 'lastError')
         throw new RowRejected(
@@ -365,6 +378,7 @@ export class CellsRepo {
     from: CellOutcomeStatus[],
     to: { status: CellOutcomeStatus; reason: string | null },
   ): number {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
     if (from.some(isTerminal))
       throw new RowRejected(
         'terminal-outcome',
@@ -391,6 +405,7 @@ export class CellsRepo {
 
   /** Spec §8.1 cabin-not-offered: the provider is not called; its not_run outcomes become no_data with the reason. */
   markNoData(executionId: string, stage: Stage, providerId: ProviderId, reason: NoDataReason): number {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
     return this.db.transaction(() => {
       const changes = this.db.raw
         .prepare(
@@ -468,6 +483,7 @@ export class CellsRepo {
    * any SQL failure inside rolls the whole tile back.
    */
   writeTile(executionId: string, providerId: ProviderId, w: TileWrite): void {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
     assertInt('tileIndex', w.tileIndex);
     assertInt('discards', w.discards);
     const prices = new Map<string, CalendarPriceInsert>();
@@ -496,6 +512,7 @@ export class CellsRepo {
         throw new RowRejected('tile-partition', `${key} is outside the tile or repeated`);
       seen.add(key);
       assertOutcomeProvenance(o);
+      if (o.sourceKind !== null) assertProviderKind(providerId, o.sourceKind, this.opts.allowSynthetic);
       assertOutcomeReason(o);
       const price = prices.get(key);
       if (o.status === 'priced' && price === undefined)
@@ -556,6 +573,7 @@ export class CellsRepo {
     reason: string,
     lastError: string | null,
   ): void {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
     assertErrorReason(reason);
     this.db.transaction(() => {
       for (const c of cells) {
@@ -596,6 +614,7 @@ export class CellsRepo {
     allCells: CellKey[],
     verificationProviders: ProviderId[],
   ): void {
+    for (const p of verificationProviders) assertProviderAllowed(p, this.opts.allowSynthetic);
     const all = new Set(allCells.map(cellKeyString));
     for (const s of selected)
       if (!all.has(cellKeyString(s.cell)))
@@ -689,6 +708,9 @@ export class CellsRepo {
    * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest observation written (ruling 13).
    */
   writeVerifiedCell(executionId: string, providerId: ProviderId, w: VerifiedCellWrite): void {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
+    if (w.outcome.sourceKind !== null)
+      assertProviderKind(providerId, w.outcome.sourceKind, this.opts.allowSynthetic);
     const key = cellKeyString(w.cell);
     const o = w.outcome;
     const offers = w.itineraries.flatMap((i) => i.offers.map((x) => ({ ...x, itinerary: i.itinerary })));
@@ -782,8 +804,9 @@ export class CellsRepo {
    * fetched the price, even when the source is itself a reused copy.
    */
   copyReused(executionId: string, providerId: ProviderId, copies: ReusedCopy[]): void {
+    assertProviderAllowed(providerId, this.opts.allowSynthetic);
     for (const copy of copies) {
-      assertReusable(providerId, copy);
+      assertReusable(providerId, copy, this.opts.allowSynthetic);
       if (copy.price !== null) validateCalendarPrice(copy.price, this.opts.allowSynthetic, false);
     }
     this.db.transaction(() => {

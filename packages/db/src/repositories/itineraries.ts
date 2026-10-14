@@ -41,6 +41,7 @@ import {
   assertNullableIsoDateTime,
   assertPointOfSale,
   assertPriceMoney,
+  assertProviderAllowed,
   assertProviderKind,
   RowRejected,
 } from '../internal/validate.js';
@@ -305,6 +306,7 @@ export class ItinerariesRepo {
 
   /** Returns the offer id for (itinerary, provider, seller, cabin), creating it if absent. */
   upsertOffer(offer: Offer): number {
+    assertProviderAllowed(offer.providerId, this.opts.allowSynthetic);
     if (offer.seller.length === 0) throw new RowRejected('seller', 'seller is required (spec §7 NOT NULL)');
     const now = this.clock.now();
     this.db.raw

@@ -1,7 +1,14 @@
 import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { CABINS, OUTCOME_STATUSES, PROVIDER_IDS, SOURCE_KINDS, STAGES } from '../internal/enums.js';
-import { isInteger, isIsoTimestamp, isNullOrInteger, isOneOf, isPointOfSale } from './checks.js';
+import {
+  isInteger,
+  isIsoTimestamp,
+  isNullOrInteger,
+  isOneOf,
+  isPointOfSale,
+  isProviderKind,
+} from './checks.js';
 import { searchCells } from './searchCells.js';
 import { searchExecutions } from './searchExecutions.js';
 
@@ -60,6 +67,7 @@ export const cellOutcomes = sqliteTable(
     check('cell_outcomes_cabin_ck', isOneOf('cabin', CABINS, true)),
     check('cell_outcomes_pos_ck', isPointOfSale('point_of_sale', true)),
     check('cell_outcomes_kind_ck', isOneOf('source_kind', SOURCE_KINDS, true)),
+    check('cell_outcomes_provider_kind_ck', isProviderKind(true)),
     check('cell_outcomes_fetched_ck', isIsoTimestamp('fetched_at', true)),
     // why: ruling 5 (prov-004). Reuse matches on these columns, so a terminal outcome without them could never be matched or would match wrongly.
     check(

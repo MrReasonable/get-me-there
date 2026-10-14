@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "92214482-434e-4e1f-99b0-03147410391b",
+  "id": "484d790d-aa7b-4406-9795-efba42f740fb",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -636,6 +636,10 @@
           "name": "cell_outcomes_kind_ck",
           "value": "source_kind IS NULL OR source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')"
         },
+        "cell_outcomes_provider_kind_ck": {
+          "name": "cell_outcomes_provider_kind_ck",
+          "value": "source_kind IS NULL OR (provider_id = 'fixture') = (source_kind = 'synthetic')"
+        },
         "cell_outcomes_fetched_ck": {
           "name": "cell_outcomes_fetched_ck",
           "value": "fetched_at IS NULL OR fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
@@ -643,6 +647,158 @@
         "cell_outcomes_provenance_ck": {
           "name": "cell_outcomes_provenance_ck",
           "value": "status NOT IN ('priced', 'empty', 'no_data') OR (status = 'no_data' AND reason IS 'cabin-not-offered') OR (fetched_at IS NOT NULL AND cabin IS NOT NULL AND point_of_sale IS NOT NULL AND source_kind IS NOT NULL)"
+        }
+      }
+    },
+    "fare_offers": {
+      "name": "fare_offers",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "itinerary_hash": {
+          "name": "itinerary_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seller": {
+          "name": "seller",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cabin": {
+          "name": "cabin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_price_pence": {
+          "name": "first_price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lowest_price_pence": {
+          "name": "lowest_price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "highest_price_pence": {
+          "name": "highest_price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "latest_price_pence": {
+          "name": "latest_price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "fare_offers_identity_uq": {
+          "name": "fare_offers_identity_uq",
+          "columns": [
+            "itinerary_hash",
+            "provider_id",
+            "seller",
+            "cabin"
+          ],
+          "isUnique": true
+        },
+        "fare_offers_itinerary_idx": {
+          "name": "fare_offers_itinerary_idx",
+          "columns": [
+            "itinerary_hash"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fare_offers_itinerary_hash_itineraries_hash_fk": {
+          "name": "fare_offers_itinerary_hash_itineraries_hash_fk",
+          "tableFrom": "fare_offers",
+          "tableTo": "itineraries",
+          "columnsFrom": [
+            "itinerary_hash"
+          ],
+          "columnsTo": [
+            "hash"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "fare_offers_provider_ck": {
+          "name": "fare_offers_provider_ck",
+          "value": "provider_id IN ('travelpayouts', 'searchapi', 'fixture')"
+        },
+        "fare_offers_cabin_ck": {
+          "name": "fare_offers_cabin_ck",
+          "value": "cabin IN ('economy', 'premium_economy', 'business', 'first')"
+        },
+        "fare_offers_first_seen_ck": {
+          "name": "fare_offers_first_seen_ck",
+          "value": "first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "fare_offers_last_seen_ck": {
+          "name": "fare_offers_last_seen_ck",
+          "value": "last_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "fare_offers_first_ck": {
+          "name": "fare_offers_first_ck",
+          "value": "first_price_pence IS NULL OR (typeof(first_price_pence) = 'integer' AND first_price_pence >= 0)"
+        },
+        "fare_offers_lowest_ck": {
+          "name": "fare_offers_lowest_ck",
+          "value": "lowest_price_pence IS NULL OR (typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0)"
+        },
+        "fare_offers_highest_ck": {
+          "name": "fare_offers_highest_ck",
+          "value": "highest_price_pence IS NULL OR (typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0)"
+        },
+        "fare_offers_latest_ck": {
+          "name": "fare_offers_latest_ck",
+          "value": "latest_price_pence IS NULL OR (typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0)"
         }
       }
     },
@@ -706,6 +862,449 @@
         "fx_rates_source_ck": {
           "name": "fx_rates_source_ck",
           "value": "length(source) > 0"
+        }
+      }
+    },
+    "itineraries": {
+      "name": "itineraries",
+      "columns": {
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'flight'"
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "destination": {
+          "name": "destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "departure_date": {
+          "name": "departure_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "return_date": {
+          "name": "return_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nights": {
+          "name": "nights",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "outbound_minutes": {
+          "name": "outbound_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "inbound_minutes": {
+          "name": "inbound_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stops_out": {
+          "name": "stops_out",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stops_in": {
+          "name": "stops_in",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "airport_change": {
+          "name": "airport_change",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "carriers_json": {
+          "name": "carriers_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "layovers_json": {
+          "name": "layovers_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "itineraries_nights_ck": {
+          "name": "itineraries_nights_ck",
+          "value": "typeof(nights) = 'integer' AND nights >= 0"
+        },
+        "itineraries_stops_out_ck": {
+          "name": "itineraries_stops_out_ck",
+          "value": "typeof(stops_out) = 'integer' AND stops_out >= 0"
+        },
+        "itineraries_stops_in_ck": {
+          "name": "itineraries_stops_in_ck",
+          "value": "typeof(stops_in) = 'integer' AND stops_in >= 0"
+        },
+        "itineraries_out_min_ck": {
+          "name": "itineraries_out_min_ck",
+          "value": "outbound_minutes IS NULL OR (typeof(outbound_minutes) = 'integer' AND outbound_minutes >= 0)"
+        },
+        "itineraries_in_min_ck": {
+          "name": "itineraries_in_min_ck",
+          "value": "inbound_minutes IS NULL OR (typeof(inbound_minutes) = 'integer' AND inbound_minutes >= 0)"
+        },
+        "itineraries_airport_change_ck": {
+          "name": "itineraries_airport_change_ck",
+          "value": "airport_change IS NULL OR airport_change IN (0, 1)"
+        },
+        "itineraries_first_seen_ck": {
+          "name": "itineraries_first_seen_ck",
+          "value": "first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        }
+      }
+    },
+    "price_observations": {
+      "name": "price_observations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "execution_id": {
+          "name": "execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_kind": {
+          "name": "source_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cabin": {
+          "name": "cabin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_observed_at": {
+          "name": "provider_observed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "price_pence": {
+          "name": "price_pence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "price_native_minor": {
+          "name": "price_native_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency_native": {
+          "name": "currency_native",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fx_rate_nano": {
+          "name": "fx_rate_nano",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fx_rate_date": {
+          "name": "fx_rate_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fx_source": {
+          "name": "fx_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fx_converted": {
+          "name": "fx_converted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "point_of_sale": {
+          "name": "point_of_sale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "max_age_hours": {
+          "name": "max_age_hours",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "taxes_included": {
+          "name": "taxes_included",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "self_transfer": {
+          "name": "self_transfer",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "segment_cabins_json": {
+          "name": "segment_cabins_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "baggage_json": {
+          "name": "baggage_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fare_conditions_json": {
+          "name": "fare_conditions_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "booking_json": {
+          "name": "booking_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "booking_expires_at": {
+          "name": "booking_expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supplied_fields_json": {
+          "name": "supplied_fields_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "partial_expansion": {
+          "name": "partial_expansion",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "price_observations_execution_price_idx": {
+          "name": "price_observations_execution_price_idx",
+          "columns": [
+            "execution_id",
+            "price_pence"
+          ],
+          "isUnique": false
+        },
+        "price_observations_offer_fetched_idx": {
+          "name": "price_observations_offer_fetched_idx",
+          "columns": [
+            "offer_id",
+            "fetched_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "price_observations_offer_id_fare_offers_id_fk": {
+          "name": "price_observations_offer_id_fare_offers_id_fk",
+          "tableFrom": "price_observations",
+          "tableTo": "fare_offers",
+          "columnsFrom": [
+            "offer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "price_observations_execution_id_search_executions_id_fk": {
+          "name": "price_observations_execution_id_search_executions_id_fk",
+          "tableFrom": "price_observations",
+          "tableTo": "search_executions",
+          "columnsFrom": [
+            "execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "price_observations_price_ck": {
+          "name": "price_observations_price_ck",
+          "value": "typeof(price_pence) = 'integer' AND price_pence >= 0"
+        },
+        "price_observations_native_ck": {
+          "name": "price_observations_native_ck",
+          "value": "typeof(price_native_minor) = 'integer' AND price_native_minor >= 0"
+        },
+        "price_observations_fx_converted_ck": {
+          "name": "price_observations_fx_converted_ck",
+          "value": "(fx_converted = 1) = (currency_native <> 'GBP')"
+        },
+        "price_observations_fx_complete_ck": {
+          "name": "price_observations_fx_complete_ck",
+          "value": "fx_converted = 0 OR (fx_rate_nano IS NOT NULL AND fx_rate_date IS NOT NULL AND fx_source IS NOT NULL)"
+        },
+        "price_observations_fx_rate_ck": {
+          "name": "price_observations_fx_rate_ck",
+          "value": "fx_rate_nano IS NULL OR (typeof(fx_rate_nano) = 'integer' AND fx_rate_nano >= 0)"
+        },
+        "price_observations_fx_bool_ck": {
+          "name": "price_observations_fx_bool_ck",
+          "value": "fx_converted IN (0, 1)"
+        },
+        "price_observations_currency_ck": {
+          "name": "price_observations_currency_ck",
+          "value": "currency_native GLOB '[A-Z][A-Z][A-Z]'"
+        },
+        "price_observations_fetched_ck": {
+          "name": "price_observations_fetched_ck",
+          "value": "fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "price_observations_observed_ck": {
+          "name": "price_observations_observed_ck",
+          "value": "provider_observed_at IS NULL OR provider_observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
+        },
+        "price_observations_max_age_ck": {
+          "name": "price_observations_max_age_ck",
+          "value": "max_age_hours IS NULL OR (typeof(max_age_hours) = 'integer' AND max_age_hours >= 0)"
+        },
+        "price_observations_cabin_ck": {
+          "name": "price_observations_cabin_ck",
+          "value": "cabin IN ('economy', 'premium_economy', 'business', 'first')"
+        },
+        "price_observations_pos_ck": {
+          "name": "price_observations_pos_ck",
+          "value": "point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'"
+        },
+        "price_observations_kind_ck": {
+          "name": "price_observations_kind_ck",
+          "value": "source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')"
+        },
+        "price_observations_taxes_ck": {
+          "name": "price_observations_taxes_ck",
+          "value": "taxes_included IS NULL OR taxes_included IN (0, 1)"
+        },
+        "price_observations_self_transfer_ck": {
+          "name": "price_observations_self_transfer_ck",
+          "value": "self_transfer IS NULL OR self_transfer IN (0, 1)"
+        },
+        "price_observations_partial_ck": {
+          "name": "price_observations_partial_ck",
+          "value": "partial_expansion IN (0, 1)"
+        },
+        "price_observations_expires_ck": {
+          "name": "price_observations_expires_ck",
+          "value": "booking_expires_at IS NULL OR booking_expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     },
@@ -1475,151 +2074,6 @@
         }
       }
     },
-    "itineraries": {
-      "name": "itineraries",
-      "columns": {
-        "hash": {
-          "name": "hash",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'flight'"
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "destination": {
-          "name": "destination",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "departure_date": {
-          "name": "departure_date",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "return_date": {
-          "name": "return_date",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "nights": {
-          "name": "nights",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "outbound_minutes": {
-          "name": "outbound_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "inbound_minutes": {
-          "name": "inbound_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stops_out": {
-          "name": "stops_out",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "stops_in": {
-          "name": "stops_in",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "airport_change": {
-          "name": "airport_change",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "carriers_json": {
-          "name": "carriers_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "layovers_json": {
-          "name": "layovers_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "first_seen_at": {
-          "name": "first_seen_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "itineraries_nights_ck": {
-          "name": "itineraries_nights_ck",
-          "value": "typeof(nights) = 'integer' AND nights >= 0"
-        },
-        "itineraries_stops_out_ck": {
-          "name": "itineraries_stops_out_ck",
-          "value": "typeof(stops_out) = 'integer' AND stops_out >= 0"
-        },
-        "itineraries_stops_in_ck": {
-          "name": "itineraries_stops_in_ck",
-          "value": "typeof(stops_in) = 'integer' AND stops_in >= 0"
-        },
-        "itineraries_out_min_ck": {
-          "name": "itineraries_out_min_ck",
-          "value": "outbound_minutes IS NULL OR (typeof(outbound_minutes) = 'integer' AND outbound_minutes >= 0)"
-        },
-        "itineraries_in_min_ck": {
-          "name": "itineraries_in_min_ck",
-          "value": "inbound_minutes IS NULL OR (typeof(inbound_minutes) = 'integer' AND inbound_minutes >= 0)"
-        },
-        "itineraries_airport_change_ck": {
-          "name": "itineraries_airport_change_ck",
-          "value": "airport_change IS NULL OR airport_change IN (0, 1)"
-        },
-        "itineraries_first_seen_ck": {
-          "name": "itineraries_first_seen_ck",
-          "value": "first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        }
-      }
-    },
     "segments": {
       "name": "segments",
       "columns": {
@@ -1781,456 +2235,6 @@
         "segments_arrive_utc_ck": {
           "name": "segments_arrive_utc_ck",
           "value": "arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        }
-      }
-    },
-    "fare_offers": {
-      "name": "fare_offers",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "itinerary_hash": {
-          "name": "itinerary_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "provider_id": {
-          "name": "provider_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "seller": {
-          "name": "seller",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cabin": {
-          "name": "cabin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "first_seen_at": {
-          "name": "first_seen_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "first_price_pence": {
-          "name": "first_price_pence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lowest_price_pence": {
-          "name": "lowest_price_pence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "highest_price_pence": {
-          "name": "highest_price_pence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "latest_price_pence": {
-          "name": "latest_price_pence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "fare_offers_identity_uq": {
-          "name": "fare_offers_identity_uq",
-          "columns": [
-            "itinerary_hash",
-            "provider_id",
-            "seller",
-            "cabin"
-          ],
-          "isUnique": true
-        },
-        "fare_offers_itinerary_idx": {
-          "name": "fare_offers_itinerary_idx",
-          "columns": [
-            "itinerary_hash"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "fare_offers_itinerary_hash_itineraries_hash_fk": {
-          "name": "fare_offers_itinerary_hash_itineraries_hash_fk",
-          "tableFrom": "fare_offers",
-          "tableTo": "itineraries",
-          "columnsFrom": [
-            "itinerary_hash"
-          ],
-          "columnsTo": [
-            "hash"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "fare_offers_provider_ck": {
-          "name": "fare_offers_provider_ck",
-          "value": "provider_id IN ('travelpayouts', 'searchapi', 'fixture')"
-        },
-        "fare_offers_cabin_ck": {
-          "name": "fare_offers_cabin_ck",
-          "value": "cabin IN ('economy', 'premium_economy', 'business', 'first')"
-        },
-        "fare_offers_first_seen_ck": {
-          "name": "fare_offers_first_seen_ck",
-          "value": "first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        },
-        "fare_offers_last_seen_ck": {
-          "name": "fare_offers_last_seen_ck",
-          "value": "last_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        },
-        "fare_offers_first_ck": {
-          "name": "fare_offers_first_ck",
-          "value": "first_price_pence IS NULL OR (typeof(first_price_pence) = 'integer' AND first_price_pence >= 0)"
-        },
-        "fare_offers_lowest_ck": {
-          "name": "fare_offers_lowest_ck",
-          "value": "lowest_price_pence IS NULL OR (typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0)"
-        },
-        "fare_offers_highest_ck": {
-          "name": "fare_offers_highest_ck",
-          "value": "highest_price_pence IS NULL OR (typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0)"
-        },
-        "fare_offers_latest_ck": {
-          "name": "fare_offers_latest_ck",
-          "value": "latest_price_pence IS NULL OR (typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0)"
-        }
-      }
-    },
-    "price_observations": {
-      "name": "price_observations",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "offer_id": {
-          "name": "offer_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "execution_id": {
-          "name": "execution_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source_kind": {
-          "name": "source_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cabin": {
-          "name": "cabin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "fetched_at": {
-          "name": "fetched_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "provider_observed_at": {
-          "name": "provider_observed_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "price_pence": {
-          "name": "price_pence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "price_native_minor": {
-          "name": "price_native_minor",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "currency_native": {
-          "name": "currency_native",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "fx_rate_nano": {
-          "name": "fx_rate_nano",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fx_rate_date": {
-          "name": "fx_rate_date",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fx_source": {
-          "name": "fx_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fx_converted": {
-          "name": "fx_converted",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "point_of_sale": {
-          "name": "point_of_sale",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "max_age_hours": {
-          "name": "max_age_hours",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "taxes_included": {
-          "name": "taxes_included",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "self_transfer": {
-          "name": "self_transfer",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "segment_cabins_json": {
-          "name": "segment_cabins_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "baggage_json": {
-          "name": "baggage_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fare_conditions_json": {
-          "name": "fare_conditions_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "booking_json": {
-          "name": "booking_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "booking_expires_at": {
-          "name": "booking_expires_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "supplied_fields_json": {
-          "name": "supplied_fields_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "partial_expansion": {
-          "name": "partial_expansion",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "price_observations_execution_price_idx": {
-          "name": "price_observations_execution_price_idx",
-          "columns": [
-            "execution_id",
-            "price_pence"
-          ],
-          "isUnique": false
-        },
-        "price_observations_offer_fetched_idx": {
-          "name": "price_observations_offer_fetched_idx",
-          "columns": [
-            "offer_id",
-            "fetched_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "price_observations_offer_id_fare_offers_id_fk": {
-          "name": "price_observations_offer_id_fare_offers_id_fk",
-          "tableFrom": "price_observations",
-          "tableTo": "fare_offers",
-          "columnsFrom": [
-            "offer_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "price_observations_execution_id_search_executions_id_fk": {
-          "name": "price_observations_execution_id_search_executions_id_fk",
-          "tableFrom": "price_observations",
-          "tableTo": "search_executions",
-          "columnsFrom": [
-            "execution_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "price_observations_price_ck": {
-          "name": "price_observations_price_ck",
-          "value": "typeof(price_pence) = 'integer' AND price_pence >= 0"
-        },
-        "price_observations_native_ck": {
-          "name": "price_observations_native_ck",
-          "value": "typeof(price_native_minor) = 'integer' AND price_native_minor >= 0"
-        },
-        "price_observations_fx_converted_ck": {
-          "name": "price_observations_fx_converted_ck",
-          "value": "(fx_converted = 1) = (currency_native <> 'GBP')"
-        },
-        "price_observations_fx_complete_ck": {
-          "name": "price_observations_fx_complete_ck",
-          "value": "fx_converted = 0 OR (fx_rate_nano IS NOT NULL AND fx_rate_date IS NOT NULL AND fx_source IS NOT NULL)"
-        },
-        "price_observations_fx_rate_ck": {
-          "name": "price_observations_fx_rate_ck",
-          "value": "fx_rate_nano IS NULL OR (typeof(fx_rate_nano) = 'integer' AND fx_rate_nano >= 0)"
-        },
-        "price_observations_fx_bool_ck": {
-          "name": "price_observations_fx_bool_ck",
-          "value": "fx_converted IN (0, 1)"
-        },
-        "price_observations_currency_ck": {
-          "name": "price_observations_currency_ck",
-          "value": "currency_native GLOB '[A-Z][A-Z][A-Z]'"
-        },
-        "price_observations_fetched_ck": {
-          "name": "price_observations_fetched_ck",
-          "value": "fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        },
-        "price_observations_observed_ck": {
-          "name": "price_observations_observed_ck",
-          "value": "provider_observed_at IS NULL OR provider_observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
-        },
-        "price_observations_max_age_ck": {
-          "name": "price_observations_max_age_ck",
-          "value": "max_age_hours IS NULL OR (typeof(max_age_hours) = 'integer' AND max_age_hours >= 0)"
-        },
-        "price_observations_cabin_ck": {
-          "name": "price_observations_cabin_ck",
-          "value": "cabin IN ('economy', 'premium_economy', 'business', 'first')"
-        },
-        "price_observations_pos_ck": {
-          "name": "price_observations_pos_ck",
-          "value": "point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'"
-        },
-        "price_observations_kind_ck": {
-          "name": "price_observations_kind_ck",
-          "value": "source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')"
-        },
-        "price_observations_taxes_ck": {
-          "name": "price_observations_taxes_ck",
-          "value": "taxes_included IS NULL OR taxes_included IN (0, 1)"
-        },
-        "price_observations_self_transfer_ck": {
-          "name": "price_observations_self_transfer_ck",
-          "value": "self_transfer IS NULL OR self_transfer IN (0, 1)"
-        },
-        "price_observations_partial_ck": {
-          "name": "price_observations_partial_ck",
-          "value": "partial_expansion IN (0, 1)"
-        },
-        "price_observations_expires_ck": {
-          "name": "price_observations_expires_ck",
-          "value": "booking_expires_at IS NULL OR booking_expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'"
         }
       }
     }
