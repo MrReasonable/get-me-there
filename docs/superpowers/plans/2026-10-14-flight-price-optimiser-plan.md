@@ -842,7 +842,7 @@ Dependencies per package: `@gmt/db`: `@gmt/core`, `better-sqlite3@13.0.3`, `driz
 
 The `typecheck` script is `tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json`. `core`'s `test` script is `vitest run --coverage && pnpm run test:tz` with `"test:tz": "TZ=Europe/London vitest run && TZ=UTC vitest run && TZ=America/Los_Angeles vitest run && TZ=Asia/Tokyo vitest run"` so the timezone matrix runs in CI.
 
-**Source resolution across the workspace.** Every package's `exports` map carries a `"@gmt/source"` condition pointing at `./src/*.ts` beside the `default` → `dist` entries; `tsconfig.base.json` sets `"customConditions": ["@gmt/source"]` and every `vitest.config.ts` sets `resolve: { conditions: ['@gmt/source'] }`, so tests and type-checks resolve workspace packages from source without a build step, while `node` at runtime uses `dist`.
+**Source resolution across the workspace.** Every package's `exports` map carries a `"@gmt/source"` condition pointing at `./src/*.ts` beside the `default` → `dist` entries, and `tsconfig.base.json` sets `"customConditions": ["@gmt/source"]`, so `tsc` resolves workspace packages from source. Vitest externalises workspace packages and resolves them through Node (which ignores the custom condition), so every `vitest.config.ts` uses `resolve: { alias: gmtAliases(repoRoot) }` from the root `vitest.aliases.ts`, which maps `@gmt/<pkg>` and the `@gmt/providers/testing`, `@gmt/providers/fixture` and `@gmt/engine/testing` subpaths to their `src` index files. Vite's dev server for the web app uses the same aliases (WP9). `node` at runtime (the Docker image, `tsx` dev scripts) uses `dist` unless started with `--conditions=@gmt/source`.
 
 `packages/core/vitest.config.ts`:
 

@@ -23,7 +23,7 @@ Give `@gmt/core` the pure, timezone-independent functions that define the search
 - `packages/core/src/coverage/`: `rollUp` (spec §6.6 table), `mergeWithinProvider`, `sixBuckets`, `selectedNotReached`.
 - `packages/core/src/selection/select.ts`: `selectCandidates` (spec §6.7 steps 1–6).
 - Tests for every spec §6.1, §6.6, §6.7 and §9 item 1 case owned by these functions, including the TZ matrix, fast-check properties and the independent roll-up enumeration.
-- Barrel exports in `packages/core/src/index.ts`; the `test` and `test:tz` script lines in `packages/core/package.json` (a WP0 file that WP0 will land with these lines; WP1 writes them as a Modify).
+- Barrel exports in `packages/core/src/index.ts`. (WP0 has already landed core's `test` script, which runs `test:tz` over Europe/London, UTC, America/Los_Angeles and Asia/Tokyo; WP1 changes nothing in `packages/core/package.json`.)
 
 **Out**
 
@@ -38,7 +38,7 @@ Give `@gmt/core` the pure, timezone-independent functions that define the search
 ## Spec sections
 
 - **§6.1 Search-space generation**: relative windows resolve in Europe/London and absolute windows clamp to tomorrow; dates are epoch-day integers, never `Date`-local arithmetic; `returnDate = departureDate + nights`, window ends inclusive; deterministic order origin, destination, departureDate, nights; `countCells` closed form; the validation list; the named test list.
-- **§6.6 Coverage math and roll-up precedence**: rows 0–6 with the skip-reason priority; monotone merge within one provider with `min_pence = min`; six buckets summing to the cell count; "selected but not reached" = `selected ∧ (not_run ∨ skipped:budget)`; property test from an independent enumeration of the table. Rulings of 2026-10-14 that go into §6.6 and that this brief implements: `no_data:cabin-not-offered` outcomes are ignored whenever another outcome exists for the cell (all of them → `no_data:cabin-not-offered`); the roll-up reason rule (priced → `partial-expansion` if any priced input has it; error → the shared reason, else `mixed`; skipped → the priority rule); both-priced merges keep the cheaper input's provenance.
+- **§6.6 Coverage math and roll-up precedence**: rows 0–6 with the skip-reason priority; monotone merge within one provider with `min_pence = min`; six buckets summing to the cell count; "selected but not reached" = `selected ∧ (not_run ∨ skipped:budget)`; property test from an independent enumeration of the table. Rulings of 2026-10-14 that go into §6.6 and that this brief implements: `no_data:cabin-not-offered` outcomes are ignored whenever another outcome exists for the cell (all of them → `no_data:cabin-not-offered`); the roll-up reason rule (priced → `partial-expansion` if any priced input has it; error → the shared reason, else `mixed`; skipped → the priority rule); a fresh outcome (any status) replaces a reused copy outright, and only when both inputs are fresh or both reused does the rank / cheaper-wins rule apply, with both-priced merges keeping the cheaper input's provenance (spec rev 11 §6.6).
 - **§6.7 Candidate selection**: `alwaysInclude` first and counted; rank priced discovery cells by `discovery_min_pence` with generation-order ties; `topN`, `maxCells`, `perDepartureDateBest`; the ceiling walk; the stride fallback with `m ≤ 0` and `total < m`; `selection_reason`.
 - **§3 Core concepts**: the cell outcome vocabulary (`not_run | priced | empty | no_data | error | skipped`, skip reasons) and the six buckets (priced, no fares, no cached data, error, skipped, not searched) with reused outcomes counted in their own bucket.
 - **§9 item 1**, rows for §6.1, §6.6 and §6.7: relative windows, clamping, zero-cell windows, `startOffsetDays = 0` rejection, DST/TZ matrix; precedence table enumerated independently, property invariant, monotone merge; every selection interaction and the stride edge cases. §9 also fixes `core` at 100% lines/branches/functions and puts `selection` and `rollUp` under Stryker at break 80%.
@@ -120,7 +120,7 @@ export function sixBuckets(outcomes: CellOutcome[]): Buckets /* one stage, one p
 export function selectCandidates(policy: VerificationPolicy, cells: Cell[], discovery: Map<string, RollUp>, hasDiscoveryProvider: boolean): Array<{ cell: CellKey; reason: SelectionReason }>;
 ```
 
-One deviation from the plan's current text, by ruling of 2026-10-14: `selectedNotReached`'s `reason` is the literal union `'not_run' | 'skipped:budget'` (spec §6.6 notation, which WP9 maps to copy) rather than `string`; the plan contract is being tightened to match. No other name is exported. The limits (window ≤ 400 days, nights ≤ 90, the epoch-day range 0001–9999), the skip-reason priority and the merge ranks are module-local constants.
+The block matches the plan verbatim. No other name is exported. The limits (window ≤ 400 days, nights ≤ 90, the epoch-day range 0001–9999), the skip-reason priority and the merge ranks are module-local constants.
 
 Behaviour later packages rely on, each pinned by a test below:
 
@@ -128,21 +128,21 @@ Behaviour later packages rely on, each pinned by a test below:
 - `validateSearchSpace` upper-cases nothing. Per code it checks format, duplicate, existence, then `airportsOfMetro`, so a code that is both an airport and a metro code is accepted. A zero-cell window is `ok: false` with `field: 'window'`; the engine tells `skipped_window` apart by calling `resolveWindow` and `countCells` itself.
 - `validateSearchSpace` also enforces the spec §6.7 policy bounds at save time: `maxCells`, `topN`, `perDepartureDateBest` non-negative integers, `topN ≤ maxCells`, distinct `alwaysInclude` ≤ `maxCells`. It is for save time only (`POST`/`PUT /definitions`); at execution start the engine uses `resolveWindow`, `countCells` and `selectCandidates`.
 - `rollUp` ignores `no_data:cabin-not-offered` beside any other outcome (all of them → `no_data` with reason `cabin-not-offered`). Reasons: priced → `partial-expansion` when any priced input has it, else null; error → the reason every error input shares, else `mixed`; skipped → budget > provider_disabled > departed > not_selected; otherwise null.
-- `mergeWithinProvider` accepts only `priced | empty | no_data | error` outcomes of the same cell, stage, provider and execution, and throws otherwise, and on a priced outcome without `minPence`. Different statuses: the higher-ranked outcome wins whole. Both priced: the result is the cheaper input whole (ties to `a`), so `minPence` and its `fetchedAt`, `sourceKind`, `pointOfSale`, `cabin` and `reusedFromExecutionId` travel together, with reason `partial-expansion` when either input has it. Same non-priced status: `a`, with the lexicographically smaller non-null reason. Callers pass (existing, incoming) and keep `attempts` bookkeeping.
+- `mergeWithinProvider` accepts only `priced | empty | no_data | error` outcomes of the same cell, stage, provider and execution, and throws otherwise, and on a priced outcome without `minPence`. Fresh beats reused: when exactly one input has `reusedFromExecutionId` null, that fresh input is returned whole, whatever its status or price (WP3's `writeTile` deletes the superseded reused price row in the same transaction). Otherwise, different statuses: the higher-ranked outcome wins whole. Both priced: the result is the cheaper input whole (ties to `a`), so `minPence` and its `fetchedAt`, `sourceKind`, `pointOfSale`, `cabin` and `reusedFromExecutionId` travel together, with reason `partial-expansion` when either input has it. Same non-priced status: `a`, with the lexicographically smaller non-null reason. Callers pass (existing, incoming) and keep `attempts` bookkeeping.
 - `sixBuckets` takes one execution × stage × provider and throws on mixed executions, stages or providers or a repeated cell. Its buckets sum to the outcomes given, which is the cell count only for a stage seeded for every cell; an empty input is spec §6.6 row 0 (`not_applicable`) and must not be rendered as coverage.
 - `selectedNotReached` returns `'not_run'` or `'skipped:budget'`, judged on the cell's verification roll-up, and throws when a selected cell has no verification rows.
 - `selectCandidates` reads `maxCells`, `topN`, `priceCeilingPence`, `perDepartureDateBest` and `alwaysInclude`; throws `RangeError` unless the counts are non-negative integers and the distinct in-space `alwaysInclude` cells number ≤ `maxCells`, so the result never exceeds `maxCells`; omits `alwaysInclude` members not in `cells`; returns fresh `CellKey` objects (no `nights`, no aliasing); and strides over the cells not already chosen, taking `min(maxCells − |alwaysInclude|, remaining)`.
 
 ## Library notes
 
-Verified 2026-10-14 against context7 and by running every test and implementation in this brief in a scratch package with the pinned versions installed (`vitest@5.0.4`, `@vitest/coverage-v8@5.0.4`, `fast-check@4.10.2`, `zod@4.6.7`, `typescript@5.9.3`, `@biomejs/biome@2.5.15`, `@stryker-mutator/core@10.0.0`, Node 26.10, with stand-ins for WP0's types written from the contract block): 219 tests green, 100% statements/branches/functions/lines on the WP1 files, `tsc --noEmit` clean over `src` **and** `test` under the plan's `tsconfig.base.json` flags (every `@ts-expect-error` is consumed), `biome check` clean, and the suite green under `TZ=Europe/London`, `TZ=UTC`, `TZ=America/Los_Angeles` and `TZ=Asia/Tokyo`.
+Verified 2026-10-14 against context7 and by running every test and implementation in this brief in a scratch package with the pinned versions installed (`vitest@5.0.4`, `@vitest/coverage-v8@5.0.4`, `fast-check@4.10.2`, `zod@4.6.7`, `typescript@5.9.3`, `@biomejs/biome@2.5.15`, `@stryker-mutator/core@10.0.0`, Node 26.10, with stand-ins for WP0's types written from the contract block): 222 tests green, 100% statements/branches/functions/lines on the WP1 files, `tsc --noEmit` clean over `src` **and** `test` under the plan's `tsconfig.base.json` flags (every `@ts-expect-error` is consumed), `biome check` clean, and the suite green under `TZ=Europe/London`, `TZ=UTC`, `TZ=America/Los_Angeles` and `TZ=Asia/Tokyo`.
 
 **No casts (ruling 2026-10-14).** Neither `src` nor `test` contains `as` except `as const` and `satisfies`. Branded values are minted only through WP0's zod schemas in production code (`isoDateSchema.parse`, `isoMonthSchema.parse`) and through WP0's `asIata`/`asIsoDate`/`asIsoMonth`/`asIsoDateTime` in tests. A deliberately invalid input in a test is passed as a widened value (`const bad: string = …`) on a call preceded by `// @ts-expect-error <why>`, never `as never`. Indexed reads are guarded (`const c = cells[i]; if (c === undefined) throw …`) or replaced by `for…of`/`flatMap`. Core's tests are type-checked from WP0 (its `tsconfig.test.json`), so the test code must compile.
 
 - **zod 4.6.7** (versions from plan Task 0.1). WP1 source does not import zod. Tests call `iataSchema.parse('lhr')` (returns `'LHR'` through WP0's `.trim().toUpperCase().regex(...)` chain) and `iataSchema.safeParse('LHRX').success` (false); the zod 4 `safeParse` result is `{ success: false, error: ZodError }` with `error.issues[]` carrying `code`, `path`, `message`. Source: context7 `/colinhacks/zod/v4.6.5`, `packages/docs/content/error-customization.mdx` and `error-formatting.mdx` (4.6.5 is the newest indexed; the scratch run used 4.6.7).
 - **fast-check 4.10.2**. Calls used: `fc.assert(fc.property(...arbs, predicate), { numRuns })`, `fc.integer({ min, max })`, `fc.array(arb, { minLength, maxLength })`, `fc.constantFrom(...values)`, `fc.constant(v)`, `fc.oneof(...arbs)`, `fc.record({ ... })`, `fc.tuple(...)`, `fc.boolean()`, `fc.option(arb, { nil })`, `arb.chain(f)`, `.map(f)`; the default import `import fc from 'fast-check'`. Source: context7 `/dubzzz/fast-check`, `website/docs/core-blocks/arbitraries/primitives/number.md`, `.../combiners/constant.md`, `.../composites/object.md`.
 - **vitest 5.0.4**. Calls used: `describe`, `it`, `it.each(rows)` with `%s`/`%j`/`%i`/`%d`, `describe.each(objects)` with `$tz` interpolation, `beforeAll`, `afterAll`, `expect(...).toEqual/toBe/toThrow/toContain/toContainEqual/toMatchObject/toHaveLength`, `expect(value, message)`. The default pool is `forks` (each test file in its own child process). The `test.env` option does **not** change the time zone in `threads`/`vmThreads` pools, and `process.env.TZ` set at runtime takes effect in a forked process; so the TZ matrix sets `process.env.TZ` inside the test file, first asserts the zone took effect, and restores an originally unset `TZ` with `Reflect.deleteProperty(process.env, 'TZ')` (assigning `undefined` stores the string `"undefined"`, which Node treats as UTC); `test:tz` sets `TZ` on the command line for the whole suite under four zones, and `test` runs it after the coverage run so CI exercises the matrix. Source: context7 `/vitest-dev/vitest/v5.0.3`, `docs/config/env.md` (warning "TZ set here does not change the time zone in threads and vmThreads pools") and `docs/guide/common-errors.md` ("Time Zone Does Not Change in Worker Threads"; pool defaults in `packages/vitest/src/node/cli/cli-config.ts`).
-- **Stryker 10.0.0**: WP0's `packages/core/stryker.config.json` is used unchanged (command runner `pnpm exec vitest run --coverage.enabled=false`, `ignorePatterns` with `"/coverage"` so `src/coverage/` is mutated, `mutate` already listing `src/selection/select.ts` and `src/coverage/rollUp.ts`, break 80). A scratch run with that configuration scored 96.32% on the two files (`rollUp.ts` 95.48%, `select.ts` 97.64%); the twelve survivors are equivalent mutants (for example the `m === 0` early return, the `ceiling === undefined` break whose absence still adds nothing, `<` → `<=` in the skip-reason `reduce` over equal ranks, and the `minPence !== null` guards already enforced by the earlier throw).
+- **Stryker 10.0.0**: WP0's `packages/core/stryker.config.json` is used unchanged (command runner `pnpm exec vitest run --coverage.enabled=false`, `ignorePatterns` with `"/coverage"` so `src/coverage/` is mutated, `mutate` already listing `src/selection/select.ts` and `src/coverage/rollUp.ts`, break 80). A scratch run with that configuration scored 96.42% on the two files (`rollUp.ts` 95.67%, `select.ts` 97.64%); the twelve survivors are equivalent mutants (for example the `m === 0` early return, the `ceiling === undefined` break whose absence still adds nothing, `<` → `<=` in the skip-reason `reduce` over equal ranks, and the `minPence !== null` guards already enforced by the earlier throw).
 - **`@date-fns/tz`**: not used in WP1 (WP2 owns instants). **`Intl`**: not needed; WP1 performs no timezone conversion, because `todayLondon` arrives from `Clock.todayLondon()` (WP0).
 
 ## Files
@@ -170,8 +170,7 @@ Verified 2026-10-14 against context7 and by running every test and implementatio
 
 **Modify**
 
-- `packages/core/src/index.ts` (append WP1 exports)
-- `packages/core/package.json` (the `test` and `test:tz` script lines; WP0 lands them, WP1 checks they are present)
+- `packages/core/src/index.ts` (WP1 export lines inserted at their sorted positions)
 
 ## Tasks
 
@@ -471,11 +470,11 @@ git add packages/core && git commit -m "wp01: epoch-day dates and cell generatio
 
 **Files:**
 - Create: `packages/core/test/dates/epochDay.test.ts`, `packages/core/test/space/calendar.test.ts`
-- Modify: `packages/core/src/dates/epochDay.ts`, `packages/core/package.json`
+- Modify: `packages/core/src/dates/epochDay.ts`
 
 **Interfaces:**
 - Consumes: Task 1.1's epoch-day functions and `generateCells`.
-- Produces: `monthOf`, `monthsSpanned`; the `test` and `test:tz` script lines.
+- Produces: `monthOf`, `monthsSpanned`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -784,14 +783,7 @@ export function monthsSpanned(from: IsoDate, to: IsoDate): IsoMonth[] {
 }
 ```
 
-In `packages/core/package.json` (a WP0 file; WP0 lands these exact lines, and WP1 adds them only if they are missing), `scripts` reads:
-
-```json
-"test": "vitest run --coverage && pnpm run test:tz",
-"test:tz": "TZ=Europe/London vitest run && TZ=UTC vitest run && TZ=America/Los_Angeles vitest run && TZ=Asia/Tokyo vitest run"
-```
-
-`// why:` spec §6.1 asks for the suite under `TZ=Europe/London` and `TZ=UTC`; the two far zones catch an off-by-one day, and running the matrix from `test` means CI (`pnpm -r test`) checks it on every push rather than once at merge. WP2 relies on the same script.
+Core's `test` already runs `test:tz` (WP0): the whole suite under `TZ=Europe/London`, `UTC`, `America/Los_Angeles` and `Asia/Tokyo`.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1550,7 +1542,7 @@ git add packages/core && git commit -m "wp01: validateSearchSpace with metro-cod
 
 - [ ] **Step 1: Write the failing test**
 
-The precedence table is checked three ways: the named rows, an exhaustive comparison against an oracle transcribed independently from spec §6.6 and the 2026-10-14 rulings (every sequence of up to three outcomes over twelve variants, including `no_data:cabin-not-offered`, two error reasons and a `partial-expansion` price: 1,885 cases), and fast-check properties (oracle agreement on longer arrays, order independence, monotonicity under an added `priced`). The merge is checked by cases on `status`, `minPence` and `reason` (including `offers-dropped:n` beside `partial-expansion`), by the provenance rule (a reused row and a fresh cheaper fetch), by its refusals (including a priced outcome without `minPence`), and by properties: commutativity and associativity on status and price, idempotence, rank, min price, and `fetchedAt`/`reusedFromExecutionId` belonging to the winner.
+The precedence table is checked three ways: the named rows, an exhaustive comparison against an oracle transcribed independently from spec §6.6 and the 2026-10-14 rulings (every sequence of up to three outcomes over twelve variants, including `no_data:cabin-not-offered`, two error reasons and a `partial-expansion` price: 1,885 cases), and fast-check properties (oracle agreement on longer arrays, order independence, monotonicity under an added `priced`). The merge is checked by cases on `status`, `minPence` and `reason` (including `offers-dropped:n` beside `partial-expansion`), by the provenance rules (fresh replaces reused outright: reused priced 450 + fresh priced 700 → fresh 700 in both argument orders, reused priced + fresh empty → fresh empty, reused priced + fresh error → fresh error; and a reused row beside a fresh cheaper fetch), by its refusals (including a priced outcome without `minPence`), and by properties over generated outcomes of which about half are fresh: commutativity and associativity on status and price, idempotence, fresh-over-reused, and (when both inputs share freshness) rank and min price, with `fetchedAt`/`reusedFromExecutionId` belonging to the winner.
 
 ```ts
 import fc from 'fast-check';
@@ -1846,6 +1838,24 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
     expect(mergeWithinProvider(a, tie)).toEqual(a);
   });
 
+  describe('fresh replaces reused outright (spec §6.6, rev 11)', () => {
+    const reused450 = m('priced', 450, null, { reusedFromExecutionId: 'exec-0' });
+    const fresh700 = m('priced', 700);
+    it('reused priced 450 + fresh priced 700 → fresh 700, in both argument orders', () => {
+      expect(mergeWithinProvider(reused450, fresh700)).toEqual(fresh700);
+      expect(mergeWithinProvider(fresh700, reused450)).toEqual(fresh700);
+    });
+    it('reused priced + fresh empty → fresh empty', () => {
+      const freshEmpty = m('empty');
+      expect(mergeWithinProvider(reused450, freshEmpty)).toEqual(freshEmpty);
+      expect(mergeWithinProvider(freshEmpty, reused450)).toEqual(freshEmpty);
+    });
+    it('reused priced + fresh error → fresh error (outright, whatever the status)', () => {
+      const freshError = m('error', null, 'upstream');
+      expect(mergeWithinProvider(reused450, freshError)).toEqual(freshError);
+    });
+  });
+
   it('a reused priced row and a fresh cheaper fetch: the fresh price keeps its own provenance', () => {
     const reused = m('priced', 700, null, {
       reusedFromExecutionId: 'exec-0',
@@ -1893,13 +1903,14 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
     expect(() => mergeWithinProvider(m('empty'), m('priced', null))).toThrow(/no minPence/);
   });
 
-  // Distinct fetchedAt and reusedFrom per generated outcome so the winner is identifiable.
+  // Distinct fetchedAt per generated outcome so the winner is identifiable; about half the
+  // outcomes are fresh (reusedFromExecutionId null), the rest reused from distinct executions.
   let serial = 0;
-  const stamp = () => {
+  const stamp = (reused: boolean) => {
     serial += 1;
     return {
       fetchedAt: asIsoDateTime(new Date(Date.UTC(2026, 9, 1) + serial * 60_000).toISOString()),
-      reusedFromExecutionId: `exec-${serial}`,
+      reusedFromExecutionId: reused ? `exec-${serial}` : null,
     };
   };
   const arb: fc.Arbitrary<O> = fc.oneof(
@@ -1908,20 +1919,22 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
         fc.integer({ min: 0, max: 100_000 }),
         fc.constantFrom(null, 'partial-expansion', 'offers-dropped:1', 'offers-dropped:2'),
       )
-      .map(([p, r]) => m('priced', p, r, stamp())),
+      .chain(([p, r]) => fc.boolean().map((reused) => m('priced', p, r, stamp(reused)))),
     fc
       .tuple(fc.constantFrom<M>('empty', 'no_data', 'error'), fc.constantFrom(null, 'upstream', 'parse'))
-      .map(([st, r]) => m(st, null, r, stamp())),
+      .chain(([st, r]) => fc.boolean().map((reused) => m(st, null, r, stamp(reused)))),
   );
   /** The input whose non-merged fields the result must carry. */
   const winnerOf = (a: O, b: O): O => {
+    const aFresh = a.reusedFromExecutionId === null;
+    if (aFresh !== (b.reusedFromExecutionId === null)) return aFresh ? a : b;
     if (rankOf(a.status) !== rankOf(b.status)) return rankOf(a.status) > rankOf(b.status) ? a : b;
     if (a.status === 'priced' && a.minPence !== null && b.minPence !== null && b.minPence < a.minPence)
       return b;
     return a;
   };
 
-  it('property: status/minPence commutative, associative, idempotent, monotone; provenance travels with the winner', () => {
+  it('property: status/minPence commutative, associative, idempotent; fresh beats reused; otherwise monotone; provenance travels with the winner', () => {
     fc.assert(
       fc.property(arb, arb, arb, (a, b, c) => {
         const ab = mergeWithinProvider(a, b);
@@ -1931,14 +1944,20 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
         const right = mergeWithinProvider(a, mergeWithinProvider(b, c));
         expect([left.status, left.minPence]).toEqual([right.status, right.minPence]);
         expect(merged(mergeWithinProvider(a, a))).toEqual(merged(a));
+        const w = winnerOf(a, b);
+        expect(ab.fetchedAt).toBe(w.fetchedAt);
+        expect(ab.reusedFromExecutionId).toBe(w.reusedFromExecutionId);
+        const sameFreshness = (a.reusedFromExecutionId === null) === (b.reusedFromExecutionId === null);
+        if (!sameFreshness) {
+          // fresh replaces reused outright
+          expect(ab).toEqual(w);
+          return;
+        }
         expect(rankOf(ab.status)).toBe(Math.max(rankOf(a.status), rankOf(b.status)));
         const prices = [a, b].flatMap((x) =>
           x.status === 'priced' && x.minPence !== null ? [x.minPence] : [],
         );
         expect(ab.minPence).toBe(prices.length > 0 ? Math.min(...prices) : null);
-        const w = winnerOf(a, b);
-        expect(ab.fetchedAt).toBe(w.fetchedAt);
-        expect(ab.reusedFromExecutionId).toBe(w.reusedFromExecutionId);
         if (a.status === 'priced' && b.status === 'priced') {
           const partial = a.reason === 'partial-expansion' || b.reason === 'partial-expansion';
           expect(ab.reason).toBe(partial ? 'partial-expansion' : w.reason);
@@ -2068,7 +2087,11 @@ function mergeRank(s: CellOutcomeStatus): number | null {
  * `writeTile` calls it when a cell already has a fetched outcome (a safety net: tiles partition
  * cells). Callers pass (existing, incoming); `attempts` bookkeeping stays with the caller.
  *
- * - Different statuses: the higher-ranked outcome wins whole.
+ * - Fresh beats reused (spec §6.6, rev 11): when exactly one input has `reusedFromExecutionId`
+ *   null, that fresh input is returned whole, whatever its status or price. why: WP3's
+ *   `writeTile` deletes the superseded reused price row in the same transaction, so keeping the
+ *   reused outcome would leave a `min_pence` and `reused_from` that no stored row backs.
+ * - Otherwise (both fresh or both reused), different statuses: the higher-ranked outcome wins whole.
  * - Both `priced`: the result is the input that supplies the minimum price (ties to `a`), so
  *   `minPence` and its provenance (`fetchedAt`, `sourceKind`, `pointOfSale`, `cabin`,
  *   `reusedFromExecutionId`) travel together (spec §3: `reused_from_execution_id` is always the
@@ -2100,6 +2123,8 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
       throw new Error('a priced outcome has no minPence (spec §3: priced means a price was written)');
     }
   }
+  const aFresh = a.reusedFromExecutionId === null;
+  if (aFresh !== (b.reusedFromExecutionId === null)) return aFresh ? a : b;
   if (ra !== rb) return ra > rb ? a : b;
   if (a.status === 'priced') {
     const source = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
@@ -2114,7 +2139,7 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/coverage/rollUp.test.ts`
-Expected: PASS, 42 tests.
+Expected: PASS, 45 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3044,23 +3069,47 @@ Expected: FAIL, 16 `exports …` tests fail with `expected 'undefined' to be 'fu
 
 - [ ] **Step 3: Implement**
 
-Append to `packages/core/src/index.ts`, after the WP0 lines:
+Insert the seven WP1 lines into `packages/core/src/index.ts` at their sorted positions, leaving every WP0 line unchanged and adding no section comment (`// why:` WP0's barrel is sorted, and Biome treats the whole run of exports as one block, so appended lines fail `biome check` with "Sort these exports"; WP2 inserts its lines the same way, which also avoids merge conflicts). The resulting file:
 
 ```ts
-// WP1: dates, windows, space, validation, roll-up, coverage, selection (spec §6.1, §6.6, §6.7).
+// Barrel for @gmt/core. Every public export of the package is re-exported from here;
+// consumers never deep-import. Extended by WP1 and WP2.
+
+export * as apiContract from './api-contract/index.js';
+export * from './config/presets.js';
+export * from './config/schema.js';
+export * from './config/secret.js';
+export * from './config/synthetic.js';
+export * from './coverage/buckets.js';
+export * from './coverage/rollUp.js';
 export * from './dates/epochDay.js';
-export * from './space/window.js';
+export * from './errors.js';
+export * from './labels/age.js';
+export * from './ports/budget.js';
+export * from './ports/cache.js';
+export * from './ports/clock.js';
+export * from './ports/logger.js';
+export * from './ports/notifier.js';
+export * from './ports/provider.js';
+export * from './selection/select.js';
 export * from './space/generate.js';
 export * from './space/validate.js';
-export * from './coverage/rollUp.js';
-export * from './coverage/buckets.js';
-export * from './selection/select.js';
+export * from './space/window.js';
+export * from './text/bannedWords.js';
+export * from './types/alerts.js';
+export * from './types/definition.js';
+export * from './types/execution.js';
+export * from './types/ids.js';
+export * from './types/itinerary.js';
+export * from './types/provenance.js';
 ```
+
+Then `pnpm exec biome check packages/core/src/index.ts` reports nothing.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core test && pnpm --filter @gmt/core mutate`
-Expected: every core test passes (WP0's plus 219 from WP1) with coverage 100% statements, branches, functions and lines and no `ERROR: Coverage for …` line, then the `test:tz` part of `test` passes under all four zones; Stryker, with WP0's configuration unchanged, lists `src/selection/select.ts` and `src/coverage/rollUp.ts` each at ≥ 80% and prints `Final mutation score of … is greater than or equal to break threshold 80` (scratch: 96.32% on the two files).
+Expected: every core test passes (WP0's plus 222 from WP1) with coverage 100% statements, branches, functions and lines and no `ERROR: Coverage for …` line, then the `test:tz` part of `test` passes under all four zones; Stryker, with WP0's configuration unchanged, lists `src/selection/select.ts` and `src/coverage/rollUp.ts` each at ≥ 80% and prints `Final mutation score of … is greater than or equal to break threshold 80` (scratch: 96.42% on the two files).
 
 - [ ] **Step 5: Commit**
 
@@ -3091,8 +3140,16 @@ Run from the repository root on the `wp/01-core-space-coverage-selection` branch
 | `node scripts/check-boundaries.mjs` | exit 0 (no `@gmt/*` import and no `process.env` under `packages/core/src/`) |
 | `pnpm test` | every package green at its thresholds |
 | `grep -rnE '\bDate\b' packages/core/src/dates packages/core/src/space packages/core/src/coverage packages/core/src/selection` | only doc-comment lines (the no-`Date` test strips comments and passes) |
-| `grep -rnE '\b(LHR\|LGW\|JFK\|EWR\|LON\|NYC)\b' packages/core/src/dates packages/core/src/space packages/core/src/coverage packages/core/src/selection` | no output (airport codes appear only in tests; the repository-wide rule stays with `scripts/check-boundaries.mjs`) |
-| `grep -rnE '\bas [A-Za-z({\[]' packages/core/src/dates packages/core/src/space packages/core/src/coverage packages/core/src/selection packages/core/test` | only `as const`, `import * as`, and prose inside test names or comments |
+
+Two source greps, outside the table so they can be pasted as written:
+
+```bash
+# No output expected: airport codes appear only in tests (the repository-wide rule stays with scripts/check-boundaries.mjs).
+grep -rnw -e LHR -e LGW -e JFK -e EWR -e LON -e NYC packages/core/src/dates packages/core/src/space packages/core/src/coverage packages/core/src/selection
+
+# Only `as const`, `import * as`, and prose inside test names or comments expected.
+grep -rnE '\bas [A-Za-z({[]' packages/core/src/dates packages/core/src/space packages/core/src/coverage packages/core/src/selection packages/core/test
+```
 
 ## Open questions
 

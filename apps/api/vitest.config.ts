@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { gmtAliases } from '../../vitest.aliases.js';
 
 // Package thresholds from the design spec §9. Coverage counts src/ only; barrels are excluded.
 export default defineConfig({
-  resolve: { conditions: ['@gmt/source'] },
+  resolve: { alias: gmtAliases(new URL('../..', import.meta.url).pathname) },
   test: {
     name: 'api',
     include: ['test/**/*.test.ts', 'test/**/*.test.ts'],
