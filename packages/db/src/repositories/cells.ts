@@ -16,6 +16,7 @@ import {
   stripUrlsInText,
 } from '@gmt/core';
 import type { Db } from '../client.js';
+import { readSnapshot } from '../internal/definitionRow.js';
 import {
   OUTCOME_STATUSES,
   PROVIDER_IDS,
@@ -33,11 +34,23 @@ import {
   toCellKey,
   toOutcome,
 } from '../internal/outcomeRow.js';
-import { insertCalendarPrice, validateCalendarPrice } from '../internal/priceRow.js';
+import {
+  type CalendarPriceDbRow,
+  insertCalendarPrice,
+  toCalendarPriceRow,
+  validateCalendarPrice,
+} from '../internal/priceRow.js';
 import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
 import { storeRollUps } from '../internal/rollUps.js';
 import { assertErrorReason, assertInt, RowRejected } from '../internal/validate.js';
-import type { CalendarPriceInsert, RepoOptions, TileWrite, VerifiedCellWrite } from '../types.js';
+import type {
+  CalendarPriceInsert,
+  CalendarPriceRow,
+  RepoOptions,
+  ReusedCopy,
+  TileWrite,
+  VerifiedCellWrite,
+} from '../types.js';
 import { ItinerariesRepo } from './itineraries.js';
 
 interface CellDbRow {
@@ -207,6 +220,39 @@ WHERE execution_id = @executionId AND stage = @stage AND provider_id = @provider
   OR (@manual = 1 AND ((status = 'skipped' AND reason = 'provider_disabled') OR (status = 'error' AND reason IN (${sqlList(MANUAL_RETRYABLE)}))))
 )
 ORDER BY origin, destination, departure_date, return_date`;
+
+/** prov-005: every field a reused copy carries must agree before anything is written (rule reuse-source). */
+function assertReusable(providerId: ProviderId, { cell, outcome, price }: ReusedCopy): void {
+  const key = cellKeyString(cell);
+  const refuse = (why: string) => new RowRejected('reuse-source', `${key}: ${why} (spec §8.1)`);
+  if (outcome.status !== 'priced' && outcome.status !== 'empty' && outcome.status !== 'no_data')
+    throw refuse(`only priced, empty or no_data outcomes are reused, got ${outcome.status}`);
+  if (outcome.providerId !== providerId || outcome.stage !== 'discovery')
+    throw refuse(
+      `a ${outcome.providerId} ${outcome.stage} outcome cannot be reused for ${providerId} discovery`,
+    );
+  if (cellKeyString(outcome) !== key) throw refuse(`the outcome is for ${cellKeyString(outcome)}`);
+  if (
+    outcome.fetchedAt === null ||
+    outcome.cabin === null ||
+    outcome.pointOfSale === null ||
+    outcome.sourceKind === null
+  )
+    throw refuse('the outcome carries no provenance');
+  if ((outcome.status === 'priced') !== (price !== null))
+    throw refuse(`a ${outcome.status} outcome with${price === null ? 'out' : ''} a price`);
+  if (price === null) return;
+  if (cellKeyString(price.cell) !== key) throw refuse(`the price is for ${cellKeyString(price.cell)}`);
+  if (price.providerId !== providerId) throw refuse(`the price is from ${price.providerId}`);
+  if (price.fetchedAt !== outcome.fetchedAt || price.pricePence !== outcome.minPence)
+    throw refuse('the price and the outcome disagree on fetched_at or amount');
+  if (
+    price.cabin !== outcome.cabin ||
+    price.pointOfSale !== outcome.pointOfSale ||
+    price.sourceKind !== outcome.sourceKind
+  )
+    throw refuse('the price and the outcome disagree on cabin, point of sale or source kind');
+}
 
 /**
  * Spec §7 `search_cells` + `cell_outcomes` and the stored roll-ups. Every method that changes an outcome stores the
@@ -728,5 +774,130 @@ export class CellsRepo {
           .prepare('UPDATE search_executions SET auto_resume_count = 0 WHERE id = ?')
           .run(executionId);
     });
+  }
+
+  /**
+   * Spec §7 atomic unit "each reused cell's outcome + copied prices + roll-up" (one transaction for the batch).
+   * Copies keep the original fetched_at and provenance; reused_from_execution_id is always the execution that
+   * fetched the price, even when the source is itself a reused copy.
+   */
+  copyReused(executionId: string, providerId: ProviderId, copies: ReusedCopy[]): void {
+    for (const copy of copies) {
+      assertReusable(providerId, copy);
+      if (copy.price !== null) validateCalendarPrice(copy.price, this.opts.allowSynthetic, false);
+    }
+    this.db.transaction(() => {
+      for (const { cell, outcome, price } of copies) {
+        const key = { ...keyParams(executionId, cell), stage: 'discovery', providerId };
+        const target = this.db.raw
+          .prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL)
+          .get(key);
+        if (target?.status !== 'not_run')
+          throw new RowRejected(
+            'reuse-target',
+            `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}, not not_run`,
+          );
+        // why: what is written is what the database holds (prov-r3-001), never the caller's objects.
+        const { stored, held } = this.assertSourceStored(executionId, providerId, { cell, outcome, price });
+        const reusedFrom = stored.reusedFromExecutionId ?? stored.executionId;
+        storeOutcome(this.db, {
+          ...stored,
+          ...keyParams(executionId, cell),
+          executionId,
+          stage: 'discovery',
+          providerId,
+          attempts: 0,
+          lastError: null,
+          reusedFromExecutionId: reusedFrom,
+        });
+        if (held !== null)
+          insertCalendarPrice(this.db, executionId, { ...held, reusedFromExecutionId: reusedFrom });
+      }
+      storeRollUps(
+        this.db,
+        executionId,
+        'discovery',
+        copies.map((c) => c.cell),
+      );
+    });
+  }
+
+  /**
+   * prov-r2-001: the copy must be what the database holds. The source outcome is re-read by its keys and the price by
+   * its id; both must equal the values supplied, and the source must be a non-child execution of the target's
+   * definition fetched in the target's cabin (spec §8.1, §9 Layer A). This is the one path that writes a price without a
+   * provider call, so it trusts no caller; copyReused writes the re-read rows it returns.
+   */
+  private assertSourceStored(
+    targetExecutionId: string,
+    providerId: ProviderId,
+    { cell, outcome, price }: ReusedCopy,
+  ): { stored: CellOutcome; held: CalendarPriceRow | null } {
+    const refuse = (why: string) =>
+      new RowRejected('reuse-source', `${cellKeyString(cell)}: ${why} (spec §8.1)`);
+    const src = this.db.raw
+      .prepare<Record<string, unknown>, OutcomeDbRow & { definition_id: string; is_child: number }>(
+        `SELECT o.*, e.definition_id, e.is_child FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
+         WHERE o.execution_id = @executionId AND o.origin = @origin AND o.destination = @destination AND o.departure_date = @departureDate AND o.return_date = @returnDate
+           AND o.stage = 'discovery' AND o.provider_id = @providerId`,
+      )
+      .get({ ...keyParams(outcome.executionId, cell), providerId });
+    if (src === undefined) throw refuse(`no stored outcome in ${outcome.executionId}`);
+    const target = this.db.raw
+      .prepare<[string], { definition_id: string; definition_snapshot_json: string }>(
+        'SELECT definition_id, definition_snapshot_json FROM search_executions WHERE id = ?',
+      )
+      .get(targetExecutionId);
+    if (src.is_child !== 0 || target === undefined || src.definition_id !== target.definition_id)
+      throw refuse('the source is not a parent execution of the same definition');
+    const stored = toOutcome(src);
+    // why: spec §9 Layer A "refuse on a cabin change": the definition's cabin may have been edited since the source ran (prov-r3-002).
+    const targetCabin = readSnapshot(
+      'search_executions.definition_snapshot_json',
+      target.definition_snapshot_json,
+    ).cabin;
+    if (stored.cabin !== targetCabin)
+      throw refuse(`the source was fetched in ${String(stored.cabin)}, the target searches ${targetCabin}`);
+    const same = (a: CellOutcome) =>
+      [
+        a.status,
+        a.reason,
+        a.fetchedAt,
+        a.minPence,
+        a.cabin,
+        a.pointOfSale,
+        a.sourceKind,
+        a.reusedFromExecutionId,
+      ].join('|');
+    if (same(stored) !== same(outcome)) throw refuse('the supplied outcome differs from the stored one');
+    if (price === null) return { stored, held: null };
+    const p = this.db.raw
+      .prepare<[number], CalendarPriceDbRow>('SELECT * FROM calendar_prices WHERE id = ?')
+      .get(price.id);
+    if (p === undefined) throw refuse(`calendar price ${price.id} does not exist`);
+    const held = toCalendarPriceRow(p);
+    const fxKey = (x: CalendarPriceRow) =>
+      x.fx.converted ? `1|${x.fx.rateNano}|${x.fx.rateDate}|${x.fx.source}` : '0';
+    const priceKey = (x: CalendarPriceRow) =>
+      [
+        x.executionId,
+        x.providerId,
+        cellKeyString(x.cell),
+        x.pricePence,
+        x.priceNativeMinor,
+        x.currencyNative,
+        fxKey(x),
+        x.fetchedAt,
+        x.providerObservedAt,
+        x.maxAgeHours,
+        x.vendorLink,
+        x.cabin,
+        x.pointOfSale,
+        x.sourceKind,
+        x.reusedFromExecutionId,
+      ].join('|');
+    if (held.executionId !== outcome.executionId || priceKey(held) !== priceKey(price))
+      throw refuse('the supplied price differs from the stored one');
+    return { stored, held };
   }
 }
