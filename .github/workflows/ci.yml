@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [main, 'wp/**']
+  pull_request: {}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm boundaries
+      - run: pnpm -r typecheck
+      - run: pnpm test:coverage
+      - run: pnpm secret-scan
+      - name: secret scan catches a planted fixture
+        run: |
+          mkdir -p packages/providers/fixtures/recorded/planted
+          echo '{"url":"https://x/?api_key=ABCDEFGH12345678"}' > packages/providers/fixtures/recorded/planted/p.json
+          if pnpm secret-scan; then echo "scan missed the plant"; exit 1; fi
+          rm -r packages/providers/fixtures/recorded/planted
+      - name: Dockerfile sets production and container flags
+        run: |
+          if [ -f Dockerfile ]; then grep -q 'ENV NODE_ENV=production' Dockerfile && grep -q 'ENV IN_CONTAINER=1' Dockerfile; fi
