@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { asIata, asIsoDate, type CellKey, type ExecutionBudget, type ProviderLimits } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  type CellKey,
+  type DefinitionInput,
+  type ExecutionBudget,
+  type ProviderLimits,
+} from '@gmt/core';
 import type { BudgetConfig } from '../../src/budgetConfig.js';
 import type { Db } from '../../src/client.js';
 import { T0 } from './db.js';
@@ -98,4 +105,31 @@ export function rawExecution(
       at: T0,
     });
   return { definitionId, executionId };
+}
+
+/** The worked example (spec §1, §11 defaults): LHR, LGW → JFK, EWR, 10–21 nights, 182-day relative window. */
+export function exampleDefinitionInput(over: Partial<DefinitionInput> = {}): DefinitionInput {
+  return {
+    name: 'London to New York',
+    origins: [LHR, LGW],
+    destinations: [JFK, EWR],
+    window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
+    minNights: 10,
+    maxNights: 21,
+    cabin: 'economy',
+    constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
+    verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
+    budget: { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 },
+    providers: {
+      discovery: ['travelpayouts', 'searchapi'],
+      verification: ['searchapi'],
+      discoveryRefreshHours: { travelpayouts: 168, searchapi: 168 },
+    },
+    destinationNotes: {},
+    onwardCostPence: {},
+    scheduleCron: '0 5 * * 1',
+    scheduleTz: 'Europe/London',
+    enabled: true,
+    ...over,
+  };
 }
