@@ -1711,7 +1711,7 @@ describe('findBannedWords (spec §11)', () => {
     expect(findBannedWords('Real-Time and realtime')).toEqual([{ word: 'real-time', index: 0 }]);
   });
   it('honours an allowlist of exact phrases', () => {
-    expect(findBannedWords('she lives in Leeds; live now', ['lives in'])).toEqual([{ word: 'live', index: 21 }]);
+    expect(findBannedWords('she lives in Leeds; live now', ['lives in'])).toEqual([{ word: 'live', index: 20 }]);
   });
   it('finds multi-word phrases', () => {
     expect(findBannedWords('searches ALL combinations')).toEqual([{ word: 'all combinations', index: 9 }]);
