@@ -10,7 +10,7 @@ status: draft
 
 # WP13: live smoke, layer-B engine tests, app_lock tool test, integration review, final pass
 
-Reconciled on 2026-10-14 against the plan's rewritten "Cross-package contracts", including its "Decisions taken at reconciliation" through round-2 item 14 (commit 790d1ea), and against spec revision 10. It also uses the interface sections of the draft briefs WP4, WP4b, WP7, WP8, WP9 and WP11.
+Reconciled on 2026-10-14 against the plan's rewritten "Cross-package contracts", including its "Decisions taken at reconciliation" through round-3 item 15 and the updated "http-kit" block, and against spec revision 11. It also uses the interface sections of the draft briefs WP4, WP4b, WP7, WP8, WP9 and WP11.
 
 ## 1. Goal
 
@@ -83,11 +83,11 @@ Prove the assembled system against recorded vendor behaviour and the operator's 
 - msw 3's `onUnhandledFrame` is the right option name.
 - `/api/tools/smoke` is mounted by WP13.
 
-**Still open** (findings for Fable):
+Round 3 closed the replay filter and miss log (`replayHandlers(root, { recordedBy? })` returns `{ handlers, misses() }`, and every consumer asserts `misses()` is empty in `afterEach`) and the fixture-transport question. `buildPorts` without `fixtureRoot` has no fixture provider, so the sentinel test now drives its execution error paths through the real adapters over replay instead.
 
-1. **No filter or miss log in replay.** The plan's `replayHandlers(recordedRoot)` has neither a `recordedBy` filter nor a miss log. A smoke recording and a WP4b recording of the same request (for example a Travelpayouts `LON` month tile) compete, and a miss surfaces only as an unhandled-request error. This brief asks WP4 for `replayHandlers(root, opts?: { recordedBy?: string })`. Until then, the smoke month must differ from WP4b's recorded month (Task 13.1, Step 5).
-2. **WP7's harness can't reach the vendors.** `EngineOptions.providerConcurrency` covers concurrency, but the harness's http limits still route `travelpayouts` to `stub.local` and give `searchapi` no host, its budget config has no `searchapi`, and `extraProviders` receives no `repos`. Task 13.4 adds the `vendors` option and `repos` additively. WP7's harness also still writes `onUnhandledRequest`; Task 13.4 changes it to `onUnhandledFrame`.
-3. **Fixture transport for the sentinel test.** `buildPorts(…, { fixtureRoot })` serves the fixture host in-process, where a test cannot set scenario rules. The sentinel test therefore omits `fixtureRoot`, so `fixture.local` goes to global fetch and msw `fixtureHandlers`, and it sets rules with `fetch(scenarioRequest(rules))`. This assumes `buildPorts` still constructs the fixture provider under `syntheticAllowed` when `fixtureRoot` is absent.
+**Still open** (a finding for Fable):
+
+1. **WP7's harness can't reach the vendors.** `EngineOptions.providerConcurrency` covers concurrency, but the harness's http limits still route `travelpayouts` to `stub.local` and give `searchapi` no host, its budget config has no `searchapi`, and `extraProviders` receives no `repos`. Task 13.4 adds the `vendors` option and `repos` additively. Layer B uses msw on global fetch rather than the in-process seam, so the harness's `HttpKitDeps.syntheticAllowed` needs no change for it.
 
 ## 4. Interfaces consumed
 
@@ -125,6 +125,8 @@ export function toGbp(amountMinor: number, currency: string, rateNano: number): 
 // db
 export function createRepos(db: Db, clock: Clock, opts: RepoOptions): Repos;
 export function openDatabase(path: string): Db; export function applyMigrations(db: Db, migrationsDir: string): { applied: string[] };
+export class LedgerRepo { countsFor(executionId): { calls; costMicroGbp; tiles /* first-attempt upstream rows only; parity = tiles + cacheHits */; cacheHits; perProvider } }
+export class RoutePriceHistoryRepo { series(origin, destination, providerId, cabin: Cabin | 'unknown'): RouteSeriesPoint[] }
 export class FxRepo { latest(currency: string, maxAgeDays: number, today: IsoDate): { rateNano: number; date: IsoDate; source: string } | null }
 export type ExecutionCreateInput = { definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; estimate: Estimate | null; trigger: Execution['trigger']; status: 'pending' | 'running' | ExecutionStatus & `skipped_${string}` }
 export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean }
@@ -144,7 +146,7 @@ export const SEARCHAPI_PARAMS: ParamsAllowlist;
 export function travelpayoutsProvider(o: { http; log; clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: { metroOf(iata: Iata): string | null } }): FlightProvider;
 export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;
 export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
-// '@gmt/providers/testing': fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot): RequestHandler[]; loadRecorded(root, providerId, endpointPath): RecordedFixture[]
+// '@gmt/providers/testing': fixtureHandlers(root, gate): RequestHandler[]; replayHandlers(recordedRoot, opts?: { recordedBy?: string }): { handlers: RequestHandler[]; misses(): string[] } (every consumer asserts misses() is empty in afterEach); loadRecorded(root, providerId, endpointPath): RecordedFixture[]
 
 // engine
 export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;
@@ -174,7 +176,6 @@ From the draft briefs, for names the plan does not pin:
 | `EmailNotifier({ smtp, nodeEnv, log, createTransport })`, `TransportFactory = (o: SmtpTransportOptions) => MailTransport`, `MailTransport { sendMail(m: MailMessage): Promise<{ messageId }> }`, `MailMessage { from, to, subject, text }` | WP11 §5 | |
 | `renderBody(input: DigestRenderInput)`, `DigestRenderInput { rule, definitionId, definitionName, items, restCount, newcomers, newcomersRest, coverage, now }` | WP11 §5 | |
 | `COPY` | WP9 `apps/web/src/copy.ts` | the single web string catalogue; nested objects of strings and string-returning functions |
-| `scenarioRequest(rules)`, `FixtureRule` | WP4 | `{ match: { path?, params? }, respond: FixtureResponse, times? }`; fixture paths `/calendar`, `/itinerary` |
 
 ## 5. Interfaces produced
 
@@ -184,7 +185,7 @@ export const SMOKE_RECORDED_BY = '@gmt/api smoke:live';
 export type SmokeExitCode = 0 | 1 | 2 | 3 | 64;
 export interface SmokeProviderReport {
   providerId: ProviderId; status: 'priced' | 'empty' | 'error'; tiles: number; prices: number;
-  ledger: { rows: number; firstAttemptOk: number }; detail: string;
+  ledger: { rows: number; tiles: number; cacheHits: number; firstAttemptOk: number }; detail: string;
 }
 export interface SmokePrice { pricePence: number; cell: CellKey; nights: number; displayName: string; provenance: Provenance }
 export interface SmokeResult { exitCode: SmokeExitCode; summary: string; lines: string[]; providers: SmokeProviderReport[]; cheapest: SmokePrice | null; fixturesWritten: string[] }
@@ -227,12 +228,11 @@ Through the route, a malformed body is a 400 from validation, and codes 0–3 an
 
 **Contract additions still proposed** (for Fable):
 
-1. `replayHandlers(root, opts?: { recordedBy?: string })`, plus a miss log (§3 item 1).
-2. WP7 harness `vendors` and `repos` (§3 item 2).
-3. `@gmt/api` and `@gmt/engine` barrels export the names the integration project imports:
-   - api: `buildPorts`, `loadConfigFromEnv`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, `API_TEXT`;
+1. WP7 harness `vendors` and `repos` (§3 item 1).
+2. `@gmt/api` and `@gmt/engine` barrels export the names the integration project imports:
+   - api: `buildPorts`, `loadConfigFromEnv`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, `smokeQuery`, `SMOKE_RECORDED_BY`, `API_TEXT`;
    - engine: `operatorMessage`, `OPERATOR_KINDS`, `EmailNotifier`, `renderBody`.
-4. `pnpm-workspace.yaml` gains `integration`, and the root `vitest.config.ts` gains the `integration` project.
+3. `pnpm-workspace.yaml` gains `integration`, and the root `vitest.config.ts` gains the `integration` project.
 
 ## 6. Library notes
 
@@ -392,18 +392,22 @@ import { replayHandlers } from '@gmt/providers/testing';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { RECORDED_ROOT } from '../../src/paths.js';
-import { runSmoke } from '../../src/tools/smoke.js';
+import { SMOKE_RECORDED_BY, runSmoke } from '../../src/tools/smoke.js';
 import { SENTINELS, smokeRecordedAt, testEnv, testPorts } from '../support/env.js';
 
 const server = setupServer();
+const replay = replayHandlers(RECORDED_ROOT, { recordedBy: SMOKE_RECORDED_BY });
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  expect(replay.misses()).toEqual([]);
+  server.resetHandlers();
+});
 afterAll(() => server.close());
 
 describe('runSmoke (spec §9 item 7)', () => {
   it('exits 0 with provenance when both providers price their one tile', async () => {
     const recordedAt = smokeRecordedAt();
-    server.use(...replayHandlers(RECORDED_ROOT));
+    server.use(...replay.handlers);
     const { ports, logs } = testPorts(
       testEnv({ TRAVELPAYOUTS_TOKEN: SENTINELS.travelpayouts, SEARCHAPI_KEY: SENTINELS.searchapi, SEARCHAPI_PLAN: 'trial' }),
       { now: recordedAt, record: true },
@@ -412,9 +416,9 @@ describe('runSmoke (spec §9 item 7)', () => {
     const r = await runSmoke(ports, { origin: asIata('LHR'), destination: asIata('JFK') });
 
     expect(r.exitCode).toBe(0);
-    expect(r.providers.map((p) => [p.providerId, p.status, p.tiles, p.ledger.rows, p.ledger.firstAttemptOk])).toEqual([
-      ['searchapi', 'priced', 1, 1, 1],
-      ['travelpayouts', 'priced', 1, 1, 1],
+    expect(r.providers.map((p) => [p.providerId, p.status, p.tiles, p.ledger.tiles + p.ledger.cacheHits, p.ledger.rows, p.ledger.firstAttemptOk])).toEqual([
+      ['searchapi', 'priced', 1, 1, 1, 1],
+      ['travelpayouts', 'priced', 1, 1, 1, 1],
     ]);
     expect(r.summary).toMatch(/^cheapest found £\d+\.\d{2} · LHR→JFK \d{4}-\d{2}-\d{2}–\d{4}-\d{2}-\d{2} \(\d+n\) · .+ · fetched /);
     expect(r.lines).toContain(r.summary);
@@ -503,7 +507,7 @@ export const SMOKE_RECORDED_BY = '@gmt/api smoke:live';
 export type SmokeExitCode = 0 | 1 | 2 | 3 | 64;
 export interface SmokeProviderReport {
   providerId: ProviderId; status: 'priced' | 'empty' | 'error'; tiles: number; prices: number;
-  ledger: { rows: number; firstAttemptOk: number }; detail: string;
+  ledger: { rows: number; tiles: number; cacheHits: number; firstAttemptOk: number }; detail: string;
 }
 export interface SmokePrice { pricePence: number; cell: CellKey; nights: number; displayName: string; provenance: Provenance }
 export interface SmokeResult { exitCode: SmokeExitCode; summary: string; lines: string[]; providers: SmokeProviderReport[]; cheapest: SmokePrice | null; fixturesWritten: string[] }
@@ -549,13 +553,22 @@ function formatPence(p: number): string {
   return `£${Math.trunc(p / 100)}.${String(p % 100).padStart(2, '0')}`;
 }
 
-/** Ledger rows by the reservation ids this run created, so concurrent app traffic (coverage checks) is never counted. */
-function ledgerFor(ports: Ports, ids: readonly string[]): { rows: number; firstAttemptOk: number } {
-  if (ids.length === 0) return { rows: 0, firstAttemptOk: 0 };
+/**
+ * Ledger rows by the reservation ids this run created, so concurrent app traffic (coverage checks) is
+ * never counted. `tiles` and `cacheHits` follow LedgerRepo.countsFor: tiles are first-attempt upstream
+ * rows only, and parity is tiles + cacheHits (spec §8.1).
+ */
+function ledgerFor(ports: Ports, ids: readonly string[]): { rows: number; tiles: number; cacheHits: number; firstAttemptOk: number } {
+  if (ids.length === 0) return { rows: 0, tiles: 0, cacheHits: 0, firstAttemptOk: 0 };
   const rows = ports.db.raw
     .prepare(`SELECT http_attempt AS attempt, outcome FROM provider_requests WHERE CAST(id AS TEXT) IN (${ids.map(() => '?').join(',')})`)
     .all(...ids) as Array<{ attempt: number; outcome: string }>;
-  return { rows: rows.length, firstAttemptOk: rows.filter((r) => r.attempt === 1 && r.outcome === 'ok').length };
+  return {
+    rows: rows.length,
+    tiles: rows.filter((r) => r.attempt === 1 && r.outcome !== 'cache_hit').length,
+    cacheHits: rows.filter((r) => r.outcome === 'cache_hit').length,
+    firstAttemptOk: rows.filter((r) => r.attempt === 1 && r.outcome === 'ok').length,
+  };
 }
 
 function describeError(err: unknown): string {
@@ -586,8 +599,9 @@ async function smokeOne(
   }
   if (result.kind === 'tile-error') return { report: report('error', 1, 0, describeError(result.error)), price: null };
   const ledger = ledgerFor(ports, guard.reservationIds(id));
-  if (ledger.rows !== 1 || ledger.firstAttemptOk !== 1) {
-    return { report: report('error', 1, result.prices.length, `ledger shows ${ledger.rows} rows, ${ledger.firstAttemptOk} first-attempt ok; expected exactly 1`), price: null };
+  // why: parity (tiles + cacheHits) must equal the plan length of 1; NO_CACHE makes cacheHits 0, so that is one first-attempt row, and it must be ok.
+  if (ledger.tiles + ledger.cacheHits !== plan.length || ledger.rows !== 1 || ledger.firstAttemptOk !== 1) {
+    return { report: report('error', 1, result.prices.length, `ledger parity ${ledger.tiles + ledger.cacheHits} over ${ledger.rows} rows, ${ledger.firstAttemptOk} first-attempt ok; expected exactly 1`), price: null };
   }
   const cheapest = [...result.prices].sort((a, b) => a.amountMinor - b.amountMinor)[0];
   if (cheapest === undefined) {
@@ -692,13 +706,13 @@ export const smokeTool: ToolEntry = {
 
 `apps/api/src/bootstrap/tool.ts`: change `TOOLS` to `{ record: recordTool, smoke: smokeTool }`, importing `smokeTool` from `../tools/smoke.js`.
 
-`apps/api/src/index.ts`: add `export { runSmoke, toToolRunResponse, SMOKE_RECORDED_BY, type SmokeResult } from './tools/smoke.js';`.
+`apps/api/src/index.ts`: add `export { runSmoke, smokeQuery, toToolRunResponse, SMOKE_RECORDED_BY, type SmokeResult } from './tools/smoke.js';`.
 
 - [ ] **Step 5: Record the smoke fixtures once (operator, real keys)**
 
 This spends one SearchApi call and one free Travelpayouts call. Run it on the dev machine with the operator's `.env`, `NODE_ENV=development` and `DATABASE_PATH="$PWD/data/dev.db"`.
 
-Before running, check that the smoke's departure month (the month after today) is not WP4b's recorded month. Run `ls packages/providers/fixtures/recorded/travelpayouts/aviasales_v3_prices_for_dates` and compare with the `--month` WP4b used. If the months match, the two recordings compete in `replayHandlers` (§3 item 1). In that case wait for the next month, or pause here until WP4 adds the `recordedBy` filter.
+The tests replay with `{ recordedBy: '@gmt/api smoke:live' }`, so these files never compete with WP4b's recordings even when the month coincides.
 
 Run: `pnpm smoke:live -- --origin LHR --destination JFK`
 Expected:
@@ -735,12 +749,16 @@ import { HttpResponse, http } from 'msw/http';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { RECORDED_ROOT } from '../../src/paths.js';
-import { runSmoke } from '../../src/tools/smoke.js';
+import { SMOKE_RECORDED_BY, runSmoke } from '../../src/tools/smoke.js';
 import { SENTINELS, smokeRecordedAt, smokeRecordings, testEnv, testPorts } from '../support/env.js';
 
 const server = setupServer();
+const replay = replayHandlers(RECORDED_ROOT, { recordedBy: SMOKE_RECORDED_BY });
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  expect(replay.misses()).toEqual([]);
+  server.resetHandlers();
+});
 afterAll(() => server.close());
 
 const both = testEnv({ TRAVELPAYOUTS_TOKEN: SENTINELS.travelpayouts, SEARCHAPI_KEY: SENTINELS.searchapi, SEARCHAPI_PLAN: 'trial' });
@@ -774,7 +792,7 @@ describe('smoke exit codes (spec §9 item 7)', () => {
   it('1: a configured provider answers 401; the other still prices and the cheapest is printed', async () => {
     const sa = recording('searchapi');
     // why: spec §2 fact 5 recorded this exact 401 body; server.use prepends, so it wins over replay.
-    server.use(...replayHandlers(RECORDED_ROOT));
+    server.use(...replay.handlers);
     server.use(http.all(`${sa.origin}/*`, () => HttpResponse.json({ error: 'Invalid API key.' }, { status: 401 })));
     const { ports } = testPorts(both, { now: smokeRecordedAt() });
     const r = await runSmoke(ports, { origin: LHR, destination: JFK });
@@ -782,7 +800,7 @@ describe('smoke exit codes (spec §9 item 7)', () => {
     const saReport = r.providers.find((p) => p.providerId === 'searchapi');
     expect(saReport?.status).toBe('error');
     expect(saReport?.detail).toMatch(/^auth/);
-    expect(saReport?.ledger).toEqual({ rows: 1, firstAttemptOk: 0 });
+    expect(saReport?.ledger).toEqual({ rows: 1, tiles: 1, cacheHits: 0, firstAttemptOk: 0 });
     expect(r.providers.find((p) => p.providerId === 'travelpayouts')?.status).toBe('priced');
     expect(r.summary.startsWith('cheapest found ')).toBe(true);
     ports.db.close();
@@ -790,7 +808,7 @@ describe('smoke exit codes (spec §9 item 7)', () => {
 
   it('1: a retryable 503 is not retried past the per-run cap of one call', async () => {
     const sa = recording('searchapi');
-    server.use(...replayHandlers(RECORDED_ROOT));
+    server.use(...replay.handlers);
     server.use(http.all(`${sa.origin}/*`, () => new HttpResponse(null, { status: 503 }), { once: true }));
     const { ports } = testPorts(both, { now: smokeRecordedAt() });
     const r = await runSmoke(ports, { origin: LHR, destination: JFK });
@@ -1017,7 +1035,7 @@ export function smokeRecordedAt() {
 }
 
 /** The harness with both vendors routed to their real hosts, the real airports and metros seeded, and replay installed. */
-export function layerB(now: HarnessOptions['now'], over: Partial<HarnessOptions> = {}): Harness {
+export function layerB(now: HarnessOptions['now'], over: Partial<HarnessOptions> = {}): { h: Harness; misses: () => string[] } {
   const sa = PLAN_PRESETS['40usd'];
   const h = createHarness({
     now,
@@ -1033,8 +1051,9 @@ export function layerB(now: HarnessOptions['now'], over: Partial<HarnessOptions>
   });
   // why: the smoke ran against the real table, where LHR maps to metro LON; Travelpayouts sends that metro.
   h.repos.airports.upsertAll(loadAirportsDataset(AIRPORTS_DIR));
-  h.server.use(...replayHandlers(RECORDED_ROOT));
-  return h;
+  const replay = replayHandlers(RECORDED_ROOT);
+  h.server.use(...replay.handlers);
+  return { h, misses: replay.misses };
 }
 
 /** The smoke's one-tile space. Same rule as apps/api smokeQuery (engine may not import api); a drift shows as unhandled requests. */
@@ -1062,7 +1081,7 @@ type Row = { provider_id: string; source_kind: string; point_of_sale: string; ma
 describe('layer B discovery (spec §9 item 4, §5.2, §8.1)', () => {
   it('one month tile and one rectangle through the real adapters with full provenance, then a reuse run with zero calls', async () => {
     const at = smokeRecordedAt();
-    const h = layerB(at);
+    const { h, misses } = layerB(at);
     const engine = createEngine(h.deps, h.options);
     const def = h.createDefinition(smokeSpace(h.clock.todayLondon()));
 
@@ -1090,6 +1109,7 @@ describe('layer B discovery (spec §9 item 4, §5.2, §8.1)', () => {
     const reused = h.db.raw.prepare('SELECT fetched_at, reused_from_execution_id FROM calendar_prices WHERE execution_id = ?').all(second.id) as Row[];
     expect(reused.length).toBe(rows.length);
     for (const r of reused) expect([r.reused_from_execution_id, r.fetched_at]).toEqual([first.id, at]); // original fetchedAt (spec §8.1)
+    expect(misses()).toEqual([]);
     h.close();
   }, 60_000);
 });
@@ -1118,7 +1138,7 @@ describe('layer B verification (spec §5.4, §9 item 4)', () => {
     expect(expandTop).toBeLessThanOrEqual(2); // why: CHILD_MAX_CALLS 6 ≥ 1 + 2 × 2 (spec §8.1)
     const p = new URL(step1.request.url).searchParams;
     const cell = { origin: asIata(p.get('departure_id') ?? ''), destination: asIata(p.get('arrival_id') ?? ''), departureDate: asIsoDate(p.get('outbound_date') ?? ''), returnDate: asIsoDate(p.get('return_date') ?? '') };
-    const h = layerB(step1.recordedAt);
+    const { h, misses } = layerB(step1.recordedAt);
     const engine = createEngine(h.deps, h.options);
     const nights = daysBetween(cell.departureDate, cell.returnDate);
     const def = h.createDefinition({
@@ -1137,8 +1157,10 @@ describe('layer B verification (spec §5.4, §9 item 4)', () => {
       const booking = o.booking_json === null ? { kind: 'none' } : (JSON.parse(o.booking_json) as { kind: string; host?: string });
       if (booking.kind !== 'none') expect(booking.host === 'google.com' || booking.host?.endsWith('.google.com')).toBe(true);
     }
-    expect(h.repos.routeHistory.series(cell.origin, cell.destination, 'searchapi').length).toBeGreaterThan(0);
+    // why: Google's route-level series states no cabin (spec §7 route_price_history).
+    expect(h.repos.routeHistory.series(cell.origin, cell.destination, 'searchapi', 'unknown').length).toBeGreaterThan(0);
     expect(h.ledgerRows(child.executionId).length).toBeLessThanOrEqual(1 + expandTop * 2);
+    expect(misses()).toEqual([]);
     h.close();
   }, 60_000);
 });
@@ -1163,7 +1185,7 @@ describe('layer B error-table rows with real adapters (spec §8.1)', () => {
     ['searchapi', () => HttpResponse.json({ error: 'Invalid API key.' }, { status: 401 }), 'travelpayouts'],
     ['travelpayouts', () => HttpResponse.text('Unauthorized', { status: 401 }), 'searchapi'],
   ] as const)('%s auth failure disables it for the run; the other still prices; completed', async (failing, respond, other) => {
-    const h = layerB(smokeRecordedAt());
+    const { h, misses } = layerB(smokeRecordedAt());
     // why: spec §2 fact 5 recorded these exact 401 bodies; server.use prepends, so this wins over replay.
     h.server.use(http.all(`${originOf(failing)}/*`, respond));
     const engine = createEngine(h.deps, h.options);
@@ -1175,6 +1197,7 @@ describe('layer B error-table rows with real adapters (spec §8.1)', () => {
     expect(bad.error + bad.skipped).toBe(96);
     expect(h.repos.cells.buckets(run.id, 'discovery', other).priced).toBeGreaterThan(0);
     expect(h.repos.notifications.wasSent('provider_disabled', run.id, def.id)).toBe(true);
+    expect(misses()).toEqual([]);
     h.close();
   }, 60_000);
 });
@@ -1459,7 +1482,7 @@ Then:
 - `pnpm-workspace.yaml`: add `- integration` under `packages:`.
 - Root `vitest.config.ts`: add `'integration/vitest.config.ts'` to `projects`.
 - `.github/workflows/ci.yml`: add `- run: pnpm build` before `- run: pnpm test:coverage`.
-- Barrels: make sure `@gmt/api` exports `API_TEXT`, `buildPorts`, `loadConfigFromEnv`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, and `@gmt/engine` exports `operatorMessage`, `OPERATOR_KINDS`, `EmailNotifier`, `renderBody`.
+- Make sure `@gmt/api` exports `API_TEXT`, `buildPorts`, `loadConfigFromEnv`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, `smokeQuery`, `SMOKE_RECORDED_BY`, and `@gmt/engine` exports `operatorMessage`, `OPERATOR_KINDS`, `EmailNotifier`, `renderBody`.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1478,7 +1501,7 @@ git add integration pnpm-workspace.yaml vitest.config.ts .github apps/api/src/in
 - Create: `integration/test/support.ts`, `integration/test/sentinel.test.ts`
 
 **Interfaces:**
-- Consumes: `loadConfigFromEnv`, `buildPorts`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, `createEngine`, `EmailNotifier`, `TransportFactory`, `fixtureHandlers`, `replayHandlers`, `loadRecorded`, `scenarioRequest`, `ROUTES`, `seedAirports`, `loadAirportsDataset`.
+- Consumes: `loadConfigFromEnv`, `buildPorts`, `createLogger`, `createApp`, `inProcessTools`, `runSmoke`, `smokeQuery`, `SMOKE_RECORDED_BY`, `createEngine`, `EmailNotifier`, `TransportFactory`, `replayHandlers`, `loadRecorded`, `ROUTES`, `seedAirports`, `loadAirportsDataset`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1493,7 +1516,6 @@ import type { Db } from '@gmt/db';
 export const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 export const FIXTURES_ROOT = join(REPO_ROOT, 'packages/providers/fixtures');
 export const RECORDED_ROOT = join(FIXTURES_ROOT, 'recorded');
-export const SYNTHETIC_ROOT = join(FIXTURES_ROOT, 'synthetic/fixture');
 export const MIGRATIONS_DIR = join(REPO_ROOT, 'packages/db/drizzle');
 export const AIRPORTS_DIR = join(REPO_ROOT, 'packages/db/data');
 
@@ -1532,16 +1554,16 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
-import { buildPorts, createApp, createLogger, inProcessTools, loadConfigFromEnv, runSmoke } from '@gmt/api';
+import { SMOKE_RECORDED_BY, buildPorts, createApp, createLogger, inProcessTools, loadConfigFromEnv, runSmoke, smokeQuery } from '@gmt/api';
 import { type AlertDigest, type AlertRule, type OperatorMessage, Secret, apiContract, asIata, fixedClock } from '@gmt/core';
 import { loadAirportsDataset, seedAirports } from '@gmt/db';
 import { EmailNotifier, type TransportFactory, createEngine } from '@gmt/engine';
-import { createRecorder, scenarioRequest } from '@gmt/providers';
-import { fixtureHandlers, loadRecorded, replayHandlers } from '@gmt/providers/testing';
+import { createRecorder } from '@gmt/providers';
+import { loadRecorded, replayHandlers } from '@gmt/providers/testing';
 import { HttpResponse, http } from 'msw/http';
 import { setupServer } from 'msw/node';
 import { describe, expect, it, vi } from 'vitest';
-import { AIRPORTS_DIR, FIXTURES_ROOT, MIGRATIONS_DIR, RECORDED_ROOT, SYNTHETIC_ROOT, everyDbValue, fileTexts } from './support.js';
+import { AIRPORTS_DIR, FIXTURES_ROOT, MIGRATIONS_DIR, RECORDED_ROOT, everyDbValue, fileTexts } from './support.js';
 
 const S = {
   searchapi: 'test-searchapi-key-0123456789abcdef',
@@ -1556,7 +1578,7 @@ const FORMS = [...Object.values(S).flatMap((v) => [v, encodeURIComponent(v), Buf
 const findSentinels = (where: string, text: string): string[] => FORMS.filter((f) => text.includes(f)).map((f) => `${where} contains sentinel form ${f.slice(0, 14)}…`);
 const smokeAt = () => {
   const t = [...loadRecorded(RECORDED_ROOT, 'searchapi', '/api/v1/search'), ...loadRecorded(RECORDED_ROOT, 'travelpayouts', '/aviasales/v3/prices_for_dates')]
-    .filter((r) => r.recordedBy === '@gmt/api smoke:live').map((r) => r.recordedAt).sort().at(-1);
+    .filter((r) => r.recordedBy === SMOKE_RECORDED_BY).map((r) => r.recordedAt).sort().at(-1);
   if (t === undefined) throw new Error('no smoke recordings');
   return t;
 };
@@ -1595,8 +1617,7 @@ describe('no secret reaches any sink (spec §5.3)', () => {
     if (config.smtp === null) throw new Error('smtp config');
     const log = createLogger(config, { destination: sink });
     const clock = fixedClock(recordedAt);
-    const recorder = createRecorder({ root: fixturesOut, secrets: [new Secret(S.searchapi), new Secret(S.travelpayouts)], clock, recordedBy: '@gmt/api smoke:live' });
-    // why: no fixtureRoot, so fixture.local goes to global fetch and msw, where scenario rules can be set (brief §3 item 3).
+    const recorder = createRecorder({ root: fixturesOut, secrets: [new Secret(S.searchapi), new Secret(S.travelpayouts)], clock, recordedBy: SMOKE_RECORDED_BY });
     const ports = buildPorts(config, { log, clock, recorder, migrationsDir: MIGRATIONS_DIR });
     seedAirports(ports.db, loadAirportsDataset(AIRPORTS_DIR));
     const emailOk = new EmailNotifier({ smtp: config.smtp, nodeEnv: config.nodeEnv, log, createTransport: capture });
@@ -1608,10 +1629,10 @@ describe('no secret reaches any sink (spec §5.3)', () => {
     const seen: Array<{ url: string; headers: string }> = [];
     server.events.on('request:start', ({ request }) => { seen.push({ url: request.url, headers: JSON.stringify([...request.headers]) }); });
     const trapped: string[] = [];
+    const replay = replayHandlers(RECORDED_ROOT, { recordedBy: SMOKE_RECORDED_BY });
     server.use(
       http.all('https://egress-trap.example/*', ({ request }) => { trapped.push(request.headers.get('authorization') ?? ''); return HttpResponse.json({}); }),
-      ...fixtureHandlers(SYNTHETIC_ROOT),
-      ...replayHandlers(RECORDED_ROOT),
+      ...replay.handlers,
     );
     server.listen({ onUnhandledFrame: 'error' });
     try {
@@ -1627,24 +1648,28 @@ describe('no secret reaches any sink (spec §5.3)', () => {
       expect((await runSmoke(ports, { origin: asIata('LHR'), destination: asIata('JFK') })).exitCode).toBe(1);
       expect(trapped).toEqual([]);
 
-      // 3. An execution on the fixture provider with a 500 and a network error in discovery, then a 401 for one child.
+      // 3. An execution on the real adapters over replay: a Travelpayouts 500 and a SearchApi network error in
+      //    discovery (each retried, then served), then a SearchApi 401 for one child verification.
+      // why: buildPorts without fixtureRoot has no fixture provider (plan round 3), and the vendor paths are the ones that carry keys.
+      const q = smokeQuery(clock.todayLondon(), asIata('LHR'), asIata('JFK'));
       const def = ports.repos.definitions.create({
-        name: 'sentinel', origins: [asIata('LHR')], destinations: [asIata('JFK')], window: { kind: 'relative', startOffsetDays: 7, lengthDays: 3 },
-        minNights: 10, maxNights: 11, cabin: 'economy', constraints: {}, verification: { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 1, bookingLinks: true },
-        budget: { maxCalls: 50, maxFreeCalls: 50, maxCostMicroGbp: 0 }, providers: { discovery: ['fixture'], verification: ['fixture'], discoveryRefreshHours: {} },
+        name: 'sentinel', origins: [q.origin], destinations: [q.destination], window: { kind: 'absolute', from: q.departureFrom, to: q.departureTo },
+        minNights: q.minNights, maxNights: q.maxNights, cabin: 'economy', constraints: {}, verification: { maxCells: 1, topN: 1, alwaysInclude: [], expandTop: 1, bookingLinks: true },
+        budget: { maxCalls: 50, maxFreeCalls: 50, maxCostMicroGbp: 0 }, providers: { discovery: ['travelpayouts', 'searchapi'], verification: [], discoveryRefreshHours: {} },
         destinationNotes: {}, onwardCostPence: {}, scheduleCron: null, scheduleTz: 'Europe/London', confirmedCostPence: null, enabled: true,
       });
-      await fetch(scenarioRequest([
-        { match: { path: '/calendar' }, respond: { kind: 'status', status: 500, body: { error: 'upstream exploded' } }, times: 1 },
-        { match: { path: '/calendar' }, respond: { kind: 'network' }, times: 1 },
-      ]));
+      server.use(
+        http.all(`${originOf('travelpayouts')}/*`, () => HttpResponse.json({ error: 'upstream exploded' }, { status: 500 }), { once: true }),
+        http.all(`${originOf('searchapi')}/*`, () => HttpResponse.error(), { once: true }),
+      );
       const run = await engine.start(def.id, { trigger: 'manual' });
       expect(run.ok).toBe(true);
       if (!run.ok) return;
-      await vi.waitFor(() => expect(['completed', 'paused_error', 'paused_budget']).toContain(ports.repos.executions.get(run.executionId)?.status), { timeout: 30_000 });
+      await vi.waitFor(() => expect(['completed', 'paused_error', 'paused_budget']).toContain(ports.repos.executions.get(run.executionId)?.status), { timeout: 60_000 });
       const cell = ports.repos.cells.outcomes(run.executionId)[0];
       if (cell === undefined) throw new Error('no outcomes');
-      await fetch(scenarioRequest([{ match: { path: '/itinerary' }, respond: { kind: 'status', status: 401, body: { error: 'denied' } }, times: 1 }]));
+      server.use(http.all(`${originOf('searchapi')}/*`, () => HttpResponse.json({ error: 'Invalid API key.' }, { status: 401 }), { once: true }));
+      ports.repos.definitions.update(def.id, { providers: { discovery: [], verification: ['searchapi'], discoveryRefreshHours: {} } });
       const child = await engine.verifyCell(def.id, { origin: cell.origin, destination: cell.destination, departureDate: cell.departureDate, returnDate: cell.returnDate });
       if (child.ok) await vi.waitFor(() => expect(ports.repos.executions.get(child.executionId)?.status).not.toBe('running'), { timeout: 30_000 });
 
@@ -1696,6 +1721,7 @@ describe('no secret reaches any sink (spec §5.3)', () => {
         ...fileTexts(fixturesOut).flatMap((f) => findSentinels(f.where, f.text)),
       ];
       expect(findings).toEqual([]);
+      expect(replay.misses()).toEqual([]);
     } finally {
       server.close();
       ports.db.close();
@@ -1801,7 +1827,8 @@ Work through each line and record its result (command output or file path) in th
       - every price shows its provenance without hover;
       - the six coverage buckets sum to the cell count;
       - the class badge, price and provenance stay visible at 375 px.
-10. **Reviewer pass.** Run `/review-spec docs/briefs/wp13-smoke-and-final-pass.md --roster full` against the branch diff, and fix every Critical and High finding before the tag.
+10. **Google search link (manual).** In the same fixture-mode session, and once against a calendar row from a real SearchApi run on the dev DB, open a row's "search link, not a fare link" for a SearchApi cell. Record in the PR what Google Flights prefills: both airports, both dates, the cabin and one adult (spec §6.9). A field that is not prefilled is a finding against WP2's `searchLinkFor`.
+11. **Reviewer pass.** Run `/review-spec docs/briefs/wp13-smoke-and-final-pass.md --roster full` against the branch diff, and fix every Critical and High finding before the tag.
 
 - [ ] **Step 4: Commit**
 

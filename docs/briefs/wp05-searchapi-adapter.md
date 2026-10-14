@@ -10,7 +10,7 @@ status: draft
 
 # WP5: SearchApi adapter
 
-Reconciled on 2026-10-14 against spec revision 10 (incl. the §5.4 settled cases) and the plan's contracts at commit 790d1ea (round-2 pins, decision 14).
+Reconciled on 2026-10-14 against spec revision 11 and the plan's contracts at commit 4244030 (round-3 pins, decision 15).
 
 ## 1. Goal
 
@@ -24,7 +24,7 @@ Build `searchApiProvider` in `@gmt/providers`: one `FlightProvider` that plans a
 - `fetchTile`: request building and the parameter allowlist check, then response parsing. Cell keys come from the response. Out-of-band entries are dropped. `has_no_flights` → `noFares`. An empty grid → `parse`. Currency and `pointOfSale` are read from the echo (spec §5.2).
 - `search`: the step 1 → 2 → 3 chain with every outcome rule of spec §5.4. Unpriced options are skipped. The price-source rule applies. `fetchedAt` is the oldest step's. `routeHistory` comes from `price_insights.price_history`.
 - Verification `estimate`, `healthcheck`, `suppliedFields`, `cabins`, and the two `CapabilityInfo` values.
-- `searchApiHttpLimits` (hosts, `billable: 'http-200'`, and `classifyError` for the recorded 401/400 bodies plus 429 quota discrimination).
+- `searchApiHttpLimits` (hosts, `billable: 'http-200'`, no `rateLimitFallbackWaitSeconds`, and a `classifyError` that recognises only SearchApi-specific bodies; everything else falls through to http-kit's default §5.2 table).
 - `SEARCHAPI_PARAMS`, a code constant that a test asserts equal to the recorded `params-<date>.json`.
 - One line each in `apps/api/src/wiring.ts`, in `httpLimitsFor` and `providersFor` (a Modify, per the plan's wiring contract).
 - Test support: in-memory budget and cache ports around the real http-kit, and thin helpers over WP4's `loadRecorded`/`replayHandlers`. Synthetic-shape builders cover the cases the recordings lack.
@@ -46,7 +46,7 @@ Build `searchApiProvider` in `@gmt/providers`: one `FlightProvider` that plans a
 - **§2 fact 2.** HTTP 400 above 200 combinations. ~23 rectangles of 8 × 19 days per pair for the default band (rev 10).
 - **§2 fact 3.** Step 3 showed a seller below the airline fare, so `bookingLinks` is forced on. Some options are unpriced.
 - **§2 fact 4.** The vendor caches repeats. The ledger counts every HTTP 200. The local window is `SEARCHAPI_CACHE_TTL_HOURS`.
-- **§2 fact 5.** Recorded bodies: 401 `{"error":"Invalid API key."}` and a 400 with a descriptive message. 429 and quota responses map by status and ledger state.
+- **§2 fact 5 / §5.2 (rev 11).** Recorded bodies: 401 `{"error":"Invalid API key."}` and a 400 with a descriptive message. A 429 is `rate-limit`, or `quota` only when the classifier recognises the recorded quota body; there is no ledger arm. A 429 without `Retry-After` and with no fallback wait configured (SearchApi configures none) is non-retryable `rate-limit` with a retry time at the hourly window. http-kit applies that rule.
 - **§2 fact 8.** The key goes only in `Authorization: Bearer`, never in a URL.
 - **§2 bonus.** Step 1's `price_insights.price_history` is returned as `routeHistory` on every verification.
 - **§3 (rev 10).** An outcome's `reason` is the `ProviderError.kind` or a normalisation reason (`no-return-legs` among them). The vendor message goes to `last_error`, never `reason`. `pointOfSale` is any ISO alpha-2 echo or `'unknown'`.
@@ -113,20 +113,21 @@ export function generateCells(space: ResolvedSpace): Cell[];
 export const MINOR_EXPONENT: Record<string, number>;
 
 // @gmt/providers http/httpKit.ts and testing subpath (WP4)
-export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never'; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; classifyError?: (status: number, body: unknown, ledgerAtCap: boolean) => ProviderError }
+export interface ResponseFacts { status: number; body: unknown /* scrubbed */; headers: Headers; providerId: ProviderId | 'fx'; endpointPath: string }
+export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never' /* in http-kit: governs timeout retryability only; the ledger's billable flag is WP3's */; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; rateLimitFallbackWaitSeconds?: number /* wait for a 429 without Retry-After; absent → the first such 429 is non-retryable rate-limit with retryAfterSeconds = seconds to the hourly refresh */; classifyError?: (f: ResponseFacts) => ProviderError | undefined /* undefined → the default spec §5.2 table; http-kit applies Retry-After, limiter-timeout and scrubbing to whichever error results */ }
 export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
-export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean }
+export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number; accept?: (body: unknown) => boolean } | 'never' /* accept vetoes caching a body the adapter cannot parse; null or empty bodies are never cached */; signal: AbortSignal; recordFixtures: boolean }
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
 export function createHttpKit(deps: HttpKitDeps): HttpKit;
 export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* scrubbed */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string>; contentSha256: string }
-// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot): RequestHandler[] (serves fixtures/recorded by matching method, path and credential-free query, reversing placeholders); loadRecorded(root, providerId, endpointPath): RecordedFixture[]. msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
+// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot, opts?: { recordedBy?: string }): { handlers: RequestHandler[]; misses(): string[] } (serves fixtures/recorded by matching method, path and credential-free query with placeholders as recorded; every consumer asserts misses() is empty in afterEach); loadRecorded(root, providerId, endpointPath): RecordedFixture[]. msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
 
 // Adapter constructors and exports (WP5, WP6), from the plan
 export function searchApiProvider(o: { http: HttpKit; log: Logger; clock: Clock; key: Secret; plan: PlanId; pointOfSale: string; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }): FlightProvider;
-export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['www.searchapi.io'], billable 'http-200', classifyError for the recorded 401/400 bodies and 429 quota discrimination
+export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['www.searchapi.io'], billable 'http-200', classifyError recognising SearchApi bodies only
 export const SEARCHAPI_PARAMS: ParamsAllowlist;   // code constant; a test asserts it equals fixtures/recorded/searchapi/params-<date>.json
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url)
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* '<path>' or '<path>?engine=<value>' for vendors that multiplex engines on one path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url) picks the most specific matching key
 export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 over method + credential-free URL (query kept) + scrubbed headers + body only; never executionId or tileIndex
 
 // apps/api src/wiring.ts (WP4b)
@@ -150,13 +151,13 @@ export const SEARCHAPI_HOST: 'www.searchapi.io';
 export const SEARCHAPI_DISPLAY_NAME: 'Google Flights via SearchApi';
 export const SEARCHAPI_DISCOVERY_INFO: CapabilityInfo;      // scraped-aggregate, maxAgeHours 24
 export const SEARCHAPI_VERIFICATION_INFO: CapabilityInfo;   // scraped-search, maxAgeHours 0
-export function classifySearchApiError(status: number, body: unknown, ledgerAtCap: boolean): ProviderError;
+export function classifySearchApiError(f: ResponseFacts): ProviderError | undefined;
 export const MAX_COMBINATIONS: 200;
 export const OUTBOUND_BLOCK_DAYS: 8;
 export function planRectangles(q: DiscoveryQuery): TilePlan[];
 ```
 
-`SEARCHAPI_PARAMS.endpoints` has the one key `/api/v1/search`, per the pinned type (keyed by endpoint path). Both engines share that path, so its `names` are the ascending union of both engines' parameters and `engine` lists both values. As a result, the allowlist cannot stop a calendar request carrying a `departure_token`. The request builders are the per-engine guard, and Task 5.3 tests them name by name.
+`SEARCHAPI_PARAMS.endpoints` has two keys, `/api/v1/search?engine=google_flights_calendar` and `/api/v1/search?engine=google_flights` (plan decision 15). `assertRequestAllowed(allow, '/api/v1/search', url)` picks the key whose `engine` matches the URL, so each engine is held to its own names.
 
 ## 6. Library notes
 
@@ -207,7 +208,7 @@ All verified on **2026-10-14**.
    - a step 3 for the cheapest priced return option of each;
    - the 401 and 400 bodies.
 2. Every HTTP 200 body carries `search_parameters.currency` and `search_parameters.gl`.
-3. `params-<date>.json` (read with WP4's `loadParamsAllowlist`) equals `SEARCHAPI_PARAMS` in Task 5.3: one endpoint `/api/v1/search`, names ascending, and `'any'` for `departure_id`, `arrival_id`, every date, `gl`, `departure_token` and `booking_token`.
+3. `params-<date>.json` (read with WP4's `loadParamsAllowlist`) equals `SEARCHAPI_PARAMS` in Task 5.3: the two engine-qualified keys, names ascending, and `'any'` for `departure_id`, `arrival_id`, every date, `gl`, `departure_token` and `booking_token`.
 
 ## 7. Files
 
@@ -686,9 +687,9 @@ describe('SearchApi parameter allowlist (spec §5.2 dated allowlist)', () => {
     expect(SEARCHAPI_PARAMS).toEqual(loadParamsAllowlist(latestParamsPath()));
   });
 
-  it('names are ascending, as the pinned type requires', () => {
-    const names = SEARCHAPI_PARAMS.endpoints[SEARCHAPI_ENDPOINT_PATH]?.names ?? [];
-    expect(names).toEqual([...names].sort());
+  it('has the two engine-qualified keys, names ascending (plan decision 15)', () => {
+    expect(Object.keys(SEARCHAPI_PARAMS.endpoints).sort()).toEqual(['/api/v1/search?engine=google_flights', '/api/v1/search?engine=google_flights_calendar']);
+    for (const e of Object.values(SEARCHAPI_PARAMS.endpoints)) expect(e.names).toEqual([...e.names].sort());
   });
 
   it('calendar parameters: exact names, values and point of sale (gl = POINT_OF_SALE lower-cased, hl=en, currency=GBP)', () => {
@@ -724,6 +725,11 @@ describe('SearchApi parameter allowlist (spec §5.2 dated allowlist)', () => {
     expect(flightsParams(CELL_QUERY, 'GB', { departure_token: 'tok' })).toEqual({ ...s1, departure_token: 'tok' });
     expect(flightsParams(CELL_QUERY, 'GB', { booking_token: 'tok' })).toEqual({ ...s1, booking_token: 'tok' });
     expect(allowed({ ...s1, booking_token: 'tok' })).not.toThrow();
+  });
+
+  it('holds each engine to its own names: a calendar request carrying a token is refused', () => {
+    expect(allowed({ ...calendarParams(calQ, rect, 'GB'), departure_token: 'tok' })).toThrow();
+    expect(allowed({ ...flightsParams(CELL_QUERY, 'GB'), outbound_date_start: '2026-11-02' })).toThrow();
   });
 
   it('refuses an unknown name and a disallowed value, and the URL never carries a key', () => {
@@ -763,25 +769,26 @@ const RECORDED_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991
 
 /**
  * Every parameter name and value this adapter may send (spec §5.2), in WP4's pinned
- * `ParamsAllowlist` shape: keyed by endpoint path, names ascending. Both engines share
- * `/api/v1/search`, so names are the union of the calendar and itinerary sets; the per-engine
- * guard is `calendarParams`/`flightsParams`, tested name by name. A test asserts deep equality
- * with WP4b's recorded `params-<date>.json`.
+ * `ParamsAllowlist` shape. Both engines share `/api/v1/search`, so each has an
+ * engine-qualified key (plan decision 15) and `assertRequestAllowed` holds it to its own
+ * names. A test asserts deep equality with WP4b's recorded `params-<date>.json`.
  */
 export const SEARCHAPI_PARAMS: ParamsAllowlist = {
   provider: 'searchapi',
   recordedAt: RECORDED_AT,
   endpoints: {
-    [SEARCHAPI_ENDPOINT_PATH]: {
-      names: [
-        'adults', 'arrival_id', 'booking_token', 'currency', 'departure_id', 'departure_token', 'engine', 'flight_type', 'gl', 'hl',
-        'outbound_date', 'outbound_date_end', 'outbound_date_start', 'return_date', 'return_date_end', 'return_date_start', 'stops', 'travel_class',
-      ],
+    [`${SEARCHAPI_ENDPOINT_PATH}?engine=google_flights_calendar`]: {
+      names: ['adults', 'arrival_id', 'currency', 'departure_id', 'engine', 'flight_type', 'gl', 'hl', 'outbound_date', 'outbound_date_end', 'outbound_date_start', 'return_date', 'return_date_end', 'return_date_start', 'travel_class'],
       values: {
-        adults: ['1'], arrival_id: 'any', booking_token: 'any', currency: ['GBP'], departure_id: 'any', departure_token: 'any',
-        engine: ['google_flights', 'google_flights_calendar'], flight_type: ['round_trip'], gl: 'any', hl: ['en'],
-        outbound_date: 'any', outbound_date_end: 'any', outbound_date_start: 'any', return_date: 'any', return_date_end: 'any', return_date_start: 'any',
-        stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'], travel_class: TRAVEL_CLASSES,
+        adults: ['1'], arrival_id: 'any', currency: ['GBP'], departure_id: 'any', engine: ['google_flights_calendar'], flight_type: ['round_trip'], gl: 'any', hl: ['en'],
+        outbound_date: 'any', outbound_date_end: 'any', outbound_date_start: 'any', return_date: 'any', return_date_end: 'any', return_date_start: 'any', travel_class: TRAVEL_CLASSES,
+      },
+    },
+    [`${SEARCHAPI_ENDPOINT_PATH}?engine=google_flights`]: {
+      names: ['adults', 'arrival_id', 'booking_token', 'currency', 'departure_id', 'departure_token', 'engine', 'flight_type', 'gl', 'hl', 'outbound_date', 'return_date', 'stops', 'travel_class'],
+      values: {
+        adults: ['1'], arrival_id: 'any', booking_token: 'any', currency: ['GBP'], departure_id: 'any', departure_token: 'any', engine: ['google_flights'], flight_type: ['round_trip'],
+        gl: 'any', hl: ['en'], outbound_date: 'any', return_date: 'any', stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'], travel_class: TRAVEL_CLASSES,
       },
     },
   },
@@ -838,7 +845,7 @@ If the test reports any other difference (names, value lists, `'any'` placement)
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/params.test.ts`
-Expected: PASS, 15 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -846,11 +853,11 @@ Expected: PASS, 15 tests.
 git add packages/providers && git commit -m "wp05: SEARCHAPI_PARAMS allowlist and request builders (spec §5.2)"
 ```
 
-### Task 5.4: Error classification and http limits
+### Task 5.4: Error classification hook and http limits
 
 **Files:** create `src/searchapi/errors.ts` and `test/searchapi/errors.test.ts`.
 
-**Interfaces:** consumes `ProviderError`, `ProviderLimits`, `PLAN_PRESETS`, `ProviderHttpLimits`, `Config`. Produces `classifySearchApiError` and `searchApiHttpLimits`.
+**Interfaces:** consumes `ProviderError`, `ProviderLimits`, `PLAN_PRESETS`, `ProviderHttpLimits`, `ResponseFacts`, `Config`. Produces `classifySearchApiError` and `searchApiHttpLimits`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -862,60 +869,43 @@ import { classifySearchApiError, searchApiHttpLimits } from '../../src/searchapi
 import { searchApiRecordings } from './support/recorded.js';
 
 const recorded = searchApiRecordings();
+const facts = (status: number, body: unknown) => ({ status, body, headers: new Headers(), providerId: 'searchapi' as const, endpointPath: '/api/v1/search' });
 
-describe('classifySearchApiError (spec §5.2 errors rev 10, §2 fact 5)', () => {
-  it('the recorded 401 body → auth, non-retryable; the vendor message in the message, never in reason', () => {
+describe('classifySearchApiError (spec §5.2 rev 11, §2 fact 5)', () => {
+  it('recognises the recorded 401 body → auth, non-retryable, vendor message for last_error, no reason', () => {
     const r = recorded.find((x) => x.status === 401);
     if (r === undefined) throw new Error('WP4b must record the 401 body');
-    const e = classifySearchApiError(401, r.body, false);
+    const e = classifySearchApiError(facts(401, r.body));
     expect(e).toMatchObject({ kind: 'auth', retryable: false, httpStatus: 401, providerId: 'searchapi' });
-    expect(e.reason).toBeUndefined();
-    expect(e.message).toContain('Invalid API key.');
-  });
-
-  it('the recorded 400 body → parse, non-retryable, vendor message carried for last_error', () => {
-    const r = recorded.find((x) => x.status === 400);
-    if (r === undefined) throw new Error('WP4b must record the 400 body');
-    const e = classifySearchApiError(400, r.body, false);
-    expect(e).toMatchObject({ kind: 'parse', retryable: false, httpStatus: 400 });
-    expect(e.reason).toBeUndefined();
-    expect(e.message).toContain((r.body as { error: string }).error.slice(0, 40));
+    expect(e?.reason).toBeUndefined();
+    expect(e?.message).toContain('Invalid API key.');
   });
 
   it.each([
-    [403, false, 'auth', false],
-    [402, false, 'quota', false],
-    [404, false, 'upstream', false],
-    [429, false, 'rate-limit', true],
-    [429, true, 'quota', false], // quota discrimination by ledger state
-    [500, false, 'upstream', true],
-    [503, false, 'upstream', true],
-    [418, false, 'upstream', false],
-  ] as const)('HTTP %i (ledger at cap: %s) → %s, retryable %s', (status, atCap, kind, retryable) => {
-    const e = classifySearchApiError(status, { error: 'x' }, atCap);
-    expect(e).toMatchObject({ kind, retryable, httpStatus: status, providerId: 'searchapi' });
-    expect(e.reason).toBeUndefined();
-  });
-
-  it('tolerates a string body and an empty body', () => {
-    expect(classifySearchApiError(400, 'bad request', false).message).toContain('bad request');
-    expect(classifySearchApiError(400, null, false).message).toContain('no message');
-  });
-
-  it('never keeps a URL query in the message', () => {
-    expect(classifySearchApiError(400, { error: 'see https://www.searchapi.io/api/v1/search?api_key=SECRET' }, false).message).not.toContain('SECRET');
+    ['the recorded 400 body', 400, 'recorded'],
+    ['a 401 with another body', 401, { error: 'something else' }],
+    ['a 429 with no body', 429, null],
+    ['a 429 with an unrecognised body', 429, { error: 'Too many requests' }],
+    ['a 500', 500, { error: 'boom' }],
+    ['a 402', 402, { error: 'x' }],
+  ] as const)('falls through to the default table for %s (returns undefined)', (_label, status, body) => {
+    const b = body === 'recorded' ? recorded.find((x) => x.status === 400)?.body : body;
+    expect(classifySearchApiError(facts(status, b))).toBeUndefined();
   });
 });
 
-describe('searchApiHttpLimits (spec §5.3)', () => {
-  it('maps plan limits, the one host, http-200 billing and the classifier', () => {
+describe('searchApiHttpLimits (spec §5.3, §5.2 rev 11)', () => {
+  it('maps plan limits, the one host, http-200 and the classifier; no fallback wait for a header-less 429', () => {
     const l = searchApiHttpLimits(PLAN_PRESETS['40usd'], { maxWaitSeconds: 3900, requestTimeoutSeconds: 60 });
     expect(l).toMatchObject({ hosts: ['www.searchapi.io'], ratePerMinute: 10, ratePerHour: 2000, concurrency: 2, billable: 'http-200', costPerCallMicroGbp: 0, maxWaitSeconds: 3900, requestTimeoutSeconds: 60 });
     expect(l.classifyError).toBe(classifySearchApiError);
+    expect('rateLimitFallbackWaitSeconds' in l).toBe(false);
     expect(searchApiHttpLimits(PLAN_PRESETS.trial, { maxWaitSeconds: 1, requestTimeoutSeconds: 1 })).toMatchObject({ ratePerMinute: 2, ratePerHour: 20, concurrency: 1 });
   });
 });
 ```
+
+The status table (400 → parse, 404 → upstream, 429 → rate-limit, header-less 429 → non-retryable with the hourly retry time, 5xx → upstream) is WP4's default and is tested there. Task 5.5 checks it end to end for this adapter: its recorded-401 test goes through http-kit.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -927,45 +917,32 @@ Expected: FAIL. `../../src/searchapi/errors.js` cannot be resolved.
 ```ts
 // src/searchapi/errors.ts
 import { type Config, ProviderError, type ProviderLimits } from '@gmt/core';
-import type { ProviderHttpLimits } from '../http/httpKit.js';
+import type { ProviderHttpLimits, ResponseFacts } from '../http/httpKit.js';
 import { SEARCHAPI_HOST } from './params.js';
 
-/** The vendor's message: `{"error": "..."}` (spec §2 fact 5), a plain string, or nothing. */
-function vendorMessage(body: unknown): string {
-  if (typeof body === 'object' && body !== null && 'error' in body) {
-    const e = (body as { error: unknown }).error;
-    if (typeof e === 'string') return e.slice(0, 200);
-  }
-  if (typeof body === 'string' && body.length > 0) return body.slice(0, 200);
-  return 'no message';
-}
+/** The recorded 401 body (spec §2 fact 5). */
+const INVALID_KEY = 'Invalid API key.';
 
 /**
- * http-kit's `classifyError` hook for SearchApi. Spec §5.2 (rev 10): 401/403 auth, 402 quota,
- * 400 parse (non-retryable), 404 upstream non-retryable, 429 rate-limit unless the ledger shows
- * the plan cap (then quota), 5xx upstream retryable. `reason` is left unset: the outcome
- * reason is the kind, and the vendor message travels in `message` to `last_error` (spec §3).
- * ProviderError strips URLs from the message.
+ * http-kit's `classifyError` hook for SearchApi (spec §5.2 rev 11, plan decision 15). It
+ * recognises SearchApi-specific bodies only and returns `undefined` for everything else, so
+ * http-kit's default §5.2 table applies; http-kit then adds Retry-After, limiter-timeout and
+ * scrubbing. Recognised today: the recorded 401 body. A quota body is recognised only once one
+ * is recorded (spec §2 fact 5: none observed yet); until then a 429 is the default rate-limit.
+ * `reason` stays unset; the vendor message travels in `message` to `last_error` (spec §3).
  */
-export function classifySearchApiError(status: number, body: unknown, ledgerAtCap: boolean): ProviderError {
-  const base = { providerId: 'searchapi' as const, httpStatus: status, message: `searchapi HTTP ${status}: ${vendorMessage(body)}` };
-  if (status === 401 || status === 403) return new ProviderError({ ...base, kind: 'auth', retryable: false });
-  if (status === 402) return new ProviderError({ ...base, kind: 'quota', retryable: false });
-  if (status === 400) return new ProviderError({ ...base, kind: 'parse', retryable: false });
-  if (status === 404) return new ProviderError({ ...base, kind: 'upstream', retryable: false });
-  if (status === 429) {
-    // why: no quota body is recorded yet (spec §2 fact 5), so the ledger decides.
-    return ledgerAtCap
-      ? new ProviderError({ ...base, kind: 'quota', retryable: false, message: `${base.message} (plan call cap reached)` })
-      : new ProviderError({ ...base, kind: 'rate-limit', retryable: true });
+export function classifySearchApiError(f: ResponseFacts): ProviderError | undefined {
+  const error = typeof f.body === 'object' && f.body !== null && 'error' in f.body ? (f.body as { error: unknown }).error : undefined;
+  if (f.status === 401 && error === INVALID_KEY) {
+    return new ProviderError({ kind: 'auth', retryable: false, httpStatus: 401, providerId: 'searchapi', message: `searchapi HTTP 401: ${INVALID_KEY}` });
   }
-  if (status >= 500) return new ProviderError({ ...base, kind: 'upstream', retryable: true });
-  return new ProviderError({ ...base, kind: 'upstream', retryable: false });
+  return undefined;
 }
 
 /**
- * SearchApi's http-kit limits (plan contract). Billable on HTTP 200 on every plan: on a
- * subscription the cost is 0 but the call cap counts (spec §5.3 billable rule).
+ * SearchApi's http-kit limits (plan contract). `billable: 'http-200'` makes a timeout
+ * non-retryable. No `rateLimitFallbackWaitSeconds`, so a 429 without Retry-After is
+ * non-retryable with a retry time at the hourly refresh (spec §5.2 rev 11).
  */
 export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits {
   return {
@@ -979,12 +956,12 @@ export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'm
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/errors.test.ts`
-Expected: PASS, 13 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp05: SearchApi error classification and http limits (spec §5.2, §5.3)"
+git add packages/providers && git commit -m "wp05: SearchApi classifyError hook (recognised bodies only) and http limits (spec §5.2 rev 11)"
 ```
 
 ### Task 5.5: Calendar tile fetch and parse
@@ -1009,12 +986,14 @@ import { RECORDED_ROOT, byEngine, need, searchApiRecordings } from './support/re
 import { ECHO, syntheticHandler } from './support/synthetic.js';
 
 const recorded = searchApiRecordings();
-const server = setupServer(...replayHandlers(RECORDED_ROOT));
+const replay = replayHandlers(RECORDED_ROOT);
+const server = setupServer(...replay.handlers);
 const sent = captureRequests(server);
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   // why: spec §5.2 / §9 item 2: every outgoing request's names and values are in the dated allowlist.
   for (const r of sent) expect(() => assertRequestAllowed(SEARCHAPI_PARAMS, SEARCHAPI_ENDPOINT_PATH, new URL(r.url))).not.toThrow();
+  expect(replay.misses()).toEqual([]);
   sent.length = 0;
   server.resetHandlers();
 });
@@ -1207,6 +1186,15 @@ describe('fetchTile, synthetic shapes absent from the recordings', () => {
     expect(one.kind === 'tile' && two.kind === 'tile' && two.fetchedAt === one.fetchedAt).toBe(true);
   });
 
+  it('a grid the parser rejects is never cached: the repeat goes upstream again (cache accept, plan decision 15) (synthetic)', async () => {
+    const seen: URLSearchParams[] = [];
+    server.use(syntheticHandler(() => ({ status: 200, body: { ...ECHO, calendar: [] } }), seen));
+    const d = deps();
+    await fetchCalendarTile(d, smallPlan(), small, ctx());
+    await fetchCalendarTile(d, smallPlan(), small, ctx());
+    expect(seen).toHaveLength(2);
+  });
+
   it('sends travel_class=first_class for the first cabin, gl=gb, no api_key (synthetic)', async () => {
     const plan = smallPlan();
     const seen: URLSearchParams[] = [];
@@ -1388,15 +1376,25 @@ export async function fetchCalendarTile(d: CalendarDeps, plan: TilePlan, q: Disc
   if (req.kind !== 'rectangle') throw new TypeError(`searchapi plans rectangle tiles only; got ${req.kind}`);
   assertWithinLimit(req);
   const url = toUrl(calendarParams(q, req, d.pointOfSale));
+  const gl = d.pointOfSale.toLowerCase();
   assertRequestAllowed(d.allowlist, SEARCHAPI_ENDPOINT_PATH, url);
   try {
     // why: the cache key excludes execution and tile ids (plan decision 14), so an identical rectangle from a resumed run is a cache hit.
+    // why: `accept` vetoes caching any body this parser would reject (plan decision 15), so a bad grid is never served from cache.
+    const accept = (body: unknown): boolean => {
+      try {
+        parseCalendarBody(body, plan, q, gl);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const res = await d.http.request({
       providerId: 'searchapi', executionId: ctx.executionId, tileIndex: plan.index, endpointPath: SEARCHAPI_ENDPOINT_PATH,
-      method: 'GET', url, headers: authHeaders(d.key), cache: { ttlSeconds: d.cacheTtlSeconds },
+      method: 'GET', url, headers: authHeaders(d.key), cache: { ttlSeconds: d.cacheTtlSeconds, accept },
       signal: ctx.signal, recordFixtures: ctx.recordFixtures,
     });
-    const parsed = parseCalendarBody(res.body, plan, q, d.pointOfSale.toLowerCase());
+    const parsed = parseCalendarBody(res.body, plan, q, gl);
     d.log.debug({ tileIndex: plan.index, prices: parsed.prices.length, noFares: parsed.noFares.length, notes: parsed.notes }, 'searchapi calendar tile parsed');
     return { kind: 'tile', index: plan.index, coveredCells: plan.coveredCells, fetchedAt: res.fetchedAt, ...parsed };
   } catch (err) {
@@ -1409,7 +1407,7 @@ export async function fetchCalendarTile(d: CalendarDeps, plan: TilePlan, q: Disc
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/calendar.test.ts`
-Expected: PASS, 14 tests, with the `afterEach` allowlist assertions holding for every request.
+Expected: PASS, 15 tests, with the `afterEach` allowlist and `misses()` assertions holding for every test.
 
 - [ ] **Step 5: Commit**
 
@@ -1438,11 +1436,13 @@ import { captureRequests, ctx, testPorts } from './support/ports.js';
 import { RECORDED_ROOT, chainRecording, need, searchApiRecordings } from './support/recorded.js';
 import { CELL_QUERY, IN_1, IN_2, OUT_A, OUT_B, POST, bookingBody, flightsBody, option, seg, syntheticHandler } from './support/synthetic.js';
 
-const server = setupServer(...replayHandlers(RECORDED_ROOT));
+const replay = replayHandlers(RECORDED_ROOT);
+const server = setupServer(...replay.handlers);
 const sent = captureRequests(server);
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   for (const r of sent) expect(() => assertRequestAllowed(SEARCHAPI_PARAMS, SEARCHAPI_ENDPOINT_PATH, new URL(r.url))).not.toThrow();
+  expect(replay.misses()).toEqual([]);
   sent.length = 0;
   server.resetHandlers();
 });
@@ -2229,7 +2229,7 @@ git add packages/providers && git commit -m "wp05: searchApiProvider assembly, s
 // test/searchapi/sentinel.test.ts
 import { asIata, asIsoDate, toEpochDay } from '@gmt/core';
 import { setupServer } from 'msw/node';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { replayHandlers } from '../../src/testing/index.js';
 import { SENTINEL_KEY, captureRequests, ctx, testPorts } from './support/ports.js';
 import { capabilities, makeProvider } from './support/provider.js';
@@ -2237,9 +2237,11 @@ import { RECORDED_ROOT, byEngine, chainRecording, need, searchApiRecordings } fr
 import { CELL_QUERY, syntheticHandler } from './support/synthetic.js';
 
 const recorded = searchApiRecordings();
-const server = setupServer(...replayHandlers(RECORDED_ROOT));
+const replay = replayHandlers(RECORDED_ROOT);
+const server = setupServer(...replay.handlers);
 const sent = captureRequests(server);
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
+afterEach(() => expect(replay.misses()).toEqual([]));
 afterAll(() => server.close());
 
 describe('the SearchApi key reaches no sink but the Authorization header (spec §5.3 sentinel test, §2 fact 8)', () => {
@@ -2401,5 +2403,5 @@ None of the plan's five Review Focus lines is owned by WP5. The adapter-local ed
 None block dispatch. These items are reported for Fable; the spec wins where it speaks.
 
 - **O1, `SEARCHAPI_PARAMS` values that depend on WP4b's file.** The constant must deep-equal WP4b's `params-<date>.json`, including `recordedAt` and `contentSha256`. Those two values do not exist until WP4b records. Task 5.3 shows stand-ins and a command that prints the real ones. The `'any'` placements in §6 "Inputs from WP4b" item 3 must match WP4b's file.
-- **O2, vendor docs gaps.** The vendor docs do not show `search_parameters`, `other_flights`, or the key holding step-2 return options. The spec §5.2 currency and point-of-sale rule rests on WP4b's recordings (Task 5.2 asserts it).
-- **O3, a path-keyed allowlist cannot tell the two engines apart.** The pinned `ParamsAllowlist` is keyed by endpoint path, and both SearchApi engines use `/api/v1/search`. So `assertRequestAllowed` accepts the union of both engines' names; a calendar request carrying `departure_token` would pass it. The per-engine guard is the request builders, whose exact name sets Task 5.3 tests. If the plan wants the allowlist itself to enforce this, `endpoints` would need an engine-qualified key, which is a WP4 contract change.
+- **O2, no quota body recorded.** Spec §5.2 rev 11 makes `quota` on a 429 depend on recognising the recorded quota body, and none is recorded (spec §2 fact 5). `classifySearchApiError` therefore recognises only the 401 body. If WP4b's record tool captures a quota body, add one recognised-body arm and its test.
+- **O3, vendor docs gaps.** The vendor docs do not show `search_parameters`, `other_flights`, or the key holding step-2 return options. The spec §5.2 currency and point-of-sale rule rests on WP4b's recordings (Task 5.2 asserts it).

@@ -8,7 +8,7 @@ reviewers: [code-architect, test-strategy-reviewer, devops-reviewer, security-re
 status: draft
 ---
 
-<!-- Reconciled 2026-10-14 against spec revision 10 and the plan's rewritten cross-package contracts. -->
+<!-- Reconciled 2026-10-14 against spec revision 11 and the plan's round-3 pins (decisions 14 and 15). -->
 
 # WP12: Docker, compose, env, backup, docs
 
@@ -99,7 +99,8 @@ export const systemClock: Clock;
 export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?: FixtureRecorder; migrationsDir: string; fixtureRoot?: string }): Ports;   // opens DB, applies migrations (callers run the backup preflight first), createRepos, guard, cache, http-kit with httpLimitsFor(config), providersFor(config, http, ...)
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;   // parseConfig + tolerantRealpath; throws listing every bad field
 // src/bootstrap/tool.ts (WP4b): export async function runTool(name: 'record' | 'smoke', argv: string[]): Promise<number /* exit code */>; `--dry-run` builds ports and takes the lock without any vendor call
-// Exit codes (one table for every CLI): 0 ok; smoke 1 provider error, 2 zero providers, 3 empty; 64 usage/bad arguments; 70 refused under NODE_ENV=test; 73 pending migrations but the backup preflight is impossible; 74 backup failed; 75 app_lock refused; 78 bad config
+// Exit codes (one table for every CLI): 0 ok; smoke 1 provider error, 2 zero providers, 3 empty; 64 usage/bad arguments; 70 refused under NODE_ENV=test; 73 the data directory or backups directory is unwritable or the preflight is impossible; 74 backup failed; 75 app_lock refused; 78 bad config. Backups live in `<dirname(dbPath)>/backups`.
+// Package resolution: every workspace package's `exports` carries a `"@gmt/source"` condition → `./src/*.ts` beside `default` → `dist`; tests and type-checks opt in (`customConditions`, vitest `resolve.conditions`), `node` at runtime uses `dist`.
 // src/bootstrap/app.ts (WP8): main(); order: refuse NODE_ENV=test → config → logger → preflight backup when pendingMigrations() is non-empty and the DB file exists (WP12's backupDatabase) → buildPorts → seed + sanity → AppLock('app') waits → createEngine(ports, { alerts: runAlerts }) → engine.boot() → serve.
 // src/tools/smoke.ts (WP13): exit codes 0 priced, 1 provider error, 2 zero providers, 3 empty, 64 bad arguments
 ```
@@ -110,6 +111,7 @@ WP0's `pendingMigrations` applies Drizzle's own rule (`drizzle-orm@0.45.4`, `sql
 
 - `scripts/backup.mjs` CLI: `node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n>]`; defaults `DATABASE_PATH` (else `/data/get-me-there.db`), `<db dir>/backups`, 5. Exit 0 prints one line `{"ok":true,"file":"…"}`; 64 usage (stderr starts `usage:`); 74 `backup failed: <cause>` (including a missing database file). No exported functions.
 - `scripts/assert-sqlite-prebuilt.mjs`: exit 0 prints `better-sqlite3 13.0.3 prebuilt ok: <path>`; exit 1 lists every failure.
+- `scripts/assert-dist-resolution.mjs`: exit 0 prints `workspace packages resolve to dist`; exit 1 names each package that resolved elsewhere.
 
 `docs/examples/london-new-york.json`: the importable example definition, a `definitionCreateRequestSchema`-valid object (plan file map: "WP12 writes it, WP9 imports it"). **Contract with WP9:** `apps/web/src/example.ts` exports `EXAMPLE_DEFINITION` as a JSON-import re-export of that file. Task 12.9 asserts they are equal.
 
@@ -130,7 +132,7 @@ All verified on 2026-10-14.
 
 ## Files
 
-- Create: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `scripts/assert-sqlite-prebuilt.mjs`, `scripts/backup.mjs`, `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`, `infra/vitest.config.ts`, `infra/tsconfig.json`
+- Create: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `scripts/assert-sqlite-prebuilt.mjs`, `scripts/assert-dist-resolution.mjs`, `scripts/backup.mjs`, `docs/setup.md`, `docs/api-limits.md`, `docs/scheduling.md`, `docs/examples/london-new-york.json`, `infra/vitest.config.ts`, `infra/tsconfig.json`
 - Modify: `.env.example` (byte-equal to spec §12), `vitest.config.ts` (root: add the infra project), `package.json` (root: `yaml` dev dependency, `typecheck` script), `pnpm-lock.yaml` (from `pnpm add`), `.github/workflows/ci.yml` (add the `docker` job)
 - Test: `infra/test/helpers.ts`, `infra/test/dockerfile.test.ts`, `infra/test/envExample.test.ts`, `infra/test/compose.test.ts`, `infra/test/backup.test.ts`, `infra/test/presetTable.ts`, `infra/test/apiLimits.test.ts`, `infra/test/docs.test.ts`, `infra/test/exampleDefinition.test.ts`, `apps/api/test/bootstrap/preMigrationBoot.test.ts`
 
@@ -139,7 +141,7 @@ All verified on 2026-10-14.
 ### Task 12.1: Infra test project, Dockerfile and `.dockerignore` (first failing test)
 
 **Files:**
-- Create: `infra/vitest.config.ts`, `infra/tsconfig.json`, `infra/test/helpers.ts`, `infra/test/dockerfile.test.ts`, `Dockerfile`, `.dockerignore`, `scripts/assert-sqlite-prebuilt.mjs`
+- Create: `infra/vitest.config.ts`, `infra/tsconfig.json`, `infra/test/helpers.ts`, `infra/test/dockerfile.test.ts`, `Dockerfile`, `.dockerignore`, `scripts/assert-sqlite-prebuilt.mjs`, `scripts/assert-dist-resolution.mjs`
 - Modify: `vitest.config.ts` (root), `package.json` (root `typecheck` script)
 
 **Interfaces:**
@@ -162,6 +164,8 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     testTimeout: 30_000,
   },
+  // why: plan decision 15: every vitest config resolves workspace packages from source.
+  resolve: { conditions: ['@gmt/source'] },
 });
 ```
 
@@ -333,6 +337,14 @@ describe('Dockerfile (spec §13, §5.5, §9 item 8)', () => {
     expect(runtimeInstructions.some((i) => i.startsWith('COPY --from=prod-deps /app/node_modules '))).toBe(true);
   });
 
+  it('builds every package and never opts the runtime into the @gmt/source condition', () => {
+    const all = stages.flatMap((s) => s.instructions).join('\n');
+    expect(stages.find((s) => s.from.endsWith(' AS build'))?.instructions).toContain('RUN pnpm build');
+    expect(all).not.toMatch(/--conditions|NODE_OPTIONS|@gmt\/source/);
+    expect(runtimeInstructions.some((i) => i.includes('/src'))).toBe(false);
+    expect(runtimeInstructions).toContain('RUN node scripts/assert-dist-resolution.mjs');
+  });
+
   it('installs with the frozen lockfile, pnpm from packageManager, and asserts the sqlite prebuilt', () => {
     const all = stages.flatMap((s) => s.instructions).join('\n');
     expect(all).toMatch(/pnpm install --frozen-lockfile/);
@@ -429,6 +441,34 @@ if (failures.length > 0) {
 console.log(`better-sqlite3 ${version} prebuilt ok: ${prebuilt}`);
 ```
 
+`scripts/assert-dist-resolution.mjs`:
+
+```js
+#!/usr/bin/env node
+// Fails the image build unless every workspace package the app imports resolves to its built
+// dist/ entry under Node's default conditions. Plan decision 15: package exports carry a
+// "@gmt/source" condition for tests; the runtime must never resolve it (src/ is not in the image).
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+const requireFromApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
+const failures = [];
+for (const name of ['@gmt/core', '@gmt/db', '@gmt/providers', '@gmt/engine']) {
+  try {
+    const resolved = requireFromApi.resolve(name);
+    if (!/[/\\]dist[/\\]/.test(resolved)) failures.push(`${name} resolved outside dist: ${resolved}`);
+    else if (!existsSync(resolved)) failures.push(`${name} resolved to a missing file: ${resolved}`);
+  } catch (err) {
+    failures.push(`${name} did not resolve: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+if (failures.length > 0) {
+  for (const f of failures) console.error(f);
+  process.exit(1);
+}
+console.log('workspace packages resolve to dist');
+```
+
 `Dockerfile`:
 
 ```dockerfile
@@ -497,6 +537,7 @@ COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/scripts ./scripts
 # why: a fresh named volume copies the ownership of the image directory it is mounted on, so
 # /data must exist and belong to node before VOLUME, or the first boot cannot write the DB.
+RUN node scripts/assert-dist-resolution.mjs
 RUN node scripts/assert-sqlite-prebuilt.mjs \
  && mkdir -p /data/backups \
  && chown -R node:node /data
@@ -504,7 +545,8 @@ VOLUME ["/data"]
 USER node
 EXPOSE 3000
 # why: start period 240 s covers migrations, the pre-migration backup, airport seeding and the
-# app_lock waits (60 s for a tool lock, 90 s for a stale app lock; spec §7) with margin.
+# app_lock waits (60 s for a tool lock; 90 s for an app lock, after which a stale lock is taken
+# over and a live second app is refused; spec §7) with margin.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=240s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "apps/api/dist/bootstrap/app.js"]
@@ -536,7 +578,7 @@ node_modules/
 - [ ] **Step 6: Run to verify it passes**
 
 Run: `pnpm vitest run --project infra && docker build -t get-me-there:local .`
-Expected: infra tests PASS (dockerfile.test.ts, 20 tests); the build log shows `better-sqlite3 13.0.3 prebuilt ok: /app/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/prebuilds/linux-x64.node` three times (on arm64 hosts `linux-arm64.node`) and ends with `naming to docker.io/library/get-me-there:local`.
+Expected: infra tests PASS (dockerfile.test.ts, 21 tests); the build log shows `better-sqlite3 13.0.3 prebuilt ok: /app/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/prebuilds/linux-x64.node` three times (on arm64 hosts `linux-arm64.node`) and ends with `naming to docker.io/library/get-me-there:local`.
 
 Then: `docker run --rm --entrypoint id get-me-there:local -u`
 Expected: `1000`.
@@ -1066,7 +1108,7 @@ The pre-migration backup, the `/data` writability check and their exit codes are
 - Test: `apps/api/test/bootstrap/preMigrationBoot.test.ts`
 
 **Interfaces:**
-- Consumes: `openDatabase` (WP0), `src/bootstrap/app.ts` `main()` (WP8), exit codes 74 (backup failed) and 73 (pending migrations but the backup preflight is impossible).
+- Consumes: `openDatabase` (WP0), `src/bootstrap/app.ts` `main()` (WP8), exit codes 74 (backup failed) and 73 (data or backups directory unwritable, or the preflight impossible).
 
 - [ ] **Step 1: Write the test**
 
@@ -1109,21 +1151,23 @@ function tables(dbPath: string): string[] {
 }
 
 describe('the app bootstrap backs up before it migrates (spec §7 Migrations, §13)', () => {
-  it('exits 74 and leaves the schema untouched when the pre-migration backup fails', () => {
+  it('refuses boot (73/74) and leaves the schema untouched when the pre-migration backup cannot be written', () => {
     const dir = mkdtempSync(join(tmpdir(), 'gmt-boot-'));
     const dbPath = pendingDb(dir);
     writeFileSync(join(dir, 'backups'), 'a file where the backups directory should be');
     const r = boot(dbPath);
-    expect(r.status).toBe(74);
+    // why: the backups directory exists as a file, so the routine cannot write there; the plan
+    // assigns an unwritable backups directory to 73, a backup that starts and fails to 74.
+    expect([73, 74]).toContain(r.status);
     expect(`${r.stdout}${r.stderr}`).toMatch(/backup/i);
     expect(tables(dbPath)).toEqual(['__drizzle_migrations']);
   });
 
-  it('refuses boot with a message naming the directory when /data is not writable', () => {
+  it('exits 73 with a message naming the directory when the data directory is not writable', () => {
     const dir = mkdtempSync(join(tmpdir(), 'gmt-boot-'));
     writeFileSync(join(dir, 'data'), 'a file, not a directory');
     const r = boot(join(dir, 'data', 'get-me-there.db'));
-    expect(r.status).not.toBe(0);
+    expect(r.status).toBe(73);
     expect(`${r.stdout}${r.stderr}`).toContain(join(dir, 'data'));
   });
 });
@@ -1801,7 +1845,8 @@ trust.
 
 Growth scales with cells (origins × destinations × window days × nights) and with runs per
 month. Expired cache rows and old cache-hit ledger rows are pruned daily; run history is
-kept, so a year of the $40 example is roughly 600 MB.
+kept, so a year of the $40 example is roughly 600 MB. Deleting a definition or an alert rule
+only marks it deleted: its runs, prices and alert events stay in the database and in History.
 
 **Docker Desktop (macOS, Windows):** keep the database on the named volume. Bind-mounting a
 host folder over `/data` goes through Docker Desktop's file-sharing layer, where SQLite's WAL
@@ -1848,13 +1893,18 @@ Every command-line entry point (the app itself, `pnpm smoke:live`, `pnpm record:
 | 3 | smoke test: the provider answered with no prices |
 | 64 | bad arguments (usage) |
 | 70 | refused because `NODE_ENV=test` |
-| 73 | migrations are pending but the pre-migration backup cannot be attempted |
+| 73 | the data directory or `<data dir>/backups` is not writable, or the pre-migration backup cannot be attempted |
 | 74 | the backup failed (boot or `scripts/backup.mjs`); migrations were not applied |
-| 75 | the database lock is held by another process |
+| 75 | the database lock is held by another running app or tool |
 | 78 | bad configuration; the message names every variable to fix |
 
 With `restart: unless-stopped`, an app that exits 73, 74 or 78 restarts and fails the same way
 until you fix the cause; `docker compose logs app` shows the message.
+
+On start the app waits up to 90 seconds for a lock left by a previous app process (logging its
+age); a lock that has gone stale is taken over, and a lock still being renewed by a second
+running app is refused with exit 75. A lock held by the smoke or record tool is waited on for
+60 seconds, then refused. The health check's 240-second start period covers these waits.
 
 ## 9. Local development
 

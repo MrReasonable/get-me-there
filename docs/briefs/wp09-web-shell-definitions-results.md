@@ -47,7 +47,7 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 - **§11 View D** — counts per stage × provider with the six buckets and "searched" beside; selected but not reached with reason; overrun and parity flags; error list with retry.
 - **§11 Providers** — capabilities, plan, usage vs caps with window bounds, the zero-cap message.
 - **§11 accessibility** — 375px layout; keyboard-operable table; visible focus; labelled controls; no colour-only meaning.
-- **§6.5** — all sorting and filtering client-side with the shared core functions, composing without refetch.
+- **§6.5** — all sorting and filtering client-side with the shared core functions, composing without refetch. Stale rows keep their place in the server's ranking and are labelled, never demoted; the `hideStale` filter is the operator's opt-in.
 - **§6.9** — basis switch with the reason; the search link labelled "search link, not a fare link" on every row whose booking is `none` (shown in every expanded row).
 - **§3** — the two label formats from `core` (`formatAgeFull`, `formatAgeCompact`); six coverage buckets; "itinerary-searched".
 - **§5.5** — the synthetic banner is data-driven; a negative test asserts its absence for real data.
@@ -126,6 +126,10 @@ export function formatAgeFull(a: EffectiveAge): string;
 export function formatAgeCompact(a: EffectiveAge): string;
 export function formatDuration(hours: number): string;
 
+// text/money.ts and constraints/labels.ts (WP2)
+export function formatPence(pence: number): string;   // en-GB grouping, throws on non-integer or negative; the single money formatter
+export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // plain-English labels
+
 // text/bannedWords.ts (WP0)
 export const BANNED_WORDS: readonly string[] = ['exhaustive', 'all combinations', 'every combination', 'live', 'bookable', 'guaranteed', 'real-time'];
 export const BANNED_WORD_ALLOWLIST: readonly string[] = ['smoke:live', 'lives in'];
@@ -143,7 +147,7 @@ From the plan's "API contract" (`apiContract`, every path under `/api`), the sha
 - `airports.ts`: `GET /api/airports?q=` → `airportsResponseSchema` `Array<{ iata, name, city, country, tz, metro: string | null }>`.
 - `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput plus `confirmedCostPence?: number`, the explicit confirmation from the create click); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits, runsPerMonth, perScope: Array<{ scope, estimated, cap, fits }> }`; `estimateSchema` `{ cells; perProvider: Array<{ providerId; stage; calls; planCalls; costMicroGbp; costPence; seconds; blocked: string | null }>; totalCalls; totalPlanCalls; totalCostMicroGbp; totalCostPence; seconds; assumptions; windowClamped; retryFactor }`; `POST /api/definitions/estimate` (unsaved body) and `POST /api/definitions/:id/estimate` → `estimateResponseSchema` `{ estimate: Estimate; budgetFit: BudgetFit }`; `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month; cachedRows; cellsInBand }> }>; calls; notes }`.
 - `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell, status, stage, reason, resumeAfter, trigger, startedAt, finishedAt, errorText, progress: Array<{ stage, providerId, buckets, total }>, budget: Usage[], estimate, ledger: { calls, costMicroGbp, costPence, tiles, cacheHits, perProvider }, parityBreak, overrun, disabledProviders }`; `startExecutionRequestSchema` `{ confirmCostPence?: number }`; `startExecutionResponseSchema` `{ executionId }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }` → `startExecutionResponseSchema`.
-- `results.ts`: `resultRowSchema` (fields as in the plan, including `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `otherOffers[].stale/ageHours`, `executionId`, `calendarPriceId`, `observationId`); `resultsResponseSchema` `{ rows; total; truncated; basis; basisReason; executions: ExecutionSummary[]; coverage: CoverageSummary; excludedByCurrentSpace; verificationProviderConfigured: boolean; cheapest: ResultRow | null }`; `coverageResponseSchema` `{ executionId; summary; perStage: Array<{ stage; providerId; buckets; total; requests: { calls; cacheHits; costMicroGbp; planCalls: number | null }; overrun; parityBreak }>; selectedNotReached: Array<{ cell: Cell; reason: string }>; errors: Array<{ cell; stage; providerId; reason; lastError; attempts; retryable }>; scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerified: (PriceCell & { cell: Cell; itineraryHash: string }) | null; cells: Array<{ cell: Cell; calendar: PriceCell; verifyAvailable: boolean }> }`.
+- `results.ts`: `resultRowSchema` (fields as in the plan, including `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `searchLink: { url; host; label } | null` (null for synthetic rows), `otherOffers[]` with `stale`, `ageHours`, `verdictClass` and `unverified`, `executionId`, `calendarPriceId`, `observationId`); `resultsResponseSchema` `{ rows; total; truncated; basis; basisReason; executions: ExecutionSummary[]; coverage: CoverageSummary; excludedByCurrentSpace; verificationProviderConfigured: boolean; cheapest: ResultRow | null }`; `coverageResponseSchema` `{ executionId; summary; perStage: Array<{ stage; providerId; buckets; total; requests: { calls; cacheHits; costMicroGbp; planCalls: number | null }; overrun; parityBreak }>; selectedNotReached: Array<{ cell: Cell; reason: 'not_run' | 'skipped:budget' }>; errors: Array<{ cell; stage; providerId; reason; lastError; attempts; retryable }>; scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerified: (PriceCell & { cell: Cell; itineraryHash: string }) | null; cells: Array<{ cell: Cell; calendar: PriceCell; verifyAvailable: boolean }> }`.
 - `system.ts`: `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`.
 
 Usage scope labels are WP8's `scopeLabel`: `execution-calls`, `execution-free-calls`, `execution-cost`, `global-month`, `provider-month:<id>`, `provider-lifetime:<id>`.
@@ -633,15 +637,13 @@ export function useNow(): IsoDateTime {
 `src/format.ts`:
 
 ```ts
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+import { formatPence } from '@gmt/core';
 
-/** Integer pence → "£412" or "£412.50". Spec §6.3: no float ever holds money, so this rejects one. */
-export function formatPence(pence: number): string {
-  if (!Number.isInteger(pence) || pence < 0) throw new RangeError(`pence must be a non-negative integer, got ${pence}`);
-  const pounds = Math.floor(pence / 100).toLocaleString('en-GB');
-  const rest = pence % 100;
-  return rest === 0 ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
-}
+// why: core's formatPence (src/text/money.ts: en-GB grouping, throws on non-integer or negative) is the
+// single money formatter for web and email; re-exported so components keep one import site.
+export { formatPence };
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 /** Integer micro-GBP → pence (rounded up, so a cost is never understated) → "£…". */
 export function formatMicroGbp(micro: number): string {
@@ -701,7 +703,7 @@ export function parsePoundsToPence(input: string): number | undefined {
 `src/copy.ts` (the whole catalogue; later tasks only import from it):
 
 ```ts
-import type { Cabin, ConstraintName, ExecutionStatus, ProviderId, SourceKind, Verdict, VerdictClass } from '@gmt/core';
+import { type Cabin, CONSTRAINT_LABELS, type ConstraintName, type ExecutionStatus, type ProviderId, type SourceKind, type Verdict, type VerdictClass } from '@gmt/core';
 
 /**
  * Every user-facing string of the web app. Spec §11: the banned-word list applies to all copy,
@@ -755,19 +757,16 @@ export const COPY = {
   classAria: (label: string) => `verdict class: ${label}`,
   basisName: { verified: 'itinerary-search basis', calendar: 'calendar basis' },
   basisSwitchLabel: 'Price basis',
-  constraint: {
-    cabin: 'cabin', maxStops: 'max stops', maxJourneyMinutes: 'max journey', minLayoverMinutes: 'min layover',
-    maxLayoverMinutes: 'max layover', noOvernightLayover: 'no overnight layover', departureWindowLocal: 'departure window',
-    arrivalWindowLocal: 'arrival window', noSelfTransfer: 'no self-transfer', noAirportChange: 'no airport change',
-    includeAirlines: 'airlines included', excludeAirlines: 'airlines excluded', cabinBagRequired: 'cabin bag',
-    checkedBagRequired: 'checked bag', minCheckedBags: 'min checked bags', maxPricePence: 'max price',
-  } satisfies Record<ConstraintName, string>,
+  // why: core's CONSTRAINT_LABELS is the one set of plain-English constraint names (web and email); kept
+  // under COPY so the catalogue test sweeps it for banned words like every other string.
+  constraint: CONSTRAINT_LABELS satisfies Record<ConstraintName, string>,
   verdictWord: { pass: 'pass', fail: 'fail', unverified: 'unverified' } satisfies Record<Verdict, string>,
   verdictGlyph: { pass: '✓', fail: '✗', unverified: '?' } satisfies Record<Verdict, string>,
   verdictAria: (constraint: string, verdict: string) => `${constraint}: ${verdict}`,
   verdictsHeading: 'Constraint verdicts',
   noVerdicts: 'No constraints evaluated for this row.',
   notApplied: (names: string) => `not applied: ${names}`,
+  unverifiedList: (names: string) => `unverified: ${names}`,
 
   // results table
   columns: {
@@ -868,6 +867,7 @@ export const COPY = {
   openOn: (host: string) => `open on ${host}`,
   continueOnForm: (host: string) => `continue on ${host} (sends a form)`,
   searchLinkLabel: 'search link, not a fare link',
+  noSearchLink: 'no search link',
   hostShown: (host: string) => `(${host})`,
   otherOffers: 'Other sellers for this itinerary',
   summary: 'Summary',
@@ -1174,8 +1174,9 @@ const SAMPLES: Record<string, unknown[]> = {
   ago: ['2h'],
   fetchedAgo: ['2h ago'],
   classAria: ['verified'],
-  verdictAria: ['arrival window', 'fail'],
-  notApplied: ['arrival window, max journey'],
+  verdictAria: ['arrival time window', 'fail'],
+  notApplied: ['arrival time window, maximum journey time'],
+  unverifiedList: ['checked bag'],
   sortBy: ['Price', 'ascending'],
   showDetails: ['JFK 14 Mar 2027 to 28 Mar 2027'],
   hideDetails: ['JFK 14 Mar 2027 to 28 Mar 2027'],
@@ -2828,7 +2829,7 @@ git add apps/web && git commit -m "wp09: status bar and per-view header"
 `test/views/results/expanded.test.tsx`:
 
 ```tsx
-import { asIata } from '@gmt/core';
+import { asIata, CONSTRAINT_LABELS } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -2848,8 +2849,9 @@ describe('verdicts: distinct text and ARIA for pass / fail / unverified (spec §
     render(failedRow());
     const list = screen.getByRole('list', { name: 'Constraint verdicts' });
     const items = within(list).getAllByRole('listitem');
-    expect(items.map((i) => i.getAttribute('aria-label'))).toEqual(['cabin: pass', 'arrival window: fail', 'checked bag: unverified']);
-    expect(items.map((i) => i.textContent)).toEqual(['✓ cabin: pass', '✗ arrival window: fail', '? checked bag: unverified']);
+    const L = CONSTRAINT_LABELS;
+    expect(items.map((i) => i.getAttribute('aria-label'))).toEqual([`${L.cabin}: pass`, `${L.arrivalWindowLocal}: fail`, `${L.checkedBagRequired}: unverified`]);
+    expect(items.map((i) => i.textContent)).toEqual([`✓ ${L.cabin}: pass`, `✗ ${L.arrivalWindowLocal}: fail`, `? ${L.checkedBagRequired}: unverified`]);
     expect(new Set(items.map((i) => i.className)).size).toBe(3);
   });
 });
@@ -2889,6 +2891,12 @@ describe('booking links (spec §5.2, §9 item 6)', () => {
     expect(search).toHaveAttribute('rel', 'noopener noreferrer');
     expect(search).toHaveAttribute('href', 'https://www.aviasales.com/search/LHR0204EWR16041');
     expect(screen.getByText('(www.aviasales.com)')).toBeInTheDocument();
+  });
+
+  it('a synthetic row has no search link and says so', () => {
+    render(calendarRow({ searchLink: null }));
+    expect(screen.getByText('no search link')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'search link, not a fare link' })).toBeNull();
   });
 
   it('a non-https URL, userinfo, or a host that disagrees with the stated host renders "no link"', () => {
@@ -2935,10 +2943,18 @@ describe('itinerary detail (spec §11 expanded row)', () => {
   });
 
   it('other sellers render through the provenance-checked price', () => {
-    render(verifiedRow({ otherOffers: [{ seller: 'Second Seller', pricePence: 42000, provenance: verifiedRow().provenance, booking: { kind: 'none' }, stale: false, ageHours: 5 }] }));
+    render(
+      verifiedRow({
+        otherOffers: [
+          { seller: 'Second Seller', pricePence: 42000, provenance: verifiedRow().provenance, booking: { kind: 'none' }, stale: false, ageHours: 5, verdictClass: 'partially-verified', unverified: ['checkedBagRequired'] },
+        ],
+      }),
+    );
     const others = screen.getByRole('region', { name: 'Other sellers for this itinerary' });
     expect(within(others).getByText('£420')).toBeInTheDocument();
     expect(within(others).getByText('Google Flights via SearchApi')).toBeInTheDocument();
+    expect(within(others).getByTestId('class-badge')).toHaveTextContent('partially verified');
+    expect(within(others).getByText(`unverified: ${CONSTRAINT_LABELS.checkedBagRequired}`)).toBeInTheDocument();
   });
 });
 
@@ -2946,7 +2962,8 @@ describe('calendar rows (spec §6.9)', () => {
   it('say there is no itinerary and name the constraints not applied', () => {
     render(calendarRow());
     expect(screen.getAllByText('calendar price, no itinerary')).toHaveLength(2);
-    expect(screen.getByText('not applied: arrival window, max journey, max stops')).toBeInTheDocument();
+    const L = CONSTRAINT_LABELS;
+    expect(screen.getByText(`not applied: ${L.arrivalWindowLocal}, ${L.maxJourneyMinutes}, ${L.maxStops}`)).toBeInTheDocument();
   });
 
   it('per-cell verify is offered only with a verification provider, and posts the cell', async () => {
@@ -3080,10 +3097,11 @@ export function BookingAction({ booking }: { booking: Booking }) {
   );
 }
 
-/** Spec §6.9: the provider search link, labelled so it is never mistaken for a fare link. */
-export function SearchLink({ link }: { link: { url: string; host: string; label: string } }) {
+/** Spec §6.9: the provider search link, labelled so it is never mistaken for a fare link; null for synthetic rows. */
+export function SearchLink({ link }: { link: { url: string; host: string; label: string } | null }) {
+  if (link === null) return <span>{COPY.noSearchLink}</span>;
   const u = safeHttpsUrl(link.url, link.host);
-  if (u === null) return null;
+  if (u === null) return <span>{COPY.noSearchLink}</span>;
   return (
     <span className="flex gap-1">
       <a href={u.href} target="_blank" rel="noopener noreferrer" className="underline">
@@ -3102,6 +3120,7 @@ import { effectiveAge, formatDuration } from '@gmt/core';
 import { useExecutionActions } from '../../api/queries.js';
 import type { ResultRow } from '../../api/types.js';
 import { BookingAction, SearchLink } from '../../components/BookingAction.js';
+import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { VerdictList } from '../../components/VerdictList.js';
@@ -3218,8 +3237,10 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
               <li key={`${o.seller}-${i}`} className="flex flex-wrap items-center gap-2">
                 <span>{COPY.seller(o.seller)}</span>
                 <PriceBoundary>
-                  <PriceCell pricePence={o.pricePence} provenance={o.provenance} calendar={false} stale={false} />
+                  <PriceCell pricePence={o.pricePence} provenance={o.provenance} calendar={false} stale={o.stale} />
                 </PriceBoundary>
+                <ClassBadge cls={o.verdictClass} />
+                {o.unverified.length > 0 ? <span>{COPY.unverifiedList(o.unverified.map((n) => COPY.constraint[n]).join(', '))}</span> : null}
                 <BookingAction booking={o.booking} />
               </li>
             ))}
@@ -3250,7 +3271,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results/expanded.test.tsx test/copy`
-Expected: PASS, 12 + 8 tests.
+Expected: PASS, 13 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3929,7 +3950,7 @@ Wire the view into `App.tsx`: replace the `view === 'results'` part of the WP9 p
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 9 + 12 + 8 tests.
+Expected: PASS, 9 + 13 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3953,6 +3974,7 @@ git add apps/web && git commit -m "wp09: View A table, two-line header, client-s
 `test/views/results/basisAndGap.test.tsx`:
 
 ```tsx
+import { CONSTRAINT_LABELS } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -3991,7 +4013,8 @@ describe('basis (spec §6.9)', () => {
       await screen.findByText('cheapest found £399 · EWR 2 Apr 2027–16 Apr 2027 (14n) · calendar basis · constraints not checked · Aviasales cache · 2h ago · ≤2d'),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /itinerary search not configured$/ })).toBeInTheDocument();
-    expect(screen.getByText('not applied: arrival window, max journey, max stops')).toBeInTheDocument();
+    const L = CONSTRAINT_LABELS;
+    expect(screen.getByText(`not applied: ${L.arrivalWindowLocal}, ${L.maxJourneyMinutes}, ${L.maxStops}`)).toBeInTheDocument();
     expect(screen.getByText('onward leg not included')).toBeInTheDocument();
   });
 });
@@ -4196,7 +4219,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 4 + 9 + 12 + 8 tests.
+Expected: PASS, 4 + 9 + 13 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4219,6 +4242,7 @@ git add apps/web && git commit -m "wp09: basis switch and calendar-gap banner wi
 `test/views/coverage.test.tsx`:
 
 ```tsx
+import { asIsoDate } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -4268,6 +4292,17 @@ describe('View D (spec §11, §6.6)', () => {
   it('selected but not reached, with the reason', async () => {
     renderWithProviders(<CoverageView definition={definition()} />);
     const list = await screen.findByRole('list', { name: 'Selected but not reached' });
+    expect(within(list).getByText('LHR → JFK 20 Mar 2027 to 1 Apr 2027: skipped: budget')).toBeInTheDocument();
+  });
+
+  it('maps both selected-but-not-reached reasons to words', async () => {
+    const base = coverageResponse();
+    const first = base.selectedNotReached[0];
+    if (first === undefined) throw new Error('fixture');
+    server.use(http.get(`${API}/definitions/:id/coverage`, () => HttpResponse.json({ ...base, selectedNotReached: [first, { ...first, cell: { ...first.cell, departureDate: asIsoDate('2027-03-22') }, reason: 'not_run' }] })));
+    renderWithProviders(<CoverageView definition={definition()} />);
+    const list = await screen.findByRole('list', { name: 'Selected but not reached' });
+    expect(within(list).getByText('LHR → JFK 22 Mar 2027 to 1 Apr 2027: not run')).toBeInTheDocument();
     expect(within(list).getByText('LHR → JFK 20 Mar 2027 to 1 Apr 2027: skipped: budget')).toBeInTheDocument();
   });
 
@@ -4331,7 +4366,8 @@ import { useSearchParams } from '../../state/urlState.js';
 const BUCKETS = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run'] as const;
 
 const cellText = (c: CellKey) => COPY.cellLabel(c.origin, c.destination, formatIsoDate(c.departureDate), formatIsoDate(c.returnDate));
-const reasonText = (r: string) => (r === 'skipped:budget' ? COPY.reasonBudget : r === 'not_run' ? COPY.reasonNotRun : r);
+/** The two reasons the contract allows (`'not_run' | 'skipped:budget'`), each in words. */
+const reasonText = (r: 'not_run' | 'skipped:budget') => (r === 'skipped:budget' ? COPY.reasonBudget : COPY.reasonNotRun);
 
 /** View D (spec §11): per stage × provider counts, estimate vs ledger, selected-not-reached, flags, errors with retry. */
 export function CoverageView({ definition }: { definition: DefinitionResponse }) {
@@ -4434,7 +4470,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/coverage.test.tsx test/copy`
-Expected: PASS, 7 + 8 tests.
+Expected: PASS, 8 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4616,6 +4652,7 @@ git add apps/web && git commit -m "wp09: Providers view with capabilities, plan,
 `test/views/definitions/form.test.tsx`:
 
 ```tsx
+import { CONSTRAINT_LABELS } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -4641,9 +4678,9 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(valueOf('Max nights')).toBe('21');
     expect(valueOf('Cabin')).toBe('economy');
     await user.click(screen.getByText('Advanced: constraints and policy'));
-    expect(valueOf('max journey')).toBe('1500');
-    expect(valueOf('arrival window from')).toBe('06:00');
-    expect(valueOf('arrival window to')).toBe('23:00');
+    expect(valueOf(CONSTRAINT_LABELS.maxJourneyMinutes)).toBe('1500');
+    expect(valueOf(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('06:00');
+    expect(valueOf(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`)).toBe('23:00');
     expect(valueOf('Max cells per run')).toBe('10');
     expect(valueOf('Top N by discovery price')).toBe('10');
     expect(valueOf('Outbounds expanded per cell')).toBe('2');
@@ -6001,7 +6038,7 @@ Run from the repository root, in order; each must give the stated outcome.
 1. `pnpm install --frozen-lockfile` → exits 0 (the lockfile includes `msw`, `@testing-library/dom` and `zod` for `@gmt/web`).
 2. `pnpm lint:fix && pnpm lint` → `biome check` reports no errors (format and organised imports applied).
 3. `pnpm --filter @gmt/web typecheck` → exits 0. `pnpm -r typecheck` → exits 0.
-4. `pnpm --filter @gmt/web test` → every web test passes (Tasks 9.1–9.14: 5 + 8 + 6 + 7 + 6 + 7 + 12 + 9 + 4 + 7 + 3 + 8 + 9 + 8 = 99 tests, none skipped) and the coverage report shows **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` with no threshold error.
+4. `pnpm --filter @gmt/web test` → every web test passes (Tasks 9.1–9.14: 5 + 8 + 6 + 7 + 6 + 7 + 13 + 9 + 4 + 8 + 3 + 8 + 9 + 8 = 101 tests, none skipped) and the coverage report shows **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` with no threshold error.
 5. `pnpm test` → every package green with its thresholds.
 6. `node scripts/check-boundaries.mjs` → exits 0; `@gmt/web` imports no workspace package except `@gmt/core`.
 7. `pnpm --filter @gmt/web build` → exits 0 and writes `apps/web/dist/index.html` plus hashed assets under `apps/web/dist/assets/`.
@@ -6017,7 +6054,7 @@ None requires the operator's judgement. The contract gaps of the first draft (ai
 
 ### Remaining mismatches (spec, plan, brief; neither spec nor plan edited)
 
-Round-2 pins (plan commit 790d1ea, decision 14) closed the confirmation field (`confirmedCostPence?` on create and update), the row key (`resultRowKey`, used by `bandCheapest` and `?row=`), the calendar-gap price's provenance (`cheapestVerified` is a PriceCell) and budgetFit before the create click (`{ estimate, budgetFit }` from both estimate routes). WP2's brief now uses the plan's `ResultFilters` names.
+Round-3 pins (decision 15, spec rev 11) are applied: core's `formatPence` (re-exported by `src/format.ts`), `CONSTRAINT_LABELS` for constraint names, nullable search links ("no search link"), class and unverified names on other sellers, the two `selectedNotReached` reasons, stale rows never demoted. Round-2 pins (plan commit 790d1ea, decision 14) closed the confirmation field (`confirmedCostPence?` on create and update), the row key (`resultRowKey`, used by `bandCheapest` and `?row=`), the calendar-gap price's provenance (`cheapestVerified` is a PriceCell) and budgetFit before the create click (`{ estimate, budgetFit }` from both estimate routes). WP2's brief now uses the plan's `ResultFilters` names.
 
 - **R6** WP12 depends on WP9 but owns `docs/examples/london-new-york.json`, which WP9 imports; WP9 writes it with WP12's content only when absent, and WP12 owns its final content and the docs test.
 - **R7** `docs/briefs/wp08-api.md` (Task 8 definitions routes) still says "the confirmation itself is never written by these routes", which contradicts the plan's `confirmedCostPence?` on create and update that this brief's create click and re-confirmation send. WP8's brief needs the same round-2 pin.

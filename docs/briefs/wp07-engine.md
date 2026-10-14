@@ -66,10 +66,11 @@ export const isoDateSchema: z.ZodType<IsoDate, string>;    // regex + real calen
 export const isoMonthSchema: z.ZodType<IsoMonth, string>;
 export const isoDateTimeSchema: z.ZodType<IsoDateTime, string>; // /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/ and Date.parse round-trips
 export function isRealDate(y: number, m: number, d: number): boolean;
-export function asIata(s: string): Iata;           // throws on mismatch; tests and seeds only
+export function asIata(s: string): Iata;           // throws on mismatch. The as* helpers are the ONLY brand mint sites in the repository (production and tests); no `as <Brand>` anywhere else
 export function asIsoDate(s: string): IsoDate;
 export function asIsoMonth(s: string): IsoMonth;
 export function asIsoDateTime(s: string): IsoDateTime;
+export function isoDateTimeOfEpochMs(ms: number): IsoDateTime;   // new Date(ms).toISOString(), minted
 ```
 
 #### Provenance and shared enums (`types/provenance.ts`, WP0)
@@ -189,6 +190,7 @@ export interface BudgetGuard {
   reserve(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; costMicroGbp: number; httpAttempt: number; endpointPath: string }): Reservation;
   recordCacheHit(p: { providerId: ProviderId; executionId: string | null; tileIndex: number | null; endpointPath: string }): void;
   usage(scope: BudgetScope): Usage;
+  recentCalls(providerId: ProviderId, since: IsoDateTime): number;   // upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart
 }
 // DiscoveryQuery stays per (origin, destination) pair. Travelpayouts queries by the origin's metro code when the airports table maps it to one (rows filtered to the pair by origin_airport); identical metro requests from other pairs are answered by the response cache inside the TTL, so a definition whose origins share a metro costs D × M upstream calls.
 // A provider whose `cabins` excludes the definition's cabin is not called at all: the engine marks every cell for that provider and stage no_data with reason 'cabin-not-offered' (spec rev 10).
@@ -219,8 +221,8 @@ export function londonDateOf(instant: IsoDateTime): IsoDate;
 #### Notifier port (`ports/notifier.ts`, WP0)
 
 ```ts
-export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string }; rowKey: string /* resultRowKey, for the app link */ }
-export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string } | null /* null for synthetic rows */; rowKey: string /* resultRowKey, for the app link */ }
+export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number /* firings beyond the top 10 */; newItems: DigestItem[]; newRestCount: number /* new cells beyond the top 10 */; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
 export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'provider_capped' | 'parity_break' | 'alerts_calendar_only' | 'crash_loop';
 export interface OperatorMessage { kind: OperatorMessageKind; executionId: string | null; definitionId: string; subject: string; body: string }
 export interface Notifier { id: string; send(msg: { kind: 'digest'; digest: AlertDigest; subject: string; body: string } | { kind: 'operator'; message: OperatorMessage }): Promise<{ ok: boolean; detail?: string }> }
@@ -235,7 +237,7 @@ export interface AlertRule { id: string; definitionId: string; type: AlertRuleTy
 export type AlertRuleInput = Omit<AlertRule, 'id'>;
 export interface AlertEvent { id: number; ruleId: string; identityKey: string; observationId: number | null; calendarPriceId: number | null; dedupKey: string; firedAt: IsoDateTime; status: 'sent' | 'failed' | 'suppressed'; reason: string | null; payload: unknown }
 export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
-export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
+export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; fetchedByExecutionId: string; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };   // evaluateAlertRules refuses candidates whose fetchedByExecutionId ≠ ctx.executionId (reused rows)
 export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
 export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean; suppressed: { reason: string } | null }   // evaluateAlertRules returns suppressed firings too; the runner records them with status 'suppressed' and the digest excludes them
 export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
@@ -263,7 +265,7 @@ As in Task 0.6, plus `export const BANNED_WORD_ALLOWLIST: readonly string[] = ['
 
 ```ts
 // client.ts (WP0)
-export interface Db { raw: BetterSqlite3.Database; drizzle: BetterSQLite3Database; transaction<T>(fn: () => T): T; close(): void }
+export interface Db { raw: BetterSqlite3.Database; drizzle: BetterSQLite3Database; transaction<T>(fn: () => T extends Promise<unknown> ? never : T): T; immediateTransaction<T>(fn: () => T extends Promise<unknown> ? never : T): T /* BEGIN IMMEDIATE, same Promise guard */; close(): void }
 export function openDatabase(path: string): Db;
 export function pendingMigrations(db: Db, migrationsDir: string): string[];      // migrate.ts (WP0): names of unapplied migration files
 export function applyMigrations(db: Db, migrationsDir: string): { applied: string[] };
@@ -275,26 +277,26 @@ export interface Airport { iata: Iata; icao: string | null; name: string; city: 
 export interface AirportsDataset { version: string; airports: Array<Omit<Airport, 'source' | 'datasetVersion'>>; metros: Record<string, string[]> /* metro → airports, from the vendored attributed list */ }
 export class AirportsRepo { exists(iata): boolean; get(iata): Airport | null; search(q: string, limit: number): Airport[]; metroOf(iata): string | null; airportsOfMetro(code: string): Iata[]; sharedMetro(iatas: Iata[]): string | null; count(): number; upsertAll(dataset: AirportsDataset): void; datasetVersion(): string | null; tzOf(iata): string | null }
 export class FxRepo { rateNano(date: IsoDate, currency: string): number | null; latest(currency: string, maxAgeDays: number, today: IsoDate): { rateNano: number; date: IsoDate; source: string } | null; upsert(rows: Array<{ date: IsoDate; currency: string; rateNano: number; source: string }>): void }
-export class DefinitionsRepo { create(input: DefinitionInput): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
+export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
 export type ExecutionCreateInput = { definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; estimate: Estimate | null; trigger: Execution['trigger']; status: 'pending' | 'running' | ExecutionStatus & `skipped_${string}` }
 export type ExecutionPatch = Partial<Pick<Execution, 'stage' | 'resumeAfter' | 'errorText' | 'startedAt' | 'finishedAt' | 'cancelRequested' | 'estimate' | 'snapshot'>>
 export class ExecutionsRepo { create(input: ExecutionCreateInput): Execution; get(id): Execution | null; listForDefinition(definitionId, opts: { limit: number; includeChildren: boolean }): Execution[]; listByStatus(statuses: ExecutionStatus[]): Execution[]; activeParent(definitionId): Execution | null; activeChild(definitionId, cell: CellKey): Execution | null; latestCompleted(definitionId): Execution | null; claimResume(id): boolean; setStatus(id, status: ExecutionStatus, patch?: ExecutionPatch): void; patch(id, patch: ExecutionPatch): void; requestCancel(id): void; bootSweep(bootAt: IsoDateTime): { interrupted: string[] }; incrementAutoResume(id): number; resetAutoResume(id): void; lastScheduledFiring(definitionId): IsoDateTime | null }
 export interface TileWrite { tileIndex: number; cells: CellKey[]; prices: CalendarPriceInsert[]; outcomes: Array<Pick<CellOutcome, 'origin' | 'destination' | 'departureDate' | 'returnDate' | 'status' | 'reason' | 'lastError' | 'fetchedAt' | 'minPence' | 'cabin' | 'pointOfSale' | 'sourceKind'>>; discards: number }
 export interface CalendarPriceInsert { providerId; sourceKind; cabin; cell: CellKey; pricePence; priceNativeMinor; currencyNative; fx: FxInfo; pointOfSale; fetchedAt; providerObservedAt: IsoDateTime | null; maxAgeHours: number | null; vendorLink: string | null; reusedFromExecutionId: string | null }
 export interface CalendarPriceRow extends CalendarPriceInsert { id: number; executionId: string; provenance: Provenance }
-export interface VerifiedCellWrite { cell: CellKey; outcome: TileWrite['outcomes'][number]; itineraries: Array<{ itinerary: NormalisedItinerary; offers: Array<{ offer: Offer; observation: ObservationFields & { provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean } }> }>; bestObservationSelector: 'cheapest-verified-or-partial' }
+export interface VerifiedCellWrite { cell: CellKey; outcome: TileWrite['outcomes'][number]; itineraries: Array<{ itinerary: NormalisedItinerary; offers: Array<{ offer: Offer; observation: ObservationFields & { provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean } }> }> }   // best_observation_id = the cheapest observation written; the write applies the §6.6 monotone merge and never downgrades priced to empty
 export interface ReusedCopy { cell: CellKey; outcome: CellOutcome; price: CalendarPriceRow | null }
 export class CellsRepo { seed(executionId, cells: Cell[], discoveryProviders: ProviderId[]): void; seedVerification(executionId, selected: Array<{ cell: CellKey; reason: SelectionReason }>, allCells: CellKey[], verificationProviders: ProviderId[]): void; outcomes(executionId, filter?: { stage?: Stage; providerId?: ProviderId; cells?: CellKey[] }): CellOutcome[]; resumable(executionId, stage, providerId, manual: boolean): CellKey[]; markDeparted(executionId, today: IsoDate): number; markNoData(executionId, stage, providerId, reason: NoDataReason): number; writeTile(executionId, providerId, w: TileWrite): void; writeTileError(executionId, providerId, cells: CellKey[], reason: string, lastError: string | null): void; writeVerifiedCell(executionId, providerId, w: VerifiedCellWrite): void; setOutcome(executionId, cell, stage, providerId, patch: Partial<CellOutcome> & { incrementAttempts?: boolean }): void; setOutcomesForProvider(executionId, stage, providerId, from: CellOutcomeStatus[], to: { status; reason }): number; copyReused(executionId, providerId, copies: ReusedCopy[]): void; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets: Buckets; total }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }>; hasVerificationOutcomes(executionId): boolean }
-export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[] /* reused excluded */; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells: CellKey[], newerThan: IsoDateTime): ReusedCopy[]; supersedeReused(executionId, providerId, cell): void; history(origin, destination, cabin): Array<{ providerId; points: HistoryPoint[] }>; belowVerified(definitionId, cabin, space, thresholdPence): CalendarPriceRow[] }
+export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[] /* reused excluded */; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells: CellKey[], newerThan: IsoDateTime): ReusedCopy[]; supersedeReused(executionId, providerId, cell): void; history(origin, destination, cabin, opts?: { definitionId?: string }): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> /* per provider, one point per execution fetch: the minimum across the pair's cells (within the definition's resolved space when given); reused rows excluded */; belowVerified(definitionId, cabin, space, thresholdPence): CalendarPriceRow[] }
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
-export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; upsertOffer(offer: Offer): number; insertObservation(obs: Omit<Observation, 'id'>): number; get(hash): (NormalisedItinerary & { firstSeenAt }) | null; observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell): CellOutcome | null; bestObservationForCell(executionId, cell): number | null }
-export class LedgerRepo { countsFor(executionId): { calls: number; costMicroGbp: number; tiles: number; cacheHits: number; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> }; firstAttemptTiles(executionId, providerId): number; sweepPending(olderThan: IsoDateTime): number; pruneCacheHits(olderThan: IsoDateTime, providerIds: ProviderId[]): number }
-export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; delete(id): void; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
+export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; upsertOffer(offer: Offer): number; insertObservation(obs: Omit<Observation, 'id'>): number; get(hash): (NormalisedItinerary & { firstSeenAt }) | null; observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell, cabin: Cabin): CellOutcome | null; bestObservationForCell(executionId, cell): number | null }
+export class LedgerRepo { countsFor(executionId): { calls: number /* upstream attempts, not cap usage */; costMicroGbp: number; tiles: number /* first-attempt upstream rows only; parity = tiles + cacheHits */; cacheHits: number; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> }; firstAttemptTiles(executionId, providerId): number; sweepPending(olderThan: IsoDateTime): number; pruneCacheHits(olderThan: IsoDateTime, providerIds: ProviderId[]): number }
+export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; softDelete(id): void /* alert_rules.deleted_at; events are kept */; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
 export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean; record(kind, executionId, definitionId, status: 'sent' | 'failed'): void }
-export class RoutePriceHistoryRepo { upsert(rows: Array<{ origin; destination; cabin: Cabin | 'unknown'; providerId; date: IsoDate; lowestPricePence: number; fetchedAt: IsoDateTime }>): void; series(origin, destination, providerId): RouteSeriesPoint[] }
-export interface BudgetConfig { providers: Partial<Record<ProviderId, ProviderLimits & { billable: boolean; trialUsed: number }>>; spend: Config['spend']; fixtureCostMicroGbp: number }   // trialUsed seeds a lifetime window: effective cap = monthlyCallCap − trialUsed
+export class RoutePriceHistoryRepo { upsert(rows: Array<{ origin; destination; cabin: Cabin | 'unknown'; providerId; date: IsoDate; lowestPricePence: number; fetchedAt: IsoDateTime }>): void; series(origin, destination, providerId, cabin: Cabin | 'unknown'): RouteSeriesPoint[] }
+export interface BudgetConfig { providers: Partial<Record<ProviderId, ProviderLimits & { billable: boolean; trialUsed: number }>>; spend: Config['spend'] }   // trialUsed seeds a lifetime window: effective cap = monthlyCallCap − trialUsed; the fixture cost is providers.fixture.costPerCallMicroGbp
 export function budgetConfigFromConfig(c: Config): BudgetConfig;
-export class SqliteBudgetGuard implements BudgetGuard { constructor(db: Db, config: BudgetConfig, clock: Clock) }   // execution caps read from the execution's snapshot budget
+export class SqliteBudgetGuard implements BudgetGuard { constructor(db: Db, config: BudgetConfig, clock: Clock) }   // execution caps read from the execution's snapshot budget; reserve refuses a costMicroGbp that differs from the provider's configured per-call rate (rule 'cost'); predicates and the pending insert run inside Db.immediateTransaction
 export class SqliteResponseCache implements ResponseCache { constructor(db: Db, clock: Clock) }
 export class AppLock { constructor(db: Db, holder: 'app' | 'tool', clock: Clock, log: Logger); acquire(opts: { waitMs: number }): 'acquired' | 'refused'; heartbeat(): void; release(): void; static inspect(db: Db): { holder; heartbeatAt; acquiredAt } | null }
 export function seedAirports(db: Db, dataset: AirportsDataset): { inserted: number; datasetVersion: string };
@@ -304,15 +306,17 @@ export function loadAirportsDataset(dir: string): AirportsDataset;   // reads ai
 export function backupDatabase(dbPath: string, backupsDir: string, opts: { keep: number; clock: Clock }): { file: string };   // src/backup.ts (WP3): VACUUM INTO a timestamped file, PRAGMA integrity_check on the output, refuse an existing target, prune to `keep`; throws on any failure. scripts/backup.mjs (WP12) is a CLI wrapper; both bootstraps call it before buildPorts when pendingMigrations() is non-empty and the DB file exists.
 ```
 
-Schema additions over spec §7 (rev 10 records them): `search_definitions.destination_notes_json`, `search_cells.discovery_reason`, `search_cells.verification_reason`, `search_cells.verification_min_pence`, `search_executions.trigger`, `search_executions.created_at`, `itineraries.layovers_json`, `fx_rates.source`, `operator_notifications.definition_id`, `provider_cache.provider_id NULL`, `route_price_history.cabin` allows `'unknown'`. `search_cells.best_observation_id` is the cheapest observation written for the cell (verdicts are computed at read time, so "cheapest verified" is a read-time query, never this column).
+Schema additions over spec §7 (rev 10 records them): `search_definitions.destination_notes_json`, `search_cells.discovery_reason`, `search_cells.verification_reason`, `search_cells.verification_min_pence`, `search_executions.trigger`, `search_executions.created_at`, `itineraries.layovers_json`, `fx_rates.source`, `operator_notifications.definition_id`, `provider_cache.provider_id NULL`, `route_price_history.cabin` allows `'unknown'`, `alert_rules.deleted_at`; the `providers` table is removed (spec rev 11; provider state comes from config); `cell_outcomes` carries the provider⇔kind CHECK and the provenance CHECK for priced/empty rows. `search_cells.best_observation_id` is the cheapest observation written for the cell (verdicts are computed at read time, so "cheapest verified" is a read-time query, never this column).
 
 #### http-kit (`@gmt/providers` `http/httpKit.ts`, WP4)
 
 ```ts
-export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never'; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; classifyError?: (status: number, body: unknown, ledgerAtCap: boolean) => ProviderError }
-export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
+export interface ResponseFacts { status: number; body: unknown /* scrubbed */; headers: Headers; providerId: ProviderId | 'fx'; endpointPath: string }
+export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never' /* in http-kit: governs timeout retryability only; the ledger's billable flag is WP3's */; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; rateLimitFallbackWaitSeconds?: number /* wait for a 429 without Retry-After; absent → the first such 429 is non-retryable rate-limit with retryAfterSeconds = seconds to the hourly refresh */; classifyError?: (f: ResponseFacts) => ProviderError | undefined /* undefined → the default spec §5.2 table; http-kit applies Retry-After, limiter-timeout and scrubbing to whichever error results */ }
+export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[] /* non-empty whenever a real provider is configured */; syntheticAllowed: boolean /* required true for inProcessHosts or limits.fixture */; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
 // inProcessHosts: wiring passes { 'fixture.local': fixtureRouter(root).fetch } only under syntheticAllowed; http-kit dispatches requests whose hostname is a key here to that function instead of globalThis.fetch. Every other step of the pipeline (limiter, reserve, finalise, cache, recorder) still runs. This is the only transport seam and it is gated by the synthetic rule.
-export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean }
+export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number; accept?: (body: unknown) => boolean } | 'never' /* accept vetoes caching a body the adapter cannot parse; null or empty bodies are never cached */; signal: AbortSignal; recordFixtures: boolean }
+// In-flight dedup: a joiner records its own recordCacheHit row (own executionId/tileIndex; not for fx), is raced against its own signal, and re-issues the request when the shared call ends in the leader's AbortedError or a BudgetExceeded on another execution's scope.
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
 export function createHttpKit(deps: HttpKitDeps): HttpKit;
@@ -325,11 +329,11 @@ export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string;
 export function scrubSecrets<T>(value: T, secrets: Secret[]): T;
 export function stripUrl(url: string): string;
 export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 over method + credential-free URL (query kept) + scrubbed headers + body only; never executionId or tileIndex, so sibling pairs share Travelpayouts metro responses
-export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* endpoint path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url)
+export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; endpoints: Record<string /* '<path>' or '<path>?engine=<value>' for vendors that multiplex engines on one path */, { names: string[] /* ascending */; values: Record<string, string[] | 'any'> }>; contentSha256: string }   // src/params/allowlist.ts (WP4): the type, loadParamsAllowlist(path), assertRequestAllowed(allowlist, endpointPath, url) picks the most specific matching key
 // RecordedFixture.request.headers DROPS credential headers entirely (Authorization, X-Access-Token) rather than scrubbing their values, so the secret scan's header-name rule passes.
 export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
-export function fixtureRouter(root: string): Hono;                      // src/fixture/router.ts; scenario control via POST /__fixture/scenario and the x-fixture-scenario header (documented in the WP4 brief)
-// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root): RequestHandler[]; replayHandlers(recordedRoot): RequestHandler[] (serves fixtures/recorded by matching method, path and credential-free query, reversing placeholders); loadRecorded(root, providerId, endpointPath): RecordedFixture[]. msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
+export function fixtureRouter(root: string, gate: SyntheticGateInput): Hono;   // '@gmt/providers/fixture' subpath (not the main barrel); throws unless syntheticAllowed(gate); scenario control via POST /__fixture/scenario, the x-fixture-scenario header, and hold/release (POST /__fixture/release) so WP7 needs no second request layer; paged-calendar and chained-verification options exist for layer-A parity tests
+// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root, gate): RequestHandler[]; replayHandlers(recordedRoot, opts?: { recordedBy?: string }): { handlers: RequestHandler[]; misses(): string[] } (serves fixtures/recorded by matching method, path and credential-free query with placeholders as recorded; every consumer asserts misses() is empty in afterEach); loadRecorded(root, providerId, endpointPath): RecordedFixture[]; withContentHash (test and record-tool use only). msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
 ```
 
 Adapter constructors and exports (WP5, WP6):
@@ -354,21 +358,24 @@ export interface AirportLookup { exists(iata: Iata): boolean; metroOf(iata: Iata
 export type ValidationResult = { ok: true; resolved: ResolvedSpace; clamped: boolean; notes: string[] } | { ok: false; errors: Array<{ field: string; message: string }> };
 export function validateSearchSpace(def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'>, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
 export function rollUp(outcomes: CellOutcome[]): RollUp; export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome;
-export function sixBuckets(outcomes: CellOutcome[]): Buckets /* one stage, one provider */; export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: string }>;
-export function selectCandidates(policy: VerificationPolicy, cells: Cell[], discovery: Map<string, RollUp>, hasDiscoveryProvider: boolean): Array<{ cell: CellKey; reason: SelectionReason }>;
+export function sixBuckets(outcomes: CellOutcome[]): Buckets /* one stage, one provider, one execution; the reference oracle WP3's SQL counts are asserted against */; export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: 'not_run' | 'skipped:budget' }>;   // throws when a selected cell has no verification rows
+export function selectCandidates(policy: VerificationPolicy, cells: Cell[], discovery: Map<string, RollUp>, hasDiscoveryProvider: boolean): Array<{ cell: CellKey; reason: SelectionReason }>;   // throws RangeError unless maxCells/topN/perDepartureDateBest are non-negative integers and deduplicated in-space alwaysInclude ≤ maxCells; the stride walks only cells not already chosen
+// rollUp rules settled: a priced roll-up carries 'partial-expansion' when any priced input has it; no_data outcomes with reason 'cabin-not-offered' are ignored whenever any other outcome exists and the roll-up is no_data:cabin-not-offered only when all are; error carries the reason when all agree, else 'mixed'; mergeWithinProvider keeps every field with the input that supplies the minimum price and throws on a priced input without minPence; WP3's write transactions call rollUp and mergeWithinProvider (no SQL copy)
 // WP2 (normalise/, constraints/, results/, alerts/)
 export function canonicalCarrier(s: string): string; export function canonicalFlightNumber(s: string | number, carrier?: string): number;
 export function departLocal(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): string; export function toIsoDateTime(input: string, timeKind: 'local' | 'utc' | 'offset', tz: string): IsoDateTime;
 export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;
 export const MINOR_EXPONENT: Record<string, number>; export const ECB_CURRENCIES: readonly string[]; export function toGbp(amountMinor: number, currency: string, rateNano: number): number;
-export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export const SEARCH_LINK_LABEL = 'search link, not a fare link'; export function validateVendorUrl(url: string, allowlist: string[]): Booking; export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string };
+export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export const SEARCH_LINK_LABEL = 'search link, not a fare link'; export function validateVendorUrl(url: string, allowlist: string[]): Booking /* https only, no userinfo, no port, host equal to or subdomain of an entry, ≤ 2048 chars; POST postData ≤ 4096 */; export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string } | null /* null for 'fixture' */;
+export function formatPence(pence: number): string;   // src/text/money.ts: en-GB grouping, throws on non-integer or negative; the single money formatter (web and email import it)
+export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // src/constraints/labels.ts: plain-English labels; completeness test
 export interface NormaliseDeps { providerId: ProviderId; cabin: Cabin; tzOf(iata: Iata): string | null; rateFor(currency: string): { rateNano: number; rateDate: IsoDate; source: string } | null }
 export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps): { ok: true; itinerary: NormalisedItinerary; offer: Offer; observation: ObservationFields } | { ok: false; error: NormalisationError };
 export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts; export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
 export type ResultRow = z.infer<typeof resultRowSchema>; export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted'; export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[]; maxStops?: number; carriers?: string[]; destination?: Iata[]; maxPricePence?: number; nights?: { min: number; max: number }; hideStale?: boolean }
 export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string;   // itineraryHash, or `calendar:${calendarPriceId}`; the web's `?row=` parameter and email links use it
-export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* row key */>;
-export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
+export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow[] /* primary offer by class, then seen-in-latest, then price, then fresher age, then seller (code-unit compare) */; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[] /* class, seen-in-latest, price, age, seller; stale rows are labelled, never demoted */; export function sortRows(rows: ResultRow[], key: SortKey, dir: 'asc' | 'desc'): ResultRow[]; export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[]; export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string /* resultRowKey */> /* skips failed and notSeenInLatest rows; unchecked rows are eligible */;
+export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];   // settles each identity on its cheapest eligible candidate before judging; returns suppressed firings with `suppressed` set; within the cooldown the same identity fires again only when the new price is at least max(£10, 5%) below the last fired price (spec §6.8 rev 11)
 export function identityKey(rule: AlertRule, c: AlertCandidate): string; export function dedupKey(identityKey: string, pricePence: number): string; export function isSuppressed(f: Pick<Firing, 'identityKey' | 'dedupKey' | 'candidate'>, prior: PriorFiring[], cooldownHours: number, now: IsoDateTime): { suppressed: boolean; reason: string | null };
 export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] }): AlertDigest | null;   // null when no firing; top 10 + restCount
 ```
@@ -436,6 +443,7 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 11. The airports dataset ships with a separate attributed metro-code list (`packages/db/data/metros.json`, from Wikipedia's list of IATA metropolitan area codes, CC BY-SA 4.0, attribution file beside it). `SEARCHAPI_PLAN` `trial` keeps the lifetime window.
 12. React is 19 (spec §4 updated). `APP_BASE_URL` is added to config. Smoke and record are invoked from the host with curl against the loopback port; the image has no curl.
 13. Dispatch dependencies: WP5 and WP6 depend on 1, 2, 4, 4b; WP12 depends on 8 and 9 (its docs-equals-constant test); WP4b depends on 3 and 4.
+15. (Round 3, from the wave-1 brief reviews) `classifyError` returns `ProviderError | undefined` over `ResponseFacts`; the ledger-at-cap arm of the 429 rule is dropped (quota only via a recognised body); joiners of in-flight requests record cache-hit rows and own their abort; cache `accept` hook; `HttpKitDeps.syntheticAllowed`; `fixtureRouter(root, gate)` on the `@gmt/providers/fixture` subpath; `rateLimitFallbackWaitSeconds`; `BudgetGuard.recentCalls`; allowlist keys with an engine discriminator; `replayHandlers` with a miss log; the `@gmt/source` export condition; `tsconfig.test.json` everywhere; `test:tz` in core; WP3 depends on WP1 and calls core's roll-up (no SQL copy); `reserve` refuses a mismatched cost; `Db.immediateTransaction`; `bestObservationSelector` and `BudgetConfig.fixtureCostMicroGbp` removed; `history` is one point per execution fetch; `latestVerificationOutcomeForCell` and `series` take a cabin; alert rules soft-delete; the `providers` table is removed; `selectCandidates` throws above `maxCells`; the cabin-not-offered precedence and roll-up reason rules; `dedupByItinerary(rows, now)` by class first; stale rows never demoted; the minimum drop step inside the cooldown; `verdictClass` throws without a cabin; `CalendarCandidate.fetchedByExecutionId`; `newRestCount`; nullable search links for synthetic rows; `formatPence` and `CONSTRAINT_LABELS` in core; `otherOffers` carry class and unverified names; the as* helpers are the only brand mint sites; the per-provider secret binding and a CI commit-trailer rule are declined.
 14. (Round 2) `backupDatabase` lives in `@gmt/db` (WP3) so both bootstraps can call it before WP12 exists; `ParamsAllowlist` lives in `@gmt/providers` (WP4); the cache key never includes execution or tile ids; recorded headers drop credentials entirely; one exit-code table for every CLI; `DigestItem` carries segments, expiry and the row key; `Firing.suppressed`; `resultRowKey`; `cell-mismatch`; `confirmedCostPence` on create/update; estimate responses carry `budgetFit`; calendar-gap carries the verified price with provenance; alert events filter by definition; child budget inherits all but `maxCalls`; `provider_capped` and `crash_loop` notification kinds; `EngineOptions.providerConcurrency`; four schema columns and `best_observation_id` semantics; spec §6.1 signature and §5.4 silent cases settled (rev 10).
 
 ## 5. Interfaces produced
@@ -572,14 +580,12 @@ export default defineConfig({
  * fixture.local … through the real http-kit and the real db BudgetGuard with the fixture cost rule,
  * in-memory DB".
  *
- * Transport (plan decision 7): http-kit reaches `fixture.local` through its gated `inProcessHosts`
- * seam, answered by WP4's `fixtureRouter(defaultFixtureRoot())`. Scenario control is WP4's
- * `POST /__fixture/scenario` (`h.fixtureScenario(rules)`). In front of the router sits one thin
- * harness layer that counts every request, can hold a request until the test releases it (or the
- * request is aborted), and can answer by request ordinal — the rules WP4 matches on path and
- * params cannot say "the second calendar request", which the interrupt and sibling tests need.
- * Everything between the engine and the router (adapter, http-kit, limiter, reserve/finalise,
- * ledger) is real. msw is used only for frankfurter (Task 7.6).
+ * Transport (plan decisions 7 and 15): http-kit (`syntheticAllowed: true`) reaches `fixture.local`
+ * through its gated `inProcessHosts` seam, answered by WP4's `fixtureRouter(defaultFixtureRoot(), gate)`.
+ * Every control is WP4's: scenario rules (`POST /__fixture/scenario`, `h.fixtureScenario`), `hold`
+ * rules and `POST /__fixture/release` (`h.releaseHolds`). The harness only logs what reaches the
+ * router (`h.requests`). Everything between the engine and the router (adapter, http-kit, limiter,
+ * reserve/finalise, ledger) is real. msw is used only for frankfurter (Task 7.6).
  */
 import {
   type CellKey,
@@ -615,8 +621,8 @@ import {
   defaultFixtureRoot,
   fixtureHttpLimits,
   fixtureProvider,
-  fixtureRouter,
 } from '@gmt/providers';
+import { fixtureRouter } from '@gmt/providers/fixture';
 import { setupServer } from 'msw/node';
 import { fileURLToPath } from 'node:url';
 import { vi } from 'vitest';
@@ -673,27 +679,8 @@ export function capturingNotifier(operator: OperatorMessage[], digests: unknown[
   };
 }
 
-// --- harness-level request layer in front of the WP4 fixture router ---
+// --- request log (observation only: every control is WP4's scenario rules, hold and release) ---
 export interface FixtureRequest { kind: 'calendar' | 'itinerary' | 'other'; pair: string; ordinal: number; path: string; params: Record<string, string> }
-export type InjectedResponse = { status: number; json?: unknown; text?: string; headers?: Record<string, string> } | 'network-error' | 'hold';
-export interface Scenario { match: (r: FixtureRequest) => boolean; respond: InjectedResponse; times?: number }
-
-/**
- * Harness-injected responses, for the few cases WP4's rules cannot express (holding a request until
- * released). Error rows of the §8.1 table use WP4's own rules through `fixtureScenario` (FIXTURE_RULES).
- */
-export const RESPONSES = {
-  auth: { status: 401, json: { error: 'Invalid API key.' } },
-  quota: { status: 402, json: { error: 'Payment required.' } },
-  rateLimit: { status: 429, json: { error: 'Too many requests.' }, headers: { 'retry-after': '0' } },
-  upstream: { status: 503, json: { error: 'Service unavailable.' } },
-  badRequest: { status: 400, json: { error: 'synthetic bad request' } },
-  malformed: { status: 200, text: '{"synthetic":true,"entr' },
-  // why: 4000 s exceeds MAX_WAIT_SECONDS (3900 by default), so http-kit raises limiter-timeout (spec §5.3)
-  limiterTimeout: { status: 429, json: { error: 'Too many requests.' }, headers: { 'retry-after': '4000' } },
-  network: 'network-error',
-  hold: 'hold',
-} as const satisfies Record<string, InjectedResponse>;
 
 /** WP4 scenario rules for every §8.1 row (WP4 brief, "Which rule drives which spec §8.1 row"); `times` counts http-kit attempts. */
 export const FIXTURE_RULES = {
@@ -708,6 +695,8 @@ export const FIXTURE_RULES = {
   limiterTimeout: { kind: 'status', status: 429, headers: { 'retry-after': '4000' } },
   noReturnLegs: { kind: 'no-return-legs' },
   partial: { kind: 'partial', failedExpansions: 1 },
+  // why: plan "http-kit" fixtureRouter — a held request waits for POST /__fixture/release or its own abort
+  hold: { kind: 'hold' },
 } as const satisfies Record<string, FixtureRule['respond']>;
 
 /** One discovery tile of the base window: WP4 tiles start every 7 departure days from WINDOW.from. */
@@ -723,24 +712,6 @@ export function itineraryRule(respond: FixtureRule['respond'], times?: number): 
 export function fixtureRequestKey(url: URL): Omit<FixtureRequest, 'ordinal'> {
   const kind = url.pathname === '/calendar' ? 'calendar' : url.pathname === '/itinerary' ? 'itinerary' : 'other';
   return { kind, pair: `${url.searchParams.get('origin') ?? '?'}-${url.searchParams.get('destination') ?? '?'}`, path: url.pathname, params: Object.fromEntries(url.searchParams) };
-}
-
-interface Deferred { promise: Promise<void>; resolve: () => void }
-function deferred(): Deferred {
-  let resolve: () => void = () => undefined;
-  const promise = new Promise<void>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
-function abortedOf(signal: AbortSignal): Promise<true> {
-  if (signal.aborted) return Promise.resolve(true);
-  return new Promise((r) => signal.addEventListener('abort', () => r(true), { once: true }));
-}
-function injected(r: Exclude<InjectedResponse, 'hold'>): Response {
-  if (r === 'network-error') return Response.error();
-  const headers = { ...(r.text === undefined ? { 'content-type': 'application/json' } : {}), ...(r.headers ?? {}) };
-  return new Response(r.text ?? JSON.stringify(r.json ?? {}), { status: r.status, headers });
 }
 
 // --- definitions ---
@@ -814,9 +785,8 @@ export interface Harness {
   requests: FixtureRequest[];
   /** WP4 scenario control: POST /__fixture/scenario { rules } (replaces the rules). */
   fixtureScenario(rules: FixtureRule[]): Promise<void>;
-  /** Harness-level, ordinal-capable injection in front of the router. */
-  scenario(s: Scenario): void;
-  releaseHolds(): void;
+  /** WP4 hold control: POST /__fixture/release answers every held request normally. */
+  releaseHolds(): Promise<void>;
   onTileCommit(fn: (n: number, executionId: string) => void): void;
   beforeTileWrite(fn: (attempt: number, executionId: string) => void): void;
   onStageStart(stage: Stage, fn: (executionId: string) => void): void;
@@ -881,46 +851,39 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
   repos.airports.upsertAll(TEST_AIRPORTS);
 
   const fixtureHttp = { ...fixtureHttpLimits({ costPerCallMicroGbp: cost, maxWaitSeconds: config.maxWaitSeconds, requestTimeoutSeconds: config.requestTimeoutSeconds }), concurrency: opts.fixtureConcurrency ?? 4 };
-  // why: plan BudgetConfig; the fixture is billed at the test cost (spec §5.3 "fixture iff HTTP 200 at the configured test cost")
+  // why: plan BudgetConfig; the fixture is billed at providers.fixture.costPerCallMicroGbp (spec §5.3 "fixture iff HTTP 200 at the configured test cost")
   const budgetConfig: BudgetConfig = {
     spend: config.spend,
-    fixtureCostMicroGbp: cost,
     providers: {
-      fixture: { monthlyCallCap: opts.fixtureMonthlyCallCap ?? 50_000, window: 'month', billingDay: 1, ratePerMinute: fixtureHttp.ratePerMinute, ratePerHour: fixtureHttp.ratePerHour, concurrency: fixtureHttp.concurrency, cacheTtlHours: 0, costPerCallMicroGbp: cost, planFixedMicroGbp: 0, excludedFromSchedule: false, billable: true },
-      travelpayouts: { ...travelpayouts.limits, billable: false },
+      fixture: { monthlyCallCap: opts.fixtureMonthlyCallCap ?? 50_000, window: 'month', billingDay: 1, ratePerMinute: fixtureHttp.ratePerMinute, ratePerHour: fixtureHttp.ratePerHour, concurrency: fixtureHttp.concurrency, cacheTtlHours: 0, costPerCallMicroGbp: cost, planFixedMicroGbp: 0, excludedFromSchedule: false, billable: true, trialUsed: 0 },
+      travelpayouts: { ...travelpayouts.limits, billable: false, trialUsed: 0 },
     },
   };
   const budget = new SqliteBudgetGuard(db, budgetConfig, clock);
   const cache = new SqliteResponseCache(db, clock);
   const freeLimit = (hosts: string[]): ProviderHttpLimits => ({ hosts, ratePerMinute: 10_000, ratePerHour: 100_000, concurrency: 4, billable: 'never', costPerCallMicroGbp: 0, maxWaitSeconds: config.maxWaitSeconds, requestTimeoutSeconds: config.requestTimeoutSeconds });
 
-  // --- the fixture router behind a counting / holding / injecting layer ---
-  const router = fixtureRouter(defaultFixtureRoot());
+  // --- WP4's fixture router, in process; the log only observes (plan decision 15: no second request layer) ---
+  const router = fixtureRouter(defaultFixtureRoot(), config);
   const requests: FixtureRequest[] = [];
-  const scenarios: Array<Scenario & { used: number }> = [];
   const ordinals: Record<FixtureRequest['kind'], number> = { calendar: 0, itinerary: 0, other: 0 };
-  let holds = deferred();
-  const front = async (req: Request): Promise<Response> => {
+  const control = (path: string, body?: unknown) =>
+    router.fetch(new Request(`${FIXTURE_ORIGIN}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) }));
+  const observed = async (req: Request): Promise<Response> => {
     const key = fixtureRequestKey(new URL(req.url));
-    if (key.path === SCENARIO_PATH) return router.fetch(req);
-    ordinals[key.kind] += 1;
-    const r: FixtureRequest = { ...key, ordinal: ordinals[key.kind] };
-    requests.push(r);
-    const sc = scenarios.find((s) => s.used < (s.times ?? 1) && s.match(r));
-    if (sc !== undefined) {
-      sc.used += 1;
-      if (sc.respond !== 'hold') return injected(sc.respond);
-      const aborted = await Promise.race([holds.promise.then(() => false), abortedOf(req.signal)]);
-      if (aborted) return Response.error();
+    if (key.kind !== 'other') {
+      ordinals[key.kind] += 1;
+      requests.push({ ...key, ordinal: ordinals[key.kind] });
     }
     return router.fetch(req);
   };
 
   const http = createHttpKit({
     budget, cache, clock, log, secrets: [],
+    syntheticAllowed: true, // why: plan "http-kit" — required true for inProcessHosts and limits.fixture
     limits: { fixture: fixtureHttp, fx: freeLimit(['api.frankfurter.dev']), travelpayouts: freeLimit(['stub.local']) },
     // why: plan decision 7 — the only transport seam; the free stub of test/wrappers.ts answers on stub.local
-    inProcessHosts: { 'fixture.local': front, 'stub.local': async () => Response.json({}) },
+    inProcessHosts: { 'fixture.local': observed, 'stub.local': async () => Response.json({}) },
   });
   const fixture = fixtureProvider({ http, log, clock, config, costMicroGbp: cost });
   const providers = [opts.transformFixture ? opts.transformFixture(fixture) : fixture, ...(opts.extraProviders?.({ clock, log, http }) ?? [])];
@@ -966,15 +929,12 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
   return {
     deps, options, config, clock, db, repos, server, fixture, logs, notifications, digests, requests,
     fixtureScenario: async (rules) => {
-      const res = await router.fetch(new Request(`${FIXTURE_ORIGIN}${SCENARIO_PATH}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rules }) }));
+      const res = await control(SCENARIO_PATH, { rules });
       if (!res.ok) throw new Error(`fixture scenario refused: ${res.status}`);
     },
-    scenario: (s) => {
-      scenarios.push({ ...s, used: 0 });
-    },
-    releaseHolds: () => {
-      holds.resolve();
-      holds = deferred();
+    releaseHolds: async () => {
+      const res = await control('/__fixture/release');
+      if (!res.ok) throw new Error(`fixture release refused: ${res.status}`);
     },
     onTileCommit: (fn) => {
       after.push(fn);
@@ -1034,7 +994,6 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
       });
     },
     close: () => {
-      holds.resolve();
       server.close();
       db.close();
     },
@@ -1326,7 +1285,7 @@ export type OperatorKind = OperatorMessageKind;
 export type StopReason =
   | { kind: 'sigterm' }
   | { kind: 'cancel' }
-  | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime }
+  | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime | null }
   | { kind: 'budget'; error: BudgetExceeded; resumeAfter: IsoDateTime | null }
   | { kind: 'all-disabled'; stage: Stage }
   | { kind: 'fatal'; message: string };
@@ -1685,8 +1644,8 @@ export function commitTile(ctx: EngineContext, run: RunState, providerId: Provid
     else write.outcomes.push({ ...base, status: 'no_data', reason: null, lastError: null, minPence: null });
   }
   ctx.db.transaction(() => {
-    // why: spec §7/§6.6 — a fresh price superseding a reused row deletes that row in the same transaction (a safety net:
-    // the plan never re-fetches a reused cell; writeTile enforces the same rule)
+    // why: spec §7/§6.6 — a fresh write replaces a reused copy outright, in the same transaction (a safety net:
+    // the plan never re-fetches a reused cell; writeTile's roll-up via core's mergeWithinProvider applies the same rule)
     for (const p of write.prices) ctx.repos.calendarPrices.supersedeReused(run.executionId, providerId, p.cell);
     ctx.repos.cells.writeTile(run.executionId, providerId, write);
   });
@@ -1727,7 +1686,11 @@ export function finalStatus(stop: StopReason | null, now: IsoDateTime): { status
     case 'cancel':
       return { status: 'cancelled', patch: { finishedAt: now, resumeAfter: null }, notice: null };
     case 'limiter-timeout':
-      return { status: 'paused_error', patch: { resumeAfter: stop.resumeAfter }, notice: { kind: 'paused_error', detail: `A provider rate window is full; the run resumes automatically at ${stop.resumeAfter}.` } };
+      return {
+        status: 'paused_error',
+        patch: { resumeAfter: stop.resumeAfter },
+        notice: { kind: 'paused_error', detail: stop.resumeAfter === null ? 'A provider rate window is full and its reopening time is not known; resume the run manually.' : `A provider rate window is full; the run resumes automatically at ${stop.resumeAfter}.` },
+      };
     case 'budget': {
       const e = stop.error;
       const when = stop.resumeAfter === null ? 'It needs a cap change, or a resume after editing the definition.' : `It resumes automatically at ${stop.resumeAfter}.`;
@@ -2318,7 +2281,7 @@ import { asIsoDate, cellKeyString, generateCells, resolveWindow } from '@gmt/cor
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, JFK, LGW, LHR, RESPONSES, WINDOW, createHarness, discoveryOf } from './harness.js';
+import { createHarness, discoveryOf, FIXTURE_RULES, type Harness, JFK, LGW, LHR, WINDOW } from './harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -2328,7 +2291,7 @@ const orch = () => createOrchestrator(buildContext(h.deps, h.options));
 describe('seeding (spec §3, §7 atomic unit "seeding search_cells + discovery cell_outcomes at start")', () => {
   it('seeds not_run for every cell × discovery provider and nothing for a stage without a provider', async () => {
     h = createHarness({ extraProviders: (t) => [freeStubProvider(t)] });
-    h.scenario({ match: (r) => r.kind === 'calendar', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const def = h.createDefinition({ providers: { discovery: ['fixture', 'travelpayouts'], verification: [], discoveryRefreshHours: {} } });
     const r = await orch().start(def.id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
@@ -2338,7 +2301,7 @@ describe('seeding (spec §3, §7 atomic unit "seeding search_cells + discovery c
     expect(fixtureRows.map(cellKeyString).sort()).toEqual(cells.map(cellKeyString).sort());
     expect(fixtureRows.every((o) => o.status === 'not_run' && o.attempts === 0)).toBe(true);
     expect(h.outcomes(r.executionId, { stage: 'verification' })).toHaveLength(0);
-    h.releaseHolds();
+    await h.releaseHolds();
     await h.waitForSettled(r.executionId);
     const rollUps = h.repos.cells.rollUps(r.executionId);
     expect(rollUps.size).toBe(cells.length);
@@ -2393,14 +2356,14 @@ describe('seeding (spec §3, §7 atomic unit "seeding search_cells + discovery c
 describe('Review Focus 4: a PUT during a run does not change the running execution', () => {
   it('keeps the snapshot and the plan of the running execution after the definition is edited', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    h.scenario({ match: (r) => r.kind === 'calendar' && r.ordinal === 1, respond: RESPONSES.hold });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold, times: 1 }]);
     const plan = vi.spyOn(discoveryOf(h.fixture), 'plan');
     const def = h.createDefinition();
     const r = await orch().start(def.id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests.length).toBe(1));
     h.repos.definitions.update(def.id, { origins: [LGW], minNights: 9, maxNights: 9, cabin: 'business' });
-    h.releaseHolds();
+    await h.releaseHolds();
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('completed');
     expect(e.snapshot.origins).toEqual([LHR]);
@@ -2531,8 +2494,8 @@ describe('classifyFailure (spec §8.1 error table, both stages)', () => {
     ['AbortedError → abort', new AbortedError(), false, { kind: 'abort' }],
     ['anything after the signal aborted → abort', pe('network'), true, { kind: 'abort' }],
     ['BudgetExceeded → budget, never a cell error', budget, false, { kind: 'budget', error: budget }],
-    ['limiter-timeout with Retry-After → resume at now + Retry-After', pe('limiter-timeout', { retryAfterSeconds: 4000 }), false, { kind: 'limiter-timeout', resumeAfter: '2026-10-14T10:06:40.000Z' }],
-    ['limiter-timeout without Retry-After → resume after an hourly window', pe('limiter-timeout'), false, { kind: 'limiter-timeout', resumeAfter: '2026-10-14T10:00:00.000Z' }],
+    ['limiter-timeout → resume at now + retryAfterSeconds (the exhausted reservoir refresh)', pe('limiter-timeout', { retryAfterSeconds: 4000 }), false, { kind: 'limiter-timeout', resumeAfter: '2026-10-14T10:06:40.000Z' }],
+    ['limiter-timeout without retryAfterSeconds → no reopen time, no guess', pe('limiter-timeout'), false, { kind: 'limiter-timeout', resumeAfter: null }],
     ['auth → error, disables the provider', pe('auth'), false, { kind: 'cell-error', reason: 'auth', parse: false, disableProvider: true }],
     ['quota → error, disables the provider', pe('quota'), false, { kind: 'cell-error', reason: 'quota', parse: false, disableProvider: true }],
     ['parse keeps reason "parse" and moves the vendor message to lastError', pe('parse', { reason: 'Requested more than 200 combinations.' }), false, { kind: 'cell-error', reason: 'parse', lastError: 'Requested more than 200 combinations.', parse: true, disableProvider: false }],
@@ -2557,7 +2520,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { addSeconds } from '../src/errors.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { FIXTURE_RULES, type Harness, JFK, LGW, LHR, RESPONSES, T0, WINDOW, createHarness, discoveryOf, tileRule } from './harness.js';
+import { createHarness, discoveryOf, FIXTURE_RULES, type Harness, JFK, LGW, LHR, T0, tileRule, WINDOW } from './harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -2677,13 +2640,13 @@ describe('error table: AbortedError (cancel / SIGTERM) → not_run', () => {
 
   it('cancel mid-run: the held tile goes back to not_run and the execution is cancelled', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    h.scenario({ match: second, respond: RESPONSES.hold });
+    await h.fixtureScenario([tileRule('LHR', SECOND, FIXTURE_RULES.hold, 1)]);
     const orch = createOrchestrator(buildContext(h.deps, h.options));
     const r = await orch.start(twoPairs().id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests.some(second)).toBe(true));
     const cancelling = orch.cancel(r.executionId);
-    h.releaseHolds();
+    await h.releaseHolds();
     expect(await cancelling).toBe(true);
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('cancelled');
@@ -2704,13 +2667,13 @@ describe('error table: AbortedError (cancel / SIGTERM) → not_run', () => {
 
   it('SIGTERM with a tile in flight: every cell stays not_run, status interrupted', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    h.scenario({ match: (r) => r.kind === 'calendar', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const orch = createOrchestrator(buildContext(h.deps, h.options));
     const r = await orch.start(h.createDefinition().id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests).toHaveLength(1));
     const stopping = orch.shutdown();
-    h.releaseHolds();
+    await h.releaseHolds();
     await stopping;
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('interrupted');
@@ -2735,12 +2698,9 @@ import { AbortedError, BudgetExceeded, type IsoDateTime, ProviderError, stripUrl
 export type FailureDecision =
   | { kind: 'abort' }
   | { kind: 'cell-error'; reason: string; lastError: string; parse: boolean; disableProvider: boolean }
-  | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime }
+  | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime | null }
   | { kind: 'budget'; error: BudgetExceeded }
   | { kind: 'fatal'; message: string };
-
-/** When a limiter-timeout carries no Retry-After, the window is assumed to reopen within the hourly reservoir. */
-export const DEFAULT_REOPEN_SECONDS = 3600;
 
 export function addSeconds(at: IsoDateTime, seconds: number): IsoDateTime {
   return new Date(Date.parse(at) + seconds * 1000).toISOString() as IsoDateTime;
@@ -2758,7 +2718,9 @@ export function classifyFailure(err: unknown, aborted: boolean, now: IsoDateTime
   if (err instanceof AbortedError || aborted) return { kind: 'abort' };
   if (err instanceof BudgetExceeded) return { kind: 'budget', error: err };
   if (err instanceof ProviderError) {
-    if (err.kind === 'limiter-timeout') return { kind: 'limiter-timeout', resumeAfter: addSeconds(now, err.retryAfterSeconds ?? DEFAULT_REOPEN_SECONDS) };
+    // why: plan decision 15 — http-kit sets retryAfterSeconds on every limiter-timeout to the exhausted
+    // reservoir's refresh (or the vendor's Retry-After); without it there is no known reopen time, so no one-shot job
+    if (err.kind === 'limiter-timeout') return { kind: 'limiter-timeout', resumeAfter: err.retryAfterSeconds === undefined ? null : addSeconds(now, err.retryAfterSeconds) };
     const reason = err.kind === 'upstream' && err.reason === 'no-return-legs' ? 'no-return-legs' : err.kind;
     return {
       kind: 'cell-error',
@@ -3475,7 +3437,7 @@ import { type FlightProvider, type ItinerarySearchResult, asIsoDate, cellKeyStri
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { FIXTURE_RULES, type Harness, RESPONSES, createHarness, itineraryRule, verificationOf, withVerification } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, verificationOf, withVerification } from './harness.js';
 import { mapOffers } from './wrappers.js';
 
 let h: Harness;
@@ -3542,7 +3504,7 @@ describe('verification stage (spec §8.1 "verification", §6.7, §7 atomic units
 
   it('selection runs once: an interrupt during verification and a resume keep the same selection', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    h.scenario({ match: (r) => r.kind === 'itinerary' && r.ordinal === 1, respond: RESPONSES.hold });
+    await h.fixtureScenario([itineraryRule(FIXTURE_RULES.hold, 1)]);
     const d = def();
     const first = orch();
     const r = await first.start(d.id, { trigger: 'manual' });
@@ -3550,7 +3512,7 @@ describe('verification stage (spec §8.1 "verification", §6.7, §7 atomic units
     await vi.waitFor(() => expect(h.requests.some((q) => q.kind === 'itinerary')).toBe(true));
     const before = h.repos.cells.selected(r.executionId).map((x) => cellKeyString(x.cell)).sort();
     const stopping = first.shutdown();
-    h.releaseHolds();
+    await h.releaseHolds();
     await stopping;
     expect((await h.waitForSettled(r.executionId)).status).toBe('interrupted');
     expect(await orch().resume(r.executionId, { manual: false })).toEqual({ ok: true, executionId: r.executionId });
@@ -3763,7 +3725,8 @@ export function routeHistoryRows(ctx: EngineContext, providerId: ProviderId, cel
 /**
  * Writes one verified cell atomically (spec §7: itinerary, segments, offer, observation, outcome,
  * best_observation_id, roll-up). The repository sets best_observation_id to the cheapest observation
- * written (plan decision 14); verdicts are applied at read time, never to this column. priced iff ≥ 1 offer
+ * written (plan decision 14), merges with core's mergeWithinProvider/rollUp (decision 15) and never
+ * downgrades priced to empty; verdicts are applied at read time, never to this column. priced iff ≥ 1 offer
  * survives normalisation, with notes `partial-expansion` and `offers-dropped:n`; error with the
  * first normalisation reason when offers existed but none survived; empty otherwise (spec §3, §5.4, §5.6).
  */
@@ -3799,8 +3762,7 @@ export function commitVerifiedCell(ctx: EngineContext, run: RunState, provider: 
   } else {
     outcome = { ...base, status: 'empty', reason: null, lastError: null, minPence: null };
   }
-  // why: the selector literal is the contract's; per plan decision 14 the repository stores the cheapest observation written, verdict-independent
-  ctx.repos.cells.writeVerifiedCell(run.executionId, provider.id, { cell, outcome, itineraries: [...groups.values()], bestObservationSelector: 'cheapest-verified-or-partial' });
+  ctx.repos.cells.writeVerifiedCell(run.executionId, provider.id, { cell, outcome, itineraries: [...groups.values()] });
   const history = routeHistoryRows(ctx, provider.id, cell, result);
   if (history.length > 0) ctx.repos.routeHistory.upsert(history);
   run.parseStreak.set(provider.id, 0);
@@ -3856,7 +3818,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { addSeconds } from '../src/errors.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { FIXTURE_RULES, type Harness, RESPONSES, T0, createHarness, itineraryRule, withVerification } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, T0, withVerification } from './harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -3931,13 +3893,13 @@ describe('error table, verification stage', () => {
 describe('cancel mid expansion → not_run, no itinerary (spec §9 item 4)', () => {
   it('a held itinerary call that is cancelled writes nothing for its cell', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    h.scenario({ match: (r) => r.kind === 'itinerary', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([itineraryRule(FIXTURE_RULES.hold)]);
     const orch = createOrchestrator(buildContext(h.deps, h.options));
     const r = await orch.start(verifying(4).id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests.some((q) => q.kind === 'itinerary')).toBe(true));
     const cancelling = orch.cancel(r.executionId);
-    h.releaseHolds();
+    await h.releaseHolds();
     expect(await cancelling).toBe(true);
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('cancelled');
@@ -4700,7 +4662,7 @@ import { asIsoDate } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, JFK, LHR, RESPONSES, createHarness } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, JFK, LHR } from './harness.js';
 import { freeStubProvider } from './wrappers.js';
 
 let h: Harness;
@@ -4712,13 +4674,13 @@ const both = { discovery: ['fixture', 'travelpayouts'] as const, verification: [
 describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + estimate(scope) ≤ cap")', () => {
   it('active: a second start while one is active → code active', async () => {
     h = createHarness();
-    h.scenario({ match: (r) => r.kind === 'calendar', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const orch = createOrchestrator(buildContext(h.deps, h.options));
     const def = h.createDefinition();
     const first = await orch.start(def.id, { trigger: 'manual' });
     expect(first.ok).toBe(true);
     expect(await orch.start(def.id, { trigger: 'manual' })).toMatchObject({ ok: false, code: 'active' });
-    h.releaseHolds();
+    await h.releaseHolds();
     if (first.ok) await h.waitForSettled(first.executionId);
   });
 
@@ -5051,7 +5013,7 @@ import { asIsoDateTime, cellKeyString } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, RESPONSES, createHarness, tileRule } from './harness.js';
+import { createHarness, FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5086,11 +5048,11 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     const id = await interruptedAfter(1, def);
     const o = orch();
     expect(await o.cancel(id)).toBe(true); // cancelled: resumable, no longer active
-    h.scenario({ match: (r) => r.kind === 'calendar', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const other = await o.start(def.id, { trigger: 'manual' });
     expect(other.ok).toBe(true);
     expect(await o.resume(id, { manual: true })).toMatchObject({ ok: false, code: 'active' });
-    h.releaseHolds();
+    await h.releaseHolds();
     if (other.ok) await h.waitForSettled(other.executionId);
   });
 
@@ -5269,7 +5231,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 - Modify: `packages/engine/src/snapshot.ts` (`childSnapshot`), `src/orchestrator.ts` (`verifyCell`)
 
 **Interfaces:**
-- Consumes: `ExecutionsRepo.create({ isChild: true, cell, trigger })/activeChild/latestCompleted`, `ItinerariesRepo.observationsForDefinition(definitionId, { executionIds, space, cabin, includeChildren })/latestVerificationOutcomeForCell`, `AirportsRepo.exists`.
+- Consumes: `ExecutionsRepo.create({ isChild: true, cell, trigger })/activeChild/latestCompleted`, `ItinerariesRepo.observationsForDefinition(definitionId, { executionIds, space, cabin, includeChildren })/latestVerificationOutcomeForCell(definitionId, cell, cabin)`, `AirportsRepo.exists`.
 - Produces: `verifyCellExecution(ctx, reg, definitionId, cell)`, `childSnapshot(ctx, parent, cell)`, `Orchestrator.verifyCell`.
 
 - [ ] **Step 1: Write the failing test**
@@ -5281,7 +5243,7 @@ import { asIsoDate, cellKeyString } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, JFK, LHR, RESPONSES, createHarness, noVerification, withVerification } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, itineraryRule, JFK, LHR, noVerification, withVerification } from './harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5308,7 +5270,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
 
   it('allows at most one active child per cell', async () => {
     h = createHarness();
-    h.scenario({ match: (r) => r.kind === 'itinerary', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([itineraryRule(FIXTURE_RULES.hold)]);
     const def = h.createDefinition({ providers: withVerification() });
     const o = orch();
     const first = await o.verifyCell(def.id, cell);
@@ -5317,7 +5279,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     expect(await o.verifyCell(def.id, cell)).toMatchObject({ ok: false, code: 'active' });
     const other = await o.verifyCell(def.id, { ...cell, returnDate: asIsoDate('2026-11-11') });
     expect(other.ok).toBe(true);
-    h.releaseHolds();
+    await h.releaseHolds();
     for (const r of [first, other]) if (r.ok) await h.waitForSettled(r.executionId);
   });
 
@@ -5346,7 +5308,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     expect(h.repos.executions.latestCompleted(def.id)?.id).toBe(parent.id);
     const obs = h.repos.itineraries.observationsForDefinition(def.id, { executionIds: [child.id], space: child.snapshot.resolved, cabin: 'economy', includeChildren: true });
     expect(obs.length).toBeGreaterThan(0);
-    expect(h.repos.itineraries.latestVerificationOutcomeForCell(def.id, cell)?.executionId).toBe(child.id);
+    expect(h.repos.itineraries.latestVerificationOutcomeForCell(def.id, cell, 'economy')?.executionId).toBe(child.id);
   });
 });
 ```
@@ -5467,7 +5429,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { type Harness, JFK, LGW, LHR, RESPONSES, createHarness } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5475,7 +5437,7 @@ afterEach(() => h.close());
 describe('Review Focus 5: SQLite busy or full during a tile write', () => {
   it('→ paused_error with the SQLite message, URL-free, in error_text; siblings → not_run; operator notified; no crash loop', async () => {
     h = createHarness({ fixtureConcurrency: 2 });
-    h.scenario({ match: (r) => r.kind === 'calendar' && r.ordinal === 2, respond: RESPONSES.hold });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-09', FIXTURE_RULES.hold, 1)]);
     h.beforeTileWrite((attempt) => {
       if (attempt === 1) throw new Database.SqliteError('database or disk is full (see https://user:pw@sqlite.example/full?db=/data/x.db)', 'SQLITE_FULL');
     });
@@ -5483,7 +5445,7 @@ describe('Review Focus 5: SQLite busy or full during a tile write', () => {
     const r = await orch.start(h.createDefinition({ origins: [LHR, LGW], destinations: [JFK] }).id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.logs.some((l) => l.msg === 'unexpected failure; pausing')).toBe(true));
-    h.releaseHolds();
+    await h.releaseHolds();
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('paused_error');
     expect(e.resumeAfter).toBeNull();
@@ -5529,7 +5491,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 import { type SearchDefinition, asIsoDateTime } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createScheduler } from '../src/scheduler/scheduler.js';
-import { type LogLine, T0, baseDefinition, capturingLogger } from './harness.js';
+import { baseDefinition, capturingLogger, FIXTURE_RULES, type LogLine, T0, tileRule } from './harness.js';
 
 const def = (patch: Partial<SearchDefinition> = {}): SearchDefinition => ({ ...baseDefinition(), id: 'def-1', confirmedCostPence: null, createdAt: T0, updatedAt: T0, deletedAt: null, scheduleCron: '0 5 * * 1', ...patch });
 
@@ -5634,7 +5596,7 @@ import { asIsoDateTime } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createOrchestrator } from '../src/orchestrator.js';
-import { FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, RESPONSES, createHarness, tileRule } from './harness.js';
+import { createHarness, FIXTURE_COST_MICRO_GBP, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
 
 let h: Harness;
 afterEach(() => h.close());
@@ -5655,7 +5617,7 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
 
   it('with an execution active, records nothing and logs "schedule blocked since"', async () => {
     h = createHarness();
-    h.scenario({ match: (r) => r.kind === 'calendar', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const def = twoPairs();
     const o = orch();
     const r = await o.start(def.id, { trigger: 'manual' });
@@ -5663,7 +5625,7 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
     expect(executions(def.id)).toHaveLength(1);
     expect(h.logs.find((l) => l.msg === 'tick: schedule blocked by an active execution')?.fields).toMatchObject({ since: h.clock.now() });
     expect(o.blockedSince()).toBe(h.clock.now());
-    h.releaseHolds();
+    await h.releaseHolds();
     if (r.ok) await h.waitForSettled(r.executionId);
   });
 
@@ -6184,7 +6146,7 @@ import { type OperatorMessage, type SearchDefinition, asIsoDate, asIsoDateTime }
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../src/index.js';
 import type { Engine } from '../src/types.js';
-import { type Harness, JFK, LGW, LHR, RESPONSES, createHarness } from './harness.js';
+import { createHarness, FIXTURE_RULES, type Harness, JFK, LGW, LHR, tileRule } from './harness.js';
 
 let h: Harness;
 const engines: Engine[] = [];
@@ -6345,7 +6307,7 @@ describe('the alerts step (AlertsStepHook; WP11 supplies runAlerts)', () => {
 describe('shutdown and status', () => {
   it('shutdown stops the scheduler, interrupts in-flight cells, and leaves auto_resume_count alone', async () => {
     h = createHarness({ fixtureConcurrency: 1 });
-    h.scenario({ match: (r) => r.kind === 'calendar' && r.ordinal === 1, respond: RESPONSES.hold });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold, times: 1 }]);
     const e = engine();
     await e.boot();
     e.scheduler.register(h.createDefinition({ scheduleCron: '0 5 * * 1' }));
@@ -6353,7 +6315,7 @@ describe('shutdown and status', () => {
     if (!r.ok) throw new Error(r.message);
     expect(e.status().running).toEqual([r.executionId]);
     const stopping = e.shutdown();
-    h.releaseHolds();
+    await h.releaseHolds();
     await stopping;
     expect(e.scheduler.jobs()).toEqual([]);
     expect(h.repos.executions.get(r.executionId)).toMatchObject({ status: 'interrupted', autoResumeCount: 0 });
@@ -6362,7 +6324,7 @@ describe('shutdown and status', () => {
 
   it('status reports jobs, the next run, the last execution, and degraded when a run is stuck', async () => {
     h = createHarness();
-    h.scenario({ match: (r) => r.kind === 'calendar', respond: RESPONSES.hold, times: 100 });
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     h.createDefinition({ scheduleCron: '0 5 * * 1' });
     const e = engine();
     await e.boot();
@@ -6373,7 +6335,7 @@ describe('shutdown and status', () => {
     h.clock.advance((h.config.stuckAfterHours + 1) * 3_600_000);
     expect(e.status()).toMatchObject({ degraded: true, lastExecutionAt: '2026-10-14T09:00:00.000Z' });
     const stopping = e.shutdown();
-    h.releaseHolds();
+    await h.releaseHolds();
     await stopping;
   });
 
@@ -6808,8 +6770,8 @@ Every task's checkboxes are ticked; every commit message starts `wp07:`.
 
 ## 11. Open questions
 
-None requires the operator's judgment, and no contract gap remains open: plan contracts v2 (commit e804941) and the round-2 pins (commit 790d1ea, decision 14) settled every item the earlier drafts raised. Three engine-side readings are recorded so a reviewer can object:
+None requires the operator's judgment: plan contracts v2 (commit e804941) and the round-2 and round-3 pins (decisions 14 and 15, commit 4244030) settled every item the earlier drafts raised. Three engine-side readings are recorded so a reviewer can object:
 
 1. **`disabled` and manual starts.** A manual start of a disabled definition is refused with `disabled` (the tick skips it silently). If manual starts of disabled definitions should be allowed, only the guard in `startExecution` changes.
 2. **Budget refresh scope.** The decision speaks of an execution-cap pause; the brief refreshes `snapshot.budget` on every manual resume of a parent `paused_budget` (provider and global pauses never read that budget, so the effect is the same) and never on automatic resume or for children.
-3. **Holding requests.** WP4's rules match path and params; the harness keeps one thin layer in front of the router to hold a request until released (`hang` can only end by abort) and to count requests. Every §8.1 error row uses WP4's own rules.
+3. **Hold rule shape.** The plan names WP4's `hold`/`release` (`POST /__fixture/release`) but the WP4 brief does not yet show the rule's `respond` shape; the harness uses `{ kind: 'hold' }` (in `FIXTURE_RULES.hold`), released by that route or by the request's own abort. If WP4 names it differently, only that constant changes. The harness keeps no request-control layer; `h.requests` only logs what reaches the router.

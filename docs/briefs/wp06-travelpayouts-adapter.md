@@ -10,7 +10,7 @@ status: draft
 
 # WP6: Travelpayouts adapter
 
-Reconciled with spec revision 10 and the plan's rewritten "Cross-package contracts" (2026-10-14).
+Reconciled with spec revision 11 and the plan's "Cross-package contracts" through "Decisions taken at reconciliation" item 15 (2026-10-14).
 
 ## 1. Goal
 
@@ -96,8 +96,8 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
 4. *(Resolved by plan item 14.)* `ParamsAllowlist`, `loadParamsAllowlist` and `assertRequestAllowed` live in WP4's `src/params/allowlist.ts`. This brief imports them and defines no allowlist code of its own.
 5. *(Resolved by plan item 14.)* `endpoints` is keyed by endpoint path, with `names` ascending, and `TRAVELPAYOUTS_PARAMS` follows that.
 6. **`TRAVELPAYOUTS_PARAMS` copies two values from the recording.** `recordedAt` and `contentSha256` exist only once WP4b has recorded. Task 6.6 Step 3 prints them from the file, and the implementer writes them into the constant. That is the one place this brief cannot show the final literal.
-7. *(Resolved by plan item 14.)* `canonicalCacheKey` covers method, credential-free URL, scrubbed headers and body only, never execution or tile ids. Task 6.4's 14 cache hits test that contract.
-8. **`replayHandlers` cannot be used here.** It matches on the credential-free query, and the recorded 401 (invalid token) shares its query with the recorded 200 for the same tile. The replay tests use `loadRecorded` from `@gmt/providers/testing` with their own per-tile handlers.
+7. *(Resolved by plan items 14 and 15.)* `canonicalCacheKey` covers method, credential-free URL, scrubbed headers and body only, never execution or tile ids. In-flight joiners record their own cache-hit rows. Task 6.4 tests both the sequential case (28/14/14) and the concurrent case (14/7/7).
+8. **`replayHandlers` (now `{ handlers, misses() }`) is not used here.** It matches on the credential-free query, and the recorded 401 (invalid token) shares its query with the recorded 200 for the same tile. The replay tests use `loadRecorded` from `@gmt/providers/testing` with their own per-tile handlers.
 9. **The testing subpath is imported by relative path.** Inside `@gmt/providers` the subpath is imported as `../../src/testing/index.js`, because the package `exports` point at `dist/`. It is the same module.
 10. **Wiring structure is unknown.** WP4b's exact code shape for `httpLimitsFor`/`providersFor` is not in the plan. Task 6.9 adds one spread entry to each, in the object or array they return.
 
@@ -233,6 +233,7 @@ export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;   // ParamsAllowlist importe
 
 // travelpayouts/limits.ts
 export const TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE: 600;
+export const TRAVELPAYOUTS_RATE_LIMIT_FALLBACK_WAIT_SECONDS: 60;   // ProviderHttpLimits.rateLimitFallbackWaitSeconds
 export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;
 
 // travelpayouts/provider.ts
@@ -259,6 +260,7 @@ export type DropReason = 'malformed-row' | 'one-way' | 'other-origin' | 'other-d
 export const DROP_REASONS: readonly DropReason[];
 export const AVIASALES_BASE: 'https://www.aviasales.com';
 export function readEnvelope(body: unknown): Envelope;
+export function cacheableBody(body: unknown): boolean;   // HttpKitRequest.cache.accept
 export function resolveCurrency(raw: string | null): { ok: true; code: string; exponent: number } | { ok: false; reason: 'currency-missing' | 'currency-malformed' | 'currency-exponent-unknown'; detail: string | null };
 export function majorToMinor(price: number, exponent: number): number | null;
 export function vendorLinkFor(link: string): string | null;
@@ -439,6 +441,7 @@ export function fakeBudget(o: { refuse?: boolean } = {}): BudgetGuard & { ledger
       ledger.cacheHits.push({ endpointPath: p.endpointPath, tileIndex: p.tileIndex });
     },
     usage: () => ({ calls: ledger.reservations.length, costMicroGbp: 0, cap: null, windowStart: null, windowEnd: null }),
+    recentCalls: () => ledger.reservations.length,
   };
 }
 
@@ -759,6 +762,14 @@ export function readEnvelope(body: unknown): Envelope {
   }
   return { ok: false, reason: 'malformed-envelope', detail: null };
 }
+
+/**
+ * The http-kit cache `accept` hook (plan item 15): only a body readEnvelope accepts is cached,
+ * so `success:false` and malformed envelopes (spec §5.2: parse errors) are never replayed from the cache.
+ */
+export function cacheableBody(body: unknown): boolean {
+  return readEnvelope(body).ok;
+}
 ```
 
 `packages/providers/src/travelpayouts/provider.ts` (first cut; Task 6.4 replaces `fetchTile`, Task 6.7 gives the final file):
@@ -786,7 +797,7 @@ import {
 import type { ParamsAllowlist } from '../params/allowlist.js';
 import type { HttpKit } from '../http/httpKit.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
-import { readEnvelope } from './response.js';
+import { cacheableBody, readEnvelope } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /** Spec §2 Travelpayouts row: authorised-cached, 48 h. The note avoids every §11 banned word. */
@@ -842,7 +853,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
       method: 'GET',
       url: buildRequestUrl(tp, 1),
       headers: { 'X-Access-Token': opts.token.reveal(), Accept: 'application/json' },
-      cache: { ttlSeconds: opts.cacheTtlSeconds },
+      cache: { ttlSeconds: opts.cacheTtlSeconds, accept: cacheableBody },
       signal: ctx.signal,
       recordFixtures: ctx.recordFixtures,
     });
@@ -1061,6 +1072,14 @@ export function readEnvelope(body: unknown): Envelope {
     }
   }
   return { ok: false, reason: 'malformed-envelope', detail: null };
+}
+
+/**
+ * The http-kit cache `accept` hook (plan item 15): only a body readEnvelope accepts is cached,
+ * so `success:false` and malformed envelopes (spec §5.2: parse errors) are never replayed from the cache.
+ */
+export function cacheableBody(body: unknown): boolean {
+  return readEnvelope(body).ok;
 }
 
 /** Why a row was not returned; each is counted in notes (spec §5.2). */
@@ -1540,6 +1559,30 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2 rev 1
   });
 });
 
+describe('cache dedup holds when sibling pairs run concurrently (plan item 15: in-flight joiners record cache-hit rows)', () => {
+  it('LHR→JFK and LGW→JFK in parallel: 14 tiles, 7 upstream calls, 7 cache hits', async () => {
+    let upstream = 0;
+    server.use(
+      http.get(ENDPOINT, () => {
+        upstream += 1;
+        return HttpResponse.json(envelope([]));
+      }),
+    );
+    const h = makeHarness();
+    const d = discoveryOf(makeProvider(h));
+    const runs = [asIata('LHR'), asIata('LGW')].flatMap((origin) => {
+      const q = query({ origin, departureFrom: asIsoDate('2027-01-01'), departureTo: asIsoDate('2027-07-01'), minNights: 10, maxNights: 21 });
+      return d.plan(q).map((p) => d.fetchTile(p, q, ctx()));
+    });
+    const results = await Promise.all(runs);
+    expect(results).toHaveLength(14);
+    expect(results.every((r) => r.kind === 'tile')).toBe(true);
+    expect(upstream).toBe(7);
+    expect(h.budget.ledger.reservations).toHaveLength(7);
+    expect(h.budget.ledger.cacheHits).toHaveLength(7);
+  });
+});
+
 describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () => {
   it('keys prices by the response dates and counts out-of-band and sibling-airport rows in notes', async () => {
     server.use(
@@ -1620,7 +1663,7 @@ Expected: FAIL.
 - The attribution tests see `prices: []`.
 - The currency tests see `kind: 'tile'`.
 
-The cache-dedup and oldest-`fetchedAt` tests already pass with the first cut, because each makes one request per tile.
+The two cache-dedup tests and the oldest-`fetchedAt` test already pass with the first cut, because each makes one request per tile.
 
 - [ ] **Step 3: Implement**
 
@@ -1645,7 +1688,7 @@ import {
 import type { ParamsAllowlist } from '../params/allowlist.js';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
-import { attributeRows, attributionNotes, readEnvelope, resolveCurrency } from './response.js';
+import { attributeRows, attributionNotes, cacheableBody, readEnvelope, resolveCurrency } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 ```
 
@@ -1695,7 +1738,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
           method: 'GET',
           url,
           headers: { 'X-Access-Token': opts.token.reveal(), Accept: 'application/json' },
-          cache: { ttlSeconds: opts.cacheTtlSeconds },
+          cache: { ttlSeconds: opts.cacheTtlSeconds, accept: cacheableBody },
           signal: ctx.signal,
           recordFixtures: ctx.recordFixtures,
         });
@@ -1759,7 +1802,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. All four files are green, and `fetchTile.test.ts` has 9 passed.
+Expected: PASS. All four files are green, and `fetchTile.test.ts` has 10 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -1805,6 +1848,7 @@ describe('travelpayoutsHttpLimits (spec §2, §5.3)', () => {
       costPerCallMicroGbp: 0,
       maxWaitSeconds: 5,
       requestTimeoutSeconds: 5,
+      rateLimitFallbackWaitSeconds: 60,
     });
   });
 
@@ -1901,6 +1945,24 @@ describe('fetchTile error mapping through the real http-kit (spec §5.2 Errors)'
     expect(await errorOf(result)).toMatchObject({ kind: 'parse' });
   });
 
+  it('a success:false body is never cached (cache accept hook): fetching the tile again reaches upstream again', async () => {
+    let hits = 0;
+    server.use(
+      http.get(ENDPOINT, () => {
+        hits += 1;
+        return HttpResponse.json({ success: false, error: 'temporary' });
+      }),
+    );
+    const h = makeHarness({ limits });
+    const d = discoveryOf(makeProvider(h));
+    const q = query();
+    const tile = only(d.plan(q));
+    await d.fetchTile(tile, q, ctx());
+    await d.fetchTile(tile, q, ctx());
+    expect(hits).toBe(2);
+    expect(h.budget.ledger.cacheHits).toHaveLength(0);
+  });
+
   it('an aborted signal raises AbortedError, never a tile-error', async () => {
     server.use(http.get(ENDPOINT, () => HttpResponse.json({ success: true, data: [] })));
     const d = discoveryOf(makeProvider(makeHarness({ limits })));
@@ -1939,6 +2001,9 @@ import { TRAVELPAYOUTS_HOST } from './params.js';
 /** Vendor per-minute ceiling for prices_for_dates (spec §2; docs/providers.md). */
 export const TRAVELPAYOUTS_VENDOR_RATE_PER_MINUTE = 600;
 
+/** Plan item 15: a 429 without Retry-After waits one minute, the vendor's per-minute window. */
+export const TRAVELPAYOUTS_RATE_LIMIT_FALLBACK_WAIT_SECONDS = 60;
+
 /**
  * The configured limits with the rate clamped to the vendor's ceiling; never billable, cost 0.
  * why: no classifyError. WP4's default table maps every Travelpayouts case spec §5.2 lists
@@ -1959,6 +2024,7 @@ export function travelpayoutsHttpLimits(
     costPerCallMicroGbp: 0,
     maxWaitSeconds: cfg.maxWaitSeconds,
     requestTimeoutSeconds: cfg.requestTimeoutSeconds,
+    rateLimitFallbackWaitSeconds: TRAVELPAYOUTS_RATE_LIMIT_FALLBACK_WAIT_SECONDS,
   };
 }
 ```
@@ -1986,7 +2052,7 @@ export function readEnvelope(body: unknown): Envelope {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS. `errors.test.ts` has 18 passed (2 limits, 16 error-mapping), and the other files stay green.
+Expected: PASS. `errors.test.ts` has 19 passed (2 limits, 17 error-mapping), and the other files stay green.
 
 - [ ] **Step 5: Commit**
 
@@ -2335,7 +2401,7 @@ import {
 import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.js';
 import type { HttpKit, HttpKitResponse } from '../http/httpKit.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
-import { attributeRows, attributionNotes, readEnvelope, resolveCurrency } from './response.js';
+import { attributeRows, attributionNotes, cacheableBody, readEnvelope, resolveCurrency } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /** Spec §2 Travelpayouts row: authorised-cached, 48 h. The note avoids every §11 banned word. */
@@ -2430,7 +2496,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
           method: 'GET',
           url,
           headers: { 'X-Access-Token': opts.token.reveal(), Accept: 'application/json' },
-          cache: { ttlSeconds: opts.cacheTtlSeconds },
+          cache: { ttlSeconds: opts.cacheTtlSeconds, accept: cacheableBody },
           signal: ctx.signal,
           recordFixtures: ctx.recordFixtures,
         });

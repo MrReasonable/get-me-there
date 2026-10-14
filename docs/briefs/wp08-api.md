@@ -10,7 +10,7 @@ status: draft
 
 # WP8 — `@gmt/api`: app bootstrap, routes, auth, hardening, static, health, record tool route
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 10) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`, "Cross-package contracts" and "Decisions taken at reconciliation") before Task 8.1. Reconciled against both on 2026-10-14.
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 11) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`, "Cross-package contracts" and "Decisions taken at reconciliation") before Task 8.1. Reconciled against both on 2026-10-14.
 
 ## 1. Goal
 
@@ -96,11 +96,12 @@ export function resolveWindow(w: WindowSpec, todayLondon: IsoDate): { departureF
 export function generateCells(space: ResolvedSpace): Cell[]; export function countCells(space: ResolvedSpace): number;
 export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number /* b − a */;
 export function validateSearchSpace(def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'>, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
-export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: string }>;
+export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: 'not_run' | 'skipped:budget' }>;
 export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts;
-export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
-export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string };
-export function dedupByItinerary(rows: ResultRow[]): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[];
+export function verdictClass(v: Verdicts): VerdictClass /* throws without a cabin verdict, so calendar rows never call it */; export function unverifiedNames(v: Verdicts): ConstraintName[];
+export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string } | null;   // null for 'fixture'
+export function formatPence(pence: number): string;   // the single money formatter for API strings
+export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow[] /* primary offer by class, seen-in-latest, price, age, seller; otherOffers carry verdictClass and unverified */; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[];
 
 // @gmt/db (WP0, WP3)
 export interface Db { raw; drizzle; transaction<T>(fn: () => T): T; close(): void }
@@ -117,13 +118,13 @@ export class ExecutionsRepo { get(id): Execution | null; listForDefinition(defin
 export class CellsRepo { outcomes(executionId, filter?: { stage?; providerId?; cells? }): CellOutcome[]; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets: Buckets; total }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }> }
 export interface CalendarPriceInsert { providerId; sourceKind; cabin; cell: CellKey; pricePence; priceNativeMinor; currencyNative; fx: FxInfo; pointOfSale; fetchedAt; providerObservedAt: IsoDateTime | null; maxAgeHours: number | null; vendorLink: string | null; reusedFromExecutionId: string | null }
 export interface CalendarPriceRow extends CalendarPriceInsert { id: number; executionId: string; provenance: Provenance }
-export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; history(origin, destination, cabin): Array<{ providerId; points: HistoryPoint[] }> }
+export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; history(origin, destination, cabin, opts?: { definitionId?: string }): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> /* one point per execution fetch, reused excluded */ }
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
-export class ItinerariesRepo { observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell): CellOutcome | null }
-export class LedgerRepo { countsFor(executionId): { calls; costMicroGbp; tiles; cacheHits; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> } }
-export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; delete(id): void; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[] }
+export class ItinerariesRepo { observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell, cabin: Cabin): CellOutcome | null }
+export class LedgerRepo { countsFor(executionId): { calls; costMicroGbp; tiles /* first-attempt upstream rows; parity = tiles + cacheHits */; cacheHits; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> } }
+export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; softDelete(id): void /* events kept */ }
 export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean }
-export class RoutePriceHistoryRepo { series(origin, destination, providerId): RouteSeriesPoint[] }
+export class RoutePriceHistoryRepo { series(origin, destination, providerId, cabin: Cabin | 'unknown'): RouteSeriesPoint[] }
 
 // @gmt/providers (WP4)
 export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
@@ -183,7 +184,8 @@ export interface BootDeps {
 }
 export interface RunningApp { app: Hono<AppEnv>; ports: Ports; engine: Engine; port: number | null; close(): Promise<void> }
 export const HEARTBEAT_MS = 30_000;
-export class BootError extends Error {}
+export const EXIT = { ok: 0, failure: 1, refusedTest: 70, unwritable: 73, backupFailed: 74, lockRefused: 75, badConfig: 78 } as const;
+export class BootError extends Error { readonly exitCode: number }
 export function bootApp(deps: BootDeps): Promise<RunningApp>;
 export function main(env: NodeJS.ProcessEnv): Promise<void>;
 
@@ -287,7 +289,7 @@ Every "Run" step assumes the workspace dependencies of `@gmt/api` are built, bec
 
 **Interfaces:**
 - Consumes: `loadConfigFromEnv`, `buildPorts`, `createLogger`, `Ports` (WP4b); `fixtureProvider` (WP4); `AppLock`, `seedAirports`, `loadAirportsDataset`, `CalendarPriceInsert` (WP3); `createEngine`, `LogNotifier` (WP7); `apiContract.ROUTES`, `FIXTURE_OPT_IN_PHRASE`, `PENCE_TO_MICRO`, `stripUrlsInText` (WP0).
-- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `ApiError`, `envelope`, `fieldsDetail`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `budgetScopes`, `bootApp`, `main`, `assetPaths`; routes `GET /api/health` (public shape), `GET /api/providers`.
+- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `EXIT`, `BootError.exitCode`, `ApiError`, `envelope`, `fieldsDetail`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `budgetScopes`, `bootApp`, `main`, `assetPaths`; routes `GET /api/health` (public shape), `GET /api/providers`.
 
 **Plan preset** (spec §8.2, §11), used by `GET /api/providers` `presets` and by `POST /api/definitions` with no body (Task 8.9): Travelpayouts discovery when configured; SearchApi in both stages only on the `40usd` plan (the `trial` credits are for the spike and smoke, spec §2 fact 7); the fixture provider in both stages when the gate admits it; `maxCells 10, topN 10, expandTop 2, bookingLinks true`; budget from `EXECUTION_MAX_*`; `discoveryRefreshHours` 168; no airports; `enabled: false`; schedule `0 5 * * 1` in `SCHEDULER_TIMEZONE`.
 
@@ -419,6 +421,15 @@ describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
       ports.db.close();
     }
   }, 90_000);
+
+  it('refuses NODE_ENV=test with exit code 70 and bad config with 78 (plan exit-code table)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gmt-spawn-'));
+    const base = { PATH: process.env.PATH ?? '', BIND_ADDRESS: '127.0.0.1', APP_BASIC_AUTH_USER: 'operator', APP_BASIC_AUTH_PASS: 'test-basic-auth-pass-0123456789' };
+    const run = (env: Record<string, string>) =>
+      waitForExit(spawn(process.execPath, ['--import', 'tsx', 'src/bootstrap/start.ts'], { cwd: apiRoot, env: { ...base, ...env }, stdio: 'ignore' }));
+    expect(await run({ NODE_ENV: 'test', DATABASE_PATH: join(dir, 'x.test.db') })).toBe(70);
+    expect(await run({ NODE_ENV: 'production', DATABASE_PATH: join(dir, 'x.db'), PORT: 'not-a-port' })).toBe(78);
+  }, 60_000);
 });
 ```
 
@@ -494,6 +505,8 @@ Expected: FAIL, `Cannot find module '../src/bootstrap/paths.js'` and `'../src/de
  * Rule: no banned word; "verified" never appears here because it is reserved for class values;
  * the verified basis is called the "itinerary-search basis" (plan reconciliation, spec §11).
  */
+import { formatPence } from '@gmt/core';
+
 export const API_TEXT = {
   internal: 'internal error; see the server log',
   notFound: 'no such route',
@@ -517,8 +530,8 @@ export const API_TEXT = {
   invalidCron: (reason: string) => `schedule rejected: ${reason}`,
   coverageCheckUnavailable: 'the coverage check reads the free Travelpayouts cache; set TRAVELPAYOUTS_TOKEN to enable it',
   zeroCapVerification: 'verification will not run: spend cap is 0',
-  ceilingNote: (capPence: number, feesPence: number) =>
-    `monthly spend cap £${(capPence / 100).toFixed(2)}, of which £${(feesPence / 100).toFixed(2)} is subscription fees counted once`,
+  // why: formatPence (core) is the only money formatter in user-facing strings (plan reconciliation 15).
+  ceilingNote: (capPence: number, feesPence: number) => `monthly spend cap ${formatPence(capPence)}, of which ${formatPence(feesPence)} is subscription fees counted once`,
   notCancellable: (status: string) => `execution is ${status} and cannot be cancelled`,
   cellNotInSpace: 'that cell is outside the current window, nights range or airports of this definition',
   unknownAirport: (iata: string) => `airport ${iata} is not in the airports table`,
@@ -751,7 +764,7 @@ function planOf(config: Config, id: ProviderId) {
   return id === 'fixture' ? ('synthetic' as const) : ('free' as const);
 }
 
-/** Spec §10 `GET /providers`: capabilities, plan, usage with window bounds, the zero-cap notice, the plan presets. */
+/** Spec §10 `GET /providers`: config + capabilities + usage only (there is no providers table, plan reconciliation 15), the zero-cap notice, the plan presets. */
 export function providersResponse(ctx: RouteContext) {
   const { config } = ctx.ports;
   const preset = defaultDefinitionInput(config, ctx.ports.providers);
@@ -1020,11 +1033,16 @@ import type { AppEnv, ToolRunners } from '../routes/types.js';
 import { type Ports, buildPorts, loadConfigFromEnv } from '../wiring.js';
 import { type AssetPaths, assetPaths } from './paths.js';
 
-/** A boot refusal: logged with its message and the process exits 1. */
+/** The plan's single CLI exit-code table ("Wiring and bootstraps"): the codes the app bootstrap can end with. */
+export const EXIT = { ok: 0, failure: 1, refusedTest: 70, unwritable: 73, backupFailed: 74, lockRefused: 75, badConfig: 78 } as const;
+
+/** A boot refusal: logged with its message; start.ts exits with `exitCode`. */
 export class BootError extends Error {
-  constructor(message: string) {
+  readonly exitCode: number;
+  constructor(message: string, exitCode: number = EXIT.failure) {
     super(stripUrlsInText(message));
     this.name = 'BootError';
+    this.exitCode = exitCode;
   }
 }
 
@@ -1071,7 +1089,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   try {
     seedAirports(ports.db, loadAirportsDataset(deps.assets.airportsDataDir));
     const lock = new AppLock(ports.db, 'app', clock, log);
-    if (lock.acquire({ waitMs: 0 }) !== 'acquired') throw new BootError('app_lock is held by another process; refusing to start');
+    if (lock.acquire({ waitMs: 0 }) !== 'acquired') throw new BootError('app_lock is held by another process; refusing to start', EXIT.lockRefused);
     const heartbeat = setInterval(() => lock.heartbeat(), HEARTBEAT_MS);
     heartbeat.unref();
     // why: WP11 adds `alerts: runAlerts` to these options; until then the engine's default noAlerts step runs.
@@ -1107,9 +1125,14 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   }
 }
 
-/** The app entrypoint: env parsed once (spec §12), boot, signals. Throws on refusal; start.ts exits 1. */
+/** The app entrypoint: env parsed once (spec §12), boot, signals. Throws on refusal; start.ts exits with its code. */
 export async function main(env: NodeJS.ProcessEnv): Promise<void> {
-  const config = loadConfigFromEnv(env);
+  let config: Config;
+  try {
+    config = loadConfigFromEnv(env);
+  } catch (err) {
+    throw new BootError(messageOf(err), EXIT.badConfig);
+  }
   const log = createLogger(config);
   let running: RunningApp;
   try {
@@ -1142,7 +1165,9 @@ import { main } from './app.js';
 
 main(process.env).catch((err: unknown) => {
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
+  // why: BootError and LockRefusedError carry the plan's exit code (70, 73, 74, 75, 78); anything else is 1.
+  const code = err !== null && typeof err === 'object' && typeof (err as { exitCode?: unknown }).exitCode === 'number' ? (err as { exitCode: number }).exitCode : 1;
+  process.exit(code);
 });
 ```
 
@@ -1151,7 +1176,7 @@ main(process.env).catch((err: unknown) => {
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/boot.spawn.test.ts test/defaults.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 5 tests; the child logs `"msg":"listening"`, `GET /api/providers` returns 200 without `fixture` and `synthetic: false`, the child exits 0 on SIGTERM, the fixture constructor throws and the synthetic insert throws a message containing "synthetic"; typecheck clean.
+Expected: PASS, 6 tests; the child logs `"msg":"listening"`, `GET /api/providers` returns 200 without `fixture` and `synthetic: false`, the child exits 0 on SIGTERM, the fixture constructor throws and the synthetic insert throws a message containing "synthetic"; typecheck clean.
 
 - [ ] **Step 5: Commit**
 
@@ -1167,14 +1192,14 @@ git add apps/api && git commit -m "wp08: app bootstrap, plan preset, and the pro
 
 **Interfaces:**
 - Consumes: `sanityCheckAirports`, `loadAirportsDataset`, `DefinitionsRepo.list` (WP3); `loadConfigFromEnv`, `createLogger` (WP4b).
-- Produces: `bootApp` refuses `nodeEnv === 'test'` before opening the database; boot fails when `sanityCheckAirports` fails.
+- Produces: `bootApp` refuses `nodeEnv === 'test'` before opening the database (exit 70) and an unwritable data directory (exit 73); boot fails when `sanityCheckAirports` fails.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { FIXTURE_OPT_IN_PHRASE } from '@gmt/core';
 import { loadAirportsDataset } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
@@ -1239,7 +1264,18 @@ describe('injected-config boot matrix (spec §5.5)', () => {
 
   it('refuses NODE_ENV=test before touching the database', async () => {
     const env = envFor({ NODE_ENV: 'test' });
-    await expect(bootWith({ ...env, DATABASE_PATH: String(env.DATABASE_PATH).replace('.fixture.db', '.test.db') })).rejects.toThrow(/NODE_ENV=test/);
+    await expect(bootWith({ ...env, DATABASE_PATH: String(env.DATABASE_PATH).replace('.fixture.db', '.test.db') })).rejects.toMatchObject({ exitCode: 70, message: expect.stringMatching(/NODE_ENV=test/) });
+  });
+
+  it.skipIf(process.getuid?.() === 0)('an unwritable data directory fails boot with exit code 73', async () => {
+    const env = envFor({});
+    const dir = dirname(String(env.DATABASE_PATH));
+    chmodSync(dir, 0o500);
+    try {
+      await expect(bootWith(env)).rejects.toMatchObject({ exitCode: 73 });
+    } finally {
+      chmodSync(dir, 0o700);
+    }
   });
 
   it('a password shorter than 12 characters fails boot naming the variable', () => {
@@ -1264,13 +1300,22 @@ Expected: FAIL on "refuses NODE_ENV=test" (boot proceeds) and "a failed airport 
 
 - [ ] **Step 3: Implement**
 
-In `src/bootstrap/app.ts`, add `sanityCheckAirports` to the `@gmt/db` import, then make these two edits inside `bootApp`.
+In `src/bootstrap/app.ts`, add `sanityCheckAirports` to the `@gmt/db` import and `import { accessSync, constants } from 'node:fs';` / `import { dirname } from 'node:path';`, then make these two edits inside `bootApp`.
 
 Insert as the first statement after `const clock = …`:
 
 ```ts
   // why: spec §5.5: both bootstraps refuse NODE_ENV=test, so a test config can never serve traffic.
-  if (config.nodeEnv === 'test') throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5); use development or production');
+  if (config.nodeEnv === 'test') throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5); use development or production', EXIT.refusedTest);
+  if (config.databasePath !== ':memory:') {
+    const dataDir = dirname(config.databasePath);
+    try {
+      accessSync(dataDir, constants.W_OK);
+    } catch {
+      // why: exit 73 (plan exit-code table) names the cause before SQLite fails with a vaguer error.
+      throw new BootError(`the data directory ${dataDir} is not writable`, EXIT.unwritable);
+    }
+  }
 ```
 
 Replace the line `seedAirports(ports.db, loadAirportsDataset(deps.assets.airportsDataDir));` with:
@@ -1286,7 +1331,7 @@ Replace the line `seedAirports(ports.db, loadAirportsDataset(deps.assets.airport
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/boot.matrix.test.ts test/boot.spawn.test.ts`
-Expected: PASS, the spawn test and 9 matrix tests.
+Expected: PASS, the spawn tests and 10 matrix tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1305,7 +1350,7 @@ git add apps/api && git commit -m "wp08: boot matrix, NODE_ENV=test refusal, air
 - Consumes: `AppLock`, `AppLock.inspect` (WP3); `fixedClock` (WP0).
 - Produces: `acquireAppLockWithWaits`, `TOOL_LOCK_WAIT_MS`, `APP_LOCK_WAIT_MS`, `LOCK_POLL_MS`, `LockRefusedError`; `BootDeps.sleep?`.
 
-Rule implemented (spec §7; plan "Wiring and bootstraps"): poll every second. A fresh `tool` lock: refuse once 60 s have passed. A fresh `app` lock: wait up to 90 s, logging its age every 10 s; take it over at once whenever WP3's `acquire` judges it stale (three missed 30 s beats); if it is still being heartbeated after 90 s, refuse (two live apps).
+Rule implemented (spec §7 rev 11, now the spec's own wording; plan "Wiring and bootstraps"): poll every second. A fresh `tool` lock: refuse once 60 s have passed. A fresh `app` lock: wait up to 90 s, logging its age every 10 s; take it over at once whenever WP3's `acquire` judges it stale (three missed 30 s beats); if it is still being heartbeated after 90 s, refuse (two live apps).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1353,7 +1398,7 @@ describe('app_lock waits for the app holder (spec §7)', () => {
   it('waits 60 s on a fresh tool lock, then refuses', async () => {
     const s = setup();
     expect(new AppLock(s.ports.db, 'tool', s.clock, s.log).acquire({ waitMs: 0 })).toBe('acquired');
-    await expect(s.acquire()).rejects.toThrow(/tool/);
+    await expect(s.acquire()).rejects.toMatchObject({ exitCode: 75, message: expect.stringMatching(/tool/) });
     expect(s.slept()).toBeGreaterThanOrEqual(TOOL_LOCK_WAIT_MS);
     expect(s.slept()).toBeLessThan(TOOL_LOCK_WAIT_MS + 2_000);
     expect(AppLock.inspect(s.ports.db)?.holder).toBe('tool');
@@ -1416,7 +1461,9 @@ export const APP_LOCK_WAIT_MS = 90_000;
 export const LOCK_POLL_MS = 1_000;
 const LOG_EVERY_MS = 10_000;
 
+/** A lock refusal; exit code 75 in the plan's table. */
 export class LockRefusedError extends Error {
+  readonly exitCode = 75;
   constructor(message: string) {
     super(stripUrlsInText(message));
     this.name = 'LockRefusedError';
@@ -1477,7 +1524,7 @@ In `src/bootstrap/app.ts`: import `acquireAppLockWithWaits` from `./lock.js`; ad
   sleep?: (ms: number) => Promise<void>;
 ```
 
-and replace the line `if (lock.acquire({ waitMs: 0 }) !== 'acquired') throw new BootError('app_lock is held by another process; refusing to start');` with:
+and replace the line `if (lock.acquire({ waitMs: 0 }) !== 'acquired') throw new BootError('app_lock is held by another process; refusing to start', EXIT.lockRefused);` with:
 
 ```ts
     await acquireAppLockWithWaits({
@@ -1593,7 +1640,7 @@ describe('backup preflight (spec §7 Migrations, §13 Backup)', () => {
     const failing = async () => {
       throw new Error('disk full writing /data/backups/x.db');
     };
-    await expect(bootOnce(dbPath, failing, migrationsWithProbe())).rejects.toThrow(/pre-migration backup failed, migrations refused: disk full/);
+    await expect(bootOnce(dbPath, failing, migrationsWithProbe())).rejects.toMatchObject({ exitCode: 74, message: expect.stringMatching(/pre-migration backup failed, migrations refused: disk full/) });
     expect(hasProbe(dbPath)).toBe(false);
   });
 
@@ -1657,7 +1704,7 @@ export function defaultBackup(clock: Clock): (dbPath: string) => Promise<void> {
 }
 ```
 
-In `src/bootstrap/app.ts`: import `hasPendingMigrations` from `./migrations.js` and `defaultBackup` from `./backup.js`; add to `BootDeps`:
+In `src/bootstrap/app.ts`: import `hasPendingMigrations` from `./migrations.js`, `defaultBackup` from `./backup.js`, and add `mkdirSync` to the `node:fs` import and `join` to the `node:path` import; add to `BootDeps`:
 
 ```ts
   /** Pre-migration backup (spec §7); defaults to `@gmt/db` `backupDatabase` via `defaultBackup`. */
@@ -1670,11 +1717,18 @@ and insert immediately before `const ports = buildPorts(`:
   const pending = hasPendingMigrations(config.databasePath, deps.assets.migrationsDir);
   if (pending.length > 0) {
     log.info({ pending }, 'migrations pending; backing up first');
+    const backupsDir = join(dirname(config.databasePath), 'backups');
+    try {
+      mkdirSync(backupsDir, { recursive: true });
+      accessSync(backupsDir, constants.W_OK);
+    } catch {
+      throw new BootError(`the backups directory ${backupsDir} is not writable; migrations refused`, EXIT.unwritable);
+    }
     const backup = deps.backup ?? defaultBackup(clock);
     try {
       await backup(config.databasePath);
     } catch (err) {
-      throw new BootError(`pre-migration backup failed, migrations refused: ${messageOf(err)}`);
+      throw new BootError(`pre-migration backup failed, migrations refused: ${messageOf(err)}`, EXIT.backupFailed);
     }
   }
 ```
@@ -3588,8 +3642,8 @@ Assembly rules, each pinned by a test below:
 2. Each offer contributes its latest observation (max `fetchedAt`, tie on id); verdicts are evaluated now against the **current** constraints and requested cabin with the observation's stored supplied fields (spec §6.2).
 3. Rows outside the current resolved space are dropped and counted in `excludedByCurrentSpace` (the repositories are read with `space: null` so the count is possible); when that count is non-zero, `basisReason` ends with "· I of N rows are inside the current window and nights range" (review focus 4).
 4. Default basis (spec §6.9): `calendar` when the latest parent execution's snapshot (or, with none, the definition) has no verification provider, or no observation is inside the space; otherwise `verified`. `basisReason` says which; `verificationProviderConfigured` reports the current definition.
-5. Verified basis: `dedupByItinerary` (one row per hash, cheapest offer, the rest in `otherOffers`), then `rankRows(rows, now)` (class, seen before `notSeenInLatest`, price, age). **All classes are returned**; `failed` ranks last. `cheapest` is the first ranked row (the Results headline).
-6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked`, `notApplied` = every configured constraint, `booking: none`, a search link.
+5. Verified basis: `dedupByItinerary(rows, now)` (one row per hash; the primary offer by class, then seen-in-latest, then price, then age; the rest in `otherOffers`, each with its `verdictClass` and `unverified`), then `rankRows(rows, now)` (class, seen before `notSeenInLatest`, price, age; stale rows are labelled, never demoted). **All classes are returned**; `failed` ranks last. `cheapest` is the first ranked row (the Results headline).
+6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked` (assigned directly: `verdictClass` throws without a cabin verdict, so it is never called on calendar rows), `notApplied` = every configured constraint, `booking: none`, a search link (`null` for synthetic rows, plan reconciliation 15).
 7. `stale` per spec §8.1: verified basis against `STALE_AFTER_HOURS`; calendar basis against `CALENDAR_STALE_AFTER_HOURS` or the provider's `discoveryRefreshHours + maxAgeHours`; unknown age is stale. Stale rows are returned, never hidden.
 8. Cheapest per cell is computed here from recomputed verdicts, never read from `search_cells.best_observation_id` (the cheapest observation written, whatever its class; plan round-2 pin).
 9. `notSeenInLatest`: the cell's newest `priced | empty` verification outcome is from another execution in which this offer has no observation → `{ ageHours }` of that newer search.
@@ -3686,7 +3740,7 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(r.rows.every((row) => row.stale && row.ageHours === 201)).toBe(true);
   });
 
-  it('dedups per itinerary: the cheapest offer is the row, the others are in otherOffers', async () => {
+  it('dedups per itinerary: the best offer (same class, cheaper) is the row, the others are in otherOffers with their class', async () => {
     const { x, def, s } = await world();
     h = x;
     s.observation('E1', { cell: C1, hash: 'hV', seller: 'OTA', pricePence: 58_000, fetchedAt: at(-1) });
@@ -3694,7 +3748,7 @@ describe('GET /definitions/:id/results, verified basis', () => {
     const hv = r.rows.filter((row) => row.itineraryHash === 'hV');
     expect(hv).toHaveLength(1);
     expect(hv[0]?.pricePence).toBe(58_000);
-    expect(hv[0]?.otherOffers.map((o) => [o.seller, o.pricePence])).toEqual([['BA', 60_000]]);
+    expect(hv[0]?.otherOffers.map((o) => [o.seller, o.pricePence, o.verdictClass])).toEqual([['BA', 60_000, 'verified']]);
     expect(hv[0]?.otherOffers[0]?.provenance.providerId).toBe('fixture');
   });
 
@@ -3748,7 +3802,7 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     expect(row?.verdictClass).toBe('unchecked');
     expect(row?.notApplied).toEqual(['maxJourneyMinutes']);
     expect(row?.booking).toEqual({ kind: 'none' });
-    expect(row?.searchLink.url).toMatch(/^https:\/\//);
+    expect(row?.searchLink).toBeNull(); // why: synthetic (fixture) rows have no search link (plan reconciliation 15)
     expect(row?.outbound).toBeNull();
     expect([row?.calendarPriceId === null, row?.observationId, row?.seller, row?.layovers]).toEqual([false, null, null, []]);
     expect([row?.stale, row?.ageHours]).toEqual([false, 3 + 24]);
@@ -4015,7 +4069,7 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionId?: stri
   // why: space null reads every cell, so rows outside the current space can be counted (review focus 4).
   const raw = ports.repos.itineraries.observationsForDefinition(def.id, { executionIds: [...ids], space: null, cabin: def.cabin, includeChildren: true });
   // why: "seen in execution X" must consider every observation, not only each offer's latest one.
-  const notSeen = notSeenResolver(raw, (c) => ports.repos.itineraries.latestVerificationOutcomeForCell(def.id, c), now);
+  const notSeen = notSeenResolver(raw, (c) => ports.repos.itineraries.latestVerificationOutcomeForCell(def.id, c, def.cabin), now);
   const latest = latestPerOffer(raw);
   const inSpace = latest.filter((o) => cellInSpace(space, o.cell));
   const hashes = (xs: readonly { itinerary: { hash: string } }[]) => new Set(xs.map((o) => o.itinerary.hash)).size;
@@ -4046,7 +4100,7 @@ export function chooseBasis(loaded: Loaded, requested: Basis | undefined): { bas
 export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: Ports): ResultsResponse {
   const loaded = loadRows(def, ports, q.executionId);
   const { basis, reason } = chooseBasis(loaded, q.basis);
-  const ranked = rankRows(basis === 'verified' ? dedupByItinerary(loaded.verified) : loaded.calendar, loaded.rc.now);
+  const ranked = rankRows(basis === 'verified' ? dedupByItinerary(loaded.verified, loaded.rc.now) : loaded.calendar, loaded.rc.now);
   const excluded = basis === 'verified' ? loaded.excluded.verified : loaded.excluded.calendar;
   const total = ranked.length;
   const limit = Math.min(q.limit ?? RESULTS_CAP, RESULTS_CAP);
@@ -4208,7 +4262,7 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
     expect(cov.summary).toEqual({ buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 0, reused: 0 }, total: 4, selected: 4, itinerarySearched: 3, onDemand: 0, reused: 0 });
     const discovery = cov.perStage.find((p) => p.stage === 'discovery');
     expect(discovery).toMatchObject({ providerId: 'fixture', total: 4, requests: { calls: 0, cacheHits: 0, costMicroGbp: 0, planCalls: null }, overrun: false, parityBreak: false });
-    expect(cov.selectedNotReached.map((s) => s.cell)).toEqual([{ ...C4, nights: 10 }]);
+    expect(cov.selectedNotReached).toEqual([{ cell: { ...C4, nights: 10 }, reason: 'not_run' }]);
     expect(cov.errors).toEqual([expect.objectContaining({ stage: 'discovery', providerId: 'fixture', reason: 'upstream', lastError: 'HTTP 503', attempts: 1, retryable: true })]);
     expect(cov.scheduleBlockedSince).toBeNull();
   });
@@ -4286,7 +4340,7 @@ export function assembleCalendar(def: SearchDefinition, ports: Ports): CalendarR
   const rollUps = parent === null ? new Map<string, { discovery: RollUp; verification: RollUp }>() : ports.repos.cells.rollUps(parent.id);
   const selected = parent === null ? [] : ports.repos.cells.selected(parent.id);
   const children = loaded.all.filter((e) => e.isChild && e.status === 'completed');
-  const verified = dedupByItinerary(loaded.verified);
+  const verified = dedupByItinerary(loaded.verified, loaded.rc.now);
   const days: CalendarResponse['days'] = [];
   for (let d = loaded.space.departureFrom; d <= loaded.space.departureTo; d = addDays(d, 1)) {
     const onDay = (r: ResultRow) => r.cell.departureDate === d;
@@ -4359,7 +4413,7 @@ export type DurationResponse = z.infer<typeof apiContract.durationAnalysisRespon
 /** Spec §10 `GET /duration-analysis`: per nights, no interpolation (absent → null / []), `searched` marks unsearched gaps. */
 export function assembleDuration(def: SearchDefinition, ports: Ports): DurationResponse {
   const loaded = loadRows(def, ports);
-  const verified = dedupByItinerary(loaded.verified).filter((r) => r.verdictClass === 'verified');
+  const verified = dedupByItinerary(loaded.verified, loaded.rc.now).filter((r) => r.verdictClass === 'verified');
   const providers = [...new Set(loaded.calendar.map((r) => r.provenance.providerId))].sort() as ProviderId[];
   const searchedNights = new Set(
     loaded.latestParent === null
@@ -4532,7 +4586,7 @@ git add apps/api && git commit -m "wp08: calendar, duration analysis, coverage, 
 - Consumes: `ItinerariesRepo.offerHistory`, `CalendarPricesRepo.history`, `RoutePriceHistoryRepo.series`, `AlertsRepo` (WP3); `itineraryHistoryResponseSchema`, `routeHistoryResponseSchema`, `alertRuleInputSchema`, `alertEventsQuerySchema` `{ ruleId?, definitionId?, limit? }`, `routeHistoryQuerySchema` `{ cabin? }`, `iataSchema` (WP0).
 - Produces: routes `GET /api/itineraries/:hash/history`, `GET /api/routes/:origin/:destination/history`, `GET/POST /api/alerts`, `PUT/DELETE /api/alerts/:id`, `GET /api/alerts/events`.
 
-Rules: itinerary history is one series per (provider, seller, cabin); route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy; reused rows excluded by the repository, asserted here) plus SearchApi's route-level lowest-price series per provider, plotted by `date` (spec §7 `route_price_history`, §11). Every point carries provenance except route-series points, which carry `providerId` and `sourceKind` because the vendor gives no cabin (plan contract). Alert routes store and read rules and events only; evaluation and delivery are WP11. `GET /api/alerts` accepts an optional `?definitionId=` filter (read with `c.req.query`, no schema is declared for it); `GET /api/alerts/events` filters by `ruleId` and `definitionId` (`alertEventsQuerySchema`); route history reads `routeHistoryQuerySchema` `{ cabin? }`. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
+Rules: itinerary history is one series per (provider, seller, cabin); route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy), one point per execution fetch carrying its `cell` and `executionId` (reused rows excluded by the repository, asserted here), plus the route-level lowest-price series per provider and stored cabin (the requested one and `'unknown'`), plotted by `date` (spec §7 `route_price_history`, §11). Every point carries provenance except route-series points, which carry `providerId` and `sourceKind` because the vendor gives no cabin (plan contract). Alert routes store and read rules and events only; evaluation and delivery are WP11. `DELETE /api/alerts/:id` soft-deletes (events are kept). `GET /api/alerts` accepts an optional `?definitionId=` filter (read with `c.req.query`, no schema is declared for it); `GET /api/alerts/events` filters by `ruleId` and `definitionId` (`alertEventsQuerySchema`); route history reads `routeHistoryQuerySchema` `{ cabin? }`. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4570,12 +4624,12 @@ async function world() {
   s.calendarPrice('E2', { cell: C1, pricePence: 45_000, fetchedAt: at(-5), reusedFrom: 'E1' });
   s.calendarPrice('E2', { cell: C2, pricePence: 47_000, fetchedAt: at(-1) });
   s.routeLowest({ origin: 'LHR', destination: 'JFK', date: '2026-10-13', pricePence: 44_000, fetchedAt: at(-1) });
-  return x;
+  return { x, s };
 }
 
 describe('history routes (spec §10, §7)', () => {
   it('itinerary history: one series per provider, seller and cabin, points in time order with provenance', async () => {
-    h = await world();
+    ({ x: h } = await world());
     const body = (await expectContract(await h.request('/api/itineraries/hV/history'), 'GET', '/api/itineraries/:hash/history')) as ItineraryHistory;
     expect(body.itineraryHash).toBe('hV');
     expect(body.series).toHaveLength(1);
@@ -4584,16 +4638,18 @@ describe('history routes (spec §10, §7)', () => {
     expect(body.series[0]?.points.every((p) => p.provenance.providerId === 'fixture')).toBe(true);
   });
 
-  it('route history excludes reused rows and carries the route-level series by date', async () => {
-    h = await world();
+  it('route history: one calendar point per execution fetch, reused rows excluded, and the route-level series by cabin and date', async () => {
+    const w = await world();
+    h = w.x;
+    const s = w.s;
     const body = (await expectContract(await h.request('/api/routes/LHR/JFK/history'), 'GET', '/api/routes/:origin/:destination/history')) as RouteHistory;
     expect([body.origin, body.destination]).toEqual(['LHR', 'JFK']);
-    expect(body.calendarSeries.find((s) => s.providerId === 'fixture')?.points.map((p) => p.pricePence)).toEqual([45_000, 47_000]);
-    expect(body.routeSeries.find((s) => s.providerId === 'fixture')?.points.map((p) => [p.date, p.pricePence])).toEqual([['2026-10-13', 44_000]]);
+    expect(body.calendarSeries.find((s) => s.providerId === 'fixture')?.points.map((p) => [p.pricePence, p.executionId])).toEqual([[45_000, s.id('E1')], [47_000, s.id('E2')]]);
+    expect(body.routeSeries.find((s) => s.providerId === 'fixture' && s.cabin === 'unknown')?.points.map((p) => [p.date, p.pricePence])).toEqual([['2026-10-13', 44_000]]);
   });
 
   it('reads the requested cabin and rejects a bad airport code', async () => {
-    h = await world();
+    ({ x: h } = await world());
     const business = (await expectContract(await h.request('/api/routes/LHR/JFK/history?cabin=business'), 'GET', '/api/routes/:origin/:destination/history')) as RouteHistory;
     expect(business.calendarSeries.every((s) => s.points.length === 0)).toBe(true);
     expect((await h.request('/api/routes/LHRX/JFK/history')).status).toBe(400);
@@ -4665,6 +4721,8 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
     });
     const events = (await expectContract(await h.request(`/api/alerts/events?ruleId=${r.id}`), 'GET', '/api/alerts/events')) as Array<{ status: string }>;
     expect(events.map((e) => e.status)).toEqual(['sent']);
+    expect((await h.request(`/api/alerts/${r.id}`, { method: 'DELETE' })).status).toBe(200);
+    expect(((await (await h.request(`/api/alerts/events?ruleId=${r.id}`)).json()) as unknown[]).length).toBe(1); // events kept after a soft delete
     expect(((await (await h.request(`/api/alerts/events?definitionId=${def.id}`)).json()) as unknown[]).length).toBe(1);
     expect(((await (await h.request('/api/alerts/events?definitionId=other')).json()) as unknown[]).length).toBe(0);
   });
@@ -4703,9 +4761,11 @@ export const historyHandlers: HandlerTable = {
     return c.json({
       origin: o.data,
       destination: d.data,
+      // why: one point per execution fetch (the pair's minimum across its cells), each with its cell and execution; reused rows excluded (plan reconciliation 15).
       calendarSeries: ctx.ports.repos.calendarPrices.history(o.data, d.data, cabin.data).map((s) => ({ providerId: s.providerId, cabin: cabin.data, points: s.points })),
+      // why: the route-level series is stored per cabin; SearchApi's carries 'unknown' (the vendor gives none), so both are read.
       routeSeries: ctx.ports.providers
-        .map((p) => ({ providerId: p.id, points: ctx.ports.repos.routeHistory.series(o.data, d.data, p.id) }))
+        .flatMap((p) => ([cabin.data, 'unknown'] as const).map((cab) => ({ providerId: p.id, cabin: cab, points: ctx.ports.repos.routeHistory.series(o.data, d.data, p.id, cab) })))
         .filter((s) => s.points.length > 0),
     });
   },
@@ -4756,7 +4816,8 @@ export const alertHandlers: HandlerTable = {
 
   'DELETE /api/alerts/:id': (c, input, ctx) => {
     const existing = getRule(ctx, param(input, 'id'));
-    ctx.ports.repos.alerts.delete(existing.id);
+    // why: alert rules soft-delete so their events stay readable (plan reconciliation 15).
+    ctx.ports.repos.alerts.softDelete(existing.id);
     return c.json(existing);
   },
 
@@ -5172,4 +5233,4 @@ Run from the repository root:
 
 ## 11. Open questions
 
-None. Every question this brief raised was closed in the plan's reconciled contracts (round 1 and the round-2 pins of commit 790d1ea) and spec revision 10. One residual note for Fable, which changes no code here: no query schema is declared for the `?definitionId=` filter on `GET /api/alerts`; this brief reads it with `c.req.query()`, so it works whether or not WP0 adds one.
+None. Every question this brief raised was closed in the plan's reconciled contracts (rounds 1–3, "Decisions taken at reconciliation" items 1–15) and spec revision 11. One residual note for Fable, which changes no code here: no query schema is declared for the `?definitionId=` filter on `GET /api/alerts`; this brief reads it with `c.req.query()`, so it works whether or not WP0 adds one.

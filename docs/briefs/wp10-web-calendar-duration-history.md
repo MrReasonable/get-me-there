@@ -129,7 +129,9 @@ cellDetailResponseSchema { cell: Cell; outcomes: CellOutcome[]; calendarPrices: 
 historyPointSchema { at: IsoDateTime; pricePence; provenance: Provenance }
 routeSeriesPointSchema { date: IsoDate; pricePence; fetchedAt: IsoDateTime; providerId; sourceKind }   // no cabin, so no full provenance; plotted by date
 itineraryHistoryResponseSchema { itineraryHash; series: Array<{ providerId; seller; cabin; points: HistoryPoint[] }> }
-routeHistoryResponseSchema { origin; destination; calendarSeries: Array<{ providerId; cabin; points: HistoryPoint[] }>; routeSeries: Array<{ providerId; points: RouteSeriesPoint[] }> }
+routeHistoryResponseSchema { origin; destination; calendarSeries: Array<{ providerId; cabin; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> /* one point per execution fetch: the pair's minimum across its cells */; routeSeries: Array<{ providerId; cabin: Cabin | 'unknown'; points: RouteSeriesPoint[] }> }
+routeHistoryQuerySchema { cabin?: Cabin }
+// core (plan decision 15): export function formatPence(pence: number): string; export const CONSTRAINT_LABELS: Record<ConstraintName, string>; searchLink is nullable on synthetic rows
 executionSummarySchema { id, status, isChild, startedAt, finishedAt, ageHours }   // newest first
 verifyCellRequestSchema { definitionId, cell: CellKey } → startExecutionResponseSchema { executionId }
 ```
@@ -160,7 +162,7 @@ export function ResultsView(props: { definition: DefinitionResponse }): JSX.Elem
 export function SyntheticBanner(): JSX.Element;   // role="alert", class bg-red-700, text COPY.syntheticBanner
 // src/now.tsx, src/format.ts, src/state/urlState.ts
 export const NowContext; export function useNow(): IsoDateTime;
-export function formatPence(pence: number): string;   export function formatIsoDate(d: string): string;   // "2027-03-14" → "14 Mar 2027" by string slicing
+export function formatIsoDate(d: string): string;   // "2027-03-14" → "14 Mar 2027" by string slicing
 export function useSearchParams(): URLSearchParams; export function hrefWith(patch: Record<string, string | null>): string; export function navigateTo(patch): (e) => void;
 // test/
 export const NOW: IsoDateTime;                          // test/render.tsx: '2026-10-14T15:00:00.000Z'
@@ -1577,10 +1579,10 @@ function GlyphList({ glyphs }: { glyphs: readonly GlyphStatus[] }) {
 
 ```tsx
 import { COPY } from '../../copy.js';
-import { formatPence } from '../../format.js';
 import type { CalendarModel } from './display.js';
 import { BAND_CLASSES } from './scale.js';
 import type { DayBasis } from './types.js';
+import { formatPence } from '@gmt/core';
 
 /** Numeric legend (spec §11): the basis on the scale, each band's pence range and day count, the hatched days, and the glyphs. */
 export function CalendarLegend({ model }: { model: CalendarModel }) {
@@ -1880,6 +1882,7 @@ export function CellPanel({ definition, date, initialCell, onClose }: CellPanelP
   );
 }
 
+// Observations are ResultRows; their searchLink may be null (synthetic rows, plan decision 15). The panel never renders it.
 function CellDetailBody({ detail, note }: { detail: CellDetailResponse; note: string | null }) {
   const empty = detail.calendarPrices.length + detail.observations.length === 0;
   return (
@@ -2595,11 +2598,11 @@ export function gapLabel(row: DurationRow): string {
 `apps/web/src/views/Duration/DurationChart.tsx`:
 
 ```tsx
+import { formatPence } from '@gmt/core';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatPence } from '../../format.js';
 import { type DurationData, type DurationRow, type DurationSeries, gapLabel } from './data.js';
 
 // why: categorical palette, one hue per series (dataviz skill); calendar series also get a dashed outline, so colour is never the only cue.
@@ -2780,14 +2783,18 @@ import { linesFromItinerary, linesFromRoute } from '../../src/views/History/line
 import { API, definition } from '../fixtures.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
-import { hoursBefore, provenanceCalendar, provenanceVerified } from '../fixtures.wp10.js';
+import { cellAt, hoursBefore, provenanceCalendar, provenanceVerified } from '../fixtures.wp10.js';
+import { render } from '@testing-library/react';
+import { HistoryTooltip } from '../../src/views/History/HistoryChart.js';
 
 const hp = (h: number, pricePence: number, provenance = provenanceCalendar(h)) => ({ at: hoursBefore(h), pricePence, provenance });
+// one point per execution fetch: the pair's minimum across its cells, with that cell and the fetching execution (plan decision 15)
+const fp = (h: number, pricePence: number) => ({ ...hp(h, pricePence), cell: cellAt('2027-03-14', 14), executionId: `exec-${h}` });
 const rp = (date: string, pricePence: number) => ({ date: asIsoDate(date), pricePence, fetchedAt: hoursBefore(2), providerId: 'searchapi' as const, sourceKind: 'scraped-search' as const });
 const routeHistory: RouteHistoryResponse = {
   origin: asIata('LHR'), destination: asIata('JFK'),
-  calendarSeries: [{ providerId: 'travelpayouts', cabin: 'economy', points: [hp(0, 39900), hp(1000, 45000), hp(496, 42000), hp(664, 43000)] }],
-  routeSeries: [{ providerId: 'searchapi', points: [rp('2026-10-10', 38000), rp('2026-10-11', 38500), rp('2026-10-14', 37000)] }],
+  calendarSeries: [{ providerId: 'travelpayouts', cabin: 'economy', points: [fp(0, 39900), fp(1000, 45000), fp(496, 42000), fp(664, 43000)] }],
+  routeSeries: [{ providerId: 'searchapi', cabin: 'unknown', points: [rp('2026-10-10', 38000), rp('2026-10-11', 38500), rp('2026-10-14', 37000)] }],
 };
 const itineraryHistory: ItineraryHistoryResponse = {
   itineraryHash: 'abc123',
@@ -2811,6 +2818,15 @@ describe('history lines (spec §11 History)', () => {
       "Google's route-level lowest price, cabin unknown",
     ]);
     expect(linesFromItinerary(itineraryHistory, () => 336).map((l) => l.name)).toEqual(['Google Flights via SearchApi · itinerary offer · Example Air']);
+  });
+  it('a calendar fetch point names its cheapest cell in the tooltip; a known-cabin route series names the cabin', () => {
+    const [calendar] = linesFromRoute(routeHistory, () => 336);
+    const point = calendar?.points[0];
+    const tip = render(<HistoryTooltip active payload={[{ name: calendar?.name, payload: point }]} />).getByTestId('history-tooltip');
+    expect(tip).toHaveTextContent('Aviasales cache · calendar price (constraints not checked): £450');
+    expect(tip).toHaveTextContent('cheapest cell LHR→JFK Sun 14 Mar–Sun 28 Mar');
+    const economy = linesFromRoute({ ...routeHistory, routeSeries: [{ providerId: 'searchapi', cabin: 'economy', points: [rp('2026-10-10', 38000)] }] }, () => 336);
+    expect(economy.at(-1)?.name).toBe("Google's route-level lowest price, economy");
   });
   it('drops series with no points', () => {
     expect(linesFromRoute({ ...routeHistory, calendarSeries: [{ providerId: 'travelpayouts', cabin: 'economy', points: [] }], routeSeries: [] }, () => 336)).toEqual([]);
@@ -2900,6 +2916,9 @@ Expected: FAIL with `Failed to resolve import "../../src/views/History/HistoryVi
     xAxis: 'fetched, or price date for the route series (Europe/London)',
     yAxis: '£',
     routeLowestSeries: "Google's route-level lowest price, cabin unknown",
+    routeLowestSeriesCabin: (cabin: string) => `Google's route-level lowest price, ${cabin}`,
+    cheapestCell: (origin: string, destination: string, dep: string, ret: string) => `cheapest cell ${origin}→${destination} ${dep}–${ret}`,
+    tooltipLine: (series: string, price: string) => `${series}: ${price}`,
     offerSeries: (source: string, seller: string) => `${source} · itinerary offer · ${seller}`,
     calendarSeries: (source: string) => `${source} · calendar price (constraints not checked)`,
     routePicker: 'Route',
@@ -2920,6 +2939,9 @@ Expected: FAIL with `Failed to resolve import "../../src/views/History/HistoryVi
 
 ```ts
   'historyView.offerSeries': ['Google Flights via SearchApi', 'Example Air'],
+  'historyView.routeLowestSeriesCabin': ['economy'],
+  'historyView.cheapestCell': ['LHR', 'JFK', 'Sun 14 Mar', 'Sun 28 Mar'],
+  'historyView.tooltipLine': ["Google's route-level lowest price, cabin unknown", '£380'],
   'historyView.calendarSeries': ['Aviasales cache'],
   'historyView.pairOption': ['LHR', 'JFK'],
   'historyView.itineraryHeading': ['abc123'],
@@ -2930,16 +2952,17 @@ Expected: FAIL with `Failed to resolve import "../../src/views/History/HistoryVi
 `apps/web/src/views/History/lines.ts`:
 
 ```ts
-import type { Provenance, ProviderId } from '@gmt/core';
+import type { Cell, Provenance, ProviderId } from '@gmt/core';
 import type { ItineraryHistoryResponse, RouteHistoryResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { discoverySourceLabel } from '../../lib/sources.js';
 import { dateMs, instantMs } from '../../lib/time.js';
 
 export type RoutePoint = RouteHistoryResponse['routeSeries'][number]['points'][number];
-type ProviderPoint = RouteHistoryResponse['calendarSeries'][number]['points'][number];
+type ProviderPoint = ItineraryHistoryResponse['series'][number]['points'][number];
+type CalendarFetchPoint = RouteHistoryResponse['calendarSeries'][number]['points'][number];
 /** One plotted point: provider points carry provenance, route points carry their own record; gap points carry neither. */
-export interface HistoryPoint { t: number; pricePence: number | null; provenance: Provenance | null; route: RoutePoint | null }
+export interface HistoryPoint { t: number; pricePence: number | null; provenance: Provenance | null; route: RoutePoint | null; cell: Cell | null }
 export interface HistoryLine { key: string; kind: 'offer' | 'calendar' | 'route-lowest'; providerId: ProviderId; name: string; points: HistoryPoint[] }
 
 const HOUR_MS = 3_600_000;
@@ -2952,14 +2975,17 @@ function withGaps(points: HistoryPoint[], limitMs: number): HistoryPoint[] {
   const out: HistoryPoint[] = [];
   let prev: number | null = null;
   for (const p of sorted) {
-    if (prev !== null && p.t - prev > limitMs) out.push({ t: prev + (p.t - prev) / 2, pricePence: null, provenance: null, route: null });
+    if (prev !== null && p.t - prev > limitMs) out.push({ t: prev + (p.t - prev) / 2, pricePence: null, provenance: null, route: null, cell: null });
     out.push(p);
     prev = p.t;
   }
   return out;
 }
 
-const fromProvider = (p: ProviderPoint): HistoryPoint => ({ t: instantMs(p.at), pricePence: p.pricePence, provenance: p.provenance, route: null });
+const fromProvider = (p: ProviderPoint): HistoryPoint => ({ t: instantMs(p.at), pricePence: p.pricePence, provenance: p.provenance, route: null, cell: null });
+// why: plan decision 15 — the route's calendar series is one point per execution fetch, the pair's minimum across its cells;
+// the point carries that cheapest cell so the tooltip and table can name it.
+const fromFetch = (p: CalendarFetchPoint): HistoryPoint => ({ t: instantMs(p.at), pricePence: p.pricePence, provenance: p.provenance, route: null, cell: p.cell });
 
 /** Route history: calendar series at fetchedAt, the route-level series at its own date (spec §11 History). */
 export function linesFromRoute(resp: RouteHistoryResponse, gapHours: (providerId: ProviderId) => number): HistoryLine[] {
@@ -2968,13 +2994,15 @@ export function linesFromRoute(resp: RouteHistoryResponse, gapHours: (providerId
     .map((s) => ({
       key: `calendar:${s.providerId}`, kind: 'calendar', providerId: s.providerId,
       name: COPY.historyView.calendarSeries(discoverySourceLabel(s.providerId)),
-      points: withGaps(s.points.map(fromProvider), gapHours(s.providerId) * HOUR_MS),
+      points: withGaps(s.points.map(fromFetch), gapHours(s.providerId) * HOUR_MS),
     }));
   const route: HistoryLine[] = resp.routeSeries
     .filter((s) => s.points.length > 0)
     .map((s) => ({
-      key: `route:${s.providerId}`, kind: 'route-lowest', providerId: s.providerId, name: COPY.historyView.routeLowestSeries,
-      points: withGaps(s.points.map((p) => ({ t: dateMs(p.date), pricePence: p.pricePence, provenance: null, route: p })), ROUTE_GAP_HOURS * HOUR_MS),
+      // why: route-level series are per cabin (plan contracts v3); the spec's wording names an unknown cabin as such.
+      key: `route:${s.providerId}:${s.cabin}`, kind: 'route-lowest', providerId: s.providerId,
+      name: s.cabin === 'unknown' ? COPY.historyView.routeLowestSeries : COPY.historyView.routeLowestSeriesCabin(COPY.cabinName[s.cabin]),
+      points: withGaps(s.points.map((p) => ({ t: dateMs(p.date), pricePence: p.pricePence, provenance: null, route: p, cell: null })), ROUTE_GAP_HOURS * HOUR_MS),
     }));
   return [...calendar, ...route];
 }
@@ -2995,13 +3023,12 @@ export function linesFromItinerary(resp: ItineraryHistoryResponse, gapHours: (pr
 `apps/web/src/views/History/HistoryChart.tsx`:
 
 ```tsx
-import { effectiveAge, formatAgeFull, type IsoDateTime } from '@gmt/core';
+import { effectiveAge, formatAgeFull, formatPence, type IsoDateTime } from '@gmt/core';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatPence } from '../../format.js';
-import { formatDayLong } from '../../lib/isoDate.js';
+import { formatDayLong, formatDayShort } from '../../lib/isoDate.js';
 import { formatInstantLondon } from '../../lib/time.js';
 import type { HistoryLine, HistoryPoint } from './lines.js';
 
@@ -3020,7 +3047,7 @@ export function HistoryChart({ lines }: { lines: readonly HistoryLine[] }) {
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(v: number) => formatInstantLondon(v)} label={{ value: H.xAxis, position: 'insideBottom', offset: -16 }} />
           <YAxis tickFormatter={(v: number) => formatPence(v)} label={{ value: H.yAxis, angle: -90, position: 'insideLeft' }} />
-          <Tooltip labelFormatter={(v) => (typeof v === 'number' ? formatInstantLondon(v) : String(v))} formatter={(v) => (typeof v === 'number' ? formatPence(v) : String(v))} />
+          <Tooltip content={(p) => <HistoryTooltip active={p.active} payload={p.payload} />} />
           <Legend verticalAlign="top" />
           {lines.map((l, i) => {
             const dash = DASH[l.kind];
@@ -3030,6 +3057,29 @@ export function HistoryChart({ lines }: { lines: readonly HistoryLine[] }) {
           })}
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Custom tooltip: when, each series' price, and for a calendar fetch the cheapest cell it came from (plan decision 15). */
+export function HistoryTooltip(props: { active?: boolean | undefined; payload?: ReadonlyArray<{ name?: unknown; payload?: unknown }> | undefined }) {
+  const items = (props.payload ?? []).flatMap((e) => {
+    const point = e.payload as HistoryPoint | undefined;
+    return point === undefined || point.pricePence === null ? [] : [{ name: String(e.name ?? ''), point: point as Plotted }];
+  });
+  const first = items[0];
+  if (props.active !== true || first === undefined) return null;
+  return (
+    <div data-testid="history-tooltip" className="rounded border bg-white p-2 text-xs shadow">
+      <p className="font-medium">{first.point.route !== null ? formatDayLong(first.point.route.date) : formatInstantLondon(first.point.t)}</p>
+      <ul>
+        {items.map(({ name, point }) => (
+          <li key={name}>
+            {H.tooltipLine(name, formatPence(point.pricePence))}
+            {point.cell !== null ? <span className="block">{H.cheapestCell(point.cell.origin, point.cell.destination, formatDayShort(point.cell.departureDate), formatDayShort(point.cell.returnDate))}</span> : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -3061,7 +3111,10 @@ export function HistoryTable({ line, now }: { line: HistoryLine; now: IsoDateTim
               </tr>
             ) : (
               <tr key={p.t}>
-                <td>{formatInstantLondon(p.t)}</td>
+                <td>
+                  {formatInstantLondon(p.t)}
+                  {p.cell !== null ? <span className="block">{H.cheapestCell(p.cell.origin, p.cell.destination, formatDayShort(p.cell.departureDate), formatDayShort(p.cell.returnDate))}</span> : null}
+                </td>
                 <td colSpan={2}>
                   <PriceBoundary>
                     <PriceCell pricePence={p.pricePence} provenance={p.provenance ?? undefined} calendar={line.kind === 'calendar'} stale={false} />
@@ -3161,7 +3214,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/history.test.tsx test/copy`
-Expected: PASS. The history file passes 11 tests.
+Expected: PASS. The history file passes 12 tests.
 
 - [ ] **Step 5: Commit**
 

@@ -10,7 +10,7 @@ status: draft
 
 # WP11: alerts runner, EmailNotifier, Alerts UI
 
-Reconciled 2026-10-14 against spec revision 10 and the plan's "Cross-package contracts" v2 with the round-2 pins (commit 790d1ea, decision 14).
+Reconciled 2026-10-14 against spec revision 10 and the plan's "Cross-package contracts" v2 with the round-2 and round-3 pins (decisions 14 and 15, commit 4244030) and spec revision 11 §6.8.
 
 ## 1. Goal
 
@@ -93,15 +93,15 @@ export interface AlertRule { id: string; definitionId: string; type: AlertRuleTy
 export type AlertRuleInput = Omit<AlertRule, 'id'>;
 export interface AlertEvent { id: number; ruleId: string; identityKey: string; observationId: number | null; calendarPriceId: number | null; dedupKey: string; firedAt: IsoDateTime; status: 'sent' | 'failed' | 'suppressed'; reason: string | null; payload: unknown }
 export type VerifiedCandidate = { basis: 'verified'; observation: Observation; itinerary: NormalisedItinerary; verdictClass: VerdictClass; unverified: ConstraintName[]; seller: string; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
-export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
+export type CalendarCandidate = { basis: 'calendar'; calendarPriceId: number; fetchedByExecutionId: string; cell: Cell; pricePence: number; provenance: Provenance; previous: { pricePence: number; fetchedAt: IsoDateTime } | null };
 export type AlertCandidate = VerifiedCandidate | CalendarCandidate;
 export interface Firing { rule: AlertRule; candidate: AlertCandidate; identityKey: string; dedupKey: string; reason: string; isNew: boolean; suppressed: { reason: string } | null }   // evaluateAlertRules returns suppressed firings too; the runner records them with status 'suppressed' and the digest excludes them
 export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: IsoDateTime; pricePence: number }
 // identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
 
 // @gmt/core — ports/notifier.ts (WP0)
-export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string }; rowKey: string /* resultRowKey, for the app link */ }
-export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number; newItems: DigestItem[]; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string } | null /* null for synthetic rows */; rowKey: string /* resultRowKey, for the app link */ }
+export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number /* firings beyond the top 10 */; newItems: DigestItem[]; newRestCount: number /* new cells beyond the top 10 */; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
 export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'provider_capped' | 'parity_break' | 'alerts_calendar_only' | 'crash_loop';   // all rendered by WP7's operator templates
 export interface OperatorMessage { kind: OperatorMessageKind; executionId: string | null; definitionId: string; subject: string; body: string }
 export interface Notifier { id: string; send(msg: { kind: 'digest'; digest: AlertDigest; subject: string; body: string } | { kind: 'operator'; message: OperatorMessage }): Promise<{ ok: boolean; detail?: string }> }
@@ -132,7 +132,12 @@ export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;
 export function evaluateConstraints(it: NormalisedItinerary, obs: ObservationFields & { segmentCabins: Cabin[] | null }, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts;
 export function verdictClass(v: Verdicts): VerdictClass; export function unverifiedNames(v: Verdicts): ConstraintName[];
 export function evaluateAlertRules(rules: AlertRule[], candidates: AlertCandidate[], prior: PriorFiring[], ctx: { now: IsoDateTime; executionId: string; cabin: Cabin; discoveryRefreshHours: Partial<Record<ProviderId, number>> }): Firing[];
+// evaluateAlertRules (spec rev 11 §6.8): refuses calendar candidates whose fetchedByExecutionId ≠ ctx.executionId; settles each identity on its cheapest
+//   eligible candidate; returns suppressed firings; within the cooldown the same identity fires again only at least max(£10, 5%) below the last fired price;
+//   every drop reason states the previous price and its age, on both bases.
 export function identityKey(rule: AlertRule, c: AlertCandidate): string;
+export function formatPence(pence: number): string;   // the single money formatter (en-GB grouping, throws on non-integer or negative)
+export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // plain-English constraint labels
 export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { executionId: string; definitionId: string; coverageCaveat: AlertDigest['coverageCaveat'] }): AlertDigest | null;   // null when no firing; top 10 + restCount
 
 // @gmt/db (WP3)
@@ -147,7 +152,7 @@ export interface CalendarPriceRow extends CalendarPriceInsert { id: number; exec
 export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; fetchedBy(executionId): CalendarPriceRow[] /* reused excluded */; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; /* … */ }
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
 export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; upsertOffer(offer: Offer): number; insertObservation(obs: Omit<Observation, 'id'>): number; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; /* … */ }
-export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; delete(id): void; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
+export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; softDelete(id): void /* alert_rules.deleted_at; events are kept */; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
 export class AirportsRepo { upsertAll(dataset: AirportsDataset): void; /* … */ }
 
 // @gmt/providers (WP4)
@@ -168,7 +173,8 @@ export class LogNotifier implements Notifier { constructor(log: Logger) }
 **Assumptions about code that later waves deliver.** Each is checked again when wave 7 opens.
 
 1. **`evaluateAlertRules` and new candidates.** An absent-then-present candidate comes back with `isNew: true`. Under a drop rule it is a listing, never a firing. Under an absolute rule it is a firing that is also new.
-2. **`buildDigest`.** It puts drop-rule `isNew` firings in `newItems`, excludes suppressed firings, and returns `null` when no firing remains in `items`.
+2. **`buildDigest`.** It puts drop-rule `isNew` firings in `newItems` (top 10, the rest counted in `newRestCount`), excludes suppressed firings, and returns `null` when no firing remains in `items`.
+6. **`formatPence(41200)` is `'£412'`** and `formatPence(2050)` is `'£20.50'` (the spec §8.3 subject format). If WP0 renders whole pounds with `.00`, the subject tests change to its output and spec §8.3 is reported.
 3. **`AlertsRepo.priorFirings`** returns `sent` events only, so a failed delivery never suppresses the next execution.
 4. **WP7's layer-A harness** (`packages/engine/test/harness.ts`) exposes `createHarness()` returning:
    - `deps` and `options`;
@@ -578,7 +584,7 @@ Expected: FAIL, because the import `../../src/alerts/runner.js` cannot be resolv
  * Every provider-supplied string passes stripControl before it is written.
  */
 import {
-  effectiveAge, formatAgeFull, formatDuration,
+  effectiveAge, formatAgeFull, formatDuration, formatPence,
   type AlertDigest, type AlertRule, type DigestItem, type IsoDateTime, type Provenance,
 } from '@gmt/core';
 
@@ -586,7 +592,6 @@ import {
 export interface DigestRenderInput { digest: AlertDigest; definitionName: string; appBaseUrl: string | null; now: IsoDateTime }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
-const NEW_ITEM_LIMIT = 10;
 
 /**
  * Removes CR, LF, every other C0/C1 control and the Unicode line/paragraph separators, collapsing runs to one space.
@@ -605,13 +610,6 @@ export function sourceLabel(p: Provenance): string {
   throw new Error(`templates: no source label for ${p.providerId}/${p.sourceKind}; synthetic rows are refused (spec §5.5)`);
 }
 
-/** "£412", "£1,234.50": integer pence in, never a float. */
-function pounds(pence: number): string {
-  const whole = Math.floor(pence / 100).toLocaleString('en-GB');
-  const rest = pence % 100;
-  return rest === 0 ? `£${whole}` : `£${whole}.${String(rest).padStart(2, '0')}`;
-}
-
 /** "14 Mar" from a calendar date string; never through Date (spec §6.1). */
 function day(d: string): string {
   const [, m, dd] = d.slice(0, 10).split('-');
@@ -620,7 +618,7 @@ function day(d: string): string {
 
 /** "£412 LHR→JFK 14 Mar–28 Mar (14n)", with "≈" when FX-converted (spec §11). */
 export function routeLine(item: Pick<DigestItem, 'pricePence' | 'provenance' | 'cell'>): string {
-  const price = `${item.provenance.fx.converted ? '≈' : ''}${pounds(item.pricePence)}`;
+  const price = `${item.provenance.fx.converted ? '≈' : ''}${formatPence(item.pricePence)}`;
   return `${price} ${item.cell.origin}→${item.cell.destination} ${day(item.cell.departureDate)}–${day(item.cell.returnDate)} (${item.cell.nights}n)`;
 }
 
@@ -653,9 +651,9 @@ function validHttps(url: string, host: string | null): URL | null {
   }
 }
 
-/** Core's labelled search link; spec §5.3 keeps its query in email. */
+/** Core's labelled search link; spec §5.3 keeps its query in email. Null only for synthetic rows, which never reach here. */
 function searchLine(item: DigestItem): string {
-  return `Link: ${item.searchLink.url} (host ${item.searchLink.host}, ${item.searchLink.label})`;
+  return item.searchLink === null ? 'Link: none' : `Link: ${item.searchLink.url} (host ${item.searchLink.host}, ${item.searchLink.label})`;
 }
 
 function calendarLinkLine(item: DigestItem): string {
@@ -669,7 +667,7 @@ function previousLine(item: DigestItem): string | null {
   if (item.previousPricePence === null) return null;
   const age = item.previousAgeHours;
   const when = age === null || age === 'unknown' ? 'at an unknown time' : age < 1 ? 'just now' : `${formatDuration(age)} ago`;
-  return `   Previous: ${pounds(item.previousPricePence)}, fetched ${when}`;
+  return `   Previous: ${formatPence(item.previousPricePence)}, fetched ${when}`;
 }
 
 /** Lines specific to the item's basis; Task 11.2 adds the verified branch. */
@@ -691,8 +689,8 @@ function itemLines(n: number, item: DigestItem, input: DigestRenderInput): strin
 }
 
 function ruleText(r: AlertRule): string {
-  const what = r.type === 'absolute' ? `alert when the price is ${pounds(r.thresholdPence ?? 0)} or less`
-    : r.type === 'dropAbs' ? `alert when the price drops by ${pounds(r.thresholdPence ?? 0)} or more`
+  const what = r.type === 'absolute' ? `alert when the price is ${formatPence(r.thresholdPence ?? 0)} or less`
+    : r.type === 'dropAbs' ? `alert when the price drops by ${formatPence(r.thresholdPence ?? 0)} or more`
     : `alert when the price drops by ${r.pct ?? 0}% or more`;
   const basis = r.basis === 'calendar' ? 'calendar basis, constraints not checked'
     : r.requireAllVerified === true ? 'itinerary-search basis, class verified only' : 'itinerary-search basis, class verified or partially-verified';
@@ -715,8 +713,8 @@ export function renderBody(input: DigestRenderInput): string {
   if (d.restCount > 0) lines.push(`and ${d.restCount} more`, '');
   if (d.newItems.length > 0) {
     lines.push('New since the last check (no earlier price to compare; not a drop):');
-    for (const item of d.newItems.slice(0, NEW_ITEM_LIMIT)) lines.push(`- ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${formatAgeFull(effectiveAge(item.provenance, input.now))}`);
-    if (d.newItems.length > NEW_ITEM_LIMIT) lines.push(`and ${d.newItems.length - NEW_ITEM_LIMIT} more new`);
+    for (const item of d.newItems) lines.push(`- ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${formatAgeFull(effectiveAge(item.provenance, input.now))}`);
+    if (d.newRestCount > 0) lines.push(`and ${d.newRestCount} more new cells`);
     lines.push('');
   }
   lines.push(coverageText(d.coverageCaveat), `Rule: ${ruleText(d.rule)}`);
@@ -801,7 +799,7 @@ function calendarPool(ctx: RunContext): CalendarCandidate[] {
   return ctx.deps.repos.calendarPrices.fetchedBy(ctx.executionId)
     .filter((r) => r.cabin === ctx.snapshot.cabin)
     .map((r) => ({
-      basis: 'calendar' as const, calendarPriceId: r.id, pricePence: r.pricePence, provenance: r.provenance, previous: null,
+      basis: 'calendar' as const, calendarPriceId: r.id, fetchedByExecutionId: r.executionId, pricePence: r.pricePence, provenance: r.provenance, previous: null,
       cell: { ...r.cell, nights: daysBetween(r.cell.departureDate, r.cell.returnDate) },
     }));
 }
@@ -948,7 +946,7 @@ export function calendarItem(over: Partial<DigestItem> = {}): DigestItem {
 export const RULE: AlertRule = { id: 'rule-1', definitionId: 'def-1', type: 'absolute', thresholdPence: 45000, pct: null, basis: 'verified', requireAllVerified: false, cooldownHours: 336, enabled: true };
 
 export function digestOf(items: DigestItem[], over: Partial<AlertDigest> = {}): AlertDigest {
-  return { ruleId: RULE.id, definitionId: 'def-1', executionId: 'ex-1', basis: 'verified', items, restCount: 0, newItems: [], coverageCaveat: { itinerarySearched: 3, selected: 10, expandTop: 2 }, rule: RULE, ...over };
+  return { ruleId: RULE.id, definitionId: 'def-1', executionId: 'ex-1', basis: 'verified', items, restCount: 0, newItems: [], newRestCount: 0, coverageCaveat: { itinerarySearched: 3, selected: 10, expandTop: 2 }, rule: RULE, ...over };
 }
 
 export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRenderInput {
@@ -959,7 +957,7 @@ export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRender
 `packages/engine/test/alerts/templates.test.ts`:
 
 ```ts
-import { asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { asIsoDateTime, BANNED_WORD_ALLOWLIST, CONSTRAINT_LABELS, findBannedWords } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { appRowLink, renderBody, renderSubject, sourceLabel, stripControl } from '../../src/alerts/templates.js';
 import { calendarItem, digestOf, NOW, renderInput, ROW_KEY, RULE, verifiedItem } from './builders.js';
@@ -986,11 +984,12 @@ describe('subject formats (spec §8.3)', () => {
 describe('verified item body (spec §8.3)', () => {
   it('segments, seller, every unverified constraint, provenance, link with host and expiry, coverage, rule, rest count', () => {
     const body = renderBody(renderInput({ digest: digestOf([verifiedItem()], { restCount: 40 }) }));
+    expect(body).not.toContain('more new cells');
     for (const line of [
       'Seller: British Airways',
       'Outbound: BA 117 LHR 08:25 → JFK 11:20 (14 Mar)',
       'Inbound: BA 112 JFK 18:30 → LHR 06:35 (29 Mar)',
-      'Verdicts: class partially-verified; unverified: checked bag',
+      `Verdicts: class partially-verified; unverified: ${CONSTRAINT_LABELS.checkedBagRequired}`,
       'Provenance: Google Flights via SearchApi · fetched 5h ago',
       'Link: https://www.google.com/travel/clk?tfs=abc (host www.google.com, expires in 3h)',
       'and 40 more',
@@ -1019,7 +1018,7 @@ describe('verified item body (spec §8.3)', () => {
   it('calendar item with a drop: previous price and age; new items in their own section', () => {
     const drop = calendarItem({ previousPricePence: 43000, previousAgeHours: 72, firingReason: 'dropped £41 (9%) from £430' });
     const body = renderBody(renderInput({
-      digest: digestOf([drop], { basis: 'calendar', coverageCaveat: null, newItems: [calendarItem({ isNew: true })], rule: { ...RULE, type: 'dropAbs', thresholdPence: 2000, basis: 'calendar', requireAllVerified: null } }),
+      digest: digestOf([drop], { basis: 'calendar', coverageCaveat: null, newItems: [calendarItem({ isNew: true })], newRestCount: 4, rule: { ...RULE, type: 'dropAbs', thresholdPence: 2000, basis: 'calendar', requireAllVerified: null } }),
     }));
     for (const line of [
       'calendar price, no itinerary; constraints not checked',
@@ -1027,6 +1026,7 @@ describe('verified item body (spec §8.3)', () => {
       'Provenance: Aviasales cache · fetched 2h ago · provider age unknown (≤7d before that)',
       'Link: https://www.aviasales.com/search/LON1403NYC28031 (host www.aviasales.com, search link, not a fare link)',
       'New since the last check (no earlier price to compare; not a drop):',
+      'and 4 more new cells',
       '- £389 LHR→JFK 14 Mar–28 Mar (14n) · Aviasales cache',
       'Coverage: itinerary-searched 0 cells (no verification provider configured)',
       'Rule: alert when the price drops by £20 or more · calendar basis, constraints not checked · cooldown 336h',
@@ -1063,7 +1063,7 @@ describe('banned words over rendered output (spec §8.3, §11)', () => {
 
 - [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/templates.test.ts`. Expected: FAIL in "verified item body" and the CRLF seller test. The body still prints "calendar price, no itinerary" for verified items and has no `Seller:` line. The subject tests pass.
 
-- [ ] **Step 3: Implement.** In `templates.ts`, add `type ConstraintName, type Segment` to the core import and add:
+- [ ] **Step 3: Implement.** In `templates.ts`, add `CONSTRAINT_LABELS` and `type Segment` to the core import (the labels are core's, plan decision 15) and add:
 
 ```ts
 const HOUR_MS = 3_600_000;
@@ -1071,15 +1071,6 @@ const HOUR_MS = 3_600_000;
 function hoursBetween(from: IsoDateTime, to: IsoDateTime): number {
   return Math.floor((new Date(to).getTime() - new Date(from).getTime()) / HOUR_MS);
 }
-
-/** Human names for constraint keys, used when naming unverified constraints. Spec §6.2. */
-const CONSTRAINT_LABELS: Record<ConstraintName, string> = {
-  cabin: 'cabin', maxStops: 'max stops', maxJourneyMinutes: 'max journey', minLayoverMinutes: 'min layover',
-  maxLayoverMinutes: 'max layover', noOvernightLayover: 'no overnight layover', departureWindowLocal: 'departure window',
-  arrivalWindowLocal: 'arrival window', noSelfTransfer: 'no self-transfer', noAirportChange: 'no airport change',
-  includeAirlines: 'include airlines', excludeAirlines: 'exclude airlines', cabinBagRequired: 'cabin bag',
-  checkedBagRequired: 'checked bag', minCheckedBags: 'min checked bags', maxPricePence: 'max price',
-};
 
 function segmentLine(s: Segment): string {
   const hhmm = (local: string) => local.slice(11, 16);
@@ -1141,7 +1132,7 @@ function linkLine(item: DigestItem, input: DigestRenderInput): string {
 - [ ] **Step 1: Write the failing test** in `packages/engine/test/alerts/runner.verified.test.ts`:
 
 ```ts
-import { asIsoDate } from '@gmt/core';
+import { asIsoDate, CONSTRAINT_LABELS } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { runAlerts } from '../../src/alerts/runner.js';
 import { ALL_FIELDS, fixture, hoursBefore, NOW, payloadOf, seedDefinition, seedExecution, seedObservation, seedRule } from './fixtures.js';
@@ -1172,7 +1163,7 @@ describe('verified basis (spec §6.8)', () => {
     expect(events.map((e) => e.identityKey).sort()).toEqual([`${rule.id}|${a.itineraryHash}`, `${rule.id}|${b.itineraryHash}`].sort());
     expect(events.every((e) => e.observationId !== null && e.calendarPriceId === null)).toBe(true);
     const body = f.notifier.digests()[0]?.body ?? '';
-    expect(body).toContain('unverified: checked bag');
+    expect(body).toContain(`unverified: ${CONSTRAINT_LABELS.checkedBagRequired}`);
     expect(body).toContain('Outbound: BA 117 LHR 08:25 → JFK 11:20 (2 Nov)');
   });
 
@@ -1191,12 +1182,13 @@ describe('verified basis (spec §6.8)', () => {
     expect(event === undefined ? null : payloadOf(event)).toMatchObject({ pricePence: 42000, previousPence: 50000, isNew: false });
     const body = f.notifier.digests()[0]?.body ?? '';
     expect(body).toContain('Previous: £500, fetched 7d ago');
+    expect(event?.reason).toContain('£500');
     expect(body).toContain('New since the last check');
     expect(body).toContain('£410 LHR→JFK 3 Nov–17 Nov (14n)');
     expect(f.repos.alerts.events({ ruleId: rule.id, limit: 100 }).some((e) => e.observationId === b.observationId)).toBe(false);
   });
 
-  it('the cheapest offer per itinerary represents it once', async () => {
+  it('the cheapest eligible offer per itinerary represents it once (core settles identities, rev 11)', async () => {
     const f = fixture();
     const def = seedDefinition(f);
     const ex = seedExecution(f, def);
@@ -1222,23 +1214,24 @@ Then add:
 ```ts
 /**
  * Observations written by this execution in the snapshot's cabin, verdicts recomputed against the current definition (spec §6.2),
- * the cheapest offer per itinerary kept; previous = that offer's previous observation. Spec §6.8.
+ * failed excluded; previous = each offer's previous observation. Spec §6.8.
+ * why: core settles each identity on its cheapest eligible candidate (rev 11), so every offer is passed; reducing here could
+ * drop the class-verified offer a requireAllVerified rule needs in favour of a cheaper partially-verified one.
  */
 function verifiedPool(ctx: RunContext): VerifiedCandidate[] {
-  const best = new Map<string, VerifiedCandidate>();
+  const out: VerifiedCandidate[] = [];
   for (const row of ctx.deps.repos.itineraries.writtenBy(ctx.executionId)) {
     if (row.offer.cabin !== ctx.snapshot.cabin) continue;
     const verdicts = evaluateConstraints(row.itinerary, row, ctx.definition.constraints, ctx.snapshot.cabin, row.suppliedFields);
     const cls = verdictClass(verdicts);
     if (cls === 'failed') continue;
-    const held = best.get(row.itinerary.hash);
-    if (held !== undefined && held.observation.pricePence <= row.pricePence) continue;
-    best.set(row.itinerary.hash, { basis: 'verified', observation: row, itinerary: row.itinerary, verdictClass: cls, unverified: unverifiedNames(verdicts), seller: row.seller, previous: null });
+    const prev = ctx.deps.repos.itineraries.previousObservation(row.offerId, row.provenance.fetchedAt);
+    out.push({
+      basis: 'verified', observation: row, itinerary: row.itinerary, verdictClass: cls, unverified: unverifiedNames(verdicts), seller: row.seller,
+      previous: prev === null ? null : { pricePence: prev.pricePence, fetchedAt: prev.provenance.fetchedAt },
+    });
   }
-  return [...best.values()].map((c) => {
-    const prev = ctx.deps.repos.itineraries.previousObservation(c.observation.offerId, c.observation.provenance.fetchedAt);
-    return prev === null ? c : { ...c, previous: { pricePence: prev.pricePence, fetchedAt: prev.provenance.fetchedAt } };
-  });
+  return out;
 }
 ```
 
@@ -1286,7 +1279,7 @@ describe('calendar basis (spec §6.8)', () => {
     expect(await runAlerts(f.deps, ex)).toEqual({ digests: 1, events: 2 });
     const events = f.repos.alerts.events({ ruleId: rule.id, limit: 100 });
     expect(events.map((e) => e.identityKey).sort()).toEqual([c167, c168].map((c) => `${rule.id}|searchapi|economy|${cellKeyString(c)}`).sort());
-    expect(events.every((e) => payloadOf(e).previousPence === 50000)).toBe(true);
+    expect(events.every((e) => payloadOf(e).previousPence === 50000 && (e.reason ?? '').includes('£500'))).toBe(true);
     const body = f.notifier.digests()[0]?.body ?? '';
     expect(body).toContain('New since the last check');
     expect(body).toContain('- £400 LHR→JFK 3 Nov–17 Nov (14n) · Google date grid via SearchApi');
@@ -1334,7 +1327,7 @@ function calendarPool(ctx: RunContext): CalendarCandidate[] {
       const refresh = ctx.snapshot.providers.discoveryRefreshHours[r.providerId] ?? DEFAULT_REFRESH_HOURS;
       const prev = ctx.deps.repos.calendarPrices.previousFor(ctx.definition.id, r.providerId, r.cabin, r.cell, r.fetchedAt, _hours(r.fetchedAt, 2 * refresh));
       return {
-        basis: 'calendar' as const, calendarPriceId: r.id, pricePence: r.pricePence, provenance: r.provenance,
+        basis: 'calendar' as const, calendarPriceId: r.id, fetchedByExecutionId: r.executionId, pricePence: r.pricePence, provenance: r.provenance,
         cell: { ...r.cell, nights: daysBetween(r.cell.departureDate, r.cell.returnDate) },
         previous: prev === null ? null : { pricePence: prev.pricePence, fetchedAt: prev.fetchedAt },
       };
@@ -1393,7 +1386,7 @@ describe('cooldown across executions (spec §6.8, §9 item 4)', () => {
     expect(await runAlerts(f.deps, third)).toEqual({ digests: 1, events: 1 });
   });
 
-  it('a lower price for the same identity inside the cooldown is sent; an equal-or-higher one is suppressed', async () => {
+  it('inside the cooldown the same identity fires again only at least max(£10, 5%) below the last fired price (spec rev 11 §6.8)', async () => {
     const f = fixture();
     const def = seedDefinition(f);
     seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
@@ -1409,8 +1402,13 @@ describe('cooldown across executions (spec §6.8, §9 item 4)', () => {
     expect(await runAlerts(f.deps, higher)).toEqual({ digests: 0, events: 1 });
 
     f.clock.advance(DAY);
+    const drift = seedExecution(f, def);
+    seedCalendar(f, drift, [{ cell, pricePence: 40800 }]);   // new £408 band but only £4 below £412: under max(£10, 5%) = £20.60
+    expect(await runAlerts(f.deps, drift)).toEqual({ digests: 0, events: 1 });
+
+    f.clock.advance(DAY);
     const lower = seedExecution(f, def);
-    seedCalendar(f, lower, [{ cell, pricePence: 39000 }]);
+    seedCalendar(f, lower, [{ cell, pricePence: 39000 }]);   // £22 below £412: at least £20.60
     expect(await runAlerts(f.deps, lower)).toEqual({ digests: 1, events: 1 });
   });
 
@@ -1867,9 +1865,10 @@ beforeEach(() => {
 });
 
 describe('Alerts rule form (spec §6.8, §11)', () => {
-  it('defaults: absolute rule, itinerary-search basis, cooldown 336 h', async () => {
+  it('defaults: absolute rule, itinerary-search basis, cooldown 336 h; deleting keeps history', async () => {
     renderWithProviders(<AlertsView definitionId="def-1" />);
     expect(await screen.findByLabelText(C.cooldown)).toHaveValue(336);
+    expect(screen.getByText(C.deleteKeepsHistory)).toBeInTheDocument();
     expect(screen.getByLabelText(C.ruleType)).toHaveValue('absolute');
     expect(screen.getByLabelText(C.basis)).toHaveValue('verified');
     expect(screen.getByLabelText(C.requireAll)).toBeEnabled();
@@ -1937,6 +1936,7 @@ In `apps/web/src/copy.ts`, add this entry to `COPY`:
     cooldown: 'Cooldown (hours)',
     cooldownHint: 'Default 336 h (two weeks), deliberately longer than a weekly schedule.',
     addRule: 'Add rule', deleteRule: 'Delete rule',
+    deleteKeepsHistory: 'Deleting a rule stops it firing; its alert history below is kept.',
     fieldError: (field: string, message: string) => `${field}: ${message}`,
     notSaved: (message: string) => `Rule not saved: ${message}`,
     rulesHeading: 'Rules', noRules: 'No alert rules for this definition yet.',
@@ -1953,6 +1953,7 @@ In `apps/web/src/api/endpoints.ts`, import `type { AlertEvent, AlertRule, AlertR
 ```ts
   alertRules: (definitionId: string) => call<AlertRule[]>('GET', '/api/alerts', { query: { definitionId } }),
   createAlertRule: (body: AlertRuleInput) => call<AlertRule>('POST', '/api/alerts', { body }),
+  // why: DELETE soft-deletes the rule (AlertsRepo.softDelete, plan decision 15); its events stay listed.
   deleteAlertRule: (id: string) => call<AlertRule>('DELETE', '/api/alerts/:id', { params: { id } }),
   alertEvents: (definitionId: string, limit: number) => call<AlertEvent[]>('GET', '/api/alerts/events', { query: { definitionId, limit: String(limit) } }),
 ```
@@ -2057,7 +2058,7 @@ import type { AlertRule } from '@gmt/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/endpoints.js';
 import { COPY } from '../../copy.js';
-import { formatPence } from '../../format.js';
+import { formatPence } from '@gmt/core';
 import { RuleForm } from './RuleForm.js';
 
 const C = COPY.alertsView;
@@ -2088,6 +2089,7 @@ export function AlertsView(props: { definitionId: string }) {
       {create.isError ? <p role="alert">{C.notSaved(create.error.message)}</p> : null}
       <div>
         <h3>{C.rulesHeading}</h3>
+        <p className="text-sm">{C.deleteKeepsHistory}</p>
         {rules.isLoading ? <p>{COPY.loading}</p> : list.length === 0 ? <p>{C.noRules}</p> : (
           <ul>
             {list.map((r) => (

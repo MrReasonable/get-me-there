@@ -113,7 +113,7 @@ export class AppLock { constructor(db: Db, holder: 'app' | 'tool', clock: Clock,
 
 ```ts
 export interface ProviderHttpLimits { hosts: string[]; ratePerMinute: number; ratePerHour: number; concurrency: number; billable: 'http-200' | 'never'; costPerCallMicroGbp: number; maxWaitSeconds: number; requestTimeoutSeconds: number; classifyError?: (status: number, body: unknown, ledgerAtCap: boolean) => ProviderError }
-export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[]; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
+export interface HttpKitDeps { budget: BudgetGuard; cache: ResponseCache; limits: Partial<Record<ProviderId | 'fx', ProviderHttpLimits>>; clock: Clock; log: Logger; secrets: Secret[] /* non-empty whenever a real provider is configured */; syntheticAllowed: boolean /* required true for inProcessHosts or limits.fixture */; recorder?: FixtureRecorder; inProcessHosts?: Record<string, (req: Request) => Promise<Response>> }
 export interface HttpKitRequest { providerId: ProviderId | 'fx'; executionId: string | null; tileIndex: number | null; endpointPath: string; method: 'GET' | 'POST'; url: URL; headers: Record<string, string>; body?: string; cache: { ttlSeconds: number } | 'never'; signal: AbortSignal; recordFixtures: boolean }
 export interface HttpKitResponse { status: number; body: unknown; fetchedAt: IsoDateTime; fromCache: boolean; cacheKey: string }
 export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>; stats(): { inFlight: number } }
@@ -122,7 +122,8 @@ export interface RecordedFixture { recordedAt: IsoDateTime; recordedBy: string; 
 export interface FixtureRecorder { record(r: { providerId: ProviderId | 'fx'; endpointPath: string; request: HttpKitRequest; status: number; body: unknown }): Promise<string /* path written */> }
 export function createRecorder(opts: { root: string; secrets: Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;   // files: <root>/<providerId>/<endpointPath with / → _>/<yyyy-mm-dd>-<sha12>.json; raw bodies to *.raw.json beside them (gitignored)
 export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
-export function fixtureRouter(root: string): Hono;
+export function fixtureRouter(root: string, gate: SyntheticGateInput): Hono;   // '@gmt/providers/fixture' subpath; throws unless syntheticAllowed(gate)
+// Db (WP0/WP3) also has immediateTransaction(fn) (BEGIN IMMEDIATE); AppLock uses it internally. The `providers` table no longer exists, and nothing here touches it.
 ```
 
 `@gmt/providers` `src/params/allowlist.ts` (WP4) exports the allowlist type and helpers. `recordParams.ts` imports the type and does not declare it:
@@ -181,7 +182,7 @@ export type ToolName = 'record' | 'smoke';
 export const EXIT: { ok: 0; failed: 1; usage: 64; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };   // plan's single exit-code table; 1 = a required recording call did not return its expected status (smoke's 'provider error')
 export const TOOLS: Readonly<Partial<Record<ToolName, ToolEntry>>>;   // { record } now; WP13 adds smoke
 export function pendingOnExistingDb(databasePath: string): string[];
-export function backupsDirFor(databasePath: string): string;   // <db dir>/backups (spec §7: /data/backups)
+export function backupsDirFor(databasePath: string): string;   // <dirname(dbPath)>/backups (plan exit table)
 // src/tools/record.ts
 export const RECORDED_BY = '@gmt/api record:fixtures';
 export const recordTool: ToolEntry;
@@ -230,16 +231,17 @@ export function writeAllowlist(root: string, doc: ParamsAllowlist): string;
   "provider": "searchapi",
   "recordedAt": "2026-10-20",
   "endpoints": {
-    "/api/v1/search": {
-      "names": ["arrival_id", "booking_token", "currency", "departure_id", "departure_token", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start"],
-      "values": { "arrival_id": "any", "booking_token": "any", "currency": ["GBP"], "engine": ["google_flights", "google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any" }
-    }
+    "/api/v1/search?engine=google_flights_calendar": {
+      "names": ["arrival_id", "currency", "departure_id", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start"],
+      "values": { "arrival_id": "any", "currency": ["GBP"], "engine": ["google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any" }
+    },
+    "/api/v1/search?engine=google_flights": { "names": ["…", "booking_token", "departure_token", "…"], "values": { "engine": ["google_flights"], "departure_token": "any" } }
   },
   "contentSha256": "…"
 }
 ```
 
-Endpoints are keyed by path, so SearchApi's two engines share `/api/v1/search` and their names and values are merged; `engine` lists both. `names` lists every parameter name sent to that path, sorted. `values` has one entry per name:
+Keys are the endpoint path, or `<path>?engine=<value>` for SearchApi's two engines on `/api/v1/search` (two keys). `names` lists every parameter name sent to that key, sorted. `values` has one entry per name:
 - a fixed-value parameter maps to the sorted values actually sent;
 - a variable parameter (airport code, date, month, page, opaque token) maps to `'any'`.
 
@@ -849,7 +851,8 @@ import {
   type AirportsRepo, type Db, type Repos, SqliteBudgetGuard, SqliteResponseCache, applyMigrations, budgetConfigFromConfig,
   createRepos, openDatabase,
 } from '@gmt/db';
-import { type FixtureRecorder, type HttpKit, type HttpKitDeps, createHttpKit, fixtureProvider, fixtureRouter } from '@gmt/providers';
+import { type FixtureRecorder, type HttpKit, type HttpKitDeps, createHttpKit, fixtureProvider } from '@gmt/providers';
+import { fixtureRouter } from '@gmt/providers/fixture';
 import { SYNTHETIC_ROOT } from './paths.js';
 
 /** Everything an entrypoint needs, built once (plan "Wiring and bootstraps"). */
@@ -919,9 +922,9 @@ export function buildPorts(
     const cache = new SqliteResponseCache(db, clock);
     const secrets = collectSecrets(config);
     const fixtureRoot = allowSynthetic ? (opts.fixtureRoot ?? SYNTHETIC_ROOT) : null;
-    const router = fixtureRoot === null ? null : fixtureRouter(fixtureRoot);
+    const router = fixtureRoot === null ? null : fixtureRouter(fixtureRoot, config);
     const http = createHttpKit({
-      budget, cache, limits: httpLimitsFor(config), clock, log: opts.log, secrets,
+      budget, cache, limits: httpLimitsFor(config), clock, log: opts.log, secrets, syntheticAllowed: allowSynthetic,
       ...(opts.recorder !== undefined ? { recorder: opts.recorder } : {}),
       ...(router !== null ? { inProcessHosts: { 'fixture.local': (req: Request) => Promise.resolve(router.fetch(req)) } } : {}),
     });
@@ -1681,7 +1684,7 @@ export type EndpointKey = 'prices_for_dates' | 'google_flights_calendar' | 'goog
 const ENDPOINT_KEYS: readonly EndpointKey[] = ['prices_for_dates', 'google_flights_calendar', 'google_flights'];
 type ValueKind = 'iata' | 'iso-date' | 'iso-month' | 'positive-int' | 'opaque-token';
 type ParamRule = { fixed: readonly string[] } | { kind: ValueKind };
-interface EndpointRules { provider: 'travelpayouts' | 'searchapi'; path: string; params: Readonly<Record<string, ParamRule>> }
+interface EndpointRules { provider: 'travelpayouts' | 'searchapi'; key: string; params: Readonly<Record<string, ParamRule>> }
 
 const KIND_PATTERN: Record<Exclude<ValueKind, 'opaque-token'>, RegExp> = {
   iata: /^[A-Z]{3}$/, 'iso-date': /^\d{4}-\d{2}-\d{2}$/, 'iso-month': /^\d{4}-\d{2}$/, 'positive-int': /^[1-9]\d*$/,
@@ -1694,18 +1697,18 @@ export function paramRules(gl: string): Readonly<Record<EndpointKey, EndpointRul
   const shared = { flight_type: { fixed: ['round_trip'] }, currency: { fixed: ['GBP'] }, gl: { fixed: [gl] }, hl: { fixed: ['en'] } } as const;
   return {
     prices_for_dates: {
-      provider: 'travelpayouts', path: '/aviasales/v3/prices_for_dates',
+      provider: 'travelpayouts', key: '/aviasales/v3/prices_for_dates',
       params: { origin: iata, destination: iata, departure_at: { kind: 'iso-month' }, one_way: { fixed: ['false'] }, currency: { fixed: ['gbp'] }, limit: { fixed: ['1000'] }, page: { kind: 'positive-int' } },
     },
     google_flights_calendar: {
-      provider: 'searchapi', path: '/api/v1/search',
+      provider: 'searchapi', key: '/api/v1/search?engine=google_flights_calendar',
       params: {
         engine: { fixed: ['google_flights_calendar'] }, departure_id: iata, arrival_id: iata, outbound_date: date,
         outbound_date_start: date, outbound_date_end: date, return_date: date, return_date_start: date, return_date_end: date, ...shared,
       },
     },
     google_flights: {
-      provider: 'searchapi', path: '/api/v1/search',
+      provider: 'searchapi', key: '/api/v1/search?engine=google_flights',
       params: {
         engine: { fixed: ['google_flights'] }, departure_id: iata, arrival_id: iata, outbound_date: date, return_date: date, ...shared,
         departure_token: { kind: 'opaque-token' }, booking_token: { kind: 'opaque-token' },
@@ -1748,34 +1751,22 @@ export class ParamLog {
   }
 
   /**
-   * The allowlist document for one provider, hashed. Keyed by endpoint path (plan ParamsAllowlist),
-   * so engines sharing a path merge: names are the union; a name variable in any engine is 'any';
-   * otherwise its values are the union of the fixed values sent.
+   * The allowlist document for one provider, hashed. Keys are the endpoint path, or
+   * '<path>?engine=<value>' for SearchApi's engines multiplexed on one path (plan ParamsAllowlist).
    */
   document(provider: 'travelpayouts' | 'searchapi', recordedAt: IsoDate): ParamsAllowlist {
-    const merged = new Map<string, Map<string, Set<string> | 'any'>>();
-    for (const key of ENDPOINT_KEYS) {
-      const r = this.rules[key];
-      const seen = this.observed.get(key);
-      if (r.provider !== provider || seen === undefined) continue;
-      const byName = merged.get(r.path) ?? new Map<string, Set<string> | 'any'>();
-      merged.set(r.path, byName);
-      for (const [name, values] of seen) {
-        const rule = r.params[name];
-        const prior = byName.get(name);
-        if (rule === undefined || !('fixed' in rule) || prior === 'any') { byName.set(name, 'any'); continue; }
-        byName.set(name, new Set([...(prior ?? []), ...values]));
-      }
-    }
     const endpoints: ParamsAllowlist['endpoints'] = {};
-    for (const [path, byName] of merged) {
-      const names = [...byName.keys()].sort();
+    for (const k of ENDPOINT_KEYS) {
+      const r = this.rules[k];
+      const seen = this.observed.get(k);
+      if (r.provider !== provider || seen === undefined) continue;
+      const names = [...seen.keys()].sort();
       const values: Record<string, string[] | 'any'> = {};
       for (const name of names) {
-        const v = byName.get(name);
-        values[name] = v === undefined || v === 'any' ? 'any' : [...v].sort();
+        const rule = r.params[name];
+        values[name] = rule !== undefined && 'fixed' in rule ? [...(seen.get(name) ?? [])].sort() : 'any';
       }
-      endpoints[path] = { names, values };
+      endpoints[r.key] = { names, values };
     }
     const body = { provider, recordedAt, endpoints };
     return { ...body, contentSha256: createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex') };
@@ -1805,7 +1796,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   BudgetExceeded, type Config, type DefinitionInput, type DefinitionSnapshot, PLAN_PRESETS, type ProviderId, ProviderError,
-  TRAVELPAYOUTS_DEFAULTS, isoDateSchema,
+  TRAVELPAYOUTS_DEFAULTS, isoDateSchema, syntheticAllowed,
 } from '@gmt/core';
 import type { AirportsRepo } from '@gmt/db';
 import { type FixtureRecorder, type HttpKit, type HttpKitDeps, type HttpKitRequest, type HttpKitResponse, createHttpKit } from '@gmt/providers';
@@ -1951,7 +1942,8 @@ async function runPlan(ports: Ports, plan: readonly PlannedCall[], signal: Abort
   const gl = ports.config.pointOfSale.toLowerCase();
   const params = new ParamLog(paramRules(gl));
   const t = tracking(inner);
-  const shared = { budget: ports.budget, cache: ports.cache, clock: ports.clock, log: ports.log, secrets: ports.secrets, recorder: t.recorder };
+  // why: secrets is non-empty here (both providers configured), as HttpKitDeps requires for real providers
+  const shared = { budget: ports.budget, cache: ports.cache, clock: ports.clock, log: ports.log, secrets: ports.secrets, syntheticAllowed: syntheticAllowed(ports.config), recorder: t.recorder };
   const kit = createHttpKit({ ...shared, limits: recordingLimits(ports.config, false) });
   const burstKit = createHttpKit({ ...shared, limits: recordingLimits(ports.config, true) });
   const calls: RecordedCall[] = [];
@@ -2157,7 +2149,7 @@ git add apps/api pnpm-lock.yaml && git commit -m "wp04b: record:fixtures run thr
 
 ```ts
 // apps/api/test/bootstrap/tool.test.ts
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock, systemClock } from '@gmt/core';
@@ -2228,6 +2220,20 @@ describe('runTool (spec §5.5, §7 app_lock tool holder)', () => {
     expect(readdirSync(backupsDirFor(dbPath)).length).toBe(1);
   });
 
+  it('refuses with 73 when the data directory is not writable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gmt-ro-'));
+    chmodSync(dir, 0o500);
+    vi.stubEnv('DATABASE_PATH', join(dir, 'tool.db'));
+    try {
+      // why: root ignores mode bits; the assertion is meaningful only for a non-root user (CI and dev)
+      if (process.getuid?.() === 0) return;
+      expect(await runTool('record', DRY)).toBe(EXIT.preflightImpossible);
+      expect(errs.join('')).toContain('is not writable');
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
   it('refuses with 73 when the backups directory cannot be created', async () => {
     openDatabase(dbPath).close();
     writeFileSync(backupsDirFor(dbPath), 'not a directory');
@@ -2277,7 +2283,7 @@ Expected: FAIL, `../../src/bootstrap/tool.js` not found.
  * uses the production ledger, never constructs or boots the engine (no sweep, no auto-resume,
  * no cron), and holds app_lock as 'tool' for its whole run. One of the allowed process.env readers.
  */
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Config, systemClock } from '@gmt/core';
@@ -2347,13 +2353,23 @@ export async function runTool(name: ToolName, argv: string[]): Promise<number> {
 
   // Backup preflight (plan: both bootstraps, before buildPorts, when the DB file exists and
   // migrations are pending; spec §7: a failed backup refuses migrations).
+  // why: plan exit table — 73 also covers an unwritable data directory, checked before anything is opened
+  if (config.databasePath !== ':memory:') {
+    try {
+      accessSync(dirname(config.databasePath), constants.W_OK);
+    } catch {
+      err(`data directory ${dirname(config.databasePath)} is not writable; refusing (spec §7)`);
+      return EXIT.preflightImpossible;
+    }
+  }
   const pending = pendingOnExistingDb(config.databasePath);
   if (pending.length > 0) {
     const backupsDir = backupsDirFor(config.databasePath);
     try {
       mkdirSync(backupsDir, { recursive: true });
+      accessSync(backupsDir, constants.W_OK);
     } catch {
-      err(`${pending.length} pending migration(s) but the backups directory ${backupsDir} cannot be created; refusing to migrate (spec §7)`);
+      err(`${pending.length} pending migration(s) but the backups directory ${backupsDir} cannot be created or written; refusing to migrate (spec §7)`);
       return EXIT.preflightImpossible;
     }
     try {
@@ -2436,7 +2452,7 @@ if (isEntryPoint()) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts`
-Expected: 9 passed. If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale. That is a WP3 bug against spec §7; raise it.
+Expected: 10 passed. If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale. That is a WP3 bug against spec §7; raise it.
 
 - [ ] **Step 5: Commit**
 
@@ -2630,7 +2646,7 @@ function checkAllowlist(root: string, provider: 'travelpayouts' | 'searchapi'): 
       const v = verifyRecordedFile(path);
       if (!v.ok) throw new Error(`${path}: ${v.reason}`);
       const q = queryOf(v.file);
-      const key = v.file.endpointPath;
+      const key = provider === 'searchapi' ? `${v.file.endpointPath}?engine=${String(q.get('engine'))}` : v.file.endpointPath;
       const ep = doc.endpoints[key];
       if (!isRecord(ep) || !Array.isArray(ep.names) || !isRecord(ep.values)) throw new Error(`${path}: endpoint ${key} missing`);
       for (const [param, value] of q) {
@@ -2653,12 +2669,8 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
       expect(tp).toMatchObject({ endpoints: { '/aviasales/v3/prices_for_dates': { values: { currency: ['gbp'], one_way: ['false'], limit: ['1000'], origin: 'any', page: 'any' } } } });
       expect(sa).toMatchObject({
         endpoints: {
-          '/api/v1/search': {
-            values: {
-              engine: ['google_flights', 'google_flights_calendar'], gl: ['gb'], hl: ['en'], currency: ['GBP'], flight_type: ['round_trip'],
-              outbound_date: 'any', departure_token: 'any', booking_token: 'any',
-            },
-          },
+          '/api/v1/search?engine=google_flights_calendar': { values: { engine: ['google_flights_calendar'], gl: ['gb'], hl: ['en'], currency: ['GBP'], flight_type: ['round_trip'], outbound_date: 'any' } },
+          '/api/v1/search?engine=google_flights': { values: { engine: ['google_flights'], departure_token: 'any', booking_token: 'any' } },
         },
       });
     } finally {
@@ -2967,9 +2979,9 @@ None. The plan's five Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, W
 
 None blocking dispatch. The items below were found while reconciling and need Fable's attention in the plan or in neighbouring briefs. The spec and plan are not edited here.
 
-1. **Backup preflight.** Resolved by plan decision 14: `@gmt/db`'s `backupDatabase` (WP3) runs in the tool's preflight. Exit 73 covers a backups directory that cannot be created and 74 a failed backup. The backups directory is `<db dir>/backups`; the plan does not name it, so WP8 should use the same `backupsDirFor`.
+1. **Backup preflight.** Resolved by plan decisions 14 and 15. `@gmt/db`'s `backupDatabase` runs in the preflight and writes to `<dirname(dbPath)>/backups`. Exit 73 covers an unwritable data directory, or a backups directory that cannot be created or written. Exit 74 is a failed backup.
 2. **Credential headers.** Resolved by plan decision 14: credential headers are dropped entirely. Task 1 asserts it, which also keeps WP0's `X-Access-Token` scan shape satisfied.
-3. **`ParamsAllowlist` keyed by endpoint path.** Resolved: it is imported from `@gmt/providers` (WP4). Keying by path merges SearchApi's two engines into one `/api/v1/search` entry, so `values.engine` is `['google_flights', 'google_flights_calendar']` and per-engine parameter sets are lost. WP5's `assertRequestAllowed` therefore checks against the union. `record.ts` does not call `assertRequestAllowed`: it writes the allowlist, and its own per-engine `ParamLog` check runs before every request.
+3. **`ParamsAllowlist` keys.** Resolved by plan decision 15. The type is imported from `@gmt/providers`. SearchApi is written as two keys (`/api/v1/search?engine=google_flights_calendar` and `…=google_flights`) and Travelpayouts by path. `record.ts` validates each request with its own `ParamLog` before sending, because the allowlist does not exist until the run writes it.
 4. **`recordingLimits` duplicates future WP5/WP6 code.** It repeats the hosts and billable rules that `searchApiHttpLimits` and `travelpayoutsHttpLimits` will declare. WP5 and WP6 may switch `record.ts` to their functions in a one-line Modify.
 5. **Recorded endpoint directory name.** The plan says `<endpointPath with / → _>`, which is `_api_v1_search` with a leading underscore, or `api_v1_search` if the leading slash is dropped. The verifier and tests in this brief do not depend on the name.
 6. **SearchApi docs versus the spike.** The docs say the calendar's `outbound_date` and `return_date` are required, and that more than 200 combinations "returns an empty response". The spike measured HTTP 400. SA-02 settles it on the public route.
