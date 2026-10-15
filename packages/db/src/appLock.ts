@@ -16,7 +16,7 @@ function isFresh(heartbeatAt: string, now: string): boolean {
 /** What readOnlyLockState reports; a present lock always names its holder and heartbeat. */
 export type ReadOnlyLockState =
   | { state: 'absent' }
-  | { state: 'fresh' | 'stale'; holder: string; heartbeatAt: IsoDateTime };
+  | { state: 'fresh' | 'stale'; holder: Holder; heartbeatAt: IsoDateTime };
 
 const HOLDERS = ['app', 'tool'] as const;
 type Holder = (typeof HOLDERS)[number];
@@ -24,6 +24,20 @@ interface LockRow {
   holder: string;
   heartbeat_at: string;
   acquired_at: string;
+}
+const LOCK_ROW_SQL = 'SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1';
+
+/** The lock row, validated; null when there is none. One reader for AppLock.inspect and readOnlyLockState (arch M-2). */
+function readLockRow(
+  raw: Database.Database,
+): { holder: Holder; heartbeatAt: IsoDateTime; acquiredAt: IsoDateTime } | null {
+  const r = raw.prepare<[], LockRow>(LOCK_ROW_SQL).get();
+  if (r === undefined) return null;
+  return {
+    holder: oneOf('app_lock.holder', HOLDERS, r.holder),
+    heartbeatAt: readTime('app_lock.heartbeat_at', r.heartbeat_at),
+    acquiredAt: readTime('app_lock.acquired_at', r.acquired_at),
+  };
 }
 
 /** Synchronous sleep for the boot-time wait (nothing else runs while the process is acquiring). */
@@ -53,15 +67,7 @@ export class AppLock {
   }
 
   static inspect(db: Db): { holder: Holder; heartbeatAt: IsoDateTime; acquiredAt: IsoDateTime } | null {
-    const r = db.raw
-      .prepare<[], LockRow>('SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1')
-      .get();
-    if (r === undefined) return null;
-    return {
-      holder: oneOf('app_lock.holder', HOLDERS, r.holder),
-      heartbeatAt: readTime('app_lock.heartbeat_at', r.heartbeat_at),
-      acquiredAt: readTime('app_lock.acquired_at', r.acquired_at),
-    };
+    return readLockRow(db.raw);
   }
 
   acquire(opts: { waitMs: number }): 'acquired' | 'refused' {
@@ -117,9 +123,7 @@ export class AppLock {
   private tryAcquire(): boolean {
     return this.db.immediateTransaction((): boolean => {
       const now = this.clock.now();
-      const row = this.db.raw
-        .prepare<[], LockRow>('SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1')
-        .get();
+      const row = this.db.raw.prepare<[], LockRow>(LOCK_ROW_SQL).get();
       this.afterRead();
       if (row !== undefined && row.holder === this.holder && row.acquired_at === this.acquiredAt) return true;
       if (row !== undefined) {
@@ -160,12 +164,13 @@ export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockSta
       )
       .get();
     if ((table?.n ?? 0) === 0) return { state: 'absent' };
-    const row = db
-      .prepare<[], LockRow>('SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1')
-      .get();
-    if (row === undefined) return { state: 'absent' };
-    const heartbeatAt = readTime('app_lock.heartbeat_at', row.heartbeat_at);
-    return { state: isFresh(heartbeatAt, clock.now()) ? 'fresh' : 'stale', holder: row.holder, heartbeatAt };
+    const row = readLockRow(db);
+    if (row === null) return { state: 'absent' };
+    return {
+      state: isFresh(row.heartbeatAt, clock.now()) ? 'fresh' : 'stale',
+      holder: row.holder,
+      heartbeatAt: row.heartbeatAt,
+    };
   } finally {
     db.close();
   }

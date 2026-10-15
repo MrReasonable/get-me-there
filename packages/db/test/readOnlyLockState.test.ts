@@ -5,6 +5,7 @@ import { fixedClock } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { AppLock, LOCK_STALE_AFTER_MS, readOnlyLockState } from '../src/appLock.js';
+import { RowCorrupt } from '../src/internal/read.js';
 import { at, freshDb, silentLog, T0, tmpDbPath, tmpDir } from './helpers/db.js';
 
 const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -93,5 +94,17 @@ describe('readOnlyLockState (spec §7 app_lock; plan decision 20)', () => {
     raw.prepare("INSERT INTO app_lock VALUES (1, 'app', 'yesterday', 'yesterday')").run();
     raw.close();
     expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(/heartbeat_at/);
+  });
+
+  it('throws RowCorrupt for a holder other than app or tool, through the same check as AppLock.inspect (arch M-2)', () => {
+    const path = tmpDbPath();
+    const raw = new Database(path);
+    raw.exec(
+      'CREATE TABLE app_lock (id INTEGER PRIMARY KEY, holder TEXT, heartbeat_at TEXT, acquired_at TEXT)',
+    );
+    raw.prepare('INSERT INTO app_lock VALUES (1, ?, ?, ?)').run('intruder', T0, T0);
+    raw.close();
+    expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(RowCorrupt);
+    expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(/app_lock\.holder/);
   });
 });

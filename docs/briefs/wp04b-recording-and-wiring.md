@@ -207,7 +207,7 @@ export interface ToolContext { signal: AbortSignal; out(line: string): void; err
 export const EXIT: { ok: 0; failed: 1; usage: 64; spendRefused: 65; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };
 export class RecordingFailedError extends Error { readonly partial: { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null } }
 // packages/db/src/appLock.ts (exported from @gmt/db; Task 7)
-export type ReadOnlyLockState = { state: 'absent' } | { state: 'fresh' | 'stale'; holder: string; heartbeatAt: IsoDateTime };
+export type ReadOnlyLockState = { state: 'absent' } | { state: 'fresh' | 'stale'; holder: 'app' | 'tool'; heartbeatAt: IsoDateTime };
 export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockState;   // absent: :memory:, no file, no app_lock table or no row; fresh: heartbeat ≤ LOCK_STALE_AFTER_MS old; never writes; throws for a non-database file or a malformed heartbeat (the tool maps a throw to 73)
 // src/bootstrap/tool.ts
 export interface ToolRunners { record(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number> }   // WP13 adds smoke
@@ -4731,7 +4731,7 @@ git add apps/api packages/providers && git commit -m "wp04b: record:fixtures run
 
 **Files:** modify `packages/db/src/appLock.ts`, `packages/db/src/index.ts`, `packages/db/test/barrel.test.ts`; create `packages/db/test/readOnlyLockState.test.ts`.
 
-**Interfaces:** consumes `AppLock`, `LOCK_STALE_AFTER_MS`, `readTime` (WP3 internals), `better-sqlite3` (already `@gmt/db`'s dependency). Produces `readOnlyLockState(dbPath, clock): ReadOnlyLockState`, a discriminated union (`{ state: 'absent' }` or `{ state: 'fresh' | 'stale'; holder; heartbeatAt }`), and the module-private `isFresh(heartbeatAt, now)` that AppLock and readOnlyLockState now share, so the two can never disagree about staleness (arch-r3-003). Both are exported from the `@gmt/db` barrel.
+**Interfaces:** consumes `AppLock`, `LOCK_STALE_AFTER_MS`, `readTime` (WP3 internals), `better-sqlite3` (already `@gmt/db`'s dependency). Produces `readOnlyLockState(dbPath, clock): ReadOnlyLockState`, a discriminated union (`{ state: 'absent' }` or `{ state: 'fresh' | 'stale'; holder: 'app' | 'tool'; heartbeatAt }`), the module-private `isFresh(heartbeatAt, now)` that AppLock and readOnlyLockState now share, so the two can never disagree about staleness (arch-r3-003), and the module-private `readLockRow` (one SELECT, `holder` validated through the same `oneOf` as `AppLock.inspect`; arch M-2). `readOnlyLockState` and `type ReadOnlyLockState` are exported from the `@gmt/db` barrel; `isFresh` and `readLockRow` stay private.
 
 The tool bootstrap must read `app_lock` before any backup or migration without opening the database read-write (spec §7, plan decision 20). This function lives beside `AppLock` so the SQLite dependency stays in `@gmt/db`. It throws for a file that is not a database and for a malformed heartbeat (only a hand-made table can hold one: the migrated schema CHECKs the column); the caller maps a throw to exit 73 (r2-ts-007).
 
@@ -4746,6 +4746,7 @@ import { fixedClock } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { AppLock, LOCK_STALE_AFTER_MS, readOnlyLockState } from '../src/appLock.js';
+import { RowCorrupt } from '../src/internal/read.js';
 import { at, freshDb, silentLog, T0, tmpDbPath, tmpDir } from './helpers/db.js';
 
 const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -4835,13 +4836,25 @@ describe('readOnlyLockState (spec §7 app_lock; plan decision 20)', () => {
     raw.close();
     expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(/heartbeat_at/);
   });
+
+  it('throws RowCorrupt for a holder other than app or tool, through the same check as AppLock.inspect (arch M-2)', () => {
+    const path = tmpDbPath();
+    const raw = new Database(path);
+    raw.exec(
+      'CREATE TABLE app_lock (id INTEGER PRIMARY KEY, holder TEXT, heartbeat_at TEXT, acquired_at TEXT)',
+    );
+    raw.prepare('INSERT INTO app_lock VALUES (1, ?, ?, ?)').run('intruder', T0, T0);
+    raw.close();
+    expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(RowCorrupt);
+    expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(/app_lock\.holder/);
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/readOnlyLockState.test.ts`
-Expected: FAIL, 8 failed; the first failure is `TypeError: readOnlyLockState is not a function`.
+Expected: FAIL, 9 failed; the first failure is `TypeError: readOnlyLockState is not a function`.
 
 - [ ] **Step 3: Implement**
 
@@ -4860,9 +4873,26 @@ function isFresh(heartbeatAt: string, now: string): boolean {
 /** What readOnlyLockState reports; a present lock always names its holder and heartbeat. */
 export type ReadOnlyLockState =
   | { state: 'absent' }
-  | { state: 'fresh' | 'stale'; holder: string; heartbeatAt: IsoDateTime };
+  | { state: 'fresh' | 'stale'; holder: Holder; heartbeatAt: IsoDateTime };
 
-// in AppLock.tryAcquire, the staleness test becomes the shared rule:
+// after the LockRow interface: one validated reader shared by AppLock.inspect and readOnlyLockState (arch M-2)
+const LOCK_ROW_SQL = 'SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1';
+
+/** The lock row, validated; null when there is none. One reader for AppLock.inspect and readOnlyLockState (arch M-2). */
+function readLockRow(
+  raw: Database.Database,
+): { holder: Holder; heartbeatAt: IsoDateTime; acquiredAt: IsoDateTime } | null {
+  const r = raw.prepare<[], LockRow>(LOCK_ROW_SQL).get();
+  if (r === undefined) return null;
+  return {
+    holder: oneOf('app_lock.holder', HOLDERS, r.holder),
+    heartbeatAt: readTime('app_lock.heartbeat_at', r.heartbeat_at),
+    acquiredAt: readTime('app_lock.acquired_at', r.acquired_at),
+  };
+}
+
+// AppLock.inspect becomes `return readLockRow(db.raw);`; AppLock.tryAcquire reads its raw row with
+// `this.db.raw.prepare<[], LockRow>(LOCK_ROW_SQL).get()`, and its staleness test becomes the shared rule:
         if (isFresh(row.heartbeat_at, now)) return false;
 
 // end of the file:
@@ -4885,12 +4915,13 @@ export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockSta
       )
       .get();
     if ((table?.n ?? 0) === 0) return { state: 'absent' };
-    const row = db
-      .prepare<[], LockRow>('SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1')
-      .get();
-    if (row === undefined) return { state: 'absent' };
-    const heartbeatAt = readTime('app_lock.heartbeat_at', row.heartbeat_at);
-    return { state: isFresh(heartbeatAt, clock.now()) ? 'fresh' : 'stale', holder: row.holder, heartbeatAt };
+    const row = readLockRow(db);
+    if (row === null) return { state: 'absent' };
+    return {
+      state: isFresh(row.heartbeatAt, clock.now()) ? 'fresh' : 'stale',
+      holder: row.holder,
+      heartbeatAt: row.heartbeatAt,
+    };
   } finally {
     db.close();
   }
@@ -4914,7 +4945,7 @@ In `packages/db/test/barrel.test.ts`, add `'readOnlyLockState'` to both lists: a
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/readOnlyLockState.test.ts test/barrel.test.ts test/appLock.test.ts` and `pnpm --filter @gmt/db test`
-Expected: 8 passed in the new file; the three files 24 passed; the db suite passes with WP3's thresholds (262 tests at assembly).
+Expected: 9 passed in the new file; the three files 25 passed; the db suite passes with WP3's thresholds (263 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -7180,7 +7211,7 @@ Rows marked **operator** run on Ian's machine with the real `.env`; every other 
 | Command | Expected |
 |---|---|
 | `pnpm --filter @gmt/api test` | all 157 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.9 / 84.5 / 95.8 / 94.9) |
-| `pnpm --filter @gmt/db test` | passes (262 at assembly), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
+| `pnpm --filter @gmt/db test` | passes (263), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
 | `pnpm --filter @gmt/providers test` | passes (264, including the barrel test naming `defaultRecordedRoot`, `withContentHash` and `assertRecordedRoot`, and the `assertRecordedRoot` test); WP4's thresholds hold |
 | `pnpm lint` | clean |
 | `pnpm -r typecheck` | clean |
@@ -7197,4 +7228,4 @@ The grep row's pattern is ERE with `\|` escaped only for this table; type it as 
 
 ## 13. Open questions
 
-None. Plan decisions 23 and 26 record this brief's contract changes; this revision's one further contract detail is that `readOnlyLockState` returns the discriminated union `ReadOnlyLockState` (`{ state: 'absent' }` or `{ state: 'fresh' | 'stale'; holder; heartbeatAt }`), with AppLock and it sharing one freshness rule.
+None. Plan decisions 23 and 26 record this brief's contract changes; this revision's one further contract detail is that `readOnlyLockState` returns the discriminated union `ReadOnlyLockState` (`{ state: 'absent' }` or `{ state: 'fresh' | 'stale'; holder: 'app' | 'tool'; heartbeatAt }`), with AppLock and it sharing one freshness rule.
