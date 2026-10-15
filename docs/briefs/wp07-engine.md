@@ -3223,7 +3223,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 
 **Interfaces:**
 - Consumes: `CalendarPricesRepo.reuseCandidates`, `CellsRepo.copyReused`, `ReusedCopy`.
-- Produces: `DEFAULT_REFRESH_HOURS`, `REUSE_TOLERANCE`, `refreshHoursOf(snapshot, providerId)`, `reuseCutoff(now, hours)`, `reusableFor(ctx, definitionId, snapshot, providerId, info, cells)`, `applyReuse(ctx, run, providerId, info): number`.
+- Produces: `REUSE_TOLERANCE`, `refreshHoursOf(snapshot, providerId)`, `reuseCutoff(now, hours)`, `reusableFor(ctx, definitionId, snapshot, providerId, info, cells)`, `applyReuse(ctx, run, providerId, info): number`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3384,18 +3384,16 @@ Expected: FAIL, `Cannot find module '../src/stages/reuse.js'`.
 `src/stages/reuse.ts`:
 
 ```ts
-import type { CapabilityInfo, CellKey, DefinitionSnapshot, IsoDateTime, ProviderId } from '@gmt/core';
+import { DEFAULT_DISCOVERY_REFRESH_HOURS, type CapabilityInfo, type CellKey, type DefinitionSnapshot, type IsoDateTime, type ProviderId } from '@gmt/core';
 import type { ReusedCopy } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import type { RunState } from '../run.js';
 
-/** Spec §7 providers_json "discoveryRefreshHours{} (default 168 per provider)". */
-export const DEFAULT_REFRESH_HOURS = 168;
 /** Spec §8.2: "reuse iff age < 0.9 × refresh, so a weekly cron refreshes weekly" (tested at 151 h, 152 h and a DST interval). */
 export const REUSE_TOLERANCE = 0.9;
 
 export function refreshHoursOf(snapshot: Pick<DefinitionSnapshot, 'providers'>, providerId: ProviderId): number {
-  return snapshot.providers.discoveryRefreshHours[providerId] ?? DEFAULT_REFRESH_HOURS;
+  return snapshot.providers.discoveryRefreshHours[providerId] ?? DEFAULT_DISCOVERY_REFRESH_HOURS;
 }
 
 /** The oldest original fetched_at still reusable: now − 0.9 × refresh hours (age measured from the original fetch). */
@@ -5516,7 +5514,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 - Modify: `packages/engine/src/resume.ts` (`isStalePaused`), `src/orchestrator.ts` (`tick`)
 
 **Interfaces:**
-- Consumes: `croner` (`new Cron(pattern|Date, options, fn)`, `nextRun`, `stop`), `parseCron`, `refreshHoursOf`, `DEFAULT_REFRESH_HOURS`.
+- Consumes: `croner` (`new Cron(pattern|Date, options, fn)`, `nextRun`, `stop`), `parseCron`, `refreshHoursOf`, `DEFAULT_DISCOVERY_REFRESH_HOURS`.
 - Produces: `createScheduler(hooks, log): Scheduler` with `register`, `unregister`, `registerResume(executionId, definitionId, at)`, `cancelResume`, `registerSystem`, `jobs` (api-contract `SchedulerJob` shape), `definitionJobCount`, `stopAll`; `tickDefinition(ctx, orch, definitionId)`; `isStalePaused(exec, now)`; `Orchestrator.tick`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -5857,7 +5855,7 @@ export function createScheduler(hooks: SchedulerHooks, log: Logger): Scheduler {
 }
 ```
 
-`src/resume.ts` — add (importing `type Execution`, `type ExecutionStatus`, `type IsoDateTime` from `@gmt/core`, and `DEFAULT_REFRESH_HOURS`, `refreshHoursOf` from `./stages/reuse.js`):
+`src/resume.ts` — add (importing `type Execution`, `type ExecutionStatus`, `type IsoDateTime` from `@gmt/core`, and `DEFAULT_DISCOVERY_REFRESH_HOURS`, `refreshHoursOf` from `./stages/reuse.js`):
 
 ```ts
 const PAUSED: readonly ExecutionStatus[] = ['paused_budget', 'paused_error'];
@@ -5871,7 +5869,7 @@ export function isStalePaused(exec: Pick<Execution, 'status' | 'resumeAfter' | '
   if (!PAUSED.includes(exec.status)) return false;
   if (exec.resumeAfter !== null && exec.resumeAfter > now) return false;
   const ids = exec.snapshot.providers.discovery;
-  const hours = ids.length === 0 ? DEFAULT_REFRESH_HOURS : Math.min(...ids.map((id) => refreshHoursOf(exec.snapshot, id)));
+  const hours = ids.length === 0 ? DEFAULT_DISCOVERY_REFRESH_HOURS : Math.min(...ids.map((id) => refreshHoursOf(exec.snapshot, id)));
   return Date.parse(now) - Date.parse(exec.startedAt ?? exec.createdAt) > hours * 3_600_000;
 }
 ```

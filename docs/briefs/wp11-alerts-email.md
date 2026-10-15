@@ -100,7 +100,7 @@ export interface PriorFiring { identityKey: string; dedupKey: string; firedAt: I
 // identityKey formats: verified `${ruleId}|${itineraryHash}`; calendar `${ruleId}|${providerId}|${cabin}|${cellKeyString(cell)}`. dedupKey = `${identityKey}|${Math.floor(pricePence / 100)}`.
 
 // @gmt/core — ports/notifier.ts (WP0)
-export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; previousAgeHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string } | null /* null for synthetic rows */; rowKey: string /* resultRowKey, for the app link */ }
+export interface DigestItem { pricePence: number; provenance: Provenance; cell: Cell; verdictClass: VerdictClass | 'unchecked'; itineraryHash: string | null; seller: string | null; unverified: ConstraintName[]; previousPricePence: number | null; fetchGapHours: number | 'unknown' | null; isNew: boolean; firingReason: string; booking: Booking; bookingExpiresAt: IsoDateTime | null; outbound: Segment[] | null; inbound: Segment[] | null; searchLink: { url: string; host: string; label: string } | null /* null for synthetic rows */; rowKey: string /* resultRowKey, for the app link */ }
 export interface AlertDigest { ruleId: string; definitionId: string; executionId: string; basis: ResultBasis; items: DigestItem[]; restCount: number /* firings beyond the top 10 */; newItems: DigestItem[]; newRestCount: number /* new cells beyond the top 10 */; coverageCaveat: { itinerarySearched: number; selected: number; expandTop: number } | null; rule: AlertRule }
 export type OperatorMessageKind = 'paused_budget' | 'paused_error' | 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed' | 'interrupted' | 'provider_disabled' | 'provider_capped' | 'parity_break' | 'alerts_calendar_only' | 'crash_loop';   // all rendered by WP7's operator templates
 export interface OperatorMessage { kind: OperatorMessageKind; executionId: string | null; definitionId: string; subject: string; body: string }
@@ -583,7 +583,7 @@ Expected: FAIL, because the import `../../src/alerts/runner.js` cannot be resolv
  * Every provider-supplied string passes stripControl before it is written.
  */
 import {
-  effectiveAge, formatAgeFull, formatDuration, formatPence,
+  effectiveAge, formatAgeFull, formatDuration, formatPence, stripControlChars,
   type AlertDigest, type AlertRule, type DigestItem, type IsoDateTime, type Provenance,
 } from '@gmt/core';
 
@@ -597,8 +597,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * Spec §8.3: provider strings are CRLF/control-stripped, so none can start a header or a line.
  */
 export function stripControl(s: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the purpose of this function.
-  return s.replace(/[\u0000-\u001f\u007f-\u009f  ]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+  // why: core's stripControlChars owns the control-character set (no regex, no lint suppression); this adds the
+  // Unicode line and paragraph separators, which are not controls but still break a header, and collapses the runs.
+  return stripControlChars(s, ' ').replace(/[\u2028\u2029]/g, ' ').replace(/ {2,}/g, ' ').trim();
 }
 
 /** Source in words (spec §11 vocabulary). Synthetic rows have no label and throw. */
@@ -664,7 +665,7 @@ function calendarLinkLine(item: DigestItem): string {
 
 function previousLine(item: DigestItem): string | null {
   if (item.previousPricePence === null) return null;
-  const age = item.previousAgeHours;
+  const age = item.fetchGapHours;
   const when = age === null || age === 'unknown' ? 'at an unknown time' : age < 1 ? 'just now' : `${formatDuration(age)} ago`;
   return `   Previous: ${formatPence(item.previousPricePence)}, fetched ${when}`;
 }
@@ -921,7 +922,7 @@ export function verifiedItem(over: Partial<DigestItem> = {}): DigestItem {
   return {
     pricePence: 41200, cell: CELL, verdictClass: 'partially-verified', itineraryHash: HASH, seller: 'British Airways', unverified: ['checkedBagRequired'],
     provenance: { providerId: 'searchapi', sourceKind: 'scraped-search', fetchedAt: asIsoDateTime('2026-10-14T10:00:00.000Z'), maxAgeHours: 0, fx: { converted: false }, pointOfSale: 'GB', cabin: 'economy' },
-    previousPricePence: null, previousAgeHours: null, isNew: false, firingReason: '£412 is at or below the £450 threshold',
+    previousPricePence: null, fetchGapHours: null, isNew: false, firingReason: '£412 is at or below the £450 threshold',
     booking: { kind: 'get', url: 'https://www.google.com/travel/clk?tfs=abc', host: 'www.google.com' }, searchLink: SEARCH,
     bookingExpiresAt: asIsoDateTime('2026-10-14T18:00:00.000Z'), rowKey: ROW_KEY,
     outbound: [{ marketingCarrier: 'BA', flightNumber: 117, from: LHR, to: JFK, departLocal: '2027-03-14T08:25', arriveLocal: '2027-03-14T11:20', durationMinutes: 475 }],
@@ -935,7 +936,7 @@ export function calendarItem(over: Partial<DigestItem> = {}): DigestItem {
   return {
     pricePence: 38900, cell: CELL, verdictClass: 'unchecked', itineraryHash: null, seller: null, unverified: [],
     provenance: { providerId: 'travelpayouts', sourceKind: 'authorised-cached', fetchedAt: asIsoDateTime('2026-10-14T13:00:00.000Z'), maxAgeHours: 168, fx: { converted: false }, pointOfSale: 'unknown', cabin: 'economy' },
-    previousPricePence: null, previousAgeHours: null, isNew: false, firingReason: '£389 is at or below the £450 threshold',
+    previousPricePence: null, fetchGapHours: null, isNew: false, firingReason: '£389 is at or below the £450 threshold',
     booking: { kind: 'none' }, searchLink: { url: 'https://www.aviasales.com/search/LON1403NYC28031', host: 'www.aviasales.com', label: 'search link, not a fare link' },
     bookingExpiresAt: null, outbound: null, inbound: null, rowKey: 'c:travelpayouts|LHR|JFK|2027-03-14|2027-03-28',
     ...over,
@@ -1015,7 +1016,7 @@ describe('verified item body (spec §8.3)', () => {
     expect(bad).toContain('Link: none (the stored link failed validation)');
   });
   it('calendar item with a drop: previous price and age; new items in their own section', () => {
-    const drop = calendarItem({ previousPricePence: 43000, previousAgeHours: 72, firingReason: 'dropped £41 (9%) from £430' });
+    const drop = calendarItem({ previousPricePence: 43000, fetchGapHours: 72, firingReason: 'dropped £41 (9%) from £430' });
     const body = renderBody(renderInput({
       digest: digestOf([drop], { basis: 'calendar', coverageCaveat: null, newItems: [calendarItem({ isNew: true })], newRestCount: 4, rule: { ...RULE, type: 'dropAbs', thresholdPence: 2000, basis: 'calendar', requireAllVerified: null } }),
     }));
@@ -1052,7 +1053,7 @@ describe('banned words over rendered output (spec §8.3, §11)', () => {
     const outputs = [
       renderSubject(verifiedItem(), NOW), renderSubject(calendarItem(), NOW),
       renderBody(renderInput({ digest: digestOf([verifiedItem()], { restCount: 40, newItems: [calendarItem({ isNew: true })] }) })),
-      renderBody(renderInput({ digest: digestOf([calendarItem({ previousPricePence: 43000, previousAgeHours: 'unknown' })], { coverageCaveat: null }) })),
+      renderBody(renderInput({ digest: digestOf([calendarItem({ previousPricePence: 43000, fetchGapHours: 'unknown' })], { coverageCaveat: null }) })),
       renderBody(renderInput({ digest: digestOf([verifiedItem({ booking: { kind: 'none' }, verdictClass: 'verified', unverified: [] })]) })),
     ];
     for (const text of outputs) expect(findBannedWords(text, BANNED_WORD_ALLOWLIST)).toEqual([]);
