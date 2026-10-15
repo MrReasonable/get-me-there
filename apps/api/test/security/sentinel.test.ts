@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { secretForms } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_SMTP, SENTINEL_TP } from '../helpers/env.js';
 import { runRecording } from '../helpers/recording.js';
@@ -40,17 +41,18 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
     expect(dirty.stderr).not.toContain(SENTINEL_SA);
   });
 
-  it('an encoded form of a configured secret (base64, base64url, URL-encoded) also fails the scan (sec minor 2)', async () => {
+  it("every encoded form WP4's scrubber knows (secretForms) also fails the scan: one shared list (sec minor 2, N-1)", async () => {
     const run = await runRecording();
     const forms = [
-      Buffer.from(SENTINEL_SA, 'utf8').toString('base64'),
-      Buffer.from(SENTINEL_TP, 'utf8').toString('base64url'),
-      encodeURIComponent(`${SENTINEL_AUTH}/x`),
+      ...new Set([SENTINEL_SA, SENTINEL_TP, SENTINEL_SMTP, SENTINEL_AUTH].flatMap((v) => secretForms(v))),
     ];
+    // why: the padded and unpadded base64 forms differ for these values, so the list is not just the raw value
+    expect(forms.length).toBeGreaterThan(8);
     for (const [i, form] of forms.entries()) {
       const dir = join(run.root, `encoded-${i}`);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'p.json'), JSON.stringify({ leaked: form }));
+      // why: written raw, not JSON-encoded, so the planted text is exactly the form
+      writeFileSync(join(dir, 'p.txt'), `leaked: ${form}\n`);
       const r = scan(run.repo);
       expect(r.status, form).toBe(1);
       expect(r.stderr).not.toContain(form);

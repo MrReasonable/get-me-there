@@ -163,7 +163,7 @@ export function withContentHash<T extends object>(file: T): T & { contentSha256:
 
 Signature checks: WP4's verifier accepts any non-blank `recordedBy`, so `checkWorkedExampleTree` (Task 12a) is the only check that requires `RECORDED_BY`.
 
-`scripts/secret-scan.mjs` (WP0, extended in Task 11): it scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`. Task 11 makes it also match each value's base64, base64url and URL-encoded forms, and print `secret scan: checked N configured secret value(s) and 4 shape rules`, with a warning on stderr when N is 0, so the real-value gate cannot pass silently with nothing loaded (sec minor 2).
+`scripts/secret-scan.mjs` (WP0, extended in Task 11): it scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`. Task 11 makes it also match every form in WP4's own `secretForms` list (raw, `encodeURIComponent`, `URLSearchParams`, JSON-escaped, base64 padded and unpadded, base64url), imported from the TypeScript leaf `packages/providers/src/http/secretForms.ts` so the scan and the scrubber share one list (N-1), and print `secret scan: checked N configured secret value(s) and 4 shape rules`, with a warning on stderr when N is 0, so the real-value gate cannot pass silently with nothing loaded (sec minor 2).
 
 ## 5. Interfaces produced
 
@@ -400,6 +400,7 @@ The metro comes from the airports table, which the tool seeds after migration wh
 | Library | Version | API used | Verified against |
 |---|---|---|---|
 | `node:child_process` | Node 22+ (dev 26) | `spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout })` | https://nodejs.org/api/child_process.html (2026-10-14) |
+| Node type stripping | 22.18+ (on by default) | `scripts/secret-scan.mjs` imports `packages/providers/src/http/secretForms.ts`, a leaf with no imports and only erasable syntax | https://nodejs.org/api/typescript.html (type stripping; relative imports keep their `.ts` extension); WP4b N-1 |
 | Node CLI | 22.9+ | `--conditions=@gmt/source`, `--env-file-if-exists=<path>`, `--import <module>` (twice: the DNS-refusal preload, then `tsx`) | https://nodejs.org/api/cli.html (2026-10-14); plan Task 0.1: Node and tsx resolve workspace packages to `dist` unless started with the condition. Verified in the assembly with every package's `dist` empty |
 | `tsx` | 4.23.15 | `node --import tsx ./file.ts` | context7 `/privatenumber/tsx` (2026-10-14) |
 | `vitest` | 5.0.4 | `describe`, `it(name, fn, timeoutMs)`, `it.each`, `it.skipIf`, `expect`, `beforeAll`, `afterEach`, `afterAll`, `vi.stubGlobal`, `vi.unstubAllGlobals`, `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })` (heartbeat) and `{ toFake: ['setTimeout', 'clearTimeout'] }` (http-kit's retry backoff, limiter spacing and request timeout), `vi.advanceTimersByTime`, `vi.advanceTimersByTimeAsync`, `vi.useRealTimers`; `setupFiles` in `vitest.config.ts` | context7 `/vitest-dev/vitest` docs/api/vi.md (2026-10-14); run in the assembly |
@@ -431,9 +432,10 @@ The metro comes from the airports table, which the tool seeds after migration wh
 - `packages/providers/src/http/recorder.ts`, `packages/providers/test/http/recorder.test.ts`: `assertRecordedRoot`, shared by the recorder, `loadRecordedJson` and WP4b's allowlist writer (Task 6, plan decision 30).
 - `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`: export and assert `withContentHash` and `assertRecordedRoot` (Task 6) and `defaultRecordedRoot` (Task 8).
 - `apps/api/package.json`: script `tool` (Task 9). No new dependency, no msw.
-- root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9); `engines.node` is `>=22.9`, the first Node with `--env-file-if-exists` (arch M-10).
+- root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9); `engines.node` is `>=22.18`: `--env-file-if-exists` needs 22.9 (arch M-10) and the secret scan's import of WP4's TypeScript `secretForms` needs type stripping, on by default since 22.18 (N-1).
 - `scripts/check-boundaries.mjs`: the msw rules and the `process.env` reader list (Task 9).
-- `scripts/secret-scan.mjs`: encoded secret forms and the checked-values line (Task 11, sec minor 2).
+- `scripts/secret-scan.mjs`: WP4's encoded secret forms and the checked-values line (Task 11, sec minor 2, N-1).
+- `packages/providers/src/http/secretForms.ts` (new leaf), `scrub.ts`, `index.ts`, `test/barrel.test.ts`: the one shared list of a secret's forms (Task 11, N-1).
 
 ## 10. Tasks
 
@@ -6529,10 +6531,10 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
         tool: 'node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts',
       },
     });
-    // why: --env-file-if-exists arrived in Node 22.9; an older Node fails with "bad option" before the exit table applies
-    // (arch M-10)
+    // why: --env-file-if-exists arrived in Node 22.9 (arch M-10), and scripts/secret-scan.mjs imports WP4's TypeScript
+    // secretForms through type stripping, on by default since Node 22.18 (WP4b N-1)
     const root: unknown = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
-    expect(root).toMatchObject({ engines: { node: '>=22.9' } });
+    expect(root).toMatchObject({ engines: { node: '>=22.18' } });
   });
 
   it("the root script passes the tool's exit code through to the operator: no --budget → 64 (plan decision 30)", () => {
@@ -6583,7 +6585,7 @@ Expected: 2 failed | 7 passed; the failures are the script test, `AssertionError
 
 - [ ] **Step 3: Implement**
 
-In the root `package.json`, set `"record:fixtures": "pnpm -C apps/api run tool record"` and `"smoke:live": "pnpm -C apps/api run tool smoke"` (plan decision 30: `pnpm --filter` reports 1 for any non-zero child code, so the operator could not tell 65 from 75; `pnpm -C … run` passes the code through, and the cwd is still `apps/api`, so `../../.env` resolves as before), and raise `engines.node` to `">=22.9"`: the `tool` script's `--env-file-if-exists` arrived in Node 22.9 (arch M-10).
+In the root `package.json`, set `"record:fixtures": "pnpm -C apps/api run tool record"` and `"smoke:live": "pnpm -C apps/api run tool smoke"` (plan decision 30: `pnpm --filter` reports 1 for any non-zero child code, so the operator could not tell 65 from 75; `pnpm -C … run` passes the code through, and the cwd is still `apps/api`, so `../../.env` resolves as before), and raise `engines.node` to `">=22.18"`: the `tool` script's `--env-file-if-exists` arrived in Node 22.9 (arch M-10), and Task 11's secret scan imports a TypeScript leaf through type stripping, on by default since 22.18 (N-1).
 
 In `apps/api/package.json`, set the `tool` script (merge the key; keep main's other scripts):
 
@@ -6853,7 +6855,7 @@ git add apps/api/test && git commit -m "wp04b: allowlists load through WP4, list
 
 ### Task 11: Sentinel secret scan and the raw-body ignore rule
 
-**Files:** create `apps/api/test/security/sentinel.test.ts`; modify `scripts/secret-scan.mjs` (encoded forms and the count line, sec minor 2).
+**Files:** create `apps/api/test/security/sentinel.test.ts`, `packages/providers/src/http/secretForms.ts`; modify `packages/providers/src/http/scrub.ts`, `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`, `scripts/secret-scan.mjs` (one shared list of encoded forms and the count line; sec minor 2, N-1).
 
 **Interfaces:** consumes `scripts/secret-scan.mjs`, `runRecording`, `git check-ignore`.
 
@@ -6869,6 +6871,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { secretForms } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_SMTP, SENTINEL_TP } from '../helpers/env.js';
 import { runRecording } from '../helpers/recording.js';
@@ -6903,17 +6906,18 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
     expect(dirty.stderr).not.toContain(SENTINEL_SA);
   });
 
-  it('an encoded form of a configured secret (base64, base64url, URL-encoded) also fails the scan (sec minor 2)', async () => {
+  it("every encoded form WP4's scrubber knows (secretForms) also fails the scan: one shared list (sec minor 2, N-1)", async () => {
     const run = await runRecording();
     const forms = [
-      Buffer.from(SENTINEL_SA, 'utf8').toString('base64'),
-      Buffer.from(SENTINEL_TP, 'utf8').toString('base64url'),
-      encodeURIComponent(`${SENTINEL_AUTH}/x`),
+      ...new Set([SENTINEL_SA, SENTINEL_TP, SENTINEL_SMTP, SENTINEL_AUTH].flatMap((v) => secretForms(v))),
     ];
+    // why: the padded and unpadded base64 forms differ for these values, so the list is not just the raw value
+    expect(forms.length).toBeGreaterThan(8);
     for (const [i, form] of forms.entries()) {
       const dir = join(run.root, `encoded-${i}`);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'p.json'), JSON.stringify({ leaked: form }));
+      // why: written raw, not JSON-encoded, so the planted text is exactly the form
+      writeFileSync(join(dir, 'p.txt'), `leaked: ${form}\n`);
       const r = scan(run.repo);
       expect(r.status, form).toBe(1);
       expect(r.stderr).not.toContain(form);
@@ -6946,23 +6950,42 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 The scan script and the ignore rule exist, so the test passes on its first run. Prove the plant branch is not vacuous by breaking the scan, not the test: change `const roots = ['packages/providers/fixtures'];` in `scripts/secret-scan.mjs` to `const roots = ['packages/providers/fixtures-missing'];` and run `pnpm --filter @gmt/api exec vitest run test/security/sentinel.test.ts`.
-Expected: the planted-sentinel test fails with `AssertionError: expected +0 to be 1 // Object.is equality` (the planted sentinel is not found). Revert the change. Before Step 3, the count-line, encoded-form and nothing-loaded tests fail too (3 failed | 2 passed): the script prints no count and matches only the raw value.
+Expected: the planted-sentinel test fails with `AssertionError: expected +0 to be 1 // Object.is equality` (the planted sentinel is not found). Revert the change. Before Step 3, the count-line, shared-form and nothing-loaded tests fail too (3 failed | 2 passed): the script prints no count, matches only the raw value, and `@gmt/providers` does not export `secretForms` yet.
 
-- [ ] **Step 3: Implement** — in `scripts/secret-scan.mjs`, after `secretValues`:
+- [ ] **Step 3: Implement** — move WP4's `secretForms` out of `packages/providers/src/http/scrub.ts` into a dependency-free leaf, so the scan imports the scrubber's own list (N-1). `scrub.ts` imports it and re-exports it (`export { secretForms };`), the main barrel adds `export { secretForms } from './http/secretForms.js';`, and the providers barrel test lists `'secretForms'`:
+
+```ts
+// packages/providers/src/http/secretForms.ts
+// The one list of a secret's textual forms (spec §5.3 "base64 and URL-encoded forms where feasible"). why: a leaf with
+// no imports and only erasable TypeScript, so scripts/secret-scan.mjs imports this very file through Node's native type
+// stripping: the scrubber, the recorder's fail-closed check and the secret scan cannot drift apart (WP4b N-1).
+
+/**
+ * Every textual form in which a secret can reach a sink: raw, encodeURIComponent, URLSearchParams form-encoding, JSON
+ * string escaping, base64 (padded and not) and base64url.
+ */
+export function secretForms(value: string): string[] {
+  if (value === '') return [];
+  const b64 = Buffer.from(value, 'utf8').toString('base64');
+  return [
+    value,
+    encodeURIComponent(value),
+    new URLSearchParams({ v: value }).toString().slice(2),
+    JSON.stringify(value).slice(1, -1),
+    b64,
+    b64.replace(/=+$/, ''),
+    Buffer.from(value, 'utf8').toString('base64url'),
+  ];
+}
+```
+
+In `scripts/secret-scan.mjs`, import it (`import { secretForms as formsOf } from '../packages/providers/src/http/secretForms.ts';`) and, after `secretValues`:
 
 ```js
-// why: a vendor may echo a key encoded; the recorder refuses these forms in-process and this is the second layer
-// (WP4b sec minor 2). The values themselves are never printed.
-const secretForms = [
-  ...new Set(
-    secretValues.flatMap((v) => [
-      v,
-      Buffer.from(v, 'utf8').toString('base64'),
-      Buffer.from(v, 'utf8').toString('base64url'),
-      encodeURIComponent(v),
-    ]),
-  ),
-];
+// why: a vendor may echo a key encoded; the recorder refuses these forms in-process and this is the second layer. The
+// list is WP4's own (packages/providers/src/http/secretForms.ts, imported through Node's type stripping), so the scan
+// and the scrubber cannot drift apart (WP4b N-1). The values themselves are never printed.
+const secretForms = [...new Set(secretValues.flatMap((v) => formsOf(v)))];
 ```
 
 loop over `secretForms` instead of `secretValues` in the per-file check, and before the final exit:

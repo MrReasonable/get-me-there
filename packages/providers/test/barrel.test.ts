@@ -25,6 +25,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'ParamsNotAllowedError',
       'withContentHash',
       'assertRecordedRoot',
+      'secretForms',
     ]) {
       expect(typeof main[name], name).toBe('function');
     }

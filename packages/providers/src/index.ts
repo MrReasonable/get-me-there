@@ -15,6 +15,7 @@ export {
   withContentHash,
 } from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError, defaultRecordedRoot, withContentHash, assertRecordedRoot: WP4b
 export { scrubSecrets, stripUrl } from './http/scrub.js';
+export { secretForms } from './http/secretForms.js'; // WP4b: the secret scan and its sentinel test share the scrubber's list
 export type {
   FixtureRecorder,
   HttpKit,
