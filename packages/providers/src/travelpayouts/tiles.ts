@@ -26,9 +26,24 @@ export interface TileParams {
   readonly month: IsoMonth;
 }
 
-/** The vendor `origin` parameter. First cut: the pair's airport; Task 6.4 adds the shared-metro rule. */
-export function originParam(q: DiscoveryQuery, _airports: MetroLookup): string {
-  return q.origin;
+/** A metropolitan code as the vendor takes it; anything else from the table is treated as no metro. */
+const CODE_RE = /^[A-Z]{3}$/;
+
+/**
+ * The vendor `origin` parameter. Spec §2 and §5.2 (rev 14): the pair origin's metropolitan code when two or more of
+ * the definition's origins (`q.definitionOrigins`, the pair origin included) map to that metro, else the airport
+ * code. Rows are split back to the pair by `origin_airport`; a sibling pair's identical metro request is answered by
+ * the response cache inside the TTL.
+ * why: a lone airport is queried by its own code, so its tile never pages through rows of airports the definition
+ * does not use; a malformed code from the table is treated as no metro rather than sent to the vendor.
+ */
+export function originParam(q: DiscoveryQuery, airports: MetroLookup): string {
+  const metro = airports.metroOf(q.origin);
+  if (metro === null || !CODE_RE.test(metro)) return q.origin;
+  const origins = new Set<Iata>([q.origin, ...(q.definitionOrigins ?? [])]);
+  let sharing = 0;
+  for (const o of origins) if (airports.metroOf(o) === metro) sharing += 1;
+  return sharing >= 2 ? metro : q.origin;
 }
 
 /**
