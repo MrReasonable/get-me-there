@@ -186,7 +186,7 @@ interface Usable {
  *   `upstream`/`no-priced-options`; a currency core does not know → `upstream`/`currency-unsupported`.
  * - Step 2 for the `expandTop` cheapest: every priced return option is an offer, `verified: false`, whose seller is
  *   the airline the vendor states on the first outbound flight; with no stated airline those offers are dropped and
- *   counted (`no-airline-skipped-step2`), never given an invented seller (plan decision 27). Returns whose prices
+ *   counted (`no-airline-skipped-step2`), never given an invented seller (plan decision 27), and the result is partial (decision 41). Returns whose prices
  *   were all dropped are not "no legs": if no outbound yields a usable leg the cell is `currency-unsupported` or
  *   `parse`, never `no-return-legs`.
  * - Step 3 for the cheapest return per outbound: every usable booking option is an offer, `verified: true`; the
@@ -320,7 +320,12 @@ export async function searchItinerary(
     withLegs += 1;
     // why: never invent a seller (plan decision 24): only an airline the vendor states names a step-2 offer.
     const airline = statedAirline(out.option.flights);
-    if (airline === null) notes.add('no-airline-skipped-step2', returns.length);
+    if (airline === null) {
+      notes.add('no-airline-skipped-step2', returns.length);
+      // why: plan decision 41: the vendor priced these returns and none can be written, so the cell's minimum may be
+      // above the vendor's; it is never written complete.
+      partial = true;
+    }
     const step2Offer = (r: Usable): RawOffer | null =>
       airline === null
         ? null

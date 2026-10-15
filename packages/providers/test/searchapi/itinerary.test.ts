@@ -504,6 +504,21 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
     const res = await searchItinerary(deps(), q1, ctx());
     expect(sellers(res)).toEqual([['Synthetic Travel Agent', 57_300, 'post', true]]);
     expect(res.notes).toEqual(['no-airline-skipped-step2:2', 'route-history-absent:1']);
+    // why: decision 41: vendor-priced step-2 fares are missing from the cell, so it is never written complete.
+    expect(res.partial).toBe(true);
+  });
+
+  it('a dropped no-airline step-2 fare below every step-3 listing makes the result partial: the cell minimum is not the vendor minimum (decision 41) (synthetic)', async () => {
+    const anon = option([seg('LHR', 'JFK', '2026-11-02', '09:00', 'X1 100')], 600, { departure_token: 'dA' });
+    chain(
+      flightsBody([anon]),
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: ok(bookingBody([agent(620)])) },
+    );
+    const res = await searchItinerary(deps(), q1, ctx());
+    expect(sellers(res)).toEqual([['Synthetic Travel Agent', 62_000, 'post', true]]);
+    expect(res).toMatchObject({ coverage: 'priced', partial: true, failedExpansions: 0 });
+    expect(res.notes).toContain('no-airline-skipped-step2:1');
   });
 
   it('a step 3 whose only options are split bookings keeps the step-2 offer; the result is not partial (synthetic)', async () => {
