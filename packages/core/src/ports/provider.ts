@@ -1,4 +1,5 @@
 import type { CellKey } from '../types/definition.js';
+import type { ErrorReason } from '../types/execution.js';
 import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
 import type { BaggageSnapshot, FareConditions, SuppliedField } from '../types/itinerary.js';
 import type { Cabin, PointOfSale, ProviderId, SourceKind } from '../types/provenance.js';
@@ -28,6 +29,11 @@ export interface DiscoveryQuery {
   currency: 'GBP';
   /** when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it */
   cells?: CellKey[];
+  /**
+   * The definition's origins, every pair's (spec §2, §5.2 rev 14). A provider that can query by metropolitan code
+   * does so only when two or more of these map to the pair origin's metro. Absent: the pair's origin alone.
+   */
+  definitionOrigins?: Iata[];
 }
 /** Vendor-neutral, typed tile requests; `month` is the Travelpayouts tile. */
 export type TileRequest =
@@ -39,6 +45,19 @@ export interface TilePlan {
   index: number;
   coveredCells: CellKey[];
   request: TileRequest;
+}
+
+/**
+ * A covered cell the adapter could not fully price (spec §3, §8.1; plan decision 24): rows it received for exactly
+ * this cell but dropped (`offersDropped`), or a cell it never finished reading. The engine records the cell `priced`
+ * with `offers-dropped:n` when the tile also returned a price for it, else `error` with `reason`, `detail` going to
+ * `last_error`. Never a vendor message in `reason`.
+ */
+export interface CellIssue {
+  cell: CellKey;
+  reason: ErrorReason;
+  offersDropped: number;
+  detail: string;
 }
 
 export interface RawCalendarPrice extends CellKey {
@@ -57,6 +76,13 @@ export type DiscoveryTileResult =
       prices: RawCalendarPrice[];
       noFares: CellKey[];
       notes: string[];
+      /** Per-cell shortfalls the engine must record (spec §8.1); absent or empty when every covered cell is clean. */
+      cellIssues?: CellIssue[];
+      /**
+       * True when the adapter stopped at its page cap: a priced cell's minimum is then the cheapest of the rows read,
+       * not of the vendor's whole cache, and the engine labels it so. Absent: every page was read.
+       */
+      truncated?: boolean;
     }
   | {
       kind: 'tile-error';
