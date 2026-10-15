@@ -125,7 +125,8 @@ function parseFlights(body: unknown, gl: string, step: string) {
   return {
     ...echo,
     options: [...(data.best_flights ?? []), ...(data.other_flights ?? [])],
-    priceHistory: data.price_insights?.price_history ?? [],
+    // why: null when the vendor sent no series at all (plan decision 40: best-effort), told apart from an empty one.
+    priceHistory: data.price_insights?.price_history ?? null,
   };
 }
 
@@ -142,10 +143,21 @@ function parseBooking(body: unknown, gl: string) {
  * `price_insights.price_history` as Google's route-level price-insight series, indicative (spec §2 bonus, §7; the
  * engine stores it in route_price_history, GBP points only per plan decision 25). That label is the spec's; whether
  * the series is per route or per searched dates and cabin is unverified (§13). A point that is malformed, has an impossible date or a price the shared `majorToMinor` refuses is dropped and counted
- * `route-history-dropped`; it never fails the step.
+ * `route-history-dropped`; it never fails the step. A response with no series at all yields an empty history and the
+ * informational count `route-history-absent` (plan decision 40: best-effort).
  */
-function toRouteHistory(points: readonly unknown[], currency: string, notes: NoteCounter): RouteHistory {
+function toRouteHistory(
+  points: readonly unknown[] | null,
+  currency: string,
+  notes: NoteCounter,
+): RouteHistory {
   const out: RouteHistory = [];
+  if (points === null) {
+    // why: plan decision 40: the series is best-effort (WP4b's recorded step 1 carries none), so its absence is an
+    // informational count, never an error, an issue or a partial result.
+    notes.add('route-history-absent');
+    return out;
+  }
   for (const raw of points) {
     const p = historyPointSchema.safeParse(raw);
     // why: `iso_date` is an instant (e.g. 2026-09-19T04:00:00Z); its UTC calendar date is the series day.

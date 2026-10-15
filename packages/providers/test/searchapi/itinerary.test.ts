@@ -209,7 +209,7 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
       kind: 'parse',
       providerId: 'searchapi',
       message: expect.stringMatching(
-        /no-departure-token-step1:1, unusable-price-step1:1, unusable-segments-step1:1.*\[unusable-step1-options\]/,
+        /no-departure-token-step1:1, route-history-absent:1, unusable-price-step1:1, unusable-segments-step1:1.*\[unusable-step1-options\]/,
       ),
     });
   });
@@ -450,7 +450,7 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
     expect(res.offers.map((o) => o.amountMinor).sort((a, b) => a - b)).toEqual([
       57_300, 60_000, 65_000, 70_000,
     ]);
-    expect(res.notes).toEqual(['airline-direct-kept:1']);
+    expect(res.notes).toEqual(['airline-direct-kept:1', 'route-history-absent:1']);
     expect(res.partial).toBe(false);
     // decision 27: only the step-3 seller listing is verified; every step-2 price stays unverified.
     expect(res.offers.filter((o) => o.verified).map((o) => o.amountMinor)).toEqual([57_300]);
@@ -484,7 +484,7 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
       ['Synthetic Air One plc', 60_000, 'post', true],
       ['Synthetic Air One', 61_000, 'none', false],
     ]);
-    expect(res.notes).toEqual(['airline-direct-kept:1']);
+    expect(res.notes).toEqual(['airline-direct-kept:1', 'route-history-absent:1']);
   });
 
   it('an outbound whose first flight states no airline: step-2 offers are dropped and counted, never named; step 3 still runs (synthetic)', async () => {
@@ -503,7 +503,7 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
     );
     const res = await searchItinerary(deps(), q1, ctx());
     expect(sellers(res)).toEqual([['Synthetic Travel Agent', 57_300, 'post', true]]);
-    expect(res.notes).toEqual(['no-airline-skipped-step2:2']);
+    expect(res.notes).toEqual(['no-airline-skipped-step2:2', 'route-history-absent:1']);
   });
 
   it('a step 3 whose only options are split bookings keeps the step-2 offer; the result is not partial (synthetic)', async () => {
@@ -514,7 +514,10 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
     );
     const res = await searchItinerary(deps(), q1, ctx());
     expect(sellers(res)).toEqual([['Synthetic Air One', 60_000, 'none', false]]);
-    expect(res).toMatchObject({ partial: false, notes: ['split-booking-skipped:1'] });
+    expect(res).toMatchObject({
+      partial: false,
+      notes: ['route-history-absent:1', 'split-booking-skipped:1'],
+    });
   });
 
   it.each([
@@ -535,7 +538,12 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
         { b1: reply },
       );
       const res = await searchItinerary(deps(), q1, ctx());
-      expect(res).toMatchObject({ coverage: 'priced', partial: true, failedExpansions: 0, notes: [note] });
+      expect(res).toMatchObject({
+        coverage: 'priced',
+        partial: true,
+        failedExpansions: 0,
+        notes: [note, 'route-history-absent:1'],
+      });
       expect(res.offers.map((o) => o.amountMinor)).toEqual([60_000]);
       expect(step2Only(res)).toBe(true);
     },
@@ -601,7 +609,10 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
   it('a cheapest return without a booking_token keeps the step-2 offer and is partial: step 3 could not run (synthetic)', async () => {
     chain(flightsBody([A]), { dA: ok(flightsBody([{ flights: IN_1, price: 600 }])) });
     const res = await searchItinerary(deps(), q1, ctx());
-    expect(res).toMatchObject({ partial: true, notes: ['no-booking-token-step2:1'] });
+    expect(res).toMatchObject({
+      partial: true,
+      notes: ['no-booking-token-step2:1', 'route-history-absent:1'],
+    });
     expect(res.offers).toHaveLength(1);
     expect(step2Only(res)).toBe(true);
   });
@@ -612,12 +623,12 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
       bookingBody([
         { price: 560, booking_request: { url: 'https://www.google.com/travel/clk/f', post_data: 'u=s' } },
       ]),
-      ['booking-options-unusable-step3:1', 'no-seller-skipped-step3:1'],
+      ['booking-options-unusable-step3:1', 'no-seller-skipped-step3:1', 'route-history-absent:1'],
     ],
     [
       'are in a currency core does not know',
       { search_parameters: { currency: 'XAU', gl: 'gb' }, booking_options: [agent(560)] },
-      ['booking-options-unusable-step3:1', 'offers-dropped:1'],
+      ['booking-options-unusable-step3:1', 'offers-dropped:1', 'route-history-absent:1'],
     ],
   ] as const)(
     'a step 3 whose non-split options %s keeps the step-2 offer and is partial (synthetic)',
@@ -725,6 +736,7 @@ describe('currency, money and route history (spec §2, §6.3, plan decisions 24�
       { date: '2026-09-20', lowestPriceMinor: 61_250, currency: 'GBP' },
     ]);
     expect(res.notes).toContain('route-history-dropped:4');
+    expect(res.notes.some((n) => n.startsWith('route-history-absent'))).toBe(false);
   });
 
   it('a step-1 body failing the schema → parse malformed-flights with providerId searchapi (synthetic)', async () => {
@@ -794,13 +806,33 @@ describe('currency, money and route history (spec §2, §6.3, plan decisions 24�
     });
   });
 
-  it('a null price_insights yields an empty routeHistory, not an error (synthetic)', async () => {
+  it.each([
+    ['a null price_insights', { price_insights: null }],
+    ['a price_insights without price_history', { price_insights: {} }],
+    ['no price_insights key (the recorded shape)', {}],
+  ])(
+    '%s yields an empty routeHistory and the informational route-history-absent count, never an error or a partial (decision 40) (synthetic)',
+    async (_label, extra) => {
+      chain(
+        flightsBody([A], extra),
+        { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+        { b1: ok(bookingBody([agent(573)])) },
+      );
+      const res = await searchItinerary(deps(), q1, ctx());
+      expect(res).toMatchObject({ routeHistory: [], partial: false, coverage: 'priced' });
+      expect(res.notes.filter((n) => n.startsWith('route-history'))).toEqual(['route-history-absent:1']);
+    },
+  );
+
+  it('an empty price_history is a series the vendor stated: empty routeHistory, no absent count (synthetic)', async () => {
     chain(
-      flightsBody([A], { price_insights: null }),
+      flightsBody([A], { price_insights: { price_history: [] } }),
       { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
       { b1: ok(bookingBody([agent(573)])) },
     );
-    expect((await searchItinerary(deps(), q1, ctx())).routeHistory).toEqual([]);
+    const res = await searchItinerary(deps(), q1, ctx());
+    expect(res.routeHistory).toEqual([]);
+    expect(res.notes.some((n) => n.startsWith('route-history'))).toBe(false);
   });
 });
 

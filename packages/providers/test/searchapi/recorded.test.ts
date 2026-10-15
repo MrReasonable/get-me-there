@@ -233,7 +233,11 @@ describe('recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) �
     );
     expect(posts.length).toBeGreaterThan(0);
     for (const h of posts) expect(h === 'google.com' || h.endsWith('.google.com')).toBe(true);
-    expect(res.routeHistory?.length ?? 0).toBeGreaterThan(0);
+    // why: plan decision 40: price_insights is best-effort; the recorded step 1 carries none, so the history is empty,
+    // the result stays whole (asserted above) and only the informational count records the absence.
+    expect('price_insights' in obj(step1.body)).toBe(false);
+    expect(res.routeHistory).toEqual([]);
+    expect(res.notes.filter((n) => n.startsWith('route-history'))).toEqual(['route-history-absent:1']);
   });
 
   it('the recorded 401 body is recognised: auth with the vendor text (spec §2 fact 5)', () => {
