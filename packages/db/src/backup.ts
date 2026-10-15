@@ -5,8 +5,8 @@ import Database from 'better-sqlite3';
 
 const BACKUP_FILE = /^get-me-there-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
 
-/** The default check: SQLite's own integrity verdict on the copy. */
-function integrityCheck(file: string): string {
+/** The default check: SQLite's own integrity verdict on the copy. Internal; exported for its test only. */
+export function integrityCheck(file: string): string {
   const out = new Database(file, { readonly: true, fileMustExist: true });
   try {
     return String(out.pragma('integrity_check', { simple: true }));

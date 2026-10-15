@@ -10,8 +10,9 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { fixedClock } from '@gmt/core';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { backupDatabase } from '../src/backup.js';
+import { backupDatabase, integrityCheck } from '../src/backup.js';
 import { at, count, freshDb, openTracked, T0, tmpDir } from './helpers/db.js';
 
 const NAME = 'get-me-there-2026-10-14T12-00-00-000Z.db';
@@ -105,6 +106,36 @@ describe('backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14)', (
         verify: () => 'row 3 missing from index',
       }),
     ).toThrow(/integrity_check returned row 3 missing/);
+    expect(existsSync(join(backups, NAME))).toBe(false);
+  });
+
+  it('a really corrupted copy fails the production integrity check, which throws and removes the file (test-strategy M3)', () => {
+    const { path, backups } = live();
+    // why: rewrite the copy's index definition under writable_schema, so the stored index no longer matches its table:
+    // a genuine corruption SQLite's own integrity_check reports, with the file still openable.
+    const corrupt = (file: string) => {
+      const d = new Database(file);
+      d.exec('CREATE TABLE t (x INTEGER, y INTEGER); CREATE INDEX t_x ON t (x);');
+      const ins = d.prepare('INSERT INTO t VALUES (?, ?)');
+      for (let k = 0; k < 50; k++) ins.run(k, 1000 - k);
+      d.unsafeMode(true);
+      d.pragma('writable_schema = ON');
+      d.prepare("UPDATE sqlite_master SET sql = 'CREATE INDEX t_x ON t (y)' WHERE name = 't_x'").run();
+      d.close();
+    };
+    let seen = '';
+    expect(() =>
+      backupDatabase(path, backups, {
+        keep: 5,
+        clock: fixedClock(T0),
+        verify: (file) => {
+          corrupt(file);
+          seen = integrityCheck(file);
+          return seen;
+        },
+      }),
+    ).toThrow(/integrity_check returned/);
+    expect(seen).not.toBe('ok');
     expect(existsSync(join(backups, NAME))).toBe(false);
   });
 
