@@ -6610,6 +6610,23 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     );
   });
 
+  it('rejects a calendar request without separate_tickets=1 (plan decision 29: both engines)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'engine') === 'google_flights_calendar' && f.status === 200,
+      (j) => {
+        const request = asObject(j.request);
+        const url = new URL(String(request.url));
+        url.searchParams.delete('separate_tickets');
+        j.request = { ...request, url: url.href };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'searchapi: a request without separate_tickets=1 (plan decisions 24 and 29: both engines)',
+    );
+  });
+
   it('rejects a second allowlist file for a provider (r3-ts-003)', async () => {
     const { root } = await runRecording();
     copyFileSync(
@@ -6749,7 +6766,9 @@ export function checkWorkedExampleTree(
   // why: SA-02 and SA-03 share outbound 2027-03-01..03-09 (plan decision 29); the return span tells them apart
   const main = cal.filter((f) => q(f, 'return_date_end') === '2027-03-30');
   if (main.length !== 1 || main[0]?.status !== 200 || q(main[0], 'outbound_date_end') !== '2027-03-09')
-    fail('searchapi: the 180-combination calendar must be one 200, out 2027-03-01..03-09 × ret 2027-03-11..03-30');
+    fail(
+      'searchapi: the 180-combination calendar must be one 200, out 2027-03-01..03-09 × ret 2027-03-11..03-30',
+    );
   const over = cal.filter((f) => q(f, 'return_date_end') === '2027-04-03');
   const overBody = over[0]?.body;
   const emptyCalendar =
@@ -6842,7 +6861,7 @@ export function checkWorkedExampleTree(
 - [ ] **Step 4: Run to verify**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/recorded` and `pnpm --filter @gmt/api test`
-Expected: `workedExampleTree.test.ts` 13 passed; `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 20` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 155 passed (156), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
+Expected: `workedExampleTree.test.ts` 14 passed (the separate_tickets negative added for plan decision 29); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 20` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 156 passed (157), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
 
 - [ ] **Step 5: Commit the check, not the gate**
 
@@ -6908,7 +6927,7 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
 - [ ] **Step 7: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api test`, `pnpm --filter @gmt/providers test`, `pnpm secret-scan`
-Expected: both suites pass (the api suite includes the manifest test, 156 passed; the suite's committed-tree snapshot holds after the commit); `secret scan: clean`.
+Expected: both suites pass (the api suite includes the manifest test, 157 passed; the suite's committed-tree snapshot holds after the commit); `secret scan: clean`.
 
 - [ ] **Step 8: Commit**
 
@@ -6939,11 +6958,11 @@ None. The plan's Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, WP8, W
 
 ## 12. Definition of done
 
-Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 155 passed).
+Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 156 passed).
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/api test` | all 156 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.9 / 84.5 / 95.8 / 94.9) |
+| `pnpm --filter @gmt/api test` | all 157 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.9 / 84.5 / 95.8 / 94.9) |
 | `pnpm --filter @gmt/db test` | passes (262 at assembly), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
 | `pnpm --filter @gmt/providers test` | passes (263 at assembly, including the barrel test naming `defaultRecordedRoot`); WP4's thresholds hold |
 | `pnpm lint` | clean |
