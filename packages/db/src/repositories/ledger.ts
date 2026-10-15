@@ -1,0 +1,95 @@
+import type { IsoDateTime, ProviderId, Stage } from '@gmt/core';
+import type { Db } from '../client.js';
+import { PROVIDER_IDS, STAGES } from '../internal/enums.js';
+import { oneOf } from '../internal/read.js';
+import { assertIsoDateTime } from '../internal/validate.js';
+
+/** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
+const TILE_EXPR = `COUNT(DISTINCT CASE WHEN tile_index IS NOT NULL AND http_attempt = 1 AND outcome <> 'cache_hit' THEN provider_id || ':' || tile_index END)`;
+const COUNTS = `COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits`;
+interface CountsRow {
+  calls: number;
+  cost: number;
+  tiles: number;
+  cacheHits: number;
+}
+
+/** Reads and housekeeping over `provider_requests` (spec §7). Inserts and finalisation belong to `SqliteBudgetGuard`. */
+export class LedgerRepo {
+  constructor(private readonly db: Db) {}
+
+  /**
+   * Actuals for one execution, total and per (provider, stage). `calls` are upstream attempts, not cap usage
+   * (cap usage comes from `BudgetGuard.usage`); spec §8.1 parity is `tiles + cacheHits`.
+   */
+  countsFor(executionId: string): {
+    calls: number;
+    costMicroGbp: number;
+    tiles: number;
+    cacheHits: number;
+    perProvider: Array<{
+      providerId: ProviderId;
+      stage: Stage | null;
+      calls: number;
+      costMicroGbp: number;
+      tiles: number;
+      cacheHits: number;
+    }>;
+  } {
+    const total = this.db.raw
+      .prepare<[string], CountsRow>(`SELECT ${COUNTS} FROM provider_requests WHERE execution_id = ?`)
+      .get(executionId);
+    const rows = this.db.raw
+      .prepare<[string], CountsRow & { providerId: string; stage: string }>(
+        `SELECT provider_id AS providerId, CASE WHEN tile_index IS NULL THEN 'verification' ELSE 'discovery' END AS stage, ${COUNTS}
+         FROM provider_requests WHERE execution_id = ? GROUP BY providerId, stage ORDER BY providerId, stage`,
+      )
+      .all(executionId);
+    return {
+      calls: total?.calls ?? 0,
+      costMicroGbp: total?.cost ?? 0,
+      tiles: total?.tiles ?? 0,
+      cacheHits: total?.cacheHits ?? 0,
+      perProvider: rows.map((r) => ({
+        providerId: oneOf('provider_id', PROVIDER_IDS, r.providerId),
+        stage: oneOf('stage', STAGES, r.stage),
+        calls: r.calls,
+        costMicroGbp: r.cost,
+        tiles: r.tiles,
+        cacheHits: r.cacheHits,
+      })),
+    };
+  }
+
+  /** Spec §8.1 parity numerator for one provider (add its cache hits for the full count). */
+  firstAttemptTiles(executionId: string, providerId: ProviderId): number {
+    return (
+      this.db.raw
+        .prepare<[string, string], { n: number }>(
+          `SELECT ${TILE_EXPR} AS n FROM provider_requests WHERE execution_id = ? AND provider_id = ?`,
+        )
+        .get(executionId, providerId)?.n ?? 0
+    );
+  }
+
+  /** Spec §5.3 "boot sweep marks pending older than 10 minutes unknown (still counted)". The caller passes boot − 10 min. */
+  sweepPending(olderThan: IsoDateTime): number {
+    assertIsoDateTime('olderThan', olderThan);
+    return this.db.raw
+      .prepare(
+        `UPDATE provider_requests SET outcome = 'unknown' WHERE outcome = 'pending' AND started_at < ?`,
+      )
+      .run(olderThan).changes;
+  }
+
+  /** Spec §7 retention: prune `cache_hit` rows older than the cutoff for the named (monthly-window) providers. */
+  pruneCacheHits(olderThan: IsoDateTime, providerIds: ProviderId[]): number {
+    assertIsoDateTime('olderThan', olderThan);
+    if (providerIds.length === 0) return 0;
+    return this.db.raw
+      .prepare(
+        `DELETE FROM provider_requests WHERE outcome = 'cache_hit' AND started_at < @olderThan AND provider_id IN (SELECT value FROM json_each(@ids))`,
+      )
+      .run({ olderThan, ids: JSON.stringify(providerIds) }).changes;
+  }
+}

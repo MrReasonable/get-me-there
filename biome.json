@@ -11,7 +11,8 @@
       "!**/reports",
       "!**/.stryker-tmp",
       "!**/drizzle/meta",
-      "!**/pnpm-lock.yaml"
+      "!**/pnpm-lock.yaml",
+      "!**/packages/db/data/airports.*.json"
     ]
   },
   "formatter": {

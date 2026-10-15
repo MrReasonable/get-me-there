@@ -1,15 +1,27 @@
 import type { ProviderId } from './types/provenance.js';
 
-/** Strip query string and userinfo from every URL inside a message. Spec §5.3: no sink ever holds a full URL. */
+/**
+ * A relative path (`/a/b`) or a schemeless host (`api.example.com`, optionally with a path) followed by a query or
+ * fragment; group 1 is the part kept. Prose such as `why?` has neither a leading slash nor a host, so it is left alone.
+ */
+const BARE_URL_QUERY =
+  /(?<![\w/:])((?:\/|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?::\d+)?)[^\s?#)'"]*)[?#][^\s)'"]*/g;
+
+/**
+ * Strip query string and userinfo from every URL inside a message, and the query and fragment from relative and
+ * schemeless URLs (prov-M7). Spec §5.3: no sink ever holds a full URL.
+ */
 export function stripUrlsInText(text: string): string {
-  return text.replace(/https?:\/\/[^\s)'"]+/g, (raw) => {
-    try {
-      const u = new URL(raw);
-      return `${u.protocol}//${u.host}${u.pathname}`;
-    } catch {
-      return '<url>';
-    }
-  });
+  return text
+    .replace(/https?:\/\/[^\s)'"]+/g, (raw) => {
+      try {
+        const u = new URL(raw);
+        return `${u.protocol}//${u.host}${u.pathname}`;
+      } catch {
+        return '<url>';
+      }
+    })
+    .replace(BARE_URL_QUERY, '$1');
 }
 
 export type ProviderErrorKind =

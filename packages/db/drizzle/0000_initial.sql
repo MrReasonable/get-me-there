@@ -1,0 +1,456 @@
+CREATE TABLE `airports` (
+	`iata` text PRIMARY KEY NOT NULL,
+	`icao` text,
+	`name` text NOT NULL,
+	`city` text NOT NULL,
+	`country` text NOT NULL,
+	`tz` text NOT NULL,
+	`lat` real NOT NULL,
+	`lon` real NOT NULL,
+	`metro` text,
+	`source` text NOT NULL,
+	`dataset_version` text NOT NULL,
+	CONSTRAINT "airports_iata_ck" CHECK(iata GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "airports_metro_ck" CHECK(metro IS NULL OR metro GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "airports_country_ck" CHECK(country GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "airports_tz_ck" CHECK(length(tz) > 0)
+);
+--> statement-breakpoint
+CREATE INDEX `airports_metro_idx` ON `airports` (`metro`);--> statement-breakpoint
+CREATE TABLE `alert_events` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`rule_id` text NOT NULL,
+	`identity_key` text NOT NULL,
+	`observation_id` integer,
+	`calendar_price_id` integer,
+	`dedup_key` text NOT NULL,
+	`fired_at` text NOT NULL,
+	`status` text NOT NULL,
+	`reason` text,
+	`payload_json` text NOT NULL,
+	FOREIGN KEY (`rule_id`) REFERENCES `alert_rules`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`observation_id`) REFERENCES `price_observations`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`calendar_price_id`) REFERENCES `calendar_prices`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "alert_events_status_ck" CHECK(status IN ('sent', 'failed', 'suppressed')),
+	CONSTRAINT "alert_events_fired_ck" CHECK(fired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `alert_events_rule_dedup_idx` ON `alert_events` (`rule_id`,`dedup_key`,`fired_at`);--> statement-breakpoint
+CREATE INDEX `alert_events_rule_identity_idx` ON `alert_events` (`rule_id`,`identity_key`,`fired_at`);--> statement-breakpoint
+CREATE TABLE `alert_rules` (
+	`id` text PRIMARY KEY NOT NULL,
+	`definition_id` text NOT NULL,
+	`type` text NOT NULL,
+	`threshold_pence` integer,
+	`pct` integer,
+	`basis` text NOT NULL,
+	`require_all_verified` integer,
+	`cooldown_hours` integer DEFAULT 336 NOT NULL,
+	`enabled` integer NOT NULL,
+	`deleted_at` text,
+	FOREIGN KEY (`definition_id`) REFERENCES `search_definitions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "alert_rules_type_ck" CHECK(type IN ('absolute', 'dropPct', 'dropAbs')),
+	CONSTRAINT "alert_rules_basis_ck" CHECK(basis IN ('verified', 'calendar')),
+	CONSTRAINT "alert_rules_threshold_ck" CHECK(threshold_pence IS NULL OR (typeof(threshold_pence) = 'integer' AND threshold_pence >= 0)),
+	CONSTRAINT "alert_rules_pct_ck" CHECK(pct IS NULL OR (typeof(pct) = 'integer' AND pct >= 0)),
+	CONSTRAINT "alert_rules_cooldown_ck" CHECK(typeof(cooldown_hours) = 'integer' AND cooldown_hours >= 0),
+	CONSTRAINT "alert_rules_require_ck" CHECK(require_all_verified IS NULL OR require_all_verified IN (0, 1)),
+	CONSTRAINT "alert_rules_enabled_ck" CHECK(enabled IN (0, 1)),
+	CONSTRAINT "alert_rules_deleted_ck" CHECK(deleted_at IS NULL OR deleted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE TABLE `app_lock` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`holder` text NOT NULL,
+	`heartbeat_at` text NOT NULL,
+	`acquired_at` text NOT NULL,
+	CONSTRAINT "app_lock_singleton_ck" CHECK(id = 1),
+	CONSTRAINT "app_lock_holder_ck" CHECK(holder IN ('app', 'tool')),
+	CONSTRAINT "app_lock_heartbeat_ck" CHECK(heartbeat_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "app_lock_acquired_ck" CHECK(acquired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE TABLE `calendar_prices` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`execution_id` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`source_kind` text NOT NULL,
+	`cabin` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`price_pence` integer NOT NULL,
+	`price_native_minor` integer NOT NULL,
+	`currency_native` text NOT NULL,
+	`fx_rate_nano` integer,
+	`fx_rate_date` text,
+	`fx_source` text,
+	`fx_converted` integer NOT NULL,
+	`point_of_sale` text NOT NULL,
+	`fetched_at` text NOT NULL,
+	`provider_observed_at` text,
+	`max_age_hours` integer,
+	`vendor_link` text,
+	`reused_from_execution_id` text,
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`reused_from_execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "calendar_prices_price_ck" CHECK(typeof(price_pence) = 'integer' AND price_pence >= 0),
+	CONSTRAINT "calendar_prices_native_ck" CHECK(typeof(price_native_minor) = 'integer' AND price_native_minor >= 0),
+	CONSTRAINT "calendar_prices_fx_converted_ck" CHECK((fx_converted = 1) = (currency_native <> 'GBP')),
+	CONSTRAINT "calendar_prices_fx_complete_ck" CHECK(fx_converted = 0 OR (fx_rate_nano IS NOT NULL AND fx_rate_date IS NOT NULL AND fx_source IS NOT NULL)),
+	CONSTRAINT "calendar_prices_fx_rate_ck" CHECK(fx_rate_nano IS NULL OR (typeof(fx_rate_nano) = 'integer' AND fx_rate_nano >= 0)),
+	CONSTRAINT "calendar_prices_fx_bool_ck" CHECK(fx_converted IN (0, 1)),
+	CONSTRAINT "calendar_prices_currency_ck" CHECK(currency_native GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "calendar_prices_fetched_ck" CHECK(fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "calendar_prices_observed_ck" CHECK(provider_observed_at IS NULL OR provider_observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "calendar_prices_max_age_ck" CHECK(max_age_hours IS NULL OR (typeof(max_age_hours) = 'integer' AND max_age_hours >= 0)),
+	CONSTRAINT "calendar_prices_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "calendar_prices_pos_ck" CHECK(point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "calendar_prices_kind_ck" CHECK(source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')),
+	CONSTRAINT "calendar_prices_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "calendar_prices_provider_kind_ck" CHECK((provider_id = 'fixture') = (source_kind = 'synthetic'))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `calendar_prices_execution_provider_cell_uq` ON `calendar_prices` (`execution_id`,`provider_id`,`origin`,`destination`,`departure_date`,`return_date`);--> statement-breakpoint
+CREATE INDEX `calendar_prices_cell_fetched_idx` ON `calendar_prices` (`origin`,`destination`,`departure_date`,`return_date`,`fetched_at`);--> statement-breakpoint
+CREATE INDEX `calendar_prices_route_fetched_idx` ON `calendar_prices` (`origin`,`destination`,`fetched_at`);--> statement-breakpoint
+CREATE INDEX `calendar_prices_execution_idx` ON `calendar_prices` (`execution_id`);--> statement-breakpoint
+CREATE TABLE `cell_outcomes` (
+	`execution_id` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`stage` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`status` text NOT NULL,
+	`reason` text,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`last_error` text,
+	`fetched_at` text,
+	`min_pence` integer,
+	`cabin` text,
+	`point_of_sale` text,
+	`source_kind` text,
+	`reused_from_execution_id` text,
+	PRIMARY KEY(`execution_id`, `origin`, `destination`, `departure_date`, `return_date`, `stage`, `provider_id`),
+	FOREIGN KEY (`reused_from_execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`execution_id`,`origin`,`destination`,`departure_date`,`return_date`) REFERENCES `search_cells`(`execution_id`,`origin`,`destination`,`departure_date`,`return_date`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "cell_outcomes_status_ck" CHECK(status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')),
+	CONSTRAINT "cell_outcomes_stage_ck" CHECK(stage IN ('discovery', 'verification')),
+	CONSTRAINT "cell_outcomes_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "cell_outcomes_skip_reason_ck" CHECK(status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'departed')),
+	CONSTRAINT "cell_outcomes_attempts_ck" CHECK(typeof(attempts) = 'integer' AND attempts >= 0),
+	CONSTRAINT "cell_outcomes_min_ck" CHECK(min_pence IS NULL OR (typeof(min_pence) = 'integer' AND min_pence >= 0)),
+	CONSTRAINT "cell_outcomes_priced_min_ck" CHECK((status = 'priced') = (min_pence IS NOT NULL)),
+	CONSTRAINT "cell_outcomes_cabin_ck" CHECK(cabin IS NULL OR cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "cell_outcomes_pos_ck" CHECK(point_of_sale IS NULL OR point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "cell_outcomes_kind_ck" CHECK(source_kind IS NULL OR source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')),
+	CONSTRAINT "cell_outcomes_provider_kind_ck" CHECK(source_kind IS NULL OR (provider_id = 'fixture') = (source_kind = 'synthetic')),
+	CONSTRAINT "cell_outcomes_fetched_ck" CHECK(fetched_at IS NULL OR fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "cell_outcomes_provenance_ck" CHECK(status NOT IN ('priced', 'empty', 'no_data') OR (status = 'no_data' AND reason IS 'cabin-not-offered') OR (fetched_at IS NOT NULL AND cabin IS NOT NULL AND point_of_sale IS NOT NULL AND source_kind IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE INDEX `cell_outcomes_stage_provider_status_idx` ON `cell_outcomes` (`execution_id`,`stage`,`provider_id`,`status`);--> statement-breakpoint
+CREATE TABLE `fare_offers` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`itinerary_hash` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`seller` text NOT NULL,
+	`cabin` text NOT NULL,
+	`first_seen_at` text NOT NULL,
+	`last_seen_at` text NOT NULL,
+	`first_price_pence` integer NOT NULL,
+	`lowest_price_pence` integer NOT NULL,
+	`highest_price_pence` integer NOT NULL,
+	`latest_price_pence` integer NOT NULL,
+	FOREIGN KEY (`itinerary_hash`) REFERENCES `itineraries`(`hash`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "fare_offers_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "fare_offers_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "fare_offers_first_seen_ck" CHECK(first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "fare_offers_last_seen_ck" CHECK(last_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "fare_offers_first_ck" CHECK(typeof(first_price_pence) = 'integer' AND first_price_pence >= 0),
+	CONSTRAINT "fare_offers_lowest_ck" CHECK(typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0),
+	CONSTRAINT "fare_offers_highest_ck" CHECK(typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0),
+	CONSTRAINT "fare_offers_latest_ck" CHECK(typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `fare_offers_identity_uq` ON `fare_offers` (`itinerary_hash`,`provider_id`,`seller`,`cabin`);--> statement-breakpoint
+CREATE INDEX `fare_offers_itinerary_idx` ON `fare_offers` (`itinerary_hash`);--> statement-breakpoint
+CREATE TABLE `fx_rates` (
+	`date` text NOT NULL,
+	`currency` text NOT NULL,
+	`rate_nano` integer NOT NULL,
+	`source` text NOT NULL,
+	PRIMARY KEY(`date`, `currency`),
+	CONSTRAINT "fx_rates_rate_ck" CHECK(typeof(rate_nano) = 'integer' AND rate_nano > 0),
+	CONSTRAINT "fx_rates_currency_ck" CHECK(currency GLOB '[A-Z][A-Z][A-Z]' AND currency <> 'GBP'),
+	CONSTRAINT "fx_rates_date_ck" CHECK(date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+	CONSTRAINT "fx_rates_source_ck" CHECK(length(source) > 0)
+);
+--> statement-breakpoint
+CREATE TABLE `itineraries` (
+	`hash` text PRIMARY KEY NOT NULL,
+	`kind` text DEFAULT 'flight' NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`nights` integer NOT NULL,
+	`outbound_minutes` integer,
+	`inbound_minutes` integer,
+	`stops_out` integer NOT NULL,
+	`stops_in` integer NOT NULL,
+	`airport_change` integer,
+	`carriers_json` text NOT NULL,
+	`layovers_json` text NOT NULL,
+	`first_seen_at` text NOT NULL,
+	CONSTRAINT "itineraries_nights_ck" CHECK(typeof(nights) = 'integer' AND nights >= 0),
+	CONSTRAINT "itineraries_stops_out_ck" CHECK(typeof(stops_out) = 'integer' AND stops_out >= 0),
+	CONSTRAINT "itineraries_stops_in_ck" CHECK(typeof(stops_in) = 'integer' AND stops_in >= 0),
+	CONSTRAINT "itineraries_out_min_ck" CHECK(outbound_minutes IS NULL OR (typeof(outbound_minutes) = 'integer' AND outbound_minutes >= 0)),
+	CONSTRAINT "itineraries_in_min_ck" CHECK(inbound_minutes IS NULL OR (typeof(inbound_minutes) = 'integer' AND inbound_minutes >= 0)),
+	CONSTRAINT "itineraries_airport_change_ck" CHECK(airport_change IS NULL OR airport_change IN (0, 1)),
+	CONSTRAINT "itineraries_first_seen_ck" CHECK(first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE TABLE `operator_notifications` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`kind` text NOT NULL,
+	`execution_id` text,
+	`definition_id` text NOT NULL,
+	`sent_at` text NOT NULL,
+	`status` text NOT NULL,
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`definition_id`) REFERENCES `search_definitions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "operator_notifications_kind_ck" CHECK(kind IN ('paused_budget', 'paused_error', 'skipped_budget', 'skipped_confirm', 'skipped_window', 'skipped_missed', 'interrupted', 'provider_disabled', 'provider_capped', 'parity_break', 'alerts_calendar_only', 'crash_loop')),
+	CONSTRAINT "operator_notifications_status_ck" CHECK(status IN ('sent', 'failed')),
+	CONSTRAINT "operator_notifications_sent_ck" CHECK(sent_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `operator_notifications_dedup_idx` ON `operator_notifications` (`kind`,`definition_id`,`execution_id`);--> statement-breakpoint
+CREATE TABLE `price_observations` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`offer_id` integer NOT NULL,
+	`execution_id` text NOT NULL,
+	`source_kind` text NOT NULL,
+	`cabin` text NOT NULL,
+	`fetched_at` text NOT NULL,
+	`provider_observed_at` text,
+	`price_pence` integer NOT NULL,
+	`price_native_minor` integer NOT NULL,
+	`currency_native` text NOT NULL,
+	`fx_rate_nano` integer,
+	`fx_rate_date` text,
+	`fx_source` text,
+	`fx_converted` integer NOT NULL,
+	`point_of_sale` text NOT NULL,
+	`max_age_hours` integer,
+	`taxes_included` integer,
+	`self_transfer` integer,
+	`segment_cabins_json` text,
+	`baggage_json` text,
+	`fare_conditions_json` text,
+	`booking_json` text,
+	`booking_expires_at` text,
+	`supplied_fields_json` text NOT NULL,
+	`partial_expansion` integer NOT NULL,
+	FOREIGN KEY (`offer_id`) REFERENCES `fare_offers`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "price_observations_price_ck" CHECK(typeof(price_pence) = 'integer' AND price_pence >= 0),
+	CONSTRAINT "price_observations_native_ck" CHECK(typeof(price_native_minor) = 'integer' AND price_native_minor >= 0),
+	CONSTRAINT "price_observations_fx_converted_ck" CHECK((fx_converted = 1) = (currency_native <> 'GBP')),
+	CONSTRAINT "price_observations_fx_complete_ck" CHECK(fx_converted = 0 OR (fx_rate_nano IS NOT NULL AND fx_rate_date IS NOT NULL AND fx_source IS NOT NULL)),
+	CONSTRAINT "price_observations_fx_rate_ck" CHECK(fx_rate_nano IS NULL OR (typeof(fx_rate_nano) = 'integer' AND fx_rate_nano >= 0)),
+	CONSTRAINT "price_observations_fx_bool_ck" CHECK(fx_converted IN (0, 1)),
+	CONSTRAINT "price_observations_currency_ck" CHECK(currency_native GLOB '[A-Z][A-Z][A-Z]'),
+	CONSTRAINT "price_observations_fetched_ck" CHECK(fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "price_observations_observed_ck" CHECK(provider_observed_at IS NULL OR provider_observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "price_observations_max_age_ck" CHECK(max_age_hours IS NULL OR (typeof(max_age_hours) = 'integer' AND max_age_hours >= 0)),
+	CONSTRAINT "price_observations_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "price_observations_pos_ck" CHECK(point_of_sale = 'unknown' OR point_of_sale GLOB '[A-Z][A-Z]'),
+	CONSTRAINT "price_observations_kind_ck" CHECK(source_kind IN ('authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic')),
+	CONSTRAINT "price_observations_taxes_ck" CHECK(taxes_included IS NULL OR taxes_included IN (0, 1)),
+	CONSTRAINT "price_observations_self_transfer_ck" CHECK(self_transfer IS NULL OR self_transfer IN (0, 1)),
+	CONSTRAINT "price_observations_partial_ck" CHECK(partial_expansion IN (0, 1)),
+	CONSTRAINT "price_observations_expires_ck" CHECK(booking_expires_at IS NULL OR booking_expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `price_observations_execution_price_idx` ON `price_observations` (`execution_id`,`price_pence`);--> statement-breakpoint
+CREATE INDEX `price_observations_offer_fetched_idx` ON `price_observations` (`offer_id`,`fetched_at`);--> statement-breakpoint
+CREATE TABLE `provider_cache` (
+	`key` text PRIMARY KEY NOT NULL,
+	`provider_id` text,
+	`body_json` text NOT NULL,
+	`stored_at` text NOT NULL,
+	`expires_at` text NOT NULL,
+	CONSTRAINT "provider_cache_key_ck" CHECK(length(key) = 64 AND key NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "provider_cache_stored_ck" CHECK(stored_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "provider_cache_expires_ck" CHECK(expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE INDEX `provider_cache_expires_idx` ON `provider_cache` (`expires_at`);--> statement-breakpoint
+CREATE TABLE `provider_requests` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`provider_id` text NOT NULL,
+	`execution_id` text,
+	`endpoint_path` text NOT NULL,
+	`tile_index` integer,
+	`started_at` text NOT NULL,
+	`finished_at` text,
+	`duration_ms` integer,
+	`http_status` integer,
+	`outcome` text NOT NULL,
+	`billable` integer,
+	`cost_micro_gbp` integer NOT NULL,
+	`http_attempt` integer NOT NULL,
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "provider_requests_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "provider_requests_outcome_ck" CHECK(outcome IN ('pending', 'ok', 'error', 'unknown', 'cache_hit')),
+	CONSTRAINT "provider_requests_billable_ck" CHECK(billable IS NULL OR billable IN (0, 1)),
+	CONSTRAINT "provider_requests_cost_ck" CHECK(typeof(cost_micro_gbp) = 'integer' AND cost_micro_gbp >= 0),
+	CONSTRAINT "provider_requests_attempt_ck" CHECK(typeof(http_attempt) = 'integer' AND http_attempt >= 0),
+	CONSTRAINT "provider_requests_tile_ck" CHECK(tile_index IS NULL OR (typeof(tile_index) = 'integer' AND tile_index >= 0)),
+	CONSTRAINT "provider_requests_started_ck" CHECK(started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "provider_requests_finished_ck" CHECK(finished_at IS NULL OR finished_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "provider_requests_path_ck" CHECK(endpoint_path GLOB '/*' AND endpoint_path NOT GLOB '//*' AND endpoint_path NOT GLOB '*[^A-Za-z0-9._~/-]*' AND length(endpoint_path) <= 200)
+);
+--> statement-breakpoint
+CREATE INDEX `provider_requests_provider_idx` ON `provider_requests` (`provider_id`,`started_at`,`outcome`,`billable`);--> statement-breakpoint
+CREATE INDEX `provider_requests_execution_idx` ON `provider_requests` (`execution_id`);--> statement-breakpoint
+CREATE TABLE `route_price_history` (
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`cabin` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`date` text NOT NULL,
+	`lowest_price_pence` integer NOT NULL,
+	`fetched_at` text NOT NULL,
+	PRIMARY KEY(`origin`, `destination`, `cabin`, `provider_id`, `date`),
+	CONSTRAINT "route_price_history_price_ck" CHECK(typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0),
+	CONSTRAINT "route_price_history_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first', 'unknown')),
+	CONSTRAINT "route_price_history_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
+	CONSTRAINT "route_price_history_fetched_ck" CHECK(fetched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE TABLE `search_cells` (
+	`execution_id` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`departure_date` text NOT NULL,
+	`return_date` text NOT NULL,
+	`discovery_status` text,
+	`discovery_reason` text,
+	`discovery_min_pence` integer,
+	`verification_selected` integer DEFAULT 0 NOT NULL,
+	`selection_reason` text,
+	`verification_status` text,
+	`verification_reason` text,
+	`verification_min_pence` integer,
+	`best_observation_id` integer,
+	PRIMARY KEY(`execution_id`, `origin`, `destination`, `departure_date`, `return_date`),
+	FOREIGN KEY (`execution_id`) REFERENCES `search_executions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`best_observation_id`) REFERENCES `price_observations`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "search_cells_discovery_status_ck" CHECK(discovery_status IS NULL OR discovery_status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')),
+	CONSTRAINT "search_cells_verification_status_ck" CHECK(verification_status IS NULL OR verification_status IN ('not_run', 'priced', 'empty', 'no_data', 'error', 'skipped')),
+	CONSTRAINT "search_cells_selected_ck" CHECK(verification_selected IN (0, 1)),
+	CONSTRAINT "search_cells_selection_reason_ck" CHECK(selection_reason IS NULL OR selection_reason IN ('always_include', 'top_n', 'ceiling', 'stride')),
+	CONSTRAINT "search_cells_discovery_min_ck" CHECK(discovery_min_pence IS NULL OR (typeof(discovery_min_pence) = 'integer' AND discovery_min_pence >= 0)),
+	CONSTRAINT "search_cells_verification_min_ck" CHECK(verification_min_pence IS NULL OR (typeof(verification_min_pence) = 'integer' AND verification_min_pence >= 0))
+);
+--> statement-breakpoint
+CREATE TABLE `search_definitions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`origins_json` text NOT NULL,
+	`destinations_json` text NOT NULL,
+	`window_json` text NOT NULL,
+	`min_nights` integer NOT NULL,
+	`max_nights` integer NOT NULL,
+	`cabin` text NOT NULL,
+	`constraints_json` text NOT NULL,
+	`verification_policy_json` text NOT NULL,
+	`budget_json` text NOT NULL,
+	`providers_json` text NOT NULL,
+	`destination_notes_json` text,
+	`onward_cost_json` text,
+	`schedule_cron` text,
+	`schedule_tz` text NOT NULL,
+	`confirmed_cost_pence` integer,
+	`enabled` integer NOT NULL,
+	`deleted_at` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	CONSTRAINT "search_definitions_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first')),
+	CONSTRAINT "search_definitions_min_nights_ck" CHECK(typeof(min_nights) = 'integer' AND min_nights >= 0),
+	CONSTRAINT "search_definitions_max_nights_ck" CHECK(typeof(max_nights) = 'integer' AND max_nights >= 0),
+	CONSTRAINT "search_definitions_confirmed_ck" CHECK(confirmed_cost_pence IS NULL OR (typeof(confirmed_cost_pence) = 'integer' AND confirmed_cost_pence >= 0)),
+	CONSTRAINT "search_definitions_enabled_ck" CHECK(enabled IN (0, 1)),
+	CONSTRAINT "search_definitions_created_ck" CHECK(created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "search_definitions_updated_ck" CHECK(updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "search_definitions_deleted_ck" CHECK(deleted_at IS NULL OR deleted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
+--> statement-breakpoint
+CREATE TABLE `search_executions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`definition_id` text NOT NULL,
+	`is_child` integer DEFAULT 0 NOT NULL,
+	`child_origin` text,
+	`child_destination` text,
+	`child_departure_date` text,
+	`child_return_date` text,
+	`definition_snapshot_json` text NOT NULL,
+	`trigger` text NOT NULL,
+	`status` text NOT NULL,
+	`stage` text,
+	`estimate_json` text,
+	`cancel_requested` integer DEFAULT 0 NOT NULL,
+	`resume_after` text,
+	`auto_resume_count` integer DEFAULT 0 NOT NULL,
+	`created_at` text NOT NULL,
+	`started_at` text,
+	`finished_at` text,
+	`error_text` text,
+	FOREIGN KEY (`definition_id`) REFERENCES `search_definitions`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "search_executions_status_ck" CHECK(status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted', 'cancelled', 'completed', 'skipped_budget', 'skipped_confirm', 'skipped_window', 'skipped_missed')),
+	CONSTRAINT "search_executions_trigger_ck" CHECK(trigger IN ('manual', 'schedule', 'tool')),
+	CONSTRAINT "search_executions_stage_ck" CHECK(stage IS NULL OR stage IN ('discovery', 'verification')),
+	CONSTRAINT "search_executions_is_child_ck" CHECK(is_child IN (0, 1)),
+	CONSTRAINT "search_executions_cancel_ck" CHECK(cancel_requested IN (0, 1)),
+	CONSTRAINT "search_executions_resume_count_ck" CHECK(typeof(auto_resume_count) = 'integer' AND auto_resume_count >= 0),
+	CONSTRAINT "search_executions_created_ck" CHECK(created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "search_executions_started_ck" CHECK(started_at IS NULL OR started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "search_executions_finished_ck" CHECK(finished_at IS NULL OR finished_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "search_executions_resume_after_ck" CHECK(resume_after IS NULL OR resume_after GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "search_executions_child_cell_ck" CHECK((is_child = 0 AND child_origin IS NULL AND child_destination IS NULL AND child_departure_date IS NULL AND child_return_date IS NULL) OR (is_child = 1 AND child_origin IS NOT NULL AND child_destination IS NOT NULL AND child_departure_date IS NOT NULL AND child_return_date IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `search_executions_active_parent_uq` ON `search_executions` (`definition_id`) WHERE is_child = 0 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
+CREATE UNIQUE INDEX `search_executions_active_child_uq` ON `search_executions` (`definition_id`,`child_origin`,`child_destination`,`child_departure_date`,`child_return_date`) WHERE is_child = 1 AND status IN ('pending', 'running', 'paused_budget', 'paused_error', 'interrupted');--> statement-breakpoint
+CREATE INDEX `search_executions_definition_started_idx` ON `search_executions` (`definition_id`,`started_at`);--> statement-breakpoint
+CREATE TABLE `segments` (
+	`itinerary_hash` text NOT NULL,
+	`direction` text NOT NULL,
+	`position` integer NOT NULL,
+	`mode` text DEFAULT 'air' NOT NULL,
+	`marketing_carrier` text NOT NULL,
+	`operating_carrier` text,
+	`flight_number` integer NOT NULL,
+	`from_iata` text NOT NULL,
+	`to_iata` text NOT NULL,
+	`depart_local` text NOT NULL,
+	`arrive_local` text NOT NULL,
+	`depart_utc` text,
+	`arrive_utc` text,
+	`duration_minutes` integer,
+	`aircraft` text,
+	PRIMARY KEY(`itinerary_hash`, `direction`, `position`),
+	FOREIGN KEY (`itinerary_hash`) REFERENCES `itineraries`(`hash`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "segments_direction_ck" CHECK(direction IN ('outbound', 'inbound')),
+	CONSTRAINT "segments_position_ck" CHECK(typeof(position) = 'integer' AND position >= 0),
+	CONSTRAINT "segments_flight_number_ck" CHECK(typeof(flight_number) = 'integer' AND flight_number >= 0),
+	CONSTRAINT "segments_duration_ck" CHECK(duration_minutes IS NULL OR (typeof(duration_minutes) = 'integer' AND duration_minutes >= 0)),
+	CONSTRAINT "segments_depart_utc_ck" CHECK(depart_utc IS NULL OR depart_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+	CONSTRAINT "segments_arrive_utc_ck" CHECK(arrive_utc IS NULL OR arrive_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+);
