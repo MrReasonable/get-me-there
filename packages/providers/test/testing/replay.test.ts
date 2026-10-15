@@ -85,6 +85,23 @@ describe('replayHandlers and loadRecorded (WP5/WP6 adapter tests, WP13 layer B)'
     expect([res.status, await jsonOf(res)]).toEqual([400, { error: 'Too many combinations' }]);
   });
 
+  it('serves the recorded response headers with the body (plan decision 20)', async () => {
+    const root = tree();
+    await rec(root).record({
+      ...at(`${SEARCH}?engine=google_flights&departure_id=JFK`, { error: 'slow down' }, 429),
+      responseHeaders: new Headers({ 'retry-after': '7', 'x-ratelimit-remaining': '0' }),
+    });
+    const replay = replayHandlers(root);
+    server.use(...replay.handlers);
+    const res = await fetch(`${SEARCH}?engine=google_flights&departure_id=JFK`);
+    expect([res.status, res.headers.get('retry-after'), res.headers.get('x-ratelimit-remaining')]).toEqual([
+      429,
+      '7',
+      '0',
+    ]);
+    expect(replay.misses()).toEqual([]);
+  });
+
   it('an unrecorded request is logged as a miss (names only), answered with a network error, and never reaches the network (arch-r2-001)', async () => {
     const guard = networkGuard();
     const replay = replayHandlers(await recordChain());

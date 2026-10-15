@@ -99,5 +99,7 @@ export interface FixtureRecorder {
     body: unknown;
     /** When the response arrived (http-kit's clock); written as recordedAt (prov-r2-003). */
     fetchedAt: IsoDateTime;
+    /** The response headers; the recorder keeps only an allowlisted subset (plan decision 20). Absent → none. */
+    responseHeaders?: Headers;
   }): Promise<string>;
 }

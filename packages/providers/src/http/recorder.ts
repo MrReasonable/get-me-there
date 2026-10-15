@@ -27,6 +27,11 @@ export interface RecordedFixture {
   status: number;
   body: unknown;
   placeholders: Record<string, string>;
+  /**
+   * Allowlisted response headers, names lower-cased: retry-after, content-type, x-ratelimit-*, ratelimit-* (plan
+   * decision 20). Inside the hash; replay serves them. A secret in one refuses the recording, like anywhere else.
+   */
+  responseHeaders: Record<string, string>;
   /** The recording session: recorder creation instant plus a random suffix; the same value the placeholders carry (prov-r2-001). */
   session: string;
   contentSha256: string;
@@ -35,6 +40,8 @@ export interface RecordedFixture {
 const TOKEN_KEY = /^[a-z0-9]+(?:_[a-z0-9]+)*_token$/;
 const RECORDED_DIR = `${sep}fixtures${sep}recorded`;
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]*$/;
+/** Response header names a recording keeps (plan decision 20); everything else is dropped. */
+const RECORDED_RESPONSE_HEADER = /^(?:retry-after|content-type|x-ratelimit-[a-z0-9-]+|ratelimit-[a-z0-9-]+)$/;
 const FILE_NAME = /^(\d{4}-\d{2}-\d{2})-([0-9a-f]{12})\.json$/;
 
 /** Absolute path of this package's recorded tree (works from src/ and dist/). */
@@ -253,6 +260,12 @@ export function createRecorder(opts: {
         status: r.status,
         body,
         placeholders: Object.fromEntries([...used].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+        // why: Headers yields lower-cased names; a value is not scrubbed but fails closed below like the body (spec §5.3).
+        responseHeaders: Object.fromEntries(
+          [...(r.responseHeaders?.entries() ?? [])]
+            .filter(([name]) => RECORDED_RESPONSE_HEADER.test(name))
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        ),
         session,
       };
       const file: RecordedFixture = { ...unhashed, contentSha256: contentHash(unhashed) };
@@ -329,6 +342,7 @@ const recordedFixtureSchema = z.object({
   status: z.number().int(),
   body: z.unknown(),
   placeholders: z.record(z.string(), z.string()),
+  responseHeaders: z.record(z.string().regex(RECORDED_RESPONSE_HEADER), z.string()),
   session: z.string().min(1),
   contentSha256: z.string(),
 });
@@ -339,8 +353,17 @@ export function loadRecordedFixture(path: string, root: string = defaultRecorded
   const fail = (why: string): Error => new Error(`refusing ${path}: ${why}`);
   const parsed = recordedFixtureSchema.safeParse(json);
   if (!parsed.success) throw fail(zodReason(parsed.error));
-  const { recordedAt, recordedBy, providerId, endpointPath, request, status, placeholders, session } =
-    parsed.data;
+  const {
+    recordedAt,
+    recordedBy,
+    providerId,
+    endpointPath,
+    request,
+    status,
+    placeholders,
+    responseHeaders,
+    session,
+  } = parsed.data;
   const { contentSha256 } = parsed.data;
   const parts = relative(realpathSync(resolve(root)), realpathSync(path)).split(sep);
   const [dirProvider, dirEndpoint, fileName = ''] = parts;
@@ -361,6 +384,7 @@ export function loadRecordedFixture(path: string, root: string = defaultRecorded
     status,
     body: json.body,
     placeholders,
+    responseHeaders,
     session,
     contentSha256,
   };

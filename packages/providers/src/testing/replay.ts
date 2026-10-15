@@ -95,7 +95,10 @@ export function replayHandlers(
       served.set(k, n + 1);
       // why: a malformed vendor body was recorded as text; replay it byte for byte so the parse path is exercised.
       const text = typeof f.body === 'string' ? f.body : JSON.stringify(f.body);
-      return new HttpResponse(text, { status: f.status, headers: { 'content-type': 'application/json' } });
+      return new HttpResponse(text, {
+        status: f.status,
+        headers: { 'content-type': 'application/json', ...f.responseHeaders },
+      });
     }),
   );
   return { handlers, misses: () => [...misses] };

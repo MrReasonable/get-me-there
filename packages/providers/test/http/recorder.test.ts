@@ -90,6 +90,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
       status: 200,
       body: { price: 41200 },
       placeholders: {},
+      responseHeaders: {},
       session: expect.stringMatching(SESSION),
       contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
@@ -272,6 +273,60 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
     ).toThrow(RecorderRefusedError);
   });
 
+  it('records only allowlisted response headers, lower-cased, inside the hash (plan decision 20)', async () => {
+    const root = tree();
+    const path = await recorder(root).record({
+      ...call(SEARCH, { price: 1 }),
+      responseHeaders: new Headers({
+        'Content-Type': 'application/json',
+        'Retry-After': '30',
+        'X-RateLimit-Remaining': '9',
+        'RateLimit-Reset': '60',
+        'Set-Cookie': 'sid=1',
+        'X-Request-Id': 'abc',
+        Server: 'vendor',
+      }),
+    });
+    const f = loadRecordedFixture(path, root);
+    expect(f.responseHeaders).toEqual({
+      'content-type': 'application/json',
+      'retry-after': '30',
+      'x-ratelimit-remaining': '9',
+      'ratelimit-reset': '60',
+    });
+    const { contentSha256, ...rest } = f;
+    expect(contentHash(rest)).toBe(contentSha256);
+    writeFileSync(path, readFileSync(path, 'utf8').replace('"9"', '"8"'));
+    expect(() => loadRecordedFixture(path, root)).toThrow(/content hash mismatch/);
+  });
+
+  it('a sentinel in an allowlisted response header refuses the recording; one in a dropped header never reaches the file', async () => {
+    const root = tree();
+    await refusedAndEmpty(
+      root,
+      recorder(root).record({
+        ...call(SEARCH, { price: 1 }),
+        responseHeaders: new Headers({ 'x-ratelimit-note': `key ${Buffer.from(key).toString('base64')}` }),
+      }),
+    );
+    const path = await recorder(root).record({
+      ...call(SEARCH, { price: 1 }),
+      responseHeaders: new Headers({ 'x-echo': key, 'retry-after': '5' }),
+    });
+    expect(readFileSync(path, 'utf8')).not.toContain(key);
+    expect(loadRecordedFixture(path, root).responseHeaders).toEqual({ 'retry-after': '5' });
+  });
+
+  it('loadRecordedFixture refuses a response header outside the allowlist', async () => {
+    const root = tree();
+    const path = await recorder(root).record(call(SEARCH, { price: 1 }));
+    writeFileSync(
+      path,
+      JSON.stringify(withContentHash({ ...parsed(path), responseHeaders: { 'set-cookie': 'x' } })),
+    );
+    expect(() => loadRecordedFixture(path, root)).toThrow(/responseHeaders/);
+  });
+
   it('canonicalJson has a known answer: keys sorted at every level, undefined dropped (prov-009)', () => {
     expect(canonicalJson({ b: 1, a: { d: [2, { z: 1, y: 2 }], c: null, u: undefined } })).toBe(
       '{"a":{"c":null,"d":[2,{"y":2,"z":1}]},"b":1}',
@@ -396,6 +451,8 @@ describe('http-kit recording hook', () => {
     await drive(kit.request(req({ url: `${SEARCH}?engine=b`, recordFixtures: false })));
     const recorded = files(root).map((f) => loadRecordedFixture(f, root));
     expect(recorded.map((f) => f.status).sort()).toEqual([200, 429]);
+    // why: the kit hands the recorder the response headers, so a recorded 429 keeps its Retry-After (plan decision 20).
+    expect(recorded.find((f) => f.status === 429)?.responseHeaders).toMatchObject({ 'retry-after': '1' });
     expect(recorded.every((f) => f.recordedAt === clock.now())).toBe(true);
   });
 

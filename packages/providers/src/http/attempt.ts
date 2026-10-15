@@ -216,6 +216,7 @@ export async function runAttempt(
       status,
       body,
       fetchedAt,
+      responseHeaders: res.headers,
     });
   }
   const scrubbed = scrubSecrets(body, deps.secrets);
