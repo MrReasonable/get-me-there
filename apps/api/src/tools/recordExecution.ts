@@ -21,6 +21,7 @@ import {
   type RecordArgs,
 } from './recordPlan.js';
 import { RECORD_TRAVEL_CLASS } from './recordRequests.js';
+import type { RecordingProviders } from './types.js';
 
 /** why: a Record over the union fails to compile when core adds a status, so the list below is always complete (arch-r2-002). */
 const STATUS_FLAGS: Record<ExecutionStatus, true> = {
@@ -148,9 +149,12 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
  * (prov-wp04b-009). The definition's space mirrors the calendar rectangle only to satisfy the definition schema:
  * nothing seeds cells for it, and spec §8.1 never resumes or schedules it.
  */
-export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string {
-  const sa = ports.config.providers.searchapi;
-  if (sa === null) throw new Error('record:fixtures needs SEARCHAPI_KEY');
+export function openRecordingExecution(
+  ports: Ports,
+  a: RecordArgs,
+  plan: readonly PlannedCall[],
+  sa: RecordingProviders['sa'],
+): string {
   const now = ports.clock.now();
   const from = firstDayOf(a.month);
   const to = addDays(from, CALENDAR_OUT_DAYS - 1);

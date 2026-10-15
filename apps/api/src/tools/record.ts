@@ -10,7 +10,6 @@ import {
   createRecorder,
   type FixtureRecorder,
   type HttpKit,
-  type HttpKitDeps,
   type HttpKitRequest,
   type HttpKitResponse,
 } from '@gmt/providers';
@@ -49,6 +48,7 @@ import {
   EXIT,
   type RecordedCall,
   RecordingFailedError,
+  type RecordingProviders,
   type RecordSummary,
   type ToolContext,
 } from './types.js';
@@ -178,10 +178,11 @@ export async function recordFixtures(
     clock: ports.clock,
     recordedBy: ctx.recordedBy,
   });
-  const executionId = openRecordingExecution(ports, args, plan);
+  const providers: RecordingProviders = { tp, sa };
+  const executionId = openRecordingExecution(ports, args, plan, sa);
   let run: PlanRun | null = null;
   try {
-    run = new PlanRun(ports, plan, executionId, recorder, ctx, recordingLimits(tp, sa, ports.config));
+    run = new PlanRun(ports, plan, executionId, recorder, ctx, providers);
     await run.execute();
   } catch (e) {
     const message = safeMessage(e, ports.secrets);
@@ -239,7 +240,7 @@ class PlanRun {
     private readonly executionId: string,
     recorder: FixtureRecorder,
     private readonly ctx: { signal: AbortSignal; recordedRoot: string },
-    limits: HttpKitDeps['limits'],
+    private readonly providers: RecordingProviders,
   ) {
     this.track = tracking(recorder);
     this.gl = ports.config.pointOfSale.toLowerCase();
@@ -252,7 +253,7 @@ class PlanRun {
       secrets: ports.secrets,
       syntheticAllowed: false,
       recorder: this.track.recorder,
-      limits,
+      limits: recordingLimits(providers.tp, providers.sa, ports.config),
     });
   }
 
@@ -324,9 +325,7 @@ class PlanRun {
   }
 
   async execute(): Promise<void> {
-    const tp = this.ports.config.providers.travelpayouts;
-    const sa = this.ports.config.providers.searchapi;
-    if (tp === null || sa === null) throw new Error('record:fixtures needs both providers');
+    const { tp, sa } = this.providers;
     const tpHeaders = (token: string): Record<string, string> => ({ 'X-Access-Token': token });
     const saHeaders = (key: string): Record<string, string> => ({ Authorization: `Bearer ${key}` });
     let calendarAnswered = false;

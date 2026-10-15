@@ -205,6 +205,7 @@ export const SPEC_REDACT_PATHS: readonly string[]; export const REDACT_PATHS: re
 export type ToolName = 'record' | 'smoke';
 export interface ToolContext { signal: AbortSignal; out(line: string): void; err(line: string): void; recordedRoot: string; recordedBy: string }
 export const EXIT: { ok: 0; failed: 1; usage: 64; spendRefused: 65; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };
+export interface RecordingProviders { tp: NonNullable<Config['providers']['travelpayouts']>; sa: NonNullable<Config['providers']['searchapi']> }
 export class RecordingFailedError extends Error { readonly partial: { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null } }
 // packages/db/src/appLock.ts (exported from @gmt/db; Task 7)
 export type ReadOnlyLockState = { state: 'absent' } | { state: 'fresh' | 'stale'; holder: 'app' | 'tool'; heartbeatAt: IsoDateTime };
@@ -250,7 +251,7 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>>; expo
 // src/tools/recordExecution.ts
 export function priorToolCredits(ports: Ports): number;
 export function budgetPosition(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[] };
-export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string;
+export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[], sa: RecordingProviders['sa']): string;   // providers narrowed once in recordFixtures (arch M-3)
 // src/tools/recordReport.ts
 export interface RunAssessment { requiredOk: boolean; notAsExpected: string[]; chainComplete: boolean; emptyEnvelope: 'yes' | 'no' | 'no-answer'; overLimit: 'http-400' | 'empty-200' | 'other' | 'no-answer' }   // 'no-answer': the call got no HTTP status, so nothing is said about the vendor
 
@@ -3599,7 +3600,13 @@ export function safeMessage(e: unknown, secrets: readonly Secret[]): string {
 ```ts
 // apps/api/src/tools/types.ts
 /** What the tool bootstrap hands a tool, the shared record-tool result types, and the one exit-code table every CLI shares. */
-import type { ProviderId } from '@gmt/core';
+import type { Config, ProviderId } from '@gmt/core';
+
+/** Both vendors' configuration, narrowed once by recordFixtures and passed down (arch M-3). */
+export interface RecordingProviders {
+  tp: NonNullable<Config['providers']['travelpayouts']>;
+  sa: NonNullable<Config['providers']['searchapi']>;
+}
 
 /** The two tools of spec §9 item 7; `smoke` arrives with WP13. */
 export type ToolName = 'record' | 'smoke';
@@ -3902,6 +3909,7 @@ import {
   type RecordArgs,
 } from './recordPlan.js';
 import { RECORD_TRAVEL_CLASS } from './recordRequests.js';
+import type { RecordingProviders } from './types.js';
 
 /** why: a Record over the union fails to compile when core adds a status, so the list below is always complete (arch-r2-002). */
 const STATUS_FLAGS: Record<ExecutionStatus, true> = {
@@ -4029,9 +4037,12 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
  * (prov-wp04b-009). The definition's space mirrors the calendar rectangle only to satisfy the definition schema:
  * nothing seeds cells for it, and spec §8.1 never resumes or schedules it.
  */
-export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string {
-  const sa = ports.config.providers.searchapi;
-  if (sa === null) throw new Error('record:fixtures needs SEARCHAPI_KEY');
+export function openRecordingExecution(
+  ports: Ports,
+  a: RecordArgs,
+  plan: readonly PlannedCall[],
+  sa: RecordingProviders['sa'],
+): string {
   const now = ports.clock.now();
   const from = firstDayOf(a.month);
   const to = addDays(from, CALENDAR_OUT_DAYS - 1);
@@ -4260,7 +4271,6 @@ import {
   createRecorder,
   type FixtureRecorder,
   type HttpKit,
-  type HttpKitDeps,
   type HttpKitRequest,
   type HttpKitResponse,
 } from '@gmt/providers';
@@ -4299,6 +4309,7 @@ import {
   EXIT,
   type RecordedCall,
   RecordingFailedError,
+  type RecordingProviders,
   type RecordSummary,
   type ToolContext,
 } from './types.js';
@@ -4428,10 +4439,11 @@ export async function recordFixtures(
     clock: ports.clock,
     recordedBy: ctx.recordedBy,
   });
-  const executionId = openRecordingExecution(ports, args, plan);
+  const providers: RecordingProviders = { tp, sa };
+  const executionId = openRecordingExecution(ports, args, plan, sa);
   let run: PlanRun | null = null;
   try {
-    run = new PlanRun(ports, plan, executionId, recorder, ctx, recordingLimits(tp, sa, ports.config));
+    run = new PlanRun(ports, plan, executionId, recorder, ctx, providers);
     await run.execute();
   } catch (e) {
     const message = safeMessage(e, ports.secrets);
@@ -4489,7 +4501,7 @@ class PlanRun {
     private readonly executionId: string,
     recorder: FixtureRecorder,
     private readonly ctx: { signal: AbortSignal; recordedRoot: string },
-    limits: HttpKitDeps['limits'],
+    private readonly providers: RecordingProviders,
   ) {
     this.track = tracking(recorder);
     this.gl = ports.config.pointOfSale.toLowerCase();
@@ -4502,7 +4514,7 @@ class PlanRun {
       secrets: ports.secrets,
       syntheticAllowed: false,
       recorder: this.track.recorder,
-      limits,
+      limits: recordingLimits(providers.tp, providers.sa, ports.config),
     });
   }
 
@@ -4574,9 +4586,7 @@ class PlanRun {
   }
 
   async execute(): Promise<void> {
-    const tp = this.ports.config.providers.travelpayouts;
-    const sa = this.ports.config.providers.searchapi;
-    if (tp === null || sa === null) throw new Error('record:fixtures needs both providers');
+    const { tp, sa } = this.providers;
     const tpHeaders = (token: string): Record<string, string> => ({ 'X-Access-Token': token });
     const saHeaders = (key: string): Record<string, string> => ({ Authorization: `Bearer ${key}` });
     let calendarAnswered = false;

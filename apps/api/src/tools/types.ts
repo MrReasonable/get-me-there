@@ -1,5 +1,11 @@
 /** What the tool bootstrap hands a tool, the shared record-tool result types, and the one exit-code table every CLI shares. */
-import type { ProviderId } from '@gmt/core';
+import type { Config, ProviderId } from '@gmt/core';
+
+/** Both vendors' configuration, narrowed once by recordFixtures and passed down (arch M-3). */
+export interface RecordingProviders {
+  tp: NonNullable<Config['providers']['travelpayouts']>;
+  sa: NonNullable<Config['providers']['searchapi']>;
+}
 
 /** The two tools of spec §9 item 7; `smoke` arrives with WP13. */
 export type ToolName = 'record' | 'smoke';
