@@ -131,6 +131,7 @@ const UPDATE_OUTCOME_SQL = `
 UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = @lastError, fetched_at = @fetchedAt, min_pence = @minPence,
   cabin = @cabin, point_of_sale = @pointOfSale, source_kind = @sourceKind, attempts = @attempts, reused_from_execution_id = @reusedFromExecutionId
 WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
+const DELETE_FRESH_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NULL`;
 const DELETE_REUSED_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NOT NULL`;
 const TILE_STATUSES = ['priced', 'empty', 'no_data'] as const;
 
@@ -550,11 +551,21 @@ export class CellsRepo {
     for (const key of prices.keys())
       if (!seen.has(key)) throw new RowRejected('price-needs-priced', `${key} has a price but no outcome`);
     this.db.transaction(() => {
-      for (const o of w.outcomes)
-        this.db.raw.prepare(DELETE_REUSED_PRICE_SQL).run({ ...keyParams(executionId, o), providerId });
-      for (const p of w.prices) insertCalendarPrice(this.db, executionId, p);
       for (const o of w.outcomes) {
         const existing = this.current(executionId, o, 'discovery', providerId);
+        const params = { ...keyParams(executionId, o), providerId };
+        this.db.raw.prepare(DELETE_REUSED_PRICE_SQL).run(params);
+        const price = prices.get(cellKeyString(o));
+        if (price !== undefined) {
+          // why: brief ruling 3, fresh on fresh priced keeps the minimum (core's merge picks the same source):
+          // a lower price replaces the stored fresh row, an equal or higher one is not written.
+          const freshPriced = existing.status === 'priced' && existing.reusedFromExecutionId === null;
+          if (!freshPriced) insertCalendarPrice(this.db, executionId, price);
+          else if (existing.minPence !== null && price.pricePence < existing.minPence) {
+            this.db.raw.prepare(DELETE_FRESH_PRICE_SQL).run(params);
+            insertCalendarPrice(this.db, executionId, price);
+          }
+        }
         const incoming: CellOutcome = {
           ...existing,
           ...o,

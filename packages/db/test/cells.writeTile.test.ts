@@ -422,3 +422,56 @@ describe('priced outcome reasons (spec §3, §5.6; ruling 2026-10-15)', () => {
       ).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
   });
 });
+
+describe('writeTile fresh-on-fresh priced overlap (brief ruling 3; ruling 2026-10-15)', () => {
+  const priced = (c: CellKey, pence: number) => ({
+    o: out(c, 'priced', pence),
+    p: calendarPrice(c, { pricePence: pence, priceNativeMinor: pence }),
+  });
+  const pricesOf = (db: ReturnType<typeof setup>['db'], executionId: string, c: CellKey) =>
+    new CalendarPricesRepo(db, fixedClock(T0), opts)
+      .fetchedBy(executionId)
+      .filter((r) => cellKeyString(r.cell) === cellKeyString(c))
+      .map((r) => r.pricePence);
+
+  it('a second priced tile over a fresh priced cell keeps the minimum, writes its other cells, and stays equal to core', () => {
+    const { db, executionId, cells } = setup();
+    const a1 = priced(A, 40_000);
+    cells.writeTile(executionId, 'travelpayouts', tile([A], [a1.o], [a1.p]));
+
+    // lower: replaces the fresh price row; the tile's other cell is written too
+    const a2 = priced(A, 38_000);
+    const b2 = priced(B, 51_000);
+    cells.writeTile(executionId, 'travelpayouts', {
+      ...tile([A, B], [a2.o, b2.o], [a2.p, b2.p]),
+      tileIndex: 1,
+    });
+    expect(pricesOf(db, executionId, A)).toEqual([38_000]);
+    expect(pricesOf(db, executionId, B)).toEqual([51_000]);
+    expect(stored(cells, executionId, A)).toEqual({ status: 'priced', reason: null, minPence: 38_000 });
+
+    // higher: the stored row and outcome keep 38,000; the other cell is still written
+    const a3 = priced(A, 42_000);
+    cells.writeTile(executionId, 'travelpayouts', {
+      ...tile([A, C], [a3.o, out(C, 'empty')], [a3.p]),
+      tileIndex: 2,
+    });
+    expect(pricesOf(db, executionId, A)).toEqual([38_000]);
+    expect(count(db, 'calendar_prices')).toBe(2);
+    expect(stored(cells, executionId, A)).toEqual({ status: 'priced', reason: null, minPence: 38_000 });
+    expect(stored(cells, executionId, C)?.status).toBe('empty');
+    for (const c of [A, B, C]) expect(stored(cells, executionId, c)).toEqual(core(cells, executionId, c));
+  });
+
+  it('an equal price keeps the existing row; a priced tile over a fresh empty cell inserts its price', () => {
+    const { db, executionId, cells } = setup();
+    const a1 = priced(A, 40_000);
+    cells.writeTile(executionId, 'travelpayouts', tile([A, B], [a1.o, out(B, 'empty')], [a1.p]));
+    const a2 = priced(A, 40_000);
+    const b2 = priced(B, 45_000);
+    cells.writeTile(executionId, 'travelpayouts', tile([A, B], [a2.o, b2.o], [a2.p, b2.p]));
+    expect(pricesOf(db, executionId, A)).toEqual([40_000]);
+    expect(pricesOf(db, executionId, B)).toEqual([45_000]);
+    expect(stored(cells, executionId, B)).toEqual({ status: 'priced', reason: null, minPence: 45_000 });
+  });
+});
