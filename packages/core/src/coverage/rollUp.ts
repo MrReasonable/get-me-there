@@ -12,9 +12,23 @@ const CABIN_NOT_OFFERED: NoDataReason = 'cabin-not-offered';
 /**
  * Roll-up and priced-outcome reason meaning "some price came from a truncated expansion". WP7 writes it
  * on priced outcomes and `rollUp` carries it up; exported so no writer spells it differently
- * (skip reasons are snake_case, this one is hyphenated). Not a closed union: tests use `offers-dropped:N`.
+ * (skip reasons are snake_case, this one is hyphenated). Priced reasons are read with `isPartialExpansion`.
  */
 export const PARTIAL_EXPANSION = 'partial-expansion';
+/**
+ * True when a priced reason marks a truncated expansion. A priced reason is `;`-joined parts: null,
+ * `partial-expansion`, `offers-dropped:n` or `partial-expansion;offers-dropped:n` (ruling 2026-10-15).
+ */
+export function isPartialExpansion(reason: string | null): boolean {
+  return reason !== null && reason.split(';').includes(PARTIAL_EXPANSION);
+}
+
+/** `reason` with `partial-expansion` added as its first part (the combined form keeps offers-dropped). */
+function withPartialExpansion(reason: string | null): string {
+  if (reason === null) return PARTIAL_EXPANSION;
+  return isPartialExpansion(reason) ? reason : `${PARTIAL_EXPANSION};${reason}`;
+}
+
 /** Roll-up reason for an `error` cell whose error outcomes disagree on their reason (spec §6.6). */
 export const MIXED_ERROR_REASON = 'mixed';
 
@@ -40,7 +54,7 @@ function isSkipReason(r: string | null): r is SkipReason {
  * why: a provider that was never asked must not make an unsearched cell look searched.
  *
  * Roll-up `reason` (ruling 2026-10-14): `priced` carries `partial-expansion` when any priced
- * input has it, else null; `error` carries the reason when every error input agrees, else
+ * input is partial (`isPartialExpansion`), else null (offers-dropped stays per outcome); `error` carries the reason when every error input agrees, else
  * `mixed`; `no_data` carries `cabin-not-offered` only in the all-not-offered case, else null;
  * `skipped` carries the highest-priority skip reason; `not_run` and `empty` carry null.
  * `minPence` is the minimum over `priced` outcomes ("the minimum over rows actually written",
@@ -64,7 +78,7 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
       }
       min = Math.min(min, o.minPence);
     }
-    const partial = priced.some((o) => o.reason === PARTIAL_EXPANSION);
+    const partial = priced.some((o) => isPartialExpansion(o.reason));
     return { status: 'priced', reason: partial ? PARTIAL_EXPANSION : null, minPence: min };
   }
   if (of('not_run').length > 0) return { status: 'not_run', reason: null, minPence: null };
@@ -123,8 +137,8 @@ function mergeRank(s: CellOutcomeStatus): number | null {
  * - Both `priced`: the result is the input that supplies the minimum price (ties to `a`), so
  *   `minPence` and its provenance (`fetchedAt`, `sourceKind`, `pointOfSale`, `cabin`,
  *   `reusedFromExecutionId`) travel together (spec §3: `reused_from_execution_id` is always the
- *   execution that fetched the price); its reason becomes `partial-expansion` when either input
- *   has it.
+ *   execution that fetched the price); it keeps its own reason, with `partial-expansion` added
+ *   when either input has it (`partial-expansion;offers-dropped:n` when it carries offers-dropped).
  * - Both the same non-priced status: `a` wins; the reason is the lexicographically smaller
  *   non-null reason, so the merged reason does not depend on argument order.
  *
@@ -160,8 +174,10 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
   if (ra !== rb) return ra > rb ? a : b;
   if (a.status === 'priced') {
     const source = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
-    const partial = a.reason === PARTIAL_EXPANSION || b.reason === PARTIAL_EXPANSION;
-    return partial ? { ...source, reason: PARTIAL_EXPANSION } : source;
+    // why: offers-dropped:n describes the source's own fetch and stays with it; partial-expansion is a
+    // property of the cell's data and survives the merge whichever input carried it (ruling 2026-10-15).
+    const partial = isPartialExpansion(a.reason) || isPartialExpansion(b.reason);
+    return partial ? { ...source, reason: withPartialExpansion(source.reason) } : source;
   }
   // why: return the input that supplies the chosen reason whole, so `reason`, `lastError`, `fetchedAt`
   // and `attempts` always describe the same attempt (the sort is stable, so a tie keeps `a`).

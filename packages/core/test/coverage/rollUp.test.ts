@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { mergeWithinProvider, rollUp } from '../../src/coverage/rollUp.js';
+import { isPartialExpansion, mergeWithinProvider, rollUp } from '../../src/coverage/rollUp.js';
 import type { CellOutcome, CellOutcomeStatus, RollUp, SkipReason } from '../../src/types/execution.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
 import { key, outcome } from '../helpers/space.js';
@@ -27,7 +27,10 @@ function oracle(all: readonly O[]): RollUp {
   const any = (s: CellOutcomeStatus) => xs.some((x) => x.status === s);
   if (any('priced')) {
     const ps = xs.flatMap((x) => (x.status === 'priced' && x.minPence !== null ? [x.minPence] : []));
-    const partial = xs.some((x) => x.status === 'priced' && x.reason === 'partial-expansion');
+    // ruling 2026-10-15: a priced reason is ';'-joined parts; partial-expansion may sit beside offers-dropped:n
+    const partial = xs.some(
+      (x) => x.status === 'priced' && (x.reason ?? '').split(';').includes('partial-expansion'),
+    );
     return { status: 'priced', reason: partial ? 'partial-expansion' : null, minPence: Math.min(...ps) }; // row 1
   }
   if (any('not_run')) return { status: 'not_run', reason: null, minPence: null }; // row 2
@@ -157,6 +160,21 @@ describe('rollUp precedence (spec §6.6)', () => {
       expect(rollUp([priced(500), priced(600, 'partial-expansion')]).reason).toBe('partial-expansion');
       expect(rollUp([priced(500, 'offers-dropped:2')]).reason).toBeNull();
     });
+    it('the combined priced reason counts as partial; offers-dropped never reaches the roll-up (ruling 2026-10-15)', () => {
+      expect(rollUp([priced(500, 'partial-expansion;offers-dropped:3')])).toEqual({
+        status: 'priced',
+        reason: 'partial-expansion',
+        minPence: 500,
+      });
+      expect(rollUp([priced(500, 'offers-dropped:3'), priced(400)]).reason).toBeNull();
+    });
+    it('isPartialExpansion reads the parts of a priced reason', () => {
+      expect(isPartialExpansion('partial-expansion')).toBe(true);
+      expect(isPartialExpansion('partial-expansion;offers-dropped:2')).toBe(true);
+      expect(isPartialExpansion('offers-dropped:2')).toBe(false);
+      expect(isPartialExpansion('partial-expansion-x')).toBe(false);
+      expect(isPartialExpansion(null)).toBe(false);
+    });
     it('error carries the reason when every error input agrees, else mixed', () => {
       expect(rollUp([o('error', { reason: 'parse' }), o('error', { reason: 'parse' })]).reason).toBe('parse');
       expect(rollUp([o('error', { reason: 'parse' }), o('error', { reason: 'upstream' })]).reason).toBe(
@@ -189,7 +207,7 @@ describe('rollUp precedence (spec §6.6)', () => {
     fc
       .tuple(
         fc.integer({ min: 0, max: 1_000_000 }),
-        fc.constantFrom(null, 'partial-expansion', 'offers-dropped:1'),
+        fc.constantFrom(null, 'partial-expansion', 'offers-dropped:1', 'partial-expansion;offers-dropped:1'),
       )
       .map(([p, r]) => priced(p, r)),
     fc.constantFrom<SkipReason>('budget', 'provider_disabled', 'departed', 'not_selected').map(skipped),
@@ -259,12 +277,22 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
     [
       m('priced', 450, 'offers-dropped:2'),
       m('priced', 700, 'partial-expansion'),
-      { status: 'priced', minPence: 450, reason: 'partial-expansion' },
+      { status: 'priced', minPence: 450, reason: 'partial-expansion;offers-dropped:2' },
     ],
     [
       m('priced', 700, 'partial-expansion'),
       m('priced', 450, 'offers-dropped:2'),
+      { status: 'priced', minPence: 450, reason: 'partial-expansion;offers-dropped:2' },
+    ],
+    [
+      m('priced', 450),
+      m('priced', 700, 'partial-expansion;offers-dropped:4'),
       { status: 'priced', minPence: 450, reason: 'partial-expansion' },
+    ],
+    [
+      m('priced', 450, 'partial-expansion;offers-dropped:1'),
+      m('priced', 700, 'offers-dropped:4'),
+      { status: 'priced', minPence: 450, reason: 'partial-expansion;offers-dropped:1' },
     ],
     [
       m('priced', 450, 'offers-dropped:2'),
@@ -376,7 +404,13 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
     fc
       .tuple(
         fc.integer({ min: 0, max: 100_000 }),
-        fc.constantFrom(null, 'partial-expansion', 'offers-dropped:1', 'offers-dropped:2'),
+        fc.constantFrom(
+          null,
+          'partial-expansion',
+          'offers-dropped:1',
+          'offers-dropped:2',
+          'partial-expansion;offers-dropped:2',
+        ),
       )
       .chain(([p, r]) => fc.boolean().map((reused) => m('priced', p, r, stamp(reused)))),
     fc
@@ -450,8 +484,12 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
         );
         expect(ab.minPence).toBe(prices.length > 0 ? Math.min(...prices) : null);
         if (a.status === 'priced' && b.status === 'priced') {
-          const partial = a.reason === 'partial-expansion' || b.reason === 'partial-expansion';
-          expect(ab.reason).toBe(partial ? 'partial-expansion' : w.reason);
+          // ruling 2026-10-15: the source keeps its own reason; partial-expansion is added when either had it
+          const parts = (r: string | null) => (r === null ? [] : r.split(';'));
+          const partial =
+            parts(a.reason).includes('partial-expansion') || parts(b.reason).includes('partial-expansion');
+          const own = parts(w.reason).filter((x) => x !== 'partial-expansion');
+          expect(ab.reason).toBe(partial ? ['partial-expansion', ...own].join(';') : w.reason);
         }
       }),
       { numRuns: 1000 },
