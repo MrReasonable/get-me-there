@@ -1,7 +1,13 @@
 // Barrel for @gmt/db. Every public export of the package is re-exported from here by name, so only the plan's
 // "Database" contract and the brief's additive list leave the package (arch-M9); consumers never deep-import.
 
-export { AppLock, HEARTBEAT_INTERVAL_MS, LOCK_STALE_AFTER_MS } from './appLock.js';
+export {
+  AppLock,
+  HEARTBEAT_INTERVAL_MS,
+  LOCK_STALE_AFTER_MS,
+  type ReadOnlyLockState,
+  readOnlyLockState,
+} from './appLock.js';
 export { backupDatabase } from './backup.js';
 export { type BudgetConfig, budgetConfigFromConfig, effectiveCallCap } from './budgetConfig.js';
 export { SqliteBudgetGuard } from './budgetGuard.js';
