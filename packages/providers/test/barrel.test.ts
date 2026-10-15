@@ -11,6 +11,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
     for (const name of [
       'createHttpKit',
       'createRecorder',
+      'defaultRecordedRoot',
       'contentHash',
       'scrubSecrets',
       'stripUrl',

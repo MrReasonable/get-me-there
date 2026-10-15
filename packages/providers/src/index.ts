@@ -8,9 +8,10 @@ export {
   canonicalJson,
   contentHash,
   createRecorder,
+  defaultRecordedRoot,
   type RecordedFixture,
   RecorderRefusedError,
-} from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError: WP4b
+} from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError, defaultRecordedRoot: WP4b
 export { scrubSecrets, stripUrl } from './http/scrub.js';
 export type {
   FixtureRecorder,
