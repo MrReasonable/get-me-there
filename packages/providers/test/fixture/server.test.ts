@@ -365,7 +365,8 @@ describe('fixture server via msw (http://fixture.local)', () => {
       settled += 1;
       return r.status;
     });
-    await new Promise((r) => setTimeout(r, 50));
+    // why: a fixed number of real macrotask turns, not wall-clock time, so the negative check is deterministic.
+    for (let i = 0; i < 20; i += 1) await new Promise<void>((r) => setImmediate(r));
     expect(settled).toBe(0);
     const ack = obj(await jsonOf(await fetch(releaseRequest('h1', { kind: 'status', status: 503 }))));
     expect(ack).toEqual({ synthetic: true, released: 2 });
