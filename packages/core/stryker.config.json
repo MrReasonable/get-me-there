@@ -14,7 +14,9 @@
     "src/constraints/*.ts",
     "src/selection/select.ts",
     "src/coverage/rollUp.ts",
-    "src/alerts/dedup.ts"
+    "src/alerts/dedup.ts",
+    "src/alerts/evaluate.ts",
+    "src/normalise/localTime.ts"
   ],
   "thresholds": {
     "high": 90,

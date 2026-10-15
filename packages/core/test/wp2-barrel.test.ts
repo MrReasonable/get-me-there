@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest';
+import * as core from '../src/index.js';
+
+// The WP2 public surface: the plan's "Core domain functions (WP2)" block plus its named constants.
+// why: named exports, not `export *`, so module-internal helpers stay private; this test pins both lists.
+const WP2 = [
+  'canonicalCarrier',
+  'canonicalFlightNumber',
+  'departLocal',
+  'toIsoDateTime',
+  'itineraryHash',
+  'MINOR_EXPONENT',
+  'ECB_CURRENCIES',
+  'toGbp',
+  'LINK_ALLOWLIST',
+  'SEARCH_LINK_LABEL',
+  'validateVendorUrl',
+  'searchLinkFor',
+  'normaliseOffer',
+  'evaluateConstraints',
+  'verdictClass',
+  'unverifiedNames',
+  'dedupByItinerary',
+  'rankRows',
+  'sortRows',
+  'filterRows',
+  'bandCheapest',
+  'resultRowKey',
+  'formatPence',
+  'CONSTRAINT_LABELS',
+  'evaluateAlertRules',
+  'DEFAULT_DISCOVERY_REFRESH_HOURS',
+  'identityKey',
+  'dedupKey',
+  'isSuppressed',
+  'buildDigest',
+  'hasControlChars',
+  'stripControlChars',
+];
+const PRIVATE = [
+  'wallToInstant',
+  'vendorInstant',
+  'parseVendorTime',
+  'localMinute',
+  'requireZone',
+  'hoursSince',
+  'priceOf',
+  'span',
+  'need',
+  'compareRows',
+  'compareText',
+  'CONSTRAINT_NAMES',
+  // module exports that no other package reads, so they stay out of the barrel
+  'MIN_REPEAT_DROP_PENCE',
+  'MIN_REPEAT_DROP_PERCENT',
+  'MAX_URL_LENGTH',
+  'MAX_POST_DATA_LENGTH',
+];
+
+describe('@gmt/core barrel, WP2 exports', () => {
+  it('DEFAULT_DISCOVERY_REFRESH_HOURS is the spec §7 default of 168', () => {
+    expect(core.DEFAULT_DISCOVERY_REFRESH_HOURS).toBe(168);
+  });
+  it.each(WP2)('exports %s', (name) => {
+    expect(core).toHaveProperty(name);
+  });
+  it.each(PRIVATE)('keeps %s private', (name) => {
+    expect(core).not.toHaveProperty(name);
+  });
+});
