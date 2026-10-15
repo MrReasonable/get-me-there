@@ -1314,7 +1314,7 @@ describe('calendar basis (spec §6.8)', () => {
 - [ ] **Step 3: Implement.** In `runner.ts`, replace `calendarPool` with:
 
 ```ts
-const DEFAULT_REFRESH_HOURS = 168;
+// the refresh default is core's DEFAULT_DISCOVERY_REFRESH_HOURS (add it to this file's @gmt/core import)
 
 /**
  * Calendar prices fetched by this execution (reused excluded by the repository) in the snapshot's cabin; previous = the
@@ -1324,7 +1324,7 @@ function calendarPool(ctx: RunContext): CalendarCandidate[] {
   return ctx.deps.repos.calendarPrices.fetchedBy(ctx.executionId)
     .filter((r) => r.cabin === ctx.snapshot.cabin)
     .map((r) => {
-      const refresh = ctx.snapshot.providers.discoveryRefreshHours[r.providerId] ?? DEFAULT_REFRESH_HOURS;
+      const refresh = ctx.snapshot.providers.discoveryRefreshHours[r.providerId] ?? DEFAULT_DISCOVERY_REFRESH_HOURS;
       const prev = ctx.deps.repos.calendarPrices.previousFor(ctx.definition.id, r.providerId, r.cabin, r.cell, r.fetchedAt, _hours(r.fetchedAt, 2 * refresh));
       return {
         basis: 'calendar' as const, calendarPriceId: r.id, fetchedByExecutionId: r.executionId, pricePence: r.pricePence, provenance: r.provenance,

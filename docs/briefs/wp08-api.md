@@ -199,7 +199,7 @@ export interface AssetPaths { migrationsDir: string; airportsDataDir: string; we
 export function assetPaths(): AssetPaths;
 
 // apps/api/src/defaults.ts
-export const DEFAULT_REFRESH_HOURS = 168; export const DEFAULT_CRON = '0 5 * * 1';
+export const DEFAULT_CRON = '0 5 * * 1';   // the refresh default is core's DEFAULT_DISCOVERY_REFRESH_HOURS
 export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput;
 
 // apps/api/src/tools/inProcess.ts
@@ -615,9 +615,8 @@ export function notFound(c: Context) {
 `src/defaults.ts`:
 
 ```ts
-import type { Config, DefinitionInput, FlightProvider, ProviderId } from '@gmt/core';
+import { DEFAULT_DISCOVERY_REFRESH_HOURS, type Config, type DefinitionInput, type FlightProvider, type ProviderId } from '@gmt/core';
 
-export const DEFAULT_REFRESH_HOURS = 168;
 export const DEFAULT_CRON = '0 5 * * 1';
 
 /**
@@ -647,7 +646,7 @@ export function defaultDefinitionInput(config: Config, providers: readonly Fligh
     constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
     verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
     budget: { maxCalls: config.spend.executionMaxCalls, maxFreeCalls: config.spend.executionMaxFreeCalls, maxCostMicroGbp: config.spend.executionMaxCostMicroGbp },
-    providers: { discovery, verification, discoveryRefreshHours: Object.fromEntries(discovery.map((id) => [id, DEFAULT_REFRESH_HOURS])) },
+    providers: { discovery, verification, discoveryRefreshHours: Object.fromEntries(discovery.map((id) => [id, DEFAULT_DISCOVERY_REFRESH_HOURS])) },
     destinationNotes: {},
     onwardCostPence: {},
     scheduleCron: DEFAULT_CRON,
@@ -738,8 +737,8 @@ export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
 `src/routes/system.ts` (health detail, airports, budget and scheduler jobs join in Task 8.8):
 
 ```ts
-import type { Config, ProviderId } from '@gmt/core';
-import { DEFAULT_REFRESH_HOURS, defaultDefinitionInput } from '../defaults.js';
+import { DEFAULT_DISCOVERY_REFRESH_HOURS, type Config, type ProviderId } from '@gmt/core';
+import { defaultDefinitionInput } from '../defaults.js';
 import { providerLimits, providerScopes, usageOf } from '../read/usage.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
@@ -785,7 +784,7 @@ export function providersResponse(ctx: RouteContext) {
       policy: { maxCells: preset.verification.maxCells, topN: preset.verification.topN, expandTop: preset.verification.expandTop, bookingLinks: preset.verification.bookingLinks },
       providers: preset.providers,
       budget: preset.budget,
-      discoveryRefreshHours: DEFAULT_REFRESH_HOURS,
+      discoveryRefreshHours: DEFAULT_DISCOVERY_REFRESH_HOURS,
       schedulerTimezone: config.schedulerTimezone,
     },
     pointOfSale: config.pointOfSale,
@@ -3859,11 +3858,10 @@ Expected: FAIL: every results request returns 404 `not_found`.
 import {
   type CellKey, type CellOutcome, type Config, type ConstraintName, type Constraints, type IsoDateTime, type Provenance, type ProviderId,
   type SearchDefinition, type apiContract, cellKeyString, daysBetween, effectiveAge, evaluateConstraints, searchLinkFor, unverifiedNames,
-  verdictClass, worstCaseAgeHours,
+  DEFAULT_DISCOVERY_REFRESH_HOURS, verdictClass, worstCaseAgeHours,
 } from '@gmt/core';
 import type { CalendarPriceRow, ObservationRow } from '@gmt/db';
 import type { z } from 'zod';
-import { DEFAULT_REFRESH_HOURS } from '../defaults.js';
 import { hoursSince } from './executions.js';
 
 export type ResultRow = z.infer<typeof apiContract.resultRowSchema>;
@@ -3872,7 +3870,7 @@ export type Basis = 'verified' | 'calendar';
 export interface RowContext { def: SearchDefinition; now: IsoDateTime; config: Config }
 
 export function refreshHoursFor(def: SearchDefinition, providerId: ProviderId): number {
-  return def.providers.discoveryRefreshHours[providerId] ?? DEFAULT_REFRESH_HOURS;
+  return def.providers.discoveryRefreshHours[providerId] ?? DEFAULT_DISCOVERY_REFRESH_HOURS;
 }
 
 /** The calendar-basis stale threshold of a provider (spec §8.1), also reported by the calendar route. */
