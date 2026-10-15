@@ -79,7 +79,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - It is authorised and cached from Aviasales user searches in the last 48 h. It has no `found_at` (the row's link carries its search day), derives the market from `origin`, and the vendor states no cabin (treated as economy).
   - It is free at 600/min. `sourceKind` is `authorised-cached` and `maxAgeHours` is 48.
 - **§2 fact 1.** `origin_airport` is on every row. `currency=gbp` is honoured. `trip_class` is not a v3 parameter and sending `market` had no effect. There is no `found_at`.
-- **§2 consequences.** Adapters return raw vendor shapes, and currency is read from the response: a response that states no currency is a `parse` error. Rows for airports outside the pair are dropped. `providerObservedAt` is set only when the vendor states it.
+- **§2 consequences.** Adapters return raw vendor shapes, and currency is read from the response: a response that states no currency is a `parse` error. A row naming an airport outside the pair fails the tile (`airport-mismatch`, decision 35). `providerObservedAt` is the day in the row's own link (day resolution, clamped to the fetch; decision 35), not a vendor-stated time.
 - **§3 cell outcomes.** `no_data` means the call covered the cell and had nothing cached. `priced` notes `offers-dropped:n`; `error` carries the kind or a normalisation reason, never vendor text, which goes to `last_error`.
 - **§5.1.** `TileRequest` has `{ kind: 'month'; month }`. `DiscoveryTileResult` `'tile'` carries `pointOfSale`. `BudgetGuard.reserve` and `recordCacheHit` carry `tileIndex`.
 - **§5.2 (rev 14).**
@@ -196,8 +196,6 @@ export function generateCells(space: ResolvedSpace): Cell[];   // ResolvedSpace 
 export const MINOR_EXPONENT: Record<string, number>;           // the 30 ECB currencies; ISK, JPY, KRW → 0, the rest → 2
 export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export function validateVendorUrl(url: string, allowlist: readonly string[]): Booking;
 
-// Database (WP3, merged): export class AirportsRepo { constructor(db: Db); metroOf(iata: string): string | null; … }
-// @gmt/db also exports openDatabase(path), applyMigrations(db, dir), MIGRATIONS_DIR (used by the wiring test).
 
 // http-kit types (@gmt/providers src/http/types.ts, WP4, merged; re-exported from the barrel)
 export interface ResponseFacts { status: number; body: unknown; headers: Headers; providerId: HttpProviderId; endpointPath: string }
@@ -233,18 +231,18 @@ export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
 
 // Wiring (apps/api src/wiring.ts, WP4b)
 export function httpLimitsFor(config: Config): HttpKitDeps['limits'];
-export function providersFor(config: Config, deps: { http: HttpKit; log: Logger; clock: Clock; airports: AirportsRepo }): FlightProvider[];
+export function providersFor(config: Config, deps: { http: HttpKit; log: Logger; clock: Clock }): FlightProvider[];   // no airports dep after decision 34 (the fixture, Travelpayouts and SearchApi adapters take none)
 ```
 
 Plan decision 24 (verbatim, the part this brief implements): "Shared adapter helpers live once in @gmt/providers: `shared/money.ts` `majorToMinor(major, currency)` (exact decimal-string arithmetic over core's MINOR_EXPONENT; null for excess precision or a non-positive amount, and the row is dropped and counted `offers-dropped:n`); `shared/errors.ts` `parseError(cause, detail)` whose `reason` is the closed-list kind-level reason and whose URL-free message carries the machine cause. A covered cell whose every row was dropped becomes `error` with the normalisation reason (spec §8.1). The ledger's unit is the tile: a sibling pair records one cache-hit row per tile, never per page. Healthchecks are stateless and probe nothing … The Travelpayouts metro query follows spec rev 14 §5.2. … `clock` stays in every adapter constructor."
 
 ## 5. Interfaces produced
 
-Only `travelpayoutsProvider`, `travelpayoutsHttpLimits` and `TRAVELPAYOUTS_PARAMS` are exported from the `@gmt/providers` barrel (the plan contract; arch-008's rule that every barrel export names its consumer). Every other name below is package-internal: WP5 imports `src/shared/*` by relative path.
+Only `travelpayoutsProvider`, `travelpayoutsHttpLimits` and `TRAVELPAYOUTS_PARAMS` are exported from the `@gmt/providers` barrel (the plan contract; arch-008's rule that every barrel export names its consumer). Every other name below is package-internal: WP5 imports `src/shared/*` by relative path. The one exception is the named subpath `@gmt/providers/recording` (plan decision 30), which exposes exactly `majorToMinor`, `buildRequestUrl`, `PAGE_LIMIT`, `MAX_PAGES` and the type `TileParams` to the `apps/api` record tool, so the tool has no second copy of the limits, the request URL, the page size or the money conversion (decision 32).
 
 ```ts
 // shared/money.ts (WP5 and WP6)
-export function majorToMinor(major: number, currency: string): number | null;   // exact; null: not finite positive, excess decimals, > MAX_SAFE_INTEGER minor units, unknown currency
+export function majorToMinor(major: number, currency: string): number | null;   // also on @gmt/providers/recording; exact; null: not finite positive, excess decimals, > MAX_SAFE_INTEGER minor units, unknown currency
 
 // shared/errors.ts (WP5 and WP6)
 export interface ParseWhere { providerId: ProviderId; endpointPath: string }
@@ -258,7 +256,7 @@ export class NoteCounter { add(key: string, n?: number): void; get(key: string):
 // travelpayouts/params.ts
 export const TRAVELPAYOUTS_HOST: 'api.travelpayouts.com';
 export const PRICES_FOR_DATES_PATH: '/aviasales/v3/prices_for_dates';
-export const PAGE_LIMIT: 1000;                                                                           // internal
+export const PAGE_LIMIT: 1000;                                                                           // internal; also on @gmt/providers/recording
 export const FIXED_PARAMS: { readonly one_way: 'false'; readonly currency: 'gbp'; readonly limit: '1000' };   // internal; limit derived from PAGE_LIMIT
 export const FORBIDDEN_PARAM_NAMES: readonly ['token', 'market', 'trip_class', 'return_at'];             // internal
 export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;                                                       // Task 6.8
@@ -275,8 +273,8 @@ export const TRAVELPAYOUTS_CABINS: readonly Cabin[];                   // ['econ
 export const TRAVELPAYOUTS_POINT_OF_SALE: 'unknown';
 export interface TravelpayoutsProviderOptions { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }
 export function travelpayoutsProvider(o: TravelpayoutsProviderOptions): FlightProvider;   // id 'travelpayouts', displayName 'Aviasales cache'
-export const MAX_PAGES: 3;                                                                 // internal
-export function buildRequestUrl(tp: TileParams, page: number): URL;                        // internal
+export const MAX_PAGES: 3;                                                                 // internal; also on @gmt/providers/recording (the record tool's page cap)
+export function buildRequestUrl(tp: TileParams, page: number): URL;                        // internal; also on @gmt/providers/recording
 
 // travelpayouts/tiles.ts (internal)
 export interface TileParams { readonly origin: Iata; readonly destination: Iata; readonly month: IsoMonth }   // origin: always the pair's airport (decision 34)
@@ -293,15 +291,17 @@ export function readEnvelope(body: unknown): Envelope;                  // throw
 export function cacheableBody(body: unknown): boolean;                  // HttpKitRequest.cache.accept: true iff readEnvelope would accept
 export const AVIASALES_BASE: 'https://www.aviasales.com';
 export function vendorLinkFor(link: unknown): string | null;
-export function observedAt(foundAt: unknown): IsoDateTime | null;
-export interface AttributionInput { coveredCells: readonly CellKey[]; origin: Iata; destination: Iata; minNights: number; maxNights: number; currency: ResponseCurrency }
+export function searchedAt(link: unknown): IsoDateTime | null;                          // search_date=DDMMYYYY of the link as that day at 00:00 UTC (decision 35)
+export function itineraryOf(link: unknown): { out: string[]; back: string[] } | null;   // both airport chains of the link's t token
+// fetchedAt: the oldest page's; a row's observation time is never later than it (day resolution)
+export interface AttributionInput { fetchedAt: IsoDateTime; coveredCells: readonly CellKey[]; origin: Iata; destination: Iata; minNights: number; maxNights: number; currency: ResponseCurrency }
 export interface Attribution { prices: RawCalendarPrice[]; cellIssues: CellIssue[]; notes: NoteCounter }
 export function attributeRows(rows: readonly unknown[], input: AttributionInput): Attribution;   // throws parseError('malformed-row')
 ```
 
 **Parse causes** (the bracketed machine word at the end of a `parse` error's message; `reason` is always `'parse'`): `malformed-envelope`, `vendor-error`, `currency-missing`, `currency-malformed`, `currency-changed-between-pages`, `malformed-row`, `page-repeated`, `airport-mismatch`.
 
-**Cell-issue detail tags** (the bracketed word at the end of `CellIssue.detail`; one issue may carry several, joined by `; `): `return-airport-mismatch` (reason `parse`: an open-jaw row), `bad-price` (reason `parse`: a row price `majorToMinor` refuses), `currency-unsupported` (reason `currency-unsupported`: the response currency has no exponent in core). Unread cells of a capped tile carry reason `upstream` and detail `pagination truncated at 3 pages`.
+**Cell-issue detail tags** (the bracketed word at the end of `CellIssue.detail`; one issue may carry several, joined by `; `): `open-jaw` (reason `parse`: a row that is not the closed round trip origin → destination → origin, any of the four ends), `bad-link` (reason `parse`: a site-relative-looking link that cannot be read), `bad-price` (reason `parse`: a row price `majorToMinor` refuses), `currency-unsupported` (reason `currency-unsupported`: the response currency has no exponent in core). Unread cells of a capped tile carry reason `upstream` and detail `pagination truncated at 3 pages`.
 
 **Notes vocabulary** (`DiscoveryTileResult.notes`, through `NoteCounter`: `key:n`, sorted, zero counts omitted): `dropped-one-way`, `dropped-other-destination`, `dropped-other-origin`, `dropped-outside-band`, `dropped-outside-tile`, `link-rejected`, `offers-dropped`, `pages`, `pages-truncated`, `rows-received`.
 
@@ -313,7 +313,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
 - `noFares` is always `[]`, because a cache never proves that no fares exist.
 - Several prices may share a cell, and the engine keeps the minimum (spec §5.6).
 - `providerObservedAt` is the day in the row's own link (`search_date=DDMMYYYY`) at 00:00 UTC (plan decision 35); the recorded rows were 4 to 7 days old. A row whose link lacks it carries none, and the 48-hour declaration is the fallback. No `found_at` is read.
-- A row whose link `t` itinerary returns to an airport other than the pair's origin (an open-jaw row) is dropped as a per-cell issue (reason `parse`, detail tag `return-airport-mismatch`); a row whose itinerary cannot be read is priced. A row naming another origin or destination airport fails the whole tile (`parse`, `airport-mismatch`) because it means a metro code reached the adapter.
+- A row whose link `t` itinerary is not the closed round trip origin → destination → origin (an open-jaw row, any of the four ends) is dropped as a per-cell issue (reason `parse`, detail tag `open-jaw`); a malformed site-relative link is the same kind of issue tagged `bad-link`; a row whose itinerary cannot be read is priced. A row naming another origin or destination airport fails the whole tile (`parse`, `airport-mismatch`) because it means a metro code reached the adapter.
 - `currency` is the envelope's code upper-cased; every page states it. A code core has no exponent for prices nothing: its in-cell rows become `currency-unsupported` issues.
 - `fetchedAt` is the oldest page's; a cache hit's is the original `storedAt`.
 - `pointOfSale` is `'unknown'` on every tile.
@@ -530,6 +530,22 @@ Expected: FAIL, `Test Files  4 failed (4)`, `Tests  5 failed | 28 passed (33)`: 
 `packages/providers/src/shared/money.ts`:
 
 ```ts
+/**
+ * The one guarded reading of a vendor `link` (plan decision 35): a site-relative path only, as a URL on the Aviasales
+ * site, or null. `//` and `/\` prefixes are refused because they mean another host, and `new URL` is wrapped so a
+ * malformed value is a null, never an unclassified throw out of fetchTile.
+ */
+function parseLink(link: unknown): URL | null {
+  if (typeof link !== 'string' || !link.startsWith('/') || link.startsWith('//') || link.startsWith('/\\')) {
+    return null;
+  }
+  try {
+    return new URL(link, AVIASALES_BASE);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Vendor money to integer minor units, shared by every adapter (plan decision 24; spec §6.3: "No float ever holds
  * money"). WP5 (SearchApi) and WP6 (Travelpayouts) both convert through this one function.
@@ -1304,7 +1320,7 @@ export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
   sourceKind: 'authorised-cached',
   maxAgeHours: MAX_AGE_HOURS,
   provenanceNote:
-    "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration). A row's own search link carries the day it was searched, which is used as its observation time; the 48 hours applies only to a row whose link has no search date. From the authorised Travelpayouts Data API; cabin not stated by the vendor, treated as economy; point of sale unknown; not a fare quote; constraints are not checked.",
+    "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration). A row's own search link carries the day it was found, which is used as its observation time at day resolution (found on that date, no time of day); the 48 hours applies only to a row whose link has no search date. From the authorised Travelpayouts Data API; cabin not stated by the vendor, treated as economy; point of sale unknown; not a fare quote; constraints are not checked.",
 };
 /**
  * Spec §5.2: from recorded fixtures only. A row names one airline, one flight number and transfer counts, which is
@@ -1417,21 +1433,21 @@ git add packages/core packages/providers && git commit -m "wp06: travelpayouts e
 **Interfaces:**
 
 - Consumes `cellKeyString`, `iataSchema`, `isoDateSchema`, `isoDateTimeOfEpochMs` (WP0), `daysBetween` (WP1), `LINK_ALLOWLIST`, `validateVendorUrl` (WP2), `majorToMinor`, `NoteCounter`, `zodReason`.
-- Produces `attributeRows`, `AttributionInput`, `Attribution`, `vendorLinkFor`, `observedAt`, `AVIASALES_BASE`.
+- Produces `attributeRows`, `AttributionInput`, `Attribution`, `vendorLinkFor`, `searchedAt`, `itineraryOf`, `AVIASALES_BASE`.
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/providers/test/travelpayouts/response.test.ts`:
 
 ```ts
-import { asIata, type CellKey } from '@gmt/core';
+import { asIata, asIsoDateTime, type CellKey } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   attributeRows,
   cacheableBody,
   currencyOf,
+  itineraryOf,
   readEnvelope,
-  returnAirportOf,
   searchedAt,
   vendorLinkFor,
 } from '../../src/travelpayouts/response.js';
@@ -1441,7 +1457,9 @@ import { cellsFor, envelope, query, row } from './harness.js';
 
 const covered: CellKey[] = cellsOf(query());
 const GBP = { code: 'GBP', exponent: 2 };
+const FETCHED = '2026-10-15T03:50:00.000Z' as const;
 const input = {
+  fetchedAt: asIsoDateTime(FETCHED),
   coveredCells: covered,
   origin: asIata('LHR'),
   destination: asIata('JFK'),
@@ -1785,22 +1803,33 @@ describe('searchedAt (the row age, decision 35)', () => {
 const linkOf = (out: string, back: string, carrier = 'UA'): string =>
   `/search/X?t=${carrier}18146070001814617500000475${out}18158511001815894900000430${back}_1d1bd24f_58507&search_date=14102026`;
 
-describe('returnAirportOf (decision 35: the airport the return flight lands at, from the link t token)', () => {
+describe('itineraryOf (decision 35: both airport chains of the link t token)', () => {
   it.each([
-    ['direct', linkOf('LHREWR', 'EWRLHR'), 'LHR'],
-    ['with connections', linkOf('LHRFRAEWR', 'EWRFRALCY'), 'LCY'],
-    ['a carrier code with a digit', linkOf('LGWKEFJFK', 'JFKKEFLGW', 'S7'), 'LGW'],
+    ['direct', linkOf('LHREWR', 'EWRLHR'), { out: ['LHR', 'EWR'], back: ['EWR', 'LHR'] }],
+    [
+      'with connections',
+      linkOf('LHRFRAEWR', 'EWRFRALCY'),
+      { out: ['LHR', 'FRA', 'EWR'], back: ['EWR', 'FRA', 'LCY'] },
+    ],
+    [
+      'a carrier code with a digit',
+      linkOf('LGWKEFJFK', 'JFKKEFLGW', 'S7'),
+      { out: ['LGW', 'KEF', 'JFK'], back: ['JFK', 'KEF', 'LGW'] },
+    ],
     ['one direction only', '/search/X?t=UA18146070001814617500000475LHREWR_abc', null],
     ['no t token', '/search/X?search_date=14102026', null],
     ['a t token that is not the itinerary shape', '/search/X?t=1', null],
     ['not a path', 'https://evil.example/x', null],
+    ['a protocol-relative link', '//[', null],
+    ['a backslash link', '/\\[', null],
+    ['an unparsable host', '//', null],
     ['not a string', 42, null],
   ] as const)('%s → %j', (_label, link, expected) => {
-    expect(returnAirportOf(link)).toBe(expected);
+    expect(itineraryOf(link)).toEqual(expected);
   });
 });
 
-describe('closed round trips only (decision 35): a row returning to another airport is a per-cell issue', () => {
+describe('closed round trips only (decision 35): an open-jaw row, on either end, is a per-cell issue', () => {
   const closed = {
     ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
     link: linkOf('LHRJFK', 'JFKLHR'),
@@ -1819,9 +1848,23 @@ describe('closed round trips only (decision 35): a row returning to another airp
         cell: expect.objectContaining({ departureDate: '2027-03-14', returnDate: '2027-03-25' }),
         reason: 'parse',
         offersDropped: 1,
-        detail: expect.stringContaining('[return-airport-mismatch]'),
+        detail: expect.stringContaining('[open-jaw]'),
       },
     ]);
+  });
+
+  it.each([
+    ['the outbound starts elsewhere', linkOf('LGWJFK', 'JFKLHR')],
+    ['the outbound lands at another airport of the destination city', linkOf('LHRLGA', 'JFKLHR')],
+    ['the return leaves from another airport of the destination city', linkOf('LHRJFK', 'LGAJFKLHR')],
+    ['the return lands at another airport', linkOf('LHRJFK', 'JFKLGW')],
+  ])('drops a row where %s', (_label, link) => {
+    const r = attributeRows(
+      [{ ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }), link }],
+      input,
+    );
+    expect(r.prices).toEqual([]);
+    expect(r.cellIssues[0]?.detail).toContain('[open-jaw]');
   });
 
   it('reports an open-jaw row for a cell the tile also priced, so the engine records priced with offers-dropped', () => {
@@ -1841,7 +1884,7 @@ describe('closed round trips only (decision 35): a row returning to another airp
     expect(r.cellIssues).toHaveLength(1);
     expect(r.cellIssues[0]?.offersDropped).toBe(2);
     expect(r.cellIssues[0]?.detail).toContain('[bad-price]');
-    expect(r.cellIssues[0]?.detail).toContain('[return-airport-mismatch]');
+    expect(r.cellIssues[0]?.detail).toContain('[open-jaw]');
   });
 
   it('prices a row whose link has no readable itinerary: the return cannot be checked, and nothing is invented about it', () => {
@@ -1851,6 +1894,72 @@ describe('closed round trips only (decision 35): a row returning to another airp
     );
     expect(r.prices).toHaveLength(1);
     expect(r.cellIssues).toEqual([]);
+  });
+});
+
+describe('a malformed vendor link never throws (one guarded parser for vendorLinkFor, searchedAt and itineraryOf)', () => {
+  it.each(['//[', '/\\[', '//evil.example/x', '/\\evil.example/x'])('link %j', (link) => {
+    expect(vendorLinkFor(link)).toBeNull();
+    expect(searchedAt(link)).toBeNull();
+    expect(itineraryOf(link)).toBeNull();
+  });
+
+  it('a row with such a link is a per-cell parse issue [bad-link], counted offers-dropped, never an exception', () => {
+    const r = attributeRows(
+      [
+        {
+          ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+          link: '//[',
+        },
+      ],
+      input,
+    );
+    expect(r.prices).toEqual([]);
+    expect(r.notes.list()).toEqual(['offers-dropped:1']);
+    expect(r.cellIssues).toEqual([
+      {
+        cell: expect.objectContaining({ departureDate: '2027-03-12' }),
+        reason: 'parse',
+        offersDropped: 1,
+        detail: expect.stringContaining('[bad-link]'),
+      },
+    ]);
+  });
+
+  it('an absolute link is still only refused (link-rejected), the row stays priced', () => {
+    const r = attributeRows(
+      [
+        {
+          ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+          link: 'https://evil.example/x',
+        },
+      ],
+      input,
+    );
+    expect(r.prices).toHaveLength(1);
+    expect(r.notes.list()).toContain('link-rejected:1');
+  });
+});
+
+describe('providerObservedAt on the fetch day (decision 35, day resolution)', () => {
+  const sameDay = (searchDate: string) => ({
+    ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+    link: `/search/X?search_date=${searchDate}`,
+  });
+
+  it('is fetchedAt, never "just now" from a midnight, when the search day is the fetch day', () => {
+    const r = attributeRows([sameDay('15102026')], input);
+    expect(r.prices.map((p) => p.providerObservedAt)).toEqual([FETCHED]);
+  });
+
+  it('is fetchedAt for a search day after the fetch day (never later than the fetch)', () => {
+    const r = attributeRows([sameDay('16102026')], input);
+    expect(r.prices.map((p) => p.providerObservedAt)).toEqual([FETCHED]);
+  });
+
+  it('stays the search day at 00:00 UTC for an earlier day', () => {
+    const r = attributeRows([sameDay('14102026')], input);
+    expect(r.prices.map((p) => p.providerObservedAt)).toEqual(['2026-10-14T00:00:00.000Z']);
   });
 });
 ```
@@ -1929,11 +2038,12 @@ export const AVIASALES_BASE = 'https://www.aviasales.com';
 /**
  * Spec §5.2 vendor links: the relative Aviasales path prefixed with the site, then checked by core's
  * validateVendorUrl against LINK_ALLOWLIST.travelpayouts (WP2). Null when refused. This is the vendor's own search
- * link for the row (its search may name another airport of the same city), never a fare link; the UI's search link is core's searchLinkFor.
+ * link for the row (its search may name another airport of the same city), never a fare link; the UI's search link is
+ * core's searchLinkFor.
  * why: only a site-relative path is accepted; an absolute or protocol-relative value is refused, never resolved.
  */
 export function vendorLinkFor(link: unknown): string | null {
-  if (typeof link !== 'string' || !link.startsWith('/') || link.startsWith('//')) return null;
+  if (parseLink(link) === null || typeof link !== 'string') return null;
   const booking = validateVendorUrl(`${AVIASALES_BASE}${link}`, LINK_ALLOWLIST.travelpayouts);
   return booking.kind === 'get' ? booking.url : null;
 }
@@ -1943,14 +2053,13 @@ const SEARCH_DATE = /^(\d{2})(\d{2})(\d{4})$/;
 
 /**
  * Spec §3 row age (plan decision 35): the day the vendor says the price was found, from `search_date=DDMMYYYY` in the
- * row's own link, as that day at 00:00 UTC (never younger than the evidence). Every recorded link carries it and the
+ * row's own link, as that day at 00:00 UTC (day resolution; the vendor does not state the day's zone). Every recorded link carries it and the
  * recorded rows were 4 to 7 days old at fetch time, so the 48-hour declaration is only the fallback for a link without
  * it. Null when the link is absent, unreadable, has no search date or an impossible calendar date; nothing is guessed.
  * why: the field is undocumented by the vendor, so the replay test pins it on the recordings.
  */
 export function searchedAt(link: unknown): IsoDateTime | null {
-  if (typeof link !== 'string' || !link.startsWith('/')) return null;
-  const m = SEARCH_DATE.exec(new URL(link, AVIASALES_BASE).searchParams.get('search_date') ?? '');
+  const m = SEARCH_DATE.exec(parseLink(link)?.searchParams.get('search_date') ?? '');
   if (m === null) return null;
   const [, dd = '', mm = '', yyyy = ''] = m;
   const day = isoDateSchema.safeParse(`${yyyy}-${mm}-${dd}`);
@@ -1961,21 +2070,32 @@ export function searchedAt(link: unknown): IsoDateTime | null {
 const LEG = /\d{26}((?:[A-Z]{3})+)/g;
 
 /**
- * The airport the return flight lands at, read from the `t` token of the row's own link (plan decision 35): the token
- * holds the outbound and the return direction, each as digits followed by its airport chain (`LHRFRAEWR`,
- * `EWRFRALCY`), and the last code of the second chain is where the traveller ends up. Null when the link, the token or
- * either direction is missing or not in that shape: the return then cannot be checked and nothing is guessed.
- * why: a row's `origin_airport` names only the outbound airport, and the recordings show metro rows that return to a
- * different airport (open-jaw); an airport query returned none, which the replay test pins. The token format is
- * undocumented by the vendor.
+ * Both airport chains of the `t` token of the row's own link (plan decision 35): the token holds the outbound and the
+ * return direction, each as digits followed by its airport chain (`LHRFRAEWR`, `EWRFRALCY`). Null when the link, the
+ * token or either direction is missing or not in that shape: the itinerary then cannot be checked and nothing is
+ * guessed.
+ * why: a row's `origin_airport` and `destination_airport` name only the outbound ends, and the recordings show metro
+ * rows whose outbound lands, or whose return leaves or lands, at another airport (open-jaw); an airport query returned
+ * none, which the replay test pins. The token format is undocumented by the vendor.
  */
-export function returnAirportOf(link: unknown): string | null {
-  if (typeof link !== 'string' || !link.startsWith('/')) return null;
-  const t = new URL(link, AVIASALES_BASE).searchParams.get('t');
-  if (t === null) return null;
+export function itineraryOf(link: unknown): { out: string[]; back: string[] } | null {
+  const t = parseLink(link)?.searchParams.get('t');
+  if (t === undefined || t === null) return null;
   const legs = [...(t.split('_')[0] ?? '').matchAll(LEG)].map((m) => m[1] ?? '');
-  if (legs.length !== 2) return null;
-  return (legs[1] ?? '').slice(-3);
+  const [out, back] = legs;
+  if (legs.length !== 2 || out === undefined || back === undefined) return null;
+  const codes = (chain: string): string[] => chain.match(/[A-Z]{3}/g) ?? [];
+  return { out: codes(out), back: codes(back) };
+}
+
+/** Whether a readable itinerary is the closed round trip origin → destination → origin. */
+function isClosed(trip: { out: string[]; back: string[] }, origin: string, destination: string): boolean {
+  return (
+    trip.out[0] === origin &&
+    trip.out.at(-1) === destination &&
+    trip.back[0] === destination &&
+    trip.back.at(-1) === origin
+  );
 }
 
 type Row = z.infer<typeof rowSchema>;
@@ -2034,10 +2154,10 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   const covered = new Set(input.coveredCells.map(cellKeyString));
   const notes = new NoteCounter();
   const prices: RawCalendarPrice[] = [];
-  // per covered cell: rows dropped for an unusable price, and rows dropped because they return to another airport
-  const dropped = new Map<string, { cell: CellKey; badPrice: number; openJaw: number }>();
+  // per covered cell: rows dropped for an unusable price, and rows dropped because they are not the closed round trip, and rows with an unusable link
+  const dropped = new Map<string, { cell: CellKey; badPrice: number; openJaw: number; badLink: number }>();
   const droppedFor = (key: string, cell: CellKey) => {
-    const d = dropped.get(key) ?? { cell, badPrice: 0, openJaw: 0 };
+    const d = dropped.get(key) ?? { cell, badPrice: 0, openJaw: 0, badLink: 0 };
     dropped.set(key, d);
     return d;
   };
@@ -2053,8 +2173,15 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
     }
     // why: an airport query is a round trip from that airport (decision 35); a row returning elsewhere is not the
     // cell's trip, so it is dropped and reported rather than priced.
-    const back = returnAirportOf(row.link);
-    if (back !== null && back !== input.origin) {
+    // why: a link that looks site-relative but cannot be read (`//host`, `/\`, an unparsable value) is a malformed
+    // row for its cell, reported rather than thrown (decision 35).
+    if (typeof row.link === 'string' && row.link.startsWith('/') && parseLink(row.link) === null) {
+      notes.add('offers-dropped');
+      droppedFor(key, cell).badLink += 1;
+      continue;
+    }
+    const trip = itineraryOf(row.link);
+    if (trip !== null && !isClosed(trip, input.origin, input.destination)) {
       notes.add('offers-dropped');
       droppedFor(key, cell).openJaw += 1;
       continue;
@@ -2072,8 +2199,13 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       continue;
     }
     const price: RawCalendarPrice = { ...cell, amountMinor, currency: input.currency.code };
+    // why: day resolution (decision 35). A search day that is the fetch day, or later, would read "just now" from its
+    // midnight, so the row is observed at the fetch itself; an earlier day stays its 00:00 UTC start.
     const seen = searchedAt(row.link);
-    if (seen !== null) price.providerObservedAt = seen;
+    if (seen !== null) {
+      price.providerObservedAt =
+        seen >= `${input.fetchedAt.slice(0, 10)}T00:00:00.000Z` ? input.fetchedAt : seen;
+    }
     const link = vendorLinkFor(row.link);
     if (link !== null) price.vendorLink = link;
     else if (row.link !== undefined && row.link !== null) notes.add('link-rejected');
@@ -2081,7 +2213,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   }
   const { code, exponent } = input.currency;
   const rowsWord = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
-  const cellIssues = [...dropped.values()].map(({ cell, badPrice, openJaw }): CellIssue => {
+  const cellIssues = [...dropped.values()].map(({ cell, badPrice, openJaw, badLink }): CellIssue => {
     const parts: string[] = [];
     if (badPrice > 0) {
       parts.push(
@@ -2092,13 +2224,13 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
     }
     if (openJaw > 0) {
       parts.push(
-        `${rowsWord(openJaw)} returned to an airport other than the pair's origin [return-airport-mismatch]`,
+        `${rowsWord(openJaw)} were not the closed round trip ${input.origin} to ${input.destination} and back [open-jaw]`,
       );
     }
     return {
       cell,
       reason: badPrice > 0 && exponent === null ? 'currency-unsupported' : 'parse',
-      offersDropped: badPrice + openJaw,
+      offersDropped: badPrice + openJaw + badLink,
       detail: `travelpayouts: ${parts.join('; ')}`,
     };
   });
@@ -3108,6 +3240,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     try {
       read = await readPages(plan, tp, ctx);
       attribution = attributeRows(read.rows, {
+        fetchedAt: read.fetchedAt,
         coveredCells: plan.coveredCells,
         origin: tp.origin,
         destination: tp.destination,
@@ -3620,7 +3753,8 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
     expect(note).toContain(
       "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration)",
     );
-    expect(note).toContain("A row's own search link carries the day it was searched");
+    expect(note).toContain("A row's own search link carries the day it was found");
+    expect(note).toContain('day resolution (found on that date, no time of day)');
     expect(note).toContain('the 48 hours applies only to a row whose link has no search date');
     expect(note).toContain('cabin not stated by the vendor, treated as economy');
     expect(note).not.toContain('rows carry no timestamp');
@@ -4065,6 +4199,7 @@ This task adds no production code: it checks the adapter, unchanged, against wha
 import {
   asIata,
   asIsoDate,
+  asIsoDateTime,
   cellKeyString,
   type DiscoveryQuery,
   fromEpochDay,
@@ -4082,7 +4217,7 @@ import {
   TRAVELPAYOUTS_PARAMS,
 } from '../../src/travelpayouts/params.js';
 import { MAX_PAGES } from '../../src/travelpayouts/provider.js';
-import { AVIASALES_BASE, returnAirportOf } from '../../src/travelpayouts/response.js';
+import { AVIASALES_BASE, itineraryOf } from '../../src/travelpayouts/response.js';
 import { SENTINELS } from '../fakes.js';
 import { arr, obj, str } from '../support/guards.js';
 import { server } from '../support/msw.js';
@@ -4093,6 +4228,7 @@ import {
   eventsOf,
   makeHarness,
   makeProvider,
+  NOW,
   only,
   query,
   tileOf,
@@ -4214,6 +4350,8 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       expect(pages.map((p) => param(p.url, 'page'))).toEqual(pages.map((_, i) => String(i + 1)));
       replay();
       const h = makeHarness();
+      // why: observation times are clamped to the fetch time (day resolution), so the clock is the recording's own
+      h.clock.set(asIsoDateTime(pages[0]?.fixture.recordedAt ?? NOW));
       const d = discoveryOf(makeProvider(h));
       const received = pages.reduce((n, p) => n + rowsOf(p.fixture.body).length, 0);
       const q = monthQuery(asIata(origin), asIata(destination), month);
@@ -4242,15 +4380,26 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     },
   );
 
-  it('every airport-tile row is a closed round trip: its link returns to the queried origin airport (decision 35)', () => {
+  it('every airport-tile row is a closed round trip: its link goes origin → destination and back destination → origin, all four ends (decision 35)', () => {
     // If this fails after a re-record, stop and report: an airport query returned an open-jaw row, and attribution by
-    // origin_airport would price it against a round trip from the origin.
-    for (const [key, pages] of airportTiles)
+    // origin_airport and destination_airport would price it against a round trip it is not.
+    for (const [key, pages] of airportTiles) {
+      const [origin = '', destination = ''] = key.split('|');
       for (const p of pages)
         for (const r of rowsOf(p.fixture.body).map(obj)) {
-          expect(returnAirportOf(r.link), `${key} ${str(r.departure_at)}`).toBe(key.split('|')[0]);
-          expect(r.origin_airport).toBe(key.split('|')[0]);
+          const trip = itineraryOf(r.link);
+          const where = `${key} ${str(r.departure_at)}`;
+          expect(trip, where).not.toBeNull();
+          expect([trip?.out[0], trip?.out.at(-1), trip?.back[0], trip?.back.at(-1)], where).toEqual([
+            origin,
+            destination,
+            destination,
+            origin,
+          ]);
+          expect(r.origin_airport).toBe(origin);
+          expect(r.destination_airport).toBe(destination);
         }
+    }
   });
 
   it('the first recorded LHR → JFK row becomes exactly its cell and amount (ts-006)', async () => {
@@ -4263,7 +4412,9 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     if (airport === undefined) throw new Error('WP4b recorded no LHR → JFK tile with rows');
     const first = obj(rowsOf(airport.fixture.body).find((r) => obj(r).origin_airport === 'LHR'));
     replay();
-    const d = discoveryOf(makeProvider(makeHarness()));
+    const h = makeHarness();
+    h.clock.set(asIsoDateTime(airport.fixture.recordedAt));
+    const d = discoveryOf(makeProvider(h));
     const q = monthQuery(asIata('LHR'), asIata('JFK'), param(airport.url, 'departure_at'));
     const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
     const price = typeof first.price === 'number' ? majorToMinor(first.price, 'GBP') : null;
@@ -4296,17 +4447,32 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     expect(rowOf('LON|JFK|2027-03', 'LTN')).toHaveLength(1);
     expect(rowOf('LON|JFK|2027-03', 'LHR')).toHaveLength(0);
     expect(rowOf('LHR|JFK|2027-03', 'LHR')).toHaveLength(1);
-    // second reason for the rule: under a metro query a row's origin_airport names only the outbound airport, and the
-    // recorded metro tiles hold exactly these open-jaw rows (outbound airport -> airport the return lands at)
+    // second reason for the rule: under a metro query a row's origin_airport and destination_airport name only the
+    // outbound ends, and the recorded metro tiles (TP-01...14 and the reverse tile TP-21) hold exactly these open-jaw
+    // rows: origin side (LHR>EWR returns to LCY, LGW>JFK returns to LHR) and destination side (JFK>LGW returns from LHR)
+    const endsOf = (r: Record<string, unknown>) => {
+      const trip = itineraryOf(r.link);
+      return `${str(r.origin_airport)}>${str(r.destination_airport)} via ${trip?.out.join('-')} / ${trip?.back.join('-')}`;
+    };
     const openJaw = [...tiles.entries()]
-      .filter(([key]) => key.startsWith('LON|'))
+      .filter(([key]) => key.startsWith('LON|') || key.split('|')[1] === 'LON')
       .flatMap(([, pages]) => pages.flatMap((p) => rowsOf(p.fixture.body).map(obj)))
-      .filter((r) => returnAirportOf(r.link) !== r.origin_airport)
-      .map(
-        (r) => `${str(r.origin_airport)}>${str(r.destination_airport)} returns to ${returnAirportOf(r.link)}`,
-      )
+      .filter((r) => {
+        const trip = itineraryOf(r.link);
+        return (
+          trip !== null &&
+          [trip.out[0], trip.out.at(-1), trip.back[0], trip.back.at(-1)].join() !==
+            [r.origin_airport, r.destination_airport, r.destination_airport, r.origin_airport].join()
+        );
+      })
+      .map(endsOf)
       .sort();
-    expect(openJaw).toEqual(['LGW>JFK returns to LHR', 'LHR>EWR returns to LCY', 'LHR>EWR returns to LGW']);
+    expect(openJaw).toEqual([
+      'JFK>LGW via JFK-ZRH-LGW / LHR-ZRH-JFK',
+      'LGW>JFK via LGW-KEF-JFK / JFK-KEF-LHR',
+      'LHR>EWR via LHR-FRA-EWR / EWR-FRA-LCY',
+      'LHR>EWR via LHR-KEF-EWR / EWR-KEF-LGW',
+    ]);
     // and the adapter, querying LHR, prices that cell
     replay();
     const d = discoveryOf(makeProvider(makeHarness()));
@@ -4504,7 +4670,7 @@ git add packages/providers && git commit -m "wp06: travelpayouts recorded fixtur
 
 **Interfaces:**
 
-- Consumes `httpLimitsFor`, `providersFor` (WP4b), `parseConfig` (WP0), `AirportsRepo`, `openDatabase`, `applyMigrations`, `MIGRATIONS_DIR` (WP3), and `travelpayoutsProvider`, `travelpayoutsHttpLimits`, `TRAVELPAYOUTS_PARAMS` (this brief).
+- Consumes `httpLimitsFor`, `providersFor` (WP4b), `parseConfig` (WP0), `travelpayoutsProvider`, `travelpayoutsHttpLimits`, `TRAVELPAYOUTS_PARAMS` (this brief).
 - Produces nothing new: the plan's "WP5 and WP6 each add their provider's line".
 
 - [ ] **Step 1: Write the failing test**
@@ -4674,10 +4840,11 @@ git add apps/api && git commit -m "wp06: wire the travelpayouts adapter and its 
 Applied after the first branch reviews, one commit per fix (`wp06:` messages in `git log`). The earlier tasks' code blocks above already show the final state of every file this task touched; this section is the list and the rules.
 
 - **Row age.** `searchedAt(link)` in `response.ts` reads `search_date=DDMMYYYY` from the row's own link as that day at 00:00 UTC into `RawCalendarPrice.providerObservedAt`; the speculative `found_at` read is gone. `TRAVELPAYOUTS_INFO.provenanceNote` says the row age comes from the link and the 48 hours is the fallback only, calls the cabin "not stated by the vendor, treated as economy", and no longer says "rows carry no timestamp". Replay test: every recorded row's link has a search date and the rows were found 4 to 7 days before they were fetched.
-- **Closed round trips.** `returnAirportOf(link)` reads the return airport from the link's `t` itinerary token (26 digits then an airport chain, per direction). `attributeRows` drops a covered-cell row whose return airport is not the pair's origin as a per-cell issue (`reason: 'parse'`, detail tag `return-airport-mismatch`, counted `offers-dropped`); a cell's bad-price and open-jaw rows share one issue. A row whose itinerary cannot be read is priced. Replay test: every airport-tile row returns to the queried origin; the documenting test records the three open-jaw metro rows (LGW>JFK returns to LHR, LHR>EWR returns to LCY and to LGW).
+- **Closed round trips.** `itineraryOf(link)` reads both airport chains from the link's `t` itinerary token (26 digits then an airport chain, per direction). `attributeRows` drops a covered-cell row that is not origin → destination and destination → origin (all four ends) as a per-cell issue (`reason: 'parse'`, detail tag `open-jaw`, counted `offers-dropped`); a cell's bad-price and open-jaw rows share one issue. A row whose itinerary cannot be read is priced. Replay test: every airport-tile row returns to the queried origin; the documenting test lists the four open-jaw metro rows (LGW>JFK returns to LHR, LHR>EWR returns to LCY and to LGW, and the destination-side JFK>LGW whose return leaves from LHR).
+- **Round 2 (re-review of fix round 1).** One guarded link parser serves `vendorLinkFor`, `searchedAt` and `itineraryOf`: `//` and `/\` prefixes are refused and `new URL` is wrapped, and a site-relative-looking link that cannot be read is a per-cell `parse` issue tagged `bad-link` instead of an exception. `providerObservedAt` is day-resolution: the search day at 00:00 UTC, but `fetchedAt` when the search day is the fetch day or later, and the provenance note says "found on that date, no time of day". `MAX_PAGES` is exported on the recording subpath and the record plan aliases it. `TRAVELPAYOUTS_CACHE_TTL_HOURS` above 48 is a config error in core's schema (the constructor guard stays as a backstop).
 - **A metro code reaching the adapter fails loudly.** `fetchTile` returns a `parse` tile-error with cause `airport-mismatch` when any row names another origin or destination airport, so such a request can never read every covered cell as `no_data`.
 - **Replay scope.** TP-21 (JFK to a metro destination) is metro evidence only: out of `airportTiles`, kept for the offset and month-bucketing checks. Each airport-tile replay asserts at least one price, no cell issue and no `dropped-outside-tile`. TP-19 (empty) is a hard assertion, not a skip. Every `Z` time leaves an airport at +00:00 on its date. TP-19 and TP-20 were recorded with the metro code as origin and replay by using that code as the pair origin (WP4b should re-record them on airport pairs).
-- **Decision 32 follow-ups.** `@gmt/providers/recording` (`src/recording/index.ts`, exports `majorToMinor`, `buildRequestUrl`, `PAGE_LIMIT`, type `TileParams`) is the named non-main subpath the record tool imports. `apps/api/src/tools/recordRequests.ts` uses `travelpayoutsHttpLimits` for its Travelpayouts limits and `buildRequestUrl` for `tpUrl`; `record.ts` converts diagnostics prices with `majorToMinor`. Test: `test/recording.test.ts`.
+- **Decision 32 follow-ups.** `@gmt/providers/recording` (`src/recording/index.ts`, exports `majorToMinor`, `buildRequestUrl`, `PAGE_LIMIT`, `MAX_PAGES`, type `TileParams`) is the named non-main subpath the record tool imports. `apps/api/src/tools/recordRequests.ts` uses `travelpayoutsHttpLimits` for its Travelpayouts limits and `buildRequestUrl` for `tpUrl`; `record.ts` converts diagnostics prices with `majorToMinor`. Test: `test/recording.test.ts`.
 - **Minors.** `cacheTtlSeconds` above the 48-hour window is refused at construction; the error-table tests run on the real `travelpayoutsHttpLimits` object; a `Z` `return_at` is tested; the fixture provider's parse message is pinned (`fixture /calendar: <code> [<code>]`); `providersFor` no longer takes `airports`; stale metro, rev 14, "ignored by the vendor" and "not measured yet" wording is corrected; `duration_to` and `duration_back` are documented row fields, only `gate` is not.
 - **Correction.** The brief said WP4b's wiring tests stay green; they do not, because `testEnv` always configures a Travelpayouts token. Task 6.10 updates five expectations in `apps/api/test/wiring/buildPorts.test.ts`.
 
@@ -4690,9 +4857,15 @@ import * as recording from '../src/recording/index.js';
 
 describe('@gmt/providers/recording (plan decision 32: what the record tool shares instead of copying)', () => {
   it('exports exactly the shared money conversion, the page size and the adapter URL builder', () => {
-    expect(Object.keys(recording).sort()).toEqual(['PAGE_LIMIT', 'buildRequestUrl', 'majorToMinor']);
+    expect(Object.keys(recording).sort()).toEqual([
+      'MAX_PAGES',
+      'PAGE_LIMIT',
+      'buildRequestUrl',
+      'majorToMinor',
+    ]);
     expect(recording.majorToMinor(412.55, 'GBP')).toBe(41255);
     expect(recording.PAGE_LIMIT).toBe(1000);
+    expect(recording.MAX_PAGES).toBe(3);
   });
 
   it('builds the same URL the adapter sends', () => {
@@ -4722,7 +4895,7 @@ describe('@gmt/providers/recording (plan decision 32: what the record tool share
 // barrel, because decision 30 keeps the adapter helpers package-internal; this subpath names its only consumer.
 export { majorToMinor } from '../shared/money.js'; // apps/api record tool: price diagnostics
 export { PAGE_LIMIT } from '../travelpayouts/params.js'; // apps/api record tool: the page size and short-page rule
-export { buildRequestUrl } from '../travelpayouts/provider.js'; // apps/api record tool: the one request URL
+export { buildRequestUrl, MAX_PAGES } from '../travelpayouts/provider.js'; // apps/api record tool: the one request URL and page cap
 export type { TileParams } from '../travelpayouts/tiles.js';
 ```
 
