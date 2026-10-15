@@ -596,6 +596,8 @@ export function departLocal(input: string, timeKind: 'local' | 'utc' | 'offset',
 export function itineraryHash(outbound: Segment[], inbound: Segment[]): string;
 export const MINOR_EXPONENT: Record<string, number>; export const ECB_CURRENCIES: readonly string[]; export function toGbp(amountMinor: number, currency: string, rateNano: number): number;
 export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export const SEARCH_LINK_LABEL = 'search link, not a fare link'; export function validateVendorUrl(url: string, allowlist: string[]): Booking /* https only, no userinfo, no port, host equal to or subdomain of an entry, ≤ 2048 chars; POST postData ≤ 4096 */; export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string } | null /* null for 'fixture' */;
+export function hasControlChars(s: string): boolean; export function stripControlChars(s: string, replacement = ''): string;   // src/text/control.ts: Unicode Cc set, code-point scan, no regex; WP11 wraps it for email headers
+export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;   // spec §7 providers_json default; WP7 imports it, no local copy
 export function formatPence(pence: number): string;   // src/text/money.ts: en-GB grouping, whole pounds when exact ('£412', '£1,234'), two decimals otherwise ('£412.50'); throws on non-integer or negative; the single money formatter (web and email import it)
 export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // src/constraints/labels.ts: plain-English labels; completeness test
 export interface NormaliseDeps { providerId: ProviderId; cabin: Cabin; tzOf(iata: Iata): string | null; rateFor(currency: string): { rateNano: number; rateDate: IsoDate; source: string } | null }
