@@ -23,7 +23,8 @@ function ports(env: Record<string, string>) {
 describe('buildPorts (plan "Wiring and bootstraps")', () => {
   it('under syntheticAllowed (test + :memory:) builds a migrated DB, the fixture provider and the in-process fixture host', async () => {
     const p = ports(testEnv(FIXTURE_COST));
-    expect(p.providers.map((x) => x.id)).toEqual(['fixture']);
+    // why: testEnv configures a Travelpayouts sentinel token, so WP6's provider is registered beside the fixture one.
+    expect(p.providers.map((x) => x.id)).toEqual(['fixture', 'travelpayouts']);
     expect(p.fixtureRoot).toBe(defaultFixtureRoot());
     expect(p.recorder).toBeNull();
     expect(p.repos.airports.count()).toBe(0); // table exists: migrations applied
@@ -37,7 +38,8 @@ describe('buildPorts (plan "Wiring and bootstraps")', () => {
     const env = testEnv({ NODE_ENV: 'production', DATABASE_PATH: path });
     for (let i = 0; i < 2; i++) {
       const p = ports(env);
-      expect(p.providers).toEqual([]);
+      // why: the synthetic gate is closed, so no fixture provider; the configured Travelpayouts one (WP6) remains.
+      expect(p.providers.map((x) => x.id)).toEqual(['travelpayouts']);
       expect(p.fixtureRoot).toBeNull();
       const url = new URL('http://fixture.local/calendar');
       await expect(
@@ -78,9 +80,9 @@ describe('buildPorts (plan "Wiring and bootstraps")', () => {
   ])('the synthetic gate stays closed: %s (ts-012)', (_name, extra) => {
     const dir = tempDir();
     const p = ports(testEnv({ ...extra, DATABASE_PATH: join(dir, extra.DATABASE_PATH) }));
-    expect(p.providers).toEqual([]);
+    expect(p.providers.map((x) => x.id)).toEqual(['travelpayouts']);
     expect(p.fixtureRoot).toBeNull();
-    expect(Object.keys(httpLimitsFor(p.config))).toEqual(['fx']);
+    expect(Object.keys(httpLimitsFor(p.config)).sort()).toEqual(['fx', 'travelpayouts']);
   });
 
   it('fails, closing the handle, when the migrations directory is missing', () => {
@@ -92,7 +94,7 @@ describe('buildPorts (plan "Wiring and bootstraps")', () => {
   it('httpLimitsFor at WP4b: fixture (WP4 fixtureHttpLimits at the configured cost) only under syntheticAllowed, fx always', () => {
     const config = loadConfigFromEnv(testEnv(FIXTURE_COST));
     const limits = httpLimitsFor(config);
-    expect(Object.keys(limits).sort()).toEqual(['fixture', 'fx']);
+    expect(Object.keys(limits).sort()).toEqual(['fixture', 'fx', 'travelpayouts']);
     // why: the guard refuses any reserve whose cost differs from its configured rate (WP3 rule 'cost'), so both read config
     expect(limits.fixture?.costPerCallMicroGbp).toBe(3200);
     expect(limits.fixture?.costPerCallMicroGbp).toBe(

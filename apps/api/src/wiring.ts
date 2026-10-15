@@ -38,6 +38,9 @@ import {
   fixtureProvider,
   type HttpKit,
   type HttpKitDeps,
+  TRAVELPAYOUTS_PARAMS,
+  travelpayoutsHttpLimits,
+  travelpayoutsProvider,
 } from '@gmt/providers';
 import { defaultFixtureRoot, fixtureRouter } from '@gmt/providers/fixture';
 
@@ -148,6 +151,10 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
   const cost = fixtureCost(config);
   return {
     ...(cost === null ? {} : { fixture: fixtureHttpLimits({ costPerCallMicroGbp: cost, ...timing }) }),
+    // WP6: Travelpayouts, only when configured (spec §2, §5.3).
+    ...(config.providers.travelpayouts === null
+      ? {}
+      : { travelpayouts: travelpayoutsHttpLimits(config.providers.travelpayouts.limits, config) }),
     // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects.
     // Owner: WP7's fx/refresh.ts holds the fx client; this entry moves beside it as `fxHttpLimits` (arch M-7).
     fx: {
@@ -172,6 +179,21 @@ export function providersFor(
   if (cost !== null) {
     out.push(
       fixtureProvider({ http: deps.http, log: deps.log, clock: deps.clock, config, costMicroGbp: cost }),
+    );
+  }
+  // WP6: Travelpayouts, only when configured; the cache TTL is what dedups sibling pairs' metro requests (spec §5.2).
+  const tp = config.providers.travelpayouts;
+  if (tp !== null) {
+    out.push(
+      travelpayoutsProvider({
+        http: deps.http,
+        log: deps.log,
+        clock: deps.clock,
+        token: tp.token,
+        cacheTtlSeconds: tp.limits.cacheTtlHours * 3600,
+        paramsAllowlist: TRAVELPAYOUTS_PARAMS,
+        airports: deps.airports,
+      }),
     );
   }
   return out;
