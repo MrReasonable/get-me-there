@@ -117,6 +117,17 @@ describe('itinerary identity (spec §6.4)', () => {
       expect(reasonOf(() => canonicalFlightNumber(n))).toBe('unmappable-carrier');
   });
 
+  it('canonicalCarrier trims and upper-cases; every rejection names the offending input', () => {
+    expect(canonicalCarrier('  vs ')).toBe('VS');
+    expect(() => canonicalCarrier('Virgin Atlantic')).toThrow('carrier "Virgin Atlantic"');
+    expect(() => canonicalFlightNumber('VS938A')).toThrow('flight number "VS938A"');
+    expect(() => canonicalFlightNumber('0')).toThrow('flight number "0"');
+    expect(() => canonicalFlightNumber(0)).toThrow('flight number 0');
+    expect(() => canonicalFlightNumber(-1)).toThrow('flight number -1');
+    expect(() => canonicalFlightNumber(1.5)).toThrow('flight number 1.5');
+    expect(canonicalFlightNumber(1)).toBe(1);
+  });
+
   it('a designator prefix naming another airline is rejected, not re-labelled', () => {
     expect(() => canonicalFlightNumber('BA 938', 'VS')).toThrow(/does not belong to VS/);
   });
