@@ -23,6 +23,9 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'fixtureHttpLimits',
       'RecorderRefusedError',
       'ParamsNotAllowedError',
+      // WP5: the SearchApi adapter's provider and limits (plan decision 30)
+      'searchApiProvider',
+      'searchApiHttpLimits',
       'travelpayoutsProvider', // WP6: apps/api providersFor
       'travelpayoutsHttpLimits', // WP6: apps/api httpLimitsFor
       'withContentHash',
@@ -32,6 +35,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       expect(typeof main[name], name).toBe('function');
     }
     expect(main.CREDENTIAL_HEADERS).toBeInstanceOf(Set);
+    expect(main.SEARCHAPI_PARAMS).toMatchObject({ provider: 'searchapi' });
     // WP6: the recorded-allowlist constant, for apps/api providersFor
     expect(main.TRAVELPAYOUTS_PARAMS).toMatchObject({ provider: 'travelpayouts' });
     for (const name of [
@@ -46,6 +50,11 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'parseError',
       'parseVendor',
       'NoteCounter',
+      // WP5: SearchApi internals stay module-local (plan decision 30)
+      'classifySearchApiError',
+      'planRectangles',
+      'SEARCHAPI_HOST',
+      'SEARCHAPI_DISCOVERY_INFO',
       // WP6: adapter constants stay internal too
       'TRAVELPAYOUTS_INFO',
       'TRAVELPAYOUTS_HOST',
