@@ -177,6 +177,23 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
     );
   });
 
+  // The window is judged in whole minutes (fix round 1): 336 h 30 min is outside 336 h even though it
+  // floors to 336 h; 335 h 59 min is inside.
+  it.each([
+    [335.99, false],
+    [336, false],
+    [336.02, true],
+    [336.5, true],
+  ] as const)('default window, previous fetched %f h earlier → isNew %s', (gap, isNew) => {
+    const fetchedAt = hoursAgo(2);
+    const c = calendar({
+      pricePence: 38_000,
+      provenance: { fetchedAt, maxAgeHours: 168 },
+      previous: { pricePence: 45_000, fetchedAt: hoursBefore(fetchedAt, gap) },
+    });
+    expect(run([drop], [c])[0]?.isNew).toBe(isNew);
+  });
+
   it('absent-then-present is "first price seen for this cell", never a drop; absolute rules still apply; new is never suppressed', () => {
     const c = calendar({ pricePence: 38_000, previous: null });
     expect(

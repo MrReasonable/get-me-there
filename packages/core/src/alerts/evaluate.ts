@@ -58,10 +58,13 @@ function judge(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): Judge
   if (c.basis === 'calendar') {
     // why (sparse-cache rule, spec §6.8): a calendar price compares only with a previous price for
     // the same provider, cabin and cell fetched within 2 × discoveryRefreshHours of this one
-    // (inclusive, whole hours). Verified drops have no window (spec), but every drop reason
+    // (inclusive, whole minutes). Verified drops have no window (spec), but every drop reason
     // states the previous price's age, so an old comparison reads as old (review pft-003).
     const window = 2 * (ctx.discoveryRefreshHours[provenance.providerId] ?? DEFAULT_DISCOVERY_REFRESH_HOURS);
-    if (gap > window) {
+    // why: the comparison is in whole minutes, not the rounded-down hours of the reason text, so a
+    // price 336 h 30 min older is outside a 336 h window (spec §6.8: "within 2 × refresh").
+    const gapMinutes = Math.floor((Date.parse(provenance.fetchedAt) - Date.parse(prev.fetchedAt)) / 60_000);
+    if (gapMinutes > window * 60) {
       return {
         reason: `last price ${formatPence(prev.pricePence)} was fetched ${gap}h earlier, outside the ${window}h comparison window; not compared`,
         isNew: true,
