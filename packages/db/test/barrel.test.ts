@@ -67,6 +67,48 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       expect(db).not.toHaveProperty(internal);
   });
 
+  it('exports contract names only (arch-M9): exactly the contract values at runtime, and no internal type', () => {
+    expect(Object.keys(db).sort()).toEqual(
+      [
+        'AIRPORTS_DATA_DIR',
+        'AIRPORTS_MIN_ROWS',
+        'AirportsRepo',
+        'AlertsRepo',
+        'AppLock',
+        'CalendarPricesRepo',
+        'CellsRepo',
+        'DefinitionsRepo',
+        'ExecutionsRepo',
+        'FxRepo',
+        'HEARTBEAT_INTERVAL_MS',
+        'ItinerariesRepo',
+        'LOCK_STALE_AFTER_MS',
+        'LedgerRepo',
+        'MIGRATIONS_DIR',
+        'NotificationsRepo',
+        'RoutePriceHistoryRepo',
+        'RowCorrupt',
+        'RowRejected',
+        'SqliteBudgetGuard',
+        'SqliteResponseCache',
+        'applyMigrations',
+        'backupDatabase',
+        'budgetConfigFromConfig',
+        'createRepos',
+        'effectiveCallCap',
+        'loadAirportsDataset',
+        'openDatabase',
+        'pendingMigrations',
+        'runMaintenance',
+        'sanityCheckAirports',
+        'seedAirports',
+      ].sort(),
+    );
+    // @ts-expect-error ProviderBudget is the guard's internal entry type, not part of the contract
+    const leaked = (x?: db.ProviderBudget) => x;
+    expect(leaked()).toBeUndefined();
+  });
+
   it('createRepos builds every repository', () => {
     const repos = db.createRepos(freshDb(), fixedClock(T0), { allowSynthetic: false });
     expect(Object.keys(repos).sort()).toEqual([
