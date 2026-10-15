@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+
 /** Plain-object guard for vendor and fixture JSON. */
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -24,4 +26,21 @@ export function byPair(a: readonly [string, string], b: readonly [string, string
 /** The `code` of a Node system error, without casting. */
 export function errnoCode(e: unknown): string | undefined {
   return e instanceof Error && 'code' in e && typeof e.code === 'string' ? e.code : undefined;
+}
+
+/** One line naming every failed field (`options.0.carrier: Invalid string`), so refusals point at the field. */
+export function zodReason(error: z.ZodError): string {
+  return error.issues
+    .map((i) => `${i.path.length > 0 ? i.path.join('.') : '(root)'}: ${i.message}`)
+    .join('; ');
+}
+
+/**
+ * Parses untrusted JSON with a zod schema (core's pattern; brands come from the schema, never a cast) and throws
+ * `<where>: <field>: <problem>` on failure. Used by the fixture tree, recorded-fixture and allowlist loaders.
+ */
+export function parseOrThrow<S extends z.ZodType>(schema: S, value: unknown, where: string): z.output<S> {
+  const r = schema.safeParse(value);
+  if (!r.success) throw new Error(`${where}: ${zodReason(r.error)}`);
+  return r.data;
 }

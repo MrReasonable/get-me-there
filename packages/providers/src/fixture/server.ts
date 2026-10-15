@@ -7,13 +7,13 @@ import {
   type SyntheticGateInput,
   syntheticAllowed,
 } from '@gmt/core';
-import { isRecord } from '../util.js';
 import { RELEASE_PATH, SCENARIO_HEADER, SCENARIO_PATH } from './constants.js';
 import {
   type FixtureResponse,
   type FixtureRule,
   parseFixtureResponse,
   parseFixtureRules,
+  parseReleaseBody,
 } from './scenario.js';
 import {
   type CalendarPairFile,
@@ -413,14 +413,11 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
     }
     if (url.pathname === RELEASE_PATH) {
       if (request.method !== 'POST') return refuse(405, 'use POST');
-      const body = await readJson(request);
-      if (!isRecord(body) || typeof body.id !== 'string' || body.id === '')
-        return refuse(400, 'body must be { id, respond? }');
-      const respond =
-        body.respond === undefined ? { kind: 'normal' as const } : parseFixtureResponse(body.respond);
-      if (typeof respond === 'string') return refuse(400, respond);
-      const waiting = held.get(body.id) ?? [];
-      held.delete(body.id);
+      const body = parseReleaseBody(await readJson(request));
+      if (typeof body === 'string') return refuse(400, body);
+      const { id, respond } = body;
+      const waiting = held.get(id) ?? [];
+      held.delete(id);
       for (const w of waiting) w.settle(render(respond, w.url, w.request));
       return json({ synthetic: true, released: waiting.length });
     }
