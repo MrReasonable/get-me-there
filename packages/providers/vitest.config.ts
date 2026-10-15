@@ -6,7 +6,8 @@ export default defineConfig({
   resolve: { alias: gmtAliases(new URL('../..', import.meta.url).pathname) },
   test: {
     name: 'providers',
-    include: ['test/**/*.test.ts', 'test/**/*.test.ts'],
+    include: ['test/**/*.test.ts'],
+    setupFiles: ['test/support/setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts', 'src/**/*.ts'],

@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "currency": "GBP",
+  "baseMinor": 43500,
+  "weekdayStepMinor": 1200,
+  "perNightMinor": 950,
+  "noFaresNights": [21],
+  "noDataNights": []
+}

@@ -1,0 +1,23 @@
+{
+  "synthetic": true,
+  "options": [
+    {
+      "seller": "Synthetic Air",
+      "carrier": "ZZ",
+      "outbound": { "flightNumber": "201", "depart": "09:30", "arrive": "12:40", "arriveDayOffset": 0 },
+      "inbound": { "flightNumber": "202", "depart": "18:30", "arrive": "06:40", "arriveDayOffset": 1 },
+      "priceDeltaMinor": 2500,
+      "cabinBagIncluded": true,
+      "checkedBags": 1
+    },
+    {
+      "seller": "Synthetic Travel",
+      "carrier": "ZX",
+      "outbound": { "flightNumber": "203", "depart": "13:15", "arrive": "16:20", "arriveDayOffset": 0 },
+      "inbound": { "flightNumber": "204", "depart": "21:45", "arrive": "09:55", "arriveDayOffset": 1 },
+      "priceDeltaMinor": 0,
+      "cabinBagIncluded": false,
+      "checkedBags": 0
+    }
+  ]
+}
