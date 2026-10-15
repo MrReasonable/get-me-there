@@ -294,6 +294,20 @@ class PlanRun {
     return r;
   }
 
+  /**
+   * Required calls run so far that did not answer as planned (a page counts for its tile). why: once one has failed,
+   * the run must be repeated and its session cannot be committed, so no SearchApi credit is spent on it (cost I-1).
+   */
+  private requiredNotAsPlanned(): string[] {
+    const planned = new Map(this.plan.map((p) => [p.id, p] as const));
+    return this.calls
+      .filter((c) => {
+        const p = planned.get(c.id.replace(/p\d+$/, ''));
+        return p?.required === true && !(typeof c.status === 'number' && p.expect.includes(c.status));
+      })
+      .map((c) => c.id);
+  }
+
   private skip(call: PlannedCall, detail: string): void {
     this.calls.push({
       id: call.id,
@@ -312,12 +326,23 @@ class PlanRun {
     const tpHeaders = (token: string): Record<string, string> => ({ 'X-Access-Token': token });
     const saHeaders = (key: string): Record<string, string> => ({ Authorization: `Bearer ${key}` });
     let calendarAnswered = false;
+    let doomed: string | null = null;
     for (const call of this.plan) {
       if (this.ctx.signal.aborted) {
         this.skip(call, 'aborted before send');
         continue;
       }
       const s = call.spec;
+      if (s.kind === 'sa-calendar') {
+        // why: SA-02 is the first billed call; a run already doomed spends nothing more (cost I-1, plan decision 30)
+        const failed = this.requiredNotAsPlanned();
+        if (failed.length > 0)
+          doomed = `skipped: required call(s) ${failed.join(', ')} not as planned; the run must be repeated`;
+      }
+      if (doomed !== null && s.kind.startsWith('sa-') && s.kind !== 'sa-auth') {
+        this.skip(call, doomed);
+        continue;
+      }
       switch (s.kind) {
         case 'tp-tile': {
           const tile = this.tileIndex++;

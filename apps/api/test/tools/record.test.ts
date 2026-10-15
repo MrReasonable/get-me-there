@@ -260,6 +260,40 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     });
   });
 
+  it('a required call not as planned before the first billed SearchApi call skips SA-02…SA-06: nothing is spent on a run that must be repeated (cost I-1, plan decision 30)', async () => {
+    // why: a stale Travelpayouts token makes every tile answer 401; the run is doomed before any credit is at stake
+    const run = await runRecording({
+      env: { TRAVELPAYOUTS_TOKEN: 'test-stale-travelpayouts-token-0123456789' },
+    });
+    const tiles = Array.from({ length: 18 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`);
+    const detail = `skipped: required call(s) ${tiles.join(', ')} not as planned; the run must be repeated`;
+    const sa = run.summary.calls.filter((c) => c.providerId === 'searchapi');
+    expect(sa.map((c) => [c.id, c.status, c.detail])).toEqual([
+      ['SA-01', 401, 'auth'],
+      ...['SA-02', 'SA-03', 'SA-04', 'SA-05', 'SA-06'].map((id) => [id, 'skipped', detail]),
+    ]);
+    expect(run.seen.sa).toHaveLength(1);
+    expect(run.summary.creditsUsed).toBe(0);
+  });
+
+  it('a required SearchApi probe not as planned (SA-01 timing out) also stops the run before SA-02 (cost I-1)', async () => {
+    const run = await runRecordingInFakeTime({
+      env: { REQUEST_TIMEOUT_SECONDS: '1' },
+      vendors: {
+        failOn: (u) =>
+          u.searchParams.get('engine') === 'google_flights' &&
+          u.searchParams.get('outbound_date') === '2027-03-10'
+            ? 'hang'
+            : undefined,
+      },
+    });
+    expect(run.summary.calls.find((c) => c.id === 'SA-02')).toMatchObject({
+      status: 'skipped',
+      detail: 'skipped: required call(s) SA-01 not as planned; the run must be repeated',
+    });
+    expect(run.seen.sa).toHaveLength(1);
+  });
+
   it('a step 3 answering 200 with no booking option ends completed with "chain incomplete" (prov-wp04b-r2-004)', async () => {
     const run = await runRecording({ vendors: { step3Empty: true } });
     expect(run.summary.calls.find((c) => c.id === 'SA-06')?.status).toBe(200);
@@ -340,7 +374,8 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       env: { REQUEST_TIMEOUT_SECONDS: '1' },
       vendors: {
         failOn: (u) =>
-          u.searchParams.get('departure_at') === '2028-03'
+          // why: the best-effort TP-19, so a required call stays as planned and SA-04 is still sent (cost I-1)
+          u.searchParams.get('departure_at') === '2028-02'
             ? 'network'
             : u.searchParams.get('engine') === 'google_flights' &&
                 u.searchParams.get('outbound_date') === '2027-03-02' &&
@@ -349,7 +384,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
               : undefined,
       },
     });
-    expect(run.summary.calls.find((c) => c.id === 'TP-20')).toMatchObject({
+    expect(run.summary.calls.find((c) => c.id === 'TP-19')).toMatchObject({
       status: 'no-response',
       detail: expect.stringContaining('NOT counted'),
     });

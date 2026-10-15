@@ -39,7 +39,7 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 - **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. A live `--out` run creates `DIR/fixtures/recorded` before the hidden execution opens, and the recorder is built before it too, so a bad root never leaves a `running` execution behind (prov-wp04b-r3-003). `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
 - The recording run on the worked example through the real http-kit + recorder + guard, under a hidden soft-deleted definition's execution with `trigger: 'tool'`, against the operator's configured `DATABASE_PATH` (the production ledger, spec §7). It records:
   - 20 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe and a 401 probe on a month no success call uses;
-  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1`, `travel_class` and `separate_tickets=1` (plan decisions 24 and 29: the vendor documents it for both engines); google_flights also sends `sort_by=price`; no `stops` (plan decision 24). The calendar rectangle is the production tiling shape for the worked band, 9 outbound days × a 20-day return span = 180 (spec rev 15 §5.2, plan decision 29). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004).
+  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1`, `travel_class` and `separate_tickets=1` (plan decisions 24 and 29: the vendor documents it for both engines); google_flights also sends `sort_by=price`; no `stops` (plan decision 24). The calendar rectangle is the production tiling shape for the worked band, 9 outbound days × a 20-day return span = 180 (spec rev 15 §5.2, plan decision 29). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004); and when any required call before the first billed one (TP-01…TP-18, TP-20, SA-01) did not answer as planned, SA-02…SA-06 are all skipped and no credit is spent (cost I-1, plan decision 30).
 
   No 429 is attempted (plan decision 20): WP5 maps rate limits from a labelled synthetic fixture and `rateLimitFallbackWaitSeconds`, and SearchApi's Retry-After behaviour stays unverified against the vendor.
 - Spend control before any live call (exit 65, `EXIT.spendRefused`): the run refuses when the SearchApi credits already ledgered to `trigger: 'tool'` executions in the provider's budget window, plus this run's worst case, exceed `--budget`, unless `--confirm-rerun` is passed (plan decision 20); and it refuses, whatever the flags, when the SearchApi window or the Travelpayouts month has less room than the run's worst case (cost-wp4b-r2-001). Travelpayouts paging stops at 3 pages per tile, so the worst case is finite (cost-wp4b-r2-002). The dry run prints every figure and verdict.
@@ -372,7 +372,7 @@ The metro comes from the airports table, which the tool seeds after migration wh
 **Why these calls:**
 
 - **TP-01…14** are a full worked-example scan, spec §5.2's "2 origins sharing LON × 2 destinations × 7 months = 14", so WP13 can replay a whole discovery. **TP-15…18** give WP6 airport-origin tiles for the no-shared-metro path. **TP-19** looks for the empty success envelope WP6's first failing test needs; it is best-effort and outside `requiredOk`. **TP-20** records the 401 body on a request key no success call shares.
-- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from, in the exact shape WP5's tiler sends for the worked band (9 × 20 = 180; plan decision 29); **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004).
+- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from, in the exact shape WP5's tiler sends for the worked band (9 × 20 = 180; plan decision 29); **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004). For the same reason, a required call before SA-02 that did not answer as planned (a stale Travelpayouts token, a Travelpayouts outage, a timed-out SA-01) skips SA-02 to SA-06 with `skipped: required call(s) <ids> not as planned; the run must be repeated` (cost I-1, plan decision 30).
 - **No 429 attempt** (plan decision 20). The trial's vendor limit is 20 % of the plan per hour and the run makes 6 SearchApi calls, so a 429 cannot be induced honestly; WP5 maps 429 with a synthetic labelled fixture and `rateLimitFallbackWaitSeconds`, and records that Retry-After behaviour is unverified against the vendor.
 
 **Spend checks before the first call (exit 65).** Every invocation creates its own hidden execution. Before a live call the tool sums the SearchApi credits already ledgered to `trigger: 'tool'` executions inside the provider's budget window (the lifetime window on the trial plan, the billing month on 40usd; the status list is exhaustive at compile time) and refuses when that sum plus this run's worst case exceeds `--budget`, unless `--confirm-rerun` is passed. Separately, it refuses whenever the SearchApi window or the Travelpayouts month has less room than the run's worst case: a run that cannot finish never starts (cost-wp4b-r2-001), and `--confirm-rerun` does not lift that. The operator rule in Task 12b: after any failed live run, stop and ask before re-running.
@@ -3224,6 +3224,40 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     });
   });
 
+  it('a required call not as planned before the first billed SearchApi call skips SA-02…SA-06: nothing is spent on a run that must be repeated (cost I-1, plan decision 30)', async () => {
+    // why: a stale Travelpayouts token makes every tile answer 401; the run is doomed before any credit is at stake
+    const run = await runRecording({
+      env: { TRAVELPAYOUTS_TOKEN: 'test-stale-travelpayouts-token-0123456789' },
+    });
+    const tiles = Array.from({ length: 18 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`);
+    const detail = `skipped: required call(s) ${tiles.join(', ')} not as planned; the run must be repeated`;
+    const sa = run.summary.calls.filter((c) => c.providerId === 'searchapi');
+    expect(sa.map((c) => [c.id, c.status, c.detail])).toEqual([
+      ['SA-01', 401, 'auth'],
+      ...['SA-02', 'SA-03', 'SA-04', 'SA-05', 'SA-06'].map((id) => [id, 'skipped', detail]),
+    ]);
+    expect(run.seen.sa).toHaveLength(1);
+    expect(run.summary.creditsUsed).toBe(0);
+  });
+
+  it('a required SearchApi probe not as planned (SA-01 timing out) also stops the run before SA-02 (cost I-1)', async () => {
+    const run = await runRecordingInFakeTime({
+      env: { REQUEST_TIMEOUT_SECONDS: '1' },
+      vendors: {
+        failOn: (u) =>
+          u.searchParams.get('engine') === 'google_flights' &&
+          u.searchParams.get('outbound_date') === '2027-03-10'
+            ? 'hang'
+            : undefined,
+      },
+    });
+    expect(run.summary.calls.find((c) => c.id === 'SA-02')).toMatchObject({
+      status: 'skipped',
+      detail: 'skipped: required call(s) SA-01 not as planned; the run must be repeated',
+    });
+    expect(run.seen.sa).toHaveLength(1);
+  });
+
   it('a step 3 answering 200 with no booking option ends completed with "chain incomplete" (prov-wp04b-r2-004)', async () => {
     const run = await runRecording({ vendors: { step3Empty: true } });
     expect(run.summary.calls.find((c) => c.id === 'SA-06')?.status).toBe(200);
@@ -3304,7 +3338,8 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       env: { REQUEST_TIMEOUT_SECONDS: '1' },
       vendors: {
         failOn: (u) =>
-          u.searchParams.get('departure_at') === '2028-03'
+          // why: the best-effort TP-19, so a required call stays as planned and SA-04 is still sent (cost I-1)
+          u.searchParams.get('departure_at') === '2028-02'
             ? 'network'
             : u.searchParams.get('engine') === 'google_flights' &&
                 u.searchParams.get('outbound_date') === '2027-03-02' &&
@@ -3313,7 +3348,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
               : undefined,
       },
     });
-    expect(run.summary.calls.find((c) => c.id === 'TP-20')).toMatchObject({
+    expect(run.summary.calls.find((c) => c.id === 'TP-19')).toMatchObject({
       status: 'no-response',
       detail: expect.stringContaining('NOT counted'),
     });
@@ -4410,6 +4445,20 @@ class PlanRun {
     return r;
   }
 
+  /**
+   * Required calls run so far that did not answer as planned (a page counts for its tile). why: once one has failed,
+   * the run must be repeated and its session cannot be committed, so no SearchApi credit is spent on it (cost I-1).
+   */
+  private requiredNotAsPlanned(): string[] {
+    const planned = new Map(this.plan.map((p) => [p.id, p] as const));
+    return this.calls
+      .filter((c) => {
+        const p = planned.get(c.id.replace(/p\d+$/, ''));
+        return p?.required === true && !(typeof c.status === 'number' && p.expect.includes(c.status));
+      })
+      .map((c) => c.id);
+  }
+
   private skip(call: PlannedCall, detail: string): void {
     this.calls.push({
       id: call.id,
@@ -4428,12 +4477,23 @@ class PlanRun {
     const tpHeaders = (token: string): Record<string, string> => ({ 'X-Access-Token': token });
     const saHeaders = (key: string): Record<string, string> => ({ Authorization: `Bearer ${key}` });
     let calendarAnswered = false;
+    let doomed: string | null = null;
     for (const call of this.plan) {
       if (this.ctx.signal.aborted) {
         this.skip(call, 'aborted before send');
         continue;
       }
       const s = call.spec;
+      if (s.kind === 'sa-calendar') {
+        // why: SA-02 is the first billed call; a run already doomed spends nothing more (cost I-1, plan decision 30)
+        const failed = this.requiredNotAsPlanned();
+        if (failed.length > 0)
+          doomed = `skipped: required call(s) ${failed.join(', ')} not as planned; the run must be repeated`;
+      }
+      if (doomed !== null && s.kind.startsWith('sa-') && s.kind !== 'sa-auth') {
+        this.skip(call, doomed);
+        continue;
+      }
       switch (s.kind) {
         case 'tp-tile': {
           const tile = this.tileIndex++;
@@ -4644,7 +4704,7 @@ export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext):
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/record.test.ts`
-Expected: 23 passed. Two failures would mean the merged WP3 or WP4 differs from section 4, so raise a finding rather than adapt the test: a missing 400 or 401 file (the recorder does not record every attempt), or a `departure_token` request in the budget test (the guard does not read the snapshot budget).
+Expected: 25 passed. Two failures would mean the merged WP3 or WP4 differs from section 4, so raise a finding rather than adapt the test: a missing 400 or 401 file (the recorder does not record every attempt), or a `departure_token` request in the budget test (the guard does not read the snapshot budget).
 
 - [ ] **Step 5: Commit**
 
