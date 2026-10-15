@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Clock, type IsoDateTime, isoDateTimeSchema, type Secret } from '@gmt/core';
-import { errnoCode, isRecord, parseMaybeJson } from '../util.js';
+import { z } from 'zod';
+import { errnoCode, isRecord, parseMaybeJson, zodReason } from '../util.js';
 import { CREDENTIAL_HEADERS } from './cacheKey.js';
 import { containsSecret, stripUrl } from './scrub.js';
 import type { FixtureRecorder } from './types.js';
@@ -279,56 +280,53 @@ export function loadRecordedJson(
   return json;
 }
 
-function stringRecord(v: unknown): Record<string, string> | null {
-  if (!isRecord(v)) return null;
-  const out: Record<string, string> = {};
-  for (const [k, x] of Object.entries(v)) {
-    if (typeof x !== 'string') return null;
-    out[k] = x;
-  }
-  return out;
-}
+const nonBlank = (what: string) =>
+  z.string().refine((v) => v.trim() !== '', { message: `${what} is missing or empty` });
+
+/** The pinned RecordedFixture shape (plan http-kit block), checked field by field by zod (prov-002). */
+const recordedFixtureSchema = z.object({
+  recordedAt: isoDateTimeSchema,
+  recordedBy: nonBlank('recordedBy'),
+  providerId: z.string().min(1),
+  endpointPath: z.string().regex(SAFE_PATH),
+  request: z.object({
+    method: z.string(),
+    url: z.string(),
+    headers: z.record(z.string(), z.string()),
+    body: z.string().nullable(),
+  }),
+  status: z.number().int(),
+  body: z.unknown(),
+  placeholders: z.record(z.string(), z.string()),
+  session: z.string().min(1),
+  contentSha256: z.string(),
+});
 
 /** Loads one recorded HTTP attempt with every field and its location checked (prov-002); built field by field. */
 export function loadRecordedFixture(path: string, root: string = defaultRecordedRoot()): RecordedFixture {
   const json = loadRecordedJson(path, root);
   const fail = (why: string): Error => new Error(`refusing ${path}: ${why}`);
-  const recordedAt = isoDateTimeSchema.safeParse(json.recordedAt);
-  if (!recordedAt.success) throw fail('recordedAt is not a toISOString() instant');
-  const { recordedBy, providerId, endpointPath, status, request, contentSha256, session } = json;
-  if (typeof session !== 'string' || session === '') throw fail('session is missing');
-  if (typeof recordedBy !== 'string' || recordedBy.trim() === '')
-    throw fail('recordedBy is missing or empty');
-  if (typeof providerId !== 'string' || typeof endpointPath !== 'string' || !SAFE_PATH.test(endpointPath))
-    throw fail('providerId or endpointPath is missing');
-  if (typeof status !== 'number' || !Number.isInteger(status)) throw fail('status must be an integer');
-  if (typeof contentSha256 !== 'string') throw fail('contentSha256 is missing');
-  if (!isRecord(request)) throw fail('request is missing');
-  const { method, url } = request;
-  const requestBody = request.body;
-  if (typeof method !== 'string' || typeof url !== 'string')
-    throw fail('request.method and request.url must be strings');
-  if (!(requestBody === null || typeof requestBody === 'string'))
-    throw fail('request.body must be a string or null');
-  const headers = stringRecord(request.headers);
-  if (headers === null) throw fail('request.headers must map names to strings');
-  const placeholders = stringRecord(json.placeholders);
-  if (placeholders === null) throw fail('placeholders must map placeholders to token keys');
+  const parsed = recordedFixtureSchema.safeParse(json);
+  if (!parsed.success) throw fail(zodReason(parsed.error));
+  const { recordedAt, recordedBy, providerId, endpointPath, request, status, placeholders, session } =
+    parsed.data;
+  const { contentSha256 } = parsed.data;
   const parts = relative(realpathSync(resolve(root)), realpathSync(path)).split(sep);
   const [dirProvider, dirEndpoint, fileName = ''] = parts;
   if (parts.length !== 3 || dirProvider !== providerId || dirEndpoint !== endpointPath.replaceAll('/', '_')) {
     throw fail('the file is not under <root>/<providerId>/<endpointPath with / → _>/');
   }
   const name = FILE_NAME.exec(fileName);
-  if (name === null || name[1] !== recordedAt.data.slice(0, 10) || name[2] !== contentSha256.slice(0, 12)) {
+  if (name === null || name[1] !== recordedAt.slice(0, 10) || name[2] !== contentSha256.slice(0, 12)) {
     throw fail('the file name does not match recordedAt and contentSha256');
   }
+  // why: built explicitly so `body` stays a required field of the contract whatever zod infers for z.unknown().
   return {
-    recordedAt: recordedAt.data,
+    recordedAt,
     recordedBy,
     providerId,
     endpointPath,
-    request: { method, url, headers, body: requestBody },
+    request,
     status,
     body: json.body,
     placeholders,
