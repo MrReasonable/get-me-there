@@ -2,7 +2,7 @@ import { formatPence } from '../text/money.js';
 import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { Cabin, ProviderId } from '../types/provenance.js';
-import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf, type Suppression } from './dedup.js';
+import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf, type Suppression, span } from './dedup.js';
 
 /**
  * Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. The one
@@ -69,7 +69,7 @@ function judge(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): Judge
     const gapMinutes = Math.floor((Date.parse(provenance.fetchedAt) - Date.parse(prev.fetchedAt)) / 60_000);
     if (gapMinutes > window * 60) {
       return {
-        reason: `last price ${formatPence(prev.pricePence)} was fetched ${gap}h earlier, outside the ${window}h comparison window; not compared`,
+        reason: `last price ${formatPence(prev.pricePence)} was fetched ${span(gap)} earlier, outside the ${span(window)} comparison window; not compared`,
         isNew: true,
       };
     }
@@ -83,7 +83,7 @@ function judge(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): Judge
   if (!fires) return null;
   const pct = Math.floor((drop * 100) / prev.pricePence);
   return {
-    reason: `down ${formatPence(drop)} (${pct}%) from ${formatPence(prev.pricePence)} fetched ${gap}h earlier`,
+    reason: `down ${formatPence(drop)} (${pct}%) from ${formatPence(prev.pricePence)} fetched ${span(gap)} earlier`,
     isNew: false,
   };
 }

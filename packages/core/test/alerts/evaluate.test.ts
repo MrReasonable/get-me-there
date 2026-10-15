@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { span } from '../../src/alerts/dedup.js';
 import { evaluateAlertRules } from '../../src/alerts/evaluate.js';
 import type { AlertCandidate, AlertRule, PriorFiring } from '../../src/types/alerts.js';
 import { CTX, calendar, cell, hoursAgo, hoursBefore, prior, rule, verified } from '../helpers/alerts.js';
@@ -74,7 +75,7 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
       previous: { pricePence: 45_000, fetchedAt: hoursAgo(205) },
     });
     expect(run([rule({ type: 'dropAbs', thresholdPence: 4_500 })], [c])[0]?.reason).toBe(
-      'down £45 (10%) from £450 fetched 200h earlier',
+      'down £45 (10%) from £450 fetched 8d (200h) earlier',
     );
     expect(run([rule({ type: 'dropAbs', thresholdPence: 4_501 })], [c])).toEqual([]);
     expect(run([rule({ type: 'dropPct', thresholdPence: null, pct: 10 })], [c])).toHaveLength(1);
@@ -92,7 +93,7 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
     });
     expect(run([rule({ type: 'dropAbs', thresholdPence: 1_000 })], [c])[0]).toMatchObject({
       isNew: false,
-      reason: 'down £50 (11%) from £450 fetched 400h earlier',
+      reason: 'down £50 (11%) from £450 fetched 2w (400h) earlier',
     });
   });
 
@@ -104,7 +105,7 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
 
   it('cooldown: a suppressed firing is returned with its reason; without prior, suppressed is null', () => {
     expect(run([rule()], [verified()], [prior()])[0]?.suppressed).toEqual({
-      reason: 'same price band alerted 24h ago (cooldown 336h)',
+      reason: 'same price band alerted 24h ago; cooldown 2w (336h)',
     });
     expect(run([rule()], [verified()], [])[0]?.suppressed).toBeNull();
   });
@@ -172,8 +173,8 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
     expect(f?.isNew).toBe(isNew);
     expect(f?.reason).toBe(
       isNew
-        ? `last price £450 was fetched ${gap}h earlier, outside the ${window}h comparison window; not compared`
-        : `down £70 (15%) from £450 fetched ${gap}h earlier`,
+        ? `last price £450 was fetched ${span(gap)} earlier, outside the ${span(window)} comparison window; not compared`
+        : `down £70 (15%) from £450 fetched ${span(gap)} earlier`,
     );
   });
 
@@ -216,7 +217,7 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
     const c = calendar({ pricePence: 38_000, previous: { pricePence: 45_000, fetchedAt: hoursAgo(-5) } });
     expect(run([drop], [c])[0]).toMatchObject({
       isNew: false,
-      reason: 'down £70 (15%) from £450 fetched 0h earlier',
+      reason: 'down £70 (15%) from £450 fetched under 1h earlier',
     });
   });
 

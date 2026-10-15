@@ -134,7 +134,7 @@ describe('buildDigest (spec §6.8)', () => {
       unverified: [],
       previousPricePence: 45_000,
       fetchGapHours: 48,
-      firingReason: 'down £70 (15%) from £450 fetched 48h earlier',
+      firingReason: 'down £70 (15%) from £450 fetched 2d (48h) earlier',
       booking: { kind: 'none' },
       bookingExpiresAt: null,
       outbound: null,
@@ -184,7 +184,7 @@ describe('buildDigest (spec §6.8)', () => {
         true,
         50_000,
         498,
-        'last price £500 was fetched 498h earlier, outside the 336h comparison window; not compared',
+        'last price £500 was fetched 2w (498h) earlier, outside the 2w (336h) comparison window; not compared',
       ],
     ]);
     expect(d?.restCount).toBe(0);

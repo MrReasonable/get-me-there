@@ -1,4 +1,4 @@
-import { effectiveAge } from '../labels/age.js';
+import { effectiveAge, formatDuration } from '../labels/age.js';
 import { formatPence } from '../text/money.js';
 import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
 import { cellKeyString } from '../types/definition.js';
@@ -13,6 +13,15 @@ export const MIN_REPEAT_DROP_PERCENT = 5;
 /** Whole hours from `at` to `now`, clamped at 0 through core's `effectiveAge` (plan review focus 2). */
 export function hoursSince(at: IsoDateTime, now: IsoDateTime): number {
   return effectiveAge({ fetchedAt: at, maxAgeHours: 'unknown' }, now).fetchedHours;
+}
+
+/**
+ * A whole-hour span as the operator reads it, in the same units as core's age labels (spec §3):
+ * "under 1h", "30h", or "14d (337h)" once past 48 h, so the exact figure stays visible.
+ */
+export function span(hours: number): string {
+  if (hours < 1) return 'under 1h';
+  return hours < 48 ? `${hours}h` : `${formatDuration(hours)} (${hours}h)`;
 }
 
 /** The candidate's price and provenance, whichever basis it is on. */
@@ -58,7 +67,10 @@ export function isSuppressed(
   const same = recent.find((p) => p.dedupKey === f.dedupKey);
   if (same !== undefined) {
     const age = hoursSince(same.firedAt, now);
-    return { suppressed: true, reason: `same price band alerted ${age}h ago (cooldown ${cooldownHours}h)` };
+    return {
+      suppressed: true,
+      reason: `same price band alerted ${span(age)} ago; cooldown ${span(cooldownHours)}`,
+    };
   }
   const last = recent
     .filter((p) => p.identityKey === f.identityKey)
@@ -73,6 +85,6 @@ export function isSuppressed(
   const floor = Math.max(0, last.pricePence - step);
   return {
     suppressed: true,
-    reason: `alerted at ${formatPence(last.pricePence)} ${hoursSince(last.firedAt, now)}h ago; within the ${cooldownHours}h cooldown a new alert needs ${formatPence(floor)} or less`,
+    reason: `alerted at ${formatPence(last.pricePence)} ${span(hoursSince(last.firedAt, now))} ago; within the ${span(cooldownHours)} cooldown a new alert needs ${formatPence(floor)} or less`,
   };
 }

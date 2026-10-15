@@ -49,6 +49,7 @@ const PRIVATE = [
   'requireZone',
   'hoursSince',
   'priceOf',
+  'span',
   'need',
   'compareRows',
   'compareText',

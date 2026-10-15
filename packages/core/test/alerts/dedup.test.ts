@@ -31,7 +31,7 @@ describe('isSuppressed (spec §6.8 cooldown, default 336 h; ruling 8 repeat step
   it('same dedup key within the cooldown is suppressed, with a reason; at the cooldown it is not', () => {
     expect(isSuppressed(at(41_200), [prior({ firedAt: hoursAgo(335) })], 336, NOW)).toEqual({
       suppressed: true,
-      reason: 'same price band alerted 335h ago (cooldown 336h)',
+      reason: 'same price band alerted 13d (335h) ago; cooldown 2w (336h)',
     });
     expect(isSuppressed(at(41_200), [prior({ firedAt: hoursAgo(336) })], 336, NOW)).toEqual({
       suppressed: false,
@@ -45,7 +45,7 @@ describe('isSuppressed (spec §6.8 cooldown, default 336 h; ruling 8 repeat step
     expect(isSuppressed(at(39_140), last, 336, NOW)).toEqual({ suppressed: false, reason: null });
     expect(isSuppressed(at(39_141), last, 336, NOW)).toEqual({
       suppressed: true,
-      reason: 'alerted at £412 24h ago; within the 336h cooldown a new alert needs £391.40 or less',
+      reason: 'alerted at £412 24h ago; within the 2w (336h) cooldown a new alert needs £391.40 or less',
     });
     // last fired £150: 5% is £7.50, so the £10 minimum applies and the floor is £140
     const cheap = [prior({ pricePence: 15_000, dedupKey: 'r1|h1|150' })];
@@ -102,7 +102,7 @@ describe('isSuppressed (spec §6.8 cooldown, default 336 h; ruling 8 repeat step
   it('review focus 2: a firing stamped in the future reads as 0 h old (inside the cooldown) without throwing', () => {
     expect(isSuppressed(at(41_200), [prior({ firedAt: hoursAgo(-3) })], 336, NOW)).toEqual({
       suppressed: true,
-      reason: 'same price band alerted 0h ago (cooldown 336h)',
+      reason: 'same price band alerted under 1h ago; cooldown 2w (336h)',
     });
   });
 });
