@@ -195,8 +195,11 @@ export function createRecorder(opts: {
   try {
     // why: the suffix is tested on the real path, so a symlink named …/fixtures/recorded cannot point elsewhere (I1).
     root = realpathSync(givenRoot);
-  } catch {
-    throw new RecorderRefusedError(`recorder root ${opts.root} does not exist`);
+  } catch (e) {
+    // why: only absence is reported as such; EACCES, ELOOP and the rest surface unchanged (re-review low 1).
+    if (errnoCode(e) === 'ENOENT')
+      throw new RecorderRefusedError(`recorder root ${opts.root} does not exist`);
+    throw e;
   }
   if (!root.endsWith(RECORDED_DIR))
     throw new RecorderRefusedError(`recorder root must end in fixtures/recorded (spec §5.5), got ${root}`);
@@ -310,10 +313,13 @@ export function loadRecordedJson(
   path: string,
   root: string = defaultRecordedRoot(),
 ): Record<string, unknown> {
-  if (!resolve(root).endsWith(RECORDED_DIR))
+  // why: the suffix is tested on the real root, as the recorder does, so a symlink named …/fixtures/recorded that
+  // points elsewhere is refused by readers too (re-review low 2).
+  const realRoot = realpathSync(resolve(root));
+  if (!realRoot.endsWith(RECORDED_DIR))
     throw new Error(`recorded root must end in fixtures/recorded, got ${root}`);
   const real = realpathSync(path);
-  if (!real.startsWith(`${realpathSync(root)}${sep}`))
+  if (!real.startsWith(`${realRoot}${sep}`))
     throw new Error(`refusing ${path}: recorded files load only from the recorded root ${root} (spec §5.5)`);
   const json: unknown = JSON.parse(readFileSync(real, 'utf8'));
   if (!isRecord(json)) throw new Error(`refusing ${path}: not a JSON object`);

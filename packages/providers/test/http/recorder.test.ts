@@ -1,5 +1,6 @@
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -327,6 +328,33 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
     expect(() => loadRecordedFixture(path, root)).toThrow(/responseHeaders/);
   });
 
+  it('reports a root it cannot resolve for a reason other than absence as that error, not as missing (re-review low 1)', () => {
+    const parent = join(mkdtempSync(join(tmpdir(), 'gmt-loop-')), 'fixtures');
+    mkdirSync(parent);
+    const loop = join(parent, 'recorded');
+    symlinkSync(loop, loop);
+    let caught: unknown;
+    try {
+      createRecorder({
+        root: loop,
+        secrets: ALL_SECRETS,
+        clock: fixedClock(asIsoDateTime(T0)),
+        recordedBy: 'x',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ code: 'ELOOP' });
+    expect(() =>
+      createRecorder({
+        root: join(parent, 'absent', 'fixtures', 'recorded'),
+        secrets: ALL_SECRETS,
+        clock: fixedClock(asIsoDateTime(T0)),
+        recordedBy: 'x',
+      }),
+    ).toThrow(/does not exist/);
+  });
+
   it('canonicalJson has a known answer: keys sorted at every level, undefined dropped (prov-009)', () => {
     expect(canonicalJson({ b: 1, a: { d: [2, { z: 1, y: 2 }], c: null, u: undefined } })).toBe(
       '{"a":{"c":null,"d":[2,{"y":2,"z":1}]},"b":1}',
@@ -357,6 +385,19 @@ describe('recorded-tree loaders (spec §9 item 2 fixture-tree rules)', () => {
     expect(loadRecordedFixture(path, root).body).toEqual({ price: 41200 });
     writeFileSync(path, readFileSync(path, 'utf8').replace('41200', '1'));
     expect(() => loadRecordedFixture(path, root)).toThrow(/content hash mismatch/);
+  });
+
+  it('loadRecordedJson tests the fixtures/recorded suffix on the real root, as the recorder does (re-review low 2)', async () => {
+    const realRoot = tree();
+    const path = await recorder(realRoot).record(call(SEARCH, { price: 1 }));
+    const elsewhere = mkdtempSync(join(tmpdir(), 'gmt-else-'));
+    cpSync(join(realRoot, 'searchapi'), join(elsewhere, 'searchapi'), { recursive: true });
+    const parent = join(mkdtempSync(join(tmpdir(), 'gmt-lnk-')), 'fixtures');
+    mkdirSync(parent);
+    symlinkSync(elsewhere, join(parent, 'recorded'));
+    const viaLink = join(parent, 'recorded', relative(realRoot, path));
+    expect(() => loadRecordedJson(viaLink, join(parent, 'recorded'))).toThrow(/fixtures\/recorded/);
+    expect(loadRecordedJson(path, realRoot)).toMatchObject({ body: { price: 1 } });
   });
 
   it('refuses a file outside the recorded root and a synthetic file inside it', () => {

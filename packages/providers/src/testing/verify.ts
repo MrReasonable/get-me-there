@@ -72,8 +72,7 @@ export function verifyFixturesTree(root: string, secrets: readonly Secret[] = []
       problems.push(`${rel}: ${why}`);
     };
     if (rel.startsWith(`recorded${sep}`)) {
-      for (const p of verifyRecordedFile(f, recordedRoot, secrets))
-        fail(p === 'holds a secret' ? 'holds a sentinel' : p);
+      for (const p of verifyRecordedFile(f, recordedRoot, secrets)) fail(p);
       continue;
     }
     if (!f.endsWith('.json')) {
