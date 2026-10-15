@@ -101,61 +101,16 @@ export function readString(column: string, v: unknown): string {
   return v;
 }
 
-export function readLayovers(column: string, v: unknown): Layover[] {
-  if (!Array.isArray(v)) throw new RowCorrupt(column, 'not an array');
-  return v.map((x) => {
-    if (!isRecord(x) || typeof x.at !== 'string') throw new RowCorrupt(column, 'bad layover');
-    return {
-      at: readIata(column, x.at),
-      minutes: readInt(column, x.minutes),
-      overnight: readBool(column, x.overnight),
-      airportChange: readBool(column, x.airportChange),
-    };
-  });
-}
-
-export function readCellKey(column: string, v: unknown): CellKey {
-  if (
-    !isRecord(v) ||
-    typeof v.origin !== 'string' ||
-    typeof v.destination !== 'string' ||
-    typeof v.departureDate !== 'string' ||
-    typeof v.returnDate !== 'string'
-  ) {
-    throw new RowCorrupt(column, 'bad cell key');
-  }
-  return {
-    origin: readIata(column, v.origin),
-    destination: readIata(column, v.destination),
-    departureDate: readDate(column, v.departureDate),
-    returnDate: readDate(column, v.returnDate),
-  };
-}
-
-function notes(column: string, v: unknown): { notes?: string[] } {
-  return v === undefined ? {} : { notes: readStringArray(column, v) };
-}
-export function readBaggage(column: string, v: unknown): BaggageSnapshot {
-  if (!isRecord(v)) throw new RowCorrupt(column, 'bad baggage');
-  const cabinBag =
-    v.cabinBag === undefined
-      ? {}
-      : {
-          cabinBag: oneOf(
-            column,
-            ['included', 'not-included'],
-            typeof v.cabinBag === 'string' ? v.cabinBag : '',
-          ),
-        };
-  const checkedBags = v.checkedBags === undefined ? {} : { checkedBags: readInt(column, v.checkedBags) };
-  return { ...cabinBag, ...checkedBags, ...notes(column, v.notes) };
-}
-export function readFareConditions(column: string, v: unknown): FareConditions {
-  if (!isRecord(v)) throw new RowCorrupt(column, 'bad fare conditions');
-  const refundable = v.refundable === undefined ? {} : { refundable: readBool(column, v.refundable) };
-  const changeable = v.changeable === undefined ? {} : { changeable: readBool(column, v.changeable) };
-  return { ...refundable, ...changeable, ...notes(column, v.notes) };
-}
+// why: nested JSON shapes parse through core's own schemas, so a stored value is judged by the same rules that wrote
+// it and the two cannot drift (arch-M1). readVerificationPolicy below is the one hand reader, for the reason it states.
+export const readLayovers = (column: string, v: unknown): Layover[] =>
+  parseWith(column, apiContract.layoverSchema.array(), v);
+export const readCellKey = (column: string, v: unknown): CellKey =>
+  parseWith(column, apiContract.cellKeySchema, v);
+export const readBaggage = (column: string, v: unknown): BaggageSnapshot =>
+  parseWith(column, apiContract.resultRowSchema.shape.baggage.unwrap(), v);
+export const readFareConditions = (column: string, v: unknown): FareConditions =>
+  parseWith(column, apiContract.resultRowSchema.shape.fareConditions.unwrap(), v);
 export const readBooking = (column: string, text: string): Booking =>
   parseWith(column, apiContract.bookingSchema, readJson(column, text));
 export const readEstimate = (column: string, text: string): Estimate =>
