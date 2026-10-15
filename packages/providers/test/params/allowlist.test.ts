@@ -160,3 +160,69 @@ describe('engine-discriminated keys (pie-005)', () => {
     expect(() => assertRequestAllowed(withBare, EP, url('engine=google_hotels'))).not.toThrow();
   });
 });
+
+describe('one reading of the parameters for the key and the request (review I2)', () => {
+  it('refuses a key whose discriminator value is not in the unreserved charset, so raw and decoded forms agree', () => {
+    for (const value of ['google%20flights', 'google+flights', 'a b'])
+      expect(() =>
+        load(
+          withContentHash({
+            ...good,
+            endpoints: { [`${EP}?engine=${value}`]: { names: ['engine'], values: { engine: [value] } } },
+          }),
+        ),
+      ).toThrow(/endpoint key/);
+  });
+  it('refuses a discriminated entry that does not list its discriminator, or allows other values of it', () => {
+    expect(() =>
+      load(
+        withContentHash({
+          ...good,
+          endpoints: { [`${EP}?engine=google_flights`]: { names: ['gl'], values: { gl: ['gb'] } } },
+        }),
+      ),
+    ).toThrow(/discriminator/);
+    expect(() =>
+      load(
+        withContentHash({
+          ...good,
+          endpoints: {
+            [`${EP}?engine=google_flights`]: {
+              names: ['engine'],
+              values: { engine: ['google_flights', 'google_hotels'] },
+            },
+          },
+        }),
+      ),
+    ).toThrow(/discriminator/);
+    expect(() =>
+      load(
+        withContentHash({
+          ...good,
+          endpoints: { [`${EP}?engine=google_flights`]: { names: ['engine'], values: { engine: 'any' } } },
+        }),
+      ),
+    ).toThrow(/discriminator/);
+  });
+  it('refuses a request that repeats a parameter, the discriminator included, naming the parameter only', () => {
+    const repeated = url('engine=google_flights&engine=google_flights_calendar&gl=gb');
+    expect(() => assertRequestAllowed(allowlist(), EP, repeated)).toThrow(ParamsNotAllowedError);
+    expect(() => assertRequestAllowed(allowlist(), EP, repeated)).toThrow(/engine.*repeated/);
+    expect(() => assertRequestAllowed(allowlist(), EP, url(`${flights}&gl=gb`))).toThrow(/gl.*repeated/);
+  });
+  it('refuses a request that more than one discriminated key matches instead of picking by sort order', () => {
+    const two = load(
+      withContentHash({
+        ...good,
+        endpoints: {
+          [`${EP}?engine=google_flights`]: {
+            names: ['engine', 'type'],
+            values: { engine: ['google_flights'], type: ['1'] },
+          },
+          [`${EP}?type=1`]: { names: ['engine', 'type'], values: { engine: 'any', type: ['1'] } },
+        },
+      }),
+    );
+    expect(() => assertRequestAllowed(two, EP, url('engine=google_flights&type=1'))).toThrow(/more than one/);
+  });
+});

@@ -23,7 +23,9 @@ export class ParamsNotAllowedError extends Error {
   }
 }
 
-const KEY = /^(\/[^?#]*)(?:\?([a-z0-9_]+)=([^&=#]+))?$/;
+// why: the discriminator value is restricted to the unreserved charset (RFC 3986), so its raw form in the key and its
+// decoded form from URLSearchParams are identical and the key can never silently miss (review I2).
+const KEY = /^(\/[^?#]*)(?:\?([a-z0-9_]+)=([A-Za-z0-9._~-]+))?$/;
 
 function parseKey(key: string): { path: string; name: string | undefined; value: string | undefined } | null {
   const m = KEY.exec(key);
@@ -66,13 +68,32 @@ const allowlistFileSchema = z.object({
   provider: providerIdSchema,
   recordedAt: isoDateSchema,
   endpoints: z.record(z.string(), endpointSchema).superRefine((endpoints, ctx) => {
-    for (const key of Object.keys(endpoints))
-      if (parseKey(key) === null)
+    for (const [key, entry] of Object.entries(endpoints)) {
+      const k = parseKey(key);
+      if (k === null) {
         ctx.addIssue({
           code: 'custom',
           path: [key],
           message: `endpoint key ${key} must be <path> or <path>?<name>=<value>`,
         });
+        continue;
+      }
+      // why: an entry selected by `name=value` must itself allow exactly that value of `name`, or the file contradicts
+      // its own key (review I2).
+      if (k.name === undefined || k.value === undefined) continue;
+      const allowed = entry.values[k.name];
+      if (
+        !entry.names.includes(k.name) ||
+        !Array.isArray(allowed) ||
+        allowed.length !== 1 ||
+        allowed[0] !== k.value
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `a discriminated entry must list its discriminator ${k.name} with exactly the value of its key`,
+        });
+    }
   }),
   contentSha256: z.string(),
 });
@@ -90,8 +111,14 @@ export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: s
   const who = `${allowlist.provider} ${endpointPath}`;
   if (url.pathname !== endpointPath)
     throw new ParamsNotAllowedError(`${who}: URL path does not match the endpoint`);
+  // why: key selection and value checks must read one value per name; a vendor may honour the last of several (review I2).
+  const seen = new Set<string>();
+  for (const name of url.searchParams.keys()) {
+    if (seen.has(name)) throw new ParamsNotAllowedError(`${who}: parameter ${name} is repeated`);
+    seen.add(name);
+  }
   let bare: string | undefined;
-  let chosen: string | undefined;
+  const matching: string[] = [];
   let discriminated = false;
   for (const key of Object.keys(allowlist.endpoints).sort()) {
     const k = parseKey(key);
@@ -99,10 +126,15 @@ export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: s
     if (k.name === undefined) bare = key;
     else {
       discriminated = true;
-      if (url.searchParams.get(k.name) === k.value) chosen = key;
+      if (url.searchParams.get(k.name) === k.value) matching.push(key);
     }
   }
-  const key = chosen ?? bare;
+  // why: two matching discriminated keys would otherwise be resolved by sort order, a rule no file author wrote (I2).
+  if (matching.length > 1)
+    throw new ParamsNotAllowedError(
+      `${who}: more than one discriminated allowlist entry matches this request`,
+    );
+  const key = matching[0] ?? bare;
   if (key === undefined) {
     throw new ParamsNotAllowedError(
       discriminated
