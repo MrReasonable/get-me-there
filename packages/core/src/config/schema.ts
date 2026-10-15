@@ -137,7 +137,13 @@ function isValidTimeZone(tz: string): boolean {
   }
 }
 
-function providerLimits(r: Reader, prefix: string, base: ProviderLimits): ProviderLimits {
+/** `maxCacheTtlHours` bounds the response cache for a provider whose data has a stated freshness window (Travelpayouts: 48). */
+function providerLimits(
+  r: Reader,
+  prefix: string,
+  base: ProviderLimits,
+  maxCacheTtlHours?: number,
+): ProviderLimits {
   return {
     ...base,
     billingDay: r.int(`${prefix}_BILLING_DAY`, 1, 28) ?? base.billingDay,
@@ -145,7 +151,7 @@ function providerLimits(r: Reader, prefix: string, base: ProviderLimits): Provid
     ratePerMinute: r.int(`${prefix}_RATE_PER_MINUTE`, 1) ?? base.ratePerMinute,
     ratePerHour: r.int(`${prefix}_RATE_PER_HOUR`, 1) ?? base.ratePerHour,
     concurrency: r.int(`${prefix}_CONCURRENCY`, 1) ?? base.concurrency,
-    cacheTtlHours: r.int(`${prefix}_CACHE_TTL_HOURS`, 0) ?? base.cacheTtlHours,
+    cacheTtlHours: r.int(`${prefix}_CACHE_TTL_HOURS`, 0, maxCacheTtlHours) ?? base.cacheTtlHours,
   };
 }
 
@@ -202,7 +208,10 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const travelpayouts =
     tpToken === undefined
       ? null
-      : { token: new Secret(tpToken), limits: providerLimits(r, 'TRAVELPAYOUTS', TRAVELPAYOUTS_DEFAULTS) };
+      : {
+          token: new Secret(tpToken),
+          limits: providerLimits(r, 'TRAVELPAYOUTS', TRAVELPAYOUTS_DEFAULTS, 48),
+        };
   const saKey = r.str('SEARCHAPI_KEY');
   const plan: PlanId = r.oneOf('SEARCHAPI_PLAN', ['trial', '40usd']) ?? 'trial';
   const preset = PLAN_PRESETS[plan];

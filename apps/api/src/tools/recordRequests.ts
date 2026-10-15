@@ -3,13 +3,13 @@
  * §5.4, docs/providers.md). Credentials go in headers only (spec §2 fact 8); nothing here is an
  * airport, every code arrives as an argument.
  */
-import { type Config, daysBetween, type IsoDate, isoDateSchema } from '@gmt/core';
-import type { HttpKitDeps } from '@gmt/providers';
+import { asIata, asIsoMonth, type Config, daysBetween, type IsoDate, isoDateSchema } from '@gmt/core';
+import { type HttpKitDeps, travelpayoutsHttpLimits } from '@gmt/providers';
+import { buildRequestUrl, PAGE_LIMIT } from '@gmt/providers/recording';
 
-export const TP_URL = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
 export const SA_URL = 'https://www.searchapi.io/api/v1/search';
-/** Spec §5.2 measured page size. */
-export const TP_PAGE_LIMIT = 1000;
+/** Spec §5.2 measured page size: the adapter's own constant, so recorded and replayed pages cannot drift apart. */
+export const TP_PAGE_LIMIT = PAGE_LIMIT;
 /** Deliberately invalid credentials for the 401 probes; not secrets, never real keys. */
 export const INVALID_SEARCHAPI_KEY = 'invalid-key-for-401-recording';
 export const INVALID_TRAVELPAYOUTS_TOKEN = 'invalid-token-for-401-recording';
@@ -42,9 +42,8 @@ export interface CellDates {
  * Vendor limits while recording, from the configured provider limits (no preset fallback: the tool's
  * precheck has refused a missing provider). why: httpLimitsFor gains these providers only when WP5/WP6
  * add their lines; WP4b records before either exists. Costs equal the guard's configured per-call rates,
- * which reserve requires (WP3 rule 'cost'). Follow-up (arch M-5): once WP5/WP6 land, the body becomes
- * `{ travelpayouts: travelpayoutsHttpLimits(…), searchapi: searchApiHttpLimits(…) }`, so each vendor's hosts, billing
- * mode and classifyError have one definition.
+ * which reserve requires (WP3 rule 'cost'; Travelpayouts is free, cost 0 in the preset and not configurable). Follow-up
+ * (arch M-5): WP5 replaces the searchapi entry with `searchApiHttpLimits(…)`.
  */
 export function recordingLimits(
   tp: NonNullable<Config['providers']['travelpayouts']>,
@@ -53,15 +52,8 @@ export function recordingLimits(
 ): HttpKitDeps['limits'] {
   const t = { maxWaitSeconds: timing.maxWaitSeconds, requestTimeoutSeconds: timing.requestTimeoutSeconds };
   return {
-    travelpayouts: {
-      hosts: ['api.travelpayouts.com'],
-      ratePerMinute: tp.limits.ratePerMinute,
-      ratePerHour: tp.limits.ratePerHour,
-      concurrency: tp.limits.concurrency,
-      billable: 'never',
-      costPerCallMicroGbp: tp.limits.costPerCallMicroGbp,
-      ...t,
-    },
+    // why: the adapter's own limits (plan decision 32): hosts, the 600/min clamp, billing mode and the 60 s 429 fallback have one definition.
+    travelpayouts: travelpayoutsHttpLimits(tp.limits, t),
     searchapi: {
       hosts: ['www.searchapi.io'],
       ratePerMinute: sa.limits.ratePerMinute,
@@ -74,17 +66,12 @@ export function recordingLimits(
   };
 }
 
-/** One prices_for_dates page (spec §5.2 Travelpayouts month tiles). */
+/** One prices_for_dates page (spec §5.2 Travelpayouts month tiles), built by the adapter's own URL builder. */
 export function tpUrl(origin: string, destination: string, month: string, page: number): URL {
-  const url = new URL(TP_URL);
-  url.searchParams.set('origin', origin);
-  url.searchParams.set('destination', destination);
-  url.searchParams.set('departure_at', month);
-  url.searchParams.set('one_way', 'false');
-  url.searchParams.set('currency', 'gbp');
-  url.searchParams.set('limit', String(TP_PAGE_LIMIT));
-  url.searchParams.set('page', String(page));
-  return url;
+  return buildRequestUrl(
+    { origin: asIata(origin), destination: asIata(destination), month: asIsoMonth(month) },
+    page,
+  );
 }
 
 export function saUrl(params: Readonly<Record<string, string>>): URL {

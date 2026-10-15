@@ -72,6 +72,12 @@ export interface HttpKitRequest {
   cache: { ttlSeconds: number; accept?: (body: unknown) => boolean } | 'never';
   signal: AbortSignal;
   recordFixtures: boolean;
+  /**
+   * `false`: a cache hit or a joined in-flight request leaves no cache-hit ledger row. A paginating adapter sets it on
+   * every page after the first, so a tile served from the cache is one cache-hit row, as parity counts tiles (spec
+   * §5.2, §8.1; plan decision 24). Absent or `true`: the row is written. Upstream attempts are always ledgered.
+   */
+  ledgerCacheHit?: boolean;
 }
 
 /** `fetchedAt` is the original `storedAt` on a cache hit and the leader's on a joined request (spec §2). */

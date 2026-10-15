@@ -30,6 +30,8 @@ import {
   toEpochDay,
 } from '@gmt/core';
 import type { HttpKit, HttpKitRequest, HttpKitResponse, ProviderHttpLimits } from '../http/types.js';
+import { type ParseWhere, parseError } from '../shared/errors.js';
+import { NoteCounter } from '../shared/notes.js';
 import { isRecord } from '../util.js';
 import { FIXTURE_HOST, FIXTURE_ORIGIN } from './constants.js';
 
@@ -135,15 +137,8 @@ export function planFixtureTiles(q: DiscoveryQuery): TilePlan[] {
     });
 }
 
-/** Parse failure with a bracketed diagnostic code in the message; `reason` stays unset (it feeds cell_outcomes.reason). */
-function parseError(endpointPath: string, code: string): ProviderError {
-  return new ProviderError({
-    kind: 'parse',
-    retryable: false,
-    providerId: 'fixture',
-    message: `fixture ${endpointPath}: ${code} [${code}]`,
-  });
-}
+/** Where a fixture response came from, for the shared parse error (plan decisions 29 and 30). */
+const where = (endpointPath: string): ParseWhere => ({ providerId: 'fixture', endpointPath });
 
 /** Envelope checks shared by every endpoint: synthetic marker, currency read from the response, pair echo. */
 function envelope(
@@ -152,14 +147,14 @@ function envelope(
   origin: string,
   destination: string,
 ): { b: Record<string, unknown>; currency: string } {
-  if (!isRecord(body)) throw parseError(endpointPath, 'malformed-envelope');
+  if (!isRecord(body)) throw parseError('malformed-envelope', null, where(endpointPath));
   // why: spec §5.5 — the provider refuses anything not marked synthetic, so it can never carry real data.
-  if (body.synthetic !== true) throw parseError(endpointPath, 'not-synthetic');
+  if (body.synthetic !== true) throw parseError('not-synthetic', null, where(endpointPath));
   const currency = body.currency;
   if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency))
-    throw parseError(endpointPath, 'missing-currency');
+    throw parseError('missing-currency', null, where(endpointPath));
   if (body.origin !== origin || body.destination !== destination)
-    throw parseError(endpointPath, 'pair-mismatch');
+    throw parseError('pair-mismatch', null, where(endpointPath));
   return { b: body, currency };
 }
 
@@ -168,24 +163,25 @@ function dated(
   endpointPath: string,
   e: unknown,
 ): { departureDate: IsoDate; returnDate: IsoDate; e: Record<string, unknown> } {
-  if (!isRecord(e)) throw parseError(endpointPath, 'malformed-entry');
+  if (!isRecord(e)) throw parseError('malformed-entry', null, where(endpointPath));
   const departureDate = isoDateSchema.safeParse(e.departureDate);
   const returnDate = isoDateSchema.safeParse(e.returnDate);
-  if (!departureDate.success || !returnDate.success) throw parseError(endpointPath, 'malformed-entry');
+  if (!departureDate.success || !returnDate.success)
+    throw parseError('malformed-entry', null, where(endpointPath));
   return { departureDate: departureDate.data, returnDate: returnDate.data, e };
 }
 
 function iata(endpointPath: string, v: unknown): Iata {
-  if (typeof v !== 'string') throw parseError(endpointPath, 'malformed-segment');
+  if (typeof v !== 'string') throw parseError('malformed-segment', null, where(endpointPath));
   try {
     return asIata(v);
   } catch {
-    throw parseError(endpointPath, 'malformed-segment');
+    throw parseError('malformed-segment', null, where(endpointPath));
   }
 }
 
 function segment(endpointPath: string, s: unknown): RawSegment {
-  if (!isRecord(s)) throw parseError(endpointPath, 'malformed-segment');
+  if (!isRecord(s)) throw parseError('malformed-segment', null, where(endpointPath));
   const { carrier, flightNumber, depart, arrive, cabin } = s;
   if (
     typeof carrier !== 'string' ||
@@ -193,7 +189,7 @@ function segment(endpointPath: string, s: unknown): RawSegment {
     typeof depart !== 'string' ||
     typeof arrive !== 'string'
   )
-    throw parseError(endpointPath, 'malformed-segment');
+    throw parseError('malformed-segment', null, where(endpointPath));
   const seg: RawSegment = {
     marketingCarrier: carrier,
     flightNumber,
@@ -209,7 +205,7 @@ function segment(endpointPath: string, s: unknown): RawSegment {
 }
 
 function offer(endpointPath: string, o: unknown, q: ItineraryQuery, currency: string): RawOffer {
-  if (!isRecord(o)) throw parseError(endpointPath, 'malformed-offer');
+  if (!isRecord(o)) throw parseError('malformed-offer', null, where(endpointPath));
   const { seller, amountMinor, outbound, inbound } = o;
   if (
     typeof seller !== 'string' ||
@@ -217,8 +213,9 @@ function offer(endpointPath: string, o: unknown, q: ItineraryQuery, currency: st
     !Number.isInteger(amountMinor) ||
     amountMinor < 0
   )
-    throw parseError(endpointPath, 'malformed-offer');
-  if (!Array.isArray(outbound) || !Array.isArray(inbound)) throw parseError(endpointPath, 'malformed-offer');
+    throw parseError('malformed-offer', null, where(endpointPath));
+  if (!Array.isArray(outbound) || !Array.isArray(inbound))
+    throw parseError('malformed-offer', null, where(endpointPath));
   const raw: RawOffer = {
     outbound: outbound.map((s: unknown) => segment(endpointPath, s)),
     inbound: inbound.map((s: unknown) => segment(endpointPath, s)),
@@ -249,7 +246,7 @@ function offersOf(
   currency: string,
 ): RawOffer[] {
   const offers = b.offers;
-  if (!Array.isArray(offers)) throw parseError(endpointPath, 'malformed-envelope');
+  if (!Array.isArray(offers)) throw parseError('malformed-envelope', null, where(endpointPath));
   return offers.map((o: unknown) => offer(endpointPath, o, q, currency));
 }
 
@@ -316,7 +313,8 @@ export function fixtureProvider(opts: {
       error,
     });
     const r = plan.request;
-    if (r.kind !== 'rectangle') return fail(parseError('/calendar', `unsupported-tile-${r.kind}`));
+    if (r.kind !== 'rectangle')
+      return fail(parseError(`unsupported-tile-${r.kind}`, null, where('/calendar')));
     const params = {
       origin: q.origin,
       destination: q.destination,
@@ -354,13 +352,13 @@ export function fixtureProvider(opts: {
           !Number.isInteger(total) ||
           total < 1
         )
-          throw parseError('/calendar', 'malformed-envelope');
+          throw parseError('malformed-envelope', null, where('/calendar'));
         pages = total;
         for (const raw of rawPrices) {
           const { departureDate, returnDate, e } = dated('/calendar', raw);
           const amount = e.amountMinor;
           if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0)
-            throw parseError('/calendar', 'malformed-entry');
+            throw parseError('malformed-entry', null, where('/calendar'));
           const cell = covered.get(
             cellKeyString({ origin: q.origin, destination: q.destination, departureDate, returnDate }),
           );
@@ -383,6 +381,9 @@ export function fixtureProvider(opts: {
       throw e;
     }
     if (fetchedAt === undefined) throw new Error('fetchTile: no page fetched');
+    // why: one notes grammar in the package (shared NoteCounter); an entry for no covered cell is outside this tile.
+    const notes = new NoteCounter();
+    notes.add('dropped-outside-tile', dropped);
     log.debug(
       { tileIndex: plan.index, prices: prices.length, noFares: noFares.length, dropped },
       'fixture tile',
@@ -395,7 +396,7 @@ export function fixtureProvider(opts: {
       pointOfSale: FIXTURE_POINT_OF_SALE,
       prices,
       noFares,
-      notes: dropped > 0 ? [`dropped-out-of-band:${dropped}`] : [],
+      notes: notes.list(),
     };
   }
 
@@ -437,7 +438,7 @@ export function fixtureProvider(opts: {
     if (b.chain === true) {
       const outbounds = b.outbounds;
       if (!Array.isArray(outbounds) || !outbounds.every((o): o is string => typeof o === 'string'))
-        throw parseError('/itinerary', 'malformed-envelope');
+        throw parseError('malformed-envelope', null, where('/itinerary'));
       const offers: RawOffer[] = [];
       const notes: string[] = [];
       let failed = 0;
@@ -471,7 +472,7 @@ export function fixtureProvider(opts: {
 
     const { outboundOptions, failedExpansions } = b;
     if (typeof outboundOptions !== 'number' || typeof failedExpansions !== 'number')
-      throw parseError('/itinerary', 'malformed-envelope');
+      throw parseError('malformed-envelope', null, where('/itinerary'));
     const offers = offersOf('/itinerary', b, q, currency);
     if (outboundOptions > 0 && offers.length === 0) throw noReturnLegs();
     return result(offers, failedExpansions, [], first.fetchedAt);

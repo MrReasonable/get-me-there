@@ -145,6 +145,13 @@ describe('parseConfig (spec §12)', () => {
       cacheTtlHours: 1,
     });
   });
+  it('rejects a Travelpayouts cache TTL beyond the vendor 48-hour freshness window as a config error', () => {
+    const tp = { ...minimal, TRAVELPAYOUTS_TOKEN: 't'.repeat(32) };
+    expect(errors({ ...tp, TRAVELPAYOUTS_CACHE_TTL_HOURS: '49' })).toContain('TRAVELPAYOUTS_CACHE_TTL_HOURS');
+    expect(
+      ok({ ...tp, TRAVELPAYOUTS_CACHE_TTL_HOURS: '48' }).providers.travelpayouts?.limits.cacheTtlHours,
+    ).toBe(48);
+  });
   it('rejects non-integer pence and billing days outside 1–28', () => {
     expect(errors({ ...minimal, MONTHLY_SPEND_CAP_PENCE: '12.5' })).toContain('MONTHLY_SPEND_CAP_PENCE');
     expect(errors({ ...minimal, GLOBAL_BILLING_DAY: '29' })).toContain('GLOBAL_BILLING_DAY');

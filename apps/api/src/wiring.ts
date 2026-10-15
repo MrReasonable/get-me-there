@@ -21,7 +21,6 @@ import {
   systemClock,
 } from '@gmt/core';
 import {
-  type AirportsRepo,
   applyMigrations,
   budgetConfigFromConfig,
   createRepos,
@@ -38,6 +37,9 @@ import {
   fixtureProvider,
   type HttpKit,
   type HttpKitDeps,
+  TRAVELPAYOUTS_PARAMS,
+  travelpayoutsHttpLimits,
+  travelpayoutsProvider,
 } from '@gmt/providers';
 import { defaultFixtureRoot, fixtureRouter } from '@gmt/providers/fixture';
 
@@ -148,6 +150,10 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
   const cost = fixtureCost(config);
   return {
     ...(cost === null ? {} : { fixture: fixtureHttpLimits({ costPerCallMicroGbp: cost, ...timing }) }),
+    // WP6: Travelpayouts, only when configured (spec §2, §5.3).
+    ...(config.providers.travelpayouts === null
+      ? {}
+      : { travelpayouts: travelpayoutsHttpLimits(config.providers.travelpayouts.limits, config) }),
     // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects.
     // Owner: WP7's fx/refresh.ts holds the fx client; this entry moves beside it as `fxHttpLimits` (arch M-7).
     fx: {
@@ -165,13 +171,27 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
 /** Providers for this config. Same ownership rule as httpLimitsFor: WP5/WP6 each add one line. */
 export function providersFor(
   config: Config,
-  deps: { http: HttpKit; log: Logger; clock: Clock; airports: AirportsRepo },
+  deps: { http: HttpKit; log: Logger; clock: Clock },
 ): FlightProvider[] {
   const out: FlightProvider[] = [];
   const cost = fixtureCost(config);
   if (cost !== null) {
     out.push(
       fixtureProvider({ http: deps.http, log: deps.log, clock: deps.clock, config, costMicroGbp: cost }),
+    );
+  }
+  // WP6: Travelpayouts, only when configured; one request per airport pair, the cache TTL only serves repeats (spec §5.2).
+  const tp = config.providers.travelpayouts;
+  if (tp !== null) {
+    out.push(
+      travelpayoutsProvider({
+        http: deps.http,
+        log: deps.log,
+        clock: deps.clock,
+        token: tp.token,
+        cacheTtlSeconds: tp.limits.cacheTtlHours * 3600,
+        paramsAllowlist: TRAVELPAYOUTS_PARAMS,
+      }),
     );
   }
   return out;
@@ -216,7 +236,7 @@ export function buildPorts(
         ? { inProcessHosts: { 'fixture.local': (req: Request) => Promise.resolve(router.fetch(req)) } }
         : {}),
     });
-    const providers = providersFor(config, { http, log: opts.log, clock, airports: repos.airports });
+    const providers = providersFor(config, { http, log: opts.log, clock });
     return {
       config,
       db,

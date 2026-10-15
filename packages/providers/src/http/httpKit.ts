@@ -134,7 +134,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
 
   // why: parity counts first-attempt rows plus cache hits per tile (spec §8.1), so a joiner leaves its own row.
   function recordJoin(r: HttpKitRequest): void {
-    if (r.providerId === 'fx') return;
+    if (r.providerId === 'fx' || r.ledgerCacheHit === false) return;
     deps.budget.recordCacheHit({
       providerId: r.providerId,
       executionId: r.executionId,
@@ -184,7 +184,8 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
       const hit = deps.cache.get(key);
       if (hit !== undefined) {
         // why: spec §5.3 — cache hits are ledgered as non-billable rows so parity counts them; 'fx' is not ledgered.
-        if (r.providerId !== 'fx')
+        // why: a later page of a paginated tile (ledgerCacheHit false) adds no row; the tile's first page already did.
+        if (r.providerId !== 'fx' && r.ledgerCacheHit !== false)
           deps.budget.recordCacheHit({
             providerId: r.providerId,
             executionId: r.executionId,
