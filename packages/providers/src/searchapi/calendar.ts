@@ -1,13 +1,28 @@
 import {
   addDays,
+  type CellIssue,
   type CellKey,
+  cellKeyString,
   type DiscoveryQuery,
+  type DiscoveryTileResult,
   daysBetween,
   generateCells,
   type IsoDate,
+  isoDateSchema,
+  type Logger,
+  type ProviderContext,
+  ProviderError,
+  type RawCalendarPrice,
+  type Secret,
   type TilePlan,
   type TileRequest,
 } from '@gmt/core';
+import type { HttpKit } from '../http/types.js';
+import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.js';
+import { parseError, parseVendor } from '../shared/errors.js';
+import { NoteCounter } from '../shared/notes.js';
+import { authHeaders, calendarParams, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_WHERE, toUrl } from './params.js';
+import { calendarResponseSchema, currencySupported, minorOrDrop, readEcho } from './shapes.js';
 
 /** Spec §2 fact 2: the calendar engine refuses more than 200 outbound × return combinations (HTTP 400). */
 export const MAX_COMBINATIONS = 200;
@@ -124,4 +139,200 @@ export function planRectangles(q: DiscoveryQuery): TilePlan[] {
     start += group.length;
   }
   return tiles;
+}
+
+/** What `fetchTile` needs; built once by `searchApiProvider`. */
+export interface CalendarDeps {
+  http: HttpKit;
+  log: Logger;
+  key: Secret;
+  pointOfSale: string;
+  allowlist: ParamsAllowlist;
+  cacheTtlSeconds: number;
+}
+
+/** A tile's parsed content, before `fetchedAt` and the tile identity are added. */
+export interface ParsedCalendar {
+  prices: RawCalendarPrice[];
+  noFares: CellKey[];
+  notes: string[];
+  pointOfSale: string;
+  /** Present only when a covered cell had a row dropped (decision 28; WP6 omits it the same way). */
+  cellIssues?: CellIssue[];
+}
+
+/** `n calendar row(s)` for a cell issue's detail. */
+const rowsWord = (n: number): string => (n === 1 ? '1 calendar row' : `${n} calendar rows`);
+
+/**
+ * A cell issue's detail in WP6's grammar: provider prefix, what happened, the machine tag in brackets (`bad-price`
+ * for reason `parse`, `currency-unsupported` for that reason), so `last_error` reads one way for both adapters.
+ */
+function dropDetail(n: number, currency: string, reason: 'currency-unsupported' | 'parse'): string {
+  return reason === 'currency-unsupported'
+    ? `searchapi: ${rowsWord(n)} for this cell priced in ${currency}, which has no known minor unit [currency-unsupported]`
+    : `searchapi: ${rowsWord(n)} for this cell had no usable ${currency} price (not a positive amount with at most its currency's decimals) [bad-price]`;
+}
+
+/**
+ * Parses one calendar response for one tile. Spec §5.2: cell keys from the response; entries outside
+ * `coveredCells` or the nights band are dropped and counted; `has_no_flights` → `noFares`; an empty grid →
+ * parse; currency and point of sale from the echo. Every in-tile priced entry is returned, duplicates included,
+ * so the engine's one-price-per-cell rule (spec §5.6: the minimum, vendor order breaking ties) decides. A cell
+ * for which the vendor stated a price is never "no fares", even when that price was dropped; a cell with both is
+ * counted `conflicting-entries`. Every covered cell with a dropped row gets a `CellIssue` (decision 28): the engine
+ * records it `priced` with `offers-dropped:n` when another row priced it, else `error` with the issue's reason
+ * (`currency-unsupported` or `parse`), never `no_data`.
+ */
+export function parseCalendarBody(
+  body: unknown,
+  plan: TilePlan,
+  q: DiscoveryQuery,
+  requestedGl: string,
+): ParsedCalendar {
+  const data = parseVendor(calendarResponseSchema, body, 'malformed-calendar', SEARCHAPI_WHERE);
+  const echo = readEcho(data.search_parameters, requestedGl);
+  // why: spec §5.2: under a passing ≤200 assertion an empty grid is a vendor fault, never "no data".
+  if (data.calendar.length === 0)
+    throw parseError('empty-grid', 'an empty grid within the 200-combination limit', SEARCHAPI_WHERE);
+  const covered = new Set(plan.coveredCells.map(cellKeyString));
+  const seen = new Set<string>();
+  const stated = new Set<string>();
+  const noFlights = new Set<string>();
+  // why: one response states one currency, so every dropped row of a tile has the same reason.
+  const dropReason = currencySupported(echo.currency) ? 'parse' : 'currency-unsupported';
+  const dropped = new Map<string, number>();
+  const notes = new NoteCounter();
+  const prices: RawCalendarPrice[] = [];
+  for (const e of data.calendar) {
+    if (e.return === undefined) {
+      notes.add('dropped-no-return');
+      continue;
+    }
+    const dep = isoDateSchema.safeParse(e.departure);
+    const ret = isoDateSchema.safeParse(e.return);
+    if (!dep.success || !ret.success) {
+      notes.add('dropped-bad-date');
+      continue;
+    }
+    const cell: CellKey = {
+      origin: q.origin,
+      destination: q.destination,
+      departureDate: dep.data,
+      returnDate: ret.data,
+    };
+    const key = cellKeyString(cell);
+    if (!covered.has(key)) {
+      notes.add('dropped-outside-tile');
+      continue;
+    }
+    const nights = daysBetween(cell.departureDate, cell.returnDate);
+    if (nights < q.minNights || nights > q.maxNights) {
+      notes.add('dropped-outside-band');
+      continue;
+    }
+    if (seen.has(key)) notes.add('duplicate-entries');
+    seen.add(key);
+    if (e.has_no_flights === true) {
+      noFlights.add(key);
+      continue;
+    }
+    if (e.price === undefined) {
+      notes.add('unpriced-skipped');
+      continue;
+    }
+    stated.add(key);
+    const m = minorOrDrop(e.price, echo.currency, notes);
+    if (m.minor === null) {
+      dropped.set(key, (dropped.get(key) ?? 0) + 1);
+      continue;
+    }
+    prices.push({ ...cell, amountMinor: m.minor, currency: echo.currency });
+  }
+  const noFares = plan.coveredCells.filter((c) => {
+    const key = cellKeyString(c);
+    return noFlights.has(key) && !stated.has(key);
+  });
+  notes.add('conflicting-entries', [...noFlights].filter((k) => stated.has(k)).length);
+  // why: an absent cell is neither priced nor "no fares"; the engine decides its outcome, the note keeps it visible.
+  notes.add('covered-cells-absent', covered.size - seen.size);
+  const cellIssues: CellIssue[] = plan.coveredCells.flatMap((cell) => {
+    const n = dropped.get(cellKeyString(cell));
+    if (n === undefined) return [];
+    return [{ cell, reason: dropReason, offersDropped: n, detail: dropDetail(n, echo.currency, dropReason) }];
+  });
+  return {
+    prices,
+    noFares,
+    notes: notes.list(),
+    pointOfSale: echo.pointOfSale,
+    ...(cellIssues.length === 0 ? {} : { cellIssues }),
+  };
+}
+
+/**
+ * `DiscoveryCapability.fetchTile` for SearchApi. Spec §5.2. The rectangle check, the ≤200 assertion and the
+ * allowlist check run before `http.request`, so none reaches `budget.reserve`. A `ProviderError` becomes a
+ * `tile-error` for exactly this tile's cells; `BudgetExceeded` and `AbortedError` propagate.
+ */
+export async function fetchCalendarTile(
+  d: CalendarDeps,
+  plan: TilePlan,
+  q: DiscoveryQuery,
+  ctx: ProviderContext,
+): Promise<DiscoveryTileResult> {
+  const req = plan.request;
+  if (req.kind !== 'rectangle') throw new TypeError(`searchapi plans rectangle tiles only; got ${req.kind}`);
+  assertWithinLimit(req);
+  const url = toUrl(calendarParams(q, req, d.pointOfSale));
+  assertRequestAllowed(d.allowlist, SEARCHAPI_ENDPOINT_PATH, url);
+  const gl = d.pointOfSale.toLowerCase();
+  // why: plan decision 15: `accept` vetoes caching a body this parser rejects, so a bad grid is never served again;
+  // only a parse refusal means "do not cache", anything else is a bug and propagates.
+  const accept = (body: unknown): boolean => {
+    try {
+      parseCalendarBody(body, plan, q, gl);
+      return true;
+    } catch (err) {
+      if (err instanceof ProviderError) return false;
+      throw err;
+    }
+  };
+  try {
+    // why: the cache key excludes execution and tile ids (plan decision 14), so an identical rectangle from a
+    // resumed run is a cache hit, ledgered with this tile's index (spec §8.1 parity).
+    const res = await d.http.request({
+      providerId: 'searchapi',
+      executionId: ctx.executionId,
+      tileIndex: plan.index,
+      endpointPath: SEARCHAPI_ENDPOINT_PATH,
+      method: 'GET',
+      url,
+      headers: authHeaders(d.key),
+      cache: { ttlSeconds: d.cacheTtlSeconds, accept },
+      signal: ctx.signal,
+      recordFixtures: ctx.recordFixtures,
+    });
+    const parsed = parseCalendarBody(res.body, plan, q, gl);
+    d.log.debug(
+      {
+        tileIndex: plan.index,
+        prices: parsed.prices.length,
+        noFares: parsed.noFares.length,
+        notes: parsed.notes,
+      },
+      'searchapi calendar tile parsed',
+    );
+    return {
+      kind: 'tile',
+      index: plan.index,
+      coveredCells: plan.coveredCells,
+      fetchedAt: res.fetchedAt,
+      ...parsed,
+    };
+  } catch (err) {
+    if (err instanceof ProviderError)
+      return { kind: 'tile-error', index: plan.index, coveredCells: plan.coveredCells, error: err };
+    throw err;
+  }
 }
