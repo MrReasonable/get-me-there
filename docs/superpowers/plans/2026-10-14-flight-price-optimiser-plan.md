@@ -404,7 +404,7 @@ export interface BudgetGuard {
   usage(scope: BudgetScope): Usage;
   recentCalls(providerId: ProviderId, since: IsoDateTime): number;   // upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart
 }
-// DiscoveryQuery stays per (origin, destination) pair. Travelpayouts queries by the origin's metro code when the airports table maps it to one (rows filtered to the pair by origin_airport); identical metro requests from other pairs are answered by the response cache inside the TTL, so a definition whose origins share a metro costs D × M upstream calls.
+// DiscoveryQuery stays per (origin, destination) pair. Travelpayouts queries by airport code only (decision 34: a metro query returns one cheapest row per date pair across the metro and hides the definition's own fares), rows filtered to the pair by origin_airport; a scan costs O × D × M upstream free calls.
 // A provider whose `cabins` excludes the definition's cabin is not called at all: the engine marks every cell for that provider and stage no_data with reason 'cabin-not-offered' (spec rev 10).
 ```
 
