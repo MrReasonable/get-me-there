@@ -1,11 +1,11 @@
-import { asIata, type CellKey } from '@gmt/core';
+import { asIata, asIsoDateTime, type CellKey } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   attributeRows,
   cacheableBody,
   currencyOf,
+  itineraryOf,
   readEnvelope,
-  returnAirportOf,
   searchedAt,
   vendorLinkFor,
 } from '../../src/travelpayouts/response.js';
@@ -15,7 +15,9 @@ import { cellsFor, envelope, query, row } from './harness.js';
 
 const covered: CellKey[] = cellsOf(query());
 const GBP = { code: 'GBP', exponent: 2 };
+const FETCHED = '2026-10-15T03:50:00.000Z' as const;
 const input = {
+  fetchedAt: asIsoDateTime(FETCHED),
   coveredCells: covered,
   origin: asIata('LHR'),
   destination: asIata('JFK'),
@@ -359,22 +361,33 @@ describe('searchedAt (the row age, decision 35)', () => {
 const linkOf = (out: string, back: string, carrier = 'UA'): string =>
   `/search/X?t=${carrier}18146070001814617500000475${out}18158511001815894900000430${back}_1d1bd24f_58507&search_date=14102026`;
 
-describe('returnAirportOf (decision 35: the airport the return flight lands at, from the link t token)', () => {
+describe('itineraryOf (decision 35: both airport chains of the link t token)', () => {
   it.each([
-    ['direct', linkOf('LHREWR', 'EWRLHR'), 'LHR'],
-    ['with connections', linkOf('LHRFRAEWR', 'EWRFRALCY'), 'LCY'],
-    ['a carrier code with a digit', linkOf('LGWKEFJFK', 'JFKKEFLGW', 'S7'), 'LGW'],
+    ['direct', linkOf('LHREWR', 'EWRLHR'), { out: ['LHR', 'EWR'], back: ['EWR', 'LHR'] }],
+    [
+      'with connections',
+      linkOf('LHRFRAEWR', 'EWRFRALCY'),
+      { out: ['LHR', 'FRA', 'EWR'], back: ['EWR', 'FRA', 'LCY'] },
+    ],
+    [
+      'a carrier code with a digit',
+      linkOf('LGWKEFJFK', 'JFKKEFLGW', 'S7'),
+      { out: ['LGW', 'KEF', 'JFK'], back: ['JFK', 'KEF', 'LGW'] },
+    ],
     ['one direction only', '/search/X?t=UA18146070001814617500000475LHREWR_abc', null],
     ['no t token', '/search/X?search_date=14102026', null],
     ['a t token that is not the itinerary shape', '/search/X?t=1', null],
     ['not a path', 'https://evil.example/x', null],
+    ['a protocol-relative link', '//[', null],
+    ['a backslash link', '/\\[', null],
+    ['an unparsable host', '//', null],
     ['not a string', 42, null],
   ] as const)('%s → %j', (_label, link, expected) => {
-    expect(returnAirportOf(link)).toBe(expected);
+    expect(itineraryOf(link)).toEqual(expected);
   });
 });
 
-describe('closed round trips only (decision 35): a row returning to another airport is a per-cell issue', () => {
+describe('closed round trips only (decision 35): an open-jaw row, on either end, is a per-cell issue', () => {
   const closed = {
     ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
     link: linkOf('LHRJFK', 'JFKLHR'),
@@ -393,9 +406,23 @@ describe('closed round trips only (decision 35): a row returning to another airp
         cell: expect.objectContaining({ departureDate: '2027-03-14', returnDate: '2027-03-25' }),
         reason: 'parse',
         offersDropped: 1,
-        detail: expect.stringContaining('[return-airport-mismatch]'),
+        detail: expect.stringContaining('[open-jaw]'),
       },
     ]);
+  });
+
+  it.each([
+    ['the outbound starts elsewhere', linkOf('LGWJFK', 'JFKLHR')],
+    ['the outbound lands at another airport of the destination city', linkOf('LHRLGA', 'JFKLHR')],
+    ['the return leaves from another airport of the destination city', linkOf('LHRJFK', 'LGAJFKLHR')],
+    ['the return lands at another airport', linkOf('LHRJFK', 'JFKLGW')],
+  ])('drops a row where %s', (_label, link) => {
+    const r = attributeRows(
+      [{ ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }), link }],
+      input,
+    );
+    expect(r.prices).toEqual([]);
+    expect(r.cellIssues[0]?.detail).toContain('[open-jaw]');
   });
 
   it('reports an open-jaw row for a cell the tile also priced, so the engine records priced with offers-dropped', () => {
@@ -415,7 +442,7 @@ describe('closed round trips only (decision 35): a row returning to another airp
     expect(r.cellIssues).toHaveLength(1);
     expect(r.cellIssues[0]?.offersDropped).toBe(2);
     expect(r.cellIssues[0]?.detail).toContain('[bad-price]');
-    expect(r.cellIssues[0]?.detail).toContain('[return-airport-mismatch]');
+    expect(r.cellIssues[0]?.detail).toContain('[open-jaw]');
   });
 
   it('prices a row whose link has no readable itinerary: the return cannot be checked, and nothing is invented about it', () => {
@@ -425,5 +452,71 @@ describe('closed round trips only (decision 35): a row returning to another airp
     );
     expect(r.prices).toHaveLength(1);
     expect(r.cellIssues).toEqual([]);
+  });
+});
+
+describe('a malformed vendor link never throws (one guarded parser for vendorLinkFor, searchedAt and itineraryOf)', () => {
+  it.each(['//[', '/\\[', '//evil.example/x', '/\\evil.example/x'])('link %j', (link) => {
+    expect(vendorLinkFor(link)).toBeNull();
+    expect(searchedAt(link)).toBeNull();
+    expect(itineraryOf(link)).toBeNull();
+  });
+
+  it('a row with such a link is a per-cell parse issue [bad-link], counted offers-dropped, never an exception', () => {
+    const r = attributeRows(
+      [
+        {
+          ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+          link: '//[',
+        },
+      ],
+      input,
+    );
+    expect(r.prices).toEqual([]);
+    expect(r.notes.list()).toEqual(['offers-dropped:1']);
+    expect(r.cellIssues).toEqual([
+      {
+        cell: expect.objectContaining({ departureDate: '2027-03-12' }),
+        reason: 'parse',
+        offersDropped: 1,
+        detail: expect.stringContaining('[bad-link]'),
+      },
+    ]);
+  });
+
+  it('an absolute link is still only refused (link-rejected), the row stays priced', () => {
+    const r = attributeRows(
+      [
+        {
+          ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+          link: 'https://evil.example/x',
+        },
+      ],
+      input,
+    );
+    expect(r.prices).toHaveLength(1);
+    expect(r.notes.list()).toContain('link-rejected:1');
+  });
+});
+
+describe('providerObservedAt on the fetch day (decision 35, day resolution)', () => {
+  const sameDay = (searchDate: string) => ({
+    ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+    link: `/search/X?search_date=${searchDate}`,
+  });
+
+  it('is fetchedAt, never "just now" from a midnight, when the search day is the fetch day', () => {
+    const r = attributeRows([sameDay('15102026')], input);
+    expect(r.prices.map((p) => p.providerObservedAt)).toEqual([FETCHED]);
+  });
+
+  it('is fetchedAt for a search day after the fetch day (never later than the fetch)', () => {
+    const r = attributeRows([sameDay('16102026')], input);
+    expect(r.prices.map((p) => p.providerObservedAt)).toEqual([FETCHED]);
+  });
+
+  it('stays the search day at 00:00 UTC for an earlier day', () => {
+    const r = attributeRows([sameDay('14102026')], input);
+    expect(r.prices.map((p) => p.providerObservedAt)).toEqual(['2026-10-14T00:00:00.000Z']);
   });
 });

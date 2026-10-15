@@ -24,7 +24,8 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
     expect(note).toContain(
       "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration)",
     );
-    expect(note).toContain("A row's own search link carries the day it was searched");
+    expect(note).toContain("A row's own search link carries the day it was found");
+    expect(note).toContain('day resolution (found on that date, no time of day)');
     expect(note).toContain('the 48 hours applies only to a row whose link has no search date');
     expect(note).toContain('cabin not stated by the vendor, treated as economy');
     expect(note).not.toContain('rows carry no timestamp');

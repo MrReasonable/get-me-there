@@ -45,7 +45,7 @@ export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
   sourceKind: 'authorised-cached',
   maxAgeHours: MAX_AGE_HOURS,
   provenanceNote:
-    "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration). A row's own search link carries the day it was searched, which is used as its observation time; the 48 hours applies only to a row whose link has no search date. From the authorised Travelpayouts Data API; cabin not stated by the vendor, treated as economy; point of sale unknown; not a fare quote; constraints are not checked.",
+    "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration). A row's own search link carries the day it was found, which is used as its observation time at day resolution (found on that date, no time of day); the 48 hours applies only to a row whose link has no search date. From the authorised Travelpayouts Data API; cabin not stated by the vendor, treated as economy; point of sale unknown; not a fare quote; constraints are not checked.",
 };
 /**
  * Spec §5.2: from recorded fixtures only. A row names one airline, one flight number and transfer counts, which is
@@ -192,6 +192,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     try {
       read = await readPages(plan, tp, ctx);
       attribution = attributeRows(read.rows, {
+        fetchedAt: read.fetchedAt,
         coveredCells: plan.coveredCells,
         origin: tp.origin,
         destination: tp.destination,

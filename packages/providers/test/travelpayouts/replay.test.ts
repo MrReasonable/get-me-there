@@ -1,6 +1,7 @@
 import {
   asIata,
   asIsoDate,
+  asIsoDateTime,
   cellKeyString,
   type DiscoveryQuery,
   fromEpochDay,
@@ -18,7 +19,7 @@ import {
   TRAVELPAYOUTS_PARAMS,
 } from '../../src/travelpayouts/params.js';
 import { MAX_PAGES } from '../../src/travelpayouts/provider.js';
-import { AVIASALES_BASE, returnAirportOf } from '../../src/travelpayouts/response.js';
+import { AVIASALES_BASE, itineraryOf } from '../../src/travelpayouts/response.js';
 import { SENTINELS } from '../fakes.js';
 import { arr, obj, str } from '../support/guards.js';
 import { server } from '../support/msw.js';
@@ -29,6 +30,7 @@ import {
   eventsOf,
   makeHarness,
   makeProvider,
+  NOW,
   only,
   query,
   tileOf,
@@ -150,6 +152,8 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       expect(pages.map((p) => param(p.url, 'page'))).toEqual(pages.map((_, i) => String(i + 1)));
       replay();
       const h = makeHarness();
+      // why: observation times are clamped to the fetch time (day resolution), so the clock is the recording's own
+      h.clock.set(asIsoDateTime(pages[0]?.fixture.recordedAt ?? NOW));
       const d = discoveryOf(makeProvider(h));
       const received = pages.reduce((n, p) => n + rowsOf(p.fixture.body).length, 0);
       const q = monthQuery(asIata(origin), asIata(destination), month);
@@ -178,15 +182,26 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     },
   );
 
-  it('every airport-tile row is a closed round trip: its link returns to the queried origin airport (decision 35)', () => {
+  it('every airport-tile row is a closed round trip: its link goes origin → destination and back destination → origin, all four ends (decision 35)', () => {
     // If this fails after a re-record, stop and report: an airport query returned an open-jaw row, and attribution by
-    // origin_airport would price it against a round trip from the origin.
-    for (const [key, pages] of airportTiles)
+    // origin_airport and destination_airport would price it against a round trip it is not.
+    for (const [key, pages] of airportTiles) {
+      const [origin = '', destination = ''] = key.split('|');
       for (const p of pages)
         for (const r of rowsOf(p.fixture.body).map(obj)) {
-          expect(returnAirportOf(r.link), `${key} ${str(r.departure_at)}`).toBe(key.split('|')[0]);
-          expect(r.origin_airport).toBe(key.split('|')[0]);
+          const trip = itineraryOf(r.link);
+          const where = `${key} ${str(r.departure_at)}`;
+          expect(trip, where).not.toBeNull();
+          expect([trip?.out[0], trip?.out.at(-1), trip?.back[0], trip?.back.at(-1)], where).toEqual([
+            origin,
+            destination,
+            destination,
+            origin,
+          ]);
+          expect(r.origin_airport).toBe(origin);
+          expect(r.destination_airport).toBe(destination);
         }
+    }
   });
 
   it('the first recorded LHR → JFK row becomes exactly its cell and amount (ts-006)', async () => {
@@ -199,7 +214,9 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     if (airport === undefined) throw new Error('WP4b recorded no LHR → JFK tile with rows');
     const first = obj(rowsOf(airport.fixture.body).find((r) => obj(r).origin_airport === 'LHR'));
     replay();
-    const d = discoveryOf(makeProvider(makeHarness()));
+    const h = makeHarness();
+    h.clock.set(asIsoDateTime(airport.fixture.recordedAt));
+    const d = discoveryOf(makeProvider(h));
     const q = monthQuery(asIata('LHR'), asIata('JFK'), param(airport.url, 'departure_at'));
     const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
     const price = typeof first.price === 'number' ? majorToMinor(first.price, 'GBP') : null;
@@ -232,17 +249,32 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     expect(rowOf('LON|JFK|2027-03', 'LTN')).toHaveLength(1);
     expect(rowOf('LON|JFK|2027-03', 'LHR')).toHaveLength(0);
     expect(rowOf('LHR|JFK|2027-03', 'LHR')).toHaveLength(1);
-    // second reason for the rule: under a metro query a row's origin_airport names only the outbound airport, and the
-    // recorded metro tiles hold exactly these open-jaw rows (outbound airport -> airport the return lands at)
+    // second reason for the rule: under a metro query a row's origin_airport and destination_airport name only the
+    // outbound ends, and the recorded metro tiles (TP-01...14 and the reverse tile TP-21) hold exactly these open-jaw
+    // rows: origin side (LHR>EWR returns to LCY, LGW>JFK returns to LHR) and destination side (JFK>LGW returns from LHR)
+    const endsOf = (r: Record<string, unknown>) => {
+      const trip = itineraryOf(r.link);
+      return `${str(r.origin_airport)}>${str(r.destination_airport)} via ${trip?.out.join('-')} / ${trip?.back.join('-')}`;
+    };
     const openJaw = [...tiles.entries()]
-      .filter(([key]) => key.startsWith('LON|'))
+      .filter(([key]) => key.startsWith('LON|') || key.split('|')[1] === 'LON')
       .flatMap(([, pages]) => pages.flatMap((p) => rowsOf(p.fixture.body).map(obj)))
-      .filter((r) => returnAirportOf(r.link) !== r.origin_airport)
-      .map(
-        (r) => `${str(r.origin_airport)}>${str(r.destination_airport)} returns to ${returnAirportOf(r.link)}`,
-      )
+      .filter((r) => {
+        const trip = itineraryOf(r.link);
+        return (
+          trip !== null &&
+          [trip.out[0], trip.out.at(-1), trip.back[0], trip.back.at(-1)].join() !==
+            [r.origin_airport, r.destination_airport, r.destination_airport, r.origin_airport].join()
+        );
+      })
+      .map(endsOf)
       .sort();
-    expect(openJaw).toEqual(['LGW>JFK returns to LHR', 'LHR>EWR returns to LCY', 'LHR>EWR returns to LGW']);
+    expect(openJaw).toEqual([
+      'JFK>LGW via JFK-ZRH-LGW / LHR-ZRH-JFK',
+      'LGW>JFK via LGW-KEF-JFK / JFK-KEF-LHR',
+      'LHR>EWR via LHR-FRA-EWR / EWR-FRA-LCY',
+      'LHR>EWR via LHR-KEF-EWR / EWR-KEF-LGW',
+    ]);
     // and the adapter, querying LHR, prices that cell
     replay();
     const d = discoveryOf(makeProvider(makeHarness()));

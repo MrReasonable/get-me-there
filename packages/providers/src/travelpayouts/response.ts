@@ -134,13 +134,30 @@ const rowSchema = z.object({
 export const AVIASALES_BASE = 'https://www.aviasales.com';
 
 /**
+ * The one guarded reading of a vendor `link` (plan decision 35): a site-relative path only, as a URL on the Aviasales
+ * site, or null. `//` and `/\` prefixes are refused because they mean another host, and `new URL` is wrapped so a
+ * malformed value is a null, never an unclassified throw out of fetchTile.
+ */
+function parseLink(link: unknown): URL | null {
+  if (typeof link !== 'string' || !link.startsWith('/') || link.startsWith('//') || link.startsWith('/\\')) {
+    return null;
+  }
+  try {
+    return new URL(link, AVIASALES_BASE);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Spec §5.2 vendor links: the relative Aviasales path prefixed with the site, then checked by core's
  * validateVendorUrl against LINK_ALLOWLIST.travelpayouts (WP2). Null when refused. This is the vendor's own search
- * link for the row (its search may name another airport of the same city), never a fare link; the UI's search link is core's searchLinkFor.
+ * link for the row (its search may name another airport of the same city), never a fare link; the UI's search link is
+ * core's searchLinkFor.
  * why: only a site-relative path is accepted; an absolute or protocol-relative value is refused, never resolved.
  */
 export function vendorLinkFor(link: unknown): string | null {
-  if (typeof link !== 'string' || !link.startsWith('/') || link.startsWith('//')) return null;
+  if (parseLink(link) === null || typeof link !== 'string') return null;
   const booking = validateVendorUrl(`${AVIASALES_BASE}${link}`, LINK_ALLOWLIST.travelpayouts);
   return booking.kind === 'get' ? booking.url : null;
 }
@@ -150,14 +167,13 @@ const SEARCH_DATE = /^(\d{2})(\d{2})(\d{4})$/;
 
 /**
  * Spec §3 row age (plan decision 35): the day the vendor says the price was found, from `search_date=DDMMYYYY` in the
- * row's own link, as that day at 00:00 UTC (never younger than the evidence). Every recorded link carries it and the
+ * row's own link, as that day at 00:00 UTC (day resolution; the vendor does not state the day's zone). Every recorded link carries it and the
  * recorded rows were 4 to 7 days old at fetch time, so the 48-hour declaration is only the fallback for a link without
  * it. Null when the link is absent, unreadable, has no search date or an impossible calendar date; nothing is guessed.
  * why: the field is undocumented by the vendor, so the replay test pins it on the recordings.
  */
 export function searchedAt(link: unknown): IsoDateTime | null {
-  if (typeof link !== 'string' || !link.startsWith('/')) return null;
-  const m = SEARCH_DATE.exec(new URL(link, AVIASALES_BASE).searchParams.get('search_date') ?? '');
+  const m = SEARCH_DATE.exec(parseLink(link)?.searchParams.get('search_date') ?? '');
   if (m === null) return null;
   const [, dd = '', mm = '', yyyy = ''] = m;
   const day = isoDateSchema.safeParse(`${yyyy}-${mm}-${dd}`);
@@ -168,21 +184,32 @@ export function searchedAt(link: unknown): IsoDateTime | null {
 const LEG = /\d{26}((?:[A-Z]{3})+)/g;
 
 /**
- * The airport the return flight lands at, read from the `t` token of the row's own link (plan decision 35): the token
- * holds the outbound and the return direction, each as digits followed by its airport chain (`LHRFRAEWR`,
- * `EWRFRALCY`), and the last code of the second chain is where the traveller ends up. Null when the link, the token or
- * either direction is missing or not in that shape: the return then cannot be checked and nothing is guessed.
- * why: a row's `origin_airport` names only the outbound airport, and the recordings show metro rows that return to a
- * different airport (open-jaw); an airport query returned none, which the replay test pins. The token format is
- * undocumented by the vendor.
+ * Both airport chains of the `t` token of the row's own link (plan decision 35): the token holds the outbound and the
+ * return direction, each as digits followed by its airport chain (`LHRFRAEWR`, `EWRFRALCY`). Null when the link, the
+ * token or either direction is missing or not in that shape: the itinerary then cannot be checked and nothing is
+ * guessed.
+ * why: a row's `origin_airport` and `destination_airport` name only the outbound ends, and the recordings show metro
+ * rows whose outbound lands, or whose return leaves or lands, at another airport (open-jaw); an airport query returned
+ * none, which the replay test pins. The token format is undocumented by the vendor.
  */
-export function returnAirportOf(link: unknown): string | null {
-  if (typeof link !== 'string' || !link.startsWith('/')) return null;
-  const t = new URL(link, AVIASALES_BASE).searchParams.get('t');
-  if (t === null) return null;
+export function itineraryOf(link: unknown): { out: string[]; back: string[] } | null {
+  const t = parseLink(link)?.searchParams.get('t');
+  if (t === undefined || t === null) return null;
   const legs = [...(t.split('_')[0] ?? '').matchAll(LEG)].map((m) => m[1] ?? '');
-  if (legs.length !== 2) return null;
-  return (legs[1] ?? '').slice(-3);
+  const [out, back] = legs;
+  if (legs.length !== 2 || out === undefined || back === undefined) return null;
+  const codes = (chain: string): string[] => chain.match(/[A-Z]{3}/g) ?? [];
+  return { out: codes(out), back: codes(back) };
+}
+
+/** Whether a readable itinerary is the closed round trip origin → destination → origin. */
+function isClosed(trip: { out: string[]; back: string[] }, origin: string, destination: string): boolean {
+  return (
+    trip.out[0] === origin &&
+    trip.out.at(-1) === destination &&
+    trip.back[0] === destination &&
+    trip.back.at(-1) === origin
+  );
 }
 
 type Row = z.infer<typeof rowSchema>;
@@ -208,6 +235,8 @@ function placeRow(row: Row, input: AttributionInput): { cell: CellKey } | { drop
 }
 
 export interface AttributionInput {
+  /** When the response was fetched (the oldest page): the upper bound of any row's observation time. */
+  fetchedAt: IsoDateTime;
   coveredCells: readonly CellKey[];
   /** The pair's origin airport; a row naming any other origin airport is dropped (and fails the tile in fetchTile). */
   origin: Iata;
@@ -241,10 +270,10 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   const covered = new Set(input.coveredCells.map(cellKeyString));
   const notes = new NoteCounter();
   const prices: RawCalendarPrice[] = [];
-  // per covered cell: rows dropped for an unusable price, and rows dropped because they return to another airport
-  const dropped = new Map<string, { cell: CellKey; badPrice: number; openJaw: number }>();
+  // per covered cell: rows dropped for an unusable price, and rows dropped because they are not the closed round trip, and rows with an unusable link
+  const dropped = new Map<string, { cell: CellKey; badPrice: number; openJaw: number; badLink: number }>();
   const droppedFor = (key: string, cell: CellKey) => {
-    const d = dropped.get(key) ?? { cell, badPrice: 0, openJaw: 0 };
+    const d = dropped.get(key) ?? { cell, badPrice: 0, openJaw: 0, badLink: 0 };
     dropped.set(key, d);
     return d;
   };
@@ -266,8 +295,15 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
     }
     // why: an airport query is a round trip from that airport (decision 35); a row returning elsewhere is not the
     // cell's trip, so it is dropped and reported rather than priced.
-    const back = returnAirportOf(row.link);
-    if (back !== null && back !== input.origin) {
+    // why: a link that looks site-relative but cannot be read (`//host`, `/\`, an unparsable value) is a malformed
+    // row for its cell, reported rather than thrown (decision 35).
+    if (typeof row.link === 'string' && row.link.startsWith('/') && parseLink(row.link) === null) {
+      notes.add('offers-dropped');
+      droppedFor(key, cell).badLink += 1;
+      continue;
+    }
+    const trip = itineraryOf(row.link);
+    if (trip !== null && !isClosed(trip, input.origin, input.destination)) {
       notes.add('offers-dropped');
       droppedFor(key, cell).openJaw += 1;
       continue;
@@ -279,8 +315,13 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       continue;
     }
     const price: RawCalendarPrice = { ...cell, amountMinor, currency: input.currency.code };
+    // why: day resolution (decision 35). A search day that is the fetch day, or later, would read "just now" from its
+    // midnight, so the row is observed at the fetch itself; an earlier day stays its 00:00 UTC start.
     const seen = searchedAt(row.link);
-    if (seen !== null) price.providerObservedAt = seen;
+    if (seen !== null) {
+      price.providerObservedAt =
+        seen >= `${input.fetchedAt.slice(0, 10)}T00:00:00.000Z` ? input.fetchedAt : seen;
+    }
     const link = vendorLinkFor(row.link);
     if (link !== null) price.vendorLink = link;
     else if (row.link !== undefined && row.link !== null) notes.add('link-rejected');
@@ -288,7 +329,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   }
   const { code, exponent } = input.currency;
   const rowsWord = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
-  const cellIssues = [...dropped.values()].map(({ cell, badPrice, openJaw }): CellIssue => {
+  const cellIssues = [...dropped.values()].map(({ cell, badPrice, openJaw, badLink }): CellIssue => {
     const parts: string[] = [];
     if (badPrice > 0) {
       parts.push(
@@ -299,13 +340,14 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
     }
     if (openJaw > 0) {
       parts.push(
-        `${rowsWord(openJaw)} returned to an airport other than the pair's origin [return-airport-mismatch]`,
+        `${rowsWord(openJaw)} were not the closed round trip ${input.origin} to ${input.destination} and back [open-jaw]`,
       );
     }
+    if (badLink > 0) parts.push(`${rowsWord(badLink)} had a malformed link [bad-link]`);
     return {
       cell,
       reason: badPrice > 0 && exponent === null ? 'currency-unsupported' : 'parse',
-      offersDropped: badPrice + openJaw,
+      offersDropped: badPrice + openJaw + badLink,
       detail: `travelpayouts: ${parts.join('; ')}`,
     };
   });
