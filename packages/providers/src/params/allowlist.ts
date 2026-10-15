@@ -1,6 +1,7 @@
 import { type IsoDate, isoDateSchema, type ProviderId, providerIdSchema } from '@gmt/core';
+import { z } from 'zod';
 import { defaultRecordedRoot, loadRecordedJson } from '../http/recorder.js';
-import { isRecord } from '../util.js';
+import { parseOrThrow } from '../util.js';
 
 /**
  * Dated parameter allowlist, spec §5.2: every parameter name **and value** an adapter may send, per endpoint key
@@ -30,47 +31,55 @@ function parseKey(key: string): { path: string; name: string | undefined; value:
   return { path: m[1], name: m[2], value: m[3] };
 }
 
+const endpointSchema = z
+  .object({
+    names: z.array(z.string()),
+    values: z.record(z.string(), z.union([z.literal('any'), z.array(z.string()).min(1)])),
+  })
+  .superRefine((e, ctx) => {
+    e.names.forEach((n, i) => {
+      const prev = e.names[i - 1];
+      if (prev !== undefined && !(prev < n))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['names', i],
+          message: `names must be strictly ascending (${prev}, ${n})`,
+        });
+      if (e.values[n] === undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['values', n],
+          message: `name ${n} needs 'any' or a non-empty value list`,
+        });
+    });
+    for (const k of Object.keys(e.values))
+      if (!e.names.includes(k))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['values', k],
+          message: `values lists ${k}, which is not in names`,
+        });
+  });
+
+/** The file form of a ParamsAllowlist; provider and recordedAt come from core's schemas, so the brands need no cast. */
+const allowlistFileSchema = z.object({
+  provider: providerIdSchema,
+  recordedAt: isoDateSchema,
+  endpoints: z.record(z.string(), endpointSchema).superRefine((endpoints, ctx) => {
+    for (const key of Object.keys(endpoints))
+      if (parseKey(key) === null)
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `endpoint key ${key} must be <path> or <path>?<name>=<value>`,
+        });
+  }),
+  contentSha256: z.string(),
+});
+
 /** Loads and validates an allowlist file (recorded tree, content hash, core schemas, key form, ascending names, values per name). */
 export function loadParamsAllowlist(path: string, root: string = defaultRecordedRoot()): ParamsAllowlist {
-  const json = loadRecordedJson(path, root);
-  const fail = (why: string): Error => new Error(`refusing params allowlist ${path}: ${why}`);
-  const provider = providerIdSchema.safeParse(json.provider);
-  if (!provider.success) throw fail('unknown provider');
-  const recordedAt = isoDateSchema.safeParse(json.recordedAt);
-  if (!recordedAt.success) throw fail('recordedAt must be a real YYYY-MM-DD date');
-  const rawEndpoints = json.endpoints;
-  if (!isRecord(rawEndpoints)) throw fail('endpoints must be an object keyed by endpoint');
-  const endpoints: ParamsAllowlist['endpoints'] = {};
-  for (const [key, entry] of Object.entries(rawEndpoints)) {
-    if (parseKey(key) === null) throw fail(`endpoint key ${key} must be <path> or <path>?<name>=<value>`);
-    if (!isRecord(entry)) throw fail(`endpoint ${key} is not an object`);
-    const rawNames = entry.names;
-    const rawValues = entry.values;
-    if (!Array.isArray(rawNames) || !isRecord(rawValues))
-      throw fail(`endpoint ${key} needs names and values`);
-    const names: string[] = [];
-    for (const n of rawNames) {
-      if (typeof n !== 'string') throw fail(`endpoint ${key}: names must be strings`);
-      const prev = names[names.length - 1];
-      if (prev !== undefined && !(prev < n))
-        throw fail(`endpoint ${key}: names must be strictly ascending (${prev}, ${n})`);
-      names.push(n);
-    }
-    const values: Record<string, string[] | 'any'> = {};
-    for (const n of names) {
-      const v = rawValues[n];
-      if (v === 'any') values[n] = 'any';
-      else if (Array.isArray(v) && v.length > 0 && v.every((x): x is string => typeof x === 'string'))
-        values[n] = [...v];
-      else throw fail(`endpoint ${key}: name ${n} needs 'any' or a non-empty value list`);
-    }
-    for (const k of Object.keys(rawValues))
-      if (!names.includes(k)) throw fail(`endpoint ${key}: values lists ${k}, which is not in names`);
-    endpoints[key] = { names, values };
-  }
-  const contentSha256 = json.contentSha256;
-  if (typeof contentSha256 !== 'string') throw fail('contentSha256 is missing');
-  return { provider: provider.data, recordedAt: recordedAt.data, endpoints, contentSha256 };
+  return parseOrThrow(allowlistFileSchema, loadRecordedJson(path, root), `refusing params allowlist ${path}`);
 }
 
 /**
