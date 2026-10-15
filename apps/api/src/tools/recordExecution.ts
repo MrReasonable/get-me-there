@@ -120,7 +120,8 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
         providerId: 'searchapi',
         stage: 'verification',
         calls: t.worstCaseCredits,
-        planCalls: t.worstCaseCredits,
+        // why: every planned first attempt, the unbilled 401 probe included, so parity with the ledger's rows holds (cost M-1)
+        planCalls: t.saCalls,
         costMicroGbp: saCost,
         costPence: Math.ceil(saCost / 10_000),
         seconds: 0,
@@ -128,7 +129,7 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
       },
     ],
     totalCalls: t.worstCaseFreeCalls + t.worstCaseCredits,
-    totalPlanCalls: t.worstCaseCredits,
+    totalPlanCalls: t.freeCalls + t.saCalls,
     totalCostMicroGbp: saCost,
     totalCostPence: Math.ceil(saCost / 10_000),
     seconds: 0,

@@ -3136,7 +3136,10 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       .prepare(
         `SELECT e.status, e.trigger, e.error_text AS errorText,
                 json_extract(e.definition_snapshot_json, '$.budget') AS budget, json_extract(e.definition_snapshot_json, '$.deletedAt') AS snapDeleted,
-                json_extract(e.estimate_json, '$.totalPlanCalls') AS planCalls, d.deleted_at AS deletedAt, d.enabled,
+                json_extract(e.estimate_json, '$.totalPlanCalls') AS planCalls,
+                json_extract(e.estimate_json, '$.perProvider[1].planCalls') AS saPlanCalls,
+                json_extract(e.estimate_json, '$.perProvider[1].calls') AS saCalls,
+                d.deleted_at AS deletedAt, d.enabled,
                 (SELECT COUNT(*) FROM search_cells c WHERE c.execution_id = e.id) AS cells
          FROM search_executions e JOIN search_definitions d ON d.id = e.definition_id`,
       )
@@ -3148,7 +3151,10 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
         errorText: null,
         budget: JSON.stringify({ maxCalls: 5, maxFreeCalls: 2000, maxCostMicroGbp: 0 }),
         snapDeleted: expect.any(String),
-        planCalls: 5,
+        // why: plan-call figures count every planned first attempt, so parity with the ledger holds (cost M-1): 21 + 6
+        planCalls: 27,
+        saPlanCalls: 6,
+        saCalls: 5,
         deletedAt: expect.any(String),
         enabled: 0,
         cells: 0,
@@ -3936,7 +3942,8 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
         providerId: 'searchapi',
         stage: 'verification',
         calls: t.worstCaseCredits,
-        planCalls: t.worstCaseCredits,
+        // why: every planned first attempt, the unbilled 401 probe included, so parity with the ledger's rows holds (cost M-1)
+        planCalls: t.saCalls,
         costMicroGbp: saCost,
         costPence: Math.ceil(saCost / 10_000),
         seconds: 0,
@@ -3944,7 +3951,7 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
       },
     ],
     totalCalls: t.worstCaseFreeCalls + t.worstCaseCredits,
-    totalPlanCalls: t.worstCaseCredits,
+    totalPlanCalls: t.freeCalls + t.saCalls,
     totalCostMicroGbp: saCost,
     totalCostPence: Math.ceil(saCost / 10_000),
     seconds: 0,
