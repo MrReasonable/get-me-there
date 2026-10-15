@@ -19,8 +19,8 @@ Decisions that shape this brief: 6 (allowlist constant equals the recorded file)
 Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns cached Aviasales round-trip prices from `/aviasales/v3/prices_for_dates` into raw, cell-keyed calendar prices, and the shared adapter helpers (`majorToMinor`, `parseError`, `NoteCounter`) that WP5 consumes.
 
 - There is one month tile per (origin, destination) pair and departure month.
-- The request uses the metro code only when two or more of the definition's origins map to that metro; a lone airport is queried by its own code (spec §2, §5.2 rev 14).
-- Sibling pairs that share a metro are deduplicated by the response cache, and the ledger counts one row per tile.
+- Every request is for one (origin airport, destination airport) pair and never uses a metro code (plan decision 34, spec rev 17): a metro query returns one cheapest row per date pair across the whole metro, which hides the definition's own fare when a cheaper airport it does not use is in that metro.
+- There is no sibling-pair dedup: each pair's tile is its own upstream call (the worked example gives 28 tiles, 28 upstream calls, 0 cache hits); the cache only serves a repeat of an identical request, which the ledger counts as one cache-hit row per tile.
 - The adapter reports every covered cell it received a row for but could not price, and every cell it did not finish reading, through `cellIssues`; a capped tile is marked `truncated`. That a reported cell never reaches the operator as `no_data` depends on WP7 applying `cellIssues` before its `no_data` fallback (decisions 28 and 30 record the rule for WP7).
 - Nothing is defaulted and nothing is invented.
 
@@ -35,7 +35,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - the fixture provider moved onto both (its private parse-error builder and its `dropped-out-of-band` note go), so the package has one parse-error rule and one notes grammar (Task 6.1).
 - `packages/providers/src/travelpayouts/`:
   - month tiling per pair (`plan`);
-  - the rev 14 metro-or-airport `origin` parameter;
+  - the `origin` parameter, always the pair's airport code;
   - row attribution by response dates, filtered to the pair, with per-cell reports of rows dropped for a covered cell;
   - pagination inside `fetchTile`, with a page cap that reports unread cells;
   - envelope, row and currency checks with zod;
@@ -43,7 +43,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - `TRAVELPAYOUTS_PARAMS` (a code constant asserted equal to the recorded allowlist file);
   - `travelpayoutsHttpLimits` (vendor ceiling 600/min, no `classifyError`, so WP4's default table applies);
   - identity fields and a stateless healthcheck that sends no request.
-- Three type-only contract additions in `packages/core/src/ports/provider.ts` (Task 6.2): `DiscoveryQuery.definitionOrigins?`, `CellIssue` / `DiscoveryTileResult.cellIssues?`, and `DiscoveryTileResult.truncated?`. Decisions 28 and 30 record all three and the spec §5.1 fold.
+- Two type-only contract additions in `packages/core/src/ports/provider.ts` (Task 6.2): `CellIssue` / `DiscoveryTileResult.cellIssues?`, and `DiscoveryTileResult.truncated?`. Decisions 28 and 30 record all three and the spec §5.1 fold.
 - One optional field in http-kit (Task 6.5): `HttpKitRequest.ledgerCacheHit?`, so a cached multi-page tile is one cache-hit row.
 - One entry each in `apps/api/src/wiring.ts` `httpLimitsFor` and `providersFor` (plan, "Wiring and bootstraps").
 - Tests:
@@ -63,7 +63,6 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
 - Recording the fixtures and writing `params-<date>.json` [WP4b].
 - `buildPorts`, and `httpLimitsFor`/`providersFor` other than the Travelpayouts entries [WP4b, WP8].
 - Engine rules [WP7]:
-  - setting `DiscoveryQuery.definitionOrigins` from the snapshot's origins;
   - applying `cellIssues`: `priced` with `offers-dropped:n` when the tile also priced the cell, else `error` with the issue's `reason` and `detail` in `last_error`;
   - labelling the prices of a `truncated` tile "cheapest of the rows read";
   - the `cabin-not-offered` rule: a provider whose `cabins` excludes the definition's cabin is never called;
@@ -72,12 +71,11 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - cell outcome writes; parity measurement.
 - Core helpers [WP2]: `validateVendorUrl`, `LINK_ALLOWLIST`, `searchLinkFor` (the Aviasales search link the UI shows when `booking` is `none`, spec §6.9), `MINOR_EXPONENT`.
 - `generateCells`, `monthOf`, `toEpochDay`, `fromEpochDay` [WP1]. `cellKeyString`, `isoDateTimeOfEpochMs` [WP0].
-- `AirportsRepo.metroOf` and the attributed metro list [WP3].
 - The coverage-check route [WP7 `coverageCheck`, WP8 route].
 
 ## 3. Spec sections
 
-- **§2 Travelpayouts row.** The endpoint is `/aviasales/v3/prices_for_dates`, with month tiles (`departure_at=YYYY-MM`, `one_way=false`, no `return_at`), paginated at 1000. Origin is an airport code, or the metro code when the definition's origins share one; rows split by `origin_airport`.
+- **§2 Travelpayouts row.** The endpoint is `/aviasales/v3/prices_for_dates`, with month tiles (`departure_at=YYYY-MM`, `one_way=false`, no `return_at`), paginated at 1000. Origin is the pair's airport code, never a metro code (rev 17, plan decision 34); rows are filtered by `origin_airport`.
   - It is authorised and cached from Aviasales user searches in the last 48 h. It has no `found_at`, ignores `market`, and is economy only.
   - It is free at 600/min. `sourceKind` is `authorised-cached` and `maxAgeHours` is 48.
 - **§2 fact 1.** `origin_airport` is on every row. `currency=gbp` is honoured. `market` and `trip_class` are ignored. There is no `found_at`.
@@ -86,9 +84,9 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
 - **§5.1.** `TileRequest` has `{ kind: 'month'; month }`. `DiscoveryTileResult` `'tile'` carries `pointOfSale`. `BudgetGuard.reserve` and `recordCacheHit` carry `tileIndex`.
 - **§5.2 (rev 14).**
   - Tiles partition the cells; `plan` is pure and deterministic.
-  - The query is per pair. `origin` is the pair origin's metropolitan code when two or more of the definition's origins map to that metro, else the airport code.
+  - The query is per pair. `origin` is the pair origin's airport code, never a metro code (rev 17, plan decision 34).
   - Rows are attributed by `origin_airport` and filtered to the pair and the nights band.
-  - Identical metro requests from sibling pairs are answered by the response cache. The worked example gives 28 tiles, 14 upstream calls and 14 cache hits.
+  - Every pair's tile is its own request. The worked example gives 28 tiles, 28 upstream calls and 0 cache hits.
   - Pages are fetched inside one `fetchTile`, each ledgered under the tile's index; parity counts tiles.
   - Cell keys come from the response, and entries outside the tile or the band are dropped and counted in `notes`.
   - Empty is per capability: a valid empty envelope gives `no_data`; a malformed envelope or `success:false` gives `parse`.
@@ -123,7 +121,6 @@ export interface DiscoveryQuery {
   departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number;
   cabin: Cabin; currency: 'GBP';
   cells?: CellKey[];               // when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it
-  definitionOrigins?: Iata[];      // + Task 6.2: the definition's origins (spec §2, §5.2 rev 14); absent → the pair origin alone
 }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }
 export type TileRequest =
@@ -230,7 +227,7 @@ export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>;
 //   support/time.ts useFakeTime(), drive(p); support/guards.ts obj, arr, str, asProviderError; support/setup.ts (installNetworkGuards + "no open reservation" after each test).
 
 // Adapter constructor and exports (plan; WP6 implements these exactly)
-export function travelpayoutsProvider(o: { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: { metroOf(iata: Iata): string | null } }): FlightProvider;
+export function travelpayoutsProvider(o: { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }): FlightProvider;
 export function travelpayoutsHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['api.travelpayouts.com'], billable 'never'; no classifyError
 export const TRAVELPAYOUTS_PARAMS: ParamsAllowlist;
 
@@ -276,18 +273,16 @@ export const TRAVELPAYOUTS_INFO: CapabilityInfo;                       // { sour
 export const TRAVELPAYOUTS_SUPPLIED_FIELDS: readonly SuppliedField[];  // ['price']
 export const TRAVELPAYOUTS_CABINS: readonly Cabin[];                   // ['economy']
 export const TRAVELPAYOUTS_POINT_OF_SALE: 'unknown';
-export interface TravelpayoutsProviderOptions { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist; airports: MetroLookup }
+export interface TravelpayoutsProviderOptions { http: HttpKit; log: Logger; clock: Clock; token: Secret; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }
 export function travelpayoutsProvider(o: TravelpayoutsProviderOptions): FlightProvider;   // id 'travelpayouts', displayName 'Aviasales cache'
 export const MAX_PAGES: 3;                                                                 // internal
 export function buildRequestUrl(tp: TileParams, page: number): URL;                        // internal
 
-// travelpayouts/tiles.ts (internal except MetroLookup)
-export interface MetroLookup { metroOf(iata: Iata): string | null }
-export interface TileParams { readonly origin: string; readonly pairOrigin: Iata; readonly destination: Iata; readonly month: IsoMonth }
-export function originParam(q: DiscoveryQuery, airports: MetroLookup): string;
+// travelpayouts/tiles.ts (internal)
+export interface TileParams { readonly origin: Iata; readonly destination: Iata; readonly month: IsoMonth }   // origin: always the pair's airport (decision 34)
 export function cellsOf(q: DiscoveryQuery): CellKey[];
 export function planMonthTiles(q: DiscoveryQuery): TilePlan[];
-export function tileParams(plan: TilePlan, q: DiscoveryQuery, airports: MetroLookup): TileParams;
+export function tileParams(plan: TilePlan, q: DiscoveryQuery): TileParams;
 
 // travelpayouts/response.ts (internal)
 export const WHERE: ParseWhere;                                         // { providerId: 'travelpayouts', endpointPath: PRICES_FOR_DATES_PATH }
@@ -322,7 +317,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
 - `fetchedAt` is the oldest page's; a cache hit's is the original `storedAt`.
 - `pointOfSale` is `'unknown'` on every tile.
 - A tile can cost 1 to `MAX_PAGES` upstream calls (one per 1000-row page, all under its `tile_index`); `plan().length` counts tiles, not calls. A tile served from the cache is one cache-hit row whatever its page count (`ledgerCacheHit`). The one case parity can still miscount: page 1 from the cache and a later page upstream (the TTL expired between two pages of one tile), which counts that tile twice.
-- `vendorLink` is the vendor's own search link for the row; on a metro query it may search the metro rather than the cell's airport.
+- `vendorLink` is the vendor's own search link for the row; a row's search link may name the metro or another airport rather than the cell's airport.
 
 ## 6. Library notes
 
@@ -703,13 +698,13 @@ git add packages/providers && git commit -m "wp06: shared adapter helpers (major
 **Files:**
 
 - Modify `packages/core/src/ports/provider.ts` (two optional fields and `CellIssue`; type-only).
-- Create `src/travelpayouts/params.ts` (Task 6.8 appends `TRAVELPAYOUTS_PARAMS`), `tiles.ts` (first cut; Task 6.4 replaces `originParam`), `response.ts` (first cut; Task 6.3 completes it), `provider.ts` (first cut; Tasks 6.5 and 6.7 complete it).
+- Create `src/travelpayouts/params.ts` (Task 6.8 appends `TRAVELPAYOUTS_PARAMS`), `tiles.ts` (final), `response.ts` (first cut; Task 6.3 completes it), `provider.ts` (first cut; Tasks 6.5 and 6.7 complete it).
 - Create `test/travelpayouts/harness.ts` (final; later tasks import from it) and `test/travelpayouts/empty.test.ts`.
 
 **Interfaces:**
 
 - Consumes `createHttpKit` through `test/fakes.ts` `makeKit`, `generateCells`, `monthOf`, `assertRequestAllowed`, `parseVendor`, `parseError`, `NoteCounter`, and the §4 types.
-- Produces `DiscoveryQuery.definitionOrigins`, `CellIssue`, `DiscoveryTileResult.cellIssues`, `DiscoveryTileResult.truncated`, `planMonthTiles`, `tileParams`, `cellsOf`, `originParam` (first cut), `readEnvelope`, `currencyOf`, `cacheableBody`, `buildRequestUrl` and `travelpayoutsProvider` (first cut).
+- Produces `CellIssue`, `DiscoveryTileResult.cellIssues`, `DiscoveryTileResult.truncated`, `planMonthTiles`, `tileParams`, `cellsOf`, `readEnvelope`, `currencyOf`, `cacheableBody`, `buildRequestUrl` and `travelpayoutsProvider` (first cut).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -741,7 +736,6 @@ import {
   type TravelpayoutsProviderOptions,
   travelpayoutsProvider,
 } from '../../src/travelpayouts/provider.js';
-import type { MetroLookup } from '../../src/travelpayouts/tiles.js';
 import { cellsOf } from '../../src/travelpayouts/tiles.js';
 import { type LedgerEvent, makeKit, SENTINELS, testLimits } from '../fakes.js';
 
@@ -811,13 +805,6 @@ export function eventsOf<T extends LedgerEvent['type']>(
   return h.events.filter((e): e is Extract<LedgerEvent, { type: T }> => e.type === type);
 }
 
-/** Synthetic stand-in for AirportsRepo.metroOf over the worked example only (London → New York). */
-export const airports: MetroLookup = {
-  metroOf: (iata) =>
-    iata === 'LHR' || iata === 'LGW' ? 'LON' : iata === 'JFK' || iata === 'EWR' ? 'NYC' : null,
-};
-export const noMetro: MetroLookup = { metroOf: () => null };
-
 /** Synthetic allowlist in the plan's ParamsAllowlist shape (not the recorded one; Task 6.8 tests that). */
 export const ALLOWLIST: ParamsAllowlist = {
   provider: 'travelpayouts',
@@ -847,7 +834,6 @@ export function makeProvider(h: Harness, over: Partial<TravelpayoutsProviderOpti
     token: TOKEN,
     cacheTtlSeconds: 6 * 3600,
     paramsAllowlist: ALLOWLIST,
-    airports,
     ...over,
   });
 }
@@ -883,7 +869,7 @@ export function errorOf(r: DiscoveryTileResult): ProviderError {
 
 /**
  * LHR → JFK, 10–20 March 2027, 10–12 nights: 11 × 3 = 33 cells in one departure month. The definition lists both
- * London airports, so the tile queries the shared metro (spec §5.2 rev 14).
+ * London airports; the tile still queries LHR alone (plan decision 34).
  */
 export function query(over: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
   return {
@@ -895,7 +881,6 @@ export function query(over: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
     maxNights: 12,
     cabin: 'economy',
     currency: 'GBP',
-    definitionOrigins: [asIata('LHR'), asIata('LGW')],
     ...over,
   };
 }
@@ -1028,11 +1013,6 @@ In `packages/core/src/ports/provider.ts`, add `import type { ErrorReason } from 
 ```ts
   /** when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it */
   cells?: CellKey[];
-  /**
-   * The definition's origins, every pair's (spec §2, §5.2 rev 14). A provider that can query by metropolitan code
-   * does so only when two or more of these map to the pair origin's metro. Absent: the pair's origin alone.
-   */
-  definitionOrigins?: Iata[];
 }
 ```
 
@@ -1102,7 +1082,7 @@ export const FIXED_PARAMS = { one_way: 'false', currency: 'gbp', limit: `${PAGE_
 export const FORBIDDEN_PARAM_NAMES = ['token', 'market', 'trip_class', 'return_at'] as const;
 ```
 
-`packages/providers/src/travelpayouts/tiles.ts` (first cut):
+`packages/providers/src/travelpayouts/tiles.ts`:
 
 ```ts
 /**
@@ -1120,22 +1100,15 @@ import {
   type TilePlan,
 } from '@gmt/core';
 
-/** The part of AirportsRepo (WP3) the adapter needs; the plan's constructor `airports` option. */
-export interface MetroLookup {
-  metroOf(iata: Iata): string | null;
-}
-
-/** What one tile sends (`origin` may be a metro code) and which pair its rows are filtered to. */
+/**
+ * What one tile sends and which pair its rows are filtered to. The vendor `origin` is always the pair's own airport
+ * (plan decision 34, spec rev 17): a metro-code query returns one cheapest row per date pair across every airport of
+ * the metro, so a cheaper airport the definition does not use hides the definition's own fare.
+ */
 export interface TileParams {
-  readonly origin: string;
-  readonly pairOrigin: Iata;
+  readonly origin: Iata;
   readonly destination: Iata;
   readonly month: IsoMonth;
-}
-
-/** The vendor `origin` parameter. First cut: the pair's airport; Task 6.4 adds the shared-metro rule. */
-export function originParam(q: DiscoveryQuery, _airports: MetroLookup): string {
-  return q.origin;
 }
 
 /**
@@ -1189,12 +1162,11 @@ export function planMonthTiles(q: DiscoveryQuery): TilePlan[] {
 }
 
 /** A tile's vendor parameters, from the plan and the pair. Throws on a tile that is not a month tile. */
-export function tileParams(plan: TilePlan, q: DiscoveryQuery, airports: MetroLookup): TileParams {
+export function tileParams(plan: TilePlan, q: DiscoveryQuery): TileParams {
   if (plan.request.kind !== 'month')
     throw new Error(`travelpayouts tiles are month tiles, got ${plan.request.kind}`);
   return {
-    origin: originParam(q, airports),
-    pairOrigin: q.origin,
+    origin: q.origin,
     destination: q.destination,
     month: plan.request.month,
   };
@@ -1293,8 +1265,8 @@ export function cacheableBody(body: unknown): boolean {
 /**
  * Travelpayouts / Aviasales Data API adapter (WP6). Spec §2 (Travelpayouts row, fact 1), §5.1, §5.2 (rev 14), §6.9,
  * §8.1. Discovery only: cached round-trip prices from /aviasales/v3/prices_for_dates, one month tile per
- * (origin, destination) pair and departure month, queried by the metro code when two or more of the definition's
- * origins share it, every page through http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6).
+ * (origin airport, destination airport) pair and departure month, always queried by airport code and never by metro
+ * code (plan decision 34, spec rev 17), every page through http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6).
  * No airport is named here (spec §1).
  */
 import {
@@ -1316,7 +1288,7 @@ import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.
 import { NoteCounter } from '../shared/notes.js';
 import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { cacheableBody, readEnvelope } from './response.js';
-import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
+import { planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /**
  * Spec §2 Travelpayouts row: authorised-cached, 48 h. The vendor says prices_for_dates holds round-trip prices
@@ -1350,12 +1322,11 @@ export interface TravelpayoutsProviderOptions {
   /** TRAVELPAYOUTS_TOKEN; sent only in the X-Access-Token header (spec §2 fact 8). Must not be empty. */
   token: Secret;
   /**
-   * Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, a sibling pair's identical metro request
-   * is a cache hit. 0 disables that dedup: upstream calls become O × D × M instead of D × M (logged at construction).
+   * Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, a repeat of an identical request (a
+   * re-run or resumed scan) is a cache hit; every pair's tile is its own request, so there is no sibling dedup.
    */
   cacheTtlSeconds: number;
   paramsAllowlist: ParamsAllowlist;
-  airports: MetroLookup;
 }
 
 /** The request URL for one page of a tile. The token never appears here (spec §2 fact 8: header only). */
@@ -1374,7 +1345,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
   const log = opts.log.child({ providerId: 'travelpayouts' });
 
   async function fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult> {
-    const tp = tileParams(plan, q, opts.airports);
+    const tp = tileParams(plan, q);
     const url = buildRequestUrl(tp, 1);
     // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
     assertRequestAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url);
@@ -1988,11 +1959,11 @@ Expected: PASS, `Test Files  2 passed (2)`, `Tests  43 passed (43)` (42 in `resp
 git add packages/providers && git commit -m "wp06: travelpayouts row attribution by response dates, per-cell drop reports (bad price, unsupported currency), vendor link"
 ```
 
-### Task 6.4: Metro origin (spec rev 14); month tiles partition the pair's cells
+### Task 6.4: Month tiles partition the pair's cells; the origin is always the pair's airport (plan decision 34)
 
-**Files:** modify `src/travelpayouts/tiles.ts` (replace the first-cut `originParam`); create `test/travelpayouts/tiles.test.ts`.
+**Files:** create `test/travelpayouts/tiles.test.ts`. `src/travelpayouts/tiles.ts` is final from Task 6.2.
 
-**Interfaces:** consumes `MetroLookup.metroOf`, `DiscoveryQuery.definitionOrigins`, `cellKeyString`. Produces the final `originParam`.
+**Interfaces:** consumes `DiscoveryQuery`, `cellKeyString`. Produces nothing new. Plan decision 34 (spec rev 17) withdrew the rev 14 metro rule: the vendor answers a metro-code query with one cheapest row per date pair across every airport of the metro, so a cheaper airport the definition does not use hides the definition's own fare (Task 6.9 documents it on the recordings). Travelpayouts is queried per (origin airport, destination airport) pair only; `DiscoveryQuery.definitionOrigins`, `MetroLookup`, `originParam` and the constructor's `airports` option do not exist.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2010,8 +1981,8 @@ import {
 } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildRequestUrl } from '../../src/travelpayouts/provider.js';
-import { cellsOf, originParam, planMonthTiles, tileParams } from '../../src/travelpayouts/tiles.js';
-import { airports, cellsFor, noMetro, query } from './harness.js';
+import { cellsOf, planMonthTiles, tileParams } from '../../src/travelpayouts/tiles.js';
+import { cellsFor, only, query } from './harness.js';
 
 const [LHR, LGW, JFK, EWR] = [asIata('LHR'), asIata('LGW'), asIata('JFK'), asIata('EWR')];
 /** Spec §5.2 worked example, one pair: 182 days (2027-01-01 … 2027-07-01, 7 months), 10–21 nights. */
@@ -2103,39 +2074,18 @@ describe('planMonthTiles (spec §5.2: per pair, one month tile per departure mon
   });
 });
 
-describe('the metro origin (spec §2 and §5.2 rev 14: the metro only when two or more of the definition’s origins share it)', () => {
-  it('sends the shared metro code when the definition lists LHR and LGW', () => {
-    expect(originParam(query({ definitionOrigins: [LHR, LGW] }), airports)).toBe('LON');
-    expect(originParam(query({ origin: LGW, definitionOrigins: [LHR, LGW] }), airports)).toBe('LON');
+describe("tile parameters (plan decision 34: always the pair's own airport, never a metro code)", () => {
+  it("sends the pair's airport even when the definition lists two airports of one metro", () => {
+    expect(tileParams(only(planMonthTiles(query({ origin: LGW }))), query({ origin: LGW })).origin).toBe(
+      'LGW',
+    );
   });
 
-  it('sends the airport when the definition has one London airport (a lone airport is queried by its own code)', () => {
-    expect(originParam(query({ definitionOrigins: [LHR] }), airports)).toBe('LHR');
-  });
-
-  it('sends the airport when definitionOrigins is absent (treated as the pair origin alone)', () => {
-    const { definitionOrigins: _omit, ...q } = query();
-    expect(originParam(q, airports)).toBe('LHR');
-  });
-
-  it("sends the airport when the definition's other origins map to other metros or none", () => {
-    expect(originParam(query({ definitionOrigins: [LHR, JFK, asIata('AAA')] }), airports)).toBe('LHR');
-  });
-
-  it('sends the airport when there is no metro', () => {
-    expect(originParam(query(), noMetro)).toBe('LHR');
-  });
-
-  it('ignores a metro code that is not three upper-case letters', () => {
-    expect(originParam(query(), { metroOf: () => 'LONDON' })).toBe('LHR');
-  });
-
-  it('tileParams carries the vendor origin, the pair and the month', () => {
+  it('tileParams carries the pair and the month', () => {
     const [first] = planMonthTiles(query());
     if (first === undefined) throw new Error('no tile');
-    expect(tileParams(first, query(), airports)).toEqual({
-      origin: 'LON',
-      pairOrigin: 'LHR',
+    expect(tileParams(first, query())).toEqual({
+      origin: 'LHR',
       destination: 'JFK',
       month: '2027-03',
     });
@@ -2153,7 +2103,7 @@ describe('the metro origin (spec §2 and §5.2 rev 14: the metro only when two o
         returnTo: asIsoDate('2027-04-01'),
       },
     };
-    expect(() => tileParams(rect, query(), airports)).toThrow(/month tiles/);
+    expect(() => tileParams(rect, query())).toThrow(/month tiles/);
   });
 
   it.each([
@@ -2166,58 +2116,20 @@ describe('the metro origin (spec §2 and §5.2 rev 14: the metro only when two o
     );
     const plan = plans.find((p) => p.request.kind === 'month' && p.request.month === month);
     if (plan === undefined) throw new Error(`no ${month} tile`);
-    expect(buildRequestUrl(tileParams(plan, query(), airports), 1).searchParams.get('departure_at')).toBe(
-      expected,
-    );
+    expect(buildRequestUrl(tileParams(plan, query()), 1).searchParams.get('departure_at')).toBe(expected);
   });
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/tiles.test.ts`
-Expected: FAIL, `Tests  2 failed | 20 passed (22)`:
-
-- `sends the shared metro code when the definition lists LHR and LGW` with `AssertionError: expected 'LHR' to be 'LON'`;
-- `tileParams carries the vendor origin, the pair and the month` with `expected { origin: 'LHR', …(3) } to deeply equal { origin: 'LON', …(3) }`.
-
-The partition, leap-day, year-end, ordering and lone-airport tests already pass with the first cut, because tiling is final from Task 6.2 and the first cut always sends the airport.
-
-- [ ] **Step 3: Implement**
-
-In `packages/providers/src/travelpayouts/tiles.ts`, replace the first-cut `originParam` (its doc comment and body) with:
-
-```ts
-/** A metropolitan code as the vendor takes it; anything else from the table is treated as no metro. */
-const CODE_RE = /^[A-Z]{3}$/;
-
-/**
- * The vendor `origin` parameter. Spec §2 and §5.2 (rev 14): the pair origin's metropolitan code when two or more of
- * the definition's origins (`q.definitionOrigins`, the pair origin included) map to that metro, else the airport
- * code. Rows are split back to the pair by `origin_airport`; a sibling pair's identical metro request is answered by
- * the response cache inside the TTL.
- * why: a lone airport is queried by its own code, so its tile never pages through rows of airports the definition
- * does not use; a malformed code from the table is treated as no metro rather than sent to the vendor.
- */
-export function originParam(q: DiscoveryQuery, airports: MetroLookup): string {
-  const metro = airports.metroOf(q.origin);
-  if (metro === null || !CODE_RE.test(metro)) return q.origin;
-  const origins = new Set<Iata>([q.origin, ...(q.definitionOrigins ?? [])]);
-  let sharing = 0;
-  for (const o of origins) if (airports.metroOf(o) === metro) sharing += 1;
-  return sharing >= 2 ? metro : q.origin;
-}
-```
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS, `Test Files  3 passed (3)`, `Tests  65 passed (65)`.
+Expected: PASS. Tiling is final from Task 6.2, so there is no red step and no implementation step in this task: it pins the partition, the leap-day, year-end and ordering cases, and that `tileParams` always carries the pair's own airport.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/providers && git commit -m "wp06: travelpayouts metro origin only when the definition's origins share it (spec rev 14)"
+git add packages/providers && git commit -m "wp06: travelpayouts month tiles partition the pair's cells; the origin is always the pair's airport (decision 34)"
 ```
 
 ### Task 6.5: Pagination inside `fetchTile`; one ledger row per cached tile; sibling dedup
@@ -2663,7 +2575,7 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
   });
 });
 
-/** The worked example's pairs over its 182-day window, 10–21 nights; the definition lists both London airports. */
+/** The worked example's pairs over its 182-day window, 10–21 nights. */
 const workedQuery = (origin: Iata, destination: Iata) =>
   query({
     origin,
@@ -2674,8 +2586,8 @@ const workedQuery = (origin: Iata, destination: Iata) =>
     maxNights: 21,
   });
 
-describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.1)', () => {
-  it('worked example: 28 tiles, 14 upstream calls, 14 cache hits, every ledger row under its own tile index', async () => {
+describe('estimate parity: every airport pair is its own request (plan decision 34, spec §5.2 rev 17, §8.1)', () => {
+  it('worked example: 28 tiles, 28 upstream calls, 0 cache hits, every ledger row under its own tile index', async () => {
     const upstream: string[] = [];
     server.use(
       http.get(TP, ({ request }) => {
@@ -2696,7 +2608,7 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
           tiles += 1;
           const before = h.events.length;
           tileOf(await d.fetchTile(p, q, ctx()));
-          // each tile leaves exactly one ledger row (upstream reserve or cache hit) with its own index
+          // each tile leaves exactly one ledger row (an upstream reserve) with its own index
           const rows = h.events.slice(before).filter((e) => e.type === 'reserve' || e.type === 'cache-hit');
           expect(
             rows.map((e) => (e.type === 'reserve' || e.type === 'cache-hit' ? e.tileIndex : null)),
@@ -2705,30 +2617,24 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
       }
     }
     expect(tiles).toBe(28);
-    expect(upstream).toHaveLength(14);
-    expect(new Set(upstream).size).toBe(14);
-    expect(upstream.every((s) => s.startsWith('LON|'))).toBe(true);
-    expect(eventsOf(h, 'reserve')).toHaveLength(14);
-    expect(eventsOf(h, 'cache-hit')).toHaveLength(14);
+    expect(upstream).toHaveLength(28);
+    expect(new Set(upstream).size).toBe(28);
+    expect(upstream.some((s) => s.startsWith('LON|'))).toBe(false);
+    expect(eventsOf(h, 'reserve')).toHaveLength(28);
+    expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
   });
 
-  it('a 2-page metro tile served to the sibling pair from the cache is one cache-hit row, not one per page (plan decision 24)', async () => {
+  it('a repeat of a 2-page tile inside the TTL (a re-run) is one cache-hit row, not one per page (plan decision 24)', async () => {
     server.use(
-      http.get(TP, ({ request }) => {
-        const lhr = rowsFor(500, 0, 'LHR');
-        const lgw = rowsFor(500, 0, 'LGW');
-        return HttpResponse.json(
-          pageOf(request) === '1' ? envelope([...lhr, ...lgw]) : envelope(rowsFor(3, 7, 'LGW')),
-        );
-      }),
+      http.get(TP, ({ request }) =>
+        HttpResponse.json(pageOf(request) === '1' ? envelope(rowsFor(1000)) : envelope(rowsFor(3, 7))),
+      ),
     );
     const h = makeHarness();
     const d = discoveryOf(makeProvider(h));
-    for (const origin of [asIata('LHR'), asIata('LGW')]) {
-      const q = query({ origin });
-      tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-    }
-    // parity = distinct upstream tiles (1) + cache-hit rows (1) = plan().length summed over the two pairs (2)
+    const q = query();
+    for (let i = 0; i < 2; i += 1) tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    // parity = upstream tile (1) + cache-hit rows (1) = the two fetches of the tile
     expect(eventsOf(h, 'reserve')).toHaveLength(2);
     expect(new Set(tileIndexes(h, 'reserve')).size).toBe(1);
     expect(eventsOf(h, 'cache-hit')).toHaveLength(1);
@@ -2748,78 +2654,42 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
     );
     const h = makeHarness();
     const d = discoveryOf(makeProvider(h));
-    const lhr = query({ origin: asIata('LHR') });
-    const lgw = query({ origin: asIata('LGW') });
-    tileOf(await d.fetchTile(only(d.plan(lhr)), lhr, ctx()));
-    // page 2's cache entry expires before the sibling pair reads it
+    const q = query();
+    tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    // page 2's cache entry expires before the repeat reads it
     const page2 = h.cache.sets[1];
     if (page2 === undefined) throw new Error('page 2 was not cached');
     h.cache.entries.delete(page2.key);
-    tileOf(await d.fetchTile(only(d.plan(lgw)), lgw, ctx()));
-    // the sibling tile leaves a cache-hit row (page 1) and an upstream row (page 2) under one tile index
+    tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    // the repeat leaves a cache-hit row (page 1) and an upstream row (page 2) under one tile index
     expect(eventsOf(h, 'cache-hit')).toHaveLength(1);
     expect(eventsOf(h, 'reserve')).toHaveLength(3);
   });
 
-  it('one LON response serves both pairs, each receiving only its own origin_airport rows (ts-003)', async () => {
+  it('each airport pair sends its own origin and receives only its own origin_airport rows', async () => {
+    const sent: string[] = [];
     server.use(
-      http.get(TP, () =>
-        HttpResponse.json(
+      http.get(TP, ({ request }) => {
+        sent.push(new URL(request.url).searchParams.get('origin') ?? '?');
+        return HttpResponse.json(
           envelope([
             row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
             row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 377 }),
           ]),
-        ),
-      ),
+        );
+      }),
     );
     const h = makeHarness();
     const d = discoveryOf(makeProvider(h));
     const lhrQ = query({ origin: asIata('LHR') });
     const lgwQ = query({ origin: asIata('LGW') });
     const lhr = tileOf(await d.fetchTile(only(d.plan(lhrQ)), lhrQ, ctx()));
-    h.clock.advance(30 * 60_000);
     const lgw = tileOf(await d.fetchTile(only(d.plan(lgwQ)), lgwQ, ctx()));
+    expect(sent).toEqual(['LHR', 'LGW']);
     expect(lhr.prices.map((p) => [p.origin, p.amountMinor])).toEqual([['LHR', 41200]]);
     expect(lgw.prices.map((p) => [p.origin, p.amountMinor])).toEqual([['LGW', 37700]]);
-    expect(eventsOf(h, 'fetch')).toHaveLength(1);
-    expect(eventsOf(h, 'cache-hit').map((e) => e.tileIndex)).toEqual([0]);
-    // a cache hit carries the original storedAt (spec §2), not the time of the second call
-    expect(lgw.fetchedAt).toBe(NOW);
-  });
-
-  it('LHR→JFK and LGW→JFK in parallel: 14 tiles, 7 upstream calls, 7 cache-hit rows (plan decision 15: joiners leave their own row)', async () => {
-    let upstream = 0;
-    server.use(
-      http.get(TP, () => {
-        upstream += 1;
-        return HttpResponse.json(envelope([]));
-      }),
-    );
-    const h = makeHarness();
-    const d = discoveryOf(makeProvider(h));
-    const runs = [asIata('LHR'), asIata('LGW')].flatMap((origin) => {
-      const q = workedQuery(origin, asIata('JFK'));
-      return d.plan(q).map((p) => d.fetchTile(p, q, ctx()));
-    });
-    const results = await Promise.all(runs);
-    expect(results.every((r) => r.kind === 'tile')).toBe(true);
-    expect(upstream).toBe(7);
-    expect(eventsOf(h, 'reserve')).toHaveLength(7);
-    expect(eventsOf(h, 'cache-hit')).toHaveLength(7);
-  });
-
-  it('a lone London origin queries its own airport and makes O × D × M calls (spec §5.2 rev 14)', async () => {
-    const origins: Array<string | null> = [];
-    server.use(
-      http.get(TP, ({ request }) => {
-        origins.push(new URL(request.url).searchParams.get('origin'));
-        return HttpResponse.json(envelope([]));
-      }),
-    );
-    const d = discoveryOf(makeProvider(makeHarness()));
-    const q = query({ definitionOrigins: [asIata('LHR')] });
-    tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-    expect(origins).toEqual(['LHR']);
+    expect(eventsOf(h, 'fetch')).toHaveLength(2);
+    expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
   });
 });
 ```
@@ -2874,8 +2744,8 @@ Replace `packages/providers/src/travelpayouts/provider.ts` with:
 /**
  * Travelpayouts / Aviasales Data API adapter (WP6). Spec §2 (Travelpayouts row, fact 1), §5.1, §5.2 (rev 14), §6.9,
  * §8.1. Discovery only: cached round-trip prices from /aviasales/v3/prices_for_dates, one month tile per
- * (origin, destination) pair and departure month, queried by the metro code when two or more of the definition's
- * origins share it, every page through http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6).
+ * (origin airport, destination airport) pair and departure month, always queried by airport code and never by metro
+ * code (plan decision 34, spec rev 17), every page through http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6).
  * No airport is named here (spec §1).
  */
 import {
@@ -2901,7 +2771,7 @@ import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.
 import { parseError } from '../shared/errors.js';
 import { FIXED_PARAMS, PAGE_LIMIT, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { attributeRows, cacheableBody, type ResponseCurrency, readEnvelope, WHERE } from './response.js';
-import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
+import { planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /**
  * Spec §2 Travelpayouts row: authorised-cached, 48 h. The vendor says prices_for_dates holds round-trip prices
@@ -2945,12 +2815,11 @@ export interface TravelpayoutsProviderOptions {
   /** TRAVELPAYOUTS_TOKEN; sent only in the X-Access-Token header (spec §2 fact 8). Must not be empty. */
   token: Secret;
   /**
-   * Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, a sibling pair's identical metro request
-   * is a cache hit. 0 disables that dedup: upstream calls become O × D × M instead of D × M (logged at construction).
+   * Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, a repeat of an identical request (a
+   * re-run or resumed scan) is a cache hit; every pair's tile is its own request, so there is no sibling dedup.
    */
   cacheTtlSeconds: number;
   paramsAllowlist: ParamsAllowlist;
-  airports: MetroLookup;
 }
 
 /** The request URL for one page of a tile. The token never appears here (spec §2 fact 8: header only). */
@@ -3044,14 +2913,14 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     q: DiscoveryQuery,
     ctx: ProviderContext,
   ): Promise<DiscoveryTileResult> {
-    const tp = tileParams(plan, q, opts.airports);
+    const tp = tileParams(plan, q);
     let read: Awaited<ReturnType<typeof readPages>>;
     let attribution: ReturnType<typeof attributeRows>;
     try {
       read = await readPages(plan, tp, ctx);
       attribution = attributeRows(read.rows, {
         coveredCells: plan.coveredCells,
-        origin: tp.pairOrigin,
+        origin: tp.origin,
         destination: tp.destination,
         minNights: q.minNights,
         maxNights: q.maxNights,
@@ -3118,7 +2987,7 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http test/travelpayouts`
-Expected: PASS, `Test Files  16 passed (16)` (WP4's http tests stay green), `Tests  250 passed (250)`.
+Expected: PASS, `Test Files  16 passed (16)` (WP4's http tests stay green), `Tests  251 passed (251)`.
 
 - [ ] **Step 5: Commit**
 
@@ -3555,12 +3424,6 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
       /TRAVELPAYOUTS_TOKEN is empty/,
     );
   });
-
-  it('warns at construction when the response cache is off, because metro dedup then stops (cost-wp06-009)', () => {
-    const h = makeHarness();
-    makeProvider(h, { cacheTtlSeconds: 0 });
-    expect(h.log.lines.some((l) => l.includes('metro dedup off'))).toBe(true);
-  });
 });
 
 describe('healthcheck (stateless, plan decision 24)', () => {
@@ -3605,8 +3468,7 @@ import {
 } from './harness.js';
 
 const tp = {
-  origin: 'LON',
-  pairOrigin: asIata('LHR'),
+  origin: asIata('LHR'),
   destination: asIata('JFK'),
   month: asIsoMonth('2027-03'),
 };
@@ -3649,7 +3511,7 @@ describe('assertRequestAllowed (WP4) on Travelpayouts requests (spec §5.2: name
 });
 
 describe('requests on the wire', () => {
-  it('carry exactly the allowlisted names and values, the metro origin, and the token only in X-Access-Token', async () => {
+  it('carry exactly the allowlisted names and values, the airport origin (never a metro code, plan decision 34), and the token only in X-Access-Token', async () => {
     const seen: Array<{ url: string; token: string | null }> = [];
     server.use(
       http.get(TP, ({ request }) => {
@@ -3663,7 +3525,7 @@ describe('requests on the wire', () => {
     await d.fetchTile(only(d.plan(q)), q, ctx());
     const req = only(seen);
     expect(Object.fromEntries(new URL(req.url).searchParams)).toEqual({
-      origin: 'LON',
+      origin: 'LHR',
       destination: 'JFK',
       departure_at: '2027-03',
       one_way: 'false',
@@ -3716,7 +3578,7 @@ and its "not exported" list after `'classifyResponse',` with:
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/provider.test.ts test/travelpayouts/wire.test.ts test/barrel.test.ts`
-Expected: FAIL, `Tests  7 failed | 15 passed (22)`: the three `refuses cacheTtlSeconds` cases and the empty-token case (`expected [Function] to throw an error`), the cache-off warning (`expected false to be true`), the healthcheck (`expected { Object (ok, detail) } to deeply equal { ok: true, …(1) }`) and the main-barrel test (`travelpayoutsProvider: expected 'undefined' to be 'function'`). `wire.test.ts` passes already: the allowlist check and the header-only token have been in `fetchTile` since Task 6.2; it pins them.
+Expected: FAIL, `Tests  6 failed | 15 passed (21)`: the three `refuses cacheTtlSeconds` cases and the empty-token case (`expected [Function] to throw an error`), the healthcheck (`expected { Object (ok, detail) } to deeply equal { ok: true, …(1) }`) and the main-barrel test (`travelpayoutsProvider: expected 'undefined' to be 'function'`). `wire.test.ts` passes already: the allowlist check and the header-only token have been in `fetchTile` since Task 6.2; it pins them.
 
 - [ ] **Step 3: Implement**
 
@@ -3730,12 +3592,6 @@ In `packages/providers/src/travelpayouts/provider.ts`, replace the line `  const
   if (opts.token.reveal().length === 0)
     throw new Error('travelpayoutsProvider: TRAVELPAYOUTS_TOKEN is empty');
   const log = opts.log.child({ providerId: 'travelpayouts' });
-  if (opts.cacheTtlSeconds === 0) {
-    log.warn(
-      { cacheTtlSeconds: 0 },
-      'travelpayouts: response cache disabled; metro dedup off, upstream calls = O × D × M',
-    );
-  }
 ```
 
 and replace `    healthcheck: async () => ({ ok: true, detail: 'token configured' }),` with:
@@ -3845,6 +3701,7 @@ export function latestSession(): {
 `packages/providers/test/travelpayouts/params.test.ts`:
 
 ```ts
+import { asIata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allowlist.js';
 import {
@@ -3855,7 +3712,7 @@ import {
 } from '../../src/travelpayouts/params.js';
 import { buildRequestUrl } from '../../src/travelpayouts/provider.js';
 import { planMonthTiles, tileParams } from '../../src/travelpayouts/tiles.js';
-import { airports, query } from './harness.js';
+import { query } from './harness.js';
 import { paramsFilePath } from './recorded.js';
 
 describe('TRAVELPAYOUTS_PARAMS (plan decision 6: a code constant equal to the recorded file)', () => {
@@ -3870,16 +3727,16 @@ describe('TRAVELPAYOUTS_PARAMS (plan decision 6: a code constant equal to the re
     for (const name of FORBIDDEN_PARAM_NAMES) expect(rules.names).not.toContain(name);
   });
 
-  it('accepts every page URL the adapter builds, metro and airport origins alike', () => {
+  it('accepts every page URL the adapter builds, airport origins', () => {
     const [plan] = planMonthTiles(query());
     if (plan === undefined) throw new Error('no tile');
-    for (const q of [query(), query({ definitionOrigins: [] })]) {
+    for (const q of [query(), query({ origin: asIata('LGW') })]) {
       for (const page of [1, 2]) {
         expect(() =>
           assertRequestAllowed(
             TRAVELPAYOUTS_PARAMS,
             PRICES_FOR_DATES_PATH,
-            buildRequestUrl(tileParams(plan, q, airports), page),
+            buildRequestUrl(tileParams(plan, q), page),
           ),
         ).not.toThrow();
       }
@@ -3966,7 +3823,7 @@ Expected: PASS for `params.test.ts` (`3 passed`), `barrel.test.ts` and every ear
 git add packages/providers && git commit -m "wp06: TRAVELPAYOUTS_PARAMS equals the recorded allowlist"
 ```
 
-### Task 6.9: Recorded fixtures replay; `suppliedFields`, local times, month boundaries and metro completeness from the recordings (needs WP4b)
+### Task 6.9: Recorded fixtures replay; `suppliedFields`, local times, month boundaries and the metro-hiding evidence from the recordings (needs WP4b)
 
 This task adds no production code: it checks the adapter, unchanged, against what the vendor really sent. Every assertion is a fact the brief relies on; if one fails, stop and report it with the failing line, and do not change the assertion or the adapter to fit.
 
@@ -4029,14 +3886,22 @@ for (const x of ok) {
   tiles.set(key, [...(tiles.get(key) ?? []), x]);
 }
 
-/** Row keys the vendor documents for prices_for_dates (Library notes). Any other key needs a human decision. */
+/**
+ * The recorded row key set: the documented keys (Library notes) plus `gate` (the selling agency), `duration_to` and
+ * `duration_back`, which the recordings show and the docs do not (plan decision 33). Nothing in Phase 1-3 reads gate
+ * or the durations; calendar prices carry no seller, so suppliedFields stays ['price']. Any other key needs a human
+ * decision.
+ */
 const DOCUMENTED_ROW_KEYS = [
   'airline',
   'departure_at',
   'destination',
   'destination_airport',
   'duration',
+  'duration_back',
+  'duration_to',
   'flight_number',
+  'gate',
   'link',
   'origin',
   'origin_airport',
@@ -4046,17 +3911,8 @@ const DOCUMENTED_ROW_KEYS = [
   'transfers',
 ];
 
-/** The worked example's airports per recorded origin parameter: LON serves both London airports. */
-const pairOriginsOf = (origin: string): Iata[] =>
-  origin === 'LON' ? [asIata('LHR'), asIata('LGW')] : [asIata(origin)];
-
 /** One month of departures, 1–120 nights: wide enough that the band drops only rows a definition could not hold. */
-function monthQuery(
-  origin: Iata,
-  destination: Iata,
-  month: string,
-  definitionOrigins: Iata[],
-): DiscoveryQuery {
+function monthQuery(origin: Iata, destination: Iata, month: string): DiscoveryQuery {
   const from = asIsoDate(`${month}-01`);
   let last = toEpochDay(from);
   while (monthOf(fromEpochDay(last + 1)) === monthOf(from)) last += 1;
@@ -4067,7 +3923,6 @@ function monthQuery(
     departureTo: fromEpochDay(last),
     minNights: 1,
     maxNights: 120,
-    definitionOrigins,
   });
 }
 
@@ -4105,54 +3960,61 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     ).toEqual([]);
   });
 
-  it.each([...tiles.entries()])(
-    'tile %s replays for every pair it serves: pages from 1, rows accounted for, one ledger row per tile',
+  // why: plan decision 34: the adapter queries by airport only, so the recorded metro (LON) tiles TP-01...14 are not
+  // replayed; they stay in the tree as the evidence for that rule (the documenting test below). The airport tiles
+  // TP-15...18 and the reverse tile TP-21 are what the adapter itself can request.
+  const airportTiles = [...tiles.entries()].filter(([key]) => !key.startsWith('LON|'));
+  it('the airport tiles TP-15...18 and the reverse tile TP-21 are recorded', () => {
+    expect(airportTiles.map(([key]) => key).sort()).toEqual([
+      'JFK|LON|2027-03',
+      'LGW|EWR|2027-03',
+      'LGW|JFK|2027-03',
+      'LHR|EWR|2027-03',
+      'LHR|JFK|2027-03',
+    ]);
+  });
+
+  it.each(airportTiles)(
+    'airport tile %s replays: pages from 1, rows accounted for, one upstream ledger row per page and no cache hit',
     async (key, pages) => {
       const [origin = '', destination = '', month = ''] = key.split('|');
       expect(pages.map((p) => param(p.url, 'page'))).toEqual(pages.map((_, i) => String(i + 1)));
       replay();
-      const pairOrigins = pairOriginsOf(origin);
       const h = makeHarness();
       const d = discoveryOf(makeProvider(h));
       const received = pages.reduce((n, p) => n + rowsOf(p.fixture.body).length, 0);
-      for (const pairOrigin of pairOrigins) {
-        const q = monthQuery(pairOrigin, asIata(destination), month, pairOrigins);
-        const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-        expect(r.pointOfSale).toBe('unknown');
-        const covered = new Set(r.coveredCells.map(cellKeyString));
-        for (const p of r.prices) {
-          expect(p.origin).toBe(pairOrigin);
-          expect(covered.has(cellKeyString(p))).toBe(true);
-          expect(p.currency).toBe('GBP');
-          expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
-          expect('providerObservedAt' in p).toBe(false);
-          if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
-        }
-        expect(sumCounts(r.notes, (k) => k === 'rows-received')).toBe(received);
-        const dropped = sumCounts(r.notes, (k) => k.startsWith('dropped-') || k === 'offers-dropped');
-        expect(r.prices.length + dropped).toBe(received);
+      const q = monthQuery(asIata(origin), asIata(destination), month);
+      const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+      expect(r.pointOfSale).toBe('unknown');
+      const covered = new Set(r.coveredCells.map(cellKeyString));
+      for (const p of r.prices) {
+        expect(p.origin).toBe(origin);
+        expect(covered.has(cellKeyString(p))).toBe(true);
+        expect(p.currency).toBe('GBP');
+        expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
+        expect('providerObservedAt' in p).toBe(false);
+        if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
       }
-      // the first pair reaches upstream once per page; the sibling is served from the cache: one row for its whole tile
+      expect(sumCounts(r.notes, (k) => k === 'rows-received')).toBe(received);
+      const dropped = sumCounts(r.notes, (k) => k.startsWith('dropped-') || k === 'offers-dropped');
+      expect(r.prices.length + dropped).toBe(received);
       expect(eventsOf(h, 'reserve')).toHaveLength(pages.length);
-      expect(eventsOf(h, 'cache-hit')).toHaveLength(pairOrigins.length - 1);
+      expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
     },
   );
 
   it('the first recorded LHR → JFK row becomes exactly its cell and amount (ts-006)', async () => {
-    const metro = ok.find(
+    const airport = ok.find(
       (x) =>
-        param(x.url, 'origin') === 'LON' &&
+        param(x.url, 'origin') === 'LHR' &&
         param(x.url, 'destination') === 'JFK' &&
-        rowsOf(x.fixture.body).some((r) => obj(r).origin_airport === 'LHR'),
+        rowsOf(x.fixture.body).length > 0,
     );
-    if (metro === undefined) throw new Error('WP4b recorded no LON → JFK tile with an LHR row');
-    const first = obj(rowsOf(metro.fixture.body).find((r) => obj(r).origin_airport === 'LHR'));
+    if (airport === undefined) throw new Error('WP4b recorded no LHR → JFK tile with rows');
+    const first = obj(rowsOf(airport.fixture.body).find((r) => obj(r).origin_airport === 'LHR'));
     replay();
     const d = discoveryOf(makeProvider(makeHarness()));
-    const q = monthQuery(asIata('LHR'), asIata('JFK'), param(metro.url, 'departure_at'), [
-      asIata('LHR'),
-      asIata('LGW'),
-    ]);
+    const q = monthQuery(asIata('LHR'), asIata('JFK'), param(airport.url, 'departure_at'));
     const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
     const price = typeof first.price === 'number' ? majorToMinor(first.price, 'GBP') : null;
     expect(r.prices).toContainEqual({
@@ -4166,55 +4028,48 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     });
   });
 
-  it('a metro tile prices every cell the airport tile prices, at the same or a lower minimum (prov-wp06-004, pie-wp06-005)', async () => {
-    replay();
-    // why: the London airport tiles (TP-15…18); the reverse-direction tile (TP-21) has no metro counterpart.
-    const airportTiles = ok.filter(
-      (x) => ['LHR', 'LGW'].includes(param(x.url, 'origin')) && param(x.url, 'page') === '1',
-    );
-    expect(airportTiles.length).toBeGreaterThan(0);
-    for (const x of airportTiles) {
-      const origin = asIata(param(x.url, 'origin'));
-      const destination = asIata(param(x.url, 'destination'));
-      const month = param(x.url, 'departure_at');
-      const d = discoveryOf(makeProvider(makeHarness()));
-      const viaAirport = monthQuery(origin, destination, month, [origin]);
-      const viaMetro = monthQuery(origin, destination, month, [asIata('LHR'), asIata('LGW')]);
-      const a = tileOf(await d.fetchTile(only(d.plan(viaAirport)), viaAirport, ctx()));
-      const m = tileOf(await d.fetchTile(only(d.plan(viaMetro)), viaMetro, ctx()));
-      const minOf = (ps: typeof a.prices) => {
-        const out = new Map<string, number>();
-        for (const p of ps)
-          out.set(
-            cellKeyString(p),
-            Math.min(out.get(cellKeyString(p)) ?? Number.POSITIVE_INFINITY, p.amountMinor),
-          );
-        return out;
-      };
-      const metroMin = minOf(m.prices);
-      // If this fails, compare the two recordings' recordedAt before concluding that the metro query hides fares the
-      // airport query sees (the vendor cache moves within 48 h); then stop and report: spec §5.2 would need a ruling.
-      for (const [cell, amount] of minOf(a.prices)) {
-        expect(metroMin.has(cell), `${cell} priced by the airport tile but absent from the metro tile`).toBe(
-          true,
+  it('why the rule exists (plan decision 34): the recorded metro tile hides the LHR 2027-03-29 / 2027-04-10 fare the LHR airport tile prices', async () => {
+    // The vendor answers a metro-code query with one cheapest row per date pair across every airport of the metro
+    // (here LTN at 429 beats LHR at 498), so a definition that does not use LTN would read that LHR cell as no_data.
+    // Hence the adapter never sends a metro code (spec rev 17). The two recordings were taken seconds apart, so this
+    // is not cache drift.
+    const rowOf = (tile: string, airport: string) =>
+      (tiles.get(tile) ?? [])
+        .flatMap((p) => rowsOf(p.fixture.body).map(obj))
+        .filter(
+          (r) =>
+            r.origin_airport === airport &&
+            str(r.departure_at).slice(0, 10) === '2027-03-29' &&
+            str(r.return_at).slice(0, 10) === '2027-04-10',
         );
-        expect(metroMin.get(cell), `${cell} via the metro`).toBeLessThanOrEqual(amount);
-      }
-    }
+    expect(rowOf('LON|JFK|2027-03', 'LTN')).toHaveLength(1);
+    expect(rowOf('LON|JFK|2027-03', 'LHR')).toHaveLength(0);
+    expect(rowOf('LHR|JFK|2027-03', 'LHR')).toHaveLength(1);
+    // and the adapter, querying LHR, prices that cell
+    replay();
+    const d = discoveryOf(makeProvider(makeHarness()));
+    const q = monthQuery(asIata('LHR'), asIata('JFK'), '2027-03');
+    const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    expect(
+      r.prices.filter((p) => p.departureDate === '2027-03-29' && p.returnDate === '2027-04-10'),
+    ).toHaveLength(1);
   });
 
   it('every vendor time carries an explicit offset (Z is +00:00), and the recordings show two different offsets (pie-wp06-001)', () => {
     const rows = ok.flatMap((x) => rowsOf(x.fixture.body).map(obj));
-    const offset = /[+-]\d{2}:\d{2}$/;
+    const offset = /(?:Z|[+-]\d{2}:\d{2})$/;
+    // the offset a time states, with the vendor's `Z` read as +00:00 (plan decision 33)
+    const offsetOf = (v: unknown): string =>
+      str(v).replace(/^.*(Z|[+-]\d{2}:\d{2})$/, (_m, o: string) => (o === 'Z' ? '+00:00' : o));
     for (const r of rows) {
       expect(str(r.departure_at)).toMatch(offset);
       expect(str(r.return_at)).toMatch(offset);
     }
     // a transatlantic round trip departs at one UTC offset and returns at another, which proves local times
-    expect(rows.some((r) => str(r.departure_at).slice(-6) !== str(r.return_at).slice(-6))).toBe(true);
+    expect(rows.some((r) => offsetOf(r.departure_at) !== offsetOf(r.return_at))).toBe(true);
   });
 
-  it('recorded rows carry only documented keys: no found_at, expires_at or actual, nothing that supplies a constraint input (spec §5.2 suppliedFields)', () => {
+  it('recorded rows carry only the known keys: no found_at, expires_at or actual, nothing that supplies a constraint input (spec §5.2 suppliedFields)', () => {
     const keys = new Set(ok.flatMap((x) => rowsOf(x.fixture.body).flatMap((r) => Object.keys(obj(r)))));
     // If this fails, stop and report the new key: a human decides whether it supplies anything (TRAVELPAYOUTS_SUPPLIED_FIELDS).
     expect([...keys].filter((k) => !DOCUMENTED_ROW_KEYS.includes(k))).toEqual([]);
@@ -4274,13 +4129,11 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     async () => {
       replay();
       for (const x of empty) {
-        const origins = pairOriginsOf(param(x.url, 'origin'));
-        const [first = asIata('LHR')] = origins;
+        // why: TP-19 was recorded with the metro code as origin; the pair origin is that code, so the replayed request is identical.
         const q = monthQuery(
-          first,
+          asIata(param(x.url, 'origin')),
           asIata(param(x.url, 'destination')),
           param(x.url, 'departure_at'),
-          origins,
         );
         const d = discoveryOf(makeProvider(makeHarness()));
         const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
@@ -4297,13 +4150,11 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     // A replay miss here (the afterEach misses() diff) means WP4b's invalid-token probe was sent with a URL the adapter
     // does not build (other params or values): look at the probe call in WP4b's record tool, not at the adapter.
     replay();
-    const origins = pairOriginsOf(param(unauthorised.url, 'origin'));
-    const [first = asIata('LHR')] = origins;
+    // why: TP-20 was recorded with the metro code as origin; the pair origin is that code, so the replayed request is identical.
     const q = monthQuery(
-      first,
+      asIata(param(unauthorised.url, 'origin')),
       asIata(param(unauthorised.url, 'destination')),
       param(unauthorised.url, 'departure_at'),
-      origins,
     );
     const d = discoveryOf(makeProvider(makeHarness()));
     expect(errorOf(await d.fetchTile(only(d.plan(q)), q, ctx()))).toMatchObject({
@@ -4435,7 +4286,7 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
     expect(httpLimitsFor(config(base)).travelpayouts).toBeUndefined();
   });
 
-  it('providersFor constructs the adapter only with a token, with the configured TTL, the airports table and the header-only token', async () => {
+  it('providersFor constructs the adapter only with a token, with the configured TTL and the header-only token', async () => {
     const { http, seen } = spyKit();
     const deps = { http, log: silentLog, clock: fixedClock(NOW), airports: emptyAirports() };
     expect(providersFor(config(base), deps).map((p) => p.id)).not.toContain('travelpayouts');
@@ -4453,7 +4304,6 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
       maxNights: 10,
       cabin: 'economy',
       currency: 'GBP',
-      definitionOrigins: [asIata('LHR'), asIata('LGW')],
     };
     const [plan] = p.discovery.plan(q);
     if (plan === undefined) throw new Error('no tile');
@@ -4468,7 +4318,7 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
     ).toBe('tile');
     const [req] = seen;
     expect(req?.cache).toMatchObject({ ttlSeconds: 3 * 3600 });
-    // the empty airports table maps no metro, so the origin is the airport
+    // the airport pair's own code, never a metro code (plan decision 34)
     expect(req?.url.searchParams.get('origin')).toBe('LHR');
     expect(req?.headers['X-Access-Token']).toBe(TOKEN);
   });
@@ -4496,7 +4346,7 @@ In `httpLimitsFor`, add this entry to the returned object literal, after the `fi
 In `providersFor`, insert before `return out;`:
 
 ```ts
-  // WP6: Travelpayouts, only when configured; the cache TTL is what dedups sibling pairs' metro requests (spec §5.2).
+  // WP6: Travelpayouts, only when configured; one request per airport pair, the cache TTL only serves repeats (spec §5.2).
   const tp = config.providers.travelpayouts;
   if (tp !== null) {
     out.push(
@@ -4507,7 +4357,6 @@ In `providersFor`, insert before `return out;`:
         token: tp.token,
         cacheTtlSeconds: tp.limits.cacheTtlHours * 3600,
         paramsAllowlist: TRAVELPAYOUTS_PARAMS,
-        airports: deps.airports,
       }),
     );
   }
@@ -4526,7 +4375,7 @@ git add apps/api && git commit -m "wp06: wire the travelpayouts adapter and its 
 
 ## 9. Pinned review-focus tests
 
-None of the plan's Review Focus lines is owned by WP6. One test here guards an adjacent risk, Review Focus 1 (metro codes): in WP6 a metro code is only ever a vendor query parameter taken from the airports table, never operator input, and only when two of the definition's origins share it. Task 6.4's metro tests ("sends the airport when the definition has one London airport", "sends the airport when there is no metro", "ignores a metro code that is not three upper-case letters") pin that.
+None of the plan's Review Focus lines is owned by WP6. One test here guards an adjacent risk, Review Focus 1 (metro codes): in WP6 a metro code is never sent at all (plan decision 34). Task 6.4's "sends the pair's airport even when the definition lists two airports of one metro" and Task 6.9's "why the rule exists" test pin that.
 
 ## 10. Definition of done
 
@@ -4546,11 +4395,11 @@ None of the plan's Review Focus lines is owned by WP6. One test here guards an a
 
 ## 11. Open questions
 
-None. The round-1 questions are settled: healthchecks are stateless, `ok: true`, detail `not probed` (decision 24 as reworded); the metro rule covers origins only and destinations are never collapsed (decision 28, spec rev 14 §5.2).
+None. The round-1 questions are settled: healthchecks are stateless, `ok: true`, detail `not probed` (decision 24 as reworded); no metro code is ever sent (decision 34, spec rev 17 §5.2).
 
 ## 12. Changes outside `src/travelpayouts`
 
-- `packages/core/src/ports/provider.ts` (Task 6.2): `DiscoveryQuery.definitionOrigins?: Iata[]`, `CellIssue` with `DiscoveryTileResult['tile'].cellIssues?: CellIssue[]`, and `DiscoveryTileResult['tile'].truncated?: boolean`. The first two are recorded in decision 28; `truncated` answers ruling 5 without a new closed-list reason (a `CellIssue` must carry an `ErrorReason`, and none means "cheapest of the rows read").
+- `packages/core/src/ports/provider.ts` (Task 6.2): `CellIssue` with `DiscoveryTileResult['tile'].cellIssues?: CellIssue[]`, and `DiscoveryTileResult['tile'].truncated?: boolean`. The first two are recorded in decision 28; `truncated` answers ruling 5 without a new closed-list reason (a `CellIssue` must carry an `ErrorReason`, and none means "cheapest of the rows read").
 - `packages/providers/src/http/types.ts`, `httpKit.ts` (Task 6.5): `HttpKitRequest.ledgerCacheHit?: boolean` (decision 28).
 - `packages/providers/src/shared/` (Task 6.1), and the fixture provider moved onto `parseError` and `NoteCounter` (Task 6.1; its adapter parse errors now carry `reason: 'parse'`, its drop note is `dropped-outside-tile:n`).
 - `packages/providers/src/index.ts` and `test/barrel.test.ts` (Tasks 6.7, 6.8): three exports, the shared helpers listed as not exported.
