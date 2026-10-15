@@ -33,4 +33,5 @@ export {
   ParamsNotAllowedError,
 } from './params/allowlist.js';
 export { travelpayoutsHttpLimits } from './travelpayouts/limits.js'; // WP6: apps/api httpLimitsFor
+export { TRAVELPAYOUTS_PARAMS } from './travelpayouts/params.js'; // WP6: apps/api providersFor
 export { travelpayoutsProvider } from './travelpayouts/provider.js'; // WP6: apps/api providersFor

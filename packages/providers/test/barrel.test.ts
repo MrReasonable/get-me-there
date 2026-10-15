@@ -32,6 +32,8 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       expect(typeof main[name], name).toBe('function');
     }
     expect(main.CREDENTIAL_HEADERS).toBeInstanceOf(Set);
+    // WP6: the recorded-allowlist constant, for apps/api providersFor
+    expect(main.TRAVELPAYOUTS_PARAMS).toMatchObject({ provider: 'travelpayouts' });
     for (const name of [
       'fixtureRouter',
       'fixtureHandlers',
