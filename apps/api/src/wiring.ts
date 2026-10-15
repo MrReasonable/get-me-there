@@ -37,6 +37,9 @@ import {
   fixtureProvider,
   type HttpKit,
   type HttpKitDeps,
+  SEARCHAPI_PARAMS,
+  searchApiHttpLimits,
+  searchApiProvider,
   TRAVELPAYOUTS_PARAMS,
   travelpayoutsHttpLimits,
   travelpayoutsProvider,
@@ -150,6 +153,10 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
   const cost = fixtureCost(config);
   return {
     ...(cost === null ? {} : { fixture: fixtureHttpLimits({ costPerCallMicroGbp: cost, ...timing }) }),
+    // WP5: SearchApi, only when SEARCHAPI_KEY is set (spec §2, §5.3).
+    ...(config.providers.searchapi === null
+      ? {}
+      : { searchapi: searchApiHttpLimits(config.providers.searchapi.limits, timing) }),
     // WP6: Travelpayouts, only when configured (spec §2, §5.3).
     ...(config.providers.travelpayouts === null
       ? {}
@@ -191,6 +198,23 @@ export function providersFor(
         token: tp.token,
         cacheTtlSeconds: tp.limits.cacheTtlHours * 3600,
         paramsAllowlist: TRAVELPAYOUTS_PARAMS,
+      }),
+    );
+  }
+  const sa = config.providers.searchapi;
+  if (sa !== null) {
+    // why: one rate source: the estimate prices calls at the same limits.costPerCallMicroGbp http-kit ledgers with;
+    // SEARCHAPI_CACHE_TTL_HOURS (spec §12) is the local window for calendar tiles (itinerary steps are never cached).
+    out.push(
+      searchApiProvider({
+        http: deps.http,
+        log: deps.log,
+        clock: deps.clock,
+        key: sa.key,
+        costPerCallMicroGbp: sa.limits.costPerCallMicroGbp,
+        pointOfSale: config.pointOfSale,
+        cacheTtlSeconds: sa.limits.cacheTtlHours * 3600,
+        paramsAllowlist: SEARCHAPI_PARAMS,
       }),
     );
   }
