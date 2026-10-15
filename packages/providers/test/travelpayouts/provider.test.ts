@@ -37,12 +37,6 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
       /TRAVELPAYOUTS_TOKEN is empty/,
     );
   });
-
-  it('warns at construction when the response cache is off, because metro dedup then stops (cost-wp06-009)', () => {
-    const h = makeHarness();
-    makeProvider(h, { cacheTtlSeconds: 0 });
-    expect(h.log.lines.some((l) => l.includes('metro dedup off'))).toBe(true);
-  });
 });
 
 describe('healthcheck (stateless, plan decision 24)', () => {

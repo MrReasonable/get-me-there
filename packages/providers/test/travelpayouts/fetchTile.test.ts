@@ -378,7 +378,7 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
   });
 });
 
-/** The worked example's pairs over its 182-day window, 10–21 nights; the definition lists both London airports. */
+/** The worked example's pairs over its 182-day window, 10–21 nights. */
 const workedQuery = (origin: Iata, destination: Iata) =>
   query({
     origin,
@@ -389,8 +389,8 @@ const workedQuery = (origin: Iata, destination: Iata) =>
     maxNights: 21,
   });
 
-describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.1)', () => {
-  it('worked example: 28 tiles, 14 upstream calls, 14 cache hits, every ledger row under its own tile index', async () => {
+describe('estimate parity: every airport pair is its own request (plan decision 34, spec §5.2 rev 17, §8.1)', () => {
+  it('worked example: 28 tiles, 28 upstream calls, 0 cache hits, every ledger row under its own tile index', async () => {
     const upstream: string[] = [];
     server.use(
       http.get(TP, ({ request }) => {
@@ -411,7 +411,7 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
           tiles += 1;
           const before = h.events.length;
           tileOf(await d.fetchTile(p, q, ctx()));
-          // each tile leaves exactly one ledger row (upstream reserve or cache hit) with its own index
+          // each tile leaves exactly one ledger row (an upstream reserve) with its own index
           const rows = h.events.slice(before).filter((e) => e.type === 'reserve' || e.type === 'cache-hit');
           expect(
             rows.map((e) => (e.type === 'reserve' || e.type === 'cache-hit' ? e.tileIndex : null)),
@@ -420,30 +420,24 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
       }
     }
     expect(tiles).toBe(28);
-    expect(upstream).toHaveLength(14);
-    expect(new Set(upstream).size).toBe(14);
-    expect(upstream.every((s) => s.startsWith('LON|'))).toBe(true);
-    expect(eventsOf(h, 'reserve')).toHaveLength(14);
-    expect(eventsOf(h, 'cache-hit')).toHaveLength(14);
+    expect(upstream).toHaveLength(28);
+    expect(new Set(upstream).size).toBe(28);
+    expect(upstream.some((s) => s.startsWith('LON|'))).toBe(false);
+    expect(eventsOf(h, 'reserve')).toHaveLength(28);
+    expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
   });
 
-  it('a 2-page metro tile served to the sibling pair from the cache is one cache-hit row, not one per page (plan decision 24)', async () => {
+  it('a repeat of a 2-page tile inside the TTL (a re-run) is one cache-hit row, not one per page (plan decision 24)', async () => {
     server.use(
-      http.get(TP, ({ request }) => {
-        const lhr = rowsFor(500, 0, 'LHR');
-        const lgw = rowsFor(500, 0, 'LGW');
-        return HttpResponse.json(
-          pageOf(request) === '1' ? envelope([...lhr, ...lgw]) : envelope(rowsFor(3, 7, 'LGW')),
-        );
-      }),
+      http.get(TP, ({ request }) =>
+        HttpResponse.json(pageOf(request) === '1' ? envelope(rowsFor(1000)) : envelope(rowsFor(3, 7))),
+      ),
     );
     const h = makeHarness();
     const d = discoveryOf(makeProvider(h));
-    for (const origin of [asIata('LHR'), asIata('LGW')]) {
-      const q = query({ origin });
-      tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-    }
-    // parity = distinct upstream tiles (1) + cache-hit rows (1) = plan().length summed over the two pairs (2)
+    const q = query();
+    for (let i = 0; i < 2; i += 1) tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    // parity = upstream tile (1) + cache-hit rows (1) = the two fetches of the tile
     expect(eventsOf(h, 'reserve')).toHaveLength(2);
     expect(new Set(tileIndexes(h, 'reserve')).size).toBe(1);
     expect(eventsOf(h, 'cache-hit')).toHaveLength(1);
@@ -463,77 +457,41 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
     );
     const h = makeHarness();
     const d = discoveryOf(makeProvider(h));
-    const lhr = query({ origin: asIata('LHR') });
-    const lgw = query({ origin: asIata('LGW') });
-    tileOf(await d.fetchTile(only(d.plan(lhr)), lhr, ctx()));
-    // page 2's cache entry expires before the sibling pair reads it
+    const q = query();
+    tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    // page 2's cache entry expires before the repeat reads it
     const page2 = h.cache.sets[1];
     if (page2 === undefined) throw new Error('page 2 was not cached');
     h.cache.entries.delete(page2.key);
-    tileOf(await d.fetchTile(only(d.plan(lgw)), lgw, ctx()));
-    // the sibling tile leaves a cache-hit row (page 1) and an upstream row (page 2) under one tile index
+    tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    // the repeat leaves a cache-hit row (page 1) and an upstream row (page 2) under one tile index
     expect(eventsOf(h, 'cache-hit')).toHaveLength(1);
     expect(eventsOf(h, 'reserve')).toHaveLength(3);
   });
 
-  it('one LON response serves both pairs, each receiving only its own origin_airport rows (ts-003)', async () => {
+  it('each airport pair sends its own origin and receives only its own origin_airport rows', async () => {
+    const sent: string[] = [];
     server.use(
-      http.get(TP, () =>
-        HttpResponse.json(
+      http.get(TP, ({ request }) => {
+        sent.push(new URL(request.url).searchParams.get('origin') ?? '?');
+        return HttpResponse.json(
           envelope([
             row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
             row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 377 }),
           ]),
-        ),
-      ),
+        );
+      }),
     );
     const h = makeHarness();
     const d = discoveryOf(makeProvider(h));
     const lhrQ = query({ origin: asIata('LHR') });
     const lgwQ = query({ origin: asIata('LGW') });
     const lhr = tileOf(await d.fetchTile(only(d.plan(lhrQ)), lhrQ, ctx()));
-    h.clock.advance(30 * 60_000);
     const lgw = tileOf(await d.fetchTile(only(d.plan(lgwQ)), lgwQ, ctx()));
+    expect(sent).toEqual(['LHR', 'LGW']);
     expect(lhr.prices.map((p) => [p.origin, p.amountMinor])).toEqual([['LHR', 41200]]);
     expect(lgw.prices.map((p) => [p.origin, p.amountMinor])).toEqual([['LGW', 37700]]);
-    expect(eventsOf(h, 'fetch')).toHaveLength(1);
-    expect(eventsOf(h, 'cache-hit').map((e) => e.tileIndex)).toEqual([0]);
-    // a cache hit carries the original storedAt (spec §2), not the time of the second call
-    expect(lgw.fetchedAt).toBe(NOW);
-  });
-
-  it('LHR→JFK and LGW→JFK in parallel: 14 tiles, 7 upstream calls, 7 cache-hit rows (plan decision 15: joiners leave their own row)', async () => {
-    let upstream = 0;
-    server.use(
-      http.get(TP, () => {
-        upstream += 1;
-        return HttpResponse.json(envelope([]));
-      }),
-    );
-    const h = makeHarness();
-    const d = discoveryOf(makeProvider(h));
-    const runs = [asIata('LHR'), asIata('LGW')].flatMap((origin) => {
-      const q = workedQuery(origin, asIata('JFK'));
-      return d.plan(q).map((p) => d.fetchTile(p, q, ctx()));
-    });
-    const results = await Promise.all(runs);
-    expect(results.every((r) => r.kind === 'tile')).toBe(true);
-    expect(upstream).toBe(7);
-    expect(eventsOf(h, 'reserve')).toHaveLength(7);
-    expect(eventsOf(h, 'cache-hit')).toHaveLength(7);
-  });
-
-  it('a lone London origin queries its own airport and makes O × D × M calls (spec §5.2 rev 14)', async () => {
-    const origins: Array<string | null> = [];
-    server.use(
-      http.get(TP, ({ request }) => {
-        origins.push(new URL(request.url).searchParams.get('origin'));
-        return HttpResponse.json(envelope([]));
-      }),
-    );
-    const d = discoveryOf(makeProvider(makeHarness()));
-    const q = query({ definitionOrigins: [asIata('LHR')] });
-    tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-    expect(origins).toEqual(['LHR']);
+    expect(eventsOf(h, 'fetch')).toHaveLength(2);
+    expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
   });
 });

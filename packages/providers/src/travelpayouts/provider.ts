@@ -1,8 +1,8 @@
 /**
- * Travelpayouts / Aviasales Data API adapter (WP6). Spec §2 (Travelpayouts row, fact 1), §5.1, §5.2 (rev 14), §6.9,
+ * Travelpayouts / Aviasales Data API adapter (WP6). Spec §2 (Travelpayouts row, fact 1), §5.1, §5.2 (rev 17), §6.9,
  * §8.1. Discovery only: cached round-trip prices from /aviasales/v3/prices_for_dates, one month tile per
- * (origin, destination) pair and departure month, queried by the metro code when two or more of the definition's
- * origins share it, every page through http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6).
+ * (origin airport, destination airport) pair and departure month, always queried by airport code and never by metro
+ * code (plan decision 34, spec rev 17), every page through http-kit. Returns raw vendor shapes; the engine normalises (spec §5.6).
  * No airport is named here (spec §1).
  */
 import {
@@ -28,7 +28,7 @@ import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.
 import { parseError } from '../shared/errors.js';
 import { FIXED_PARAMS, PAGE_LIMIT, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
 import { attributeRows, cacheableBody, type ResponseCurrency, readEnvelope, WHERE } from './response.js';
-import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
+import { planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /**
  * Spec §2 Travelpayouts row: authorised-cached, 48 h. The vendor says prices_for_dates holds round-trip prices
@@ -72,12 +72,11 @@ export interface TravelpayoutsProviderOptions {
   /** TRAVELPAYOUTS_TOKEN; sent only in the X-Access-Token header (spec §2 fact 8). Must not be empty. */
   token: Secret;
   /**
-   * Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, a sibling pair's identical metro request
-   * is a cache hit. 0 disables that dedup: upstream calls become O × D × M instead of D × M (logged at construction).
+   * Response cache window: TRAVELPAYOUTS_CACHE_TTL_HOURS × 3600. Inside it, a repeat of an identical request (a
+   * re-run or resumed scan) is a cache hit; every pair's tile is its own request, so there is no sibling dedup.
    */
   cacheTtlSeconds: number;
   paramsAllowlist: ParamsAllowlist;
-  airports: MetroLookup;
 }
 
 /** The request URL for one page of a tile. The token never appears here (spec §2 fact 8: header only). */
@@ -102,12 +101,6 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
   if (opts.token.reveal().length === 0)
     throw new Error('travelpayoutsProvider: TRAVELPAYOUTS_TOKEN is empty');
   const log = opts.log.child({ providerId: 'travelpayouts' });
-  if (opts.cacheTtlSeconds === 0) {
-    log.warn(
-      { cacheTtlSeconds: 0 },
-      'travelpayouts: response cache disabled; metro dedup off, upstream calls = O × D × M',
-    );
-  }
 
   function tileError(plan: TilePlan, error: ProviderError): DiscoveryTileResult {
     log.warn(
@@ -183,14 +176,14 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     q: DiscoveryQuery,
     ctx: ProviderContext,
   ): Promise<DiscoveryTileResult> {
-    const tp = tileParams(plan, q, opts.airports);
+    const tp = tileParams(plan, q);
     let read: Awaited<ReturnType<typeof readPages>>;
     let attribution: ReturnType<typeof attributeRows>;
     try {
       read = await readPages(plan, tp, ctx);
       attribution = attributeRows(read.rows, {
         coveredCells: plan.coveredCells,
-        origin: tp.pairOrigin,
+        origin: tp.origin,
         destination: tp.destination,
         minNights: q.minNights,
         maxNights: q.maxNights,

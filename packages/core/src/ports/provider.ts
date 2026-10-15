@@ -29,11 +29,6 @@ export interface DiscoveryQuery {
   currency: 'GBP';
   /** when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it */
   cells?: CellKey[];
-  /**
-   * The definition's origins, every pair's (spec §2, §5.2 rev 14). A provider that can query by metropolitan code
-   * does so only when two or more of these map to the pair origin's metro. Absent: the pair's origin alone.
-   */
-  definitionOrigins?: Iata[];
 }
 /** Vendor-neutral, typed tile requests; `month` is the Travelpayouts tile. */
 export type TileRequest =

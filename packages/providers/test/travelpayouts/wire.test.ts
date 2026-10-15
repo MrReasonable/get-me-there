@@ -20,8 +20,7 @@ import {
 } from './harness.js';
 
 const tp = {
-  origin: 'LON',
-  pairOrigin: asIata('LHR'),
+  origin: asIata('LHR'),
   destination: asIata('JFK'),
   month: asIsoMonth('2027-03'),
 };
@@ -64,7 +63,7 @@ describe('assertRequestAllowed (WP4) on Travelpayouts requests (spec §5.2: name
 });
 
 describe('requests on the wire', () => {
-  it('carry exactly the allowlisted names and values, the metro origin, and the token only in X-Access-Token', async () => {
+  it('carry exactly the allowlisted names and values, the airport origin (never a metro code, plan decision 34), and the token only in X-Access-Token', async () => {
     const seen: Array<{ url: string; token: string | null }> = [];
     server.use(
       http.get(TP, ({ request }) => {
@@ -78,7 +77,7 @@ describe('requests on the wire', () => {
     await d.fetchTile(only(d.plan(q)), q, ctx());
     const req = only(seen);
     expect(Object.fromEntries(new URL(req.url).searchParams)).toEqual({
-      origin: 'LON',
+      origin: 'LHR',
       destination: 'JFK',
       departure_at: '2027-03',
       one_way: 'false',

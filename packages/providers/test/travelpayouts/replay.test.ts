@@ -73,17 +73,8 @@ const DOCUMENTED_ROW_KEYS = [
   'transfers',
 ];
 
-/** The worked example's airports per recorded origin parameter: LON serves both London airports. */
-const pairOriginsOf = (origin: string): Iata[] =>
-  origin === 'LON' ? [asIata('LHR'), asIata('LGW')] : [asIata(origin)];
-
 /** One month of departures, 1–120 nights: wide enough that the band drops only rows a definition could not hold. */
-function monthQuery(
-  origin: Iata,
-  destination: Iata,
-  month: string,
-  definitionOrigins: Iata[],
-): DiscoveryQuery {
+function monthQuery(origin: Iata, destination: Iata, month: string): DiscoveryQuery {
   const from = asIsoDate(`${month}-01`);
   let last = toEpochDay(from);
   while (monthOf(fromEpochDay(last + 1)) === monthOf(from)) last += 1;
@@ -94,7 +85,6 @@ function monthQuery(
     departureTo: fromEpochDay(last),
     minNights: 1,
     maxNights: 120,
-    definitionOrigins,
   });
 }
 
@@ -132,54 +122,61 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     ).toEqual([]);
   });
 
-  it.each([...tiles.entries()])(
-    'tile %s replays for every pair it serves: pages from 1, rows accounted for, one ledger row per tile',
+  // why: plan decision 34: the adapter queries by airport only, so the recorded metro (LON) tiles TP-01...14 are not
+  // replayed; they stay in the tree as the evidence for that rule (the documenting test below). The airport tiles
+  // TP-15...18 and the reverse tile TP-21 are what the adapter itself can request.
+  const airportTiles = [...tiles.entries()].filter(([key]) => !key.startsWith('LON|'));
+  it('the airport tiles TP-15...18 and the reverse tile TP-21 are recorded', () => {
+    expect(airportTiles.map(([key]) => key).sort()).toEqual([
+      'JFK|LON|2027-03',
+      'LGW|EWR|2027-03',
+      'LGW|JFK|2027-03',
+      'LHR|EWR|2027-03',
+      'LHR|JFK|2027-03',
+    ]);
+  });
+
+  it.each(airportTiles)(
+    'airport tile %s replays: pages from 1, rows accounted for, one upstream ledger row per page and no cache hit',
     async (key, pages) => {
       const [origin = '', destination = '', month = ''] = key.split('|');
       expect(pages.map((p) => param(p.url, 'page'))).toEqual(pages.map((_, i) => String(i + 1)));
       replay();
-      const pairOrigins = pairOriginsOf(origin);
       const h = makeHarness();
       const d = discoveryOf(makeProvider(h));
       const received = pages.reduce((n, p) => n + rowsOf(p.fixture.body).length, 0);
-      for (const pairOrigin of pairOrigins) {
-        const q = monthQuery(pairOrigin, asIata(destination), month, pairOrigins);
-        const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-        expect(r.pointOfSale).toBe('unknown');
-        const covered = new Set(r.coveredCells.map(cellKeyString));
-        for (const p of r.prices) {
-          expect(p.origin).toBe(pairOrigin);
-          expect(covered.has(cellKeyString(p))).toBe(true);
-          expect(p.currency).toBe('GBP');
-          expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
-          expect('providerObservedAt' in p).toBe(false);
-          if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
-        }
-        expect(sumCounts(r.notes, (k) => k === 'rows-received')).toBe(received);
-        const dropped = sumCounts(r.notes, (k) => k.startsWith('dropped-') || k === 'offers-dropped');
-        expect(r.prices.length + dropped).toBe(received);
+      const q = monthQuery(asIata(origin), asIata(destination), month);
+      const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+      expect(r.pointOfSale).toBe('unknown');
+      const covered = new Set(r.coveredCells.map(cellKeyString));
+      for (const p of r.prices) {
+        expect(p.origin).toBe(origin);
+        expect(covered.has(cellKeyString(p))).toBe(true);
+        expect(p.currency).toBe('GBP');
+        expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
+        expect('providerObservedAt' in p).toBe(false);
+        if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
       }
-      // the first pair reaches upstream once per page; the sibling is served from the cache: one row for its whole tile
+      expect(sumCounts(r.notes, (k) => k === 'rows-received')).toBe(received);
+      const dropped = sumCounts(r.notes, (k) => k.startsWith('dropped-') || k === 'offers-dropped');
+      expect(r.prices.length + dropped).toBe(received);
       expect(eventsOf(h, 'reserve')).toHaveLength(pages.length);
-      expect(eventsOf(h, 'cache-hit')).toHaveLength(pairOrigins.length - 1);
+      expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
     },
   );
 
   it('the first recorded LHR → JFK row becomes exactly its cell and amount (ts-006)', async () => {
-    const metro = ok.find(
+    const airport = ok.find(
       (x) =>
-        param(x.url, 'origin') === 'LON' &&
+        param(x.url, 'origin') === 'LHR' &&
         param(x.url, 'destination') === 'JFK' &&
-        rowsOf(x.fixture.body).some((r) => obj(r).origin_airport === 'LHR'),
+        rowsOf(x.fixture.body).length > 0,
     );
-    if (metro === undefined) throw new Error('WP4b recorded no LON → JFK tile with an LHR row');
-    const first = obj(rowsOf(metro.fixture.body).find((r) => obj(r).origin_airport === 'LHR'));
+    if (airport === undefined) throw new Error('WP4b recorded no LHR → JFK tile with rows');
+    const first = obj(rowsOf(airport.fixture.body).find((r) => obj(r).origin_airport === 'LHR'));
     replay();
     const d = discoveryOf(makeProvider(makeHarness()));
-    const q = monthQuery(asIata('LHR'), asIata('JFK'), param(metro.url, 'departure_at'), [
-      asIata('LHR'),
-      asIata('LGW'),
-    ]);
+    const q = monthQuery(asIata('LHR'), asIata('JFK'), param(airport.url, 'departure_at'));
     const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
     const price = typeof first.price === 'number' ? majorToMinor(first.price, 'GBP') : null;
     expect(r.prices).toContainEqual({
@@ -191,6 +188,33 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       currency: 'GBP',
       vendorLink: `${AVIASALES_BASE}${str(first.link)}`,
     });
+  });
+
+  it('why the rule exists (plan decision 34): the recorded metro tile hides the LHR 2027-03-29 / 2027-04-10 fare the LHR airport tile prices', async () => {
+    // The vendor answers a metro-code query with one cheapest row per date pair across every airport of the metro
+    // (here LTN at 429 beats LHR at 498), so a definition that does not use LTN would read that LHR cell as no_data.
+    // Hence the adapter never sends a metro code (spec rev 17). The two recordings were taken seconds apart, so this
+    // is not cache drift.
+    const rowOf = (tile: string, airport: string) =>
+      (tiles.get(tile) ?? [])
+        .flatMap((p) => rowsOf(p.fixture.body).map(obj))
+        .filter(
+          (r) =>
+            r.origin_airport === airport &&
+            str(r.departure_at).slice(0, 10) === '2027-03-29' &&
+            str(r.return_at).slice(0, 10) === '2027-04-10',
+        );
+    expect(rowOf('LON|JFK|2027-03', 'LTN')).toHaveLength(1);
+    expect(rowOf('LON|JFK|2027-03', 'LHR')).toHaveLength(0);
+    expect(rowOf('LHR|JFK|2027-03', 'LHR')).toHaveLength(1);
+    // and the adapter, querying LHR, prices that cell
+    replay();
+    const d = discoveryOf(makeProvider(makeHarness()));
+    const q = monthQuery(asIata('LHR'), asIata('JFK'), '2027-03');
+    const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+    expect(
+      r.prices.filter((p) => p.departureDate === '2027-03-29' && p.returnDate === '2027-04-10'),
+    ).toHaveLength(1);
   });
 
   it('every vendor time carries an explicit offset (Z is +00:00), and the recordings show two different offsets (pie-wp06-001)', () => {
@@ -267,13 +291,11 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     async () => {
       replay();
       for (const x of empty) {
-        const origins = pairOriginsOf(param(x.url, 'origin'));
-        const [first = asIata('LHR')] = origins;
+        // why: TP-19 was recorded with the metro code as origin; the pair origin is that code, so the replayed request is identical.
         const q = monthQuery(
-          first,
+          asIata(param(x.url, 'origin')),
           asIata(param(x.url, 'destination')),
           param(x.url, 'departure_at'),
-          origins,
         );
         const d = discoveryOf(makeProvider(makeHarness()));
         const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
@@ -290,13 +312,11 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     // A replay miss here (the afterEach misses() diff) means WP4b's invalid-token probe was sent with a URL the adapter
     // does not build (other params or values): look at the probe call in WP4b's record tool, not at the adapter.
     replay();
-    const origins = pairOriginsOf(param(unauthorised.url, 'origin'));
-    const [first = asIata('LHR')] = origins;
+    // why: TP-20 was recorded with the metro code as origin; the pair origin is that code, so the replayed request is identical.
     const q = monthQuery(
-      first,
+      asIata(param(unauthorised.url, 'origin')),
       asIata(param(unauthorised.url, 'destination')),
       param(unauthorised.url, 'departure_at'),
-      origins,
     );
     const d = discoveryOf(makeProvider(makeHarness()));
     expect(errorOf(await d.fetchTile(only(d.plan(q)), q, ctx()))).toMatchObject({

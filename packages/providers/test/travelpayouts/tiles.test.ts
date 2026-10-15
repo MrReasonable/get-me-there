@@ -9,8 +9,8 @@ import {
 } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildRequestUrl } from '../../src/travelpayouts/provider.js';
-import { cellsOf, originParam, planMonthTiles, tileParams } from '../../src/travelpayouts/tiles.js';
-import { airports, cellsFor, noMetro, query } from './harness.js';
+import { cellsOf, planMonthTiles, tileParams } from '../../src/travelpayouts/tiles.js';
+import { cellsFor, only, query } from './harness.js';
 
 const [LHR, LGW, JFK, EWR] = [asIata('LHR'), asIata('LGW'), asIata('JFK'), asIata('EWR')];
 /** Spec §5.2 worked example, one pair: 182 days (2027-01-01 … 2027-07-01, 7 months), 10–21 nights. */
@@ -102,39 +102,18 @@ describe('planMonthTiles (spec §5.2: per pair, one month tile per departure mon
   });
 });
 
-describe('the metro origin (spec §2 and §5.2 rev 14: the metro only when two or more of the definition’s origins share it)', () => {
-  it('sends the shared metro code when the definition lists LHR and LGW', () => {
-    expect(originParam(query({ definitionOrigins: [LHR, LGW] }), airports)).toBe('LON');
-    expect(originParam(query({ origin: LGW, definitionOrigins: [LHR, LGW] }), airports)).toBe('LON');
+describe("tile parameters (plan decision 34: always the pair's own airport, never a metro code)", () => {
+  it("sends the pair's airport even when the definition lists two airports of one metro", () => {
+    expect(tileParams(only(planMonthTiles(query({ origin: LGW }))), query({ origin: LGW })).origin).toBe(
+      'LGW',
+    );
   });
 
-  it('sends the airport when the definition has one London airport (a lone airport is queried by its own code)', () => {
-    expect(originParam(query({ definitionOrigins: [LHR] }), airports)).toBe('LHR');
-  });
-
-  it('sends the airport when definitionOrigins is absent (treated as the pair origin alone)', () => {
-    const { definitionOrigins: _omit, ...q } = query();
-    expect(originParam(q, airports)).toBe('LHR');
-  });
-
-  it("sends the airport when the definition's other origins map to other metros or none", () => {
-    expect(originParam(query({ definitionOrigins: [LHR, JFK, asIata('AAA')] }), airports)).toBe('LHR');
-  });
-
-  it('sends the airport when there is no metro', () => {
-    expect(originParam(query(), noMetro)).toBe('LHR');
-  });
-
-  it('ignores a metro code that is not three upper-case letters', () => {
-    expect(originParam(query(), { metroOf: () => 'LONDON' })).toBe('LHR');
-  });
-
-  it('tileParams carries the vendor origin, the pair and the month', () => {
+  it('tileParams carries the pair and the month', () => {
     const [first] = planMonthTiles(query());
     if (first === undefined) throw new Error('no tile');
-    expect(tileParams(first, query(), airports)).toEqual({
-      origin: 'LON',
-      pairOrigin: 'LHR',
+    expect(tileParams(first, query())).toEqual({
+      origin: 'LHR',
       destination: 'JFK',
       month: '2027-03',
     });
@@ -152,7 +131,7 @@ describe('the metro origin (spec §2 and §5.2 rev 14: the metro only when two o
         returnTo: asIsoDate('2027-04-01'),
       },
     };
-    expect(() => tileParams(rect, query(), airports)).toThrow(/month tiles/);
+    expect(() => tileParams(rect, query())).toThrow(/month tiles/);
   });
 
   it.each([
@@ -165,8 +144,6 @@ describe('the metro origin (spec §2 and §5.2 rev 14: the metro only when two o
     );
     const plan = plans.find((p) => p.request.kind === 'month' && p.request.month === month);
     if (plan === undefined) throw new Error(`no ${month} tile`);
-    expect(buildRequestUrl(tileParams(plan, query(), airports), 1).searchParams.get('departure_at')).toBe(
-      expected,
-    );
+    expect(buildRequestUrl(tileParams(plan, query()), 1).searchParams.get('departure_at')).toBe(expected);
   });
 });

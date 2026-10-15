@@ -23,7 +23,6 @@ import {
   type TravelpayoutsProviderOptions,
   travelpayoutsProvider,
 } from '../../src/travelpayouts/provider.js';
-import type { MetroLookup } from '../../src/travelpayouts/tiles.js';
 import { cellsOf } from '../../src/travelpayouts/tiles.js';
 import { type LedgerEvent, makeKit, SENTINELS, testLimits } from '../fakes.js';
 
@@ -93,13 +92,6 @@ export function eventsOf<T extends LedgerEvent['type']>(
   return h.events.filter((e): e is Extract<LedgerEvent, { type: T }> => e.type === type);
 }
 
-/** Synthetic stand-in for AirportsRepo.metroOf over the worked example only (London → New York). */
-export const airports: MetroLookup = {
-  metroOf: (iata) =>
-    iata === 'LHR' || iata === 'LGW' ? 'LON' : iata === 'JFK' || iata === 'EWR' ? 'NYC' : null,
-};
-export const noMetro: MetroLookup = { metroOf: () => null };
-
 /** Synthetic allowlist in the plan's ParamsAllowlist shape (not the recorded one; Task 6.8 tests that). */
 export const ALLOWLIST: ParamsAllowlist = {
   provider: 'travelpayouts',
@@ -129,7 +121,6 @@ export function makeProvider(h: Harness, over: Partial<TravelpayoutsProviderOpti
     token: TOKEN,
     cacheTtlSeconds: 6 * 3600,
     paramsAllowlist: ALLOWLIST,
-    airports,
     ...over,
   });
 }
@@ -165,7 +156,7 @@ export function errorOf(r: DiscoveryTileResult): ProviderError {
 
 /**
  * LHR → JFK, 10–20 March 2027, 10–12 nights: 11 × 3 = 33 cells in one departure month. The definition lists both
- * London airports, so the tile queries the shared metro (spec §5.2 rev 14).
+ * London airports; the tile still queries LHR alone (plan decision 34).
  */
 export function query(over: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
   return {
@@ -177,7 +168,6 @@ export function query(over: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
     maxNights: 12,
     cabin: 'economy',
     currency: 'GBP',
-    definitionOrigins: [asIata('LHR'), asIata('LGW')],
     ...over,
   };
 }

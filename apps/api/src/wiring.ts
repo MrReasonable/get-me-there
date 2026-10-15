@@ -181,7 +181,7 @@ export function providersFor(
       fixtureProvider({ http: deps.http, log: deps.log, clock: deps.clock, config, costMicroGbp: cost }),
     );
   }
-  // WP6: Travelpayouts, only when configured; the cache TTL is what dedups sibling pairs' metro requests (spec §5.2).
+  // WP6: Travelpayouts, only when configured; one request per airport pair, the cache TTL only serves repeats (spec §5.2).
   const tp = config.providers.travelpayouts;
   if (tp !== null) {
     out.push(
@@ -192,7 +192,6 @@ export function providersFor(
         token: tp.token,
         cacheTtlSeconds: tp.limits.cacheTtlHours * 3600,
         paramsAllowlist: TRAVELPAYOUTS_PARAMS,
-        airports: deps.airports,
       }),
     );
   }

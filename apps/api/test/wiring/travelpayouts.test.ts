@@ -76,7 +76,7 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
     expect(httpLimitsFor(config(base)).travelpayouts).toBeUndefined();
   });
 
-  it('providersFor constructs the adapter only with a token, with the configured TTL, the airports table and the header-only token', async () => {
+  it('providersFor constructs the adapter only with a token, with the configured TTL and the header-only token', async () => {
     const { http, seen } = spyKit();
     const deps = { http, log: silentLog, clock: fixedClock(NOW), airports: emptyAirports() };
     expect(providersFor(config(base), deps).map((p) => p.id)).not.toContain('travelpayouts');
@@ -94,7 +94,6 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
       maxNights: 10,
       cabin: 'economy',
       currency: 'GBP',
-      definitionOrigins: [asIata('LHR'), asIata('LGW')],
     };
     const [plan] = p.discovery.plan(q);
     if (plan === undefined) throw new Error('no tile');
@@ -109,7 +108,7 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
     ).toBe('tile');
     const [req] = seen;
     expect(req?.cache).toMatchObject({ ttlSeconds: 3 * 3600 });
-    // the empty airports table maps no metro, so the origin is the airport
+    // the airport pair's own code, never a metro code (plan decision 34)
     expect(req?.url.searchParams.get('origin')).toBe('LHR');
     expect(req?.headers['X-Access-Token']).toBe(TOKEN);
   });
