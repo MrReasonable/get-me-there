@@ -22,6 +22,14 @@ export function assertKitConfig(
   if ((hosts.length > 0 || deps.limits.fixture !== undefined) && !deps.syntheticAllowed) {
     throw new Error('inProcessHosts and limits.fixture require syntheticAllowed (spec §5.5)');
   }
+  // why: the fixture provider's only host is fixture.local, and no real provider may name it: a real provider's
+  // request (credential header included) would otherwise be dispatched to the in-process router (security minor 1).
+  const fixtureHosts = deps.limits.fixture?.hosts;
+  if (fixtureHosts !== undefined && (fixtureHosts.length !== 1 || fixtureHosts[0] !== FIXTURE_HOST))
+    throw new Error(`limits.fixture.hosts must be exactly ['${FIXTURE_HOST}']`);
+  for (const id of ['searchapi', 'travelpayouts', 'fx'] as const)
+    if (deps.limits[id]?.hosts.includes(FIXTURE_HOST))
+      throw new Error(`limits.${id}.hosts may not include ${FIXTURE_HOST}`);
   const values = deps.secrets.map((s) => s.reveal()).filter((v) => v !== '');
   if (values.some((v) => v.length < MIN_SECRET_LENGTH))
     throw new Error(`every configured secret must be at least ${MIN_SECRET_LENGTH} characters`);
@@ -70,8 +78,14 @@ export function assertEgress(
   if (!PATH_ONLY.test(r.endpointPath) || r.endpointPath !== u.pathname)
     deny('endpointPath must equal the URL path');
   if (r.providerId === 'fx' || r.providerId === 'fixture') {
-    for (const name of Object.keys(r.headers))
+    for (const [name, value] of Object.entries(r.headers)) {
       if (CREDENTIAL_HEADERS.has(name.toLowerCase()))
         deny(`credential header ${name.toLowerCase()} on a ${r.providerId} request`);
+      // why: a header name outside the credential list can still carry a key; scan every value (security minor 2).
+      if (containsSecret(value, secrets))
+        deny(`a credential appears in a header on a ${r.providerId} request`);
+    }
+    if (r.body !== undefined && containsSecret(r.body, secrets))
+      deny(`a credential appears in the body of a ${r.providerId} request`);
   }
 }

@@ -92,3 +92,43 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
     await refused({ url: 'http://fixture.local/health', providerId: 'travelpayouts', headers: {} });
   });
 });
+
+describe('fixture host pinning and credential sentinels on fx and fixture requests (security review minors 1–2)', () => {
+  beforeEach(useFakeTime);
+  afterEach(() => vi.useRealTimers());
+
+  it('refuses limits.fixture whose hosts are not exactly fixture.local', () => {
+    expect(() => makeKit({ overrides: { fixture: { hosts: ['evil.example'] } } })).toThrow(/fixture\.local/);
+    expect(() => makeKit({ overrides: { fixture: { hosts: ['fixture.local', 'evil.example'] } } })).toThrow(
+      /fixture\.local/,
+    );
+  });
+  it.each(['searchapi', 'travelpayouts', 'fx'] as const)(
+    'refuses fixture.local in the %s host list',
+    (id) => {
+      expect(() =>
+        makeKit({ overrides: { [id]: { hosts: [testLimits()[id].hosts[0] ?? '', 'fixture.local'] } } }),
+      ).toThrow(/fixture\.local/);
+    },
+  );
+  it.each([
+    ['fx', 'https://api.frankfurter.dev/v1/latest'],
+    ['fixture', 'http://fixture.local/health'],
+  ] as const)(
+    'refuses a %s request carrying a secret under any header name or in its body',
+    async (providerId, url) => {
+      const run = async (o: Partial<Parameters<typeof req>[0]>) => {
+        const { kit, budget } = makeKit();
+        const err = asProviderError(
+          await driveError(kit.request(req({ url, providerId, headers: {}, ...o }))),
+        );
+        expect(err.message).toContain('[egress-denied]');
+        expect(err.message).not.toContain(SENTINELS.smtp.reveal());
+        expect(budget.count('fetch')).toBe(0);
+      };
+      await run({ headers: { 'x-rapidapi-key': SENTINELS.searchapi.reveal() } });
+      await run({ headers: { 'x-note': `b64 ${Buffer.from(SENTINELS.smtp.reveal()).toString('base64')}` } });
+      await run({ method: 'POST', body: JSON.stringify({ k: SENTINELS.travelpayouts.reveal() }) });
+    },
+  );
+});
