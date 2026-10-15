@@ -11,6 +11,7 @@ import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js'
 import { tempDir } from '../helpers/tmp.js';
 
 const API_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const NO_NETWORK = fileURLToPath(new URL('../support/noNetwork.mjs', import.meta.url));
 const DRY = ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03', '--dry-run'];
 /** Node's arguments for every spawned child: workspace sources, and the DNS-refusal preload (one list, r3-ts-006). */
@@ -90,6 +91,30 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
       },
     });
   });
+
+  it("the root script passes the tool's exit code through to the operator: no --budget → 64 (plan decision 30)", () => {
+    const dbPath = freshDbPath();
+    // why: `pnpm --filter` collapsed every child code to 1, hiding 64/65/70/73/74/75/78 (arch I-1); the env blanks every
+    // variable the tool reads, so a developer's .env (loaded by --env-file-if-exists, existing variables win) adds nothing
+    const r = spawnSync(
+      'pnpm',
+      ['run', '--silent', 'record:fixtures', '--route', 'LHR:JFK', '--month', '2027-03'],
+      {
+        cwd: REPO_ROOT,
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          NODE_OPTIONS: `--import=${NO_NETWORK}`,
+          ...toolEnv(dbPath),
+        },
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+    expect(r.stderr).toContain('--budget is required');
+    expect(r.status).toBe(64);
+    expect(existsSync(dbPath)).toBe(false);
+  }, 60_000);
 
   it('every spawned child gets the DNS-refusal preload, and under it fetch, as http-kit uses it, cannot reach a host (r2-ts-006, r3-ts-006)', () => {
     expect(NODE_ARGS).toContain(NO_NETWORK);

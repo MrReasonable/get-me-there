@@ -418,6 +418,7 @@ The metro comes from the airports table, which the tool seeds after migration wh
 - `packages/db/src/appLock.ts`, `packages/db/src/index.ts`, `packages/db/test/barrel.test.ts`: `readOnlyLockState` and its export (Task 7).
 - `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`: export and assert `defaultRecordedRoot` (Task 8).
 - `apps/api/package.json`: script `tool` (Task 9). No new dependency, no msw.
+- root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9).
 - `scripts/check-boundaries.mjs`: the msw rules and the `process.env` reader list (Task 9).
 
 ## 10. Tasks
@@ -5889,7 +5890,7 @@ git add apps/api packages/providers/src/index.ts packages/providers/test/barrel.
 
 ### Task 9: Tool bootstrap entry, spawned; the network guards; the package script; the boundary rules
 
-**Files:** modify `apps/api/package.json` (script), `scripts/check-boundaries.mjs`; create `apps/api/test/support/noNetwork.mjs`, `apps/api/test/support/guards.test.ts`, `apps/api/test/bootstrap/tool.spawn.test.ts`.
+**Files:** modify `apps/api/package.json` (script), the root `package.json` (`record:fixtures`, `smoke:live`), `scripts/check-boundaries.mjs`; create `apps/api/test/support/noNetwork.mjs`, `apps/api/test/support/guards.test.ts`, `apps/api/test/bootstrap/tool.spawn.test.ts`.
 
 **Interfaces:** consumes the real entry `src/bootstrap/tool.ts`, `takeStrays`. Produces the `tool` script the root's `record:fixtures` and `smoke:live` call.
 
@@ -5941,6 +5942,7 @@ import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js'
 import { tempDir } from '../helpers/tmp.js';
 
 const API_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const NO_NETWORK = fileURLToPath(new URL('../support/noNetwork.mjs', import.meta.url));
 const DRY = ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03', '--dry-run'];
 /** Node's arguments for every spawned child: workspace sources, and the DNS-refusal preload (one list, r3-ts-006). */
@@ -6021,6 +6023,30 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
     });
   });
 
+  it("the root script passes the tool's exit code through to the operator: no --budget → 64 (plan decision 30)", () => {
+    const dbPath = freshDbPath();
+    // why: `pnpm --filter` collapsed every child code to 1, hiding 64/65/70/73/74/75/78 (arch I-1); the env blanks every
+    // variable the tool reads, so a developer's .env (loaded by --env-file-if-exists, existing variables win) adds nothing
+    const r = spawnSync(
+      'pnpm',
+      ['run', '--silent', 'record:fixtures', '--route', 'LHR:JFK', '--month', '2027-03'],
+      {
+        cwd: REPO_ROOT,
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          NODE_OPTIONS: `--import=${NO_NETWORK}`,
+          ...toolEnv(dbPath),
+        },
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+    expect(r.stderr).toContain('--budget is required');
+    expect(r.status).toBe(64);
+    expect(existsSync(dbPath)).toBe(false);
+  }, 60_000);
+
   it('every spawned child gets the DNS-refusal preload, and under it fetch, as http-kit uses it, cannot reach a host (r2-ts-006, r3-ts-006)', () => {
     expect(NODE_ARGS).toContain(NO_NETWORK);
     const r = spawnSync(
@@ -6041,9 +6067,11 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts`
-Expected: 1 failed | 6 passed; the failure is the script test, `AssertionError: expected { name: '@gmt/api', …(7) } to match object { Object (scripts) }`. The spawn tests pass because the entry exists since Task 8; if one fails instead, the entry-point guard does not fire under `node --import tsx`: fix `isEntryPoint` before going on. The preload test and the guard test pass on first run; they prove the two network guards are live (r2-ts-006).
+Expected: 2 failed | 6 passed; the failures are the script test, `AssertionError: expected { name: '@gmt/api', …(7) } to match object { Object (scripts) }`, and the root-script test, `AssertionError: expected 1 to be 64` (`pnpm --filter` collapses the child's exit code to 1). The spawn tests pass because the entry exists since Task 8; if one fails instead, the entry-point guard does not fire under `node --import tsx`: fix `isEntryPoint` before going on. The preload test and the guard test pass on first run; they prove the two network guards are live (r2-ts-006).
 
 - [ ] **Step 3: Implement**
+
+In the root `package.json`, set `"record:fixtures": "pnpm -C apps/api run tool record"` and `"smoke:live": "pnpm -C apps/api run tool smoke"` (plan decision 30: `pnpm --filter` reports 1 for any non-zero child code, so the operator could not tell 65 from 75; `pnpm -C … run` passes the code through, and the cwd is still `apps/api`, so `../../.env` resolves as before).
 
 In `apps/api/package.json`, set the `tool` script (merge the key; keep main's other scripts):
 
@@ -6055,7 +6083,7 @@ In `apps/api/package.json`, set the `tool` script (merge the key; keep main's ot
 }
 ```
 
-`// why:` (record it in the PR description; JSON has no comments) The root scripts are `"record:fixtures": "pnpm --filter @gmt/api tool record"` and `"smoke:live": "pnpm --filter @gmt/api tool smoke"`, so pnpm appends the operator's arguments after `record`. `--conditions=@gmt/source` makes Node and tsx resolve workspace packages to their sources rather than stale or missing `dist` builds (plan Task 0.1). Node loads `.env` into `process.env`, where existing variables win; `loadConfigFromEnv` is the only reader. The spawn tests call `node` directly with their own env, so no test ever loads the real `.env`.
+`// why:` (record it in the PR description; JSON has no comments) The root scripts are `"record:fixtures": "pnpm -C apps/api run tool record"` and `"smoke:live": "pnpm -C apps/api run tool smoke"`, so pnpm appends the operator's arguments after `record` and the tool's exit code is the operator's (plan decision 30). `--conditions=@gmt/source` makes Node and tsx resolve workspace packages to their sources rather than stale or missing `dist` builds (plan Task 0.1). Node loads `.env` into `process.env`, where existing variables win; `loadConfigFromEnv` is the only reader. The spawn tests call `node` directly with their own env; the one root-script test goes through `pnpm` with an env that blanks every variable the tool reads (existing variables win over `.env`) and exits at argument parsing, so no test ever takes a value from the real `.env`.
 
 In `scripts/check-boundaries.mjs`, widen `walk`'s file filter so `.mjs` test-support files are scanned too (arch-r3-002):
 
@@ -6104,7 +6132,7 @@ for (const f of walk('apps/api/test')) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts` and `node scripts/check-boundaries.mjs`
-Expected: 7 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file. Do the same with `import 'msw/node';` in `apps/api/test/support/plant.mjs`, expecting `apps/api/test/support/plant.mjs imports msw; …`.
+Expected: 8 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file. Do the same with `import 'msw/node';` in `apps/api/test/support/plant.mjs`, expecting `apps/api/test/support/plant.mjs imports msw; …`.
 
 - [ ] **Step 5: Commit**
 
@@ -6970,7 +6998,7 @@ Rows marked **operator** run on Ian's machine with the real `.env`; every other 
 | `node scripts/check-boundaries.mjs` | exit 0: `process.env` is read only under `apps/api/src/bootstrap/`; any msw import (static, side-effect or dynamic) appears only under `packages/providers/src/testing/` among the packages' `src` trees; `@gmt/api` neither lists msw nor imports it from any `.ts`, `.mts`, `.cts`, `.js`, `.mjs` or `.cjs` file under `apps/api/test` |
 | `pnpm secret-scan` | `secret scan: clean` |
 | `git ls-files packages/providers/fixtures \| grep -c 'raw\.json'` | `0` |
-| `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 64, `--budget is required` |
+| `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 64, `--budget is required` (the code passes through `pnpm -C apps/api run`, plan decision 30; `tool.spawn.test.ts` asserts it through the root script) |
 | `grep -rnE 'LHR\|LGW\|JFK\|EWR\|LON\|NYC' apps/api/src --exclude=workedExample.ts` | no output (airports only in `workedExample.ts`, tests, docs and fixtures) |
 | **operator:** `pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run` | exit 0, the 26 call lines and the total line of section 7, no `a live run would be refused` line |
 | **operator:** `node --env-file=.env scripts/secret-scan.mjs` | `secret scan: clean` with the real values loaded |

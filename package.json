@@ -17,8 +17,8 @@
     "test:coverage": "vitest run --coverage",
     "mutate": "pnpm --filter @gmt/core mutate",
     "dev": "pnpm --parallel --filter @gmt/api --filter @gmt/web dev",
-    "smoke:live": "pnpm --filter @gmt/api tool smoke",
-    "record:fixtures": "pnpm --filter @gmt/api tool record",
+    "smoke:live": "pnpm -C apps/api run tool smoke",
+    "record:fixtures": "pnpm -C apps/api run tool record",
     "secret-scan": "node scripts/secret-scan.mjs"
   },
   "devDependencies": {
