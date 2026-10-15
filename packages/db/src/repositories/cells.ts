@@ -7,7 +7,6 @@ import {
   type Clock,
   cellKeyString,
   type IsoDate,
-  isPartialExpansion,
   type NoDataReason,
   type ProviderId,
   type RollUp,
@@ -16,7 +15,6 @@ import {
   stripUrlsInText,
 } from '@gmt/core';
 import type { Db } from '../client.js';
-import { readSnapshot } from '../internal/definitionRow.js';
 import {
   NO_DATA_REASONS,
   OUTCOME_STATUSES,
@@ -35,44 +33,14 @@ import {
   toCellKey,
   toOutcome,
 } from '../internal/outcomeRow.js';
-import {
-  assertOutcomeProvenance,
-  assertOutcomeReason,
-  DELETE_FRESH_PRICE_SQL,
-  DELETE_REUSED_PRICE_SQL,
-  nextOutcome,
-  readOutcome,
-  SELECT_OUTCOME_SQL,
-  storeOutcome,
-  TILE_STATUSES,
-} from '../internal/outcomeWrite.js';
-import {
-  type CalendarPriceDbRow,
-  insertCalendarPrice,
-  toCalendarPriceRow,
-  validateCalendarPrice,
-} from '../internal/priceRow.js';
+import { nextOutcome, readOutcome, storeOutcome } from '../internal/outcomeWrite.js';
 import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
+import { writeReusedCopies } from '../internal/reuseCopy.js';
 import { storeRollUps } from '../internal/rollUps.js';
-import {
-  assertErrorReason,
-  assertInt,
-  assertIsoDateTime,
-  assertProviderAllowed,
-  assertProviderKind,
-  RowRejected,
-} from '../internal/validate.js';
-import type {
-  CalendarPriceInsert,
-  CalendarPriceRow,
-  RepoOptions,
-  ReuseCriteria,
-  ReusedCopy,
-  TileWrite,
-  VerifiedCellWrite,
-} from '../types.js';
-import { ExecutionsRepo } from './executions.js';
-import { ItinerariesRepo } from './itineraries.js';
+import { writeTileRows } from '../internal/tileWrite.js';
+import { assertErrorReason, assertInt, assertProviderAllowed, RowRejected } from '../internal/validate.js';
+import { writeVerifiedCellRows } from '../internal/verifiedCellWrite.js';
+import type { RepoOptions, ReuseCriteria, ReusedCopy, TileWrite, VerifiedCellWrite } from '../types.js';
 
 interface CellDbRow {
   origin: string;
@@ -166,44 +134,6 @@ WHERE execution_id = @executionId AND stage = @stage AND provider_id = @provider
   OR (@manual = 1 AND ((status = 'skipped' AND reason = 'provider_disabled') OR (status = 'error' AND reason IN (${sqlList(MANUAL_RETRYABLE)}))))
 )
 ORDER BY origin, destination, departure_date, return_date`;
-
-/** prov-005: every field a reused copy carries must agree before anything is written (rule reuse-source). */
-function assertReusable(
-  providerId: ProviderId,
-  { cell, outcome, price }: ReusedCopy,
-  allowSynthetic: boolean,
-): void {
-  const key = cellKeyString(cell);
-  const refuse = (why: string) => new RowRejected('reuse-source', `${key}: ${why} (spec §8.1)`);
-  if (outcome.status !== 'priced' && outcome.status !== 'empty' && outcome.status !== 'no_data')
-    throw refuse(`only priced, empty or no_data outcomes are reused, got ${outcome.status}`);
-  if (outcome.providerId !== providerId || outcome.stage !== 'discovery')
-    throw refuse(
-      `a ${outcome.providerId} ${outcome.stage} outcome cannot be reused for ${providerId} discovery`,
-    );
-  if (cellKeyString(outcome) !== key) throw refuse(`the outcome is for ${cellKeyString(outcome)}`);
-  if (
-    outcome.fetchedAt === null ||
-    outcome.cabin === null ||
-    outcome.pointOfSale === null ||
-    outcome.sourceKind === null
-  )
-    throw refuse('the outcome carries no provenance');
-  assertProviderKind(providerId, outcome.sourceKind, allowSynthetic);
-  if ((outcome.status === 'priced') !== (price !== null))
-    throw refuse(`a ${outcome.status} outcome with${price === null ? 'out' : ''} a price`);
-  if (price === null) return;
-  if (cellKeyString(price.cell) !== key) throw refuse(`the price is for ${cellKeyString(price.cell)}`);
-  if (price.providerId !== providerId) throw refuse(`the price is from ${price.providerId}`);
-  if (price.fetchedAt !== outcome.fetchedAt || price.pricePence !== outcome.minPence)
-    throw refuse('the price and the outcome disagree on fetched_at or amount');
-  if (
-    price.cabin !== outcome.cabin ||
-    price.pointOfSale !== outcome.pointOfSale ||
-    price.sourceKind !== outcome.sourceKind
-  )
-    throw refuse('the price and the outcome disagree on cabin, point of sale or source kind');
-}
 
 /**
  * Spec §7 `search_cells` + `cell_outcomes` and the stored roll-ups. Every method that changes an outcome stores the
@@ -423,100 +353,11 @@ export class CellsRepo {
   }
 
   /**
-   * Spec §7 atomic unit: one tile's prices, outcomes and roll-ups. Validation first (a malformed tile writes nothing);
-   * any SQL failure inside rolls the whole tile back.
+   * Spec §7 atomic unit: one tile's prices, outcomes and roll-ups (internal/tileWrite.ts). Validation first, then one
+   * transaction; any SQL failure inside rolls the whole tile back.
    */
   writeTile(executionId: string, providerId: ProviderId, w: TileWrite): void {
-    assertProviderAllowed(providerId, this.opts.allowSynthetic);
-    assertInt('tileIndex', w.tileIndex);
-    assertInt('discards', w.discards);
-    const prices = new Map<string, CalendarPriceInsert>();
-    for (const p of w.prices) {
-      if (p.providerId !== providerId)
-        throw new RowRejected('provider', `price from ${p.providerId} in a ${providerId} tile`);
-      const key = cellKeyString(p.cell);
-      if (prices.has(key))
-        throw new RowRejected(
-          'in-tile-conflict',
-          `two prices for ${key} in one tile; the engine keeps one per cell (spec §5.6)`,
-        );
-      validateCalendarPrice(p, this.opts.allowSynthetic, true);
-      prices.set(key, p);
-    }
-    const covered = new Set(w.cells.map(cellKeyString));
-    const seen = new Set<string>();
-    for (const o of w.outcomes) {
-      const key = cellKeyString(o);
-      if (!TILE_STATUSES.some((s) => s === o.status))
-        throw new RowRejected(
-          'tile-status',
-          `a tile outcome is priced, empty or no_data; got ${o.status} (errors go through writeTileError)`,
-        );
-      if (!covered.has(key) || seen.has(key))
-        throw new RowRejected('tile-partition', `${key} is outside the tile or repeated`);
-      seen.add(key);
-      assertOutcomeProvenance(o);
-      if (o.sourceKind !== null) assertProviderKind(providerId, o.sourceKind, this.opts.allowSynthetic);
-      assertOutcomeReason(o);
-      const price = prices.get(key);
-      if (o.status === 'priced' && price === undefined)
-        throw new RowRejected(
-          'priced-needs-price',
-          `${key} is priced but the tile wrote no price for it (spec §3)`,
-        );
-      if (o.status !== 'priced' && price !== undefined)
-        throw new RowRejected('price-needs-priced', `${key} has a price but its outcome is ${o.status}`);
-      if (price !== undefined) {
-        if (o.minPence !== price.pricePence)
-          throw new RowRejected(
-            'min-pence',
-            `${key} min_pence ${String(o.minPence)} differs from its price ${price.pricePence}`,
-          );
-        if (
-          o.fetchedAt !== price.fetchedAt ||
-          o.cabin !== price.cabin ||
-          o.pointOfSale !== price.pointOfSale ||
-          o.sourceKind !== price.sourceKind
-        ) {
-          throw new RowRejected(
-            'outcome-price-mismatch',
-            `${key} outcome provenance differs from its price row (ruling 5)`,
-          );
-        }
-      }
-    }
-    if (seen.size !== covered.size)
-      throw new RowRejected('tile-partition', 'every covered cell needs exactly one outcome');
-    for (const key of prices.keys())
-      if (!seen.has(key)) throw new RowRejected('price-needs-priced', `${key} has a price but no outcome`);
-    this.db.transaction(() => {
-      for (const o of w.outcomes) {
-        const existing = this.current(executionId, o, 'discovery', providerId);
-        const params = { ...keyParams(executionId, o), providerId };
-        this.db.raw.prepare(DELETE_REUSED_PRICE_SQL).run(params);
-        const price = prices.get(cellKeyString(o));
-        if (price !== undefined) {
-          // why: brief ruling 3, fresh on fresh priced keeps the minimum (core's merge picks the same source):
-          // a lower price replaces the stored fresh row, an equal or higher one is not written.
-          const freshPriced = existing.status === 'priced' && existing.reusedFromExecutionId === null;
-          if (!freshPriced) insertCalendarPrice(this.db, executionId, price);
-          else if (existing.minPence !== null && price.pricePence < existing.minPence) {
-            this.db.raw.prepare(DELETE_FRESH_PRICE_SQL).run(params);
-            insertCalendarPrice(this.db, executionId, price);
-          }
-        }
-        const incoming: CellOutcome = {
-          ...existing,
-          ...o,
-          attempts: existing.attempts,
-          reusedFromExecutionId: null,
-        };
-        storeOutcome(this.db, nextOutcome(existing, incoming, false));
-        // why: per cell, so a later failure in the same tile also rolls back roll-ups already stored (test-011 pins it).
-        storeRollUps(this.db, executionId, 'discovery', [o]);
-      }
-      new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
-    });
+    writeTileRows(this.db, this.clock, this.opts.allowSynthetic, executionId, providerId, w);
   }
 
   /** Spec §8.1 "tile-error marks exactly its cells": error with the kind as reason, attempts + 1, merged through core. */
@@ -654,116 +495,15 @@ export class CellsRepo {
 
   /**
    * Spec §7 atomic unit: one verified cell's itineraries, segments, offers, observations, outcome, best_observation_id
-   * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest observation written (ruling 13).
+   * and roll-up (internal/verifiedCellWrite.ts).
    */
   writeVerifiedCell(executionId: string, providerId: ProviderId, w: VerifiedCellWrite): void {
-    assertProviderAllowed(providerId, this.opts.allowSynthetic);
-    if (w.outcome.sourceKind !== null)
-      assertProviderKind(providerId, w.outcome.sourceKind, this.opts.allowSynthetic);
-    const key = cellKeyString(w.cell);
-    const o = w.outcome;
-    const offers = w.itineraries.flatMap((i) => i.offers.map((x) => ({ ...x, itinerary: i.itinerary })));
-    if (cellKeyString(o) !== key)
-      throw new RowRejected('cell-mismatch', `outcome is for ${cellKeyString(o)}, not ${key}`);
-    if (o.status !== 'priced' && o.status !== 'empty' && o.status !== 'error')
-      throw new RowRejected('verified-status', `a verified cell is priced, empty or error; got ${o.status}`);
-    if (o.status === 'priced' && offers.length === 0)
-      throw new RowRejected('priced-needs-offer', `${key} is priced with no offer (spec §5.4)`);
-    if (o.status !== 'priced' && offers.length > 0)
-      throw new RowRejected('offers-need-priced', `${key} has offers but status ${o.status}`);
-    if (o.status === 'error') assertErrorReason(o.reason);
-    else {
-      assertOutcomeProvenance(o);
-      assertOutcomeReason(o);
-    }
-    for (const x of offers) {
-      if (cellKeyString(x.itinerary) !== key)
-        throw new RowRejected(
-          'cell-mismatch',
-          `itinerary ${x.itinerary.hash} is for ${cellKeyString(x.itinerary)}, not ${key}`,
-        );
-      if (x.offer.itineraryHash !== x.itinerary.hash || x.offer.providerId !== providerId)
-        throw new RowRejected(
-          'offer-mismatch',
-          `offer does not belong to itinerary ${x.itinerary.hash} from ${providerId}`,
-        );
-      const p = x.observation.provenance;
-      if (
-        p.providerId !== providerId ||
-        p.cabin !== o.cabin ||
-        p.pointOfSale !== o.pointOfSale ||
-        p.sourceKind !== o.sourceKind
-      )
-        throw new RowRejected(
-          'outcome-price-mismatch',
-          `${key} observation provenance differs from its outcome (ruling 5)`,
-        );
-    }
-    // why: the per-observation flag and the outcome reason describe the same truncation; a cell must not roll up as
-    // complete while its observations say expansion was partial, or the reverse (prov-M6).
-    if (
-      o.status === 'priced' &&
-      offers.some((x) => x.observation.partialExpansion) !== isPartialExpansion(o.reason)
-    )
-      throw new RowRejected(
-        'partial-expansion',
-        `${key} reason ${String(o.reason)} disagrees with its observations' partialExpansion flags`,
-      );
-    if (offers.length > 0) {
-      const cheapest = Math.min(...offers.map((x) => x.observation.pricePence));
-      const oldest = offers.map((x) => x.observation.provenance.fetchedAt).sort()[0];
-      if (o.minPence !== cheapest)
-        throw new RowRejected(
-          'min-pence',
-          `${key} min_pence ${String(o.minPence)} differs from the cheapest offer ${cheapest}`,
-        );
-      if (o.fetchedAt !== oldest)
-        throw new RowRejected(
-          'outcome-price-mismatch',
-          `${key} outcome fetchedAt must be its oldest observation's (spec §2)`,
-        );
-    }
-    const itineraries = new ItinerariesRepo(this.db, this.clock, this.opts);
-    this.db.transaction(() => {
-      let best: { id: number; pence: number } | null = null;
-      for (const x of offers) {
-        itineraries.upsertItinerary(x.itinerary);
-        const { observationId: id } = itineraries.recordObservation(x.offer, {
-          ...x.observation,
-          executionId,
-        });
-        if (best === null || x.observation.pricePence < best.pence)
-          best = { id, pence: x.observation.pricePence };
-      }
-      const existing = this.current(executionId, w.cell, 'verification', providerId);
-      // why: an error carries no fetched data, so it stores no provenance, as writeTileError does (prov-M5).
-      const provenance =
-        o.status === 'error' ? { fetchedAt: null, cabin: null, pointOfSale: null, sourceKind: null } : {};
-      const incoming: CellOutcome = {
-        ...existing,
-        ...o,
-        ...provenance,
-        minPence: best?.pence ?? null,
-        attempts: existing.attempts,
-        reusedFromExecutionId: null,
-      };
-      storeOutcome(this.db, nextOutcome(existing, incoming, o.status === 'error'));
-      if (best !== null) {
-        this.db.raw
-          .prepare(
-            `UPDATE search_cells SET best_observation_id = @bestId WHERE ${CELL_WHERE} AND (best_observation_id IS NULL OR (SELECT price_pence FROM price_observations WHERE id = search_cells.best_observation_id) > @bestPence)`,
-          )
-          .run({ ...keyParams(executionId, w.cell), bestId: best.id, bestPence: best.pence });
-      }
-      storeRollUps(this.db, executionId, 'verification', [w.cell]);
-      if (o.status !== 'error') new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
-    });
+    writeVerifiedCellRows(this.db, this.clock, this.opts.allowSynthetic, executionId, providerId, w);
   }
 
   /**
-   * Spec §7 atomic unit "each reused cell's outcome + copied prices + roll-up" (one transaction for the batch).
-   * Copies keep the original fetched_at and provenance; reused_from_execution_id is always the execution that
-   * fetched the price, even when the source is itself a reused copy.
+   * Spec §7 atomic unit "each reused cell's outcome + copied prices + roll-up" (internal/reuseCopy.ts): every copy is
+   * re-checked against what the database holds and the reuse criteria before anything is written.
    */
   copyReused(
     executionId: string,
@@ -771,141 +511,14 @@ export class CellsRepo {
     copies: ReusedCopy[],
     criteria: ReuseCriteria,
   ): void {
-    assertProviderAllowed(providerId, this.opts.allowSynthetic);
-    assertIsoDateTime('newerThan', criteria.newerThan);
-    for (const copy of copies) {
-      assertReusable(providerId, copy, this.opts.allowSynthetic);
-      if (copy.price !== null) validateCalendarPrice(copy.price, this.opts.allowSynthetic, false);
-    }
-    this.db.transaction(() => {
-      for (const { cell, outcome, price } of copies) {
-        const key = { ...keyParams(executionId, cell), stage: 'discovery', providerId };
-        const target = this.db.raw
-          .prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL)
-          .get(key);
-        if (target?.status !== 'not_run')
-          throw new RowRejected(
-            'reuse-target',
-            `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}, not not_run`,
-          );
-        // why: what is written is what the database holds (prov-r3-001), never the caller's objects.
-        const { stored, held } = this.assertSourceStored(
-          executionId,
-          providerId,
-          { cell, outcome, price },
-          criteria,
-        );
-        const reusedFrom = stored.reusedFromExecutionId ?? stored.executionId;
-        storeOutcome(this.db, {
-          ...stored,
-          ...keyParams(executionId, cell),
-          executionId,
-          stage: 'discovery',
-          providerId,
-          attempts: 0,
-          lastError: null,
-          reusedFromExecutionId: reusedFrom,
-        });
-        if (held !== null)
-          insertCalendarPrice(this.db, executionId, { ...held, reusedFromExecutionId: reusedFrom });
-      }
-      storeRollUps(
-        this.db,
-        executionId,
-        'discovery',
-        copies.map((c) => c.cell),
-      );
-      // why: spec §7 "reset when a tile or cell commits"; a run that progresses only by reuse is progressing (dm-M1).
-      if (copies.length > 0) new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
-    });
-  }
-
-  /**
-   * prov-r2-001: the copy must be what the database holds. The source outcome is re-read by its keys and the price by
-   * its id; both must equal the values supplied, and the source must be a non-child execution of the target's
-   * definition fetched in the target's cabin, at the criteria's point of sale and source kind and after its cutoff
-   * (spec §8.1, §9 Layer A). This is the one path that writes a price without a
-   * provider call, so it trusts no caller; copyReused writes the re-read rows it returns.
-   */
-  private assertSourceStored(
-    targetExecutionId: string,
-    providerId: ProviderId,
-    { cell, outcome, price }: ReusedCopy,
-    criteria: ReuseCriteria,
-  ): { stored: CellOutcome; held: CalendarPriceRow | null } {
-    const refuse = (why: string) =>
-      new RowRejected('reuse-source', `${cellKeyString(cell)}: ${why} (spec §8.1)`);
-    const src = this.db.raw
-      .prepare<Record<string, unknown>, OutcomeDbRow & { definition_id: string; is_child: number }>(
-        `SELECT o.*, e.definition_id, e.is_child FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
-         WHERE o.execution_id = @executionId AND o.origin = @origin AND o.destination = @destination AND o.departure_date = @departureDate AND o.return_date = @returnDate
-           AND o.stage = 'discovery' AND o.provider_id = @providerId`,
-      )
-      .get({ ...keyParams(outcome.executionId, cell), providerId });
-    if (src === undefined) throw refuse(`no stored outcome in ${outcome.executionId}`);
-    const target = this.db.raw
-      .prepare<[string], { definition_id: string; definition_snapshot_json: string }>(
-        'SELECT definition_id, definition_snapshot_json FROM search_executions WHERE id = ?',
-      )
-      .get(targetExecutionId);
-    if (src.is_child !== 0 || target === undefined || src.definition_id !== target.definition_id)
-      throw refuse('the source is not a parent execution of the same definition');
-    const stored = toOutcome(src);
-    // why: spec §9 Layer A "refuse on a cabin change": the definition's cabin may have been edited since the source ran (prov-r3-002).
-    const targetCabin = readSnapshot(
-      'search_executions.definition_snapshot_json',
-      target.definition_snapshot_json,
-    ).cabin;
-    if (stored.cabin !== targetCabin)
-      throw refuse(`the source was fetched in ${String(stored.cabin)}, the target searches ${targetCabin}`);
-    // why: spec §8.1 reuse matches point of sale and source kind and takes only sources newer than the cutoff; this
-    // path trusts no caller, so it re-applies the criteria reuseCandidates used (prov-M3).
-    if (stored.pointOfSale !== criteria.pointOfSale || stored.sourceKind !== criteria.sourceKind)
-      throw refuse(
-        `the source is ${String(stored.pointOfSale)}/${String(stored.sourceKind)}, not ${criteria.pointOfSale}/${criteria.sourceKind}`,
-      );
-    if (stored.fetchedAt === null || stored.fetchedAt <= criteria.newerThan)
-      throw refuse(`the source was fetched at ${String(stored.fetchedAt)}, not after ${criteria.newerThan}`);
-    const same = (a: CellOutcome) =>
-      [
-        a.status,
-        a.reason,
-        a.fetchedAt,
-        a.minPence,
-        a.cabin,
-        a.pointOfSale,
-        a.sourceKind,
-        a.reusedFromExecutionId,
-      ].join('|');
-    if (same(stored) !== same(outcome)) throw refuse('the supplied outcome differs from the stored one');
-    if (price === null) return { stored, held: null };
-    const p = this.db.raw
-      .prepare<[number], CalendarPriceDbRow>('SELECT * FROM calendar_prices WHERE id = ?')
-      .get(price.id);
-    if (p === undefined) throw refuse(`calendar price ${price.id} does not exist`);
-    const held = toCalendarPriceRow(p);
-    const fxKey = (x: CalendarPriceRow) =>
-      x.fx.converted ? `1|${x.fx.rateNano}|${x.fx.rateDate}|${x.fx.source}` : '0';
-    const priceKey = (x: CalendarPriceRow) =>
-      [
-        x.executionId,
-        x.providerId,
-        cellKeyString(x.cell),
-        x.pricePence,
-        x.priceNativeMinor,
-        x.currencyNative,
-        fxKey(x),
-        x.fetchedAt,
-        x.providerObservedAt,
-        x.maxAgeHours,
-        x.vendorLink,
-        x.cabin,
-        x.pointOfSale,
-        x.sourceKind,
-        x.reusedFromExecutionId,
-      ].join('|');
-    if (held.executionId !== outcome.executionId || priceKey(held) !== priceKey(price))
-      throw refuse('the supplied price differs from the stored one');
-    return { stored, held };
+    writeReusedCopies(
+      this.db,
+      this.clock,
+      this.opts.allowSynthetic,
+      executionId,
+      providerId,
+      copies,
+      criteria,
+    );
   }
 }
