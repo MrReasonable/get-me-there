@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { type IsoDate, toEpochDay } from '@gmt/core';
 import { isRecord } from '../util.js';
-import { epochDayOf } from './dates.js';
 
 /** `calendar/<O>-<D>.json`: parameters of the deterministic synthetic price formula. */
 export interface CalendarPairFile {
@@ -50,9 +50,9 @@ export function defaultFixtureRoot(): string {
 }
 
 /** The formula price for a cell: base + weekday step × (epoch day mod 7) + nights × per-night. */
-export function calendarPriceMinor(file: CalendarPairFile, departureDate: string, nights: number): number {
+export function calendarPriceMinor(file: CalendarPairFile, departureDate: IsoDate, nights: number): number {
   return (
-    file.baseMinor + (epochDayOf(departureDate) % 7) * file.weekdayStepMinor + nights * file.perNightMinor
+    file.baseMinor + (toEpochDay(departureDate) % 7) * file.weekdayStepMinor + nights * file.perNightMinor
   );
 }
 

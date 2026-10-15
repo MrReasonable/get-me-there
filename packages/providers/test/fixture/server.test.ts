@@ -1,6 +1,7 @@
 import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FIXTURE_ORIGIN, RELEASE_PATH, SCENARIO_HEADER, SCENARIO_PATH } from '../../src/fixture/constants.js';
 import { fixtureRouter } from '../../src/fixture/router.js';
@@ -171,7 +172,7 @@ describe('fixture server via msw (http://fixture.local)', () => {
       prices.find((p) => p.departureDate === '2026-11-02' && p.returnDate === '2026-11-16')?.amountMinor,
     ).toBe(59_800);
     const file = loadFixtureTree(ROOT).calendar.get('LHR-JFK');
-    expect(file && calendarPriceMinor(file, '2026-11-02', 14)).toBe(59_800);
+    expect(file && calendarPriceMinor(file, asIsoDate('2026-11-02'), 14)).toBe(59_800);
   });
 
   it('applies noFaresNights and noDataNights from the pair file', async () => {

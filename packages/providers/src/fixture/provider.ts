@@ -9,6 +9,7 @@ import {
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type FlightProvider,
+  fromEpochDay,
   type Iata,
   type IsoDate,
   type IsoDateTime,
@@ -26,11 +27,11 @@ import {
   type SyntheticGateInput,
   syntheticAllowed,
   type TilePlan,
+  toEpochDay,
 } from '@gmt/core';
 import type { HttpKit, HttpKitRequest, HttpKitResponse, ProviderHttpLimits } from '../http/types.js';
 import { isRecord } from '../util.js';
 import { FIXTURE_HOST, FIXTURE_ORIGIN } from './constants.js';
-import { epochDayOf, isoDateOfEpochDay } from './dates.js';
 
 /** Departure days per discovery tile. */
 export const FIXTURE_TILE_DAYS = 7;
@@ -80,13 +81,13 @@ export function fixtureHttpLimits(o: {
 
 function enumerate(q: DiscoveryQuery): CellKey[] {
   const out: CellKey[] = [];
-  for (let d = epochDayOf(q.departureFrom); d <= epochDayOf(q.departureTo); d += 1) {
+  for (let d = toEpochDay(q.departureFrom); d <= toEpochDay(q.departureTo); d += 1) {
     for (let n = q.minNights; n <= q.maxNights; n += 1) {
       out.push({
         origin: q.origin,
         destination: q.destination,
-        departureDate: isoDateOfEpochDay(d),
-        returnDate: isoDateOfEpochDay(d + n),
+        departureDate: fromEpochDay(d),
+        returnDate: fromEpochDay(d + n),
       });
     }
   }
@@ -101,10 +102,10 @@ export function planFixtureTiles(q: DiscoveryQuery): TilePlan[] {
   const cells = q.cells
     ? q.cells.filter((c) => c.origin === q.origin && c.destination === q.destination)
     : enumerate(q);
-  const start = epochDayOf(q.departureFrom);
+  const start = toEpochDay(q.departureFrom);
   const blocks = new Map<number, CellKey[]>();
   for (const c of cells) {
-    const b = Math.floor((epochDayOf(c.departureDate) - start) / FIXTURE_TILE_DAYS);
+    const b = Math.floor((toEpochDay(c.departureDate) - start) / FIXTURE_TILE_DAYS);
     const list = blocks.get(b);
     if (list) list.push(c);
     else blocks.set(b, [c]);

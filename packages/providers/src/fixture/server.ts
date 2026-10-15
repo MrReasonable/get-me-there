@@ -1,7 +1,14 @@
-import { isoDateSchema, type SyntheticGateInput, syntheticAllowed } from '@gmt/core';
+import {
+  addDays,
+  asIsoDate,
+  daysBetween,
+  type IsoDate,
+  isoDateSchema,
+  type SyntheticGateInput,
+  syntheticAllowed,
+} from '@gmt/core';
 import { isRecord } from '../util.js';
 import { RELEASE_PATH, SCENARIO_HEADER, SCENARIO_PATH } from './constants.js';
-import { addDaysIso, daysBetweenIso, localPlusMinutes } from './dates.js';
 import {
   type FixtureResponse,
   type FixtureRule,
@@ -25,9 +32,28 @@ export interface FixtureServer {
   reset(): void;
 }
 
+/** A cell's dates as validated at the request boundary. */
+interface CellDates {
+  departureDate: IsoDate;
+  returnDate: IsoDate;
+  nights: number;
+}
+
 const MAX_NIGHTS = 90;
 const MAX_SPAN_DAYS = 400;
 const AGENCY_DISCOUNT_MINOR = 300;
+
+/** `YYYY-MM-DDTHH:mm` plus `minutes`, as wall-clock arithmetic (no timezone involved). */
+export function localPlusMinutes(local: string, minutes: number): string {
+  const ms = Date.UTC(
+    Number(local.slice(0, 4)),
+    Number(local.slice(5, 7)) - 1,
+    Number(local.slice(8, 10)),
+    Number(local.slice(11, 13)),
+    Number(local.slice(14, 16)),
+  );
+  return new Date(ms + minutes * 60_000).toISOString().slice(0, 16);
+}
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
@@ -95,26 +121,24 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
     const dates = ['departFrom', 'departTo', 'returnFrom', 'returnTo'];
     const p = need(url, ['origin', 'destination', ...dates], dates);
     if (p instanceof Response) return p;
-    const {
-      origin = '',
-      destination = '',
-      departFrom = '',
-      departTo = '',
-      returnFrom = '',
-      returnTo = '',
-    } = p;
+    const { origin = '', destination = '' } = p;
+    // why: `need` has validated every date with isoDateSchema; the brand is minted here, where they enter.
+    const departFrom = asIsoDate(p.departFrom ?? '');
+    const departTo = asIsoDate(p.departTo ?? '');
+    const returnFrom = asIsoDate(p.returnFrom ?? '');
+    const returnTo = asIsoDate(p.returnTo ?? '');
     const file = tree.calendar.get(`${origin}-${destination}`);
     if (file === undefined) return refuse(404, `no calendar fixture for ${origin}-${destination}`);
     if (
-      daysBetweenIso(departFrom, departTo) > MAX_SPAN_DAYS ||
-      daysBetweenIso(returnFrom, returnTo) > MAX_SPAN_DAYS
+      daysBetween(departFrom, departTo) > MAX_SPAN_DAYS ||
+      daysBetween(returnFrom, returnTo) > MAX_SPAN_DAYS
     )
       return refuse(400, 'rectangle too large');
     const entries: Array<{ departureDate: string; returnDate: string; amountMinor: number | null }> = [];
     if (respond.kind !== 'empty') {
-      for (let dep: string = departFrom; dep <= departTo; dep = addDaysIso(dep, 1)) {
-        for (let ret: string = returnFrom; ret <= returnTo; ret = addDaysIso(ret, 1)) {
-          const nights = daysBetweenIso(dep, ret);
+      for (let dep = departFrom; dep <= departTo; dep = addDays(dep, 1)) {
+        for (let ret = returnFrom; ret <= returnTo; ret = addDays(ret, 1)) {
+          const nights = daysBetween(dep, ret);
           if (nights < 0 || nights > MAX_NIGHTS || file.noDataNights.includes(nights)) continue;
           const noFare = respond.kind === 'no-fares' || file.noFaresNights.includes(nights);
           entries.push({
@@ -158,12 +182,12 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
     t: LegTemplate,
     from: string,
     to: string,
-    date: string,
+    date: IsoDate,
     cabin: string,
     via: string | undefined,
   ): unknown[] {
     const depart = `${date}T${t.depart}`;
-    const arrive = `${addDaysIso(date, t.arriveDayOffset)}T${t.arrive}`;
+    const arrive = `${addDays(date, t.arriveDayOffset)}T${t.arrive}`;
     if (via === undefined)
       return [{ carrier, flightNumber: t.flightNumber, from, to, depart, arrive, cabin }];
     // why: the connection exists only to drive the engine's unknown-airport-tz path; times are template arithmetic.
@@ -193,11 +217,12 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
     o: OptionTemplate,
     index: number,
     p: Record<string, string>,
-    nights: number,
+    dates: CellDates,
     cal: CalendarPairFile,
     respond: Generated,
   ): Record<string, unknown> {
-    const { origin = '', destination = '', departureDate = '', returnDate = '', cabin = '' } = p;
+    const { origin = '', destination = '', cabin = '' } = p;
+    const { departureDate, returnDate, nights } = dates;
     const applies = respond.kind === 'variant' && (respond.scope === 'all-offers' || index === 0);
     const carrier = applies && respond.carrier !== undefined ? respond.carrier : o.carrier;
     const via = applies ? respond.connectVia : undefined;
@@ -214,16 +239,20 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
 
   /** Shared request parsing for the itinerary routes. */
   function itineraryContext(url: URL, extra: string[]) {
-    const dates = ['departureDate', 'returnDate'];
-    const p = need(url, ['origin', 'destination', ...dates, 'cabin', ...extra], dates);
+    const dateNames = ['departureDate', 'returnDate'];
+    const p = need(url, ['origin', 'destination', ...dateNames, 'cabin', ...extra], dateNames);
     if (p instanceof Response) return p;
     const pair = `${p.origin}-${p.destination}`;
     const cal = tree.calendar.get(pair);
     const it = tree.itinerary.get(pair);
     if (cal === undefined || it === undefined) return refuse(404, `no itinerary fixture for ${pair}`);
-    const nights = daysBetweenIso(p.departureDate ?? '', p.returnDate ?? '');
+    // why: `need` has validated both dates with isoDateSchema; the brand is minted here, where they enter.
+    const departureDate = asIsoDate(p.departureDate ?? '');
+    const returnDate = asIsoDate(p.returnDate ?? '');
+    const nights = daysBetween(departureDate, returnDate);
     if (nights < 0) return refuse(400, 'returnDate before departureDate');
-    return { p, cal, it, nights };
+    const dates: CellDates = { departureDate, returnDate, nights };
+    return { p, cal, it, dates };
   }
 
   function header(
@@ -248,7 +277,7 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
   function itinerary(respond: Generated, url: URL): Response {
     const c = itineraryContext(url, []);
     if (c instanceof Response) return c;
-    const { p, cal, it, nights } = c;
+    const { p, cal, it, dates } = c;
     const base = header(p, respond, cal);
     if (it.chain) {
       const outbounds = respond.kind === 'empty' ? [] : it.options.map((_o, i) => `o${i}`);
@@ -276,7 +305,7 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
         failedExpansions: options.length,
         offers: [],
       });
-    const offers = options.map((o, i) => offerOf(o, i, p, nights, cal, respond));
+    const offers = options.map((o, i) => offerOf(o, i, p, dates, cal, respond));
     const failed = respond.kind === 'partial' ? Math.min(respond.failedExpansions, offers.length) : 0;
     return json({
       ...base,
@@ -290,7 +319,7 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
   function chainStep(respond: Generated, url: URL, step: 'return' | 'booking'): Response {
     const c = itineraryContext(url, ['outbound']);
     if (c instanceof Response) return c;
-    const { p, cal, it, nights } = c;
+    const { p, cal, it, dates } = c;
     if (!it.chain) return refuse(404, `${p.origin}-${p.destination} is not a chained pair`);
     const id = /^o(\d+)$/.exec(p.outbound ?? '');
     const index = id === null ? -1 : Number(id[1]);
@@ -298,10 +327,12 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
     if (option === undefined) return refuse(404, `no outbound ${p.outbound ?? ''}`);
     const base = { ...header(p, respond, cal), outbound: p.outbound };
     if (respond.kind === 'empty' || respond.kind === 'no-return-legs') return json({ ...base, offers: [] });
-    const offer = offerOf(option, index, p, nights, cal, respond);
+    const offer = offerOf(option, index, p, dates, cal, respond);
     if (step === 'return') return json({ ...base, offers: [offer] });
     const agencyPrice =
-      calendarPriceMinor(cal, p.departureDate ?? '', nights) + option.priceDeltaMinor - AGENCY_DISCOUNT_MINOR;
+      calendarPriceMinor(cal, dates.departureDate, dates.nights) +
+      option.priceDeltaMinor -
+      AGENCY_DISCOUNT_MINOR;
     return json({ ...base, offers: [{ ...offer, seller: 'Synthetic Agency', amountMinor: agencyPrice }] });
   }
 
