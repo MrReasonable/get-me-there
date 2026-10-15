@@ -32,6 +32,8 @@ const toAirport = (r: AirportDbRow): Airport => ({
 });
 const IATA = /^[A-Z]{3}$/;
 
+// why: a copy of core's private isValidTimeZone (packages/core/src/config/schema.ts); import it instead once core
+// exports it (arch-M7). Both ask Intl whether it knows the zone.
 function isKnownTimeZone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat('en', { timeZone: tz });
