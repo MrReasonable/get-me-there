@@ -1,5 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
@@ -7,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/client.js';
 import { applyMigrations, pendingMigrations } from '../src/migrate.js';
 import { MIGRATIONS_DIR } from '../src/paths.js';
-import { count, openTracked, T0, tmpDbPath } from './helpers/db.js';
+import { count, openTracked, T0, tmpDbPath, tmpDir } from './helpers/db.js';
 
 describe('openDatabase (spec §7 SQLite settings)', () => {
   it('sets busy_timeout and foreign_keys on an in-memory db', () => {
@@ -17,7 +16,7 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
     db.close();
   });
   it('uses WAL on a file db', () => {
-    const db = openDatabase(join(mkdtempSync(join(tmpdir(), 'gmt-')), 'x.test.db'));
+    const db = openDatabase(join(tmpDir(), 'x.test.db'));
     expect(db.raw.pragma('journal_mode', { simple: true })).toBe('wal');
     db.close();
   });
@@ -32,7 +31,7 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
     db.close();
   });
   it('immediateTransaction takes the write lock before the callback runs', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gmt-'));
+    const dir = tmpDir();
     const a = openDatabase(join(dir, 'lock.test.db'));
     const b = openDatabase(join(dir, 'lock.test.db'));
     b.raw.pragma('busy_timeout = 50');
@@ -54,7 +53,7 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
 
 describe('migrations (spec §7)', () => {
   it('with an empty journal nothing is pending and nothing is applied', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gmt-mig-'));
+    const dir = tmpDir();
     mkdirSync(join(dir, 'meta'));
     writeFileSync(
       join(dir, 'meta', '_journal.json'),
@@ -66,7 +65,7 @@ describe('migrations (spec §7)', () => {
     db.close();
   });
   it('applies a real migration once and reports nothing pending afterwards', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gmt-mig-'));
+    const dir = tmpDir();
     mkdirSync(join(dir, 'meta'));
     writeFileSync(
       join(dir, 'meta', '_journal.json'),
@@ -153,11 +152,14 @@ describe('SQLite settings on a file database (spec §7, plan Review Focus 5)', (
       worker.once('error', reject);
     });
     await new Promise((resolve) => worker.once('message', resolve)); // 'holding'
-    const started = Date.now();
     insertLedgerRow(db); // blocks inside SQLite until the worker commits, well under 5,000 ms
-    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
     await released;
     expect(count(db, 'provider_requests')).toBe(2);
+    // why: order, not wall-clock time (test-strategy M2): the held row committed first, so ours waited for the lock.
+    expect(db.raw.prepare('SELECT endpoint_path AS p FROM provider_requests ORDER BY id').all()).toEqual([
+      { p: '/held' },
+      { p: '/v3' },
+    ]);
   });
 
   it('contention longer than busy_timeout surfaces SqliteError SQLITE_BUSY, not a hang or a crash', () => {
