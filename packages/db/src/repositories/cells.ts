@@ -55,6 +55,7 @@ import { storeRollUps } from '../internal/rollUps.js';
 import {
   assertErrorReason,
   assertInt,
+  assertIsoDateTime,
   assertProviderAllowed,
   assertProviderKind,
   RowRejected,
@@ -63,6 +64,7 @@ import type {
   CalendarPriceInsert,
   CalendarPriceRow,
   RepoOptions,
+  ReuseCriteria,
   ReusedCopy,
   TileWrite,
   VerifiedCellWrite,
@@ -745,8 +747,14 @@ export class CellsRepo {
    * Copies keep the original fetched_at and provenance; reused_from_execution_id is always the execution that
    * fetched the price, even when the source is itself a reused copy.
    */
-  copyReused(executionId: string, providerId: ProviderId, copies: ReusedCopy[]): void {
+  copyReused(
+    executionId: string,
+    providerId: ProviderId,
+    copies: ReusedCopy[],
+    criteria: ReuseCriteria,
+  ): void {
     assertProviderAllowed(providerId, this.opts.allowSynthetic);
+    assertIsoDateTime('newerThan', criteria.newerThan);
     for (const copy of copies) {
       assertReusable(providerId, copy, this.opts.allowSynthetic);
       if (copy.price !== null) validateCalendarPrice(copy.price, this.opts.allowSynthetic, false);
@@ -763,7 +771,12 @@ export class CellsRepo {
             `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}, not not_run`,
           );
         // why: what is written is what the database holds (prov-r3-001), never the caller's objects.
-        const { stored, held } = this.assertSourceStored(executionId, providerId, { cell, outcome, price });
+        const { stored, held } = this.assertSourceStored(
+          executionId,
+          providerId,
+          { cell, outcome, price },
+          criteria,
+        );
         const reusedFrom = stored.reusedFromExecutionId ?? stored.executionId;
         storeOutcome(this.db, {
           ...stored,
@@ -790,13 +803,15 @@ export class CellsRepo {
   /**
    * prov-r2-001: the copy must be what the database holds. The source outcome is re-read by its keys and the price by
    * its id; both must equal the values supplied, and the source must be a non-child execution of the target's
-   * definition fetched in the target's cabin (spec §8.1, §9 Layer A). This is the one path that writes a price without a
+   * definition fetched in the target's cabin, at the criteria's point of sale and source kind and after its cutoff
+   * (spec §8.1, §9 Layer A). This is the one path that writes a price without a
    * provider call, so it trusts no caller; copyReused writes the re-read rows it returns.
    */
   private assertSourceStored(
     targetExecutionId: string,
     providerId: ProviderId,
     { cell, outcome, price }: ReusedCopy,
+    criteria: ReuseCriteria,
   ): { stored: CellOutcome; held: CalendarPriceRow | null } {
     const refuse = (why: string) =>
       new RowRejected('reuse-source', `${cellKeyString(cell)}: ${why} (spec §8.1)`);
@@ -823,6 +838,14 @@ export class CellsRepo {
     ).cabin;
     if (stored.cabin !== targetCabin)
       throw refuse(`the source was fetched in ${String(stored.cabin)}, the target searches ${targetCabin}`);
+    // why: spec §8.1 reuse matches point of sale and source kind and takes only sources newer than the cutoff; this
+    // path trusts no caller, so it re-applies the criteria reuseCandidates used (prov-M3).
+    if (stored.pointOfSale !== criteria.pointOfSale || stored.sourceKind !== criteria.sourceKind)
+      throw refuse(
+        `the source is ${String(stored.pointOfSale)}/${String(stored.sourceKind)}, not ${criteria.pointOfSale}/${criteria.sourceKind}`,
+      );
+    if (stored.fetchedAt === null || stored.fetchedAt <= criteria.newerThan)
+      throw refuse(`the source was fetched at ${String(stored.fetchedAt)}, not after ${criteria.newerThan}`);
     const same = (a: CellOutcome) =>
       [
         a.status,

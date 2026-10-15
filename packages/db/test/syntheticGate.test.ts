@@ -4,7 +4,7 @@ import { CellsRepo } from '../src/repositories/cells.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
 import { ItinerariesRepo } from '../src/repositories/itineraries.js';
 import type { ReusedCopy, TileWrite, VerifiedCellWrite } from '../src/types.js';
-import { count, freshDb, sqliteCode, T0 } from './helpers/db.js';
+import { at, count, freshDb, sqliteCode, T0 } from './helpers/db.js';
 import { cell, EWR, itinerary, newExecution, observationWrite, withNights } from './helpers/factories.js';
 
 const A = cell();
@@ -241,18 +241,29 @@ describe('paths carrying a source kind: the gate and fixture ⇔ synthetic, both
     const target = newExecution(w.db, w.clock, { definition: w.definition }).execution.id;
     w.open.seed(target, [withNights(A)], ['fixture', 'travelpayouts']);
     const copy: ReusedCopy = { cell: A, outcome: source, price: null };
-    expect(() => w.closed.copyReused(target, 'fixture', [copy])).toThrow(gate);
+    const criteria = {
+      pointOfSale: 'unknown',
+      sourceKind: 'synthetic',
+      newerThan: at('2026-10-14T00:00:00.000Z'),
+    } as const;
+    expect(() => w.closed.copyReused(target, 'fixture', [copy], criteria)).toThrow(gate);
     expect(() =>
-      w.open.copyReused(target, 'fixture', [
-        { ...copy, outcome: { ...source, sourceKind: 'authorised-cached' } },
-      ]),
+      w.open.copyReused(
+        target,
+        'fixture',
+        [{ ...copy, outcome: { ...source, sourceKind: 'authorised-cached' } }],
+        criteria,
+      ),
     ).toThrow(kind);
     expect(() =>
-      w.open.copyReused(target, 'travelpayouts', [
-        { ...copy, outcome: { ...source, providerId: 'travelpayouts' } },
-      ]),
+      w.open.copyReused(
+        target,
+        'travelpayouts',
+        [{ ...copy, outcome: { ...source, providerId: 'travelpayouts' } }],
+        criteria,
+      ),
     ).toThrow(kind);
-    w.open.copyReused(target, 'fixture', [copy]);
+    w.open.copyReused(target, 'fixture', [copy], criteria);
     expect(w.open.outcomes(target, { providerId: 'fixture' })[0]).toMatchObject({
       status: 'empty',
       sourceKind: 'synthetic',

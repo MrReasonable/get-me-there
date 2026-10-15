@@ -1,10 +1,17 @@
-import { asIsoDate, type CellKey, cellKeyString, fixedClock, type IsoDateTime } from '@gmt/core';
+import {
+  asIsoDate,
+  type CellKey,
+  cellKeyString,
+  fixedClock,
+  type IsoDateTime,
+  type ProviderId,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
 import { CellsRepo } from '../src/repositories/cells.js';
 import { DefinitionsRepo } from '../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
-import type { CalendarPriceRow, ReusedCopy, TileWrite } from '../src/types.js';
+import type { CalendarPriceRow, ReuseCriteria, ReusedCopy, TileWrite } from '../src/types.js';
 import { at, count, freshDb, T0 } from './helpers/db.js';
 import {
   calendarPrice,
@@ -49,6 +56,19 @@ const pricedTile = (cells: Array<[CellKey, number]>, fetchedAt: IsoDateTime): Ti
   ),
   outcomes: cells.map(([c, pence]) => out(c, 'priced', fetchedAt, pence)),
 });
+/** The reuse criteria the engine passes to both reuseCandidates and copyReused (prov-M3). */
+const CRITERIA = {
+  pointOfSale: 'unknown',
+  sourceKind: 'authorised-cached',
+  newerThan: at('2026-10-14T11:00:00.000Z'),
+} as const;
+const reuse = (
+  cells: CellsRepo,
+  executionId: string,
+  providerId: ProviderId,
+  copies: ReusedCopy[],
+  criteria: ReuseCriteria = CRITERIA,
+) => cells.copyReused(executionId, providerId, copies, criteria);
 const ask = (
   prices: CalendarPricesRepo,
   definitionId: string,
@@ -90,6 +110,25 @@ const find = (copies: ReusedCopy[], c: CellKey) => {
 };
 
 describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell")', () => {
+  it('copyReused re-checks the reuse criteria itself: point of sale, source kind and the age cutoff (prov-M3)', () => {
+    const { db, clock, cells, prices, definition } = world();
+    const c = newExecution(db, clock, { definition }).execution.id;
+    cells.seed(c, ALL.map(withNights), ['travelpayouts']);
+    const copies = ask(prices, definition.id, [P, E]);
+    const refused: ReuseCriteria[] = [
+      { ...CRITERIA, pointOfSale: 'GB' },
+      { ...CRITERIA, sourceKind: 'scraped-aggregate' },
+      { ...CRITERIA, newerThan: T0 }, // fetched at T0: not newer than the cutoff
+    ];
+    for (const criteria of refused)
+      expect(() => reuse(cells, c, 'travelpayouts', copies, criteria)).toThrow(
+        expect.objectContaining({ rule: 'reuse-source' }),
+      );
+    expect(cells.outcomes(c, { cells: [P, E] }).map((o) => o.status)).toEqual(['not_run', 'not_run']);
+    reuse(cells, c, 'travelpayouts', copies);
+    expect(cells.outcomes(c, { cells: [P, E] }).map((o) => o.status)).toEqual(['empty', 'priced']);
+  });
+
   it('candidates: newest priced|empty|no_data per cell for the same provider, cabin, point of sale and source kind; never error or not_run', () => {
     const { prices, definition, a } = world();
     const copies = ask(prices, definition.id, ALL);
@@ -134,7 +173,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     clock.advance(60_000);
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
-    cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, ALL));
+    reuse(cells, c, 'travelpayouts', ask(prices, definition.id, ALL));
     expect(cells.outcomes(c, { cells: [P] })[0]).toMatchObject({
       status: 'priced',
       fetchedAt: T0,
@@ -171,7 +210,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     clock.advance(60_000);
     const d = newExecution(db, clock, { definition }).execution.id;
     cells.seed(d, [withNights(P)], ['travelpayouts']);
-    cells.copyReused(d, 'travelpayouts', ask(prices, definition.id, [P]));
+    reuse(cells, d, 'travelpayouts', ask(prices, definition.id, [P]));
     expect(cells.outcomes(d, { cells: [P] })[0]?.reusedFromExecutionId).toBe(a);
   });
 
@@ -181,10 +220,10 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
     const errorOutcome = cells.outcomes(a, { cells: [X] })[0];
     if (errorOutcome === undefined) throw new Error('fixture');
-    expect(() =>
-      cells.copyReused(c, 'travelpayouts', [{ cell: X, outcome: errorOutcome, price: null }]),
-    ).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
-    expect(() => cells.copyReused(c, 'searchapi', ask(prices, definition.id, ALL))).toThrow(
+    expect(() => reuse(cells, c, 'travelpayouts', [{ cell: X, outcome: errorOutcome, price: null }])).toThrow(
+      expect.objectContaining({ rule: 'reuse-source' }),
+    );
+    expect(() => reuse(cells, c, 'searchapi', ask(prices, definition.id, ALL))).toThrow(
       expect.objectContaining({ rule: 'reuse-source' }),
     );
     expect(count(db, 'calendar_prices')).toBe(1);
@@ -201,7 +240,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
       outcome: { ...real.outcome, minPence: 1 },
       price: { ...real.price, pricePence: 1, priceNativeMinor: 1 },
     }; // internally consistent
-    expect(() => cells.copyReused(c, 'travelpayouts', [forged])).toThrow(
+    expect(() => reuse(cells, c, 'travelpayouts', [forged])).toThrow(
       expect.objectContaining({ rule: 'reuse-source' }),
     );
     const other = new DefinitionsRepo(db, clock).create(exampleDefinitionInput({ name: 'Other' }));
@@ -220,7 +259,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
       ),
       P,
     );
-    expect(() => cells.copyReused(c, 'travelpayouts', [foreign])).toThrow(
+    expect(() => reuse(cells, c, 'travelpayouts', [foreign])).toThrow(
       expect.objectContaining({ rule: 'reuse-source' }),
     );
     expect(cells.outcomes(c, { cells: [P] })[0]?.status).toBe('not_run');
@@ -267,13 +306,13 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     const real = find(ask(prices, definition.id, [usd]), usd);
     const realPrice = real.price;
     if (realPrice === null) throw new Error('fixture: priced');
-    expect(() => cells.copyReused(c, 'travelpayouts', [{ ...real, price: forge(realPrice) }])).toThrow(
+    expect(() => reuse(cells, c, 'travelpayouts', [{ ...real, price: forge(realPrice) }])).toThrow(
       expect.objectContaining({ rule: 'reuse-source' }),
     );
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual(
       { n: 0 },
     );
-    cells.copyReused(c, 'travelpayouts', [real]); // the unforged copy is accepted and stored with its conversion
+    reuse(cells, c, 'travelpayouts', [real]); // the unforged copy is accepted and stored with its conversion
     expect(
       prices.reuseCandidates(
         definition.id,
@@ -292,7 +331,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     const business = new DefinitionsRepo(db, clock).update(definition.id, { cabin: 'business' });
     const c = newExecution(db, clock, { definition: business }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
-    expect(() => cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, [P]))).toThrow(
+    expect(() => reuse(cells, c, 'travelpayouts', ask(prices, definition.id, [P]))).toThrow(
       expect.objectContaining({ rule: 'reuse-source' }),
     );
     expect(cells.outcomes(c, { cells: [P] })[0]?.status).toBe('not_run');
@@ -343,7 +382,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
     expect(() =>
-      cells.copyReused(c, 'travelpayouts', [mutate(find(ask(prices, definition.id, [P]), P))]),
+      reuse(cells, c, 'travelpayouts', [mutate(find(ask(prices, definition.id, [P]), P))]),
     ).toThrow(expect.objectContaining({ rule: 'reuse-source' }));
     expect(cells.outcomes(c, { cells: [P, E] }).map((o) => o.status)).toEqual(['not_run', 'not_run']);
     expect(count(db, 'calendar_prices')).toBe(1);
@@ -354,7 +393,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
     cells.setOutcome(c, N, 'discovery', 'travelpayouts', { status: 'error', reason: 'network' }); // N sorts after E and P
-    expect(() => cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, ALL))).toThrow(
+    expect(() => reuse(cells, c, 'travelpayouts', ask(prices, definition.id, ALL))).toThrow(
       expect.objectContaining({ rule: 'reuse-target' }),
     );
     expect(cells.outcomes(c, { cells: [E, P] }).map((o) => [o.status, o.reusedFromExecutionId])).toEqual([
@@ -369,7 +408,7 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     const { db, clock, cells, prices, definition } = world();
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
-    cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, [P]));
+    reuse(cells, c, 'travelpayouts', ask(prices, definition.id, [P]));
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual(
       { n: 1 },
     );
@@ -409,7 +448,7 @@ describe('calendar-basis reads (spec §6.9, §6.8) ignore reused copies (test-00
     clock.advance(3_600_000);
     const b = newExecution(db, clock, { definition }).execution.id;
     cells.seed(b, [withNights(P)], ['travelpayouts']);
-    cells.copyReused(b, 'travelpayouts', ask(prices, definition.id, [P]));
+    reuse(cells, b, 'travelpayouts', ask(prices, definition.id, [P]));
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(b)).toEqual(
       { n: 1 },
     ); // the reused row exists
@@ -523,7 +562,10 @@ describe('route history (ruling 8, po-001): one point per provider and execution
     clock.advance(3_600_000);
     const c = newExecution(db, clock, { definition }).execution.id; // reuses only
     cells.seed(c, [withNights(P)], ['travelpayouts']);
-    cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, [P], '2026-10-14T00:00:00.000Z'));
+    reuse(cells, c, 'travelpayouts', ask(prices, definition.id, [P], '2026-10-14T00:00:00.000Z'), {
+      ...CRITERIA,
+      newerThan: at('2026-10-14T00:00:00.000Z'),
+    });
     const child = newExecution(db, clock, { definition, cell: Q }).execution.id;
     cells.seed(child, [withNights(Q)], ['travelpayouts']);
     cells.writeTile(child, 'travelpayouts', pricedTile([[Q, 30_000]], clock.now()));

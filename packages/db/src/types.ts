@@ -130,6 +130,12 @@ export interface VerifiedCellWrite {
   }>;
 }
 /** A reuse source for one cell (spec §8.1 reuse). `price` is null for empty and no_data outcomes. */
+/** The spec §8.1 reuse criteria the engine passes to reuseCandidates, re-checked by copyReused (prov-M3); cabin comes from the snapshot. */
+export interface ReuseCriteria {
+  pointOfSale: PointOfSale;
+  sourceKind: SourceKind;
+  newerThan: IsoDateTime;
+}
 export interface ReusedCopy {
   cell: CellKey;
   outcome: CellOutcome;
