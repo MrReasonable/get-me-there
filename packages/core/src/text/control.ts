@@ -17,9 +17,13 @@ export function hasControlChars(s: string): boolean {
   return false;
 }
 
-/** The string with every control character removed (spec §8.3: provider strings are control-stripped). */
-export function stripControlChars(s: string): string {
+/**
+ * The string with every control character removed, or replaced one for one by `replacement`
+ * (spec §8.3: provider strings are control-stripped). Character set: Unicode Cc only; U+2028 and
+ * U+2029 are not controls and are left for the caller (WP11's email templates) to handle.
+ */
+export function stripControlChars(s: string, replacement = ''): string {
   let out = '';
-  for (const ch of s) if (!isControl(ch.charCodeAt(0))) out += ch;
+  for (const ch of s) out += isControl(ch.charCodeAt(0)) ? replacement : ch;
   return out;
 }
