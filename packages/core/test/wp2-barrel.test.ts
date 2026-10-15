@@ -36,10 +36,6 @@ const WP2 = [
   'buildDigest',
   'hasControlChars',
   'stripControlChars',
-  'MIN_REPEAT_DROP_PENCE',
-  'MIN_REPEAT_DROP_PERCENT',
-  'MAX_URL_LENGTH',
-  'MAX_POST_DATA_LENGTH',
 ];
 const PRIVATE = [
   'wallToInstant',
@@ -54,6 +50,11 @@ const PRIVATE = [
   'compareRows',
   'compareText',
   'CONSTRAINT_NAMES',
+  // module exports that no other package reads, so they stay out of the barrel
+  'MIN_REPEAT_DROP_PENCE',
+  'MIN_REPEAT_DROP_PERCENT',
+  'MAX_URL_LENGTH',
+  'MAX_POST_DATA_LENGTH',
 ];
 
 describe('@gmt/core barrel, WP2 exports', () => {
