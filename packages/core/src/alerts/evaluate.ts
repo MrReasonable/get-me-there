@@ -4,8 +4,11 @@ import type { IsoDateTime } from '../types/ids.js';
 import type { Cabin, ProviderId } from '../types/provenance.js';
 import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf } from './dedup.js';
 
-/** Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. */
-const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
+/**
+ * Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. The one
+ * owner of the default: the engine imports it from `@gmt/core` for its reuse cutoff.
+ */
+export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
 
 /** Per-run context for `evaluateAlertRules` (the plan's inline ctx type, named). */
 export interface AlertEvalContext {

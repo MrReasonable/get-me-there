@@ -9,7 +9,7 @@ export {
   MIN_REPEAT_DROP_PERCENT,
 } from './alerts/dedup.js';
 export { buildDigest } from './alerts/digest.js';
-export { evaluateAlertRules } from './alerts/evaluate.js';
+export { DEFAULT_DISCOVERY_REFRESH_HOURS, evaluateAlertRules } from './alerts/evaluate.js';
 // Inferred contract types that other packages name in signatures (the schemas stay under `apiContract`).
 export type {
   BudgetFit,

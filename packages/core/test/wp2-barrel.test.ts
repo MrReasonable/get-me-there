@@ -29,6 +29,7 @@ const WP2 = [
   'formatPence',
   'CONSTRAINT_LABELS',
   'evaluateAlertRules',
+  'DEFAULT_DISCOVERY_REFRESH_HOURS',
   'identityKey',
   'dedupKey',
   'isSuppressed',
@@ -55,6 +56,9 @@ const PRIVATE = [
 ];
 
 describe('@gmt/core barrel, WP2 exports', () => {
+  it('DEFAULT_DISCOVERY_REFRESH_HOURS is the spec §7 default of 168', () => {
+    expect(core.DEFAULT_DISCOVERY_REFRESH_HOURS).toBe(168);
+  });
   it.each(WP2)('exports %s', (name) => {
     expect(core).toHaveProperty(name);
   });
