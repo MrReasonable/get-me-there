@@ -47,7 +47,7 @@ export function checkWorkedExampleTree(
   const all = [...tp, ...sa];
 
   // signature, session, stand-in tripwire
-  if (tp.length < 20) fail(`travelpayouts: ${tp.length} recordings, expected at least 20`);
+  if (tp.length < 21) fail(`travelpayouts: ${tp.length} recordings, expected at least 21`);
   if (sa.length !== 6) fail(`searchapi: ${sa.length} recordings, expected 6`);
   for (const f of all)
     if (f.recordedBy !== opts.recordedBy) fail(`recordedBy ${f.recordedBy} on a ${f.providerId} file`);
@@ -83,6 +83,17 @@ export function checkWorkedExampleTree(
     for (const d of ['JFK', 'EWR'])
       if (!tp.some((f) => f.status === 200 && q(f, 'origin') === o && q(f, 'destination') === d))
         fail(`travelpayouts: no airport tile ${o}→${d}`);
+  // why: plan decision 31 — the reverse tile JFK→LON for the worked month (TP-21), for WP6's local-month check
+  if (
+    !tp.some(
+      (f) =>
+        f.status === 200 &&
+        q(f, 'origin') === 'JFK' &&
+        q(f, 'destination') === 'LON' &&
+        q(f, 'departure_at') === '2027-03',
+    )
+  )
+    fail('travelpayouts: no reverse tile JFK→LON 2027-03 (plan decision 31)');
   if (JSON.stringify(tp.filter((f) => q(f, 'departure_at') === '2028-02').map((f) => f.status)) !== '[200]')
     fail('travelpayouts: the empty-envelope probe (2028-02) is missing or not a 200');
   if (JSON.stringify(tp.filter((f) => f.status === 401).map((f) => q(f, 'departure_at'))) !== '["2028-03"]')

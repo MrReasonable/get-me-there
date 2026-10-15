@@ -98,19 +98,22 @@ function tpAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
   if (opts.echo === 'tp-bearer')
     return json({ success: true, data: [], currency: 'gbp', note: `Bearer ${SENTINEL_TP}` });
   const n = opts.tpRows?.(p) ?? 1;
+  // why: the reverse tile (TP-21, plan decision 31) departs westward-local: 22:30 on 31 March in New York is already
+  // 1 April in UTC, the month-boundary case WP6 checks
+  const reverse = p.get('origin') === 'JFK';
   const row = {
     origin: p.get('origin'),
     destination: p.get('destination'),
-    origin_airport: 'LHR',
-    destination_airport: p.get('destination'),
+    origin_airport: reverse ? 'JFK' : 'LHR',
+    destination_airport: reverse ? 'LHR' : p.get('destination'),
     price: 412,
     airline: 'ZZ',
     flight_number: '9999',
-    departure_at: '2027-03-02T08:25:00+00:00',
-    return_at: '2027-03-16T18:00:00-04:00',
+    departure_at: reverse ? '2027-03-31T22:30:00-04:00' : '2027-03-02T08:25:00+00:00',
+    return_at: reverse ? '2027-04-14T08:00:00+01:00' : '2027-03-16T18:00:00-04:00',
     transfers: 0,
     return_transfers: 0,
-    link: `/search/${STANDIN_MARKER}-0203-1603`,
+    link: `/search/${STANDIN_MARKER}-${reverse ? '3103-1404' : '0203-1603'}`,
   };
   return json({ success: true, currency: 'gbp', data: Array.from({ length: n }, () => row) }, 200, {
     'x-ratelimit-remaining': '599',

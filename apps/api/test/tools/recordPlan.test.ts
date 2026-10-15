@@ -149,10 +149,10 @@ describe('date steps use core helpers (ts-011)', () => {
 });
 
 describe('planCalls: the exact live call list of brief section 7', () => {
-  it('with the shared metro LON: 20 Travelpayouts calls, 6 SearchApi calls, ≤5 credits (4 expected)', () => {
+  it('with the shared metro LON: 21 Travelpayouts calls, 6 SearchApi calls, ≤5 credits (4 expected)', () => {
     const plan = planCalls(args(), 'LON');
     expect(plan.map((c) => c.id)).toEqual([
-      ...Array.from({ length: 20 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`),
+      ...Array.from({ length: 21 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`),
       ...Array.from({ length: 6 }, (_, i) => `SA-${String(i + 1).padStart(2, '0')}`),
     ]);
     expect(plan.map((c) => c.label)).toEqual([
@@ -176,6 +176,7 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       'travelpayouts prices_for_dates LGW→EWR 2027-03 (airport)',
       'travelpayouts prices_for_dates LON→JFK 2028-02 (empty-probe)',
       'travelpayouts prices_for_dates LON→JFK 2028-03 with an invalid token (401 body)',
+      'travelpayouts prices_for_dates JFK→LON 2027-03 (reverse)',
       'searchapi google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body)',
       'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-03-30 (180)',
       'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-04-03 (216) over the limit (400, or an empty 200 per the docs)',
@@ -188,15 +189,16 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       saCalls: 6,
       worstCaseCredits: 5,
       expectedCredits: 4,
-      freeCalls: 20,
-      worstCaseFreeCalls: 58,
+      freeCalls: 21,
+      worstCaseFreeCalls: 61,
     });
     const lines = formatPlan(plan);
     expect(lines[19]).toContain('Travelpayouts 1 (running 20)');
-    expect(lines[20]).toContain('SearchApi ≤0 (running ≤0)');
-    expect(lines[25]).toContain('SearchApi ≤1 (running ≤5)');
-    expect(lines[26]).toBe(
-      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58 with up to 3 pages per tile',
+    expect(lines[20]).toContain('Travelpayouts 1 (running 21)');
+    expect(lines[21]).toContain('SearchApi ≤0 (running ≤0)');
+    expect(lines[26]).toContain('SearchApi ≤1 (running ≤5)');
+    expect(lines[27]).toBe(
+      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 21 free calls, ≤61 with up to 3 pages per tile',
     );
   });
 
@@ -224,16 +226,19 @@ describe('planCalls: the exact live call list of brief section 7', () => {
     }
   });
 
-  it('without a shared metro: every origin airport for 7 months, no separate airport tiles, 30 free calls', () => {
+  it('without a shared metro: every origin airport for 7 months, no separate airport tiles, 31 free calls; the reverse tile ends at the first origin', () => {
     const plan = planCalls(args(), null);
-    expect(plan.filter((c) => c.spec.kind === 'tp-tile')).toHaveLength(2 * 2 * 7 + 1);
-    expect(planTotals(plan).freeCalls).toBe(30);
+    expect(plan.filter((c) => c.spec.kind === 'tp-tile')).toHaveLength(2 * 2 * 7 + 2);
+    expect(planTotals(plan).freeCalls).toBe(31);
+    expect(plan.find((c) => c.id === 'TP-31')?.label).toBe(
+      'travelpayouts prices_for_dates JFK→LHR 2027-03 (reverse)',
+    );
   });
 
   it('freeCallMisfit compares the worst case (3 pages per tile) with the configured cap (ruling 13, cost-wp4b-r2-002)', () => {
-    expect(freeCallMisfit(planCalls(args(), null), 88)).toBeNull();
-    expect(freeCallMisfit(planCalls(args(), null), 87)).toContain(
-      'the plan needs up to 88 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 87',
+    expect(freeCallMisfit(planCalls(args(), null), 91)).toBeNull();
+    expect(freeCallMisfit(planCalls(args(), null), 90)).toContain(
+      'the plan needs up to 91 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 90',
     );
   });
 });

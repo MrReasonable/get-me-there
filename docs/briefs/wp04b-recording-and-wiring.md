@@ -10,7 +10,7 @@ status: reviewed
 
 # WP4b — fixture recording on the example route and the wiring helper
 
-Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–29, spec revision 15, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at d86d24d. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
+Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–31, spec revision 15, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at d86d24d. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
 
 ## 1. Goal
 
@@ -38,8 +38,8 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 - `apps/api/src/tools/{types,recordRequests,recordPlan,recordParams,recordExecution,recordReport,record,workedExample}.ts`: `pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--out DIR] [--dry-run] [--confirm-rerun]` and `recordFixtures(ports, args, ctx)` as the plan's contract (plan decision 23; section 5.1).
 - **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. A live `--out` run creates `DIR/fixtures/recorded` before the hidden execution opens, and the recorder is built before it too, so a bad root never leaves a `running` execution behind (prov-wp04b-r3-003). `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
 - The recording run on the worked example through the real http-kit + recorder + guard, under a hidden soft-deleted definition's execution with `trigger: 'tool'`, against the operator's configured `DATABASE_PATH` (the production ledger, spec §7). It records:
-  - 20 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe and a 401 probe on a month no success call uses;
-  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1`, `travel_class` and `separate_tickets=1` (plan decisions 24 and 29: the vendor documents it for both engines); google_flights also sends `sort_by=price`; no `stops` (plan decision 24). The calendar rectangle is the production tiling shape for the worked band, 9 outbound days × a 20-day return span = 180 (spec rev 15 §5.2, plan decision 29). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004); and when any required call before the first billed one (TP-01…TP-18, TP-20, SA-01) did not answer as planned, SA-02…SA-06 are all skipped and no credit is spent (cost I-1, plan decision 30).
+  - 21 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe, a 401 probe on a month no success call uses, and the reverse-direction tile JFK → LON for the worked month (plan decision 31);
+  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1`, `travel_class` and `separate_tickets=1` (plan decisions 24 and 29: the vendor documents it for both engines); google_flights also sends `sort_by=price`; no `stops` (plan decision 24). The calendar rectangle is the production tiling shape for the worked band, 9 outbound days × a 20-day return span = 180 (spec rev 15 §5.2, plan decision 29). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004); and when any required call before the first billed one (TP-01…TP-18, TP-20, TP-21, SA-01) did not answer as planned, SA-02…SA-06 are all skipped and no credit is spent (cost I-1, plan decision 30).
 
   No 429 is attempted (plan decision 20): WP5 maps rate limits from a labelled synthetic fixture and `rateLimitFallbackWaitSeconds`, and SearchApi's Retry-After behaviour stays unverified against the vendor.
 - Spend control before any live call (exit 65, `EXIT.spendRefused`): the run refuses when the SearchApi credits already ledgered to `trigger: 'tool'` executions in the provider's budget window, plus this run's worst case, exceed `--budget`, unless `--confirm-rerun` is passed (plan decision 20); and it refuses, whatever the flags, when the SearchApi window or the Travelpayouts month has less room than the run's worst case (cost-wp4b-r2-001). Travelpayouts paging stops at 3 pages per tile, so the worst case is finite (cost-wp4b-r2-002). The dry run prints every figure and verdict.
@@ -360,19 +360,20 @@ The metro comes from the airports table, which the tool seeds after migration wh
 | TP-15…TP-18 | LHR→JFK, LHR→EWR, LGW→JFK, LGW→EWR 2027-03 (airport) | 200 | 0 (0) | 4 (18) |
 | TP-19 | LON→JFK 2028-02 (empty-envelope probe, best-effort, not required) | 200 | 0 (0) | 1 (19) |
 | TP-20 | LON→JFK 2028-03 with an invalid token (401 body; a month no success call uses) | 401 | 0 (0) | 1 (20) |
-| SA-01 | google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body; a cell outside the SA-02 rectangle) | 401 | 0 (0) | 0 (20) |
-| SA-02 | calendar LHR→JFK out 2027-03-01..03-09 × ret 2027-03-11..03-30 (9 × 20 = 180, the production tiling shape of spec rev 15 §5.2; plan decision 29) | 200 | 1 (1) | 0 (20) |
-| SA-03 | calendar out 2027-03-01..03-09 × ret 2027-03-11..04-03 (9 × 24 = 216, over the limit) | 400, or an empty 200 | 1 (2) | 0 (20) |
-| SA-04 | google_flights step 1 LHR→JFK, the cheapest priced SA-02 cell inside the rectangle with 10–21 nights | 200 | 1 (3) | 0 (20) |
-| SA-05 | step 2, `departure_token` of the cheapest priced step-1 option | 200 | 1 (4) | 0 (20) |
-| SA-06 | step 3, `booking_token` of the cheapest priced step-2 option | 200 | 1 (5) | 0 (20) |
+| TP-21 | JFK→LON 2027-03 (reverse direction, plan decision 31) | 200 | 0 (0) | 1 (21) |
+| SA-01 | google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body; a cell outside the SA-02 rectangle) | 401 | 0 (0) | 0 (21) |
+| SA-02 | calendar LHR→JFK out 2027-03-01..03-09 × ret 2027-03-11..03-30 (9 × 20 = 180, the production tiling shape of spec rev 15 §5.2; plan decision 29) | 200 | 1 (1) | 0 (21) |
+| SA-03 | calendar out 2027-03-01..03-09 × ret 2027-03-11..04-03 (9 × 24 = 216, over the limit) | 400, or an empty 200 | 1 (2) | 0 (21) |
+| SA-04 | google_flights step 1 LHR→JFK, the cheapest priced SA-02 cell inside the rectangle with 10–21 nights | 200 | 1 (3) | 0 (21) |
+| SA-05 | step 2, `departure_token` of the cheapest priced step-1 option | 200 | 1 (4) | 0 (21) |
+| SA-06 | step 3, `booking_token` of the cheapest priced step-2 option | 200 | 1 (5) | 0 (21) |
 
-**Totals:** 6 SearchApi calls, at most **5** billed credits (4 expected: SA-02, SA-04, SA-05, SA-06; SA-03 is billed only if the vendor answers it with an empty 200). Plan decision 24's extra parameters and plan decision 29 (`separate_tickets` on the calendar, the 9 × 20 rectangle) change no call and no credit. 20 Travelpayouts free calls, at most 58 with up to 3 pages per tile (19 tiles × 3 + the 401 probe); a tile still at 1000 rows on its third page is recorded with `detail: page cap reached`. The execution's snapshot budget caps SearchApi at `min(--budget, 5)` and Travelpayouts at `EXECUTION_MAX_FREE_CALLS` (default 2000); a plan whose worst case exceeds that cap is refused before any call (exit 78), and a provider window with less room than the worst case refuses a live run (exit 65).
+**Totals:** 6 SearchApi calls, at most **5** billed credits (4 expected: SA-02, SA-04, SA-05, SA-06; SA-03 is billed only if the vendor answers it with an empty 200). Plan decision 24's extra parameters and plan decision 29 (`separate_tickets` on the calendar, the 9 × 20 rectangle) change no call and no credit. 21 Travelpayouts free calls, at most 61 with up to 3 pages per tile (20 tiles × 3 + the 401 probe; plan decision 31's TP-21 adds one call and no credit); a tile still at 1000 rows on its third page is recorded with `detail: page cap reached`. The execution's snapshot budget caps SearchApi at `min(--budget, 5)` and Travelpayouts at `EXECUTION_MAX_FREE_CALLS` (default 2000); a plan whose worst case exceeds that cap is refused before any call (exit 78), and a provider window with less room than the worst case refuses a live run (exit 65).
 
 **Why these calls:**
 
-- **TP-01…14** are a full worked-example scan, spec §5.2's "2 origins sharing LON × 2 destinations × 7 months = 14", so WP13 can replay a whole discovery. **TP-15…18** give WP6 airport-origin tiles for the no-shared-metro path. **TP-19** looks for the empty success envelope WP6's first failing test needs; it is best-effort and outside `requiredOk`. **TP-20** records the 401 body on a request key no success call shares.
-- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from, in the exact shape WP5's tiler sends for the worked band (9 × 20 = 180; plan decision 29); **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004). For the same reason, a required call before SA-02 that did not answer as planned (a stale Travelpayouts token, a Travelpayouts outage, a timed-out SA-01) skips SA-02 to SA-06 with `skipped: required call(s) <ids> not as planned; the run must be repeated` (cost I-1, plan decision 30).
+- **TP-01…14** are a full worked-example scan, spec §5.2's "2 origins sharing LON × 2 destinations × 7 months = 14", so WP13 can replay a whole discovery. **TP-15…18** give WP6 airport-origin tiles for the no-shared-metro path. **TP-19** looks for the empty success envelope WP6's first failing test needs; it is best-effort and outside `requiredOk`. **TP-20** records the 401 body on a request key no success call shares. **TP-21** (plan decision 31, required) is the reverse-direction tile JFK → LON for the worked month: its rows depart from a westward origin, so WP6's replay test can check that every row's local departure month matches the tile month (UTC bucketing at month boundaries).
+- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from, in the exact shape WP5's tiler sends for the worked band (9 × 20 = 180; plan decision 29); **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004). For the same reason, a required call before SA-02 (TP-01…TP-18, TP-20, TP-21, SA-01) that did not answer as planned (a stale Travelpayouts token, a Travelpayouts outage, a timed-out SA-01) skips SA-02 to SA-06 with `skipped: required call(s) <ids> not as planned; the run must be repeated` (cost I-1, plan decision 30).
 - **No 429 attempt** (plan decision 20). The trial's vendor limit is 20 % of the plan per hour and the run makes 6 SearchApi calls, so a 429 cannot be induced honestly; WP5 maps 429 with a synthetic labelled fixture and `rateLimitFallbackWaitSeconds`, and records that Retry-After behaviour is unverified against the vendor.
 
 **Spend checks before the first call (exit 65).** Every invocation creates its own hidden execution. Before a live call the tool sums the SearchApi credits already ledgered to `trigger: 'tool'` executions inside the provider's budget window (the lifetime window on the trial plan, the billing month on 40usd; the status list is exhaustive at compile time) and refuses when that sum plus this run's worst case exceeds `--budget`, unless `--confirm-rerun` is passed. Separately, it refuses whenever the SearchApi window or the Travelpayouts month has less room than the run's worst case: a run that cannot finish never starts (cost-wp4b-r2-001), and `--confirm-rerun` does not lift that. The operator rule in Task 12b: after any failed live run, stop and ask before re-running.
@@ -733,19 +734,22 @@ function tpAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
   if (opts.echo === 'tp-bearer')
     return json({ success: true, data: [], currency: 'gbp', note: `Bearer ${SENTINEL_TP}` });
   const n = opts.tpRows?.(p) ?? 1;
+  // why: the reverse tile (TP-21, plan decision 31) departs westward-local: 22:30 on 31 March in New York is already
+  // 1 April in UTC, the month-boundary case WP6 checks
+  const reverse = p.get('origin') === 'JFK';
   const row = {
     origin: p.get('origin'),
     destination: p.get('destination'),
-    origin_airport: 'LHR',
-    destination_airport: p.get('destination'),
+    origin_airport: reverse ? 'JFK' : 'LHR',
+    destination_airport: reverse ? 'LHR' : p.get('destination'),
     price: 412,
     airline: 'ZZ',
     flight_number: '9999',
-    departure_at: '2027-03-02T08:25:00+00:00',
-    return_at: '2027-03-16T18:00:00-04:00',
+    departure_at: reverse ? '2027-03-31T22:30:00-04:00' : '2027-03-02T08:25:00+00:00',
+    return_at: reverse ? '2027-04-14T08:00:00+01:00' : '2027-03-16T18:00:00-04:00',
     transfers: 0,
     return_transfers: 0,
-    link: `/search/${STANDIN_MARKER}-0203-1603`,
+    link: `/search/${STANDIN_MARKER}-${reverse ? '3103-1404' : '0203-1603'}`,
   };
   return json({ success: true, currency: 'gbp', data: Array.from({ length: n }, () => row) }, 200, {
     'x-ratelimit-remaining': '599',
@@ -2348,10 +2352,10 @@ describe('date steps use core helpers (ts-011)', () => {
 });
 
 describe('planCalls: the exact live call list of brief section 7', () => {
-  it('with the shared metro LON: 20 Travelpayouts calls, 6 SearchApi calls, ≤5 credits (4 expected)', () => {
+  it('with the shared metro LON: 21 Travelpayouts calls, 6 SearchApi calls, ≤5 credits (4 expected)', () => {
     const plan = planCalls(args(), 'LON');
     expect(plan.map((c) => c.id)).toEqual([
-      ...Array.from({ length: 20 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`),
+      ...Array.from({ length: 21 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`),
       ...Array.from({ length: 6 }, (_, i) => `SA-${String(i + 1).padStart(2, '0')}`),
     ]);
     expect(plan.map((c) => c.label)).toEqual([
@@ -2375,6 +2379,7 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       'travelpayouts prices_for_dates LGW→EWR 2027-03 (airport)',
       'travelpayouts prices_for_dates LON→JFK 2028-02 (empty-probe)',
       'travelpayouts prices_for_dates LON→JFK 2028-03 with an invalid token (401 body)',
+      'travelpayouts prices_for_dates JFK→LON 2027-03 (reverse)',
       'searchapi google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body)',
       'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-03-30 (180)',
       'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-04-03 (216) over the limit (400, or an empty 200 per the docs)',
@@ -2387,15 +2392,16 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       saCalls: 6,
       worstCaseCredits: 5,
       expectedCredits: 4,
-      freeCalls: 20,
-      worstCaseFreeCalls: 58,
+      freeCalls: 21,
+      worstCaseFreeCalls: 61,
     });
     const lines = formatPlan(plan);
     expect(lines[19]).toContain('Travelpayouts 1 (running 20)');
-    expect(lines[20]).toContain('SearchApi ≤0 (running ≤0)');
-    expect(lines[25]).toContain('SearchApi ≤1 (running ≤5)');
-    expect(lines[26]).toBe(
-      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58 with up to 3 pages per tile',
+    expect(lines[20]).toContain('Travelpayouts 1 (running 21)');
+    expect(lines[21]).toContain('SearchApi ≤0 (running ≤0)');
+    expect(lines[26]).toContain('SearchApi ≤1 (running ≤5)');
+    expect(lines[27]).toBe(
+      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 21 free calls, ≤61 with up to 3 pages per tile',
     );
   });
 
@@ -2423,16 +2429,19 @@ describe('planCalls: the exact live call list of brief section 7', () => {
     }
   });
 
-  it('without a shared metro: every origin airport for 7 months, no separate airport tiles, 30 free calls', () => {
+  it('without a shared metro: every origin airport for 7 months, no separate airport tiles, 31 free calls; the reverse tile ends at the first origin', () => {
     const plan = planCalls(args(), null);
-    expect(plan.filter((c) => c.spec.kind === 'tp-tile')).toHaveLength(2 * 2 * 7 + 1);
-    expect(planTotals(plan).freeCalls).toBe(30);
+    expect(plan.filter((c) => c.spec.kind === 'tp-tile')).toHaveLength(2 * 2 * 7 + 2);
+    expect(planTotals(plan).freeCalls).toBe(31);
+    expect(plan.find((c) => c.id === 'TP-31')?.label).toBe(
+      'travelpayouts prices_for_dates JFK→LHR 2027-03 (reverse)',
+    );
   });
 
   it('freeCallMisfit compares the worst case (3 pages per tile) with the configured cap (ruling 13, cost-wp4b-r2-002)', () => {
-    expect(freeCallMisfit(planCalls(args(), null), 88)).toBeNull();
-    expect(freeCallMisfit(planCalls(args(), null), 87)).toContain(
-      'the plan needs up to 88 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 87',
+    expect(freeCallMisfit(planCalls(args(), null), 91)).toBeNull();
+    expect(freeCallMisfit(planCalls(args(), null), 90)).toContain(
+      'the plan needs up to 91 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 90',
     );
   });
 });
@@ -2516,13 +2525,21 @@ export interface RecordCli {
 }
 export type ParseRecordResult = { ok: true; value: RecordCli } | { ok: false; message: string };
 
+/**
+ * Why a Travelpayouts tile is in the plan. `reverse` (TP-21, plan decision 31): the first destination back to the
+ * origins' metro for the same month, so WP6 can check every row's local departure month against the tile month for a
+ * westward origin (UTC bucketing at month boundaries).
+ */
+export type TilePurpose = 'metro' | 'airport' | 'empty-probe' | 'reverse';
+
 export type CallSpec =
   | {
       kind: 'tp-tile';
+      /** An airport or a metro code; the reverse tile's destination is the metro (plan decision 31). */
       origin: string;
-      destination: Iata;
+      destination: string;
       month: IsoMonth;
-      purpose: 'metro' | 'airport' | 'empty-probe';
+      purpose: TilePurpose;
     }
   | { kind: 'tp-auth'; origin: string; destination: Iata; month: IsoMonth }
   | { kind: 'sa-calendar' | 'sa-over-limit'; origin: Iata; destination: Iata; rect: Rect }
@@ -2682,12 +2699,7 @@ export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[] {
       required: true,
     });
   };
-  const tile = (
-    origin: string,
-    destination: Iata,
-    month: IsoMonth,
-    purpose: 'metro' | 'airport' | 'empty-probe',
-  ): void =>
+  const tile = (origin: string, destination: string, month: IsoMonth, purpose: TilePurpose): void =>
     tpCall(
       { kind: 'tp-tile', origin, destination, month, purpose },
       `travelpayouts prices_for_dates ${origin}→${destination} ${month} (${purpose})`,
@@ -2714,6 +2726,8 @@ export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[] {
     [401],
     true,
   );
+  // why: plan decision 31 — a required, free reverse-direction tile for the same month (TP-21)
+  tile(d0, tpOrigin, a.month, 'reverse');
 
   const rect = rectangle(a.month, CALENDAR_OUT_DAYS, CALENDAR_RET_DAYS, RECORD_MIN_NIGHTS);
   const over = rectangle(a.month, OVER_LIMIT_OUT_DAYS, OVER_LIMIT_RET_DAYS, RECORD_MIN_NIGHTS);
@@ -3047,6 +3061,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(statuses(summary.calls)).toEqual([
       ...Array.from({ length: 19 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}:200`),
       'TP-20:401',
+      'TP-21:200',
       'SA-01:401',
       'SA-02:200',
       'SA-03:400',
@@ -3056,7 +3071,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     ]);
     for (const c of summary.calls) expect(c.files, c.id).toHaveLength(1);
     expect(summary.creditsUsed).toBe(4); // SA-02, 04, 05, 06: 200s count, 401 and 400 do not (spec §2 fact 4)
-    expect(summary.freeCalls).toBe(20);
+    expect(summary.freeCalls).toBe(21);
     expect(summary.chain).toEqual({
       currency: 'GBP',
       step1PricePence: 60300,
@@ -3085,7 +3100,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     // the recorded tree: WP4's verifier finds nothing, one session, the test signature, no credential anywhere
     expect(verifyRecordedTree(root, run.ports.secrets)).toEqual([]);
     const files = recordings(root);
-    expect(files).toHaveLength(26);
+    expect(files).toHaveLength(27);
     expect(new Set(files.map((f) => f.session)).size).toBe(1);
     expect(summary.session).toBe(files[0]?.session);
     for (const f of files) {
@@ -3192,7 +3207,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       'TP-04:200',
     ]);
     expect(run.summary.calls[5]?.detail).toBe('page cap reached (3 pages of 1000 rows)');
-    expect(run.summary.freeCalls).toBe(23);
+    expect(run.summary.freeCalls).toBe(24);
   });
 
   it('the Travelpayouts month cap stops a run mid-way with the guard, before the vendor (r2-ts-004)', async () => {
@@ -3229,7 +3244,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     const run = await runRecording({
       env: { TRAVELPAYOUTS_TOKEN: 'test-stale-travelpayouts-token-0123456789' },
     });
-    const tiles = Array.from({ length: 18 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`);
+    const tiles = [...Array.from({ length: 18 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`), 'TP-21'];
     const detail = `skipped: required call(s) ${tiles.join(', ')} not as planned; the run must be repeated`;
     const sa = run.summary.calls.filter((c) => c.providerId === 'searchapi');
     expect(sa.map((c) => [c.id, c.status, c.detail])).toEqual([
@@ -3387,9 +3402,9 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
   });
 
   it.each([
-    ['calendar-parameters', 21],
-    ['calendar-base64', 21],
-    ['sa-401-bearer', 21],
+    ['calendar-parameters', 22],
+    ['calendar-base64', 22],
+    ['sa-401-bearer', 22],
     ['tp-body', 0],
     ['tp-bearer', 0],
   ] as const)(
@@ -3424,7 +3439,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
   it('refuses a plan whose worst-case free calls exceed EXECUTION_MAX_FREE_CALLS before any request (ruling 13)', async () => {
     const ports = seededPorts({ EXECUTION_MAX_FREE_CALLS: '57' });
     await expect(runRecording({ ports })).rejects.toThrow(
-      'the plan needs up to 58 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
+      'the plan needs up to 61 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
     );
     expect(ports.db.raw.prepare('SELECT COUNT(*) AS n FROM search_executions').get()).toEqual({ n: 0 });
   });
@@ -5180,7 +5195,7 @@ describe('runTool success paths', () => {
     expect(text).toContain('tool lock acquired');
     expect(text).toContain('metro from the airports table: LON');
     expect(text).toContain(
-      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58',
+      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 21 free calls, ≤61',
     );
     expect(text).toContain(`recording into: ${h.root}`);
     expect(text).toContain(
@@ -5202,7 +5217,7 @@ describe('runTool success paths', () => {
     const h = harness(undefined, { EXECUTION_MAX_FREE_CALLS: '57' });
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.badConfig);
     expect(h.errors()).toContain(
-      'the plan needs up to 58 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
+      'the plan needs up to 61 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
     );
   });
 
@@ -5217,10 +5232,10 @@ describe('runTool success paths', () => {
     stubVendors();
     expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain('required calls: all as expected');
-    expect(h.text()).toContain('ledger: SearchApi 4 credit(s) of budget 5; Travelpayouts 20 free call(s)');
+    expect(h.text()).toContain('ledger: SearchApi 4 credit(s) of budget 5; Travelpayouts 21 free call(s)');
     expect(filesUnder(h.root).filter((f) => f.endsWith('.json') && !f.endsWith('.raw.json'))).toHaveLength(
-      28,
-    ); // 26 recordings + 2 allowlists
+      29,
+    ); // 27 recordings + 2 allowlists
     for (const f of loadRecorded(h.root, 'searchapi', '/api/v1/search'))
       expect(f.recordedBy).toBe(TEST_RECORDED_BY);
     const again = harness(h.dbPath);
@@ -5249,7 +5264,7 @@ describe('runTool success paths', () => {
     expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.failed);
     expect(h.errors()).toContain('record:fixtures failed');
     expect(h.text()).toMatch(/session: \S+/);
-    expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 20 free call(s)'); // the refused 200 was billed
+    expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 21 free call(s)'); // the refused 200 was billed
     expect(`${h.text()}${h.errors()}`).not.toContain(SENTINEL_SA);
   });
 });
@@ -5446,7 +5461,7 @@ describe('runRecord through runTool: failed and partial runs (r2-ts-004)', () =>
       'over-limit calendar (SA-03): no vendor answer recorded: SA-03 skipped (skipped: calendar SA-02 gave no usable cell; the run must be repeated)',
     );
     expect(text).not.toContain('raise a finding for WP5');
-    expect(text).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 20 free call(s)');
+    expect(text).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 21 free call(s)');
   });
 
   it('a 5xx retried into a 200 prints the deletable non-final attempt file (prov-wp04b-r2-005, prov-wp04b-r3-005)', async () => {
@@ -6801,6 +6816,23 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     );
   });
 
+  it('rejects a tree without the reverse tile JFK→LON (plan decision 31)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'origin') === 'JFK' && f.status === 200,
+      (j) => {
+        const request = asObject(j.request);
+        const url = new URL(String(request.url));
+        url.searchParams.set('departure_at', '2027-04');
+        j.request = { ...request, url: url.href };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'travelpayouts: no reverse tile JFK→LON 2027-03 (plan decision 31)',
+    );
+  });
+
   it('rejects a second allowlist file for a provider (r3-ts-003)', async () => {
     const { root } = await runRecording();
     copyFileSync(
@@ -6893,7 +6925,7 @@ export function checkWorkedExampleTree(
   const all = [...tp, ...sa];
 
   // signature, session, stand-in tripwire
-  if (tp.length < 20) fail(`travelpayouts: ${tp.length} recordings, expected at least 20`);
+  if (tp.length < 21) fail(`travelpayouts: ${tp.length} recordings, expected at least 21`);
   if (sa.length !== 6) fail(`searchapi: ${sa.length} recordings, expected 6`);
   for (const f of all)
     if (f.recordedBy !== opts.recordedBy) fail(`recordedBy ${f.recordedBy} on a ${f.providerId} file`);
@@ -6929,6 +6961,17 @@ export function checkWorkedExampleTree(
     for (const d of ['JFK', 'EWR'])
       if (!tp.some((f) => f.status === 200 && q(f, 'origin') === o && q(f, 'destination') === d))
         fail(`travelpayouts: no airport tile ${o}→${d}`);
+  // why: plan decision 31 — the reverse tile JFK→LON for the worked month (TP-21), for WP6's local-month check
+  if (
+    !tp.some(
+      (f) =>
+        f.status === 200 &&
+        q(f, 'origin') === 'JFK' &&
+        q(f, 'destination') === 'LON' &&
+        q(f, 'departure_at') === '2027-03',
+    )
+  )
+    fail('travelpayouts: no reverse tile JFK→LON 2027-03 (plan decision 31)');
   if (JSON.stringify(tp.filter((f) => q(f, 'departure_at') === '2028-02').map((f) => f.status)) !== '[200]')
     fail('travelpayouts: the empty-envelope probe (2028-02) is missing or not a 200');
   if (JSON.stringify(tp.filter((f) => f.status === 401).map((f) => q(f, 'departure_at'))) !== '["2028-03"]')
@@ -7035,7 +7078,7 @@ export function checkWorkedExampleTree(
 - [ ] **Step 4: Run to verify**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/recorded` and `pnpm --filter @gmt/api test`
-Expected: `workedExampleTree.test.ts` 14 passed (the separate_tickets negative added for plan decision 29); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 20` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 156 passed (157), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
+Expected: `workedExampleTree.test.ts` 15 passed (the negatives added for plan decisions 29 and 31); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 21` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 156 passed (157), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
 
 - [ ] **Step 5: Commit the check, not the gate**
 
@@ -7064,7 +7107,7 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
    pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run
    ```
 
-   Expected, exit 0: `airports seeded: …` on a first run; `tool lock acquired`; the 26 call lines of section 7; `total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58 with up to 3 pages per tile`; `metro from the airports table: LON`; `recording into: <repository>/packages/providers/fixtures/recorded`; `Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): …`; `SearchApi credits already ledgered to tool runs in this budget window: 0; this run ≤5; --budget 5`; `SearchApi window: <used> of <cap> used (compare with the dashboard); room <room>, this run ≤5`; `Travelpayouts month: …`; no `a live run would be refused` line; `tool lock released`. On the trial plan `<cap> − <used>` must equal the dashboard reading; if not, stop and resync `SEARCHAPI_TRIAL_USED` with Ian.
+   Expected, exit 0: `airports seeded: …` on a first run; `tool lock acquired`; the 27 call lines of section 7; `total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 21 free calls, ≤61 with up to 3 pages per tile`; `metro from the airports table: LON`; `recording into: <repository>/packages/providers/fixtures/recorded`; `Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): …`; `SearchApi credits already ledgered to tool runs in this budget window: 0; this run ≤5; --budget 5`; `SearchApi window: <used> of <cap> used (compare with the dashboard); room <room>, this run ≤5`; `Travelpayouts month: …`; no `a live run would be refused` line; `tool lock released`. On the trial plan `<cap> − <used>` must equal the dashboard reading; if not, stop and resync `SEARCHAPI_TRIAL_USED` with Ian.
 
 - [ ] **Step 3: Live run.** The same command without `--dry-run`:
 
@@ -7073,11 +7116,11 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
    ```
 
    It takes a few minutes (calendar calls take 9–29 s; the trial limiter allows 2 per minute). Expected, exit 0:
-   - TP-01…TP-19 at 200 (TP-19 is best-effort), TP-20 at 401;
+   - TP-01…TP-19 at 200 (TP-19 is best-effort), TP-20 at 401, TP-21 at 200;
    - SA-01 at 401; SA-02, SA-04, SA-05, SA-06 at 200; SA-03 at 400 or an empty 200;
    - `required calls: all as expected`, `chain step 1 → 2 → 3: complete`;
    - the chain-prices, over-limit, empty-envelope, `429: not attempted` and `session:` lines;
-   - `ledger: SearchApi <4 or 5> credit(s) of budget 5; Travelpayouts <≥ 20> free call(s)`.
+   - `ledger: SearchApi <4 or 5> credit(s) of budget 5; Travelpayouts <≥ 21> free call(s)`.
 
    If the run exits non-zero, do not re-run: copy the summary, including its `session:` line (printed on the failure path too), into the notes and stop for Ian. A re-run needs `--confirm-rerun` (exit 65 otherwise) and a cleaned tree (Step 1).
 
@@ -7094,7 +7137,7 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
    - [ ] No personal data: no operator name, email or account id, no location other than the worked example's airports and the carriers' own data. No opaque id other than the vendor's search ids; any query parameter on a `www.google.com` booking URL is noted in the PR (the manifest refuses opaque values there).
    - [ ] `recordedBy` is `@gmt/api record:fixtures` on every file.
    - [ ] Booking URLs in step-3 bodies are `https://www.google.com/…` (spec §5.2 link allowlist).
-   - [ ] File count: 20 Travelpayouts (+ one per extra page) and 6 SearchApi recordings, plus `travelpayouts/params-<date>.json` and `searchapi/params-<date>.json`.
+   - [ ] File count: 21 Travelpayouts (+ one per extra page) and 6 SearchApi recordings, plus `travelpayouts/params-<date>.json` and `searchapi/params-<date>.json`.
 
    If any item fails, delete every file of the session and its allowlists, fix the cause in a follow-up (a recorder issue goes to WP4's owner), and re-run only with Ian's agreement (Step 1).
 
@@ -7146,7 +7189,7 @@ Rows marked **operator** run on Ian's machine with the real `.env`; every other 
 | `git ls-files packages/providers/fixtures \| grep -c 'raw\.json'` | `0` |
 | `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 64, `--budget is required` (the code passes through `pnpm -C apps/api run`, plan decision 30; `tool.spawn.test.ts` asserts it through the root script) |
 | `grep -rnE 'LHR\|LGW\|JFK\|EWR\|LON\|NYC' apps/api/src --exclude=workedExample.ts` | no output (airports only in `workedExample.ts`, tests, docs and fixtures) |
-| **operator:** `pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run` | exit 0, the 26 call lines and the total line of section 7, no `a live run would be refused` line |
+| **operator:** `pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run` | exit 0, the 27 call lines and the total line of section 7, no `a live run would be refused` line |
 | **operator:** `node --env-file=.env scripts/secret-scan.mjs` | `secret scan: clean` with the real values loaded |
 | **operator:** SearchApi dashboard | the drop over the run ≤ the ledger's SearchApi figure, recorded in the PR |
 

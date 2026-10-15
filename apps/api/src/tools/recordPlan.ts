@@ -67,13 +67,21 @@ export interface RecordCli {
 }
 export type ParseRecordResult = { ok: true; value: RecordCli } | { ok: false; message: string };
 
+/**
+ * Why a Travelpayouts tile is in the plan. `reverse` (TP-21, plan decision 31): the first destination back to the
+ * origins' metro for the same month, so WP6 can check every row's local departure month against the tile month for a
+ * westward origin (UTC bucketing at month boundaries).
+ */
+export type TilePurpose = 'metro' | 'airport' | 'empty-probe' | 'reverse';
+
 export type CallSpec =
   | {
       kind: 'tp-tile';
+      /** An airport or a metro code; the reverse tile's destination is the metro (plan decision 31). */
       origin: string;
-      destination: Iata;
+      destination: string;
       month: IsoMonth;
-      purpose: 'metro' | 'airport' | 'empty-probe';
+      purpose: TilePurpose;
     }
   | { kind: 'tp-auth'; origin: string; destination: Iata; month: IsoMonth }
   | { kind: 'sa-calendar' | 'sa-over-limit'; origin: Iata; destination: Iata; rect: Rect }
@@ -233,12 +241,7 @@ export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[] {
       required: true,
     });
   };
-  const tile = (
-    origin: string,
-    destination: Iata,
-    month: IsoMonth,
-    purpose: 'metro' | 'airport' | 'empty-probe',
-  ): void =>
+  const tile = (origin: string, destination: string, month: IsoMonth, purpose: TilePurpose): void =>
     tpCall(
       { kind: 'tp-tile', origin, destination, month, purpose },
       `travelpayouts prices_for_dates ${origin}→${destination} ${month} (${purpose})`,
@@ -265,6 +268,8 @@ export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[] {
     [401],
     true,
   );
+  // why: plan decision 31 — a required, free reverse-direction tile for the same month (TP-21)
+  tile(d0, tpOrigin, a.month, 'reverse');
 
   const rect = rectangle(a.month, CALENDAR_OUT_DAYS, CALENDAR_RET_DAYS, RECORD_MIN_NIGHTS);
   const over = rectangle(a.month, OVER_LIMIT_OUT_DAYS, OVER_LIMIT_RET_DAYS, RECORD_MIN_NIGHTS);

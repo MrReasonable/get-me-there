@@ -226,6 +226,23 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     );
   });
 
+  it('rejects a tree without the reverse tile JFK→LON (plan decision 31)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'origin') === 'JFK' && f.status === 200,
+      (j) => {
+        const request = asObject(j.request);
+        const url = new URL(String(request.url));
+        url.searchParams.set('departure_at', '2027-04');
+        j.request = { ...request, url: url.href };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'travelpayouts: no reverse tile JFK→LON 2027-03 (plan decision 31)',
+    );
+  });
+
   it('rejects a second allowlist file for a provider (r3-ts-003)', async () => {
     const { root } = await runRecording();
     copyFileSync(

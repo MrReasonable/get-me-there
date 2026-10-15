@@ -83,6 +83,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(statuses(summary.calls)).toEqual([
       ...Array.from({ length: 19 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}:200`),
       'TP-20:401',
+      'TP-21:200',
       'SA-01:401',
       'SA-02:200',
       'SA-03:400',
@@ -92,7 +93,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     ]);
     for (const c of summary.calls) expect(c.files, c.id).toHaveLength(1);
     expect(summary.creditsUsed).toBe(4); // SA-02, 04, 05, 06: 200s count, 401 and 400 do not (spec §2 fact 4)
-    expect(summary.freeCalls).toBe(20);
+    expect(summary.freeCalls).toBe(21);
     expect(summary.chain).toEqual({
       currency: 'GBP',
       step1PricePence: 60300,
@@ -121,7 +122,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     // the recorded tree: WP4's verifier finds nothing, one session, the test signature, no credential anywhere
     expect(verifyRecordedTree(root, run.ports.secrets)).toEqual([]);
     const files = recordings(root);
-    expect(files).toHaveLength(26);
+    expect(files).toHaveLength(27);
     expect(new Set(files.map((f) => f.session)).size).toBe(1);
     expect(summary.session).toBe(files[0]?.session);
     for (const f of files) {
@@ -228,7 +229,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       'TP-04:200',
     ]);
     expect(run.summary.calls[5]?.detail).toBe('page cap reached (3 pages of 1000 rows)');
-    expect(run.summary.freeCalls).toBe(23);
+    expect(run.summary.freeCalls).toBe(24);
   });
 
   it('the Travelpayouts month cap stops a run mid-way with the guard, before the vendor (r2-ts-004)', async () => {
@@ -265,7 +266,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     const run = await runRecording({
       env: { TRAVELPAYOUTS_TOKEN: 'test-stale-travelpayouts-token-0123456789' },
     });
-    const tiles = Array.from({ length: 18 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`);
+    const tiles = [...Array.from({ length: 18 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}`), 'TP-21'];
     const detail = `skipped: required call(s) ${tiles.join(', ')} not as planned; the run must be repeated`;
     const sa = run.summary.calls.filter((c) => c.providerId === 'searchapi');
     expect(sa.map((c) => [c.id, c.status, c.detail])).toEqual([
@@ -423,9 +424,9 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
   });
 
   it.each([
-    ['calendar-parameters', 21],
-    ['calendar-base64', 21],
-    ['sa-401-bearer', 21],
+    ['calendar-parameters', 22],
+    ['calendar-base64', 22],
+    ['sa-401-bearer', 22],
     ['tp-body', 0],
     ['tp-bearer', 0],
   ] as const)(
@@ -460,7 +461,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
   it('refuses a plan whose worst-case free calls exceed EXECUTION_MAX_FREE_CALLS before any request (ruling 13)', async () => {
     const ports = seededPorts({ EXECUTION_MAX_FREE_CALLS: '57' });
     await expect(runRecording({ ports })).rejects.toThrow(
-      'the plan needs up to 58 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
+      'the plan needs up to 61 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
     );
     expect(ports.db.raw.prepare('SELECT COUNT(*) AS n FROM search_executions').get()).toEqual({ n: 0 });
   });

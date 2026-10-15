@@ -259,7 +259,7 @@ describe('runTool success paths', () => {
     expect(text).toContain('tool lock acquired');
     expect(text).toContain('metro from the airports table: LON');
     expect(text).toContain(
-      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58',
+      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 21 free calls, ≤61',
     );
     expect(text).toContain(`recording into: ${h.root}`);
     expect(text).toContain(
@@ -281,7 +281,7 @@ describe('runTool success paths', () => {
     const h = harness(undefined, { EXECUTION_MAX_FREE_CALLS: '57' });
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.badConfig);
     expect(h.errors()).toContain(
-      'the plan needs up to 58 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
+      'the plan needs up to 61 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
     );
   });
 
@@ -296,10 +296,10 @@ describe('runTool success paths', () => {
     stubVendors();
     expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain('required calls: all as expected');
-    expect(h.text()).toContain('ledger: SearchApi 4 credit(s) of budget 5; Travelpayouts 20 free call(s)');
+    expect(h.text()).toContain('ledger: SearchApi 4 credit(s) of budget 5; Travelpayouts 21 free call(s)');
     expect(filesUnder(h.root).filter((f) => f.endsWith('.json') && !f.endsWith('.raw.json'))).toHaveLength(
-      28,
-    ); // 26 recordings + 2 allowlists
+      29,
+    ); // 27 recordings + 2 allowlists
     for (const f of loadRecorded(h.root, 'searchapi', '/api/v1/search'))
       expect(f.recordedBy).toBe(TEST_RECORDED_BY);
     const again = harness(h.dbPath);
@@ -328,7 +328,7 @@ describe('runTool success paths', () => {
     expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.failed);
     expect(h.errors()).toContain('record:fixtures failed');
     expect(h.text()).toMatch(/session: \S+/);
-    expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 20 free call(s)'); // the refused 200 was billed
+    expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 21 free call(s)'); // the refused 200 was billed
     expect(`${h.text()}${h.errors()}`).not.toContain(SENTINEL_SA);
   });
 });
@@ -525,7 +525,7 @@ describe('runRecord through runTool: failed and partial runs (r2-ts-004)', () =>
       'over-limit calendar (SA-03): no vendor answer recorded: SA-03 skipped (skipped: calendar SA-02 gave no usable cell; the run must be repeated)',
     );
     expect(text).not.toContain('raise a finding for WP5');
-    expect(text).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 20 free call(s)');
+    expect(text).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 21 free call(s)');
   });
 
   it('a 5xx retried into a 200 prints the deletable non-final attempt file (prov-wp04b-r2-005, prov-wp04b-r3-005)', async () => {
