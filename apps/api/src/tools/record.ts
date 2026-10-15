@@ -61,9 +61,6 @@ export type { RecordArgs } from './recordPlan.js';
  */
 export const RECORDED_BY = '@gmt/api record:fixtures';
 
-// why: one sanitiser for every apps/api sink (src/safeMessage.ts); re-exported here, where the plan contract names it
-export { safeMessage };
-
 /** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
 export function recordPrecheck(c: Config): string | null {
   if (c.providers.travelpayouts === null || c.providers.searchapi === null)

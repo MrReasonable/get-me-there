@@ -72,13 +72,6 @@ export function repositoryRoots(from: string = defaultRecordedRoot()): string[] 
   return roots;
 }
 
-/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
-export function repositoryRoot(): string {
-  const [nearest] = repositoryRoots();
-  if (nearest === undefined) throw new Error('repository root not found above the recorded tree');
-  return nearest;
-}
-
 /** The true-case real path of `p`, or of its nearest existing ancestor with the rest appended (a directory not made yet). */
 function realOrAncestor(p: string): string {
   const abs = resolve(p);

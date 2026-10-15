@@ -215,8 +215,7 @@ export interface ToolRunners { record(ports: Ports, cli: RecordCli, ctx: ToolCon
 export interface RecordingTarget { root: string; recordedBy: string }
 export interface RunToolOptions { env?; runners?: Partial<ToolRunners>; out?; err?; logDestination?; clock?: Clock; migrationsDir?: string; recording?: RecordingTarget /* root and signature together */ }
 export function recordingTarget(cli: RecordCli, given: RecordingTarget | undefined, roots?: readonly string[]): RecordingTarget | { refusal: string };   // roots default: repositoryRoots()
-export function repositoryRoots(from?: string): string[];   // every ancestor of the recorded tree holding pnpm-workspace.yaml, nearest first, true-case real paths
-export function repositoryRoot(): string;   // the nearest of them
+export function repositoryRoots(from?: string): string[];   // every ancestor of the recorded tree holding pnpm-workspace.yaml, nearest first, true-case real paths (tool.test.ts takes the nearest as its repository root)
 export function isEntryPoint(script?: string, self?: string): boolean;
 // src/bootstrap/preflight.ts (Task 8; the pre-migration preflight WP8's app bootstrap reuses, plan decision 30 / arch M-1)
 export const BACKUPS_KEPT = 5;
@@ -224,7 +223,7 @@ export function backupsDirFor(databasePath: string): string;   // <dirname(dbPat
 export function dataDirRefusal(databasePath: string): string | null;   // the refusal when the data directory is not writable
 export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[];   // opens read-write (no schema change)
 export function backupBeforeMigrations(databasePath: string, migrationsDir: string, clock: Clock, secrets: readonly Secret[]): { ok: true; line: string | null } | { ok: false; code: 73 | 74; message: string };
-// src/safeMessage.ts (Task 6; record.ts re-exports it)
+// src/safeMessage.ts (Task 6; the one import path for every consumer)
 export function safeMessage(e: unknown, secrets: readonly Secret[]): string;
 // src/tools/workedExample.ts
 export const WORKED_EXAMPLE_ROUTE: { origins: readonly ['LHR', 'LGW']; destinations: readonly ['JFK', 'EWR'] }; export const WORKED_EXAMPLE_ROUTE_ARG: string;
@@ -262,7 +261,7 @@ export function readRecorded(file: string | null): Record<string, unknown> | und
 // src/tools/record.ts
 export const RECORDED_BY = '@gmt/api record:fixtures';
 export function failureOf(e: unknown): { status: RecordedCall['status']; detail: string } | null;   // null: not a request result, it propagates
-export function recordPrecheck(c: Config): string | null; export function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number>; export function safeMessage(e: unknown, secrets: readonly Secret[]): string;
+export function recordPrecheck(c: Config): string | null; export function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number>;
 ```
 
 ### 5.3 Recorded file format (plan `RecordedFixture`, written by WP4's recorder)
@@ -4345,9 +4344,6 @@ export type { RecordArgs } from './recordPlan.js';
  */
 export const RECORDED_BY = '@gmt/api record:fixtures';
 
-// why: one sanitiser for every apps/api sink (src/safeMessage.ts); re-exported here, where the plan contract names it
-export { safeMessage };
-
 /** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
 export function recordPrecheck(c: Config): string | null {
   if (c.providers.travelpayouts === null || c.providers.searchapi === null)
@@ -5082,7 +5078,7 @@ git add packages/db && git commit -m "wp04b: readOnlyLockState in @gmt/db, so th
 
 **Files:** create `apps/api/src/bootstrap/tool.ts`, `apps/api/src/bootstrap/preflight.ts`, `apps/api/src/tools/workedExample.ts`, `apps/api/test/bootstrap/tool.test.ts`, `apps/api/test/bootstrap/preflight.test.ts`; modify `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`.
 
-**Interfaces:** consumes `AppLock`, `HEARTBEAT_INTERVAL_MS`, `readOnlyLockState` (Task 7), `openDatabase`, `pendingMigrations`, `backupDatabase`, `seedAirports`, `loadAirportsDataset`, `AIRPORTS_DATA_DIR`, `MIGRATIONS_DIR`, `defaultRecordedRoot`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `runRecord`, `recordPrecheck`. Produces `runTool`, `RunToolOptions`, `RecordingTarget`, `recordingTarget`, `repositoryRoot`, `isEntryPoint`, `ToolRunners`, `backupsDirFor`, `pendingOnExistingDb`, `WORKED_EXAMPLE_ROUTE`, `isWorkedExampleRoute`.
+**Interfaces:** consumes `AppLock`, `HEARTBEAT_INTERVAL_MS`, `readOnlyLockState` (Task 7), `openDatabase`, `pendingMigrations`, `backupDatabase`, `seedAirports`, `loadAirportsDataset`, `AIRPORTS_DATA_DIR`, `MIGRATIONS_DIR`, `defaultRecordedRoot`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `runRecord`, `recordPrecheck`. Produces `runTool`, `RunToolOptions`, `RecordingTarget`, `recordingTarget`, `repositoryRoots`, `isEntryPoint`, `ToolRunners`, the preflight helpers (`backupsDirFor`, `dataDirRefusal`, `pendingOnExistingDb`, `backupBeforeMigrations`), `WORKED_EXAMPLE_ROUTE`, `isWorkedExampleRoute`.
 
 Every exit path is tested through the injectable `runners` table: a throwing tool, SIGINT and SIGTERM (twice), the heartbeat under fake timers, a lock taken over mid-run (with and without a throw), a buildPorts failure, an unreadable database, an unreadable migration state, an existing database in a read-only directory (ts-003, r2-ts-005). The refusal after `buildPorts` when `AppLock.acquire` refuses is reached only by a process that takes the lock between the read-only check and the acquire; WP3's AppLock tests cover the refusal itself. Every test records into a temporary tree under the test signature, and the suite snapshots the committed tree's files (with size and mtime) before it runs and asserts the snapshot unchanged after: no test adds, removes or changes a file in the committed tree, before or after Task 12b commits it (prov-wp04b-006, prov-wp04b-r3-001). Three further groups drive `runRecord` through `runTool`: a run with required calls not as planned, a 5xx retried into a 200 (fake timers; the retry line and its file), and a SIGINT during the calendar; a live `--out` run into a fresh directory; and `recordingTarget` itself (a given target wins; the worked example and `--out` sign `RECORDED_BY`; `--out` at the repository root, through a relative path or through a symlink into it is refused) (r2-ts-004, r3-ts-004).
 
@@ -5115,7 +5111,6 @@ import {
   isEntryPoint,
   type RunToolOptions,
   recordingTarget,
-  repositoryRoot,
   repositoryRoots,
   runTool,
 } from '../../src/bootstrap/tool.js';
@@ -5125,6 +5120,13 @@ import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js'
 import { TEST_RECORDED_BY, testRecording } from '../helpers/recording.js';
 import { filesUnder, tempDir } from '../helpers/tmp.js';
 import { stubVendors } from '../helpers/vendors.js';
+
+/** The nearest repository root (the worktree's own, when run from one). */
+function repositoryRoot(): string {
+  const [nearest] = repositoryRoots();
+  if (nearest === undefined) throw new Error('no repository root above the recorded tree');
+  return nearest;
+}
 
 const ROUTE = ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03'];
 const DRY = [...ROUTE, '--dry-run'];
@@ -6084,13 +6086,6 @@ export function repositoryRoots(from: string = defaultRecordedRoot()): string[] 
   }
   if (roots.length === 0) throw new Error('repository root not found above the recorded tree');
   return roots;
-}
-
-/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
-export function repositoryRoot(): string {
-  const [nearest] = repositoryRoots();
-  if (nearest === undefined) throw new Error('repository root not found above the recorded tree');
-  return nearest;
 }
 
 /** The true-case real path of `p`, or of its nearest existing ancestor with the rest appended (a directory not made yet). */
@@ -7614,7 +7609,7 @@ Rows marked **operator** run on Ian's machine with the real `.env`; every other 
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/api test` | all 185 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (fix round 1, manifest excluded: lines 97.1 / branches 84.9 / functions 96.7 / statements 95.3) |
+| `pnpm --filter @gmt/api test` | all 185 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (after the round-1 re-review fixes, manifest excluded: lines 97.1 / branches 85.0 / functions 96.7 / statements 95.4) |
 | `pnpm --filter @gmt/db test` | passes (263), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
 | `pnpm --filter @gmt/providers test` | passes (264, including the barrel test naming `defaultRecordedRoot`, `withContentHash` and `assertRecordedRoot`, and the `assertRecordedRoot` test); WP4's thresholds hold |
 | `pnpm lint` | clean |

@@ -23,7 +23,6 @@ import {
   isEntryPoint,
   type RunToolOptions,
   recordingTarget,
-  repositoryRoot,
   repositoryRoots,
   runTool,
 } from '../../src/bootstrap/tool.js';
@@ -33,6 +32,13 @@ import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js'
 import { TEST_RECORDED_BY, testRecording } from '../helpers/recording.js';
 import { filesUnder, tempDir } from '../helpers/tmp.js';
 import { stubVendors } from '../helpers/vendors.js';
+
+/** The nearest repository root (the worktree's own, when run from one). */
+function repositoryRoot(): string {
+  const [nearest] = repositoryRoots();
+  if (nearest === undefined) throw new Error('no repository root above the recorded tree');
+  return nearest;
+}
 
 const ROUTE = ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03'];
 const DRY = [...ROUTE, '--dry-run'];
