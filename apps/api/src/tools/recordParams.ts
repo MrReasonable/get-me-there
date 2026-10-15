@@ -3,11 +3,10 @@
  * enumerates parameter names and values; tests assert both"), in the plan's ParamsAllowlist shape.
  * Every parameter record:fixtures sends is checked against this table before the request leaves.
  */
-import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import type { IsoDate } from '@gmt/core';
-import { canonicalJson, type ParamsAllowlist } from '@gmt/providers';
+import { assertRecordedRoot, type ParamsAllowlist, withContentHash } from '@gmt/providers';
 
 export type EndpointKey = 'prices_for_dates' | 'google_flights_calendar' | 'google_flights';
 const ENDPOINT_KEYS: readonly EndpointKey[] = [
@@ -41,7 +40,6 @@ export const SEARCHAPI_TRAVEL_CLASSES: readonly string[] = [
   'first_class',
   'premium_economy',
 ];
-const RECORDED_DIR = `${sep}fixtures${sep}recorded`;
 
 /** The full rule table. `gl` is pinned to `gb`: the recorded tree is the public worked example's (spec §2). */
 export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
@@ -142,8 +140,8 @@ export class ParamLog {
   }
 
   /**
-   * The allowlist document for one provider, hashed like a recorded fixture (canonicalJson from
-   * @gmt/providers, so WP4's loadParamsAllowlist verifies it). Keys are the endpoint path, or
+   * The allowlist document for one provider, hashed by WP4's own withContentHash, so WP4's loadParamsAllowlist
+   * verifies it with the same code that wrote it (arch I-3). Keys are the endpoint path, or
    * '<path>?engine=<value>' for SearchApi's engines multiplexed on one path (plan ParamsAllowlist).
    */
   document(provider: 'travelpayouts' | 'searchapi', recordedAt: IsoDate): ParamsAllowlist {
@@ -165,23 +163,17 @@ export class ParamLog {
       }
       endpoints[r.key] = { names, values };
     }
-    const body = { provider, recordedAt, endpoints };
-    return { ...body, contentSha256: createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex') };
+    return withContentHash({ provider, recordedAt, endpoints });
   }
 }
 
 /**
- * Writes params-<date>.json under `root` (spec §5.5). Refuses a root whose real path is not a
- * fixtures/recorded directory, a provider directory that resolves outside the real root (sec-003), and an existing
- * file or symlink at the target.
+ * Writes params-<date>.json under `root` (spec §5.5). The root must pass WP4's assertRecordedRoot (it exists and its
+ * real path ends in fixtures/recorded: the recorder's own rule, arch I-3); a provider directory that resolves outside
+ * the real root (sec-003) and an existing file or symlink at the target are refused.
  */
 export function writeAllowlist(root: string, doc: ParamsAllowlist): string {
-  if (!resolve(root).endsWith(RECORDED_DIR))
-    throw new Error(`refusing to write outside fixtures/recorded/: ${resolve(root)}`);
-  mkdirSync(root, { recursive: true });
-  const realRoot = realpathSync(root);
-  if (!realRoot.endsWith(RECORDED_DIR))
-    throw new Error(`refusing to write: ${root} resolves to ${realRoot}, outside fixtures/recorded/`);
+  const realRoot = assertRecordedRoot(root);
   const dir = join(root, doc.provider);
   mkdirSync(dir, { recursive: true });
   const realDir = realpathSync(dir);

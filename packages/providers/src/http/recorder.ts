@@ -49,6 +49,25 @@ export function defaultRecordedRoot(): string {
   return fileURLToPath(new URL('../../fixtures/recorded', import.meta.url));
 }
 
+/**
+ * The real path of a recorded root, refused unless it exists and its real path ends in fixtures/recorded (spec §5.5).
+ * why: the suffix is tested on the real path, so a symlink named …/fixtures/recorded cannot point elsewhere (I1); the
+ * recorder, the readers and WP4b's allowlist writer share this one rule (WP4b I-3).
+ */
+export function assertRecordedRoot(root: string): string {
+  let real: string;
+  try {
+    real = realpathSync(resolve(root));
+  } catch (e) {
+    // why: only absence is reported as such; EACCES, ELOOP and the rest surface unchanged (re-review low 1).
+    if (errnoCode(e) === 'ENOENT') throw new RecorderRefusedError(`recorder root ${root} does not exist`);
+    throw e;
+  }
+  if (!real.endsWith(RECORDED_DIR))
+    throw new RecorderRefusedError(`recorder root must end in fixtures/recorded (spec §5.5), got ${real}`);
+  return real;
+}
+
 /** JSON with object keys sorted at every level and undefined members dropped: the hash input. */
 export function canonicalJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
@@ -71,7 +90,7 @@ export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string {
   return hashOf(f);
 }
 
-/** Adds `contentSha256` over everything else. Exported only through `./testing` (tests, WP4b's record tool). */
+/** Adds `contentSha256` over everything else (the main barrel exports it for WP4b's allowlist writer; tests use it too). */
 export function withContentHash<T extends object>(file: T): T & { contentSha256: string } {
   return { ...file, contentSha256: hashOf(file) };
 }
@@ -190,19 +209,9 @@ export function createRecorder(opts: {
   clock: Clock;
   recordedBy: string;
 }): FixtureRecorder {
+  // why: the returned path is reported under the root as given (a caller's symlinked path stays recognisable)
   const givenRoot = resolve(opts.root);
-  let root: string;
-  try {
-    // why: the suffix is tested on the real path, so a symlink named …/fixtures/recorded cannot point elsewhere (I1).
-    root = realpathSync(givenRoot);
-  } catch (e) {
-    // why: only absence is reported as such; EACCES, ELOOP and the rest surface unchanged (re-review low 1).
-    if (errnoCode(e) === 'ENOENT')
-      throw new RecorderRefusedError(`recorder root ${opts.root} does not exist`);
-    throw e;
-  }
-  if (!root.endsWith(RECORDED_DIR))
-    throw new RecorderRefusedError(`recorder root must end in fixtures/recorded (spec §5.5), got ${root}`);
+  const root = assertRecordedRoot(opts.root);
   if (opts.recordedBy.trim() === '')
     throw new RecorderRefusedError('recordedBy must name who ran the recording');
   // why: two sessions never share an identity, even when started in the same millisecond (prov-r2-001).
@@ -313,11 +322,9 @@ export function loadRecordedJson(
   path: string,
   root: string = defaultRecordedRoot(),
 ): Record<string, unknown> {
-  // why: the suffix is tested on the real root, as the recorder does, so a symlink named …/fixtures/recorded that
-  // points elsewhere is refused by readers too (re-review low 2).
-  const realRoot = realpathSync(resolve(root));
-  if (!realRoot.endsWith(RECORDED_DIR))
-    throw new Error(`recorded root must end in fixtures/recorded, got ${root}`);
+  // why: readers apply the recorder's own root rule, so a symlink named …/fixtures/recorded that points elsewhere is
+  // refused by readers too (re-review low 2).
+  const realRoot = assertRecordedRoot(root);
   const real = realpathSync(path);
   if (!real.startsWith(`${realRoot}${sep}`))
     throw new Error(`refusing ${path}: recorded files load only from the recorded root ${root} (spec §5.5)`);

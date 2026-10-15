@@ -135,6 +135,8 @@ export interface FixtureRecorder { record(r: { providerId; endpointPath: string;
 export interface RecordedFixture { recordedAt: IsoDateTime /* = fetchedAt */; recordedBy: string; providerId: string; endpointPath: string; request: { method: string; url: string /* credential-free, query kept */; headers: Record<string, string> /* credential headers dropped */; body: string | null }; status: number; body: unknown; placeholders: Record<string, string> /* '<key:n@session>' → key */; responseHeaders: Record<string, string> /* retry-after, content-type, x-ratelimit-*, ratelimit-*; lower-cased; a secret in one refuses the recording */; session: string; contentSha256: string }
 export function createRecorder(opts: { root: string /* must end in fixtures/recorded */; secrets: readonly Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;   // <root>/<providerId>/<endpointPath with / → _>/<yyyy-mm-dd>-<sha12>.json; raw body beside it as .raw.json (gitignored); search_metadata URLs keep their keys with query and userinfo stripped
 export function defaultRecordedRoot(): string;   // src/http/recorder.ts; Task 8 adds it to the barrel
+export function withContentHash<T extends object>(file: T): T & { contentSha256: string };   // src/http/recorder.ts; Task 6 adds it to the main barrel (plan decision 30)
+export function assertRecordedRoot(root: string): string;   // Task 6 adds it to recorder.ts and the main barrel: the real root, refused unless it exists and ends in fixtures/recorded (the recorder's own rule)
 export function canonicalJson(v: unknown): string;   // keys sorted, undefined dropped: the hash input
 export function scrubSecrets<T>(value: T, secrets: readonly Secret[]): T;
 export const CREDENTIAL_HEADERS: ReadonlySet<string>;   // authorization, proxy-authorization, x-access-token, x-api-key, cookie
@@ -416,7 +418,8 @@ The metro comes from the airports table, which the tool seeds after migration wh
 
 - `apps/api/vitest.config.ts`: `setupFiles`, single `include`/`coverage.include` entries (Task 1).
 - `packages/db/src/appLock.ts`, `packages/db/src/index.ts`, `packages/db/test/barrel.test.ts`: `readOnlyLockState` and its export (Task 7).
-- `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`: export and assert `defaultRecordedRoot` (Task 8).
+- `packages/providers/src/http/recorder.ts`, `packages/providers/test/http/recorder.test.ts`: `assertRecordedRoot`, shared by the recorder, `loadRecordedJson` and WP4b's allowlist writer (Task 6, plan decision 30).
+- `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`: export and assert `withContentHash` and `assertRecordedRoot` (Task 6) and `defaultRecordedRoot` (Task 8).
 - `apps/api/package.json`: script `tool` (Task 9). No new dependency, no msw.
 - root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9).
 - `scripts/check-boundaries.mjs`: the msw rules and the `process.env` reader list (Task 9).
@@ -2816,9 +2819,9 @@ git add apps/api && git commit -m "wp04b: record:fixtures arguments and the exac
 
 ### Task 6: The recording run through the real http-kit, recorder and guard
 
-**Files:** create `apps/api/src/tools/types.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `apps/api/test/helpers/recording.ts`, `apps/api/test/tools/record.test.ts`. The four `src/tools` modules split the work (arch-r2-005): execution bookkeeping and the budget position (`recordExecution.ts`), assessment and the report (`recordReport.ts`), the request loop and the CLI runner (`record.ts`), the shared result types and exit codes (`types.ts`).
+**Files:** modify `packages/providers/src/http/recorder.ts`, `packages/providers/src/index.ts`, `packages/providers/test/http/recorder.test.ts`, `packages/providers/test/barrel.test.ts` (Step 3a); create `apps/api/src/tools/types.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `apps/api/test/helpers/recording.ts`, `apps/api/test/tools/record.test.ts`. The four `src/tools` modules split the work (arch-r2-005): execution bookkeeping and the budget position (`recordExecution.ts`), assessment and the report (`recordReport.ts`), the request loop and the CLI runner (`record.ts`), the shared result types and exit codes (`types.ts`).
 
-**Interfaces:** consumes `createHttpKit`, `createRecorder`, `canonicalJson`, `scrubSecrets`, `ProviderError`, `BudgetExceeded`, `AbortedError`, `stripUrlsInText`, `DefinitionInput`, `DefinitionSnapshot`, `Estimate`, `Repos.definitions.create/get/softDelete`, `Repos.executions.create/listByStatus/setStatus`, `Db.immediateTransaction`, `budget.usage`, `seedAirports`, `loadAirportsDataset`, `verifyRecordedTree`, `loadRecorded`. Produces `recordFixtures`, `RecordSummary`, `RecordedCall`, `RecordingFailedError`, `RECORDED_BY`, `recordPrecheck`, `priorToolCredits`, `budgetPosition`, `openRecordingExecution`, `assessRun`, `formatSummary`, `ledgerLine`, `retryAttemptLines`, `runRecord`, `safeMessage`, `ParamLog`, `paramRules`, `writeAllowlist`, `EXIT`, `ToolContext`, `ToolName`.
+**Interfaces:** consumes `createHttpKit`, `createRecorder`, `withContentHash`, `assertRecordedRoot` (Step 3a), `scrubSecrets`, `ProviderError`, `BudgetExceeded`, `AbortedError`, `stripUrlsInText`, `DefinitionInput`, `DefinitionSnapshot`, `Estimate`, `Repos.definitions.create/get/softDelete`, `Repos.executions.create/listByStatus/setStatus`, `Db.immediateTransaction`, `budget.usage`, `seedAirports`, `loadAirportsDataset`, `verifyRecordedTree`, `loadRecorded`. Produces `recordFixtures`, `RecordSummary`, `RecordedCall`, `RecordingFailedError`, `RECORDED_BY`, `recordPrecheck`, `priorToolCredits`, `budgetPosition`, `openRecordingExecution`, `assessRun`, `formatSummary`, `ledgerLine`, `retryAttemptLines`, `runRecord`, `safeMessage`, `ParamLog`, `paramRules`, `writeAllowlist`, `EXIT`, `ToolContext`, `ToolName`.
 
 The tests run the recording against the stand-ins on an in-memory, seeded database with a fixed clock, into a temporary recorded tree created before the run (so a failed run's files can be scanned, ts-008), under the test signature `@gmt/api record:fixtures (test)`. Every identifier the stand-ins invent carries the marker `gmt-standin-7f3a`, a token that cannot occur in vendor text, so a stand-in recording can never pass as a vendor one (prov-wp04b-006; Task 12a's check requires `RECORDED_BY` and rejects the marker). The failure cases (a 5xx retried into a 200, a 429, a socket failure, a timeout) run under fake timers through `runRecordingInFakeTime`.
 
@@ -3414,6 +3417,52 @@ Expected: FAIL, `Error: Cannot find module '../../src/tools/recordExecution.js' 
 
 - [ ] **Step 3: Implement**
 
+Step 3a (plan decision 30, ruling on arch I-3): WP4 owns the tamper-evidence hash and the recorded-root rule, so the allowlist writer uses them rather than second copies. In `packages/providers/src/http/recorder.ts`, add `assertRecordedRoot` above `canonicalJson`, and replace the root checks in `createRecorder` (keep `givenRoot = resolve(opts.root)` for the returned paths; `const root = assertRecordedRoot(opts.root);`) and in `loadRecordedJson` (`const realRoot = assertRecordedRoot(root);`) with calls to it:
+
+```ts
+/**
+ * The real path of a recorded root, refused unless it exists and its real path ends in fixtures/recorded (spec §5.5).
+ * why: the suffix is tested on the real path, so a symlink named …/fixtures/recorded cannot point elsewhere (I1); the
+ * recorder, the readers and WP4b's allowlist writer share this one rule (WP4b I-3).
+ */
+export function assertRecordedRoot(root: string): string {
+  let real: string;
+  try {
+    real = realpathSync(resolve(root));
+  } catch (e) {
+    // why: only absence is reported as such; EACCES, ELOOP and the rest surface unchanged (re-review low 1).
+    if (errnoCode(e) === 'ENOENT') throw new RecorderRefusedError(`recorder root ${root} does not exist`);
+    throw e;
+  }
+  if (!real.endsWith(RECORDED_DIR))
+    throw new RecorderRefusedError(`recorder root must end in fixtures/recorded (spec §5.5), got ${real}`);
+  return real;
+}
+```
+
+Add `assertRecordedRoot` and `withContentHash` to the main barrel's `./http/recorder.js` export list; in `packages/providers/test/barrel.test.ts` add both to the main-barrel function list and remove `'withContentHash'` from the "not in main" list (it stays in `./testing` too). In `packages/providers/test/http/recorder.test.ts` (import `assertRecordedRoot` and `realpathSync`), before the `canonicalJson` known-answer test:
+
+```ts
+  it('assertRecordedRoot returns the real root, and refuses a missing root, a wrong suffix and a symlink pointing elsewhere (WP4b I-3)', () => {
+    const root = tree();
+    expect(assertRecordedRoot(root)).toBe(realpathSync(root));
+    const base = mkdtempSync(join(tmpdir(), 'gmt-root-'));
+    expect(() => assertRecordedRoot(join(base, 'absent', 'fixtures', 'recorded'))).toThrow(
+      RecorderRefusedError,
+    );
+    expect(() => assertRecordedRoot(join(base, 'absent', 'fixtures', 'recorded'))).toThrow(/does not exist/);
+    expect(() => assertRecordedRoot(base)).toThrow(/must end in fixtures\/recorded/);
+    const linked = join(base, 'elsewhere', 'fixtures', 'recorded');
+    mkdirSync(join(linked, '..'), { recursive: true });
+    symlinkSync(base, linked);
+    expect(() => assertRecordedRoot(linked)).toThrow(/must end in fixtures\/recorded/);
+  });
+```
+
+Run `pnpm --filter @gmt/providers exec vitest run test/barrel.test.ts test/http/recorder.test.ts` first: 2 failed (`withContentHash: expected 'undefined' to be 'function'`, `TypeError: assertRecordedRoot is not a function`); after the change, the providers suite passes (264).
+
+Step 3b: the apps/api modules.
+
 ```ts
 // apps/api/src/tools/types.ts
 /** What the tool bootstrap hands a tool, the shared record-tool result types, and the one exit-code table every CLI shares. */
@@ -3511,11 +3560,10 @@ export class RecordingFailedError extends Error {
  * enumerates parameter names and values; tests assert both"), in the plan's ParamsAllowlist shape.
  * Every parameter record:fixtures sends is checked against this table before the request leaves.
  */
-import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import type { IsoDate } from '@gmt/core';
-import { canonicalJson, type ParamsAllowlist } from '@gmt/providers';
+import { assertRecordedRoot, type ParamsAllowlist, withContentHash } from '@gmt/providers';
 
 export type EndpointKey = 'prices_for_dates' | 'google_flights_calendar' | 'google_flights';
 const ENDPOINT_KEYS: readonly EndpointKey[] = [
@@ -3549,7 +3597,6 @@ export const SEARCHAPI_TRAVEL_CLASSES: readonly string[] = [
   'first_class',
   'premium_economy',
 ];
-const RECORDED_DIR = `${sep}fixtures${sep}recorded`;
 
 /** The full rule table. `gl` is pinned to `gb`: the recorded tree is the public worked example's (spec §2). */
 export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
@@ -3650,8 +3697,8 @@ export class ParamLog {
   }
 
   /**
-   * The allowlist document for one provider, hashed like a recorded fixture (canonicalJson from
-   * @gmt/providers, so WP4's loadParamsAllowlist verifies it). Keys are the endpoint path, or
+   * The allowlist document for one provider, hashed by WP4's own withContentHash, so WP4's loadParamsAllowlist
+   * verifies it with the same code that wrote it (arch I-3). Keys are the endpoint path, or
    * '<path>?engine=<value>' for SearchApi's engines multiplexed on one path (plan ParamsAllowlist).
    */
   document(provider: 'travelpayouts' | 'searchapi', recordedAt: IsoDate): ParamsAllowlist {
@@ -3673,23 +3720,17 @@ export class ParamLog {
       }
       endpoints[r.key] = { names, values };
     }
-    const body = { provider, recordedAt, endpoints };
-    return { ...body, contentSha256: createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex') };
+    return withContentHash({ provider, recordedAt, endpoints });
   }
 }
 
 /**
- * Writes params-<date>.json under `root` (spec §5.5). Refuses a root whose real path is not a
- * fixtures/recorded directory, a provider directory that resolves outside the real root (sec-003), and an existing
- * file or symlink at the target.
+ * Writes params-<date>.json under `root` (spec §5.5). The root must pass WP4's assertRecordedRoot (it exists and its
+ * real path ends in fixtures/recorded: the recorder's own rule, arch I-3); a provider directory that resolves outside
+ * the real root (sec-003) and an existing file or symlink at the target are refused.
  */
 export function writeAllowlist(root: string, doc: ParamsAllowlist): string {
-  if (!resolve(root).endsWith(RECORDED_DIR))
-    throw new Error(`refusing to write outside fixtures/recorded/: ${resolve(root)}`);
-  mkdirSync(root, { recursive: true });
-  const realRoot = realpathSync(root);
-  if (!realRoot.endsWith(RECORDED_DIR))
-    throw new Error(`refusing to write: ${root} resolves to ${realRoot}, outside fixtures/recorded/`);
+  const realRoot = assertRecordedRoot(root);
   const dir = join(root, doc.provider);
   mkdirSync(dir, { recursive: true });
   const realDir = realpathSync(dir);
@@ -4608,7 +4649,7 @@ Expected: 23 passed. Two failures would mean the merged WP3 or WP4 differs from 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "wp04b: record:fixtures run through the real http-kit, recorder and guard under a hidden tool execution"
+git add apps/api packages/providers && git commit -m "wp04b: record:fixtures run through the real http-kit, recorder and guard under a hidden tool execution"
 ```
 
 ### Task 7: `readOnlyLockState` in `@gmt/db`
@@ -5466,20 +5507,22 @@ Expected: FAIL, `Error: Cannot find module '../../src/bootstrap/tool.js' importe
 
 - [ ] **Step 3: Implement**
 
-In `packages/providers/src/index.ts`, add `defaultRecordedRoot` to the existing `./http/recorder.js` export list:
+In `packages/providers/src/index.ts`, add `defaultRecordedRoot` to the `./http/recorder.js` export list (Task 6 added `assertRecordedRoot` and `withContentHash`):
 
 ```ts
 export {
+  assertRecordedRoot,
   canonicalJson,
   contentHash,
   createRecorder,
   defaultRecordedRoot,
   type RecordedFixture,
   RecorderRefusedError,
-} from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError, defaultRecordedRoot: WP4b
+  withContentHash,
+} from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError, defaultRecordedRoot, withContentHash, assertRecordedRoot: WP4b
 ```
 
-In `packages/providers/test/barrel.test.ts`, add `'defaultRecordedRoot'` after `'createRecorder'` in the main-barrel function list (arch-r2-007).
+In `packages/providers/test/barrel.test.ts`, add `'defaultRecordedRoot'` after `'createRecorder'` in the main-barrel function list (arch-r2-007); `withContentHash` and `assertRecordedRoot` are already there since Task 6.
 
 ```ts
 // apps/api/src/tools/workedExample.ts
@@ -5915,7 +5958,7 @@ if (isEntryPoint()) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts` and `pnpm --filter @gmt/providers test`
-Expected: 45 passed (the two read-only-directory cases are reported skipped when run as root); the providers suite passes (263 at assembly). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
+Expected: 45 passed (the two read-only-directory cases are reported skipped when run as root); the providers suite passes (264). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
 
 - [ ] **Step 5: Commit**
 
@@ -6190,7 +6233,12 @@ git add apps/api scripts/check-boundaries.mjs && git commit -m "wp04b: tool scri
 import { mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate } from '@gmt/core';
-import { assertRequestAllowed, loadParamsAllowlist, type ParamsAllowlist } from '@gmt/providers';
+import {
+  assertRequestAllowed,
+  loadParamsAllowlist,
+  type ParamsAllowlist,
+  RecorderRefusedError,
+} from '@gmt/providers';
 import { loadRecorded } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 import { ParamLog, paramRules, writeAllowlist } from '../../src/tools/recordParams.js';
@@ -6334,13 +6382,16 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
       endpoints: {},
       contentSha256: '',
     };
-    expect(() => writeAllowlist(join(tempDir(), 'elsewhere'), doc)).toThrow(
-      'refusing to write outside fixtures/recorded/',
-    );
+    // why: the root rule is WP4's assertRecordedRoot, shared with the recorder (arch I-3)
+    const elsewhere = join(tempDir(), 'elsewhere');
+    mkdirSync(elsewhere);
+    expect(() => writeAllowlist(elsewhere, doc)).toThrow(RecorderRefusedError);
+    expect(() => writeAllowlist(elsewhere, doc)).toThrow(/must end in fixtures\/recorded/);
+    expect(() => writeAllowlist(join(tempDir(), 'fixtures', 'recorded'), doc)).toThrow(/does not exist/);
     const linkedRoot = join(tempDir(), 'fixtures', 'recorded');
     mkdirSync(join(linkedRoot, '..'), { recursive: true });
     symlinkSync(tempDir(), linkedRoot);
-    expect(() => writeAllowlist(linkedRoot, doc)).toThrow(/resolves to .*outside fixtures\/recorded/);
+    expect(() => writeAllowlist(linkedRoot, doc)).toThrow(/must end in fixtures\/recorded/);
     const { root } = tempRecordedRoot();
     symlinkSync(tempDir(), join(root, 'searchapi'));
     expect(() => writeAllowlist(root, doc)).toThrow(/resolves outside/);
@@ -7027,7 +7078,7 @@ Rows marked **operator** run on Ian's machine with the real `.env`; every other 
 |---|---|
 | `pnpm --filter @gmt/api test` | all 157 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.9 / 84.5 / 95.8 / 94.9) |
 | `pnpm --filter @gmt/db test` | passes (262 at assembly), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
-| `pnpm --filter @gmt/providers test` | passes (263 at assembly, including the barrel test naming `defaultRecordedRoot`); WP4's thresholds hold |
+| `pnpm --filter @gmt/providers test` | passes (264, including the barrel test naming `defaultRecordedRoot`, `withContentHash` and `assertRecordedRoot`, and the `assertRecordedRoot` test); WP4's thresholds hold |
 | `pnpm lint` | clean |
 | `pnpm -r typecheck` | clean |
 | `node scripts/check-boundaries.mjs` | exit 0: `process.env` is read only under `apps/api/src/bootstrap/`; any msw import (static, side-effect or dynamic) appears only under `packages/providers/src/testing/` among the packages' `src` trees; `@gmt/api` neither lists msw nor imports it from any `.ts`, `.mts`, `.cts`, `.js`, `.mjs` or `.cjs` file under `apps/api/test` |

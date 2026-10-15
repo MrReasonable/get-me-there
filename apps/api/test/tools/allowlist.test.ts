@@ -3,7 +3,12 @@
 import { mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate } from '@gmt/core';
-import { assertRequestAllowed, loadParamsAllowlist, type ParamsAllowlist } from '@gmt/providers';
+import {
+  assertRequestAllowed,
+  loadParamsAllowlist,
+  type ParamsAllowlist,
+  RecorderRefusedError,
+} from '@gmt/providers';
 import { loadRecorded } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 import { ParamLog, paramRules, writeAllowlist } from '../../src/tools/recordParams.js';
@@ -147,13 +152,16 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
       endpoints: {},
       contentSha256: '',
     };
-    expect(() => writeAllowlist(join(tempDir(), 'elsewhere'), doc)).toThrow(
-      'refusing to write outside fixtures/recorded/',
-    );
+    // why: the root rule is WP4's assertRecordedRoot, shared with the recorder (arch I-3)
+    const elsewhere = join(tempDir(), 'elsewhere');
+    mkdirSync(elsewhere);
+    expect(() => writeAllowlist(elsewhere, doc)).toThrow(RecorderRefusedError);
+    expect(() => writeAllowlist(elsewhere, doc)).toThrow(/must end in fixtures\/recorded/);
+    expect(() => writeAllowlist(join(tempDir(), 'fixtures', 'recorded'), doc)).toThrow(/does not exist/);
     const linkedRoot = join(tempDir(), 'fixtures', 'recorded');
     mkdirSync(join(linkedRoot, '..'), { recursive: true });
     symlinkSync(tempDir(), linkedRoot);
-    expect(() => writeAllowlist(linkedRoot, doc)).toThrow(/resolves to .*outside fixtures\/recorded/);
+    expect(() => writeAllowlist(linkedRoot, doc)).toThrow(/must end in fixtures\/recorded/);
     const { root } = tempRecordedRoot();
     symlinkSync(tempDir(), join(root, 'searchapi'));
     expect(() => writeAllowlist(root, doc)).toThrow(/resolves outside/);
