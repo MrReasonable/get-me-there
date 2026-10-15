@@ -1,72 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { defaultFixtureRoot, loadFixtureTree } from '../../src/fixture/tree.js';
-import {
-  createRecorder,
-  loadRecordedFixture,
-  loadRecordedJson,
-  withContentHash,
-} from '../../src/http/recorder.js';
-import { containsSecret } from '../../src/http/scrub.js';
-import { loadParamsAllowlist } from '../../src/params/allowlist.js';
-import { isRecord } from '../../src/util.js';
+import { createRecorder, loadRecordedJson, withContentHash } from '../../src/http/recorder.js';
+import { verifyFixturesTree, verifyRecordedFile, verifyRecordedTree } from '../../src/testing/verify.js';
 import { ALL_SECRETS, req, SEARCH, SENTINELS } from '../fakes.js';
 
 const FIXTURES = fileURLToPath(new URL('../../fixtures', import.meta.url));
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
-// why: a recording's request must target its provider's real host (prov-003 cross-check); vendor hosts, not airports.
-const PROVIDER_HOST: Record<string, string> = {
-  searchapi: 'www.searchapi.io',
-  travelpayouts: 'api.travelpayouts.com',
-};
-
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
-  );
-}
-
-/** Every problem in a fixtures root (spec §9 item 2 fixture-tree rules); empty means clean. */
-function scanFixtures(root: string): string[] {
-  const problems: string[] = [];
-  const recordedRoot = join(root, 'recorded');
-  const files = walk(root).filter((f) => !f.endsWith('.gitkeep') && !f.endsWith('.raw.json'));
-  for (const f of files) {
-    const rel = relative(root, f);
-    const fail = (why: string): void => {
-      problems.push(`${rel}: ${why}`);
-    };
-    if (!f.endsWith('.json')) {
-      fail('not a JSON file');
-      continue;
-    }
-    const text = readFileSync(f, 'utf8');
-    if (containsSecret(text, ALL_SECRETS)) fail('holds a sentinel');
-    const parsed: unknown = JSON.parse(text);
-    if (rel.startsWith(`synthetic${sep}fixture${sep}`)) {
-      if (!isRecord(parsed) || parsed.synthetic !== true) fail('synthetic file without "synthetic": true');
-      else if ('recordedAt' in parsed || 'contentSha256' in parsed)
-        fail('synthetic file with recording fields');
-    } else if (rel.startsWith(`recorded${sep}`)) {
-      try {
-        if (rel.split(sep).at(-1)?.startsWith('params-')) loadParamsAllowlist(f, recordedRoot);
-        else {
-          const rec = loadRecordedFixture(f, recordedRoot);
-          if (new URL(rec.request.url).hostname !== PROVIDER_HOST[rec.providerId])
-            fail(`request host is not ${rec.providerId}'s`);
-        }
-      } catch (e) {
-        fail(e instanceof Error ? e.message : String(e));
-      }
-    } else fail('outside synthetic/fixture and recorded');
-  }
-  return problems;
-}
+const scanFixtures = (root: string): string[] => verifyFixturesTree(root, ALL_SECRETS);
 
 describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)', () => {
   it('reports each planted fault in a temporary tree (positive control, test-008)', async () => {
@@ -135,7 +81,7 @@ describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)',
         (p) => p.includes('AAA-BBB.json') && p.endsWith('synthetic file without "synthetic": true'),
       ),
     ).toBe(true);
-    expect(problems.some((p) => p.includes('AAA-CCC.json') && p.endsWith('holds a sentinel'))).toBe(true);
+    expect(problems.some((p) => p.includes('AAA-CCC.json') && p.endsWith('holds a secret'))).toBe(true);
     expect(problems.some((p) => p.includes('notes.txt') && p.endsWith('not a JSON file'))).toBe(true);
     expect(
       problems.some(
@@ -144,6 +90,32 @@ describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)',
     ).toBe(true);
     expect(problems.some((p) => p.includes(relative(root, good)))).toBe(false);
     expect(problems.some((p) => p.includes('params-2026-10-14.json'))).toBe(false);
+  });
+
+  it('verifyRecordedTree and verifyRecordedFile check a recorded root on its own (WP4b record tool)', async () => {
+    const recordedRoot = join(mkdtempSync(join(tmpdir(), 'gmt-vr-')), 'fixtures', 'recorded');
+    mkdirSync(recordedRoot, { recursive: true });
+    const recorder = createRecorder({
+      root: recordedRoot,
+      secrets: ALL_SECRETS,
+      clock: fixedClock(asIsoDateTime('2026-10-14T15:00:00.000Z')),
+      recordedBy: 'verify-test',
+    });
+    const good = await recorder.record({
+      providerId: 'searchapi',
+      endpointPath: '/api/v1/search',
+      request: req({ url: `${SEARCH}?engine=google_flights` }),
+      status: 200,
+      body: { price: 1 },
+      fetchedAt: asIsoDateTime('2026-10-14T15:00:00.000Z'),
+    });
+    expect(verifyRecordedFile(good, recordedRoot, ALL_SECRETS)).toEqual([]);
+    expect(verifyRecordedTree(recordedRoot, ALL_SECRETS)).toEqual([]);
+    writeFileSync(good, readFileSync(good, 'utf8').replace('"price": 1', '"price": 2'));
+    expect(verifyRecordedFile(good, recordedRoot, ALL_SECRETS).join()).toMatch(/content hash mismatch/);
+    expect(verifyRecordedTree(recordedRoot, ALL_SECRETS)).toEqual([
+      expect.stringMatching(/^searchapi\/_api_v1_search\/.*: .*content hash mismatch/),
+    ]);
   });
 
   it('the committed fixtures tree is clean and the synthetic tree loads', () => {

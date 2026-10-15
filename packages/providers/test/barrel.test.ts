@@ -49,6 +49,9 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'hangUntilAborted',
       'respondAfter',
       'takeStrays',
+      'verifyRecordedTree',
+      'verifyRecordedFile',
+      'verifyFixturesTree',
     ])
       expect(typeof t[name], name).toBe('function');
     expect(typeof t.guardedServer, 'guardedServer').toBe('object');
