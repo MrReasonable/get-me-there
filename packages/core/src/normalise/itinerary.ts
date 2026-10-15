@@ -1,8 +1,9 @@
+import { daysBetween, fromEpochDay, toEpochDay } from '../dates/epochDay.js';
 import { NormalisationError } from '../errors.js';
 import type { RawOffer, RawSegment } from '../ports/provider.js';
 import { hasControlChars } from '../text/control.js';
 import { type CellKey, cellKeyString } from '../types/definition.js';
-import { type Iata, type IsoDate, isoDateTimeOfEpochMs } from '../types/ids.js';
+import { asIsoDate, type Iata, type IsoDate, isoDateTimeOfEpochMs } from '../types/ids.js';
 import type {
   Booking,
   Layover,
@@ -35,7 +36,6 @@ export type NormaliseResult =
   | { ok: false; error: NormalisationError };
 
 const MINUTE_MS = 60_000;
-const DAY_MS = 86_400_000;
 
 /** Longest POST booking body kept (review sec-002); longer or control-character bodies are dropped. */
 export const MAX_POST_DATA_LENGTH = 4096;
@@ -93,11 +93,11 @@ function normaliseSegment(raw: RawSegment, tzOf: (iata: Iata) => string): TimedS
 
 /** True when (arriveMs, departMs) overlaps 00:00–05:00 local on any date it touches. Spec §6.2. */
 function spansNight(arriveMs: number, departMs: number, tz: string): boolean {
-  const first = Date.parse(`${localMinute(arriveMs, tz).slice(0, 10)}T00:00:00.000Z`);
-  const last = Date.parse(`${localMinute(departMs, tz).slice(0, 10)}T00:00:00.000Z`);
-  for (let day = first; day <= last; day += DAY_MS) {
-    const d = new Date(day);
-    const parts = { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(), mi: 0, s: 0, ms: 0 };
+  const first = toEpochDay(asIsoDate(localMinute(arriveMs, tz).slice(0, 10)));
+  const last = toEpochDay(asIsoDate(localMinute(departMs, tz).slice(0, 10)));
+  for (let day = first; day <= last; day += 1) {
+    const [y = 0, mo = 0, d = 0] = fromEpochDay(day).split('-').map(Number);
+    const parts = { y, mo, d, mi: 0, s: 0, ms: 0 };
     const start = wallToInstant({ ...parts, h: 0 }, tz);
     const end = wallToInstant({ ...parts, h: 5 }, tz);
     if (arriveMs < end && departMs > start) return true;
@@ -215,9 +215,7 @@ export function normaliseOffer(raw: RawOffer, cell: CellKey, deps: NormaliseDeps
       destination: cell.destination,
       departureDate: cell.departureDate,
       returnDate: cell.returnDate,
-      // why: WP1's daysBetween is not importable while WP1 and WP2 build in parallel; WP13's
-      // integration review switches this to daysBetween(cell.departureDate, cell.returnDate).
-      nights: Math.round((Date.parse(cell.returnDate) - Date.parse(cell.departureDate)) / DAY_MS),
+      nights: daysBetween(cell.departureDate, cell.returnDate),
       outbound,
       inbound,
       outboundMinutes: directionMinutes(out),
