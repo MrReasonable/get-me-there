@@ -18,7 +18,7 @@ import {
   TRAVELPAYOUTS_PARAMS,
 } from '../../src/travelpayouts/params.js';
 import { MAX_PAGES } from '../../src/travelpayouts/provider.js';
-import { AVIASALES_BASE } from '../../src/travelpayouts/response.js';
+import { AVIASALES_BASE, returnAirportOf } from '../../src/travelpayouts/response.js';
 import { SENTINELS } from '../fakes.js';
 import { arr, obj, str } from '../support/guards.js';
 import { server } from '../support/msw.js';
@@ -127,13 +127,15 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     ).toEqual([]);
   });
 
-  // why: plan decision 34: the adapter queries by airport only, so the recorded metro (LON) tiles TP-01...14 are not
-  // replayed; they stay in the tree as the evidence for that rule (the documenting test below). The airport tiles
-  // TP-15...18 and the reverse tile TP-21 are what the adapter itself can request.
-  const airportTiles = [...tiles.entries()].filter(([key]) => !key.startsWith('LON|'));
-  it('the airport tiles TP-15...18 and the reverse tile TP-21 are recorded', () => {
+  // why: plan decision 34: the adapter queries by airport only, so the recorded metro (LON) tiles TP-01...14 and the
+  // reverse tile TP-21 (JFK → LON, a metro destination) are not replayed; they stay in the tree as evidence (the
+  // documenting test and the offset and month-bucketing checks below). The airport tiles TP-15...18 are what the
+  // adapter itself can request.
+  const airportTiles = [...tiles.entries()].filter(
+    ([key]) => !key.startsWith('LON|') && key.split('|')[1] !== 'LON',
+  );
+  it('the four airport tiles TP-15...18 are recorded', () => {
     expect(airportTiles.map(([key]) => key).sort()).toEqual([
-      'JFK|LON|2027-03',
       'LGW|EWR|2027-03',
       'LGW|JFK|2027-03',
       'LHR|EWR|2027-03',
@@ -153,6 +155,10 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       const q = monthQuery(asIata(origin), asIata(destination), month);
       const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
       expect(r.pointOfSale).toBe('unknown');
+      // a tile that priced nothing would pass every per-price check below, so the recorded rows must have become prices
+      expect(r.prices.length).toBeGreaterThan(0);
+      expect(r.prices.length).toBe(received);
+      expect(r.cellIssues).toBeUndefined();
       const covered = new Set(r.coveredCells.map(cellKeyString));
       for (const p of r.prices) {
         expect(p.origin).toBe(origin);
@@ -166,10 +172,22 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       expect(sumCounts(r.notes, (k) => k === 'rows-received')).toBe(received);
       const dropped = sumCounts(r.notes, (k) => k.startsWith('dropped-') || k === 'offers-dropped');
       expect(r.prices.length + dropped).toBe(received);
+      expect(sumCounts(r.notes, (k) => k === 'dropped-outside-tile')).toBe(0);
       expect(eventsOf(h, 'reserve')).toHaveLength(pages.length);
       expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
     },
   );
+
+  it('every airport-tile row is a closed round trip: its link returns to the queried origin airport (decision 35)', () => {
+    // If this fails after a re-record, stop and report: an airport query returned an open-jaw row, and attribution by
+    // origin_airport would price it against a round trip from the origin.
+    for (const [key, pages] of airportTiles)
+      for (const p of pages)
+        for (const r of rowsOf(p.fixture.body).map(obj)) {
+          expect(returnAirportOf(r.link), `${key} ${str(r.departure_at)}`).toBe(key.split('|')[0]);
+          expect(r.origin_airport).toBe(key.split('|')[0]);
+        }
+  });
 
   it('the first recorded LHR → JFK row becomes exactly its cell and amount (ts-006)', async () => {
     const airport = ok.find(
@@ -214,6 +232,17 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     expect(rowOf('LON|JFK|2027-03', 'LTN')).toHaveLength(1);
     expect(rowOf('LON|JFK|2027-03', 'LHR')).toHaveLength(0);
     expect(rowOf('LHR|JFK|2027-03', 'LHR')).toHaveLength(1);
+    // second reason for the rule: under a metro query a row's origin_airport names only the outbound airport, and the
+    // recorded metro tiles hold exactly these open-jaw rows (outbound airport -> airport the return lands at)
+    const openJaw = [...tiles.entries()]
+      .filter(([key]) => key.startsWith('LON|'))
+      .flatMap(([, pages]) => pages.flatMap((p) => rowsOf(p.fixture.body).map(obj)))
+      .filter((r) => returnAirportOf(r.link) !== r.origin_airport)
+      .map(
+        (r) => `${str(r.origin_airport)}>${str(r.destination_airport)} returns to ${returnAirportOf(r.link)}`,
+      )
+      .sort();
+    expect(openJaw).toEqual(['LGW>JFK returns to LHR', 'LHR>EWR returns to LCY', 'LHR>EWR returns to LGW']);
     // and the adapter, querying LHR, prices that cell
     replay();
     const d = discoveryOf(makeProvider(makeHarness()));
@@ -253,13 +282,43 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     expect(rows.some((r) => offsetOf(r.departure_at) !== offsetOf(r.return_at))).toBe(true);
   });
 
+  it('every Z time leaves an airport that is at +00:00 on that date, so Z is local time and not a true UTC reading of a far zone (decision 33)', () => {
+    // If this fails after a re-record, stop and report: a Z on a non-zero-offset leg would key an evening departure a day late.
+    const zoneOf: Record<string, string> = {
+      LHR: 'Europe/London',
+      LGW: 'Europe/London',
+      LTN: 'Europe/London',
+      LCY: 'Europe/London',
+      JFK: 'America/New_York',
+      EWR: 'America/New_York',
+    };
+    const offsetName = (zone: string, iso: string): string =>
+      new Intl.DateTimeFormat('en-GB', { timeZone: zone, timeZoneName: 'longOffset' })
+        .formatToParts(new Date(iso))
+        .find((part) => part.type === 'timeZoneName')?.value ?? '?';
+    let seen = 0;
+    for (const r of ok.flatMap((x) => rowsOf(x.fixture.body).map(obj))) {
+      // the outbound leaves origin_airport, the return leaves destination_airport
+      for (const [time, airport] of [
+        [str(r.departure_at), str(r.origin_airport)],
+        [str(r.return_at), str(r.destination_airport)],
+      ] as const) {
+        if (!time.endsWith('Z')) continue;
+        seen += 1;
+        expect(zoneOf[airport], airport).toBeDefined();
+        expect(offsetName(zoneOf[airport] ?? '', time), `${airport} ${time}`).toMatch(/^GMT(?:\+00:00)?$/);
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+
   it('recorded rows carry only the known keys: no found_at, expires_at or actual, nothing that supplies a constraint input (spec §5.2 suppliedFields)', () => {
     const keys = new Set(ok.flatMap((x) => rowsOf(x.fixture.body).flatMap((r) => Object.keys(obj(r)))));
     // If this fails, stop and report the new key: a human decides whether it supplies anything (TRAVELPAYOUTS_SUPPLIED_FIELDS).
     expect([...keys].filter((k) => !DOCUMENTED_ROW_KEYS.includes(k))).toEqual([]);
   });
 
-  it('a westward origin (TP-21, JFK → LON) keys every row in the tile month by local departure date (decision 31)', () => {
+  it('a westward origin (TP-21, JFK → LON: metro evidence, never requested by the adapter) keys every row in the tile month by local departure date (decision 31)', () => {
     // If this fails, stop and report: the vendor buckets departure_at=YYYY-MM by UTC date, so an evening departure on
     // a month's last day (or the first, east of UTC) lands in the neighbouring tile and its own cell reads no_data.
     const westward = [...tiles.entries()].filter(([key]) => key.startsWith('JFK|'));
@@ -306,27 +365,24 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       param(x.url, 'page') === '1'
     );
   });
-  // why: TP-19 is best-effort (WP4b); when the probed month held rows there is no empty recording, the test shows as
-  // skipped and the report says so, rather than passing without asserting anything.
-  it.skipIf(empty.length === 0)(
-    'a recorded empty envelope replays as a tile with no prices and no issues: every covered cell is left for no_data',
-    async () => {
-      replay();
-      for (const x of empty) {
-        // why: TP-19 was recorded with the metro code as origin; the pair origin is that code, so the replayed request is identical.
-        const q = monthQuery(
-          asIata(param(x.url, 'origin')),
-          asIata(param(x.url, 'destination')),
-          param(x.url, 'departure_at'),
-        );
-        const d = discoveryOf(makeProvider(makeHarness()));
-        const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
-        expect(r.prices).toEqual([]);
-        expect(r.cellIssues).toBeUndefined();
-        expect(r.notes).toEqual(['pages:1']);
-      }
-    },
-  );
+  it('a recorded empty envelope replays as a tile with no prices and no issues: every covered cell is left for no_data', async () => {
+    // TP-19 is required evidence: a re-record that lands on a month with rows must fail here, not skip.
+    expect(empty.length, 'WP4b recorded no empty tile (TP-19)').toBeGreaterThan(0);
+    replay();
+    for (const x of empty) {
+      // why: TP-19 was recorded with the metro code as origin; the pair origin is that code, so the replayed request is identical.
+      const q = monthQuery(
+        asIata(param(x.url, 'origin')),
+        asIata(param(x.url, 'destination')),
+        param(x.url, 'departure_at'),
+      );
+      const d = discoveryOf(makeProvider(makeHarness()));
+      const r = tileOf(await d.fetchTile(only(d.plan(q)), q, ctx()));
+      expect(r.prices).toEqual([]);
+      expect(r.cellIssues).toBeUndefined();
+      expect(r.notes).toEqual(['pages:1']);
+    }
+  });
 
   it('the recorded 401 (invalid token) replays as tile-error auth (spec §2 fact 5)', async () => {
     const unauthorised = recordings.find((x) => x.fixture.status === 401);

@@ -196,6 +196,20 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
       throw e;
     }
     const { notes } = attribution;
+    // why: an airport-code query returns rows for that airport only (decision 34). A row for another origin or
+    // destination means the request was not an airport pair (for example a metro code reached the adapter), and
+    // pricing nothing would read every covered cell as no_data, so the tile fails loudly instead (decision 35).
+    const foreign = notes.get('dropped-other-origin') + notes.get('dropped-other-destination');
+    if (foreign > 0) {
+      return tileError(
+        plan,
+        parseError(
+          'airport-mismatch',
+          `${foreign} row${foreign === 1 ? '' : 's'} named an airport other than ${tp.origin} to ${tp.destination}; Travelpayouts is queried by airport code only`,
+          WHERE,
+        ),
+      );
+    }
     notes.add('rows-received', read.rows.length);
     notes.add('pages', read.pages);
     const cellIssues: CellIssue[] = [...attribution.cellIssues];

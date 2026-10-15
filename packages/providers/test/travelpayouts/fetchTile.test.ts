@@ -321,7 +321,6 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
           envelope([
             row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
             row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-30', price: 350 }),
-            row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 300 }),
             row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-13', ret: '2027-03-24', price: 0 }),
           ]),
         ),
@@ -352,13 +351,7 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
     ]);
     expect(r.noFares).toEqual([]);
     expect(r.pointOfSale).toBe('unknown');
-    expect(r.notes).toEqual([
-      'dropped-other-origin:1',
-      'dropped-outside-band:1',
-      'offers-dropped:1',
-      'pages:1',
-      'rows-received:4',
-    ]);
+    expect(r.notes).toEqual(['dropped-outside-band:1', 'offers-dropped:1', 'pages:1', 'rows-received:3']);
   });
 
   it('a malformed row anywhere makes the tile a parse error: its cells cannot be told apart', async () => {
@@ -469,15 +462,21 @@ describe('estimate parity: every airport pair is its own request (plan decision 
     expect(eventsOf(h, 'reserve')).toHaveLength(3);
   });
 
-  it('each airport pair sends its own origin and receives only its own origin_airport rows', async () => {
+  it('each airport pair sends its own origin and prices only that airport', async () => {
     const sent: string[] = [];
     server.use(
       http.get(TP, ({ request }) => {
-        sent.push(new URL(request.url).searchParams.get('origin') ?? '?');
+        const origin = new URL(request.url).searchParams.get('origin') ?? '?';
+        sent.push(origin);
         return HttpResponse.json(
           envelope([
-            row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
-            row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 377 }),
+            row({
+              origin,
+              dest: 'JFK',
+              dep: '2027-03-12',
+              ret: '2027-03-23',
+              price: origin === 'LHR' ? 412 : 377,
+            }),
           ]),
         );
       }),
@@ -494,4 +493,34 @@ describe('estimate parity: every airport pair is its own request (plan decision 
     expect(eventsOf(h, 'fetch')).toHaveLength(2);
     expect(eventsOf(h, 'cache-hit')).toHaveLength(0);
   });
+
+  it.each<[string, { origin?: string; destination?: string }]>([
+    ['a metro code as the origin, answered with a different airport', { origin: 'LON' }],
+    ['a metro code as the destination, answered with a different airport', { destination: 'NYC' }],
+  ])(
+    'refuses %s loudly: a parse tile-error, never every covered cell read as no_data (decision 35)',
+    async (_label, over) => {
+      server.use(
+        http.get(TP, () =>
+          HttpResponse.json(
+            envelope([
+              row({ origin: 'LTN', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+              row({ origin: 'LHR', dest: 'EWR', dep: '2027-03-12', ret: '2027-03-23', price: 400 }),
+            ]),
+          ),
+        ),
+      );
+      const d = discoveryOf(makeProvider(makeHarness()));
+      const q = query({
+        ...(over.origin === undefined ? {} : { origin: asIata(over.origin) }),
+        ...(over.destination === undefined ? {} : { destination: asIata(over.destination) }),
+      });
+      expect(errorOf(await d.fetchTile(only(d.plan(q)), q, ctx()))).toMatchObject({
+        kind: 'parse',
+        reason: 'parse',
+        retryable: false,
+        message: expect.stringContaining('[airport-mismatch]'),
+      });
+    },
+  );
 });

@@ -164,6 +164,27 @@ export function searchedAt(link: unknown): IsoDateTime | null {
   return day.success ? isoDateTimeOfEpochMs(toEpochDay(day.data) * 86_400_000) : null;
 }
 
+/** One direction of the link's `t` itinerary: 26 digits (two epoch times and a duration), then its airport chain. */
+const LEG = /\d{26}((?:[A-Z]{3})+)/g;
+
+/**
+ * The airport the return flight lands at, read from the `t` token of the row's own link (plan decision 35): the token
+ * holds the outbound and the return direction, each as digits followed by its airport chain (`LHRFRAEWR`,
+ * `EWRFRALCY`), and the last code of the second chain is where the traveller ends up. Null when the link, the token or
+ * either direction is missing or not in that shape: the return then cannot be checked and nothing is guessed.
+ * why: a row's `origin_airport` names only the outbound airport, and the recordings show metro rows that return to a
+ * different airport (open-jaw); an airport query returned none, which the replay test pins. The token format is
+ * undocumented by the vendor.
+ */
+export function returnAirportOf(link: unknown): string | null {
+  if (typeof link !== 'string' || !link.startsWith('/')) return null;
+  const t = new URL(link, AVIASALES_BASE).searchParams.get('t');
+  if (t === null) return null;
+  const legs = [...(t.split('_')[0] ?? '').matchAll(LEG)].map((m) => m[1] ?? '');
+  if (legs.length !== 2) return null;
+  return (legs[1] ?? '').slice(-3);
+}
+
 type Row = z.infer<typeof rowSchema>;
 
 /**
@@ -220,7 +241,13 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   const covered = new Set(input.coveredCells.map(cellKeyString));
   const notes = new NoteCounter();
   const prices: RawCalendarPrice[] = [];
-  const dropped = new Map<string, { cell: CellKey; n: number }>();
+  // per covered cell: rows dropped for an unusable price, and rows dropped because they return to another airport
+  const dropped = new Map<string, { cell: CellKey; badPrice: number; openJaw: number }>();
+  const droppedFor = (key: string, cell: CellKey) => {
+    const d = dropped.get(key) ?? { cell, badPrice: 0, openJaw: 0 };
+    dropped.set(key, d);
+    return d;
+  };
   for (const [i, raw] of rows.entries()) {
     const r = rowSchema.safeParse(raw);
     // why: not parseVendor, because the detail names the row's index so the operator can find it in the response.
@@ -237,12 +264,18 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       notes.add('dropped-outside-tile');
       continue;
     }
+    // why: an airport query is a round trip from that airport (decision 35); a row returning elsewhere is not the
+    // cell's trip, so it is dropped and reported rather than priced.
+    const back = returnAirportOf(row.link);
+    if (back !== null && back !== input.origin) {
+      notes.add('offers-dropped');
+      droppedFor(key, cell).openJaw += 1;
+      continue;
+    }
     const amountMinor = typeof row.price === 'number' ? majorToMinor(row.price, input.currency.code) : null;
     if (amountMinor === null) {
       notes.add('offers-dropped');
-      const d = dropped.get(key);
-      if (d === undefined) dropped.set(key, { cell, n: 1 });
-      else d.n += 1;
+      droppedFor(key, cell).badPrice += 1;
       continue;
     }
     const price: RawCalendarPrice = { ...cell, amountMinor, currency: input.currency.code };
@@ -255,21 +288,26 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   }
   const { code, exponent } = input.currency;
   const rowsWord = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
-  const cellIssues = [...dropped.values()].map(
-    ({ cell, n }): CellIssue =>
-      exponent === null
-        ? {
-            cell,
-            reason: 'currency-unsupported',
-            offersDropped: n,
-            detail: `travelpayouts: ${rowsWord(n)} for this cell priced in ${code}, which has no known minor unit [currency-unsupported]`,
-          }
-        : {
-            cell,
-            reason: 'parse',
-            offersDropped: n,
-            detail: `travelpayouts: ${rowsWord(n)} for this cell had no usable ${code} price (not a positive amount with at most ${exponent} decimals) [bad-price]`,
-          },
-  );
+  const cellIssues = [...dropped.values()].map(({ cell, badPrice, openJaw }): CellIssue => {
+    const parts: string[] = [];
+    if (badPrice > 0) {
+      parts.push(
+        exponent === null
+          ? `${rowsWord(badPrice)} priced in ${code}, which has no known minor unit [currency-unsupported]`
+          : `${rowsWord(badPrice)} had no usable ${code} price (not a positive amount with at most ${exponent} decimals) [bad-price]`,
+      );
+    }
+    if (openJaw > 0) {
+      parts.push(
+        `${rowsWord(openJaw)} returned to an airport other than the pair's origin [return-airport-mismatch]`,
+      );
+    }
+    return {
+      cell,
+      reason: badPrice > 0 && exponent === null ? 'currency-unsupported' : 'parse',
+      offersDropped: badPrice + openJaw,
+      detail: `travelpayouts: ${parts.join('; ')}`,
+    };
+  });
   return { prices, cellIssues, notes };
 }

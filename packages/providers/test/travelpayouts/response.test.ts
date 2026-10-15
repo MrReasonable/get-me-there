@@ -5,6 +5,7 @@ import {
   cacheableBody,
   currencyOf,
   readEnvelope,
+  returnAirportOf,
   searchedAt,
   vendorLinkFor,
 } from '../../src/travelpayouts/response.js';
@@ -340,5 +341,78 @@ describe('searchedAt (the row age, decision 35)', () => {
     [42, null],
   ] as const)('%j → %j', (link, expected) => {
     expect(searchedAt(link)).toBe(expected);
+  });
+});
+
+/** A link whose t token is the vendor's real shape: carrier, then per direction 26 digits and an airport chain. */
+const linkOf = (out: string, back: string, carrier = 'UA'): string =>
+  `/search/X?t=${carrier}18146070001814617500000475${out}18158511001815894900000430${back}_1d1bd24f_58507&search_date=14102026`;
+
+describe('returnAirportOf (decision 35: the airport the return flight lands at, from the link t token)', () => {
+  it.each([
+    ['direct', linkOf('LHREWR', 'EWRLHR'), 'LHR'],
+    ['with connections', linkOf('LHRFRAEWR', 'EWRFRALCY'), 'LCY'],
+    ['a carrier code with a digit', linkOf('LGWKEFJFK', 'JFKKEFLGW', 'S7'), 'LGW'],
+    ['one direction only', '/search/X?t=UA18146070001814617500000475LHREWR_abc', null],
+    ['no t token', '/search/X?search_date=14102026', null],
+    ['a t token that is not the itinerary shape', '/search/X?t=1', null],
+    ['not a path', 'https://evil.example/x', null],
+    ['not a string', 42, null],
+  ] as const)('%s → %j', (_label, link, expected) => {
+    expect(returnAirportOf(link)).toBe(expected);
+  });
+});
+
+describe('closed round trips only (decision 35): a row returning to another airport is a per-cell issue', () => {
+  const closed = {
+    ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+    link: linkOf('LHRJFK', 'JFKLHR'),
+  };
+  const openJaw = {
+    ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-14', ret: '2027-03-25', price: 380 }),
+    link: linkOf('LHRJFK', 'JFKLGW'),
+  };
+
+  it('keeps a row that returns to the pair origin and drops one that returns elsewhere', () => {
+    const r = attributeRows([closed, openJaw], input);
+    expect(r.prices.map((p) => p.amountMinor)).toEqual([41200]);
+    expect(r.notes.list()).toEqual(['offers-dropped:1']);
+    expect(r.cellIssues).toEqual([
+      {
+        cell: expect.objectContaining({ departureDate: '2027-03-14', returnDate: '2027-03-25' }),
+        reason: 'parse',
+        offersDropped: 1,
+        detail: expect.stringContaining('[return-airport-mismatch]'),
+      },
+    ]);
+  });
+
+  it('reports an open-jaw row for a cell the tile also priced, so the engine records priced with offers-dropped', () => {
+    const sameCell = {
+      ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 380 }),
+      link: linkOf('LHRJFK', 'JFKLGW'),
+    };
+    const r = attributeRows([closed, sameCell], input);
+    expect(r.prices).toHaveLength(1);
+    expect(r.cellIssues).toHaveLength(1);
+    expect(r.cellIssues[0]).toMatchObject({ offersDropped: 1, reason: 'parse' });
+  });
+
+  it('merges bad-price and open-jaw rows of one cell into one issue with both tags', () => {
+    const bad = { ...openJaw, price: 0, link: linkOf('LHRJFK', 'JFKLHR') };
+    const r = attributeRows([openJaw, bad], input);
+    expect(r.cellIssues).toHaveLength(1);
+    expect(r.cellIssues[0]?.offersDropped).toBe(2);
+    expect(r.cellIssues[0]?.detail).toContain('[bad-price]');
+    expect(r.cellIssues[0]?.detail).toContain('[return-airport-mismatch]');
+  });
+
+  it('prices a row whose link has no readable itinerary: the return cannot be checked, and nothing is invented about it', () => {
+    const r = attributeRows(
+      [row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 })],
+      input,
+    );
+    expect(r.prices).toHaveLength(1);
+    expect(r.cellIssues).toEqual([]);
   });
 });
