@@ -22,7 +22,7 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 
 - `apps/api/src/wiring.ts`: `Ports`, `buildPorts`, `httpLimitsFor`, `providersFor` and `loadConfigFromEnv` as the plan's contract, plus `tolerantRealpath`, `InvalidConfigError` and `collectSecrets`. `httpLimitsFor` and `providersFor` cover only `fixture` (under `syntheticAllowed`, at `config.providers.fixture.costMicroGbp` through WP4's `fixtureHttpLimits`) and `fx`; WP5 and WP6 each add one line. Paths come from the packages that own them: `MIGRATIONS_DIR` and `AIRPORTS_DATA_DIR` from `@gmt/db`, `defaultFixtureRoot()` from `@gmt/providers/fixture`, `defaultRecordedRoot()` from `@gmt/providers` (one-line barrel export, Task 8).
 - `packages/db/src/appLock.ts`: `readOnlyLockState(dbPath, clock)`, exported from the `@gmt/db` barrel (Task 7, ruling on review item 4): the tool reads the lock before any backup or migration without opening SQLite itself; `@gmt/api` takes no SQLite dependency.
-- `apps/api/src/logger.ts`: `createLogger(config, opts?)`, pino to stdout (spec §14) with the spec §14 redact paths, WP4's `CREDENTIAL_HEADERS` in every casing at the top level and one level down, `err.config`, `smtp.pass`, and a line sink that replaces every configured secret value in any encoded form.
+- `apps/api/src/logger.ts`: `createLogger(config, opts?)`, pino to stdout (spec §14) with the spec §14 redact paths, WP4's `CREDENTIAL_HEADERS` in every casing at the top level and one level down, `err.config`, `smtp.pass`, and pino's `hooks.streamWrite` replacing every configured secret value in any encoded form, written through `pino.destination({ dest: fd, sync: true })` (plan decision 30).
 - `apps/api/src/bootstrap/tool.ts`: `runTool(name, argv, opts?): Promise<number>`, a `switch (name)` (no registry), in this order:
   1. parse the config once through `loadConfigFromEnv` (78 on a bad config); the only `process.env` read;
   2. refuse `config.nodeEnv === 'test'` (70);
@@ -391,9 +391,9 @@ The metro comes from the airports table, which the tool seeds after migration wh
 | Node CLI | 22.9+ | `--conditions=@gmt/source`, `--env-file-if-exists=<path>`, `--import <module>` (twice: the DNS-refusal preload, then `tsx`) | https://nodejs.org/api/cli.html (2026-10-14); plan Task 0.1: Node and tsx resolve workspace packages to `dist` unless started with the condition. Verified in the assembly with every package's `dist` empty |
 | `tsx` | 4.23.15 | `node --import tsx ./file.ts` | context7 `/privatenumber/tsx` (2026-10-14) |
 | `vitest` | 5.0.4 | `describe`, `it(name, fn, timeoutMs)`, `it.each`, `it.skipIf`, `expect`, `beforeAll`, `afterEach`, `afterAll`, `vi.stubGlobal`, `vi.unstubAllGlobals`, `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })` (heartbeat) and `{ toFake: ['setTimeout', 'clearTimeout'] }` (http-kit's retry backoff, limiter spacing and request timeout), `vi.advanceTimersByTime`, `vi.advanceTimersByTimeAsync`, `vi.useRealTimers`; `setupFiles` in `vitest.config.ts` | context7 `/vitest-dev/vitest` docs/api/vi.md (2026-10-14); run in the assembly |
-| `pino` | 10.4.0 | `pino({ level, redact: { paths, censor } }, stream)`; bracket paths `headers["x-access-token"]` and a leading wildcard `*.headers["X-Access-Token"]`; `logger.child(bindings)` | context7 `/pinojs/pino/v10.1.0` docs/redaction.md (2026-10-14); the logger tests exercise each path form |
+| `pino` | 10.4.0 | `pino({ level, redact: { paths, censor }, hooks: { streamWrite } }, destination)`, `pino.destination({ dest: fd, sync: true })` (docs/api.md: streamWrite rewrites the stringified line before any destination writes it); bracket paths `headers["x-access-token"]` and a leading wildcard `*.headers["X-Access-Token"]`; `logger.child(bindings)` | context7 `/pinojs/pino/v10.1.0` docs/redaction.md (2026-10-14); the logger tests exercise each path form |
 | `better-sqlite3` | 13.0.3 (already `@gmt/db`'s dependency; nothing new in `@gmt/api`) | in `readOnlyLockState` only: `new Database(path, { readonly: true, fileMustExist: true })`, `prepare(sql).get()`, `close()` | used the same way by WP3's `backupDatabase`. Measured in the assembly: a read-only connection reads the `-wal`, so a live app's uncheckpointed heartbeat is seen; on a cleanly closed WAL database it creates empty `-wal`/`-shm` sidecars and writes nothing (the test asserts the database file's digest and mtime are unchanged and the `-wal` is empty). URI `immutable=1` is not available (better-sqlite3 opens without URI support) and would hide the live app's WAL anyway |
-| `node:stream`, `node:fs` | Node 22+ | `new Writable({ write })`; `writeSync(fd, line)`; `readdirSync(dir, { withFileTypes: true, recursive: true })` with `Dirent.parentPath` | https://nodejs.org/api/fs.html (2026-10-14) |
+| `node:stream`, `node:fs` | Node 22+ | `new Writable({ write })` (test sinks only); `readdirSync(dir, { withFileTypes: true, recursive: true })` with `Dirent.parentPath` | https://nodejs.org/api/fs.html (2026-10-14) |
 | msw | — | **not used by apps/api.** Vendor stand-ins replace `globalThis.fetch` with `vi.stubGlobal` (http-kit calls the global `fetch` for every non-fixture host); while stubbed, the stand-in is itself the barrier (it throws for any other host). WP4's `installNetworkGuards` in the setup file covers every unstubbed test, and `test/support/guards.test.ts` proves it live through `takeStrays()` | plan decisions 7, 18, 20 |
 | internal | — | `@gmt/core`, `@gmt/db`, `@gmt/providers` as in section 4 | merged code |
 
@@ -403,7 +403,7 @@ The metro comes from the airports table, which the tool seeds after migration wh
 
 - `apps/api/src/wiring.ts`, `apps/api/src/logger.ts`, `apps/api/src/bootstrap/tool.ts`
 - `apps/api/src/tools/types.ts`, `recordRequests.ts`, `recordPlan.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `workedExample.ts`
-- `apps/api/test/support/setup.ts`, `noNetwork.mjs`, `guards.test.ts`
+- `apps/api/test/support/setup.ts`, `noNetwork.mjs`, `guards.test.ts`, `logToFd.ts`
 - `apps/api/test/helpers/env.ts`, `tmp.ts`, `vendors.ts`, `recording.ts`, `workedExampleTree.ts`
 - `apps/api/test/tools/recordedHash.test.ts`, `recordPlan.test.ts`, `record.test.ts`, `allowlist.test.ts`
 - `apps/api/test/wiring/loadConfig.test.ts`, `buildPorts.test.ts`; `apps/api/test/logger.test.ts`
@@ -1809,17 +1809,19 @@ git add apps/api && git commit -m "wp04b: buildPorts, httpLimitsFor and provider
 
 ### Task 4: Logger
 
-**Files:** create `apps/api/src/logger.ts`, `apps/api/test/logger.test.ts`.
+**Files:** create `apps/api/src/logger.ts`, `apps/api/test/logger.test.ts`, `apps/api/test/support/logToFd.ts`.
 
 **Interfaces:** consumes `Logger`, `Config['logLevel']`, `CREDENTIAL_HEADERS`, `scrubSecrets`, `createHttpKit`, `recordingLimits`. Produces `createLogger`, `SPEC_REDACT_PATHS`, `REDACT_PATHS`.
 
 - [ ] **Step 1: Write the failing test**
 
-The third and fourth tests drive the real pino logger through http-kit's own log calls at debug level (a 503 retried into a 200, a 400 and a 401) with sentinel credentials in the headers and sentinels echoed in vendor bodies (sec-001): once without the scrubbing sink, so only pino's redact paths and http-kit's own stripping stand, and once with it (r2-ts-003). Fake timers drive the retry backoff and the limiter spacing.
+The fifth and sixth tests spawn `test/support/logToFd.ts`, which logs once through the default destination and exits at once: the line arrives on the chosen fd, scrubbed. The last two tests drive the real pino logger through http-kit's own log calls at debug level (a 503 retried into a 200, a 400 and a 401) with sentinel credentials in the headers and sentinels echoed in vendor bodies (sec-001): once without the scrubbing sink, so only pino's redact paths and http-kit's own stripping stand, and once with it (r2-ts-003). Fake timers drive the retry backoff and the limiter spacing.
 
 ```ts
 // apps/api/test/logger.test.ts
+import { spawnSync } from 'node:child_process';
 import { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock, Secret } from '@gmt/core';
 import { MIGRATIONS_DIR } from '@gmt/db';
 import { createHttpKit, type HttpKitRequest } from '@gmt/providers';
@@ -1922,6 +1924,36 @@ describe('createLogger (spec §14 redact paths, sec-001, sec-002)', () => {
     expect(s.text()).not.toContain(SENTINEL_SA);
     expect(s.text()).toContain('[redacted]');
   });
+
+  it.each([1, 2] as const)(
+    'the default destination writes fd %i synchronously and scrubbed, so a process exiting at once keeps its last line (pino.destination sync, hooks.streamWrite)',
+    (fd) => {
+      const r = spawnSync(
+        process.execPath,
+        [
+          '--conditions=@gmt/source',
+          '--import',
+          'tsx',
+          fileURLToPath(new URL('./support/logToFd.ts', import.meta.url)),
+          String(fd),
+          SENTINEL_SA,
+        ],
+        {
+          cwd: fileURLToPath(new URL('../', import.meta.url)),
+          env: { PATH: process.env.PATH ?? '' },
+          encoding: 'utf8',
+          timeout: 30_000,
+        },
+      );
+      expect(r.status).toBe(3);
+      const [written, other] = fd === 1 ? [r.stdout, r.stderr] : [r.stderr, r.stdout];
+      expect(written).toContain('"msg":"failed with [redacted]"');
+      expect(written).toContain('"detail":"upstream echoed [redacted]"');
+      expect(`${written}${other}`).not.toContain(SENTINEL_SA);
+      expect(other).toBe('');
+    },
+    30_000,
+  );
 
   it.each([
     ["without the scrubbing sink: only pino redact and http-kit's own stripping stand", false],
@@ -2034,6 +2066,19 @@ describe('createLogger (spec §14 redact paths, sec-001, sec-002)', () => {
 });
 ```
 
+```ts
+// apps/api/test/support/logToFd.ts
+// Spawned by test/logger.test.ts: logs one line through the default destination to the given fd, then exits at once,
+// so the test sees whether the write was synchronous and scrubbed. Arguments: <fd 1|2> <secret>.
+import { Secret } from '@gmt/core';
+import { createLogger } from '../../src/logger.js';
+
+const [fdArg, secret = ''] = process.argv.slice(2);
+const log = createLogger({ logLevel: 'info' }, { fd: fdArg === '1' ? 1 : 2, secrets: [new Secret(secret)] });
+log.error({ detail: `upstream echoed ${secret}` }, `failed with ${secret}`);
+process.exit(3);
+```
+
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/logger.test.ts`
@@ -2049,8 +2094,6 @@ Expected: FAIL, `Error: Cannot find module '../src/logger.js' imported from …/
  * in http-kit before anything reaches a log line (§5.3). Every line is also scrubbed of the
  * configured secret values (all their encoded forms) before it reaches the destination.
  */
-import { writeSync } from 'node:fs';
-import { Writable } from 'node:stream';
 import type { Config, Logger, Secret } from '@gmt/core';
 import { CREDENTIAL_HEADERS, scrubSecrets } from '@gmt/providers';
 import pino, { type Logger as PinoLogger } from 'pino';
@@ -2104,35 +2147,27 @@ function wrap(p: PinoLogger): Logger {
   };
 }
 
-/** A line sink that replaces every configured secret value (in any encoded form) before writing. */
-function scrubbingStream(secrets: readonly Secret[], write: (line: string) => void): Writable {
-  return new Writable({
-    write(chunk, _enc, cb) {
-      write(scrubSecrets(String(chunk), secrets));
-      cb();
-    },
-  });
-}
-
 /**
  * JSON logs to stdout by default (spec §14). The tool bootstrap passes `fd: 2` so its human report on
- * stdout stays clean. why: writes are synchronous (writeSync), so a process that exits right after an
- * error keeps its last line.
+ * stdout stays clean. Every line is scrubbed of the configured secret values (all their encoded forms) by pino's
+ * `hooks.streamWrite`, before any destination sees it. why: `pino.destination({ dest: fd, sync: true })` (SonicBoom)
+ * writes synchronously, so a process that exits right after an error keeps its last line, and it handles partial
+ * writes and EAGAIN on a pipe, which a hand-rolled `writeSync` stream did not (arch I-2, sec minor 3). `destination`
+ * is the test seam.
  */
 export function createLogger(
   config: Pick<Config, 'logLevel'>,
   opts?: { destination?: NodeJS.WritableStream; fd?: 1 | 2; secrets?: readonly Secret[] },
 ): Logger {
-  const fd = opts?.fd ?? 1;
-  const destination = opts?.destination;
-  const write =
-    destination === undefined
-      ? (line: string) => void writeSync(fd, line)
-      : (line: string) => void destination.write(line);
+  const secrets = opts?.secrets ?? [];
   return wrap(
     pino(
-      { level: config.logLevel, redact: { paths: [...REDACT_PATHS], censor: '[redacted]' } },
-      scrubbingStream(opts?.secrets ?? [], write),
+      {
+        level: config.logLevel,
+        redact: { paths: [...REDACT_PATHS], censor: '[redacted]' },
+        hooks: { streamWrite: (line) => scrubSecrets(line, secrets) },
+      },
+      opts?.destination ?? pino.destination({ dest: opts?.fd ?? 1, sync: true }),
     ),
   );
 }
@@ -2141,7 +2176,7 @@ export function createLogger(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/logger.test.ts`
-Expected: 4 passed.
+Expected: 6 passed (the two fd cases spawn `test/support/logToFd.ts`, which logs through the default destination and exits at once).
 
 - [ ] **Step 5: Commit**
 

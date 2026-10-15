@@ -4,8 +4,6 @@
  * in http-kit before anything reaches a log line (§5.3). Every line is also scrubbed of the
  * configured secret values (all their encoded forms) before it reaches the destination.
  */
-import { writeSync } from 'node:fs';
-import { Writable } from 'node:stream';
 import type { Config, Logger, Secret } from '@gmt/core';
 import { CREDENTIAL_HEADERS, scrubSecrets } from '@gmt/providers';
 import pino, { type Logger as PinoLogger } from 'pino';
@@ -59,35 +57,27 @@ function wrap(p: PinoLogger): Logger {
   };
 }
 
-/** A line sink that replaces every configured secret value (in any encoded form) before writing. */
-function scrubbingStream(secrets: readonly Secret[], write: (line: string) => void): Writable {
-  return new Writable({
-    write(chunk, _enc, cb) {
-      write(scrubSecrets(String(chunk), secrets));
-      cb();
-    },
-  });
-}
-
 /**
  * JSON logs to stdout by default (spec §14). The tool bootstrap passes `fd: 2` so its human report on
- * stdout stays clean. why: writes are synchronous (writeSync), so a process that exits right after an
- * error keeps its last line.
+ * stdout stays clean. Every line is scrubbed of the configured secret values (all their encoded forms) by pino's
+ * `hooks.streamWrite`, before any destination sees it. why: `pino.destination({ dest: fd, sync: true })` (SonicBoom)
+ * writes synchronously, so a process that exits right after an error keeps its last line, and it handles partial
+ * writes and EAGAIN on a pipe, which a hand-rolled `writeSync` stream did not (arch I-2, sec minor 3). `destination`
+ * is the test seam.
  */
 export function createLogger(
   config: Pick<Config, 'logLevel'>,
   opts?: { destination?: NodeJS.WritableStream; fd?: 1 | 2; secrets?: readonly Secret[] },
 ): Logger {
-  const fd = opts?.fd ?? 1;
-  const destination = opts?.destination;
-  const write =
-    destination === undefined
-      ? (line: string) => void writeSync(fd, line)
-      : (line: string) => void destination.write(line);
+  const secrets = opts?.secrets ?? [];
   return wrap(
     pino(
-      { level: config.logLevel, redact: { paths: [...REDACT_PATHS], censor: '[redacted]' } },
-      scrubbingStream(opts?.secrets ?? [], write),
+      {
+        level: config.logLevel,
+        redact: { paths: [...REDACT_PATHS], censor: '[redacted]' },
+        hooks: { streamWrite: (line) => scrubSecrets(line, secrets) },
+      },
+      opts?.destination ?? pino.destination({ dest: opts?.fd ?? 1, sync: true }),
     ),
   );
 }

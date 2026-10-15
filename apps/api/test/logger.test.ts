@@ -1,4 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock, Secret } from '@gmt/core';
 import { MIGRATIONS_DIR } from '@gmt/db';
 import { createHttpKit, type HttpKitRequest } from '@gmt/providers';
@@ -101,6 +103,36 @@ describe('createLogger (spec §14 redact paths, sec-001, sec-002)', () => {
     expect(s.text()).not.toContain(SENTINEL_SA);
     expect(s.text()).toContain('[redacted]');
   });
+
+  it.each([1, 2] as const)(
+    'the default destination writes fd %i synchronously and scrubbed, so a process exiting at once keeps its last line (pino.destination sync, hooks.streamWrite)',
+    (fd) => {
+      const r = spawnSync(
+        process.execPath,
+        [
+          '--conditions=@gmt/source',
+          '--import',
+          'tsx',
+          fileURLToPath(new URL('./support/logToFd.ts', import.meta.url)),
+          String(fd),
+          SENTINEL_SA,
+        ],
+        {
+          cwd: fileURLToPath(new URL('../', import.meta.url)),
+          env: { PATH: process.env.PATH ?? '' },
+          encoding: 'utf8',
+          timeout: 30_000,
+        },
+      );
+      expect(r.status).toBe(3);
+      const [written, other] = fd === 1 ? [r.stdout, r.stderr] : [r.stderr, r.stdout];
+      expect(written).toContain('"msg":"failed with [redacted]"');
+      expect(written).toContain('"detail":"upstream echoed [redacted]"');
+      expect(`${written}${other}`).not.toContain(SENTINEL_SA);
+      expect(other).toBe('');
+    },
+    30_000,
+  );
 
   it.each([
     ["without the scrubbing sink: only pino redact and http-kit's own stripping stand", false],
