@@ -19,13 +19,18 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
     expect(TRAVELPAYOUTS_POINT_OF_SALE).toBe('unknown');
   });
 
-  it('the provenance note attributes the round trip and the 48 hours to the vendor, names no passenger count, and uses no banned word (spec §11)', () => {
-    expect(TRAVELPAYOUTS_INFO.provenanceNote).toContain(
-      "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration; rows carry no timestamp)",
+  it('the provenance note attributes the round trip and the 48 hours to the vendor, says the row age comes from the link and the 48 hours is the fallback, names no passenger count, and uses no banned word (spec §11)', () => {
+    const note = TRAVELPAYOUTS_INFO.provenanceNote;
+    expect(note).toContain(
+      "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration)",
     );
+    expect(note).toContain("A row's own search link carries the day it was searched");
+    expect(note).toContain('the 48 hours applies only to a row whose link has no search date');
+    expect(note).toContain('cabin not stated by the vendor, treated as economy');
+    expect(note).not.toContain('rows carry no timestamp');
     // ruling 4: the vendor states no passenger count, so the note states none
-    expect(TRAVELPAYOUTS_INFO.provenanceNote).not.toMatch(/adults?|passengers?/i);
-    expect(findBannedWords(TRAVELPAYOUTS_INFO.provenanceNote)).toEqual([]);
+    expect(note).not.toMatch(/adults?|passengers?/i);
+    expect(findBannedWords(note)).toEqual([]);
   });
 
   it.each([-1, 1.5, Number.NaN])('refuses cacheTtlSeconds %d', (ttl) => {

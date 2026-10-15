@@ -32,17 +32,18 @@ import { planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /**
  * Spec §2 Travelpayouts row: authorised-cached, 48 h. The vendor says prices_for_dates holds round-trip prices
- * (one_way=false) that Aviasales users found within the last 48 hours (docs/providers.md, help article 203956163);
- * rows carry no timestamp (spike fact 1), so the 48 hours is the vendor's declared horizon, never a measured age, and
- * the note attributes the whole description to the vendor. The vendor states no passenger count, so the note names
- * none (ruling 4); WP13's smoke row compares a recorded price with the vendor's own search page. The note avoids every
- * §11 banned word (tested).
+ * (one_way=false) that Aviasales users found within the last 48 hours (docs/providers.md, help article 203956163), so
+ * the note attributes that description to the vendor. Rows carry no `found_at`, but each row's own link carries the
+ * day it was searched and the recordings show rows 4 to 7 days old, so that day is the row's observation time
+ * (plan decision 35; searchedAt) and the 48 hours is only the fallback for a link without it. The vendor states no
+ * passenger count, so the note names none (ruling 4); WP13's smoke row compares a recorded price with the vendor's own
+ * search page. "Economy" is the spec's treatment, not a vendor statement. The note avoids every §11 banned word (tested).
  */
 export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
   sourceKind: 'authorised-cached',
   maxAgeHours: 48,
   provenanceNote:
-    "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration; rows carry no timestamp). From the authorised Travelpayouts Data API. Economy only; point of sale unknown; not a fare quote; constraints are not checked.",
+    "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration). A row's own search link carries the day it was searched, which is used as its observation time; the 48 hours applies only to a row whose link has no search date. From the authorised Travelpayouts Data API; cabin not stated by the vendor, treated as economy; point of sale unknown; not a fare quote; constraints are not checked.",
 };
 /**
  * Spec §5.2: from recorded fixtures only. A row names one airline, one flight number and transfer counts, which is

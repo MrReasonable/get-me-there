@@ -4,8 +4,8 @@ import {
   attributeRows,
   cacheableBody,
   currencyOf,
-  observedAt,
   readEnvelope,
+  searchedAt,
   vendorLinkFor,
 } from '../../src/travelpayouts/response.js';
 import { cellsOf } from '../../src/travelpayouts/tiles.js';
@@ -124,18 +124,26 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
     ]);
   });
 
-  it('never sets providerObservedAt when rows carry no found_at (spec §2 fact 1)', () => {
+  it('sets no providerObservedAt when the link carries no search_date: the 48-hour declaration is the fallback (decision 35)', () => {
     expect(a.prices.every((p) => !('providerObservedAt' in p))).toBe(true);
   });
 
-  it('uses a row found_at, when the vendor states one, as providerObservedAt (ruling 9)', () => {
+  it("sets providerObservedAt to the link's search_date day at 00:00 UTC (decision 35)", () => {
+    const found = {
+      ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+      link: '/search/LON1203JFK23031?t=X_abc&search_date=11102026&expected_price=412',
+    };
+    expect(attributeRows([found], input).prices.map((p) => p.providerObservedAt)).toEqual([
+      '2026-10-11T00:00:00.000Z',
+    ]);
+  });
+
+  it('ignores a found_at field: no recording carries one, so its format is unknown (provider review M-5)', () => {
     const found = {
       ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
       found_at: '2026-10-13T09:30:00+03:00',
     };
-    expect(attributeRows([found], input).prices.map((p) => p.providerObservedAt)).toEqual([
-      '2026-10-13T06:30:00.000Z',
-    ]);
+    expect(attributeRows([found], input).prices.every((p) => !('providerObservedAt' in p))).toBe(true);
   });
 
   it('throws malformed-row when a row cannot be placed at all (no cell can be told apart)', () => {
@@ -318,15 +326,19 @@ describe('vendorLinkFor (spec §5.2 vendor links: LINK_ALLOWLIST.travelpayouts)'
   );
 });
 
-describe('observedAt', () => {
+describe('searchedAt (the row age, decision 35)', () => {
   it.each([
-    ['2026-10-13T09:30:00Z', '2026-10-13T09:30:00.000Z'],
-    ['2026-10-13T09:30:00+03:00', '2026-10-13T06:30:00.000Z'],
-    ['2026-10-13', null],
-    ['2026-10-13T09:30:00', null],
-    [1_760_000_000, null],
+    ['/search/X?search_date=14102026', '2026-10-14T00:00:00.000Z'],
+    ['/search/X?t=A_b&search_date=01012027&z=1', '2027-01-01T00:00:00.000Z'],
+    ['/search/X?search_date=29022028', '2028-02-29T00:00:00.000Z'],
+    ['/search/X?search_date=29022027', null],
+    ['/search/X?search_date=2026-10-14', null],
+    ['/search/X?search_date=', null],
+    ['/search/X', null],
+    ['not a path', null],
     [undefined, null],
-  ] as const)('%j → %j', (raw, expected) => {
-    expect(observedAt(raw)).toBe(expected);
+    [42, null],
+  ] as const)('%j → %j', (link, expected) => {
+    expect(searchedAt(link)).toBe(expected);
   });
 });

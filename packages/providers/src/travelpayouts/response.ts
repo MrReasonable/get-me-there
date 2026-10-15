@@ -17,6 +17,7 @@ import {
   LINK_ALLOWLIST,
   MINOR_EXPONENT,
   type RawCalendarPrice,
+  toEpochDay,
   validateVendorUrl,
 } from '@gmt/core';
 import { z } from 'zod';
@@ -116,7 +117,7 @@ const localDateSchema = z
 
 /**
  * One row. The attribution fields are required and checked (an unreadable one makes the whole response `parse`,
- * because the row cannot be placed in or out of any cell); `price`, `link` and `found_at` are read leniently and
+ * because the row cannot be placed in or out of any cell); `price` and `link` are read leniently and
  * judged per row. Other fields (airline, flight_number, transfers, duration, and the undocumented `gate` selling
  * agency, `duration_to`, `duration_back`) are not used: unknown keys are allowed on a row (plan decision 33).
  */
@@ -127,7 +128,6 @@ const rowSchema = z.object({
   return_at: localDateSchema.nullish(),
   price: z.unknown(),
   link: z.unknown().optional(),
-  found_at: z.unknown().optional(),
 });
 
 /** The Aviasales site the vendor's relative `link` is relative to (docs/providers.md). */
@@ -145,21 +145,23 @@ export function vendorLinkFor(link: unknown): string | null {
   return booking.kind === 'get' ? booking.url : null;
 }
 
-/**
- * An instant with an explicit zone, the only form a vendor observation time is taken in.
- * why: with the zone in the string, Date.parse is exact; core's toIsoDateTime needs a time kind and an airport zone.
- */
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+/** `search_date=DDMMYYYY` in a vendor link's query. */
+const SEARCH_DATE = /^(\d{2})(\d{2})(\d{4})$/;
 
 /**
- * Spec §2 and §3: `providerObservedAt` only when the vendor states when the price was found. Spike fact 1 says
- * prices_for_dates rows carry no `found_at`; if a row ever does, its instant is used, else nothing is set (the
- * declared 48-hour horizon applies). An unreadable value is ignored, never guessed.
+ * Spec §3 row age (plan decision 35): the day the vendor says the price was found, from `search_date=DDMMYYYY` in the
+ * row's own link, as that day at 00:00 UTC (never younger than the evidence). Every recorded link carries it and the
+ * recorded rows were 4 to 7 days old at fetch time, so the 48-hour declaration is only the fallback for a link without
+ * it. Null when the link is absent, unreadable, has no search date or an impossible calendar date; nothing is guessed.
+ * why: the field is undocumented by the vendor, so the replay test pins it on the recordings.
  */
-export function observedAt(foundAt: unknown): IsoDateTime | null {
-  if (typeof foundAt !== 'string' || !INSTANT.test(foundAt)) return null;
-  const ms = Date.parse(foundAt);
-  return Number.isNaN(ms) ? null : isoDateTimeOfEpochMs(ms);
+export function searchedAt(link: unknown): IsoDateTime | null {
+  if (typeof link !== 'string' || !link.startsWith('/')) return null;
+  const m = SEARCH_DATE.exec(new URL(link, AVIASALES_BASE).searchParams.get('search_date') ?? '');
+  if (m === null) return null;
+  const [, dd = '', mm = '', yyyy = ''] = m;
+  const day = isoDateSchema.safeParse(`${yyyy}-${mm}-${dd}`);
+  return day.success ? isoDateTimeOfEpochMs(toEpochDay(day.data) * 86_400_000) : null;
 }
 
 type Row = z.infer<typeof rowSchema>;
@@ -244,7 +246,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       continue;
     }
     const price: RawCalendarPrice = { ...cell, amountMinor, currency: input.currency.code };
-    const seen = observedAt(row.found_at);
+    const seen = searchedAt(row.link);
     if (seen !== null) price.providerObservedAt = seen;
     const link = vendorLinkFor(row.link);
     if (link !== null) price.vendorLink = link;

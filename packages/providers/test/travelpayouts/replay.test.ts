@@ -40,6 +40,11 @@ const ok = recordings.filter((x) => x.fixture.status === 200);
 /** The data rows of a recorded body, narrowed without a cast (test/support/guards.ts). */
 const rowsOf = (body: unknown): unknown[] => arr(obj(body).data);
 const param = (u: URL, name: string): string => str(u.searchParams.get(name));
+/** A recorded link's `search_date=DDMMYYYY` as the ISO instant the adapter must report (decision 35), read independently of the adapter. */
+const searchDay = (link: unknown): string => {
+  const d = str(new URL(str(link), AVIASALES_BASE).searchParams.get('search_date'));
+  return `${d.slice(4)}-${d.slice(2, 4)}-${d.slice(0, 2)}T00:00:00.000Z`;
+};
 
 /** Recorded 200 pages grouped into tiles by (origin, destination, departure month), pages in order from 1. */
 const tiles = new Map<string, typeof ok>();
@@ -154,7 +159,8 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
         expect(covered.has(cellKeyString(p))).toBe(true);
         expect(p.currency).toBe('GBP');
         expect(Number.isSafeInteger(p.amountMinor) && p.amountMinor > 0).toBe(true);
-        expect('providerObservedAt' in p).toBe(false);
+        // decision 35: every recorded link carries its search day, so every price has an observation time
+        expect(p.providerObservedAt).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/);
         if (p.vendorLink !== undefined) expect(new URL(p.vendorLink).hostname).toBe('www.aviasales.com');
       }
       expect(sumCounts(r.notes, (k) => k === 'rows-received')).toBe(received);
@@ -187,6 +193,7 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
       amountMinor: price,
       currency: 'GBP',
       vendorLink: `${AVIASALES_BASE}${str(first.link)}`,
+      providerObservedAt: searchDay(first.link),
     });
   });
 
@@ -215,6 +222,21 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     expect(
       r.prices.filter((p) => p.departureDate === '2027-03-29' && p.returnDate === '2027-04-10'),
     ).toHaveLength(1);
+  });
+
+  it('every recorded link carries a search_date, and the recorded rows were found 4 to 7 days before they were fetched, so the 48-hour declaration cannot be the row age (decision 35)', () => {
+    const ages: number[] = [];
+    for (const x of ok)
+      for (const r of rowsOf(x.fixture.body)) {
+        const searched = Date.parse(searchDay(obj(r).link));
+        expect(Number.isNaN(searched)).toBe(false);
+        ages.push((Date.parse(x.fixture.recordedAt) - searched) / 86_400_000);
+      }
+    expect(ages.length).toBeGreaterThan(0);
+    // if this fails after a re-record, the declared horizon and this note's wording need a human decision
+    expect(Math.min(...ages)).toBeGreaterThan(0);
+    expect(Math.max(...ages)).toBeLessThan(8);
+    expect(ages.some((age) => age > 2)).toBe(true);
   });
 
   it('every vendor time carries an explicit offset (Z is +00:00), and the recordings show two different offsets (pie-wp06-001)', () => {
