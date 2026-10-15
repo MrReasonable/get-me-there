@@ -59,9 +59,12 @@ export function option(
 ) {
   return { flights, ...(price === undefined ? {} : { price }), ...token };
 }
+// why: WP4b's recorded step 1 and step 2 bodies carry their options under `other_flights` only (no `best_flights`,
+// 2026-10-15 recordings), so the builder uses the recorded key and the drift guard holds; tests that need the
+// documented `best_flights` key write it out explicitly.
 export const flightsBody = (options: unknown[], extra: object = {}) => ({
   ...ECHO,
-  best_flights: options,
+  other_flights: options,
   ...extra,
 });
 export const bookingBody = (options: unknown[]) => ({ ...ECHO, booking_options: options });
