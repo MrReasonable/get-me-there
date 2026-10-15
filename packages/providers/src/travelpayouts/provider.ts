@@ -8,10 +8,13 @@
 import {
   type Cabin,
   type CapabilityInfo,
+  type CellIssue,
   type Clock,
+  cellKeyString,
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type FlightProvider,
+  type IsoDateTime,
   type Logger,
   type ProviderContext,
   ProviderError,
@@ -19,11 +22,12 @@ import {
   type SuppliedField,
   type TilePlan,
 } from '@gmt/core';
+import { canonicalJson } from '../http/recorder.js';
 import type { HttpKit } from '../http/types.js';
 import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.js';
-import { NoteCounter } from '../shared/notes.js';
-import { FIXED_PARAMS, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
-import { cacheableBody, readEnvelope } from './response.js';
+import { parseError } from '../shared/errors.js';
+import { FIXED_PARAMS, PAGE_LIMIT, PRICES_FOR_DATES_PATH, TRAVELPAYOUTS_HOST } from './params.js';
+import { attributeRows, cacheableBody, type ResponseCurrency, readEnvelope, WHERE } from './response.js';
 import { type MetroLookup, planMonthTiles, type TileParams, tileParams } from './tiles.js';
 
 /**
@@ -49,6 +53,16 @@ export const TRAVELPAYOUTS_SUPPLIED_FIELDS: readonly SuppliedField[] = ['price']
 export const TRAVELPAYOUTS_CABINS: readonly Cabin[] = ['economy'];
 /** Spec §2: market is ignored, so every tile's point of sale is unknown. */
 export const TRAVELPAYOUTS_POINT_OF_SALE = 'unknown' as const;
+/**
+ * Most pages read for one tile. why: a loop guard. 3 pages (3000 rows) is the cap WP4b's recorder uses (plan decision
+ * 26), so every page the adapter can ask for is one a recording can hold, and it bounds the free calls a vendor that
+ * ignores `page` could cost (each page is a ledger row). No worked-example month has been measured yet; Task 6.9 stops
+ * if a recorded tile reached the cap. A tile that reaches it is marked `truncated` (its priced cells hold the cheapest
+ * of the rows read) and reports an `upstream` issue for each covered cell it did not price (spec §3: an unsearched
+ * cell never reads as searched).
+ */
+export const MAX_PAGES = 3;
+
 /** The plan's constructor options, field for field. */
 export interface TravelpayoutsProviderOptions {
   http: HttpKit;
@@ -77,20 +91,32 @@ export function buildRequestUrl(tp: TileParams, page: number): URL {
   return url;
 }
 
-/** Spec §5.1 FlightProvider for Travelpayouts. First cut: one page, rows counted but not yet attributed (Task 6.5). */
+const older = (a: IsoDateTime | undefined, b: IsoDateTime): IsoDateTime => (a === undefined || b < a ? b : a);
+
+/** Spec §5.1 FlightProvider for Travelpayouts: discovery capability only, no verification. */
 export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): FlightProvider {
   const log = opts.log.child({ providerId: 'travelpayouts' });
 
-  async function fetchTile(
-    plan: TilePlan,
-    q: DiscoveryQuery,
-    ctx: ProviderContext,
-  ): Promise<DiscoveryTileResult> {
-    const tp = tileParams(plan, q, opts.airports);
-    const url = buildRequestUrl(tp, 1);
-    // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
-    assertRequestAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url);
-    try {
+  function tileError(plan: TilePlan, error: ProviderError): DiscoveryTileResult {
+    log.warn(
+      { tileIndex: plan.index, kind: error.kind, message: error.message },
+      'travelpayouts tile failed',
+    );
+    return { kind: 'tile-error', index: plan.index, coveredCells: plan.coveredCells, error };
+  }
+
+  /** Every page of one tile, in order; throws ProviderError (classified or parse), BudgetExceeded or AbortedError. */
+  async function readPages(plan: TilePlan, tp: TileParams, ctx: ProviderContext) {
+    const rows: unknown[] = [];
+    let currency: ResponseCurrency | undefined;
+    let fetchedAt: IsoDateTime | undefined;
+    let previous: string | undefined;
+    let pages = 0;
+    let truncated = false;
+    for (let page = 1; ; page += 1) {
+      const url = buildRequestUrl(tp, page);
+      // why: fail closed before anything leaves the process (spec §5.2 allowlist of names and values).
+      assertRequestAllowed(opts.paramsAllowlist, PRICES_FOR_DATES_PATH, url);
       const res = await opts.http.request({
         providerId: 'travelpayouts',
         executionId: ctx.executionId,
@@ -102,29 +128,107 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
         cache: { ttlSeconds: opts.cacheTtlSeconds, accept: cacheableBody },
         signal: ctx.signal,
         recordFixtures: ctx.recordFixtures,
+        // why: the ledger's unit is the tile (plan decision 24); only the first page of a cached tile leaves a row.
+        ledgerCacheHit: page === 1,
       });
+      pages += 1;
+      // why: spec §2, fetchedAt of a multi-call result is the oldest call; ISO strings order lexically.
+      fetchedAt = older(fetchedAt, res.fetchedAt);
       const env = readEnvelope(res.body);
-      const notes = new NoteCounter();
-      notes.add('rows-received', env.rows.length);
-      notes.add('pages', 1);
-      return {
-        kind: 'tile',
-        index: plan.index,
-        coveredCells: plan.coveredCells,
-        fetchedAt: res.fetchedAt,
-        pointOfSale: TRAVELPAYOUTS_POINT_OF_SALE,
-        prices: [],
-        noFares: [],
-        notes: notes.list(),
-      };
-    } catch (e) {
-      // why: BudgetExceeded and AbortedError belong to the engine (spec §8.1); only ProviderError becomes a tile-error.
-      if (e instanceof ProviderError) {
-        log.warn({ tileIndex: plan.index, kind: e.kind, message: e.message }, 'travelpayouts tile failed');
-        return { kind: 'tile-error', index: plan.index, coveredCells: plan.coveredCells, error: e };
+      // why: every page states its own currency (spec §2), so no page's amounts take another page's currency.
+      if (currency !== undefined && env.currency.code !== currency.code) {
+        throw parseError(
+          'currency-changed-between-pages',
+          `page ${page} is in ${env.currency.code}, page 1 in ${currency.code}`,
+          WHERE,
+        );
       }
+      currency = env.currency;
+      rows.push(...env.rows);
+      if (env.rows.length < PAGE_LIMIT) break;
+      // why: a vendor that ignores `page` returns the same full page forever; stop at the second copy (cost-wp06-004).
+      const fingerprint = canonicalJson(env.rows);
+      if (fingerprint === previous)
+        throw parseError('page-repeated', `page ${page} repeats page ${page - 1}`, WHERE);
+      previous = fingerprint;
+      if (page === MAX_PAGES) {
+        truncated = true;
+        break;
+      }
+    }
+    // why: unreachable; the loop runs at least once and sets both (kept for the type checker).
+    if (currency === undefined || fetchedAt === undefined) throw new Error('travelpayouts: no page was read');
+    return { rows, currency, fetchedAt, pages, truncated };
+  }
+
+  /**
+   * Spec §5.2: one tile, all of its pages (limit=1000, page=1..n until a short page, at most MAX_PAGES), each sent
+   * through http-kit under the tile's index. Spec §8.1: a ProviderError on any page makes the whole tile a
+   * tile-error (no partial prices); BudgetExceeded and AbortedError propagate to the engine.
+   */
+  async function fetchTile(
+    plan: TilePlan,
+    q: DiscoveryQuery,
+    ctx: ProviderContext,
+  ): Promise<DiscoveryTileResult> {
+    const tp = tileParams(plan, q, opts.airports);
+    let read: Awaited<ReturnType<typeof readPages>>;
+    let attribution: ReturnType<typeof attributeRows>;
+    try {
+      read = await readPages(plan, tp, ctx);
+      attribution = attributeRows(read.rows, {
+        coveredCells: plan.coveredCells,
+        origin: tp.pairOrigin,
+        destination: tp.destination,
+        minNights: q.minNights,
+        maxNights: q.maxNights,
+        currency: read.currency,
+      });
+    } catch (e) {
+      // why: only classified vendor failures become a tile-error; no adapter-level retry (spec §5.2).
+      if (e instanceof ProviderError) return tileError(plan, e);
       throw e;
     }
+    const { notes } = attribution;
+    notes.add('rows-received', read.rows.length);
+    notes.add('pages', read.pages);
+    const cellIssues: CellIssue[] = [...attribution.cellIssues];
+    if (read.truncated) {
+      // why: spec §3, rows on unread pages may price any cell still without one, so each such cell is an error
+      // (reason upstream), never no_data; cells already priced or already reported keep their result (ruling 10).
+      notes.add('pages-truncated', MAX_PAGES);
+      const done = new Set([
+        ...attribution.prices.map(cellKeyString),
+        ...cellIssues.map((i) => cellKeyString(i.cell)),
+      ]);
+      for (const cell of plan.coveredCells) {
+        if (done.has(cellKeyString(cell))) continue;
+        cellIssues.push({
+          cell,
+          reason: 'upstream',
+          offersDropped: 0,
+          detail: `pagination truncated at ${MAX_PAGES} pages`,
+        });
+      }
+    }
+    log.debug(
+      { tileIndex: plan.index, prices: attribution.prices.length, notes: notes.list() },
+      'travelpayouts tile read',
+    );
+    return {
+      kind: 'tile',
+      index: plan.index,
+      coveredCells: plan.coveredCells,
+      fetchedAt: read.fetchedAt,
+      pointOfSale: TRAVELPAYOUTS_POINT_OF_SALE,
+      prices: attribution.prices,
+      // why: a cache never proves "no fares", so noFares is always empty (spec §5.2 authorised-cached).
+      noFares: [],
+      notes: notes.list(),
+      ...(cellIssues.length > 0 ? { cellIssues } : {}),
+      // why: prices on a capped tile are the cheapest of the rows read; WP7 labels them so (ruling 5).
+      ...(read.truncated ? { truncated: true } : {}),
+    };
   }
 
   return {
