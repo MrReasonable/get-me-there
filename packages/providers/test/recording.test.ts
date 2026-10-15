@@ -4,9 +4,15 @@ import * as recording from '../src/recording/index.js';
 
 describe('@gmt/providers/recording (plan decision 32: what the record tool shares instead of copying)', () => {
   it('exports exactly the shared money conversion, the page size and the adapter URL builder', () => {
-    expect(Object.keys(recording).sort()).toEqual(['PAGE_LIMIT', 'buildRequestUrl', 'majorToMinor']);
+    expect(Object.keys(recording).sort()).toEqual([
+      'MAX_PAGES',
+      'PAGE_LIMIT',
+      'buildRequestUrl',
+      'majorToMinor',
+    ]);
     expect(recording.majorToMinor(412.55, 'GBP')).toBe(41255);
     expect(recording.PAGE_LIMIT).toBe(1000);
+    expect(recording.MAX_PAGES).toBe(3);
   });
 
   it('builds the same URL the adapter sends', () => {

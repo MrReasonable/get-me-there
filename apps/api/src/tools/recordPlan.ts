@@ -13,6 +13,7 @@ import {
   isoMonthSchema,
   monthOf,
 } from '@gmt/core';
+import { MAX_PAGES } from '@gmt/providers/recording';
 import type { CellDates, Rect } from './recordRequests.js';
 
 export type { CellDates, Rect } from './recordRequests.js';
@@ -45,7 +46,7 @@ export const OVER_LIMIT_RET_DAYS = 24;
  * Pages fetched at most per Travelpayouts tile (cost-wp4b-r2-002): a vendor that ignored `page` and always answered
  * 1000 rows would otherwise page until the per-run cap. 3 covers the spike's busiest gateway month several times over.
  */
-export const TP_MAX_PAGES_PER_TILE = 3;
+export const TP_MAX_PAGES_PER_TILE = MAX_PAGES;
 
 /** Plan contract (Wiring and bootstraps), without `metro`: the metro comes from the seeded airports table (decision 20). */
 export interface RecordArgs {
