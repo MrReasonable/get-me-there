@@ -17,6 +17,7 @@ import {
 import type { Db } from '../client.js';
 import { readSnapshot } from '../internal/definitionRow.js';
 import {
+  NO_DATA_REASONS,
   OUTCOME_STATUSES,
   PROVIDER_IDS,
   SELECTION_REASONS,
@@ -344,6 +345,10 @@ export class CellsRepo {
   /** Spec §8.1 cabin-not-offered: the provider is not called; its not_run outcomes become no_data with the reason. */
   markNoData(executionId: string, stage: Stage, providerId: ProviderId, reason: NoDataReason): number {
     assertProviderAllowed(providerId, this.opts.allowSynthetic);
+    // why: the one terminal write without assertOutcomeReason; an untyped caller's other reason would otherwise surface
+    // as a raw provenance CHECK failure instead of a named refusal (prov-M4).
+    if (!NO_DATA_REASONS.some((r) => r === reason))
+      throw new RowRejected('outcome-reason', `markNoData takes a NoDataReason, got ${String(reason)}`);
     return this.db.transaction(() => {
       const changes = this.db.raw
         .prepare(

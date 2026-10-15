@@ -5,6 +5,7 @@ import type {
   CellOutcomeStatus,
   ErrorReason,
   ExecutionStatus,
+  NoDataReason,
   OperatorMessageKind,
   ProviderId,
   ResultBasis,
@@ -89,6 +90,8 @@ export const ERROR_REASONS = [
   'unmappable-carrier',
   'bad-local-time',
 ] as const satisfies readonly ErrorReason[];
+/** Spec §3: the reasons a no_data outcome written without a fetch may carry (markNoData). */
+export const NO_DATA_REASONS = ['cabin-not-offered'] as const satisfies readonly NoDataReason[];
 /** The outcome statuses only a write that carries data may set (ruling 4). */
 export const TERMINAL_STATUSES = [
   'priced',
