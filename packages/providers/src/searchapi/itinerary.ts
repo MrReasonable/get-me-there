@@ -5,7 +5,6 @@ import {
   type IsoDateTime,
   type ItineraryQuery,
   type ItinerarySearchResult,
-  isoDateSchema,
   type Logger,
   type ProviderContext,
   ProviderError,
@@ -15,22 +14,13 @@ import {
 } from '@gmt/core';
 import type { HttpKit, HttpKitResponse } from '../http/types.js';
 import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.js';
-import { parseError, parseVendor } from '../shared/errors.js';
+import { parseError } from '../shared/errors.js';
 import { majorToMinor } from '../shared/money.js';
 import { NoteCounter } from '../shared/notes.js';
 import { bookingOffers, statedAirline, step3NamesAirline, toRawSegments } from './offers.js';
 import { authHeaders, flightsParams, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_WHERE, toUrl } from './params.js';
-import {
-  bookingResponseSchema,
-  currencySupported,
-  flightsResponseSchema,
-  historyPointSchema,
-  minorOrDrop,
-  readEcho,
-  type VendorOption,
-} from './shapes.js';
-
-type RouteHistory = NonNullable<ItinerarySearchResult['routeHistory']>;
+import { currencySupported, minorOrDrop, type VendorOption } from './shapes.js';
+import { parseBooking, parseFlights, toRouteHistory } from './steps.js';
 
 /** What `search` needs; built once by `searchApiProvider`. */
 export interface ItineraryDeps {
@@ -81,6 +71,20 @@ function isExpansionFailure(err: unknown): err is ProviderError {
   );
 }
 
+/**
+ * The chain's `currency-unsupported` error (spec §3: a normalisation reason, never `parse`; plan decision 29):
+ * non-retryable `upstream`, the message naming the step.
+ */
+function currencyUnsupported(message: string): ProviderError {
+  return new ProviderError({
+    kind: 'upstream',
+    reason: 'currency-unsupported',
+    retryable: false,
+    providerId: 'searchapi',
+    message,
+  });
+}
+
 /** A refused reservation or an operator cancel: the chain stops (plan decisions 24 and 25). */
 function isChainStop(err: unknown): err is BudgetExceeded | AbortedError {
   return err instanceof BudgetExceeded || err instanceof AbortedError;
@@ -107,69 +111,6 @@ async function send(
     signal: ctx.signal,
     recordFixtures: ctx.recordFixtures,
   });
-}
-
-/**
- * Steps 1 and 2 (`step` names which in the message). A body with neither `best_flights` nor `other_flights` is a parse error, never "no options": an
- * unread key must not become positive evidence of no fares (spec §3 `empty`).
- */
-function parseFlights(body: unknown, gl: string, step: string) {
-  const data = parseVendor(flightsResponseSchema, body, 'malformed-flights', SEARCHAPI_WHERE);
-  const echo = readEcho(data.search_parameters, gl);
-  if (data.best_flights === undefined && data.other_flights === undefined)
-    throw parseError(
-      'no-options-key',
-      `${step}: neither best_flights nor other_flights is present`,
-      SEARCHAPI_WHERE,
-    );
-  return {
-    ...echo,
-    options: [...(data.best_flights ?? []), ...(data.other_flights ?? [])],
-    // why: null when the vendor sent no series at all (plan decision 40: best-effort), told apart from an empty one.
-    priceHistory: data.price_insights?.price_history ?? null,
-  };
-}
-
-/** Step 3. A body without `booking_options` is a failed step 3 (the step-2 offer is kept, partial). */
-function parseBooking(body: unknown, gl: string) {
-  const data = parseVendor(bookingResponseSchema, body, 'malformed-booking-options', SEARCHAPI_WHERE);
-  const echo = readEcho(data.search_parameters, gl);
-  if (data.booking_options === undefined)
-    throw parseError('no-booking-options-key', 'step 3: booking_options is not present', SEARCHAPI_WHERE);
-  return { ...echo, options: data.booking_options };
-}
-
-/**
- * `price_insights.price_history` as Google's route-level price-insight series, indicative (spec §2 bonus, §7; the
- * engine stores it in route_price_history, GBP points only per plan decision 25). That label is the spec's; whether
- * the series is per route or per searched dates and cabin is unverified (§13). A point that is malformed, has an impossible date or a price the shared `majorToMinor` refuses is dropped and counted
- * `route-history-dropped`; it never fails the step. A response with no series at all yields an empty history and the
- * informational count `route-history-absent` (plan decision 40: best-effort).
- */
-function toRouteHistory(
-  points: readonly unknown[] | null,
-  currency: string,
-  notes: NoteCounter,
-): RouteHistory {
-  const out: RouteHistory = [];
-  if (points === null) {
-    // why: plan decision 40: the series is best-effort (WP4b's recorded step 1 carries none), so its absence is an
-    // informational count, never an error, an issue or a partial result.
-    notes.add('route-history-absent');
-    return out;
-  }
-  for (const raw of points) {
-    const p = historyPointSchema.safeParse(raw);
-    // why: `iso_date` is an instant (e.g. 2026-09-19T04:00:00Z); its UTC calendar date is the series day.
-    const date = p.success ? isoDateSchema.safeParse(p.data.iso_date.slice(0, 10)) : null;
-    const minor = p.success && currencySupported(currency) ? majorToMinor(p.data.price, currency) : null;
-    if (date === null || !date.success || minor === null) {
-      notes.add('route-history-dropped');
-      continue;
-    }
-    out.push({ date: date.data, lowestPriceMinor: minor, currency });
-  }
-  return out;
 }
 
 /** A priced option with its converted legs. */
@@ -228,13 +169,9 @@ export async function searchItinerary(
   if (!currencySupported(r1.currency)) {
     // why: spec §8.1: currency-unsupported is a normalisation reason, never parse; stopping here spends no step-2 call
     // on prices that could only be dropped.
-    throw new ProviderError({
-      kind: 'upstream',
-      reason: 'currency-unsupported',
-      retryable: false,
-      providerId: 'searchapi',
-      message: `searchapi step 1: prices in ${r1.currency}, which has no known minor-unit exponent`,
-    });
+    throw currencyUnsupported(
+      `searchapi step 1: prices in ${r1.currency}, which has no known minor-unit exponent`,
+    );
   }
 
   const usable1: Array<Usable & { token: string }> = [];
@@ -401,13 +338,9 @@ export async function searchItinerary(
       'searchapi chain stopped; returning the offers already paid for',
     );
   } else if (withLegs === 0 && legDrops.has('currency-unsupported')) {
-    throw new ProviderError({
-      kind: 'upstream',
-      reason: 'currency-unsupported',
-      retryable: false,
-      providerId: 'searchapi',
-      message: `searchapi step 2: return prices in a currency with no known minor-unit exponent`,
-    });
+    throw currencyUnsupported(
+      `searchapi step 2: return prices in a currency with no known minor-unit exponent`,
+    );
   } else if (withLegs === 0 && legDrops.size > 0) {
     throw parseError(
       'unusable-return-prices',
@@ -427,13 +360,9 @@ export async function searchItinerary(
     // why: decision 31 (PA3-01): the vendor priced return legs but no offer survived (no stated airline and no usable
     // step-3 listing). A priced result without offers would be written `empty`, positive evidence of no fares.
     if (legDrops.has('currency-unsupported'))
-      throw new ProviderError({
-        kind: 'upstream',
-        reason: 'currency-unsupported',
-        retryable: false,
-        providerId: 'searchapi',
-        message: 'searchapi: no usable offer; prices in a currency with no known minor-unit exponent',
-      });
+      throw currencyUnsupported(
+        'searchapi: no usable offer; prices in a currency with no known minor-unit exponent',
+      );
     throw parseError(
       'no-usable-offers',
       `priced legs but no offer attributable to a stated seller (${notes.list().join(', ')})`,
