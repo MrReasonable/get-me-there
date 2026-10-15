@@ -69,6 +69,7 @@ import type {
   TileWrite,
   VerifiedCellWrite,
 } from '../types.js';
+import { ExecutionsRepo } from './executions.js';
 import { ItinerariesRepo } from './itineraries.js';
 
 interface CellDbRow {
@@ -508,7 +509,7 @@ export class CellsRepo {
         // why: per cell, so a later failure in the same tile also rolls back roll-ups already stored (test-011 pins it).
         storeRollUps(this.db, executionId, 'discovery', [o]);
       }
-      this.db.raw.prepare('UPDATE search_executions SET auto_resume_count = 0 WHERE id = ?').run(executionId);
+      new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
     });
   }
 
@@ -735,10 +736,7 @@ export class CellsRepo {
           .run({ ...keyParams(executionId, w.cell), bestId: best.id, bestPence: best.pence });
       }
       storeRollUps(this.db, executionId, 'verification', [w.cell]);
-      if (o.status !== 'error')
-        this.db.raw
-          .prepare('UPDATE search_executions SET auto_resume_count = 0 WHERE id = ?')
-          .run(executionId);
+      if (o.status !== 'error') new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
     });
   }
 
@@ -797,6 +795,8 @@ export class CellsRepo {
         'discovery',
         copies.map((c) => c.cell),
       );
+      // why: spec §7 "reset when a tile or cell commits"; a run that progresses only by reuse is progressing (dm-M1).
+      if (copies.length > 0) new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
     });
   }
 

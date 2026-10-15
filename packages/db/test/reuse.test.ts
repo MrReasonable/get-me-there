@@ -110,6 +110,19 @@ const find = (copies: ReusedCopy[], c: CellKey) => {
 };
 
 describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell")', () => {
+  it('copyReused commits progress: it resets auto_resume_count like a tile or verified cell (spec §7, dm-M1)', () => {
+    const { db, clock, cells, prices, definition } = world();
+    const c = newExecution(db, clock, { definition }).execution.id;
+    cells.seed(c, ALL.map(withNights), ['travelpayouts']);
+    const executions = new ExecutionsRepo(db, clock);
+    executions.incrementAutoResume(c);
+    executions.incrementAutoResume(c);
+    reuse(cells, c, 'travelpayouts', []);
+    expect(executions.get(c)?.autoResumeCount).toBe(2); // nothing committed, nothing reset
+    reuse(cells, c, 'travelpayouts', ask(prices, definition.id, [P]));
+    expect(executions.get(c)?.autoResumeCount).toBe(0);
+  });
+
   it('copyReused re-checks the reuse criteria itself: point of sale, source kind and the age cutoff (prov-M3)', () => {
     const { db, clock, cells, prices, definition } = world();
     const c = newExecution(db, clock, { definition }).execution.id;
