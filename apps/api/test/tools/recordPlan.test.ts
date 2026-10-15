@@ -1,12 +1,18 @@
 import { asIsoMonth } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
+  CALENDAR_OUT_DAYS,
+  CALENDAR_RET_DAYS,
   formatPlan,
   freeCallMisfit,
   monthAfter,
+  OVER_LIMIT_OUT_DAYS,
+  OVER_LIMIT_RET_DAYS,
   parseRecordArgs,
   planCalls,
   planTotals,
+  RECORD_MAX_NIGHTS,
+  RECORD_MIN_NIGHTS,
   type RecordArgs,
   rectangle,
 } from '../../src/tools/recordPlan.js';
@@ -137,6 +143,13 @@ describe('date steps use core helpers (ts-011)', () => {
       expect(rectangle(asIsoMonth(m), 9, 20, 10)).toEqual(want);
     },
   );
+  it('the calendar block is the largest b with b × (b + maxNights − minNights) ≤ 200, and the probe exceeds 200 (arch M-6)', () => {
+    const span = (b: number): number => b + RECORD_MAX_NIGHTS - RECORD_MIN_NIGHTS;
+    expect(CALENDAR_RET_DAYS).toBe(span(CALENDAR_OUT_DAYS));
+    expect(CALENDAR_OUT_DAYS * CALENDAR_RET_DAYS).toBeLessThanOrEqual(200);
+    expect((CALENDAR_OUT_DAYS + 1) * span(CALENDAR_OUT_DAYS + 1)).toBeGreaterThan(200);
+    expect(OVER_LIMIT_OUT_DAYS * OVER_LIMIT_RET_DAYS).toBeGreaterThan(200);
+  });
   it('the over-limit rectangle is 9 × 24 = 216', () => {
     expect(rectangle(asIsoMonth('2027-03'), 9, 24, 10)).toEqual({
       outFrom: '2027-03-01',

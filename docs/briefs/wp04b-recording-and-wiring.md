@@ -2212,12 +2212,18 @@ git add apps/api && git commit -m "wp04b: pino logger with the spec redact paths
 import { asIsoMonth } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
+  CALENDAR_OUT_DAYS,
+  CALENDAR_RET_DAYS,
   formatPlan,
   freeCallMisfit,
   monthAfter,
+  OVER_LIMIT_OUT_DAYS,
+  OVER_LIMIT_RET_DAYS,
   parseRecordArgs,
   planCalls,
   planTotals,
+  RECORD_MAX_NIGHTS,
+  RECORD_MIN_NIGHTS,
   type RecordArgs,
   rectangle,
 } from '../../src/tools/recordPlan.js';
@@ -2348,6 +2354,13 @@ describe('date steps use core helpers (ts-011)', () => {
       expect(rectangle(asIsoMonth(m), 9, 20, 10)).toEqual(want);
     },
   );
+  it('the calendar block is the largest b with b × (b + maxNights − minNights) ≤ 200, and the probe exceeds 200 (arch M-6)', () => {
+    const span = (b: number): number => b + RECORD_MAX_NIGHTS - RECORD_MIN_NIGHTS;
+    expect(CALENDAR_RET_DAYS).toBe(span(CALENDAR_OUT_DAYS));
+    expect(CALENDAR_OUT_DAYS * CALENDAR_RET_DAYS).toBeLessThanOrEqual(200);
+    expect((CALENDAR_OUT_DAYS + 1) * span(CALENDAR_OUT_DAYS + 1)).toBeGreaterThan(200);
+    expect(OVER_LIMIT_OUT_DAYS * OVER_LIMIT_RET_DAYS).toBeGreaterThan(200);
+  });
   it('the over-limit rectangle is 9 × 24 = 216', () => {
     expect(rectangle(asIsoMonth('2027-03'), 9, 24, 10)).toEqual({
       outFrom: '2027-03-01',
@@ -2493,24 +2506,25 @@ export const TP_MONTHS = 7;
 export const TP_EMPTY_PROBE_OFFSET_MONTHS = 11;
 /** Month offset of the Travelpayouts 401 probe (TP-20): a request no success recording makes (plan decision 20). */
 export const TP_AUTH_PROBE_OFFSET_MONTHS = 12;
-/**
- * Spec rev 15 §5.2 production tiling shape for the worked 10–21-night band (plan decision 29): the largest outbound
- * block b with b × (b + maxNights − minNights) ≤ 200, i.e. 9 outbound days × a 20-day return span = 180.
- */
-export const CALENDAR_OUT_DAYS = 9;
-export const CALENDAR_RET_DAYS = 20;
-/** The deliberate over-limit probe: 9 × 24 = 216 > 200 (spec §2 fact 2). */
-export const OVER_LIMIT_OUT_DAYS = 9;
-export const OVER_LIMIT_RET_DAYS = 24;
 /** The worked example's nights band, 10–21 (spec §1): returns start 10 days after the first outbound. */
 export const RECORD_MIN_NIGHTS = 10;
 export const RECORD_NIGHTS_BAND = 12;
+export const RECORD_MAX_NIGHTS = RECORD_MIN_NIGHTS + RECORD_NIGHTS_BAND - 1;
+/**
+ * Spec rev 15 §5.2 production tiling shape for the worked 10–21-night band (plan decision 29): the largest outbound
+ * block b with b × (b + maxNights − minNights) ≤ 200, i.e. 9 outbound days × a 20-day return span = 180. why: the
+ * return span is the rule, not a literal, so a changed band cannot silently leave the production shape (arch M-6).
+ */
+export const CALENDAR_OUT_DAYS = 9;
+export const CALENDAR_RET_DAYS = CALENDAR_OUT_DAYS + RECORD_MAX_NIGHTS - RECORD_MIN_NIGHTS;
+/** The deliberate over-limit probe: 9 × 24 = 216 > 200 (spec §2 fact 2). */
+export const OVER_LIMIT_OUT_DAYS = 9;
+export const OVER_LIMIT_RET_DAYS = 24;
 /**
  * Pages fetched at most per Travelpayouts tile (cost-wp4b-r2-002): a vendor that ignored `page` and always answered
  * 1000 rows would otherwise page until the per-run cap. 3 covers the spike's busiest gateway month several times over.
  */
 export const TP_MAX_PAGES_PER_TILE = 3;
-export const RECORD_MAX_NIGHTS = RECORD_MIN_NIGHTS + RECORD_NIGHTS_BAND - 1;
 
 /** Plan contract (Wiring and bootstraps), without `metro`: the metro comes from the seeded airports table (decision 20). */
 export interface RecordArgs {
@@ -2831,7 +2845,7 @@ export function freeCallMisfit(plan: readonly PlannedCall[], maxFreeCalls: numbe
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/recordPlan.test.ts`
-Expected: 35 passed.
+Expected: 36 passed.
 
 - [ ] **Step 5: Commit**
 

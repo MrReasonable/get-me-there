@@ -27,24 +27,25 @@ export const TP_MONTHS = 7;
 export const TP_EMPTY_PROBE_OFFSET_MONTHS = 11;
 /** Month offset of the Travelpayouts 401 probe (TP-20): a request no success recording makes (plan decision 20). */
 export const TP_AUTH_PROBE_OFFSET_MONTHS = 12;
-/**
- * Spec rev 15 §5.2 production tiling shape for the worked 10–21-night band (plan decision 29): the largest outbound
- * block b with b × (b + maxNights − minNights) ≤ 200, i.e. 9 outbound days × a 20-day return span = 180.
- */
-export const CALENDAR_OUT_DAYS = 9;
-export const CALENDAR_RET_DAYS = 20;
-/** The deliberate over-limit probe: 9 × 24 = 216 > 200 (spec §2 fact 2). */
-export const OVER_LIMIT_OUT_DAYS = 9;
-export const OVER_LIMIT_RET_DAYS = 24;
 /** The worked example's nights band, 10–21 (spec §1): returns start 10 days after the first outbound. */
 export const RECORD_MIN_NIGHTS = 10;
 export const RECORD_NIGHTS_BAND = 12;
+export const RECORD_MAX_NIGHTS = RECORD_MIN_NIGHTS + RECORD_NIGHTS_BAND - 1;
+/**
+ * Spec rev 15 §5.2 production tiling shape for the worked 10–21-night band (plan decision 29): the largest outbound
+ * block b with b × (b + maxNights − minNights) ≤ 200, i.e. 9 outbound days × a 20-day return span = 180. why: the
+ * return span is the rule, not a literal, so a changed band cannot silently leave the production shape (arch M-6).
+ */
+export const CALENDAR_OUT_DAYS = 9;
+export const CALENDAR_RET_DAYS = CALENDAR_OUT_DAYS + RECORD_MAX_NIGHTS - RECORD_MIN_NIGHTS;
+/** The deliberate over-limit probe: 9 × 24 = 216 > 200 (spec §2 fact 2). */
+export const OVER_LIMIT_OUT_DAYS = 9;
+export const OVER_LIMIT_RET_DAYS = 24;
 /**
  * Pages fetched at most per Travelpayouts tile (cost-wp4b-r2-002): a vendor that ignored `page` and always answered
  * 1000 rows would otherwise page until the per-run cap. 3 covers the spike's busiest gateway month several times over.
  */
 export const TP_MAX_PAGES_PER_TILE = 3;
-export const RECORD_MAX_NIGHTS = RECORD_MIN_NIGHTS + RECORD_NIGHTS_BAND - 1;
 
 /** Plan contract (Wiring and bootstraps), without `metro`: the metro comes from the seeded airports table (decision 20). */
 export interface RecordArgs {
