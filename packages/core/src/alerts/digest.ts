@@ -37,9 +37,9 @@ function item(f: Firing): DigestItem {
     unverified: verified ? c.unverified : [],
     // why: the previous price is shown only when the firing reason states it (a drop, or a new
     // cell whose last price was outside the window), so item and reason never disagree (review
-    // pft-002, po-003). Its age is measured at this fetch, the figure the rule judged.
+    // pft-002, po-003). The gap is measured between the two fetches (`fetchGapHours`), the figure the rule judged.
     previousPricePence: stated === null ? null : stated.pricePence,
-    previousAgeHours: stated === null ? null : hoursSince(stated.fetchedAt, provenance.fetchedAt),
+    fetchGapHours: stated === null ? null : hoursSince(stated.fetchedAt, provenance.fetchedAt),
     isNew: f.isNew,
     firingReason: f.reason,
     booking: verified ? c.observation.booking : { kind: 'none' },

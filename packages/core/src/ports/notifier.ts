@@ -14,7 +14,12 @@ export interface DigestItem {
   seller: string | null;
   unverified: ConstraintName[];
   previousPricePence: number | null;
-  previousAgeHours: number | 'unknown' | null;
+  /**
+   * Whole hours between the previous price's fetch and this one's. It is the gap the rule judged,
+   * never the previous price's age (a cached calendar price was older than its own fetch).
+   * Render it as "fetched Nh before this price", not as an age.
+   */
+  fetchGapHours: number | 'unknown' | null;
   isNew: boolean;
   firingReason: string;
   booking: Booking;

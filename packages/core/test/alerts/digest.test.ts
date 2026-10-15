@@ -94,7 +94,7 @@ describe('buildDigest (spec §6.8)', () => {
       verdictClass: 'partially-verified',
       unverified: ['checkedBagRequired'],
       previousPricePence: null,
-      previousAgeHours: null,
+      fetchGapHours: null,
       isNew: false,
       firingReason: '£412 is at or below the £450 threshold',
       booking: { kind: 'get', host: 'www.google.com' },
@@ -117,7 +117,7 @@ describe('buildDigest (spec §6.8)', () => {
   it('an absolute firing does not show a previous price its reason does not state', () => {
     const c = verified({ previous: { pricePence: 50_000, fetchedAt: hoursAgo(30) } });
     const item = buildDigest(rule(), evaluateAlertRules([rule()], [c], [], CTX), DCTX)?.items[0];
-    expect(item).toMatchObject({ previousPricePence: null, previousAgeHours: null });
+    expect(item).toMatchObject({ previousPricePence: null, fetchGapHours: null });
   });
 
   it('a calendar drop item carries the previous price and its age at this fetch, the current provenance, no booking, an Aviasales link', () => {
@@ -133,7 +133,7 @@ describe('buildDigest (spec §6.8)', () => {
       seller: null,
       unverified: [],
       previousPricePence: 45_000,
-      previousAgeHours: 48,
+      fetchGapHours: 48,
       firingReason: 'down £70 (15%) from £450 fetched 48h earlier',
       booking: { kind: 'none' },
       bookingExpiresAt: null,
@@ -176,7 +176,7 @@ describe('buildDigest (spec §6.8)', () => {
     const d = buildDigest(drop, mixed.toReversed(), DCTX);
     expect(d?.items.map((i) => i.rowKey)).toEqual(['calendar:3']);
     expect(
-      d?.newItems.map((i) => [i.rowKey, i.isNew, i.previousPricePence, i.previousAgeHours, i.firingReason]),
+      d?.newItems.map((i) => [i.rowKey, i.isNew, i.previousPricePence, i.fetchGapHours, i.firingReason]),
     ).toEqual([
       ['calendar:1', true, null, null, 'first price seen for this cell'],
       [
