@@ -1,4 +1,4 @@
-import { AbortedError, ProviderError } from '@gmt/core';
+import { AbortedError, BudgetExceeded, ProviderError } from '@gmt/core';
 import Bottleneck from 'bottleneck';
 import type { HttpProviderId, ProviderHttpLimits } from './types.js';
 
@@ -24,9 +24,11 @@ const HEARTBEAT_MS = 5_000;
 
 /**
  * Per-provider limiter. The hourly bottleneck (reservoir = ratePerHour − usedThisHour, refreshed to ratePerHour)
- * admits a job; the chained per-minute bottleneck (reservoir = ratePerMinute, maxConcurrent, minTime) runs it.
- * The queue deadline is our own timer plus an age check at release, because bottleneck's `expiration` bounds a
- * running job, not queue time. A job whose caller already gave up refunds both tokens and does nothing.
+ * admits a job; the per-minute bottleneck (reservoir = ratePerMinute, maxConcurrent, minTime) then runs it.
+ * The queue deadline is our own timer plus an age check at each release, because bottleneck's `expiration` bounds a
+ * running job, not queue time. A job whose caller already gave up is dropped at the hourly stage (refunding its hour
+ * token, never taking a per-minute launch slot) or at the per-minute stage (refunding both). An attempt refused by
+ * the budget (BudgetExceeded from reserve) refunds both tokens: no call was sent (cost minor 2).
  */
 export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: number }): ProviderLimiter {
   const createdAt = Date.now();
@@ -47,7 +49,6 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
     reservoirRefreshInterval: MINUTE_MS,
     heartbeatInterval: HEARTBEAT_MS,
   });
-  perHour.chain(perMinute);
 
   const secondsTo = (windowMs: number): number =>
     Math.max(1, Math.ceil((windowMs - ((Date.now() - createdAt) % windowMs)) / 1000));
@@ -97,27 +98,36 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
         o.signal.addEventListener('abort', onAbort, { once: true });
         if (o.signal.aborted) onAbort();
 
+        /** False (after settling the caller) when the caller has already given up or must now. */
+        const wanted = (): boolean => {
+          if (state === 'queued' && Date.now() - enqueuedAt > o.maxWaitMs) timeOut();
+          if (state === 'queued' && o.signal.aborted) onAbort();
+          return state === 'queued';
+        };
         perHour
           .schedule(async () => {
-            if (state === 'queued' && Date.now() - enqueuedAt > o.maxWaitMs) timeOut();
-            if (state !== 'queued') {
-              // why: the caller already received limiter-timeout or AbortedError; refund so a dead job does not eat the next window (cost-006).
-              await refund();
+            // why: a dead job leaves here with its hour token refunded, so a backlog of them never queues for
+            // per-minute launch slots ahead of live jobs (cost minor 2, cost-006).
+            if (!wanted()) {
+              await perHour.incrementReservoir(1);
               return;
             }
-            if (o.signal.aborted) {
-              onAbort();
-              await refund();
-              return;
-            }
-            state = 'running';
-            clearTimeout(timer);
-            o.signal.removeEventListener('abort', onAbort);
-            try {
-              resolve(await fn());
-            } catch (e) {
-              reject(e);
-            }
+            await perMinute.schedule(async () => {
+              if (!wanted()) {
+                await refund();
+                return;
+              }
+              state = 'running';
+              clearTimeout(timer);
+              o.signal.removeEventListener('abort', onAbort);
+              try {
+                resolve(await fn());
+              } catch (e) {
+                // why: reserve refused before anything was sent; the tokens go back for the next caller.
+                if (e instanceof BudgetExceeded) await refund();
+                reject(e);
+              }
+            });
           })
           .catch((e: unknown) => {
             if (state !== 'queued') return;

@@ -1,4 +1,4 @@
-import { AbortedError } from '@gmt/core';
+import { AbortedError, BudgetExceeded } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLimiter } from '../../src/http/limiter.js';
@@ -148,5 +148,50 @@ describe('createLimiter token refunds (cost-006)', { timeout: 60_000 }, () => {
     await idle(61_000);
     // why: bottleneck's store yields through setTimeout(0), so even a reservoir read needs fake time driven.
     expect(await drive(limiter.reservoirs())).toEqual({ minute: 1, hour: 9 });
+  });
+});
+
+describe('dead jobs and refused reservations do not hold limiter capacity (cost minor 2)', {
+  timeout: 60_000,
+}, () => {
+  beforeEach(useFakeTime);
+  afterEach(() => vi.useRealTimers());
+
+  it('a reservation refused by the budget refunds its minute and hour tokens', async () => {
+    const limits = testLimits({ searchapi: { ratePerMinute: 3, ratePerHour: 5 } }).searchapi;
+    const limiter = createLimiter(limits, { usedThisHour: 0 });
+    const o = {
+      signal: new AbortController().signal,
+      maxWaitMs: 30_000,
+      providerId: 'searchapi' as const,
+      endpointPath: '/api/v1/search',
+    };
+    const refused = new BudgetExceeded({ scope: 'provider-month', cap: 0, current: 0, requested: 1 });
+    expect(
+      await driveError(
+        limiter.run(async () => {
+          throw refused;
+        }, o),
+      ),
+    ).toBe(refused);
+    expect(await drive(limiter.reservoirs())).toEqual({ minute: 3, hour: 5 });
+    await drive(limiter.run(async () => 'sent', o));
+    expect(await drive(limiter.reservoirs())).toEqual({ minute: 2, hour: 4 });
+  });
+
+  it('a backlog of timed-out jobs is dropped before the per-minute stage, so a live job is not delayed by their minTime slots', async () => {
+    const { kit, events } = makeKit({
+      overrides: { searchapi: { ratePerMinute: 10, ratePerHour: 2, maxWaitSeconds: 30 } },
+    });
+    ok();
+    const t0 = Date.now();
+    await drive(Promise.all([kit.request(nth(1)), kit.request(nth(2))]));
+    const dead = [3, 4, 5, 6, 7].map((i) => kit.request(nth(i)).catch((e: unknown) => e));
+    for (const e of await drive(Promise.all(dead))) expect(asProviderError(e).kind).toBe('limiter-timeout');
+    await idle(3_595_000 - (Date.now() - t0), 30_000);
+    await drive(kit.request(nth(8)), HOURS);
+    const at = fetchTimes(events, t0);
+    expect(at).toHaveLength(3);
+    expect(at[2] ?? Number.POSITIVE_INFINITY).toBeLessThan(3_612_000);
   });
 });
