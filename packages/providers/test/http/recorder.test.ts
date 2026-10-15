@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -231,6 +232,44 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
       root,
       recorder(root).record({ ...call(SEARCH, {}), endpointPath: '/api/../x?y=1' }),
     );
+  });
+
+  it('refuses a provider or endpoint directory that is a symlink, creating nothing outside the tree (review I1)', async () => {
+    const root = tree();
+    const outside = mkdtempSync(join(tmpdir(), 'gmt-out-'));
+    symlinkSync(outside, join(root, 'searchapi'));
+    expect(
+      await recorder(root)
+        .record(call(SEARCH, { price: 1 }))
+        .catch((e: unknown) => e),
+    ).toBeInstanceOf(RecorderRefusedError);
+    expect(readdirSync(outside)).toEqual([]);
+
+    const root2 = tree();
+    const outside2 = mkdtempSync(join(tmpdir(), 'gmt-out-'));
+    mkdirSync(join(root2, 'searchapi'));
+    symlinkSync(outside2, join(root2, 'searchapi', '_api_v1_search'));
+    expect(
+      await recorder(root2)
+        .record(call(SEARCH, { price: 1 }))
+        .catch((e: unknown) => e),
+    ).toBeInstanceOf(RecorderRefusedError);
+    expect(readdirSync(outside2)).toEqual([]);
+  });
+
+  it('refuses a root that is a symlink ending in fixtures/recorded whose real path does not (review I1)', () => {
+    const real = mkdtempSync(join(tmpdir(), 'gmt-real-'));
+    const parent = join(mkdtempSync(join(tmpdir(), 'gmt-lnk-')), 'fixtures');
+    mkdirSync(parent);
+    symlinkSync(real, join(parent, 'recorded'));
+    expect(() =>
+      createRecorder({
+        root: join(parent, 'recorded'),
+        secrets: ALL_SECRETS,
+        clock: fixedClock(asIsoDateTime(T0)),
+        recordedBy: 'x',
+      }),
+    ).toThrow(RecorderRefusedError);
   });
 
   it('canonicalJson has a known answer: keys sorted at every level, undefined dropped (prov-009)', () => {

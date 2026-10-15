@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Clock, type IsoDateTime, isoDateTimeSchema, type Secret } from '@gmt/core';
@@ -153,6 +153,17 @@ function stripMetadataUrls(v: unknown, inside: boolean): unknown {
   return v;
 }
 
+/** lstat without following links: a real directory, anything else (symlink, file), or nothing yet. */
+function directoryState(path: string): 'directory' | 'other' | 'missing' {
+  try {
+    const st = lstatSync(path);
+    return st.isDirectory() && !st.isSymbolicLink() ? 'directory' : 'other';
+  } catch (e) {
+    if (errnoCode(e) === 'ENOENT') return 'missing';
+    throw e;
+  }
+}
+
 /** Writes `text` unless the file exists (same content on the same day hashes to the same name). */
 function writeOnce(path: string, text: string): void {
   try {
@@ -172,7 +183,14 @@ export function createRecorder(opts: {
   clock: Clock;
   recordedBy: string;
 }): FixtureRecorder {
-  const root = resolve(opts.root);
+  const givenRoot = resolve(opts.root);
+  let root: string;
+  try {
+    // why: the suffix is tested on the real path, so a symlink named …/fixtures/recorded cannot point elsewhere (I1).
+    root = realpathSync(givenRoot);
+  } catch {
+    throw new RecorderRefusedError(`recorder root ${opts.root} does not exist`);
+  }
   if (!root.endsWith(RECORDED_DIR))
     throw new RecorderRefusedError(`recorder root must end in fixtures/recorded (spec §5.5), got ${root}`);
   if (opts.recordedBy.trim() === '')
@@ -248,15 +266,28 @@ export function createRecorder(opts: {
           'an opaque token also appears outside a token position; nothing is rewritten (prov-007)',
         );
 
-      const dir = join(root, r.providerId, r.endpointPath.replaceAll('/', '_'));
-      mkdirSync(dir, { recursive: true });
-      // why: a symlinked provider directory must not redirect the write outside the recorded tree.
-      if (!realpathSync(dir).startsWith(`${realpathSync(root)}${sep}`))
-        throw refuse(r, `the target directory resolves outside ${root}`);
+      const providerDir = join(root, r.providerId);
+      const dir = join(providerDir, r.endpointPath.replaceAll('/', '_'));
+      // why: each component is checked with lstat before anything is created under it, and created one level at a
+      // time, so a symlinked provider or endpoint directory cannot redirect a mkdir or a write outside the recorded
+      // tree (review I1). A component swapped for a symlink between this check and the `wx` write is still possible;
+      // that needs local write access to the repository, which is outside this operator-run tool's threat model.
+      for (const d of [providerDir, dir]) {
+        const state = directoryState(d);
+        if (state === 'missing') {
+          try {
+            mkdirSync(d);
+          } catch (e) {
+            if (errnoCode(e) !== 'EEXIST') throw e;
+          }
+          if (directoryState(d) !== 'directory') throw refuse(r, `${d} is not a plain directory`);
+        } else if (state !== 'directory') throw refuse(r, `${d} is a symlink or not a directory`);
+      }
       const target = join(dir, `${file.recordedAt.slice(0, 10)}-${file.contentSha256.slice(0, 12)}.json`);
       writeOnce(target, text);
       writeOnce(target.replace(/\.json$/, '.raw.json'), raw);
-      return target;
+      // why: the path is reported under the root as the caller named it (the same file as the real path written).
+      return join(givenRoot, relative(root, target));
     },
   };
 }
