@@ -2,7 +2,7 @@ import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asIsoDate } from '@gmt/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FIXTURE_ORIGIN, RELEASE_PATH, SCENARIO_HEADER, SCENARIO_PATH } from '../../src/fixture/constants.js';
 import { fixtureRouter } from '../../src/fixture/router.js';
 import {
@@ -11,7 +11,7 @@ import {
   releaseRequest,
   scenarioRequest,
 } from '../../src/fixture/scenario.js';
-import { createFixtureServer } from '../../src/fixture/server.js';
+import { createFixtureServer, HOLD_MAX_MS } from '../../src/fixture/server.js';
 import { calendarPriceMinor, defaultFixtureRoot, loadFixtureTree } from '../../src/fixture/tree.js';
 import { fixtureHandlers } from '../../src/testing/handlers.js';
 import { arr, jsonOf, obj } from '../support/guards.js';
@@ -397,5 +397,44 @@ describe('fixtureRouter (Hono) serves the same tree', () => {
     expect(obj(await jsonOf(ack))).toEqual({ synthetic: true, rules: 1 });
     expect((await router.request(cal(tile))).status).toBe(402);
     expect((await router.request(`${FIXTURE_ORIGIN}/health`)).status).toBe(200);
+  });
+});
+
+describe('held requests are bounded (security review minor 3)', () => {
+  afterEach(() => vi.useRealTimers());
+  const holdAll = (s: ReturnType<typeof createFixtureServer>) =>
+    s.setRules([{ match: { path: '/calendar' }, respond: { kind: 'hold', id: 'h' } }]);
+  const calUrl = `${FIXTURE_ORIGIN}/calendar?origin=LHR&destination=JFK&departFrom=2026-11-02&departTo=2026-11-08&returnFrom=2026-11-09&returnTo=2026-11-22&cabin=economy&currency=GBP`;
+
+  it(`answers a held request with a network error after HOLD_MAX_MS, and release then finds nothing`, async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const s = createFixtureServer(ROOT, GATE);
+    holdAll(s);
+    let res: Response | undefined;
+    const p = s.handle(new Request(calUrl)).then((r) => {
+      res = r;
+    });
+    await vi.advanceTimersByTimeAsync(HOLD_MAX_MS - 1);
+    expect(res).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await p;
+    expect(res?.type).toBe('error');
+    expect(obj(await jsonOf(await s.handle(releaseRequest('h'))))).toEqual({ synthetic: true, released: 0 });
+  });
+  it('settles a held request with a network error when its client aborts', async () => {
+    const s = createFixtureServer(ROOT, GATE);
+    holdAll(s);
+    const ac = new AbortController();
+    const p = s.handle(new Request(calUrl, { signal: ac.signal }));
+    ac.abort();
+    expect((await p).type).toBe('error');
+    expect(obj(await jsonOf(await s.handle(releaseRequest('h'))))).toEqual({ synthetic: true, released: 0 });
+  });
+  it('reset (DELETE on the scenario path) answers every held request with a network error', async () => {
+    const s = createFixtureServer(ROOT, GATE);
+    holdAll(s);
+    const p = s.handle(new Request(calUrl));
+    s.reset();
+    expect((await p).type).toBe('error');
   });
 });

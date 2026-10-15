@@ -39,6 +39,16 @@ interface CellDates {
   nights: number;
 }
 
+/** One request parked by a `hold` response until release, abort, reset or HOLD_MAX_MS. */
+interface Held {
+  url: URL;
+  request: Request;
+  settle: (res: Response | Promise<Response>) => void;
+}
+
+/** Longest a held request waits for its release before it is answered with a network error (security minor 3). */
+export const HOLD_MAX_MS = 3_600_000;
+
 const MAX_NIGHTS = 90;
 const MAX_SPAN_DAYS = 400;
 const AGENCY_DISCOUNT_MINOR = 300;
@@ -79,15 +89,22 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
     throw new Error('fixture server refused: syntheticAllowed(gate) is false (spec §5.5)');
   const tree: FixtureTree = loadFixtureTree(root);
   let rules: Array<{ rule: FixtureRule; remaining: number }> = [];
-  const held = new Map<
-    string,
-    Array<{ url: URL; request: Request; settle: (res: Response | Promise<Response>) => void }>
-  >();
+  const held = new Map<string, Held[]>();
   const setRules = (next: FixtureRule[]): void => {
     rules = next.map((rule) => ({ rule, remaining: rule.times ?? Number.POSITIVE_INFINITY }));
   };
+  // why: a held request leaves `held` on release, on its client's abort, on reset, or after HOLD_MAX_MS, whichever
+  // comes first, so a test that forgets to release cannot leak requests or hang a client (security minor 3).
+  const unhold = (id: string, entry: Held): void => {
+    const list = (held.get(id) ?? []).filter((x) => x !== entry);
+    if (list.length === 0) held.delete(id);
+    else held.set(id, list);
+  };
   const reset = (): void => {
     rules = [];
+    const all = [...held.values()].flat();
+    held.clear();
+    for (const w of all) w.settle(Response.error());
   };
 
   const pick = (url: URL): FixtureResponse => {
@@ -377,9 +394,25 @@ export function createFixtureServer(root: string, gate: SyntheticGateInput): Fix
         });
       case 'hold':
         return new Promise<Response>((resolve) => {
-          const list = held.get(respond.id) ?? [];
-          list.push({ url, request, settle: resolve });
-          held.set(respond.id, list);
+          const id = respond.id;
+          const entry: Held = {
+            url,
+            request,
+            settle: (res) => {
+              clearTimeout(timer);
+              request.signal.removeEventListener('abort', onAbort);
+              resolve(res);
+            },
+          };
+          const expire = (): void => {
+            unhold(id, entry);
+            entry.settle(Response.error());
+          };
+          const onAbort = (): void => expire();
+          const timer = setTimeout(expire, HOLD_MAX_MS);
+          request.signal.addEventListener('abort', onAbort, { once: true });
+          held.set(id, [...(held.get(id) ?? []), entry]);
+          if (request.signal.aborted) expire();
         });
       case 'normal':
       case 'empty':
