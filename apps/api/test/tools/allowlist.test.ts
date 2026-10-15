@@ -65,10 +65,12 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
           'outbound_date_start',
           'return_date_end',
           'return_date_start',
+          'separate_tickets',
         ].sort(),
         values: {
           ...fixedSa,
           engine: ['google_flights_calendar'],
+          separate_tickets: ['1'],
           arrival_id: 'any',
           departure_id: 'any',
           outbound_date: 'any',

@@ -95,45 +95,48 @@ describe('date steps use core helpers (ts-011)', () => {
       '2027-03',
       {
         outFrom: '2027-03-01',
-        outTo: '2027-03-08',
+        outTo: '2027-03-09',
         retFrom: '2027-03-11',
-        retTo: '2027-03-29',
-        combinations: 152,
+        retTo: '2027-03-30',
+        combinations: 180,
       },
     ],
     [
       '2028-02',
       {
         outFrom: '2028-02-01',
-        outTo: '2028-02-08',
+        outTo: '2028-02-09',
         retFrom: '2028-02-11',
-        retTo: '2028-02-29',
-        combinations: 152,
+        retTo: '2028-03-01',
+        combinations: 180,
       },
     ],
     [
       '2027-02',
       {
         outFrom: '2027-02-01',
-        outTo: '2027-02-08',
+        outTo: '2027-02-09',
         retFrom: '2027-02-11',
-        retTo: '2027-03-01',
-        combinations: 152,
+        retTo: '2027-03-02',
+        combinations: 180,
       },
     ],
     [
       '2027-12',
       {
         outFrom: '2027-12-01',
-        outTo: '2027-12-08',
+        outTo: '2027-12-09',
         retFrom: '2027-12-11',
-        retTo: '2027-12-29',
-        combinations: 152,
+        retTo: '2027-12-30',
+        combinations: 180,
       },
     ],
-  ])('rectangle(%s) for the 12-night band is 8 × 19 = 152 (spec §5.2)', (m, want) => {
-    expect(rectangle(asIsoMonth(m), 8, 19, 10)).toEqual(want);
-  });
+  ])(
+    'rectangle(%s) for the 10–21-night band is 9 × 20 = 180, the production tiling shape (spec §5.2, plan decision 29)',
+    (m, want) => {
+      expect(rectangle(asIsoMonth(m), 9, 20, 10)).toEqual(want);
+    },
+  );
   it('the over-limit rectangle is 9 × 24 = 216', () => {
     expect(rectangle(asIsoMonth('2027-03'), 9, 24, 10)).toEqual({
       outFrom: '2027-03-01',
@@ -173,8 +176,8 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       'travelpayouts prices_for_dates LGW→EWR 2027-03 (airport)',
       'travelpayouts prices_for_dates LON→JFK 2028-02 (empty-probe)',
       'travelpayouts prices_for_dates LON→JFK 2028-03 with an invalid token (401 body)',
-      'searchapi google_flights step 1 LHR→JFK 2027-03-09/2027-03-30 with an invalid key (401 body)',
-      'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-08 × ret 2027-03-11..2027-03-29 (152)',
+      'searchapi google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body)',
+      'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-03-30 (180)',
       'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-04-03 (216) over the limit (400, or an empty 200 per the docs)',
       'searchapi google_flights step 1 LHR→JFK, cheapest priced in-band cell of SA-02',
       'searchapi google_flights step 2, departure_token of the cheapest priced step-1 option',

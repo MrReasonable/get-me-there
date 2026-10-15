@@ -27,9 +27,12 @@ export const TP_MONTHS = 7;
 export const TP_EMPTY_PROBE_OFFSET_MONTHS = 11;
 /** Month offset of the Travelpayouts 401 probe (TP-20): a request no success recording makes (plan decision 20). */
 export const TP_AUTH_PROBE_OFFSET_MONTHS = 12;
-/** Spec §5.2: 8 outbound × 19 return days covers a 12-night band (152 ≤ 200). */
-export const CALENDAR_OUT_DAYS = 8;
-export const CALENDAR_RET_DAYS = 19;
+/**
+ * Spec rev 15 §5.2 production tiling shape for the worked 10–21-night band (plan decision 29): the largest outbound
+ * block b with b × (b + maxNights − minNights) ≤ 200, i.e. 9 outbound days × a 20-day return span = 180.
+ */
+export const CALENDAR_OUT_DAYS = 9;
+export const CALENDAR_RET_DAYS = 20;
 /** The deliberate over-limit probe: 9 × 24 = 216 > 200 (spec §2 fact 2). */
 export const OVER_LIMIT_OUT_DAYS = 9;
 export const OVER_LIMIT_RET_DAYS = 24;

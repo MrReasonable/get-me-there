@@ -34,10 +34,10 @@ const statuses = (calls: ReadonlyArray<{ id: string; status: unknown }>): string
   calls.map((c) => `${c.id}:${String(c.status)}`);
 const RECT = {
   outFrom: asIsoDate('2027-03-01'),
-  outTo: asIsoDate('2027-03-08'),
+  outTo: asIsoDate('2027-03-09'),
   retFrom: asIsoDate('2027-03-11'),
-  retTo: asIsoDate('2027-03-29'),
-  combinations: 152,
+  retTo: asIsoDate('2027-03-30'),
+  combinations: 180,
 };
 const BAND = { minNights: 10, maxNights: 21 };
 
@@ -55,7 +55,7 @@ describe('response readers (ts-005, pie-006, prov-wp04b-r2-002)', () => {
       calendar: [
         { departure: '2027-03-01', return: '2027-03-29', price: 380 },
         { departure: '2027-03-04', return: '2027-03-16', has_no_flights: true, price: 390 },
-        { departure: '2027-03-09', return: '2027-03-30', price: 400 },
+        { departure: '2027-03-10', return: '2027-03-31', price: 400 },
         { departure: '2027-03-02', return: '2027-03-16', price: 603 },
         { departure: 'not-a-date', return: '2027-03-16', price: 1 },
       ],
@@ -325,7 +325,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
   it('a 429 on a required call leaves it not as planned (r2-ts-004)', async () => {
     const run = await runRecordingInFakeTime({
       vendors: {
-        failOn: (u) => (u.searchParams.get('outbound_date_end') === '2027-03-09' ? 'http-429' : undefined),
+        failOn: (u) => (u.searchParams.get('return_date_end') === '2027-04-03' ? 'http-429' : undefined),
       },
     });
     expect(run.summary.calls.find((c) => c.id === 'SA-03')).toMatchObject({

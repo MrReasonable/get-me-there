@@ -10,7 +10,7 @@ status: reviewed
 
 # WP4b — fixture recording on the example route and the wiring helper
 
-Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–26, spec revision 14, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at d86d24d. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
+Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–29, spec revision 15, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at d86d24d. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
 
 ## 1. Goal
 
@@ -39,7 +39,7 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 - **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. A live `--out` run creates `DIR/fixtures/recorded` before the hidden execution opens, and the recorder is built before it too, so a bad root never leaves a `running` execution behind (prov-wp04b-r3-003). `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
 - The recording run on the worked example through the real http-kit + recorder + guard, under a hidden soft-deleted definition's execution with `trigger: 'tool'`, against the operator's configured `DATABASE_PATH` (the production ledger, spec §7). It records:
   - 20 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe and a 401 probe on a month no success call uses;
-  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1` and `travel_class`; google_flights also sends `sort_by=price` and `separate_tickets=1`; no `stops` (plan decision 24). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004).
+  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1`, `travel_class` and `separate_tickets=1` (plan decisions 24 and 29: the vendor documents it for both engines); google_flights also sends `sort_by=price`; no `stops` (plan decision 24). The calendar rectangle is the production tiling shape for the worked band, 9 outbound days × a 20-day return span = 180 (spec rev 15 §5.2, plan decision 29). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004).
 
   No 429 is attempted (plan decision 20): WP5 maps rate limits from a labelled synthetic fixture and `rateLimitFallbackWaitSeconds`, and SearchApi's Retry-After behaviour stays unverified against the vendor.
 - Spend control before any live call (exit 65, `EXIT.spendRefused`): the run refuses when the SearchApi credits already ledgered to `trigger: 'tool'` executions in the provider's budget window, plus this run's worst case, exceed `--budget`, unless `--confirm-rerun` is passed (plan decision 20); and it refuses, whatever the flags, when the SearchApi window or the Travelpayouts month has less room than the run's worst case (cost-wp4b-r2-001). Travelpayouts paging stops at 3 pages per tile, so the worst case is finite (cost-wp4b-r2-002). The dry run prints every figure and verdict.
@@ -290,8 +290,8 @@ export function recordPrecheck(c: Config): string | null; export function runRec
   "recordedAt": "2026-10-20",
   "endpoints": {
     "/api/v1/search?engine=google_flights_calendar": {
-      "names": ["adults", "arrival_id", "currency", "departure_id", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start", "travel_class"],
-      "values": { "adults": ["1"], "arrival_id": "any", "currency": ["GBP"], "departure_id": "any", "engine": ["google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any", "outbound_date_end": "any", "outbound_date_start": "any", "return_date": "any", "return_date_end": "any", "return_date_start": "any", "travel_class": ["business", "economy", "first_class", "premium_economy"] }
+      "names": ["adults", "arrival_id", "currency", "departure_id", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start", "separate_tickets", "travel_class"],
+      "values": { "adults": ["1"], "arrival_id": "any", "currency": ["GBP"], "departure_id": "any", "engine": ["google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any", "outbound_date_end": "any", "outbound_date_start": "any", "return_date": "any", "return_date_end": "any", "return_date_start": "any", "separate_tickets": ["1"], "travel_class": ["business", "economy", "first_class", "premium_economy"] }
     },
     "/api/v1/search?engine=google_flights": {
       "names": ["adults", "arrival_id", "booking_token", "currency", "departure_id", "departure_token", "engine", "flight_type", "gl", "hl", "outbound_date", "return_date", "separate_tickets", "sort_by", "travel_class"],
@@ -302,7 +302,7 @@ export function recordPrecheck(c: Config): string | null; export function runRec
 }
 ```
 
-Keys are the endpoint path, or `<path>?engine=<value>` for SearchApi's two engines on `/api/v1/search`; Travelpayouts has one key, `/aviasales/v3/prices_for_dates`, with names `currency, departure_at, destination, limit, one_way, origin, page`. `names` lists every parameter sent to that key, sorted. `values`: a fixed parameter maps to the sorted values sent; `travel_class` maps to the vendor's documented set (spec §5.4), so WP5 can send the definition's cabin while this run sends `economy`; a variable parameter (airport, date, month, page, opaque token) maps to `'any'`. No credential name (`api_key`, `token`) and none of `market`, `trip_class`, `return_at`, `stops` ever appears. A name enters the file only when a request carrying it got a response, so a call the guard refused or an abort stopped evidences nothing (prov-wp04b-r2-003). Plan decision 24: this SearchApi file equals WP5's `SEARCHAPI_PARAMS`. `contentSha256` is over `canonicalJson` without the field, so `loadParamsAllowlist` verifies it.
+Keys are the endpoint path, or `<path>?engine=<value>` for SearchApi's two engines on `/api/v1/search`; Travelpayouts has one key, `/aviasales/v3/prices_for_dates`, with names `currency, departure_at, destination, limit, one_way, origin, page`. `names` lists every parameter sent to that key, sorted. `values`: a fixed parameter maps to the sorted values sent; `travel_class` maps to the vendor's documented set (spec §5.4), so WP5 can send the definition's cabin while this run sends `economy`; a variable parameter (airport, date, month, page, opaque token) maps to `'any'`. No credential name (`api_key`, `token`) and none of `market`, `trip_class`, `return_at`, `stops` ever appears. A name enters the file only when a request carrying it got a response, so a call the guard refused or an abort stopped evidences nothing (prov-wp04b-r2-003). Plan decision 24: this SearchApi file equals WP5's `SEARCHAPI_PARAMS`; plan decision 29 puts `separate_tickets` (`["1"]`) on both engines. `contentSha256` is over `canonicalJson` without the field, so `loadParamsAllowlist` verifies it.
 
 ## 6. Endpoints and parameters
 
@@ -337,11 +337,12 @@ Verified = read on the vendor's documentation page on 2026-10-14, or in the WP5 
 | `currency` | `GBP` | verified (default `USD`) |
 | `gl` | `gb` (the tool refuses unless `POINT_OF_SALE=GB`) | verified (default `us`) |
 | `hl` | `en` | verified |
-| no `stops`, no `separate_tickets` on the calendar | — | plan decision 24 (the calendar's `stops` filter would hide cells WP5 must price) |
+| `separate_tickets` | `1` (excludes separate-ticket itineraries) | verified (documented for both engines); plan decision 29 |
+| no `stops` | — | plan decision 24 (the calendar's `stops` filter would hide cells WP5 must price) |
 
 The docs say more than 200 combinations "returns an empty response"; the spike measured HTTP 400. SA-03 records which happens: a 400 or an empty 200 both pass, the empty 200 is billed (section 7), and the summary names the behaviour.
 
-`engine=google_flights` (https://www.searchapi.io/docs/google-flights-api): `engine`, `departure_id`, `arrival_id`, `outbound_date`, `return_date`, `flight_type=round_trip`, `travel_class=economy`, `adults=1`, `currency=GBP`, `gl=gb`, `hl=en` (verified), plus, by plan decision 24, the documented price sort `sort_by=price` and `separate_tickets=1`, the value that excludes separate-ticket itineraries (the evidence note gives the parameter and its default 0, which shows them; the excluding value is the non-default one, and WP5's equality test against this file keeps both packages on one value); no `stops`; step 2 adds `departure_token` from the cheapest priced step-1 option and resends the step-1 parameters (token verified; resending the parameters with it is unverified, the docs show no step-2 example); step 3 sends `booking_token` from the cheapest priced step-2 option with the step-1 parameters and without `departure_token` (verified). Response fields per the docs: `best_flights[]`, `booking_options[]` (`book_with`, `price`, `booking_request`), `price_insights`; `record.ts` also reads `other_flights` and tolerates either array being absent.
+`engine=google_flights` (https://www.searchapi.io/docs/google-flights-api): `engine`, `departure_id`, `arrival_id`, `outbound_date`, `return_date`, `flight_type=round_trip`, `travel_class=economy`, `adults=1`, `currency=GBP`, `gl=gb`, `hl=en` (verified), plus, by plan decision 24, the documented price sort `sort_by=price` and, as on the calendar (plan decision 29), `separate_tickets=1`, the value that excludes separate-ticket itineraries (the evidence note gives the parameter and its default 0, which shows them; the excluding value is the non-default one, and WP5's equality test against this file keeps both packages on one value); no `stops`; step 2 adds `departure_token` from the cheapest priced step-1 option and resends the step-1 parameters (token verified; resending the parameters with it is unverified, the docs show no step-2 example); step 3 sends `booking_token` from the cheapest priced step-2 option with the step-1 parameters and without `departure_token` (verified). Response fields per the docs: `best_flights[]`, `booking_options[]` (`book_with`, `price`, `booking_request`), `price_insights`; `record.ts` also reads `other_flights` and tolerates either array being absent.
 
 ## 7. Planned live call list (worked example)
 
@@ -357,19 +358,19 @@ The metro comes from the airports table, which the tool seeds after migration wh
 | TP-15…TP-18 | LHR→JFK, LHR→EWR, LGW→JFK, LGW→EWR 2027-03 (airport) | 200 | 0 (0) | 4 (18) |
 | TP-19 | LON→JFK 2028-02 (empty-envelope probe, best-effort, not required) | 200 | 0 (0) | 1 (19) |
 | TP-20 | LON→JFK 2028-03 with an invalid token (401 body; a month no success call uses) | 401 | 0 (0) | 1 (20) |
-| SA-01 | google_flights step 1 LHR→JFK 2027-03-09/2027-03-30 with an invalid key (401 body; a cell outside the SA-02 rectangle) | 401 | 0 (0) | 0 (20) |
-| SA-02 | calendar LHR→JFK out 2027-03-01..03-08 × ret 2027-03-11..03-29 (8 × 19 = 152, spec §5.2) | 200 | 1 (1) | 0 (20) |
+| SA-01 | google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body; a cell outside the SA-02 rectangle) | 401 | 0 (0) | 0 (20) |
+| SA-02 | calendar LHR→JFK out 2027-03-01..03-09 × ret 2027-03-11..03-30 (9 × 20 = 180, the production tiling shape of spec rev 15 §5.2; plan decision 29) | 200 | 1 (1) | 0 (20) |
 | SA-03 | calendar out 2027-03-01..03-09 × ret 2027-03-11..04-03 (9 × 24 = 216, over the limit) | 400, or an empty 200 | 1 (2) | 0 (20) |
 | SA-04 | google_flights step 1 LHR→JFK, the cheapest priced SA-02 cell inside the rectangle with 10–21 nights | 200 | 1 (3) | 0 (20) |
 | SA-05 | step 2, `departure_token` of the cheapest priced step-1 option | 200 | 1 (4) | 0 (20) |
 | SA-06 | step 3, `booking_token` of the cheapest priced step-2 option | 200 | 1 (5) | 0 (20) |
 
-**Totals:** 6 SearchApi calls, at most **5** billed credits (4 expected: SA-02, SA-04, SA-05, SA-06; SA-03 is billed only if the vendor answers it with an empty 200). Plan decision 24's extra parameters change no call and no credit. 20 Travelpayouts free calls, at most 58 with up to 3 pages per tile (19 tiles × 3 + the 401 probe); a tile still at 1000 rows on its third page is recorded with `detail: page cap reached`. The execution's snapshot budget caps SearchApi at `min(--budget, 5)` and Travelpayouts at `EXECUTION_MAX_FREE_CALLS` (default 2000); a plan whose worst case exceeds that cap is refused before any call (exit 78), and a provider window with less room than the worst case refuses a live run (exit 65).
+**Totals:** 6 SearchApi calls, at most **5** billed credits (4 expected: SA-02, SA-04, SA-05, SA-06; SA-03 is billed only if the vendor answers it with an empty 200). Plan decision 24's extra parameters and plan decision 29 (`separate_tickets` on the calendar, the 9 × 20 rectangle) change no call and no credit. 20 Travelpayouts free calls, at most 58 with up to 3 pages per tile (19 tiles × 3 + the 401 probe); a tile still at 1000 rows on its third page is recorded with `detail: page cap reached`. The execution's snapshot budget caps SearchApi at `min(--budget, 5)` and Travelpayouts at `EXECUTION_MAX_FREE_CALLS` (default 2000); a plan whose worst case exceeds that cap is refused before any call (exit 78), and a provider window with less room than the worst case refuses a live run (exit 65).
 
 **Why these calls:**
 
 - **TP-01…14** are a full worked-example scan, spec §5.2's "2 origins sharing LON × 2 destinations × 7 months = 14", so WP13 can replay a whole discovery. **TP-15…18** give WP6 airport-origin tiles for the no-shared-metro path. **TP-19** looks for the empty success envelope WP6's first failing test needs; it is best-effort and outside `requiredOk`. **TP-20** records the 401 body on a request key no success call shares.
-- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from; **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004).
+- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from, in the exact shape WP5's tiler sends for the worked band (9 × 20 = 180; plan decision 29); **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004).
 - **No 429 attempt** (plan decision 20). The trial's vendor limit is 20 % of the plan per hour and the run makes 6 SearchApi calls, so a 429 cannot be induced honestly; WP5 maps 429 with a synthetic labelled fixture and `rateLimitFallbackWaitSeconds`, and records that Retry-After behaviour is unverified against the vendor.
 
 **Spend checks before the first call (exit 65).** Every invocation creates its own hidden execution. Before a live call the tool sums the SearchApi credits already ledgered to `trigger: 'tool'` executions inside the provider's budget window (the lifetime window on the trial plan, the billing month on 40usd; the status list is exhaustive at compile time) and refuses when that sum plus this run's worst case exceeds `--budget`, unless `--confirm-rerun` is passed. Separately, it refuses whenever the SearchApi window or the Travelpayouts month has less room than the run's worst case: a run that cannot finish never starts (cost-wp4b-r2-001), and `--confirm-rerun` does not lift that. The operator rule in Task 12b: after any failed live run, stop and ask before re-running.
@@ -997,8 +998,9 @@ export const RECORD_TRAVEL_CLASS = 'economy';
 
 /** Passengers on every SearchApi request, sent explicitly (plan decision 24; vendor default 1). */
 export const RECORD_ADULTS = '1';
-/** google_flights only (plan decision 24): results sorted by price, and separate-ticket itineraries excluded. */
+/** google_flights only (plan decision 24): results sorted by price. */
 export const RECORD_SORT_BY = 'price';
+/** Both engines (plan decisions 24 and 29; the vendor documents it for both): separate-ticket itineraries excluded. */
 export const RECORD_SEPARATE_TICKETS = '1';
 
 /** A calendar rectangle (spec §5.2): outbound and return date ranges, both inclusive. */
@@ -1088,6 +1090,7 @@ export function calendarParams(
     flight_type: 'round_trip',
     travel_class: RECORD_TRAVEL_CLASS,
     adults: RECORD_ADULTS,
+    separate_tickets: RECORD_SEPARATE_TICKETS,
     currency: 'GBP',
     gl,
     hl: 'en',
@@ -2252,45 +2255,48 @@ describe('date steps use core helpers (ts-011)', () => {
       '2027-03',
       {
         outFrom: '2027-03-01',
-        outTo: '2027-03-08',
+        outTo: '2027-03-09',
         retFrom: '2027-03-11',
-        retTo: '2027-03-29',
-        combinations: 152,
+        retTo: '2027-03-30',
+        combinations: 180,
       },
     ],
     [
       '2028-02',
       {
         outFrom: '2028-02-01',
-        outTo: '2028-02-08',
+        outTo: '2028-02-09',
         retFrom: '2028-02-11',
-        retTo: '2028-02-29',
-        combinations: 152,
+        retTo: '2028-03-01',
+        combinations: 180,
       },
     ],
     [
       '2027-02',
       {
         outFrom: '2027-02-01',
-        outTo: '2027-02-08',
+        outTo: '2027-02-09',
         retFrom: '2027-02-11',
-        retTo: '2027-03-01',
-        combinations: 152,
+        retTo: '2027-03-02',
+        combinations: 180,
       },
     ],
     [
       '2027-12',
       {
         outFrom: '2027-12-01',
-        outTo: '2027-12-08',
+        outTo: '2027-12-09',
         retFrom: '2027-12-11',
-        retTo: '2027-12-29',
-        combinations: 152,
+        retTo: '2027-12-30',
+        combinations: 180,
       },
     ],
-  ])('rectangle(%s) for the 12-night band is 8 × 19 = 152 (spec §5.2)', (m, want) => {
-    expect(rectangle(asIsoMonth(m), 8, 19, 10)).toEqual(want);
-  });
+  ])(
+    'rectangle(%s) for the 10–21-night band is 9 × 20 = 180, the production tiling shape (spec §5.2, plan decision 29)',
+    (m, want) => {
+      expect(rectangle(asIsoMonth(m), 9, 20, 10)).toEqual(want);
+    },
+  );
   it('the over-limit rectangle is 9 × 24 = 216', () => {
     expect(rectangle(asIsoMonth('2027-03'), 9, 24, 10)).toEqual({
       outFrom: '2027-03-01',
@@ -2330,8 +2336,8 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       'travelpayouts prices_for_dates LGW→EWR 2027-03 (airport)',
       'travelpayouts prices_for_dates LON→JFK 2028-02 (empty-probe)',
       'travelpayouts prices_for_dates LON→JFK 2028-03 with an invalid token (401 body)',
-      'searchapi google_flights step 1 LHR→JFK 2027-03-09/2027-03-30 with an invalid key (401 body)',
-      'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-08 × ret 2027-03-11..2027-03-29 (152)',
+      'searchapi google_flights step 1 LHR→JFK 2027-03-10/2027-03-31 with an invalid key (401 body)',
+      'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-03-30 (180)',
       'searchapi google_flights_calendar LHR→JFK out 2027-03-01..2027-03-09 × ret 2027-03-11..2027-04-03 (216) over the limit (400, or an empty 200 per the docs)',
       'searchapi google_flights step 1 LHR→JFK, cheapest priced in-band cell of SA-02',
       'searchapi google_flights step 2, departure_token of the cheapest priced step-1 option',
@@ -2431,9 +2437,12 @@ export const TP_MONTHS = 7;
 export const TP_EMPTY_PROBE_OFFSET_MONTHS = 11;
 /** Month offset of the Travelpayouts 401 probe (TP-20): a request no success recording makes (plan decision 20). */
 export const TP_AUTH_PROBE_OFFSET_MONTHS = 12;
-/** Spec §5.2: 8 outbound × 19 return days covers a 12-night band (152 ≤ 200). */
-export const CALENDAR_OUT_DAYS = 8;
-export const CALENDAR_RET_DAYS = 19;
+/**
+ * Spec rev 15 §5.2 production tiling shape for the worked 10–21-night band (plan decision 29): the largest outbound
+ * block b with b × (b + maxNights − minNights) ≤ 200, i.e. 9 outbound days × a 20-day return span = 180.
+ */
+export const CALENDAR_OUT_DAYS = 9;
+export const CALENDAR_RET_DAYS = 20;
 /** The deliberate over-limit probe: 9 × 24 = 216 > 200 (spec §2 fact 2). */
 export const OVER_LIMIT_OUT_DAYS = 9;
 export const OVER_LIMIT_RET_DAYS = 24;
@@ -2950,10 +2959,10 @@ const statuses = (calls: ReadonlyArray<{ id: string; status: unknown }>): string
   calls.map((c) => `${c.id}:${String(c.status)}`);
 const RECT = {
   outFrom: asIsoDate('2027-03-01'),
-  outTo: asIsoDate('2027-03-08'),
+  outTo: asIsoDate('2027-03-09'),
   retFrom: asIsoDate('2027-03-11'),
-  retTo: asIsoDate('2027-03-29'),
-  combinations: 152,
+  retTo: asIsoDate('2027-03-30'),
+  combinations: 180,
 };
 const BAND = { minNights: 10, maxNights: 21 };
 
@@ -2971,7 +2980,7 @@ describe('response readers (ts-005, pie-006, prov-wp04b-r2-002)', () => {
       calendar: [
         { departure: '2027-03-01', return: '2027-03-29', price: 380 },
         { departure: '2027-03-04', return: '2027-03-16', has_no_flights: true, price: 390 },
-        { departure: '2027-03-09', return: '2027-03-30', price: 400 },
+        { departure: '2027-03-10', return: '2027-03-31', price: 400 },
         { departure: '2027-03-02', return: '2027-03-16', price: 603 },
         { departure: 'not-a-date', return: '2027-03-16', price: 1 },
       ],
@@ -3241,7 +3250,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
   it('a 429 on a required call leaves it not as planned (r2-ts-004)', async () => {
     const run = await runRecordingInFakeTime({
       vendors: {
-        failOn: (u) => (u.searchParams.get('outbound_date_end') === '2027-03-09' ? 'http-429' : undefined),
+        failOn: (u) => (u.searchParams.get('return_date_end') === '2027-04-03' ? 'http-429' : undefined),
       },
     });
     expect(run.summary.calls.find((c) => c.id === 'SA-03')).toMatchObject({
@@ -3517,6 +3526,8 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
     currency: { fixed: ['GBP'] },
     gl: { fixed: ['gb'] },
     hl: { fixed: ['en'] },
+    // why: plan decision 29 — separate-ticket itineraries excluded on both engines (documented for both)
+    separate_tickets: { fixed: ['1'] },
   } as const;
   return {
     prices_for_dates: {
@@ -3558,9 +3569,8 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
         outbound_date: date,
         return_date: date,
         ...shared,
-        // why: plan decision 24 — sorted by price, separate-ticket itineraries excluded; no `stops` on either engine
+        // why: plan decision 24 — sorted by price; no `stops` on either engine (separate_tickets is shared, decision 29)
         sort_by: { fixed: ['price'] },
-        separate_tickets: { fixed: ['1'] },
         departure_token: { kind: 'opaque-token' },
         booking_token: { kind: 'opaque-token' },
       },
@@ -6179,10 +6189,12 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
           'outbound_date_start',
           'return_date_end',
           'return_date_start',
+          'separate_tickets',
         ].sort(),
         values: {
           ...fixedSa,
           engine: ['google_flights_calendar'],
+          separate_tickets: ['1'],
           arrival_id: 'any',
           departure_id: 'any',
           outbound_date: 'any',
@@ -6734,10 +6746,11 @@ export function checkWorkedExampleTree(
 
   // SearchApi
   const cal = sa.filter((f) => q(f, 'engine') === 'google_flights_calendar');
-  const main = cal.filter((f) => q(f, 'outbound_date_end') === '2027-03-08');
-  if (main.length !== 1 || main[0]?.status !== 200 || q(main[0], 'return_date_end') !== '2027-03-29')
-    fail('searchapi: the 152-combination calendar must be one 200 ending 2027-03-29');
-  const over = cal.filter((f) => q(f, 'outbound_date_end') === '2027-03-09');
+  // why: SA-02 and SA-03 share outbound 2027-03-01..03-09 (plan decision 29); the return span tells them apart
+  const main = cal.filter((f) => q(f, 'return_date_end') === '2027-03-30');
+  if (main.length !== 1 || main[0]?.status !== 200 || q(main[0], 'outbound_date_end') !== '2027-03-09')
+    fail('searchapi: the 180-combination calendar must be one 200, out 2027-03-01..03-09 × ret 2027-03-11..03-30');
+  const over = cal.filter((f) => q(f, 'return_date_end') === '2027-04-03');
   const overBody = over[0]?.body;
   const emptyCalendar =
     typeof overBody === 'object' &&
@@ -6749,8 +6762,8 @@ export function checkWorkedExampleTree(
   const unauth = sa
     .filter((f) => f.status === 401)
     .map((f) => `${q(f, 'outbound_date')}/${q(f, 'return_date')}`);
-  if (JSON.stringify(unauth) !== '["2027-03-09/2027-03-30"]')
-    fail('searchapi: the 401 probe must be the one 401, on 2027-03-09/2027-03-30');
+  if (JSON.stringify(unauth) !== '["2027-03-10/2027-03-31"]')
+    fail('searchapi: the 401 probe must be the one 401, on 2027-03-10/2027-03-31');
   for (const f of sa) {
     if (
       q(f, 'gl') !== 'gb' ||
@@ -6760,11 +6773,10 @@ export function checkWorkedExampleTree(
     )
       fail('searchapi: gl, travel_class, currency or adults differs');
     if (q(f, 'stops') !== null) fail('searchapi: a stops parameter was sent (plan decision 24)');
-    if (
-      q(f, 'engine') === 'google_flights' &&
-      (q(f, 'sort_by') !== 'price' || q(f, 'separate_tickets') !== '1')
-    )
-      fail('searchapi: google_flights without sort_by=price and separate_tickets=1 (plan decision 24)');
+    if (q(f, 'separate_tickets') !== '1')
+      fail('searchapi: a request without separate_tickets=1 (plan decisions 24 and 29: both engines)');
+    if (q(f, 'engine') === 'google_flights' && q(f, 'sort_by') !== 'price')
+      fail('searchapi: google_flights without sort_by=price (plan decision 24)');
   }
 
   // the chain

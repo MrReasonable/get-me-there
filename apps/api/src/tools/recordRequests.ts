@@ -19,8 +19,9 @@ export const RECORD_TRAVEL_CLASS = 'economy';
 
 /** Passengers on every SearchApi request, sent explicitly (plan decision 24; vendor default 1). */
 export const RECORD_ADULTS = '1';
-/** google_flights only (plan decision 24): results sorted by price, and separate-ticket itineraries excluded. */
+/** google_flights only (plan decision 24): results sorted by price. */
 export const RECORD_SORT_BY = 'price';
+/** Both engines (plan decisions 24 and 29; the vendor documents it for both): separate-ticket itineraries excluded. */
 export const RECORD_SEPARATE_TICKETS = '1';
 
 /** A calendar rectangle (spec §5.2): outbound and return date ranges, both inclusive. */
@@ -110,6 +111,7 @@ export function calendarParams(
     flight_type: 'round_trip',
     travel_class: RECORD_TRAVEL_CLASS,
     adults: RECORD_ADULTS,
+    separate_tickets: RECORD_SEPARATE_TICKETS,
     currency: 'GBP',
     gl,
     hl: 'en',

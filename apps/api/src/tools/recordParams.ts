@@ -54,6 +54,8 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
     currency: { fixed: ['GBP'] },
     gl: { fixed: ['gb'] },
     hl: { fixed: ['en'] },
+    // why: plan decision 29 — separate-ticket itineraries excluded on both engines (documented for both)
+    separate_tickets: { fixed: ['1'] },
   } as const;
   return {
     prices_for_dates: {
@@ -95,9 +97,8 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
         outbound_date: date,
         return_date: date,
         ...shared,
-        // why: plan decision 24 — sorted by price, separate-ticket itineraries excluded; no `stops` on either engine
+        // why: plan decision 24 — sorted by price; no `stops` on either engine (separate_tickets is shared, decision 29)
         sort_by: { fixed: ['price'] },
-        separate_tickets: { fixed: ['1'] },
         departure_token: { kind: 'opaque-token' },
         booking_token: { kind: 'opaque-token' },
       },
