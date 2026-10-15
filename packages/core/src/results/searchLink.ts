@@ -34,29 +34,35 @@ export function searchLinkFor(
   cell: CellKey,
   cabin: Cabin,
 ): { url: string; host: string; label: string } | null {
-  if (providerId === 'fixture') return null;
-  let url: URL;
-  let label = SEARCH_LINK_LABEL;
-  if (providerId === 'travelpayouts') {
-    url = new URL('https://search.aviasales.com/flights/');
-    url.search = new URLSearchParams({
-      origin_iata: cell.origin,
-      destination_iata: cell.destination,
-      depart_date: cell.departureDate,
-      return_date: cell.returnDate,
-      adults: '1',
-      children: '0',
-      infants: '0',
-      trip_class: AVIASALES_CLASS[cabin],
-    }).toString();
-    if (cabin === 'premium_economy') label = `${SEARCH_LINK_LABEL}; cabin not prefilled`;
-  } else {
-    url = new URL('https://www.google.com/travel/flights');
-    url.search = new URLSearchParams({
-      q: `Flights from ${cell.origin} to ${cell.destination} on ${cell.departureDate} through ${cell.returnDate} ${GOOGLE_CABIN[cabin]} 1 adult`,
-      hl: 'en',
-      curr: 'GBP',
-    }).toString();
+  // why: an exhaustive switch (no default), so a new ProviderId fails to compile here instead of
+  // silently getting another vendor's search link (review arch M-2).
+  switch (providerId) {
+    case 'fixture':
+      return null;
+    case 'travelpayouts': {
+      const url = new URL('https://search.aviasales.com/flights/');
+      url.search = new URLSearchParams({
+        origin_iata: cell.origin,
+        destination_iata: cell.destination,
+        depart_date: cell.departureDate,
+        return_date: cell.returnDate,
+        adults: '1',
+        children: '0',
+        infants: '0',
+        trip_class: AVIASALES_CLASS[cabin],
+      }).toString();
+      const label =
+        cabin === 'premium_economy' ? `${SEARCH_LINK_LABEL}; cabin not prefilled` : SEARCH_LINK_LABEL;
+      return { url: url.href, host: url.hostname, label };
+    }
+    case 'searchapi': {
+      const url = new URL('https://www.google.com/travel/flights');
+      url.search = new URLSearchParams({
+        q: `Flights from ${cell.origin} to ${cell.destination} on ${cell.departureDate} through ${cell.returnDate} ${GOOGLE_CABIN[cabin]} 1 adult`,
+        hl: 'en',
+        curr: 'GBP',
+      }).toString();
+      return { url: url.href, host: url.hostname, label: SEARCH_LINK_LABEL };
+    }
   }
-  return { url: url.href, host: url.hostname, label };
 }
