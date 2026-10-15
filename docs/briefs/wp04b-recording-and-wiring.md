@@ -10,7 +10,7 @@ status: draft
 
 # WP4b — fixture recording on the example route and the wiring helper
 
-Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–22, spec revision 13, and the merged `@gmt/core`, `@gmt/db` (WP3) and `@gmt/providers` (WP4) on main at 672411f. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
+Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–25, spec revision 14, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at 23d7982. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
 
 ## 1. Goal
 
@@ -27,24 +27,25 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
   1. parse the config once through `loadConfigFromEnv` (78 on a bad config); the only `process.env` read;
   2. refuse `config.nodeEnv === 'test'` (70);
   3. refuse while `syntheticAllowed(config)` is true (78);
-  4. parse the tool's arguments (64) and run its configuration precheck (78);
-  5. read `app_lock` through `@gmt/db`'s `readOnlyLockState` (a read-only connection; no migration, no journal-mode change) and refuse while a fresh lock exists (75), before any backup or migration;
-  6. refuse an unwritable data directory (73);
-  7. when the file exists and migrations are pending: refuse a backups path that is not a writable directory (73), then `backupDatabase` (74 on failure);
+  4. parse the tool's arguments (64), decide where it records (64 for a route other than the worked example without `--out`, or an `--out` inside the repository), and run its configuration precheck (78);
+  5. refuse an unwritable data directory (73);
+  6. read `app_lock` through `@gmt/db`'s `readOnlyLockState` (a read-only connection; no migration, no journal-mode change) and refuse while a fresh lock exists (75); a file it cannot read (not a database, unreadable) refuses with 73;
+  7. when the file exists and migrations are pending: refuse an unreadable migration state or a backups path that is not a writable directory (73), then `backupDatabase` (74 on failure);
   8. `buildPorts` (migrations; 1 on failure);
-  9. take `AppLock('tool')` (75), seed the airports table when it is empty or the dataset version changed, heartbeat every `HEARTBEAT_INTERVAL_MS` (a lost lock aborts the tool and returns 75), stop on SIGINT/SIGTERM, release on every path.
+  9. take `AppLock('tool')` (75), seed the airports table when it is empty or the dataset version changed, heartbeat every `HEARTBEAT_INTERVAL_MS` (a lost lock aborts the tool and returns 75), abort on SIGINT/SIGTERM (repeated signals only abort again), release on every path.
 
-  It never constructs or boots the engine.
-- `apps/api/src/tools/{types,recordRequests,recordPlan,recordParams,record}.ts`: `pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--dry-run] [--confirm-rerun]` and `recordFixtures(ports, args, ctx)` as the plan's contract (section 5.1 lists the widening).
+  Every failure after the config parse maps to an exit code with a secret-scrubbed message, so nothing reaches the entry point's catch. It never constructs or boots the engine.
+- `apps/api/src/tools/{types,recordRequests,recordPlan,recordParams,recordExecution,recordReport,record,workedExample}.ts`: `pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--out DIR] [--dry-run] [--confirm-rerun]` and `recordFixtures(ports, args, ctx)` as the plan's contract (plan decision 23; section 5.1).
+- **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
 - The recording run on the worked example through the real http-kit + recorder + guard, under a hidden soft-deleted definition's execution with `trigger: 'tool'`, against the operator's configured `DATABASE_PATH` (the production ledger, spec §7). It records:
   - 20 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe and a 401 probe on a month no success call uses;
-  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell.
+  - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1` and `travel_class`; google_flights also sends `sort_by=price` and `separate_tickets=1`; no `stops` (plan decision 24). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004).
 
   No 429 is attempted (plan decision 20): WP5 maps rate limits from a labelled synthetic fixture and `rateLimitFallbackWaitSeconds`, and SearchApi's Retry-After behaviour stays unverified against the vendor.
-- Cross-run spend control: a live run refuses (exit 65) when the SearchApi credits already ledgered to `trigger: 'tool'` executions in the provider's budget window, plus this run's worst case, exceed `--budget`, unless `--confirm-rerun` is passed; the dry run prints that sum.
+- Spend control before any live call (exit 65, `EXIT.spendRefused`): the run refuses when the SearchApi credits already ledgered to `trigger: 'tool'` executions in the provider's budget window, plus this run's worst case, exceed `--budget`, unless `--confirm-rerun` is passed (plan decision 20); and it refuses, whatever the flags, when the SearchApi window or the Travelpayouts month has less room than the run's worst case (cost-wp4b-r2-001). Travelpayouts paging stops at 3 pages per tile, so the worst case is finite (cost-wp4b-r2-002). The dry run prints every figure and verdict.
 - The dated parameter allowlists `packages/providers/fixtures/recorded/<provider>/params-<date>.json` in the plan's `ParamsAllowlist` shape, loadable by WP4's `loadParamsAllowlist`.
-- The committed recorded tree, a manual review of every recorded file before commit, and the committed-tree manifest test.
-- `scripts/check-boundaries.mjs`: msw imports fail in every package's `src` outside `packages/providers/src/testing/`, and `@gmt/api` may neither list msw nor import it from its test tree (plan decisions 7 and 20).
+- The committed recorded tree, a manual review of every recorded file before commit, and the committed-tree manifest: `checkWorkedExampleTree(root, opts)` in apps/api's test helpers, proven against a stand-in tree and broken copies of it, and called on the committed tree by one test (r2-ts-002). Its stand-in tripwire fails on any committed file carrying the test stand-ins' marker.
+- `scripts/check-boundaries.mjs`: any msw import (static, side-effect or dynamic) fails in every package's `src` outside `packages/providers/src/testing/`, `@gmt/api` may neither list msw nor import it from its test tree (plan decisions 7 and 20), and `process.env` may be read only under `apps/api/src/bootstrap/` (wiring and logger take the env as an argument).
 - **The recorded tree is for this private repository.** Publishing the repository requires removing or re-recording the vendor bodies first (plan decision 20; Task 12b repeats it in the PR).
 
 **Out**
@@ -154,7 +155,11 @@ export function installNetworkGuards(hooks: GuardHooks): { server };   // refuse
 export function verifyRecordedFile(path: string, recordedRoot: string, secrets?: readonly Secret[]): string[];   // problems; [] = clean (hash, recordedAt, recordedBy, session, location, file name, response headers, provider host, no secret)
 export function verifyRecordedTree(recordedRoot: string, secrets?: readonly Secret[]): string[];
 export function loadRecorded(root: string, providerId: string, endpointPath: string): RecordedFixture[];   // recordedAt order
+export function takeStrays(): string[];   // requests the catch-all answered since the last call, cleared (the guard test reads it)
+export function withContentHash<T extends object>(file: T): T & { contentSha256: string };   // the manifest's negative tests re-hash an edited copy
 ```
+
+Signature checks: WP4's verifier accepts any non-blank `recordedBy`, so `checkWorkedExampleTree` (Task 12a) is the only check that requires `RECORDED_BY`.
 
 `scripts/secret-scan.mjs` (WP0) is consumed as written: it scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`.
 
@@ -174,15 +179,16 @@ export function createLogger(config: Pick<Config, 'logLevel'>, opts?: { destinat
 // src/bootstrap/tool.ts
 export async function runTool(name: 'record' | 'smoke', argv: string[], opts?: RunToolOptions): Promise<number>;
 // src/tools/record.ts
-export async function recordFixtures(ports: Ports, args: RecordArgs, ctx: { signal: AbortSignal; recordedRoot: string; recordedBy?: string; plan?: readonly PlannedCall[] }): Promise<RecordSummary>;
+export async function recordFixtures(ports: Ports, args: RecordArgs, ctx: { signal: AbortSignal; recordedRoot: string; recordedBy: string; plan?: readonly PlannedCall[] }): Promise<RecordSummary>;
 export interface RecordArgs { budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth }
-export interface RecordSummary { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null; chain: { step1Price: number | null; step2Price: number | null; step3Options: Array<{ bookWith: string; price: number }> } }
+// src/tools/types.ts
+export interface RecordSummary { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null; chain: { currency: 'GBP'; step1PricePence: number | null; step2PricePence: number | null; step3Options: Array<{ bookWith: string; pricePence: number }> } }
 export interface RecordedCall { id: string; providerId: ProviderId; status: number | 'skipped' | 'aborted' | 'no-response'; file: string | null; files: string[]; detail: string | null }
 ```
 
-Widenings against the plan's text, each forced by a review finding and listed in section 13 for the plan: `createLogger`'s `fd` and `secrets` (sec-002, arch-016); `runTool`'s optional `opts` (ts-003, ts-014); `recordFixtures`' `ctx.recordedRoot`/`recordedBy`/`plan` (ruling 5, prov-wp04b-006, arch-023); `RecordArgs` loses `metro` (ruling 6: the metro comes from the seeded airports table); `RecordSummary` gains `session` and `chain` (prov-wp04b-008, pie-008); `RecordedCall.status` gains `'aborted'` and `'no-response'`, and `files`/`detail` are added (arch-019, cost-wp4b-005, prov-wp04b-007).
+Plan decision 23 records the widenings against the plan's first text (`createLogger`'s `fd`/`secrets`, `runTool`'s `opts`, `recordFixtures`' ctx, `RecordArgs` without `metro`, `RecordSummary.session`/`chain`, the `RecordedCall` fields). This revision adds two that section 13 lists: `ctx.recordedBy` is required (no fallback signature), and `chain` carries integer pence with its currency (prov-wp04b-r2-001: diagnostics, never offers).
 
-`RecordedCall.status` is the HTTP status when a response arrived; `'no-response'` when the request may have reached the vendor but no status came back (timeout, network error; http-kit ledgers it `unknown`, counted); `'aborted'` when SIGINT, SIGTERM or a lost lock stopped it; `'skipped'` only when nothing reached the vendor (a guard refusal, a missing chain prerequisite, an abort before send). `files` lists every file the recorder wrote for the call, retries included; `file` is the last. `creditsUsed` and `freeCalls` are `budget.usage` of the execution's `execution-calls` and `execution-free-calls` scopes.
+`RecordedCall.status` is the HTTP status when a response arrived; `'no-response'` when the request may have reached the vendor but no status came back, with `detail` saying whether the ledger counted it (a timeout is finalised `unknown` and counted; a socket failure is finalised `error`, not counted, and retried by http-kit: the one path where the vendor may have billed a credit the ledger does not show, cost-wp4b-r2-003); `'aborted'` when SIGINT, SIGTERM or a lost lock stopped it; `'skipped'` only when nothing reached the vendor (a guard refusal, a missing chain prerequisite, an abort before send). `files` lists every file the recorder wrote for the call, retries included; `file` is the last. `creditsUsed` and `freeCalls` are `budget.usage` of the execution's `execution-calls` and `execution-free-calls` scopes.
 
 ### 5.2 Helpers, also exported (used by WP8/WP13 or by this brief's tests)
 
@@ -195,40 +201,55 @@ export function collectSecrets(config: Config): Secret[];
 export const SPEC_REDACT_PATHS: readonly string[]; export const REDACT_PATHS: readonly string[];
 // src/tools/types.ts
 export type ToolName = 'record' | 'smoke';
-export interface ToolContext { signal: AbortSignal; out(line: string): void; err(line: string): void; recordedRoot: string }
-export const EXIT: { ok: 0; failed: 1; usage: 64; rerunUnconfirmed: 65; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };
+export interface ToolContext { signal: AbortSignal; out(line: string): void; err(line: string): void; recordedRoot: string; recordedBy: string }
+export const EXIT: { ok: 0; failed: 1; usage: 64; spendRefused: 65; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };
+export class RecordingFailedError extends Error { readonly partial: { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null } }
 // packages/db/src/appLock.ts (exported from @gmt/db; Task 7)
-export function readOnlyLockState(dbPath: string, clock: Clock): { state: 'absent' | 'fresh' | 'stale'; holder?: string; heartbeatAt?: IsoDateTime };   // absent: no file, no app_lock table or no row; fresh: heartbeat ≤ LOCK_STALE_AFTER_MS old; never writes
+export function readOnlyLockState(dbPath: string, clock: Clock): { state: 'absent' | 'fresh' | 'stale'; holder?: string; heartbeatAt?: IsoDateTime };   // absent: :memory:, no file, no app_lock table or no row; fresh: heartbeat ≤ LOCK_STALE_AFTER_MS old; never writes; throws for a non-database file or a malformed heartbeat (the tool maps a throw to 73)
 // src/bootstrap/tool.ts
 export interface ToolRunners { record(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number> }   // WP13 adds smoke
-export interface RunToolOptions { env?; runners?: Partial<ToolRunners>; out?; err?; logDestination?; clock?: Clock; migrationsDir?: string; recordedRoot?: string }
+export interface RecordingTarget { root: string; recordedBy: string }
+export interface RunToolOptions { env?; runners?: Partial<ToolRunners>; out?; err?; logDestination?; clock?: Clock; migrationsDir?: string; recording?: RecordingTarget /* root and signature together */ }
+export function recordingTarget(cli: RecordCli, given: RecordingTarget | undefined): RecordingTarget | { refusal: string };
+export function repositoryRoot(): string;   // nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml
+export function isEntryPoint(script?: string, self?: string): boolean;
 export function backupsDirFor(databasePath: string): string;   // <dirname(dbPath)>/backups
-export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[];
+export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[];   // opens read-write (no schema change)
+// src/tools/workedExample.ts
+export const WORKED_EXAMPLE_ROUTE: { origins: readonly ['LHR', 'LGW']; destinations: readonly ['JFK', 'EWR'] }; export const WORKED_EXAMPLE_ROUTE_ARG: string;
+export function isWorkedExampleRoute(a: { origins: readonly string[]; destinations: readonly string[] }): boolean;
 // src/tools/recordRequests.ts
-export const TP_URL; export const SA_URL; export const TP_PAGE_LIMIT = 1000; export const RECORD_TRAVEL_CLASS = 'economy';
+export const TP_URL; export const SA_URL; export const TP_PAGE_LIMIT = 1000; export const RECORD_TRAVEL_CLASS = 'economy'; export const RECORD_ADULTS = '1'; export const RECORD_SORT_BY = 'price'; export const RECORD_SEPARATE_TICKETS = '1';
 export interface Rect { outFrom: IsoDate; outTo: IsoDate; retFrom: IsoDate; retTo: IsoDate; combinations: number }
 export interface CellDates { departure: IsoDate; return: IsoDate }
+export function isRecord(v: unknown): v is Record<string, unknown>;
 export function recordingLimits(tp, sa, timing): HttpKitDeps['limits'];
 export function tpUrl(…): URL; export function saUrl(…): URL; export function calendarParams(…); export function flightsParams(…);
-export function cheapestCalendarCell(body: unknown, band: { minNights: number; maxNights: number }): (CellDates & { price: number }) | null;
+export function cheapestCalendarCell(body: unknown, band: { minNights: number; maxNights: number }, rect: Rect): (CellDates & { price: number }) | null;
 export function cheapestOption(body: unknown, tokenField: 'departure_token' | 'booking_token'): { token: string; price: number } | null;
 export function calendarIsEmpty(body: unknown): boolean; export function dataRowCount(body: unknown): number; export function bookingOptions(body: unknown): Array<{ bookWith: string; price: number }>;
 // src/tools/recordPlan.ts
-export interface RecordCli { args: RecordArgs; dryRun: boolean; confirmRerun: boolean }
+export const TP_MAX_PAGES_PER_TILE = 3;
+export interface RecordCli { args: RecordArgs; dryRun: boolean; confirmRerun: boolean; out: string | null }
 export function parseRecordArgs(argv: readonly string[]): { ok: true; value: RecordCli } | { ok: false; message: string };
 export function monthAfter(month: IsoMonth, k: number): IsoMonth; export function rectangle(month: IsoMonth, outDays: number, retDays: number, minNights: number): Rect;
-export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[]; export function planTotals(plan): { saCalls; worstCaseCredits; expectedCredits; freeCalls };
-export function formatPlan(plan: readonly PlannedCall[]): string[]; export function freeCallMisfit(plan, maxFreeCalls: number): string | null;
+export function planCalls(a: RecordArgs, metro: string | null): PlannedCall[]; export function planTotals(plan): { saCalls; worstCaseCredits; expectedCredits; freeCalls; worstCaseFreeCalls };
+export function formatPlan(plan: readonly PlannedCall[]): string[]; export function freeCallMisfit(plan, maxFreeCalls: number): string | null;   // against the worst case
 // src/tools/recordParams.ts
-export class ParamLog { note(key: EndpointKey, params: URLSearchParams): void; document(provider, recordedAt: IsoDate): ParamsAllowlist }
-export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>>; export function writeAllowlist(root: string, doc: ParamsAllowlist): string;
+export class ParamLog { validate(key: EndpointKey, params: URLSearchParams): void /* before send */; observe(key: EndpointKey, params: URLSearchParams): void /* after a response */; document(provider, recordedAt: IsoDate): ParamsAllowlist }
+export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>>; export function writeAllowlist(root: string, doc: ParamsAllowlist): string;   // 'wx'
+// src/tools/recordExecution.ts
+export function priorToolCredits(ports: Ports): number;
+export function budgetPosition(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[] };
+export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string;
+// src/tools/recordReport.ts
+export interface RunAssessment { requiredOk: boolean; notAsExpected: string[]; chainComplete: boolean; emptyEnvelope: boolean; overLimit: 'http-400' | 'empty-200' | 'other' }
+export function assessRun(plan, s: Pick<RecordSummary, 'calls'>): RunAssessment;
+export function formatSummary(s, v, a): string[]; export function ledgerLine(s, a): string; export function retryAttemptLines(calls): string[];
+export function readRecorded(file: string | null): Record<string, unknown> | undefined; export function sessionOf(file: string): string | null; export function sessionOfCalls(calls): string | null;
 // src/tools/record.ts
 export const RECORDED_BY = '@gmt/api record:fixtures';
-export class RecordingFailedError extends Error { readonly partial: { calls: RecordedCall[]; creditsUsed: number; freeCalls: number } }
-export function recordPrecheck(c: Config): string | null; export function priorToolCredits(ports: Ports): number;
-export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string;
-export function assessRun(plan, s: RecordSummary): { requiredOk: boolean; chainComplete: boolean; emptyEnvelope: boolean; overLimit: 'http-400' | 'empty-200' | 'other' };
-export function formatSummary(s, v, a): string[]; export function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number>; export function safeMessage(e: unknown, secrets: readonly Secret[]): string;
+export function recordPrecheck(c: Config): string | null; export function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number>; export function safeMessage(e: unknown, secrets: readonly Secret[]): string;
 ```
 
 ### 5.3 Recorded file format (plan `RecordedFixture`, written by WP4's recorder)
@@ -267,23 +288,23 @@ export function formatSummary(s, v, a): string[]; export function runRecord(port
   "recordedAt": "2026-10-20",
   "endpoints": {
     "/api/v1/search?engine=google_flights_calendar": {
-      "names": ["arrival_id", "currency", "departure_id", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start", "travel_class"],
-      "values": { "arrival_id": "any", "currency": ["GBP"], "departure_id": "any", "engine": ["google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any", "outbound_date_end": "any", "outbound_date_start": "any", "return_date": "any", "return_date_end": "any", "return_date_start": "any", "travel_class": ["business", "economy", "first_class", "premium_economy"] }
+      "names": ["adults", "arrival_id", "currency", "departure_id", "engine", "flight_type", "gl", "hl", "outbound_date", "outbound_date_end", "outbound_date_start", "return_date", "return_date_end", "return_date_start", "travel_class"],
+      "values": { "adults": ["1"], "arrival_id": "any", "currency": ["GBP"], "departure_id": "any", "engine": ["google_flights_calendar"], "flight_type": ["round_trip"], "gl": ["gb"], "hl": ["en"], "outbound_date": "any", "outbound_date_end": "any", "outbound_date_start": "any", "return_date": "any", "return_date_end": "any", "return_date_start": "any", "travel_class": ["business", "economy", "first_class", "premium_economy"] }
     },
     "/api/v1/search?engine=google_flights": {
-      "names": ["arrival_id", "booking_token", "currency", "departure_id", "departure_token", "engine", "flight_type", "gl", "hl", "outbound_date", "return_date", "travel_class"],
-      "values": { "…": "as above", "booking_token": "any", "departure_token": "any", "engine": ["google_flights"] }
+      "names": ["adults", "arrival_id", "booking_token", "currency", "departure_id", "departure_token", "engine", "flight_type", "gl", "hl", "outbound_date", "return_date", "separate_tickets", "sort_by", "travel_class"],
+      "values": { "…": "as above", "booking_token": "any", "departure_token": "any", "engine": ["google_flights"], "separate_tickets": ["1"], "sort_by": ["price"] }
     }
   },
   "contentSha256": "…"
 }
 ```
 
-Keys are the endpoint path, or `<path>?engine=<value>` for SearchApi's two engines on `/api/v1/search`; Travelpayouts has one key, `/aviasales/v3/prices_for_dates`, with names `currency, departure_at, destination, limit, one_way, origin, page`. `names` lists every parameter sent to that key, sorted. `values`: a fixed parameter maps to the sorted values sent; `travel_class` maps to the vendor's documented set (spec §5.4), so WP5 can send the definition's cabin while this run sends `economy`; a variable parameter (airport, date, month, page, opaque token) maps to `'any'`. No credential name (`api_key`, `token`) and none of `market`, `trip_class`, `return_at` ever appears. `contentSha256` is over `canonicalJson` without the field, so `loadParamsAllowlist` verifies it.
+Keys are the endpoint path, or `<path>?engine=<value>` for SearchApi's two engines on `/api/v1/search`; Travelpayouts has one key, `/aviasales/v3/prices_for_dates`, with names `currency, departure_at, destination, limit, one_way, origin, page`. `names` lists every parameter sent to that key, sorted. `values`: a fixed parameter maps to the sorted values sent; `travel_class` maps to the vendor's documented set (spec §5.4), so WP5 can send the definition's cabin while this run sends `economy`; a variable parameter (airport, date, month, page, opaque token) maps to `'any'`. No credential name (`api_key`, `token`) and none of `market`, `trip_class`, `return_at`, `stops` ever appears. A name enters the file only when a request carrying it got a response, so a call the guard refused or an abort stopped evidences nothing (prov-wp04b-r2-003). Plan decision 24: this SearchApi file equals WP5's `SEARCHAPI_PARAMS`. `contentSha256` is over `canonicalJson` without the field, so `loadParamsAllowlist` verifies it.
 
 ## 6. Endpoints and parameters
 
-Verified = read on the vendor's documentation page on 2026-10-14 (this revision makes no vendor request and does not re-fetch them). Spike-measured = settled by the 2026-10-14 spike (spec §2, `docs/providers.md`).
+Verified = read on the vendor's documentation page on 2026-10-14, or in the WP5 review's evidence note of 2026-10-15 (`~/.cache/get-me-there/review-spec/wp05-searchapi-adapter/r1/evidence/provider-integration-expert-vendor-docs.md`); this revision makes no vendor request. Spike-measured = settled by the 2026-10-14 spike (spec §2, `docs/providers.md`).
 
 **Travelpayouts** `GET https://api.travelpayouts.com/aviasales/v3/prices_for_dates`. Credential in header `X-Access-Token`.
 
@@ -295,7 +316,7 @@ Verified = read on the vendor's documentation page on 2026-10-14 (this revision 
 | `one_way` | `false` | spike-measured |
 | `currency` | `gbp` | spike-measured (fact 1: honoured) |
 | `limit` | `1000` | spike-measured |
-| `page` | `1`, then `2…` while a page returns 1000 rows | spike-measured |
+| `page` | `1`, then `2…` while a page returns 1000 rows, at most 3 pages per tile | spike-measured; the cap is this brief's (cost-wp4b-r2-002) |
 | no `return_at`, `market`, `trip_class` or `token` query parameter | — | spike-measured (fact 1, fact 8) |
 
 **SearchApi** `GET https://www.searchapi.io/api/v1/search`. Credential in header `Authorization: Bearer <key>` (verified; `api_key` is never sent).
@@ -309,20 +330,22 @@ Verified = read on the vendor's documentation page on 2026-10-14 (this revision 
 | `outbound_date`, `return_date` | = the rectangle's start dates | verified; the docs mark both required |
 | `outbound_date_start`/`_end`, `return_date_start`/`_end` | rectangle bounds | verified |
 | `flight_type` | `round_trip` | verified |
-| `travel_class` | `economy` (the worked example's cabin) | spec §5.4 value set; sent on every SearchApi request (plan decision 20) |
+| `travel_class` | `economy` (the worked example's cabin) | verified (2026-10-15 evidence); spec §5.4 value set; sent on every SearchApi request (plan decisions 20, 24) |
+| `adults` | `1`, sent explicitly | verified (default 1); plan decision 24 |
 | `currency` | `GBP` | verified (default `USD`) |
 | `gl` | `gb` (the tool refuses unless `POINT_OF_SALE=GB`) | verified (default `us`) |
 | `hl` | `en` | verified |
+| no `stops`, no `separate_tickets` on the calendar | — | plan decision 24 (the calendar's `stops` filter would hide cells WP5 must price) |
 
 The docs say more than 200 combinations "returns an empty response"; the spike measured HTTP 400. SA-03 records which happens: a 400 or an empty 200 both pass, the empty 200 is billed (section 7), and the summary names the behaviour.
 
-`engine=google_flights` (https://www.searchapi.io/docs/google-flights-api): `engine`, `departure_id`, `arrival_id`, `outbound_date`, `return_date`, `flight_type=round_trip`, `travel_class=economy`, `currency=GBP`, `gl=gb`, `hl=en` (verified); step 2 adds `departure_token` from the cheapest priced step-1 option and resends the step-1 parameters (token verified; resending the parameters with it is unverified, the docs show no step-2 example); step 3 sends `booking_token` from the cheapest priced step-2 option with the step-1 parameters and without `departure_token` (verified). Response fields per the docs: `best_flights[]`, `booking_options[]` (`book_with`, `price`, `booking_request`), `price_insights`; `record.ts` also reads `other_flights` and tolerates either array being absent.
+`engine=google_flights` (https://www.searchapi.io/docs/google-flights-api): `engine`, `departure_id`, `arrival_id`, `outbound_date`, `return_date`, `flight_type=round_trip`, `travel_class=economy`, `adults=1`, `currency=GBP`, `gl=gb`, `hl=en` (verified), plus, by plan decision 24, the documented price sort `sort_by=price` and `separate_tickets=1`, the value that excludes separate-ticket itineraries (the evidence note gives the parameter and its default 0, which shows them; the excluding value is the non-default one, and WP5's equality test against this file keeps both packages on one value); no `stops`; step 2 adds `departure_token` from the cheapest priced step-1 option and resends the step-1 parameters (token verified; resending the parameters with it is unverified, the docs show no step-2 example); step 3 sends `booking_token` from the cheapest priced step-2 option with the step-1 parameters and without `departure_token` (verified). Response fields per the docs: `best_flights[]`, `booking_options[]` (`book_with`, `price`, `booking_request`), `price_insights`; `record.ts` also reads `other_flights` and tolerates either array being absent.
 
 ## 7. Planned live call list (worked example)
 
 Command, against the operator's `.env` (no `DATABASE_PATH` override): `pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03`.
 
-The metro comes from the airports table, which the tool seeds after migration when it is empty or its dataset version changed (the vendored metro list maps LHR and LGW to `LON`). The nights band is the worked example's 10–21. `--dry-run` prints exactly this list (Task 5 asserts it line by line), then the Travelpayouts per-run cap, the credits already ledgered to tool runs in the SearchApi window, and the window's used/cap figure to compare with the dashboard.
+The metro comes from the airports table, which the tool seeds after migration when it is empty or its dataset version changed (the vendored metro list maps LHR and LGW to `LON`). The nights band is the worked example's 10–21. `--dry-run` prints exactly this list (Task 5 asserts it line by line), then where it records, the Travelpayouts per-run cap, the credits already ledgered to tool runs in the SearchApi window, each provider window's used/cap/room figures (the SearchApi one to compare with the dashboard), and any refusal a live run would meet.
 
 "Credits ≤" counts every HTTP 200 SearchApi call as billed, which is how the ledger counts them (spec §2 fact 4: the ledger may overcount, never undercount). 400 and 401 responses are not billed and are not counted once finalised. The guard counts a reservation while it is pending, so the SearchApi 401 probe runs first: its reservation never meets a cap the billed calls have filled.
 
@@ -335,23 +358,25 @@ The metro comes from the airports table, which the tool seeds after migration wh
 | SA-01 | google_flights step 1 LHR→JFK 2027-03-09/2027-03-30 with an invalid key (401 body; a cell outside the SA-02 rectangle) | 401 | 0 (0) | 0 (20) |
 | SA-02 | calendar LHR→JFK out 2027-03-01..03-08 × ret 2027-03-11..03-29 (8 × 19 = 152, spec §5.2) | 200 | 1 (1) | 0 (20) |
 | SA-03 | calendar out 2027-03-01..03-09 × ret 2027-03-11..04-03 (9 × 24 = 216, over the limit) | 400, or an empty 200 | 1 (2) | 0 (20) |
-| SA-04 | google_flights step 1 LHR→JFK, the cheapest priced SA-02 cell with 10–21 nights | 200 | 1 (3) | 0 (20) |
+| SA-04 | google_flights step 1 LHR→JFK, the cheapest priced SA-02 cell inside the rectangle with 10–21 nights | 200 | 1 (3) | 0 (20) |
 | SA-05 | step 2, `departure_token` of the cheapest priced step-1 option | 200 | 1 (4) | 0 (20) |
 | SA-06 | step 3, `booking_token` of the cheapest priced step-2 option | 200 | 1 (5) | 0 (20) |
 
-**Totals:** 6 SearchApi calls, at most **5** billed credits (4 expected: SA-02, SA-04, SA-05, SA-06; SA-03 is billed only if the vendor answers it with an empty 200); 20 Travelpayouts free calls, plus one per extra page if a page holds 1000 rows. The execution's snapshot budget caps SearchApi at `min(--budget, 5)` and Travelpayouts at `EXECUTION_MAX_FREE_CALLS` (default 2000); a plan whose free calls exceed that cap is refused before any call (exit 78).
+**Totals:** 6 SearchApi calls, at most **5** billed credits (4 expected: SA-02, SA-04, SA-05, SA-06; SA-03 is billed only if the vendor answers it with an empty 200). Plan decision 24's extra parameters change no call and no credit. 20 Travelpayouts free calls, at most 58 with up to 3 pages per tile (19 tiles × 3 + the 401 probe); a tile still at 1000 rows on its third page is recorded with `detail: page cap reached`. The execution's snapshot budget caps SearchApi at `min(--budget, 5)` and Travelpayouts at `EXECUTION_MAX_FREE_CALLS` (default 2000); a plan whose worst case exceeds that cap is refused before any call (exit 78), and a provider window with less room than the worst case refuses a live run (exit 65).
 
 **Why these calls:**
 
 - **TP-01…14** are a full worked-example scan, spec §5.2's "2 origins sharing LON × 2 destinations × 7 months = 14", so WP13 can replay a whole discovery. **TP-15…18** give WP6 airport-origin tiles for the no-shared-metro path. **TP-19** looks for the empty success envelope WP6's first failing test needs; it is best-effort and outside `requiredOk`. **TP-20** records the 401 body on a request key no success call shares.
-- **SA-01** records the 401 body on a cell one day past the rectangle on both sides, so replay never confuses it with SA-04. **SA-02** is the calendar WP5 tiles from; **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify.
+- **SA-01** records the 401 body on a cell one day past the rectangle on both sides; the chain's cell is chosen only inside the rectangle, so replay never confuses the two. **SA-02** is the calendar WP5 tiles from; **SA-03** settles the over-limit behaviour; **SA-04…06** record the chain on a cell the worked example would verify. When SA-02 yields no usable cell (a non-200, a timeout, no priced in-band cell), SA-03 to SA-06 are skipped: the run must be repeated anyway, so nothing more is spent (ruling on cost-wp4b-r2-004).
 - **No 429 attempt** (plan decision 20). The trial's vendor limit is 20 % of the plan per hour and the run makes 6 SearchApi calls, so a 429 cannot be induced honestly; WP5 maps 429 with a synthetic labelled fixture and `rateLimitFallbackWaitSeconds`, and records that Retry-After behaviour is unverified against the vendor.
 
-**Cross-run spend.** Every invocation creates its own hidden execution. Before a live call the tool sums the SearchApi credits already ledgered to `trigger: 'tool'` executions inside the provider's budget window (the lifetime window on the trial plan, the billing month on 40usd) and refuses with exit 65 when that sum plus this run's worst case exceeds `--budget`, unless `--confirm-rerun` is passed. The operator rule in Task 12b: after any failed live run, stop and ask before re-running.
+**Spend checks before the first call (exit 65).** Every invocation creates its own hidden execution. Before a live call the tool sums the SearchApi credits already ledgered to `trigger: 'tool'` executions inside the provider's budget window (the lifetime window on the trial plan, the billing month on 40usd; the status list is exhaustive at compile time) and refuses when that sum plus this run's worst case exceeds `--budget`, unless `--confirm-rerun` is passed. Separately, it refuses whenever the SearchApi window or the Travelpayouts month has less room than the run's worst case: a run that cannot finish never starts (cost-wp4b-r2-001), and `--confirm-rerun` does not lift that. The operator rule in Task 12b: after any failed live run, stop and ask before re-running.
 
-**Ledger and dashboard.** The run uses the production ledger, so the app's lifetime window sees these credits; `SEARCHAPI_TRIAL_USED` in the operator's `.env` stays what it is (the credits spent outside this app, 9 from the spike, while on the trial plan; ignored on 40usd). The dry run prints the window's used/cap figure. After the run, the dashboard's drop must be at most the ledger's `creditsUsed` (Task 12b step 5).
+**A retried attempt.** http-kit records every attempt. A SearchApi 5xx retried into a 200 leaves one extra file for that call, with the same request URL and a non-200 status, unbilled; the summary lists it, and Task 12b step 4 deletes that file only (ruling on prov-wp04b-r2-005). Every other failure keeps the whole session out of the commit.
 
-**Residual risk, documented (cost-wp4b-013).** If the connection drops after SearchApi has produced and billed a 200 but before the status line arrives, http-kit finalises the attempt as `error` (zero, not counted) and may retry; the vendor would then have billed one credit the ledger does not count. Over 6 calls this is unlikely and the dashboard check in Task 12b would show it; no code change here.
+**Ledger and dashboard.** Run the tool as the app's user: on a cleanly closed database its read-only lock probe leaves SQLite's empty `-wal`/`-shm` side files, owned by whoever ran it, and an app running as another user could not then open the database (sec2-003; WP12's setup docs carry the same rule). The run uses the production ledger, so the app's lifetime window sees these credits; `SEARCHAPI_TRIAL_USED` in the operator's `.env` stays what it is (the credits spent outside this app, 9 from the spike, while on the trial plan; ignored on 40usd). The dry run prints the window's used/cap figure. After the run, the dashboard's drop must be at most the ledger's `creditsUsed` (Task 12b step 5).
+
+**Residual risk, documented (cost-wp4b-013).** If the connection drops after SearchApi has produced and billed a 200 but before the status line arrives, http-kit finalises the attempt as `error` (zero, not counted) and may retry; the vendor would then have billed one credit the ledger does not count. Over 6 calls this is unlikely; such a call's summary line reads `no-response (network; ledgered error, NOT counted …)`, and the dashboard check in Task 12b would show the difference; no code change here.
 
 **Credentials** come from the operator's `.env` through `loadConfigFromEnv` only; the `tool` script loads the file with Node's `--env-file-if-exists`. Never print, `cat`, `echo`, `grep` or otherwise display `.env` or any key, and never pass a key on the command line.
 
@@ -362,11 +387,11 @@ The metro comes from the airports table, which the tool seeds after migration wh
 | `node:child_process` | Node 22+ (dev 26) | `spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout })` | https://nodejs.org/api/child_process.html (2026-10-14) |
 | Node CLI | 22.9+ | `--conditions=@gmt/source`, `--env-file-if-exists=<path>`, `--import <module>` (twice: the DNS-refusal preload, then `tsx`) | https://nodejs.org/api/cli.html (2026-10-14); plan Task 0.1: Node and tsx resolve workspace packages to `dist` unless started with the condition. Verified in the assembly with every package's `dist` empty |
 | `tsx` | 4.23.15 | `node --import tsx ./file.ts` | context7 `/privatenumber/tsx` (2026-10-14) |
-| `vitest` | 5.0.4 | `describe`, `it(name, fn, timeoutMs)`, `it.each`, `it.skipIf`, `expect`, `beforeAll`, `afterEach`, `afterAll`, `vi.stubGlobal`, `vi.unstubAllGlobals`, `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })`, `vi.advanceTimersByTime`, `vi.useRealTimers`; `setupFiles` in `vitest.config.ts` | context7 `/vitest-dev/vitest` docs/api/vi.md (2026-10-14); run in the assembly |
+| `vitest` | 5.0.4 | `describe`, `it(name, fn, timeoutMs)`, `it.each`, `it.skipIf`, `expect`, `beforeAll`, `afterEach`, `afterAll`, `vi.stubGlobal`, `vi.unstubAllGlobals`, `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })` (heartbeat) and `{ toFake: ['setTimeout', 'clearTimeout'] }` (http-kit's retry backoff, limiter spacing and request timeout), `vi.advanceTimersByTime`, `vi.advanceTimersByTimeAsync`, `vi.useRealTimers`; `setupFiles` in `vitest.config.ts` | context7 `/vitest-dev/vitest` docs/api/vi.md (2026-10-14); run in the assembly |
 | `pino` | 10.4.0 | `pino({ level, redact: { paths, censor } }, stream)`; bracket paths `headers["x-access-token"]` and a leading wildcard `*.headers["X-Access-Token"]`; `logger.child(bindings)` | context7 `/pinojs/pino/v10.1.0` docs/redaction.md (2026-10-14); the logger tests exercise each path form |
 | `better-sqlite3` | 13.0.3 (already `@gmt/db`'s dependency; nothing new in `@gmt/api`) | in `readOnlyLockState` only: `new Database(path, { readonly: true, fileMustExist: true })`, `prepare(sql).get()`, `close()` | used the same way by WP3's `backupDatabase`. Measured in the assembly: a read-only connection reads the `-wal`, so a live app's uncheckpointed heartbeat is seen; on a cleanly closed WAL database it creates empty `-wal`/`-shm` sidecars and writes nothing (the test asserts the database file's digest and mtime are unchanged and the `-wal` is empty). URI `immutable=1` is not available (better-sqlite3 opens without URI support) and would hide the live app's WAL anyway |
 | `node:stream`, `node:fs` | Node 22+ | `new Writable({ write })`; `writeSync(fd, line)`; `readdirSync(dir, { withFileTypes: true, recursive: true })` with `Dirent.parentPath` | https://nodejs.org/api/fs.html (2026-10-14) |
-| msw | — | **not used by apps/api.** Vendor stand-ins replace `globalThis.fetch` with `vi.stubGlobal` (http-kit calls the global `fetch` for every non-fixture host); WP4's `installNetworkGuards` in the setup file is the backstop | plan decisions 7, 18, 20 |
+| msw | — | **not used by apps/api.** Vendor stand-ins replace `globalThis.fetch` with `vi.stubGlobal` (http-kit calls the global `fetch` for every non-fixture host); while stubbed, the stand-in is itself the barrier (it throws for any other host). WP4's `installNetworkGuards` in the setup file covers every unstubbed test, and `test/support/guards.test.ts` proves it live through `takeStrays()` | plan decisions 7, 18, 20 |
 | internal | — | `@gmt/core`, `@gmt/db`, `@gmt/providers` as in section 4 | merged code |
 
 ## 9. Files
@@ -374,13 +399,13 @@ The metro comes from the airports table, which the tool seeds after migration wh
 **Create**
 
 - `apps/api/src/wiring.ts`, `apps/api/src/logger.ts`, `apps/api/src/bootstrap/tool.ts`
-- `apps/api/src/tools/types.ts`, `recordRequests.ts`, `recordPlan.ts`, `recordParams.ts`, `record.ts`
-- `apps/api/test/support/setup.ts`, `apps/api/test/support/noNetwork.mjs`
-- `apps/api/test/helpers/env.ts`, `tmp.ts`, `vendors.ts`, `recording.ts`
+- `apps/api/src/tools/types.ts`, `recordRequests.ts`, `recordPlan.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `workedExample.ts`
+- `apps/api/test/support/setup.ts`, `noNetwork.mjs`, `guards.test.ts`
+- `apps/api/test/helpers/env.ts`, `tmp.ts`, `vendors.ts`, `recording.ts`, `workedExampleTree.ts`
 - `apps/api/test/tools/recordedHash.test.ts`, `recordPlan.test.ts`, `record.test.ts`, `allowlist.test.ts`
 - `apps/api/test/wiring/loadConfig.test.ts`, `buildPorts.test.ts`; `apps/api/test/logger.test.ts`
 - `apps/api/test/bootstrap/tool.test.ts`, `tool.spawn.test.ts`; `apps/api/test/security/sentinel.test.ts`
-- `packages/providers/test/recorded/manifest.test.ts`
+- `apps/api/test/recorded/workedExampleTree.test.ts`, `manifest.test.ts`
 - `packages/db/test/readOnlyLockState.test.ts`
 - `packages/providers/fixtures/recorded/**` (the recorded tree and two `params-<date>.json`, Task 12b)
 
@@ -388,9 +413,9 @@ The metro comes from the airports table, which the tool seeds after migration wh
 
 - `apps/api/vitest.config.ts`: `setupFiles`, single `include`/`coverage.include` entries (Task 1).
 - `packages/db/src/appLock.ts`, `packages/db/src/index.ts`, `packages/db/test/barrel.test.ts`: `readOnlyLockState` and its export (Task 7).
+- `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`: export and assert `defaultRecordedRoot` (Task 8).
 - `apps/api/package.json`: script `tool` (Task 9). No new dependency, no msw.
-- `packages/providers/src/index.ts`: export `defaultRecordedRoot` from `./http/recorder.js` (Task 8).
-- `scripts/check-boundaries.mjs`: the msw rules (Task 9).
+- `scripts/check-boundaries.mjs`: the msw rules and the `process.env` reader list (Task 9).
 
 ## 10. Tasks
 
@@ -601,11 +626,17 @@ export function filesUnder(dir: string): string[] {
 
 ```ts
 // apps/api/test/helpers/vendors.ts
-// In-process stand-ins for the two vendors, shaped like spec §2 facts 1–5. Test bodies only; never committed.
-// why: msw is imported only by @gmt/providers/testing (plan decision 7); a stubbed globalThis.fetch is what
-// http-kit calls for vendor hosts, and WP4's network guards (test/support/setup.ts) catch anything that escapes.
+// In-process stand-ins for the two vendors, shaped like spec §2 facts 1–5. Test bodies only; never committed: every
+// identifier they invent carries STANDIN_MARKER, and the committed-tree check rejects any file holding it (prov-wp04b-006).
+// why: msw is imported only by @gmt/providers/testing (plan decision 7). While stubbed, this function replaces the
+// msw-patched fetch, so it is itself the barrier: it answers the two vendor hosts and throws for any other host; WP4's
+// network guards (test/support/setup.ts) cover every test that does not stub fetch (r2-ts-006).
 import { vi } from 'vitest';
 import { SENTINEL_SA, SENTINEL_TP } from './env.js';
+
+/** The marker every stand-in identifier carries; the committed-tree check fails on it. */
+export const STANDIN_MARKER = 'standin';
+
 import { onCleanup } from './tmp.js';
 
 export interface VendorLog {
@@ -618,8 +649,14 @@ export interface VendorLog {
 export interface VendorOptions {
   /** Rows a Travelpayouts page returns (default 1); 1000 makes the tool fetch the next page. */
   tpRows?: (p: URLSearchParams) => number;
-  /** The calendar body: the default grid, one with no priced in-band cell, or one that echoes the real key. */
-  calendar?: 'default' | 'no-priced-cell' | 'echo-key';
+  /** The calendar body: the default grid, or one with no priced in-band cell. */
+  calendar?: 'default' | 'no-priced-cell';
+  /** A vendor that echoes a real credential (ts-008): in the calendar's search_parameters, in a 401 body, in a Travelpayouts body. */
+  echo?: 'calendar-parameters' | 'sa-401-bearer' | 'tp-body';
+  /** A failure for chosen requests (r2-ts-004): an HTTP 500 or 429, a socket error, or no answer until the client aborts. */
+  failOn?: (url: URL) => 'http-500' | 'http-429' | 'network' | 'hang' | undefined;
+  /** Step 1 answers with priced options that carry no departure_token. */
+  step1WithoutToken?: boolean;
   /** How the vendor answers more than 200 combinations (spec §2 fact 2 versus the docs). */
   overLimit?: '400' | 'empty-200';
   /** Called before each answer (e.g. to abort the run after a given call). */
@@ -646,11 +683,41 @@ const CALENDAR = [
   { departure: '2027-03-02', return: '2027-03-16', price: 603, is_lowest_price: true },
 ];
 
+/** Stand-in tokens; the cheapest priced option of each step is the one the tool must follow. */
+export const DT = {
+  unpriced: `${STANDIN_MARKER}-DT-unpriced`,
+  dearer: `${STANDIN_MARKER}-DT-dearer`,
+  cheapest: `${STANDIN_MARKER}-DT-cheapest`,
+};
+export const BT = {
+  unpriced: `${STANDIN_MARKER}-BT-unpriced`,
+  dearer: `${STANDIN_MARKER}-BT-dearer`,
+  cheapest: `${STANDIN_MARKER}-BT-cheapest`,
+};
+
+function failure(
+  how: 'http-500' | 'http-429' | 'network' | 'hang',
+  init: RequestInit | undefined,
+): Promise<Response> {
+  if (how === 'http-500') return Promise.resolve(json({ error: 'internal error' }, 500));
+  if (how === 'http-429')
+    return Promise.resolve(json({ error: 'Too many requests.' }, 429, { 'retry-after': '0' }));
+  if (how === 'network') return Promise.reject(new TypeError('fetch failed'));
+  // why: settle on abort, so http-kit's request timeout ends the call inside the process
+  return new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
+      once: true,
+    });
+  });
+}
+
 function tpAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
   const p = url.searchParams;
   if (headers.get('x-access-token') !== SENTINEL_TP)
     return new Response('Unauthorized', { status: 401, headers: { 'content-type': 'text/plain' } });
   if (p.get('departure_at') === '2028-02') return json({ success: true, data: [], currency: 'gbp' });
+  if (opts.echo === 'tp-body')
+    return json({ success: true, data: [], currency: 'gbp', debug: `X-Access-Token: ${SENTINEL_TP}` });
   const n = opts.tpRows?.(p) ?? 1;
   const row = {
     origin: p.get('origin'),
@@ -658,13 +725,13 @@ function tpAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
     origin_airport: 'LHR',
     destination_airport: p.get('destination'),
     price: 412,
-    airline: 'BA',
-    flight_number: '117',
+    airline: 'ZZ',
+    flight_number: '9999',
     departure_at: '2027-03-02T08:25:00+00:00',
     return_at: '2027-03-16T18:00:00-04:00',
     transfers: 0,
     return_transfers: 0,
-    link: '/search/LON0203JFK16031',
+    link: `/search/${STANDIN_MARKER}-0203-1603`,
   };
   return json({ success: true, currency: 'gbp', data: Array.from({ length: n }, () => row) }, 200, {
     'x-ratelimit-remaining': '599',
@@ -676,13 +743,15 @@ function saAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
   if (headers.get('authorization') !== `Bearer ${SENTINEL_SA}`)
     return json({ error: 'Invalid API key.' }, 401);
   const engine = p.get('engine');
+  if (opts.echo === 'sa-401-bearer' && engine === 'google_flights_calendar')
+    return json({ error: `Invalid API key: Bearer ${SENTINEL_SA}` }, 401);
   if (engine === 'google_flights_calendar') {
     const combos =
       inclusiveDays(p.get('outbound_date_start'), p.get('outbound_date_end')) *
       inclusiveDays(p.get('return_date_start'), p.get('return_date_end'));
     if (combos > 200)
       return opts.overLimit === 'empty-200'
-        ? json({ search_metadata: { id: 'cal-empty' } })
+        ? json({ search_metadata: { id: `${STANDIN_MARKER}-cal-empty` } })
         : json({ error: 'Too many date combinations: the maximum is 200.' }, 400);
     const calendar =
       opts.calendar === 'no-priced-cell'
@@ -690,15 +759,15 @@ function saAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
         : CALENDAR;
     return json({
       search_metadata: {
-        id: 'cal-1',
+        id: `${STANDIN_MARKER}-cal-1`,
         request_url: 'https://www.searchapi.io/api/v1/search?engine=google_flights_calendar&departure_id=LHR',
-        json_endpoint: 'https://user:pw@www.searchapi.io/api/v1/searches/cal-1.json',
+        json_endpoint: `https://user:pw@www.searchapi.io/api/v1/searches/${STANDIN_MARKER}-cal-1.json`,
       },
       search_parameters: {
         engine,
         gl: p.get('gl'),
         currency: p.get('currency'),
-        ...(opts.calendar === 'echo-key' ? { api_key: SENTINEL_SA } : {}),
+        ...(opts.echo === 'calendar-parameters' ? { api_key: SENTINEL_SA } : {}),
       },
       calendar,
     });
@@ -708,16 +777,18 @@ function saAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
     const bt = p.get('booking_token');
     if (dt === null && bt === null)
       return json({
-        best_flights: [{ departure_token: 'DT-unpriced' }, { price: 655, departure_token: 'DT-dearer' }],
-        other_flights: [{ price: 603, departure_token: 'DT-cheapest' }],
+        best_flights: opts.step1WithoutToken
+          ? [{ price: 603 }, { price: 655 }]
+          : [{ departure_token: DT.unpriced }, { price: 655, departure_token: DT.dearer }],
+        other_flights: opts.step1WithoutToken ? [] : [{ price: 603, departure_token: DT.cheapest }],
         price_insights: { lowest_price: 590, price_history: [[1790000000, 610]] },
       });
-    if (dt === 'DT-cheapest' && bt === null)
+    if (dt === DT.cheapest && bt === null)
       return json({
-        best_flights: [{ booking_token: 'BT-unpriced' }, { price: 640, booking_token: 'BT-dearer' }],
-        other_flights: [{ price: 603, booking_token: 'BT-cheapest' }],
+        best_flights: [{ booking_token: BT.unpriced }, { price: 640, booking_token: BT.dearer }],
+        other_flights: [{ price: 603, booking_token: BT.cheapest }],
       });
-    if (bt === 'BT-cheapest' && dt === null)
+    if (bt === BT.cheapest && dt === null)
       return json({
         booking_options: [
           {
@@ -745,6 +816,12 @@ export function stubVendors(opts: VendorOptions = {}): VendorLog {
     const headers = new Headers(init?.headers);
     seen.requests.push({ url: url.href, headerNames: [...headers.keys()] });
     opts.onRequest?.(url);
+    const fail = opts.failOn?.(url);
+    if (fail !== undefined) {
+      if (url.hostname === 'www.searchapi.io') seen.sa.push(url.searchParams);
+      else seen.tp.push(url.searchParams);
+      return failure(fail, init);
+    }
     if (url.hostname === 'api.travelpayouts.com') {
       seen.tp.push(url.searchParams);
       return tpAnswer(url, headers, opts);
@@ -898,6 +975,12 @@ export const INVALID_TRAVELPAYOUTS_TOKEN = 'invalid-token-for-401-recording';
 /** The worked example's cabin, sent as SearchApi `travel_class` on every request (spec §5.4, plan decision 20). */
 export const RECORD_TRAVEL_CLASS = 'economy';
 
+/** Passengers on every SearchApi request, sent explicitly (plan decision 24; vendor default 1). */
+export const RECORD_ADULTS = '1';
+/** google_flights only (plan decision 24): results sorted by price, and separate-ticket itineraries excluded. */
+export const RECORD_SORT_BY = 'price';
+export const RECORD_SEPARATE_TICKETS = '1';
+
 /** A calendar rectangle (spec §5.2): outbound and return date ranges, both inclusive. */
 export interface Rect {
   outFrom: IsoDate;
@@ -984,6 +1067,7 @@ export function calendarParams(
     return_date_end: r.retTo,
     flight_type: 'round_trip',
     travel_class: RECORD_TRAVEL_CLASS,
+    adults: RECORD_ADULTS,
     currency: 'GBP',
     gl,
     hl: 'en',
@@ -1006,6 +1090,9 @@ export function flightsParams(
     return_date: cell.return,
     flight_type: 'round_trip',
     travel_class: RECORD_TRAVEL_CLASS,
+    adults: RECORD_ADULTS,
+    sort_by: RECORD_SORT_BY,
+    separate_tickets: RECORD_SEPARATE_TICKETS,
     currency: 'GBP',
     gl,
     hl: 'en',
@@ -1013,17 +1100,21 @@ export function flightsParams(
   };
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+/** Plain-object guard for vendor JSON; the one copy the record tool's modules share. */
+export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 /**
- * Cheapest priced calendar entry whose nights fall inside `band` (pie-006: the chain is recorded for a
- * cell the worked example would verify). Entries with has_no_flights, no price or malformed dates are skipped.
+ * Cheapest priced calendar entry inside the requested rectangle whose nights fall inside `band` (pie-006: the chain
+ * is recorded for a cell the worked example would verify; prov-wp04b-r2-002: an entry outside the rectangle the vendor
+ * returns anyway is ignored, so step 1 can never equal the 401 probe's cell). Entries with has_no_flights, no price or
+ * malformed dates are skipped.
  */
 export function cheapestCalendarCell(
   body: unknown,
   band: { minNights: number; maxNights: number },
+  rect: Rect,
 ): (CellDates & { price: number }) | null {
   if (!isRecord(body) || !Array.isArray(body.calendar)) return null;
   let best: (CellDates & { price: number }) | null = null;
@@ -1032,6 +1123,13 @@ export function cheapestCalendarCell(
     const departure = isoDateSchema.safeParse(e.departure);
     const ret = isoDateSchema.safeParse(e.return);
     if (!departure.success || !ret.success) continue;
+    if (
+      departure.data < rect.outFrom ||
+      departure.data > rect.outTo ||
+      ret.data < rect.retFrom ||
+      ret.data > rect.retTo
+    )
+      continue;
     const nights = daysBetween(departure.data, ret.data);
     if (nights < band.minNights || nights > band.maxNights) continue;
     if (best === null || e.price < best.price)
@@ -1227,10 +1325,10 @@ Expected: FAIL, `Error: Cannot find module '../../src/wiring.js' imported from �
 // apps/api/src/wiring.ts (part 1 of 2; Task 3 replaces the file)
 /**
  * The wiring helper (part 1 of 2; Task 3 completes the file): one config parse and one port construction shared by the app bootstrap (WP8)
- * and the tool bootstrap (this package). Spec §4 ("both built on the wiring helper from WP4b and
- * parsing process.env once through the core schema"), §5.5, §7, §12.
+ * and the tool bootstrap (this package). Spec §4 (both bootstraps are built on this helper and parse the
+ * environment once through the core schema), §5.5, §7, §12.
  *
- * This module never reads process.env: the bootstraps pass the environment in.
+ * This module never reads the process environment: the bootstraps pass it in (the boundary script enforces it).
  */
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -1372,7 +1470,10 @@ describe('buildPorts (plan "Wiring and bootstraps")', () => {
           signal: new AbortController().signal,
           recordFixtures: false,
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(
+        'fixture /calendar: egress denied (no HTTP limits configured for this provider) [egress-denied]',
+      );
+      expect(p.db.raw.prepare('SELECT COUNT(*) AS n FROM provider_requests').get()).toEqual({ n: 0 });
     }
     expect(existsSync(path)).toBe(true);
   });
@@ -1434,10 +1535,10 @@ Expected: FAIL, first failure `TypeError: buildPorts is not a function`.
 // apps/api/src/wiring.ts
 /**
  * The wiring helper: one config parse and one port construction shared by the app bootstrap (WP8)
- * and the tool bootstrap (this package). Spec §4 ("both built on the wiring helper from WP4b and
- * parsing process.env once through the core schema"), §5.5, §7, §12.
+ * and the tool bootstrap (this package). Spec §4 (both bootstraps are built on this helper and parse the
+ * environment once through the core schema), §5.5, §7, §12.
  *
- * This module never reads process.env: the bootstraps pass the environment in.
+ * This module never reads the process environment: the bootstraps pass it in (the boundary script enforces it).
  */
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -1690,7 +1791,7 @@ git add apps/api && git commit -m "wp04b: buildPorts, httpLimitsFor and provider
 
 - [ ] **Step 1: Write the failing test**
 
-The third test drives the real pino logger through http-kit's own log calls at debug level (a 503 retried into a 200, a 400 and a 401) with sentinel credentials in the headers and a sentinel echoed in a vendor body (sec-001).
+The third and fourth tests drive the real pino logger through http-kit's own log calls at debug level (a 503 retried into a 200, a 400 and a 401) with sentinel credentials in the headers and sentinels echoed in vendor bodies (sec-001): once without the scrubbing sink, so only pino's redact paths and http-kit's own stripping stand, and once with it (r2-ts-003). Fake timers drive the retry backoff and the limiter spacing.
 
 ```ts
 // apps/api/test/logger.test.ts
@@ -1798,77 +1899,114 @@ describe('createLogger (spec §14 redact paths, sec-001, sec-002)', () => {
     expect(s.text()).toContain('[redacted]');
   });
 
-  it('the real pino logger behind http-kit at debug level leaks no credential on success, retry, 401 and 400 paths', async () => {
-    const config = loadConfigFromEnv(testEnv());
-    const { travelpayouts: tp, searchapi: sa } = config.providers;
-    if (tp === null || sa === null) throw new Error('both providers configured');
-    const ports = buildPorts(config, {
-      log: silentLog,
-      clock: fixedClock(asIsoDateTime('2026-10-20T09:00:00.000Z')),
-      migrationsDir: MIGRATIONS_DIR,
-    });
-    onCleanup(() => ports.db.close());
-    const s = sink();
-    const log = createLogger({ logLevel: 'debug' }, { destination: s.destination, secrets: ports.secrets });
-    const http = createHttpKit({
-      budget: ports.budget,
-      cache: ports.cache,
-      clock: ports.clock,
-      log,
-      secrets: ports.secrets,
-      syntheticAllowed: false,
-      limits: recordingLimits(tp, sa, config),
-    });
-    let calls = 0;
-    vi.stubGlobal('fetch', async (input: string | URL | Request): Promise<Response> => {
-      const url = new URL(input instanceof Request ? input.url : input.toString());
-      calls++;
-      if (url.hostname === 'api.travelpayouts.com')
-        return calls === 1
-          ? new Response(`upstream overloaded for token ${SENTINEL_TP}`, { status: 503 })
-          : new Response(JSON.stringify({ success: true, data: [], currency: 'gbp' }), { status: 200 });
-      if (url.searchParams.get('engine') === 'google_flights_calendar')
-        return new Response(JSON.stringify({ error: 'Too many date combinations.' }), { status: 400 });
-      return new Response(JSON.stringify({ error: 'Invalid API key.' }), { status: 401 });
-    });
-    onCleanup(() => vi.unstubAllGlobals());
-    const req = (
-      providerId: 'travelpayouts' | 'searchapi',
-      url: URL,
-      headers: Record<string, string>,
-    ): HttpKitRequest => ({
-      providerId,
-      executionId: null,
-      tileIndex: 0,
-      endpointPath: url.pathname,
-      method: 'GET',
-      url,
-      headers,
-      cache: 'never',
-      signal: new AbortController().signal,
-      recordFixtures: false,
-    });
-    await http.request(
-      req('travelpayouts', tpUrl('LON', 'JFK', '2027-03', 1), { 'X-Access-Token': SENTINEL_TP }),
-    ); // 503, retried, then 200
-    await expect(
-      http.request(
-        req('searchapi', saUrl({ engine: 'google_flights_calendar' }), {
-          Authorization: `Bearer ${SENTINEL_SA}`,
-        }),
-      ),
-    ).rejects.toThrow();
-    await expect(
-      http.request(
-        req('searchapi', saUrl({ engine: 'google_flights' }), { Authorization: `Bearer ${SENTINEL_SA}` }),
-      ),
-    ).rejects.toThrow();
-    const text = s.text();
-    expect(text).toContain('"level":20'); // debug lines were written
-    expect(text).toContain('http request failed');
-    for (const banned of [SENTINEL_SA, SENTINEL_TP, 'Bearer ', 'api_key=', 'departure_at='])
-      expect(text).not.toContain(banned);
-  }, 20_000);
+  it.each([
+    ["without the scrubbing sink: only pino redact and http-kit's own stripping stand", false],
+    ['with the scrubbing sink', true],
+  ] as const)(
+    'the real pino logger behind http-kit at debug level leaks no credential on success, retry, 401 and 400 paths, %s (sec-001, r2-ts-003)',
+    async (_name, scrub) => {
+      // why: fake timers drive http-kit's retry backoff, so the test is deterministic and fast
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      onCleanup(() => vi.useRealTimers());
+      const config = loadConfigFromEnv(testEnv());
+      const { travelpayouts: tp, searchapi: sa } = config.providers;
+      if (tp === null || sa === null) throw new Error('both providers configured');
+      const ports = buildPorts(config, {
+        log: silentLog,
+        clock: fixedClock(asIsoDateTime('2026-10-20T09:00:00.000Z')),
+        migrationsDir: MIGRATIONS_DIR,
+      });
+      onCleanup(() => ports.db.close());
+      const s = sink();
+      const log = createLogger(
+        { logLevel: 'debug' },
+        { destination: s.destination, ...(scrub ? { secrets: ports.secrets } : {}) },
+      );
+      const http = createHttpKit({
+        budget: ports.budget,
+        cache: ports.cache,
+        clock: ports.clock,
+        log,
+        secrets: ports.secrets,
+        syntheticAllowed: false,
+        limits: recordingLimits(tp, sa, config),
+      });
+      let calls = 0;
+      vi.stubGlobal('fetch', async (input: string | URL | Request): Promise<Response> => {
+        const url = new URL(input instanceof Request ? input.url : input.toString());
+        calls++;
+        if (url.hostname === 'api.travelpayouts.com')
+          return calls === 1
+            ? new Response(`upstream overloaded for token ${SENTINEL_TP}`, { status: 503 })
+            : new Response(JSON.stringify({ success: true, data: [], currency: 'gbp' }), { status: 200 });
+        if (url.searchParams.get('engine') === 'google_flights_calendar')
+          return new Response(JSON.stringify({ error: 'Too many date combinations.' }), { status: 400 });
+        return new Response(JSON.stringify({ error: `Invalid API key: Bearer ${SENTINEL_SA}` }), {
+          status: 401,
+        });
+      });
+      onCleanup(() => vi.unstubAllGlobals());
+      const req = (
+        providerId: 'travelpayouts' | 'searchapi',
+        url: URL,
+        headers: Record<string, string>,
+      ): HttpKitRequest => ({
+        providerId,
+        executionId: null,
+        tileIndex: 0,
+        endpointPath: url.pathname,
+        method: 'GET',
+        url,
+        headers,
+        cache: 'never',
+        signal: new AbortController().signal,
+        recordFixtures: false,
+      });
+      // why: the limiter's spacing and the retry backoff are timers; each request is driven by advancing fake time
+      const drive = async <T>(p: Promise<T>): Promise<PromiseSettledResult<T>> => {
+        const settled = Promise.allSettled([p]);
+        await vi.advanceTimersByTimeAsync(10_000);
+        const [r] = await settled;
+        if (r === undefined) throw new Error('no result');
+        return r;
+      };
+      const ok = await drive(
+        http.request(
+          req('travelpayouts', tpUrl('LON', 'JFK', '2027-03', 1), { 'X-Access-Token': SENTINEL_TP }),
+        ),
+      ); // 503, retried, then 200
+      expect(ok.status).toBe('fulfilled');
+      expect(
+        (
+          await drive(
+            http.request(
+              req('searchapi', saUrl({ engine: 'google_flights_calendar' }), {
+                Authorization: `Bearer ${SENTINEL_SA}`,
+              }),
+            ),
+          )
+        ).status,
+      ).toBe('rejected');
+      expect(
+        (
+          await drive(
+            http.request(
+              req('searchapi', saUrl({ engine: 'google_flights' }), {
+                Authorization: `Bearer ${SENTINEL_SA}`,
+              }),
+            ),
+          )
+        ).status,
+      ).toBe('rejected');
+      const text = s.text();
+      expect(calls).toBe(4);
+      expect(text).toContain('"level":20'); // debug lines were written
+      expect(text).toContain('http request failed');
+      for (const banned of [SENTINEL_SA, SENTINEL_TP, 'Bearer ', 'api_key=', 'departure_at='])
+        expect(text).not.toContain(banned);
+      if (!scrub) expect(text).not.toContain('[redacted]'); // nothing here needed the sink: http-kit logged no credential at all
+    },
+  );
 });
 ```
 
@@ -1979,7 +2117,7 @@ export function createLogger(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/logger.test.ts`
-Expected: 3 passed.
+Expected: 4 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -2051,11 +2189,14 @@ describe('parseRecordArgs refuses to run without an explicit budget (spec §9 it
         args: { budget: 5, origins: ['LHR', 'LGW'], destinations: ['JFK', 'EWR'], month: '2027-03' },
         dryRun: true,
         confirmRerun: false,
+        out: null,
       },
     });
-    expect(parseRecordArgs(['--budget', '5', ...ROUTE, '--confirm-rerun'])).toMatchObject({
+    expect(
+      parseRecordArgs(['--budget', '5', ...ROUTE, '--confirm-rerun', '--out', '/tmp/rec']),
+    ).toMatchObject({
       ok: true,
-      value: { dryRun: false, confirmRerun: true },
+      value: { dryRun: false, confirmRerun: true, out: '/tmp/rec' },
     });
   });
 });
@@ -2071,6 +2212,17 @@ describe('date steps use core helpers (ts-011)', () => {
     ['2027-08', 12, '2028-08'],
   ])('monthAfter(%s, %i) = %s', (m, k, want) => {
     expect(monthAfter(asIsoMonth(m), k)).toBe(want);
+  });
+  it('monthAfter agrees with year·12 + month arithmetic for every start month of 2027–2028 and k = 0..12 (r2-ts-010)', () => {
+    for (let y = 2027; y <= 2028; y++)
+      for (let m = 1; m <= 12; m++)
+        for (let k = 0; k <= 12; k++) {
+          const idx = y * 12 + (m - 1) + k;
+          const want = `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
+          expect(monthAfter(asIsoMonth(`${y}-${String(m).padStart(2, '0')}`), k), `${y}-${m} + ${k}`).toBe(
+            want,
+          );
+        }
   });
   it('monthAfter refuses more than 12 months', () => {
     expect(() => monthAfter(asIsoMonth('2027-03'), 13)).toThrow(RangeError);
@@ -2166,13 +2318,19 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       'searchapi google_flights step 3, booking_token of the cheapest priced step-2 option',
     ]);
     expect(plan.filter((c) => !c.required).map((c) => c.id)).toEqual(['TP-19']);
-    expect(planTotals(plan)).toEqual({ saCalls: 6, worstCaseCredits: 5, expectedCredits: 4, freeCalls: 20 });
+    expect(planTotals(plan)).toEqual({
+      saCalls: 6,
+      worstCaseCredits: 5,
+      expectedCredits: 4,
+      freeCalls: 20,
+      worstCaseFreeCalls: 58,
+    });
     const lines = formatPlan(plan);
     expect(lines[19]).toContain('Travelpayouts 1 (running 20)');
     expect(lines[20]).toContain('SearchApi ≤0 (running ≤0)');
     expect(lines[25]).toContain('SearchApi ≤1 (running ≤5)');
     expect(lines[26]).toBe(
-      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls (plus one per extra page if a page holds 1000 rows)',
+      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58 with up to 3 pages per tile',
     );
   });
 
@@ -2190,6 +2348,13 @@ describe('planCalls: the exact live call list of brief section 7', () => {
       const probes = plan.filter((c) => c.spec.kind === 'tp-auth' || c.spec.kind === 'sa-auth').map(key);
       const others = plan.filter((c) => c.spec.kind !== 'tp-auth' && c.spec.kind !== 'sa-auth').map(key);
       for (const p of probes) expect(others).not.toContain(p);
+      // why: the chain's cell comes from the calendar rectangle, so the 401 probe's cell must lie outside it (r2-ts-008)
+      const auth = plan.find((c) => c.spec.kind === 'sa-auth')?.spec;
+      const cal = plan.find((c) => c.spec.kind === 'sa-calendar')?.spec;
+      if (auth?.kind !== 'sa-auth' || cal?.kind !== 'sa-calendar')
+        throw new Error('plan lacks the probe or the calendar');
+      expect(auth.cell.departure > cal.rect.outTo).toBe(true);
+      expect(auth.cell.return > cal.rect.retTo).toBe(true);
     }
   });
 
@@ -2199,10 +2364,10 @@ describe('planCalls: the exact live call list of brief section 7', () => {
     expect(planTotals(plan).freeCalls).toBe(30);
   });
 
-  it('freeCallMisfit compares the plan with the configured cap (ruling 13, cost-wp4b-001)', () => {
-    expect(freeCallMisfit(planCalls(args(), null), 30)).toBeNull();
-    expect(freeCallMisfit(planCalls(args(), null), 29)).toContain(
-      'the plan needs 30 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 29',
+  it('freeCallMisfit compares the worst case (3 pages per tile) with the configured cap (ruling 13, cost-wp4b-r2-002)', () => {
+    expect(freeCallMisfit(planCalls(args(), null), 88)).toBeNull();
+    expect(freeCallMisfit(planCalls(args(), null), 87)).toContain(
+      'the plan needs up to 88 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 87',
     );
   });
 });
@@ -2255,6 +2420,11 @@ export const OVER_LIMIT_RET_DAYS = 24;
 /** The worked example's nights band, 10–21 (spec §1): returns start 10 days after the first outbound. */
 export const RECORD_MIN_NIGHTS = 10;
 export const RECORD_NIGHTS_BAND = 12;
+/**
+ * Pages fetched at most per Travelpayouts tile (cost-wp4b-r2-002): a vendor that ignored `page` and always answered
+ * 1000 rows would otherwise page until the per-run cap. 3 covers the spike's busiest gateway month several times over.
+ */
+export const TP_MAX_PAGES_PER_TILE = 3;
 export const RECORD_MAX_NIGHTS = RECORD_MIN_NIGHTS + RECORD_NIGHTS_BAND - 1;
 
 /** Plan contract (Wiring and bootstraps), without `metro`: the metro comes from the seeded airports table (decision 20). */
@@ -2270,6 +2440,11 @@ export interface RecordCli {
   dryRun: boolean;
   /** Required for a live run when earlier tool runs already ledgered SearchApi credits in the window (decision 20). */
   confirmRerun: boolean;
+  /**
+   * `--out DIR`: record into DIR/fixtures/recorded instead of the committed tree. Required for any route other than the
+   * worked example, and DIR must be outside the repository (sec2-002; the operator's own routes never enter the repo).
+   */
+  out: string | null;
 }
 export type ParseRecordResult = { ok: true; value: RecordCli } | { ok: false; message: string };
 
@@ -2301,8 +2476,8 @@ export interface PlannedCall {
 }
 
 export const USAGE =
-  'usage: pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--dry-run] [--confirm-rerun]';
-const VALUE_FLAGS = new Set(['budget', 'route', 'month']);
+  'usage: pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--out DIR] [--dry-run] [--confirm-rerun]';
+const VALUE_FLAGS = new Set(['budget', 'route', 'month', 'out']);
 const SWITCHES = new Set(['dry-run', 'confirm-rerun']);
 
 function positiveInt(s: string): number | null {
@@ -2370,6 +2545,7 @@ export function parseRecordArgs(argv: readonly string[]): ParseRecordResult {
       args: { budget, origins, destinations, month: month.data },
       dryRun: switches.has('dry-run'),
       confirmRerun: switches.has('confirm-rerun'),
+      out: flags.get('out') ?? null,
     },
   };
 }
@@ -2523,12 +2699,17 @@ export function planTotals(plan: readonly PlannedCall[]): {
   worstCaseCredits: number;
   expectedCredits: number;
   freeCalls: number;
+  worstCaseFreeCalls: number;
 } {
+  const tiles = plan.filter((c) => c.spec.kind === 'tp-tile').length;
+  const freeCalls = plan.reduce((n, c) => n + c.freeCalls, 0);
   return {
     saCalls: plan.filter((c) => c.spec.kind.startsWith('sa-')).length,
     worstCaseCredits: plan.reduce((n, c) => n + c.worstCaseCredits, 0),
     expectedCredits: plan.reduce((n, c) => n + c.expectedCredits, 0),
-    freeCalls: plan.reduce((n, c) => n + c.freeCalls, 0),
+    freeCalls,
+    // why: every tile may page up to TP_MAX_PAGES_PER_TILE; the 401 probe never pages
+    worstCaseFreeCalls: freeCalls + tiles * (TP_MAX_PAGES_PER_TILE - 1),
   };
 }
 
@@ -2543,24 +2724,24 @@ export function formatPlan(plan: readonly PlannedCall[]): string[] {
   });
   const t = planTotals(plan);
   lines.push(
-    `total: SearchApi ${t.saCalls} calls, ≤${t.worstCaseCredits} credits (${t.expectedCredits} expected); Travelpayouts ${t.freeCalls} free calls (plus one per extra page if a page holds 1000 rows)`,
+    `total: SearchApi ${t.saCalls} calls, ≤${t.worstCaseCredits} credits (${t.expectedCredits} expected); Travelpayouts ${t.freeCalls} free calls, ≤${t.worstCaseFreeCalls} with up to ${TP_MAX_PAGES_PER_TILE} pages per tile`,
   );
   return lines;
 }
 
-/** Refusal message when the plan's free calls exceed the configured per-execution cap (EXECUTION_MAX_FREE_CALLS), else null. */
+/** Refusal message when the plan's worst-case free calls exceed the configured per-execution cap (EXECUTION_MAX_FREE_CALLS), else null. */
 export function freeCallMisfit(plan: readonly PlannedCall[], maxFreeCalls: number): string | null {
-  const need = planTotals(plan).freeCalls;
+  const need = planTotals(plan).worstCaseFreeCalls;
   return need <= maxFreeCalls
     ? null
-    : `the plan needs ${need} Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is ${maxFreeCalls}; raise it or narrow --route`;
+    : `the plan needs up to ${need} Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is ${maxFreeCalls}; raise it or narrow --route`;
 }
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/recordPlan.test.ts`
-Expected: 34 passed.
+Expected: 35 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -2570,11 +2751,11 @@ git add apps/api && git commit -m "wp04b: record:fixtures arguments and the exac
 
 ### Task 6: The recording run through the real http-kit, recorder and guard
 
-**Files:** create `apps/api/src/tools/types.ts`, `apps/api/src/tools/recordParams.ts`, `apps/api/src/tools/record.ts`, `apps/api/test/helpers/recording.ts`, `apps/api/test/tools/record.test.ts`.
+**Files:** create `apps/api/src/tools/types.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `apps/api/test/helpers/recording.ts`, `apps/api/test/tools/record.test.ts`. The four `src/tools` modules split the work (arch-r2-005): execution bookkeeping and the budget position (`recordExecution.ts`), assessment and the report (`recordReport.ts`), the request loop and the CLI runner (`record.ts`), the shared result types and exit codes (`types.ts`).
 
-**Interfaces:** consumes `createHttpKit`, `createRecorder`, `canonicalJson`, `scrubSecrets`, `ProviderError`, `BudgetExceeded`, `AbortedError`, `stripUrlsInText`, `DefinitionInput`, `DefinitionSnapshot`, `Estimate`, `Repos.definitions.create/get/softDelete`, `Repos.executions.create/listByStatus/setStatus`, `Db.immediateTransaction`, `budget.usage`, `seedAirports`, `loadAirportsDataset`, `verifyRecordedTree`, `loadRecorded`. Produces `recordFixtures`, `RecordSummary`, `RecordedCall`, `RecordingFailedError`, `RECORDED_BY`, `recordPrecheck`, `priorToolCredits`, `openRecordingExecution`, `assessRun`, `formatSummary`, `runRecord`, `safeMessage`, `ParamLog`, `paramRules`, `writeAllowlist`, `EXIT`, `ToolContext`, `ToolName`.
+**Interfaces:** consumes `createHttpKit`, `createRecorder`, `canonicalJson`, `scrubSecrets`, `ProviderError`, `BudgetExceeded`, `AbortedError`, `stripUrlsInText`, `DefinitionInput`, `DefinitionSnapshot`, `Estimate`, `Repos.definitions.create/get/softDelete`, `Repos.executions.create/listByStatus/setStatus`, `Db.immediateTransaction`, `budget.usage`, `seedAirports`, `loadAirportsDataset`, `verifyRecordedTree`, `loadRecorded`. Produces `recordFixtures`, `RecordSummary`, `RecordedCall`, `RecordingFailedError`, `RECORDED_BY`, `recordPrecheck`, `priorToolCredits`, `budgetPosition`, `openRecordingExecution`, `assessRun`, `formatSummary`, `ledgerLine`, `retryAttemptLines`, `runRecord`, `safeMessage`, `ParamLog`, `paramRules`, `writeAllowlist`, `EXIT`, `ToolContext`, `ToolName`.
 
-The tests run the recording against the stand-ins on an in-memory, seeded database with a fixed clock, into a temporary recorded tree, under the test signature `@gmt/api record:fixtures (test)` so a stand-in recording can never pass as a vendor one (prov-wp04b-006; the manifest test in Task 12a requires `RECORDED_BY` on every committed file).
+The tests run the recording against the stand-ins on an in-memory, seeded database with a fixed clock, into a temporary recorded tree created before the run (so a failed run's files can be scanned, ts-008), under the test signature `@gmt/api record:fixtures (test)`. Every identifier the stand-ins invent carries the marker `standin`, so a stand-in recording can never pass as a vendor one (prov-wp04b-006; Task 12a's check requires `RECORDED_BY` and rejects the marker). The failure cases (a 5xx retried into a 200, a 429, a socket failure, a timeout) run under fake timers through `runRecordingInFakeTime`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2583,15 +2764,30 @@ The tests run the recording against the stand-ins on an in-memory, seeded databa
 // Runs record:fixtures against the stand-ins into a temporary recorded tree, with a test signature (prov-wp04b-006).
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset, MIGRATIONS_DIR, seedAirports } from '@gmt/db';
-import { type RecordArgs, type RecordSummary, recordFixtures } from '../../src/tools/record.js';
+import { vi } from 'vitest';
+import { type RecordArgs, recordFixtures } from '../../src/tools/record.js';
 import { type PlannedCall, parseRecordArgs, planCalls } from '../../src/tools/recordPlan.js';
+import type { RecordSummary } from '../../src/tools/types.js';
 import { buildPorts, loadConfigFromEnv, type Ports } from '../../src/wiring.js';
 import { silentLog, testEnv } from './env.js';
 import { onCleanup, tempRecordedRoot } from './tmp.js';
 import { stubVendors, type VendorLog, type VendorOptions } from './vendors.js';
 
-/** The signature test recordings carry; the verifier's default allowed list does not name it. */
+/**
+ * The signature test recordings carry. WP4's verifier accepts any non-blank signature; the committed-tree check
+ * (checkWorkedExampleTree) requires RECORDED_BY, so a test tree can never pass as a vendor one (prov-wp04b-006).
+ */
 export const TEST_RECORDED_BY = '@gmt/api record:fixtures (test)';
+
+/** A temporary recorded tree and the test signature, for runTool's `recording` option. */
+export function testRecording(): {
+  repo: string;
+  root: string;
+  recording: { root: string; recordedBy: string };
+} {
+  const { repo, root } = tempRecordedRoot();
+  return { repo, root, recording: { root, recordedBy: TEST_RECORDED_BY } };
+}
 export const AT = asIsoDateTime('2026-10-20T09:00:00.000Z');
 
 /** The worked example's arguments, parsed (so the codes are branded Iata values). */
@@ -2602,10 +2798,10 @@ export const WORKED_EXAMPLE: RecordArgs = (() => {
 })();
 
 /** Ports over a migrated in-memory DB with the airports table seeded (so LON is the shared metro). */
-export function seededPorts(env: Record<string, string> = {}): Ports {
+export function seededPorts(env: Record<string, string> = {}, clock = fixedClock(AT)): Ports {
   const ports = buildPorts(loadConfigFromEnv(testEnv(env)), {
     log: silentLog,
-    clock: fixedClock(AT),
+    clock,
     migrationsDir: MIGRATIONS_DIR,
   });
   onCleanup(() => ports.db.close());
@@ -2622,6 +2818,40 @@ export interface Recording {
   plan: PlannedCall[];
 }
 
+/** A prepared run: the tree exists before the recording starts, so a failed run's files can still be inspected (ts-008). */
+export interface RecordingSetup {
+  seen: VendorLog;
+  repo: string;
+  root: string;
+  ports: Ports;
+  args: RecordArgs;
+  plan: PlannedCall[];
+  run(signal?: AbortSignal): Promise<RecordSummary>;
+}
+
+export function recordingSetup(
+  o: { args?: RecordArgs; vendors?: VendorOptions; env?: Record<string, string>; ports?: Ports } = {},
+): RecordingSetup {
+  const args = o.args ?? WORKED_EXAMPLE;
+  const ports = o.ports ?? seededPorts(o.env);
+  const seen = stubVendors(o.vendors);
+  const { repo, root } = tempRecordedRoot();
+  return {
+    seen,
+    repo,
+    root,
+    ports,
+    args,
+    plan: planCalls(args, ports.repos.airports.sharedMetro(args.origins)),
+    run: (signal) =>
+      recordFixtures(ports, args, {
+        signal: signal ?? new AbortController().signal,
+        recordedRoot: root,
+        recordedBy: TEST_RECORDED_BY,
+      }),
+  };
+}
+
 /** Runs the whole recording; `ports` lets a test reuse one database across runs. */
 export async function runRecording(
   o: {
@@ -2632,37 +2862,61 @@ export async function runRecording(
     signal?: AbortSignal;
   } = {},
 ): Promise<Recording> {
-  const args = o.args ?? WORKED_EXAMPLE;
-  const ports = o.ports ?? seededPorts(o.env);
-  const seen = stubVendors(o.vendors);
-  const { repo, root } = tempRecordedRoot();
-  const summary = await recordFixtures(ports, args, {
-    signal: o.signal ?? new AbortController().signal,
-    recordedRoot: root,
-    recordedBy: TEST_RECORDED_BY,
-  });
-  return {
-    summary,
-    seen,
-    repo,
-    root,
-    ports,
-    plan: planCalls(args, ports.repos.airports.sharedMetro(args.origins)),
-  };
+  const s = recordingSetup(o);
+  const summary = await s.run(o.signal);
+  return { summary, seen: s.seen, repo: s.repo, root: s.root, ports: s.ports, plan: s.plan };
+}
+
+/**
+ * Runs a recording whose vendor fails and retries under fake timers, so http-kit's backoff and request timeout pass
+ * in fake time (r2-ts-003): deterministic and fast. Restores real timers afterwards.
+ */
+export async function runRecordingInFakeTime(o: Parameters<typeof runRecording>[0] = {}): Promise<Recording> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const p = runRecording(o);
+    let done = false;
+    p.then(
+      () => {
+        done = true;
+      },
+      () => {
+        done = true;
+      },
+    );
+    while (!done) await vi.advanceTimersByTimeAsync(500);
+    return await p;
+  } finally {
+    vi.useRealTimers();
+  }
 }
 ```
 
 ```ts
 // apps/api/test/tools/record.test.ts
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { asIsoDate, asIsoDateTime, fixedClock } from '@gmt/core';
 import type { RecordedFixture } from '@gmt/providers';
+import { loadParamsAllowlist } from '@gmt/providers';
 import { loadRecorded, verifyRecordedTree } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
-import { assessRun, RecordingFailedError } from '../../src/tools/record.js';
+import { priorToolCredits } from '../../src/tools/recordExecution.js';
+import { assessRun } from '../../src/tools/recordReport.js';
 import { cheapestCalendarCell, cheapestOption } from '../../src/tools/recordRequests.js';
+import { RecordingFailedError } from '../../src/tools/types.js';
 import { SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
-import { runRecording, seededPorts, TEST_RECORDED_BY, WORKED_EXAMPLE } from '../helpers/recording.js';
+import {
+  AT,
+  recordingSetup,
+  runRecording,
+  runRecordingInFakeTime,
+  seededPorts,
+  TEST_RECORDED_BY,
+  WORKED_EXAMPLE,
+} from '../helpers/recording.js';
 import { filesUnder } from '../helpers/tmp.js';
+import { BT, DT } from '../helpers/vendors.js';
 
 function recordings(root: string): RecordedFixture[] {
   return [
@@ -2671,8 +2925,18 @@ function recordings(root: string): RecordedFixture[] {
   ];
 }
 const q = (f: RecordedFixture, k: string): string | null => new URL(f.request.url).searchParams.get(k);
+const statuses = (calls: ReadonlyArray<{ id: string; status: unknown }>): string[] =>
+  calls.map((c) => `${c.id}:${String(c.status)}`);
+const RECT = {
+  outFrom: asIsoDate('2027-03-01'),
+  outTo: asIsoDate('2027-03-08'),
+  retFrom: asIsoDate('2027-03-11'),
+  retTo: asIsoDate('2027-03-29'),
+  combinations: 152,
+};
+const BAND = { minNights: 10, maxNights: 21 };
 
-describe('response readers (ts-005, pie-006)', () => {
+describe('response readers (ts-005, pie-006, prov-wp04b-r2-002)', () => {
   it('cheapestOption takes the cheapest priced option across best_flights and other_flights, skipping unpriced ones', () => {
     const body = {
       best_flights: [{ departure_token: 'unpriced' }, { price: 655, departure_token: 'dearer' }],
@@ -2681,21 +2945,22 @@ describe('response readers (ts-005, pie-006)', () => {
     expect(cheapestOption(body, 'departure_token')).toEqual({ token: 'cheapest', price: 603 });
     expect(cheapestOption({ best_flights: [{ departure_token: 'x' }] }, 'departure_token')).toBeNull();
   });
-  it('cheapestCalendarCell skips has_no_flights cells that carry a price and cells outside the nights band', () => {
+  it('cheapestCalendarCell skips has_no_flights cells that carry a price, out-of-band cells and cells outside the rectangle', () => {
     const body = {
       calendar: [
         { departure: '2027-03-01', return: '2027-03-29', price: 380 },
         { departure: '2027-03-04', return: '2027-03-16', has_no_flights: true, price: 390 },
+        { departure: '2027-03-09', return: '2027-03-30', price: 400 },
         { departure: '2027-03-02', return: '2027-03-16', price: 603 },
         { departure: 'not-a-date', return: '2027-03-16', price: 1 },
       ],
     };
-    expect(cheapestCalendarCell(body, { minNights: 10, maxNights: 21 })).toEqual({
+    expect(cheapestCalendarCell(body, BAND, RECT)).toEqual({
       departure: '2027-03-02',
       return: '2027-03-16',
       price: 603,
     });
-    expect(cheapestCalendarCell({ calendar: [] }, { minNights: 10, maxNights: 21 })).toBeNull();
+    expect(cheapestCalendarCell({ calendar: [] }, BAND, RECT)).toBeNull();
   });
 });
 
@@ -2705,11 +2970,12 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     const { summary, seen, plan, root } = run;
     expect(assessRun(plan, summary)).toEqual({
       requiredOk: true,
+      notAsExpected: [],
       chainComplete: true,
       emptyEnvelope: true,
       overLimit: 'http-400',
     });
-    expect(summary.calls.map((c) => `${c.id}:${String(c.status)}`)).toEqual([
+    expect(statuses(summary.calls)).toEqual([
       ...Array.from({ length: 19 }, (_, i) => `TP-${String(i + 1).padStart(2, '0')}:200`),
       'TP-20:401',
       'SA-01:401',
@@ -2723,11 +2989,12 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(summary.creditsUsed).toBe(4); // SA-02, 04, 05, 06: 200s count, 401 and 400 do not (spec §2 fact 4)
     expect(summary.freeCalls).toBe(20);
     expect(summary.chain).toEqual({
-      step1Price: 603,
-      step2Price: 603,
+      currency: 'GBP',
+      step1PricePence: 60300,
+      step2PricePence: 60300,
       step3Options: [
-        { bookWith: 'OTA', price: 573 },
-        { bookWith: 'Airline', price: 603 },
+        { bookWith: 'OTA', pricePence: 57300 },
+        { bookWith: 'Airline', pricePence: 60300 },
       ],
     });
 
@@ -2739,8 +3006,8 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       flights.map((p) => [p.get('return_date'), p.get('departure_token'), p.get('booking_token')]),
     ).toEqual([
       ['2027-03-16', null, null],
-      ['2027-03-16', 'DT-cheapest', null],
-      ['2027-03-16', null, 'BT-cheapest'],
+      ['2027-03-16', DT.cheapest, null],
+      ['2027-03-16', null, BT.cheapest],
     ]);
     for (const p of seen.sa)
       expect([p.get('api_key'), p.get('travel_class'), p.get('gl')]).toEqual([null, 'economy', 'gb']);
@@ -2757,11 +3024,6 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       for (const p of Object.keys(f.placeholders))
         expect(p).toMatch(new RegExp(`^<[a-z_]+:\\d+@${f.session}>$`));
     }
-    const step2 = files.find((f) => q(f, 'departure_token') !== null);
-    const step3 = files.find((f) => q(f, 'booking_token') !== null);
-    if (step2 === undefined || step3 === undefined) throw new Error('chain files missing');
-    expect(q(step2, 'departure_token')).toMatch(/^<departure_token:\d+@[^>]+>$/);
-    expect(q(step3, 'booking_token')).toMatch(/^<booking_token:\d+@[^>]+>$/);
     for (const path of filesUnder(root)) {
       const text = readFileSync(path, 'utf8');
       expect(text).not.toContain(SENTINEL_SA);
@@ -2774,16 +3036,8 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       '"request_url":"https://www.searchapi.io/api/v1/search"',
     );
     expect(JSON.stringify(calendar?.body)).toContain(
-      '"json_endpoint":"https://www.searchapi.io/api/v1/searches/cal-1.json"',
+      '"json_endpoint":"https://www.searchapi.io/api/v1/searches/standin-cal-1.json"',
     );
-    // replay can tell every recording apart: no two files share a credential-free request with different statuses
-    const byKey = new Map<string, Set<number>>();
-    for (const f of files)
-      byKey.set(
-        `${f.request.method} ${f.request.url}`,
-        (byKey.get(`${f.request.method} ${f.request.url}`) ?? new Set()).add(f.status),
-      );
-    for (const [k, statuses] of byKey) expect(statuses.size, k).toBe(1);
   });
 
   it('the execution is hidden and carries the approved plan: soft-deleted definition, trigger tool, completed, caps and estimate', async () => {
@@ -2812,10 +3066,10 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     ]);
   });
 
-  it('the real SqliteBudgetGuard stops the run at the budget, before the vendor is hit (ts-004)', async () => {
+  it('the real SqliteBudgetGuard stops the run at the budget before the vendor is hit; the allowlist names only parameters sent (ts-004, prov-wp04b-r2-003)', async () => {
     const run = await runRecording({ args: { ...WORKED_EXAMPLE, budget: 2 } });
     const sa = run.summary.calls.filter((c) => c.providerId === 'searchapi');
-    expect(sa.map((c) => `${c.id}:${String(c.status)}`)).toEqual([
+    expect(statuses(sa)).toEqual([
       'SA-01:401',
       'SA-02:200',
       'SA-03:400',
@@ -2833,43 +3087,145 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
         .get(),
     ).toEqual({ n: 4 });
     expect(run.summary.creditsUsed).toBe(2);
-    expect(assessRun(run.plan, run.summary).requiredOk).toBe(false);
-    expect(run.ports.db.raw.prepare('SELECT error_text AS e FROM search_executions').get()).toEqual({
-      e: '1 call(s) refused by the guard',
+    expect(assessRun(run.plan, run.summary)).toMatchObject({
+      requiredOk: false,
+      notAsExpected: ['SA-05', 'SA-06'],
     });
+    expect(run.ports.db.raw.prepare('SELECT error_text AS e FROM search_executions').get()).toEqual({
+      e: 'required calls not as expected: SA-05, SA-06; 1 call(s) refused by the guard',
+    });
+    const allow = loadParamsAllowlist(join(run.root, 'searchapi', 'params-2026-10-20.json'), run.root);
+    expect(allow.endpoints['/api/v1/search?engine=google_flights']?.names).not.toContain('departure_token');
   });
 
-  it('pages a Travelpayouts tile while a page holds 1000 rows (ts-006)', async () => {
+  it('pages a Travelpayouts tile while a page holds 1000 rows, and stops at the page cap (ts-006, cost-wp4b-r2-002)', async () => {
+    const lonJfk = (p: URLSearchParams): boolean =>
+      p.get('origin') === 'LON' && p.get('destination') === 'JFK';
     const run = await runRecording({
       vendors: {
         tpRows: (p) =>
-          p.get('departure_at') === '2027-03' && p.get('destination') === 'JFK' && p.get('origin') === 'LON'
+          lonJfk(p) && p.get('departure_at') === '2027-03'
             ? p.get('page') === '1'
               ? 1000
               : 3
-            : 1,
+            : lonJfk(p) && p.get('departure_at') === '2027-04'
+              ? 1000
+              : 1,
       },
     });
-    expect(run.summary.calls.slice(0, 2).map((c) => `${c.id}:${String(c.status)}`)).toEqual([
+    expect(statuses(run.summary.calls.slice(0, 7))).toEqual([
       'TP-01:200',
       'TP-01p2:200',
+      'TP-02:200',
+      'TP-03:200',
+      'TP-03p2:200',
+      'TP-03p3:200',
+      'TP-04:200',
     ]);
-    expect(run.summary.freeCalls).toBe(21);
-    expect(run.seen.tp.filter((p) => p.get('page') === '2')).toHaveLength(1);
+    expect(run.summary.calls[5]?.detail).toBe('page cap reached (3 pages of 1000 rows)');
+    expect(run.summary.freeCalls).toBe(23);
   });
 
-  it('a calendar with no priced in-band cell skips the chain and fails requiredOk (ts-006)', async () => {
+  it('the Travelpayouts month cap stops a run mid-way with the guard, before the vendor (r2-ts-004)', async () => {
+    const run = await runRecording({ env: { TRAVELPAYOUTS_MONTHLY_CALL_CAP: '18' } });
+    expect(statuses(run.summary.calls.slice(17, 20))).toEqual([
+      'TP-18:200',
+      'TP-19:skipped',
+      'TP-20:skipped',
+    ]);
+    expect(run.summary.calls[18]?.detail).toBe('refused by the guard: provider-month');
+    expect(run.seen.tp).toHaveLength(18);
+  });
+
+  it('a calendar with no priced in-band cell skips SA-03 and the chain: nothing more is spent (ts-006, cost-wp4b-r2-004)', async () => {
     const run = await runRecording({ vendors: { calendar: 'no-priced-cell' } });
     const byId = new Map(run.summary.calls.map((c) => [c.id, c]));
-    for (const id of ['SA-04', 'SA-05', 'SA-06']) expect(byId.get(id)?.status).toBe('skipped');
-    expect(run.seen.sa.filter((p) => p.get('engine') === 'google_flights')).toHaveLength(1); // only SA-01's 401
+    expect(byId.get('SA-03')?.detail).toBe(
+      'skipped: calendar SA-02 gave no usable cell; the run must be repeated',
+    );
+    for (const id of ['SA-03', 'SA-04', 'SA-05', 'SA-06']) expect(byId.get(id)?.status).toBe('skipped');
+    expect(run.seen.sa.map((p) => p.get('engine'))).toEqual(['google_flights', 'google_flights_calendar']); // the 401 probe, then SA-02
     expect(assessRun(run.plan, run.summary)).toMatchObject({ requiredOk: false, chainComplete: false });
+  });
+
+  it('a step 1 without any departure_token breaks the chain after one paid call (r2-ts-004)', async () => {
+    const run = await runRecording({ vendors: { step1WithoutToken: true } });
+    expect(statuses(run.summary.calls.slice(-3))).toEqual(['SA-04:200', 'SA-05:skipped', 'SA-06:skipped']);
+    expect(run.summary.creditsUsed).toBe(2);
+    expect(assessRun(run.plan, run.summary)).toMatchObject({
+      requiredOk: false,
+      notAsExpected: ['SA-05', 'SA-06'],
+    });
   });
 
   it('an empty 200 for the over-limit calendar is accepted, named and billed (pie-005, cost-wp4b-004)', async () => {
     const run = await runRecording({ vendors: { overLimit: 'empty-200' } });
     expect(assessRun(run.plan, run.summary)).toMatchObject({ requiredOk: true, overLimit: 'empty-200' });
     expect(run.summary.creditsUsed).toBe(5);
+  });
+
+  it('a 5xx retried into a 200 keeps both attempt files on the call, the failed one first (prov-wp04b-r2-005)', async () => {
+    let failed = false;
+    const run = await runRecordingInFakeTime({
+      vendors: {
+        failOn: (u) => {
+          if (failed || u.searchParams.get('engine') !== 'google_flights_calendar') return undefined;
+          failed = true;
+          return 'http-500';
+        },
+      },
+    });
+    const sa02 = run.summary.calls.find((c) => c.id === 'SA-02');
+    expect(sa02?.status).toBe(200);
+    expect(sa02?.files).toHaveLength(2);
+    const [first, last] = (sa02?.files ?? []).map((p) => JSON.parse(readFileSync(p, 'utf8')).status);
+    expect([first, last]).toEqual([500, 200]);
+    expect(run.summary.creditsUsed).toBe(4); // the 500 is not billed
+  });
+
+  it('a 429 on a required call leaves it not as planned (r2-ts-004)', async () => {
+    const run = await runRecordingInFakeTime({
+      vendors: {
+        failOn: (u) => (u.searchParams.get('outbound_date_end') === '2027-03-09' ? 'http-429' : undefined),
+      },
+    });
+    expect(run.summary.calls.find((c) => c.id === 'SA-03')).toMatchObject({
+      status: 429,
+      detail: 'rate-limit',
+    });
+    expect(assessRun(run.plan, run.summary)).toMatchObject({ requiredOk: false, notAsExpected: ['SA-03'] });
+  });
+
+  it('a socket failure is no-response, NOT counted; a timeout is no-response, ledgered unknown and counted (cost-wp4b-r2-003)', async () => {
+    const run = await runRecordingInFakeTime({
+      env: { REQUEST_TIMEOUT_SECONDS: '1' },
+      vendors: {
+        failOn: (u) =>
+          u.searchParams.get('departure_at') === '2028-03'
+            ? 'network'
+            : u.searchParams.get('engine') === 'google_flights' &&
+                u.searchParams.get('outbound_date') === '2027-03-02' &&
+                u.searchParams.get('departure_token') === null
+              ? 'hang'
+              : undefined,
+      },
+    });
+    expect(run.summary.calls.find((c) => c.id === 'TP-20')).toMatchObject({
+      status: 'no-response',
+      detail: expect.stringContaining('NOT counted'),
+    });
+    expect(run.summary.calls.find((c) => c.id === 'SA-04')).toMatchObject({
+      status: 'no-response',
+      detail: 'timeout (ledgered unknown, counted)',
+    });
+    expect(
+      run.ports.db.raw
+        .prepare(
+          `SELECT outcome FROM provider_requests WHERE provider_id = 'searchapi' AND outcome = 'unknown'`,
+        )
+        .all(),
+    ).toEqual([{ outcome: 'unknown' }]);
+    expect(run.summary.creditsUsed).toBe(2); // SA-02 and the timed-out SA-04 (counted); SA-05/06 skipped
   });
 
   it('an abort during the calendar stops the run: later calls never reach the vendor and the execution is cancelled (ts-006, cost-wp4b-006)', async () => {
@@ -2892,24 +3248,50 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     });
   });
 
-  it('a vendor echoing the real key fails closed: no file holds it, the execution is cancelled with a clean errorText (ts-008)', async () => {
-    const ports = seededPorts();
-    const err = await runRecording({ ports, vendors: { calendar: 'echo-key' } }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(RecordingFailedError);
-    if (!(err instanceof RecordingFailedError)) return;
-    expect(err.message).not.toContain(SENTINEL_SA);
-    expect(err.partial.calls.map((c) => c.id).at(-1)).toBe('SA-01');
-    const row = ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get();
-    expect(row).toMatchObject({ status: 'cancelled', e: expect.stringContaining('record:fixtures failed') });
-    expect(JSON.stringify(row)).not.toContain(SENTINEL_SA);
-  });
+  it.each(['calendar-parameters', 'sa-401-bearer', 'tp-body'] as const)(
+    'a vendor echoing a real credential (%s) fails closed: no file under the root holds it, the execution is cancelled cleanly (ts-008)',
+    async (echo) => {
+      const setup = recordingSetup({ vendors: { echo } });
+      const err = await setup.run().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RecordingFailedError);
+      if (!(err instanceof RecordingFailedError)) return;
+      expect(err.message).not.toContain(SENTINEL_SA);
+      expect(err.message).not.toContain(SENTINEL_TP);
+      for (const path of filesUnder(setup.root)) {
+        const text = readFileSync(path, 'utf8');
+        expect(text, path).not.toContain(SENTINEL_SA);
+        expect(text, path).not.toContain(SENTINEL_TP);
+      }
+      const row = setup.ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get();
+      expect(row).toMatchObject({
+        status: 'cancelled',
+        e: expect.stringContaining('record:fixtures failed'),
+      });
+      expect(JSON.stringify(row)).not.toContain(SENTINEL_SA);
+      expect(JSON.stringify(row)).not.toContain(SENTINEL_TP);
+    },
+  );
 
-  it('refuses a plan whose free calls exceed EXECUTION_MAX_FREE_CALLS before any request (ruling 13)', async () => {
-    const ports = seededPorts({ EXECUTION_MAX_FREE_CALLS: '5' });
+  it('refuses a plan whose worst-case free calls exceed EXECUTION_MAX_FREE_CALLS before any request (ruling 13)', async () => {
+    const ports = seededPorts({ EXECUTION_MAX_FREE_CALLS: '57' });
     await expect(runRecording({ ports })).rejects.toThrow(
-      'the plan needs 20 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 5',
+      'the plan needs up to 58 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
     );
     expect(ports.db.raw.prepare('SELECT COUNT(*) AS n FROM search_executions').get()).toEqual({ n: 0 });
+  });
+
+  it('priorToolCredits counts tool runs inside the SearchApi window only: lifetime on the trial, the billing month on 40usd (r2-ts-004)', async () => {
+    const clock = fixedClock(AT);
+    const ports = seededPorts({ SEARCHAPI_PLAN: '40usd' }, clock);
+    await runRecording({ ports });
+    expect(priorToolCredits(ports)).toBe(4);
+    clock.set(asIsoDateTime('2026-11-02T09:00:00.000Z'));
+    expect(priorToolCredits(ports)).toBe(0);
+    const trialClock = fixedClock(AT);
+    const trial = seededPorts({}, trialClock);
+    await runRecording({ ports: trial });
+    trialClock.set(asIsoDateTime('2027-11-02T09:00:00.000Z'));
+    expect(priorToolCredits(trial)).toBe(4);
   });
 });
 ```
@@ -2917,43 +3299,98 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/record.test.ts`
-Expected: FAIL, `Error: Cannot find module '../../src/tools/record.js' imported from …/apps/api/test/helpers/recording.ts`.
+Expected: FAIL, `Error: Cannot find module '../../src/tools/recordExecution.js' imported from …/apps/api/test/tools/record.test.ts`.
 
 - [ ] **Step 3: Implement**
 
 ```ts
 // apps/api/src/tools/types.ts
-/** What the tool bootstrap hands a tool, and the one exit-code table every CLI shares (plan "Wiring and bootstraps"). */
+/** What the tool bootstrap hands a tool, the shared record-tool result types, and the one exit-code table every CLI shares. */
+import type { ProviderId } from '@gmt/core';
 
 /** The two tools of spec §9 item 7; `smoke` arrives with WP13. */
 export type ToolName = 'record' | 'smoke';
 
-/** Per-run context: the abort signal (SIGINT, SIGTERM, a lost app_lock), the two output lines and the recorded root. */
+/** Per-run context: the abort signal (SIGINT, SIGTERM, a lost app_lock), the two output lines and where recordings go. */
 export interface ToolContext {
   signal: AbortSignal;
   out(line: string): void;
   err(line: string): void;
-  /** Where recordings go: `defaultRecordedRoot()` in a real run, a temporary tree in tests (spec §5.5). */
+  /** `defaultRecordedRoot()` for the worked example, `<--out>/fixtures/recorded` otherwise, a temporary tree in tests. */
   recordedRoot: string;
+  /** `RECORDED_BY` in every real run; tests pass their own signature together with their root (prov-wp04b-006). */
+  recordedBy: string;
 }
 
 /**
- * The plan's single exit-code table for every CLI (smoke adds 2 and 3 in WP13). 1 = a required
- * recording call did not return its expected status, or the run failed; 65 = a live recording that
- * would exceed `--budget` together with credits already ledgered to earlier tool runs, without
- * `--confirm-rerun` (plan decision 20).
+ * The plan's single exit-code table for every CLI (smoke adds 2 and 3 in WP13). 1 = a required recording call did not
+ * return its expected status, or the run failed. 65 = a live recording refused for spend: credits already ledgered to
+ * earlier tool runs plus this run's worst case exceed `--budget` without `--confirm-rerun` (plan decision 20), or a
+ * provider's budget window has less room than the run's worst case (cost-wp4b-r2-001).
  */
 export const EXIT = {
   ok: 0,
   failed: 1,
   usage: 64,
-  rerunUnconfirmed: 65,
+  spendRefused: 65,
   refusedTestEnv: 70,
   preflightImpossible: 73,
   backupFailed: 74,
   lockRefused: 75,
   badConfig: 78,
 } as const;
+
+/**
+ * One planned call's result. `status` is the HTTP status when a response arrived; `'no-response'` when the request
+ * may have reached the vendor but no status came back (`detail` says whether the ledger counted it: a timeout is
+ * ledgered `unknown` and counted, a socket failure `error` and not counted); `'aborted'` when SIGINT, SIGTERM or a
+ * lost lock stopped it; `'skipped'` only when nothing reached the vendor (guard refusal, missing chain prerequisite,
+ * abort before send). `files` lists every file the recorder wrote for the call, retries included; `file` is the last.
+ */
+export interface RecordedCall {
+  id: string;
+  providerId: ProviderId;
+  status: number | 'skipped' | 'aborted' | 'no-response';
+  file: string | null;
+  files: string[];
+  detail: string | null;
+}
+
+/** Plan contract (Wiring and bootstraps; plan decision 23). */
+export interface RecordSummary {
+  calls: RecordedCall[];
+  creditsUsed: number;
+  freeCalls: number;
+  /** The recorder session every file of this run carries (null when nothing was written). */
+  session: string | null;
+  /**
+   * Diagnostics along the chain (pie-008), in integer pence with their currency (hard rule 7): never prices shown to the
+   * operator as offers; they let the PR state whether step 1 = step 2 and what step 3 showed.
+   */
+  chain: {
+    currency: 'GBP';
+    step1PricePence: number | null;
+    step2PricePence: number | null;
+    step3Options: Array<{ bookWith: string; pricePence: number }>;
+  };
+}
+
+/** recordFixtures failed after opening its execution; carries what was done so far (cause = the original error). */
+export class RecordingFailedError extends Error {
+  constructor(
+    message: string,
+    readonly partial: {
+      calls: RecordedCall[];
+      creditsUsed: number;
+      freeCalls: number;
+      session: string | null;
+    },
+    options: { cause: unknown },
+  ) {
+    super(message, options);
+    this.name = 'RecordingFailedError';
+  }
+}
 ```
 
 ```ts
@@ -3010,6 +3447,7 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
   const shared = {
     flight_type: { fixed: ['round_trip'] },
     travel_class: { oneOf: SEARCHAPI_TRAVEL_CLASSES },
+    adults: { fixed: ['1'] },
     currency: { fixed: ['GBP'] },
     gl: { fixed: ['gb'] },
     hl: { fixed: ['en'] },
@@ -3054,6 +3492,9 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
         outbound_date: date,
         return_date: date,
         ...shared,
+        // why: plan decision 24 — sorted by price, separate-ticket itineraries excluded; no `stops` on either engine
+        sort_by: { fixed: ['price'] },
+        separate_tickets: { fixed: ['1'] },
         departure_token: { kind: 'opaque-token' },
         booking_token: { kind: 'opaque-token' },
       },
@@ -3067,10 +3508,8 @@ export class ParamLog {
   constructor(private readonly rules: Readonly<Record<EndpointKey, EndpointRules>>) {}
 
   /** Throws before a request leaves if any parameter or value is outside the table. Messages name parameters, never values. */
-  note(key: EndpointKey, params: URLSearchParams): void {
+  validate(key: EndpointKey, params: URLSearchParams): void {
     const table = this.rules[key].params;
-    const seen = this.observed.get(key) ?? new Map<string, Set<string>>();
-    this.observed.set(key, seen);
     for (const [name, value] of params) {
       const rule = table[name];
       if (rule === undefined) throw new Error(`parameter ${name} is not in the ${key} allowlist`);
@@ -3079,9 +3518,22 @@ export class ParamLog {
         throw new Error(`${key}: a value of ${name} is not allowed`);
       if ('kind' in rule && rule.kind !== 'opaque-token' && !KIND_PATTERN[rule.kind].test(value))
         throw new Error(`${key}: ${name} is not a ${rule.kind}`);
+    }
+  }
+
+  /**
+   * Records the names and fixed values of a request the vendor answered. why: only a request that left and got a
+   * response evidences a parameter; a call the guard refused or an abort stopped adds nothing (prov-wp04b-r2-003).
+   */
+  observe(key: EndpointKey, params: URLSearchParams): void {
+    const table = this.rules[key].params;
+    const seen = this.observed.get(key) ?? new Map<string, Set<string>>();
+    this.observed.set(key, seen);
+    for (const [name, value] of params) {
+      const rule = table[name];
       const values = seen.get(name) ?? new Set<string>();
       seen.set(name, values);
-      if ('fixed' in rule) values.add(value); // why: oneOf lists the documented set and variables are 'any'
+      if (rule !== undefined && 'fixed' in rule) values.add(value); // why: oneOf lists the documented set and variables are 'any'
     }
   }
 
@@ -3116,7 +3568,8 @@ export class ParamLog {
 
 /**
  * Writes params-<date>.json under `root` (spec §5.5). Refuses a root whose real path is not a
- * fixtures/recorded directory, and a provider directory that resolves outside the real root (sec-003).
+ * fixtures/recorded directory, a provider directory that resolves outside the real root (sec-003), and an existing
+ * file or symlink at the target.
  */
 export function writeAllowlist(root: string, doc: ParamsAllowlist): string {
   if (!resolve(root).endsWith(RECORDED_DIR))
@@ -3131,180 +3584,114 @@ export function writeAllowlist(root: string, doc: ParamsAllowlist): string {
   if (realDir !== join(realRoot, doc.provider))
     throw new Error(`refusing to write: ${dir} resolves outside ${realRoot}`);
   const path = join(realDir, `params-${doc.recordedAt}.json`);
-  writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`);
+  // why: 'wx' refuses an existing file or symlink at the target, as WP4's recorder does (sec2-006); a second run on the
+  // same date must first delete the earlier session's files and allowlists (Task 12b step 1)
+  writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`, { flag: 'wx' });
   return path;
 }
 ```
 
 ```ts
-// apps/api/src/tools/record.ts
+// apps/api/src/tools/recordExecution.ts
 /**
- * `pnpm record:fixtures` (spec §9 item 7, §5.3 Recorder, §2 facts 1–8, §16 WP4b).
- * Hand-built vendor requests through the real http-kit, recorder and SqliteBudgetGuard. The
- * adapters (WP5, WP6) do not exist yet and later replay what this records.
+ * The record tool's execution bookkeeping (spec §7 production ledger, plan decisions 5, 20 and 23): the hidden
+ * soft-deleted definition and its execution, the plan's stored estimate, the credits earlier tool runs ledgered, and
+ * the provider windows' room for this run.
  */
-
-import { existsSync, readFileSync } from 'node:fs';
 import {
-  AbortedError,
   addDays,
-  asIsoDate,
-  BudgetExceeded,
-  type Config,
   type DefinitionInput,
   type DefinitionSnapshot,
   type Estimate,
   type ExecutionStatus,
-  ProviderError,
-  type ProviderId,
-  type Secret,
-  stripUrlsInText,
 } from '@gmt/core';
-import {
-  createHttpKit,
-  createRecorder,
-  type FixtureRecorder,
-  type HttpKit,
-  type HttpKitDeps,
-  type HttpKitRequest,
-  type HttpKitResponse,
-  scrubSecrets,
-} from '@gmt/providers';
 import type { Ports } from '../wiring.js';
-import { ParamLog, paramRules, writeAllowlist } from './recordParams.js';
 import {
   CALENDAR_OUT_DAYS,
-  type CellDates,
   firstDayOf,
-  formatPlan,
-  freeCallMisfit,
   type PlannedCall,
-  planCalls,
   planTotals,
   RECORD_MAX_NIGHTS,
   RECORD_MIN_NIGHTS,
   type RecordArgs,
-  type RecordCli,
 } from './recordPlan.js';
-import {
-  bookingOptions,
-  calendarIsEmpty,
-  calendarParams,
-  cheapestCalendarCell,
-  cheapestOption,
-  dataRowCount,
-  flightsParams,
-  INVALID_SEARCHAPI_KEY,
-  INVALID_TRAVELPAYOUTS_TOKEN,
-  RECORD_TRAVEL_CLASS,
-  recordingLimits,
-  saUrl,
-  TP_PAGE_LIMIT,
-  tpUrl,
-} from './recordRequests.js';
-import { EXIT, type ToolContext } from './types.js';
+import { RECORD_TRAVEL_CLASS } from './recordRequests.js';
 
-export type { RecordArgs } from './recordPlan.js';
-
-/** recordedBy signature on every file this tool records (spec §5.5); the verifier's allowed list names it. */
-export const RECORDED_BY = '@gmt/api record:fixtures';
-
-/** Every ExecutionStatus, for the cross-run spend query. */
-const ALL_STATUSES = [
-  'pending',
-  'running',
-  'paused_budget',
-  'paused_error',
-  'interrupted',
-  'cancelled',
-  'completed',
-  'skipped_budget',
-  'skipped_confirm',
-  'skipped_window',
-  'skipped_missed',
-] as const satisfies readonly ExecutionStatus[];
-
-/**
- * One planned call's result. `status` is the HTTP status when a response arrived; `'no-response'` when the
- * request may have reached the vendor but no status came back (timeout, network: the ledger counts it
- * `unknown`); `'aborted'` when SIGINT or a lost lock stopped it; `'skipped'` only when nothing reached the
- * vendor (guard refusal, missing chain prerequisite, abort before send). `files` lists every file the
- * recorder wrote for the call, retries included (prov-wp04b-007); `file` is the last of them.
- */
-export interface RecordedCall {
-  id: string;
-  providerId: ProviderId;
-  status: number | 'skipped' | 'aborted' | 'no-response';
-  file: string | null;
-  files: string[];
-  detail: string | null;
+/** why: a Record over the union fails to compile when core adds a status, so the list below is always complete (arch-r2-002). */
+const STATUS_FLAGS: Record<ExecutionStatus, true> = {
+  pending: true,
+  running: true,
+  paused_budget: true,
+  paused_error: true,
+  interrupted: true,
+  cancelled: true,
+  completed: true,
+  skipped_budget: true,
+  skipped_confirm: true,
+  skipped_window: true,
+  skipped_missed: true,
+};
+function isExecutionStatus(s: string): s is ExecutionStatus {
+  return Object.hasOwn(STATUS_FLAGS, s);
 }
+const ALL_STATUSES: ExecutionStatus[] = Object.keys(STATUS_FLAGS).filter(isExecutionStatus);
 
-/** Plan contract (Wiring and bootstraps), widened by WP4b (brief §5.1) with `session`, `chain` and the RecordedCall fields. */
-export interface RecordSummary {
-  calls: RecordedCall[];
-  creditsUsed: number;
-  freeCalls: number;
-  /** The recorder session every file of this run carries (null when nothing was written). */
-  session: string | null;
-  /** Prices seen along the chain (pie-008), so the PR can state whether step 1 = step 2 and what step 3 showed. */
-  chain: {
-    step1Price: number | null;
-    step2Price: number | null;
-    step3Options: Array<{ bookWith: string; price: number }>;
-  };
-}
-export interface RunAssessment {
-  requiredOk: boolean;
-  chainComplete: boolean;
-  emptyEnvelope: boolean;
-  overLimit: 'http-400' | 'empty-200' | 'other';
-}
-
-/** recordFixtures failed after opening its execution; carries what was done so far (cause = the original error). */
-export class RecordingFailedError extends Error {
-  constructor(
-    message: string,
-    readonly partial: { calls: RecordedCall[]; creditsUsed: number; freeCalls: number },
-    options: { cause: unknown },
-  ) {
-    super(message, options);
-    this.name = 'RecordingFailedError';
-  }
-}
-
-/** A message safe for any sink: URL query and userinfo stripped, every configured secret replaced (spec §5.3, sec-006). */
-export function safeMessage(e: unknown, secrets: readonly Secret[]): string {
-  return scrubSecrets(stripUrlsInText(e instanceof Error ? e.message : String(e)), secrets);
-}
-
-/** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
-export function recordPrecheck(c: Config): string | null {
-  if (c.providers.travelpayouts === null || c.providers.searchapi === null)
-    return 'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY in the environment (.env)';
-  // why: the committed tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
-  if (c.pointOfSale !== 'GB')
-    return `record:fixtures records the worked example at POINT_OF_SALE=GB; got ${c.pointOfSale}`;
-  return null;
-}
-
-/**
- * SearchApi credits already ledgered to earlier `trigger: 'tool'` executions inside the provider's
- * current budget window (the lifetime window on the trial plan, the billing month on 40usd); plan decision 20.
- */
-export function priorToolCredits(ports: Ports): number {
-  const sa = ports.config.providers.searchapi;
-  if (sa === null) return 0;
-  const window = ports.budget.usage(
-    sa.limits.window === 'lifetime'
+/** The SearchApi budget window the configured plan uses: lifetime on the trial, the billing month on 40usd. */
+function searchApiWindow(ports: Ports) {
+  return ports.budget.usage(
+    ports.config.providers.searchapi?.limits.window === 'lifetime'
       ? { kind: 'provider-lifetime', providerId: 'searchapi' }
       : { kind: 'provider-month', providerId: 'searchapi' },
   );
-  const start = window.windowStart;
+}
+
+/**
+ * SearchApi credits already ledgered to earlier `trigger: 'tool'` executions inside the provider's current budget
+ * window (the lifetime window on the trial plan, the billing month on 40usd); plan decision 20.
+ */
+export function priorToolCredits(ports: Ports): number {
+  if (ports.config.providers.searchapi === null) return 0;
+  const start = searchApiWindow(ports).windowStart;
   return ports.repos.executions
-    .listByStatus([...ALL_STATUSES])
+    .listByStatus(ALL_STATUSES)
     .filter((e) => e.trigger === 'tool' && (start === null || e.createdAt >= start))
     .reduce((n, e) => n + ports.budget.usage({ kind: 'execution-calls', executionId: e.id }).calls, 0);
+}
+
+/**
+ * Where this run stands against every spend limit before a live call (plan decision 20, cost-wp4b-r2-001): the cross-run
+ * sum against `--budget`, and each provider window's remaining room against the plan's worst case. `refusals` is empty
+ * when a live run may start; `--confirm-rerun` lifts only the cross-run refusal, never a window that has no room.
+ */
+export function budgetPosition(
+  ports: Ports,
+  a: RecordArgs,
+  plan: readonly PlannedCall[],
+): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[] } {
+  const t = planTotals(plan);
+  const prior = priorToolCredits(ports);
+  const rerunNeedsConfirm = prior + t.worstCaseCredits > a.budget;
+  const sa = searchApiWindow(ports);
+  const tp = ports.budget.usage({ kind: 'provider-month', providerId: 'travelpayouts' });
+  const windowRefusals: string[] = [];
+  const room = (cap: number | null, used: number): number | null => (cap === null ? null : cap - used);
+  const saRoom = room(sa.cap, sa.calls);
+  const tpRoom = room(tp.cap, tp.calls);
+  if (saRoom !== null && saRoom < t.worstCaseCredits)
+    windowRefusals.push(
+      `the SearchApi window has room for ${saRoom} credit(s) but this run may use ${t.worstCaseCredits}`,
+    );
+  if (tpRoom !== null && tpRoom < t.worstCaseFreeCalls)
+    windowRefusals.push(
+      `the Travelpayouts month has room for ${tpRoom} call(s) but this run may make ${t.worstCaseFreeCalls}`,
+    );
+  const lines = [
+    `SearchApi credits already ledgered to tool runs in this budget window: ${prior}; this run ≤${t.worstCaseCredits}; --budget ${a.budget}${rerunNeedsConfirm ? ' (a live run needs --confirm-rerun)' : ''}`,
+    `SearchApi window: ${sa.calls} of ${sa.cap ?? 'no cap'} used (compare with the dashboard); room ${saRoom ?? 'unlimited'}, this run ≤${t.worstCaseCredits}`,
+    `Travelpayouts month: ${tp.calls} of ${tp.cap ?? 'no cap'} used; room ${tpRoom ?? 'unlimited'}, this run ≤${t.worstCaseFreeCalls}`,
+    ...windowRefusals.map((r) => `a live run would be refused: ${r}`),
+  ];
+  return { lines, rerunNeedsConfirm, windowRefusals };
 }
 
 /** The plan's estimate, stored on the hidden execution so ledger-vs-estimate parity can be computed (cost-wp4b-010). */
@@ -3317,7 +3704,7 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
       {
         providerId: 'travelpayouts',
         stage: 'discovery',
-        calls: t.freeCalls,
+        calls: t.worstCaseFreeCalls,
         planCalls: t.freeCalls,
         costMicroGbp: 0,
         costPence: 0,
@@ -3335,13 +3722,13 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
         blocked: null,
       },
     ],
-    totalCalls: t.freeCalls + t.worstCaseCredits,
+    totalCalls: t.worstCaseFreeCalls + t.worstCaseCredits,
     totalPlanCalls: t.worstCaseCredits,
     totalCostMicroGbp: saCost,
     totalCostPence: Math.ceil(saCost / 10_000),
     seconds: 0,
     assumptions: [
-      'record:fixtures plan: SearchApi calls at worst-case credits; Travelpayouts calls exclude extra pages',
+      'record:fixtures plan: SearchApi calls at worst-case credits; Travelpayouts calls at the page cap',
     ],
     windowClamped: false,
     retryFactor: 1,
@@ -3349,11 +3736,11 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
 }
 
 /**
- * The hidden execution that carries the run's caps in its snapshot budget (plan decision 5). The guard
- * reads execution caps from the snapshot, and the ledger's execution_id references search_executions, so
- * recording needs a real execution. Create and soft-delete are one transaction, and the snapshot is built
- * from the deleted row (prov-wp04b-009). The definition's space mirrors the calendar rectangle only to
- * satisfy the definition schema: nothing seeds cells for it, and spec §8.1 never resumes or schedules it.
+ * The hidden execution that carries the run's caps in its snapshot budget (plan decision 5). The guard reads execution
+ * caps from the snapshot, and the ledger's execution_id references search_executions, so recording needs a real
+ * execution. Create and soft-delete are one transaction, and the snapshot is built from the deleted row
+ * (prov-wp04b-009). The definition's space mirrors the calendar rectangle only to satisfy the definition schema:
+ * nothing seeds cells for it, and spec §8.1 never resumes or schedules it.
  */
 export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string {
   const sa = ports.config.providers.searchapi;
@@ -3361,9 +3748,8 @@ export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readon
   const now = ports.clock.now();
   const from = firstDayOf(a.month);
   const to = addDays(from, CALENDAR_OUT_DAYS - 1);
-  const worst = planTotals(plan).worstCaseCredits;
   // why: the guard enforces exactly the figure the dry run printed, never more than --budget (cost-wp4b-011)
-  const maxCalls = Math.min(a.budget, worst);
+  const maxCalls = Math.min(a.budget, planTotals(plan).worstCaseCredits);
   const input: DefinitionInput = {
     name: `record:fixtures ${now} (hidden tool run)`,
     origins: a.origins,
@@ -3417,6 +3803,211 @@ export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readon
     status: 'running',
   }).id;
 }
+```
+
+```ts
+// apps/api/src/tools/recordReport.ts
+/** Assessment and the human report of a recording run (spec §9 item 7; brief WP4b Task 12b reads these lines). */
+import { existsSync, readFileSync } from 'node:fs';
+import type { PlannedCall, RecordArgs } from './recordPlan.js';
+import { bookingOptions, calendarIsEmpty, dataRowCount, isRecord } from './recordRequests.js';
+import type { RecordedCall, RecordSummary } from './types.js';
+
+export interface RunAssessment {
+  requiredOk: boolean;
+  /** Ids of required calls that did not answer as planned (empty when requiredOk). */
+  notAsExpected: string[];
+  chainComplete: boolean;
+  emptyEnvelope: boolean;
+  overLimit: 'http-400' | 'empty-200' | 'other';
+}
+
+/** The parsed recorded file, or undefined when it is missing (e.g. never written). */
+export function readRecorded(file: string | null): Record<string, unknown> | undefined {
+  if (file === null || !existsSync(file)) return undefined;
+  const v: unknown = JSON.parse(readFileSync(file, 'utf8'));
+  return isRecord(v) ? v : undefined;
+}
+
+/** The recorder session a recorded file carries. */
+export function sessionOf(file: string): string | null {
+  const s = readRecorded(file)?.session;
+  return typeof s === 'string' ? s : null;
+}
+
+/** The session of the first file any call wrote, or null. */
+export function sessionOfCalls(calls: readonly RecordedCall[]): string | null {
+  const first = calls.find((c) => c.file !== null)?.file ?? null;
+  return first === null ? null : sessionOf(first);
+}
+
+/** Derived verdicts over a summary: required calls as planned, the chain, the empty envelope, the over-limit behaviour. */
+export function assessRun(plan: readonly PlannedCall[], s: Pick<RecordSummary, 'calls'>): RunAssessment {
+  const byId = new Map(s.calls.map((c) => [c.id, c] as const));
+  const callOf = (kind: PlannedCall['spec']['kind'], purpose?: string): RecordedCall | undefined => {
+    const p = plan.find(
+      (x) =>
+        x.spec.kind === kind &&
+        (purpose === undefined || ('purpose' in x.spec && x.spec.purpose === purpose)),
+    );
+    return p === undefined ? undefined : byId.get(p.id);
+  };
+  const step3 = callOf('sa-step3');
+  const probe = callOf('tp-tile', 'empty-probe');
+  const over = callOf('sa-over-limit');
+  const chainComplete = step3?.status === 200 && bookingOptions(readRecorded(step3.file)?.body).length > 0;
+  const emptyEnvelope = probe?.status === 200 && dataRowCount(readRecorded(probe.file)?.body) === 0;
+  const overLimit =
+    over?.status === 400
+      ? 'http-400'
+      : over?.status === 200 && calendarIsEmpty(readRecorded(over.file)?.body)
+        ? 'empty-200'
+        : 'other';
+  const notAsExpected = plan
+    .filter((p) => {
+      if (!p.required) return false;
+      if (p.spec.kind === 'sa-over-limit') return overLimit === 'other';
+      const c = byId.get(p.id);
+      return c === undefined || typeof c.status !== 'number' || !p.expect.includes(c.status);
+    })
+    .map((p) => p.id);
+  return {
+    requiredOk: notAsExpected.length === 0 && chainComplete,
+    notAsExpected,
+    chainComplete,
+    emptyEnvelope,
+    overLimit,
+  };
+}
+
+/** The ledger line, printed on every path that opened an execution (cost-wp4b-006). */
+export function ledgerLine(s: { creditsUsed: number; freeCalls: number }, a: RecordArgs): string {
+  return `ledger: SearchApi ${s.creditsUsed} credit(s) of budget ${a.budget}; Travelpayouts ${s.freeCalls} free call(s)`;
+}
+
+/**
+ * Files of calls that were retried: every attempt before the last answered with an error and was not billed, so each
+ * may be deleted whole before commit (prov-wp04b-r2-005); the operator never edits a file.
+ */
+export function retryAttemptLines(calls: readonly RecordedCall[]): string[] {
+  return calls
+    .filter((c) => c.files.length > 1)
+    .map(
+      (c) =>
+        `${c.id}: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): ${c.files.slice(0, -1).join(', ')}`,
+    );
+}
+
+const pounds = (pence: number | null): string => (pence === null ? '—' : (pence / 100).toFixed(2));
+
+/** Human summary printed after a run. */
+export function formatSummary(s: RecordSummary, v: RunAssessment, a: RecordArgs): string[] {
+  const c = s.chain;
+  const step3 = c.step3Options.map((o) => `${o.bookWith} ${pounds(o.pricePence)}`).join(', ');
+  return [
+    ...s.calls.map(
+      (x) =>
+        `${x.id} ${String(x.status)}${x.detail === null ? '' : ` (${x.detail})`}${x.files.length === 0 ? '' : ` → ${x.files.join(', ')}`}`,
+    ),
+    `required calls: ${v.requiredOk ? 'all as expected' : `NOT all as expected: ${v.notAsExpected.join(', ') || 'the chain is incomplete'}`}`,
+    `chain step 1 → 2 → 3: ${v.chainComplete ? 'complete' : 'incomplete'}`,
+    `chain prices (${c.currency}, diagnostics only): step 1 ${pounds(c.step1PricePence)}, step 2 ${pounds(c.step2PricePence)} (step 1 = step 2: ${c.step1PricePence !== null && c.step1PricePence === c.step2PricePence ? 'yes' : 'no'}); step 3 ${step3 === '' ? '—' : step3}`,
+    `over-limit calendar (SA-03): ${v.overLimit === 'http-400' ? 'HTTP 400, as spike fact 2' : v.overLimit === 'empty-200' ? 'an empty HTTP 200, as the docs say (billed)' : 'neither 400 nor an empty 200: raise a finding for WP5'}`,
+    `empty envelope recorded: ${v.emptyEnvelope ? 'yes' : 'no (best-effort; WP6 then needs a synthetic one: raise a finding)'}`,
+    '429: not attempted; WP5 maps rate limits from a labelled synthetic fixture (plan decision 20)',
+    ...retryAttemptLines(s.calls),
+    `session: ${s.session ?? 'none (nothing recorded)'}`,
+    ledgerLine(s, a),
+    'next: read the SearchApi dashboard credits; run the manual review checklist (Task 12b) before git add',
+  ];
+}
+```
+
+```ts
+// apps/api/src/tools/record.ts
+/**
+ * `pnpm record:fixtures` (spec §9 item 7, §5.3 Recorder, §2 facts 1–8, §16 WP4b).
+ * Hand-built vendor requests through the real http-kit, recorder and SqliteBudgetGuard. The
+ * adapters (WP5, WP6) do not exist yet and later replay what this records.
+ */
+import {
+  AbortedError,
+  asIsoDate,
+  BudgetExceeded,
+  type Config,
+  ProviderError,
+  type Secret,
+  stripUrlsInText,
+} from '@gmt/core';
+import {
+  createHttpKit,
+  createRecorder,
+  type FixtureRecorder,
+  type HttpKit,
+  type HttpKitDeps,
+  type HttpKitRequest,
+  type HttpKitResponse,
+  scrubSecrets,
+} from '@gmt/providers';
+import type { Ports } from '../wiring.js';
+import { budgetPosition, openRecordingExecution } from './recordExecution.js';
+import { type EndpointKey, ParamLog, paramRules, writeAllowlist } from './recordParams.js';
+import {
+  type CellDates,
+  formatPlan,
+  freeCallMisfit,
+  type PlannedCall,
+  planCalls,
+  RECORD_MAX_NIGHTS,
+  RECORD_MIN_NIGHTS,
+  type RecordArgs,
+  type RecordCli,
+  TP_MAX_PAGES_PER_TILE,
+} from './recordPlan.js';
+import { assessRun, formatSummary, ledgerLine, retryAttemptLines, sessionOfCalls } from './recordReport.js';
+import {
+  bookingOptions,
+  calendarParams,
+  cheapestCalendarCell,
+  cheapestOption,
+  dataRowCount,
+  flightsParams,
+  INVALID_SEARCHAPI_KEY,
+  INVALID_TRAVELPAYOUTS_TOKEN,
+  recordingLimits,
+  saUrl,
+  TP_PAGE_LIMIT,
+  tpUrl,
+} from './recordRequests.js';
+import {
+  EXIT,
+  type RecordedCall,
+  RecordingFailedError,
+  type RecordSummary,
+  type ToolContext,
+} from './types.js';
+
+export type { RecordArgs } from './recordPlan.js';
+
+/**
+ * recordedBy signature on every file a real run records (spec §5.5). WP4's verifier accepts any non-blank signature;
+ * the committed-tree manifest (checkWorkedExampleTree) is the only check that requires this one.
+ */
+export const RECORDED_BY = '@gmt/api record:fixtures';
+
+/** A message safe for any sink: URL query and userinfo stripped, every configured secret replaced (spec §5.3, sec-006). */
+export function safeMessage(e: unknown, secrets: readonly Secret[]): string {
+  return scrubSecrets(stripUrlsInText(e instanceof Error ? e.message : String(e)), secrets);
+}
+
+/** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
+export function recordPrecheck(c: Config): string | null {
+  if (c.providers.travelpayouts === null || c.providers.searchapi === null)
+    return 'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY in the environment (.env)';
+  // why: the committed tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
+  if (c.pointOfSale !== 'GB') return `record:fixtures records at POINT_OF_SALE=GB; got ${c.pointOfSale}`;
+  return null;
+}
 
 /** Wraps the recorder so every file written while a call runs (retries included) is attributed to that call. */
 function tracking(inner: FixtureRecorder): { recorder: FixtureRecorder; take(): string[] } {
@@ -3449,11 +4040,24 @@ async function send(http: HttpKit, req: HttpKitRequest): Promise<Sent> {
     if (e instanceof BudgetExceeded)
       return { ok: false, status: 'skipped', detail: `refused by the guard: ${e.scope}` };
     if (e instanceof AbortedError)
-      return { ok: false, status: 'aborted', detail: 'aborted (any started attempt is ledgered unknown)' };
-    if (e instanceof ProviderError)
-      return e.httpStatus === undefined
-        ? { ok: false, status: 'no-response', detail: `${e.kind} (ledgered unknown when the request left)` }
-        : { ok: false, status: e.httpStatus, detail: e.kind };
+      return {
+        ok: false,
+        status: 'aborted',
+        detail: 'aborted (an attempt already sent is ledgered unknown, counted)',
+      };
+    if (e instanceof ProviderError) {
+      if (e.httpStatus !== undefined) return { ok: false, status: e.httpStatus, detail: e.kind };
+      // why: WP4 finalises a timeout `unknown` (counted) but a socket failure `error` (not counted, and retried), so
+      // only the latter can leave a vendor charge the ledger does not show (cost-wp4b-r2-003)
+      return e.message.endsWith('[timeout]')
+        ? { ok: false, status: 'no-response', detail: 'timeout (ledgered unknown, counted)' }
+        : {
+            ok: false,
+            status: 'no-response',
+            detail:
+              'network (ledgered error, NOT counted: if the dashboard drop exceeds the ledger, this call is why)',
+          };
+    }
     throw e;
   }
 }
@@ -3462,17 +4066,22 @@ function providerOf(call: PlannedCall): 'travelpayouts' | 'searchapi' {
   return call.spec.kind.startsWith('tp-') ? 'travelpayouts' : 'searchapi';
 }
 
+/** Whole pence of a vendor's GBP price, or null for anything not a finite number (hard rule 7). */
+function toPence(price: number | undefined): number | null {
+  return price !== undefined && Number.isFinite(price) ? Math.round(price * 100) : null;
+}
+
 /**
- * Runs the plan through the real http-kit + recorder + guard (spec §9 item 7), under the hidden recording
- * execution. Every request is cache 'never' (the vendor answers it) and recordFixtures true (the recorder
- * sees it). The execution ends `completed` only when the plan ran to its end, `cancelled` on abort, and
- * `cancelled` with a URL-free errorText when anything threw; the error is then rethrown as a
- * RecordingFailedError whose cause is the original (plan decision 20, ruling on arch-018).
+ * Runs the plan through the real http-kit + recorder + guard (spec §9 item 7), under the hidden recording execution.
+ * Every request is cache 'never' (the vendor answers it) and recordFixtures true (the recorder sees it). The execution
+ * ends `completed` when the plan ran to its end, with errorText naming any required call not as planned and any guard
+ * refusal (prov-wp04b-r2-004); `cancelled` on abort; `cancelled` with errorText 'record:fixtures failed: …' when anything
+ * threw (ExecutionStatus has no 'failed'), the error then rethrown as a RecordingFailedError whose cause is the original.
  */
 export async function recordFixtures(
   ports: Ports,
   args: RecordArgs,
-  ctx: { signal: AbortSignal; recordedRoot: string; recordedBy?: string; plan?: readonly PlannedCall[] },
+  ctx: { signal: AbortSignal; recordedRoot: string; recordedBy: string; plan?: readonly PlannedCall[] },
 ): Promise<RecordSummary> {
   const tp = ports.config.providers.travelpayouts;
   const sa = ports.config.providers.searchapi;
@@ -3488,7 +4097,7 @@ export async function recordFixtures(
     root: ctx.recordedRoot,
     secrets: ports.secrets,
     clock: ports.clock,
-    recordedBy: ctx.recordedBy ?? RECORDED_BY,
+    recordedBy: ctx.recordedBy,
   });
   const run = new PlanRun(ports, plan, executionId, recorder, ctx, recordingLimits(tp, sa, ports.config));
   try {
@@ -3501,19 +4110,29 @@ export async function recordFixtures(
     });
     throw new RecordingFailedError(`record:fixtures failed: ${message}`, run.usage(), { cause: e });
   }
-  const guardStops = run.calls.filter((c) => c.detail?.startsWith('refused by the guard') === true).length;
+  const summary = run.summary();
+  const guardStops = summary.calls.filter(
+    (c) => c.detail?.startsWith('refused by the guard') === true,
+  ).length;
+  const verdict = assessRun(plan, summary);
+  const notes = [
+    ...(verdict.notAsExpected.length > 0
+      ? [`required calls not as expected: ${verdict.notAsExpected.join(', ')}`]
+      : []),
+    ...(guardStops > 0 ? [`${guardStops} call(s) refused by the guard`] : []),
+  ];
   const aborted = ctx.signal.aborted;
   ports.repos.executions.setStatus(executionId, aborted ? 'cancelled' : 'completed', {
     finishedAt: ports.clock.now(),
     // why: completed, not paused_budget — paused_budget is an active status, and this execution is never resumed (cost-wp4b-012)
-    errorText: aborted ? 'aborted' : guardStops > 0 ? `${guardStops} call(s) refused by the guard` : null,
+    errorText: aborted ? 'aborted' : notes.length > 0 ? notes.join('; ') : null,
   });
-  return run.summary();
+  return summary;
 }
 
 /** One run of the plan: the state the chain threads from call to call. */
 class PlanRun {
-  readonly calls: RecordedCall[] = [];
+  private readonly calls: RecordedCall[] = [];
   private readonly params = new ParamLog(paramRules());
   private readonly track: ReturnType<typeof tracking>;
   private readonly kit: HttpKit;
@@ -3522,7 +4141,12 @@ class PlanRun {
   private departureToken: string | null = null;
   private bookingToken: string | null = null;
   private tileIndex = 0;
-  private readonly chain: RecordSummary['chain'] = { step1Price: null, step2Price: null, step3Options: [] };
+  private readonly chain: RecordSummary['chain'] = {
+    currency: 'GBP',
+    step1PricePence: null,
+    step2PricePence: null,
+    step3Options: [],
+  };
 
   constructor(
     private readonly ports: Ports,
@@ -3567,13 +4191,17 @@ class PlanRun {
     };
   }
 
+  /** Validates before the request leaves; adds the parameters to the allowlist only when the vendor answered. */
   private async exec(
     id: string,
     providerId: 'travelpayouts' | 'searchapi',
+    key: EndpointKey,
     req: HttpKitRequest,
   ): Promise<Sent> {
+    this.params.validate(key, req.url.searchParams);
     const r = await send(this.kit, req);
     const files = this.track.take();
+    if (r.ok || typeof r.status === 'number') this.params.observe(key, req.url.searchParams);
     this.calls.push({
       id,
       providerId,
@@ -3602,6 +4230,7 @@ class PlanRun {
     if (tp === null || sa === null) throw new Error('record:fixtures needs both providers');
     const tpHeaders = (token: string): Record<string, string> => ({ 'X-Access-Token': token });
     const saHeaders = (key: string): Record<string, string> => ({ Authorization: `Bearer ${key}` });
+    let calendarAnswered = false;
     for (const call of this.plan) {
       if (this.ctx.signal.aborted) {
         this.skip(call, 'aborted before send');
@@ -3613,40 +4242,64 @@ class PlanRun {
           const tile = this.tileIndex++;
           for (let page = 1; ; page++) {
             const url = tpUrl(s.origin, s.destination, s.month, page);
-            this.params.note('prices_for_dates', url.searchParams);
+            const id = page === 1 ? call.id : `${call.id}p${page}`;
             const r = await this.exec(
-              page === 1 ? call.id : `${call.id}p${page}`,
+              id,
               'travelpayouts',
+              'prices_for_dates',
               this.request('travelpayouts', url, tpHeaders(tp.token.reveal()), tile),
             );
             if (!r.ok || dataRowCount(r.res.body) < TP_PAGE_LIMIT) break;
+            if (page === TP_MAX_PAGES_PER_TILE) {
+              const last = this.calls.at(-1);
+              // why: a vendor ignoring `page` must not page to the per-run cap (cost-wp4b-r2-002)
+              if (last !== undefined)
+                last.detail = `page cap reached (${TP_MAX_PAGES_PER_TILE} pages of ${TP_PAGE_LIMIT} rows)`;
+              break;
+            }
           }
           break;
         }
         case 'tp-auth': {
           const url = tpUrl(s.origin, s.destination, s.month, 1);
-          this.params.note('prices_for_dates', url.searchParams);
           await this.exec(
             call.id,
             'travelpayouts',
+            'prices_for_dates',
             this.request('travelpayouts', url, tpHeaders(INVALID_TRAVELPAYOUTS_TOKEN), null),
           );
           break;
         }
-        case 'sa-calendar':
-        case 'sa-over-limit': {
+        case 'sa-calendar': {
           const url = saUrl(calendarParams(s.origin, s.destination, s.rect, this.gl));
-          this.params.note('google_flights_calendar', url.searchParams);
           const r = await this.exec(
             call.id,
             'searchapi',
+            'google_flights_calendar',
             this.request('searchapi', url, saHeaders(sa.key.reveal()), this.tileIndex++),
           );
-          if (s.kind === 'sa-calendar' && r.ok)
-            this.cell = cheapestCalendarCell(r.res.body, {
-              minNights: RECORD_MIN_NIGHTS,
-              maxNights: RECORD_MAX_NIGHTS,
-            });
+          if (r.ok)
+            this.cell = cheapestCalendarCell(
+              r.res.body,
+              { minNights: RECORD_MIN_NIGHTS, maxNights: RECORD_MAX_NIGHTS },
+              s.rect,
+            );
+          calendarAnswered = this.cell !== null;
+          break;
+        }
+        case 'sa-over-limit': {
+          // why: without a usable calendar the chain is doomed and the run must be repeated, so nothing more is spent (cost-wp4b-r2-004)
+          if (!calendarAnswered) {
+            this.skip(call, 'skipped: calendar SA-02 gave no usable cell; the run must be repeated');
+            break;
+          }
+          const url = saUrl(calendarParams(s.origin, s.destination, s.rect, this.gl));
+          await this.exec(
+            call.id,
+            'searchapi',
+            'google_flights_calendar',
+            this.request('searchapi', url, saHeaders(sa.key.reveal()), this.tileIndex++),
+          );
           break;
         }
         case 'sa-step1':
@@ -3670,32 +4323,35 @@ class PlanRun {
             break;
           }
           const url = saUrl(flightsParams(s.origin, s.destination, this.cell, this.gl, token));
-          this.params.note('google_flights', url.searchParams);
           const r = await this.exec(
             call.id,
             'searchapi',
+            'google_flights',
             this.request('searchapi', url, saHeaders(sa.key.reveal()), null),
           );
           if (!r.ok) break;
           if (s.kind === 'sa-step1') {
             const o = cheapestOption(r.res.body, 'departure_token');
             this.departureToken = o?.token ?? null;
-            this.chain.step1Price = o?.price ?? null;
+            this.chain.step1PricePence = toPence(o?.price);
           } else if (s.kind === 'sa-step2') {
             const o = cheapestOption(r.res.body, 'booking_token');
             this.bookingToken = o?.token ?? null;
-            this.chain.step2Price = o?.price ?? null;
+            this.chain.step2PricePence = toPence(o?.price);
           } else {
-            this.chain.step3Options = bookingOptions(r.res.body);
+            this.chain.step3Options = bookingOptions(r.res.body).flatMap((o) => {
+              const pricePence = toPence(o.price);
+              return pricePence === null ? [] : [{ bookWith: o.bookWith, pricePence }];
+            });
           }
           break;
         }
         case 'sa-auth': {
           const url = saUrl(flightsParams(s.origin, s.destination, s.cell, this.gl, {}));
-          this.params.note('google_flights', url.searchParams);
           await this.exec(
             call.id,
             'searchapi',
+            'google_flights',
             this.request('searchapi', url, saHeaders(INVALID_SEARCHAPI_KEY), null),
           );
           break;
@@ -3714,106 +4370,34 @@ class PlanRun {
     }
   }
 
-  usage(): { calls: RecordedCall[]; creditsUsed: number; freeCalls: number } {
+  usage(): { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null } {
     return {
       calls: this.calls,
       creditsUsed: this.ports.budget.usage({ kind: 'execution-calls', executionId: this.executionId }).calls,
       freeCalls: this.ports.budget.usage({ kind: 'execution-free-calls', executionId: this.executionId })
         .calls,
+      session: sessionOfCalls(this.calls),
     };
   }
 
   summary(): RecordSummary {
-    const firstFile = this.calls.find((c) => c.file !== null)?.file ?? null;
-    return { ...this.usage(), session: firstFile === null ? null : sessionOf(firstFile), chain: this.chain };
+    return { ...this.usage(), chain: this.chain };
   }
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** The parsed recorded file, or undefined when it is missing (e.g. never written). */
-function readRecorded(file: string | null): Record<string, unknown> | undefined {
-  if (file === null || !existsSync(file)) return undefined;
-  const v: unknown = JSON.parse(readFileSync(file, 'utf8'));
-  return isRecord(v) ? v : undefined;
-}
-
-function sessionOf(file: string): string | null {
-  const s = readRecorded(file)?.session;
-  return typeof s === 'string' ? s : null;
-}
-
-/** Derived verdicts over a summary: required calls as expected, chain, empty envelope, the over-limit calendar's behaviour. */
-export function assessRun(plan: readonly PlannedCall[], s: RecordSummary): RunAssessment {
-  const byId = new Map(s.calls.map((c) => [c.id, c] as const));
-  const callOf = (kind: PlannedCall['spec']['kind'], purpose?: string): RecordedCall | undefined => {
-    const p = plan.find(
-      (x) =>
-        x.spec.kind === kind &&
-        (purpose === undefined || ('purpose' in x.spec && x.spec.purpose === purpose)),
-    );
-    return p === undefined ? undefined : byId.get(p.id);
-  };
-  const step3 = callOf('sa-step3');
-  const probe = callOf('tp-tile', 'empty-probe');
-  const over = callOf('sa-over-limit');
-  const chainComplete = step3?.status === 200 && bookingOptions(readRecorded(step3.file)?.body).length > 0;
-  const emptyEnvelope = probe?.status === 200 && dataRowCount(readRecorded(probe.file)?.body) === 0;
-  const overLimit =
-    over?.status === 400
-      ? 'http-400'
-      : over?.status === 200 && calendarIsEmpty(readRecorded(over.file)?.body)
-        ? 'empty-200'
-        : 'other';
-  const asExpected = plan.every((p) => {
-    if (!p.required) return true;
-    if (p.spec.kind === 'sa-over-limit') return overLimit !== 'other';
-    const c = byId.get(p.id);
-    return c !== undefined && typeof c.status === 'number' && p.expect.includes(c.status);
-  });
-  return { requiredOk: asExpected && chainComplete, chainComplete, emptyEnvelope, overLimit };
-}
-
-/** Human summary printed after a run. */
-export function formatSummary(s: RecordSummary, v: RunAssessment, a: RecordArgs): string[] {
-  const c = s.chain;
-  const step3 = c.step3Options.map((o) => `${o.bookWith} ${o.price}`).join(', ');
-  return [
-    ...s.calls.map(
-      (x) =>
-        `${x.id} ${String(x.status)}${x.detail === null ? '' : ` (${x.detail})`}${x.files.length === 0 ? '' : ` → ${x.files.join(', ')}`}`,
-    ),
-    `required calls: ${v.requiredOk ? 'all as expected' : 'NOT all as expected (see lines above)'}`,
-    `chain step 1 → 2 → 3: ${v.chainComplete ? 'complete' : 'incomplete'}`,
-    `chain prices (GBP): step 1 ${c.step1Price ?? '—'}, step 2 ${c.step2Price ?? '—'} (step 1 = step 2: ${c.step1Price !== null && c.step1Price === c.step2Price ? 'yes' : 'no'}); step 3 ${step3 === '' ? '—' : step3}`,
-    `over-limit calendar (SA-03): ${v.overLimit === 'http-400' ? 'HTTP 400, as spike fact 2' : v.overLimit === 'empty-200' ? 'an empty HTTP 200, as the docs say (billed)' : 'neither 400 nor an empty 200: raise a finding for WP5'}`,
-    `empty envelope recorded: ${v.emptyEnvelope ? 'yes' : 'no (best-effort; WP6 then needs a synthetic one: raise a finding)'}`,
-    '429: not attempted; WP5 maps rate limits from a labelled synthetic fixture (plan decision 20)',
-    `session: ${s.session ?? 'none (nothing recorded)'}`,
-    ledgerLine(s, a),
-    'next: read the SearchApi dashboard credits; run the manual review checklist (Task 12b) before git add',
-  ];
-}
-
-function ledgerLine(s: { creditsUsed: number; freeCalls: number }, a: RecordArgs): string {
-  return `ledger: SearchApi ${s.creditsUsed} credit(s) of budget ${a.budget}; Travelpayouts ${s.freeCalls} free call(s)`;
-}
-
 /**
- * The `record` tool (spec §7 tool bootstrap, §9 item 7). Prints the plan and the budget position; a dry run
- * stops there. A live run refuses when its worst case plus credits already ledgered to earlier tool runs
- * would exceed --budget, unless --confirm-rerun (plan decision 20). The ledger line is printed on every
- * path that opened an execution (cost-wp4b-006).
+ * The `record` tool (spec §7 tool bootstrap, §9 item 7). Prints the plan and the budget position; a dry run stops
+ * there. A live run refuses (exit 65) when a provider window lacks room for the worst case, or when its worst case
+ * plus credits already ledgered to earlier tool runs would exceed --budget, unless --confirm-rerun (plan decision 20).
+ * The ledger line and the session id are printed on every path that opened an execution (cost-wp4b-006, prov-wp04b-r2-005).
  */
 export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number> {
   const a = cli.args;
   const metro = ports.repos.airports.sharedMetro(a.origins);
   const plan = planCalls(a, metro);
-  const totals = planTotals(plan);
   for (const line of formatPlan(plan)) ctx.out(line);
   ctx.out(`metro from the airports table: ${metro ?? 'none (each origin airport is tiled)'}`);
+  ctx.out(`recording into: ${ctx.recordedRoot}`);
   const maxFree = ports.config.spend.executionMaxFreeCalls;
   ctx.out(`Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): ${maxFree}`);
   const misfit = freeCallMisfit(plan, maxFree);
@@ -3821,32 +4405,34 @@ export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext):
     ctx.err(misfit);
     return EXIT.badConfig;
   }
-  const prior = priorToolCredits(ports);
-  const needsConfirm = prior + totals.worstCaseCredits > a.budget;
-  ctx.out(
-    `SearchApi credits already ledgered to tool runs in this budget window: ${prior}; this run ≤${totals.worstCaseCredits}; --budget ${a.budget}${needsConfirm ? ' (a live run needs --confirm-rerun)' : ''}`,
-  );
-  const window = ports.budget.usage(
-    ports.config.providers.searchapi?.limits.window === 'lifetime'
-      ? { kind: 'provider-lifetime', providerId: 'searchapi' }
-      : { kind: 'provider-month', providerId: 'searchapi' },
-  );
-  ctx.out(`SearchApi window: ${window.calls} of ${window.cap ?? 'no cap'} used (compare with the dashboard)`);
+  const position = budgetPosition(ports, a, plan);
+  for (const line of position.lines) ctx.out(line);
   if (cli.dryRun) return EXIT.ok;
-  if (needsConfirm && !cli.confirmRerun) {
+  if (position.windowRefusals.length > 0) {
+    ctx.err(`refusing: ${position.windowRefusals.join('; ')} (never start what cannot finish)`);
+    return EXIT.spendRefused;
+  }
+  if (position.rerunNeedsConfirm && !cli.confirmRerun) {
     ctx.err(
-      `refusing: ${prior} credit(s) already ledgered to earlier tool runs plus this run's ≤${totals.worstCaseCredits} exceed --budget ${a.budget}; stop and ask before re-running, then pass --confirm-rerun (plan decision 20)`,
+      `refusing: credits already ledgered to earlier tool runs plus this run's worst case exceed --budget ${a.budget}; stop and ask before re-running, then pass --confirm-rerun (plan decision 20)`,
     );
-    return EXIT.rerunUnconfirmed;
+    return EXIT.spendRefused;
   }
   let summary: RecordSummary;
   try {
-    summary = await recordFixtures(ports, a, { signal: ctx.signal, recordedRoot: ctx.recordedRoot, plan });
+    summary = await recordFixtures(ports, a, {
+      signal: ctx.signal,
+      recordedRoot: ctx.recordedRoot,
+      recordedBy: ctx.recordedBy,
+      plan,
+    });
   } catch (e) {
     if (!(e instanceof RecordingFailedError)) throw e;
     for (const x of e.partial.calls)
       ctx.out(`${x.id} ${String(x.status)}${x.files.length === 0 ? '' : ` → ${x.files.join(', ')}`}`);
+    for (const line of retryAttemptLines(e.partial.calls)) ctx.out(line);
     ctx.err(e.message);
+    ctx.out(`session: ${e.partial.session ?? 'none (nothing recorded)'}`);
     ctx.out(ledgerLine(e.partial, a));
     return EXIT.failed;
   }
@@ -3859,7 +4445,7 @@ export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext):
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/record.test.ts`
-Expected: 11 passed. Two failures would mean the merged WP3 or WP4 differs from section 4, so raise a finding rather than adapt the test: a missing 400 or 401 file (the recorder does not record every attempt), or a `departure_token` request in the budget test (the guard does not read the snapshot budget).
+Expected: 19 passed. Two failures would mean the merged WP3 or WP4 differs from section 4, so raise a finding rather than adapt the test: a missing 400 or 401 file (the recorder does not record every attempt), or a `departure_token` request in the budget test (the guard does not read the snapshot budget).
 
 - [ ] **Step 5: Commit**
 
@@ -3873,14 +4459,14 @@ git add apps/api && git commit -m "wp04b: record:fixtures run through the real h
 
 **Interfaces:** consumes `AppLock`, `LOCK_STALE_AFTER_MS`, `readTime` (WP3 internals), `better-sqlite3` (already `@gmt/db`'s dependency). Produces `readOnlyLockState(dbPath, clock): { state: 'absent' | 'fresh' | 'stale'; holder?: string; heartbeatAt?: IsoDateTime }`, exported from the `@gmt/db` barrel.
 
-The tool bootstrap must read `app_lock` before any backup or migration without opening the database read-write (spec §7, plan decision 20). This function lives beside `AppLock` so the SQLite dependency stays in `@gmt/db`.
+The tool bootstrap must read `app_lock` before any backup or migration without opening the database read-write (spec §7, plan decision 20). This function lives beside `AppLock` so the SQLite dependency stays in `@gmt/db`. It throws for a file that is not a database and for a malformed heartbeat (only a hand-made table can hold one: the migrated schema CHECKs the column); the caller maps a throw to exit 73 (r2-ts-007).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // packages/db/test/readOnlyLockState.test.ts
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixedClock } from '@gmt/core';
 import Database from 'better-sqlite3';
@@ -3954,13 +4540,34 @@ describe('readOnlyLockState (spec §7 app_lock; plan decision 20)', () => {
     expect(statSync(`${path}-wal`).size).toBeGreaterThan(0);
     expect(readOnlyLockState(path, clock)).toEqual({ state: 'fresh', holder: 'app', heartbeatAt: T0 });
   });
+
+  it(':memory: is absent', () => {
+    expect(readOnlyLockState(':memory:', fixedClock(T0))).toEqual({ state: 'absent' });
+  });
+
+  it('throws for a file that is not a SQLite database (the tool maps it to exit 73)', () => {
+    const path = join(tmpDir(), 'garbage.db');
+    writeFileSync(path, 'this is not a database, just text long enough to fill a header page');
+    expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(/not a database/);
+  });
+
+  it('throws RowCorrupt for a malformed heartbeat_at (a hand-made table; the migrated schema CHECKs the column)', () => {
+    const path = tmpDbPath();
+    const raw = new Database(path);
+    raw.exec(
+      'CREATE TABLE app_lock (id INTEGER PRIMARY KEY, holder TEXT, heartbeat_at TEXT, acquired_at TEXT)',
+    );
+    raw.prepare("INSERT INTO app_lock VALUES (1, 'app', 'yesterday', 'yesterday')").run();
+    raw.close();
+    expect(() => readOnlyLockState(path, fixedClock(T0))).toThrow(/heartbeat_at/);
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/readOnlyLockState.test.ts`
-Expected: FAIL, 5 failed; the first failure is `TypeError: readOnlyLockState is not a function`.
+Expected: FAIL, 8 failed; the first failure is `TypeError: readOnlyLockState is not a function`.
 
 - [ ] **Step 3: Implement**
 
@@ -3977,6 +4584,8 @@ import Database from 'better-sqlite3';
  * an empty table; `fresh` while the heartbeat is at most LOCK_STALE_AFTER_MS old; `stale` after that. It never writes:
  * no journal-mode change, no migration, no checkpoint on close. why: a read-only connection still reads the -wal, so a
  * live app's latest heartbeat is seen; SQLite creates empty -wal/-shm sidecars when they are absent and writes nothing.
+ * Throws for a file that is not a SQLite database, a database it cannot open, or a malformed heartbeat_at (RowCorrupt);
+ * the tool bootstrap maps any throw to exit 73.
  */
 export function readOnlyLockState(
   dbPath: string,
@@ -4015,7 +4624,7 @@ In `packages/db/test/barrel.test.ts`, add `'readOnlyLockState'` to both lists: a
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/db exec vitest run test/readOnlyLockState.test.ts test/barrel.test.ts test/appLock.test.ts` and `pnpm --filter @gmt/db test`
-Expected: 5 passed in the new file; the three files 21 passed; the db suite passes with WP3's thresholds (259 tests at assembly).
+Expected: 8 passed in the new file; the three files 24 passed; the db suite passes with WP3's thresholds (262 tests at assembly).
 
 - [ ] **Step 5: Commit**
 
@@ -4025,11 +4634,11 @@ git add packages/db && git commit -m "wp04b: readOnlyLockState in @gmt/db, so th
 
 ### Task 8: Tool bootstrap (in-process)
 
-**Files:** create `apps/api/src/bootstrap/tool.ts`, `apps/api/test/bootstrap/tool.test.ts`; modify `packages/providers/src/index.ts`.
+**Files:** create `apps/api/src/bootstrap/tool.ts`, `apps/api/src/tools/workedExample.ts`, `apps/api/test/bootstrap/tool.test.ts`; modify `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`.
 
-**Interfaces:** consumes `AppLock`, `HEARTBEAT_INTERVAL_MS`, `readOnlyLockState` (Task 7), `openDatabase`, `pendingMigrations`, `backupDatabase`, `seedAirports`, `loadAirportsDataset`, `AIRPORTS_DATA_DIR`, `MIGRATIONS_DIR`, `defaultRecordedRoot`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `runRecord`, `recordPrecheck`. Produces `runTool`, `RunToolOptions`, `ToolRunners`, `backupsDirFor`, `pendingOnExistingDb`.
+**Interfaces:** consumes `AppLock`, `HEARTBEAT_INTERVAL_MS`, `readOnlyLockState` (Task 7), `openDatabase`, `pendingMigrations`, `backupDatabase`, `seedAirports`, `loadAirportsDataset`, `AIRPORTS_DATA_DIR`, `MIGRATIONS_DIR`, `defaultRecordedRoot`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `runRecord`, `recordPrecheck`. Produces `runTool`, `RunToolOptions`, `RecordingTarget`, `recordingTarget`, `repositoryRoot`, `isEntryPoint`, `ToolRunners`, `backupsDirFor`, `pendingOnExistingDb`, `WORKED_EXAMPLE_ROUTE`, `isWorkedExampleRoute`.
 
-Every exit path is tested through the injectable `runners` table: a throwing tool, SIGINT and SIGTERM, the heartbeat under fake timers, a lock taken over mid-run, and a buildPorts failure (ts-003).
+Every exit path is tested through the injectable `runners` table: a throwing tool, SIGINT and SIGTERM (twice), the heartbeat under fake timers, a lock taken over mid-run (with and without a throw), a buildPorts failure, an unreadable database, an unreadable migration state, an existing database in a read-only directory (ts-003, r2-ts-005). The refusal after `buildPorts` when `AppLock.acquire` refuses is reached only by a process that takes the lock between the read-only check and the acquire; WP3's AppLock tests cover the refusal itself. Every test records into a temporary tree under the test signature, and an `afterAll` asserts the committed tree still holds only `.gitkeep` (prov-wp04b-006).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4038,12 +4647,23 @@ Every exit path is tested through the injectable `runners` table: a throwing too
 import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { asIsoDateTime, fixedClock, systemClock } from '@gmt/core';
 import { AppLock, applyMigrations, HEARTBEAT_INTERVAL_MS, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { backupsDirFor, EXIT, type RunToolOptions, runTool } from '../../src/bootstrap/tool.js';
+import { defaultRecordedRoot } from '@gmt/providers';
+import { loadRecorded } from '@gmt/providers/testing';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  backupsDirFor,
+  EXIT,
+  isEntryPoint,
+  type RunToolOptions,
+  repositoryRoot,
+  runTool,
+} from '../../src/bootstrap/tool.js';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js';
-import { filesUnder, tempDir, tempRecordedRoot } from '../helpers/tmp.js';
+import { TEST_RECORDED_BY, testRecording } from '../helpers/recording.js';
+import { filesUnder, tempDir } from '../helpers/tmp.js';
 import { stubVendors } from '../helpers/vendors.js';
 
 const ROUTE = ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03'];
@@ -4052,8 +4672,14 @@ const DRY = [...ROUTE, '--dry-run'];
 afterEach(() => {
   vi.useRealTimers();
 });
+// why: a live run without the test `recording` option would write stand-in bodies into the committed tree (prov-wp04b-006)
+afterAll(() => {
+  expect(readdirSync(defaultRecordedRoot())).toEqual(['.gitkeep']);
+});
 
+/** A temp database and a temp recorded tree with the test signature (every runTool test records there, never in the committed tree). */
 function harness(dbPath = join(tempDir('gmt-tool-'), 'tool.db'), extra: Record<string, string> = {}) {
+  const rec = testRecording();
   const out: string[] = [];
   const err: string[] = [];
   // why: the tool's pino lines (e.g. a lost lock) go to this sink, not the test runner's stderr
@@ -4067,8 +4693,9 @@ function harness(dbPath = join(tempDir('gmt-tool-'), 'tool.db'), extra: Record<s
     out: (l) => out.push(l),
     err: (l) => err.push(l),
     logDestination,
+    recording: rec.recording,
   };
-  return { dbPath, out, err, opts, text: () => out.join('\n'), errors: () => err.join('\n') };
+  return { dbPath, root: rec.root, out, err, opts, text: () => out.join('\n'), errors: () => err.join('\n') };
 }
 
 function holdLock(dbPath: string, at: 'now' | 'stale', holder: 'app' | 'tool' = 'app'): void {
@@ -4165,6 +4792,35 @@ describe('runTool refusals (spec §5.5, §7, plan decision 20)', () => {
     },
   );
 
+  it.skipIf(process.getuid?.() === 0)(
+    'refuses with 73 when an existing database sits in a directory that is not writable (arch-r2-001, sec2-001)',
+    async () => {
+      const dir = tempDir();
+      const h = harness(join(dir, 'tool.db'));
+      holdLock(h.dbPath, 'stale');
+      chmodSync(dir, 0o500);
+      expect(await runTool('record', DRY, h.opts)).toBe(EXIT.preflightImpossible);
+      expect(h.errors()).toContain('is not writable');
+    },
+  );
+
+  it('refuses with 73, scrubbed, when DATABASE_PATH is not a SQLite database: no backup, no lock (r2-ts-005 a)', async () => {
+    const h = harness();
+    writeFileSync(h.dbPath, 'not a database; long enough to fill a SQLite header page, which this is not');
+    expect(await runTool('record', DRY, h.opts)).toBe(EXIT.preflightImpossible);
+    expect(h.errors()).toContain('cannot read app_lock');
+    expect(existsSync(backupsDirFor(h.dbPath))).toBe(false);
+  });
+
+  it('refuses with 73 when the migration state cannot be read (r2-ts-005 b)', async () => {
+    const h = harness();
+    const db = openDatabase(h.dbPath);
+    db.raw.exec('CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY)'); // no created_at column
+    db.close();
+    expect(await runTool('record', DRY, h.opts)).toBe(EXIT.preflightImpossible);
+    expect(h.errors()).toContain('cannot read the migration state');
+  });
+
   it('refuses with 73 when migrations are pending and the backups path is not a directory', async () => {
     const h = harness();
     openDatabase(h.dbPath).close();
@@ -4224,7 +4880,13 @@ describe('runTool success paths', () => {
     expect(text).toMatch(/airports seeded: \d+ rows/);
     expect(text).toContain('tool lock acquired');
     expect(text).toContain('metro from the airports table: LON');
-    expect(text).toContain('total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls');
+    expect(text).toContain(
+      'total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58',
+    );
+    expect(text).toContain(`recording into: ${h.root}`);
+    expect(text).toContain(
+      'SearchApi window: 0 of 100 used (compare with the dashboard); room 100, this run ≤5',
+    );
     expect(text).toContain('Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): 2000');
     expect(text).toContain(
       'SearchApi credits already ledgered to tool runs in this budget window: 0; this run ≤5; --budget 5',
@@ -4238,9 +4900,11 @@ describe('runTool success paths', () => {
   });
 
   it('dry run refuses a plan that does not fit EXECUTION_MAX_FREE_CALLS (ruling 13)', async () => {
-    const h = harness(undefined, { EXECUTION_MAX_FREE_CALLS: '19' });
+    const h = harness(undefined, { EXECUTION_MAX_FREE_CALLS: '57' });
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.badConfig);
-    expect(h.errors()).toContain('the plan needs 20 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 19');
+    expect(h.errors()).toContain(
+      'the plan needs up to 58 Travelpayouts calls but EXECUTION_MAX_FREE_CALLS is 57',
+    );
   });
 
   it('takes over a stale app lock', async () => {
@@ -4249,22 +4913,107 @@ describe('runTool success paths', () => {
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
   });
 
-  it('a live run through runTool records into the given root; a second run needs --confirm-rerun (ts-014, ruling 3)', async () => {
+  it('a live run through runTool records into the given root under the test signature; a second run needs --confirm-rerun (ts-014, ruling 3, prov-wp04b-006)', async () => {
     const h = harness();
-    const { root } = tempRecordedRoot();
     stubVendors();
-    expect(await runTool('record', ROUTE, { ...h.opts, recordedRoot: root })).toBe(EXIT.ok);
+    expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain('required calls: all as expected');
     expect(h.text()).toContain('ledger: SearchApi 4 credit(s) of budget 5; Travelpayouts 20 free call(s)');
-    expect(filesUnder(root).filter((f) => f.endsWith('.json') && !f.endsWith('.raw.json'))).toHaveLength(28); // 26 recordings + 2 allowlists
+    expect(filesUnder(h.root).filter((f) => f.endsWith('.json') && !f.endsWith('.raw.json'))).toHaveLength(
+      28,
+    ); // 26 recordings + 2 allowlists
+    for (const f of loadRecorded(h.root, 'searchapi', '/api/v1/search'))
+      expect(f.recordedBy).toBe(TEST_RECORDED_BY);
     const again = harness(h.dbPath);
-    expect(await runTool('record', ROUTE, { ...again.opts, recordedRoot: root })).toBe(EXIT.rerunUnconfirmed);
-    expect(again.errors()).toContain('4 credit(s) already ledgered to earlier tool runs');
+    expect(await runTool('record', ROUTE, again.opts)).toBe(EXIT.spendRefused);
+    expect(again.errors()).toContain('credits already ledgered to earlier tool runs');
     expect(again.text()).toContain('(a live run needs --confirm-rerun)');
     const confirmed = harness(h.dbPath);
+    expect(await runTool('record', [...ROUTE, '--confirm-rerun'], confirmed.opts)).toBe(EXIT.ok);
+  });
+
+  it('a live run refuses with 65, before any request, when the SearchApi window has less room than the worst case (cost-wp4b-r2-001)', async () => {
+    const h = harness(undefined, { SEARCHAPI_TRIAL_USED: '97' });
+    const seen = stubVendors();
+    expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
+    expect(h.text()).toContain(
+      'a live run would be refused: the SearchApi window has room for 3 credit(s) but this run may use 5',
+    );
+    expect(await runTool('record', [...ROUTE, '--confirm-rerun'], h.opts)).toBe(EXIT.spendRefused);
+    expect(h.errors()).toContain('the SearchApi window has room for 3 credit(s)');
+    expect(seen.requests).toEqual([]);
+  });
+
+  it('a recording that fails closed exits 1 and still prints the calls, the session and the ledger line (r2-ts-004)', async () => {
+    const h = harness();
+    stubVendors({ echo: 'calendar-parameters' });
+    expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.failed);
+    expect(h.errors()).toContain('record:fixtures failed');
+    expect(h.text()).toMatch(/session: \S+/);
+    expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 20 free call(s)'); // the refused 200 was billed
+    expect(`${h.text()}${h.errors()}`).not.toContain(SENTINEL_SA);
+  });
+});
+
+describe('where a record run may write (sec2-002 ruling)', () => {
+  function bare(extra: Record<string, string> = {}) {
+    const h = harness(undefined, extra);
+    const { recording: _ignored, ...opts } = h.opts;
+    return { ...h, opts };
+  }
+
+  it('the committed tree takes only the worked example: another route without --out refuses with 64 before anything is opened', async () => {
+    const h = bare();
     expect(
-      await runTool('record', [...ROUTE, '--confirm-rerun'], { ...confirmed.opts, recordedRoot: root }),
+      await runTool(
+        'record',
+        ['--budget', '5', '--route', 'LHR:JFK', '--month', '2027-03', '--dry-run'],
+        h.opts,
+      ),
+    ).toBe(EXIT.usage);
+    expect(h.errors()).toContain(
+      'the committed recorded tree holds only the worked example (--route LHR,LGW:JFK,EWR)',
+    );
+    expect(existsSync(h.dbPath)).toBe(false);
+  });
+
+  it('--out inside the repository refuses with 64', async () => {
+    const h = bare();
+    const inside = join(repositoryRoot(), 'tmp-recordings');
+    expect(
+      await runTool(
+        'record',
+        ['--budget', '5', '--route', 'LHR:JFK', '--month', '2027-03', '--out', inside, '--dry-run'],
+        h.opts,
+      ),
+    ).toBe(EXIT.usage);
+    expect(h.errors()).toContain('is inside the repository');
+    expect(existsSync(inside)).toBe(false);
+  });
+
+  it('--out outside the repository records any route into <out>/fixtures/recorded', async () => {
+    const h = bare();
+    const out = join(tempDir(), 'mine');
+    expect(
+      await runTool(
+        'record',
+        ['--budget', '5', '--route', 'LHR:JFK', '--month', '2027-03', '--out', out, '--dry-run'],
+        h.opts,
+      ),
     ).toBe(EXIT.ok);
+    expect(h.text()).toContain(`recording into: ${join(out, 'fixtures', 'recorded')}`);
+  });
+
+  it('the worked example without --out writes the committed tree (the dry run names it; nothing is written)', async () => {
+    const h = bare();
+    expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
+    expect(h.text()).toContain(`recording into: ${defaultRecordedRoot()}`);
+  });
+
+  it('isEntryPoint compares the unresolved path when realpath fails (arch-r2-006)', () => {
+    const missing = join(tempDir(), 'gone.ts');
+    expect(isEntryPoint(missing, pathToFileURL(missing).href)).toBe(true);
+    expect(isEntryPoint(undefined, pathToFileURL(missing).href)).toBe(false);
   });
 });
 
@@ -4310,6 +5059,24 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
     },
   );
 
+  it('a second SIGINT only aborts again: the handler stays until the lock is released (r2-ts-005 e)', async () => {
+    const h = harness();
+    const before = process.listenerCount('SIGINT');
+    const code = await runTool('record', DRY, {
+      ...h.opts,
+      runners: {
+        record: async (_ports, _cli, ctx) => {
+          process.emit('SIGINT');
+          process.emit('SIGINT');
+          return process.listenerCount('SIGINT') === before + 1 && ctx.signal.aborted ? 42 : 0;
+        },
+      },
+    });
+    expect(code).toBe(42);
+    expect(process.listenerCount('SIGINT')).toBe(before);
+    expect(lockRow(h.dbPath)).toEqual({ n: 0 });
+  });
+
   it('heartbeats every HEARTBEAT_INTERVAL_MS while the tool runs', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const h = harness();
@@ -4347,6 +5114,25 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
     expect(h.errors()).toContain('app_lock lost');
     expect(count(h.dbPath, 'SELECT holder FROM app_lock')).toEqual({ holder: 'app' }); // never deletes another holder's lock
   });
+
+  it('a tool that throws after the lock was lost returns 75 (r2-ts-005 d)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const h = harness();
+    const code = await runTool('record', DRY, {
+      ...h.opts,
+      runners: {
+        record: async (ports) => {
+          ports.db.raw
+            .prepare("UPDATE app_lock SET holder = 'app', acquired_at = '2000-01-01T00:00:00.000Z'")
+            .run();
+          vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+          throw new Error('the tool noticed the abort and gave up');
+        },
+      },
+    });
+    expect(code).toBe(EXIT.lockRefused);
+    expect(h.errors()).toContain('tool failed: the tool noticed the abort and gave up');
+  });
 });
 ```
 
@@ -4370,18 +5156,46 @@ export {
 } from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError, defaultRecordedRoot: WP4b
 ```
 
+In `packages/providers/test/barrel.test.ts`, add `'defaultRecordedRoot'` after `'createRecorder'` in the main-barrel function list (arch-r2-007).
+
+```ts
+// apps/api/src/tools/workedExample.ts
+/**
+ * The public worked example's route (brief README, spec §1): the only route the committed recorded tree may hold.
+ * why: the privacy rule — the operator's own route never enters the repository, so a run that would write into the
+ * committed tree with any other route is refused (sec2-002). This is the one apps/api source file that names airports
+ * (the WP4b definition-of-done grep excludes it), as apps/web/src/example.ts is for the web.
+ */
+export const WORKED_EXAMPLE_ROUTE = { origins: ['LHR', 'LGW'], destinations: ['JFK', 'EWR'] } as const;
+
+/** True only for exactly the worked example's route, in its order: `LHR,LGW:JFK,EWR`. */
+export function isWorkedExampleRoute(a: {
+  origins: readonly string[];
+  destinations: readonly string[];
+}): boolean {
+  const same = (x: readonly string[], y: readonly string[]): boolean =>
+    x.length === y.length && x.every((v, i) => v === y[i]);
+  return (
+    same(a.origins, WORKED_EXAMPLE_ROUTE.origins) && same(a.destinations, WORKED_EXAMPLE_ROUTE.destinations)
+  );
+}
+
+/** `LHR,LGW:JFK,EWR`, for messages. */
+export const WORKED_EXAMPLE_ROUTE_ARG = `${WORKED_EXAMPLE_ROUTE.origins.join(',')}:${WORKED_EXAMPLE_ROUTE.destinations.join(',')}`;
+```
+
 ```ts
 // apps/api/src/bootstrap/tool.ts
 /**
- * The tool bootstrap (spec §7 SQLite settings, app_lock and Migrations; §5.5; §9 item 7): the second
- * entrypoint in apps/api. It reuses the config parse and port wiring, opens the operator's configured
- * database (the production ledger), never constructs or boots the engine (no sweep, no auto-resume,
- * no cron), and holds app_lock as 'tool' for its whole run. The one process.env read is here.
+ * The tool bootstrap (spec §7 SQLite settings, app_lock and Migrations; §5.5; §9 item 7): the second entrypoint in
+ * apps/api. It reuses the config parse and port wiring, opens the operator's configured database (the production
+ * ledger), never constructs or boots the engine (no sweep, no auto-resume, no cron), and holds app_lock as 'tool' for
+ * its whole run. The one process.env read is here.
  */
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { type Clock, type Config, syntheticAllowed, systemClock } from '@gmt/core';
+import { type Clock, type Config, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
 import {
   AIRPORTS_DATA_DIR,
   AppLock,
@@ -4396,9 +5210,10 @@ import {
 } from '@gmt/db';
 import { defaultRecordedRoot } from '@gmt/providers';
 import { createLogger } from '../logger.js';
-import { recordPrecheck, runRecord, safeMessage } from '../tools/record.js';
+import { RECORDED_BY, recordPrecheck, runRecord, safeMessage } from '../tools/record.js';
 import { parseRecordArgs, type RecordCli } from '../tools/recordPlan.js';
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
+import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
 
 export { EXIT, type ToolName } from '../tools/types.js';
@@ -4409,6 +5224,12 @@ export interface ToolRunners {
 }
 const DEFAULT_RUNNERS: ToolRunners = { record: runRecord };
 
+/** Where recordings go and the signature they carry; always given together (prov-wp04b-006, r2-ts-001). */
+export interface RecordingTarget {
+  root: string;
+  recordedBy: string;
+}
+
 /** Test seams; production passes none of them (the entry point below calls runTool(name, argv)). */
 export interface RunToolOptions {
   env?: NodeJS.ProcessEnv;
@@ -4418,7 +5239,8 @@ export interface RunToolOptions {
   logDestination?: NodeJS.WritableStream;
   clock?: Clock;
   migrationsDir?: string;
-  recordedRoot?: string;
+  /** Tests record into a temporary tree under a test signature; a real run never passes this. */
+  recording?: RecordingTarget;
 }
 
 /** Spec §7 Migrations: keep the last 5 backups. */
@@ -4429,7 +5251,11 @@ export function backupsDirFor(databasePath: string): string {
   return join(dirname(databasePath), 'backups');
 }
 
-/** Pending migrations on a database file that already exists (none for a new file or :memory:). */
+/**
+ * Pending migrations on a database file that already exists (none for a new file or :memory:). why: this opens the file
+ * read-write through openDatabase (journal-mode pragma, checkpoint on close) but changes no schema; only the app_lock
+ * read before it is strictly read-only (arch-r2-003).
+ */
 export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[] {
   if (databasePath === ':memory:' || !existsSync(databasePath)) return [];
   const db = openDatabase(databasePath);
@@ -4440,16 +5266,66 @@ export function pendingOnExistingDb(databasePath: string, migrationsDir: string)
   }
 }
 
+/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
+export function repositoryRoot(): string {
+  let dir = defaultRecordedRoot();
+  while (!existsSync(join(dir, 'pnpm-workspace.yaml'))) {
+    const up = dirname(dir);
+    if (up === dir) throw new Error('repository root not found above the recorded tree');
+    dir = up;
+  }
+  return realpathSync(dir);
+}
+
+/** The real path of `p`, or of its nearest existing ancestor with the rest appended (for a directory not made yet). */
+function realOrAncestor(p: string): string {
+  const abs = resolve(p);
+  if (existsSync(abs)) return realpathSync(abs);
+  const up = dirname(abs);
+  return up === abs ? abs : join(realOrAncestor(up), abs.slice(up.length + 1));
+}
+
+/**
+ * Where a record run writes, and under which signature (sec2-002, ruling 2026-10-15): the committed tree only for the
+ * worked example's route; any other route needs `--out DIR` outside the repository, which writes DIR/fixtures/recorded.
+ */
+export function recordingTarget(
+  cli: RecordCli,
+  given: RecordingTarget | undefined,
+): RecordingTarget | { refusal: string } {
+  if (given !== undefined) return given;
+  if (cli.out !== null) {
+    const out = realOrAncestor(cli.out);
+    const repo = repositoryRoot();
+    if (out === repo || out.startsWith(`${repo}${sep}`))
+      return {
+        refusal: `--out ${cli.out} is inside the repository; recordings of other routes stay outside it`,
+      };
+    return { root: join(resolve(cli.out), 'fixtures', 'recorded'), recordedBy: RECORDED_BY };
+  }
+  if (!isWorkedExampleRoute(cli.args))
+    return {
+      refusal: `the committed recorded tree holds only the worked example (--route ${WORKED_EXAMPLE_ROUTE_ARG}); record any other route with --out DIR outside the repository`,
+    };
+  return { root: defaultRecordedRoot(), recordedBy: RECORDED_BY };
+}
+
 type Prepared =
-  | { ok: true; precheck: string | null; run(ports: Ports, ctx: ToolContext): Promise<number> }
+  | {
+      ok: true;
+      precheck: string | null;
+      target: RecordingTarget;
+      run(ports: Ports, ctx: ToolContext): Promise<number>;
+    }
   | { ok: false; code: number };
 
-/** The per-tool part: argument parsing and the configuration precheck. A switch, not a registry (arch-020). */
+/** The per-tool part: argument parsing, where to record, and the configuration precheck. A switch, not a registry (arch-020). */
 function prepare(
   name: ToolName,
   argv: readonly string[],
   config: Config,
   runners: ToolRunners,
+  given: RecordingTarget | undefined,
   err: (l: string) => void,
 ): Prepared {
   switch (name) {
@@ -4459,9 +5335,15 @@ function prepare(
         err(parsed.message);
         return { ok: false, code: EXIT.usage };
       }
+      const target = recordingTarget(parsed.value, given);
+      if ('refusal' in target) {
+        err(target.refusal);
+        return { ok: false, code: EXIT.usage };
+      }
       return {
         ok: true,
         precheck: recordPrecheck(config),
+        target,
         run: (ports, ctx) => runners.record(ports, parsed.value, ctx),
       };
     }
@@ -4477,14 +5359,33 @@ function prepare(
 }
 
 /**
- * Runs one tool and returns its exit code. Order (spec §5.5, §7, plan decision 20): config → refuse
- * NODE_ENV=test → refuse an open synthetic gate → arguments → precheck → app_lock read-only → data
- * directory writable → backup when migrations are pending → buildPorts (migrations) → app_lock('tool')
- * → seed airports → heartbeat → run → release on every path.
+ * Runs one tool and returns its exit code; every failure after the config parse maps to a code with a scrubbed
+ * message, so nothing reaches the entry point's catch (sec2-001). Order (spec §5.5, §7, plan decision 20): config →
+ * refuse NODE_ENV=test → refuse an open synthetic gate → arguments and recording target → precheck → data directory
+ * writable → app_lock read-only → backup when migrations are pending → buildPorts (migrations) → app_lock('tool') →
+ * seed airports → heartbeat → run → release on every path.
  */
 export async function runTool(name: ToolName, argv: string[], opts: RunToolOptions = {}): Promise<number> {
-  const out = opts.out ?? ((line: string) => void process.stdout.write(`${line}\n`));
   const err = opts.err ?? ((line: string) => void process.stderr.write(`${line}\n`));
+  let secrets: readonly Secret[] = [];
+  try {
+    return await runToolSteps(name, argv, opts, err, (s) => {
+      secrets = s;
+    });
+  } catch (e) {
+    err(`tool failed: ${safeMessage(e, secrets)}`);
+    return EXIT.failed;
+  }
+}
+
+async function runToolSteps(
+  name: ToolName,
+  argv: string[],
+  opts: RunToolOptions,
+  err: (line: string) => void,
+  knowSecrets: (s: readonly Secret[]) => void,
+): Promise<number> {
+  const out = opts.out ?? ((line: string) => void process.stdout.write(`${line}\n`));
   // why: the single process.env read (plan decision 9); NODE_ENV is read only through loadConfigFromEnv (sec-005)
   const env = opts.env ?? process.env;
   let config: Config;
@@ -4497,6 +5398,8 @@ export async function runTool(name: ToolName, argv: string[], opts: RunToolOptio
     }
     throw e;
   }
+  const secrets = collectSecrets(config);
+  knowSecrets(secrets);
   if (config.nodeEnv === 'test') {
     err('tool bootstrap refuses NODE_ENV=test (spec §5.5)');
     return EXIT.refusedTestEnv;
@@ -4507,7 +5410,7 @@ export async function runTool(name: ToolName, argv: string[], opts: RunToolOptio
     );
     return EXIT.badConfig;
   }
-  const prepared = prepare(name, argv, config, { ...DEFAULT_RUNNERS, ...opts.runners }, err);
+  const prepared = prepare(name, argv, config, { ...DEFAULT_RUNNERS, ...opts.runners }, opts.recording, err);
   if (!prepared.ok) return prepared.code;
   if (prepared.precheck !== null) {
     err(prepared.precheck);
@@ -4515,16 +5418,7 @@ export async function runTool(name: ToolName, argv: string[], opts: RunToolOptio
   }
   const clock = opts.clock ?? systemClock;
   const migrationsDir = opts.migrationsDir ?? MIGRATIONS_DIR;
-  const secrets = collectSecrets(config);
 
-  // why: read-only, before any backup or migration, so a live app's schema is never touched (spec §7, decision 20)
-  const held = readOnlyLockState(config.databasePath, clock);
-  if (held.state === 'fresh') {
-    err(
-      `app_lock is held by ${held.holder} (heartbeat ${held.heartbeatAt}); stop it, or use POST /api/tools/${name} while the app runs (spec §7)`,
-    );
-    return EXIT.lockRefused;
-  }
   if (config.databasePath !== ':memory:') {
     try {
       accessSync(dirname(config.databasePath), constants.W_OK);
@@ -4532,6 +5426,20 @@ export async function runTool(name: ToolName, argv: string[], opts: RunToolOptio
       err(`data directory ${dirname(config.databasePath)} is not writable; refusing (spec §7)`);
       return EXIT.preflightImpossible;
     }
+  }
+  let held: ReturnType<typeof readOnlyLockState>;
+  try {
+    // why: read-only, before any backup or migration, so a live app's schema is never touched (spec §7, decision 20)
+    held = readOnlyLockState(config.databasePath, clock);
+  } catch (e) {
+    err(`cannot read app_lock in ${config.databasePath}: ${safeMessage(e, secrets)}; refusing (spec §7)`);
+    return EXIT.preflightImpossible;
+  }
+  if (held.state === 'fresh') {
+    err(
+      `app_lock is held by ${held.holder ?? 'another process'} (heartbeat ${held.heartbeatAt ?? 'unknown'}); stop it, or use POST /api/tools/${name} while the app runs (spec §7)`,
+    );
+    return EXIT.lockRefused;
   }
   let pending: string[];
   try {
@@ -4578,7 +5486,8 @@ export async function runTool(name: ToolName, argv: string[], opts: RunToolOptio
   }
   try {
     const lock = new AppLock(ports.db, 'tool', ports.clock, log);
-    // why: waitMs 0 — a tool never queues behind the app; the operator uses POST /api/tools/* instead (spec §7)
+    // why: waitMs 0 — a tool never queues behind the app; the operator uses POST /api/tools/* instead (spec §7). Only a
+    // process that took the lock between the read-only check and here reaches the refusal (AppLock's own tests cover it).
     if (lock.acquire({ waitMs: 0 }) === 'refused') {
       const now = AppLock.inspect(ports.db);
       err(
@@ -4601,16 +5510,19 @@ export async function runTool(name: ToolName, argv: string[], opts: RunToolOptio
       }
     }, HEARTBEAT_INTERVAL_MS);
     beat.unref();
+    // why: `on`, not `once` — a second Ctrl-C must not kill the process with the lock held and the execution running
+    // (r2-ts-005 e); the handler stays until the lock is released
     const onSignal = (): void => ac.abort();
-    process.once('SIGINT', onSignal);
-    process.once('SIGTERM', onSignal);
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
     try {
       seedIfNeeded(ports, out);
       const code = await prepared.run(ports, {
         signal: ac.signal,
         out,
         err,
-        recordedRoot: opts.recordedRoot ?? defaultRecordedRoot(),
+        recordedRoot: prepared.target.root,
+        recordedBy: prepared.target.recordedBy,
       });
       return lockLost ? EXIT.lockRefused : code;
     } catch (e) {
@@ -4636,14 +5548,22 @@ function seedIfNeeded(ports: Ports, out: (line: string) => void): void {
   out(`airports seeded: ${r.inserted} rows, dataset ${r.datasetVersion}`);
 }
 
-function isEntryPoint(): boolean {
-  const script = process.argv[1];
+/**
+ * True when this module is the process entry. why: argv[1] may be a symlink (pnpm's bin links), so it is resolved; if
+ * resolution fails the unresolved path is compared instead of silently skipping the run (arch-r2-006).
+ */
+export function isEntryPoint(
+  script: string | undefined = process.argv[1],
+  self: string = import.meta.url,
+): boolean {
   if (script === undefined) return false;
+  let resolved = script;
   try {
-    return import.meta.url === pathToFileURL(realpathSync(script)).href;
+    resolved = realpathSync(script);
   } catch {
-    return false;
+    // why: compare the path as given; a missing or unreadable argv[1] simply never equals this module's URL
   }
+  return self === pathToFileURL(resolved).href;
 }
 
 // why: run only when executed directly, so tests import runTool without side effects.
@@ -4658,7 +5578,8 @@ if (isEntryPoint()) {
         process.exitCode = code;
       },
       (e: unknown) => {
-        // why: only errors before any secret is known reach here (config parsing); the message is URL-stripped anyway
+        // why: unreachable by design — runTool maps every failure to an exit code with secrets scrubbed; kept so an
+        // unforeseen rejection still exits non-zero, URL-stripped
         process.stderr.write(`tool failed: ${safeMessage(e, [])}\n`);
         process.exitCode = EXIT.failed;
       },
@@ -4670,19 +5591,19 @@ if (isEntryPoint()) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts` and `pnpm --filter @gmt/providers test`
-Expected: 22 passed (the unwritable-directory case is reported skipped when run as root); the providers suite passes. If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
+Expected: 34 passed (the two read-only-directory cases are reported skipped when run as root); the providers suite passes (263 at assembly). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api packages/providers/src/index.ts && git commit -m "wp04b: tool bootstrap with read-only lock check, backup preflight, airport seeding and the tool lock"
+git add apps/api packages/providers/src/index.ts packages/providers/test/barrel.test.ts && git commit -m "wp04b: tool bootstrap with read-only lock check, backup preflight, airport seeding, the tool lock and the recording-target rule"
 ```
 
-### Task 9: Tool bootstrap entry, spawned; the package script; the boundary rules
+### Task 9: Tool bootstrap entry, spawned; the network guards; the package script; the boundary rules
 
-**Files:** modify `apps/api/package.json` (script), `scripts/check-boundaries.mjs`; create `apps/api/test/support/noNetwork.mjs`, `apps/api/test/bootstrap/tool.spawn.test.ts`.
+**Files:** modify `apps/api/package.json` (script), `scripts/check-boundaries.mjs`; create `apps/api/test/support/noNetwork.mjs`, `apps/api/test/support/guards.test.ts`, `apps/api/test/bootstrap/tool.spawn.test.ts`.
 
-**Interfaces:** consumes the real entry `src/bootstrap/tool.ts`. Produces the `tool` script the root's `record:fixtures` and `smoke:live` call.
+**Interfaces:** consumes the real entry `src/bootstrap/tool.ts`, `takeStrays`. Produces the `tool` script the root's `record:fixtures` and `smoke:live` call.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4700,6 +5621,21 @@ const refuse = (hostname, ...rest) => {
   if (typeof callback === 'function') process.nextTick(() => callback(error));
 };
 Object.defineProperty(dns, 'lookup', { value: refuse, writable: true, configurable: true });
+```
+
+```ts
+// apps/api/test/support/guards.test.ts
+// The setup file's network guards are live in apps/api (r2-ts-006): an unstubbed request to a vendor host fails in
+// process and is recorded as a stray (cleared here, so the guard's afterEach does not fail this test).
+import { takeStrays } from '@gmt/providers/testing';
+import { describe, expect, it } from 'vitest';
+
+describe('apps/api network guards (plan decision 18)', () => {
+  it('an unstubbed fetch to a vendor host is refused in process and recorded as a stray', async () => {
+    await expect(fetch('https://www.searchapi.io/api/v1/search?engine=google_flights')).rejects.toThrow();
+    expect(takeStrays()).toEqual(['GET https://www.searchapi.io/api/v1/search']);
+  });
+});
 ```
 
 ```ts
@@ -4774,7 +5710,9 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
     db.close();
   }, 60_000);
 
-  it('otherwise, at debug log level, acquires the tool lock, prints the plan, releases the lock and leaks no credential (sec-001)', () => {
+  // why: a dry run makes no HTTP request, so this proves only the bootstrap's own output; http-kit's debug lines are
+  // covered through the real pino logger in test/logger.test.ts (sec2-004)
+  it('otherwise, at debug log level, acquires the tool lock, prints the plan and releases the lock; the bootstrap prints no credential', () => {
     const dbPath = freshDbPath();
     const r = spawnTool(toolEnv(dbPath, { LOG_LEVEL: 'debug' }));
     expect(r.status).toBe(0);
@@ -4801,13 +5739,27 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
       },
     });
   });
+
+  it('the DNS-refusal preload takes effect in a spawned process (r2-ts-006)', () => {
+    const r = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        NO_NETWORK,
+        '-e',
+        "require('node:dns').lookup('www.searchapi.io', (e) => { process.stdout.write(e ? e.code : 'resolved'); })",
+      ],
+      { cwd: API_ROOT, env: { PATH: process.env.PATH ?? '' }, encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(r.stdout).toBe('ENOTFOUND');
+  }, 30_000);
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts`
-Expected: the four spawn tests pass (the entry exists since Task 8); the script test FAILS with `AssertionError: expected { name: '@gmt/api', …(5) } to match object { scripts: { tool: 'node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts' } }`. If a spawn test fails instead, the entry-point guard does not fire under `node --import tsx`: fix `isEntryPoint` before going on.
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts`
+Expected: 1 failed | 6 passed; the failure is the script test, `AssertionError: expected { name: '@gmt/api', …(7) } to match object { Object (scripts) }`. The spawn tests pass because the entry exists since Task 8; if one fails instead, the entry-point guard does not fire under `node --import tsx`: fix `isEntryPoint` before going on. The preload test and the guard test pass on first run; they prove the two network guards are live (r2-ts-006).
 
 - [ ] **Step 3: Implement**
 
@@ -4821,14 +5773,23 @@ In `apps/api/package.json`, set the `tool` script (merge the key; keep main's ot
 }
 ```
 
-`// why:` (record it in the PR description; JSON has no comments) The root scripts are `"record:fixtures": "pnpm --filter @gmt/api tool record"` and `"smoke:live": "pnpm --filter @gmt/api tool smoke"`, so pnpm appends the operator's arguments after `record`. `--conditions=@gmt/source` makes Node and tsx resolve workspace packages to their sources rather than stale or missing `dist` builds (plan Task 0.1). Node loads `.env` into `process.env`, where existing variables win; `loadConfigFromEnv` is the only reader. The spawn test calls `node` directly with its own env so no test ever loads the real `.env`.
+`// why:` (record it in the PR description; JSON has no comments) The root scripts are `"record:fixtures": "pnpm --filter @gmt/api tool record"` and `"smoke:live": "pnpm --filter @gmt/api tool smoke"`, so pnpm appends the operator's arguments after `record`. `--conditions=@gmt/source` makes Node and tsx resolve workspace packages to their sources rather than stale or missing `dist` builds (plan Task 0.1). Node loads `.env` into `process.env`, where existing variables win; `loadConfigFromEnv` is the only reader. The spawn tests call `node` directly with their own env, so no test ever loads the real `.env`.
 
-In `scripts/check-boundaries.mjs`, replace the providers-only msw rule inside the per-file loop and append the `@gmt/api` rules after the loop (before `process.exit`):
+In `scripts/check-boundaries.mjs`, replace the `ENV_READERS` line and add the msw pattern beside it:
+
+```js
+// The only files that may read process.env: the app and tool bootstraps (wiring and logger take the env as an argument).
+const ENV_READERS = ['/bootstrap/'];
+// Any static, side-effect or dynamic import of msw.
+const MSW_IMPORT = /(from\s+|import\s*\(\s*|import\s+)['"]msw/;
+```
+
+change the `process.env` message to `${f} reads process.env outside apps/api/src/bootstrap/`, then replace the providers-only msw rule inside the per-file loop and append the `@gmt/api` rules after the loop (before `process.exit`):
 
 ```js
 // scripts/check-boundaries.mjs, inside the per-file loop (replaces the `name === '@gmt/providers'` msw rule)
     // why: plan decision 7 — @gmt/providers/testing is the only production-tree module that imports msw, in every package
-    if (!(name === '@gmt/providers' && f.includes('/src/testing/')) && /from ['"]msw/.test(src)) {
+    if (!(name === '@gmt/providers' && f.includes('/src/testing/')) && MSW_IMPORT.test(src)) {
       console.error(`${f} imports msw outside packages/providers/src/testing/`);
       bad++;
     }
@@ -4845,7 +5806,7 @@ for (const field of ['dependencies', 'devDependencies']) {
   }
 }
 for (const f of walk('apps/api/test')) {
-  if (/from ['"]msw/.test(readFileSync(f, 'utf8'))) {
+  if (MSW_IMPORT.test(readFileSync(f, 'utf8'))) {
     console.error(`${f} imports msw; apps/api tests use @gmt/providers/testing`);
     bad++;
   }
@@ -4854,13 +5815,13 @@ for (const f of walk('apps/api/test')) {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts` and `node scripts/check-boundaries.mjs`
-Expected: 5 passed; the boundary script exits 0. Then create `apps/api/test/plant.ts` containing `import { http } from 'msw/http';`, run `node scripts/check-boundaries.mjs`, expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`, and delete the file.
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts` and `node scripts/check-boundaries.mjs`
+Expected: 7 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api scripts/check-boundaries.mjs && git commit -m "wp04b: tool script on workspace sources, spawned-bootstrap tests and the msw boundary rules"
+git add apps/api scripts/check-boundaries.mjs && git commit -m "wp04b: tool script on workspace sources, spawned-bootstrap and network-guard tests, msw and env boundary rules"
 ```
 
 ### Task 10: Parameter allowlist files
@@ -4902,6 +5863,7 @@ const SA_COMMON = [
   'outbound_date',
   'return_date',
   'travel_class',
+  'adults',
 ];
 
 describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
@@ -4924,6 +5886,7 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
       },
     });
     const fixedSa = {
+      adults: ['1'],
       currency: ['GBP'],
       flight_type: ['round_trip'],
       gl: ['gb'],
@@ -4953,10 +5916,12 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
         },
       },
       '/api/v1/search?engine=google_flights': {
-        names: [...SA_COMMON, 'booking_token', 'departure_token'].sort(),
+        names: [...SA_COMMON, 'booking_token', 'departure_token', 'separate_tickets', 'sort_by'].sort(),
         values: {
           ...fixedSa,
           engine: ['google_flights'],
+          separate_tickets: ['1'],
+          sort_by: ['price'],
           arrival_id: 'any',
           departure_id: 'any',
           outbound_date: 'any',
@@ -4968,7 +5933,7 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
     });
     for (const doc of [tp, sa]) {
       for (const ep of Object.values(doc.endpoints))
-        for (const banned of ['api_key', 'token', 'market', 'trip_class', 'return_at'])
+        for (const banned of ['api_key', 'token', 'market', 'trip_class', 'return_at', 'stops'])
           expect(ep.names).not.toContain(banned);
     }
     for (const f of loadRecorded(root, 'travelpayouts', '/aviasales/v3/prices_for_dates'))
@@ -4980,17 +5945,33 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
   it('ParamLog refuses an unlisted parameter or value before the request leaves, naming the parameter only (ts-015)', () => {
     const log = new ParamLog(paramRules());
     expect(() =>
-      log.note('google_flights', new URLSearchParams({ engine: 'google_flights', api_key: 'x' })),
+      log.validate('google_flights', new URLSearchParams({ engine: 'google_flights', api_key: 'x' })),
     ).toThrow('parameter api_key is not in the google_flights allowlist');
-    expect(() => log.note('prices_for_dates', new URLSearchParams({ currency: 'GBP' }))).toThrow(
+    expect(() => log.validate('prices_for_dates', new URLSearchParams({ currency: 'GBP' }))).toThrow(
       'prices_for_dates: a value of currency is not allowed',
     );
-    expect(() => log.note('google_flights', new URLSearchParams({ gl: 'us' }))).toThrow(
+    expect(() => log.validate('google_flights', new URLSearchParams({ gl: 'us' }))).toThrow(
       'google_flights: a value of gl is not allowed',
     );
-    expect(() => log.note('google_flights', new URLSearchParams({ outbound_date: '2027-3-1' }))).toThrow(
+    expect(() => log.validate('google_flights', new URLSearchParams({ outbound_date: '2027-3-1' }))).toThrow(
       'google_flights: outbound_date is not a iso-date',
     );
+  });
+
+  it('refuses a second allowlist for the same provider and date, and a symlink at the target (sec2-006)', () => {
+    const doc: ParamsAllowlist = {
+      provider: 'searchapi',
+      recordedAt: asIsoDate('2026-10-20'),
+      endpoints: {},
+      contentSha256: '',
+    };
+    const { root } = tempRecordedRoot();
+    writeAllowlist(root, doc);
+    expect(() => writeAllowlist(root, doc)).toThrow(/EEXIST/);
+    const other = tempRecordedRoot().root;
+    mkdirSync(join(other, 'searchapi'));
+    symlinkSync(join(tempDir(), 'elsewhere.json'), join(other, 'searchapi', 'params-2026-10-20.json'));
+    expect(() => writeAllowlist(other, doc)).toThrow(/EEXIST/);
   });
 
   it('refuses to write outside fixtures/recorded, through a symlinked recorded root or a symlinked provider directory (sec-003)', () => {
@@ -5016,20 +5997,20 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-The writer exists since Task 6, so the test passes on its first run. Prove it is not vacuous: change `currency: { fixed: ['gbp'] }` in `paramRules`' `prices_for_dates` entry to `{ fixed: ['GBP'] }` and run `pnpm --filter @gmt/api exec vitest run test/tools/allowlist.test.ts`.
-Expected: FAIL in the first test with `RecordingFailedError: record:fixtures failed: prices_for_dates: a value of currency is not allowed`. Revert the change.
+The writer exists since Task 6, so the test passes on its first run. Prove the exact-names-and-values assertion bites with a mutation that lets the run finish (r2-ts-009): change `travel_class: { oneOf: SEARCHAPI_TRAVEL_CLASSES }` in `paramRules` to `travel_class: { fixed: SEARCHAPI_TRAVEL_CLASSES }` and run `pnpm --filter @gmt/api exec vitest run test/tools/allowlist.test.ts`.
+Expected: FAIL, 1 failed | 3 passed; the first test fails with `AssertionError: expected { …(2) } to deeply equal { …(2) }` (the allowlist now lists only `economy`). Revert the change.
 
 - [ ] **Step 3: Implement** — no production change; the test is the deliverable.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/allowlist.test.ts`
-Expected: 3 passed.
+Expected: 4 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/test && git commit -m "wp04b: allowlists load through WP4, list exactly the sent names and values, and refuse symlinked roots"
+git add apps/api/test && git commit -m "wp04b: allowlists load through WP4, list exactly the sent names and values, refuse symlinks and same-date overwrites"
 ```
 
 ### Task 11: Sentinel secret scan and the raw-body ignore rule
@@ -5101,7 +6082,7 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 The scan script and the ignore rule exist, so the test passes on its first run. Prove the plant branch is not vacuous by breaking the scan, not the test: change `const roots = ['packages/providers/fixtures'];` in `scripts/secret-scan.mjs` to `const roots = ['packages/providers/fixtures-missing'];` and run `pnpm --filter @gmt/api exec vitest run test/security/sentinel.test.ts`.
-Expected: FAIL in the first test with `AssertionError: expected +0 to be 1` (the planted sentinel is not found). Revert the change.
+Expected: FAIL, 1 failed | 2 passed, with `AssertionError: expected +0 to be 1 // Object.is equality` (the planted sentinel is not found). Revert the change.
 
 - [ ] **Step 3: Implement** — no production change.
 
@@ -5116,45 +6097,188 @@ Expected: 3 passed.
 git add apps/api/test && git commit -m "wp04b: sentinel secret scan over recorded trees and the raw-body ignore rule"
 ```
 
-### Task 12a: The committed-tree manifest test (offline)
+### Task 12a: The committed-tree check, proven offline
 
-**Files:** create `packages/providers/test/recorded/manifest.test.ts`.
+**Files:** create `apps/api/test/helpers/workedExampleTree.ts`, `apps/api/test/recorded/workedExampleTree.test.ts`, `apps/api/test/recorded/manifest.test.ts`.
 
-**Interfaces:** consumes `defaultRecordedRoot`, `loadRecorded`, `verifyRecordedTree`, `loadParamsAllowlist`, `assertRequestAllowed`. Produces the gate the live run must turn green.
+**Interfaces:** consumes `verifyRecordedTree`, `loadRecorded`, `withContentHash`, `loadParamsAllowlist`, `assertRequestAllowed`, `defaultRecordedRoot`, `STANDIN_MARKER`, `runRecording`. Produces `checkWorkedExampleTree(root, { recordedBy, standInsAllowed, secrets? }): string[]`, the gate the live run must turn green.
+
+The check is a function of a root (r2-ts-002): proven green on a tree recorded from the stand-ins, and red on broken copies of it (a second session, a step-2 placeholder missing from step 1's body, an out-of-band step-1 cell, a body URL on a foreign host) and on the stand-ins signed as the real tool. It lives in apps/api's test helpers because it names the worked example's airports, which `packages/providers/src` may not. The committed tree is one thin test calling it.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// packages/providers/test/recorded/manifest.test.ts
-// The committed recorded tree for the worked example (brief WP4b section 7): what WP5, WP6 and WP13 replay.
-// Red until the operator's live run (WP4b Task 12b) commits the tree; worked example only.
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+// apps/api/test/recorded/workedExampleTree.test.ts
+// Every predicate of the committed-tree check passes on a known-good tree recorded from the stand-ins and fails on a
+// broken copy (r2-ts-002), before it ever meets the live recording; the stand-in tripwire catches a test tree
+// signed as a real one (prov-wp04b-006).
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import type { RecordedFixture } from '@gmt/providers';
+import { loadRecorded, withContentHash } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
-import type { RecordedFixture } from '../../src/http/recorder.js';
-import { defaultRecordedRoot } from '../../src/http/recorder.js';
-import {
-  assertRequestAllowed,
-  loadParamsAllowlist,
-  type ParamsAllowlist,
-} from '../../src/params/allowlist.js';
-import { loadRecorded, verifyRecordedTree } from '../../src/testing/index.js';
+import { RECORDED_BY } from '../../src/tools/record.js';
+import { runRecording, TEST_RECORDED_BY } from '../helpers/recording.js';
+import { filesUnder } from '../helpers/tmp.js';
+import { checkWorkedExampleTree } from '../helpers/workedExampleTree.js';
 
-const ROOT = defaultRecordedRoot();
-const RECORDED_BY = '@gmt/api record:fixtures';
-const TP = loadRecorded(ROOT, 'travelpayouts', '/aviasales/v3/prices_for_dates');
-const SA = loadRecorded(ROOT, 'searchapi', '/api/v1/search');
-const ALL = [...TP, ...SA];
+const OK = { recordedBy: TEST_RECORDED_BY, standInsAllowed: true };
+const q = (f: RecordedFixture, k: string): string | null => new URL(f.request.url).searchParams.get(k);
+
+/** Rewrites one recording through `mutate`, re-hashed and renamed so only the predicate under test can object. */
+function rewrite(
+  root: string,
+  pick: (f: RecordedFixture) => boolean,
+  mutate: (json: Record<string, unknown>) => void,
+): void {
+  const path = filesUnder(root).find((p) => {
+    if (!p.endsWith('.json') || p.endsWith('.raw.json') || p.includes('params-')) return false;
+    const f = [
+      ...loadRecorded(root, 'travelpayouts', '/aviasales/v3/prices_for_dates'),
+      ...loadRecorded(root, 'searchapi', '/api/v1/search'),
+    ].find((x) => p.endsWith(`${x.recordedAt.slice(0, 10)}-${x.contentSha256.slice(0, 12)}.json`));
+    return f !== undefined && pick(f);
+  });
+  if (path === undefined) throw new Error('no recording matched');
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+    throw new Error('not an object');
+  const json = Object.fromEntries(Object.entries(parsed).filter(([k]) => k !== 'contentSha256'));
+  mutate(json);
+  const hashed = withContentHash(json);
+  const recordedAt = typeof json.recordedAt === 'string' ? json.recordedAt : '';
+  const next = join(dirname(path), `${recordedAt.slice(0, 10)}-${hashed.contentSha256.slice(0, 12)}.json`);
+  writeFileSync(path, `${JSON.stringify(hashed, null, 2)}\n`);
+  renameSync(path, next);
+}
+
+describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
+  it('accepts a known-good tree recorded from the stand-ins', async () => {
+    const { root } = await runRecording();
+    expect(checkWorkedExampleTree(root, OK)).toEqual([]);
+  });
+
+  it('rejects the stand-ins under the real signature: the signature check and the stand-in tripwire both fire (prov-wp04b-006)', async () => {
+    const { root } = await runRecording();
+    const problems = checkWorkedExampleTree(root, { recordedBy: RECORDED_BY, standInsAllowed: false });
+    expect(problems).toContain(`recordedBy ${TEST_RECORDED_BY} on a searchapi file`);
+    expect(problems).toContain(
+      "a searchapi file holds the test stand-ins' marker: stand-in data in the committed tree",
+    );
+  });
+
+  it('rejects a second recording session', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => f.providerId === 'travelpayouts' && f.status === 200,
+      (j) => {
+        j.session = '20000101T000000000Z-000000';
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain('2 recording sessions, expected one');
+  });
+
+  it("rejects a step-2 placeholder missing from step 1's body", async () => {
+    const { root } = await runRecording();
+    const step1 = (f: RecordedFixture): boolean =>
+      q(f, 'engine') === 'google_flights' &&
+      f.status === 200 &&
+      q(f, 'departure_token') === null &&
+      q(f, 'booking_token') === null;
+    rewrite(root, step1, (j) => {
+      j.body = {};
+    });
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      "searchapi: step 2's departure_token is not in step 1's body",
+    );
+  });
+
+  it('rejects a step-1 cell outside the 10–21-night band', async () => {
+    const { root } = await runRecording();
+    const step1 = (f: RecordedFixture): boolean =>
+      q(f, 'engine') === 'google_flights' &&
+      f.status === 200 &&
+      q(f, 'departure_token') === null &&
+      q(f, 'booking_token') === null;
+    rewrite(root, step1, (j) => {
+      const request = j.request;
+      if (
+        typeof request !== 'object' ||
+        request === null ||
+        !('url' in request) ||
+        typeof request.url !== 'string'
+      )
+        throw new Error('request');
+      const url = new URL(request.url);
+      url.searchParams.set('return_date', '2027-03-29');
+      j.request = { ...request, url: url.href };
+    });
+    expect(checkWorkedExampleTree(root, OK)).toContain('searchapi: step 1 is 27 nights, outside 10–21');
+  });
+
+  it('rejects a body URL on a host outside the link allowlist', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          booking_options: [
+            {
+              book_with: 'OTA',
+              price: 573,
+              booking_request: { url: 'https://evil.example/book', post_data: 'u=ota' },
+            },
+          ],
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain('body URL host evil.example under url');
+  });
+});
+```
+
+```ts
+// apps/api/test/recorded/manifest.test.ts
+// The committed recorded tree for the worked example (brief WP4b section 7): what WP5, WP6 and WP13 replay.
+// Red until the operator's live run (WP4b Task 12b) commits the tree.
+import { defaultRecordedRoot } from '@gmt/providers';
+import { describe, expect, it } from 'vitest';
+import { RECORDED_BY } from '../../src/tools/record.js';
+import { checkWorkedExampleTree } from '../helpers/workedExampleTree.js';
+
+describe('committed recorded tree for the worked example', () => {
+  it('is one live recording session of the worked example, under the record tool signature, with no stand-in data', () => {
+    expect(
+      checkWorkedExampleTree(defaultRecordedRoot(), { recordedBy: RECORDED_BY, standInsAllowed: false }),
+    ).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/recorded`
+Expected: FAIL, both files with `Error: Cannot find module '../helpers/workedExampleTree.js' imported from …/apps/api/test/recorded/manifest.test.ts` (and the same for `workedExampleTree.test.ts`).
+
+- [ ] **Step 3: Implement**
+
+```ts
+// apps/api/test/helpers/workedExampleTree.ts
+// The committed-tree manifest as a function of a root (r2-ts-002), so every predicate is proven against a known-good
+// tree recorded from the stand-ins, and against broken copies, before it ever meets the live recording.
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Secret } from '@gmt/core';
+import { assertRequestAllowed, loadParamsAllowlist, type RecordedFixture } from '@gmt/providers';
+import { loadRecorded, verifyRecordedTree } from '@gmt/providers/testing';
+import { STANDIN_MARKER } from './vendors.js';
+
 const q = (f: RecordedFixture, k: string): string | null => new URL(f.request.url).searchParams.get(k);
 const nights = (f: RecordedFixture): number =>
   (Date.parse(`${q(f, 'return_date')}T00:00:00Z`) - Date.parse(`${q(f, 'outbound_date')}T00:00:00Z`)) /
   86_400_000;
-
-function allowlist(provider: string): ParamsAllowlist {
-  const names = readdirSync(join(ROOT, provider)).filter((n) => /^params-\d{4}-\d{2}-\d{2}\.json$/.test(n));
-  expect(names, provider).toHaveLength(1);
-  return loadParamsAllowlist(join(ROOT, provider, names[0] ?? ''), ROOT);
-}
 
 /** Every string inside a JSON value, with the key it sits under. */
 function strings(v: unknown, key = ''): Array<{ key: string; value: string }> {
@@ -5164,122 +6288,187 @@ function strings(v: unknown, key = ''): Array<{ key: string; value: string }> {
   return [];
 }
 
-describe('committed recorded tree for the worked example', () => {
-  it('verifies under WP4 rules, carries one recording session and the record tool signature only', () => {
-    expect(verifyRecordedTree(ROOT)).toEqual([]);
-    expect(TP.length).toBeGreaterThanOrEqual(20);
-    expect(SA).toHaveLength(6);
-    expect(new Set(ALL.map((f) => f.recordedBy))).toEqual(new Set([RECORDED_BY]));
-    const sessions = new Set(ALL.map((f) => f.session));
-    expect(sessions.size).toBe(1);
-    for (const f of ALL)
-      for (const p of Object.keys(f.placeholders)) expect(p.endsWith(`@${f.session}>`), p).toBe(true);
-  });
+/** A query value that looks like an opaque token rather than a placeholder or a short code (sec2-005). */
+const OPAQUE = /^[A-Za-z0-9_-]{24,}$/;
 
-  it('replay can tell every file apart: no two share a credential-free request with different statuses (decision 20)', () => {
-    const statuses = new Map<string, Set<number>>();
-    for (const f of ALL)
-      statuses.set(
-        `${f.request.method} ${f.request.url}`,
-        (statuses.get(`${f.request.method} ${f.request.url}`) ?? new Set<number>()).add(f.status),
-      );
-    for (const [k, s] of statuses) expect(s.size, k).toBe(1);
-  });
+/**
+ * Every way `root` differs from the worked example's recorded tree (brief WP4b section 7); empty = conforming.
+ * `recordedBy` is the one signature every file must carry; `standInsAllowed` is true only for trees recorded from the
+ * test stand-ins, whose identifiers carry STANDIN_MARKER (the committed tree must never hold one).
+ */
+export function checkWorkedExampleTree(
+  root: string,
+  opts: { recordedBy: string; standInsAllowed: boolean; secrets?: readonly Secret[] },
+): string[] {
+  const problems: string[] = [];
+  const fail = (p: string): void => {
+    problems.push(p);
+  };
+  for (const p of verifyRecordedTree(root, opts.secrets ?? [])) fail(`verifier: ${p}`);
+  const tp = loadRecorded(root, 'travelpayouts', '/aviasales/v3/prices_for_dates');
+  const sa = loadRecorded(root, 'searchapi', '/api/v1/search');
+  const all = [...tp, ...sa];
 
-  it('Travelpayouts: 14 metro tiles over 7 months, 4 airport tiles, the empty probe, a 401 body on its own month', () => {
-    const metro = new Set(
-      TP.filter((f) => f.status === 200 && q(f, 'origin') === 'LON' && q(f, 'page') === '1').map(
-        (f) => `${q(f, 'destination')}|${q(f, 'departure_at')}`,
-      ),
-    );
+  // signature, session, stand-in tripwire
+  if (tp.length < 20) fail(`travelpayouts: ${tp.length} recordings, expected at least 20`);
+  if (sa.length !== 6) fail(`searchapi: ${sa.length} recordings, expected 6`);
+  for (const f of all)
+    if (f.recordedBy !== opts.recordedBy) fail(`recordedBy ${f.recordedBy} on a ${f.providerId} file`);
+  const sessions = new Set(all.map((f) => f.session));
+  if (sessions.size > 1) fail(`${sessions.size} recording sessions, expected one`);
+  for (const f of all)
+    for (const p of Object.keys(f.placeholders))
+      if (!p.endsWith(`@${f.session}>`)) fail(`placeholder ${p} not scoped to its session`);
+  if (!opts.standInsAllowed)
+    for (const f of all)
+      if (JSON.stringify([f.request, f.body]).toLowerCase().includes(STANDIN_MARKER))
+        fail(`a ${f.providerId} file holds the test stand-ins' marker: stand-in data in the committed tree`);
+
+  // replay distinctness (plan decision 20)
+  const statuses = new Map<string, Set<number>>();
+  for (const f of all) {
+    const k = `${f.request.method} ${f.request.url}`;
+    statuses.set(k, (statuses.get(k) ?? new Set<number>()).add(f.status));
+  }
+  for (const [k, s] of statuses)
+    if (s.size > 1) fail(`one request recorded with statuses ${[...s].join(', ')}: ${k}`);
+
+  // Travelpayouts
+  const metro = new Set(
+    tp
+      .filter((f) => f.status === 200 && q(f, 'origin') === 'LON' && q(f, 'page') === '1')
+      .map((f) => `${q(f, 'destination')}|${q(f, 'departure_at')}`),
+  );
+  for (const d of ['JFK', 'EWR'])
+    for (const m of ['2027-03', '2027-04', '2027-05', '2027-06', '2027-07', '2027-08', '2027-09'])
+      if (!metro.has(`${d}|${m}`)) fail(`travelpayouts: no metro tile LON→${d} ${m}`);
+  for (const o of ['LHR', 'LGW'])
     for (const d of ['JFK', 'EWR'])
-      for (const m of ['2027-03', '2027-04', '2027-05', '2027-06', '2027-07', '2027-08', '2027-09'])
-        expect(metro.has(`${d}|${m}`), `${d} ${m}`).toBe(true);
-    for (const o of ['LHR', 'LGW'])
-      for (const d of ['JFK', 'EWR'])
-        expect(
-          TP.some((f) => f.status === 200 && q(f, 'origin') === o && q(f, 'destination') === d),
-          `${o}→${d}`,
-        ).toBe(true);
-    expect(TP.filter((f) => q(f, 'departure_at') === '2028-02').map((f) => f.status)).toEqual([200]);
-    expect(TP.filter((f) => f.status === 401).map((f) => q(f, 'departure_at'))).toEqual(['2028-03']);
-    for (const f of TP) expect(q(f, 'currency')).toBe('gbp');
-  });
+      if (!tp.some((f) => f.status === 200 && q(f, 'origin') === o && q(f, 'destination') === d))
+        fail(`travelpayouts: no airport tile ${o}→${d}`);
+  if (JSON.stringify(tp.filter((f) => q(f, 'departure_at') === '2028-02').map((f) => f.status)) !== '[200]')
+    fail('travelpayouts: the empty-envelope probe (2028-02) is missing or not a 200');
+  if (JSON.stringify(tp.filter((f) => f.status === 401).map((f) => q(f, 'departure_at'))) !== '["2028-03"]')
+    fail('travelpayouts: the 401 probe must be the one 401, on 2028-03');
+  for (const f of tp) if (q(f, 'currency') !== 'gbp') fail('travelpayouts: currency is not gbp');
 
-  it('SearchApi: one calendar of 152, the over-limit response, a 401 body; gl=gb and travel_class on every request', () => {
-    const cal = SA.filter((f) => q(f, 'engine') === 'google_flights_calendar');
-    expect(
-      cal
-        .filter((f) => q(f, 'outbound_date_end') === '2027-03-08')
-        .map((f) => [f.status, q(f, 'return_date_end')]),
-    ).toEqual([[200, '2027-03-29']]);
-    const over = cal.filter((f) => q(f, 'outbound_date_end') === '2027-03-09');
-    expect(over).toHaveLength(1);
-    const overBody = over[0]?.body;
-    const emptyCalendar =
-      typeof overBody === 'object' &&
-      overBody !== null &&
-      !Array.isArray(overBody) &&
-      (!('calendar' in overBody) || (Array.isArray(overBody.calendar) && overBody.calendar.length === 0));
-    expect(over[0]?.status === 400 || (over[0]?.status === 200 && emptyCalendar)).toBe(true);
-    expect(
-      SA.filter((f) => f.status === 401).map((f) => [q(f, 'outbound_date'), q(f, 'return_date')]),
-    ).toEqual([['2027-03-09', '2027-03-30']]);
-    for (const f of SA)
-      expect([q(f, 'gl'), q(f, 'travel_class'), q(f, 'currency')]).toEqual(['gb', 'economy', 'GBP']);
-  });
+  // SearchApi
+  const cal = sa.filter((f) => q(f, 'engine') === 'google_flights_calendar');
+  const main = cal.filter((f) => q(f, 'outbound_date_end') === '2027-03-08');
+  if (main.length !== 1 || main[0]?.status !== 200 || q(main[0], 'return_date_end') !== '2027-03-29')
+    fail('searchapi: the 152-combination calendar must be one 200 ending 2027-03-29');
+  const over = cal.filter((f) => q(f, 'outbound_date_end') === '2027-03-09');
+  const overBody = over[0]?.body;
+  const emptyCalendar =
+    typeof overBody === 'object' &&
+    overBody !== null &&
+    !Array.isArray(overBody) &&
+    (!('calendar' in overBody) || (Array.isArray(overBody.calendar) && overBody.calendar.length === 0));
+  if (over.length !== 1 || !(over[0]?.status === 400 || (over[0]?.status === 200 && emptyCalendar)))
+    fail('searchapi: the over-limit calendar must be one 400 or one empty 200');
+  const unauth = sa
+    .filter((f) => f.status === 401)
+    .map((f) => `${q(f, 'outbound_date')}/${q(f, 'return_date')}`);
+  if (JSON.stringify(unauth) !== '["2027-03-09/2027-03-30"]')
+    fail('searchapi: the 401 probe must be the one 401, on 2027-03-09/2027-03-30');
+  for (const f of sa) {
+    if (
+      q(f, 'gl') !== 'gb' ||
+      q(f, 'travel_class') !== 'economy' ||
+      q(f, 'currency') !== 'GBP' ||
+      q(f, 'adults') !== '1'
+    )
+      fail('searchapi: gl, travel_class, currency or adults differs');
+    if (q(f, 'stops') !== null) fail('searchapi: a stops parameter was sent (plan decision 24)');
+    if (
+      q(f, 'engine') === 'google_flights' &&
+      (q(f, 'sort_by') !== 'price' || q(f, 'separate_tickets') !== '1')
+    )
+      fail('searchapi: google_flights without sort_by=price and separate_tickets=1 (plan decision 24)');
+  }
 
-  it('SearchApi chain: step 1 → 2 → 3 on an in-band cell, placeholders carried from each body into the next request', () => {
-    const flights = SA.filter((f) => q(f, 'engine') === 'google_flights' && f.status === 200);
-    const step1 = flights.find((f) => q(f, 'departure_token') === null && q(f, 'booking_token') === null);
-    const step2 = flights.find((f) => q(f, 'departure_token') !== null);
-    const step3 = flights.find((f) => q(f, 'booking_token') !== null);
-    if (step1 === undefined || step2 === undefined || step3 === undefined)
-      throw new Error('the chain is incomplete');
-    expect(nights(step1)).toBeGreaterThanOrEqual(10);
-    expect(nights(step1)).toBeLessThanOrEqual(21);
+  // the chain
+  const flights = sa.filter((f) => q(f, 'engine') === 'google_flights' && f.status === 200);
+  const step1 = flights.find((f) => q(f, 'departure_token') === null && q(f, 'booking_token') === null);
+  const step2 = flights.find((f) => q(f, 'departure_token') !== null);
+  const step3 = flights.find((f) => q(f, 'booking_token') !== null);
+  if (step1 === undefined || step2 === undefined || step3 === undefined)
+    fail('searchapi: the step 1 → 2 → 3 chain is incomplete');
+  else {
+    if (nights(step1) < 10 || nights(step1) > 21)
+      fail(`searchapi: step 1 is ${nights(step1)} nights, outside 10–21`);
     const dt = q(step2, 'departure_token') ?? '';
     const bt = q(step3, 'booking_token') ?? '';
-    expect(dt).toMatch(new RegExp(`^<departure_token:\\d+@${step2.session}>$`));
-    expect(bt).toMatch(new RegExp(`^<booking_token:\\d+@${step3.session}>$`));
-    expect(JSON.stringify(step1.body)).toContain(JSON.stringify(dt));
-    expect(JSON.stringify(step2.body)).toContain(JSON.stringify(bt));
-  });
+    if (!new RegExp(`^<departure_token:\\d+@${step2.session}>$`).test(dt))
+      fail('searchapi: step 2 departure_token is not a session placeholder');
+    if (!new RegExp(`^<booking_token:\\d+@${step3.session}>$`).test(bt))
+      fail('searchapi: step 3 booking_token is not a session placeholder');
+    if (!JSON.stringify(step1.body).includes(JSON.stringify(dt)))
+      fail("searchapi: step 2's departure_token is not in step 1's body");
+    if (!JSON.stringify(step2.body).includes(JSON.stringify(bt)))
+      fail("searchapi: step 3's booking_token is not in step 2's body");
+  }
 
-  it('request queries pass the committed allowlists; body URLs are allowlisted hosts and search_metadata URLs carry no query or userinfo (sec-004, ts-007)', () => {
-    const tp = allowlist('travelpayouts');
-    const sa = allowlist('searchapi');
-    for (const f of TP) assertRequestAllowed(tp, f.endpointPath, new URL(f.request.url));
-    for (const f of SA) assertRequestAllowed(sa, f.endpointPath, new URL(f.request.url));
-    for (const f of ALL) {
-      for (const { key, value } of strings(f.body)) {
-        if (!/^https?:\/\//i.test(value)) continue;
-        const u = new URL(value);
-        expect(['www.google.com', 'www.searchapi.io'], `${key}: ${u.host}`).toContain(u.host);
-        expect(u.username + u.password, key).toBe('');
-        if (u.host === 'www.searchapi.io') expect(u.search, key).toBe('');
-      }
+  // allowlists, body URLs
+  for (const [provider, files] of [
+    ['travelpayouts', tp],
+    ['searchapi', sa],
+  ] as const) {
+    const dir = join(root, provider);
+    const names = existsSync(dir)
+      ? readdirSync(dir).filter((n) => /^params-\d{4}-\d{2}-\d{2}\.json$/.test(n))
+      : [];
+    if (names.length !== 1) {
+      fail(`${provider}: ${names.length} allowlist files, expected 1`);
+      continue;
     }
-  });
-});
+    try {
+      const allow = loadParamsAllowlist(join(dir, names[0] ?? ''), root);
+      for (const f of files) assertRequestAllowed(allow, f.endpointPath, new URL(f.request.url));
+    } catch (e) {
+      fail(`${provider} allowlist: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  for (const f of all)
+    for (const { key, value } of strings(f.body)) {
+      if (!/^https?:\/\//i.test(value)) continue;
+      const u = new URL(value);
+      if (u.host !== 'www.google.com' && u.host !== 'www.searchapi.io')
+        fail(`body URL host ${u.host} under ${key}`);
+      if (u.username !== '' || u.password !== '') fail(`body URL with userinfo under ${key}`);
+      if (u.host === 'www.searchapi.io' && u.search !== '')
+        fail(`search_metadata URL with a query under ${key}`);
+      if (u.host === 'www.google.com')
+        for (const [name, v] of u.searchParams)
+          if (OPAQUE.test(v) && !v.startsWith('<'))
+            fail(`www.google.com URL parameter ${name} under ${key} holds an opaque value`);
+    }
+  return problems;
+}
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 4: Run to verify**
 
-Run: `pnpm --filter @gmt/providers exec vitest run test/recorded/manifest.test.ts`
-Expected: FAIL, 5 failed | 1 passed; the first failure is `AssertionError: expected 0 to be greater than or equal to 20` (the committed tree holds only `.gitkeep`).
+Run: `pnpm --filter @gmt/api exec vitest run test/recorded` and `pnpm --filter @gmt/api test`
+Expected: `workedExampleTree.test.ts` 6 passed; `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 20` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 133 passed (134), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
 
-- [ ] **Step 3: Do not commit yet.** The test stays uncommitted until Task 12b's tree turns it green, so no red test ever lands on the branch. The implementing agent stops here and hands Task 12b to Ian.
+- [ ] **Step 5: Commit the check, not the gate**
+
+```bash
+git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/workedExampleTree.test.ts && git commit -m "wp04b: the committed-tree check as a function, proven on a stand-in tree and broken copies"
+```
+
+`apps/api/test/recorded/manifest.test.ts` stays uncommitted until Task 12b's tree turns it green, so no red test ever lands on the branch. The implementing agent stops here and hands Task 12b to Ian.
 
 ### Task 12b: Live recording on the example route (operator only), manual review and commit
 
-**STOP: operator-only.** This task spends real SearchApi credits and reads the operator's `.env`. A subagent never runs it; Fable hands it to Ian with the branch green (Tasks 1–12a) and runs Steps 1–2 only with Ian present.
+**STOP: operator-only.** This task spends real SearchApi credits and reads the operator's `.env`. A subagent never runs it; Fable hands it to Ian in the pre-handoff state of Task 12a and runs Steps 1–2 only with Ian present.
 
-**Files:** create `packages/providers/fixtures/recorded/**` (by the run); commit `packages/providers/test/recorded/manifest.test.ts` with it.
+**Files:** create `packages/providers/fixtures/recorded/**` (by the run); commit `apps/api/test/recorded/manifest.test.ts` with it.
 
 - [ ] **Step 1: Preconditions.**
-   - Tasks 1–11 are committed and green; Task 12a's test is written and red.
-   - The app is not running (`app_lock` free).
+   - Tasks 1–11 and Task 12a's check are committed and green; `manifest.test.ts` is written and red.
+   - The app is not running (`app_lock` free). Run every command as the app's user (the read-only lock probe can leave SQLite's empty `-wal`/`-shm` side files, owned by whoever ran it; sec2-003).
    - The operator's `.env` at the repository root defines `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY` and the production `DATABASE_PATH`, and `POINT_OF_SALE` is `GB` or unset. On the trial plan, `SEARCHAPI_TRIAL_USED` holds the credits spent outside this app (9 from the spike). Do not open, print or grep `.env`.
    - Read the SearchApi dashboard's "Remaining free searches (credits)" and write it down.
    - The recorded tree holds only `.gitkeep`. After any earlier failed live run, every file of that run's session and its allowlists were deleted, and Ian agreed to the re-run.
@@ -5290,7 +6479,7 @@ Expected: FAIL, 5 failed | 1 passed; the first failure is `AssertionError: expec
    pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run
    ```
 
-   Expected, exit 0: `airports seeded: …` on a first run; `tool lock acquired`; the 26 call lines of section 7; `total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls (plus one per extra page if a page holds 1000 rows)`; `metro from the airports table: LON`; `Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): …`; `SearchApi credits already ledgered to tool runs in this budget window: 0; this run ≤5; --budget 5`; `SearchApi window: <used> of <cap> used (compare with the dashboard)`; `tool lock released`. On the trial plan `<cap> − <used>` must equal the dashboard reading; if not, stop and resync `SEARCHAPI_TRIAL_USED` with Ian.
+   Expected, exit 0: `airports seeded: …` on a first run; `tool lock acquired`; the 26 call lines of section 7; `total: SearchApi 6 calls, ≤5 credits (4 expected); Travelpayouts 20 free calls, ≤58 with up to 3 pages per tile`; `metro from the airports table: LON`; `recording into: <repository>/packages/providers/fixtures/recorded`; `Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): …`; `SearchApi credits already ledgered to tool runs in this budget window: 0; this run ≤5; --budget 5`; `SearchApi window: <used> of <cap> used (compare with the dashboard); room <room>, this run ≤5`; `Travelpayouts month: …`; no `a live run would be refused` line; `tool lock released`. On the trial plan `<cap> − <used>` must equal the dashboard reading; if not, stop and resync `SEARCHAPI_TRIAL_USED` with Ian.
 
 - [ ] **Step 3: Live run.** The same command without `--dry-run`:
 
@@ -5305,11 +6494,11 @@ Expected: FAIL, 5 failed | 1 passed; the first failure is `AssertionError: expec
    - the chain-prices, over-limit, empty-envelope, `429: not attempted` and `session:` lines;
    - `ledger: SearchApi <4 or 5> credit(s) of budget 5; Travelpayouts <≥ 20> free call(s)`.
 
-   If the run exits non-zero, do not re-run: copy the summary into the notes and stop for Ian. A re-run needs `--confirm-rerun` (exit 65 otherwise) and a cleaned tree (Step 1).
+   If the run exits non-zero, do not re-run: copy the summary, including its `session:` line (printed on the failure path too), into the notes and stop for Ian. A re-run needs `--confirm-rerun` (exit 65 otherwise) and a cleaned tree (Step 1).
 
-- [ ] **Step 4: Committed-tree test.** Run `pnpm --filter @gmt/providers exec vitest run test/recorded/manifest.test.ts`. Expected: 6 passed. Any failure: stop; do not edit a recorded file (the hash test fails on any edit by design).
+- [ ] **Step 4: Committed-tree test.** Run `pnpm --filter @gmt/api exec vitest run test/recorded/manifest.test.ts`. Expected: 1 passed. If it fails, the manifest stays strict (ruling on prov-wp04b-r2-005); the one permitted repair is for a retried call: when the summary printed a line `<id>: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): <files>`, each listed file has the same request URL as that call's final 200 and a non-200 status, was not billed, and may be deleted whole together with its `.raw.json`. Delete only those files, record each in the PR, and run the manifest test again before committing. Any other failure: stop; do not edit or delete a recorded file (the hash test fails on any edit by design).
 
-- [ ] **Step 5: Dashboard.** Read the remaining credits again. The drop must be **at most** the ledger line's SearchApi figure (spec §2 fact 4: the ledger may overcount, never undercount). If the drop is larger, stop: do not re-run, record a finding against the WP4 billing rule, and resync `SEARCHAPI_TRIAL_USED` with Ian. Record the ledger figure, both readings and the difference in the PR.
+- [ ] **Step 5: Dashboard.** Read the remaining credits again. The drop must be **at most** the ledger line's SearchApi figure (spec §2 fact 4: the ledger may overcount, never undercount). If the drop is larger, stop: do not re-run, record a finding against the WP4 billing rule (a `no-response (network; … NOT counted …)` line names the likely call), and resync `SEARCHAPI_TRIAL_USED` with Ian. Record the ledger figure, both readings and the difference in the PR.
 
 - [ ] **Step 6: Manual review of every recorded file before `git add`.** Run `git status --porcelain packages/providers/fixtures`; no `.raw.json` may appear (if one does, the ignore rule is broken: stop). Then open each `.json` under `fixtures/recorded/` and check:
    - [ ] No key or token value: `node --env-file=.env scripts/secret-scan.mjs` prints `secret scan: clean` (Node loads the real values into the scan's environment without printing them). This is the real-value gate; CI cannot run it.
@@ -5317,7 +6506,7 @@ Expected: FAIL, 5 failed | 1 passed; the first failure is `AssertionError: expec
    - [ ] `search_metadata` URL fields (`request_url`, `json_endpoint`, …) keep their keys, and every such URL has no `?` and no `user:pass@`.
    - [ ] Every `departure_token` and `booking_token`, in request URLs and in bodies, has the form `<departure_token:n@<session>>` / `<booking_token:n@<session>>`, where `<session>` equals the file's `session`, the same in every file; the step-2 and step-3 request placeholders appear in the previous step's body.
    - [ ] `responseHeaders` holds only `content-type`, `retry-after`, `x-ratelimit-*` or `ratelimit-*`.
-   - [ ] No personal data: no operator name, email or account id, no location other than the worked example's airports and the carriers' own data. No opaque id other than the vendor's search ids.
+   - [ ] No personal data: no operator name, email or account id, no location other than the worked example's airports and the carriers' own data. No opaque id other than the vendor's search ids; any query parameter on a `www.google.com` booking URL is noted in the PR (the manifest refuses opaque values there).
    - [ ] `recordedBy` is `@gmt/api record:fixtures` on every file.
    - [ ] Booking URLs in step-3 bodies are `https://www.google.com/…` (spec §5.2 link allowlist).
    - [ ] File count: 20 Travelpayouts (+ one per extra page) and 6 SearchApi recordings, plus `travelpayouts/params-<date>.json` and `searchapi/params-<date>.json`.
@@ -5326,13 +6515,13 @@ Expected: FAIL, 5 failed | 1 passed; the first failure is `AssertionError: expec
 
 - [ ] **Step 7: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/providers test`, `pnpm --filter @gmt/api test`, `pnpm secret-scan`
-Expected: both suites pass (providers includes the manifest test); `secret scan: clean`.
+Run: `pnpm --filter @gmt/api test`, `pnpm --filter @gmt/providers test`, `pnpm secret-scan`
+Expected: both suites pass (the api suite includes the manifest test, 134 passed); `secret scan: clean`.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/providers/fixtures/recorded packages/providers/test/recorded && git commit -m "wp04b: recorded fixtures for the worked example and the committed-tree manifest test"
+git add packages/providers/fixtures/recorded apps/api/test/recorded/manifest.test.ts && git commit -m "wp04b: recorded fixtures for the worked example and the committed-tree manifest test"
 ```
 
 The tree after the run (date = the run's UTC date):
@@ -5350,7 +6539,7 @@ packages/providers/fixtures/recorded/
 (every <date>-<sha12>.raw.json sibling stays on disk, gitignored, never committed)
 ```
 
-The PR description carries: the dashboard readings before and after, the ledger figure and the difference; the run summary lines, including the session id; SA-03's behaviour (400 or empty 200); whether TP-19 was empty; the chain prices and "step 1 = step 2: yes/no"; the `tool` script `// why:` of Task 9; and this line: **the recorded tree is for this private repository; publishing the repository requires removing or re-recording the vendor bodies first (plan decision 20).**
+The PR description carries: the dashboard readings before and after, the ledger figure and the difference; the run summary lines, including the session id; any non-final attempt file deleted under Step 4; SA-03's behaviour (400 or empty 200); whether TP-19 was empty; the chain prices and "step 1 = step 2: yes/no"; the `tool` script `// why:` of Task 9; and this line: **the recorded tree is for this private repository; publishing the repository requires removing or re-recording the vendor bodies first (plan decision 20).**
 
 ## 11. Pinned review-focus tests
 
@@ -5358,32 +6547,33 @@ None. The plan's Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, WP8, W
 
 ## 12. Definition of done
 
-Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI.
+Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 133 passed).
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/api test` | all tests pass (102 at assembly); coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly: 95.5 / 81.1 / 94.9 / 93.6) |
-| `pnpm --filter @gmt/db test` | passes (259 at assembly), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
-| `pnpm --filter @gmt/providers test` | passes, including `test/recorded/manifest.test.ts` after Task 12b; WP4's thresholds hold |
+| `pnpm --filter @gmt/api test` | all 134 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.7 / 83.7 / 95.0 / 94.7) |
+| `pnpm --filter @gmt/db test` | passes (262 at assembly), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
+| `pnpm --filter @gmt/providers test` | passes (263 at assembly, including the barrel test naming `defaultRecordedRoot`); WP4's thresholds hold |
 | `pnpm lint` | clean |
 | `pnpm -r typecheck` | clean |
-| `node scripts/check-boundaries.mjs` | exit 0 (`process.env` only in `apps/api/src/bootstrap/tool.ts`; msw only under `packages/providers/src/testing/`; none in `@gmt/api`) |
+| `node scripts/check-boundaries.mjs` | exit 0: `process.env` is read only under `apps/api/src/bootstrap/`; any msw import (static, side-effect or dynamic) appears only under `packages/providers/src/testing/` among the packages' `src` trees; `@gmt/api` neither lists msw nor imports it from `apps/api/test` |
 | `pnpm secret-scan` | `secret scan: clean` |
 | `git ls-files packages/providers/fixtures \| grep -c 'raw\.json'` | `0` |
 | `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 64, `--budget is required` |
-| `grep -rnE 'LHR\|LGW\|JFK\|EWR\|LON\|NYC' apps/api/src` | no output (airports only in tests, docs and fixtures) |
-| **operator:** `pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run` | exit 0, the 26 call lines and the total line of section 7 |
+| `grep -rnE 'LHR\|LGW\|JFK\|EWR\|LON\|NYC' apps/api/src --exclude=workedExample.ts` | no output (airports only in `workedExample.ts`, tests, docs and fixtures) |
+| **operator:** `pnpm record:fixtures --budget 5 --route LHR,LGW:JFK,EWR --month 2027-03 --dry-run` | exit 0, the 26 call lines and the total line of section 7, no `a live run would be refused` line |
 | **operator:** `node --env-file=.env scripts/secret-scan.mjs` | `secret scan: clean` with the real values loaded |
 | **operator:** SearchApi dashboard | the drop over the run ≤ the ledger's SearchApi figure, recorded in the PR |
 
-The grep row's pattern is ERE with `\|` escaped only for this table; type it as `grep -rnE 'LHR|LGW|JFK|EWR|LON|NYC' apps/api/src`.
+The grep row's pattern is ERE with `\|` escaped only for this table; type it as `grep -rnE 'LHR|LGW|JFK|EWR|LON|NYC' apps/api/src --exclude=workedExample.ts`.
 
 ## 13. Open questions
 
-None blocking dispatch. The items below record where this brief widens or settles the plan's text; Fable folds them into the plan's contracts.
+None blocking dispatch. Plan decision 23 records this brief's earlier widenings, exit 65, the probe order, the hidden execution's status and `readOnlyLockState`. The items below are what the plan has not recorded yet; Fable folds them in.
 
-1. **Plan contract widenings** (section 5.1): `createLogger` opts `fd`/`secrets`; `runTool`'s optional `opts`; `recordFixtures` ctx `recordedRoot`/`recordedBy`/`plan`; `RecordArgs` without `metro`; `RecordSummary.session`/`chain`; `RecordedCall` status `'aborted' | 'no-response'`, `files`, `detail`.
-2. **Exit code 65** (`rerunUnconfirmed`) joins the plan's single exit-code table.
-3. **SearchApi probe order.** The 401 probe runs before the billed calls because WP3's guard counts a pending reservation against `execution-calls`; at a cap equal to the worst case, a probe after the chain would be refused. The plan's text needs no change; WP13's smoke should order probes the same way.
-4. **`readOnlyLockState` joins the Database contract** (ruled 2026-10-15; Task 7). A read-only connection to a WAL database leaves empty `-wal`/`-shm` sidecars when none existed; nothing is written to the database or its log. The plan's Database block should list the function.
-5. **The hidden execution's status** is `completed` when the plan ran to its end even if the guard refused calls (the count goes to `errorText`), because `paused_budget` is an active status and this execution is never resumed (cost-wp4b-012).
+1. **Contract details from review round 2:** `recordFixtures` ctx `recordedBy` is required (no fallback signature); `RunToolOptions.recording` carries root and signature together; `RecordSummary.chain` is `{ currency: 'GBP'; step1PricePence; step2PricePence; step3Options: [{ bookWith; pricePence }] }`; `EXIT[65]` is named `spendRefused` and also covers a provider window with less room than the worst case.
+2. **Recording target (ruling on sec2-002):** the committed tree takes only the worked example's route; other routes need `--out DIR` outside the repository. `apps/api/src/tools/workedExample.ts` joins `apps/web/src/example.ts` as an application file allowed to name the worked example's airports.
+3. **Travelpayouts paging is capped** at 3 pages per tile (`TP_MAX_PAGES_PER_TILE`), and the per-run free-call check uses that worst case.
+4. **Run tools as the app's user** (sec2-003): WP12's setup docs state it, because the read-only lock probe can leave `-wal`/`-shm` side files owned by the tool's user.
+5. **`separate_tickets=1`** is the excluding value inferred from the WP5 evidence note (the parameter's default 0 shows separate tickets); WP5's equality test against the recorded allowlist keeps both packages on one value, and the first live run's file is the authority.
+6. **Failure encoding:** a recording run that threw ends `cancelled` with `errorText` `record:fixtures failed: …` (ExecutionStatus has no `failed`); one that ran to its end with required calls not as planned ends `completed` with `errorText` naming them.
