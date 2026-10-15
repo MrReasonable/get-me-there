@@ -134,24 +134,53 @@ describe('itinerary identity (spec §6.4)', () => {
     );
   });
 
-  it('property: equal inputs give equal hashes; any change to a hashed field changes it', () => {
+  it('property: equal inputs give equal hashes; changing any hashed field of any segment changes it', () => {
+    const CARRIERS = ['VS', '4U', 'BA', 'AA'] as const;
+    const FROMS = ['LHR', 'LGW'] as const;
+    const TOS = ['JFK', 'EWR'] as const;
+    const TIMES = ['2027-03-14T10:05', '2027-03-14T22:40', '2027-10-31T01:30'] as const;
+    // the next value in a list, wrapping, so the replacement always differs from the original
+    const next = (list: readonly string[], v: string): string => {
+      const i = list.indexOf(v);
+      return list[(i + 1) % list.length] ?? v;
+    };
     const segArb = fc.record({
-      marketingCarrier: fc.constantFrom('VS', '4U', 'BA', 'AA'),
+      marketingCarrier: fc.constantFrom(...CARRIERS),
       flightNumber: fc.integer({ min: 1, max: 9999 }),
-      from: fc.constantFrom('LHR', 'LGW').map(asIata),
-      to: fc.constantFrom('JFK', 'EWR').map(asIata),
-      departLocal: fc.constantFrom('2027-03-14T10:05', '2027-03-14T22:40', '2027-10-31T01:30'),
+      from: fc.constantFrom(...FROMS).map(asIata),
+      to: fc.constantFrom(...TOS).map(asIata),
+      departLocal: fc.constantFrom(...TIMES),
     });
+    const fieldArb = fc.constantFrom('marketingCarrier', 'flightNumber', 'from', 'to', 'departLocal');
+    const alter = (x: HashSegment, field: string): HashSegment => {
+      switch (field) {
+        case 'marketingCarrier':
+          return { ...x, marketingCarrier: next(CARRIERS, x.marketingCarrier) };
+        case 'flightNumber':
+          return { ...x, flightNumber: (x.flightNumber % 9999) + 1 };
+        case 'from':
+          return { ...x, from: asIata(next(FROMS, x.from)) };
+        case 'to':
+          return { ...x, to: asIata(next(TOS, x.to)) };
+        default:
+          return { ...x, departLocal: next(TIMES, x.departLocal) };
+      }
+    };
     fc.assert(
       fc.property(
         fc.array(segArb, { minLength: 1, maxLength: 3 }),
         fc.array(segArb, { minLength: 1, maxLength: 3 }),
-        (out, back) => {
+        fc.boolean(),
+        fc.nat(),
+        fieldArb,
+        (out, back, inOutbound, index, field) => {
           expect(itineraryHash(out, back)).toBe(itineraryHash(structuredClone(out), structuredClone(back)));
-          const changed = out.map((x, i) =>
-            i === 0 ? { ...x, flightNumber: (x.flightNumber % 9999) + 1 } : x,
-          );
-          expect(itineraryHash(changed, back)).not.toBe(itineraryHash(out, back));
+          // why: any one field of any one segment, in either direction, is part of the identity.
+          const target = inOutbound ? out : back;
+          const at = index % target.length;
+          const altered = target.map((x, i) => (i === at ? alter(x, field) : x));
+          const [o2, b2] = inOutbound ? [altered, back] : [out, altered];
+          expect(itineraryHash(o2, b2)).not.toBe(itineraryHash(out, back));
           // why: swapping directions must change identity (OUT/IN are tagged).
           expect(itineraryHash(back, out) === itineraryHash(out, back)).toBe(
             JSON.stringify(out) === JSON.stringify(back),
