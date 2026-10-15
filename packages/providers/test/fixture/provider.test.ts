@@ -215,7 +215,7 @@ describe('fixture discovery through the real http-kit and msw', () => {
         ?.amountMinor,
     ).toBe(59_800);
     expect(result).toMatchObject({
-      notes: ['dropped-out-of-band:42'],
+      notes: ['dropped-outside-tile:42'],
       fetchedAt: '2026-10-14T15:00:00.000Z',
       pointOfSale: 'unknown',
     });
@@ -341,7 +341,13 @@ describe('fixture discovery through the real http-kit and msw', () => {
     const { discovery } = setup();
     expect(await drive(discovery.fetchTile(firstTile(), q, ctx()))).toMatchObject({
       kind: 'tile-error',
-      error: { kind: 'parse', reason: undefined, message: expect.stringContaining(`[${code}]`) },
+      // why: the adapter's own parse errors carry the kind-level reason (shared parseError, plan decision 29); http-kit's
+      // non-JSON body error leaves it unset, and the engine records `reason ?? kind` = 'parse' for both.
+      error: {
+        kind: 'parse',
+        reason: code === 'malformed-json' ? undefined : 'parse',
+        message: expect.stringContaining(`[${code}]`),
+      },
     });
   });
 
