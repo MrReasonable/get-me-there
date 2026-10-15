@@ -5547,7 +5547,7 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
     expect(lockRow(h.dbPath)).toEqual({ n: 0 });
   });
 
-  it('heartbeats every HEARTBEAT_INTERVAL_MS while the tool runs', async () => {
+  it('heartbeats every HEARTBEAT_INTERVAL_MS while the tool runs, not just once', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const h = harness();
     const clock = fixedClock(asIsoDateTime('2026-10-20T09:00:00.000Z'));
@@ -5556,9 +5556,14 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
       clock,
       runners: {
         record: async (ports) => {
-          clock.advance(HEARTBEAT_INTERVAL_MS);
-          vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
-          return AppLock.inspect(ports.db)?.heartbeatAt === '2026-10-20T09:00:30.000Z' ? 0 : 9;
+          // why: two intervals, so a one-shot timer in place of setInterval fails (ts minor 2)
+          const beats: Array<string | undefined> = [];
+          for (let i = 0; i < 2; i++) {
+            clock.advance(HEARTBEAT_INTERVAL_MS);
+            vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+            beats.push(AppLock.inspect(ports.db)?.heartbeatAt);
+          }
+          return beats.join() === '2026-10-20T09:00:30.000Z,2026-10-20T09:01:00.000Z' ? 0 : 9;
         },
       },
     });
@@ -6411,6 +6416,7 @@ Object.defineProperty(dns, 'lookup', { value: refuse, writable: true, configurab
 // apps/api/test/support/guards.test.ts
 // The setup file's network guards are live in apps/api (r2-ts-006): an unstubbed request to a vendor host fails in
 // process and is recorded as a stray (cleared here, so the guard's afterEach does not fail this test).
+import dns from 'node:dns';
 import { takeStrays } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -6418,6 +6424,13 @@ describe('apps/api network guards (plan decision 18)', () => {
   it('an unstubbed fetch to a vendor host is refused in process and recorded as a stray', async () => {
     await expect(fetch('https://www.searchapi.io/api/v1/search?engine=google_flights')).rejects.toThrow();
     expect(takeStrays()).toEqual(['GET https://www.searchapi.io/api/v1/search']);
+  });
+
+  it('a DNS lookup in process is refused with ENOTFOUND, so nothing unstubbed can resolve a host (ts minor 3)', async () => {
+    const error = await new Promise<unknown>((resolve) => {
+      dns.lookup('www.searchapi.io', (e) => resolve(e));
+    });
+    expect(error).toMatchObject({ code: 'ENOTFOUND', message: expect.stringContaining('www.searchapi.io') });
   });
 });
 ```
@@ -6566,7 +6579,7 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts`
-Expected: 2 failed | 6 passed; the failures are the script test, `AssertionError: expected { name: '@gmt/api', …(7) } to match object { Object (scripts) }`, and the root-script test, `AssertionError: expected 1 to be 64` (`pnpm --filter` collapses the child's exit code to 1). The spawn tests pass because the entry exists since Task 8; if one fails instead, the entry-point guard does not fire under `node --import tsx`: fix `isEntryPoint` before going on. The preload test and the guard test pass on first run; they prove the two network guards are live (r2-ts-006).
+Expected: 2 failed | 7 passed; the failures are the script test, `AssertionError: expected { name: '@gmt/api', …(7) } to match object { Object (scripts) }`, and the root-script test, `AssertionError: expected 1 to be 64` (`pnpm --filter` collapses the child's exit code to 1). The spawn tests pass because the entry exists since Task 8; if one fails instead, the entry-point guard does not fire under `node --import tsx`: fix `isEntryPoint` before going on. The preload test and the two guard tests (the stray request and the in-process DNS refusal) pass on first run; they prove the network guards are live (r2-ts-006, ts minor 3).
 
 - [ ] **Step 3: Implement**
 
@@ -6631,7 +6644,7 @@ for (const f of walk('apps/api/test')) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts` and `node scripts/check-boundaries.mjs`
-Expected: 8 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file. Do the same with `import 'msw/node';` in `apps/api/test/support/plant.mjs`, expecting `apps/api/test/support/plant.mjs imports msw; …`.
+Expected: 9 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file. Do the same with `import 'msw/node';` in `apps/api/test/support/plant.mjs`, expecting `apps/api/test/support/plant.mjs imports msw; …`.
 
 - [ ] **Step 5: Commit**
 

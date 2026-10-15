@@ -457,7 +457,7 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
     expect(lockRow(h.dbPath)).toEqual({ n: 0 });
   });
 
-  it('heartbeats every HEARTBEAT_INTERVAL_MS while the tool runs', async () => {
+  it('heartbeats every HEARTBEAT_INTERVAL_MS while the tool runs, not just once', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const h = harness();
     const clock = fixedClock(asIsoDateTime('2026-10-20T09:00:00.000Z'));
@@ -466,9 +466,14 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
       clock,
       runners: {
         record: async (ports) => {
-          clock.advance(HEARTBEAT_INTERVAL_MS);
-          vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
-          return AppLock.inspect(ports.db)?.heartbeatAt === '2026-10-20T09:00:30.000Z' ? 0 : 9;
+          // why: two intervals, so a one-shot timer in place of setInterval fails (ts minor 2)
+          const beats: Array<string | undefined> = [];
+          for (let i = 0; i < 2; i++) {
+            clock.advance(HEARTBEAT_INTERVAL_MS);
+            vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+            beats.push(AppLock.inspect(ports.db)?.heartbeatAt);
+          }
+          return beats.join() === '2026-10-20T09:00:30.000Z,2026-10-20T09:01:00.000Z' ? 0 : 9;
         },
       },
     });
