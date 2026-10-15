@@ -160,6 +160,11 @@ export class AirportsRepo {
     this.db.transaction(() => {
       for (const a of dataset.airports)
         stmt.run({ ...a, metro: metros.get(a.iata) ?? null, source, datasetVersion: dataset.version });
+      // why: a row the new dataset no longer lists is kept (definitions may reference it) but must not keep a metro
+      // the vendored list no longer gives it (dm-M4).
+      this.db.raw
+        .prepare('UPDATE airports SET metro = NULL WHERE dataset_version <> ? AND metro IS NOT NULL')
+        .run(dataset.version);
     });
   }
 }

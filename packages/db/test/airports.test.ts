@@ -158,6 +158,16 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(() => loadAirportsDataset(dir)).toThrow(/airports\.bad\.json.*airports\[0\]\.lat/);
   });
 
+  it('a new version clears the metro of airports it no longer lists; they stay, at their old version (dm-M4)', () => {
+    const db = freshDb();
+    const repo = new AirportsRepo(db);
+    repo.upsertAll(dataset([row('AAA'), row('AAB'), row('AAC')], 'v1', { AAX: ['AAA', 'AAB', 'AAC'] }));
+    repo.upsertAll(dataset([row('AAA'), row('AAC')], 'v2', { AAX: ['AAA', 'AAC'] }));
+    expect(repo.get('AAB')).toMatchObject({ metro: null, datasetVersion: 'v1' }); // still referenced by definitions, so kept
+    expect(repo.airportsOfMetro('AAX')).toEqual(['AAA', 'AAC']);
+    expect([repo.metroOf('AAA'), repo.get('AAA')?.datasetVersion]).toEqual(['AAX', 'v2']);
+  });
+
   it('a metro of fewer than two airports is refused (dm-M3)', () => {
     expect(() =>
       new AirportsRepo(freshDb()).upsertAll(dataset([row('AAA'), row('AAB')], 'v', { AAX: ['AAA'] })),
