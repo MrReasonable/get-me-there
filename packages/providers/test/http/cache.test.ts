@@ -187,6 +187,22 @@ describe('in-flight dedup (spec §5.3 rev 11, ruling 4)', () => {
     expect(budget.count('fetch')).toBe(1);
   });
 
+  it('a joiner whose leader fails with a ProviderError still leaves its own cache-hit row, so parity counts its tile (cost minor 1)', async () => {
+    const { kit, budget, events } = makeKit();
+    server.use(
+      http.get(SEARCH, ({ request }) =>
+        respondAfter(request, 2000, () => HttpResponse.json({ error: 'busy' }, { status: 503 })),
+      ),
+    );
+    const a = kit.request(req({ url: URL1, executionId: 'exec-A', tileIndex: 1 }));
+    const b = kit.request(req({ url: URL1, executionId: 'exec-A', tileIndex: 2 }));
+    const [ea, eb] = await both(a, b);
+    expect(ea).toMatchObject({ kind: 'upstream', httpStatus: 503 });
+    expect(eb).toBe(ea);
+    expect(budget.count('fetch')).toBe(3);
+    expect(cacheHits(events)).toEqual([expect.objectContaining({ executionId: 'exec-A', tileIndex: 2 })]);
+  });
+
   it('a BudgetExceeded on a shared provider scope reaches the joiner unchanged (no re-issue)', async () => {
     const { kit, budget } = makeKit();
     slow();
@@ -204,6 +220,7 @@ describe('in-flight dedup (spec §5.3 rev 11, ruling 4)', () => {
     expect(ea).toBeInstanceOf(BudgetExceeded);
     expect(eb).toBeInstanceOf(BudgetExceeded);
     expect([budget.reserveCalls, budget.count('fetch')]).toEqual([1, 0]);
+    expect(budget.count('cache-hit')).toBe(0);
   });
 });
 

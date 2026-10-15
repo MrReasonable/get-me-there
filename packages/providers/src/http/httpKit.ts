@@ -132,6 +132,17 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
     };
   }
 
+  // why: parity counts first-attempt rows plus cache hits per tile (spec §8.1), so a joiner leaves its own row.
+  function recordJoin(r: HttpKitRequest): void {
+    if (r.providerId === 'fx') return;
+    deps.budget.recordCacheHit({
+      providerId: r.providerId,
+      executionId: r.executionId,
+      tileIndex: r.tileIndex,
+      endpointPath: r.endpointPath,
+    });
+  }
+
   async function join(r: HttpKitRequest, flight: Flight): Promise<HttpKitResponse> {
     let shared: HttpKitResponse;
     try {
@@ -146,16 +157,13 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
       // why: the leader's cancellation or its own execution cap says nothing about this caller (ruling 4);
       // it re-issues under its own signal and its own scopes.
       if (leaderAborted || othersCap) return request(r);
+      // why: the leader's upstream rows exist (it reached the vendor), so the joiner's tile leaves its own non-billable
+      // row as on success; otherwise parity would flag a tile that was simply served by a sibling (cost minor 1). A
+      // BudgetExceeded means nobody reached the vendor, so no row is written for anyone.
+      if (err instanceof ProviderError) recordJoin(r);
       throw err;
     }
-    // why: parity counts first-attempt rows plus cache hits per tile (spec §8.1), so a joiner leaves its own row.
-    if (r.providerId !== 'fx')
-      deps.budget.recordCacheHit({
-        providerId: r.providerId,
-        executionId: r.executionId,
-        tileIndex: r.tileIndex,
-        endpointPath: r.endpointPath,
-      });
+    recordJoin(r);
     deps.log.debug(
       { providerId: r.providerId, endpointPath: r.endpointPath },
       'http joined in-flight request',
