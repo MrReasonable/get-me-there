@@ -33,6 +33,24 @@ describe('ProviderError', () => {
     expect(e.message).not.toContain('SECRET');
     expect(e.message).not.toContain('pw@');
   });
+  it.each([
+    ['GET /api/v1/search?engine=google_flights&api_key=SECRET failed', 'GET /api/v1/search failed'],
+    ['at api.example.com/v1/x?token=SECRET (503)', 'at api.example.com/v1/x (503)'],
+    ['host api.example.com?api_key=SECRET', 'host api.example.com'],
+    ["'/aviasales/v3/prices_for_dates#token=SECRET'", "'/aviasales/v3/prices_for_dates'"],
+    ['see https://h.example/x?a=1 and /y?b=2', 'see https://h.example/x and /y'],
+  ])(
+    'stripUrlsInText strips the query and fragment of a relative or schemeless URL too (prov-M7): %s',
+    (input, out) => {
+      expect(stripUrlsInText(input)).toBe(out);
+      expect(stripUrlsInText(input)).not.toContain('SECRET');
+    },
+  );
+  it('stripUrlsInText leaves prose questions alone', () => {
+    expect(stripUrlsInText('why? no fares for 2027-03-14 (cabin?)')).toBe(
+      'why? no fares for 2027-03-14 (cabin?)',
+    );
+  });
   it('stripUrlsInText replaces an unparseable URL-like token', () => {
     expect(stripUrlsInText('see http://[bad')).toBe('see <url>');
   });

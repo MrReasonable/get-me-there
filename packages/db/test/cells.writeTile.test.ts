@@ -478,3 +478,19 @@ describe('writeTile fresh-on-fresh priced overlap (brief ruling 3; ruling 2026-1
     expect(stored(cells, executionId, B)).toEqual({ status: 'priced', reason: null, minPence: 45_000 });
   });
 });
+
+describe('last_error never holds a query, even on a relative or schemeless URL (spec §5.3, prov-M7)', () => {
+  it('writeTileError strips the credential-shaped query from a relative path and a schemeless host', () => {
+    const { executionId, cells } = setup();
+    cells.writeTileError(
+      executionId,
+      'travelpayouts',
+      [A],
+      'upstream',
+      'HTTP 500 on /aviasales/v3/prices_for_dates?origin=LON&token=SECRET via api.travelpayouts.com/v3?token=SECRET',
+    );
+    const lastError = cells.outcomes(executionId, { cells: [A] })[0]?.lastError;
+    expect(lastError).toBe('HTTP 500 on /aviasales/v3/prices_for_dates via api.travelpayouts.com/v3');
+    expect(lastError).not.toContain('SECRET');
+  });
+});
