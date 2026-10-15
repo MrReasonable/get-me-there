@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 14.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 15.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -412,10 +412,10 @@ export class AbortedError extends Error {}
   inside its TTL, so upstream calls are `D × M` with a shared metro (the
   worked example: 2 origins sharing LON × 2 destinations × 7 months = 28
   tiles, 14 upstream calls, 14 cache hits). **SearchApi** (measured):
-  `rectangle` tiles of 8 outbound days × the tight return span the nights
-  band needs (19 days for a 12-night band: 152 combinations, 96 useful
-  cells), asserted ≤200 before reserve; ~23 tiles per pair for a 182-day
-  window (the worked example: 4 pairs ≈ 92).
+  `rectangle` tiles of the largest outbound block b with
+  b × (b + maxNights − minNights) ≤ 200 (9 days × a 20-day return span for
+  the 10–21-night band: 180 combinations), asserted ≤200 before reserve;
+  ~21 tiles per pair for a 182-day window (the worked example: 4 pairs ≈ 84).
 - **Cell keys from the response**; entries outside `coveredCells` or with
   nights ≠ the requested length are dropped and counted in `notes`.
 - **Empty is per capability.** `authorised-cached`: a schema-valid success
@@ -1169,7 +1169,7 @@ under the §5.2 tilings measured by the spike:
 | Config | Per run | Per month (weekly) | Fits |
 |---|---|---|---|
 | £0 Travelpayouts, `month` tiles | `O × D × M` free calls, or `D × M` with a shared metro (worked example 14) | ~60 | yes, cap 50,000; usefulness is whatever the coverage check reports for the pairs |
-| SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~23 tiles per pair + `maxCells × 5` (worked example ~92 + 50 = ~142) | ~615 of 10,000 | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,090/run) or daily runs (~4,300/month) |
+| SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | ~615 of 10,000 | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,090/run) or daily runs (~4,300/month) |
 | SearchApi trial | one discovery exceeds 100 | — | spike and smoke only; scheduled runs exclude SearchApi on `trial` |
 
 There is no built-in definition with airports in it. The Definitions form
@@ -1612,6 +1612,14 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 15: SearchApi tiling and itinerary age (2026-10-15)
+
+§5.2 and §8.2: SearchApi calendar rectangles use the largest outbound block
+b with b × (b + maxNights − minNights) ≤ 200 cells (9 days for the 10–21-night
+band: ~21 tiles per pair, ~84 discovery calls for the worked example instead of
+~92). §3: SearchApi itinerary results carry `maxAgeHours: 'unknown'`, since the
+vendor may serve a cached answer of undocumented age (spike fact 4).
 
 ### Revision 14: metro query rule (2026-10-15)
 

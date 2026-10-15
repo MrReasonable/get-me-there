@@ -5,12 +5,12 @@ owner: fable
 depends_on: [3, 4]
 spec_sections: ["§2 (spike facts 1–8)", "§5.3 Recorder", "§5.5", "§7 app_lock, Migrations, tool bootstrap", "§9 item 7", "§12", "§14", "§16 WP4b"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, security-reviewer, cost-and-budget-reviewer, provenance-auditor, product-owner]
-status: draft
+status: reviewed
 ---
 
 # WP4b — fixture recording on the example route and the wiring helper
 
-Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–25, spec revision 14, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at 23d7982. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
+Reconciled against the plan's "Cross-package contracts" (Wiring and bootstraps, http-kit, Database, Budget port), its "Decisions taken at reconciliation" 1–26, spec revision 14, and the merged `@gmt/core`, `@gmt/db` (WP3), `@gmt/providers` (WP4) and WP2 on main at d86d24d. Every code block below was assembled on that commit on 2026-10-15 and passes typecheck, lint and its tests there (section 12).
 
 ## 1. Goal
 
@@ -26,7 +26,7 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 - `apps/api/src/bootstrap/tool.ts`: `runTool(name, argv, opts?): Promise<number>`, a `switch (name)` (no registry), in this order:
   1. parse the config once through `loadConfigFromEnv` (78 on a bad config); the only `process.env` read;
   2. refuse `config.nodeEnv === 'test'` (70);
-  3. refuse while `syntheticAllowed(config)` is true (78);
+  3. refuse while `syntheticAllowed(config)` is true (70, as the plan's exit table gives both refusals of synthetic data);
   4. parse the tool's arguments (64), decide where it records (64 for a route other than the worked example without `--out`, or an `--out` inside the repository), and run its configuration precheck (78);
   5. refuse an unwritable data directory (73);
   6. read `app_lock` through `@gmt/db`'s `readOnlyLockState` (a read-only connection; no migration, no journal-mode change) and refuse while a fresh lock exists (75); a file it cannot read (not a database, unreadable) refuses with 73;
@@ -36,7 +36,7 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 
   Every failure after the config parse maps to an exit code with a secret-scrubbed message, so nothing reaches the entry point's catch. It never constructs or boots the engine.
 - `apps/api/src/tools/{types,recordRequests,recordPlan,recordParams,recordExecution,recordReport,record,workedExample}.ts`: `pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--out DIR] [--dry-run] [--confirm-rerun]` and `recordFixtures(ports, args, ctx)` as the plan's contract (plan decision 23; section 5.1).
-- **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
+- **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. A live `--out` run creates `DIR/fixtures/recorded` before the hidden execution opens, and the recorder is built before it too, so a bad root never leaves a `running` execution behind (prov-wp04b-r3-003). `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
 - The recording run on the worked example through the real http-kit + recorder + guard, under a hidden soft-deleted definition's execution with `trigger: 'tool'`, against the operator's configured `DATABASE_PATH` (the production ledger, spec §7). It records:
   - 20 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe and a 401 probe on a month no success call uses;
   - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1` and `travel_class`; google_flights also sends `sort_by=price` and `separate_tickets=1`; no `stops` (plan decision 24). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004).
@@ -205,7 +205,8 @@ export interface ToolContext { signal: AbortSignal; out(line: string): void; err
 export const EXIT: { ok: 0; failed: 1; usage: 64; spendRefused: 65; refusedTestEnv: 70; preflightImpossible: 73; backupFailed: 74; lockRefused: 75; badConfig: 78 };
 export class RecordingFailedError extends Error { readonly partial: { calls: RecordedCall[]; creditsUsed: number; freeCalls: number; session: string | null } }
 // packages/db/src/appLock.ts (exported from @gmt/db; Task 7)
-export function readOnlyLockState(dbPath: string, clock: Clock): { state: 'absent' | 'fresh' | 'stale'; holder?: string; heartbeatAt?: IsoDateTime };   // absent: :memory:, no file, no app_lock table or no row; fresh: heartbeat ≤ LOCK_STALE_AFTER_MS old; never writes; throws for a non-database file or a malformed heartbeat (the tool maps a throw to 73)
+export type ReadOnlyLockState = { state: 'absent' } | { state: 'fresh' | 'stale'; holder: string; heartbeatAt: IsoDateTime };
+export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockState;   // absent: :memory:, no file, no app_lock table or no row; fresh: heartbeat ≤ LOCK_STALE_AFTER_MS old; never writes; throws for a non-database file or a malformed heartbeat (the tool maps a throw to 73)
 // src/bootstrap/tool.ts
 export interface ToolRunners { record(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number> }   // WP13 adds smoke
 export interface RecordingTarget { root: string; recordedBy: string }
@@ -243,9 +244,10 @@ export function priorToolCredits(ports: Ports): number;
 export function budgetPosition(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[] };
 export function openRecordingExecution(ports: Ports, a: RecordArgs, plan: readonly PlannedCall[]): string;
 // src/tools/recordReport.ts
-export interface RunAssessment { requiredOk: boolean; notAsExpected: string[]; chainComplete: boolean; emptyEnvelope: boolean; overLimit: 'http-400' | 'empty-200' | 'other' }
+export interface RunAssessment { requiredOk: boolean; notAsExpected: string[]; chainComplete: boolean; emptyEnvelope: 'yes' | 'no' | 'no-answer'; overLimit: 'http-400' | 'empty-200' | 'other' | 'no-answer' }   // 'no-answer': the call got no HTTP status, so nothing is said about the vendor
+
 export function assessRun(plan, s: Pick<RecordSummary, 'calls'>): RunAssessment;
-export function formatSummary(s, v, a): string[]; export function ledgerLine(s, a): string; export function retryAttemptLines(calls): string[];
+export function formatSummary(s, v, a, plan): string[]; export function ledgerLine(s, a): string; export function retryAttemptLines(calls): string[];   // a deletable line only for a call whose final attempt answered 200
 export function readRecorded(file: string | null): Record<string, unknown> | undefined; export function sessionOf(file: string): string | null; export function sessionOfCalls(calls): string | null;
 // src/tools/record.ts
 export const RECORDED_BY = '@gmt/api record:fixtures';
@@ -634,8 +636,11 @@ export function filesUnder(dir: string): string[] {
 import { vi } from 'vitest';
 import { SENTINEL_SA, SENTINEL_TP } from './env.js';
 
-/** The marker every stand-in identifier carries; the committed-tree check fails on it. */
-export const STANDIN_MARKER = 'standin';
+/**
+ * The marker every stand-in identifier carries; the committed-tree check fails on it. why: a token that cannot occur in
+ * vendor text, matched case-sensitively, so 'Outstanding legroom' in a real body never trips it (r3-ts-002).
+ */
+export const STANDIN_MARKER = 'gmt-standin-7f3a';
 
 import { onCleanup } from './tmp.js';
 
@@ -652,11 +657,13 @@ export interface VendorOptions {
   /** The calendar body: the default grid, or one with no priced in-band cell. */
   calendar?: 'default' | 'no-priced-cell';
   /** A vendor that echoes a real credential (ts-008): in the calendar's search_parameters, in a 401 body, in a Travelpayouts body. */
-  echo?: 'calendar-parameters' | 'sa-401-bearer' | 'tp-body';
+  echo?: 'calendar-parameters' | 'calendar-base64' | 'sa-401-bearer' | 'tp-body' | 'tp-bearer';
   /** A failure for chosen requests (r2-ts-004): an HTTP 500 or 429, a socket error, or no answer until the client aborts. */
   failOn?: (url: URL) => 'http-500' | 'http-429' | 'network' | 'hang' | undefined;
   /** Step 1 answers with priced options that carry no departure_token. */
   step1WithoutToken?: boolean;
+  /** Step 3 answers 200 with no booking option. */
+  step3Empty?: boolean;
   /** How the vendor answers more than 200 combinations (spec §2 fact 2 versus the docs). */
   overLimit?: '400' | 'empty-200';
   /** Called before each answer (e.g. to abort the run after a given call). */
@@ -718,6 +725,8 @@ function tpAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
   if (p.get('departure_at') === '2028-02') return json({ success: true, data: [], currency: 'gbp' });
   if (opts.echo === 'tp-body')
     return json({ success: true, data: [], currency: 'gbp', debug: `X-Access-Token: ${SENTINEL_TP}` });
+  if (opts.echo === 'tp-bearer')
+    return json({ success: true, data: [], currency: 'gbp', note: `Bearer ${SENTINEL_TP}` });
   const n = opts.tpRows?.(p) ?? 1;
   const row = {
     origin: p.get('origin'),
@@ -768,6 +777,9 @@ function saAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
         gl: p.get('gl'),
         currency: p.get('currency'),
         ...(opts.echo === 'calendar-parameters' ? { api_key: SENTINEL_SA } : {}),
+        ...(opts.echo === 'calendar-base64'
+          ? { key_b64: Buffer.from(SENTINEL_SA, 'utf8').toString('base64') }
+          : {}),
       },
       calendar,
     });
@@ -790,18 +802,26 @@ function saAnswer(url: URL, headers: Headers, opts: VendorOptions): Response {
       });
     if (bt === BT.cheapest && dt === null)
       return json({
-        booking_options: [
-          {
-            book_with: 'Airline',
-            price: 603,
-            booking_request: { url: 'https://www.google.com/travel/clk/f', post_data: 'u=airline' },
-          },
-          {
-            book_with: 'OTA',
-            price: 573,
-            booking_request: { url: 'https://www.google.com/travel/clk/f', post_data: 'u=ota' },
-          },
-        ],
+        booking_options: opts.step3Empty
+          ? []
+          : [
+              {
+                book_with: 'Airline',
+                price: 603,
+                booking_request: {
+                  url: `https://www.google.com/travel/clk/f?booking_token=${BT.cheapest}`,
+                  post_data: 'u=airline',
+                },
+              },
+              {
+                book_with: 'OTA',
+                price: 573,
+                booking_request: {
+                  url: `https://www.google.com/travel/clk/f?booking_token=${BT.cheapest}`,
+                  post_data: 'u=ota',
+                },
+              },
+            ],
       });
   }
   return json({ error: 'unexpected request' }, 400);
@@ -2755,7 +2775,7 @@ git add apps/api && git commit -m "wp04b: record:fixtures arguments and the exac
 
 **Interfaces:** consumes `createHttpKit`, `createRecorder`, `canonicalJson`, `scrubSecrets`, `ProviderError`, `BudgetExceeded`, `AbortedError`, `stripUrlsInText`, `DefinitionInput`, `DefinitionSnapshot`, `Estimate`, `Repos.definitions.create/get/softDelete`, `Repos.executions.create/listByStatus/setStatus`, `Db.immediateTransaction`, `budget.usage`, `seedAirports`, `loadAirportsDataset`, `verifyRecordedTree`, `loadRecorded`. Produces `recordFixtures`, `RecordSummary`, `RecordedCall`, `RecordingFailedError`, `RECORDED_BY`, `recordPrecheck`, `priorToolCredits`, `budgetPosition`, `openRecordingExecution`, `assessRun`, `formatSummary`, `ledgerLine`, `retryAttemptLines`, `runRecord`, `safeMessage`, `ParamLog`, `paramRules`, `writeAllowlist`, `EXIT`, `ToolContext`, `ToolName`.
 
-The tests run the recording against the stand-ins on an in-memory, seeded database with a fixed clock, into a temporary recorded tree created before the run (so a failed run's files can be scanned, ts-008), under the test signature `@gmt/api record:fixtures (test)`. Every identifier the stand-ins invent carries the marker `standin`, so a stand-in recording can never pass as a vendor one (prov-wp04b-006; Task 12a's check requires `RECORDED_BY` and rejects the marker). The failure cases (a 5xx retried into a 200, a 429, a socket failure, a timeout) run under fake timers through `runRecordingInFakeTime`.
+The tests run the recording against the stand-ins on an in-memory, seeded database with a fixed clock, into a temporary recorded tree created before the run (so a failed run's files can be scanned, ts-008), under the test signature `@gmt/api record:fixtures (test)`. Every identifier the stand-ins invent carries the marker `gmt-standin-7f3a`, a token that cannot occur in vendor text, so a stand-in recording can never pass as a vendor one (prov-wp04b-006; Task 12a's check requires `RECORDED_BY` and rejects the marker). The failure cases (a 5xx retried into a 200, a 429, a socket failure, a timeout) run under fake timers through `runRecordingInFakeTime`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2901,6 +2921,7 @@ import type { RecordedFixture } from '@gmt/providers';
 import { loadParamsAllowlist } from '@gmt/providers';
 import { loadRecorded, verifyRecordedTree } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
+import { recordFixtures } from '../../src/tools/record.js';
 import { priorToolCredits } from '../../src/tools/recordExecution.js';
 import { assessRun } from '../../src/tools/recordReport.js';
 import { cheapestCalendarCell, cheapestOption } from '../../src/tools/recordRequests.js';
@@ -2915,8 +2936,8 @@ import {
   TEST_RECORDED_BY,
   WORKED_EXAMPLE,
 } from '../helpers/recording.js';
-import { filesUnder } from '../helpers/tmp.js';
-import { BT, DT } from '../helpers/vendors.js';
+import { filesUnder, tempDir } from '../helpers/tmp.js';
+import { BT, DT, STANDIN_MARKER, stubVendors } from '../helpers/vendors.js';
 
 function recordings(root: string): RecordedFixture[] {
   return [
@@ -2972,7 +2993,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       requiredOk: true,
       notAsExpected: [],
       chainComplete: true,
-      emptyEnvelope: true,
+      emptyEnvelope: 'yes',
       overLimit: 'http-400',
     });
     expect(statuses(summary.calls)).toEqual([
@@ -3036,7 +3057,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       '"request_url":"https://www.searchapi.io/api/v1/search"',
     );
     expect(JSON.stringify(calendar?.body)).toContain(
-      '"json_endpoint":"https://www.searchapi.io/api/v1/searches/standin-cal-1.json"',
+      `"json_endpoint":"https://www.searchapi.io/api/v1/searches/${STANDIN_MARKER}-cal-1.json"`,
     );
   });
 
@@ -3092,7 +3113,7 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
       notAsExpected: ['SA-05', 'SA-06'],
     });
     expect(run.ports.db.raw.prepare('SELECT error_text AS e FROM search_executions').get()).toEqual({
-      e: 'required calls not as expected: SA-05, SA-06; 1 call(s) refused by the guard',
+      e: 'required calls not as expected: SA-05, SA-06; chain incomplete; 1 call(s) refused by the guard',
     });
     const allow = loadParamsAllowlist(join(run.root, 'searchapi', 'params-2026-10-20.json'), run.root);
     expect(allow.endpoints['/api/v1/search?engine=google_flights']?.names).not.toContain('departure_token');
@@ -3135,6 +3156,8 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     ]);
     expect(run.summary.calls[18]?.detail).toBe('refused by the guard: provider-month');
     expect(run.seen.tp).toHaveLength(18);
+    // why: TP-19 never reached the vendor, so nothing is said about its envelope (prov-wp04b-r3-002)
+    expect(assessRun(run.plan, run.summary).emptyEnvelope).toBe('no-answer');
   });
 
   it('a calendar with no priced in-band cell skips SA-03 and the chain: nothing more is spent (ts-006, cost-wp4b-r2-004)', async () => {
@@ -3145,7 +3168,39 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     );
     for (const id of ['SA-03', 'SA-04', 'SA-05', 'SA-06']) expect(byId.get(id)?.status).toBe('skipped');
     expect(run.seen.sa.map((p) => p.get('engine'))).toEqual(['google_flights', 'google_flights_calendar']); // the 401 probe, then SA-02
-    expect(assessRun(run.plan, run.summary)).toMatchObject({ requiredOk: false, chainComplete: false });
+    expect(assessRun(run.plan, run.summary)).toMatchObject({
+      requiredOk: false,
+      chainComplete: false,
+      overLimit: 'no-answer',
+      notAsExpected: ['SA-03', 'SA-04', 'SA-05', 'SA-06'],
+    });
+  });
+
+  it('a step 3 answering 200 with no booking option ends completed with "chain incomplete" (prov-wp04b-r2-004)', async () => {
+    const run = await runRecording({ vendors: { step3Empty: true } });
+    expect(run.summary.calls.find((c) => c.id === 'SA-06')?.status).toBe(200);
+    expect(assessRun(run.plan, run.summary)).toMatchObject({
+      requiredOk: false,
+      notAsExpected: [],
+      chainComplete: false,
+    });
+    expect(run.ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get()).toEqual({
+      status: 'completed',
+      e: 'chain incomplete',
+    });
+  });
+
+  it('a recorded root that does not exist is refused before the hidden execution opens (prov-wp04b-r3-003)', async () => {
+    const ports = seededPorts();
+    stubVendors();
+    await expect(
+      recordFixtures(ports, WORKED_EXAMPLE, {
+        signal: new AbortController().signal,
+        recordedRoot: join(tempDir(), 'fixtures', 'recorded'),
+        recordedBy: TEST_RECORDED_BY,
+      }),
+    ).rejects.toThrow(/recorder root/);
+    expect(ports.db.raw.prepare('SELECT COUNT(*) AS n FROM search_executions').get()).toEqual({ n: 0 });
   });
 
   it('a step 1 without any departure_token breaks the chain after one paid call (r2-ts-004)', async () => {
@@ -3248,19 +3303,30 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     });
   });
 
-  it.each(['calendar-parameters', 'sa-401-bearer', 'tp-body'] as const)(
-    'a vendor echoing a real credential (%s) fails closed: no file under the root holds it, the execution is cancelled cleanly (ts-008)',
-    async (echo) => {
+  it.each([
+    ['calendar-parameters', 21],
+    ['calendar-base64', 21],
+    ['sa-401-bearer', 21],
+    ['tp-body', 0],
+    ['tp-bearer', 0],
+  ] as const)(
+    'a vendor echoing a real credential (%s) fails closed: the earlier %i recordings exist, the refused call has none, no file holds the key (ts-008, r3-ts-005)',
+    async (echo, earlier) => {
       const setup = recordingSetup({ vendors: { echo } });
       const err = await setup.run().catch((e: unknown) => e);
       expect(err).toBeInstanceOf(RecordingFailedError);
       if (!(err instanceof RecordingFailedError)) return;
       expect(err.message).not.toContain(SENTINEL_SA);
       expect(err.message).not.toContain(SENTINEL_TP);
+      const files = recordings(setup.root);
+      expect(files).toHaveLength(earlier);
+      // the refused call (the SA-02 calendar, or TP-01) left no recording
+      expect(files.some((f) => q(f, 'engine') === 'google_flights_calendar')).toBe(false);
       for (const path of filesUnder(setup.root)) {
         const text = readFileSync(path, 'utf8');
         expect(text, path).not.toContain(SENTINEL_SA);
         expect(text, path).not.toContain(SENTINEL_TP);
+        expect(text, path).not.toContain(Buffer.from(SENTINEL_SA, 'utf8').toString('base64'));
       }
       const row = setup.ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get();
       expect(row).toMatchObject({
@@ -3324,7 +3390,7 @@ export interface ToolContext {
 
 /**
  * The plan's single exit-code table for every CLI (smoke adds 2 and 3 in WP13). 1 = a required recording call did not
- * return its expected status, or the run failed. 65 = a live recording refused for spend: credits already ledgered to
+ * return its expected status, or the run failed. 70 = refused under NODE_ENV=test or while the synthetic gate is open. 65 = a live recording refused for spend: credits already ledgered to
  * earlier tool runs plus this run's worst case exceed `--budget` without `--confirm-rerun` (plan decision 20), or a
  * provider's budget window has less room than the run's worst case (cost-wp4b-r2-001).
  */
@@ -3818,8 +3884,12 @@ export interface RunAssessment {
   /** Ids of required calls that did not answer as planned (empty when requiredOk). */
   notAsExpected: string[];
   chainComplete: boolean;
-  emptyEnvelope: boolean;
-  overLimit: 'http-400' | 'empty-200' | 'other';
+  /**
+   * `'no-answer'` when the call got no HTTP status (skipped, aborted, no response): nothing is then said about what the
+   * vendor would have answered (prov-wp04b-r3-002).
+   */
+  emptyEnvelope: 'yes' | 'no' | 'no-answer';
+  overLimit: 'http-400' | 'empty-200' | 'other' | 'no-answer';
 }
 
 /** The parsed recorded file, or undefined when it is missing (e.g. never written). */
@@ -3856,17 +3926,24 @@ export function assessRun(plan: readonly PlannedCall[], s: Pick<RecordSummary, '
   const probe = callOf('tp-tile', 'empty-probe');
   const over = callOf('sa-over-limit');
   const chainComplete = step3?.status === 200 && bookingOptions(readRecorded(step3.file)?.body).length > 0;
-  const emptyEnvelope = probe?.status === 200 && dataRowCount(readRecorded(probe.file)?.body) === 0;
-  const overLimit =
-    over?.status === 400
+  const answered = (c: RecordedCall | undefined): c is RecordedCall & { status: number } =>
+    typeof c?.status === 'number';
+  const emptyEnvelope = !answered(probe)
+    ? 'no-answer'
+    : probe.status === 200 && dataRowCount(readRecorded(probe.file)?.body) === 0
+      ? 'yes'
+      : 'no';
+  const overLimit = !answered(over)
+    ? 'no-answer'
+    : over.status === 400
       ? 'http-400'
-      : over?.status === 200 && calendarIsEmpty(readRecorded(over.file)?.body)
+      : over.status === 200 && calendarIsEmpty(readRecorded(over.file)?.body)
         ? 'empty-200'
         : 'other';
   const notAsExpected = plan
     .filter((p) => {
       if (!p.required) return false;
-      if (p.spec.kind === 'sa-over-limit') return overLimit === 'other';
+      if (p.spec.kind === 'sa-over-limit') return overLimit === 'other' || overLimit === 'no-answer';
       const c = byId.get(p.id);
       return c === undefined || typeof c.status !== 'number' || !p.expect.includes(c.status);
     })
@@ -3892,16 +3969,41 @@ export function ledgerLine(s: { creditsUsed: number; freeCalls: number }, a: Rec
 export function retryAttemptLines(calls: readonly RecordedCall[]): string[] {
   return calls
     .filter((c) => c.files.length > 1)
-    .map(
-      (c) =>
-        `${c.id}: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): ${c.files.slice(0, -1).join(', ')}`,
+    .map((c) =>
+      // why: only a call whose final attempt answered 200 has deletable failed attempts; any other multi-file call is a
+      // failure the operator keeps for review (prov-wp04b-r3-005)
+      c.status === 200
+        ? `${c.id}: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): ${c.files.slice(0, -1).join(', ')}`
+        : `${c.id}: ${c.files.length} failed attempts, keep for review; the session cannot be committed as is`,
     );
+}
+
+/** The call a verdict line is about, by plan kind, for its status and detail. */
+function callLine(
+  s: RecordSummary,
+  plan: readonly PlannedCall[],
+  kind: PlannedCall['spec']['kind'],
+  purpose?: string,
+): string {
+  const p = plan.find(
+    (x) =>
+      x.spec.kind === kind && (purpose === undefined || ('purpose' in x.spec && x.spec.purpose === purpose)),
+  );
+  const c = p === undefined ? undefined : s.calls.find((x) => x.id === p.id);
+  return c === undefined
+    ? 'not in the plan'
+    : `${c.id} ${String(c.status)}${c.detail === null ? '' : ` (${c.detail})`}`;
 }
 
 const pounds = (pence: number | null): string => (pence === null ? '—' : (pence / 100).toFixed(2));
 
 /** Human summary printed after a run. */
-export function formatSummary(s: RecordSummary, v: RunAssessment, a: RecordArgs): string[] {
+export function formatSummary(
+  s: RecordSummary,
+  v: RunAssessment,
+  a: RecordArgs,
+  plan: readonly PlannedCall[],
+): string[] {
   const c = s.chain;
   const step3 = c.step3Options.map((o) => `${o.bookWith} ${pounds(o.pricePence)}`).join(', ');
   return [
@@ -3912,8 +4014,8 @@ export function formatSummary(s: RecordSummary, v: RunAssessment, a: RecordArgs)
     `required calls: ${v.requiredOk ? 'all as expected' : `NOT all as expected: ${v.notAsExpected.join(', ') || 'the chain is incomplete'}`}`,
     `chain step 1 → 2 → 3: ${v.chainComplete ? 'complete' : 'incomplete'}`,
     `chain prices (${c.currency}, diagnostics only): step 1 ${pounds(c.step1PricePence)}, step 2 ${pounds(c.step2PricePence)} (step 1 = step 2: ${c.step1PricePence !== null && c.step1PricePence === c.step2PricePence ? 'yes' : 'no'}); step 3 ${step3 === '' ? '—' : step3}`,
-    `over-limit calendar (SA-03): ${v.overLimit === 'http-400' ? 'HTTP 400, as spike fact 2' : v.overLimit === 'empty-200' ? 'an empty HTTP 200, as the docs say (billed)' : 'neither 400 nor an empty 200: raise a finding for WP5'}`,
-    `empty envelope recorded: ${v.emptyEnvelope ? 'yes' : 'no (best-effort; WP6 then needs a synthetic one: raise a finding)'}`,
+    `over-limit calendar (SA-03): ${v.overLimit === 'http-400' ? 'HTTP 400, as spike fact 2' : v.overLimit === 'empty-200' ? 'an empty HTTP 200, as the docs say (billed)' : v.overLimit === 'no-answer' ? `no vendor answer recorded: ${callLine(s, plan, 'sa-over-limit')}` : 'neither 400 nor an empty 200: raise a finding for WP5'}`,
+    `empty envelope recorded: ${v.emptyEnvelope === 'yes' ? 'yes' : v.emptyEnvelope === 'no-answer' ? `no vendor answer recorded: ${callLine(s, plan, 'tp-tile', 'empty-probe')}` : 'no (best-effort; WP6 then needs a synthetic one: raise a finding)'}`,
     '429: not attempted; WP5 maps rate limits from a labelled synthetic fixture (plan decision 20)',
     ...retryAttemptLines(s.calls),
     `session: ${s.session ?? 'none (nothing recorded)'}`,
@@ -3930,6 +4032,7 @@ export function formatSummary(s: RecordSummary, v: RunAssessment, a: RecordArgs)
  * Hand-built vendor requests through the real http-kit, recorder and SqliteBudgetGuard. The
  * adapters (WP5, WP6) do not exist yet and later replay what this records.
  */
+import { mkdirSync } from 'node:fs';
 import {
   AbortedError,
   asIsoDate,
@@ -4092,15 +4195,18 @@ export async function recordFixtures(
   const plan = ctx.plan ?? planCalls(args, ports.repos.airports.sharedMetro(args.origins));
   const misfit = freeCallMisfit(plan, ports.config.spend.executionMaxFreeCalls);
   if (misfit !== null) throw new Error(misfit);
-  const executionId = openRecordingExecution(ports, args, plan);
+  // why: the recorder refuses a missing or misplaced root; it is built before the hidden execution opens, so such a
+  // refusal never leaves a 'running' execution behind (prov-wp04b-r3-003)
   const recorder = createRecorder({
     root: ctx.recordedRoot,
     secrets: ports.secrets,
     clock: ports.clock,
     recordedBy: ctx.recordedBy,
   });
-  const run = new PlanRun(ports, plan, executionId, recorder, ctx, recordingLimits(tp, sa, ports.config));
+  const executionId = openRecordingExecution(ports, args, plan);
+  let run: PlanRun | null = null;
   try {
+    run = new PlanRun(ports, plan, executionId, recorder, ctx, recordingLimits(tp, sa, ports.config));
     await run.execute();
   } catch (e) {
     const message = safeMessage(e, ports.secrets);
@@ -4108,7 +4214,8 @@ export async function recordFixtures(
       finishedAt: ports.clock.now(),
       errorText: `record:fixtures failed: ${message}`,
     });
-    throw new RecordingFailedError(`record:fixtures failed: ${message}`, run.usage(), { cause: e });
+    const partial = run?.usage() ?? { calls: [], creditsUsed: 0, freeCalls: 0, session: null };
+    throw new RecordingFailedError(`record:fixtures failed: ${message}`, partial, { cause: e });
   }
   const summary = run.summary();
   const guardStops = summary.calls.filter(
@@ -4119,6 +4226,9 @@ export async function recordFixtures(
     ...(verdict.notAsExpected.length > 0
       ? [`required calls not as expected: ${verdict.notAsExpected.join(', ')}`]
       : []),
+    // why: a step 3 that answered 200 without a priced booking option leaves requiredOk false with every status as
+    // planned (prov-wp04b-r2-004)
+    ...(verdict.chainComplete ? [] : ['chain incomplete']),
     ...(guardStops > 0 ? [`${guardStops} call(s) refused by the guard`] : []),
   ];
   const aborted = ctx.signal.aborted;
@@ -4418,6 +4528,8 @@ export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext):
     );
     return EXIT.spendRefused;
   }
+  // why: `--out DIR` names a directory that may not exist yet, and the recorder requires its root (prov-wp04b-r3-003)
+  mkdirSync(ctx.recordedRoot, { recursive: true });
   let summary: RecordSummary;
   try {
     summary = await recordFixtures(ports, a, {
@@ -4437,7 +4549,7 @@ export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext):
     return EXIT.failed;
   }
   const verdict = assessRun(plan, summary);
-  for (const line of formatSummary(summary, verdict, a)) ctx.out(line);
+  for (const line of formatSummary(summary, verdict, a, plan)) ctx.out(line);
   return verdict.requiredOk && !ctx.signal.aborted ? EXIT.ok : EXIT.failed;
 }
 ```
@@ -4445,7 +4557,7 @@ export async function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext):
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/tools/record.test.ts`
-Expected: 19 passed. Two failures would mean the merged WP3 or WP4 differs from section 4, so raise a finding rather than adapt the test: a missing 400 or 401 file (the recorder does not record every attempt), or a `departure_token` request in the budget test (the guard does not read the snapshot budget).
+Expected: 23 passed. Two failures would mean the merged WP3 or WP4 differs from section 4, so raise a finding rather than adapt the test: a missing 400 or 401 file (the recorder does not record every attempt), or a `departure_token` request in the budget test (the guard does not read the snapshot budget).
 
 - [ ] **Step 5: Commit**
 
@@ -4457,7 +4569,7 @@ git add apps/api && git commit -m "wp04b: record:fixtures run through the real h
 
 **Files:** modify `packages/db/src/appLock.ts`, `packages/db/src/index.ts`, `packages/db/test/barrel.test.ts`; create `packages/db/test/readOnlyLockState.test.ts`.
 
-**Interfaces:** consumes `AppLock`, `LOCK_STALE_AFTER_MS`, `readTime` (WP3 internals), `better-sqlite3` (already `@gmt/db`'s dependency). Produces `readOnlyLockState(dbPath, clock): { state: 'absent' | 'fresh' | 'stale'; holder?: string; heartbeatAt?: IsoDateTime }`, exported from the `@gmt/db` barrel.
+**Interfaces:** consumes `AppLock`, `LOCK_STALE_AFTER_MS`, `readTime` (WP3 internals), `better-sqlite3` (already `@gmt/db`'s dependency). Produces `readOnlyLockState(dbPath, clock): ReadOnlyLockState`, a discriminated union (`{ state: 'absent' }` or `{ state: 'fresh' | 'stale'; holder; heartbeatAt }`), and the module-private `isFresh(heartbeatAt, now)` that AppLock and readOnlyLockState now share, so the two can never disagree about staleness (arch-r3-003). Both are exported from the `@gmt/db` barrel.
 
 The tool bootstrap must read `app_lock` before any backup or migration without opening the database read-write (spec §7, plan decision 20). This function lives beside `AppLock` so the SQLite dependency stays in `@gmt/db`. It throws for a file that is not a database and for a malformed heartbeat (only a hand-made table can hold one: the migrated schema CHECKs the column); the caller maps a throw to exit 73 (r2-ts-007).
 
@@ -4572,10 +4684,24 @@ Expected: FAIL, 8 failed; the first failure is `TypeError: readOnlyLockState is 
 - [ ] **Step 3: Implement**
 
 ```ts
-// packages/db/src/appLock.ts (additions)
+// packages/db/src/appLock.ts (changes)
 // top of the file: two new imports beside the existing ones
 import { existsSync } from 'node:fs';
 import Database from 'better-sqlite3';
+
+// after LOCK_STALE_AFTER_MS:
+/** The one freshness rule (spec §7): a heartbeat at most LOCK_STALE_AFTER_MS old. AppLock and readOnlyLockState share it. */
+function isFresh(heartbeatAt: string, now: string): boolean {
+  return Date.parse(now) - Date.parse(heartbeatAt) <= LOCK_STALE_AFTER_MS;
+}
+
+/** What readOnlyLockState reports; a present lock always names its holder and heartbeat. */
+export type ReadOnlyLockState =
+  | { state: 'absent' }
+  | { state: 'fresh' | 'stale'; holder: string; heartbeatAt: IsoDateTime };
+
+// in AppLock.tryAcquire, the staleness test becomes the shared rule:
+        if (isFresh(row.heartbeat_at, now)) return false;
 
 // end of the file:
 /**
@@ -4587,10 +4713,7 @@ import Database from 'better-sqlite3';
  * Throws for a file that is not a SQLite database, a database it cannot open, or a malformed heartbeat_at (RowCorrupt);
  * the tool bootstrap maps any throw to exit 73.
  */
-export function readOnlyLockState(
-  dbPath: string,
-  clock: Clock,
-): { state: 'absent' | 'fresh' | 'stale'; holder?: string; heartbeatAt?: IsoDateTime } {
+export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockState {
   if (dbPath === ':memory:' || !existsSync(dbPath)) return { state: 'absent' };
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
@@ -4605,8 +4728,7 @@ export function readOnlyLockState(
       .get();
     if (row === undefined) return { state: 'absent' };
     const heartbeatAt = readTime('app_lock.heartbeat_at', row.heartbeat_at);
-    const age = Date.parse(clock.now()) - Date.parse(heartbeatAt);
-    return { state: age <= LOCK_STALE_AFTER_MS ? 'fresh' : 'stale', holder: row.holder, heartbeatAt };
+    return { state: isFresh(heartbeatAt, clock.now()) ? 'fresh' : 'stale', holder: row.holder, heartbeatAt };
   } finally {
     db.close();
   }
@@ -4616,7 +4738,13 @@ export function readOnlyLockState(
 In `packages/db/src/index.ts`, extend the `appLock.js` export line:
 
 ```ts
-export { AppLock, HEARTBEAT_INTERVAL_MS, LOCK_STALE_AFTER_MS, readOnlyLockState } from './appLock.js';
+export {
+  AppLock,
+  HEARTBEAT_INTERVAL_MS,
+  LOCK_STALE_AFTER_MS,
+  type ReadOnlyLockState,
+  readOnlyLockState,
+} from './appLock.js';
 ```
 
 In `packages/db/test/barrel.test.ts`, add `'readOnlyLockState'` to both lists: after `'LOCK_STALE_AFTER_MS'` in the "exports every contract name" list, and after `'pendingMigrations'` in the exact-keys list.
@@ -4638,13 +4766,22 @@ git add packages/db && git commit -m "wp04b: readOnlyLockState in @gmt/db, so th
 
 **Interfaces:** consumes `AppLock`, `HEARTBEAT_INTERVAL_MS`, `readOnlyLockState` (Task 7), `openDatabase`, `pendingMigrations`, `backupDatabase`, `seedAirports`, `loadAirportsDataset`, `AIRPORTS_DATA_DIR`, `MIGRATIONS_DIR`, `defaultRecordedRoot`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `runRecord`, `recordPrecheck`. Produces `runTool`, `RunToolOptions`, `RecordingTarget`, `recordingTarget`, `repositoryRoot`, `isEntryPoint`, `ToolRunners`, `backupsDirFor`, `pendingOnExistingDb`, `WORKED_EXAMPLE_ROUTE`, `isWorkedExampleRoute`.
 
-Every exit path is tested through the injectable `runners` table: a throwing tool, SIGINT and SIGTERM (twice), the heartbeat under fake timers, a lock taken over mid-run (with and without a throw), a buildPorts failure, an unreadable database, an unreadable migration state, an existing database in a read-only directory (ts-003, r2-ts-005). The refusal after `buildPorts` when `AppLock.acquire` refuses is reached only by a process that takes the lock between the read-only check and the acquire; WP3's AppLock tests cover the refusal itself. Every test records into a temporary tree under the test signature, and an `afterAll` asserts the committed tree still holds only `.gitkeep` (prov-wp04b-006).
+Every exit path is tested through the injectable `runners` table: a throwing tool, SIGINT and SIGTERM (twice), the heartbeat under fake timers, a lock taken over mid-run (with and without a throw), a buildPorts failure, an unreadable database, an unreadable migration state, an existing database in a read-only directory (ts-003, r2-ts-005). The refusal after `buildPorts` when `AppLock.acquire` refuses is reached only by a process that takes the lock between the read-only check and the acquire; WP3's AppLock tests cover the refusal itself. Every test records into a temporary tree under the test signature, and the suite snapshots the committed tree's files (with size and mtime) before it runs and asserts the snapshot unchanged after: no test adds, removes or changes a file in the committed tree, before or after Task 12b commits it (prov-wp04b-006, prov-wp04b-r3-001). Three further groups drive `runRecord` through `runTool`: a run with required calls not as planned, a 5xx retried into a 200 (fake timers; the retry line and its file), and a SIGINT during the calendar; a live `--out` run into a fresh directory; and `recordingTarget` itself (a given target wins; the worked example and `--out` sign `RECORDED_BY`; `--out` at the repository root, through a relative path or through a symlink into it is refused) (r2-ts-004, r3-ts-004).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // apps/api/test/bootstrap/tool.test.ts
-import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
@@ -4652,15 +4789,18 @@ import { asIsoDateTime, fixedClock, systemClock } from '@gmt/core';
 import { AppLock, applyMigrations, HEARTBEAT_INTERVAL_MS, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
 import { defaultRecordedRoot } from '@gmt/providers';
 import { loadRecorded } from '@gmt/providers/testing';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   backupsDirFor,
   EXIT,
   isEntryPoint,
   type RunToolOptions,
+  recordingTarget,
   repositoryRoot,
   runTool,
 } from '../../src/bootstrap/tool.js';
+import { RECORDED_BY } from '../../src/tools/record.js';
+import { parseRecordArgs } from '../../src/tools/recordPlan.js';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js';
 import { TEST_RECORDED_BY, testRecording } from '../helpers/recording.js';
 import { filesUnder, tempDir } from '../helpers/tmp.js';
@@ -4672,9 +4812,21 @@ const DRY = [...ROUTE, '--dry-run'];
 afterEach(() => {
   vi.useRealTimers();
 });
-// why: a live run without the test `recording` option would write stand-in bodies into the committed tree (prov-wp04b-006)
+/** Every file of the committed tree with its size and mtime. */
+function committedTree(): string[] {
+  return filesUnder(defaultRecordedRoot()).map((p) => {
+    const st = statSync(p);
+    return `${p} ${st.size} ${st.mtimeMs}`;
+  });
+}
+// why: no test adds, removes or changes a file in the committed tree (prov-wp04b-006); a snapshot, not a fixed list,
+// so the guard holds before and after Task 12b commits the recorded tree (prov-wp04b-r3-001)
+let committedBefore: string[] = [];
+beforeAll(() => {
+  committedBefore = committedTree();
+});
 afterAll(() => {
-  expect(readdirSync(defaultRecordedRoot())).toEqual(['.gitkeep']);
+  expect(committedTree()).toEqual(committedBefore);
 });
 
 /** A temp database and a temp recorded tree with the test signature (every runTool test records there, never in the committed tree). */
@@ -4732,10 +4884,10 @@ describe('runTool refusals (spec §5.5, §7, plan decision 20)', () => {
     expect(h.errors()).not.toContain(SENTINEL_SA);
   });
 
-  it('refuses while the synthetic gate is open (sec-005, ts-012)', async () => {
+  it('refuses while the synthetic gate is open with 70, as the plan exit table says (sec-005, ts-012, arch-r3-001)', async () => {
     const dir = tempDir();
     const h = harness(join(dir, 'tool.fixture.db'), { ALLOW_FIXTURE_PROVIDER: 'i-understand-this-is-fake' });
-    expect(await runTool('record', DRY, h.opts)).toBe(EXIT.badConfig);
+    expect(await runTool('record', DRY, h.opts)).toBe(EXIT.refusedTestEnv);
     expect(h.errors()).toContain('synthetic gate is open');
     expect(existsSync(join(dir, 'tool.fixture.db'))).toBe(false);
   });
@@ -5134,6 +5286,131 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
     expect(h.errors()).toContain('tool failed: the tool noticed the abort and gave up');
   });
 });
+
+describe('runRecord through runTool: failed and partial runs (r2-ts-004)', () => {
+  it('a run with required calls not as planned exits 1 and reports them without attributing skipped calls to the vendor', async () => {
+    const h = harness();
+    stubVendors({ calendar: 'no-priced-cell' });
+    expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.failed);
+    const text = h.text();
+    expect(text).toContain('required calls: NOT all as expected: SA-03, SA-04, SA-05, SA-06');
+    expect(text).toContain('chain step 1 → 2 → 3: incomplete');
+    expect(text).toContain(
+      'over-limit calendar (SA-03): no vendor answer recorded: SA-03 skipped (skipped: calendar SA-02 gave no usable cell; the run must be repeated)',
+    );
+    expect(text).not.toContain('raise a finding for WP5');
+    expect(text).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 20 free call(s)');
+  });
+
+  it('a 5xx retried into a 200 prints the deletable non-final attempt file (prov-wp04b-r2-005, prov-wp04b-r3-005)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    let failed = false;
+    stubVendors({
+      failOn: (u) => {
+        if (failed || u.searchParams.get('engine') !== 'google_flights_calendar') return undefined;
+        failed = true;
+        return 'http-500';
+      },
+    });
+    const run = runTool('record', ROUTE, h.opts);
+    let done = false;
+    run.then(
+      () => {
+        done = true;
+      },
+      () => {
+        done = true;
+      },
+    );
+    while (!done) await vi.advanceTimersByTimeAsync(500);
+    expect(await run).toBe(EXIT.ok);
+    const line = h.out.find((l) =>
+      l.startsWith('SA-02: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): '),
+    );
+    expect(line).toBeDefined();
+    const path = line?.split(': ').at(-1) ?? '';
+    expect(JSON.parse(readFileSync(path, 'utf8')).status).toBe(500);
+  });
+
+  it('SIGINT during the calendar aborts the run: exit 1, the execution cancelled, the ledger line printed', async () => {
+    const h = harness();
+    stubVendors({
+      onRequest: (u) => {
+        if (u.searchParams.get('engine') === 'google_flights_calendar') process.emit('SIGINT');
+      },
+    });
+    expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.failed);
+    expect(h.text()).toContain('SA-02 aborted');
+    expect(h.text()).toMatch(/ledger: SearchApi \d credit\(s\) of budget 5/);
+    expect(count(h.dbPath, 'SELECT status, error_text AS e FROM search_executions')).toEqual({
+      status: 'cancelled',
+      e: 'aborted',
+    });
+  });
+
+  it('--out records live into a fresh directory outside the repository, creating <out>/fixtures/recorded first (prov-wp04b-r3-003)', async () => {
+    const h = harness();
+    const { recording: _ignored, ...opts } = h.opts;
+    const out = join(tempDir(), 'fresh', 'mine');
+    stubVendors();
+    expect(await runTool('record', [...ROUTE, '--out', out], opts)).toBe(EXIT.ok);
+    const root = join(out, 'fixtures', 'recorded');
+    expect(loadRecorded(root, 'searchapi', '/api/v1/search').map((f) => f.recordedBy)).toEqual(
+      Array(6).fill(RECORDED_BY),
+    );
+    expect(count(h.dbPath, 'SELECT status FROM search_executions')).toEqual({ status: 'completed' });
+  });
+});
+
+describe('recordingTarget (sec2-002 ruling, r3-ts-004)', () => {
+  const cli = (argv: string[]) => {
+    const r = parseRecordArgs(['--budget', '5', '--month', '2027-03', ...argv]);
+    if (!r.ok) throw new Error(r.message);
+    return r.value;
+  };
+  const example = ['--route', 'LHR,LGW:JFK,EWR'];
+  const other = ['--route', 'LHR:JFK'];
+
+  it('a given target wins unchanged', () => {
+    const given = { root: '/tmp/x/fixtures/recorded', recordedBy: TEST_RECORDED_BY };
+    expect(recordingTarget(cli(other), given)).toBe(given);
+  });
+  it('the worked example without --out records the committed tree under RECORDED_BY', () => {
+    expect(recordingTarget(cli(example), undefined)).toEqual({
+      root: defaultRecordedRoot(),
+      recordedBy: RECORDED_BY,
+    });
+  });
+  it('--out outside the repository records <out>/fixtures/recorded under RECORDED_BY', () => {
+    const out = join(tempDir(), 'mine');
+    expect(recordingTarget(cli([...other, '--out', out]), undefined)).toEqual({
+      root: join(out, 'fixtures', 'recorded'),
+      recordedBy: RECORDED_BY,
+    });
+  });
+  it.each([
+    ['the repository root', () => repositoryRoot()],
+    ['a relative path that resolves inside it', () => join(repositoryRoot(), 'apps', '..', 'tmp-rec')],
+    [
+      'a symlink pointing into it',
+      () => {
+        const link = join(tempDir(), 'link');
+        symlinkSync(repositoryRoot(), link);
+        return join(link, 'tmp-rec');
+      },
+    ],
+  ])('--out %s is refused', (_name, out) => {
+    expect(recordingTarget(cli([...other, '--out', out()]), undefined)).toEqual({
+      refusal: expect.stringContaining('is inside the repository'),
+    });
+  });
+  it('another route without --out is refused', () => {
+    expect(recordingTarget(cli(other), undefined)).toEqual({
+      refusal: expect.stringContaining('holds only the worked example'),
+    });
+  });
+});
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -5408,7 +5685,8 @@ async function runToolSteps(
     err(
       'tool bootstrap refuses while the synthetic gate is open (ALLOW_FIXTURE_PROVIDER with a .fixture.db path): recordings and the ledger never share a database with synthetic data (spec §5.5)',
     );
-    return EXIT.badConfig;
+    // why: the plan's single exit-code table gives 70 to both refusals of synthetic data (NODE_ENV=test, open gate)
+    return EXIT.refusedTestEnv;
   }
   const prepared = prepare(name, argv, config, { ...DEFAULT_RUNNERS, ...opts.runners }, opts.recording, err);
   if (!prepared.ok) return prepared.code;
@@ -5437,7 +5715,7 @@ async function runToolSteps(
   }
   if (held.state === 'fresh') {
     err(
-      `app_lock is held by ${held.holder ?? 'another process'} (heartbeat ${held.heartbeatAt ?? 'unknown'}); stop it, or use POST /api/tools/${name} while the app runs (spec §7)`,
+      `app_lock is held by ${held.holder} (heartbeat ${held.heartbeatAt}); stop it, or use POST /api/tools/${name} while the app runs (spec §7)`,
     );
     return EXIT.lockRefused;
   }
@@ -5591,7 +5869,7 @@ if (isEntryPoint()) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts` and `pnpm --filter @gmt/providers test`
-Expected: 34 passed (the two read-only-directory cases are reported skipped when run as root); the providers suite passes (263 at assembly). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
+Expected: 45 passed (the two read-only-directory cases are reported skipped when run as root); the providers suite passes (263 at assembly). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
 
 - [ ] **Step 5: Commit**
 
@@ -5655,20 +5933,13 @@ import { tempDir } from '../helpers/tmp.js';
 const API_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const NO_NETWORK = fileURLToPath(new URL('../support/noNetwork.mjs', import.meta.url));
 const DRY = ['--budget', '5', '--route', 'LHR,LGW:JFK,EWR', '--month', '2027-03', '--dry-run'];
+/** Node's arguments for every spawned child: workspace sources, and the DNS-refusal preload (one list, r3-ts-006). */
+const NODE_ARGS = ['--conditions=@gmt/source', '--import', NO_NETWORK] as const;
 
 function spawnTool(env: Record<string, string>) {
   return spawnSync(
     process.execPath,
-    [
-      '--conditions=@gmt/source',
-      '--import',
-      NO_NETWORK,
-      '--import',
-      'tsx',
-      'src/bootstrap/tool.ts',
-      'record',
-      ...DRY,
-    ],
+    [...NODE_ARGS, '--import', 'tsx', 'src/bootstrap/tool.ts', 'record', ...DRY],
     {
       cwd: API_ROOT,
       env: { PATH: process.env.PATH ?? '', ...env },
@@ -5740,18 +6011,19 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
     });
   });
 
-  it('the DNS-refusal preload takes effect in a spawned process (r2-ts-006)', () => {
+  it('every spawned child gets the DNS-refusal preload, and under it fetch, as http-kit uses it, cannot reach a host (r2-ts-006, r3-ts-006)', () => {
+    expect(NODE_ARGS).toContain(NO_NETWORK);
     const r = spawnSync(
       process.execPath,
       [
-        '--import',
-        NO_NETWORK,
+        ...NODE_ARGS,
+        '--input-type=module',
         '-e',
-        "require('node:dns').lookup('www.searchapi.io', (e) => { process.stdout.write(e ? e.code : 'resolved'); })",
+        "fetch('https://example.invalid/').then(() => process.stdout.write('fetched'), (e) => process.stdout.write(String(e.cause?.message ?? e.message)))",
       ],
       { cwd: API_ROOT, env: { PATH: process.env.PATH ?? '' }, encoding: 'utf8', timeout: 30_000 },
     );
-    expect(r.stdout).toBe('ENOTFOUND');
+    expect(r.stdout).toContain('spawned tool test makes no DNS lookups (example.invalid)');
   }, 30_000);
 });
 ```
@@ -5775,7 +6047,13 @@ In `apps/api/package.json`, set the `tool` script (merge the key; keep main's ot
 
 `// why:` (record it in the PR description; JSON has no comments) The root scripts are `"record:fixtures": "pnpm --filter @gmt/api tool record"` and `"smoke:live": "pnpm --filter @gmt/api tool smoke"`, so pnpm appends the operator's arguments after `record`. `--conditions=@gmt/source` makes Node and tsx resolve workspace packages to their sources rather than stale or missing `dist` builds (plan Task 0.1). Node loads `.env` into `process.env`, where existing variables win; `loadConfigFromEnv` is the only reader. The spawn tests call `node` directly with their own env, so no test ever loads the real `.env`.
 
-In `scripts/check-boundaries.mjs`, replace the `ENV_READERS` line and add the msw pattern beside it:
+In `scripts/check-boundaries.mjs`, widen `walk`'s file filter so `.mjs` test-support files are scanned too (arch-r3-002):
+
+```js
+    else if (/\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(p)) yield p; // why: .mjs test-support files count too (arch-r3-002)
+```
+
+replace the `ENV_READERS` line and add the msw pattern beside it:
 
 ```js
 // The only files that may read process.env: the app and tool bootstraps (wiring and logger take the env as an argument).
@@ -5816,7 +6094,7 @@ for (const f of walk('apps/api/test')) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.spawn.test.ts test/support/guards.test.ts` and `node scripts/check-boundaries.mjs`
-Expected: 7 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file.
+Expected: 7 passed; the boundary script exits 0. Then, for each of `import { http } from 'msw/http';`, `import 'msw/node';` and `await import('msw');`, write the line to `apps/api/test/plant.ts`, run `node scripts/check-boundaries.mjs` and expect exit 1 with `apps/api/test/plant.ts imports msw; apps/api tests use @gmt/providers/testing`; delete the file. Do the same with `import 'msw/node';` in `apps/api/test/support/plant.mjs`, expecting `apps/api/test/support/plant.mjs imports msw; …`.
 
 - [ ] **Step 5: Commit**
 
@@ -6103,7 +6381,7 @@ git add apps/api/test && git commit -m "wp04b: sentinel secret scan over recorde
 
 **Interfaces:** consumes `verifyRecordedTree`, `loadRecorded`, `withContentHash`, `loadParamsAllowlist`, `assertRequestAllowed`, `defaultRecordedRoot`, `STANDIN_MARKER`, `runRecording`. Produces `checkWorkedExampleTree(root, { recordedBy, standInsAllowed, secrets? }): string[]`, the gate the live run must turn green.
 
-The check is a function of a root (r2-ts-002): proven green on a tree recorded from the stand-ins, and red on broken copies of it (a second session, a step-2 placeholder missing from step 1's body, an out-of-band step-1 cell, a body URL on a foreign host) and on the stand-ins signed as the real tool. It lives in apps/api's test helpers because it names the worked example's airports, which `packages/providers/src` may not. The committed tree is one thin test calling it.
+The check is a function of a root (r2-ts-002): proven green on a tree recorded from the stand-ins, and red on broken copies of it (a second session, a step-2 placeholder missing from step 1's body, an out-of-band step-1 cell, a body URL on a foreign host) and on the stand-ins signed as the real tool. Further negatives cover each remaining predicate: a `www.google.com` booking parameter holding an opaque value (the good tree's booking URL carries a recorder placeholder, so the accept branch runs too), a body URL with userinfo, a `search_metadata` URL with a query, a request with `stops`, and a second allowlist file; the stand-in tripwire is shown to match only its marker, never prose such as 'Outstanding legroom' (r3-ts-002, r3-ts-003). It lives in apps/api's test helpers because it names the worked example's airports, which `packages/providers/src` may not. The committed tree is one thin test calling it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6112,7 +6390,7 @@ The check is a function of a root (r2-ts-002): proven green on a tree recorded f
 // Every predicate of the committed-tree check passes on a known-good tree recorded from the stand-ins and fails on a
 // broken copy (r2-ts-002), before it ever meets the live recording; the stand-in tripwire catches a test tree
 // signed as a real one (prov-wp04b-006).
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { RecordedFixture } from '@gmt/providers';
 import { loadRecorded, withContentHash } from '@gmt/providers/testing';
@@ -6120,7 +6398,8 @@ import { describe, expect, it } from 'vitest';
 import { RECORDED_BY } from '../../src/tools/record.js';
 import { runRecording, TEST_RECORDED_BY } from '../helpers/recording.js';
 import { filesUnder } from '../helpers/tmp.js';
-import { checkWorkedExampleTree } from '../helpers/workedExampleTree.js';
+import { STANDIN_MARKER } from '../helpers/vendors.js';
+import { checkWorkedExampleTree, holdsStandInMarker } from '../helpers/workedExampleTree.js';
 
 const OK = { recordedBy: TEST_RECORDED_BY, standInsAllowed: true };
 const q = (f: RecordedFixture, k: string): string | null => new URL(f.request.url).searchParams.get(k);
@@ -6236,7 +6515,103 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     );
     expect(checkWorkedExampleTree(root, OK)).toContain('body URL host evil.example under url');
   });
+
+  it('the stand-in tripwire matches only the marker, never ordinary prose (r3-ts-002)', () => {
+    for (const prose of ['Outstanding legroom', 'Standing room only', 'STANDIN', 'standin', 'understanding'])
+      expect(holdsStandInMarker(prose), prose).toBe(false);
+    expect(holdsStandInMarker(`id ${STANDIN_MARKER}-cal-1`)).toBe(true);
+  });
+
+  it.each([
+    [
+      'a www.google.com booking parameter holding an opaque value',
+      (j: Record<string, unknown>) => {
+        j.body = {
+          booking_options: [
+            {
+              book_with: 'OTA',
+              price: 573,
+              booking_request: {
+                url: 'https://www.google.com/travel/clk/f?tfs=CBwQAhooEgoyMDI3LTAzLTAyagcIARID',
+                post_data: 'u=ota',
+              },
+            },
+          ],
+        };
+      },
+      'www.google.com URL parameter tfs under url holds an opaque value',
+    ],
+    [
+      'a body URL with userinfo',
+      (j: Record<string, unknown>) => {
+        j.body = {
+          booking_options: [
+            {
+              book_with: 'OTA',
+              price: 573,
+              booking_request: { url: 'https://me:pw@www.google.com/travel/clk/f', post_data: 'u=ota' },
+            },
+          ],
+        };
+      },
+      'body URL with userinfo under url',
+    ],
+    [
+      'a search_metadata URL with a query',
+      (j: Record<string, unknown>) => {
+        j.body = {
+          ...asObject(j.body),
+          search_metadata: { request_url: 'https://www.searchapi.io/api/v1/search?engine=google_flights' },
+        };
+      },
+      'search_metadata URL with a query under request_url',
+    ],
+  ] as const)('rejects %s (r3-ts-003)', async (_name, mutate, problem) => {
+    const { root } = await runRecording();
+    rewrite(root, (f) => q(f, 'booking_token') !== null && f.status === 200, mutate);
+    expect(checkWorkedExampleTree(root, OK)).toContain(problem);
+  });
+
+  it('accepts a www.google.com booking parameter that carries a recorder placeholder (r3-ts-003)', async () => {
+    const { root } = await runRecording();
+    const step3 = loadRecorded(root, 'searchapi', '/api/v1/search').find(
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+    );
+    expect(JSON.stringify(step3?.body)).toContain('booking_token=%3Cbooking_token');
+    expect(checkWorkedExampleTree(root, OK)).toEqual([]);
+  });
+
+  it('rejects a request with a stops parameter (r3-ts-003)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'engine') === 'google_flights_calendar' && f.status === 200,
+      (j) => {
+        const request = asObject(j.request);
+        const url = new URL(String(request.url));
+        url.searchParams.set('stops', '0');
+        j.request = { ...request, url: url.href };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'searchapi: a stops parameter was sent (plan decision 24)',
+    );
+  });
+
+  it('rejects a second allowlist file for a provider (r3-ts-003)', async () => {
+    const { root } = await runRecording();
+    copyFileSync(
+      join(root, 'searchapi', 'params-2026-10-20.json'),
+      join(root, 'searchapi', 'params-2026-10-21.json'),
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain('searchapi: 2 allowlist files, expected 1');
+  });
 });
+
+function asObject(v: unknown): Record<string, unknown> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error('not an object');
+  return Object.fromEntries(Object.entries(v));
+}
 ```
 
 ```ts
@@ -6288,6 +6663,11 @@ function strings(v: unknown, key = ''): Array<{ key: string; value: string }> {
   return [];
 }
 
+/** True when text carries the test stand-ins' marker; case-sensitive, so ordinary prose never matches (r3-ts-002). */
+export function holdsStandInMarker(text: string): boolean {
+  return text.includes(STANDIN_MARKER);
+}
+
 /** A query value that looks like an opaque token rather than a placeholder or a short code (sec2-005). */
 const OPAQUE = /^[A-Za-z0-9_-]{24,}$/;
 
@@ -6321,7 +6701,7 @@ export function checkWorkedExampleTree(
       if (!p.endsWith(`@${f.session}>`)) fail(`placeholder ${p} not scoped to its session`);
   if (!opts.standInsAllowed)
     for (const f of all)
-      if (JSON.stringify([f.request, f.body]).toLowerCase().includes(STANDIN_MARKER))
+      if (holdsStandInMarker(JSON.stringify([f.request, f.body])))
         fail(`a ${f.providerId} file holds the test stand-ins' marker: stand-in data in the committed tree`);
 
   // replay distinctness (plan decision 20)
@@ -6450,7 +6830,7 @@ export function checkWorkedExampleTree(
 - [ ] **Step 4: Run to verify**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/recorded` and `pnpm --filter @gmt/api test`
-Expected: `workedExampleTree.test.ts` 6 passed; `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 20` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 133 passed (134), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
+Expected: `workedExampleTree.test.ts` 13 passed; `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 20` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 155 passed (156), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
 
 - [ ] **Step 5: Commit the check, not the gate**
 
@@ -6496,7 +6876,7 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
 
    If the run exits non-zero, do not re-run: copy the summary, including its `session:` line (printed on the failure path too), into the notes and stop for Ian. A re-run needs `--confirm-rerun` (exit 65 otherwise) and a cleaned tree (Step 1).
 
-- [ ] **Step 4: Committed-tree test.** Run `pnpm --filter @gmt/api exec vitest run test/recorded/manifest.test.ts`. Expected: 1 passed. If it fails, the manifest stays strict (ruling on prov-wp04b-r2-005); the one permitted repair is for a retried call: when the summary printed a line `<id>: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): <files>`, each listed file has the same request URL as that call's final 200 and a non-200 status, was not billed, and may be deleted whole together with its `.raw.json`. Delete only those files, record each in the PR, and run the manifest test again before committing. Any other failure: stop; do not edit or delete a recorded file (the hash test fails on any edit by design).
+- [ ] **Step 4: Committed-tree test.** Run `pnpm --filter @gmt/api exec vitest run test/recorded/manifest.test.ts`. Expected: 1 passed. If it fails, the manifest stays strict (ruling on prov-wp04b-r2-005); the one permitted repair is for a retried call: when the summary printed a line `<id>: non-final attempt file(s), unbilled, delete before commit (Task 12b step 4): <files>`, each listed file has the same request URL as that call's final 200 and a non-200 status, was not billed, and may be deleted whole together with its `.raw.json`. Delete only those files, record each in the PR, and run the manifest test again before committing. A line `<id>: <n> failed attempts, keep for review; the session cannot be committed as is` (a call whose final attempt also failed) permits nothing: keep the files and stop. Any other failure: stop; do not edit or delete a recorded file (the hash test fails on any edit by design).
 
 - [ ] **Step 5: Dashboard.** Read the remaining credits again. The drop must be **at most** the ledger line's SearchApi figure (spec §2 fact 4: the ledger may overcount, never undercount). If the drop is larger, stop: do not re-run, record a finding against the WP4 billing rule (a `no-response (network; … NOT counted …)` line names the likely call), and resync `SEARCHAPI_TRIAL_USED` with Ian. Record the ledger figure, both readings and the difference in the PR.
 
@@ -6516,7 +6896,7 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
 - [ ] **Step 7: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api test`, `pnpm --filter @gmt/providers test`, `pnpm secret-scan`
-Expected: both suites pass (the api suite includes the manifest test, 134 passed); `secret scan: clean`.
+Expected: both suites pass (the api suite includes the manifest test, 156 passed; the suite's committed-tree snapshot holds after the commit); `secret scan: clean`.
 
 - [ ] **Step 8: Commit**
 
@@ -6547,16 +6927,16 @@ None. The plan's Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, WP8, W
 
 ## 12. Definition of done
 
-Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 133 passed).
+Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 155 passed).
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/api test` | all 134 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.7 / 83.7 / 95.0 / 94.7) |
+| `pnpm --filter @gmt/api test` | all 156 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.9 / 84.5 / 95.8 / 94.9) |
 | `pnpm --filter @gmt/db test` | passes (262 at assembly), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
 | `pnpm --filter @gmt/providers test` | passes (263 at assembly, including the barrel test naming `defaultRecordedRoot`); WP4's thresholds hold |
 | `pnpm lint` | clean |
 | `pnpm -r typecheck` | clean |
-| `node scripts/check-boundaries.mjs` | exit 0: `process.env` is read only under `apps/api/src/bootstrap/`; any msw import (static, side-effect or dynamic) appears only under `packages/providers/src/testing/` among the packages' `src` trees; `@gmt/api` neither lists msw nor imports it from `apps/api/test` |
+| `node scripts/check-boundaries.mjs` | exit 0: `process.env` is read only under `apps/api/src/bootstrap/`; any msw import (static, side-effect or dynamic) appears only under `packages/providers/src/testing/` among the packages' `src` trees; `@gmt/api` neither lists msw nor imports it from any `.ts`, `.mts`, `.cts`, `.js`, `.mjs` or `.cjs` file under `apps/api/test` |
 | `pnpm secret-scan` | `secret scan: clean` |
 | `git ls-files packages/providers/fixtures \| grep -c 'raw\.json'` | `0` |
 | `pnpm record:fixtures --route LHR:JFK --month 2027-03` | exit 64, `--budget is required` |
@@ -6569,11 +6949,4 @@ The grep row's pattern is ERE with `\|` escaped only for this table; type it as 
 
 ## 13. Open questions
 
-None blocking dispatch. Plan decision 23 records this brief's earlier widenings, exit 65, the probe order, the hidden execution's status and `readOnlyLockState`. The items below are what the plan has not recorded yet; Fable folds them in.
-
-1. **Contract details from review round 2:** `recordFixtures` ctx `recordedBy` is required (no fallback signature); `RunToolOptions.recording` carries root and signature together; `RecordSummary.chain` is `{ currency: 'GBP'; step1PricePence; step2PricePence; step3Options: [{ bookWith; pricePence }] }`; `EXIT[65]` is named `spendRefused` and also covers a provider window with less room than the worst case.
-2. **Recording target (ruling on sec2-002):** the committed tree takes only the worked example's route; other routes need `--out DIR` outside the repository. `apps/api/src/tools/workedExample.ts` joins `apps/web/src/example.ts` as an application file allowed to name the worked example's airports.
-3. **Travelpayouts paging is capped** at 3 pages per tile (`TP_MAX_PAGES_PER_TILE`), and the per-run free-call check uses that worst case.
-4. **Run tools as the app's user** (sec2-003): WP12's setup docs state it, because the read-only lock probe can leave `-wal`/`-shm` side files owned by the tool's user.
-5. **`separate_tickets=1`** is the excluding value inferred from the WP5 evidence note (the parameter's default 0 shows separate tickets); WP5's equality test against the recorded allowlist keeps both packages on one value, and the first live run's file is the authority.
-6. **Failure encoding:** a recording run that threw ends `cancelled` with `errorText` `record:fixtures failed: …` (ExecutionStatus has no `failed`); one that ran to its end with required calls not as planned ends `completed` with `errorText` naming them.
+None. Plan decisions 23 and 26 record this brief's contract changes; this revision's one further contract detail is that `readOnlyLockState` returns the discriminated union `ReadOnlyLockState` (`{ state: 'absent' }` or `{ state: 'fresh' | 'stale'; holder; heartbeatAt }`), with AppLock and it sharing one freshness rule.
