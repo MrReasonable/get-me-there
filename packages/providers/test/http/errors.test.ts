@@ -375,3 +375,31 @@ describe('per-request timeout, abort, body failures and redirect', () => {
     );
   });
 });
+
+describe('http-kit owns retries: auth, quota, parse and limiter-timeout are never retried (cost minor 3)', () => {
+  beforeEach(useFakeTime);
+  afterEach(() => vi.useRealTimers());
+
+  it.each(['auth', 'quota', 'parse', 'limiter-timeout'] as const)(
+    'an adapter classifier returning %s with retryable: true still makes one attempt',
+    async (kind) => {
+      const { kit, budget } = makeKit({
+        overrides: {
+          searchapi: {
+            classifyError: (f) =>
+              new ProviderError({
+                kind,
+                retryable: true,
+                httpStatus: f.status,
+                message: `searchapi: ${kind}`,
+              }),
+          },
+        },
+      });
+      reply(503);
+      const err = asProviderError(await driveError(kit.request(req({ url: SEARCH }))));
+      expect(err).toMatchObject({ kind, retryable: false });
+      expect(budget.count('fetch')).toBe(1);
+    },
+  );
+});

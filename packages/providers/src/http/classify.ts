@@ -103,6 +103,14 @@ export interface FinishContext {
   secondsToHourRefresh: () => number;
 }
 
+/** Kinds that are never retried whatever a classifier says (spec §5.2: auth, quota, parse; the limiter's own deadline). */
+const NEVER_RETRIED: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>([
+  'auth',
+  'quota',
+  'parse',
+  'limiter-timeout',
+]);
+
 /**
  * The post-step for whichever error classification produced (adapter or default), spec §5.2 rev 11:
  * the message and any reason are re-scrubbed and URL-stripped (an adapter may have copied vendor text or a key);
@@ -113,15 +121,17 @@ export interface FinishContext {
 export function finishError(err: ProviderError, c: FinishContext): ProviderError {
   const clean = (s: string): string => stripUrlsInText(scrubSecrets(s, c.secrets));
   const message = clean(err.message);
+  // why: http-kit is the single owner of retries; an adapter classifier cannot make these kinds retryable (cost minor 3).
+  const retryable = err.retryable && !NEVER_RETRIED.has(err.kind);
   const base = {
     kind: err.kind,
-    retryable: err.retryable,
+    retryable,
     providerId: c.facts.providerId,
     ...(err.httpStatus === undefined ? {} : { httpStatus: err.httpStatus }),
     ...(err.reason === undefined ? {} : { reason: clean(err.reason) }),
     ...(err.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: err.retryAfterSeconds }),
   };
-  if (!err.retryable) return new ProviderError({ ...base, message });
+  if (!retryable) return new ProviderError({ ...base, message });
   const is429 = c.facts.status === 429;
   const wait =
     parseRetryAfter(c.facts.headers.get('retry-after'), c.now) ??
