@@ -163,7 +163,7 @@ export function withContentHash<T extends object>(file: T): T & { contentSha256:
 
 Signature checks: WP4's verifier accepts any non-blank `recordedBy`, so `checkWorkedExampleTree` (Task 12a) is the only check that requires `RECORDED_BY`.
 
-`scripts/secret-scan.mjs` (WP0) is consumed as written: it scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`.
+`scripts/secret-scan.mjs` (WP0, extended in Task 11): it scans `packages/providers/fixtures` under its cwd, takes values from `TRAVELPAYOUTS_TOKEN`, `SEARCHAPI_KEY`, `SMTP_PASS` and `APP_BASIC_AUTH_PASS` (≥ 8 chars), and rejects `api_key=…`, `token=…16+`, `Bearer …16+` and the literal `X-Access-Token`. Task 11 makes it also match each value's base64, base64url and URL-encoded forms, and print `secret scan: checked N configured secret value(s) and 4 shape rules`, with a warning on stderr when N is 0, so the real-value gate cannot pass silently with nothing loaded (sec minor 2).
 
 ## 5. Interfaces produced
 
@@ -433,6 +433,7 @@ The metro comes from the airports table, which the tool seeds after migration wh
 - `apps/api/package.json`: script `tool` (Task 9). No new dependency, no msw.
 - root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9); `engines.node` is `>=22.9`, the first Node with `--env-file-if-exists` (arch M-10).
 - `scripts/check-boundaries.mjs`: the msw rules and the `process.env` reader list (Task 9).
+- `scripts/secret-scan.mjs`: encoded secret forms and the checked-values line (Task 11, sec minor 2).
 
 ## 10. Tasks
 
@@ -6839,7 +6840,7 @@ git add apps/api/test && git commit -m "wp04b: allowlists load through WP4, list
 
 ### Task 11: Sentinel secret scan and the raw-body ignore rule
 
-**Files:** create `apps/api/test/security/sentinel.test.ts`.
+**Files:** create `apps/api/test/security/sentinel.test.ts`; modify `scripts/secret-scan.mjs` (encoded forms and the count line, sec minor 2).
 
 **Interfaces:** consumes `scripts/secret-scan.mjs`, `runRecording`, `git check-ignore`.
 
@@ -6852,7 +6853,7 @@ git add apps/api/test && git commit -m "wp04b: allowlists load through WP4, list
 // recorder with sentinel keys, (b) that tree with a planted sentinel, (c) the committed tree — which proves only the
 // shape rules there, since CI has no real keys; the real-value scan is the operator gate of Task 12b (sec-004).
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -6869,14 +6870,15 @@ const SENTINEL_ENV = {
   APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
 };
 
-function scan(cwd: string) {
-  return spawnSync(process.execPath, [SCAN], { cwd, env: SENTINEL_ENV, encoding: 'utf8', timeout: 30_000 });
+function scan(cwd: string, env: Record<string, string> = SENTINEL_ENV) {
+  return spawnSync(process.execPath, [SCAN], { cwd, env, encoding: 'utf8', timeout: 30_000 });
 }
 
 describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
   it('a tree recorded with sentinel keys, raw bodies included, is clean; planting a sentinel makes the scan fail without printing it', async () => {
     const run = await runRecording();
     const clean = scan(run.repo);
+    expect(clean.stdout).toContain('secret scan: checked 4 configured secret value(s)');
     expect(clean.stdout).toContain('secret scan: clean');
     expect(clean.status).toBe(0);
     const plantDir = join(run.root, 'planted');
@@ -6886,6 +6888,31 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
     expect(dirty.status).toBe(1);
     expect(dirty.stderr).toContain('secret value found');
     expect(dirty.stderr).not.toContain(SENTINEL_SA);
+  });
+
+  it('an encoded form of a configured secret (base64, base64url, URL-encoded) also fails the scan (sec minor 2)', async () => {
+    const run = await runRecording();
+    const forms = [
+      Buffer.from(SENTINEL_SA, 'utf8').toString('base64'),
+      Buffer.from(SENTINEL_TP, 'utf8').toString('base64url'),
+      encodeURIComponent(`${SENTINEL_AUTH}/x`),
+    ];
+    for (const [i, form] of forms.entries()) {
+      const dir = join(run.root, `encoded-${i}`);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'p.json'), JSON.stringify({ leaked: form }));
+      const r = scan(run.repo);
+      expect(r.status, form).toBe(1);
+      expect(r.stderr).not.toContain(form);
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it('with no secret loaded it still passes, but says that only the shape rules ran (sec minor 2)', () => {
+    const r = scan(REPO, { PATH: process.env.PATH ?? '' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('secret scan: checked 0 configured secret value(s)');
+    expect(r.stderr).toContain('no configured secret value is loaded');
   });
 
   it('the committed fixture tree passes the shape rules (the real-value scan is the operator gate in Task 12b)', () => {
@@ -6906,14 +6933,41 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 The scan script and the ignore rule exist, so the test passes on its first run. Prove the plant branch is not vacuous by breaking the scan, not the test: change `const roots = ['packages/providers/fixtures'];` in `scripts/secret-scan.mjs` to `const roots = ['packages/providers/fixtures-missing'];` and run `pnpm --filter @gmt/api exec vitest run test/security/sentinel.test.ts`.
-Expected: FAIL, 1 failed | 2 passed, with `AssertionError: expected +0 to be 1 // Object.is equality` (the planted sentinel is not found). Revert the change.
+Expected: the planted-sentinel test fails with `AssertionError: expected +0 to be 1 // Object.is equality` (the planted sentinel is not found). Revert the change. Before Step 3, the count-line, encoded-form and nothing-loaded tests fail too (3 failed | 2 passed): the script prints no count and matches only the raw value.
 
-- [ ] **Step 3: Implement** — no production change.
+- [ ] **Step 3: Implement** — in `scripts/secret-scan.mjs`, after `secretValues`:
+
+```js
+// why: a vendor may echo a key encoded; the recorder refuses these forms in-process and this is the second layer
+// (WP4b sec minor 2). The values themselves are never printed.
+const secretForms = [
+  ...new Set(
+    secretValues.flatMap((v) => [
+      v,
+      Buffer.from(v, 'utf8').toString('base64'),
+      Buffer.from(v, 'utf8').toString('base64url'),
+      encodeURIComponent(v),
+    ]),
+  ),
+];
+```
+
+loop over `secretForms` instead of `secretValues` in the per-file check, and before the final exit:
+
+```js
+console.log(
+  `secret scan: checked ${secretValues.length} configured secret value(s) and ${shapes.length} shape rules`,
+);
+if (secretValues.length === 0)
+  console.error(
+    'secret scan: warning: no configured secret value is loaded, so only the shape rules ran; the real-value gate is node --env-file=.env scripts/secret-scan.mjs',
+  );
+```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/security/sentinel.test.ts`
-Expected: 3 passed.
+Expected: 5 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -7473,8 +7527,8 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
 
 - [ ] **Step 5: Dashboard.** Read the remaining credits again. The drop must be **at most** the ledger line's SearchApi figure (spec §2 fact 4: the ledger may overcount, never undercount). If the drop is larger, stop: do not re-run, record a finding against the WP4 billing rule (a `no-response (network; … NOT counted …)` line names the likely call), and resync `SEARCHAPI_TRIAL_USED` with Ian. Record the ledger figure, both readings and the difference in the PR.
 
-- [ ] **Step 6: Manual review of every recorded file before `git add`.** Run `git status --porcelain packages/providers/fixtures`; no `.raw.json` may appear (if one does, the ignore rule is broken: stop). Then open each `.json` under `fixtures/recorded/` and check:
-   - [ ] No key or token value: `node --env-file=.env scripts/secret-scan.mjs` prints `secret scan: clean` (Node loads the real values into the scan's environment without printing them). This is the real-value gate; CI cannot run it.
+- [ ] **Step 6: Manual review of every recorded file before `git add`.** Run `git status --porcelain packages/providers/fixtures`; no `.raw.json` may appear (if one does, the ignore rule is broken: stop). Stage with `git add packages/providers/fixtures/recorded`, which honours the ignore rule, and never with `-f`: the `.raw.json` side files hold unredacted vendor bodies (opaque tokens, booking links). An `--out` tree outside any repository has no ignore rule, so keep such a tree private (sec minor 4). Then open each `.json` under `fixtures/recorded/` and check:
+   - [ ] No key or token value: `node --env-file=.env scripts/secret-scan.mjs` prints `secret scan: checked 2 configured secret value(s) …` (or more, with SMTP and basic auth configured; never 0) and `secret scan: clean` (Node loads the real values into the scan's environment without printing them). This is the real-value gate; CI cannot run it.
    - [ ] `request.url` keeps its query; it has no `api_key` or `token` parameter, no userinfo and no credential value. `request.headers` has no `authorization` or `x-access-token`.
    - [ ] `search_metadata` URL fields (`request_url`, `json_endpoint`, …) keep their keys, and every such URL has no `?` and no `user:pass@`.
    - [ ] Every `departure_token` and `booking_token`, in request URLs and in bodies, has the form `<departure_token:n@<session>>` / `<booking_token:n@<session>>`, where `<session>` equals the file's `session`, the same in every file; the step-2 and step-3 request placeholders appear in the previous step's body.

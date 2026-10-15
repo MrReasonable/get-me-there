@@ -3,7 +3,7 @@
 // recorder with sentinel keys, (b) that tree with a planted sentinel, (c) the committed tree — which proves only the
 // shape rules there, since CI has no real keys; the real-value scan is the operator gate of Task 12b (sec-004).
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -20,14 +20,15 @@ const SENTINEL_ENV = {
   APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
 };
 
-function scan(cwd: string) {
-  return spawnSync(process.execPath, [SCAN], { cwd, env: SENTINEL_ENV, encoding: 'utf8', timeout: 30_000 });
+function scan(cwd: string, env: Record<string, string> = SENTINEL_ENV) {
+  return spawnSync(process.execPath, [SCAN], { cwd, env, encoding: 'utf8', timeout: 30_000 });
 }
 
 describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
   it('a tree recorded with sentinel keys, raw bodies included, is clean; planting a sentinel makes the scan fail without printing it', async () => {
     const run = await runRecording();
     const clean = scan(run.repo);
+    expect(clean.stdout).toContain('secret scan: checked 4 configured secret value(s)');
     expect(clean.stdout).toContain('secret scan: clean');
     expect(clean.status).toBe(0);
     const plantDir = join(run.root, 'planted');
@@ -37,6 +38,31 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
     expect(dirty.status).toBe(1);
     expect(dirty.stderr).toContain('secret value found');
     expect(dirty.stderr).not.toContain(SENTINEL_SA);
+  });
+
+  it('an encoded form of a configured secret (base64, base64url, URL-encoded) also fails the scan (sec minor 2)', async () => {
+    const run = await runRecording();
+    const forms = [
+      Buffer.from(SENTINEL_SA, 'utf8').toString('base64'),
+      Buffer.from(SENTINEL_TP, 'utf8').toString('base64url'),
+      encodeURIComponent(`${SENTINEL_AUTH}/x`),
+    ];
+    for (const [i, form] of forms.entries()) {
+      const dir = join(run.root, `encoded-${i}`);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'p.json'), JSON.stringify({ leaked: form }));
+      const r = scan(run.repo);
+      expect(r.status, form).toBe(1);
+      expect(r.stderr).not.toContain(form);
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it('with no secret loaded it still passes, but says that only the shape rules ran (sec minor 2)', () => {
+    const r = scan(REPO, { PATH: process.env.PATH ?? '' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('secret scan: checked 0 configured secret value(s)');
+    expect(r.stderr).toContain('no configured secret value is loaded');
   });
 
   it('the committed fixture tree passes the shape rules (the real-value scan is the operator gate in Task 12b)', () => {
