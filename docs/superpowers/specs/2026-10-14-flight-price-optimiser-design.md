@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 12.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 13.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -527,8 +527,10 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   `data/`, `*.db*` and `backups/`.
 - **Recorder**: `fixtures/recorded/<provider>/<endpoint>/<yyyy-mm-dd>-<sha>.json`;
   credentials fail closed; `search_metadata` URLs stripped; **opaque vendor
-  tokens are replaced by deterministic placeholders** (`<departure_token:0>`)
-  consistent between a response and the next request so chains replay.
+  tokens are replaced by deterministic placeholders** of the form
+  `<key:n@session>` (key = the token's field name, n = its ordinal within the
+  recording session) consistent between a response and the next request so
+  chains replay.
 
 ### 5.4 SearchApi itinerary flow
 
@@ -1610,6 +1612,12 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 13: placeholder format (2026-10-15)
+
+§5.3: recorder placeholders are `<key:n@session>`, matching the plan's
+decision 17 and the http-kit implementation; the earlier `<departure_token:0>`
+example lacked the session scope.
 
 ### Revision 12: second-pass clarifications (2026-10-14)
 

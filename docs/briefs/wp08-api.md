@@ -3271,11 +3271,10 @@ export function seeder(ports: Ports) {
         outbound, inbound, outboundMinutes: 480, inboundMinutes: 480, stopsOut: s.stopsOut ?? 0, stopsIn: 0, layovers: [], airportChange: false, marketingCarriers: ['BA'],
       };
       repos.itineraries.upsertItinerary(itinerary);
-      const offerId = repos.itineraries.upsertOffer({ itineraryHash: s.hash, providerId, seller: s.seller ?? 'BA', cabin });
       const baggage = s.baggage === undefined ? { checkedBags: 1 } : s.baggage;
       const suppliedFields: SuppliedField[] = ['segments', 'segmentTimes', 'segmentCabins', 'selfTransfer', 'seller', 'price', ...(baggage === null ? [] : (['baggage'] as const))];
-      const observationId = repos.itineraries.insertObservation({
-        offerId, executionId: id(name), pricePence: s.pricePence, priceNativeMinor: s.pricePence, currencyNative: 'GBP', fx: { converted: false },
+      const { offerId, observationId } = repos.itineraries.recordObservation({ itineraryHash: s.hash, providerId, seller: s.seller ?? 'BA', cabin }, {
+        executionId: id(name), pricePence: s.pricePence, priceNativeMinor: s.pricePence, currencyNative: 'GBP', fx: { converted: false },
         taxesIncluded: true, selfTransfer: false, segmentCabins: [...outbound, ...inbound].map(() => cabin), baggage, fareConditions: null,
         booking: { kind: 'none' }, bookingExpiresAt: null, suppliedFields, partialExpansion: false,
         provenance: { providerId, sourceKind: s.sourceKind ?? 'synthetic', fetchedAt: s.fetchedAt, maxAgeHours: s.maxAgeHours ?? 0, fx: { converted: false }, pointOfSale: 'GB', cabin },

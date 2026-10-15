@@ -151,7 +151,7 @@ export interface CalendarPriceInsert { providerId; sourceKind; cabin; cell: Cell
 export interface CalendarPriceRow extends CalendarPriceInsert { id: number; executionId: string; provenance: Provenance }
 export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; fetchedBy(executionId): CalendarPriceRow[] /* reused excluded */; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; /* … */ }
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
-export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; upsertOffer(offer: Offer): number; insertObservation(obs: Omit<Observation, 'id'>): number; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; /* … */ }
+export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; recordObservation(offer: Offer, obs: Omit<Observation, 'id' | 'offerId'>): { offerId: number; observationId: number }; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; /* … */ }
 export class AlertsRepo { rules(definitionId?: string): AlertRule[]; get(id): AlertRule | null; create(input: AlertRuleInput): AlertRule; update(id, patch: Partial<AlertRuleInput>): AlertRule; softDelete(id): void /* alert_rules.deleted_at; events are kept */; events(filter: { ruleId?: string; definitionId?: string; limit: number }): AlertEvent[]; priorFirings(ruleId, identityKeys: string[], since: IsoDateTime): PriorFiring[]; insertEvent(e: Omit<AlertEvent, 'id'>): number }
 export class AirportsRepo { upsertAll(dataset: AirportsDataset): void; /* … */ }
 
@@ -468,9 +468,8 @@ export function seedObservation(f: Fixture, executionId: string, o: ObservationS
   };
   f.repos.itineraries.upsertItinerary(it);
   const providerId: ProviderId = o.synthetic === true ? 'fixture' : 'searchapi';
-  const offerId = f.repos.itineraries.upsertOffer({ itineraryHash: hash, providerId, seller: o.seller ?? 'British Airways', cabin: 'economy' });
-  const observationId = f.repos.itineraries.insertObservation({
-    offerId, executionId,
+  const { offerId, observationId } = f.repos.itineraries.recordObservation({ itineraryHash: hash, providerId, seller: o.seller ?? 'British Airways', cabin: 'economy' }, {
+    executionId,
     provenance: { providerId, sourceKind: o.synthetic === true ? 'synthetic' : 'scraped-search', fetchedAt: o.fetchedAt ?? f.clock.now(), maxAgeHours: 0, fx: { converted: false }, pointOfSale: 'GB', cabin: 'economy' },
     pricePence: o.pricePence, priceNativeMinor: o.pricePence, currencyNative: 'GBP', fx: { converted: false }, taxesIncluded: true, selfTransfer: false,
     segmentCabins: ['economy', 'economy'], baggage: { cabinBag: 'included', checkedBags: 1 }, fareConditions: null,
