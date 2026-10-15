@@ -5855,7 +5855,7 @@ export function createScheduler(hooks: SchedulerHooks, log: Logger): Scheduler {
 }
 ```
 
-`src/resume.ts` — add (importing `type Execution`, `type ExecutionStatus`, `type IsoDateTime` from `@gmt/core`, and `DEFAULT_DISCOVERY_REFRESH_HOURS`, `refreshHoursOf` from `./stages/reuse.js`):
+`src/resume.ts` — add (importing `DEFAULT_DISCOVERY_REFRESH_HOURS`, `type Execution`, `type ExecutionStatus`, `type IsoDateTime` from `@gmt/core`, and `refreshHoursOf` from `./stages/reuse.js`):
 
 ```ts
 const PAUSED: readonly ExecutionStatus[] = ['paused_budget', 'paused_error'];
