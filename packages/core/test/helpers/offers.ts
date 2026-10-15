@@ -2,6 +2,7 @@ import type { NormaliseDeps } from '../../src/normalise/itinerary.js';
 import type { RawOffer, RawSegment } from '../../src/ports/provider.js';
 import type { CellKey } from '../../src/types/definition.js';
 import { asIata, asIsoDate } from '../../src/types/ids.js';
+import { key } from './space.js';
 
 /** Worked-example zones plus two clearly synthetic connection airports (AAA, BBB). */
 const ZONES: Record<string, string> = {
@@ -12,9 +13,6 @@ const ZONES: Record<string, string> = {
   AAA: 'Atlantic/Reykjavik',
   BBB: 'Atlantic/Reykjavik',
 };
-
-/** WP0's brand mint, so a fixture cannot hold a code the real schema rejects. */
-export const iata = asIata;
 
 export function deps(over: Partial<NormaliseDeps> = {}): NormaliseDeps {
   return {
@@ -39,13 +37,13 @@ export function seg(
 export function offer(over: Partial<RawOffer> = {}): RawOffer {
   return {
     outbound: [
-      seg({ from: iata('LHR'), to: iata('JFK'), depart: '2027-03-14T10:05', arrive: '2027-03-14T13:05' }),
+      seg({ from: asIata('LHR'), to: asIata('JFK'), depart: '2027-03-14T10:05', arrive: '2027-03-14T13:05' }),
     ],
     inbound: [
       seg({
         flightNumber: '939',
-        from: iata('JFK'),
-        to: iata('LHR'),
+        from: asIata('JFK'),
+        to: asIata('LHR'),
         depart: '2027-03-28T18:30',
         arrive: '2027-03-29T06:40',
       }),
@@ -59,21 +57,6 @@ export function offer(over: Partial<RawOffer> = {}): RawOffer {
   };
 }
 
-/** A cell from plain strings, minted through WP0's helpers. */
-export function cellKey(
-  origin: string,
-  destination: string,
-  departureDate: string,
-  returnDate: string,
-): CellKey {
-  return {
-    origin: asIata(origin),
-    destination: asIata(destination),
-    departureDate: asIsoDate(departureDate),
-    returnDate: asIsoDate(returnDate),
-  };
-}
-
 /**
  * The cell a raw offer was returned for, read from its first outbound segment, last outbound
  * segment and first inbound segment as written. Tests that check the cell guard pass a different
@@ -83,7 +66,7 @@ export function cellOf(raw: RawOffer): CellKey {
   const first = raw.outbound[0];
   const last = raw.outbound.at(-1);
   const back = raw.inbound[0];
-  return cellKey(
+  return key(
     first?.from ?? 'LHR',
     last?.to ?? 'JFK',
     first?.depart.slice(0, 10) ?? '2027-03-14',

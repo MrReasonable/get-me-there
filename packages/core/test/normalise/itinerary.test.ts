@@ -3,8 +3,8 @@ import { NormalisationError } from '../../src/errors.js';
 import { MAX_POST_DATA_LENGTH, type NormaliseResult, normaliseOffer } from '../../src/normalise/itinerary.js';
 import type { RawOffer } from '../../src/ports/provider.js';
 import type { CellKey } from '../../src/types/definition.js';
-import { asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
-import { cellOf, deps, iata, offer, seg } from '../helpers/offers.js';
+import { asIata, asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
+import { cellOf, deps, offer, seg } from '../helpers/offers.js';
 
 function ok(raw: RawOffer, d = deps(), cell: CellKey = cellOf(raw)): Extract<NormaliseResult, { ok: true }> {
   const r = normaliseOffer(raw, cell, d);
@@ -27,8 +27,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
       raw.outbound = [
         seg({
           flightNumber: f,
-          from: iata('LHR'),
-          to: iata('JFK'),
+          from: asIata('LHR'),
+          to: asIata('JFK'),
           depart: '2027-03-14T10:05',
           arrive: '2027-03-14T13:05',
         }),
@@ -42,8 +42,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
       outbound: [
         seg({
           timeKind: 'utc',
-          from: iata('LHR'),
-          to: iata('JFK'),
+          from: asIata('LHR'),
+          to: asIata('JFK'),
           depart: '2027-03-14T10:05:00Z',
           arrive: '2027-03-14T17:05:00Z',
         }),
@@ -52,8 +52,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
         seg({
           timeKind: 'utc',
           flightNumber: '939',
-          from: iata('JFK'),
-          to: iata('LHR'),
+          from: asIata('JFK'),
+          to: asIata('LHR'),
           depart: '2027-03-28T22:30:00Z',
           arrive: '2027-03-29T05:40:00Z',
         }),
@@ -63,8 +63,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
       outbound: [
         seg({
           timeKind: 'offset',
-          from: iata('LHR'),
-          to: iata('JFK'),
+          from: asIata('LHR'),
+          to: asIata('JFK'),
           depart: '2027-03-14T10:05:00+00:00',
           arrive: '2027-03-14T13:05:00-04:00',
         }),
@@ -73,8 +73,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
         seg({
           timeKind: 'offset',
           flightNumber: '939',
-          from: iata('JFK'),
-          to: iata('LHR'),
+          from: asIata('JFK'),
+          to: asIata('LHR'),
           depart: '2027-03-28T18:30:00-04:00',
           arrive: '2027-03-29T06:40:00+01:00',
         }),
@@ -105,8 +105,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
         operatingCarrier: 'BA',
         durationMinutes: 420,
         aircraft: '77W',
-        from: iata('LHR'),
-        to: iata('JFK'),
+        from: asIata('LHR'),
+        to: asIata('JFK'),
         depart: '2027-03-14T10:05',
         arrive: '2027-03-14T13:05',
       }),
@@ -123,8 +123,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     raw.outbound = [
       seg({
         timeKind: 'utc',
-        from: iata('LHR'),
-        to: iata('ZZZ'),
+        from: asIata('LHR'),
+        to: asIata('ZZZ'),
         depart: '2027-03-14T10:05:00Z',
         arrive: '2027-03-14T17:05:00Z',
       }),
@@ -137,8 +137,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     raw.outbound = [
       seg({
         marketingCarrier: 'VIR',
-        from: iata('LHR'),
-        to: iata('JFK'),
+        from: asIata('LHR'),
+        to: asIata('JFK'),
         depart: '2027-03-14T10:05',
         arrive: '2027-03-14T13:05',
       }),
@@ -148,8 +148,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     op.outbound = [
       seg({
         operatingCarrier: 'Virgin Atlantic',
-        from: iata('LHR'),
-        to: iata('JFK'),
+        from: asIata('LHR'),
+        to: asIata('JFK'),
         depart: '2027-03-14T10:05',
         arrive: '2027-03-14T13:05',
       }),
@@ -163,15 +163,15 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     expect(reason(offer(), deps(), { ...asked, departureDate: asIsoDate('2027-03-13') })).toBe(
       'cell-mismatch',
     );
-    expect(reason(offer(), deps(), { ...asked, origin: iata('LGW') })).toBe('cell-mismatch');
-    expect(reason(offer(), deps(), { ...asked, destination: iata('EWR') })).toBe('cell-mismatch');
+    expect(reason(offer(), deps(), { ...asked, origin: asIata('LGW') })).toBe('cell-mismatch');
+    expect(reason(offer(), deps(), { ...asked, destination: asIata('EWR') })).toBe('cell-mismatch');
     // The inbound must leave the cell's destination and land at its origin (review po-004, prov-004).
     const fromEwr = offer();
     fromEwr.inbound = [
       seg({
         flightNumber: '939',
-        from: iata('EWR'),
-        to: iata('LHR'),
+        from: asIata('EWR'),
+        to: asIata('LHR'),
         depart: '2027-03-28T18:30',
         arrive: '2027-03-29T06:40',
       }),
@@ -181,8 +181,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     toLgw.inbound = [
       seg({
         flightNumber: '939',
-        from: iata('JFK'),
-        to: iata('LGW'),
+        from: asIata('JFK'),
+        to: asIata('LGW'),
         depart: '2027-03-28T18:30',
         arrive: '2027-03-29T06:40',
       }),
@@ -215,8 +215,8 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
         offer({
           outbound: [
             seg({
-              from: iata('LHR'),
-              to: iata('JFK'),
+              from: asIata('LHR'),
+              to: asIata('JFK'),
               depart: '2027-03-14T10:05',
               arrive: '2027-03-14T05:00',
             }),
@@ -229,15 +229,15 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
         offer({
           outbound: [
             seg({
-              from: iata('LHR'),
-              to: iata('AAA'),
+              from: asIata('LHR'),
+              to: asIata('AAA'),
               depart: '2027-03-14T10:00',
               arrive: '2027-03-14T13:00',
             }),
             seg({
               flightNumber: '1',
-              from: iata('AAA'),
-              to: iata('JFK'),
+              from: asIata('AAA'),
+              to: asIata('JFK'),
               depart: '2027-03-14T12:00',
               arrive: '2027-03-14T15:00',
             }),
@@ -283,16 +283,16 @@ describe('normaliseOffer: derived itinerary fields', () => {
         seg({
           marketingCarrier: 'VS',
           flightNumber: '7',
-          from: iata('LHR'),
-          to: iata('AAA'),
+          from: asIata('LHR'),
+          to: asIata('AAA'),
           depart: '2027-03-14T08:00',
           arrive: '2027-03-14T11:00',
         }),
         seg({
           marketingCarrier: '4U',
           flightNumber: '8',
-          from: iata('AAA'),
-          to: iata('JFK'),
+          from: asIata('AAA'),
+          to: asIata('JFK'),
           depart: '2027-03-14T12:00',
           arrive: '2027-03-14T15:00',
         }),
@@ -304,7 +304,12 @@ describe('normaliseOffer: derived itinerary fields', () => {
   it('a segment of zero length is bad-local-time; a raw "none" booking stays exactly { kind: "none" }', () => {
     const raw = offer({
       outbound: [
-        seg({ from: iata('LHR'), to: iata('JFK'), depart: '2027-03-14T10:05', arrive: '2027-03-14T05:05' }),
+        seg({
+          from: asIata('LHR'),
+          to: asIata('JFK'),
+          depart: '2027-03-14T10:05',
+          arrive: '2027-03-14T05:05',
+        }),
       ],
     });
     expect(reason(raw)).toBe('bad-local-time'); // lands 09:05Z, before it leaves at 10:05Z
@@ -312,8 +317,8 @@ describe('normaliseOffer: derived itinerary fields', () => {
       outbound: [
         seg({
           timeKind: 'utc',
-          from: iata('LHR'),
-          to: iata('JFK'),
+          from: asIata('LHR'),
+          to: asIata('JFK'),
           depart: '2027-03-14T10:05Z',
           arrive: '2027-03-14T10:05Z',
         }),
@@ -334,8 +339,8 @@ describe('normaliseOffer: derived itinerary fields', () => {
         operatingCarrier: 'ba',
         durationMinutes: 420,
         aircraft: '77W',
-        from: iata('LHR'),
-        to: iata('JFK'),
+        from: asIata('LHR'),
+        to: asIata('JFK'),
         depart: '2027-03-14T10:05',
         arrive: '2027-03-14T13:05',
       }),
@@ -353,16 +358,16 @@ describe('normaliseOffer: derived itinerary fields', () => {
         seg({
           marketingCarrier: '4U',
           flightNumber: '4U 8888',
-          from: iata('LHR'),
-          to: iata('AAA'),
+          from: asIata('LHR'),
+          to: asIata('AAA'),
           depart: '2027-03-14T20:00',
           arrive: '2027-03-14T23:10',
         }),
         seg({
           marketingCarrier: 'VS',
           flightNumber: '1',
-          from: iata('AAA'),
-          to: iata('JFK'),
+          from: asIata('AAA'),
+          to: asIata('JFK'),
           depart: '2027-03-15T06:20',
           arrive: '2027-03-15T08:00',
         }),
@@ -370,15 +375,15 @@ describe('normaliseOffer: derived itinerary fields', () => {
       inbound: [
         seg({
           flightNumber: '2',
-          from: iata('JFK'),
-          to: iata('AAA'),
+          from: asIata('JFK'),
+          to: asIata('AAA'),
           depart: '2027-03-28T10:00',
           arrive: '2027-03-28T19:00',
         }),
         seg({
           flightNumber: '3',
-          from: iata('BBB'),
-          to: iata('LHR'),
+          from: asIata('BBB'),
+          to: asIata('LHR'),
           depart: '2027-03-28T21:00',
           arrive: '2027-03-29T00:10',
         }),
@@ -407,8 +412,14 @@ describe('normaliseOffer: derived itinerary fields', () => {
   ])('overnight boundary: arrive %s, depart %s → %s', (arrive, depart, overnight) => {
     const raw = offer({
       outbound: [
-        seg({ from: iata('LHR'), to: iata('AAA'), depart: '2027-03-13T20:00', arrive }),
-        seg({ flightNumber: '1', from: iata('AAA'), to: iata('JFK'), depart, arrive: '2027-03-15T12:00' }),
+        seg({ from: asIata('LHR'), to: asIata('AAA'), depart: '2027-03-13T20:00', arrive }),
+        seg({
+          flightNumber: '1',
+          from: asIata('AAA'),
+          to: asIata('JFK'),
+          depart,
+          arrive: '2027-03-15T12:00',
+        }),
       ],
     });
     expect(ok(raw).itinerary.layovers[0]?.overnight).toBe(overnight);
@@ -419,8 +430,8 @@ describe('normaliseOffer: derived itinerary fields', () => {
     all.outbound = [
       seg({
         cabin: 'premium_economy',
-        from: iata('LHR'),
-        to: iata('JFK'),
+        from: asIata('LHR'),
+        to: asIata('JFK'),
         depart: '2027-03-14T10:05',
         arrive: '2027-03-14T13:05',
       }),
@@ -429,8 +440,8 @@ describe('normaliseOffer: derived itinerary fields', () => {
       seg({
         cabin: 'economy',
         flightNumber: '939',
-        from: iata('JFK'),
-        to: iata('LHR'),
+        from: asIata('JFK'),
+        to: asIata('LHR'),
         depart: '2027-03-28T18:30',
         arrive: '2027-03-29T06:40',
       }),
@@ -440,8 +451,8 @@ describe('normaliseOffer: derived itinerary fields', () => {
     some.outbound = [
       seg({
         cabin: 'economy',
-        from: iata('LHR'),
-        to: iata('JFK'),
+        from: asIata('LHR'),
+        to: asIata('JFK'),
         depart: '2027-03-14T10:05',
         arrive: '2027-03-14T13:05',
       }),

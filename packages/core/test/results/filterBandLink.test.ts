@@ -6,8 +6,8 @@ import { resultRowKey } from '../../src/results/rowKey.js';
 import { SEARCH_LINK_LABEL, searchLinkFor } from '../../src/results/searchLink.js';
 import type { ResultFilters, ResultRow } from '../../src/results/types.js';
 import { asIata } from '../../src/types/ids.js';
-import { cellKey } from '../helpers/offers.js';
 import { calendarRow, row } from '../helpers/rows.js';
+import { key } from '../helpers/space.js';
 
 const v = row({
   itineraryHash: 'v',
@@ -117,7 +117,7 @@ describe('bandCheapest (spec §6.5, 6h bands)', () => {
 });
 
 describe('searchLinkFor (spec §6.9)', () => {
-  const cell = cellKey('LHR', 'JFK', '2027-03-14', '2027-03-28');
+  const cell = key('LHR', 'JFK', '2027-03-14', '2027-03-28');
 
   it('Travelpayouts rows link to an Aviasales search with airports, dates, cabin and one adult', () => {
     const link = searchLinkFor('travelpayouts', cell, 'economy');

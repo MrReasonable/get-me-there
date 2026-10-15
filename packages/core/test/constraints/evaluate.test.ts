@@ -4,6 +4,7 @@ import { CONSTRAINT_LABELS, CONSTRAINT_NAMES } from '../../src/constraints/label
 import { unverifiedNames, verdictClass } from '../../src/constraints/verdictClass.js';
 import { normaliseOffer } from '../../src/normalise/itinerary.js';
 import type { Constraints } from '../../src/types/definition.js';
+import { asIata } from '../../src/types/ids.js';
 import type {
   ConstraintName,
   NormalisedItinerary,
@@ -12,7 +13,7 @@ import type {
   Verdict,
 } from '../../src/types/itinerary.js';
 import type { Cabin } from '../../src/types/provenance.js';
-import { cellOf, deps, iata, offer, seg } from '../helpers/offers.js';
+import { cellOf, deps, offer, seg } from '../helpers/offers.js';
 
 /**
  * One-stop out via AAA (overnight, 430 min), one-stop back changing AAA→BBB (120 min), VS and 4U.
@@ -25,15 +26,15 @@ function itinerary(): NormalisedItinerary {
       seg({
         marketingCarrier: '4U',
         flightNumber: '8888',
-        from: iata('LHR'),
-        to: iata('AAA'),
+        from: asIata('LHR'),
+        to: asIata('AAA'),
         depart: '2027-03-14T20:00',
         arrive: '2027-03-14T23:10',
       }),
       seg({
         flightNumber: '1',
-        from: iata('AAA'),
-        to: iata('JFK'),
+        from: asIata('AAA'),
+        to: asIata('JFK'),
         depart: '2027-03-15T06:20',
         arrive: '2027-03-15T08:00',
       }),
@@ -41,15 +42,15 @@ function itinerary(): NormalisedItinerary {
     inbound: [
       seg({
         flightNumber: '2',
-        from: iata('JFK'),
-        to: iata('AAA'),
+        from: asIata('JFK'),
+        to: asIata('AAA'),
         depart: '2027-03-28T10:00',
         arrive: '2027-03-28T19:00',
       }),
       seg({
         flightNumber: '3',
-        from: iata('BBB'),
-        to: iata('LHR'),
+        from: asIata('BBB'),
+        to: asIata('LHR'),
         depart: '2027-03-28T21:00',
         arrive: '2027-03-29T00:10',
       }),

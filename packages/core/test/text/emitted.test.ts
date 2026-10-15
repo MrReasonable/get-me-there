@@ -6,9 +6,10 @@ import { CONSTRAINT_LABELS } from '../../src/constraints/labels.js';
 import { normaliseOffer } from '../../src/normalise/itinerary.js';
 import { searchLinkFor } from '../../src/results/searchLink.js';
 import { BANNED_WORD_ALLOWLIST, findBannedWords } from '../../src/text/bannedWords.js';
-import { asIsoDate } from '../../src/types/ids.js';
+import { asIata, asIsoDate } from '../../src/types/ids.js';
 import { CTX, calendar, cell, hoursAgo, prior, rule, verified } from '../helpers/alerts.js';
-import { cellKey, cellOf, deps, iata, offer, seg } from '../helpers/offers.js';
+import { cellOf, deps, offer, seg } from '../helpers/offers.js';
+import { key } from '../helpers/space.js';
 
 /** Every user-facing string WP2 emits, gathered from real calls (spec §11 banned words). */
 function emitted(): string[] {
@@ -52,7 +53,7 @@ function emitted(): string[] {
     for (const i of [...(d?.items ?? []), ...(d?.newItems ?? [])])
       out.push(i.firingReason, i.searchLink?.label ?? '');
   }
-  const c = cellKey('LHR', 'JFK', '2027-03-14', '2027-03-28');
+  const c = key('LHR', 'JFK', '2027-03-14', '2027-03-28');
   for (const id of ['travelpayouts', 'searchapi'] as const) {
     for (const cabin of ['economy', 'premium_economy'] as const)
       out.push(searchLinkFor(id, c, cabin)?.label ?? '');
@@ -65,8 +66,8 @@ function emitted(): string[] {
       outbound: [
         seg({
           marketingCarrier: 'VIR',
-          from: iata('LHR'),
-          to: iata('JFK'),
+          from: asIata('LHR'),
+          to: asIata('JFK'),
           depart: '2027-03-14T10:05',
           arrive: '2027-03-14T13:05',
         }),
@@ -74,12 +75,22 @@ function emitted(): string[] {
     }),
     offer({
       outbound: [
-        seg({ from: iata('LHR'), to: iata('ZZZ'), depart: '2027-03-14T10:05', arrive: '2027-03-14T13:05' }),
+        seg({
+          from: asIata('LHR'),
+          to: asIata('ZZZ'),
+          depart: '2027-03-14T10:05',
+          arrive: '2027-03-14T13:05',
+        }),
       ],
     }),
     offer({
       outbound: [
-        seg({ from: iata('LHR'), to: iata('JFK'), depart: '14/03/2027 10:05', arrive: '2027-03-14T13:05' }),
+        seg({
+          from: asIata('LHR'),
+          to: asIata('JFK'),
+          depart: '14/03/2027 10:05',
+          arrive: '2027-03-14T13:05',
+        }),
       ],
     }),
   ];

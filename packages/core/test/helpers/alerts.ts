@@ -1,20 +1,24 @@
+import type { AlertEvalContext } from '../../src/alerts/evaluate.js';
+import { addDays } from '../../src/dates/epochDay.js';
 import { normaliseOffer } from '../../src/normalise/itinerary.js';
 import type { AlertRule, CalendarCandidate, PriorFiring, VerifiedCandidate } from '../../src/types/alerts.js';
 import type { Cell } from '../../src/types/definition.js';
-import { asIsoDateTime, type IsoDateTime, isoDateTimeOfEpochMs } from '../../src/types/ids.js';
+import { asIsoDate, type IsoDateTime, isoDateTimeOfEpochMs } from '../../src/types/ids.js';
 import type { Observation } from '../../src/types/itinerary.js';
-import type { Cabin, Provenance, ProviderId } from '../../src/types/provenance.js';
-import { cellKey, cellOf, deps, offer } from './offers.js';
+import type { Provenance } from '../../src/types/provenance.js';
+import { cellOf, deps, offer } from './offers.js';
+import { NOW } from './rows.js';
+import { spaceCell } from './space.js';
 
-export const NOW = asIsoDateTime('2027-03-01T12:00:00.000Z');
+export { NOW };
 
-/** `evaluateAlertRules`' context (spelled out so this helper compiles before Task 2.10 exists). */
-export const CTX: {
-  now: IsoDateTime;
-  executionId: string;
-  cabin: Cabin;
-  discoveryRefreshHours: Partial<Record<ProviderId, number>>;
-} = { now: NOW, executionId: 'ex-2', cabin: 'economy', discoveryRefreshHours: {} };
+/** `evaluateAlertRules`' context. */
+export const CTX: AlertEvalContext = {
+  now: NOW,
+  executionId: 'ex-2',
+  cabin: 'economy',
+  discoveryRefreshHours: {},
+};
 
 /** The instant `h` hours before NOW (negative = in the future). */
 export const hoursAgo = (h: number): IsoDateTime => isoDateTimeOfEpochMs(Date.parse(NOW) - h * 3_600_000);
@@ -41,8 +45,7 @@ export function rule(over: Partial<AlertRule> = {}): AlertRule {
 /** LHR→JFK departing 2027-03-`day`, `nights` later. */
 export function cell(day = 14, nights = 14): Cell {
   const dep = `2027-03-${String(day).padStart(2, '0')}`;
-  const ret = new Date(Date.parse(dep) + nights * 86_400_000).toISOString().slice(0, 10);
-  return { ...cellKey('LHR', 'JFK', dep, ret), nights };
+  return spaceCell('LHR', 'JFK', dep, addDays(asIsoDate(dep), nights), nights);
 }
 
 const verifiedProv: Provenance = {
