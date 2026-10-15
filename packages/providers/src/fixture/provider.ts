@@ -225,6 +225,9 @@ function offer(endpointPath: string, o: unknown, q: ItineraryQuery, currency: st
     currency,
     // why: synthetic data never links anywhere (spec §5.2 vendor links; §5.5 no fabricated data).
     booking: { kind: 'none' },
+    // why: under the synthetic gate these offers stand in for confirmed prices (plan decision 31), so the engine's
+    // verified path is exercised; their provenance stays `synthetic` and is never a confirmation of a real fare.
+    verified: true,
   };
   // why: only what the response states is passed on (prov-011); nothing is defaulted.
   if (typeof o.taxesIncluded === 'boolean') raw.taxesIncluded = o.taxesIncluded;

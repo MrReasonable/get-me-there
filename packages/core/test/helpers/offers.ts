@@ -53,6 +53,7 @@ export function offer(over: Partial<RawOffer> = {}): RawOffer {
     amountMinor: 41_200,
     currency: 'GBP',
     booking: { kind: 'none' },
+    verified: true,
     ...over,
   };
 }
