@@ -5,12 +5,12 @@ owner: opus
 depends_on: [1, 2, 4, 4b, 6]
 spec_sections: ["§2", "§3", "§5.1", "§5.2", "§5.3", "§5.4", "§5.6", "§6.2", "§6.3", "§6.4", "§8.1", "§9 item 2"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer, security-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP5: SearchApi adapter
 
-Reconciled on 2026-10-15 against spec revision 15, the plan's "Cross-package contracts" and decisions 1–29, the WP4b brief at 8014bdf (recorded allowlist and call list SA-01…SA-06, aligned to decision 29) and the WP6 brief at 62aba32 (the shared modules and the `CellIssue` contract this brief consumes), and the merged `@gmt/core` and `@gmt/providers` on main. Every code block below was assembled on main (a001e0d) on 2026-10-15, with local stand-ins for WP6's three shared modules and its two `provider.ts` additions (copied from its brief) and for WP4b's `apps/api/src/wiring.ts`. There `pnpm -r typecheck`, `pnpm lint` and `pnpm boundaries` are clean and every core, providers and api test passes except Task 5.9's eleven, which fail with `pending-fixtures` until WP4b's recordings land (section 12).
+Reconciled on 2026-10-15 against spec revision 15, the plan's "Cross-package contracts" and decisions 1–31 (main at c4fd052), the WP4b brief at 8014bdf (recorded allowlist and call list SA-01…SA-06, aligned to decision 29) and the WP6 brief at bf5aab1 (the shared modules, `CellIssue`, `truncated` and the decision-30 barrel this brief builds on). The plan sequences WP5 after WP6 (dispatch table and decision 13, 32b7edc), so every edit below is written against a WP6-merged base. Every code block was assembled on main (c4fd052) on 2026-10-15, with local stand-ins for WP6's three shared modules and its `provider.ts` additions (copied from its brief) and for WP4b's `apps/api/src/wiring.ts`. There `pnpm -r typecheck`, `pnpm lint` and `pnpm boundaries` are clean and every core, providers and api test passes, the providers per-directory coverage floor included, except Task 5.9's eleven, which fail with `pending-fixtures` until WP4b's recordings land (section 12).
 
 ## 1. Goal
 
@@ -23,14 +23,15 @@ Build `searchApiProvider` in `@gmt/providers`: one `FlightProvider` that plans a
 - `RawOffer.verified: boolean` in core's provider port (Task 5.0, plan decision 29): true only when a step-3 seller listing confirmed the price, false for every step-2 offer; the fixture provider and core's test helper set it.
 - `plan`: pure rectangle tiling with the largest outbound block `b` such that `b × (b + maxNights − minNights) ≤ 200`, bounded by the window length (spec rev 15: 9 days × 20 return days for the worked 10–21-night band, 21 tiles per pair; 14 × 14 for a fixed-length stay, 13 tiles). Tiles partition the query's cells and every rectangle is asserted ≤200 before reserve.
 - `fetchTile`: request building and the allowlist check, then parsing. Cell keys come from the response; out-of-tile, out-of-band, bad-date and return-less entries are dropped and counted; `has_no_flights` → `noFares` only when the vendor stated no price for the cell; an empty grid → `parse`; every in-tile priced entry is returned (duplicates included) so the engine's minimum-per-tile rule decides; every covered cell with a dropped row is reported in `cellIssues` (decision 28) so the engine writes `error` or `priced` with `offers-dropped`, never `no_data`; currency and `pointOfSale` come from the echo.
-- `search`: the step 1 → 2 → 3 chain with every outcome rule of spec §5.4 and plan decisions 17, 24, 25 and 27: only `upstream`, `network` and `parse` count as a failed expansion; a body without an options key is `parse`, never `empty`; the price-source rule against the step-2 offer's own airline; a step 3 whose non-split options were all unusable is partial; a chain stopped by budget or cancel returns the offers it already paid for.
+- `search`: the step 1 → 2 → 3 chain with every outcome rule of spec §5.4 and plan decisions 17, 24, 25, 27 and 31: only `upstream`, `network` and `parse` count as a failed expansion; a body without an options key is `parse`, never `empty`; priced-but-unusable step-1 options are `parse`, only all-unpriced ones `no-priced-options`; the price-source rule against the step-2 offer's own airline; an outbound whose step-2 prices were all dropped, or a step 3 whose non-split options were all unusable, makes the result partial; a chain that ends with zero usable offers throws (`parse`, or `upstream`/`currency-unsupported`), never a priced result with no offers; a chain stopped by budget or cancel returns the offers it already paid for.
 - Money through WP6's shared `majorToMinor` (no rounding): a refused amount drops the row (`offers-dropped:n`, reason `parse`); a currency core does not know is the normalisation reason `currency-unsupported` in both adapters, rows dropped and counted, never a tile-level parse error (decision 29).
 - Never invent a seller: a step-2 offer is named by the airline the vendor states, or dropped and counted (decision 27); `suppliedFields` never declares `seller`.
 - `separate_tickets=1` on both engines (documented on both; decision 29), `sort_by=price` on `google_flights`, no `stops`.
 - Verification `estimate` at the configured `limits.costPerCallMicroGbp`; a stateless healthcheck that probes nothing; `suppliedFields`, `cabins`, the two `CapabilityInfo` values (itinerary `maxAgeHours: 'unknown'`, spec rev 15).
 - `searchApiHttpLimits` (one host, `billable: 'http-200'`, no `rateLimitFallbackWaitSeconds`, a classifier for the recorded 401 body only) and the error table, 429 rows included, tested through the real http-kit with synthetic labelled bodies (plan decision 20).
 - `SEARCHAPI_PARAMS`, a code constant equal to WP4b's recorded `params-<date>.json`.
-- One entry each in `apps/api/src/wiring.ts` `httpLimitsFor` and `providersFor`, and the barrel exports.
+- One entry each in `apps/api/src/wiring.ts` `httpLimitsFor` and `providersFor`; the barrel exports the provider, limits and params constant only (decision 30).
+- A coverage floor for `src/searchapi/**` (90 lines / 80 branches / 90 functions / 90 statements) in `packages/providers/vitest.config.ts`, beside WP6's (decision 31).
 - Tests on the package's own harness: `makeKit`, `FakeBudget`, `FakeCache`, `CapturingLogger` and `SENTINELS` from `test/fakes.ts`, `server` (the guarded msw server) from `test/support/msw.ts`, fake time from `test/support/time.ts`.
 
 **Out**
@@ -85,7 +86,7 @@ export interface TilePlan { index: number; coveredCells: CellKey[]; request: Til
 export interface CellIssue { cell: CellKey; reason: ErrorReason; offersDropped: number; detail: string }   // WP6 Task 6.2 (decision 28)
 export interface RawCalendarPrice extends CellKey { amountMinor: number; currency: string; providerObservedAt?: IsoDateTime; vendorLink?: string }
 export type DiscoveryTileResult =
-  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[]; cellIssues?: CellIssue[] /* WP6 Task 6.2 */ }
+  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[]; cellIssues?: CellIssue[]; truncated?: boolean /* both WP6 Task 6.2 (decisions 28, 30); SearchApi tiles are one page and never set truncated */ }
   | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: ProviderError };
 export interface ItineraryQuery extends CellKey { cabin: Cabin; adults: 1; currency: 'GBP'; maxStops?: number; expandTop: number; bookingLinks: boolean }
 export interface RawSegment { marketingCarrier: string; operatingCarrier?: string; flightNumber: string; from: Iata; to: Iata; depart: string; arrive: string; timeKind: 'local' | 'utc' | 'offset'; cabin?: Cabin; durationMinutes?: number; aircraft?: string }
@@ -148,8 +149,8 @@ export interface HttpKit { request(r: HttpKitRequest): Promise<HttpKitResponse>;
 export function majorToMinor(major: number, currency: string): number | null;   // exact decimal-string arithmetic over MINOR_EXPONENT; null: not finite positive, excess decimals, > MAX_SAFE_INTEGER minor units, unknown currency
 // src/shared/errors.ts
 export interface ParseWhere { providerId: ProviderId; endpointPath: string }
-export function parseError(cause: string, detail: string | null, where?: ParseWhere): ProviderError;   // kind 'parse', non-retryable, reason 'parse'; message `<provider> <path>: <detail or cause> [<cause>]`; providerId set from where (this brief always passes it)
-export function parseVendor<S extends z.ZodType>(schema: S, body: unknown, cause: string, where?: ParseWhere): z.output<S>;   // throws parseError(cause, zodReason(...), where)
+export function parseError(cause: string, detail: string | null, where: ParseWhere): ProviderError;   // kind 'parse', non-retryable, reason 'parse'; message `<provider> <path>: <detail or cause> [<cause>]`; providerId from where (required, decision 30)
+export function parseVendor<S extends z.ZodType>(schema: S, body: unknown, cause: string, where: ParseWhere): z.output<S>;   // throws parseError(cause, zodReason(...), where)
 // src/shared/notes.ts
 export class NoteCounter { add(key: string, n?: number): void; get(key: string): number; list(): string[] /* `key:n`, code-unit order, zeros omitted */ }
 
@@ -169,7 +170,6 @@ Exported from `@gmt/providers` (`src/index.ts`):
 export function searchApiProvider(o: { http: HttpKit; log: Logger; clock: Clock; key: Secret; costPerCallMicroGbp: number; pointOfSale: string; cacheTtlSeconds: number; paramsAllowlist: ParamsAllowlist }): FlightProvider;
 export function searchApiHttpLimits(limits: ProviderLimits, cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>): ProviderHttpLimits;   // hosts ['www.searchapi.io'], billable 'http-200', no rateLimitFallbackWaitSeconds, classifyError = classifySearchApiError
 export const SEARCHAPI_PARAMS: ParamsAllowlist;   // equal to WP4b's recorded params-<date>.json; contentSha256 computed with withContentHash
-export function classifySearchApiError(f: ResponseFacts): ProviderError | undefined;   // the wiring test identifies the wired classifier by it
 ```
 
 `searchApiProvider` takes `costPerCallMicroGbp`, the configured `limits.costPerCallMicroGbp`, so the estimate prices calls at the rate http-kit ledgers with (decision 27); `clock` stays (decision 24).
@@ -180,7 +180,7 @@ Added to `@gmt/core` (`src/ports/provider.ts`, Task 5.0; decisions 27, 29):
 export interface RawOffer { /* … as in §4 … */ verified: boolean }   // true only when a step-3 seller listing confirmed the price
 ```
 
-Module-local (not in the barrel; no other package names them): `SEARCHAPI_HOST`, `SEARCHAPI_WHERE`, `SEARCHAPI_DISPLAY_NAME`, `SEARCHAPI_DISCOVERY_INFO`, `SEARCHAPI_VERIFICATION_INFO`, `SEARCHAPI_SUPPLIED_FIELDS`, `MAX_COMBINATIONS`, `outboundBlockDays`, `planRectangles`. `SEARCHAPI_PARAMS.endpoints` has two keys, `/api/v1/search?engine=google_flights_calendar` and `/api/v1/search?engine=google_flights`; `assertRequestAllowed` picks the one whose `engine` matches.
+Module-local (not in the barrel, decision 30; no other package names them): `classifySearchApiError` (reached as `searchApiHttpLimits(…).classifyError`), `SEARCHAPI_HOST`, `SEARCHAPI_WHERE`, `SEARCHAPI_DISPLAY_NAME`, `SEARCHAPI_DISCOVERY_INFO`, `SEARCHAPI_VERIFICATION_INFO`, `SEARCHAPI_SUPPLIED_FIELDS`, `MAX_COMBINATIONS`, `outboundBlockDays`, `planRectangles`. `SEARCHAPI_PARAMS.endpoints` has two keys, `/api/v1/search?engine=google_flights_calendar` and `/api/v1/search?engine=google_flights`; `assertRequestAllowed` picks the one whose `engine` matches.
 
 ## 6. Endpoints and parameters
 
@@ -249,8 +249,9 @@ Modify:
 - `packages/core/src/ports/provider.ts`: `RawOffer.verified` (Task 5.0)
 - `packages/core/test/helpers/offers.ts` and `packages/core/test/normalise/itinerary.test.ts`: the helper's offer states `verified`; the identity test pins that it never changes the hash (Task 5.0)
 - `packages/providers/src/fixture/provider.ts` and `packages/providers/test/fixture/provider.test.ts`: fixture offers state `verified: true` (Task 5.0)
-- `packages/providers/src/index.ts`: four exports (Task 5.7)
-- `packages/providers/test/barrel.test.ts`: the new public names, and three that must stay module-local (Task 5.7)
+- `packages/providers/src/index.ts`: three exports (Task 5.7)
+- `packages/providers/vitest.config.ts`: the `src/searchapi/**` coverage floor (Task 5.7)
+- `packages/providers/test/barrel.test.ts`: the new public names, and four that must stay module-local (Task 5.7)
 - `apps/api/src/wiring.ts`: the SearchApi entry in `httpLimitsFor` and in `providersFor` (Task 5.10)
 
 Create, under `apps/api/`: `test/wiring/searchapi.test.ts` (Task 5.10, beside WP4b's wiring tests).
@@ -269,30 +270,11 @@ Per-task commands run one file without coverage; section 12 runs the packages wi
 
 - [ ] **Step 1: Write the failing test**
 
-In `packages/providers/test/fixture/provider.test.ts`, the synthetic search's first offer must state the flag:
+The edits are given as anchors, not hunks, because WP6 (merged first) also edits the fixture files.
 
-```diff
-@@ -383,4 +383,5 @@ describe('fixture verification through the real http-kit and msw', () => {
-       taxesIncluded: true,
-       booking: { kind: 'none' },
-+      verified: true,
-       baggage: { cabinBag: 'included', checkedBags: 1 },
-       outbound: [
-```
+In `packages/providers/test/fixture/provider.test.ts`, in "search returns priced synthetic offers …", add `verified: true,` to the first offer's expected object, directly after `booking: { kind: 'none' },`.
 
-In `packages/core/test/normalise/itinerary.test.ts`, pin that the flag is not identity (spec §6.4):
-
-```diff
-@@ -90,6 +90,7 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
-   });
- 
--  it('price, cabin, seller, provider, booking and currency do not change identity', () => {
-+  it('price, cabin, seller, provider, booking, currency and verified do not change identity', () => {
-     const other = offer({
-+      verified: false,
-       seller: 'Some OTA',
-       amountMinor: 999_999,
-```
+In `packages/core/test/normalise/itinerary.test.ts`, rename the identity test to `'price, cabin, seller, provider, booking, currency and verified do not change identity'` and add `verified: false,` as the first property of its `other` offer (spec §6.4: the flag is never identity).
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -314,29 +296,15 @@ In `packages/core/src/ports/provider.ts`, add the last member of `RawOffer`:
 }
 ```
 
-The fixture provider's offer states it:
+In `packages/providers/src/fixture/provider.ts`, in `offer()`, directly after `booking: { kind: 'none' },` (decision 31):
 
-```diff
-@@ -229,4 +229,7 @@ function offer(endpointPath: string, o: unknown, q: ItineraryQuery, currency: st
-     // why: synthetic data never links anywhere (spec §5.2 vendor links; §5.5 no fabricated data).
-     booking: { kind: 'none' },
-+    // why: the fixture server's offer is its whole search result, seller included, so it stands for a confirmed
-+    // price (plan decision 29); its provenance stays `synthetic` whatever this flag says.
-+    verified: true,
-   };
-   // why: only what the response states is passed on (prov-011); nothing is defaulted.
+```ts
+    // why: under the synthetic gate these offers stand in for confirmed prices (plan decision 31), so the engine's
+    // verified path is exercised; their provenance stays `synthetic` and is never a confirmation of a real fare.
+    verified: true,
 ```
 
-And core's test helper:
-
-```diff
-@@ -54,4 +54,5 @@ export function offer(over: Partial<RawOffer> = {}): RawOffer {
-     currency: 'GBP',
-     booking: { kind: 'none' },
-+    verified: true,
-     ...over,
-   };
-```
+In `packages/core/test/helpers/offers.ts`, in `offer()`, add `verified: true,` directly after `booking: { kind: 'none' },` (before `...over`).
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -474,6 +442,21 @@ describe('planRectangles (spec §5.2 SearchApi tiling, §2 fact 2)', () => {
         if (b < windowDays) expect((b + 1) * (b + 1 + spread)).toBeGreaterThan(MAX_COMBINATIONS);
         else expect(b).toBe(windowDays);
       }
+  });
+
+  it('for every spread 0..90 over a 30-day window, every tile is within 200, tiles partition the band, and a full block is b × (b + spread)', () => {
+    for (let spread = 0; spread <= 90; spread++) {
+      const band = { ...q, departureTo: addDays(FROM, 29), minNights: 0, maxNights: spread };
+      const b = outboundBlockDays(band);
+      const plans = planRectangles(band);
+      const covered = plans.flatMap((p) => p.coveredCells.map(keyOf)).sort();
+      expect(covered).toEqual(generateCells(space(band)).map(keyOf).sort());
+      for (const p of plans) {
+        if (p.request.kind !== 'rectangle') throw new Error('expected a rectangle');
+        expect(combinations(p.request)).toBeLessThanOrEqual(MAX_COMBINATIONS);
+      }
+      expect(combinations(firstRect(plans))).toBe(b * (b + spread));
+    }
   });
 
   it('the block never exceeds the window: a 3-day window is one 3-day tile', () => {
@@ -666,7 +649,7 @@ export function planRectangles(q: DiscoveryQuery): TilePlan[] {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/tiling.test.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1888,6 +1871,9 @@ describe('fetchTile parsing (spec §5.2), synthetic shapes', () => {
       'unpriced-skipped:1',
     ]);
     expect(res.prices.some((p) => cellKeyString(p) === cellKeyString(b))).toBe(false);
+    // why: an unpriced row is neither "no fares" nor a dropped price; the engine decides the cell from that absence.
+    expect(res.noFares.some((c) => cellKeyString(c) === cellKeyString(b))).toBe(false);
+    expect(res.cellIssues ?? []).toEqual([]);
   });
 
   it('duplicates pass through so the engine keeps the minimum: a cheaper second entry is returned (synthetic)', async () => {
@@ -1978,7 +1964,7 @@ describe('fetchTile money (spec §6.3, plan decision 24: shared majorToMinor, no
   it('a currency core does not know is currency-unsupported: rows dropped and counted, the tile is not a parse error (synthetic)', async () => {
     const res = await priced(500, 'XAU');
     expect(res.prices).toEqual([]);
-    expect(res.notes).toEqual(['covered-cells-absent:8', 'currency-unsupported:1', 'offers-dropped:1']);
+    expect(res.notes).toEqual(['covered-cells-absent:8', 'offers-dropped:1']);
     expect(res.cellIssues).toMatchObject([{ reason: 'currency-unsupported', offersDropped: 1 }]);
   });
 
@@ -2123,14 +2109,13 @@ export type Minor =
 
 /**
  * Vendor major units → integer minor units through WP6's shared `majorToMinor` (exact decimal arithmetic, plan
- * decision 24; never rounded). A row is dropped and counted `offers-dropped`: with reason `currency-unsupported`
- * (also counted) when core knows no exponent for the currency (plan decision 29: a normalisation reason, never a
- * tile-level parse error), else with reason `parse` (decision 28: a bad vendor price) for excess precision or a
- * non-positive amount.
+ * decision 24; never rounded). A row is dropped and counted `offers-dropped` (WP6's notes vocabulary): with
+ * reason `currency-unsupported` when core knows no exponent for the currency (plan decision 29: a normalisation
+ * reason, never a tile-level parse error), else with reason `parse` (decision 28: a bad vendor price) for excess
+ * precision or a non-positive amount. The reason travels in the result (a `CellIssue`, an error), not in a note.
  */
 export function minorOrDrop(major: number, currency: string, notes: NoteCounter): Minor {
   if (!currencySupported(currency)) {
-    notes.add('currency-unsupported');
     notes.add('offers-dropped');
     return { minor: null, dropped: 'currency-unsupported' };
   }
@@ -2169,7 +2154,7 @@ import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.
 import { parseError, parseVendor } from '../shared/errors.js';
 import { NoteCounter } from '../shared/notes.js';
 import { authHeaders, calendarParams, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_WHERE, toUrl } from './params.js';
-import { calendarResponseSchema, minorOrDrop, readEcho } from './shapes.js';
+import { calendarResponseSchema, currencySupported, minorOrDrop, readEcho } from './shapes.js';
 
 /** Spec §2 fact 2: the calendar engine refuses more than 200 outbound × return combinations (HTTP 400). */
 export const MAX_COMBINATIONS = 200;
@@ -2308,10 +2293,18 @@ export interface ParsedCalendar {
   cellIssues?: CellIssue[];
 }
 
-const DROP_DETAIL: Readonly<Record<'currency-unsupported' | 'parse', string>> = {
-  'currency-unsupported': 'a price in a currency with no known minor-unit exponent',
-  parse: 'a price with more decimals than its currency has, or not positive',
-};
+/** `n calendar row(s)` for a cell issue's detail. */
+const rowsWord = (n: number): string => (n === 1 ? '1 calendar row' : `${n} calendar rows`);
+
+/**
+ * A cell issue's detail in WP6's grammar: provider prefix, what happened, the machine tag in brackets (`bad-price`
+ * for reason `parse`, `currency-unsupported` for that reason), so `last_error` reads one way for both adapters.
+ */
+function dropDetail(n: number, currency: string, reason: 'currency-unsupported' | 'parse'): string {
+  return reason === 'currency-unsupported'
+    ? `searchapi: ${rowsWord(n)} for this cell priced in ${currency}, which has no known minor unit [currency-unsupported]`
+    : `searchapi: ${rowsWord(n)} for this cell had no usable ${currency} price (not a positive amount with at most its currency's decimals) [bad-price]`;
+}
 
 /**
  * Parses one calendar response for one tile. Spec §5.2: cell keys from the response; entries outside
@@ -2338,7 +2331,9 @@ export function parseCalendarBody(
   const seen = new Set<string>();
   const stated = new Set<string>();
   const noFlights = new Set<string>();
-  const dropped = new Map<string, { n: number; reasons: Set<'currency-unsupported' | 'parse'> }>();
+  // why: one response states one currency, so every dropped row of a tile has the same reason.
+  const dropReason = currencySupported(echo.currency) ? 'parse' : 'currency-unsupported';
+  const dropped = new Map<string, number>();
   const notes = new NoteCounter();
   const prices: RawCalendarPrice[] = [];
   for (const e of data.calendar) {
@@ -2381,10 +2376,7 @@ export function parseCalendarBody(
     stated.add(key);
     const m = minorOrDrop(e.price, echo.currency, notes);
     if (m.minor === null) {
-      const d = dropped.get(key) ?? { n: 0, reasons: new Set() };
-      d.n += 1;
-      d.reasons.add(m.dropped);
-      dropped.set(key, d);
+      dropped.set(key, (dropped.get(key) ?? 0) + 1);
       continue;
     }
     prices.push({ ...cell, amountMinor: m.minor, currency: echo.currency });
@@ -2397,12 +2389,9 @@ export function parseCalendarBody(
   // why: an absent cell is neither priced nor "no fares"; the engine decides its outcome, the note keeps it visible.
   notes.add('covered-cells-absent', covered.size - seen.size);
   const cellIssues: CellIssue[] = plan.coveredCells.flatMap((cell) => {
-    const d = dropped.get(cellKeyString(cell));
-    if (d === undefined) return [];
-    const reason = d.reasons.has('parse') ? 'parse' : 'currency-unsupported';
-    return [
-      { cell, reason, offersDropped: d.n, detail: `${d.n} calendar row(s) dropped: ${DROP_DETAIL[reason]}` },
-    ];
+    const n = dropped.get(cellKeyString(cell));
+    if (n === undefined) return [];
+    return [{ cell, reason: dropReason, offersDropped: n, detail: dropDetail(n, echo.currency, dropReason) }];
   });
   return {
     prices,
@@ -2484,7 +2473,7 @@ export async function fetchCalendarTile(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/calendar.test.ts test/searchapi/tiling.test.ts`
-Expected: PASS, 31 and 12 tests, with the afterEach allowlist check holding for every request.
+Expected: PASS, 31 and 13 tests, with the afterEach allowlist check holding for every request.
 
 - [ ] **Step 5: Commit**
 
@@ -2502,7 +2491,7 @@ git add packages/providers && git commit -m "wp05: SearchApi calendar tiles: res
 
 ```ts
 // test/searchapi/offers.test.ts
-import { asIata, type RawOffer } from '@gmt/core';
+import { asIata, canonicalCarrier, canonicalFlightNumber, type RawOffer } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   bookingOffers,
@@ -2581,6 +2570,18 @@ describe('toRawSegment (raw only, spec §5.2), synthetic', () => {
   });
 });
 
+describe('toRawSegment agrees with core (spec §6.4), synthetic', () => {
+  it.each(['X1 100', '9X 12', 'BA0938', 'X1100'])(
+    'the split of %s is one core canonicalises without error (synthetic)',
+    (number) => {
+      const s = toRawSegment(vendorSeg('LHR', 'JFK', '2026-11-02', '09:05', number));
+      if (s === null) throw new Error('segment');
+      // why: the adapter's designator split copies core's rule; a drift fails here, not later as unmappable-carrier.
+      expect(() => canonicalFlightNumber(s.flightNumber, canonicalCarrier(s.marketingCarrier))).not.toThrow();
+    },
+  );
+});
+
 describe('statedAirline (never invent a seller), synthetic', () => {
   it('is the airline the vendor states on the first outbound flight, else null; never the flight number (synthetic)', () => {
     expect(
@@ -2646,17 +2647,17 @@ describe('bookingOffers (spec §5.4 step 3), synthetic', () => {
     );
     expect(offers).toEqual([]);
     expect(notes.list()).toEqual([
-      'no-seller-skipped:step3:2',
+      'no-seller-skipped-step3:2',
       'offers-dropped:2',
       'split-booking-skipped:1',
-      'unpriced-skipped:step3:1',
+      'unpriced-skipped-step3:1',
     ]);
   });
 
   it('a currency core does not know drops the options as currency-unsupported (synthetic)', () => {
     const notes = new NoteCounter();
     expect(bookingOffers(pairing, options([agent(573)]), 'XAU', notes)).toEqual([]);
-    expect(notes.list()).toEqual(['currency-unsupported:1', 'offers-dropped:1']);
+    expect(notes.list()).toEqual(['offers-dropped:1']);
   });
 });
 
@@ -2765,12 +2766,12 @@ export function bookingOffers(
       continue;
     }
     if (b.price === undefined) {
-      notes.add('unpriced-skipped:step3');
+      notes.add('unpriced-skipped-step3');
       continue;
     }
     const seller = b.book_with?.trim();
     if (seller === undefined || seller === '') {
-      notes.add('no-seller-skipped:step3');
+      notes.add('no-seller-skipped-step3');
       continue;
     }
     const { minor: amountMinor } = minorOrDrop(b.price, currency, notes);
@@ -2814,7 +2815,7 @@ export function step3NamesAirline(step3: readonly RawOffer[], airline: string): 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/offers.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2999,7 +3000,7 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
     const d = deps();
     const res = await searchItinerary(d, CELL_QUERY, ctx());
     expect(res.notes).toEqual(
-      expect.arrayContaining(['unpriced-skipped:step1:1', 'unpriced-skipped:step2:1']),
+      expect.arrayContaining(['unpriced-skipped-step1:1', 'unpriced-skipped-step2:1']),
     );
     expect(tokens(d, 'departure_token')).toEqual(['dA']);
     expect(tokens(d, 'booking_token')).toEqual(['b1']);
@@ -3016,7 +3017,21 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
     expect(sentUrls(d.k.events)).toHaveLength(1);
   });
 
-  it('step-1 options without a token, with a non-IATA airport or an unusable price are skipped and counted (synthetic)', async () => {
+  it('all step-1 options unpriced stays upstream no-priced-options (spec §5.4) and is distinct from unusable ones (synthetic)', async () => {
+    chain(
+      flightsBody([
+        option(OUT_A, undefined, { departure_token: 'dA' }),
+        option(OUT_B, undefined, { departure_token: 'dB' }),
+      ]),
+      {},
+    );
+    await expect(searchItinerary(deps(), CELL_QUERY, ctx())).rejects.toMatchObject({
+      kind: 'upstream',
+      reason: 'no-priced-options',
+    });
+  });
+
+  it('priced step-1 options without a token, with a non-IATA airport or an unusable price → parse unusable-step1-options, never no-priced-options (synthetic)', async () => {
     const noToken = { flights: OUT_A, price: 500 };
     const badAirport = option(
       [seg('/m/04jpl', 'JFK', '2026-11-02', '09:00', 'X1 100', 'Synthetic Air One')],
@@ -3026,9 +3041,10 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
     const badPrice = option(OUT_B, 520.005, { departure_token: 'dY' });
     chain(flightsBody([noToken, badAirport, badPrice]), {});
     await expect(searchItinerary(deps(), CELL_QUERY, ctx())).rejects.toMatchObject({
-      reason: 'no-priced-options',
+      kind: 'parse',
+      providerId: 'searchapi',
       message: expect.stringMatching(
-        /no-departure-token:step1:1, unusable-price:step1:1, unusable-segments:step1:1/,
+        /no-departure-token-step1:1, unusable-price-step1:1, unusable-segments-step1:1.*\[unusable-step1-options\]/,
       ),
     });
   });
@@ -3194,7 +3210,7 @@ describe('a chain stopped by budget or cancel keeps what it paid for (plan decis
       ['Synthetic Air One', 65_000, 'none', false],
       ['Synthetic Air One', 60_000, 'none', false],
     ]);
-    expect(res.notes).toContain('chain-stopped:budget:1');
+    expect(res.notes).toContain('chain-stopped-budget:1');
     expect(sentUrls(d.k.events)).toHaveLength(2);
   });
 
@@ -3235,7 +3251,7 @@ describe('a chain stopped by budget or cancel keeps what it paid for (plan decis
     const d = deps(saKit({ budget }));
     const res = await searchItinerary(d, q1, ctx(ac.signal));
     expect(res.partial).toBe(true);
-    expect(res.notes).toContain('chain-stopped:abort:1');
+    expect(res.notes).toContain('chain-stopped-abort:1');
     expect(res.offers).toHaveLength(2);
     expect(step2Only(res)).toBe(true);
     expect(tokens(d, 'booking_token')).toEqual([]);
@@ -3322,7 +3338,7 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
     );
     const res = await searchItinerary(deps(), q1, ctx());
     expect(sellers(res)).toEqual([['Synthetic Travel Agent', 57_300, 'post', true]]);
-    expect(res.notes).toEqual(['no-airline-skipped:step2:2']);
+    expect(res.notes).toEqual(['no-airline-skipped-step2:2']);
   });
 
   it('a step 3 whose only options are split bookings keeps the step-2 offer; the result is not partial (synthetic)', async () => {
@@ -3339,6 +3355,12 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
   it.each([
     ['fails (404)', notFound, 'booking-options-failed:1'],
     ['has no booking_options key', ok({ ...ECHO }), 'booking-options-failed:1'],
+    ['fails the schema', ok({ ...ECHO, booking_options: 'x' }), 'booking-options-failed:1'],
+    [
+      'echoes another gl',
+      ok({ search_parameters: { currency: 'GBP', gl: 'us' }, booking_options: [agent(560)] }),
+      'booking-options-failed:1',
+    ],
   ] as const)(
     'a step 3 that %s keeps the step-2 offer and marks the result partial, not a failed expansion (synthetic)',
     async (_label, reply, note) => {
@@ -3354,10 +3376,67 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
     },
   );
 
+  it.each([
+    ['no booking_token', { dA: ok(flightsBody([{ flights: IN_1, price: 600 }])) }, {}],
+    [
+      'a 404 at step 3',
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: notFound },
+    ],
+    [
+      'split-only booking options',
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: ok(bookingBody([{ is_split_booking: true, price: 400 }])) },
+    ],
+  ] as const)(
+    'an airline-less outbound with %s ends with no usable offer → parse no-usable-offers, never a priced empty result (decision 31) (synthetic)',
+    async (_label, step2, step3) => {
+      const anon = option([seg('LHR', 'JFK', '2026-11-02', '09:00', 'X1 100')], 600, {
+        departure_token: 'dA',
+      });
+      chain(flightsBody([anon]), step2, step3);
+      await expect(searchItinerary(deps(), q1, ctx())).rejects.toMatchObject({
+        kind: 'parse',
+        providerId: 'searchapi',
+        message: expect.stringMatching(/\[no-usable-offers\]/),
+      });
+    },
+  );
+
+  it('an airline-less outbound whose step 3 prices are in an unknown currency → upstream currency-unsupported (synthetic)', async () => {
+    const anon = option([seg('LHR', 'JFK', '2026-11-02', '09:00', 'X1 100')], 600, { departure_token: 'dA' });
+    chain(
+      flightsBody([anon]),
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: ok({ search_parameters: { currency: 'XAU', gl: 'gb' }, booking_options: [agent(560)] }) },
+    );
+    await expect(searchItinerary(deps(), q1, ctx())).rejects.toMatchObject({
+      kind: 'upstream',
+      reason: 'currency-unsupported',
+    });
+  });
+
+  it('an outbound whose step-2 prices were all dropped marks the result partial even when another outbound priced (decision 31) (synthetic)', async () => {
+    chain(
+      flightsBody([A, B]),
+      {
+        dA: ok({
+          search_parameters: { currency: 'XAU', gl: 'gb' },
+          best_flights: [option(IN_1, 600, { booking_token: 'b1' })],
+        }),
+        dB: ok(flightsBody([option(IN_2, 640, { booking_token: 'b2' })])),
+      },
+      { b2: ok(bookingBody([agent(610)])) },
+    );
+    const res = await searchItinerary(deps(), CELL_QUERY, ctx());
+    expect(res).toMatchObject({ coverage: 'priced', partial: true, failedExpansions: 0 });
+    expect(res.notes).toContain('returns-dropped-for-outbound:1');
+  });
+
   it('a cheapest return without a booking_token keeps the step-2 offer and is partial: step 3 could not run (synthetic)', async () => {
     chain(flightsBody([A]), { dA: ok(flightsBody([{ flights: IN_1, price: 600 }])) });
     const res = await searchItinerary(deps(), q1, ctx());
-    expect(res).toMatchObject({ partial: true, notes: ['no-booking-token:step2:1'] });
+    expect(res).toMatchObject({ partial: true, notes: ['no-booking-token-step2:1'] });
     expect(res.offers).toHaveLength(1);
     expect(step2Only(res)).toBe(true);
   });
@@ -3368,12 +3447,12 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
       bookingBody([
         { price: 560, booking_request: { url: 'https://www.google.com/travel/clk/f', post_data: 'u=s' } },
       ]),
-      ['booking-options-unusable:step3:1', 'no-seller-skipped:step3:1'],
+      ['booking-options-unusable-step3:1', 'no-seller-skipped-step3:1'],
     ],
     [
       'are in a currency core does not know',
       { search_parameters: { currency: 'XAU', gl: 'gb' }, booking_options: [agent(560)] },
-      ['booking-options-unusable:step3:1', 'currency-unsupported:1', 'offers-dropped:1'],
+      ['booking-options-unusable-step3:1', 'offers-dropped:1'],
     ],
   ] as const)(
     'a step 3 whose non-split options %s keeps the step-2 offer and is partial (synthetic)',
@@ -3507,7 +3586,7 @@ describe('currency, money and route history (spec §2, §6.3, plan decisions 24�
       { b1: ok(bookingBody([agent(573)])) },
     );
     const res = await searchItinerary(deps(), q1, ctx());
-    expect(res.notes).toContain('unusable-segments:step2:1');
+    expect(res.notes).toContain('unusable-segments-step2:1');
     expect(res.offers.map((o) => o.amountMinor)).not.toContain(55_000);
   });
 
@@ -3727,9 +3806,8 @@ function parseBooking(body: unknown, gl: string) {
 
 /**
  * `price_insights.price_history` as Google's route-level price-insight series, indicative (spec §2 bonus, §7; the
- * engine stores it in route_price_history, GBP points only per plan decision 25). No scope beyond that label is
- * claimed. A point
- * that is malformed, has an impossible date or a price the shared `majorToMinor` refuses is dropped and counted
+ * engine stores it in route_price_history, GBP points only per plan decision 25). That label is the spec's; whether
+ * the series is per route or per searched dates and cabin is unverified (§13). A point that is malformed, has an impossible date or a price the shared `majorToMinor` refuses is dropped and counted
  * `route-history-dropped`; it never fails the step.
  */
 function toRouteHistory(points: readonly unknown[], currency: string, notes: NoteCounter): RouteHistory {
@@ -3762,7 +3840,7 @@ interface Usable {
  *   `upstream`/`no-priced-options`; a currency core does not know → `upstream`/`currency-unsupported`.
  * - Step 2 for the `expandTop` cheapest: every priced return option is an offer, `verified: false`, whose seller is
  *   the airline the vendor states on the first outbound flight; with no stated airline those offers are dropped and
- *   counted (`no-airline-skipped:step2`), never given an invented seller (plan decision 27). Returns whose prices
+ *   counted (`no-airline-skipped-step2`), never given an invented seller (plan decision 27). Returns whose prices
  *   were all dropped are not "no legs": if no outbound yields a usable leg the cell is `currency-unsupported` or
  *   `parse`, never `no-return-legs`.
  * - Step 3 for the cheapest return per outbound: every usable booking option is an offer, `verified: true`; the
@@ -3817,11 +3895,19 @@ export async function searchItinerary(
   for (const o of r1.options) {
     const segs = toRawSegments(o.flights);
     const minor = o.price === undefined ? null : majorToMinor(o.price, r1.currency);
-    if (o.price === undefined) notes.add('unpriced-skipped:step1');
-    else if (o.departure_token === undefined) notes.add('no-departure-token:step1');
-    else if (segs === null) notes.add('unusable-segments:step1');
-    else if (minor === null) notes.add('unusable-price:step1');
+    if (o.price === undefined) notes.add('unpriced-skipped-step1');
+    else if (o.departure_token === undefined) notes.add('no-departure-token-step1');
+    else if (segs === null) notes.add('unusable-segments-step1');
+    else if (minor === null) notes.add('unusable-price-step1');
     else usable1.push({ option: o, minor, segs, token: o.departure_token });
+  }
+  if (usable1.length === 0 && r1.options.some((o) => o.price !== undefined)) {
+    // why: decision 31: the vendor priced options the adapter could not use; that is a parse fault, not "no prices".
+    throw parseError(
+      'unusable-step1-options',
+      `step 1: ${r1.options.length} options and none usable (${notes.list().join(', ')})`,
+      SEARCHAPI_WHERE,
+    );
   }
   if (usable1.length === 0) {
     // why: spec §5.4: every step-1 option unpriced → upstream, reason no-priced-options, non-retryable on resume.
@@ -3830,7 +3916,7 @@ export async function searchItinerary(
       reason: 'no-priced-options',
       retryable: false,
       providerId: 'searchapi',
-      message: `searchapi step 1: ${r1.options.length} options and none priced and expandable (${notes.list().join(', ')})`,
+      message: `searchapi step 1: ${r1.options.length} options and none priced`,
     });
   }
   const expand = [...usable1].sort((a, b) => a.minor - b.minor).slice(0, q.expandTop); // stable: vendor order breaks ties
@@ -3868,8 +3954,8 @@ export async function searchItinerary(
     const dropped = new Set<'currency-unsupported' | 'parse'>();
     for (const o of r2.options) {
       const segs = toRawSegments(o.flights);
-      if (o.price === undefined) notes.add('unpriced-skipped:step2');
-      else if (segs === null) notes.add('unusable-segments:step2');
+      if (o.price === undefined) notes.add('unpriced-skipped-step2');
+      else if (segs === null) notes.add('unusable-segments-step2');
       else {
         const m = minorOrDrop(o.price, r2.currency, notes);
         if (m.minor === null) dropped.add(m.dropped);
@@ -3878,6 +3964,8 @@ export async function searchItinerary(
     }
     if (returns.length === 0) {
       if (dropped.size > 0) {
+        // why: decision 31 (PA3-02): this outbound's fares were present and are missing from the cell.
+        partial = true;
         notes.add('returns-dropped-for-outbound');
         for (const reason of dropped) legDrops.add(reason);
       } else notes.add('no-return-legs-for-outbound'); // spec §5.4: contributes nothing, not a failure
@@ -3886,7 +3974,7 @@ export async function searchItinerary(
     withLegs += 1;
     // why: never invent a seller (plan decision 24): only an airline the vendor states names a step-2 offer.
     const airline = statedAirline(out.option.flights);
-    if (airline === null) notes.add('no-airline-skipped:step2', returns.length);
+    if (airline === null) notes.add('no-airline-skipped-step2', returns.length);
     const step2Offer = (r: Usable): RawOffer | null =>
       airline === null
         ? null
@@ -3908,7 +3996,7 @@ export async function searchItinerary(
     const bookingToken = cheapest.option.booking_token;
     if (bookingToken === undefined) {
       // why: spec §5.4: step 3 always runs, because a seller can undercut the airline; without it the cell is partial.
-      notes.add('no-booking-token:step2');
+      notes.add('no-booking-token-step2');
       partial = true;
       add(direct);
       continue;
@@ -3918,6 +4006,7 @@ export async function searchItinerary(
       const s3 = await send(d, { ...base, booking_token: bookingToken }, ctx);
       fetched.push(s3.fetchedAt);
       const r3 = parseBooking(s3.body, gl);
+      if (!currencySupported(r3.currency)) legDrops.add('currency-unsupported');
       step3 = bookingOffers(
         { cabin: q.cabin, outbound: out.segs, inbound: cheapest.segs },
         r3.options,
@@ -3928,7 +4017,7 @@ export async function searchItinerary(
       // (PA2-03); only split bookings are excluded by rule and leave the result whole.
       if (step3.length === 0 && r3.options.some((o) => o.is_split_booking !== true)) {
         partial = true;
-        notes.add('booking-options-unusable:step3');
+        notes.add('booking-options-unusable-step3');
       }
     } catch (err) {
       if (isExpansionFailure(err)) {
@@ -3955,7 +4044,7 @@ export async function searchItinerary(
   }
 
   if (stop !== null) {
-    notes.add(stop instanceof BudgetExceeded ? 'chain-stopped:budget' : 'chain-stopped:abort');
+    notes.add(stop instanceof BudgetExceeded ? 'chain-stopped-budget' : 'chain-stopped-abort');
     d.log.info(
       { offers: offers.length, notes: notes.list() },
       'searchapi chain stopped; returning the offers already paid for',
@@ -3983,6 +4072,23 @@ export async function searchItinerary(
       message: `searchapi: ${expand.length} outbound expansions produced no return legs (${failed} failed)`,
     });
   }
+  if (offers.length === 0) {
+    // why: decision 31 (PA3-01): the vendor priced return legs but no offer survived (no stated airline and no usable
+    // step-3 listing). A priced result without offers would be written `empty`, positive evidence of no fares.
+    if (legDrops.has('currency-unsupported'))
+      throw new ProviderError({
+        kind: 'upstream',
+        reason: 'currency-unsupported',
+        retryable: false,
+        providerId: 'searchapi',
+        message: 'searchapi: no usable offer; prices in a currency with no known minor-unit exponent',
+      });
+    throw parseError(
+      'no-usable-offers',
+      `priced legs but no offer attributable to a stated seller (${notes.list().join(', ')})`,
+      SEARCHAPI_WHERE,
+    );
+  }
   const fetchedAt = fetched.reduce((a, b) => (b < a ? b : a));
   d.log.debug(
     { offers: offers.length, failedExpansions: failed, notes: notes.list() },
@@ -4001,12 +4107,12 @@ export async function searchItinerary(
 }
 ```
 
-The adapter sets `ProviderError.reason` only to `no-return-legs`, `no-priced-options` (spec §5.4) and `currency-unsupported` (a normalisation reason, spec §3; decision 29); its parse errors carry the kind-level reason `parse` from WP6's `parseError`, with `providerId: 'searchapi'` and the cause in brackets; every other cause is a note or a tag in the message, which goes to `last_error`. Every step-2 offer is `verified: false` and every step-3 offer `verified: true` (decision 27), so WP7 never writes a declared step-2 price as a verified fare. A chain stopped by a refused reservation or an operator cancel after offers were gathered resolves rather than rejects: the result is `priced` with `partial: true` and the note `chain-stopped:budget` or `chain-stopped:abort`, which WP7 writes with `partial-expansion` after the stop signal (decision 27), so a resume does not re-bill the chain; the stop itself reaches the engine through `ctx.signal` and the next reservation (decision 25).
+The adapter sets `ProviderError.reason` only to `no-return-legs`, `no-priced-options` (spec §5.4) and `currency-unsupported` (a normalisation reason, spec §3; decision 29); its parse errors carry the kind-level reason `parse` from WP6's `parseError`, with `providerId: 'searchapi'` and the cause in brackets; every other cause is a note or a tag in the message, which goes to `last_error`. Every step-2 offer is `verified: false` and every step-3 offer `verified: true` (decision 27), so WP7 never writes a declared step-2 price as a verified fare. A chain that ends with zero usable offers (an outbound with no stated airline and no usable step-3 listing) throws `parse` (`no-usable-offers`) or `upstream`/`currency-unsupported` (decision 31), because a priced result with no offers would be written `empty`. Note keys use hyphens only (`unpriced-skipped-step1`, `chain-stopped-budget`), so the shared `key:n` grammar has exactly one colon. A chain stopped by a refused reservation or an operator cancel after offers were gathered resolves rather than rejects: the result is `priced` with `partial: true` and the note `chain-stopped:budget` or `chain-stopped:abort`, which WP7 writes with `partial-expansion` after the stop signal (decision 27), so a resume does not re-bill the chain; the stop itself reaches the engine through `ctx.signal` and the next reservation (decision 25).
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/searchapi/itinerary.test.ts`
-Expected: PASS, 52 tests.
+Expected: PASS, 60 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4016,7 +4122,7 @@ git add packages/providers && git commit -m "wp05: SearchApi itinerary chain wit
 
 ### Task 5.7: Provider assembly, estimate, healthcheck, barrel
 
-**Files:** create `src/searchapi/provider.ts`, `test/searchapi/support/provider.ts` and `test/searchapi/provider.test.ts`. Modify `src/index.ts` and `test/barrel.test.ts`.
+**Files:** create `src/searchapi/provider.ts`, `test/searchapi/support/provider.ts` and `test/searchapi/provider.test.ts`. Modify `src/index.ts`, `test/barrel.test.ts` and `vitest.config.ts`.
 
 **Interfaces:** consumes everything above, plus `cabinSchema`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`. Produces `searchApiProvider` (section 5 signature), `SEARCHAPI_DISPLAY_NAME`, `SEARCHAPI_DISCOVERY_INFO`, `SEARCHAPI_VERIFICATION_INFO`, `SEARCHAPI_SUPPLIED_FIELDS`, and the barrel exports.
 
@@ -4152,34 +4258,28 @@ describe('searchApiProvider (spec §5.1, §2)', () => {
 });
 ```
 
-In `test/barrel.test.ts`, add the public names and three that must stay module-local:
+In `test/barrel.test.ts` (decision 30's surface), add to the main barrel's exported-functions list, after `'ParamsNotAllowedError',`:
 
-```diff
-@@ -22,10 +22,14 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
-       'fixtureHttpLimits',
-       'RecorderRefusedError',
-       'ParamsNotAllowedError',
-+      'searchApiProvider',
-+      'searchApiHttpLimits',
-+      'classifySearchApiError',
-     ]) {
-       expect(typeof main[name], name).toBe('function');
-     }
-     expect(main.CREDENTIAL_HEADERS).toBeInstanceOf(Set);
-+    expect(main.SEARCHAPI_PARAMS).toMatchObject({ provider: 'searchapi' });
-     for (const name of [
-       'withContentHash',
-       'fixtureRouter',
-@@ -34,6 +38,9 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
-       'createFixtureServer',
-       'loadRecordedFixture',
-       'classifyResponse',
-+      'planRectangles',
-+      'SEARCHAPI_HOST',
-+      'SEARCHAPI_DISCOVERY_INFO',
-     ]) {
-       expect(name in main, name).toBe(false);
-     }
+```ts
+      // WP5: the SearchApi adapter's provider and limits (plan decision 30)
+      'searchApiProvider',
+      'searchApiHttpLimits',
+```
+
+after `expect(main.CREDENTIAL_HEADERS).toBeInstanceOf(Set);`:
+
+```ts
+    expect(main.SEARCHAPI_PARAMS).toMatchObject({ provider: 'searchapi' });
+```
+
+and to its "not exported" list, after WP6's `'NoteCounter',` line:
+
+```ts
+      // WP5: SearchApi internals stay module-local (plan decision 30)
+      'classifySearchApiError',
+      'planRectangles',
+      'SEARCHAPI_HOST',
+      'SEARCHAPI_DISCOVERY_INFO',
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -4305,10 +4405,19 @@ export function searchApiProvider(o: {
 Append to `src/index.ts`:
 
 ```ts
-export { classifySearchApiError, searchApiHttpLimits } from './searchapi/errors.js'; // classifySearchApiError: WP5 wiring test
-export { SEARCHAPI_PARAMS } from './searchapi/params.js';
-export { searchApiProvider } from './searchapi/provider.js';
+export { searchApiHttpLimits } from './searchapi/errors.js'; // WP5: apps/api httpLimitsFor
+export { SEARCHAPI_PARAMS } from './searchapi/params.js'; // WP5: apps/api providersFor
+export { searchApiProvider } from './searchapi/provider.js'; // WP5: apps/api providersFor
 ```
+
+In `packages/providers/vitest.config.ts`, add to the `thresholds` object WP6 wrote, after its `'src/shared/**'` entry (decision 31):
+
+```ts
+        // why: the SearchApi adapter holds to its own floor so the package average cannot mask it (plan decision 31).
+        'src/searchapi/**': { lines: 90, branches: 80, functions: 90, statements: 90 },
+```
+
+(The assembly checked that the floor bites: a 99% branch floor on `src/searchapi/**` fails the run with `ERROR: Coverage for branches (96.16%) does not meet "src/searchapi/**" threshold (99%)`.)
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -4852,15 +4961,15 @@ git add packages/providers && git commit -m "wp05: SearchApi recorded-fixture in
 
 **Files:** modify `apps/api/src/wiring.ts`. Create `apps/api/test/wiring/searchapi.test.ts`.
 
-**Interfaces:** consumes `httpLimitsFor`, `providersFor`, `loadConfigFromEnv` (WP4b), `createRepos`, `openDatabase`, `applyMigrations`, `MIGRATIONS_DIR` (WP3), and `searchApiProvider`, `searchApiHttpLimits`, `SEARCHAPI_PARAMS`, `classifySearchApiError`. Produces SearchApi in `Ports.providers` and in http-kit limits whenever `SEARCHAPI_KEY` is set.
+**Interfaces:** consumes `httpLimitsFor`, `providersFor`, `loadConfigFromEnv` (WP4b), `createRepos`, `openDatabase`, `applyMigrations`, `MIGRATIONS_DIR` (WP3), and `searchApiProvider`, `searchApiHttpLimits`, `SEARCHAPI_PARAMS`. Produces SearchApi in `Ports.providers` and in http-kit limits whenever `SEARCHAPI_KEY` is set.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // apps/api/test/wiring/searchapi.test.ts
-import { asIata, asIsoDate, asIsoDateTime, fixedClock, type Logger } from '@gmt/core';
+import { asIata, asIsoDate, asIsoDateTime, fixedClock, type Logger, PLAN_PRESETS } from '@gmt/core';
 import { applyMigrations, createRepos, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
-import { classifySearchApiError, type HttpKit } from '@gmt/providers';
+import { type HttpKit, searchApiHttpLimits } from '@gmt/providers';
 import { afterAll, describe, expect, it } from 'vitest';
 import { httpLimitsFor, loadConfigFromEnv, providersFor } from '../../src/wiring.js';
 
@@ -4897,7 +5006,9 @@ describe('wiring: SearchApi (plan "Wiring and bootstraps")', () => {
       ratePerHour: 2000,
       concurrency: 2,
     });
-    expect(l?.classifyError).toBe(classifySearchApiError);
+    // why: the classifier stays module-local (plan decision 30); the wired one is the one the adapter's limits carry.
+    const own = searchApiHttpLimits(PLAN_PRESETS['40usd'], { maxWaitSeconds: 1, requestTimeoutSeconds: 1 });
+    expect(l?.classifyError).toBe(own.classifyError);
   });
 
   it('constructs the searchapi provider when SEARCHAPI_KEY is set, and not otherwise', () => {
@@ -4991,20 +5102,21 @@ None of the plan's five Review Focus lines is owned by WP5. The adapter-local ed
 - A vendor body that drops its options key is a parse error, never "no fares" (Task 5.6, "no-options-key").
 - A price with more precision than its currency is dropped, never rounded, and its cell is reported, never `no_data` (Tasks 5.4 and 5.6).
 - A step-2 price is never passed on as confirmed: every step-2 offer is `verified: false` (Task 5.6).
+- A chain the vendor priced but that yields no usable offer is an error, never a priced-and-empty result (Task 5.6, decision 31).
 
 ## 12. Definition of done
 
-Assembled on main (a001e0d) on 2026-10-15 with WP6's shared modules and `provider.ts` additions and WP4b's `wiring.ts` stood in: every command below passed except the 11 `recorded.test.ts` tests, which fail with `pending-fixtures` until WP4b's recordings land. With them excluded (the interim commands) the providers suite ran 413 tests green at 95.8% lines / 89.1% branches, `src/searchapi` at 99.3% lines / 96.4% branches; core ran 717 tests green at its 100% thresholds.
+Assembled on main (c4fd052) on 2026-10-15 with WP6's shared modules and `provider.ts` additions and WP4b's `wiring.ts` stood in: every command below passed except the 11 `recorded.test.ts` tests, which fail with `pending-fixtures` until WP4b's recordings land. With them excluded (the interim command) the providers suite ran 426 tests green at 95.8% lines / 89.2% branches, `src/searchapi` at 99.3% lines / 96.2% branches / 100% functions under its own floor; core ran 717 tests green at its 100% thresholds.
 
-- Until WP4b's recorded tree is on the branch, run the interim forms, which exclude only the pending file: `pnpm --filter @gmt/providers exec vitest run --coverage --exclude test/searchapi/recorded.test.ts` and `pnpm --filter @gmt/providers exec vitest run --coverage --coverage.include='src/searchapi/**' --coverage.thresholds.lines=90 --coverage.thresholds.branches=80 --exclude test/searchapi/recorded.test.ts test/searchapi`. Drop the `--exclude` once the tree is present; the two commands below are then the done criteria.
-- `pnpm --filter @gmt/providers test` passes with the package thresholds (85% lines, 70% branches, 85% functions and statements), `recorded.test.ts` included.
-- `pnpm --filter @gmt/providers exec vitest run --coverage --coverage.include='src/searchapi/**' --coverage.thresholds.lines=90 --coverage.thresholds.branches=80 test/searchapi` passes: the adapter itself clears 90% lines and 80% branches, so the package average cannot mask it.
+- Until WP4b's recorded tree is on the branch, run the interim form, which excludes only the pending file and still applies every floor in `vitest.config.ts`: `pnpm --filter @gmt/providers exec vitest run --coverage --exclude test/searchapi/recorded.test.ts`. Drop the `--exclude` once the tree is present.
+- `pnpm --filter @gmt/providers test` passes with no "does not meet" line: the package floor (85 / 70 / 85 / 85), WP6's per-directory floors, and `src/searchapi/**` at 90 lines / 80 branches / 90 functions / 90 statements (Task 5.7), `recorded.test.ts` included.
 - `pnpm --filter @gmt/core test` passes at core's 100% thresholds (Task 5.0 is type-only).
 - `pnpm --filter @gmt/api test` passes with its thresholds (85% lines, 70% branches, 85% functions and statements).
 - `pnpm lint` is clean (no `any`, no non-null assertion); `pnpm -r typecheck` is clean (tests included, through `tsconfig.test.json`).
 - `pnpm boundaries` exits 0; production `src/` never imports `src/testing/` or msw.
 - `grep -rnE " as (unknown|never|[A-Z][A-Za-z]*(<|\[|;|,|\)))" packages/providers/src/searchapi packages/providers/test/searchapi apps/api/test/wiring/searchapi.test.ts` prints nothing (`as const` is the only cast).
 - `grep -rnE "setupServer|Math.round|class NoteCounter|function parseError|function majorToMinor" packages/providers/src/searchapi packages/providers/test/searchapi` prints nothing (one msw server; no rounding; WP6's helpers only).
+- `grep -rnE "notes\.add\('[^']*:" packages/providers/src/searchapi` prints nothing (note keys carry no colon).
 - `pnpm secret-scan` prints `secret scan: clean`.
 - `grep -rn "api_key" packages/providers/src/searchapi` prints nothing.
 - `grep -rnE "'(LHR|LGW|JFK|EWR|LON|NYC)'" packages/providers/src` prints nothing.
@@ -5013,6 +5125,6 @@ Assembled on main (a001e0d) on 2026-10-15 with WP6's shared modules and `provide
 
 ## 13. Open questions
 
-Decisions 24–29 settle every round-1 and round-2 question this brief raised (seller-less offers dropped, `RawOffer.verified`, the cost option, spec rev 15's tiling and itinerary age, the chain-stop result, the WP13 smoke rows, self-transfer as a Phase 4 gap, `separate_tickets` on both engines, the currency rule, WP6 first); they are implemented above. One item remains, shared with WP6 (its §11 item 1):
+Decisions 24–31 settle every question rounds 1–3 raised (seller-less offers dropped, `RawOffer.verified`, the cost option, spec rev 15's tiling and itinerary age, the chain-stop result, the WP13 smoke rows, self-transfer as a Phase 4 gap, `separate_tickets` on both engines, the currency rule, the stateless healthcheck, the empty-chain rule, the fixture flag, the coverage floors, WP6 first); they are implemented above. One spec note remains:
 
-- **Healthcheck `ok` from recent errors** (`requires_human_judgment`, Fable). Decision 24 says `ok` derives from `recentCalls` (a recent auth or quota error → false), but `BudgetGuard.recentCalls` returns a count of attempts, not outcomes, and the adapter holds no budget port. This brief implements the stateless rule: `{ ok: true, detail: 'not probed: …' }`, no request (`GET /api/v1/me` is not called: its billing is undocumented). Either drop that clause from decision 24 or add a port that reports the last outcome per provider and name its reader. Not blocking.
+- **Route-history scope (spec note for Fable; not blocking).** The adapter labels `price_insights.price_history` as the spec does, Google's route-level price-insight series, indicative (spec §2 bonus, §7). Nothing evidences that scope: the series is fetched per cell with `travel_class`, and if it is per date pair and cabin, `route_price_history`'s key (route, cabin, provider, date) merges series from different cells under a route-level label. Proposed: a WP13 smoke row comparing `price_history` from two cells on the same route; if they differ, revise the spec §7 label (or key) at the next spec revision.
