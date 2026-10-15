@@ -7490,7 +7490,7 @@ export function checkWorkedExampleTree(
 - [ ] **Step 4: Run to verify**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/recorded` and `pnpm --filter @gmt/api test`
-Expected: `workedExampleTree.test.ts` 15 passed (the negatives added for plan decisions 29 and 31); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 21` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 156 passed (157), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
+Expected: `workedExampleTree.test.ts` 15 passed (the negatives added for plan decisions 29 and 31); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 21` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 184 passed (185), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
 
 - [ ] **Step 5: Commit the check, not the gate**
 
@@ -7556,7 +7556,7 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
 - [ ] **Step 7: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api test`, `pnpm --filter @gmt/providers test`, `pnpm secret-scan`
-Expected: both suites pass (the api suite includes the manifest test, 157 passed; the suite's committed-tree snapshot holds after the commit); `secret scan: clean`.
+Expected: both suites pass (the api suite includes the manifest test, 185 passed; the suite's committed-tree snapshot holds after the commit); `secret scan: clean`.
 
 - [ ] **Step 8: Commit**
 
@@ -7587,11 +7587,11 @@ None. The plan's Review Focus lines are owned by WP0, WP1, WP2, WP3, WP7, WP8, W
 
 ## 12. Definition of done
 
-Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 156 passed).
+Rows marked **operator** run on Ian's machine with the real `.env`; every other row runs anywhere, including CI. Before Task 12b (the pre-handoff state) every row is green except the first, which fails in exactly `test/recorded/manifest.test.ts` (1 failed | 184 passed).
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/api test` | all 157 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (assembly, manifest excluded: 96.9 / 84.5 / 95.8 / 94.9) |
+| `pnpm --filter @gmt/api test` | all 185 tests pass after Task 12b; coverage over `src/**` ≥ 85 % lines, 70 % branches, 85 % functions, 85 % statements (fix round 1, manifest excluded: lines 97.1 / branches 84.9 / functions 96.7 / statements 95.3) |
 | `pnpm --filter @gmt/db test` | passes (263), including `test/readOnlyLockState.test.ts` and the updated barrel test; WP3's thresholds hold |
 | `pnpm --filter @gmt/providers test` | passes (264, including the barrel test naming `defaultRecordedRoot`, `withContentHash` and `assertRecordedRoot`, and the `assertRecordedRoot` test); WP4's thresholds hold |
 | `pnpm lint` | clean |
