@@ -3459,7 +3459,17 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(run.ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get()).toEqual({
       status: 'cancelled',
       e: 'aborted',
-    });
+    }); // why: an abort with the real kit leaves no open reservation; the aborted SA-02 is ledgered unknown and counted, so the
+    // ledger line shows it (cost M-3)
+    expect(
+      run.ports.db.raw.prepare("SELECT COUNT(*) AS n FROM provider_requests WHERE outcome = 'pending'").get(),
+    ).toEqual({ n: 0 });
+    expect(
+      run.ports.db.raw
+        .prepare("SELECT outcome FROM provider_requests WHERE provider_id = 'searchapi' ORDER BY rowid")
+        .all(),
+    ).toEqual([{ outcome: 'error' }, { outcome: 'unknown' }]);
+    expect(run.summary.creditsUsed).toBe(1);
   });
 
   it.each([
