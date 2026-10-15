@@ -709,8 +709,10 @@ export class CellsRepo {
       let best: { id: number; pence: number } | null = null;
       for (const x of offers) {
         itineraries.upsertItinerary(x.itinerary);
-        const offerId = itineraries.upsertOffer(x.offer);
-        const id = itineraries.insertObservation({ ...x.observation, offerId, executionId });
+        const { observationId: id } = itineraries.recordObservation(x.offer, {
+          ...x.observation,
+          executionId,
+        });
         if (best === null || x.observation.pricePence < best.pence)
           best = { id, pence: x.observation.pricePence };
       }

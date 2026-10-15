@@ -114,15 +114,22 @@ describe('gate-only paths: fixture refused when closed, accepted when open (ruli
         w.open.outcomes(w.executionId, { providerId: 'fixture' }).filter((o) => o.status === 'error').length,
     ],
     [
-      'upsertOffer',
+      'recordObservation',
       (w, r) => {
         w.itOpen.upsertItinerary(itinerary());
-        return (r === 'open' ? w.itOpen : w.itClosed).upsertOffer({
-          itineraryHash: 'a'.repeat(64),
-          providerId: 'fixture',
-          seller: 'Fixture',
-          cabin: 'economy',
-        });
+        return (r === 'open' ? w.itOpen : w.itClosed).recordObservation(
+          { itineraryHash: 'a'.repeat(64), providerId: 'fixture', seller: 'Fixture', cabin: 'economy' },
+          {
+            ...observationWrite({
+              provenance: {
+                ...observationWrite().provenance,
+                providerId: 'fixture',
+                sourceKind: 'synthetic',
+              },
+            }),
+            executionId: w.executionId,
+          },
+        );
       },
       (w) => count(w.db, 'fare_offers'),
     ],

@@ -161,19 +161,19 @@ CREATE TABLE `fare_offers` (
 	`cabin` text NOT NULL,
 	`first_seen_at` text NOT NULL,
 	`last_seen_at` text NOT NULL,
-	`first_price_pence` integer,
-	`lowest_price_pence` integer,
-	`highest_price_pence` integer,
-	`latest_price_pence` integer,
+	`first_price_pence` integer NOT NULL,
+	`lowest_price_pence` integer NOT NULL,
+	`highest_price_pence` integer NOT NULL,
+	`latest_price_pence` integer NOT NULL,
 	FOREIGN KEY (`itinerary_hash`) REFERENCES `itineraries`(`hash`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "fare_offers_provider_ck" CHECK(provider_id IN ('travelpayouts', 'searchapi', 'fixture')),
 	CONSTRAINT "fare_offers_cabin_ck" CHECK(cabin IN ('economy', 'premium_economy', 'business', 'first')),
 	CONSTRAINT "fare_offers_first_seen_ck" CHECK(first_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
 	CONSTRAINT "fare_offers_last_seen_ck" CHECK(last_seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-	CONSTRAINT "fare_offers_first_ck" CHECK(first_price_pence IS NULL OR (typeof(first_price_pence) = 'integer' AND first_price_pence >= 0)),
-	CONSTRAINT "fare_offers_lowest_ck" CHECK(lowest_price_pence IS NULL OR (typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0)),
-	CONSTRAINT "fare_offers_highest_ck" CHECK(highest_price_pence IS NULL OR (typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0)),
-	CONSTRAINT "fare_offers_latest_ck" CHECK(latest_price_pence IS NULL OR (typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0))
+	CONSTRAINT "fare_offers_first_ck" CHECK(typeof(first_price_pence) = 'integer' AND first_price_pence >= 0),
+	CONSTRAINT "fare_offers_lowest_ck" CHECK(typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0),
+	CONSTRAINT "fare_offers_highest_ck" CHECK(typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0),
+	CONSTRAINT "fare_offers_latest_ck" CHECK(typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `fare_offers_identity_uq` ON `fare_offers` (`itinerary_hash`,`provider_id`,`seller`,`cabin`);--> statement-breakpoint

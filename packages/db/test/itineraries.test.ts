@@ -1,4 +1,4 @@
-import { type CellKey, cellKeyString, fixedClock, type Provenance } from '@gmt/core';
+import { type CellKey, cellKeyString, fixedClock, type Offer, type Provenance } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { RowRejected } from '../src/internal/validate.js';
@@ -44,9 +44,9 @@ function setup(allowSynthetic = false) {
 const insertObs = (
   repo: ItinerariesRepo,
   executionId: string,
-  offerId: number,
+  offer: Offer,
   over: Parameters<typeof observationWrite>[0] = {},
-) => repo.insertObservation({ ...observationWrite(over), offerId, executionId });
+) => repo.recordObservation(offer, { ...observationWrite(over), executionId });
 
 /** Raw insert into price_observations, to prove the shared price CHECKs hold on this table too (test-017). */
 function rawObservation(db: Db, executionId: string, offerId: number, over: Record<string, unknown>): void {
@@ -90,35 +90,66 @@ describe('itineraries and offers (spec §7)', () => {
     expect(repo.get('missing')).toBeNull();
   });
 
-  it('UNIQUE (itinerary_hash, provider_id, seller, cabin): upsertOffer returns the same id; a raw duplicate throws', () => {
-    const { db, repo } = setup();
+  it('UNIQUE (itinerary_hash, provider_id, seller, cabin): recordObservation reuses the offer id; a raw duplicate throws', () => {
+    const { db, executionId, repo } = setup();
     repo.upsertItinerary(itinerary());
-    const id = repo.upsertOffer(offerOf());
-    expect(repo.upsertOffer(offerOf())).toBe(id);
-    expect(repo.upsertOffer(offerOf(undefined, 'Mytrip'))).not.toBe(id);
-    expect(repo.upsertOffer({ ...offerOf(), cabin: 'business' })).not.toBe(id);
+    const { offerId: id } = insertObs(repo, executionId, offerOf());
+    expect(insertObs(repo, executionId, offerOf()).offerId).toBe(id);
+    expect(insertObs(repo, executionId, offerOf(undefined, 'Mytrip')).offerId).not.toBe(id);
+    const business = insertObs(
+      repo,
+      executionId,
+      { ...offerOf(), cabin: 'business' },
+      {
+        provenance: { ...SEARCHAPI_PROVENANCE, cabin: 'business' },
+        segmentCabins: ['business', 'business'],
+      },
+    );
+    expect(business.offerId).not.toBe(id);
+    const raw = (prices: boolean) => () =>
+      db.raw
+        .prepare(
+          prices
+            ? `INSERT INTO fare_offers (itinerary_hash, provider_id, seller, cabin, first_seen_at, last_seen_at, first_price_pence, lowest_price_pence, highest_price_pence, latest_price_pence) VALUES (?, 'searchapi', 'British Airways', 'economy', ?, ?, 1, 1, 1, 1)`
+            : `INSERT INTO fare_offers (itinerary_hash, provider_id, seller, cabin, first_seen_at, last_seen_at) VALUES (?, 'searchapi', 'Elsewhere', 'economy', ?, ?)`,
+        )
+        .run('a'.repeat(64), T0, T0);
+    expect(sqliteCode(raw(true))).toBe('SQLITE_CONSTRAINT_UNIQUE');
+    // dm-M2: an offer without its price aggregates cannot exist
+    expect(sqliteCode(raw(false))).toBe('SQLITE_CONSTRAINT_NOTNULL');
+  });
+
+  it('recordObservation writes offer, observation and aggregates in one transaction; the offer is first seen at the observation', () => {
+    const { db, clock, executionId, repo } = setup();
+    repo.upsertItinerary(itinerary());
+    clock.advance(3_600_000); // the clock moves on; the offer's first_seen_at must still be the observation's
+    const { offerId, observationId } = insertObs(repo, executionId, offerOf());
     expect(
-      sqliteCode(() =>
-        db.raw
-          .prepare(
-            `INSERT INTO fare_offers (itinerary_hash, provider_id, seller, cabin, first_seen_at, last_seen_at) VALUES (?, 'searchapi', 'British Airways', 'economy', ?, ?)`,
-          )
-          .run('a'.repeat(64), T0, T0),
-      ),
-    ).toBe('SQLITE_CONSTRAINT_UNIQUE');
+      db.raw
+        .prepare(
+          'SELECT first_seen_at AS fs, last_seen_at AS ls, first_price_pence AS f, lowest_price_pence AS l, highest_price_pence AS h, latest_price_pence AS x FROM fare_offers WHERE id = ?',
+        )
+        .get(offerId),
+    ).toEqual({ fs: T0, ls: T0, f: 41_200, l: 41_200, h: 41_200, x: 41_200 });
+    expect(repo.previousObservation(offerId, at('2026-10-15T00:00:00.000Z'))?.id).toBe(observationId);
+    // a SQL failure on the observation (unknown execution: FK) leaves no new offer behind
+    expect(sqliteCode(() => insertObs(repo, 'no-such-execution', offerOf(undefined, 'Mytrip')))).toBe(
+      'SQLITE_CONSTRAINT_FOREIGNKEY',
+    );
+    expect([count(db, 'fare_offers'), count(db, 'price_observations')]).toEqual([1, 1]);
   });
 
   it('latest = max fetched_at, ties broken by id; first, lowest, highest follow; previousObservation looks strictly before', () => {
     const { db, executionId, repo } = setup();
     repo.upsertItinerary(itinerary());
-    const offerId = repo.upsertOffer(offerOf());
+    const offer = offerOf();
     const obs = (fetchedAt: string, pence: number) =>
-      insertObs(repo, executionId, offerId, {
+      insertObs(repo, executionId, offer, {
         pricePence: pence,
         priceNativeMinor: pence,
         provenance: { ...SEARCHAPI_PROVENANCE, fetchedAt: at(fetchedAt) },
       });
-    obs('2026-10-14T10:00:00.000Z', 50_000);
+    const { offerId } = obs('2026-10-14T10:00:00.000Z', 50_000);
     obs('2026-10-14T12:00:00.000Z', 45_000);
     obs('2026-10-14T11:00:00.000Z', 40_000); // inserted later, fetched earlier
     const read = () =>
@@ -144,13 +175,13 @@ describe('itineraries and offers (spec §7)', () => {
   it('observations: provider ⇔ kind both directions, the gate, offer mismatch, disagreeing fx, non-integers', () => {
     const open = setup(true);
     open.repo.upsertItinerary(itinerary());
-    const offerId = open.repo.upsertOffer(offerOf());
-    const fixtureOffer = open.repo.upsertOffer({ ...offerOf(), providerId: 'fixture' });
+    const offer = offerOf();
+    const fixtureOffer: Offer = { ...offerOf(), providerId: 'fixture' };
     const closed = new ItinerariesRepo(open.db, open.clock, { allowSynthetic: false });
-    const write = (repo: ItinerariesRepo, id: number, over: Parameters<typeof observationWrite>[0]) => () =>
-      insertObs(repo, open.executionId, id, over);
+    const write = (repo: ItinerariesRepo, offer: Offer, over: Parameters<typeof observationWrite>[0]) => () =>
+      insertObs(repo, open.executionId, offer, over);
     expect(
-      write(closed, offerId, { provenance: { ...SEARCHAPI_PROVENANCE, sourceKind: 'synthetic' } }),
+      write(closed, offer, { provenance: { ...SEARCHAPI_PROVENANCE, sourceKind: 'synthetic' } }),
     ).toThrow(expect.objectContaining({ rule: 'provider-kind' }));
     for (const repo of [open.repo, closed]) {
       expect(
@@ -164,32 +195,32 @@ describe('itineraries and offers (spec §7)', () => {
         provenance: { ...SEARCHAPI_PROVENANCE, providerId: 'fixture', sourceKind: 'synthetic' },
       }),
     ).toThrow(expect.objectContaining({ rule: 'synthetic-gate' }));
-    expect(write(closed, offerId, { provenance: { ...SEARCHAPI_PROVENANCE, cabin: 'business' } })).toThrow(
+    expect(write(closed, offer, { provenance: { ...SEARCHAPI_PROVENANCE, cabin: 'business' } })).toThrow(
       expect.objectContaining({ rule: 'offer-mismatch' }),
     );
     expect(
-      write(closed, offerId, {
+      write(closed, offer, {
         provenance: { ...SEARCHAPI_PROVENANCE, providerId: 'travelpayouts', sourceKind: 'authorised-cached' },
       }),
     ).toThrow(expect.objectContaining({ rule: 'offer-mismatch' }));
     expect(
-      write(closed, offerId, {
+      write(closed, offer, {
         provenance: {
           ...SEARCHAPI_PROVENANCE,
           fx: { converted: true, rateNano: 1, rateDate: cell().departureDate, source: 'x' },
         },
       }),
     ).toThrow(expect.objectContaining({ rule: 'fx-mismatch' }));
-    expect(write(closed, offerId, { pricePence: 412.5, priceNativeMinor: 412.5 })).toThrow(
+    expect(write(closed, offer, { pricePence: 412.5, priceNativeMinor: 412.5 })).toThrow(
       expect.objectContaining({ rule: 'integer' }),
     );
-    expect(count(open.db, 'price_observations')).toBe(0);
+    expect([count(open.db, 'price_observations'), count(open.db, 'fare_offers')]).toEqual([0, 0]);
   });
 
   it('price_observations carries the shared price CHECKs (test-017)', () => {
     const { db, executionId, repo } = setup();
     repo.upsertItinerary(itinerary());
-    const offerId = repo.upsertOffer(offerOf());
+    const { offerId } = insertObs(repo, executionId, offerOf());
     rawObservation(db, executionId, offerId, {}); // positive control: the baseline row satisfies every CHECK
     rawObservation(db, executionId, offerId, { price_pence: '412', price_native_minor: '412' }); // INTEGER affinity stores 412
     expect(
@@ -237,7 +268,7 @@ describe('itineraries and offers (spec §7)', () => {
     expect(
       sqliteCode(() => rawObservation(db, executionId, offerId, { fetched_at: '2026-10-14T12:00:00Z' })),
     ).toBe('SQLITE_CONSTRAINT_CHECK');
-    expect(count(db, 'price_observations')).toBe(2);
+    expect(count(db, 'price_observations')).toBe(3);
   });
 });
 

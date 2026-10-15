@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "074e44ba-bf4b-4787-a30a-002c4b46b356",
+  "id": "877714da-3cf0-49fd-a9a9-0449f37750d2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "airports": {
@@ -1037,28 +1037,28 @@
           "name": "first_price_pence",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "lowest_price_pence": {
           "name": "lowest_price_pence",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "highest_price_pence": {
           "name": "highest_price_pence",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "latest_price_pence": {
           "name": "latest_price_pence",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
@@ -1117,19 +1117,19 @@
         },
         "fare_offers_first_ck": {
           "name": "fare_offers_first_ck",
-          "value": "first_price_pence IS NULL OR (typeof(first_price_pence) = 'integer' AND first_price_pence >= 0)"
+          "value": "typeof(first_price_pence) = 'integer' AND first_price_pence >= 0"
         },
         "fare_offers_lowest_ck": {
           "name": "fare_offers_lowest_ck",
-          "value": "lowest_price_pence IS NULL OR (typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0)"
+          "value": "typeof(lowest_price_pence) = 'integer' AND lowest_price_pence >= 0"
         },
         "fare_offers_highest_ck": {
           "name": "fare_offers_highest_ck",
-          "value": "highest_price_pence IS NULL OR (typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0)"
+          "value": "typeof(highest_price_pence) = 'integer' AND highest_price_pence >= 0"
         },
         "fare_offers_latest_ck": {
           "name": "fare_offers_latest_ck",
-          "value": "latest_price_pence IS NULL OR (typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0)"
+          "value": "typeof(latest_price_pence) = 'integer' AND latest_price_pence >= 0"
         }
       }
     },

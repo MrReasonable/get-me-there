@@ -305,38 +305,25 @@ export class ItinerariesRepo {
   }
 
   /** Returns the offer id for (itinerary, provider, seller, cabin), creating it if absent. */
-  upsertOffer(offer: Offer): number {
+  /**
+   * Records one observation of one offer (ruling 2026-10-15, dm-M2): in one transaction the offer is upserted on
+   * (itinerary, provider, seller, cabin), the observation appended, and the offer's first/lowest/highest/latest and
+   * first/last seen recomputed from its observations (latest = max fetched_at, tie id). An offer therefore never
+   * exists without an observation behind its aggregates.
+   */
+  recordObservation(
+    offer: Offer,
+    obs: Omit<Observation, 'id' | 'offerId'>,
+  ): { offerId: number; observationId: number } {
+    const p = obs.provenance;
+    // why: the kind rule first, so a fixture/non-synthetic pair is named provider-kind even where the gate is closed (test-010).
+    assertProviderKind(p.providerId, p.sourceKind, this.opts.allowSynthetic);
     assertProviderAllowed(offer.providerId, this.opts.allowSynthetic);
     if (offer.seller.length === 0) throw new RowRejected('seller', 'seller is required (spec §7 NOT NULL)');
-    const now = this.clock.now();
-    this.db.raw
-      .prepare(
-        `INSERT INTO fare_offers (itinerary_hash, provider_id, seller, cabin, first_seen_at, last_seen_at) VALUES (@itineraryHash, @providerId, @seller, @cabin, @now, @now) ON CONFLICT(itinerary_hash, provider_id, seller, cabin) DO NOTHING`,
-      )
-      .run({ ...offer, now });
-    const r = this.db.raw
-      .prepare<Record<string, unknown>, { id: number }>(
-        'SELECT id FROM fare_offers WHERE itinerary_hash = @itineraryHash AND provider_id = @providerId AND seller = @seller AND cabin = @cabin',
-      )
-      .get({ ...offer });
-    if (r === undefined) throw new Error('fare offer vanished after upsert');
-    return r.id;
-  }
-
-  /** Appends one observation and recomputes the offer's first/lowest/highest/latest (latest = max fetched_at, tie id). */
-  insertObservation(obs: Omit<Observation, 'id'>): number {
-    const offer = this.db.raw
-      .prepare<[number], { provider_id: string; cabin: string }>(
-        'SELECT provider_id, cabin FROM fare_offers WHERE id = ?',
-      )
-      .get(obs.offerId);
-    if (offer === undefined) throw new RowRejected('missing', `fare offer ${obs.offerId} does not exist`);
-    const p = obs.provenance;
-    assertProviderKind(p.providerId, p.sourceKind, this.opts.allowSynthetic);
-    if (p.providerId !== offer.provider_id || p.cabin !== offer.cabin)
+    if (p.providerId !== offer.providerId || p.cabin !== offer.cabin)
       throw new RowRejected(
         'offer-mismatch',
-        `observation ${p.providerId}/${p.cabin} does not match offer ${offer.provider_id}/${offer.cabin}`,
+        `observation ${p.providerId}/${p.cabin} does not match offer ${offer.providerId}/${offer.cabin}`,
       );
     if (!sameFx(p.fx, obs.fx))
       throw new RowRejected('fx-mismatch', 'observation fx and provenance fx disagree');
@@ -348,7 +335,22 @@ export class ItinerariesRepo {
     assertPointOfSale(p.pointOfSale);
     const fx = obs.fx;
     return this.db.transaction(() => {
-      const id = Number(
+      // why: the aggregates start as this observation's price and are recomputed below, so NOT NULL always holds.
+      this.db.raw
+        .prepare(
+          `INSERT INTO fare_offers (itinerary_hash, provider_id, seller, cabin, first_seen_at, last_seen_at, first_price_pence, lowest_price_pence, highest_price_pence, latest_price_pence)
+           VALUES (@itineraryHash, @providerId, @seller, @cabin, @at, @at, @price, @price, @price, @price)
+           ON CONFLICT(itinerary_hash, provider_id, seller, cabin) DO NOTHING`,
+        )
+        .run({ ...offer, at: p.fetchedAt, price: obs.pricePence });
+      const row = this.db.raw
+        .prepare<Record<string, unknown>, { id: number }>(
+          'SELECT id FROM fare_offers WHERE itinerary_hash = @itineraryHash AND provider_id = @providerId AND seller = @seller AND cabin = @cabin',
+        )
+        .get({ ...offer });
+      if (row === undefined) throw new Error('fare offer vanished after upsert');
+      const offerId = row.id;
+      const observationId = Number(
         this.db.raw
           .prepare(
             `INSERT INTO price_observations (offer_id, execution_id, source_kind, cabin, fetched_at, provider_observed_at, price_pence, price_native_minor, currency_native,
@@ -359,7 +361,7 @@ export class ItinerariesRepo {
               @fareConditions, @booking, @bookingExpiresAt, @suppliedFields, @partialExpansion)`,
           )
           .run({
-            offerId: obs.offerId,
+            offerId,
             executionId: obs.executionId,
             sourceKind: p.sourceKind,
             cabin: p.cabin,
@@ -385,8 +387,8 @@ export class ItinerariesRepo {
             partialExpansion: obs.partialExpansion ? 1 : 0,
           }).lastInsertRowid,
       );
-      this.db.raw.prepare(RECOMPUTE_OFFER_SQL).run({ id: obs.offerId });
-      return id;
+      this.db.raw.prepare(RECOMPUTE_OFFER_SQL).run({ id: offerId });
+      return { offerId, observationId };
     });
   }
 
