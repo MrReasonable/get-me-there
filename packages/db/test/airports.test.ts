@@ -81,7 +81,8 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
 
   it('the vendored data carries the worked example, the exact metro members, one country per metro, and passes the sanity check', () => {
     const ds = loadAirportsDataset(AIRPORTS_DATA_DIR);
-    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633');
+    // the metro rules are versioned too, so a rule change re-seeds an existing database (dm-M3 re-review)
+    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633.r2');
     expect(
       ds.airports.filter((a) => /^[A-Z]{3}$/.test(a.iata) && a.tz.length > 0).length,
     ).toBeGreaterThanOrEqual(AIRPORTS_MIN_ROWS);
@@ -120,6 +121,29 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(metros.LON).toEqual(['LCY', 'LGW', 'LHR', 'LTN', 'SEN', 'STN']);
   });
 
+  it('airports with no passenger service are excluded by the explicit list, and metros left with one airport go too (dm-M3 re-review)', () => {
+    const { metros } = loadAirportsDataset(AIRPORTS_DATA_DIR);
+    const members = Object.values(metros).flat();
+    for (const closed of ['SDV', 'DKR', 'YMX', 'RAJ', 'MES']) expect(members, closed).not.toContain(closed);
+    expect(metros.YMQ).toEqual(['YHU', 'YUL']); // Mirabel gone, Montreal keeps two airports
+    for (const gone of ['TLV', 'DKR', 'RAJ', 'MES']) expect(Object.keys(metros), gone).not.toContain(gone);
+    const attribution = readFileSync(join(AIRPORTS_DATA_DIR, 'metros.ATTRIBUTION'), 'utf8');
+    for (const closed of ['SDV', 'DKR', 'YMX', 'RAJ', 'MES']) expect(attribution, closed).toContain(closed);
+  });
+
+  it('loadAirportsDataset requires the metro rules version', () => {
+    const dir = tmpDir();
+    writeFileSync(
+      join(dir, 'airports.v.json'),
+      JSON.stringify({ version: 'v', source: 's', licence: 'l', airports: [] }),
+    );
+    writeFileSync(
+      join(dir, 'metros.json'),
+      JSON.stringify({ source: 's', revision: '1', licence: 'l', retrieved: '2026-10-14', metros: {} }),
+    );
+    expect(() => loadAirportsDataset(dir)).toThrow(/metros\.json.*rules/);
+  });
+
   it('seeding reads only local files: the seed module imports node:fs, node:path, @gmt/core and relative modules only (test-016)', () => {
     const source = readFileSync(new URL('../src/seed/airports.ts', import.meta.url), 'utf8');
     const imports = [...source.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
@@ -153,7 +177,14 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     );
     writeFileSync(
       join(dir, 'metros.json'),
-      JSON.stringify({ source: 's', revision: '1', licence: 'l', retrieved: '2026-10-14', metros: {} }),
+      JSON.stringify({
+        source: 's',
+        revision: '1',
+        rules: 'r2',
+        licence: 'l',
+        retrieved: '2026-10-14',
+        metros: {},
+      }),
     );
     expect(() => loadAirportsDataset(dir)).toThrow(/airports\.bad\.json.*airports\[0\]\.lat/);
   });

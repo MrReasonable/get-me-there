@@ -9,6 +9,22 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const MIN_ROWS = 5000; // spec §7 sanity threshold
+/**
+ * The metro rules version, written to metros.json and folded into the dataset version so a rule change re-seeds.
+ * r1: first sentence only, ≥ 2 members, majority country. r2: adds CLOSED_TO_PASSENGERS (dm-M3 re-review).
+ */
+const RULES = 'r2';
+/**
+ * Airports mwgg still carries but with no scheduled passenger service; mwgg has no status field, so they are listed
+ * by hand. A metro left with one airport after this is dropped by the ≥ 2 rule.
+ */
+const CLOSED_TO_PASSENGERS = {
+  SDV: 'Sde Dov, Tel Aviv: closed 2019',
+  DKR: 'Dakar-Yoff (Léopold Sédar Senghor): closed to commercial traffic 2017, replaced by DSS',
+  YMX: 'Montréal-Mirabel: passenger flights ended 2004',
+  RAJ: 'Rajkot (old airport): replaced by Hirasar (HSR) 2023',
+  MES: 'Medan Soewondo: an air force base since Kualanamu (KNO) opened in 2013',
+};
 const IATA = /^[A-Z]{3}$/;
 const dataDir = fileURLToPath(new URL('../data/', import.meta.url));
 const { values } = parseArgs({
@@ -48,8 +64,13 @@ if (values.wikitext) {
       drops.push(`${head[1]}:${m[1]} named only in a later sentence about former airports`);
     const rest = current.replace(/''[^']*''/g, '').replace(/formerly [A-Z]{3}/g, '');
     const codes = [...new Set([...rest.matchAll(/\(([A-Z]{3})[,)]/g)].map((m) => m[1]))].sort();
-    const present = codes.filter((c) => byIata.has(c));
-    for (const c of codes) if (!byIata.has(c)) drops.push(`${head[1]}:${c} absent from the airports file`);
+    for (const c of codes)
+      if (c in CLOSED_TO_PASSENGERS)
+        drops.push(`${head[1]}:${c} closed to passengers (${CLOSED_TO_PASSENGERS[c]})`);
+    const present = codes.filter((c) => byIata.has(c) && !(c in CLOSED_TO_PASSENGERS));
+    for (const c of codes)
+      if (!byIata.has(c) && !(c in CLOSED_TO_PASSENGERS))
+        drops.push(`${head[1]}:${c} absent from the airports file`);
     const countries = {};
     for (const c of present) countries[byIata.get(c).country] = (countries[byIata.get(c).country] ?? 0) + 1;
     const majority = Object.entries(countries).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -69,7 +90,7 @@ if (values.wikitext) {
   const source = `https://en.wikipedia.org/w/index.php?title=IATA_airport_code&oldid=${values.revision}`;
   writeFileSync(
     `${dataDir}metros.json`,
-    `${JSON.stringify({ source, revision: values.revision, licence: 'CC BY-SA 4.0', retrieved: values.retrieved ?? new Date().toISOString().slice(0, 10), metros }, null, 1)}\n`,
+    `${JSON.stringify({ source, revision: values.revision, rules: RULES, licence: 'CC BY-SA 4.0', retrieved: values.retrieved ?? new Date().toISOString().slice(0, 10), metros }, null, 1)}\n`,
   );
   console.log(
     `wrote ${Object.keys(metros).length} metro codes from revision ${values.revision}; dropped: ${drops.join('; ') || 'none'}`,

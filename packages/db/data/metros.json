@@ -1,6 +1,7 @@
 {
   "source": "https://en.wikipedia.org/w/index.php?title=IATA_airport_code&oldid=1378312633",
   "revision": "1378312633",
+  "rules": "r2",
   "licence": "CC BY-SA 4.0",
   "retrieved": "2026-10-14",
   "metros": {
@@ -12,7 +13,7 @@
     "JKT": ["CGK", "HLP"],
     "LON": ["LCY", "LGW", "LHR", "LTN", "SEN", "STN"],
     "MIL": ["BGY", "LIN", "MXP"],
-    "YMQ": ["YHU", "YMX", "YUL"],
+    "YMQ": ["YHU", "YUL"],
     "MOW": ["CKL", "DME", "OSF", "SVO", "VKO", "ZIA"],
     "NYC": ["EWR", "JFK", "LGA"],
     "OSA": ["ITM", "KIX", "UKB"],
@@ -30,7 +31,6 @@
     "BKK": ["BKK", "DMK"],
     "BFS": ["BFS", "BHD"],
     "CMB": ["CMB", "RML"],
-    "DKR": ["DKR", "DSS"],
     "DFW": ["ADS", "AFW", "DAL", "DFW", "FTW"],
     "DXB": ["DWC", "DXB"],
     "GLA": ["GLA", "PIK"],
@@ -41,19 +41,16 @@
     "KUL": ["KUL", "SZB"],
     "IEV": ["IEV", "KBP"],
     "LAX": ["BUR", "LAX", "LGB", "ONT", "PMD", "SBD", "SNA", "VNY"],
-    "MES": ["KNO", "MES"],
     "MDE": ["EOH", "MDE"],
     "MEX": ["MEX", "NLU"],
     "MEL": ["AVV", "MEB", "MEL"],
     "MIA": ["FLL", "MIA"],
     "NGO": ["NGO", "NKM"],
-    "RAJ": ["HSR", "RAJ"],
     "SFO": ["OAK", "SFO", "SJC", "STS"],
     "SEA": ["BFI", "PAE", "SEA"],
     "SHA": ["PVG", "SHA"],
     "SYD": ["BWU", "SYD", "WSI"],
     "TPE": ["TPE", "TSA"],
-    "THR": ["IKA", "THR"],
-    "TLV": ["SDV", "TLV"]
+    "THR": ["IKA", "THR"]
   }
 }

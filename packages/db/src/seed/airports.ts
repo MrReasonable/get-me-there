@@ -31,6 +31,8 @@ export function loadAirportsDataset(dir: string): AirportsDataset {
   const m: unknown = JSON.parse(readFileSync(join(dir, 'metros.json'), 'utf8'));
   if (!isRecord(m) || !isRecord(m.metros)) fail('metros.json', 'metros', 'must be an object');
   const revision = str('metros.json', 'revision', m.revision);
+  // why: the build rules are versioned with the data, so a rule change alone re-seeds (dm-M3 re-review).
+  const rules = str('metros.json', 'rules', m.rules);
   const metros: Record<string, string[]> = {};
   for (const [code, members] of Object.entries(m.metros)) {
     if (!Array.isArray(members)) fail('metros.json', `metros.${code}`, 'must be an array');
@@ -59,7 +61,7 @@ export function loadAirportsDataset(dir: string): AirportsDataset {
       metro: index.get(iata) ?? null,
     };
   });
-  return { version: `${version}+metros-${revision}`, airports, metros };
+  return { version: `${version}+metros-${revision}.${rules}`, airports, metros };
 }
 
 /** Seeds or re-seeds `airports` by upsert when the dataset version changes (spec §7); skips when every row is present at this version. */

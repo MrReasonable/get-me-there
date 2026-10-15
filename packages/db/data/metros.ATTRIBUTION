@@ -4,5 +4,7 @@ section "Cities with multiple commercial airports", revision 1378312633
 Licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
 Changes: only the three-letter codes were kept, as a JSON map from metro code to airport codes; former codes,
 codes named only in a later sentence about former airports, codes absent from airports.2026-10-01-a89e4e0.json
-or outside the metro's country, and metros left with fewer than two airports were dropped, by
+or outside the metro's country, airports with no passenger service (SDV Sde Dov, closed 2019; DKR Dakar-Yoff,
+closed to commercial traffic 2017; YMX Montreal-Mirabel, passenger flights ended 2004; RAJ old Rajkot, replaced
+2023; MES Medan Soewondo, an air force base), and metros left with fewer than two airports were dropped (rules r2), by
 packages/db/scripts/build-airports.mjs. This file and metros.json are distributed under the same licence.
