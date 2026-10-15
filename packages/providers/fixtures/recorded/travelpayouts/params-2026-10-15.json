@@ -1,0 +1,19 @@
+{
+  "provider": "travelpayouts",
+  "recordedAt": "2026-10-15",
+  "endpoints": {
+    "/aviasales/v3/prices_for_dates": {
+      "names": ["currency", "departure_at", "destination", "limit", "one_way", "origin", "page"],
+      "values": {
+        "currency": ["gbp"],
+        "departure_at": "any",
+        "destination": "any",
+        "limit": ["1000"],
+        "one_way": ["false"],
+        "origin": "any",
+        "page": "any"
+      }
+    }
+  },
+  "contentSha256": "0cf1d45436da3fb56cccfa23073d314fec761635435fc1347e09be3f810131a5"
+}
