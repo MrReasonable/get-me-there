@@ -190,7 +190,7 @@ export interface RecordedCall { id: string; providerId: ProviderId; status: numb
 
 Plan decision 23 records the widenings against the plan's first text (`createLogger`'s `fd`/`secrets`, `runTool`'s `opts`, `recordFixtures`' ctx, `RecordArgs` without `metro`, `RecordSummary.session`/`chain`, the `RecordedCall` fields). This revision adds two that section 13 lists: `ctx.recordedBy` is required (no fallback signature), and `chain` carries integer pence with its currency (prov-wp04b-r2-001: diagnostics, never offers).
 
-`RecordedCall.status` is the HTTP status when a response arrived; `'no-response'` when the request may have reached the vendor but no status came back, with `detail` saying whether the ledger counted it (a timeout is finalised `unknown` and counted; a socket failure is finalised `error`, not counted, and retried by http-kit: the one path where the vendor may have billed a credit the ledger does not show, cost-wp4b-r2-003); `'aborted'` when SIGINT, SIGTERM or a lost lock stopped it; `'skipped'` only when nothing reached the vendor (a guard refusal, a missing chain prerequisite, an abort before send). `files` lists every file the recorder wrote for the call, retries included; `file` is the last. `creditsUsed` and `freeCalls` are `budget.usage` of the execution's `execution-calls` and `execution-free-calls` scopes.
+`RecordedCall.status` is the HTTP status when a response arrived; `'no-response'` when the request may have reached the vendor but no status came back, with `detail` saying whether the ledger counted it (a timeout is finalised `unknown` and counted; a socket failure is finalised `error`, not counted, and retried by http-kit: the one path where the vendor may have billed a credit the ledger does not show, cost-wp4b-r2-003); `'aborted'` when SIGINT, SIGTERM or a lost lock stopped it; `'skipped'` only when nothing reached the vendor (a guard refusal, a rate-limit slot not granted within `MAX_WAIT_SECONDS`, a missing chain prerequisite, an abort before send; cost M-2). Any other status-less ProviderError is `'no-response'` naming its code, so only a `[socket]` failure carries the "NOT counted" line Task 12b step 5 reconciles against the dashboard. `files` lists every file the recorder wrote for the call, retries included; `file` is the last. `creditsUsed` and `freeCalls` are `budget.usage` of the execution's `execution-calls` and `execution-free-calls` scopes.
 
 ### 5.2 Helpers, also exported (used by WP8/WP13 or by this brief's tests)
 
@@ -259,6 +259,7 @@ export function formatSummary(s, v, a, plan): string[]; export function ledgerLi
 export function readRecorded(file: string | null): Record<string, unknown> | undefined; export function sessionOf(file: string): string | null; export function sessionOfCalls(calls): string | null;
 // src/tools/record.ts
 export const RECORDED_BY = '@gmt/api record:fixtures';
+export function failureOf(e: unknown): { status: RecordedCall['status']; detail: string } | null;   // null: not a request result, it propagates
 export function recordPrecheck(c: Config): string | null; export function runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number>; export function safeMessage(e: unknown, secrets: readonly Secret[]): string;
 ```
 
@@ -2984,12 +2985,12 @@ export async function runRecordingInFakeTime(o: Parameters<typeof runRecording>[
 // apps/api/test/tools/record.test.ts
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIsoDate, asIsoDateTime, fixedClock } from '@gmt/core';
+import { AbortedError, asIsoDate, asIsoDateTime, BudgetExceeded, fixedClock, ProviderError } from '@gmt/core';
 import type { RecordedFixture } from '@gmt/providers';
 import { loadParamsAllowlist } from '@gmt/providers';
 import { loadRecorded, verifyRecordedTree } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
-import { recordFixtures } from '../../src/tools/record.js';
+import { failureOf, recordFixtures } from '../../src/tools/record.js';
 import { priorToolCredits } from '../../src/tools/recordExecution.js';
 import { assessRun } from '../../src/tools/recordReport.js';
 import { cheapestCalendarCell, cheapestOption } from '../../src/tools/recordRequests.js';
@@ -3050,6 +3051,54 @@ describe('response readers (ts-005, pie-006, prov-wp04b-r2-002)', () => {
       price: 603,
     });
     expect(cheapestCalendarCell({ calendar: [] }, BAND, RECT)).toBeNull();
+  });
+});
+
+describe('failureOf: how a failed request is reported (cost-wp4b-r2-003, cost M-2)', () => {
+  const pe = (kind: ProviderError['kind'], code: string, httpStatus?: number): ProviderError =>
+    new ProviderError({
+      kind,
+      retryable: false,
+      providerId: 'searchapi',
+      message: `searchapi /api/v1/search: detail [${code}]`,
+      ...(httpStatus === undefined ? {} : { httpStatus }),
+    });
+  it.each([
+    [pe('rate-limit', 'http-429', 429), { status: 429, detail: 'rate-limit' }],
+    [pe('limiter-timeout', 'retry-after-exceeds-max-wait', 429), { status: 429, detail: 'limiter-timeout' }],
+    [
+      pe('limiter-timeout', 'queue-wait-exceeded'),
+      { status: 'skipped', detail: 'rate-limit slot not granted within MAX_WAIT_SECONDS; nothing sent' },
+    ],
+    [pe('network', 'timeout'), { status: 'no-response', detail: 'timeout (ledgered unknown, counted)' }],
+    [
+      pe('network', 'socket'),
+      {
+        status: 'no-response',
+        detail:
+          'network (ledgered error, NOT counted: if the dashboard drop exceeds the ledger, this call is why)',
+      },
+    ],
+    [
+      pe('upstream', 'redirect-refused'),
+      {
+        status: 'no-response',
+        detail: 'upstream without an HTTP status (redirect-refused); see its ledger row',
+      },
+    ],
+    [
+      new BudgetExceeded({ scope: 'execution-calls', cap: 5, current: 5, requested: 1 }),
+      { status: 'skipped', detail: 'refused by the guard: execution-calls' },
+    ],
+    [
+      new AbortedError(),
+      { status: 'aborted', detail: 'aborted (an attempt already sent is ledgered unknown, counted)' },
+    ],
+  ] as const)('%s', (e, want) => {
+    expect(failureOf(e)).toEqual(want);
+  });
+  it('anything else is not a request result (it propagates)', () => {
+    expect(failureOf(new Error('recorder refused'))).toBeNull();
   });
 });
 
@@ -4287,33 +4336,47 @@ type Sent =
   | { ok: true; res: HttpKitResponse }
   | { ok: false; status: RecordedCall['status']; detail: string };
 
+/** The trailing `[code]` http-kit puts on every classified ProviderError message. */
+function codeOf(e: ProviderError): string | null {
+  return /\[([a-z0-9-]+)\]$/.exec(e.message)?.[1] ?? null;
+}
+
+/**
+ * How a failed request is reported, or null for anything that is not a request result (recorder refusal, SQLite),
+ * which then propagates. `skipped` only when nothing reached the vendor: a guard refusal, or a limiter queue timeout
+ * (nothing reserved or sent, cost M-2). WP4 finalises a timeout `unknown` (counted) but a socket failure `error` (not
+ * counted, and retried), so only the latter can leave a vendor charge the ledger does not show (cost-wp4b-r2-003).
+ */
+export function failureOf(e: unknown): { status: RecordedCall['status']; detail: string } | null {
+  if (e instanceof BudgetExceeded) return { status: 'skipped', detail: `refused by the guard: ${e.scope}` };
+  if (e instanceof AbortedError)
+    return { status: 'aborted', detail: 'aborted (an attempt already sent is ledgered unknown, counted)' };
+  if (!(e instanceof ProviderError)) return null;
+  if (e.httpStatus !== undefined) return { status: e.httpStatus, detail: e.kind };
+  if (e.kind === 'limiter-timeout')
+    return { status: 'skipped', detail: 'rate-limit slot not granted within MAX_WAIT_SECONDS; nothing sent' };
+  const code = codeOf(e);
+  if (code === 'timeout') return { status: 'no-response', detail: 'timeout (ledgered unknown, counted)' };
+  if (code === 'socket')
+    return {
+      status: 'no-response',
+      detail:
+        'network (ledgered error, NOT counted: if the dashboard drop exceeds the ledger, this call is why)',
+    };
+  return {
+    status: 'no-response',
+    detail: `${e.kind} without an HTTP status (${code ?? 'no code'}); see its ledger row`,
+  };
+}
+
 /** One request; the guard, abort and provider errors become results, anything else (recorder refusal, SQLite) propagates. */
 async function send(http: HttpKit, req: HttpKitRequest): Promise<Sent> {
   try {
     return { ok: true, res: await http.request(req) };
   } catch (e) {
-    if (e instanceof BudgetExceeded)
-      return { ok: false, status: 'skipped', detail: `refused by the guard: ${e.scope}` };
-    if (e instanceof AbortedError)
-      return {
-        ok: false,
-        status: 'aborted',
-        detail: 'aborted (an attempt already sent is ledgered unknown, counted)',
-      };
-    if (e instanceof ProviderError) {
-      if (e.httpStatus !== undefined) return { ok: false, status: e.httpStatus, detail: e.kind };
-      // why: WP4 finalises a timeout `unknown` (counted) but a socket failure `error` (not counted, and retried), so
-      // only the latter can leave a vendor charge the ledger does not show (cost-wp4b-r2-003)
-      return e.message.endsWith('[timeout]')
-        ? { ok: false, status: 'no-response', detail: 'timeout (ledgered unknown, counted)' }
-        : {
-            ok: false,
-            status: 'no-response',
-            detail:
-              'network (ledgered error, NOT counted: if the dashboard drop exceeds the ledger, this call is why)',
-          };
-    }
-    throw e;
+    const f = failureOf(e);
+    if (f === null) throw e;
+    return { ok: false, ...f };
   }
 }
 

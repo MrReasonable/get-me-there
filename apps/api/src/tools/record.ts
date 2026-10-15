@@ -96,33 +96,47 @@ type Sent =
   | { ok: true; res: HttpKitResponse }
   | { ok: false; status: RecordedCall['status']; detail: string };
 
+/** The trailing `[code]` http-kit puts on every classified ProviderError message. */
+function codeOf(e: ProviderError): string | null {
+  return /\[([a-z0-9-]+)\]$/.exec(e.message)?.[1] ?? null;
+}
+
+/**
+ * How a failed request is reported, or null for anything that is not a request result (recorder refusal, SQLite),
+ * which then propagates. `skipped` only when nothing reached the vendor: a guard refusal, or a limiter queue timeout
+ * (nothing reserved or sent, cost M-2). WP4 finalises a timeout `unknown` (counted) but a socket failure `error` (not
+ * counted, and retried), so only the latter can leave a vendor charge the ledger does not show (cost-wp4b-r2-003).
+ */
+export function failureOf(e: unknown): { status: RecordedCall['status']; detail: string } | null {
+  if (e instanceof BudgetExceeded) return { status: 'skipped', detail: `refused by the guard: ${e.scope}` };
+  if (e instanceof AbortedError)
+    return { status: 'aborted', detail: 'aborted (an attempt already sent is ledgered unknown, counted)' };
+  if (!(e instanceof ProviderError)) return null;
+  if (e.httpStatus !== undefined) return { status: e.httpStatus, detail: e.kind };
+  if (e.kind === 'limiter-timeout')
+    return { status: 'skipped', detail: 'rate-limit slot not granted within MAX_WAIT_SECONDS; nothing sent' };
+  const code = codeOf(e);
+  if (code === 'timeout') return { status: 'no-response', detail: 'timeout (ledgered unknown, counted)' };
+  if (code === 'socket')
+    return {
+      status: 'no-response',
+      detail:
+        'network (ledgered error, NOT counted: if the dashboard drop exceeds the ledger, this call is why)',
+    };
+  return {
+    status: 'no-response',
+    detail: `${e.kind} without an HTTP status (${code ?? 'no code'}); see its ledger row`,
+  };
+}
+
 /** One request; the guard, abort and provider errors become results, anything else (recorder refusal, SQLite) propagates. */
 async function send(http: HttpKit, req: HttpKitRequest): Promise<Sent> {
   try {
     return { ok: true, res: await http.request(req) };
   } catch (e) {
-    if (e instanceof BudgetExceeded)
-      return { ok: false, status: 'skipped', detail: `refused by the guard: ${e.scope}` };
-    if (e instanceof AbortedError)
-      return {
-        ok: false,
-        status: 'aborted',
-        detail: 'aborted (an attempt already sent is ledgered unknown, counted)',
-      };
-    if (e instanceof ProviderError) {
-      if (e.httpStatus !== undefined) return { ok: false, status: e.httpStatus, detail: e.kind };
-      // why: WP4 finalises a timeout `unknown` (counted) but a socket failure `error` (not counted, and retried), so
-      // only the latter can leave a vendor charge the ledger does not show (cost-wp4b-r2-003)
-      return e.message.endsWith('[timeout]')
-        ? { ok: false, status: 'no-response', detail: 'timeout (ledgered unknown, counted)' }
-        : {
-            ok: false,
-            status: 'no-response',
-            detail:
-              'network (ledgered error, NOT counted: if the dashboard drop exceeds the ledger, this call is why)',
-          };
-    }
-    throw e;
+    const f = failureOf(e);
+    if (f === null) throw e;
+    return { ok: false, ...f };
   }
 }
 
