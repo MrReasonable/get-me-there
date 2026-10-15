@@ -216,8 +216,14 @@ export interface RunToolOptions { env?; runners?: Partial<ToolRunners>; out?; er
 export function recordingTarget(cli: RecordCli, given: RecordingTarget | undefined): RecordingTarget | { refusal: string };
 export function repositoryRoot(): string;   // nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml
 export function isEntryPoint(script?: string, self?: string): boolean;
+// src/bootstrap/preflight.ts (Task 8; the pre-migration preflight WP8's app bootstrap reuses, plan decision 30 / arch M-1)
+export const BACKUPS_KEPT = 5;
 export function backupsDirFor(databasePath: string): string;   // <dirname(dbPath)>/backups
+export function dataDirRefusal(databasePath: string): string | null;   // the refusal when the data directory is not writable
 export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[];   // opens read-write (no schema change)
+export function backupBeforeMigrations(databasePath: string, migrationsDir: string, clock: Clock, secrets: readonly Secret[]): { ok: true; line: string | null } | { ok: false; code: 73 | 74; message: string };
+// src/safeMessage.ts (Task 6; record.ts re-exports it)
+export function safeMessage(e: unknown, secrets: readonly Secret[]): string;
 // src/tools/workedExample.ts
 export const WORKED_EXAMPLE_ROUTE: { origins: readonly ['LHR', 'LGW']; destinations: readonly ['JFK', 'EWR'] }; export const WORKED_EXAMPLE_ROUTE_ARG: string;
 export function isWorkedExampleRoute(a: { origins: readonly string[]; destinations: readonly string[] }): boolean;
@@ -404,13 +410,13 @@ The metro comes from the airports table, which the tool seeds after migration wh
 
 **Create**
 
-- `apps/api/src/wiring.ts`, `apps/api/src/logger.ts`, `apps/api/src/bootstrap/tool.ts`
+- `apps/api/src/wiring.ts`, `apps/api/src/logger.ts`, `apps/api/src/safeMessage.ts`, `apps/api/src/bootstrap/tool.ts`, `apps/api/src/bootstrap/preflight.ts`
 - `apps/api/src/tools/types.ts`, `recordRequests.ts`, `recordPlan.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `workedExample.ts`
 - `apps/api/test/support/setup.ts`, `noNetwork.mjs`, `guards.test.ts`, `logToFd.ts`
 - `apps/api/test/helpers/env.ts`, `tmp.ts`, `vendors.ts`, `recording.ts`, `workedExampleTree.ts`
 - `apps/api/test/tools/recordedHash.test.ts`, `recordPlan.test.ts`, `record.test.ts`, `allowlist.test.ts`
 - `apps/api/test/wiring/loadConfig.test.ts`, `buildPorts.test.ts`; `apps/api/test/logger.test.ts`
-- `apps/api/test/bootstrap/tool.test.ts`, `tool.spawn.test.ts`; `apps/api/test/security/sentinel.test.ts`
+- `apps/api/test/bootstrap/tool.test.ts`, `tool.spawn.test.ts`, `preflight.test.ts`; `apps/api/test/security/sentinel.test.ts`
 - `apps/api/test/recorded/workedExampleTree.test.ts`, `manifest.test.ts`
 - `packages/db/test/readOnlyLockState.test.ts`
 - `packages/providers/fixtures/recorded/**` (the recorded tree and two `params-<date>.json`, Task 12b)
@@ -2833,7 +2839,7 @@ git add apps/api && git commit -m "wp04b: record:fixtures arguments and the exac
 
 ### Task 6: The recording run through the real http-kit, recorder and guard
 
-**Files:** modify `packages/providers/src/http/recorder.ts`, `packages/providers/src/index.ts`, `packages/providers/test/http/recorder.test.ts`, `packages/providers/test/barrel.test.ts` (Step 3a); create `apps/api/src/tools/types.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `apps/api/test/helpers/recording.ts`, `apps/api/test/tools/record.test.ts`. The four `src/tools` modules split the work (arch-r2-005): execution bookkeeping and the budget position (`recordExecution.ts`), assessment and the report (`recordReport.ts`), the request loop and the CLI runner (`record.ts`), the shared result types and exit codes (`types.ts`).
+**Files:** modify `packages/providers/src/http/recorder.ts`, `packages/providers/src/index.ts`, `packages/providers/test/http/recorder.test.ts`, `packages/providers/test/barrel.test.ts` (Step 3a); create `apps/api/src/safeMessage.ts`, `apps/api/src/tools/types.ts`, `recordParams.ts`, `recordExecution.ts`, `recordReport.ts`, `record.ts`, `apps/api/test/helpers/recording.ts`, `apps/api/test/tools/record.test.ts`. The four `src/tools` modules split the work (arch-r2-005): execution bookkeeping and the budget position (`recordExecution.ts`), assessment and the report (`recordReport.ts`), the request loop and the CLI runner (`record.ts`), the shared result types and exit codes (`types.ts`).
 
 **Interfaces:** consumes `createHttpKit`, `createRecorder`, `withContentHash`, `assertRecordedRoot` (Step 3a), `scrubSecrets`, `ProviderError`, `BudgetExceeded`, `AbortedError`, `stripUrlsInText`, `DefinitionInput`, `DefinitionSnapshot`, `Estimate`, `Repos.definitions.create/get/softDelete`, `Repos.executions.create/listByStatus/setStatus`, `Db.immediateTransaction`, `budget.usage`, `seedAirports`, `loadAirportsDataset`, `verifyRecordedTree`, `loadRecorded`. Produces `recordFixtures`, `RecordSummary`, `RecordedCall`, `RecordingFailedError`, `RECORDED_BY`, `recordPrecheck`, `priorToolCredits`, `budgetPosition`, `openRecordingExecution`, `assessRun`, `formatSummary`, `ledgerLine`, `retryAttemptLines`, `runRecord`, `safeMessage`, `ParamLog`, `paramRules`, `writeAllowlist`, `EXIT`, `ToolContext`, `ToolName`.
 
@@ -3514,6 +3520,18 @@ Run `pnpm --filter @gmt/providers exec vitest run test/barrel.test.ts test/http/
 Step 3b: the apps/api modules.
 
 ```ts
+// apps/api/src/safeMessage.ts
+/** One error-message sanitiser for every apps/api sink: the tool bootstrap, the preflight and the record tool. */
+import { type Secret, stripUrlsInText } from '@gmt/core';
+import { scrubSecrets } from '@gmt/providers';
+
+/** A message safe for any sink: URL query and userinfo stripped, every configured secret replaced (spec §5.3, sec-006). */
+export function safeMessage(e: unknown, secrets: readonly Secret[]): string {
+  return scrubSecrets(stripUrlsInText(e instanceof Error ? e.message : String(e)), secrets);
+}
+```
+
+```ts
 // apps/api/src/tools/types.ts
 /** What the tool bootstrap hands a tool, the shared record-tool result types, and the one exit-code table every CLI shares. */
 import type { ProviderId } from '@gmt/core';
@@ -4170,15 +4188,7 @@ export function formatSummary(
  * adapters (WP5, WP6) do not exist yet and later replay what this records.
  */
 import { mkdirSync } from 'node:fs';
-import {
-  AbortedError,
-  asIsoDate,
-  BudgetExceeded,
-  type Config,
-  ProviderError,
-  type Secret,
-  stripUrlsInText,
-} from '@gmt/core';
+import { AbortedError, asIsoDate, BudgetExceeded, type Config, ProviderError } from '@gmt/core';
 import {
   createHttpKit,
   createRecorder,
@@ -4187,8 +4197,8 @@ import {
   type HttpKitDeps,
   type HttpKitRequest,
   type HttpKitResponse,
-  scrubSecrets,
 } from '@gmt/providers';
+import { safeMessage } from '../safeMessage.js';
 import type { Ports } from '../wiring.js';
 import { budgetPosition, openRecordingExecution } from './recordExecution.js';
 import { type EndpointKey, ParamLog, paramRules, writeAllowlist } from './recordParams.js';
@@ -4235,10 +4245,8 @@ export type { RecordArgs } from './recordPlan.js';
  */
 export const RECORDED_BY = '@gmt/api record:fixtures';
 
-/** A message safe for any sink: URL query and userinfo stripped, every configured secret replaced (spec §5.3, sec-006). */
-export function safeMessage(e: unknown, secrets: readonly Secret[]): string {
-  return scrubSecrets(stripUrlsInText(e instanceof Error ? e.message : String(e)), secrets);
-}
+// why: one sanitiser for every apps/api sink (src/safeMessage.ts); re-exported here, where the plan contract names it
+export { safeMessage };
 
 /** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
 export function recordPrecheck(c: Config): string | null {
@@ -4955,7 +4963,7 @@ git add packages/db && git commit -m "wp04b: readOnlyLockState in @gmt/db, so th
 
 ### Task 8: Tool bootstrap (in-process)
 
-**Files:** create `apps/api/src/bootstrap/tool.ts`, `apps/api/src/tools/workedExample.ts`, `apps/api/test/bootstrap/tool.test.ts`; modify `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`.
+**Files:** create `apps/api/src/bootstrap/tool.ts`, `apps/api/src/bootstrap/preflight.ts`, `apps/api/src/tools/workedExample.ts`, `apps/api/test/bootstrap/tool.test.ts`, `apps/api/test/bootstrap/preflight.test.ts`; modify `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`.
 
 **Interfaces:** consumes `AppLock`, `HEARTBEAT_INTERVAL_MS`, `readOnlyLockState` (Task 7), `openDatabase`, `pendingMigrations`, `backupDatabase`, `seedAirports`, `loadAirportsDataset`, `AIRPORTS_DATA_DIR`, `MIGRATIONS_DIR`, `defaultRecordedRoot`, `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger`, `runRecord`, `recordPrecheck`. Produces `runTool`, `RunToolOptions`, `RecordingTarget`, `recordingTarget`, `repositoryRoot`, `isEntryPoint`, `ToolRunners`, `backupsDirFor`, `pendingOnExistingDb`, `WORKED_EXAMPLE_ROUTE`, `isWorkedExampleRoute`.
 
@@ -4983,8 +4991,8 @@ import { AppLock, applyMigrations, HEARTBEAT_INTERVAL_MS, MIGRATIONS_DIR, openDa
 import { defaultRecordedRoot } from '@gmt/providers';
 import { loadRecorded } from '@gmt/providers/testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { backupsDirFor } from '../../src/bootstrap/preflight.js';
 import {
-  backupsDirFor,
   EXIT,
   isEntryPoint,
   type RunToolOptions,
@@ -5606,10 +5614,103 @@ describe('recordingTarget (sec2-002 ruling, r3-ts-004)', () => {
 });
 ```
 
+```ts
+// apps/api/test/bootstrap/preflight.test.ts
+// The pre-migration preflight both bootstraps share (spec §7 Migrations; plan "Wiring and bootstraps": both call
+// backupDatabase before buildPorts when migrations are pending). WP8's app bootstrap reuses this module (arch M-1).
+import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { asIsoDateTime, fixedClock } from '@gmt/core';
+import { MIGRATIONS_DIR, openDatabase } from '@gmt/db';
+import { describe, expect, it } from 'vitest';
+import {
+  BACKUPS_KEPT,
+  backupBeforeMigrations,
+  backupsDirFor,
+  dataDirRefusal,
+  pendingOnExistingDb,
+} from '../../src/bootstrap/preflight.js';
+import { EXIT } from '../../src/tools/types.js';
+import { tempDir } from '../helpers/tmp.js';
+
+const clock = fixedClock(asIsoDateTime('2026-10-20T09:00:00.000Z'));
+const bareDb = (): string => {
+  const path = join(tempDir('gmt-pre-'), 'app.db');
+  openDatabase(path).close(); // an existing database with every migration pending
+  return path;
+};
+
+describe('bootstrap preflight (spec §7 Migrations)', () => {
+  it('backups live beside the database and five are kept', () => {
+    expect(backupsDirFor('/data/app.db')).toBe('/data/backups');
+    expect(BACKUPS_KEPT).toBe(5);
+  });
+
+  it('a new file or :memory: has nothing pending; an existing bare database has every migration pending', () => {
+    expect(pendingOnExistingDb(':memory:', MIGRATIONS_DIR)).toEqual([]);
+    expect(pendingOnExistingDb(join(tempDir(), 'none.db'), MIGRATIONS_DIR)).toEqual([]);
+    expect(pendingOnExistingDb(bareDb(), MIGRATIONS_DIR).length).toBeGreaterThan(0);
+  });
+
+  it('nothing pending: no backup, no line', () => {
+    expect(backupBeforeMigrations(join(tempDir(), 'none.db'), MIGRATIONS_DIR, clock, [])).toEqual({
+      ok: true,
+      line: null,
+    });
+  });
+
+  it('pending: backs up first and names the file', () => {
+    const path = bareDb();
+    const r = backupBeforeMigrations(path, MIGRATIONS_DIR, clock, []);
+    expect(r).toMatchObject({ ok: true, line: expect.stringMatching(/^backup before \d+ migration\(s\): /) });
+    expect(readdirSync(backupsDirFor(path))).toHaveLength(1);
+  });
+
+  it('refuses with 73 when the backups path is not a writable directory, and with 74 when the backup fails', () => {
+    const notDir = bareDb();
+    writeFileSync(backupsDirFor(notDir), 'not a directory');
+    expect(backupBeforeMigrations(notDir, MIGRATIONS_DIR, clock, [])).toMatchObject({
+      ok: false,
+      code: EXIT.preflightImpossible,
+      message: expect.stringContaining('is not a writable directory'),
+    });
+    const worldWritable = bareDb();
+    mkdirSync(backupsDirFor(worldWritable));
+    chmodSync(backupsDirFor(worldWritable), 0o777); // WP3 refuses a world-writable backups directory
+    expect(backupBeforeMigrations(worldWritable, MIGRATIONS_DIR, clock, [])).toMatchObject({
+      ok: false,
+      code: EXIT.backupFailed,
+      message: expect.stringContaining('backup failed, refusing to migrate'),
+    });
+  });
+
+  it('refuses with 73 when the migration state cannot be read', () => {
+    const path = join(tempDir('gmt-pre-'), 'app.db');
+    const db = openDatabase(path);
+    db.raw.exec('CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY)');
+    db.close();
+    expect(backupBeforeMigrations(path, MIGRATIONS_DIR, clock, [])).toMatchObject({
+      ok: false,
+      code: EXIT.preflightImpossible,
+      message: expect.stringContaining('cannot read the migration state'),
+    });
+  });
+
+  it.skipIf(process.getuid?.() === 0)('names an unwritable data directory; :memory: has none', () => {
+    expect(dataDirRefusal(':memory:')).toBeNull();
+    const dir = tempDir();
+    expect(dataDirRefusal(join(dir, 'app.db'))).toBeNull();
+    chmodSync(dir, 0o500);
+    expect(dataDirRefusal(join(dir, 'app.db'))).toContain('is not writable');
+    expect(existsSync(join(dir, 'app.db'))).toBe(false);
+  });
+});
+```
+
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts`
-Expected: FAIL, `Error: Cannot find module '../../src/bootstrap/tool.js' imported from …/apps/api/test/bootstrap/tool.test.ts`.
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts test/bootstrap/preflight.test.ts`
+Expected: FAIL, both files with `Error: Cannot find module '../../src/bootstrap/preflight.js' imported from …` (each imports the preflight module first).
 
 - [ ] **Step 3: Implement**
 
@@ -5656,6 +5757,110 @@ export function isWorkedExampleRoute(a: {
 export const WORKED_EXAMPLE_ROUTE_ARG = `${WORKED_EXAMPLE_ROUTE.origins.join(',')}:${WORKED_EXAMPLE_ROUTE.destinations.join(',')}`;
 ```
 
+The pre-migration preflight lives in its own module so WP8's app bootstrap reuses it rather than importing the tool entry (plan decision 30, arch M-1):
+
+```ts
+// apps/api/src/bootstrap/preflight.ts
+/**
+ * The pre-migration preflight both bootstraps share (spec §7 SQLite settings and Migrations; plan "Wiring and
+ * bootstraps": both call backupDatabase before buildPorts when pendingMigrations() is non-empty). The tool bootstrap
+ * uses it today and WP8's app bootstrap reuses it (arch M-1); WP12's scripts/backup.mjs uses the same directory and
+ * keep count. Under bootstrap/, so the process.env rule is unchanged; nothing here reads the environment.
+ */
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import type { Clock, Secret } from '@gmt/core';
+import { backupDatabase, openDatabase, pendingMigrations } from '@gmt/db';
+import { safeMessage } from '../safeMessage.js';
+import { EXIT } from '../tools/types.js';
+
+/** Spec §7 Migrations: keep the last 5 backups. */
+export const BACKUPS_KEPT = 5;
+
+/** Spec §7: backups live beside the database (`/data/backups` in the container). */
+export function backupsDirFor(databasePath: string): string {
+  return join(dirname(databasePath), 'backups');
+}
+
+/** Why the database's directory cannot take a new file or SQLite's side files, or null (73 in the tool). */
+export function dataDirRefusal(databasePath: string): string | null {
+  if (databasePath === ':memory:') return null;
+  try {
+    accessSync(dirname(databasePath), constants.W_OK);
+    return null;
+  } catch {
+    return `data directory ${dirname(databasePath)} is not writable; refusing (spec §7)`;
+  }
+}
+
+/**
+ * Pending migrations on a database file that already exists (none for a new file or :memory:). why: this opens the file
+ * read-write through openDatabase (journal-mode pragma, checkpoint on close) but changes no schema; only the app_lock
+ * read before it is strictly read-only (arch-r2-003).
+ */
+export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[] {
+  if (databasePath === ':memory:' || !existsSync(databasePath)) return [];
+  const db = openDatabase(databasePath);
+  try {
+    return pendingMigrations(db, migrationsDir);
+  } finally {
+    db.close();
+  }
+}
+
+export type BackupOutcome =
+  | { ok: true; line: string | null }
+  | { ok: false; code: typeof EXIT.preflightImpossible | typeof EXIT.backupFailed; message: string };
+
+/**
+ * Backs the database up when migrations are pending (spec §7: "a failed backup refuses migrations"). 73 when the
+ * migration state cannot be read or the backups path is not a writable directory; 74 when the backup itself fails.
+ * Messages are scrubbed of every configured secret and URL query.
+ */
+export function backupBeforeMigrations(
+  databasePath: string,
+  migrationsDir: string,
+  clock: Clock,
+  secrets: readonly Secret[],
+): BackupOutcome {
+  let pending: string[];
+  try {
+    pending = pendingOnExistingDb(databasePath, migrationsDir);
+  } catch (e) {
+    return {
+      ok: false,
+      code: EXIT.preflightImpossible,
+      message: `cannot read the migration state: ${safeMessage(e, secrets)}`,
+    };
+  }
+  if (pending.length === 0) return { ok: true, line: null };
+  const backupsDir = backupsDirFor(databasePath);
+  if (existsSync(backupsDir)) {
+    try {
+      if (!statSync(backupsDir).isDirectory()) throw new Error('not a directory');
+      accessSync(backupsDir, constants.W_OK);
+    } catch {
+      return {
+        ok: false,
+        code: EXIT.preflightImpossible,
+        message: `${pending.length} pending migration(s) but the backups directory ${backupsDir} is not a writable directory; refusing to migrate (spec §7)`,
+      };
+    }
+  }
+  try {
+    // why: backupDatabase creates the directory itself, 0o700 (arch-015)
+    const { file } = backupDatabase(databasePath, backupsDir, { keep: BACKUPS_KEPT, clock });
+    return { ok: true, line: `backup before ${pending.length} migration(s): ${file}` };
+  } catch (e) {
+    return {
+      ok: false,
+      code: EXIT.backupFailed,
+      message: `backup failed, refusing to migrate (spec §7): ${safeMessage(e, secrets)}`,
+    };
+  }
+}
+```
+
 ```ts
 // apps/api/src/bootstrap/tool.ts
 /**
@@ -5664,29 +5869,28 @@ export const WORKED_EXAMPLE_ROUTE_ARG = `${WORKED_EXAMPLE_ROUTE.origins.join(','
  * ledger), never constructs or boots the engine (no sweep, no auto-resume, no cron), and holds app_lock as 'tool' for
  * its whole run. The one process.env read is here.
  */
-import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Clock, type Config, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
 import {
   AIRPORTS_DATA_DIR,
   AppLock,
-  backupDatabase,
   HEARTBEAT_INTERVAL_MS,
   loadAirportsDataset,
   MIGRATIONS_DIR,
-  openDatabase,
-  pendingMigrations,
   readOnlyLockState,
   seedAirports,
 } from '@gmt/db';
 import { defaultRecordedRoot } from '@gmt/providers';
 import { createLogger } from '../logger.js';
-import { RECORDED_BY, recordPrecheck, runRecord, safeMessage } from '../tools/record.js';
+import { safeMessage } from '../safeMessage.js';
+import { RECORDED_BY, recordPrecheck, runRecord } from '../tools/record.js';
 import { parseRecordArgs, type RecordCli } from '../tools/recordPlan.js';
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
 import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
+import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
 
 export { EXIT, type ToolName } from '../tools/types.js';
 
@@ -5713,29 +5917,6 @@ export interface RunToolOptions {
   migrationsDir?: string;
   /** Tests record into a temporary tree under a test signature; a real run never passes this. */
   recording?: RecordingTarget;
-}
-
-/** Spec §7 Migrations: keep the last 5 backups. */
-const BACKUPS_KEPT = 5;
-
-/** Spec §7: backups live beside the database (`/data/backups` in the container). */
-export function backupsDirFor(databasePath: string): string {
-  return join(dirname(databasePath), 'backups');
-}
-
-/**
- * Pending migrations on a database file that already exists (none for a new file or :memory:). why: this opens the file
- * read-write through openDatabase (journal-mode pragma, checkpoint on close) but changes no schema; only the app_lock
- * read before it is strictly read-only (arch-r2-003).
- */
-export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[] {
-  if (databasePath === ':memory:' || !existsSync(databasePath)) return [];
-  const db = openDatabase(databasePath);
-  try {
-    return pendingMigrations(db, migrationsDir);
-  } finally {
-    db.close();
-  }
 }
 
 /** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
@@ -5892,13 +6073,10 @@ async function runToolSteps(
   const clock = opts.clock ?? systemClock;
   const migrationsDir = opts.migrationsDir ?? MIGRATIONS_DIR;
 
-  if (config.databasePath !== ':memory:') {
-    try {
-      accessSync(dirname(config.databasePath), constants.W_OK);
-    } catch {
-      err(`data directory ${dirname(config.databasePath)} is not writable; refusing (spec §7)`);
-      return EXIT.preflightImpossible;
-    }
+  const dataDir = dataDirRefusal(config.databasePath);
+  if (dataDir !== null) {
+    err(dataDir);
+    return EXIT.preflightImpossible;
   }
   let held: ReturnType<typeof readOnlyLockState>;
   try {
@@ -5914,35 +6092,12 @@ async function runToolSteps(
     );
     return EXIT.lockRefused;
   }
-  let pending: string[];
-  try {
-    pending = pendingOnExistingDb(config.databasePath, migrationsDir);
-  } catch (e) {
-    err(`cannot read the migration state: ${safeMessage(e, secrets)}`);
-    return EXIT.preflightImpossible;
+  const backup = backupBeforeMigrations(config.databasePath, migrationsDir, clock, secrets);
+  if (!backup.ok) {
+    err(backup.message);
+    return backup.code;
   }
-  if (pending.length > 0) {
-    const backupsDir = backupsDirFor(config.databasePath);
-    if (existsSync(backupsDir)) {
-      try {
-        if (!statSync(backupsDir).isDirectory()) throw new Error('not a directory');
-        accessSync(backupsDir, constants.W_OK);
-      } catch {
-        err(
-          `${pending.length} pending migration(s) but the backups directory ${backupsDir} is not a writable directory; refusing to migrate (spec §7)`,
-        );
-        return EXIT.preflightImpossible;
-      }
-    }
-    try {
-      // why: backupDatabase creates the directory itself, 0o700 (arch-015)
-      const { file } = backupDatabase(config.databasePath, backupsDir, { keep: BACKUPS_KEPT, clock });
-      out(`backup before ${pending.length} migration(s): ${file}`);
-    } catch (e) {
-      err(`backup failed, refusing to migrate (spec §7): ${safeMessage(e, secrets)}`);
-      return EXIT.backupFailed;
-    }
-  }
+  if (backup.line !== null) out(backup.line);
 
   const log = createLogger(config, {
     fd: 2,
@@ -6063,8 +6218,8 @@ if (isEntryPoint()) {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts` and `pnpm --filter @gmt/providers test`
-Expected: 45 passed (the two read-only-directory cases are reported skipped when run as root); the providers suite passes (264). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts test/bootstrap/preflight.test.ts` and `pnpm --filter @gmt/providers test`
+Expected: 45 + 7 passed (the three read-only-directory cases are reported skipped when run as root); the providers suite passes (264). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
 
 - [ ] **Step 5: Commit**
 

@@ -4,29 +4,28 @@
  * ledger), never constructs or boots the engine (no sweep, no auto-resume, no cron), and holds app_lock as 'tool' for
  * its whole run. The one process.env read is here.
  */
-import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Clock, type Config, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
 import {
   AIRPORTS_DATA_DIR,
   AppLock,
-  backupDatabase,
   HEARTBEAT_INTERVAL_MS,
   loadAirportsDataset,
   MIGRATIONS_DIR,
-  openDatabase,
-  pendingMigrations,
   readOnlyLockState,
   seedAirports,
 } from '@gmt/db';
 import { defaultRecordedRoot } from '@gmt/providers';
 import { createLogger } from '../logger.js';
-import { RECORDED_BY, recordPrecheck, runRecord, safeMessage } from '../tools/record.js';
+import { safeMessage } from '../safeMessage.js';
+import { RECORDED_BY, recordPrecheck, runRecord } from '../tools/record.js';
 import { parseRecordArgs, type RecordCli } from '../tools/recordPlan.js';
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
 import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
+import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
 
 export { EXIT, type ToolName } from '../tools/types.js';
 
@@ -53,29 +52,6 @@ export interface RunToolOptions {
   migrationsDir?: string;
   /** Tests record into a temporary tree under a test signature; a real run never passes this. */
   recording?: RecordingTarget;
-}
-
-/** Spec §7 Migrations: keep the last 5 backups. */
-const BACKUPS_KEPT = 5;
-
-/** Spec §7: backups live beside the database (`/data/backups` in the container). */
-export function backupsDirFor(databasePath: string): string {
-  return join(dirname(databasePath), 'backups');
-}
-
-/**
- * Pending migrations on a database file that already exists (none for a new file or :memory:). why: this opens the file
- * read-write through openDatabase (journal-mode pragma, checkpoint on close) but changes no schema; only the app_lock
- * read before it is strictly read-only (arch-r2-003).
- */
-export function pendingOnExistingDb(databasePath: string, migrationsDir: string): string[] {
-  if (databasePath === ':memory:' || !existsSync(databasePath)) return [];
-  const db = openDatabase(databasePath);
-  try {
-    return pendingMigrations(db, migrationsDir);
-  } finally {
-    db.close();
-  }
 }
 
 /** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
@@ -232,13 +208,10 @@ async function runToolSteps(
   const clock = opts.clock ?? systemClock;
   const migrationsDir = opts.migrationsDir ?? MIGRATIONS_DIR;
 
-  if (config.databasePath !== ':memory:') {
-    try {
-      accessSync(dirname(config.databasePath), constants.W_OK);
-    } catch {
-      err(`data directory ${dirname(config.databasePath)} is not writable; refusing (spec §7)`);
-      return EXIT.preflightImpossible;
-    }
+  const dataDir = dataDirRefusal(config.databasePath);
+  if (dataDir !== null) {
+    err(dataDir);
+    return EXIT.preflightImpossible;
   }
   let held: ReturnType<typeof readOnlyLockState>;
   try {
@@ -254,35 +227,12 @@ async function runToolSteps(
     );
     return EXIT.lockRefused;
   }
-  let pending: string[];
-  try {
-    pending = pendingOnExistingDb(config.databasePath, migrationsDir);
-  } catch (e) {
-    err(`cannot read the migration state: ${safeMessage(e, secrets)}`);
-    return EXIT.preflightImpossible;
+  const backup = backupBeforeMigrations(config.databasePath, migrationsDir, clock, secrets);
+  if (!backup.ok) {
+    err(backup.message);
+    return backup.code;
   }
-  if (pending.length > 0) {
-    const backupsDir = backupsDirFor(config.databasePath);
-    if (existsSync(backupsDir)) {
-      try {
-        if (!statSync(backupsDir).isDirectory()) throw new Error('not a directory');
-        accessSync(backupsDir, constants.W_OK);
-      } catch {
-        err(
-          `${pending.length} pending migration(s) but the backups directory ${backupsDir} is not a writable directory; refusing to migrate (spec §7)`,
-        );
-        return EXIT.preflightImpossible;
-      }
-    }
-    try {
-      // why: backupDatabase creates the directory itself, 0o700 (arch-015)
-      const { file } = backupDatabase(config.databasePath, backupsDir, { keep: BACKUPS_KEPT, clock });
-      out(`backup before ${pending.length} migration(s): ${file}`);
-    } catch (e) {
-      err(`backup failed, refusing to migrate (spec §7): ${safeMessage(e, secrets)}`);
-      return EXIT.backupFailed;
-    }
-  }
+  if (backup.line !== null) out(backup.line);
 
   const log = createLogger(config, {
     fd: 2,

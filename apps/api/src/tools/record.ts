@@ -4,15 +4,7 @@
  * adapters (WP5, WP6) do not exist yet and later replay what this records.
  */
 import { mkdirSync } from 'node:fs';
-import {
-  AbortedError,
-  asIsoDate,
-  BudgetExceeded,
-  type Config,
-  ProviderError,
-  type Secret,
-  stripUrlsInText,
-} from '@gmt/core';
+import { AbortedError, asIsoDate, BudgetExceeded, type Config, ProviderError } from '@gmt/core';
 import {
   createHttpKit,
   createRecorder,
@@ -21,8 +13,8 @@ import {
   type HttpKitDeps,
   type HttpKitRequest,
   type HttpKitResponse,
-  scrubSecrets,
 } from '@gmt/providers';
+import { safeMessage } from '../safeMessage.js';
 import type { Ports } from '../wiring.js';
 import { budgetPosition, openRecordingExecution } from './recordExecution.js';
 import { type EndpointKey, ParamLog, paramRules, writeAllowlist } from './recordParams.js';
@@ -69,10 +61,8 @@ export type { RecordArgs } from './recordPlan.js';
  */
 export const RECORDED_BY = '@gmt/api record:fixtures';
 
-/** A message safe for any sink: URL query and userinfo stripped, every configured secret replaced (spec §5.3, sec-006). */
-export function safeMessage(e: unknown, secrets: readonly Secret[]): string {
-  return scrubSecrets(stripUrlsInText(e instanceof Error ? e.message : String(e)), secrets);
-}
+// why: one sanitiser for every apps/api sink (src/safeMessage.ts); re-exported here, where the plan contract names it
+export { safeMessage };
 
 /** Why the configuration cannot record, or null (exit 78 in the tool bootstrap). */
 export function recordPrecheck(c: Config): string | null {

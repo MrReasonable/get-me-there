@@ -16,8 +16,8 @@ import { AppLock, applyMigrations, HEARTBEAT_INTERVAL_MS, MIGRATIONS_DIR, openDa
 import { defaultRecordedRoot } from '@gmt/providers';
 import { loadRecorded } from '@gmt/providers/testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { backupsDirFor } from '../../src/bootstrap/preflight.js';
 import {
-  backupsDirFor,
   EXIT,
   isEntryPoint,
   type RunToolOptions,
