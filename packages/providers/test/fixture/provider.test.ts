@@ -12,7 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureHttpLimits, fixtureProvider, planFixtureTiles } from '../../src/fixture/provider.js';
 import { fixtureRouter } from '../../src/fixture/router.js';
-import { type FixtureRule, scenarioRequest } from '../../src/fixture/server.js';
+import { type FixtureRule, scenarioRequest } from '../../src/fixture/scenario.js';
 import { defaultFixtureRoot } from '../../src/fixture/tree.js';
 import type { FixtureRecorder } from '../../src/http/types.js';
 import { fixtureHandlers } from '../../src/testing/handlers.js';

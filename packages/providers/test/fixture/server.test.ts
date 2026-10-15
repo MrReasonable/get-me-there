@@ -5,12 +5,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { FIXTURE_ORIGIN, RELEASE_PATH, SCENARIO_HEADER, SCENARIO_PATH } from '../../src/fixture/constants.js';
 import { fixtureRouter } from '../../src/fixture/router.js';
 import {
-  createFixtureServer,
   type FixtureResponse,
   type FixtureRule,
   releaseRequest,
   scenarioRequest,
-} from '../../src/fixture/server.js';
+} from '../../src/fixture/scenario.js';
+import { createFixtureServer } from '../../src/fixture/server.js';
 import { calendarPriceMinor, defaultFixtureRoot, loadFixtureTree } from '../../src/fixture/tree.js';
 import { fixtureHandlers } from '../../src/testing/handlers.js';
 import { arr, jsonOf, obj } from '../support/guards.js';
