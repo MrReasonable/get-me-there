@@ -371,3 +371,54 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
     expect(stored(cells, executionId, A)).toEqual({ status: 'empty', reason: null, minPence: null });
   });
 });
+
+describe('priced outcome reasons (spec §3, §5.6; ruling 2026-10-15)', () => {
+  it.each([
+    [null, null],
+    ['partial-expansion', 'partial-expansion'],
+    ['offers-dropped:3', null],
+    ['partial-expansion;offers-dropped:3', 'partial-expansion'],
+  ])('a priced outcome may carry %s; the roll-up reason is %s and equals core', (reason, rolled) => {
+    const { executionId, cells } = setup();
+    cells.writeTile(
+      executionId,
+      'travelpayouts',
+      tile([A], [out(A, 'priced', 41_200, { reason })], [calendarPrice(A)]),
+    );
+    expect(cells.outcomes(executionId, { cells: [A] })[0]?.reason).toBe(reason);
+    expect(stored(cells, executionId, A)).toEqual({ status: 'priced', reason: rolled, minPence: 41_200 });
+    expect(stored(cells, executionId, A)).toEqual(core(cells, executionId, A));
+  });
+
+  it.each([
+    'offers-dropped:0',
+    'offers-dropped:01',
+    'offers-dropped:',
+    'offers-dropped:x',
+    'offers-dropped:3;partial-expansion',
+    'partial-expansion;partial-expansion',
+    'partial-expansion;offers-dropped:0',
+    'cabin-not-offered',
+  ])('refuses the priced reason %s', (reason) => {
+    const { executionId, cells } = setup();
+    expect(() =>
+      cells.writeTile(
+        executionId,
+        'travelpayouts',
+        tile([A], [out(A, 'priced', 41_200, { reason })], [calendarPrice(A)]),
+      ),
+    ).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
+  });
+
+  it('offers-dropped is never accepted on an empty or no_data outcome', () => {
+    const { executionId, cells } = setup();
+    for (const status of ['empty', 'no_data'] as const)
+      expect(() =>
+        cells.writeTile(
+          executionId,
+          'travelpayouts',
+          tile([A], [out(A, status, null, { reason: 'offers-dropped:1' })]),
+        ),
+      ).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
+  });
+});

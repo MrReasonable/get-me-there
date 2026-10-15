@@ -174,17 +174,21 @@ function storeOutcome(db: Db, o: CellOutcome): void {
   });
 }
 
+/** Ruling 2026-10-15: the closed set of priced reasons; offers-dropped counts are positive and unpadded. */
+const PRICED_REASON =
+  /^(?:partial-expansion|offers-dropped:[1-9][0-9]*|partial-expansion;offers-dropped:[1-9][0-9]*)$/;
+
 /**
  * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:
- * priced → null | 'partial-expansion', empty → null, no_data → null | 'cabin-not-offered'.
+ * priced → null | 'partial-expansion' | 'offers-dropped:n' | 'partial-expansion;offers-dropped:n',
+ * empty → null, no_data → null | 'cabin-not-offered'.
  */
 function assertOutcomeReason(o: { status: CellOutcomeStatus; reason: string | null } & CellKey): void {
-  const allowed: Partial<Record<CellOutcomeStatus, ReadonlyArray<string | null>>> = {
-    priced: [null, 'partial-expansion'],
-    empty: [null],
-    no_data: [null, 'cabin-not-offered'],
-  };
-  if (!(allowed[o.status] ?? []).includes(o.reason))
+  const ok =
+    o.reason === null ||
+    (o.status === 'priced' && PRICED_REASON.test(o.reason)) ||
+    (o.status === 'no_data' && o.reason === 'cabin-not-offered');
+  if (!ok || (o.status !== 'priced' && o.status !== 'empty' && o.status !== 'no_data'))
     throw new RowRejected(
       'outcome-reason',
       `${cellKeyString(o)} ${o.status} cannot carry reason ${String(o.reason)}`,

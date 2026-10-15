@@ -497,6 +497,21 @@ describe('CellsRepo.writeVerifiedCell (spec §7 atomic unit "each verified cell"
       }),
     ).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
   });
+  it('a priced verified cell may carry offers-dropped:n (ruling 2026-10-15)', () => {
+    const { executionId, cells } = seeded();
+    const base = write(cell(), [{ hash: 'a'.repeat(64), seller: 'British Airways', pence: 60_300 }]);
+    cells.writeVerifiedCell(executionId, 'searchapi', {
+      ...base,
+      outcome: { ...base.outcome, reason: 'offers-dropped:2' },
+    });
+    const stored = cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0];
+    expect(stored?.reason).toBe('offers-dropped:2');
+    expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification).toEqual({
+      status: 'priced',
+      reason: null,
+      minPence: 60_300,
+    });
+  });
 });
 
 describe('ItinerariesRepo reads', () => {
