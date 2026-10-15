@@ -181,18 +181,28 @@ describe('evaluateAlertRules, calendar basis (spec §6.8)', () => {
   // The window is judged in whole minutes (fix round 1): 336 h 30 min is outside 336 h even though it
   // floors to 336 h; 335 h 59 min is inside.
   it.each([
-    [335.99, false],
-    [336, false],
-    [336.02, true],
-    [336.5, true],
-  ] as const)('default window, previous fetched %f h earlier → isNew %s', (gap, isNew) => {
+    [335.99, false, 'down £70 (15%) from £450 fetched 13d (335h) earlier'],
+    [336, false, 'down £70 (15%) from £450 fetched 2w (336h) earlier'],
+    [
+      336.02,
+      true,
+      'last price £450 was fetched 2w (337h) earlier, outside the 2w (336h) comparison window; not compared',
+    ],
+    [
+      336.5,
+      true,
+      'last price £450 was fetched 2w (337h) earlier, outside the 2w (336h) comparison window; not compared',
+    ],
+  ] as const)('default window, previous fetched %f h earlier → isNew %s', (gap, isNew, reason) => {
     const fetchedAt = hoursAgo(2);
     const c = calendar({
       pricePence: 38_000,
       provenance: { fetchedAt, maxAgeHours: 168 },
       previous: { pricePence: 45_000, fetchedAt: hoursBefore(fetchedAt, gap) },
     });
-    expect(run([drop], [c])[0]?.isNew).toBe(isNew);
+    const [f] = run([drop], [c]);
+    expect(f?.isNew).toBe(isNew);
+    expect(f?.reason).toBe(reason);
   });
 
   it('absent-then-present is "first price seen for this cell", never a drop; absolute rules still apply; new is never suppressed', () => {

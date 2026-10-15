@@ -19,7 +19,7 @@ export interface DigestItem {
    * never the previous price's age (a cached calendar price was older than its own fetch).
    * Render it as "fetched Nh before this price", not as an age.
    */
-  fetchGapHours: number | 'unknown' | null;
+  fetchGapHours: number | null;
   isNew: boolean;
   firingReason: string;
   booking: Booking;

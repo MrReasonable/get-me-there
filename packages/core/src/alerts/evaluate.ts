@@ -67,9 +67,10 @@ function judge(rule: AlertRule, c: AlertCandidate, ctx: AlertEvalContext): Judge
     // why: the comparison is in whole minutes, not the rounded-down hours of the reason text, so a
     // price 336 h 30 min older is outside a 336 h window (spec §6.8: "within 2 × refresh").
     const gapMinutes = Math.floor((Date.parse(provenance.fetchedAt) - Date.parse(prev.fetchedAt)) / 60_000);
+    // why: the outside-window text rounds the gap up, so 336 h 30 min reads as 337 h and never as inside 336 h.
     if (gapMinutes > window * 60) {
       return {
-        reason: `last price ${formatPence(prev.pricePence)} was fetched ${span(gap)} earlier, outside the ${span(window)} comparison window; not compared`,
+        reason: `last price ${formatPence(prev.pricePence)} was fetched ${span(Math.ceil(gapMinutes / 60))} earlier, outside the ${span(window)} comparison window; not compared`,
         isNew: true,
       };
     }
