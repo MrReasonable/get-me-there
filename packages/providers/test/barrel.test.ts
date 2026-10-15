@@ -38,10 +38,20 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       expect(name in main, name).toBe(false);
     }
   });
-  it('./testing exports fixtureHandlers, replayHandlers, loadRecorded and withContentHash', () => {
+  it('./testing exports fixtureHandlers, replayHandlers, loadRecorded, withContentHash and the network guards', () => {
     const t = surface(testing);
-    for (const name of ['fixtureHandlers', 'replayHandlers', 'loadRecorded', 'withContentHash'])
+    for (const name of [
+      'fixtureHandlers',
+      'replayHandlers',
+      'loadRecorded',
+      'withContentHash',
+      'installNetworkGuards',
+      'hangUntilAborted',
+      'respondAfter',
+      'takeStrays',
+    ])
       expect(typeof t[name], name).toBe('function');
+    expect(typeof t.guardedServer, 'guardedServer').toBe('object');
   });
   it('./fixture exports the gated router and the scenario-control contract', () => {
     const f = surface(fixture);
