@@ -15,7 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --coverage",
     "dev": "tsx watch src/bootstrap/app.ts",
-    "tool": "tsx src/bootstrap/tool.ts"
+    "tool": "node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts"
   },
   "dependencies": {
     "@gmt/core": "workspace:*",
