@@ -235,7 +235,8 @@ export function parseCalendarBody(
     seen.add(key);
     if (e.has_no_flights === true) {
       noFlights.add(key);
-      continue;
+      // why: a row that also states a price is a stated fare, never "no fares"; the cell counts as conflicting below.
+      if (e.price === undefined) continue;
     }
     if (e.price === undefined) {
       notes.add('unpriced-skipped');

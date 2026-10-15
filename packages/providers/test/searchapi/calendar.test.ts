@@ -401,6 +401,34 @@ describe('fetchTile parsing (spec §5.2), synthetic shapes', () => {
     expect(res.notes).toEqual(['conflicting-entries:1', 'duplicate-entries:1']);
   });
 
+  it('one row carrying both has_no_flights and a price is a priced conflicting entry, never "no fares" (review provenance Minor) (synthetic)', async () => {
+    const plan = smallPlan();
+    const [a] = plan.coveredCells;
+    if (a === undefined) throw new Error('cells');
+    const body = gridFor(plan);
+    body.calendar[0] = { departure: a.departureDate, return: a.returnDate, has_no_flights: true, price: 455 };
+    answer(ok(body));
+    const res = await tileOf(plan);
+    expect(res.noFares).toEqual([]);
+    expect(res.prices.filter((p) => cellKeyString(p) === cellKeyString(a)).map((p) => p.amountMinor)).toEqual(
+      [45_500],
+    );
+    expect(res.notes).toEqual(['conflicting-entries:1']);
+  });
+
+  it('one row carrying both has_no_flights and an unusable price is reported, never "no fares" (synthetic)', async () => {
+    const plan = smallPlan();
+    const [a] = plan.coveredCells;
+    if (a === undefined) throw new Error('cells');
+    const body = gridFor(plan);
+    body.calendar[0] = { departure: a.departureDate, return: a.returnDate, has_no_flights: true, price: 0 };
+    answer(ok(body));
+    const res = await tileOf(plan);
+    expect(res.noFares).toEqual([]);
+    expect(res.notes).toEqual(['conflicting-entries:1', 'offers-dropped:1']);
+    expect(res.cellIssues).toMatchObject([{ cell: a, reason: 'parse', offersDropped: 1 }]);
+  });
+
   it('a no-flights entry beside a vendor price that was dropped is not "no fares": counted conflicting, with an issue (synthetic)', async () => {
     const plan = smallPlan();
     const [a] = plan.coveredCells;
