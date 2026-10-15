@@ -14,17 +14,6 @@ import type {
   ProviderHttpLimits,
 } from './types.js';
 
-export type {
-  FixtureRecorder,
-  HttpKit,
-  HttpKitDeps,
-  HttpKitRequest,
-  HttpKitResponse,
-  HttpProviderId,
-  ProviderHttpLimits,
-  ResponseFacts,
-} from './types.js';
-
 /** Spec §5.3: p-retry, max 3 attempts. */
 export const MAX_ATTEMPTS = 3;
 /** Exponential backoff base: 1–2 s before attempt 2, 2–4 s before attempt 3 (randomised). */
