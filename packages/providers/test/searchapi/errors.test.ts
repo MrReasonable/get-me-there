@@ -147,8 +147,11 @@ describe('error table through the real http-kit with SearchApi limits (spec §5.
 
   it('a 429 with Retry-After: 30 waits and retries; the retry succeeds (synthetic)', async () => {
     const k = serve({ status: 429, body: null, headers: { 'retry-after': '30' } }, ok({ calendar: [] }));
+    const t0 = Date.now();
     const res = await drive(k.kit.request(request()));
     expect(res.status).toBe(200);
+    // why (review test-strategy 4): an immediate retry would also reach attempt 2; the wait itself is the behaviour.
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(30_000);
     expect(k.budget.events.filter((e) => e.type === 'reserve').map((e) => e.httpAttempt)).toEqual([1, 2]);
   });
 

@@ -18,7 +18,7 @@ import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allo
 import { fetchCalendarTile, outboundBlockDays, planRectangles } from '../../src/searchapi/calendar.js';
 import { classifySearchApiError } from '../../src/searchapi/errors.js';
 import { searchItinerary } from '../../src/searchapi/itinerary.js';
-import { SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS } from '../../src/searchapi/params.js';
+import { authHeaders, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS } from '../../src/searchapi/params.js';
 import { SEARCHAPI_SUPPLIED_FIELDS } from '../../src/searchapi/provider.js';
 import {
   bookingResponseSchema,
@@ -37,6 +37,7 @@ import {
   chainRecording,
   latestParamsPath,
   need,
+  overLimit,
   RECORDED_ROOT,
   type SearchApiRecording,
   searchApiRecordings,
@@ -110,14 +111,14 @@ describe('WP4b recordings this brief relies on (§7 "Inputs from WP4b") — pend
     expect(step3s).toHaveLength(step2s.length);
   });
 
-  it('has the 401 body, and the over-limit probe as a descriptive 400 or an empty 200 (spec §2 facts 2 and 5)', () => {
+  it('has the 401 body, and the over-limit probe as a descriptive 400 naming the 200-combination limit (spec §2 facts 2 and 5)', () => {
     const rs = searchApiRecordings();
     expect(rs.find((r) => r.status === 401)?.body).toEqual({ error: 'Invalid API key.' });
-    const over = byEngine(rs, 'google_flights_calendar').find(
-      (r) => r.status === 400 || calendarResponseSchema.safeParse(r.body).data?.calendar.length === 0,
-    );
-    if (over === undefined) throw new Error('WP4b must record the over-limit probe (SA-03)');
-    if (over.status === 400) expect(String(obj(over.body).error ?? '').length).toBeGreaterThan(0);
+    // why: the recording is a 400 (the docs say "empty response"); a re-record that came back an empty 200 would change
+    // what an empty grid means, so it must fail here rather than pass silently (review pie M-2).
+    const over = overLimit(rs);
+    expect(over.status).toBe(400);
+    expect(String(obj(over.body).error ?? '')).toMatch(/200 combinations/);
   });
 
   it('every HTTP 200 body with content echoes currency and gl in search_parameters (spec §5.2 rests on this)', () => {
@@ -220,14 +221,22 @@ describe('recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) �
     );
     expect(sentUrls(k.events)).toHaveLength(1 + step2s.length + step3s.length);
     expect(res).toMatchObject({ coverage: 'priced', partial: false, failedExpansions: 0, pointOfSale: 'GB' });
-    // spike fact 3: the expanded outbound's step-1 price is the cheapest priced step-2 option's price.
-    const s2 = step2s[0];
-    if (s2 === undefined) throw new Error('step 2');
-    const expanded = flights(step1).find((o) => o.departure_token === need(s2.params, 'departure_token'));
-    const cheapest2 = Math.min(
-      ...flights(s2).flatMap((o) => (o.price === undefined ? [] : [minor(o.price)])),
-    );
-    expect(minor(expanded?.price ?? 0)).toBe(cheapest2);
+    // spike fact 3, for every expanded outbound: its step-1 price is the cheapest priced step-2 option's price.
+    for (const s2 of step2s) {
+      const expanded = flights(step1).find((o) => o.departure_token === need(s2.params, 'departure_token'));
+      const cheapest2 = Math.min(
+        ...flights(s2).flatMap((o) => (o.price === undefined ? [] : [minor(o.price)])),
+      );
+      expect(minor(expanded?.price ?? 0)).toBe(cheapest2);
+      // why (review pie M-1): the cheapest step-2 price also equals the step-3 listing of the airline step 1 states,
+      // the only evidence that a step-2 price is the round-trip total. The non-cheapest step-2 prices have no step 3
+      // behind them and are trip totals by analogy only, which is why they stay verified: false.
+      const cheapest = flights(s2).find((o) => o.price !== undefined && minor(o.price) === cheapest2);
+      const s3 = step3s.find((r) => r.params.booking_token === cheapest?.booking_token);
+      const airline = expanded?.flights[0]?.airline;
+      const own = s3 === undefined ? undefined : bookings(s3).find((b) => b.book_with === airline);
+      expect(own?.price === undefined ? null : minor(own.price)).toBe(cheapest2);
+    }
     for (const b of step3s.flatMap(bookings)) {
       if (b.is_split_booking === true || b.price === undefined || b.book_with === undefined) continue;
       expect(
@@ -302,6 +311,47 @@ describe('recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) �
     expect(e).toMatchObject({ kind: 'auth', retryable: false });
     expect(e?.message).toContain('Invalid API key.');
   });
+
+  // why (review pie M-2, test-strategy 2 and 3): the recorded error bodies replayed through the real http-kit with
+  // SearchApi's limits, so a regression in mapping either real body fails against the recording, not only a synthetic one.
+  it.each([
+    ['the recorded 401', 'auth', 401, /Invalid API key\./],
+    // why: http-kit keeps the first 200 characters of a vendor message (WP4), so the start of the recorded text is asserted.
+    [
+      'the recorded over-limit 400',
+      'parse',
+      400,
+      /HTTP 400 \(The combination of outbound parameters .*\[bad-request\]/,
+    ],
+  ] as const)(
+    '%s through http-kit → %s, non-retryable, one attempt, vendor text in the message',
+    async (_label, kind, status, text) => {
+      const rec = searchApiRecordings().find((r) => r.status === status);
+      if (rec === undefined) throw new Error(`WP4b must record the HTTP ${status} body`);
+      replay();
+      const k = saKit();
+      const err: unknown = await k.kit
+        .request({
+          providerId: 'searchapi',
+          executionId: 'exec-test',
+          tileIndex: null,
+          endpointPath: SEARCHAPI_ENDPOINT_PATH,
+          method: 'GET',
+          url: new URL(rec.request.url),
+          headers: authHeaders(KEY),
+          cache: 'never',
+          signal: new AbortController().signal,
+          recordFixtures: false,
+        })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(err).toMatchObject({ kind, retryable: false, httpStatus: status, providerId: 'searchapi' });
+      expect(err instanceof Error ? err.message : '').toMatch(text);
+      expect(k.budget.count('reserve')).toBe(1);
+    },
+  );
 });
 
 describe('supplied fields and synthetic drift against the recordings (spec §5.2) — pending-fixtures', () => {
