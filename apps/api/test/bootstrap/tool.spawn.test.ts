@@ -90,6 +90,10 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
         tool: 'node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts',
       },
     });
+    // why: --env-file-if-exists arrived in Node 22.9; an older Node fails with "bad option" before the exit table applies
+    // (arch M-10)
+    const root: unknown = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+    expect(root).toMatchObject({ engines: { node: '>=22.9' } });
   });
 
   it("the root script passes the tool's exit code through to the operator: no --budget → 64 (plan decision 30)", () => {

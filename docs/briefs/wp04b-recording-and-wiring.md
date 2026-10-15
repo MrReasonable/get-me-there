@@ -430,7 +430,7 @@ The metro comes from the airports table, which the tool seeds after migration wh
 - `packages/providers/src/http/recorder.ts`, `packages/providers/test/http/recorder.test.ts`: `assertRecordedRoot`, shared by the recorder, `loadRecordedJson` and WP4b's allowlist writer (Task 6, plan decision 30).
 - `packages/providers/src/index.ts`, `packages/providers/test/barrel.test.ts`: export and assert `withContentHash` and `assertRecordedRoot` (Task 6) and `defaultRecordedRoot` (Task 8).
 - `apps/api/package.json`: script `tool` (Task 9). No new dependency, no msw.
-- root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9).
+- root `package.json`: `record:fixtures` and `smoke:live` run `pnpm -C apps/api run tool …`, so the tool's exit code reaches the operator (plan decision 30, Task 9); `engines.node` is `>=22.9`, the first Node with `--env-file-if-exists` (arch M-10).
 - `scripts/check-boundaries.mjs`: the msw rules and the `process.env` reader list (Task 9).
 
 ## 10. Tasks
@@ -6464,6 +6464,10 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
         tool: 'node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts',
       },
     });
+    // why: --env-file-if-exists arrived in Node 22.9; an older Node fails with "bad option" before the exit table applies
+    // (arch M-10)
+    const root: unknown = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+    expect(root).toMatchObject({ engines: { node: '>=22.9' } });
   });
 
   it("the root script passes the tool's exit code through to the operator: no --budget → 64 (plan decision 30)", () => {
@@ -6514,7 +6518,7 @@ Expected: 2 failed | 6 passed; the failures are the script test, `AssertionError
 
 - [ ] **Step 3: Implement**
 
-In the root `package.json`, set `"record:fixtures": "pnpm -C apps/api run tool record"` and `"smoke:live": "pnpm -C apps/api run tool smoke"` (plan decision 30: `pnpm --filter` reports 1 for any non-zero child code, so the operator could not tell 65 from 75; `pnpm -C … run` passes the code through, and the cwd is still `apps/api`, so `../../.env` resolves as before).
+In the root `package.json`, set `"record:fixtures": "pnpm -C apps/api run tool record"` and `"smoke:live": "pnpm -C apps/api run tool smoke"` (plan decision 30: `pnpm --filter` reports 1 for any non-zero child code, so the operator could not tell 65 from 75; `pnpm -C … run` passes the code through, and the cwd is still `apps/api`, so `../../.env` resolves as before), and raise `engines.node` to `">=22.9"`: the `tool` script's `--env-file-if-exists` arrived in Node 22.9 (arch M-10).
 
 In `apps/api/package.json`, set the `tool` script (merge the key; keep main's other scripts):
 
