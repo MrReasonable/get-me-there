@@ -20,7 +20,7 @@ export const PARTIAL_EXPANSION = 'partial-expansion';
  * `partial-expansion`, `offers-dropped:n` or `partial-expansion;offers-dropped:n` (ruling 2026-10-15).
  */
 export function isPartialExpansion(reason: string | null): boolean {
-  return reason !== null && reason.split(';').includes(PARTIAL_EXPANSION);
+  return (reason ?? '').split(';').includes(PARTIAL_EXPANSION);
 }
 
 /** `reason` with `partial-expansion` added as its first part (the combined form keeps offers-dropped). */
