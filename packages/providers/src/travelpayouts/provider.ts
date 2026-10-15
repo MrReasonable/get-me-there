@@ -95,7 +95,19 @@ const older = (a: IsoDateTime | undefined, b: IsoDateTime): IsoDateTime => (a ==
 
 /** Spec §5.1 FlightProvider for Travelpayouts: discovery capability only, no verification. */
 export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): FlightProvider {
+  if (!Number.isSafeInteger(opts.cacheTtlSeconds) || opts.cacheTtlSeconds < 0) {
+    throw new Error('travelpayoutsProvider: cacheTtlSeconds must be a non-negative integer');
+  }
+  // why: fail closed; an empty token could only produce 401s, each a ledger row and a disabled provider.
+  if (opts.token.reveal().length === 0)
+    throw new Error('travelpayoutsProvider: TRAVELPAYOUTS_TOKEN is empty');
   const log = opts.log.child({ providerId: 'travelpayouts' });
+  if (opts.cacheTtlSeconds === 0) {
+    log.warn(
+      { cacheTtlSeconds: 0 },
+      'travelpayouts: response cache disabled; metro dedup off, upstream calls = O × D × M',
+    );
+  }
 
   function tileError(plan: TilePlan, error: ProviderError): DiscoveryTileResult {
     log.warn(
@@ -237,6 +249,11 @@ export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): Fligh
     suppliedFields: TRAVELPAYOUTS_SUPPLIED_FIELDS,
     cabins: TRAVELPAYOUTS_CABINS,
     discovery: { info: TRAVELPAYOUTS_INFO, plan: (q) => planMonthTiles(q), fetchTile },
-    healthcheck: async () => ({ ok: true, detail: 'token configured' }),
+    // why: stateless like every adapter (plan decision 24). A probe needs an airport pair, and no airport is named in
+    // code (spec §1); the token was checked at construction.
+    healthcheck: async () => ({
+      ok: true,
+      detail: 'not probed: token configured; the healthcheck sends no request',
+    }),
   };
 }

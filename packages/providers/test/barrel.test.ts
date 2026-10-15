@@ -23,6 +23,8 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'fixtureHttpLimits',
       'RecorderRefusedError',
       'ParamsNotAllowedError',
+      'travelpayoutsProvider', // WP6: apps/api providersFor
+      'travelpayoutsHttpLimits', // WP6: apps/api httpLimitsFor
       'withContentHash',
       'assertRecordedRoot',
       'secretForms',
@@ -37,6 +39,15 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'createFixtureServer',
       'loadRecordedFixture',
       'classifyResponse',
+      // WP6: the shared adapter helpers stay package-internal (WP5 imports them from ../shared/*.js)
+      'majorToMinor',
+      'parseError',
+      'parseVendor',
+      'NoteCounter',
+      // WP6: adapter constants stay internal too
+      'TRAVELPAYOUTS_INFO',
+      'TRAVELPAYOUTS_HOST',
+      'PRICES_FOR_DATES_PATH',
     ]) {
       expect(name in main, name).toBe(false);
     }
