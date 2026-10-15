@@ -214,7 +214,6 @@ describe('response dates are local calendar dates (spec §6.1: never through UTC
   });
 
   it.each([
-    ['a Z time', '2027-03-12T08:55:00Z'],
     ['an offset-less time', '2027-03-12T08:55:00'],
     ['a non-date', 'next tuesday'],
     ['an impossible date', '2027-02-30T08:55:00+00:00'],
@@ -226,6 +225,24 @@ describe('response dates are local calendar dates (spec §6.1: never through UTC
       departure_at: departureAt,
     };
     expect(thrown(() => attributeRows([r], input)).message).toContain('[malformed-row]');
+  });
+
+  it('accepts a Z time as an explicit +00:00 offset: the local date is the date written (plan decision 33)', () => {
+    const r = {
+      ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+      departure_at: '2027-03-12T23:55:00Z',
+    };
+    expect(attributeRows([r], input).prices.map((p) => p.departureDate)).toEqual(['2027-03-12']);
+  });
+
+  it('accepts the undocumented gate, duration_to and duration_back keys on a row (plan decision 33)', () => {
+    const r = {
+      ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+      gate: 'Synthetic Agency',
+      duration_to: 475,
+      duration_back: 430,
+    };
+    expect(attributeRows([r], input).prices).toHaveLength(1);
   });
 
   it('accepts a bare date', () => {

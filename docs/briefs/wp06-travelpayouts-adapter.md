@@ -337,7 +337,7 @@ Verified on 2026-10-15.
   - **Round trip and passengers:** the vendor describes `one_way=false` results as round-trip ("back-to-back") prices; that description, like the 48 hours, is attributed to the vendor in the provenance note. The vendor states no passenger count, so the note names none (plan ruling: stated only if the docs state it); WP13's live smoke compares one recorded row with the vendor's own search page (decision 27).
   - **Page cap and sort order:** no worked-example month has been measured (the spike's four to six rows a month were on routes to a thin long-haul destination); `MAX_PAGES` is the recorder's cap (decision 26), and Task 6.9 stops if a recorded tile reached it. The default `sorting` of prices_for_dates is undocumented and the allowlist sends none, so a capped tile is marked `truncated` instead of trusting that unread pages hold dearer rows.
   - **Rate limit:** 600 per minute for `/v3/prices_for_dates` (`docs/providers.md`, help article 4402565416594). No 429 was recorded; `Retry-After` is unverified and every 429 test is labelled synthetic (plan decision 20).
-  - **Times:** the sample row is local time with an explicit offset. One general vendor note says times are UTC, so the adapter accepts a bare date or a time with an explicit `±HH:MM` offset and refuses `Z` or offset-less times as `malformed-row`; Task 6.9 asserts on WP4b's recordings that every `departure_at`/`return_at` carries an offset and that some row's two offsets differ (a transatlantic round trip in local time). The local-date reading rests on that assertion, not on the docs. One month-boundary case is not documented: if the vendor buckets `departure_at=YYYY-MM` by UTC date, then for any origin far from UTC a departure on a month's first or last day can land in the neighbouring month's tile (a 20:00 EST departure on the 31st is 01:00 UTC on the 1st; an early-morning departure east of UTC on the 1st is the previous day in UTC). Such a row is dropped there as `dropped-outside-tile` and its own cell reads `no_data`. The adapter is route-agnostic, so this is settled with a westward origin: WP4b records TP-21, a JFK → LON month tile (decision 31), and Task 6.9 asserts that every row's local departure month equals the tile month, stopping if not.
+  - **Times:** the sample row is local time with an explicit offset. One general vendor note says times are UTC, so the adapter accepts a bare date or a time with an explicit offset (`±HH:MM`, or `Z` as `+00:00`: the vendor writes a zero offset as `Z`, recorded 2026-10-15, plan decision 33) and refuses offset-less times as `malformed-row`; Task 6.9 asserts on WP4b's recordings that every `departure_at`/`return_at` carries an offset and that some row's two offsets differ (a transatlantic round trip in local time). The local-date reading rests on that assertion, not on the docs. One month-boundary case is not documented: if the vendor buckets `departure_at=YYYY-MM` by UTC date, then for any origin far from UTC a departure on a month's first or last day can land in the neighbouring month's tile (a 20:00 EST departure on the 31st is 01:00 UTC on the 1st; an early-morning departure east of UTC on the 1st is the previous day in UTC). Such a row is dropped there as `dropped-outside-tile` and its own cell reads `no_data`. The adapter is route-agnostic, so this is settled with a westward origin: WP4b records TP-21, a JFK → LON month tile (decision 31), and Task 6.9 asserts that every row's local departure month equals the tile month, stopping if not.
   - **Not verifiable from the docs:** the passenger count a price is for; the default sort order; whether a month query without `return_at` returns every cached return date per departure day; `return_at` on rows (the sample is one-way); error bodies (null in the collection; the 401 plain-text body is spike fact 5, and the `success:false` + `error` string shape is an assumption whose other shapes fall to `malformed-envelope`); the public host (the collection's base URL is internal). Task 6.9 asserts `return_at` and the host on the recordings.
 - **zod 4.6.7** (a dependency of `@gmt/providers` since WP4; the package's recorder, allowlist and fixture loaders already parse untrusted JSON with it through `util.ts`). Used: `z.object`, `z.discriminatedUnion('success', […])`, `z.literal`, `z.array`, `z.string().regex`, `z.unknown()`, `.optional()`, `.nullish()`, `.transform(...)`, `.pipe(isoDateSchema)`, `safeParse`, `z.infer`, `z.output`, `z.ZodType`. Core's `iataSchema` and `isoDateSchema` mint the brands, so no value is cast.
 - **msw 3.0.3.** Handlers only: `http.get(url, resolver)` and `HttpResponse` from `msw/http`, `HttpResponse.json(body, init?)`, `new HttpResponse(text, { status, headers })`, `HttpResponse.error()`. No test creates a server: every handler goes on the package's guarded server (`test/support/msw.ts` re-exports `guardedServer`) with `server.use`, and `test/support/setup.ts` owns `listen`, `resetHandlers` and `close` and fails any test that left a stray request (plan decisions 18 and 20).
@@ -1667,7 +1667,6 @@ describe('response dates are local calendar dates (spec §6.1: never through UTC
   });
 
   it.each([
-    ['a Z time', '2027-03-12T08:55:00Z'],
     ['an offset-less time', '2027-03-12T08:55:00'],
     ['a non-date', 'next tuesday'],
     ['an impossible date', '2027-02-30T08:55:00+00:00'],
@@ -1806,13 +1805,14 @@ and append:
 ```ts
 /**
  * A vendor time read as its local calendar date (spec §6.1: never through UTC). Accepted: a bare date, or a date-time
- * with an explicit `±HH:MM` offset, which is the documented form (`2021-09-14T08:55:00+03:00`). A `Z` or offset-less
- * time is refused: whether it is local or UTC cannot be told, and a UTC reading keys evening flights a day late.
+ * with an explicit offset, which is the documented form (`2021-09-14T08:55:00+03:00`). The vendor writes a zero offset
+ * as `Z` (recorded), so `Z` is an explicit `+00:00` offset (plan decision 33). An offset-less time is refused: whether it is
+ * local or UTC cannot be told, and a UTC reading keys evening flights a day late.
  * why: core's vendor-time parser (normalise/localTime.ts) is not exported and takes no bare date, so this pattern
  * checks the time part's ranges itself; the calendar date is then checked by core's isoDateSchema.
  */
 const LOCAL_TIME =
-  /^\d{4}-\d{2}-\d{2}(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/;
+  /^\d{4}-\d{2}-\d{2}(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/;
 const localDateSchema = z
   .string()
   .regex(LOCAL_TIME)
@@ -1822,7 +1822,7 @@ const localDateSchema = z
 /**
  * One row. The attribution fields are required and checked (an unreadable one makes the whole response `parse`,
  * because the row cannot be placed in or out of any cell); `price`, `link` and `found_at` are read leniently and
- * judged per row. Other documented fields (airline, flight_number, transfers, duration) are not used.
+ * judged per row. Other fields (airline, flight_number, transfers, duration, and the undocumented `gate`, `duration_to`, `duration_back`) are not used; unknown row keys are allowed (plan decision 33).
  */
 const rowSchema = z.object({
   origin_airport: iataSchema,
@@ -4203,7 +4203,7 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     }
   });
 
-  it('vendor times are local with an explicit offset, never Z, and the recordings show two different offsets (pie-wp06-001)', () => {
+  it('every vendor time carries an explicit offset (Z is +00:00), and the recordings show two different offsets (pie-wp06-001)', () => {
     const rows = ok.flatMap((x) => rowsOf(x.fixture.body).map(obj));
     const offset = /[+-]\d{2}:\d{2}$/;
     for (const r of rows) {

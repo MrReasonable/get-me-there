@@ -99,13 +99,15 @@ export function cacheableBody(body: unknown): boolean {
 
 /**
  * A vendor time read as its local calendar date (spec §6.1: never through UTC). Accepted: a bare date, or a date-time
- * with an explicit `±HH:MM` offset, which is the documented form (`2021-09-14T08:55:00+03:00`). A `Z` or offset-less
- * time is refused: whether it is local or UTC cannot be told, and a UTC reading keys evening flights a day late.
+ * with an explicit offset, which is the documented form (`2021-09-14T08:55:00+03:00`). The vendor writes a zero offset
+ * as `Z` (recorded: London winter times such as `2027-03-15T06:50:00Z`), so `Z` is an explicit `+00:00` offset (plan
+ * decision 33). An offset-less time is refused: whether it is local or UTC cannot be told, and a UTC reading keys
+ * evening flights a day late.
  * why: core's vendor-time parser (normalise/localTime.ts) is not exported and takes no bare date, so this pattern
  * checks the time part's ranges itself; the calendar date is then checked by core's isoDateSchema.
  */
 const LOCAL_TIME =
-  /^\d{4}-\d{2}-\d{2}(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/;
+  /^\d{4}-\d{2}-\d{2}(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/;
 const localDateSchema = z
   .string()
   .regex(LOCAL_TIME)
@@ -115,7 +117,8 @@ const localDateSchema = z
 /**
  * One row. The attribution fields are required and checked (an unreadable one makes the whole response `parse`,
  * because the row cannot be placed in or out of any cell); `price`, `link` and `found_at` are read leniently and
- * judged per row. Other documented fields (airline, flight_number, transfers, duration) are not used.
+ * judged per row. Other fields (airline, flight_number, transfers, duration, and the undocumented `gate` selling
+ * agency, `duration_to`, `duration_back`) are not used: unknown keys are allowed on a row (plan decision 33).
  */
 const rowSchema = z.object({
   origin_airport: iataSchema,
