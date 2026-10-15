@@ -417,7 +417,7 @@ export type BudgetScope =
   | { kind: 'global-month' };
 export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
 // cap is null for a window the plan does not use (a month scope on a lifetime plan, and vice versa) and for a scope with no cap configured.
-// Per-execution caps come from the execution's snapshot budget (search_executions.definition_snapshot_json → budget), never from config at reserve time; child executions carry { maxCalls: CHILD_MAX_CALLS, maxFreeCalls: 0, maxCostMicroGbp: 0 } in their snapshot. Config EXECUTION_MAX_* are the defaults a new definition is created with.
+// Per-execution caps come from the execution's snapshot budget (search_executions.definition_snapshot_json → budget), never from config at reserve time; child executions carry { maxCalls: ceil(perCellEstimate × ESTIMATE_RETRY_FACTOR) bounded by the parent's remaining headroom (decision 25; CHILD_MAX_CALLS is the floor), maxFreeCalls: 0, maxCostMicroGbp: 0 } in their snapshot. Config EXECUTION_MAX_* are the defaults a new definition is created with.
 ```
 
 ### Logger and clock (`ports/logger.ts`, `ports/clock.ts`, WP0)
@@ -618,7 +618,7 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 
 ```ts
 export interface EngineDeps { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; notifiers: Notifier[]; clock: Clock; log: Logger }
-export interface EngineOptions { alerts?: AlertsStepHook; fixtureCostMicroGbp?: number; providerConcurrency?: Partial<Record<ProviderId, number>> /* tests; production reads config limits */ }
+export interface EngineOptions { alerts?: AlertsStepHook; providerConcurrency?: Partial<Record<ProviderId, number>> /* tests; production reads config limits */ }
 export type AlertsStepHook = (deps: EngineDeps, executionId: string) => Promise<{ digests: number; events: number }>;   // WP11 provides runAlerts; default noAlerts
 export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled'; message: string; details: unknown };
 export type Estimate = z.infer<typeof estimateSchema>; export type BudgetFit = z.infer<typeof budgetFitSchema>; export type SchedulerJob = z.infer<typeof schedulerJobSchema>;
@@ -627,7 +627,7 @@ export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   
 export function parseCron(expr: string, tz: string): { ok: true; next: (from: Date) => Date | null } | { ok: false; reason: string };
 export class LogNotifier implements Notifier { constructor(log: Logger) }
 export function renderOperatorMessage(kind: OperatorMessageKind, ctx: {...}): { subject: string; body: string };   // engine/src/notifiers/operatorTemplates.ts
-// A child execution's snapshot budget is the definition's budget with only maxCalls replaced by CHILD_MAX_CALLS; its policy is { maxCells: 1, topN: 1, alwaysInclude: [cell] } with discovery [] so the stored snapshot satisfies the save-time refinements. Route calendar history covers parent executions only (children never discover).
+// A child execution's snapshot budget is the definition's budget with only maxCalls replaced by the decision-25 child cap (per-cell estimate × retry factor, bounded by the parent's headroom, never below CHILD_MAX_CALLS); a child never pauses: on a cap breach it ends `cancelled` with its cell `skipped:budget`; its policy is { maxCells: 1, topN: 1, alwaysInclude: [cell] } with discovery [] so the stored snapshot satisfies the save-time refinements. Route calendar history covers parent executions only (children never discover).
 // Rules settled: manual resume of a paused_budget execution-* breach copies the definition's CURRENT budget into the snapshot (only `budget`), then re-checks caps (spec rev 10). Executions whose definition is soft-deleted are never auto-resumed and never scheduled (the record tool's hidden definition relies on this). Supersede of a reused row is enforced in writeTile as a safety net even though the plan never re-fetches a reused cell.
 ```
 

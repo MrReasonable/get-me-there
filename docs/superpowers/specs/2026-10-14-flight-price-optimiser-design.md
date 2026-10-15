@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 17.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 18.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -1138,8 +1138,11 @@ completed
   validates the cell ∈ `generateCells(current resolved space)` and airports
   exist; creates a child execution (`is_child = 1`, cell columns set) that
   skips discovery, `alwaysInclude = [cell]`, `maxCells = 1`, its own call
-  cap (`CHILD_MAX_CALLS` default 6; the other budget fields are inherited
-  from the definition), shares the provider/global caps; at most one active child per cell; the action is hidden when the
+  cap (the cell's estimated calls × the retry factor, bounded by the parent's
+  remaining headroom and never below `CHILD_MAX_CALLS`, default 6; the other
+  budget fields are inherited from the definition; a child never pauses: a
+  cap breach ends it `cancelled` with the cell left unverified), shares the
+  provider/global caps; at most one active child per cell; the action is hidden when the
   definition has no verification provider. Child observations are
   **included** in results, calendar-gap, View B counts and duration
   analysis (filtered to the current resolved space), counted separately as
@@ -1615,6 +1618,13 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 18: child caps and budget stops (2026-10-15)
+
+§6.7: a child execution's call cap derives from its cell's estimate and the
+parent's headroom, with `CHILD_MAX_CALLS` as the floor, and a child never
+pauses. §5.3: a reservation that passed every cap is honoured and its result
+written; a budget stop refuses only new reservations (plan decision 25).
 
 ### Revision 17: no metro queries (2026-10-15)
 
