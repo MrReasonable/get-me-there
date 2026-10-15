@@ -14,6 +14,11 @@
       "types": "./dist/fixture/index.d.ts",
       "default": "./dist/fixture/index.js"
     },
+    "./recording": {
+      "@gmt/source": "./src/recording/index.ts",
+      "types": "./dist/recording/index.d.ts",
+      "default": "./dist/recording/index.js"
+    },
     "./testing": {
       "@gmt/source": "./src/testing/index.ts",
       "types": "./dist/testing/index.d.ts",
