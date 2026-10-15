@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import type { Clock, IsoDateTime, Logger } from '@gmt/core';
+import Database from 'better-sqlite3';
 import type { Db } from './client.js';
 import { oneOf, readTime } from './internal/read.js';
 
@@ -6,12 +8,36 @@ import { oneOf, readTime } from './internal/read.js';
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const LOCK_STALE_AFTER_MS = 3 * HEARTBEAT_INTERVAL_MS;
 
+/** The one freshness rule (spec §7): a heartbeat at most LOCK_STALE_AFTER_MS old. AppLock and readOnlyLockState share it. */
+function isFresh(heartbeatAt: string, now: string): boolean {
+  return Date.parse(now) - Date.parse(heartbeatAt) <= LOCK_STALE_AFTER_MS;
+}
+
+/** What readOnlyLockState reports; a present lock always names its holder and heartbeat. */
+export type ReadOnlyLockState =
+  | { state: 'absent' }
+  | { state: 'fresh' | 'stale'; holder: Holder; heartbeatAt: IsoDateTime };
+
 const HOLDERS = ['app', 'tool'] as const;
 type Holder = (typeof HOLDERS)[number];
 interface LockRow {
   holder: string;
   heartbeat_at: string;
   acquired_at: string;
+}
+const LOCK_ROW_SQL = 'SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1';
+
+/** The lock row, validated; null when there is none. One reader for AppLock.inspect and readOnlyLockState (arch M-2). */
+function readLockRow(
+  raw: Database.Database,
+): { holder: Holder; heartbeatAt: IsoDateTime; acquiredAt: IsoDateTime } | null {
+  const r = raw.prepare<[], LockRow>(LOCK_ROW_SQL).get();
+  if (r === undefined) return null;
+  return {
+    holder: oneOf('app_lock.holder', HOLDERS, r.holder),
+    heartbeatAt: readTime('app_lock.heartbeat_at', r.heartbeat_at),
+    acquiredAt: readTime('app_lock.acquired_at', r.acquired_at),
+  };
 }
 
 /** Synchronous sleep for the boot-time wait (nothing else runs while the process is acquiring). */
@@ -41,15 +67,7 @@ export class AppLock {
   }
 
   static inspect(db: Db): { holder: Holder; heartbeatAt: IsoDateTime; acquiredAt: IsoDateTime } | null {
-    const r = db.raw
-      .prepare<[], LockRow>('SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1')
-      .get();
-    if (r === undefined) return null;
-    return {
-      holder: oneOf('app_lock.holder', HOLDERS, r.holder),
-      heartbeatAt: readTime('app_lock.heartbeat_at', r.heartbeat_at),
-      acquiredAt: readTime('app_lock.acquired_at', r.acquired_at),
-    };
+    return readLockRow(db.raw);
   }
 
   acquire(opts: { waitMs: number }): 'acquired' | 'refused' {
@@ -105,14 +123,12 @@ export class AppLock {
   private tryAcquire(): boolean {
     return this.db.immediateTransaction((): boolean => {
       const now = this.clock.now();
-      const row = this.db.raw
-        .prepare<[], LockRow>('SELECT holder, heartbeat_at, acquired_at FROM app_lock WHERE id = 1')
-        .get();
+      const row = this.db.raw.prepare<[], LockRow>(LOCK_ROW_SQL).get();
       this.afterRead();
       if (row !== undefined && row.holder === this.holder && row.acquired_at === this.acquiredAt) return true;
       if (row !== undefined) {
         const ageMs = Date.parse(now) - Date.parse(row.heartbeat_at);
-        if (ageMs <= LOCK_STALE_AFTER_MS) return false;
+        if (isFresh(row.heartbeat_at, now)) return false;
         this.log.warn(
           { holder: this.holder, previousHolder: row.holder, lockAgeMs: ageMs },
           'taking over a stale app_lock (heartbeat older than 3 missed beats)',
@@ -126,5 +142,36 @@ export class AppLock {
       this.acquiredAt = now;
       return true;
     });
+  }
+}
+
+/**
+ * The lock as another process would judge it, read through a read-only connection (spec §7; plan decision 20: a tool
+ * inspects app_lock before any backup or migration). `absent` for a missing file, a database without the table or
+ * an empty table; `fresh` while the heartbeat is at most LOCK_STALE_AFTER_MS old; `stale` after that. It never writes:
+ * no journal-mode change, no migration, no checkpoint on close. why: a read-only connection still reads the -wal, so a
+ * live app's latest heartbeat is seen; SQLite creates empty -wal/-shm sidecars when they are absent and writes nothing.
+ * Throws for a file that is not a SQLite database, a database it cannot open, or a malformed heartbeat_at (RowCorrupt);
+ * the tool bootstrap maps any throw to exit 73.
+ */
+export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockState {
+  if (dbPath === ':memory:' || !existsSync(dbPath)) return { state: 'absent' };
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    const table = db
+      .prepare<[], { n: number }>(
+        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'app_lock'",
+      )
+      .get();
+    if ((table?.n ?? 0) === 0) return { state: 'absent' };
+    const row = readLockRow(db);
+    if (row === null) return { state: 'absent' };
+    return {
+      state: isFresh(row.heartbeatAt, clock.now()) ? 'fresh' : 'stale',
+      holder: row.holder,
+      heartbeatAt: row.heartbeatAt,
+    };
+  } finally {
+    db.close();
   }
 }

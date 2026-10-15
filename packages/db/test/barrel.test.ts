@@ -60,6 +60,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       'AIRPORTS_MIN_ROWS',
       'HEARTBEAT_INTERVAL_MS',
       'LOCK_STALE_AFTER_MS',
+      'readOnlyLockState',
     ]) {
       expect(db, name).toHaveProperty(name);
     }
@@ -99,6 +100,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'loadAirportsDataset',
         'openDatabase',
         'pendingMigrations',
+        'readOnlyLockState',
         'runMaintenance',
         'sanityCheckAirports',
         'seedAirports',

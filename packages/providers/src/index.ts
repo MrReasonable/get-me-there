@@ -5,13 +5,17 @@ export { fixtureHttpLimits, fixtureProvider } from './fixture/provider.js'; // f
 export { CREDENTIAL_HEADERS, canonicalCacheKey } from './http/cacheKey.js'; // CREDENTIAL_HEADERS: WP4b createLogger
 export { createHttpKit } from './http/httpKit.js';
 export {
+  assertRecordedRoot,
   canonicalJson,
   contentHash,
   createRecorder,
+  defaultRecordedRoot,
   type RecordedFixture,
   RecorderRefusedError,
-} from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError: WP4b
+  withContentHash,
+} from './http/recorder.js'; // canonicalJson: WP5/WP6; RecorderRefusedError, defaultRecordedRoot, withContentHash, assertRecordedRoot: WP4b
 export { scrubSecrets, stripUrl } from './http/scrub.js';
+export { secretForms } from './http/secretForms.js'; // WP4b: the secret scan and its sentinel test share the scrubber's list
 export type {
   FixtureRecorder,
   HttpKit,

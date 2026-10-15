@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -15,6 +16,7 @@ import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  assertRecordedRoot,
   canonicalJson,
   contentHash,
   createRecorder,
@@ -353,6 +355,21 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
         recordedBy: 'x',
       }),
     ).toThrow(/does not exist/);
+  });
+
+  it('assertRecordedRoot returns the real root, and refuses a missing root, a wrong suffix and a symlink pointing elsewhere (WP4b I-3)', () => {
+    const root = tree();
+    expect(assertRecordedRoot(root)).toBe(realpathSync(root));
+    const base = mkdtempSync(join(tmpdir(), 'gmt-root-'));
+    expect(() => assertRecordedRoot(join(base, 'absent', 'fixtures', 'recorded'))).toThrow(
+      RecorderRefusedError,
+    );
+    expect(() => assertRecordedRoot(join(base, 'absent', 'fixtures', 'recorded'))).toThrow(/does not exist/);
+    expect(() => assertRecordedRoot(base)).toThrow(/must end in fixtures\/recorded/);
+    const linked = join(base, 'elsewhere', 'fixtures', 'recorded');
+    mkdirSync(join(linked, '..'), { recursive: true });
+    symlinkSync(base, linked);
+    expect(() => assertRecordedRoot(linked)).toThrow(/must end in fixtures\/recorded/);
   });
 
   it('canonicalJson has a known answer: keys sorted at every level, undefined dropped (prov-009)', () => {

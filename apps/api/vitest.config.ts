@@ -6,10 +6,11 @@ export default defineConfig({
   resolve: { alias: gmtAliases(new URL('../..', import.meta.url).pathname) },
   test: {
     name: 'api',
-    include: ['test/**/*.test.ts', 'test/**/*.test.ts'],
+    include: ['test/**/*.test.ts'],
+    setupFiles: ['test/support/setup.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts', 'src/**/*.ts'],
+      include: ['src/**/*.ts'],
       exclude: ['src/index.ts', 'src/**/index.ts'],
       thresholds: { lines: 85, branches: 70, functions: 85, statements: 85 },
     },

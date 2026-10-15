@@ -11,6 +11,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
     for (const name of [
       'createHttpKit',
       'createRecorder',
+      'defaultRecordedRoot',
       'contentHash',
       'scrubSecrets',
       'stripUrl',
@@ -22,12 +23,14 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'fixtureHttpLimits',
       'RecorderRefusedError',
       'ParamsNotAllowedError',
+      'withContentHash',
+      'assertRecordedRoot',
+      'secretForms',
     ]) {
       expect(typeof main[name], name).toBe('function');
     }
     expect(main.CREDENTIAL_HEADERS).toBeInstanceOf(Set);
     for (const name of [
-      'withContentHash',
       'fixtureRouter',
       'fixtureHandlers',
       'replayHandlers',

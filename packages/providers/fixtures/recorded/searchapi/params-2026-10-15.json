@@ -1,0 +1,81 @@
+{
+  "provider": "searchapi",
+  "recordedAt": "2026-10-15",
+  "endpoints": {
+    "/api/v1/search?engine=google_flights_calendar": {
+      "names": [
+        "adults",
+        "arrival_id",
+        "currency",
+        "departure_id",
+        "engine",
+        "flight_type",
+        "gl",
+        "hl",
+        "outbound_date",
+        "outbound_date_end",
+        "outbound_date_start",
+        "return_date",
+        "return_date_end",
+        "return_date_start",
+        "separate_tickets",
+        "travel_class"
+      ],
+      "values": {
+        "adults": ["1"],
+        "arrival_id": "any",
+        "currency": ["GBP"],
+        "departure_id": "any",
+        "engine": ["google_flights_calendar"],
+        "flight_type": ["round_trip"],
+        "gl": ["gb"],
+        "hl": ["en"],
+        "outbound_date": "any",
+        "outbound_date_end": "any",
+        "outbound_date_start": "any",
+        "return_date": "any",
+        "return_date_end": "any",
+        "return_date_start": "any",
+        "separate_tickets": ["1"],
+        "travel_class": ["business", "economy", "first_class", "premium_economy"]
+      }
+    },
+    "/api/v1/search?engine=google_flights": {
+      "names": [
+        "adults",
+        "arrival_id",
+        "booking_token",
+        "currency",
+        "departure_id",
+        "departure_token",
+        "engine",
+        "flight_type",
+        "gl",
+        "hl",
+        "outbound_date",
+        "return_date",
+        "separate_tickets",
+        "sort_by",
+        "travel_class"
+      ],
+      "values": {
+        "adults": ["1"],
+        "arrival_id": "any",
+        "booking_token": "any",
+        "currency": ["GBP"],
+        "departure_id": "any",
+        "departure_token": "any",
+        "engine": ["google_flights"],
+        "flight_type": ["round_trip"],
+        "gl": ["gb"],
+        "hl": ["en"],
+        "outbound_date": "any",
+        "return_date": "any",
+        "separate_tickets": ["1"],
+        "sort_by": ["price"],
+        "travel_class": ["business", "economy", "first_class", "premium_economy"]
+      }
+    }
+  },
+  "contentSha256": "33024e6a8c86f1ff0da11c594486fd23d0267360cd6468730dbab7c03c1f7ea7"
+}

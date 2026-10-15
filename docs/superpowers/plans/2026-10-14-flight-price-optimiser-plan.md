@@ -555,6 +555,9 @@ export interface RecordedFixture { recordedAt: IsoDateTime /* the response's fet
 export interface FixtureRecorder { record(r: { providerId: ProviderId | 'fx'; endpointPath: string; request: HttpKitRequest; status: number; body: unknown; fetchedAt: IsoDateTime }): Promise<string /* path written */> }
 export function createRecorder(opts: { root: string; secrets: Secret[]; clock: Clock; recordedBy: string }): FixtureRecorder;   // files: <root>/<providerId>/<endpointPath with / → _>/<yyyy-mm-dd>-<sha12>.json; raw bodies to *.raw.json beside them (gitignored)
 export function contentHash(f: Omit<RecordedFixture, 'contentSha256'>): string;
+export function withContentHash<T extends object>(file: T): T & { contentSha256: string };   // main barrel (WP4b): the allowlist writer hashes with WP4's own code
+export function assertRecordedRoot(root: string): string;   // main barrel (WP4b): the real root, refused unless it exists and ends in fixtures/recorded; shared by the recorder, the readers and WP4b's allowlist writer
+export function secretForms(value: string): string[];   // main barrel (WP4b): the one list of a secret's textual forms, from the leaf src/http/secretForms.ts that scripts/secret-scan.mjs also imports
 export function scrubSecrets<T>(value: T, secrets: Secret[]): T;
 export function stripUrl(url: string): string;
 export function canonicalCacheKey(r: HttpKitRequest, secrets: Secret[]): string;   // sha256 over method + credential-free URL (query kept) + scrubbed headers + body only; never executionId or tileIndex, so sibling pairs share Travelpayouts metro responses
@@ -562,7 +565,7 @@ export interface ParamsAllowlist { provider: ProviderId; recordedAt: IsoDate; en
 // RecordedFixture.request.headers DROPS credential headers entirely (Authorization, X-Access-Token) rather than scrubbing their values, so the secret scan's header-name rule passes.
 export function fixtureProvider(opts: { http: HttpKit; log: Logger; clock: Clock; config: SyntheticGateInput; costMicroGbp: number }): FlightProvider;
 export function fixtureRouter(root: string, gate: SyntheticGateInput): Hono;   // '@gmt/providers/fixture' subpath (not the main barrel); throws unless syntheticAllowed(gate); scenario control via POST /__fixture/scenario, the x-fixture-scenario header, and hold/release (POST /__fixture/release) so WP7 needs no second request layer; paged-calendar and chained-verification options exist for layer-A parity tests
-// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root, gate): RequestHandler[]; replayHandlers(recordedRoot, opts?: { session?: string }): { handlers: RequestHandler[]; misses(): string[] } (serves fixtures/recorded by matching method, path and credential-free query with placeholders as recorded; a miss is logged and answered with HttpResponse.error(), never passed through to the network; a match key served by more than one session is refused at construction unless `session` picks one; every consumer asserts misses() is empty in afterEach); loadRecorded(root, providerId, endpointPath): RecordedFixture[]; withContentHash (test and record-tool use only). msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
+// '@gmt/providers/testing' subpath export (src/testing/index.ts): fixtureHandlers(root, gate): RequestHandler[]; replayHandlers(recordedRoot, opts?: { session?: string }): { handlers: RequestHandler[]; misses(): string[] } (serves fixtures/recorded by matching method, path and credential-free query with placeholders as recorded; a miss is logged and answered with HttpResponse.error(), never passed through to the network; a match key served by more than one session is refused at construction unless `session` picks one; every consumer asserts misses() is empty in afterEach); loadRecorded(root, providerId, endpointPath): RecordedFixture[]; withContentHash (also on the main barrel, below). msw is a dependency of the package (not dev) because this subpath imports it; production code never imports the subpath (boundary script asserts).
 ```
 
 Adapter constructors and exports (WP5, WP6):
@@ -660,7 +663,7 @@ export function createLogger(config: Pick<Config, 'logLevel'>, opts?: { destinat
 6. The recorded-fixture file format and hash field (`contentSha256`) are pinned above; parameter allowlists carry the same hash; the runtime allowlist is a code constant asserted equal to the recorded file.
 7. The fixture host is reached through http-kit's gated `inProcessHosts`; `@gmt/providers/testing` is the only module that imports msw.
 8. Stryker runs with its command runner (`"testRunner": "command"`, `"commandRunner": { "command": "pnpm exec vitest run --coverage.enabled=false" }`) because `@stryker-mutator/vitest-runner` 10 executes no tests under Vitest 5; `ignorePatterns` uses `"/coverage"` so `src/coverage/` is mutated. Per-task test runs use `pnpm --filter @gmt/<pkg> exec vitest run <file>` (no coverage threshold on a partial run).
-9. The `.gitignore` gains `backups/` and `*.db*`. The boundary script's `process.env` rule applies to `src/` trees only; `apps/api/src/bootstrap/`, `apps/api/src/wiring.ts` (loadConfigFromEnv) and `apps/api/src/logger.ts` are the allowed readers.
+9. The `.gitignore` gains `backups/` and `*.db*`. The boundary script's `process.env` rule applies to `src/` trees only; only `apps/api/src/bootstrap/` reads `process.env`; `apps/api/src/wiring.ts` (`loadConfigFromEnv(env)`) and `apps/api/src/logger.ts` take the environment or config as an argument (tightened by WP4b, whose boundary script enforces it).
 10. `AlertDigest` is structured; subject and body are rendered by WP11's templates. A digest with only "new" items and no firing is not sent. Validated booking and search links keep their query strings in API bodies and emails; every other URL sink is stripped.
 11. The airports dataset ships with a separate attributed metro-code list (`packages/db/data/metros.json`, from Wikipedia's list of IATA metropolitan area codes, CC BY-SA 4.0, attribution file beside it). `SEARCHAPI_PLAN` `trial` keeps the lifetime window.
 12. React is 19 (spec §4 updated). `APP_BASE_URL` is added to config. Smoke and record are invoked from the host with curl against the loopback port; the image has no curl.
@@ -732,7 +735,7 @@ Expected: FAIL (no `package.json`, no `vitest`).
   "private": true,
   "version": "0.0.0",
   "packageManager": "pnpm@12.9.1",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.18" },
   "scripts": {
     "build": "pnpm -r --filter './packages/**' --filter './apps/**' build",
     "typecheck": "pnpm -r typecheck",
@@ -742,8 +745,8 @@ Expected: FAIL (no `package.json`, no `vitest`).
     "test:coverage": "vitest run --coverage",
     "mutate": "pnpm --filter @gmt/core mutate",
     "dev": "pnpm --parallel --filter @gmt/api --filter @gmt/web dev",
-    "smoke:live": "pnpm --filter @gmt/api tool smoke",
-    "record:fixtures": "pnpm --filter @gmt/api tool record",
+    "smoke:live": "pnpm -C apps/api run tool smoke",
+    "record:fixtures": "pnpm -C apps/api run tool record",
     "secret-scan": "node scripts/secret-scan.mjs"
   },
   "devDependencies": {
@@ -2351,8 +2354,8 @@ for (const [name, dir] of Object.entries(dirs)) {
     const src = readFileSync(f, 'utf8');
     for (const m of src.matchAll(/from\s+['"](@gmt\/[a-z]+)/g)) if (!ALLOWED[name].includes(m[1])) { console.error(`${f} imports ${m[1]}`); bad++; }
     if (name !== '@gmt/api' && /process\.env/.test(src)) { console.error(`${f} reads process.env outside apps/api`); bad++; }
-    const envReaders = ['/bootstrap/', '/wiring.ts', '/logger.ts'];
-    if (name === '@gmt/api' && !envReaders.some((p) => f.includes(p)) && /process\.env/.test(src)) { console.error(`${f} reads process.env outside bootstrap/, wiring.ts or logger.ts`); bad++; }
+    const envReaders = ['/bootstrap/']; // WP4b: wiring and logger take the env as an argument
+    if (name === '@gmt/api' && !envReaders.some((p) => f.includes(p)) && /process\.env/.test(src)) { console.error(`${f} reads process.env outside apps/api/src/bootstrap/`); bad++; }
     if (name === '@gmt/providers' && !f.includes('/src/testing/') && /from ['"]msw/.test(src)) { console.error(`${f} imports msw outside src/testing/`); bad++; }
   }
 }
