@@ -75,9 +75,15 @@ describe('fetchTile error mapping through the real http-kit (spec §5.2 Errors; 
         return handler(request);
       }),
     );
+    // why: every row runs on the adapter's real limits object (its host list, billing mode and fallback wait), with
+    // only the rate raised so the limiter's smoothing gap stays small; a test that passes `limits` brings its own.
     const h = makeHarness({
-      ...(o.limits === undefined ? {} : { limits: o.limits }),
-      overrides: { maxWaitSeconds: 5, requestTimeoutSeconds: 5, ...o.overrides },
+      limits: o.limits ?? {
+        ...travelpayoutsHttpLimits(TRAVELPAYOUTS_DEFAULTS, cfg),
+        ratePerMinute: 60_000,
+        ratePerHour: 3_600_000,
+        ...o.overrides,
+      },
       ...(o.refuse === undefined ? {} : { refuse: o.refuse }),
     });
     const d = discoveryOf(makeProvider(h));

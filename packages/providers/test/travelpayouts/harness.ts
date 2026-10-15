@@ -155,8 +155,7 @@ export function errorOf(r: DiscoveryTileResult): ProviderError {
 }
 
 /**
- * LHR → JFK, 10–20 March 2027, 10–12 nights: 11 × 3 = 33 cells in one departure month. The definition lists both
- * London airports; the tile still queries LHR alone (plan decision 34).
+ * LHR → JFK, 10–20 March 2027, 10–12 nights: 11 × 3 = 33 cells in one departure month.
  */
 export function query(over: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
   return {

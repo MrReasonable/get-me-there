@@ -37,6 +37,11 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
     expect(() => makeProvider(makeHarness(), { cacheTtlSeconds: ttl })).toThrow(/cacheTtlSeconds/);
   });
 
+  it('refuses a cacheTtlSeconds beyond the 48-hour freshness window, and accepts exactly 48 hours', () => {
+    expect(() => makeProvider(makeHarness(), { cacheTtlSeconds: 48 * 3600 + 1 })).toThrow(/freshness window/);
+    expect(() => makeProvider(makeHarness(), { cacheTtlSeconds: 48 * 3600 })).not.toThrow();
+  });
+
   it('refuses an empty token at construction (fails closed: no request is ever made with it)', () => {
     expect(() => makeProvider(makeHarness(), { token: new Secret('') })).toThrow(
       /TRAVELPAYOUTS_TOKEN is empty/,

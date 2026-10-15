@@ -15,15 +15,16 @@ export const PRICES_FOR_DATES_PATH = '/aviasales/v3/prices_for_dates';
 export const PAGE_LIMIT = 1000;
 
 /**
- * Fixed parameters (spec §5.2). `market` and `trip_class` are absent on purpose: the spike proved the vendor ignores
- * both (spec §2 fact 1).
+ * Fixed parameters (spec §5.2). `market` and `trip_class` are absent on purpose. `trip_class` is not a v3 parameter at
+ * all. The vendor's docs derive the market from the `origin` parameter, and the spike saw no effect from sending
+ * `market` (spec §2 fact 1); point of sale stays `unknown` either way.
  * why: `limit` is derived from PAGE_LIMIT, so the page size sent and the short-page stop rule cannot drift apart.
  */
 export const FIXED_PARAMS = { one_way: 'false', currency: 'gbp', limit: `${PAGE_LIMIT}` } as const;
 
 /**
  * Names that must never be sent. `token`: the credential travels in X-Access-Token only (spec §2 fact 8). `market`,
- * `trip_class`: ignored by the vendor (fact 1). `return_at`: month tiles send none (spec §5.2).
+ * `trip_class`: no observed effect (fact 1), and `trip_class` is not a v3 parameter. `return_at`: month tiles send none (spec §5.2).
  */
 export const FORBIDDEN_PARAM_NAMES = ['token', 'market', 'trip_class', 'return_at'] as const;
 

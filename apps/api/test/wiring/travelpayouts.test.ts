@@ -8,7 +8,6 @@ import {
   type Logger,
   parseConfig,
 } from '@gmt/core';
-import { AirportsRepo, applyMigrations, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
 import { type HttpKit, type HttpKitRequest, travelpayoutsHttpLimits } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
 import { httpLimitsFor, providersFor } from '../../src/wiring.js';
@@ -49,13 +48,6 @@ function spyKit(): { http: HttpKit; seen: HttpKitRequest[] } {
   return { http, seen };
 }
 
-/** A real AirportsRepo over an empty in-memory database: the wiring type without a cast (plan decision 15). */
-function emptyAirports(): AirportsRepo {
-  const db = openDatabase(':memory:');
-  applyMigrations(db, MIGRATIONS_DIR);
-  return new AirportsRepo(db);
-}
-
 describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => {
   it('httpLimitsFor registers travelpayoutsHttpLimits when TRAVELPAYOUTS_TOKEN is set: rate clamped to 600, never billable', () => {
     const c = config({ ...base, TRAVELPAYOUTS_TOKEN: TOKEN, TRAVELPAYOUTS_RATE_PER_MINUTE: '900' });
@@ -78,7 +70,7 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
 
   it('providersFor constructs the adapter only with a token, with the configured TTL and the header-only token', async () => {
     const { http, seen } = spyKit();
-    const deps = { http, log: silentLog, clock: fixedClock(NOW), airports: emptyAirports() };
+    const deps = { http, log: silentLog, clock: fixedClock(NOW) };
     expect(providersFor(config(base), deps).map((p) => p.id)).not.toContain('travelpayouts');
     const p = providersFor(
       config({ ...base, TRAVELPAYOUTS_TOKEN: TOKEN, TRAVELPAYOUTS_CACHE_TTL_HOURS: '3' }),

@@ -118,8 +118,8 @@ const localDateSchema = z
 /**
  * One row. The attribution fields are required and checked (an unreadable one makes the whole response `parse`,
  * because the row cannot be placed in or out of any cell); `price` and `link` are read leniently and
- * judged per row. Other fields (airline, flight_number, transfers, duration, and the undocumented `gate` selling
- * agency, `duration_to`, `duration_back`) are not used: unknown keys are allowed on a row (plan decision 33).
+ * judged per row. Other fields (airline, flight_number, transfers, duration, `duration_to`, `duration_back`, and the undocumented
+ * `gate` selling agency) are not used: unknown keys are allowed on a row (plan decision 33).
  */
 const rowSchema = z.object({
   origin_airport: iataSchema,
@@ -136,7 +136,7 @@ export const AVIASALES_BASE = 'https://www.aviasales.com';
 /**
  * Spec §5.2 vendor links: the relative Aviasales path prefixed with the site, then checked by core's
  * validateVendorUrl against LINK_ALLOWLIST.travelpayouts (WP2). Null when refused. This is the vendor's own search
- * link for the row (it may search the metro), never a fare link; the UI's search link is core's searchLinkFor.
+ * link for the row (its search may name another airport of the same city), never a fare link; the UI's search link is core's searchLinkFor.
  * why: only a site-relative path is accepted; an absolute or protocol-relative value is refused, never resolved.
  */
 export function vendorLinkFor(link: unknown): string | null {
@@ -209,7 +209,7 @@ function placeRow(row: Row, input: AttributionInput): { cell: CellKey } | { drop
 
 export interface AttributionInput {
   coveredCells: readonly CellKey[];
-  /** The pair's origin airport; rows from other airports of a metro response are dropped. */
+  /** The pair's origin airport; a row naming any other origin airport is dropped (and fails the tile in fetchTile). */
   origin: Iata;
   destination: Iata;
   minNights: number;

@@ -244,7 +244,18 @@ describe('response dates are local calendar dates (spec §6.1: never through UTC
     expect(attributeRows([r], input).prices.map((p) => p.departureDate)).toEqual(['2027-03-12']);
   });
 
-  it('accepts the undocumented gate, duration_to and duration_back keys on a row (plan decision 33)', () => {
+  it('accepts a Z return_at too, beside an offset departure (a real recording has it, decision 33)', () => {
+    const r = {
+      ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+      departure_at: '2027-03-12T16:25:00-05:00',
+      return_at: '2027-03-23T06:00:00Z',
+    };
+    expect(attributeRows([r], input).prices.map((p) => [p.departureDate, p.returnDate])).toEqual([
+      ['2027-03-12', '2027-03-23'],
+    ]);
+  });
+
+  it('accepts the gate key (undocumented by the vendor) and the documented duration_to and duration_back keys on a row (plan decision 33)', () => {
     const r = {
       ...row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
       gate: 'Synthetic Agency',

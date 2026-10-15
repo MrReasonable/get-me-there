@@ -21,7 +21,6 @@ import {
   systemClock,
 } from '@gmt/core';
 import {
-  type AirportsRepo,
   applyMigrations,
   budgetConfigFromConfig,
   createRepos,
@@ -172,7 +171,7 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
 /** Providers for this config. Same ownership rule as httpLimitsFor: WP5/WP6 each add one line. */
 export function providersFor(
   config: Config,
-  deps: { http: HttpKit; log: Logger; clock: Clock; airports: AirportsRepo },
+  deps: { http: HttpKit; log: Logger; clock: Clock },
 ): FlightProvider[] {
   const out: FlightProvider[] = [];
   const cost = fixtureCost(config);
@@ -237,7 +236,7 @@ export function buildPorts(
         ? { inProcessHosts: { 'fixture.local': (req: Request) => Promise.resolve(router.fetch(req)) } }
         : {}),
     });
-    const providers = providersFor(config, { http, log: opts.log, clock, airports: repos.airports });
+    const providers = providersFor(config, { http, log: opts.log, clock });
     return {
       config,
       db,

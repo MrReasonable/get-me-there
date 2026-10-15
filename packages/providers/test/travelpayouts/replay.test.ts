@@ -54,8 +54,8 @@ for (const x of ok) {
 }
 
 /**
- * The recorded row key set: the documented keys (Library notes) plus `gate` (the selling agency), `duration_to` and
- * `duration_back`, which the recordings show and the docs do not (plan decision 33). Nothing in Phase 1-3 reads gate
+ * The recorded row key set: the documented keys (Library notes) plus `gate` (the selling agency), which the recordings show and
+ * the docs do not, and `duration_to` / `duration_back`, which the docs list but the Library notes missed (decision 33). Nothing in Phase 1-3 reads gate
  * or the durations; calendar prices carry no seller, so suppliedFields stays ['price']. Any other key needs a human
  * decision.
  */

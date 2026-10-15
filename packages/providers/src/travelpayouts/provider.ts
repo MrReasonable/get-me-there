@@ -39,9 +39,11 @@ import { planMonthTiles, type TileParams, tileParams } from './tiles.js';
  * passenger count, so the note names none (ruling 4); WP13's smoke row compares a recorded price with the vendor's own
  * search page. "Economy" is the spec's treatment, not a vendor statement. The note avoids every §11 banned word (tested).
  */
+/** The vendor's declared freshness window in hours; also the longest response-cache TTL accepted. */
+const MAX_AGE_HOURS = 48;
 export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
   sourceKind: 'authorised-cached',
-  maxAgeHours: 48,
+  maxAgeHours: MAX_AGE_HOURS,
   provenanceNote:
     "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration). A row's own search link carries the day it was searched, which is used as its observation time; the 48 hours applies only to a row whose link has no search date. From the authorised Travelpayouts Data API; cabin not stated by the vendor, treated as economy; point of sale unknown; not a fare quote; constraints are not checked.",
 };
@@ -50,15 +52,15 @@ export const TRAVELPAYOUTS_INFO: CapabilityInfo = {
  * not a segment list, so only the price is supplied; Task 6.9 pins the recorded row keys so a new field fails a test.
  */
 export const TRAVELPAYOUTS_SUPPLIED_FIELDS: readonly SuppliedField[] = ['price'];
-/** Spec §2 fact 1 and §5.2: trip_class is ignored, so economy only; the engine never calls this provider for another cabin. */
+/** Spec §5.2: treated as economy only (the vendor states no cabin); the engine never calls this provider for another cabin. */
 export const TRAVELPAYOUTS_CABINS: readonly Cabin[] = ['economy'];
-/** Spec §2: market is ignored, so every tile's point of sale is unknown. */
+/** Spec §2: no market is sent and the vendor derives it from the origin, so every tile's point of sale is unknown. */
 export const TRAVELPAYOUTS_POINT_OF_SALE = 'unknown' as const;
 /**
  * Most pages read for one tile. why: a loop guard. 3 pages (3000 rows) is the cap WP4b's recorder uses (plan decision
  * 26), so every page the adapter can ask for is one a recording can hold, and it bounds the free calls a vendor that
- * ignores `page` could cost (each page is a ledger row). No worked-example month has been measured yet; Task 6.9 stops
- * if a recorded tile reached the cap. A tile that reaches it is marked `truncated` (its priced cells hold the cheapest
+ * ignores `page` could cost (each page is a ledger row). The recorded worked-example months hold at most 4 rows and one
+ * page each; the replay test fails if a recorded tile ever reaches the cap. A tile that reaches it is marked `truncated` (its priced cells hold the cheapest
  * of the rows read) and reports an `upstream` issue for each covered cell it did not price (spec §3: an unsearched
  * cell never reads as searched).
  */
@@ -97,6 +99,13 @@ const older = (a: IsoDateTime | undefined, b: IsoDateTime): IsoDateTime => (a ==
 export function travelpayoutsProvider(opts: TravelpayoutsProviderOptions): FlightProvider {
   if (!Number.isSafeInteger(opts.cacheTtlSeconds) || opts.cacheTtlSeconds < 0) {
     throw new Error('travelpayoutsProvider: cacheTtlSeconds must be a non-negative integer');
+  }
+  // why: a cached body older than the vendor's own freshness window would replay as current scan input.
+  const maxTtl = MAX_AGE_HOURS * 3600;
+  if (opts.cacheTtlSeconds > maxTtl) {
+    throw new Error(
+      `travelpayoutsProvider: cacheTtlSeconds must not exceed the ${maxTtl} s freshness window`,
+    );
   }
   // why: fail closed; an empty token could only produce 401s, each a ledger row and a disabled provider.
   if (opts.token.reveal().length === 0)

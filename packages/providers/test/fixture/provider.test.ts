@@ -346,7 +346,12 @@ describe('fixture discovery through the real http-kit and msw', () => {
       error: {
         kind: 'parse',
         reason: code === 'malformed-json' ? undefined : 'parse',
-        message: expect.stringContaining(`[${code}]`),
+        // the shared parseError shape is `<provider> <path>: <detail or cause> [<cause>]` (pinned, decision 29); the
+        // non-JSON error is http-kit's own message
+        message:
+          code === 'malformed-json'
+            ? expect.stringContaining(`[${code}]`)
+            : `fixture /calendar: ${code} [${code}]`,
       },
     });
   });

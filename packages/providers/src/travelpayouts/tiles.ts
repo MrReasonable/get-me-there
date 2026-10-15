@@ -1,5 +1,5 @@
 /**
- * Travelpayouts month tiling. Spec §5.2 (rev 14): the query stays per (origin, destination) pair; one `month` tile
+ * Travelpayouts month tiling. Spec §5.2 (rev 17): the query stays per (origin, destination) pair; one `month` tile
  * per departure month on /aviasales/v3/prices_for_dates; tiles partition the pair's cells; plan is pure and
  * deterministic. No airport is named here (spec §1).
  */
