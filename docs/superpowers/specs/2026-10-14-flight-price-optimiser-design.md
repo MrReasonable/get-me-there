@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 19.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 20.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -103,7 +103,7 @@ Google has no public API.
 |---|---|---|---|---|---|
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (declared, conservative assumption: a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
-| SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | 0 (interactive search at request time) |
+| SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
 on the understanding that its data is obtained in a way Google's terms
@@ -1618,6 +1618,10 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 20: provider table age cell (2026-10-15)
+
+§2: the SearchApi itinerary row's age cell reads `'unknown'`, matching rev 15.
 
 ### Revision 19: Travelpayouts row age (2026-10-15)
 
