@@ -53,7 +53,9 @@ function searchApiWindow(ports: Ports) {
 
 /**
  * SearchApi credits already ledgered to earlier `trigger: 'tool'` executions inside the provider's current budget
- * window (the lifetime window on the trial plan, the billing month on 40usd); plan decision 20.
+ * window (the lifetime window on the trial plan, the billing month on 40usd); plan decision 20. It scans every
+ * execution and asks the guard per tool run: acceptable for a rarely run tool. Follow-up for WP3's owner (arch M-8): a
+ * repository query for credits ledgered to `trigger = 'tool'` executions since an instant, which retires STATUS_FLAGS.
  */
 export function priorToolCredits(ports: Ports): number {
   if (ports.config.providers.searchapi === null) return 0;

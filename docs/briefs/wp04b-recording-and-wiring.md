@@ -1037,7 +1037,9 @@ export interface CellDates {
  * Vendor limits while recording, from the configured provider limits (no preset fallback: the tool's
  * precheck has refused a missing provider). why: httpLimitsFor gains these providers only when WP5/WP6
  * add their lines; WP4b records before either exists. Costs equal the guard's configured per-call rates,
- * which reserve requires (WP3 rule 'cost').
+ * which reserve requires (WP3 rule 'cost'). Follow-up (arch M-5): once WP5/WP6 land, the body becomes
+ * `{ travelpayouts: travelpayoutsHttpLimits(…), searchapi: searchApiHttpLimits(…) }`, so each vendor's hosts, billing
+ * mode and classifyError have one definition.
  */
 export function recordingLimits(
   tp: NonNullable<Config['providers']['travelpayouts']>,
@@ -1722,7 +1724,8 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
   const cost = fixtureCost(config);
   return {
     ...(cost === null ? {} : { fixture: fixtureHttpLimits({ costPerCallMicroGbp: cost, ...timing }) }),
-    // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects
+    // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects.
+    // Owner: WP7's fx/refresh.ts holds the fx client; this entry moves beside it as `fxHttpLimits` (arch M-7).
     fx: {
       hosts: ['api.frankfurter.dev'],
       ratePerMinute: 10,
@@ -3955,7 +3958,9 @@ function searchApiWindow(ports: Ports) {
 
 /**
  * SearchApi credits already ledgered to earlier `trigger: 'tool'` executions inside the provider's current budget
- * window (the lifetime window on the trial plan, the billing month on 40usd); plan decision 20.
+ * window (the lifetime window on the trial plan, the billing month on 40usd); plan decision 20. It scans every
+ * execution and asks the guard per tool run: acceptable for a rarely run tool. Follow-up for WP3's owner (arch M-8): a
+ * repository query for credits ledgered to `trigger = 'tool'` executions since an instant, which retires STATUS_FLAGS.
  */
 export function priorToolCredits(ports: Ports): number {
   if (ports.config.providers.searchapi === null) return 0;
@@ -4419,7 +4424,11 @@ function providerOf(call: PlannedCall): 'travelpayouts' | 'searchapi' {
   return call.spec.kind.startsWith('tp-') ? 'travelpayouts' : 'searchapi';
 }
 
-/** Whole pence of a vendor's GBP price, or null for anything not a finite number (hard rule 7). */
+/**
+ * Whole pence of a vendor's GBP price, or null for anything not a finite number (hard rule 7). Diagnostics only.
+ * Follow-up (arch M-4): when WP6 lands `majorToMinor` in `@gmt/providers` (plan decision 24), this becomes
+ * `majorToMinor(price, 'GBP')`, the single exact conversion.
+ */
 function toPence(price: number | undefined): number | null {
   return price !== undefined && Number.isFinite(price) ? Math.round(price * 100) : null;
 }

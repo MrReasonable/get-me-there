@@ -42,7 +42,9 @@ export interface CellDates {
  * Vendor limits while recording, from the configured provider limits (no preset fallback: the tool's
  * precheck has refused a missing provider). why: httpLimitsFor gains these providers only when WP5/WP6
  * add their lines; WP4b records before either exists. Costs equal the guard's configured per-call rates,
- * which reserve requires (WP3 rule 'cost').
+ * which reserve requires (WP3 rule 'cost'). Follow-up (arch M-5): once WP5/WP6 land, the body becomes
+ * `{ travelpayouts: travelpayoutsHttpLimits(…), searchapi: searchApiHttpLimits(…) }`, so each vendor's hosts, billing
+ * mode and classifyError have one definition.
  */
 export function recordingLimits(
   tp: NonNullable<Config['providers']['travelpayouts']>,

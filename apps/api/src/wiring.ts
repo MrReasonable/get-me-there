@@ -148,7 +148,8 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
   const cost = fixtureCost(config);
   return {
     ...(cost === null ? {} : { fixture: fixtureHttpLimits({ costPerCallMicroGbp: cost, ...timing }) }),
-    // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects
+    // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects.
+    // Owner: WP7's fx/refresh.ts holds the fx client; this entry moves beside it as `fxHttpLimits` (arch M-7).
     fx: {
       hosts: ['api.frankfurter.dev'],
       ratePerMinute: 10,

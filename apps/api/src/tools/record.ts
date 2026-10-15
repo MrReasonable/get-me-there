@@ -144,7 +144,11 @@ function providerOf(call: PlannedCall): 'travelpayouts' | 'searchapi' {
   return call.spec.kind.startsWith('tp-') ? 'travelpayouts' : 'searchapi';
 }
 
-/** Whole pence of a vendor's GBP price, or null for anything not a finite number (hard rule 7). */
+/**
+ * Whole pence of a vendor's GBP price, or null for anything not a finite number (hard rule 7). Diagnostics only.
+ * Follow-up (arch M-4): when WP6 lands `majorToMinor` in `@gmt/providers` (plan decision 24), this becomes
+ * `majorToMinor(price, 'GBP')`, the single exact conversion.
+ */
 function toPence(price: number | undefined): number | null {
   return price !== undefined && Number.isFinite(price) ? Math.round(price * 100) : null;
 }
