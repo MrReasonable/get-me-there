@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 16.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 17.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -101,7 +101,7 @@ Google has no public API.
 
 | Provider | Nature | Cost | Role | `sourceKind` | `maxAgeHours` |
 |---|---|---|---|---|---|
-| Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is an airport code, or the metro code when the definition's origins share one, rows split by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, last 48h; **no** `found_at` on rows; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
+| Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, last 48h; **no** `found_at` on rows; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (declared, conservative assumption: a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | 0 (interactive search at request time) |
 
@@ -142,10 +142,10 @@ package changes.
 - The engine's cells are `(origin, destination)` airport pairs from the
   definition. SearchApi is queried per airport pair (it rejects city
   codes). Travelpayouts is queried per (origin, destination, month) by
-  airport code, or once per (metro, destination, month) when several of
-  the definition's origins share a metro code in the airports table, with
-  rows attributed by their `origin_airport` field, which the spike proved
-  is always present; rows for airports outside the definition are
+  airport code, never by metro code (a metro query returns one cheapest
+  row per date pair across the whole metro, hiding the definition's own
+  airports' fares), with rows attributed by their `origin_airport` field,
+  which the spike proved is always present; rows for airports outside the definition are
   dropped. No airport, city or country is named in application code. `point_of_sale` is `'unknown'` for Travelpayouts because the
   `market` parameter is ignored, and `'GB'` for SearchApi, which echoes
   `gl=gb`.
@@ -166,9 +166,11 @@ calls and ~175 free Travelpayouts calls settled every open fact:
    `trip_class` ignored (economy only); no `found_at` on
    `prices_for_dates` rows; coverage on a thin long-haul route zero to two
    rows over eight months, on busy gateways four to six a month;
-   `grouped_prices` unusable with a nights band; cheapest tiling is one
-   `prices_for_dates` call per (destination, month) with the origins'
-   shared metro code (`LON` in the example).
+   `grouped_prices` unusable with a nights band; tiling is one
+   `prices_for_dates` call per (origin airport, destination, month). A
+   metro-code query (`LON`) returns one cheapest row per date pair across
+   the metro, so a cheaper non-definition airport hides the definition's
+   fare (recorded 2026-10-15); metro queries are not used.
 2. SearchApi calendar: 200-combination limit enforced as HTTP 400; per
    airport only; every probed route fully priced, thin ones included; 9–29 s
    latency; ~23 rectangles per pair for the default band (8 outbound days ×
@@ -338,7 +340,6 @@ export interface DiscoveryQuery {
   departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number;
   cabin: Cabin; currency: 'GBP';
   cells?: CellKey[];     // when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it
-  definitionOrigins?: Iata[];   // the definition's origins, so an adapter can apply the §5.2 metro rule (two or more share a metro)
 }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
@@ -409,14 +410,11 @@ export class AbortedError extends Error {}
   and parity counts tiles. **Travelpayouts** (measured): `month` tiles on
   `/aviasales/v3/prices_for_dates` with `departure_at=YYYY-MM`,
   `one_way=false`, `currency=gbp`, `limit=1000`, no `return_at`; the query
-  stays per (origin, destination) pair and `origin` is the pair's origin
-  airport's metropolitan code when two or more of the definition's origins
-  map to that metro (§2), else the airport code; rows are attributed by
-  `origin_airport` and filtered to the pair and the nights band. Logical tiles per scan: `O × D × M`; identical
-  metro requests from sibling pairs are answered by the response cache
-  inside its TTL, so upstream calls are `D × M` with a shared metro (the
-  worked example: 2 origins sharing LON × 2 destinations × 7 months = 28
-  tiles, 14 upstream calls, 14 cache hits). **SearchApi** (measured):
+  stays per (origin, destination) pair and `origin` is always the airport
+  code (never a metro code, §2); rows are attributed by `origin_airport`
+  and filtered to the pair and the nights band. Logical tiles per scan:
+  `O × D × M`, each an upstream call (the worked example: 2 origins × 2
+  destinations × 7 months = 28 tiles, 28 free calls). **SearchApi** (measured):
   `rectangle` tiles of the largest outbound block b with
   b × (b + maxNights − minNights) ≤ 200 (9 days × a 20-day return span for
   the 10–21-night band: 180 combinations), asserted ≤200 before reserve;
@@ -1173,7 +1171,7 @@ under the §5.2 tilings measured by the spike:
 
 | Config | Per run | Per month (weekly) | Fits |
 |---|---|---|---|
-| £0 Travelpayouts, `month` tiles | `O × D × M` free calls, or `D × M` with a shared metro (worked example 14) | ~60 | yes, cap 50,000; usefulness is whatever the coverage check reports for the pairs |
+| £0 Travelpayouts, `month` tiles | `O × D × M` free calls (worked example 28) | ~60 | yes, cap 50,000; usefulness is whatever the coverage check reports for the pairs |
 | SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | ~615 of 10,000 | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,090/run) or daily runs (~4,300/month) |
 | SearchApi trial | one discovery exceeds 100 | — | spike and smoke only; scheduled runs exclude SearchApi on `trial` |
 
@@ -1617,6 +1615,14 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 17: no metro queries (2026-10-15)
+
+§2, §5.1, §5.2, §8.2: the live recordings showed that a Travelpayouts metro
+query returns one cheapest row per date pair across the whole metro, hiding
+the definition's own airports' fares; Travelpayouts is queried per airport
+pair only, `DiscoveryQuery.definitionOrigins` is withdrawn, and the worked
+example is 28 upstream free calls per scan.
 
 ### Revision 16: provider-port fields (2026-10-15)
 
