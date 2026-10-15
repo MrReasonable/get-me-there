@@ -5,14 +5,14 @@ owner: sonnet
 depends_on: [1, 2, 4, 4b]
 spec_sections: ["§2", "§3", "§5.1", "§5.2", "§5.3", "§6.9", "§8.1", "§9 item 2"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP6: Travelpayouts adapter
 
-Reconciled with spec revision 15 and the plan's "Global Constraints", "Cross-package contracts" and "Decisions taken at reconciliation" 1–29 (2026-10-15), and with the code merged on `main` at `a001e0d`. Every code block in this brief was assembled on a scratch worktree of that commit and run green (§10 lists the result).
+Reconciled with spec revision 15 and the plan's "Global Constraints", "Cross-package contracts" and "Decisions taken at reconciliation" 1–31 (2026-10-15), and with the code merged on `main` at `c4fd052`. Every code block in this brief was assembled on a scratch worktree of that commit and run green (§10 lists the result).
 
-Decisions that shape this brief: 6 (allowlist constant equals the recorded file), 8 (single-file test runs), 14 (allowlist in WP4, cache key without execution or tile ids), 15 (`classifyError` over `ResponseFacts`, cache `accept` hook, `syntheticAllowed`, `rateLimitFallbackWaitSeconds`, the `as*` helpers as the only brand mint sites), 17 (replay filters by recording session), 18 and 20 (one guarded msw server per package, synthetic labelled 429s), 19 (the closed priced-reason set: `offers-dropped:n`), 24 (shared adapter helpers, the dropped-row rule, the tile as the ledger unit, stateless healthchecks, the rev 14 metro rule), 26 (the recorder pages at most 3 per tile, which `MAX_PAGES` matches), 27 (WP6 merges before WP5, which consumes `src/shared/`), 28 (records this brief's core and http-kit additions and its parse rules), 29 (a currency core does not know is `currency-unsupported` per cell, never a tile-level error; `parseError(cause, detail, where)` with `where` always given; the shared `NoteCounter` with `add`/`get`/`list` is the only note helper). Decisions 16, 21, 22, 23 and 25 do not touch WP6 beyond what the merged code already carries. Spec rev 15 changes SearchApi only. `RawOffer.verified` (decisions 27, 29) is WP5's addition, not this brief's.
+Decisions that shape this brief: 6 (allowlist constant equals the recorded file), 8 (single-file test runs), 14 (allowlist in WP4, cache key without execution or tile ids), 15 (`classifyError` over `ResponseFacts`, cache `accept` hook, `syntheticAllowed`, `rateLimitFallbackWaitSeconds`, the `as*` helpers as the only brand mint sites), 17 (replay filters by recording session), 18 and 20 (one guarded msw server per package, synthetic labelled 429s), 19 (the closed priced-reason set: `offers-dropped:n`), 24 (shared adapter helpers, the dropped-row rule, the tile as the ledger unit, stateless healthchecks, the rev 14 metro rule), 26 (the recorder pages at most 3 per tile, which `MAX_PAGES` matches), 27 (WP6 merges before WP5, which consumes `src/shared/`), 28 (records this brief's core and http-kit additions and its parse rules), 29 (a currency core does not know is `currency-unsupported` per cell, never a tile-level error; `parseError(cause, detail, where)` with `where` always given; the shared `NoteCounter` with `add`/`get`/`list` is the only note helper), 30 (`truncated?`, required `where`, the fixture provider on the shared helpers with `dropped-outside-tile`, the contract-only barrel, the WP7 label for truncated tiles and the spec §5.1 fold), 31 (WP4b records TP-21, a JFK → LON month tile, for Task 6.9's month-boundary assertion; adapter coverage floors live in the providers vitest config). Decisions 16, 21, 22, 23 and 25 do not touch WP6 beyond what the merged code already carries. Spec rev 15 changes SearchApi only. `RawOffer.verified` (decisions 27, 29) is WP5's addition, not this brief's.
 
 ## 1. Goal
 
@@ -21,7 +21,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
 - There is one month tile per (origin, destination) pair and departure month.
 - The request uses the metro code only when two or more of the definition's origins map to that metro; a lone airport is queried by its own code (spec §2, §5.2 rev 14).
 - Sibling pairs that share a metro are deduplicated by the response cache, and the ledger counts one row per tile.
-- The adapter reports every covered cell it received a row for but could not price, and every cell it did not finish reading, through `cellIssues`; a capped tile is marked `truncated`. That a reported cell never reaches the operator as `no_data` depends on WP7 applying `cellIssues` before its `no_data` fallback (decision 28; the WP7 rule is in §13).
+- The adapter reports every covered cell it received a row for but could not price, and every cell it did not finish reading, through `cellIssues`; a capped tile is marked `truncated`. That a reported cell never reaches the operator as `no_data` depends on WP7 applying `cellIssues` before its `no_data` fallback (decisions 28 and 30 record the rule for WP7).
 - Nothing is defaulted and nothing is invented.
 
 ## 2. Scope
@@ -43,7 +43,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - `TRAVELPAYOUTS_PARAMS` (a code constant asserted equal to the recorded allowlist file);
   - `travelpayoutsHttpLimits` (vendor ceiling 600/min, no `classifyError`, so WP4's default table applies);
   - identity fields and a stateless healthcheck that sends no request.
-- Three type-only contract additions in `packages/core/src/ports/provider.ts` (Task 6.2): `DiscoveryQuery.definitionOrigins?`, `CellIssue` / `DiscoveryTileResult.cellIssues?`, and `DiscoveryTileResult.truncated?`. Decision 28 records the first two; §13 lists `truncated` and the spec §5.1 fold.
+- Three type-only contract additions in `packages/core/src/ports/provider.ts` (Task 6.2): `DiscoveryQuery.definitionOrigins?`, `CellIssue` / `DiscoveryTileResult.cellIssues?`, and `DiscoveryTileResult.truncated?`. Decisions 28 and 30 record all three and the spec §5.1 fold.
 - One optional field in http-kit (Task 6.5): `HttpKitRequest.ledgerCacheHit?`, so a cached multi-page tile is one cache-hit row.
 - One entry each in `apps/api/src/wiring.ts` `httpLimitsFor` and `providersFor` (plan, "Wiring and bootstraps").
 - Tests:
@@ -51,7 +51,7 @@ Build `travelpayoutsProvider(...)`, a discovery-only `FlightProvider` that turns
   - replay of WP4b's recorded fixtures through `replayHandlers` with the recording session;
   - synthetic-shape tests, labelled, for cases that were not recorded;
   - a wiring test in `apps/api/test/wiring/`.
-- Barrel exports from `packages/providers/src/index.ts`: only the plan contract's `travelpayoutsProvider`, `travelpayoutsHttpLimits` and `TRAVELPAYOUTS_PARAMS`, each with its consumer named. Everything else, the shared helpers included, stays package-internal (WP5 imports `../shared/*.js`).
+- Barrel exports from `packages/providers/src/index.ts`: only the plan contract's `travelpayoutsProvider`, `travelpayoutsHttpLimits` and `TRAVELPAYOUTS_PARAMS`, each with its consumer named. Everything else, the shared helpers included, stays package-internal (WP5 imports `../shared/*.js`). The public surface is asserted only in `test/barrel.test.ts`.
 - Per-directory coverage floors for `src/travelpayouts/**` and `src/shared/**` in `packages/providers/vitest.config.ts` (Task 6.7).
 
 **Runs before WP4b merges.** Tasks 6.1–6.7 need nothing from WP4b and are implemented and committed first. Tasks 6.8 (the allowlist file), 6.9 (the recordings) and 6.10 (`apps/api/src/wiring.ts`) are blocked until WP4b is on `main`: stop after Task 6.7 if it is not, and never write recordings, an allowlist file or a wiring module by hand.
@@ -312,7 +312,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
 
 **Semantics WP7 relies on.**
 
-- A covered cell with no price and no `cellIssues` entry in a `tile` result is `no_data`: the vendor returned no row for it on this query. (Whether a month query returns every cached return date for a departure day or collapses some is not documented; Task 6.9 stops if the recordings show only one return date per departure day.)
+- A covered cell with no price and no `cellIssues` entry in a `tile` result is `no_data`: the vendor returned no row for it on this query. That holds on a month's first and last day only because Task 6.9's TP-21 assertion shows the vendor buckets `departure_at` by local date (§6 Times). (Whether a month query returns every cached return date for a departure day or collapses some is not documented; Task 6.9 stops if the recordings show only one return date per departure day.)
 - A `cellIssues` entry is applied per cell: `priced` with `offers-dropped:<offersDropped>` when the tile also returned a price for that cell, else `error` with `reason` (`parse` for unusable rows, `currency-unsupported` for rows in a currency core does not know, `upstream` for cells left unread by the page cap) and `detail` in `last_error`. Never `no_data`.
 - `truncated: true` means the tile stopped at `MAX_PAGES`: each priced cell carries the cheapest of the rows read, not necessarily the cache's minimum, and WP7 labels it so. It does not depend on the vendor's sort order.
 - `noFares` is always `[]`, because a cache never proves that no fares exist.
@@ -333,11 +333,11 @@ Verified on 2026-10-15.
   - **Token:** "in the X-Access-Token header or in the token parameter". The adapter uses the header only.
   - **Envelope:** `{ "currency": "rub", "data": [...], "success": true }`.
   - **Row fields:** `airline`, `departure_at` (local with offset, `2021-09-14T08:55:00+03:00`), `destination`, `destination_airport`, `duration`, `flight_number`, `link` (relative path), `origin`, `origin_airport`, `price` (integer, major unit, in the sample), `return_at`, `return_transfers`, `transfers`. Task 6.9 pins the recorded key set to this list.
-  - **Freshness:** prices_for_dates holds prices "found by users in last 48h" (`docs/providers.md`, help article 203956163). That is the vendor's declared horizon; rows carry no timestamp (spike fact 1), so the provenance note says "declared by vendor" and `maxAgeHours: 48` is never shown as a measured age. The same article lists `found_at`, `expires_at` and `actual`; the spike found no `found_at`, and Task 6.9's key pin fails if any of the three appears, so a human decides (the adapter already reads `found_at` into `providerObservedAt` when present).
+  - **Freshness:** prices_for_dates holds prices "found by users in last 48h" (`docs/providers.md`, help article 203956163). That is the vendor's declared horizon; rows carry no timestamp (spike fact 1), so the provenance note attributes the description to the vendor ("vendor's declaration; rows carry no timestamp") and `maxAgeHours: 48` is never shown as a measured age. The same article lists `found_at`, `expires_at` and `actual`; the spike found no `found_at`, and Task 6.9's key pin fails if any of the three appears, so a human decides (the adapter already reads `found_at` into `providerObservedAt` when present).
   - **Round trip and passengers:** the vendor describes `one_way=false` results as round-trip ("back-to-back") prices; that description, like the 48 hours, is attributed to the vendor in the provenance note. The vendor states no passenger count, so the note names none (plan ruling: stated only if the docs state it); WP13's live smoke compares one recorded row with the vendor's own search page (decision 27).
   - **Page cap and sort order:** no worked-example month has been measured (the spike's four to six rows a month were on routes to a thin long-haul destination); `MAX_PAGES` is the recorder's cap (decision 26), and Task 6.9 stops if a recorded tile reached it. The default `sorting` of prices_for_dates is undocumented and the allowlist sends none, so a capped tile is marked `truncated` instead of trusting that unread pages hold dearer rows.
   - **Rate limit:** 600 per minute for `/v3/prices_for_dates` (`docs/providers.md`, help article 4402565416594). No 429 was recorded; `Retry-After` is unverified and every 429 test is labelled synthetic (plan decision 20).
-  - **Times:** the sample row is local time with an explicit offset. One general vendor note says times are UTC, so the adapter accepts a bare date or a time with an explicit `±HH:MM` offset and refuses `Z` or offset-less times as `malformed-row`; Task 6.9 asserts on WP4b's recordings that every `departure_at`/`return_at` carries an offset and that some row's two offsets differ (a transatlantic round trip in local time). The local-date reading rests on that assertion, not on the docs. One month-boundary case is unknown: if the vendor buckets `departure_at=YYYY-MM` by UTC date, a London departure just after local midnight on the 1st (00:30 BST is 23:30 UTC on the last day of the previous month) comes back in the previous month's tile, is dropped there as `dropped-outside-tile`, and its own cell reads `no_data`. Task 6.9's report counts such rows.
+  - **Times:** the sample row is local time with an explicit offset. One general vendor note says times are UTC, so the adapter accepts a bare date or a time with an explicit `±HH:MM` offset and refuses `Z` or offset-less times as `malformed-row`; Task 6.9 asserts on WP4b's recordings that every `departure_at`/`return_at` carries an offset and that some row's two offsets differ (a transatlantic round trip in local time). The local-date reading rests on that assertion, not on the docs. One month-boundary case is not documented: if the vendor buckets `departure_at=YYYY-MM` by UTC date, then for any origin far from UTC a departure on a month's first or last day can land in the neighbouring month's tile (a 20:00 EST departure on the 31st is 01:00 UTC on the 1st; an early-morning departure east of UTC on the 1st is the previous day in UTC). Such a row is dropped there as `dropped-outside-tile` and its own cell reads `no_data`. The adapter is route-agnostic, so this is settled with a westward origin: WP4b records TP-21, a JFK → LON month tile (decision 31), and Task 6.9 asserts that every row's local departure month equals the tile month, stopping if not.
   - **Not verifiable from the docs:** the passenger count a price is for; the default sort order; whether a month query without `return_at` returns every cached return date per departure day; `return_at` on rows (the sample is one-way); error bodies (null in the collection; the 401 plain-text body is spike fact 5, and the `success:false` + `error` string shape is an assumption whose other shapes fall to `malformed-envelope`); the public host (the collection's base URL is internal). Task 6.9 asserts `return_at` and the host on the recordings.
 - **zod 4.6.7** (a dependency of `@gmt/providers` since WP4; the package's recorder, allowlist and fixture loaders already parse untrusted JSON with it through `util.ts`). Used: `z.object`, `z.discriminatedUnion('success', […])`, `z.literal`, `z.array`, `z.string().regex`, `z.unknown()`, `.optional()`, `.nullish()`, `.transform(...)`, `.pipe(isoDateSchema)`, `safeParse`, `z.infer`, `z.output`, `z.ZodType`. Core's `iataSchema` and `isoDateSchema` mint the brands, so no value is cast.
 - **msw 3.0.3.** Handlers only: `http.get(url, resolver)` and `HttpResponse` from `msw/http`, `HttpResponse.json(body, init?)`, `new HttpResponse(text, { status, headers })`, `HttpResponse.error()`. No test creates a server: every handler goes on the package's guarded server (`test/support/msw.ts` re-exports `guardedServer`) with `server.use`, and `test/support/setup.ts` owns `listen`, `resetHandlers` and `close` and fails any test that left a stray request (plan decisions 18 and 20).
@@ -546,9 +546,9 @@ const PLAIN_DECIMAL = /^(\d+)(?:\.(\d+))?$/;
 /**
  * A vendor's major-unit amount (`412.5` GBP) as integer minor units (`41250`) with core's ISO 4217 exponent.
  * Returns null when the amount is not a finite positive number, carries more decimals than the currency has
- * (`412.555` GBP), is beyond `Number.MAX_SAFE_INTEGER` minor units, or the currency has no known exponent (callers
- * resolve the currency first: an unknown currency is a response-level parse error, not a row drop). Never rounds.
- * Callers drop a null row and count it `offers-dropped:n` (spec §8.1).
+ * (`412.555` GBP), is beyond `Number.MAX_SAFE_INTEGER` minor units, or the currency has no known exponent (an
+ * unknown currency returns null; callers drop the row and report the cell as `currency-unsupported`, plan decision
+ * 29). Never rounds. Callers drop every null row and count it `offers-dropped:n` (spec §8.1).
  * why: exact decimal-string arithmetic. `String(n)` is the shortest decimal that reads back as the same double, which
  * for any amount a vendor writes in JSON is the literal it wrote; multiplying by 100 instead gives 0.29 × 100 =
  * 28.999…, and Math.round would hide a third decimal the vendor really sent.
@@ -658,20 +658,23 @@ export class NoteCounter {
 In `packages/providers/src/fixture/provider.ts`, add to the imports:
 
 ```ts
-import { parseError as sharedParseError } from '../shared/errors.js';
+import { type ParseWhere, parseError } from '../shared/errors.js';
 import { NoteCounter } from '../shared/notes.js';
 ```
 
-replace the private `parseError` (its doc comment says `reason` stays unset, which decision 24 reverses) with:
+delete the private `parseError(endpointPath, code)` (its doc comment says `reason` stays unset, which decision 24 reverses; decision 30 removes the second, differently ordered `parseError` from the package) and put in its place:
 
 ```ts
-/**
- * Parse failure through the shared builder (plan decisions 24 and 29): `reason` is the kind-level 'parse' and the
- * message is `fixture <path>: <code> [<code>]`.
- */
-function parseError(endpointPath: string, code: string): ProviderError {
-  return sharedParseError(code, null, { providerId: 'fixture', endpointPath });
-}
+/** Where a fixture response came from, for the shared parse error (plan decisions 29 and 30). */
+const where = (endpointPath: string): ParseWhere => ({ providerId: 'fixture', endpointPath });
+```
+
+then rewrite its 19 call sites from `parseError(<path>, <code>)` to the shared argument order `parseError(<code>, null, where(<path>))`, and let Biome re-wrap the lines:
+
+```bash
+perl -pi -e "s/parseError\((endpointPath|'\/calendar'|'\/itinerary'), ('[^']+'|\`[^\`]+\`)\)/parseError(\2, null, where(\1))/g" packages/providers/src/fixture/provider.ts
+grep -c "null, where(" packages/providers/src/fixture/provider.ts   # 19
+pnpm exec biome check --write packages/providers/src/fixture/provider.ts
 ```
 
 insert after `if (fetchedAt === undefined) throw new Error('fetchTile: no page fetched');` in `fetchTile`:
@@ -1897,7 +1900,10 @@ export interface AttributionInput {
 
 export interface Attribution {
   prices: RawCalendarPrice[];
-  /** One entry per covered cell that had rows dropped (spec §8.1): reason 'parse', the count, a URL-free detail. */
+  /**
+   * One entry per covered cell that had rows dropped (spec §8.1): reason 'parse' (unusable price) or
+   * 'currency-unsupported' (a currency core does not know), the count, a URL-free detail.
+   */
   cellIssues: CellIssue[];
   /** Tile-level counts: `dropped-*`, `offers-dropped`, `link-rejected` (spec §5.2: every drop is counted). */
   notes: NoteCounter;
@@ -1919,6 +1925,7 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
   const dropped = new Map<string, { cell: CellKey; n: number }>();
   for (const [i, raw] of rows.entries()) {
     const r = rowSchema.safeParse(raw);
+    // why: not parseVendor, because the detail names the row's index so the operator can find it in the response.
     if (!r.success) throw parseError('malformed-row', `row ${i}: ${zodReason(r.error)}`, WHERE);
     const row = r.data;
     const placed = placeRow(row, input);
@@ -2421,29 +2428,47 @@ describe('fetchTile pagination (spec §5.2: one tile, every page ledgered under 
   });
 
   it('BudgetExceeded on page 2 propagates; page 1 prices are never returned as a partial tile (ts2-004)', async () => {
+    let hits = 0;
     server.use(
-      http.get(TP, ({ request }) =>
-        HttpResponse.json(envelope(pageOf(request) === '1' ? rowsFor(1000) : rowsFor(3))),
-      ),
+      http.get(TP, ({ request }) => {
+        hits += 1;
+        return HttpResponse.json(envelope(pageOf(request) === '1' ? rowsFor(1000) : rowsFor(3)));
+      }),
     );
     const h = makeHarness({ refuse: 2 });
     const d = discoveryOf(makeProvider(h));
     const q = query();
     await expect(d.fetchTile(only(d.plan(q)), q, ctx())).rejects.toBeInstanceOf(BudgetExceeded);
+    // the budget is the hard stop: one reservation, and exactly one HTTP request reached the vendor (ts3-002)
     expect(eventsOf(h, 'reserve')).toHaveLength(1);
+    expect(hits).toBe(1);
   });
 
-  it('an abort after page 1 raises AbortedError; page 1 prices are never returned (ts2-004)', async () => {
+  it('an abort between page 1 and page 2 raises AbortedError, sends no page 2 and returns no page-1 prices (ts3-001)', async () => {
     const ac = new AbortController();
+    let hits = 0;
     server.use(
       http.get(TP, () => {
-        ac.abort();
+        hits += 1;
         return HttpResponse.json(envelope(rowsFor(1000)));
       }),
     );
-    const d = discoveryOf(makeProvider(makeHarness()));
+    const h = makeHarness();
+    // why: the abort lands after page 1 has fully arrived and before page 2 is asked for, not while a fetch is in flight
+    const kit = h.http;
+    h.http = {
+      request: async (r) => {
+        const res = await kit.request(r);
+        ac.abort();
+        return res;
+      },
+      stats: () => kit.stats(),
+    };
+    const d = discoveryOf(makeProvider(h));
     const q = query();
     await expect(d.fetchTile(only(d.plan(q)), q, ctx(ac.signal))).rejects.toBeInstanceOf(AbortedError);
+    expect(hits).toBe(1);
+    expect(eventsOf(h, 'reserve')).toHaveLength(1);
   });
 
   it('a vendor that ignores `page` (the same full page again) is a parse error, not a silent loop', async () => {
@@ -2802,14 +2827,14 @@ describe('estimate parity and cache dedup across sibling pairs (spec §5.2, §8.
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/http/ledgerCacheHit.test.ts test/travelpayouts/fetchTile.test.ts`
-Expected: FAIL, `Tests  18 failed | 6 passed (24)`. The first failures:
+Expected: FAIL, `Tests  19 failed | 5 passed (24)`. The first failures:
 
 - `false: a cache hit returns the cached body and writes no cache-hit row`: `AssertionError: expected 1 to be +0`;
 - `fetches page 2 after a full page of 1000 …`: `expected [ '1' ] to deeply equal [ '1', '2' ]`;
 - `stops at MAX_PAGES (undefined) …`: `MAX_PAGES` is not exported yet;
 - `passes a non-GBP currency through unconverted …`: `expected [] to deeply equal [ [ 50000, 'USD' ] ]`.
 
-These six pass already, because each makes one request per tile and the first cut parses the envelope: `absent: the cache hit is ledgered as before`, `rows under an envelope without currency are a parse error`, the abort-after-page-1 case, the 28/14/14 worked example, the 14/7/7 concurrent case and the lone-London-origin case.
+These five pass already, because each makes one request per tile and the first cut parses the envelope: `absent: the cache hit is ledgered as before`, `rows under an envelope without currency are a parse error`, the 28/14/14 worked example, the 14/7/7 concurrent case and the lone-London-origin case.
 
 - [ ] **Step 3: Implement**
 
@@ -3493,7 +3518,6 @@ git add packages/providers && git commit -m "wp06: travelpayouts error mapping t
 ```ts
 import { findBannedWords, Secret } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import * as barrel from '../../src/index.js';
 import { TRAVELPAYOUTS_INFO, TRAVELPAYOUTS_POINT_OF_SALE } from '../../src/travelpayouts/provider.js';
 import { ctx, discoveryOf, makeHarness, makeProvider, TOKEN } from './harness.js';
 
@@ -3518,7 +3542,7 @@ describe('travelpayoutsProvider identity (spec §2, §5.1, §5.2)', () => {
       "Travelpayouts describes these as cached round-trip prices that Aviasales users found within the last 48 hours (vendor's declaration; rows carry no timestamp)",
     );
     // ruling 4: the vendor states no passenger count, so the note states none
-    expect(TRAVELPAYOUTS_INFO.provenanceNote).not.toMatch(/adult|passenger/);
+    expect(TRAVELPAYOUTS_INFO.provenanceNote).not.toMatch(/adults?|passengers?/i);
     expect(findBannedWords(TRAVELPAYOUTS_INFO.provenanceNote)).toEqual([]);
   });
 
@@ -3552,23 +3576,6 @@ describe('healthcheck (stateless, plan decision 24)', () => {
     expect(second).toEqual(first);
     expect(h.events).toEqual([]);
     expect(JSON.stringify(first)).not.toContain(TOKEN.reveal());
-  });
-});
-
-describe('@gmt/providers barrel (arch-008: the plan contract plus named-consumer extras only)', () => {
-  it('exports the adapter and its limits for apps/api wiring, and keeps the shared helpers and constants internal', () => {
-    expect(typeof barrel.travelpayoutsProvider).toBe('function');
-    expect(typeof barrel.travelpayoutsHttpLimits).toBe('function');
-    for (const name of [
-      'majorToMinor',
-      'parseError',
-      'parseVendor',
-      'NoteCounter',
-      'TRAVELPAYOUTS_INFO',
-      'TRAVELPAYOUTS_HOST',
-      'PRICES_FOR_DATES_PATH',
-    ])
-      expect(name in barrel, name).toBe(false);
   });
 });
 ```
@@ -3685,7 +3692,14 @@ describe('requests on the wire', () => {
 });
 ```
 
-In `packages/providers/test/barrel.test.ts`, extend the main barrel's "not exported" list after `'classifyResponse',` with:
+The package's public surface is asserted in one place, `packages/providers/test/barrel.test.ts` (decision 30). Extend its main barrel's exported list after `'ParamsNotAllowedError',` with:
+
+```ts
+      'travelpayoutsProvider', // WP6: apps/api providersFor
+      'travelpayoutsHttpLimits', // WP6: apps/api httpLimitsFor
+```
+
+and its "not exported" list after `'classifyResponse',` with:
 
 ```ts
       // WP6: the shared adapter helpers stay package-internal (WP5 imports them from ../shared/*.js)
@@ -3693,12 +3707,16 @@ In `packages/providers/test/barrel.test.ts`, extend the main barrel's "not expor
       'parseError',
       'parseVendor',
       'NoteCounter',
+      // WP6: adapter constants stay internal too
+      'TRAVELPAYOUTS_INFO',
+      'TRAVELPAYOUTS_HOST',
+      'PRICES_FOR_DATES_PATH',
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/provider.test.ts test/travelpayouts/wire.test.ts test/barrel.test.ts`
-Expected: FAIL, `Tests  7 failed | 16 passed (23)`: the three `refuses cacheTtlSeconds` cases and the empty-token case (`expected [Function] to throw an error`), the cache-off warning (`expected false to be true`), the healthcheck (`expected { Object (ok, detail) } to deeply equal { ok: true, …(1) }`) and the barrel (`expected 'undefined' to be 'function'`). `wire.test.ts` and `barrel.test.ts` pass already: the allowlist check and the header-only token have been in `fetchTile` since Task 6.2, and nothing is exported yet; they pin both.
+Expected: FAIL, `Tests  7 failed | 15 passed (22)`: the three `refuses cacheTtlSeconds` cases and the empty-token case (`expected [Function] to throw an error`), the cache-off warning (`expected false to be true`), the healthcheck (`expected { Object (ok, detail) } to deeply equal { ok: true, …(1) }`) and the main-barrel test (`travelpayoutsProvider: expected 'undefined' to be 'function'`). `wire.test.ts` passes already: the allowlist check and the header-only token have been in `fetchTile` since Task 6.2; it pins them.
 
 - [ ] **Step 3: Implement**
 
@@ -3760,7 +3778,7 @@ In `packages/providers/vitest.config.ts`, replace the `thresholds` line with:
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts test/barrel.test.ts`
-Expected: PASS, `Test Files  8 passed (8)`, `Tests  133 passed (133)`. Then `pnpm --filter @gmt/providers test` passes with both directory floors met.
+Expected: PASS, `Test Files  8 passed (8)`, `Tests  132 passed (132)`. Then `pnpm --filter @gmt/providers test` passes with both directory floors met.
 
 - [ ] **Step 5: Commit**
 
@@ -3770,7 +3788,7 @@ git add packages/providers && git commit -m "wp06: travelpayouts identity, state
 
 ### Task 6.8: `TRAVELPAYOUTS_PARAMS` equal to the recorded allowlist (needs WP4b)
 
-**Files:** append to `src/travelpayouts/params.ts`; modify `src/index.ts`; create `test/travelpayouts/recorded.ts` and `test/travelpayouts/params.test.ts`.
+**Files:** append to `src/travelpayouts/params.ts`; modify `src/index.ts` and `test/barrel.test.ts`; create `test/travelpayouts/recorded.ts` and `test/travelpayouts/params.test.ts`.
 
 **Interfaces:** consumes `loadRecorded`, `RecordedFixture`, `defaultRecordedRoot`, `loadParamsAllowlist`, `assertRequestAllowed`, `asIsoDate`. Produces `TRAVELPAYOUTS_PARAMS` and the test helpers `RECORDED_ROOT`, `paramsFilePath`, `latestSession`.
 
@@ -3828,7 +3846,6 @@ export function latestSession(): {
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import * as barrel from '../../src/index.js';
 import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allowlist.js';
 import {
   FIXED_PARAMS,
@@ -3868,17 +3885,20 @@ describe('TRAVELPAYOUTS_PARAMS (plan decision 6: a code constant equal to the re
       }
     }
   });
-
-  it('is exported from the @gmt/providers barrel for apps/api wiring', () => {
-    expect(barrel.TRAVELPAYOUTS_PARAMS).toBe(TRAVELPAYOUTS_PARAMS);
-  });
 });
+```
+
+In `packages/providers/test/barrel.test.ts`, add after `expect(main.CREDENTIAL_HEADERS).toBeInstanceOf(Set);`:
+
+```ts
+    // WP6: the recorded-allowlist constant, for apps/api providersFor
+    expect(main.TRAVELPAYOUTS_PARAMS).toMatchObject({ provider: 'travelpayouts' });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/params.test.ts`
-Expected: FAIL, `Tests  3 failed | 1 passed (4)`: `expected undefined to deeply equal { provider: 'travelpayouts', …(3) }`, then `TypeError: Cannot read properties of undefined (reading 'endpoints')` twice. (The barrel test passes vacuously until Step 3, as `undefined` is `undefined`.) If the error is instead `no params-<date>.json under …`, WP4b has not merged: stop and report, and do not create the file.
+Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/params.test.ts test/barrel.test.ts`
+Expected: FAIL, `Tests  4 failed | 2 passed (6)`: `expected undefined to deeply equal { provider: 'travelpayouts', …(3) }`, then `TypeError: Cannot read properties of undefined (reading 'endpoints')` twice, and in `barrel.test.ts` `expected undefined to match object { provider: 'travelpayouts' }`. If the error is instead `no params-<date>.json under …`, WP4b has not merged: stop and report, and do not create the file.
 
 - [ ] **Step 3: Implement**
 
@@ -3937,8 +3957,8 @@ export { TRAVELPAYOUTS_PARAMS } from './travelpayouts/params.js'; // WP6: apps/a
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts`
-Expected: PASS for `params.test.ts` (`4 passed`) and every earlier file. If the equality test fails on `endpoints` (a different key or name order in WP4b's file), stop and report it (plan decision 14 pins path keys and ascending names); do not reshape the constant to the file.
+Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts test/barrel.test.ts`
+Expected: PASS for `params.test.ts` (`3 passed`), `barrel.test.ts` and every earlier file. If the equality test fails on `endpoints` (a different key or name order in WP4b's file), stop and report it (plan decision 14 pins path keys and ascending names); do not reshape the constant to the file.
 
 - [ ] **Step 5: Commit**
 
@@ -3946,7 +3966,7 @@ Expected: PASS for `params.test.ts` (`4 passed`) and every earlier file. If the 
 git add packages/providers && git commit -m "wp06: TRAVELPAYOUTS_PARAMS equals the recorded allowlist"
 ```
 
-### Task 6.9: Recorded fixtures replay; `suppliedFields`, time format and metro completeness from the recordings (needs WP4b)
+### Task 6.9: Recorded fixtures replay; `suppliedFields`, local times, month boundaries and metro completeness from the recordings (needs WP4b)
 
 This task adds no production code: it checks the adapter, unchanged, against what the vendor really sent. Every assertion is a fact the brief relies on; if one fails, stop and report it with the failing line, and do not change the assertion or the adapter to fit.
 
@@ -4148,7 +4168,10 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
 
   it('a metro tile prices every cell the airport tile prices, at the same or a lower minimum (prov-wp06-004, pie-wp06-005)', async () => {
     replay();
-    const airportTiles = ok.filter((x) => param(x.url, 'origin') !== 'LON' && param(x.url, 'page') === '1');
+    // why: the London airport tiles (TP-15…18); the reverse-direction tile (TP-21) has no metro counterpart.
+    const airportTiles = ok.filter(
+      (x) => ['LHR', 'LGW'].includes(param(x.url, 'origin')) && param(x.url, 'page') === '1',
+    );
     expect(airportTiles.length).toBeGreaterThan(0);
     for (const x of airportTiles) {
       const origin = asIata(param(x.url, 'origin'));
@@ -4197,6 +4220,19 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     expect([...keys].filter((k) => !DOCUMENTED_ROW_KEYS.includes(k))).toEqual([]);
   });
 
+  it('a westward origin (TP-21, JFK → LON) keys every row in the tile month by local departure date (decision 31)', () => {
+    // If this fails, stop and report: the vendor buckets departure_at=YYYY-MM by UTC date, so an evening departure on
+    // a month's last day (or the first, east of UTC) lands in the neighbouring tile and its own cell reads no_data.
+    const westward = [...tiles.entries()].filter(([key]) => key.startsWith('JFK|'));
+    if (westward.length === 0) throw new Error('WP4b recorded no JFK → LON tile (TP-21)');
+    for (const [key, pages] of westward) {
+      const month = key.split('|')[2] ?? '';
+      const rows = pages.flatMap((p) => rowsOf(p.fixture.body).map(obj));
+      expect(rows.length, `${key} carries rows`).toBeGreaterThan(0);
+      for (const r of rows) expect(str(r.departure_at).slice(0, 7), key).toBe(month);
+    }
+  });
+
   it(`no recorded tile reached the ${MAX_PAGES}-page cap, so the cap guards a loop rather than deciding coverage (pie-wp06-r2-003)`, () => {
     // If this fails, stop and report the tile: a worked-example month holds more rows than MAX_PAGES pages.
     for (const [key, pages] of tiles) expect(pages.length, key).toBeLessThan(MAX_PAGES);
@@ -4222,7 +4258,15 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
     for (const x of ok) expect(obj(x.fixture.body).currency).toBe('gbp');
   });
 
-  const empty = ok.filter((x) => rowsOf(x.fixture.body).length === 0);
+  // why: a single-page tile whose only page is empty; the empty last page of a paginated tile is not an empty envelope.
+  const empty = ok.filter((x) => {
+    const key = ['origin', 'destination', 'departure_at'].map((n) => param(x.url, n)).join('|');
+    return (
+      rowsOf(x.fixture.body).length === 0 &&
+      (tiles.get(key) ?? []).length === 1 &&
+      param(x.url, 'page') === '1'
+    );
+  });
   // why: TP-19 is best-effort (WP4b); when the probed month held rows there is no empty recording, the test shows as
   // skipped and the report says so, rather than passing without asserting anything.
   it.skipIf(empty.length === 0)(
@@ -4250,6 +4294,8 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
   it('the recorded 401 (invalid token) replays as tile-error auth (spec §2 fact 5)', async () => {
     const unauthorised = recordings.find((x) => x.fixture.status === 401);
     if (unauthorised === undefined) throw new Error('WP4b recorded no Travelpayouts 401');
+    // A replay miss here (the afterEach misses() diff) means WP4b's invalid-token probe was sent with a URL the adapter
+    // does not build (other params or values): look at the probe call in WP4b's record tool, not at the adapter.
     replay();
     const origins = pairOriginsOf(param(unauthorised.url, 'origin'));
     const [first = asIata('LHR')] = origins;
@@ -4279,7 +4325,7 @@ describe('recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (
 - [ ] **Step 2: Run it**
 
 Run: `pnpm --filter @gmt/providers exec vitest run test/travelpayouts/replay.test.ts`
-Expected: PASS, `Tests  <11 + the number of recorded 200 tiles> passed`. Under WP4b's call list that is 19 tiles (TP-01…14: LON→JFK and LON→EWR for 2027-03…09; TP-15…18: the four airport tiles of 2027-03; TP-19: the empty-envelope probe), so `30 passed`, or `29 passed | 1 skipped` when TP-19's month held rows and the empty-envelope test skips (say so in the report). Print the tile count in the report. Before WP4b has merged the file fails to load with `WP4b recorded no Travelpayouts prices_for_dates exchange`: that is the blocked state, not a red step to fix.
+Expected: PASS, `Tests  <12 + the number of recorded 200 tiles> passed`. Under WP4b's call list that is 20 tiles (TP-01…14: LON→JFK and LON→EWR for 2027-03…09; TP-15…18: the four airport tiles of 2027-03; TP-19: the empty-envelope probe; TP-21: the reverse-direction JFK → LON tile, decision 31), so `32 passed`, or `31 passed | 1 skipped` when TP-19's month held rows and the empty-envelope test skips (say so in the report). Print the tile count in the report. Before WP4b has merged the file fails to load with `WP4b recorded no Travelpayouts prices_for_dates exchange`: that is the blocked state, not a red step to fix.
 
 Then print the facts the brief cannot assert in advance, and put the output in the report:
 
@@ -4496,7 +4542,7 @@ None of the plan's Review Focus lines is owned by WP6. One test here guards an a
 - `grep -rn "PRINTED_ABOVE" packages/providers/src` prints nothing (Task 6.8's two copied values are filled in).
 - `git log --oneline main..HEAD` shows the ten `wp06:` commits of Tasks 6.1–6.10.
 
-**Assembly record (2026-10-15, scratch worktree of `main` at `a001e0d`).** Tasks 6.1–6.9 applied in order: every red step failed with the message and counts quoted above and every green step passed. Tasks 6.8 and 6.9 ran against a synthetic stand-in recorded tree that mirrors WP4b's call list (TP-01…20 in WP4b's file format, written by a scratch script, never committed): 4 and 30 tests passed. Task 6.10 ran against a scratch `wiring.ts` holding WP4b's `httpLimitsFor`/`providersFor`: 3 tests passed. Final state: `pnpm -r typecheck` exit 0, `pnpm lint` clean, `pnpm boundaries` exit 0, `pnpm secret-scan` clean; `pnpm --filter @gmt/providers test` 31 of 31 files, 454 tests, with every floor met (the per-directory floor was shown to fail a run when raised above the measured value); without the stand-in tree, 29 of 31 files pass and the two that need WP4b's recordings (`params.test.ts` equality, `replay.test.ts`) fail as expected.
+**Assembly record (2026-10-15, scratch worktree of `main` at `c4fd052`).** Tasks 6.1–6.9 applied in order: every red step failed with the message and counts quoted above and every green step passed. Tasks 6.8 and 6.9 ran against a synthetic stand-in recorded tree that mirrors WP4b's call list including TP-21 (written in WP4b's file format by a scratch script, never committed): 6 and 32 tests passed. Task 6.10 ran against a scratch `wiring.ts` holding WP4b's `httpLimitsFor`/`providersFor`: red as quoted, then 3 passed. Final state: `pnpm -r typecheck` exit 0, `pnpm lint` clean, `pnpm boundaries` exit 0, `pnpm secret-scan` clean; `pnpm --filter @gmt/providers test` 31 of 31 files, 454 tests, every coverage floor met (a floor raised above the measured value fails the run); without the stand-in tree, 29 of 31 files pass and the two that need WP4b's recordings (`params.test.ts` equality, `replay.test.ts`) fail as expected.
 
 ## 11. Open questions
 
@@ -4513,8 +4559,7 @@ None. The round-1 questions are settled: healthchecks are stateless, `ok: true`,
 
 ## 13. For the plan (not yet recorded there)
 
-1. **WP7 rule for `cellIssues` and `truncated`** (prov-wp06-r2-001; decision 28 adds the field but not the engine rule). In commitTile, before the `no_data` fallback, per covered cell: a cell with a price in the tile and a `cellIssues` entry is `priced` with `offers-dropped:<offersDropped>` (merged with the engine's own normalisation drops into one `offers-dropped:n`); a cell with only an entry is `error` with the entry's `reason` and `last_error = detail`; a cell with neither stays `no_data`. A `truncated` tile's prices are labelled "cheapest of the rows read" (in the outcome or price row, WP7's choice; no new closed-list reason). WP7 tests: an issue-only cell becomes `error` (`parse`, `currency-unsupported`, `upstream`); a priced cell with an issue becomes `priced` with the merged `offers-dropped:n`.
-2. **Contract fold** (prov-wp06-r2-002): add `definitionOrigins?` (absent means the pair origin alone), `CellIssue` / `cellIssues?` (an entry is never `no_data`) and `truncated?` to spec §5.1 and to the plan's "Provider port" block; add `ledgerCacheHit?` to the plan's http-kit block.
-3. **WP5 alignment** (arch-008, arch-010): WP5 deletes its own `NoteCounter` (`shapes.ts`, with `count()`) and imports `src/shared/notes.ts` (`get()`); calls `parseError(cause, detail, { providerId: 'searchapi', endpointPath })` instead of writing a `searchapi …` prefix into the detail; uses `parseVendor` wherever it does `safeParse` + `parseError(cause, zodReason(…))`; builds its harness on `test/fakes.ts` with `syntheticAllowed: false`; puts its wiring test at `apps/api/test/wiring/searchapi.test.ts`. The shared helpers are not barrel exports.
-4. **One cast check** (arch-r2-004): a repo script `scripts/check-casts.mjs`, run in CI beside `check-boundaries.mjs`, so every brief's definition of done calls one rule instead of its own grep.
-5. **WP13 smoke row** (pie-wp06-002; decision 27 records "compare one recorded fare with the vendor's own page"): for Travelpayouts, compare one recorded round-trip row (TP-01 or TP-15) with the Aviasales search page for the same airports and dates, and record the passenger count that page assumes; the provenance note names no passenger count until then.
+Decisions 28–31 record everything else this brief added (the core and http-kit fields, the WP7 rule for `cellIssues` and `truncated`, the spec §5.1 fold, the WP5 alignment, TP-21, the coverage floors). Two items remain:
+
+1. **One cast check** (arch-r2-004): a repo script `scripts/check-casts.mjs`, run in CI beside `check-boundaries.mjs`, so every brief's definition of done calls one rule instead of its own grep.
+2. **WP13 smoke row for Travelpayouts** (pie-wp06-002; decision 27 records the general "compare one recorded fare with the vendor's own page"): compare one recorded round-trip row (TP-01 or TP-15) with the Aviasales search page for the same airports and dates, and record the passenger count that page assumes; the provenance note names no passenger count until then.
