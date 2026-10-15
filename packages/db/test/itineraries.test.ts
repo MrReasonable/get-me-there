@@ -528,6 +528,62 @@ describe('CellsRepo.writeVerifiedCell (spec §7 atomic unit "each verified cell"
       }),
     ).toThrow(expect.objectContaining({ rule: 'outcome-reason' }));
   });
+  it('an error outcome stores no provenance, whatever the caller supplied (prov-M5)', () => {
+    const { executionId, cells } = seeded();
+    const base = write(cell(), [], 'error');
+    cells.writeVerifiedCell(executionId, 'searchapi', {
+      ...base,
+      outcome: { ...base.outcome, fetchedAt: T0 },
+    });
+    expect(cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0]).toMatchObject({
+      status: 'error',
+      reason: 'upstream',
+      fetchedAt: null,
+      minPence: null,
+      cabin: null,
+      pointOfSale: null,
+      sourceKind: null,
+    });
+  });
+
+  it('partial expansion: the outcome reason and the observations’ partialExpansion flags must agree (prov-M6)', () => {
+    const { executionId, cells } = seeded();
+    const base = write(cell(), [{ hash: 'a'.repeat(64), seller: 'British Airways', pence: 60_300 }]);
+    const partialObs = (v: VerifiedCellWrite): VerifiedCellWrite => ({
+      ...v,
+      itineraries: v.itineraries.map((i) => ({
+        ...i,
+        offers: i.offers.map((x) => ({ ...x, observation: { ...x.observation, partialExpansion: true } })),
+      })),
+    });
+    const withReason = (v: VerifiedCellWrite, reason: string | null): VerifiedCellWrite => ({
+      ...v,
+      outcome: { ...v.outcome, reason },
+    });
+    for (const bad of [
+      withReason(base, 'partial-expansion'),
+      withReason(base, 'partial-expansion;offers-dropped:1'),
+      partialObs(base),
+      partialObs(withReason(base, 'offers-dropped:1')),
+    ])
+      expect(() => cells.writeVerifiedCell(executionId, 'searchapi', bad)).toThrow(
+        expect.objectContaining({ rule: 'partial-expansion' }),
+      );
+    cells.writeVerifiedCell(
+      executionId,
+      'searchapi',
+      partialObs(withReason(base, 'partial-expansion;offers-dropped:1')),
+    );
+    expect(cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0]?.reason).toBe(
+      'partial-expansion;offers-dropped:1',
+    );
+    expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification).toEqual({
+      status: 'priced',
+      reason: 'partial-expansion',
+      minPence: 60_300,
+    });
+  });
+
   it('a priced verified cell may carry offers-dropped:n (ruling 2026-10-15)', () => {
     const { executionId, cells } = seeded();
     const base = write(cell(), [{ hash: 'a'.repeat(64), seller: 'British Airways', pence: 60_300 }]);

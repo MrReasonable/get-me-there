@@ -7,6 +7,7 @@ import {
   type Clock,
   cellKeyString,
   type IsoDate,
+  isPartialExpansion,
   type NoDataReason,
   type ProviderId,
   type RollUp,
@@ -698,6 +699,16 @@ export class CellsRepo {
           `${key} observation provenance differs from its outcome (ruling 5)`,
         );
     }
+    // why: the per-observation flag and the outcome reason describe the same truncation; a cell must not roll up as
+    // complete while its observations say expansion was partial, or the reverse (prov-M6).
+    if (
+      o.status === 'priced' &&
+      offers.some((x) => x.observation.partialExpansion) !== isPartialExpansion(o.reason)
+    )
+      throw new RowRejected(
+        'partial-expansion',
+        `${key} reason ${String(o.reason)} disagrees with its observations' partialExpansion flags`,
+      );
     if (offers.length > 0) {
       const cheapest = Math.min(...offers.map((x) => x.observation.pricePence));
       const oldest = offers.map((x) => x.observation.provenance.fetchedAt).sort()[0];
@@ -725,9 +736,13 @@ export class CellsRepo {
           best = { id, pence: x.observation.pricePence };
       }
       const existing = this.current(executionId, w.cell, 'verification', providerId);
+      // why: an error carries no fetched data, so it stores no provenance, as writeTileError does (prov-M5).
+      const provenance =
+        o.status === 'error' ? { fetchedAt: null, cabin: null, pointOfSale: null, sourceKind: null } : {};
       const incoming: CellOutcome = {
         ...existing,
         ...o,
+        ...provenance,
         minPence: best?.pence ?? null,
         attempts: existing.attempts,
         reusedFromExecutionId: null,
