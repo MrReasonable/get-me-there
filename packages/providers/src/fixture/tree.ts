@@ -2,38 +2,50 @@ import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type IsoDate, toEpochDay } from '@gmt/core';
-import { isRecord } from '../util.js';
+import { z } from 'zod';
+import { isRecord, parseOrThrow } from '../util.js';
+
+const HHMM = /^\d{2}:\d{2}$/;
+const minorInt = (min = 0) => z.number().int().min(min);
 
 /** `calendar/<O>-<D>.json`: parameters of the deterministic synthetic price formula. */
-export interface CalendarPairFile {
-  currency: string;
-  baseMinor: number;
-  weekdayStepMinor: number;
-  perNightMinor: number;
-  noFaresNights: number[];
-  noDataNights: number[];
-  pageSize?: number;
-}
-export interface LegTemplate {
-  flightNumber: string;
-  depart: string;
-  arrive: string;
-  arriveDayOffset: number;
-}
-export interface OptionTemplate {
-  seller: string;
-  carrier: string;
-  outbound: LegTemplate;
-  inbound: LegTemplate;
-  priceDeltaMinor: number;
-  cabinBagIncluded: boolean;
-  checkedBags: number;
-}
+const calendarPairSchema = z.object({
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  baseMinor: minorInt(),
+  weekdayStepMinor: minorInt(),
+  perNightMinor: minorInt(),
+  noFaresNights: z.array(z.number().int()),
+  noDataNights: z.array(z.number().int()),
+  pageSize: minorInt(1).optional(),
+});
+export type CalendarPairFile = z.output<typeof calendarPairSchema>;
+
+const legSchema = z.object({
+  flightNumber: z.string().regex(/^\d{1,4}$/),
+  depart: z.string().regex(HHMM),
+  arrive: z.string().regex(HHMM),
+  arriveDayOffset: minorInt(),
+});
+export type LegTemplate = z.output<typeof legSchema>;
+
+const optionSchema = z.object({
+  seller: z.string().min(1),
+  carrier: z.string().regex(/^[A-Z0-9]{2}$/),
+  outbound: legSchema,
+  inbound: legSchema,
+  priceDeltaMinor: minorInt(),
+  cabinBagIncluded: z.boolean(),
+  checkedBags: minorInt(),
+});
+export type OptionTemplate = z.output<typeof optionSchema>;
+
 /** `itinerary/<O>-<D>.json`: offer templates placed on a cell's dates; `chain` makes verification three steps. */
-export interface ItineraryPairFile {
-  chain: boolean;
-  options: OptionTemplate[];
-}
+const itineraryPairSchema = z.object({
+  chain: z.boolean().default(false),
+  options: z.array(optionSchema).min(1),
+});
+export type ItineraryPairFile = z.output<typeof itineraryPairSchema>;
+
 export interface FixtureTree {
   root: string;
   calendar: Map<string, CalendarPairFile>;
@@ -42,7 +54,6 @@ export interface FixtureTree {
 
 const TREE_SUFFIX = `${sep}fixtures${sep}synthetic${sep}fixture`;
 const PAIR_FILE = /^[A-Z]{3}-[A-Z]{3}\.json$/;
-const HHMM = /^\d{2}:\d{2}$/;
 
 /** Absolute path of this package's synthetic tree (works from src/ and dist/). */
 export function defaultFixtureRoot(): string {
@@ -56,51 +67,7 @@ export function calendarPriceMinor(file: CalendarPairFile, departureDate: IsoDat
   );
 }
 
-type Obj = Record<string, unknown>;
-function int(o: Obj, k: string, where: string, min = 0): number {
-  const v = o[k];
-  if (typeof v !== 'number' || !Number.isInteger(v) || v < min)
-    throw new Error(`${where}: ${k} must be an integer ≥ ${min}`);
-  return v;
-}
-function str(o: Obj, k: string, where: string, re?: RegExp): string {
-  const v = o[k];
-  if (typeof v !== 'string' || v === '' || (re !== undefined && !re.test(v)))
-    throw new Error(`${where}: ${k} is missing or malformed`);
-  return v;
-}
-function ints(o: Obj, k: string, where: string): number[] {
-  const v = o[k];
-  if (!Array.isArray(v)) throw new Error(`${where}: ${k} must be an integer array`);
-  const out: number[] = [];
-  for (const x of v) {
-    if (typeof x !== 'number' || !Number.isInteger(x))
-      throw new Error(`${where}: ${k} must be an integer array`);
-    out.push(x);
-  }
-  return out;
-}
-function obj(o: Obj, k: string, where: string): Obj {
-  const v = o[k];
-  if (!isRecord(v)) throw new Error(`${where}: ${k} must be an object`);
-  return v;
-}
-function bool(o: Obj, k: string, where: string, fallback?: boolean): boolean {
-  const v = o[k];
-  if (v === undefined && fallback !== undefined) return fallback;
-  if (typeof v !== 'boolean') throw new Error(`${where}: ${k} must be a boolean`);
-  return v;
-}
-function leg(o: Obj, where: string): LegTemplate {
-  return {
-    flightNumber: str(o, 'flightNumber', where, /^\d{1,4}$/),
-    depart: str(o, 'depart', where, HHMM),
-    arrive: str(o, 'arrive', where, HHMM),
-    arriveDayOffset: int(o, 'arriveDayOffset', where),
-  };
-}
-
-function readPairs(dir: string): Array<{ pair: string; file: string; json: Obj }> {
+function readPairs(dir: string): Array<{ pair: string; file: string; json: unknown }> {
   return readdirSync(dir)
     .filter((n) => PAIR_FILE.test(n))
     .sort()
@@ -124,38 +91,10 @@ export function loadFixtureTree(root: string): FixtureTree {
       `refusing fixture tree ${root}: the fixture provider reads only fixtures/synthetic/fixture (spec §5.5)`,
     );
   const calendar = new Map<string, CalendarPairFile>();
-  for (const { pair, file, json } of readPairs(join(real, 'calendar'))) {
-    calendar.set(pair, {
-      currency: str(json, 'currency', file, /^[A-Z]{3}$/),
-      baseMinor: int(json, 'baseMinor', file),
-      weekdayStepMinor: int(json, 'weekdayStepMinor', file),
-      perNightMinor: int(json, 'perNightMinor', file),
-      noFaresNights: ints(json, 'noFaresNights', file),
-      noDataNights: ints(json, 'noDataNights', file),
-      ...(json.pageSize === undefined ? {} : { pageSize: int(json, 'pageSize', file, 1) }),
-    });
-  }
+  for (const { pair, file, json } of readPairs(join(real, 'calendar')))
+    calendar.set(pair, parseOrThrow(calendarPairSchema, json, file));
   const itinerary = new Map<string, ItineraryPairFile>();
-  for (const { pair, file, json } of readPairs(join(real, 'itinerary'))) {
-    const options = json.options;
-    if (!Array.isArray(options) || options.length === 0)
-      throw new Error(`${file}: options must be a non-empty array`);
-    itinerary.set(pair, {
-      chain: bool(json, 'chain', file, false),
-      options: options.map((raw: unknown, i) => {
-        const where = `${file} options[${i}]`;
-        if (!isRecord(raw)) throw new Error(`${where}: not an object`);
-        return {
-          seller: str(raw, 'seller', where),
-          carrier: str(raw, 'carrier', where, /^[A-Z0-9]{2}$/),
-          outbound: leg(obj(raw, 'outbound', where), `${where}.outbound`),
-          inbound: leg(obj(raw, 'inbound', where), `${where}.inbound`),
-          priceDeltaMinor: int(raw, 'priceDeltaMinor', where),
-          cabinBagIncluded: bool(raw, 'cabinBagIncluded', where),
-          checkedBags: int(raw, 'checkedBags', where),
-        };
-      }),
-    });
-  }
+  for (const { pair, file, json } of readPairs(join(real, 'itinerary')))
+    itinerary.set(pair, parseOrThrow(itineraryPairSchema, json, file));
   return { root: real, calendar, itinerary };
 }
