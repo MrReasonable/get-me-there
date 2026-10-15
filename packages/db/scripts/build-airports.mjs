@@ -2,7 +2,7 @@
 // Builds the vendored airports data (spec §7, decision 11). Run by a person when updating the data, never by the app or CI.
 //
 //   node packages/db/scripts/build-airports.mjs --input <mwgg airports.json> --commit <40-hex sha> --date <YYYY-MM-DD>
-//   node packages/db/scripts/build-airports.mjs --wikitext <section wikitext> --revision <Wikipedia revision id>
+//   node packages/db/scripts/build-airports.mjs --wikitext <section wikitext> --revision <Wikipedia revision id> [--retrieved <YYYY-MM-DD>]
 // The second form needs the first's output: metro members are checked against the built airports file (po-002).
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ const { values } = parseArgs({
     date: { type: 'string' },
     wikitext: { type: 'string' },
     revision: { type: 'string' },
+    retrieved: { type: 'string' },
   },
 });
 
@@ -37,10 +38,15 @@ if (values.wikitext) {
     const head = line.match(/\(([A-Z]{3})\)&nbsp;–/);
     if (!head) continue;
     // why: a code introduced by "formerly" (inline or in ''…'' italics) is a historical code, not a member.
-    const rest = line
+    // why: only the first sentence lists current members; later sentences describe former airports ("The city also
+    // previously had … (THF) … now closed"), so their codes are dropped (dm-M3). An initial ("O. R. Tambo") is not a
+    // sentence end.
+    const [current, ...history] = line
       .slice(line.indexOf(head[0]) + head[0].length)
-      .replace(/''[^']*''/g, '')
-      .replace(/formerly [A-Z]{3}/g, '');
+      .split(/(?<!\b[A-Z])\.\s+(?=[A-Z])/);
+    for (const m of history.join(' ').matchAll(/\(([A-Z]{3})[,)]/g))
+      drops.push(`${head[1]}:${m[1]} named only in a later sentence about former airports`);
+    const rest = current.replace(/''[^']*''/g, '').replace(/formerly [A-Z]{3}/g, '');
     const codes = [...new Set([...rest.matchAll(/\(([A-Z]{3})[,)]/g)].map((m) => m[1]))].sort();
     const present = codes.filter((c) => byIata.has(c));
     for (const c of codes) if (!byIata.has(c)) drops.push(`${head[1]}:${c} absent from the airports file`);
@@ -56,12 +62,14 @@ if (values.wikitext) {
         throw new Error(`${c} is listed under both ${owner.get(c)} and ${head[1]}`);
       owner.set(c, head[1]);
     }
-    if (kept.length > 0) metros[head[1]] = kept;
+    // why: a metro code stands for a multi-airport city; one left with a single member is not one (dm-M3).
+    if (kept.length >= 2) metros[head[1]] = kept;
+    else if (kept.length === 1) drops.push(`${head[1]}: only ${kept[0]} remains, not a multi-airport city`);
   }
   const source = `https://en.wikipedia.org/w/index.php?title=IATA_airport_code&oldid=${values.revision}`;
   writeFileSync(
     `${dataDir}metros.json`,
-    `${JSON.stringify({ source, revision: values.revision, licence: 'CC BY-SA 4.0', retrieved: new Date().toISOString().slice(0, 10), metros }, null, 1)}\n`,
+    `${JSON.stringify({ source, revision: values.revision, licence: 'CC BY-SA 4.0', retrieved: values.retrieved ?? new Date().toISOString().slice(0, 10), metros }, null, 1)}\n`,
   );
   console.log(
     `wrote ${Object.keys(metros).length} metro codes from revision ${values.revision}; dropped: ${drops.join('; ') || 'none'}`,

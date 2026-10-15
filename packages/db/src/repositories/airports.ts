@@ -46,6 +46,8 @@ export function metroIndex(metros: Record<string, string[]>): Map<string, string
   const out = new Map<string, string>();
   for (const [code, members] of Object.entries(metros)) {
     if (!IATA.test(code)) throw new RowRejected('metro', `metro code must match ^[A-Z]{3}$, got ${code}`);
+    // why: a metro code stands for a multi-airport city; a one-airport "metro" would only alias its airport (dm-M3).
+    if (members.length < 2) throw new RowRejected('metro', `metro ${code} needs at least two airports`);
     for (const m of members) {
       const prior = out.get(m);
       if (prior !== undefined && prior !== code)

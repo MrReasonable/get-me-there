@@ -108,6 +108,18 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(repo.sharedMetro([JFK, EWR])).toBe('NYC');
   });
 
+  it('the vendored metro list holds only current multi-airport cities: no closed member, no one-airport metro (dm-M3)', () => {
+    const { metros } = loadAirportsDataset(AIRPORTS_DATA_DIR);
+    for (const [code, members] of Object.entries(metros))
+      expect(members.length, `${code} has at least two members`).toBeGreaterThanOrEqual(2);
+    // BER's closed THF and TXL come from a later sentence about former airports; with them gone BER is one airport.
+    expect(Object.values(metros).flat()).not.toEqual(expect.arrayContaining(['THF']));
+    expect(Object.values(metros).flat()).not.toEqual(expect.arrayContaining(['TXL']));
+    expect(Object.keys(metros)).not.toContain('BER');
+    expect(Object.keys(metros)).not.toContain('LUH'); // HWR is absent from the airports file, so LUH stands alone
+    expect(metros.LON).toEqual(['LCY', 'LGW', 'LHR', 'LTN', 'SEN', 'STN']);
+  });
+
   it('seeding reads only local files: the seed module imports node:fs, node:path, @gmt/core and relative modules only (test-016)', () => {
     const source = readFileSync(new URL('../src/seed/airports.ts', import.meta.url), 'utf8');
     const imports = [...source.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
@@ -146,9 +158,17 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(() => loadAirportsDataset(dir)).toThrow(/airports\.bad\.json.*airports\[0\]\.lat/);
   });
 
+  it('a metro of fewer than two airports is refused (dm-M3)', () => {
+    expect(() =>
+      new AirportsRepo(freshDb()).upsertAll(dataset([row('AAA'), row('AAB')], 'v', { AAX: ['AAA'] })),
+    ).toThrow(expect.objectContaining({ rule: 'metro' }));
+  });
+
   it('a metro list that puts one airport in two metros is refused', () => {
     expect(() =>
-      new AirportsRepo(freshDb()).upsertAll(dataset([row('AAA')], 'v', { AAX: ['AAA'], AAY: ['AAA'] })),
+      new AirportsRepo(freshDb()).upsertAll(
+        dataset([row('AAA'), row('AAB'), row('AAC')], 'v', { AAX: ['AAA', 'AAB'], AAY: ['AAA', 'AAC'] }),
+      ),
     ).toThrow(expect.objectContaining({ rule: 'metro' }));
   });
 });
@@ -161,10 +181,10 @@ describe('AirportsRepo', () => {
   };
 
   it('exists, metroOf, airportsOfMetro, sharedMetro, tzOf', () => {
-    const repo = seeded([row('AAA'), row('AAB'), row('BBB'), row('CCC', { tz: 'Europe/London' })], {
-      AAX: ['AAA', 'AAB'],
-      BBX: ['BBB'],
-    });
+    const repo = seeded(
+      [row('AAA'), row('AAB'), row('BBB'), row('BBC'), row('CCC', { tz: 'Europe/London' })],
+      { AAX: ['AAA', 'AAB'], BBX: ['BBB', 'BBC'] },
+    );
     expect([repo.exists('AAA'), repo.exists('ZZZ')]).toEqual([true, false]);
     expect([repo.metroOf('AAA'), repo.metroOf('CCC')]).toEqual(['AAX', null]);
     expect(repo.airportsOfMetro('AAX')).toEqual(['AAA', 'AAB']);
