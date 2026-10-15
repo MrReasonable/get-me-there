@@ -660,7 +660,7 @@ export function createLogger(config: Pick<Config, 'logLevel'>, opts?: { destinat
 6. The recorded-fixture file format and hash field (`contentSha256`) are pinned above; parameter allowlists carry the same hash; the runtime allowlist is a code constant asserted equal to the recorded file.
 7. The fixture host is reached through http-kit's gated `inProcessHosts`; `@gmt/providers/testing` is the only module that imports msw.
 8. Stryker runs with its command runner (`"testRunner": "command"`, `"commandRunner": { "command": "pnpm exec vitest run --coverage.enabled=false" }`) because `@stryker-mutator/vitest-runner` 10 executes no tests under Vitest 5; `ignorePatterns` uses `"/coverage"` so `src/coverage/` is mutated. Per-task test runs use `pnpm --filter @gmt/<pkg> exec vitest run <file>` (no coverage threshold on a partial run).
-9. The `.gitignore` gains `backups/` and `*.db*`. The boundary script's `process.env` rule applies to `src/` trees only; `apps/api/src/bootstrap/`, `apps/api/src/wiring.ts` (loadConfigFromEnv) and `apps/api/src/logger.ts` are the allowed readers.
+9. The `.gitignore` gains `backups/` and `*.db*`. The boundary script's `process.env` rule applies to `src/` trees only; only `apps/api/src/bootstrap/` reads `process.env`; `apps/api/src/wiring.ts` (`loadConfigFromEnv(env)`) and `apps/api/src/logger.ts` take the environment or config as an argument (tightened by WP4b, whose boundary script enforces it).
 10. `AlertDigest` is structured; subject and body are rendered by WP11's templates. A digest with only "new" items and no firing is not sent. Validated booking and search links keep their query strings in API bodies and emails; every other URL sink is stripped.
 11. The airports dataset ships with a separate attributed metro-code list (`packages/db/data/metros.json`, from Wikipedia's list of IATA metropolitan area codes, CC BY-SA 4.0, attribution file beside it). `SEARCHAPI_PLAN` `trial` keeps the lifetime window.
 12. React is 19 (spec §4 updated). `APP_BASE_URL` is added to config. Smoke and record are invoked from the host with curl against the loopback port; the image has no curl.
@@ -2346,8 +2346,8 @@ for (const [name, dir] of Object.entries(dirs)) {
     const src = readFileSync(f, 'utf8');
     for (const m of src.matchAll(/from\s+['"](@gmt\/[a-z]+)/g)) if (!ALLOWED[name].includes(m[1])) { console.error(`${f} imports ${m[1]}`); bad++; }
     if (name !== '@gmt/api' && /process\.env/.test(src)) { console.error(`${f} reads process.env outside apps/api`); bad++; }
-    const envReaders = ['/bootstrap/', '/wiring.ts', '/logger.ts'];
-    if (name === '@gmt/api' && !envReaders.some((p) => f.includes(p)) && /process\.env/.test(src)) { console.error(`${f} reads process.env outside bootstrap/, wiring.ts or logger.ts`); bad++; }
+    const envReaders = ['/bootstrap/']; // WP4b: wiring and logger take the env as an argument
+    if (name === '@gmt/api' && !envReaders.some((p) => f.includes(p)) && /process\.env/.test(src)) { console.error(`${f} reads process.env outside apps/api/src/bootstrap/`); bad++; }
     if (name === '@gmt/providers' && !f.includes('/src/testing/') && /from ['"]msw/.test(src)) { console.error(`${f} imports msw outside src/testing/`); bad++; }
   }
 }
