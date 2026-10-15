@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 15.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 16.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -338,6 +338,7 @@ export interface DiscoveryQuery {
   departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number;
   cabin: Cabin; currency: 'GBP';
   cells?: CellKey[];     // when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it
+  definitionOrigins?: Iata[];   // the definition's origins, so an adapter can apply the §5.2 metro rule (two or more share a metro)
 }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
@@ -346,11 +347,14 @@ export type TileRequest =
   | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
   | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
 
+export interface CellIssue { cell: CellKey; reason: ErrorReason; offersDropped: number; detail: string }   // a covered cell the adapter could not price honestly
 export interface RawCalendarPrice extends CellKey {
   amountMinor: number; currency: string; providerObservedAt?: IsoDateTime; vendorLink?: string;
 }
 export type DiscoveryTileResult =
-  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[] }
+  | { kind: 'tile'; index: number; coveredCells: CellKey[]; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; prices: RawCalendarPrice[]; noFares: CellKey[]; notes: string[];
+      cellIssues?: CellIssue[];   // per covered cell: rows dropped at normalisation or cells left unread, each with a closed-list reason; the engine writes `error` with that reason, never `no_data`
+      truncated?: boolean }       // the pagination cap stopped the tile early; its prices are labelled "cheapest of the rows read"
   | { kind: 'tile-error'; index: number; coveredCells: CellKey[]; error: ProviderError };
 
 export interface ItineraryQuery extends CellKey { cabin: Cabin; adults: 1; currency: 'GBP'; maxStops?: number; expandTop: number; bookingLinks: boolean }
@@ -361,6 +365,7 @@ export interface RawOffer {
   baggage?: BaggageSnapshot; fareConditions?: FareConditions; selfTransfer?: boolean;
   booking: { kind: 'get'; url: string } | { kind: 'post'; url: string; postData: string } | { kind: 'none' };
   bookingExpiresAt?: IsoDateTime;
+  verified: boolean;   // true only when the final chain step confirmed this price; every earlier-step offer is written as unverified
 }
 export interface ItinerarySearchResult {
   offers: RawOffer[]; coverage: 'priced' | 'empty'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; partial: boolean; failedExpansions: number; notes: string[];
@@ -1612,6 +1617,12 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 16: provider-port fields (2026-10-15)
+
+§5.1: `DiscoveryQuery.definitionOrigins?`, `cellIssues?` and `truncated?` on the
+tile result, and `RawOffer.verified`, as the WP5/WP6 brief reviews settled
+(plan decisions 27–31).
 
 ### Revision 15: SearchApi tiling and itinerary age (2026-10-15)
 
