@@ -54,21 +54,35 @@ export interface RunToolOptions {
   recording?: RecordingTarget;
 }
 
-/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
-export function repositoryRoot(): string {
-  let dir = defaultRecordedRoot();
-  while (!existsSync(join(dir, 'pnpm-workspace.yaml'))) {
+/**
+ * Every ancestor of the recorded tree holding pnpm-workspace.yaml, nearest first, as true-case real paths. why: run from
+ * a `.worktrees/` worktree, the enclosing main checkout is a repository too, and `--out` into it must be refused like
+ * `--out` into the worktree (sec minor 1). `realpathSync.native` returns the on-disk case, so a differently cased
+ * spelling on a case-insensitive file system (macOS APFS) cannot slip past the containment check.
+ */
+export function repositoryRoots(from: string = defaultRecordedRoot()): string[] {
+  const roots: string[] = [];
+  for (let dir = resolve(from); ; ) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) roots.push(realpathSync.native(dir));
     const up = dirname(dir);
-    if (up === dir) throw new Error('repository root not found above the recorded tree');
+    if (up === dir) break;
     dir = up;
   }
-  return realpathSync(dir);
+  if (roots.length === 0) throw new Error('repository root not found above the recorded tree');
+  return roots;
 }
 
-/** The real path of `p`, or of its nearest existing ancestor with the rest appended (for a directory not made yet). */
+/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
+export function repositoryRoot(): string {
+  const [nearest] = repositoryRoots();
+  if (nearest === undefined) throw new Error('repository root not found above the recorded tree');
+  return nearest;
+}
+
+/** The true-case real path of `p`, or of its nearest existing ancestor with the rest appended (a directory not made yet). */
 function realOrAncestor(p: string): string {
   const abs = resolve(p);
-  if (existsSync(abs)) return realpathSync(abs);
+  if (existsSync(abs)) return realpathSync.native(abs);
   const up = dirname(abs);
   return up === abs ? abs : join(realOrAncestor(up), abs.slice(up.length + 1));
 }
@@ -80,12 +94,12 @@ function realOrAncestor(p: string): string {
 export function recordingTarget(
   cli: RecordCli,
   given: RecordingTarget | undefined,
+  roots?: readonly string[],
 ): RecordingTarget | { refusal: string } {
   if (given !== undefined) return given;
   if (cli.out !== null) {
     const out = realOrAncestor(cli.out);
-    const repo = repositoryRoot();
-    if (out === repo || out.startsWith(`${repo}${sep}`))
+    if ((roots ?? repositoryRoots()).some((repo) => out === repo || out.startsWith(`${repo}${sep}`)))
       return {
         refusal: `--out ${cli.out} is inside the repository; recordings of other routes stay outside it`,
       };

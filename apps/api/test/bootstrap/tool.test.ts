@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -23,6 +24,7 @@ import {
   type RunToolOptions,
   recordingTarget,
   repositoryRoot,
+  repositoryRoots,
   runTool,
 } from '../../src/bootstrap/tool.js';
 import { RECORDED_BY } from '../../src/tools/record.js';
@@ -629,6 +631,31 @@ describe('recordingTarget (sec2-002 ruling, r3-ts-004)', () => {
   ])('--out %s is refused', (_name, out) => {
     expect(recordingTarget(cli([...other, '--out', out()]), undefined)).toEqual({
       refusal: expect.stringContaining('is inside the repository'),
+    });
+  });
+  it.skipIf(
+    !existsSync(repositoryRoot().toUpperCase()) || repositoryRoot().toUpperCase() === repositoryRoot(),
+  )('--out spelled in another case on a case-insensitive file system is refused (sec minor 1)', () => {
+    expect(
+      recordingTarget(cli([...other, '--out', join(repositoryRoot().toUpperCase(), 'tmp-rec')]), undefined),
+    ).toEqual({ refusal: expect.stringContaining('is inside the repository') });
+  });
+  it('from a worktree, the enclosing checkout is a repository too, and --out inside it is refused (sec minor 1)', () => {
+    const outer = realpathSync(tempDir('gmt-outer-'));
+    const inner = join(outer, '.worktrees', 'x');
+    const recorded = join(inner, 'packages', 'providers', 'fixtures', 'recorded');
+    mkdirSync(recorded, { recursive: true });
+    writeFileSync(join(outer, 'pnpm-workspace.yaml'), '');
+    writeFileSync(join(inner, 'pnpm-workspace.yaml'), '');
+    const roots = repositoryRoots(recorded);
+    expect(roots).toEqual([inner, outer]);
+    expect(recordingTarget(cli([...other, '--out', join(outer, 'tmp-rec')]), undefined, roots)).toEqual({
+      refusal: expect.stringContaining('is inside the repository'),
+    });
+    const outside = join(tempDir(), 'mine');
+    expect(recordingTarget(cli([...other, '--out', outside]), undefined, roots)).toEqual({
+      root: join(outside, 'fixtures', 'recorded'),
+      recordedBy: RECORDED_BY,
     });
   });
   it('another route without --out is refused', () => {

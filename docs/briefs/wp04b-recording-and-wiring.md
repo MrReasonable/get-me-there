@@ -36,7 +36,7 @@ Build the wiring helper and the tool bootstrap that every later entrypoint reuse
 
   Every failure after the config parse maps to an exit code with a secret-scrubbed message, so nothing reaches the entry point's catch. It never constructs or boots the engine.
 - `apps/api/src/tools/{types,recordRequests,recordPlan,recordParams,recordExecution,recordReport,record,workedExample}.ts`: `pnpm record:fixtures --budget N --route O1,O2:D1,D2 --month YYYY-MM [--out DIR] [--dry-run] [--confirm-rerun]` and `recordFixtures(ports, args, ctx)` as the plan's contract (plan decision 23; section 5.1).
-- **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. Anything else refuses with 64 before the database is opened. A live `--out` run creates `DIR/fixtures/recorded` before the hidden execution opens, and the recorder is built before it too, so a bad root never leaves a `running` execution behind (prov-wp04b-r3-003). `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
+- **Where a run writes (ruling on sec2-002):** into the committed tree (`defaultRecordedRoot()`) only when `--route` is exactly the worked example `LHR,LGW:JFK,EWR`; any other route needs `--out DIR` outside the repository and writes `DIR/fixtures/recorded`. "The repository" is every ancestor holding `pnpm-workspace.yaml`, so from a `.worktrees/` worktree the enclosing main checkout counts too, and paths are compared as true-case real paths (`realpathSync.native`), so a differently cased spelling on macOS cannot slip through (sec minor 1). Anything else refuses with 64 before the database is opened. A live `--out` run creates `DIR/fixtures/recorded` before the hidden execution opens, and the recorder is built before it too, so a bad root never leaves a `running` execution behind (prov-wp04b-r3-003). `apps/api/src/tools/workedExample.ts` is the one application source file that names those airports (the section 12 grep excludes it), as `apps/web/src/example.ts` is for the web. Tests always pass their own root together with the test signature (`RunToolOptions.recording`), so no test can write the committed tree or sign as the real tool (prov-wp04b-006).
 - The recording run on the worked example through the real http-kit + recorder + guard, under a hidden soft-deleted definition's execution with `trigger: 'tool'`, against the operator's configured `DATABASE_PATH` (the production ledger, spec §7). It records:
   - 21 Travelpayouts calls: a 7-month metro scan, 4 airport tiles, an empty-envelope probe, a 401 probe on a month no success call uses, and the reverse-direction tile JFK → LON for the worked month (plan decision 31);
   - 6 SearchApi calls: a 401 probe on a cell outside the calendar rectangle, one calendar rectangle, a deliberate over-limit calendar, and the step 1 → 2 → 3 chain for the cheapest priced in-band cell inside the rectangle. Every SearchApi request sends `adults=1`, `travel_class` and `separate_tickets=1` (plan decisions 24 and 29: the vendor documents it for both engines); google_flights also sends `sort_by=price`; no `stops` (plan decision 24). The calendar rectangle is the production tiling shape for the worked band, 9 outbound days × a 20-day return span = 180 (spec rev 15 §5.2, plan decision 29). When the calendar yields no usable cell, the over-limit probe and the chain are skipped, so a doomed run spends nothing more (ruling on cost-wp4b-r2-004); and when any required call before the first billed one (TP-01…TP-18, TP-20, TP-21, SA-01) did not answer as planned, SA-02…SA-06 are all skipped and no credit is spent (cost I-1, plan decision 30).
@@ -214,8 +214,9 @@ export function readOnlyLockState(dbPath: string, clock: Clock): ReadOnlyLockSta
 export interface ToolRunners { record(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number> }   // WP13 adds smoke
 export interface RecordingTarget { root: string; recordedBy: string }
 export interface RunToolOptions { env?; runners?: Partial<ToolRunners>; out?; err?; logDestination?; clock?: Clock; migrationsDir?: string; recording?: RecordingTarget /* root and signature together */ }
-export function recordingTarget(cli: RecordCli, given: RecordingTarget | undefined): RecordingTarget | { refusal: string };
-export function repositoryRoot(): string;   // nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml
+export function recordingTarget(cli: RecordCli, given: RecordingTarget | undefined, roots?: readonly string[]): RecordingTarget | { refusal: string };   // roots default: repositoryRoots()
+export function repositoryRoots(from?: string): string[];   // every ancestor of the recorded tree holding pnpm-workspace.yaml, nearest first, true-case real paths
+export function repositoryRoot(): string;   // the nearest of them
 export function isEntryPoint(script?: string, self?: string): boolean;
 // src/bootstrap/preflight.ts (Task 8; the pre-migration preflight WP8's app bootstrap reuses, plan decision 30 / arch M-1)
 export const BACKUPS_KEPT = 5;
@@ -5092,6 +5093,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -5111,6 +5113,7 @@ import {
   type RunToolOptions,
   recordingTarget,
   repositoryRoot,
+  repositoryRoots,
   runTool,
 } from '../../src/bootstrap/tool.js';
 import { RECORDED_BY } from '../../src/tools/record.js';
@@ -5719,6 +5722,31 @@ describe('recordingTarget (sec2-002 ruling, r3-ts-004)', () => {
       refusal: expect.stringContaining('is inside the repository'),
     });
   });
+  it.skipIf(
+    !existsSync(repositoryRoot().toUpperCase()) || repositoryRoot().toUpperCase() === repositoryRoot(),
+  )('--out spelled in another case on a case-insensitive file system is refused (sec minor 1)', () => {
+    expect(
+      recordingTarget(cli([...other, '--out', join(repositoryRoot().toUpperCase(), 'tmp-rec')]), undefined),
+    ).toEqual({ refusal: expect.stringContaining('is inside the repository') });
+  });
+  it('from a worktree, the enclosing checkout is a repository too, and --out inside it is refused (sec minor 1)', () => {
+    const outer = realpathSync(tempDir('gmt-outer-'));
+    const inner = join(outer, '.worktrees', 'x');
+    const recorded = join(inner, 'packages', 'providers', 'fixtures', 'recorded');
+    mkdirSync(recorded, { recursive: true });
+    writeFileSync(join(outer, 'pnpm-workspace.yaml'), '');
+    writeFileSync(join(inner, 'pnpm-workspace.yaml'), '');
+    const roots = repositoryRoots(recorded);
+    expect(roots).toEqual([inner, outer]);
+    expect(recordingTarget(cli([...other, '--out', join(outer, 'tmp-rec')]), undefined, roots)).toEqual({
+      refusal: expect.stringContaining('is inside the repository'),
+    });
+    const outside = join(tempDir(), 'mine');
+    expect(recordingTarget(cli([...other, '--out', outside]), undefined, roots)).toEqual({
+      root: join(outside, 'fixtures', 'recorded'),
+      recordedBy: RECORDED_BY,
+    });
+  });
   it('another route without --out is refused', () => {
     expect(recordingTarget(cli(other), undefined)).toEqual({
       refusal: expect.stringContaining('holds only the worked example'),
@@ -6032,21 +6060,35 @@ export interface RunToolOptions {
   recording?: RecordingTarget;
 }
 
-/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
-export function repositoryRoot(): string {
-  let dir = defaultRecordedRoot();
-  while (!existsSync(join(dir, 'pnpm-workspace.yaml'))) {
+/**
+ * Every ancestor of the recorded tree holding pnpm-workspace.yaml, nearest first, as true-case real paths. why: run from
+ * a `.worktrees/` worktree, the enclosing main checkout is a repository too, and `--out` into it must be refused like
+ * `--out` into the worktree (sec minor 1). `realpathSync.native` returns the on-disk case, so a differently cased
+ * spelling on a case-insensitive file system (macOS APFS) cannot slip past the containment check.
+ */
+export function repositoryRoots(from: string = defaultRecordedRoot()): string[] {
+  const roots: string[] = [];
+  for (let dir = resolve(from); ; ) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) roots.push(realpathSync.native(dir));
     const up = dirname(dir);
-    if (up === dir) throw new Error('repository root not found above the recorded tree');
+    if (up === dir) break;
     dir = up;
   }
-  return realpathSync(dir);
+  if (roots.length === 0) throw new Error('repository root not found above the recorded tree');
+  return roots;
 }
 
-/** The real path of `p`, or of its nearest existing ancestor with the rest appended (for a directory not made yet). */
+/** The repository's root: the nearest ancestor of the committed recorded tree holding pnpm-workspace.yaml. */
+export function repositoryRoot(): string {
+  const [nearest] = repositoryRoots();
+  if (nearest === undefined) throw new Error('repository root not found above the recorded tree');
+  return nearest;
+}
+
+/** The true-case real path of `p`, or of its nearest existing ancestor with the rest appended (a directory not made yet). */
 function realOrAncestor(p: string): string {
   const abs = resolve(p);
-  if (existsSync(abs)) return realpathSync(abs);
+  if (existsSync(abs)) return realpathSync.native(abs);
   const up = dirname(abs);
   return up === abs ? abs : join(realOrAncestor(up), abs.slice(up.length + 1));
 }
@@ -6058,12 +6100,12 @@ function realOrAncestor(p: string): string {
 export function recordingTarget(
   cli: RecordCli,
   given: RecordingTarget | undefined,
+  roots?: readonly string[],
 ): RecordingTarget | { refusal: string } {
   if (given !== undefined) return given;
   if (cli.out !== null) {
     const out = realOrAncestor(cli.out);
-    const repo = repositoryRoot();
-    if (out === repo || out.startsWith(`${repo}${sep}`))
+    if ((roots ?? repositoryRoots()).some((repo) => out === repo || out.startsWith(`${repo}${sep}`)))
       return {
         refusal: `--out ${cli.out} is inside the repository; recordings of other routes stay outside it`,
       };
@@ -6332,7 +6374,7 @@ if (isEntryPoint()) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/tool.test.ts test/bootstrap/preflight.test.ts` and `pnpm --filter @gmt/providers test`
-Expected: 45 + 7 passed (the three read-only-directory cases are reported skipped when run as root); the providers suite passes (264). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
+Expected: 47 + 7 passed (the case-variant `--out` test is skipped on a case-sensitive file system; the three read-only-directory cases are reported skipped when run as root); the providers suite passes (264). If "takes over a stale app lock" fails, WP3's `AppLock` does not treat a heartbeat older than three beats as stale: a WP3 bug against spec §7, raise it.
 
 - [ ] **Step 5: Commit**
 
