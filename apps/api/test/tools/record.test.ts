@@ -530,7 +530,11 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(ports.db.raw.prepare('SELECT COUNT(*) AS n FROM search_executions').get()).toEqual({ n: 0 });
   });
 
-  it('priorToolCredits counts tool runs inside the SearchApi window only: lifetime on the trial, the billing month on 40usd (r2-ts-004)', async () => {
+  // why: it builds two real SQLite-backed ports and runs the recording tool twice against a real ledger; under full-suite
+  // load it once took 5,014 ms, past vitest's 5 s default, so it gets an explicit 15 s budget (coordinator ruling).
+  it('priorToolCredits counts tool runs inside the SearchApi window only: lifetime on the trial, the billing month on 40usd (r2-ts-004)', {
+    timeout: 15_000,
+  }, async () => {
     const clock = fixedClock(AT);
     const ports = seededPorts({ SEARCHAPI_PLAN: '40usd' }, clock);
     await runRecording({ ports });
