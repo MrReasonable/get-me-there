@@ -107,7 +107,61 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     expect(checkWorkedExampleTree(root, OK)).toContain('searchapi: step 1 is 27 nights, outside 10–21');
   });
 
-  it('rejects a body URL on a host outside the link allowlist', async () => {
+  it('rejects a search_metadata URL on a host other than www.searchapi.io (the host allowlist applies there)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          ...asObject(j.body),
+          search_metadata: { json_endpoint: 'https://evil.example/api/v1/searches/x.json' },
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'search_metadata URL host evil.example under json_endpoint',
+    );
+  });
+
+  it('accepts vendor body URLs on any https host: airline sites and gstatic images (ruling after the live run)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          ...asObject(j.body),
+          airline_logos: ['https://www.gstatic.com/flights/airline_logos/70px/EI.png'],
+          booking_options: [
+            {
+              book_with: 'Aer Lingus',
+              price: 603,
+              booking_request: { url: 'https://www.aerlingus.com/booking?lang=en&cabin=economy' },
+              baggage: { url: 'http://www.aerlingus.com/help/baggage/' },
+            },
+          ],
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toEqual([]);
+  });
+
+  it('rejects a plain-http body URL that carries a query', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          booking_options: [{ book_with: 'Aer Lingus', url: 'http://www.aerlingus.com/booking?lang=en' }],
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain('body URL under url is not https');
+  });
+
+  it('rejects a credential-shaped query parameter on an airline URL', async () => {
     const { root } = await runRecording();
     rewrite(
       root,
@@ -116,15 +170,17 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
         j.body = {
           booking_options: [
             {
-              book_with: 'OTA',
-              price: 573,
-              booking_request: { url: 'https://evil.example/book', post_data: 'u=ota' },
+              book_with: 'Aer Lingus',
+              price: 603,
+              booking_request: { url: 'https://www.aerlingus.com/booking?lang=en&api_key=abc12345' },
             },
           ],
         };
       },
     );
-    expect(checkWorkedExampleTree(root, OK)).toContain('body URL host evil.example under url');
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'body URL parameter api_key under url (www.aerlingus.com) is credential-shaped',
+    );
   });
 
   it('the stand-in tripwire matches only the marker, never ordinary prose (r3-ts-002)', () => {
@@ -150,7 +206,7 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
           ],
         };
       },
-      'www.google.com URL parameter tfs under url holds an opaque value',
+      'body URL parameter tfs under url (www.google.com) holds an opaque value',
     ],
     [
       'a body URL with userinfo',

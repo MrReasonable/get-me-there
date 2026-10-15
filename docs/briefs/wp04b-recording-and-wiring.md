@@ -7012,7 +7012,7 @@ git add apps/api/test && git commit -m "wp04b: sentinel secret scan over recorde
 
 **Interfaces:** consumes `verifyRecordedTree`, `loadRecorded`, `withContentHash`, `loadParamsAllowlist`, `assertRequestAllowed`, `defaultRecordedRoot`, `STANDIN_MARKER`, `runRecording`. Produces `checkWorkedExampleTree(root, { recordedBy, standInsAllowed, secrets? }): string[]`, the gate the live run must turn green.
 
-The check is a function of a root (r2-ts-002): proven green on a tree recorded from the stand-ins, and red on broken copies of it (a second session, a step-2 placeholder missing from step 1's body, an out-of-band step-1 cell, a body URL on a foreign host) and on the stand-ins signed as the real tool. Further negatives cover each remaining predicate: a `www.google.com` booking parameter holding an opaque value (the good tree's booking URL carries a recorder placeholder, so the accept branch runs too), a body URL with userinfo, a `search_metadata` URL with a query, a request with `stops`, and a second allowlist file; the stand-in tripwire is shown to match only its marker, never prose such as 'Outstanding legroom' (r3-ts-002, r3-ts-003). It lives in apps/api's test helpers because it names the worked example's airports, which `packages/providers/src` may not. The committed tree is one thin test calling it.
+The check is a function of a root (r2-ts-002): proven green on a tree recorded from the stand-ins, and red on broken copies of it (a second session, a step-2 placeholder missing from step 1's body, an out-of-band step-1 cell, a `search_metadata` URL on a foreign host) and on the stand-ins signed as the real tool. **URL rule (ruling 2026-10-15, after the live run found 75 gstatic image URLs and 18 airline-website URLs in vendor bodies):** the host allowlist applies only to `request.url` (the provider's own host) and to `search_metadata` URLs (`www.searchapi.io` or `www.google.com`, no query); every other body URL may be on any host but must carry no userinfo, no credential-shaped query parameter name (`api_key`, `*_token`, `session`, `sig`, …) and no opaque query value, and must be https, except a query-less `http://` information page (the live tree has three airline baggage pages like that), which carries no data. Further negatives cover each remaining predicate: a `www.google.com` booking parameter holding an opaque value (the good tree's booking URL carries a recorder placeholder, so the accept branch runs too), a body URL with userinfo, a `search_metadata` URL with a query, a credential-shaped query parameter on an airline URL, a plain-http body URL with a query, a request with `stops`, and a second allowlist file; one positive accepts airline and gstatic URLs on any host; the stand-in tripwire is shown to match only its marker, never prose such as 'Outstanding legroom' (r3-ts-002, r3-ts-003). It lives in apps/api's test helpers because it names the worked example's airports, which `packages/providers/src` may not. The committed tree is one thin test calling it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7127,7 +7127,61 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     expect(checkWorkedExampleTree(root, OK)).toContain('searchapi: step 1 is 27 nights, outside 10–21');
   });
 
-  it('rejects a body URL on a host outside the link allowlist', async () => {
+  it('rejects a search_metadata URL on a host other than www.searchapi.io (the host allowlist applies there)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          ...asObject(j.body),
+          search_metadata: { json_endpoint: 'https://evil.example/api/v1/searches/x.json' },
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'search_metadata URL host evil.example under json_endpoint',
+    );
+  });
+
+  it('accepts vendor body URLs on any https host: airline sites and gstatic images (ruling after the live run)', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          ...asObject(j.body),
+          airline_logos: ['https://www.gstatic.com/flights/airline_logos/70px/EI.png'],
+          booking_options: [
+            {
+              book_with: 'Aer Lingus',
+              price: 603,
+              booking_request: { url: 'https://www.aerlingus.com/booking?lang=en&cabin=economy' },
+              baggage: { url: 'http://www.aerlingus.com/help/baggage/' },
+            },
+          ],
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toEqual([]);
+  });
+
+  it('rejects a plain-http body URL that carries a query', async () => {
+    const { root } = await runRecording();
+    rewrite(
+      root,
+      (f) => q(f, 'booking_token') !== null && f.status === 200,
+      (j) => {
+        j.body = {
+          booking_options: [{ book_with: 'Aer Lingus', url: 'http://www.aerlingus.com/booking?lang=en' }],
+        };
+      },
+    );
+    expect(checkWorkedExampleTree(root, OK)).toContain('body URL under url is not https');
+  });
+
+  it('rejects a credential-shaped query parameter on an airline URL', async () => {
     const { root } = await runRecording();
     rewrite(
       root,
@@ -7136,15 +7190,17 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
         j.body = {
           booking_options: [
             {
-              book_with: 'OTA',
-              price: 573,
-              booking_request: { url: 'https://evil.example/book', post_data: 'u=ota' },
+              book_with: 'Aer Lingus',
+              price: 603,
+              booking_request: { url: 'https://www.aerlingus.com/booking?lang=en&api_key=abc12345' },
             },
           ],
         };
       },
     );
-    expect(checkWorkedExampleTree(root, OK)).toContain('body URL host evil.example under url');
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'body URL parameter api_key under url (www.aerlingus.com) is credential-shaped',
+    );
   });
 
   it('the stand-in tripwire matches only the marker, never ordinary prose (r3-ts-002)', () => {
@@ -7170,7 +7226,7 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
           ],
         };
       },
-      'www.google.com URL parameter tfs under url holds an opaque value',
+      'body URL parameter tfs under url (www.google.com) holds an opaque value',
     ],
     [
       'a body URL with userinfo',
@@ -7320,11 +7376,16 @@ const nights = (f: RecordedFixture): number =>
   (Date.parse(`${q(f, 'return_date')}T00:00:00Z`) - Date.parse(`${q(f, 'outbound_date')}T00:00:00Z`)) /
   86_400_000;
 
-/** Every string inside a JSON value, with the key it sits under. */
-function strings(v: unknown, key = ''): Array<{ key: string; value: string }> {
-  if (typeof v === 'string') return [{ key, value: v }];
-  if (Array.isArray(v)) return v.flatMap((x) => strings(x, key));
-  if (typeof v === 'object' && v !== null) return Object.entries(v).flatMap(([k, x]) => strings(x, k));
+/** Every string inside a JSON value, with the key it sits under and whether it lies inside `search_metadata`. */
+function strings(
+  v: unknown,
+  key = '',
+  inMetadata = false,
+): Array<{ key: string; value: string; inMetadata: boolean }> {
+  if (typeof v === 'string') return [{ key, value: v, inMetadata }];
+  if (Array.isArray(v)) return v.flatMap((x) => strings(x, key, inMetadata));
+  if (typeof v === 'object' && v !== null)
+    return Object.entries(v).flatMap(([k, x]) => strings(x, k, inMetadata || k === 'search_metadata'));
   return [];
 }
 
@@ -7335,6 +7396,14 @@ export function holdsStandInMarker(text: string): boolean {
 
 /** A query value that looks like an opaque token rather than a placeholder or a short code (sec2-005). */
 const OPAQUE = /^[A-Za-z0-9_-]{24,}$/;
+/** A query parameter name that carries a credential (api_key, access_token, session_id, password, sig, …). */
+const CREDENTIAL_NAME =
+  /(?:^|[_-])(?:key|apikey|token|secret|password|passwd|pwd|auth|authorization|signature|sig|session|sessionid|sid)$/i;
+/** The one host each provider's requests go to (spec §5.3 egress). */
+const REQUEST_HOST: Readonly<Record<string, string>> = {
+  travelpayouts: 'api.travelpayouts.com',
+  searchapi: 'www.searchapi.io',
+};
 
 /**
  * Every way `root` differs from the worked example's recorded tree (brief WP4b section 7); empty = conforming.
@@ -7487,19 +7556,43 @@ export function checkWorkedExampleTree(
       fail(`${provider} allowlist: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  // Host allowlist: only for request URLs and search_metadata URLs (ruling 2026-10-15 after the live run). Vendor body
+  // URLs elsewhere (airline sites in booking options, gstatic logos and thumbnails) may be on any host, but carry no
+  // userinfo and no credential-shaped or opaque query parameter, and must be https. why: one exception, found in the live
+  // recording: an airline's plain `http://` information page (baggage rules) with no query carries no data, so it passes.
+  for (const f of all) {
+    const req = new URL(f.request.url);
+    if (req.protocol !== 'https:' || req.host !== REQUEST_HOST[f.providerId])
+      fail(`request URL host ${req.host} on a ${f.providerId} file`);
+  }
   for (const f of all)
-    for (const { key, value } of strings(f.body)) {
-      if (!/^https?:\/\//i.test(value)) continue;
-      const u = new URL(value);
-      if (u.host !== 'www.google.com' && u.host !== 'www.searchapi.io')
-        fail(`body URL host ${u.host} under ${key}`);
+    for (const { key, value, inMetadata } of strings(f.body)) {
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) continue;
+      let u: URL;
+      try {
+        u = new URL(value);
+      } catch {
+        fail(`unparseable body URL under ${key}`);
+        continue;
+      }
       if (u.username !== '' || u.password !== '') fail(`body URL with userinfo under ${key}`);
-      if (u.host === 'www.searchapi.io' && u.search !== '')
-        fail(`search_metadata URL with a query under ${key}`);
-      if (u.host === 'www.google.com')
-        for (const [name, v] of u.searchParams)
-          if (OPAQUE.test(v) && !v.startsWith('<'))
-            fail(`www.google.com URL parameter ${name} under ${key} holds an opaque value`);
+      if (inMetadata) {
+        // why: search_metadata.request_url names the Google Flights page the vendor read (query stripped by the recorder)
+        if (u.host !== 'www.searchapi.io' && u.host !== 'www.google.com')
+          fail(`search_metadata URL host ${u.host} under ${key}`);
+        if (u.search !== '') fail(`search_metadata URL with a query under ${key}`);
+        continue;
+      }
+      if (u.protocol !== 'https:' && !(u.protocol === 'http:' && u.search === ''))
+        fail(`body URL under ${key} is not https`);
+      for (const [name, v] of u.searchParams) {
+        // why: a recorder placeholder (<key:n@session>) is the redacted form of an opaque value, never the value itself
+        if (v.startsWith('<')) continue;
+        if (CREDENTIAL_NAME.test(name))
+          fail(`body URL parameter ${name} under ${key} (${u.host}) is credential-shaped`);
+        else if (OPAQUE.test(v))
+          fail(`body URL parameter ${name} under ${key} (${u.host}) holds an opaque value`);
+      }
     }
   return problems;
 }
@@ -7508,7 +7601,7 @@ export function checkWorkedExampleTree(
 - [ ] **Step 4: Run to verify**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/recorded` and `pnpm --filter @gmt/api test`
-Expected: `workedExampleTree.test.ts` 15 passed (the negatives added for plan decisions 29 and 31); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 21` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 184 passed (185), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
+Expected: `workedExampleTree.test.ts` 18 passed (the negatives added for plan decisions 29 and 31 and the body-URL ruling); `manifest.test.ts` 1 failed, its problem list starting with the verifier's and `travelpayouts: 0 recordings, expected at least 21` (the committed tree holds only `.gitkeep`). The package suite: 1 failed | 184 passed (185), the one failure being `test/recorded/manifest.test.ts`; every other row of section 12 is green. This is the pre-handoff state (r2-ts-012).
 
 - [ ] **Step 5: Commit the check, not the gate**
 
@@ -7564,9 +7657,9 @@ git add apps/api/test/helpers/workedExampleTree.ts apps/api/test/recorded/worked
    - [ ] `search_metadata` URL fields (`request_url`, `json_endpoint`, …) keep their keys, and every such URL has no `?` and no `user:pass@`.
    - [ ] Every `departure_token` and `booking_token`, in request URLs and in bodies, has the form `<departure_token:n@<session>>` / `<booking_token:n@<session>>`, where `<session>` equals the file's `session`, the same in every file; the step-2 and step-3 request placeholders appear in the previous step's body.
    - [ ] `responseHeaders` holds only `content-type`, `retry-after`, `x-ratelimit-*` or `ratelimit-*`.
-   - [ ] No personal data: no operator name, email or account id, no location other than the worked example's airports and the carriers' own data. No opaque id other than the vendor's search ids; any query parameter on a `www.google.com` booking URL is noted in the PR (the manifest refuses opaque values there).
+   - [ ] No personal data: no operator name, email or account id, no location other than the worked example's airports and the carriers' own data. No opaque id other than the vendor's search ids; any query parameter on a body URL (airline sites, `www.google.com` booking links) is noted in the PR; the manifest refuses opaque values and credential-shaped names on every body URL.
    - [ ] `recordedBy` is `@gmt/api record:fixtures` on every file.
-   - [ ] Booking URLs in step-3 bodies are `https://www.google.com/…` (spec §5.2 link allowlist).
+   - [ ] Body URLs: `request.url` is on the provider's own host; `search_metadata` URLs are on `www.searchapi.io` or `www.google.com` with no query; booking-option and image URLs may be on any host (airline sites, `www.gstatic.com`) but are https (a query-less `http://` information page aside), with no userinfo and no credential-shaped or opaque query parameter. Note in the PR which hosts appear (the web app's own link allowlist, spec §5.2, still governs what it renders as a link).
    - [ ] File count: 21 Travelpayouts (+ one per extra page) and 6 SearchApi recordings, plus `travelpayouts/params-<date>.json` and `searchapi/params-<date>.json`.
 
    If any item fails, delete every file of the session and its allowlists, fix the cause in a follow-up (a recorder issue goes to WP4's owner), and re-run only with Ian's agreement (Step 1).

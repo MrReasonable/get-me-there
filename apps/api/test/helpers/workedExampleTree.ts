@@ -12,11 +12,16 @@ const nights = (f: RecordedFixture): number =>
   (Date.parse(`${q(f, 'return_date')}T00:00:00Z`) - Date.parse(`${q(f, 'outbound_date')}T00:00:00Z`)) /
   86_400_000;
 
-/** Every string inside a JSON value, with the key it sits under. */
-function strings(v: unknown, key = ''): Array<{ key: string; value: string }> {
-  if (typeof v === 'string') return [{ key, value: v }];
-  if (Array.isArray(v)) return v.flatMap((x) => strings(x, key));
-  if (typeof v === 'object' && v !== null) return Object.entries(v).flatMap(([k, x]) => strings(x, k));
+/** Every string inside a JSON value, with the key it sits under and whether it lies inside `search_metadata`. */
+function strings(
+  v: unknown,
+  key = '',
+  inMetadata = false,
+): Array<{ key: string; value: string; inMetadata: boolean }> {
+  if (typeof v === 'string') return [{ key, value: v, inMetadata }];
+  if (Array.isArray(v)) return v.flatMap((x) => strings(x, key, inMetadata));
+  if (typeof v === 'object' && v !== null)
+    return Object.entries(v).flatMap(([k, x]) => strings(x, k, inMetadata || k === 'search_metadata'));
   return [];
 }
 
@@ -27,6 +32,14 @@ export function holdsStandInMarker(text: string): boolean {
 
 /** A query value that looks like an opaque token rather than a placeholder or a short code (sec2-005). */
 const OPAQUE = /^[A-Za-z0-9_-]{24,}$/;
+/** A query parameter name that carries a credential (api_key, access_token, session_id, password, sig, …). */
+const CREDENTIAL_NAME =
+  /(?:^|[_-])(?:key|apikey|token|secret|password|passwd|pwd|auth|authorization|signature|sig|session|sessionid|sid)$/i;
+/** The one host each provider's requests go to (spec §5.3 egress). */
+const REQUEST_HOST: Readonly<Record<string, string>> = {
+  travelpayouts: 'api.travelpayouts.com',
+  searchapi: 'www.searchapi.io',
+};
 
 /**
  * Every way `root` differs from the worked example's recorded tree (brief WP4b section 7); empty = conforming.
@@ -179,19 +192,43 @@ export function checkWorkedExampleTree(
       fail(`${provider} allowlist: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  // Host allowlist: only for request URLs and search_metadata URLs (ruling 2026-10-15 after the live run). Vendor body
+  // URLs elsewhere (airline sites in booking options, gstatic logos and thumbnails) may be on any host, but carry no
+  // userinfo and no credential-shaped or opaque query parameter, and must be https. why: one exception, found in the live
+  // recording: an airline's plain `http://` information page (baggage rules) with no query carries no data, so it passes.
+  for (const f of all) {
+    const req = new URL(f.request.url);
+    if (req.protocol !== 'https:' || req.host !== REQUEST_HOST[f.providerId])
+      fail(`request URL host ${req.host} on a ${f.providerId} file`);
+  }
   for (const f of all)
-    for (const { key, value } of strings(f.body)) {
-      if (!/^https?:\/\//i.test(value)) continue;
-      const u = new URL(value);
-      if (u.host !== 'www.google.com' && u.host !== 'www.searchapi.io')
-        fail(`body URL host ${u.host} under ${key}`);
+    for (const { key, value, inMetadata } of strings(f.body)) {
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) continue;
+      let u: URL;
+      try {
+        u = new URL(value);
+      } catch {
+        fail(`unparseable body URL under ${key}`);
+        continue;
+      }
       if (u.username !== '' || u.password !== '') fail(`body URL with userinfo under ${key}`);
-      if (u.host === 'www.searchapi.io' && u.search !== '')
-        fail(`search_metadata URL with a query under ${key}`);
-      if (u.host === 'www.google.com')
-        for (const [name, v] of u.searchParams)
-          if (OPAQUE.test(v) && !v.startsWith('<'))
-            fail(`www.google.com URL parameter ${name} under ${key} holds an opaque value`);
+      if (inMetadata) {
+        // why: search_metadata.request_url names the Google Flights page the vendor read (query stripped by the recorder)
+        if (u.host !== 'www.searchapi.io' && u.host !== 'www.google.com')
+          fail(`search_metadata URL host ${u.host} under ${key}`);
+        if (u.search !== '') fail(`search_metadata URL with a query under ${key}`);
+        continue;
+      }
+      if (u.protocol !== 'https:' && !(u.protocol === 'http:' && u.search === ''))
+        fail(`body URL under ${key} is not https`);
+      for (const [name, v] of u.searchParams) {
+        // why: a recorder placeholder (<key:n@session>) is the redacted form of an opaque value, never the value itself
+        if (v.startsWith('<')) continue;
+        if (CREDENTIAL_NAME.test(name))
+          fail(`body URL parameter ${name} under ${key} (${u.host}) is credential-shaped`);
+        else if (OPAQUE.test(v))
+          fail(`body URL parameter ${name} under ${key} (${u.host}) holds an opaque value`);
+      }
     }
   return problems;
 }
