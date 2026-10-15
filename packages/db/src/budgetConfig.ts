@@ -17,7 +17,12 @@ export function effectiveCallCap(b: ProviderLimits & { trialUsed: number }): num
   return b.window === 'lifetime' ? Math.max(0, b.monthlyCallCap - b.trialUsed) : b.monthlyCallCap;
 }
 
-/** The fixture provider's guard entry: billable at the configured test rate, a finite test cap (no config field exists for it). */
+/**
+ * The fixture provider's guard entry, fixture-only: billable at the configured test rate, a finite test cap (no
+ * config field exists for it). why: the guard reads only monthlyCallCap, window, billingDay, costPerCallMicroGbp and
+ * planFixedMicroGbp; the rate, concurrency, TTL and schedule values exist only to satisfy ProviderLimits, describe no
+ * real vendor, and never reach the ledger (the fixture's ledger cost is `FIXTURE_COST_MICRO_GBP`, set below; arch-M5).
+ */
 const FIXTURE_LIMITS: ProviderLimits = {
   monthlyCallCap: 100_000,
   window: 'month',

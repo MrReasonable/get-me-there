@@ -121,4 +121,26 @@ describe('budgetConfigFromConfig (spec §12 presets)', () => {
       ).providers.fixture,
     ).toBeUndefined();
   });
+
+  it('the fixture entry’s invented limits never reach the ledger: a row carries only the configured test rate (arch-M5)', () => {
+    const b = budgetConfigFromConfig(
+      parse({ ...base, FIXTURE_COST_MICRO_GBP: '3200', MONTHLY_SPEND_CAP_PENCE: '100' }),
+    );
+    const db = freshDb();
+    const guard = new SqliteBudgetGuard(db, b, fixedClock(T0));
+    const call = {
+      providerId: 'fixture',
+      executionId: null,
+      tileIndex: 0,
+      httpAttempt: 1,
+      endpointPath: '/fixture',
+    } as const;
+    guard
+      .reserve({ ...call, costMicroGbp: 3200 })
+      .finalise({ outcome: 'ok', httpStatus: 200, durationMs: 1 });
+    expect(() => guard.reserve({ ...call, costMicroGbp: 0 })).toThrow(/3200/);
+    expect(
+      db.raw.prepare('SELECT provider_id, cost_micro_gbp, billable FROM provider_requests').all(),
+    ).toEqual([{ provider_id: 'fixture', cost_micro_gbp: 3200, billable: 1 }]);
+  });
 });
