@@ -36,6 +36,9 @@ export function dedupKey(identityKey: string, pricePence: number): string {
   return `${identityKey}|${Math.floor(pricePence / 100)}`;
 }
 
+/** The cooldown verdict: the reason is present exactly when the firing is suppressed. */
+export type Suppression = { suppressed: false; reason: null } | { suppressed: true; reason: string };
+
 /**
  * Spec §6.8 cooldown. `prior` is this rule's *sent* firings (the engine's query excludes failed
  * and suppressed events, so a failed send is retried next run). Within `cooldownHours` before
@@ -50,7 +53,7 @@ export function isSuppressed(
   prior: PriorFiring[],
   cooldownHours: number,
   now: IsoDateTime,
-): { suppressed: boolean; reason: string | null } {
+): Suppression {
   const recent = prior.filter((p) => hoursSince(p.firedAt, now) < cooldownHours);
   const same = recent.find((p) => p.dedupKey === f.dedupKey);
   if (same !== undefined) {

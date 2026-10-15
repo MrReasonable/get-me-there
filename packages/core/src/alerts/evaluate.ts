@@ -2,7 +2,7 @@ import { formatPence } from '../text/money.js';
 import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { Cabin, ProviderId } from '../types/provenance.js';
-import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf } from './dedup.js';
+import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf, type Suppression } from './dedup.js';
 
 /**
  * Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. The one
@@ -115,7 +115,7 @@ export function evaluateAlertRules(
       const j = judge(rule, c, ctx);
       if (j === null) continue;
       const key = dedupKey(id, priceOf(c).pricePence);
-      const verdict = j.isNew
+      const verdict: Suppression = j.isNew
         ? { suppressed: false, reason: null }
         : isSuppressed({ identityKey: id, dedupKey: key, candidate: c }, prior, rule.cooldownHours, ctx.now);
       out.push({
@@ -124,7 +124,7 @@ export function evaluateAlertRules(
         identityKey: id,
         dedupKey: key,
         ...j,
-        suppressed: verdict.reason === null ? null : { reason: verdict.reason },
+        suppressed: verdict.suppressed ? { reason: verdict.reason } : null,
       });
     }
   }
