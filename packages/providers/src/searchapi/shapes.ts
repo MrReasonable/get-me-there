@@ -58,6 +58,8 @@ export const bookingOptionSchema = z.object({
   booking_request: z.object({ url: z.string(), post_data: z.string() }).optional(),
   booking_phone: z.string().optional(),
   is_split_booking: z.boolean().optional(),
+  /** The designators the seller lists, one per flight in step-1 then step-2 order (recorded 2026-10-15). */
+  flight_numbers: z.array(z.string()).optional(),
 });
 /** Step 3 (`booking_token`). */
 export const bookingResponseSchema = z.object({

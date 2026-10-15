@@ -1,6 +1,18 @@
 // pending-fixtures: every test here replays or reads WP4b's recordings and fails with a "pending-fixtures" message
 // until they land (WP5 depends on WP4b). No other test file needs them.
-import { addDays, asIata, asIsoDate, daysBetween, type ItineraryQuery, type SuppliedField } from '@gmt/core';
+import {
+  addDays,
+  asIata,
+  asIsoDate,
+  canonicalCarrier,
+  canonicalFlightNumber,
+  daysBetween,
+  type ItineraryQuery,
+  itineraryHash,
+  type RawOffer,
+  type RawSegment,
+  type SuppliedField,
+} from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allowlist.js';
 import { fetchCalendarTile, outboundBlockDays, planRectangles } from '../../src/searchapi/calendar.js';
@@ -222,6 +234,43 @@ describe('recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) �
         res.offers.some((o) => o.seller === b.book_with?.trim() && o.amountMinor === minor(b.price ?? 0)),
       ).toBe(true);
     }
+    // Codeshares (review pie I-1): each verified offer flies the designators its seller lists, the step-2 carrier
+    // operating where they differ, so the itinerary identity (spec §6.4, marketing flights) separates the listings.
+    const listedBy = new Map(
+      step3s
+        .flatMap(bookings)
+        .flatMap((b) =>
+          b.book_with === undefined || b.flight_numbers === undefined
+            ? []
+            : [[b.book_with.trim(), b.flight_numbers]],
+        ),
+    );
+    const verified = res.offers.filter((o) => o.verified);
+    for (const o of verified) {
+      const segs = [...o.outbound, ...o.inbound];
+      expect(segs.map((x) => `${x.marketingCarrier} ${x.flightNumber}`)).toEqual(listedBy.get(o.seller));
+      const step2Carrier = flights(step1)
+        .flatMap((x) => x.flights)[0]
+        ?.flight_number.split(' ')[0];
+      for (const x of segs)
+        expect(x.operatingCarrier).toBe(x.marketingCarrier === step2Carrier ? undefined : step2Carrier);
+    }
+    const hashOf = (o: RawOffer) => {
+      const h = (x: RawSegment) => ({
+        marketingCarrier: canonicalCarrier(x.marketingCarrier),
+        flightNumber: canonicalFlightNumber(x.flightNumber, canonicalCarrier(x.marketingCarrier)),
+        from: x.from,
+        to: x.to,
+        departLocal: x.depart,
+      });
+      return itineraryHash(o.outbound.map(h), o.inbound.map(h));
+    };
+    const carriers = new Set(verified.map((o) => o.outbound[0]?.marketingCarrier));
+    expect(new Set(verified.map(hashOf)).size).toBe(carriers.size);
+    expect(carriers.size).toBeGreaterThan(1); // the recording lists EI, AA and BA designators
+    expect(res.notes).toContain(
+      `codeshare-listing-step3:${verified.filter((o) => o.outbound[0]?.operatingCarrier !== undefined).length}`,
+    );
     // decision 27: an offer is verified exactly when a recorded step-3 seller listing confirmed it.
     const listed = step3s
       .flatMap(bookings)

@@ -19,14 +19,20 @@ const FLIGHT_RE = /^([A-Z][A-Z0-9]|[0-9][A-Z])\s*(\d{1,4})$/;
  * only brand mint site; a vendor place id that is not an IATA code returns null and the caller drops and counts
  * the option.
  */
+/** A vendor designator split at core's rule, or passed whole (both parts) so core rejects it as unmappable. */
+function splitDesignator(raw: string): { carrier: string; number: string } {
+  const m = FLIGHT_RE.exec(raw.trim().toUpperCase());
+  return { carrier: m?.[1] ?? raw, number: m?.[2] ?? raw };
+}
+
 export function toRawSegment(s: VendorSegment): RawSegment | null {
   const from = iataSchema.safeParse(s.departure_airport.id);
   const to = iataSchema.safeParse(s.arrival_airport.id);
   if (!from.success || !to.success) return null;
-  const m = FLIGHT_RE.exec(s.flight_number.trim().toUpperCase());
+  const d = splitDesignator(s.flight_number);
   const seg: RawSegment = {
-    marketingCarrier: m?.[1] ?? s.flight_number,
-    flightNumber: m?.[2] ?? s.flight_number,
+    marketingCarrier: d.carrier,
+    flightNumber: d.number,
     from: from.data,
     to: to.data,
     depart: `${s.departure_airport.date}T${s.departure_airport.time}`,
@@ -65,10 +71,58 @@ export interface Pairing {
   inbound: RawSegment[];
 }
 
+/** Same flight: same carrier and the same number (leading zeros aside, as core canonicalises them). */
+function sameDesignator(seg: RawSegment, listed: { carrier: string; number: string }): boolean {
+  if (seg.marketingCarrier !== listed.carrier) return false;
+  const a = /^\d+$/.test(seg.flightNumber) ? Number(seg.flightNumber) : seg.flightNumber;
+  const b = /^\d+$/.test(listed.number) ? Number(listed.number) : listed.number;
+  return a === b;
+}
+
+/**
+ * The pairing's legs as one seller lists them. A codeshare seller sells the same physical flights under its own
+ * designators (recorded 2026-10-15: Aer Lingus lists EI 381/111/110/380, American AA 8059/8317/8316/8060, British
+ * Airways BA 5941/6131/6130/5940 for one pairing). Each listed designator becomes the segment's marketing carrier and
+ * flight number, and the step-2 carrier the operating one where they differ, so identity hashes on the flights the
+ * seller sells (spec §6.4: codeshares hash on the marketing carrier). The spec's Segment has no operating flight
+ * number, so only the operating carrier is kept. Null when the listing has a different number of flights: another
+ * itinerary, never this pairing's fare.
+ */
+function listedLegs(
+  p: Pairing,
+  listed: readonly string[] | undefined,
+  notes: NoteCounter,
+): { outbound: RawSegment[]; inbound: RawSegment[] } | null {
+  if (listed === undefined) return { outbound: p.outbound, inbound: p.inbound };
+  if (listed.length !== p.outbound.length + p.inbound.length) {
+    notes.add('itinerary-mismatch-step3');
+    return null;
+  }
+  let codeshare = false;
+  const relabel = (seg: RawSegment, i: number): RawSegment => {
+    const raw = listed[i];
+    if (raw === undefined) return seg;
+    const d = splitDesignator(raw);
+    if (sameDesignator(seg, d)) return seg;
+    codeshare = true;
+    return {
+      ...seg,
+      marketingCarrier: d.carrier,
+      flightNumber: d.number,
+      operatingCarrier: seg.marketingCarrier,
+    };
+  };
+  const outbound = p.outbound.map((seg, i) => relabel(seg, i));
+  const inbound = p.inbound.map((seg, i) => relabel(seg, p.outbound.length + i));
+  if (codeshare) notes.add('codeshare-listing-step3');
+  return { outbound, inbound };
+}
+
 /**
  * Step-3 booking options as offers (spec §5.4): each usable option is its own offer, `verified: true`, with its
- * `book_with` seller, `baggage_prices` as baggage notes and its booking POST. Split bookings, unpriced options and options naming no
- * seller are skipped and counted; a price the shared `majorToMinor` refuses is dropped and counted.
+ * `book_with` seller, `baggage_prices` as baggage notes, its booking POST, and the flights it lists (`listedLegs`: a
+ * codeshare listing is its own itinerary). Split bookings, unpriced options, options naming no seller and listings of
+ * another itinerary are skipped and counted; a price the shared `majorToMinor` refuses is dropped and counted.
  */
 export function bookingOffers(
   p: Pairing,
@@ -92,6 +146,8 @@ export function bookingOffers(
       notes.add('no-seller-skipped-step3');
       continue;
     }
+    const legs = listedLegs(p, b.flight_numbers, notes);
+    if (legs === null) continue;
     const { minor: amountMinor } = minorOrDrop(b.price, currency, notes);
     if (amountMinor === null) continue;
     let booking: RawOffer['booking'] = { kind: 'none' };
@@ -104,8 +160,8 @@ export function bookingOffers(
         ? { notes: [...b.baggage_prices] }
         : undefined;
     offers.push({
-      outbound: p.outbound,
-      inbound: p.inbound,
+      outbound: legs.outbound,
+      inbound: legs.inbound,
       seller,
       requestedCabin: p.cabin,
       amountMinor,

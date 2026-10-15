@@ -176,3 +176,60 @@ describe('step3NamesAirline (spec §5.4 price-source rule), synthetic', () => {
     expect(step3NamesAirline([], 'Synthetic Air One')).toBe(false);
   });
 });
+
+describe('bookingOffers codeshare listings (spec §6.4 identity on marketing flights; ruling on review pie I-1), synthetic', () => {
+  it('a listing naming the pairing flights keeps the step-2 segments, with no operating carrier and no note (synthetic)', () => {
+    const notes = new NoteCounter();
+    const [o] = bookingOffers(
+      pairing,
+      options([{ ...agent(573), flight_numbers: ['X1 100', 'X1 101'] }]),
+      'GBP',
+      notes,
+    );
+    expect(o?.outbound).toEqual(out);
+    expect(o?.inbound).toEqual(inb);
+    expect(o?.outbound[0]?.operatingCarrier).toBeUndefined();
+    expect(notes.list()).toEqual([]);
+  });
+
+  it('a codeshare listing carries the seller-listed marketing flights; the step-2 carrier becomes the operating carrier (synthetic)', () => {
+    const notes = new NoteCounter();
+    const [o] = bookingOffers(
+      pairing,
+      options([{ ...agent(590, 'Synthetic Partner Air'), flight_numbers: ['Y2 5941', 'X1 101'] }]),
+      'GBP',
+      notes,
+    );
+    expect(o?.outbound).toEqual([
+      { ...out[0], marketingCarrier: 'Y2', flightNumber: '5941', operatingCarrier: 'X1' },
+    ]);
+    // why: a leg the seller lists under the step-2 designator is not a codeshare and stays as step 2 gave it.
+    expect(o?.inbound).toEqual(inb);
+    expect(notes.list()).toEqual(['codeshare-listing-step3:1']);
+  });
+
+  it('the split of a listed designator agrees with core, so the codeshare itinerary hashes on the listed flights (synthetic)', () => {
+    const [o] = bookingOffers(
+      pairing,
+      options([{ ...agent(590), flight_numbers: ['Y2 5941', 'Y2 5940'] }]),
+      'GBP',
+      new NoteCounter(),
+    );
+    const s = o?.outbound[0];
+    if (s === undefined) throw new Error('segment');
+    expect(canonicalFlightNumber(s.flightNumber, canonicalCarrier(s.marketingCarrier))).toBe(5941);
+    expect(o?.inbound[0]).toMatchObject({
+      marketingCarrier: 'Y2',
+      flightNumber: '5940',
+      operatingCarrier: 'X1',
+    });
+  });
+
+  it('a listing whose flight count differs from the pairing is another itinerary: dropped and counted (synthetic)', () => {
+    const notes = new NoteCounter();
+    expect(
+      bookingOffers(pairing, options([{ ...agent(590), flight_numbers: ['Y2 5941'] }]), 'GBP', notes),
+    ).toEqual([]);
+    expect(notes.list()).toEqual(['itinerary-mismatch-step3:1']);
+  });
+});
