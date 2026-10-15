@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 13.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 14.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -405,9 +405,9 @@ export class AbortedError extends Error {}
   `/aviasales/v3/prices_for_dates` with `departure_at=YYYY-MM`,
   `one_way=false`, `currency=gbp`, `limit=1000`, no `return_at`; the query
   stays per (origin, destination) pair and `origin` is the pair's origin
-  airport's metropolitan code when the airports table maps it to one, else
-  the airport; rows are attributed by `origin_airport` and filtered to the
-  pair and the nights band. Logical tiles per scan: `O × D × M`; identical
+  airport's metropolitan code when two or more of the definition's origins
+  map to that metro (§2), else the airport code; rows are attributed by
+  `origin_airport` and filtered to the pair and the nights band. Logical tiles per scan: `O × D × M`; identical
   metro requests from sibling pairs are answered by the response cache
   inside its TTL, so upstream calls are `D × M` with a shared metro (the
   worked example: 2 origins sharing LON × 2 destinations × 7 months = 28
@@ -1612,6 +1612,12 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 14: metro query rule (2026-10-15)
+
+§5.2: the Travelpayouts query uses the metro code only when two or more of
+the definition's origins map to that metro, matching the §2 provider table;
+a lone airport is queried by its own code.
 
 ### Revision 13: placeholder format (2026-10-15)
 
