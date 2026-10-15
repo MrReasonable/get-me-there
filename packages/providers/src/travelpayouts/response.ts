@@ -143,7 +143,9 @@ function parseLink(link: unknown): URL | null {
     return null;
   }
   try {
-    return new URL(link, AVIASALES_BASE);
+    const url = new URL(link, AVIASALES_BASE);
+    // why: the WHATWG parser strips tabs and newlines, so `/\t/evil` passes the prefix checks and parses as another host.
+    return url.origin === AVIASALES_BASE ? url : null;
   } catch {
     return null;
   }
@@ -293,8 +295,6 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       notes.add('dropped-outside-tile');
       continue;
     }
-    // why: an airport query is a round trip from that airport (decision 35); a row returning elsewhere is not the
-    // cell's trip, so it is dropped and reported rather than priced.
     // why: a link that looks site-relative but cannot be read (`//host`, `/\`, an unparsable value) is a malformed
     // row for its cell, reported rather than thrown (decision 35).
     if (typeof row.link === 'string' && row.link.startsWith('/') && parseLink(row.link) === null) {
@@ -302,6 +302,8 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       droppedFor(key, cell).badLink += 1;
       continue;
     }
+    // why: an airport query is the closed round trip origin → destination → origin (decision 35); a row whose outbound
+    // or return starts or ends at another airport is not the cell's trip, so it is dropped and reported rather than priced.
     const trip = itineraryOf(row.link);
     if (trip !== null && !isClosed(trip, input.origin, input.destination)) {
       notes.add('offers-dropped');

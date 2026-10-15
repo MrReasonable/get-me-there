@@ -456,7 +456,14 @@ describe('closed round trips only (decision 35): an open-jaw row, on either end,
 });
 
 describe('a malformed vendor link never throws (one guarded parser for vendorLinkFor, searchedAt and itineraryOf)', () => {
-  it.each(['//[', '/\\[', '//evil.example/x', '/\\evil.example/x'])('link %j', (link) => {
+  it.each([
+    '//[',
+    '/\\[',
+    '//evil.example/x',
+    '/\\evil.example/x',
+    '/\t/evil.example/x',
+    '/\n/evil.example/x',
+  ])('link %j', (link) => {
     expect(vendorLinkFor(link)).toBeNull();
     expect(searchedAt(link)).toBeNull();
     expect(itineraryOf(link)).toBeNull();
