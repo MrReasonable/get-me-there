@@ -365,16 +365,41 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     expect(count(db, 'calendar_prices')).toBe(1);
   });
 
-  it('supersedeReused deletes only the reused row', () => {
+  it('a fresh tile write deletes only the reused row (supersede happens inside writeTile)', () => {
     const { db, clock, cells, prices, definition } = world();
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
     cells.copyReused(c, 'travelpayouts', ask(prices, definition.id, [P]));
-    prices.supersedeReused(c, 'travelpayouts', P);
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual(
+      { n: 1 },
+    );
+    cells.writeTile(c, 'travelpayouts', {
+      tileIndex: 0,
+      cells: [P],
+      prices: [],
+      outcomes: [
+        {
+          ...P,
+          status: 'empty',
+          reason: null,
+          lastError: null,
+          fetchedAt: clock.now(),
+          minPence: null,
+          cabin: 'economy',
+          pointOfSale: 'unknown',
+          sourceKind: 'authorised-cached',
+        },
+      ],
+      discards: 0,
+    });
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM calendar_prices WHERE execution_id = ?').get(c)).toEqual(
       { n: 0 },
     );
     expect(count(db, 'calendar_prices')).toBe(1);
+    expect(cells.outcomes(c, { cells: [P] })[0]).toMatchObject({
+      status: 'empty',
+      reusedFromExecutionId: null,
+    });
   });
 });
 

@@ -2,8 +2,10 @@ import {
   type Cabin,
   type Cell,
   type CellKey,
+  type CellOutcome,
   type Clock,
   cellKeyString,
+  daysBetween,
   type HistoryPoint,
   type Iata,
   type IsoDateTime,
@@ -14,8 +16,9 @@ import {
   type SourceKind,
 } from '@gmt/core';
 import type { Db } from '../client.js';
-import { type DefinitionDbRow, readDefinition } from '../internal/definitionRow.js';
-import { type OutcomeDbRow, toOutcome } from '../internal/outcomeRow.js';
+import { type DefinitionDbRow, readDefinition, readSnapshot } from '../internal/definitionRow.js';
+import { CELL_WHERE, keyParams, type OutcomeDbRow, toOutcome } from '../internal/outcomeRow.js';
+import { DELETE_REUSED_PRICE_SQL, nextOutcome, readOutcome, storeOutcome } from '../internal/outcomeWrite.js';
 import {
   type CalendarPriceDbRow,
   insertCalendarPrice,
@@ -23,8 +26,10 @@ import {
   validateCalendarPrice,
 } from '../internal/priceRow.js';
 import { RowCorrupt } from '../internal/read.js';
+import { storeRollUps } from '../internal/rollUps.js';
 import { assertIsoDateTime, RowRejected } from '../internal/validate.js';
 import type { CalendarPriceInsert, CalendarPriceRow, RepoOptions, ReusedCopy } from '../types.js';
+import { ExecutionsRepo } from './executions.js';
 
 /**
  * Spec §8.1 reuse source: per cell, the newest priced|empty|no_data discovery outcome for the same definition,
@@ -80,7 +85,16 @@ const spaceParams = (space: ResolvedSpace | null) => ({
   maxNights: space?.maxNights ?? 0,
 });
 
-/** Spec §7 `calendar_prices`. Insert-only except the reused-row supersede. */
+interface ExecutionScopeRow {
+  is_child: number;
+  child_origin: string | null;
+  child_destination: string | null;
+  child_departure_date: string | null;
+  child_return_date: string | null;
+  definition_snapshot_json: string;
+}
+
+/** Spec §7 `calendar_prices`. Rows are written with their outcome (insert, writeTile, copyReused); a fresh write deletes a reused row. */
 export class CalendarPricesRepo {
   constructor(
     private readonly db: Db,
@@ -88,10 +102,91 @@ export class CalendarPricesRepo {
     private readonly opts: RepoOptions,
   ) {}
 
-  /** Validates every row, then inserts all in one transaction and returns the ids in order. A UNIQUE conflict throws SqliteError. */
+  /**
+   * A prices-only tile write (spec §3 "priced ⇔ a price row", §7 atomic unit; ruling 2026-10-15). Every row is
+   * validated and must lie inside the execution's definition (the snapshot's resolved space and night range, or the
+   * child's one cell) before anything is written. Then, in one transaction, per row: the cell and its discovery
+   * outcome for the row's provider are seeded when absent, a reused price for that key is deleted, the price is
+   * inserted (a second fresh price for the same key throws SqliteError UNIQUE), a `priced` outcome carrying the row's
+   * provenance and price is merged like writeTile's, and the cell's roll-up is stored through core.
+   */
   insert(executionId: string, rows: CalendarPriceInsert[]): number[] {
     for (const r of rows) validateCalendarPrice(r, this.opts.allowSynthetic, true);
-    return this.db.transaction(() => rows.map((r) => insertCalendarPrice(this.db, executionId, r)));
+    const inScope = this.executionScope(executionId);
+    for (const r of rows)
+      if (!inScope(r.cell))
+        throw new RowRejected(
+          'cell-outside-definition',
+          `${cellKeyString(r.cell)} is not a cell of execution ${executionId}'s definition`,
+        );
+    const cellExists = this.db.raw.prepare<Record<string, unknown>, { n: number }>(
+      `SELECT COUNT(*) AS n FROM search_cells WHERE ${CELL_WHERE}`,
+    );
+    const seedCell = this.db.raw.prepare(
+      `INSERT INTO search_cells (execution_id, origin, destination, departure_date, return_date, discovery_status, verification_selected) VALUES (@executionId, @origin, @destination, @departureDate, @returnDate, 'not_run', 0)`,
+    );
+    const outcomeExists = this.db.raw.prepare<Record<string, unknown>, { n: number }>(
+      `SELECT COUNT(*) AS n FROM cell_outcomes WHERE ${CELL_WHERE} AND stage = 'discovery' AND provider_id = @providerId`,
+    );
+    const seedOutcome = this.db.raw.prepare(
+      `INSERT INTO cell_outcomes (execution_id, origin, destination, departure_date, return_date, stage, provider_id, status, attempts) VALUES (@executionId, @origin, @destination, @departureDate, @returnDate, 'discovery', @providerId, 'not_run', 0)`,
+    );
+    return this.db.transaction(() => {
+      const ids = rows.map((r) => {
+        const params = { ...keyParams(executionId, r.cell), providerId: r.providerId };
+        if ((cellExists.get(params)?.n ?? 0) === 0) seedCell.run(params);
+        if ((outcomeExists.get(params)?.n ?? 0) === 0) seedOutcome.run(params);
+        this.db.raw.prepare(DELETE_REUSED_PRICE_SQL).run(params);
+        const id = insertCalendarPrice(this.db, executionId, r);
+        const existing = readOutcome(this.db, executionId, r.cell, 'discovery', r.providerId);
+        const incoming: CellOutcome = {
+          ...existing,
+          status: 'priced',
+          reason: null,
+          lastError: null,
+          fetchedAt: r.fetchedAt,
+          minPence: r.pricePence,
+          cabin: r.cabin,
+          pointOfSale: r.pointOfSale,
+          sourceKind: r.sourceKind,
+          reusedFromExecutionId: null,
+        };
+        storeOutcome(this.db, nextOutcome(existing, incoming, false));
+        storeRollUps(this.db, executionId, 'discovery', [r.cell]);
+        return id;
+      });
+      if (rows.length > 0) new ExecutionsRepo(this.db, this.clock).resetAutoResume(executionId);
+      return ids;
+    });
+  }
+
+  /** The membership test for the execution's cells: a child's one cell, or the snapshot's resolved space. */
+  private executionScope(executionId: string): (c: CellKey) => boolean {
+    const e = this.db.raw
+      .prepare<[string], ExecutionScopeRow>(
+        'SELECT is_child, child_origin, child_destination, child_departure_date, child_return_date, definition_snapshot_json FROM search_executions WHERE id = ?',
+      )
+      .get(executionId);
+    if (e === undefined) throw new RowRejected('missing', `execution ${executionId} does not exist`);
+    if (e.is_child === 1) {
+      const own = [e.child_origin, e.child_destination, e.child_departure_date, e.child_return_date].join(
+        '|',
+      );
+      return (c) => [c.origin, c.destination, c.departureDate, c.returnDate].join('|') === own;
+    }
+    const snapshot = readSnapshot('search_executions.definition_snapshot_json', e.definition_snapshot_json);
+    const s = snapshot.resolved;
+    return (c) => {
+      const nights = daysBetween(c.departureDate, c.returnDate);
+      return (
+        s.origins.includes(c.origin) &&
+        s.destinations.includes(c.destination) &&
+        c.departureDate >= s.departureFrom &&
+        c.departureDate <= s.departureTo &&
+        nights >= s.minNights &&
+        nights <= s.maxNights
+      );
+    };
   }
 
   /** Prices this execution fetched itself (reused copies excluded): the calendar-basis alert candidates (spec §6.8). */
@@ -142,15 +237,6 @@ export class CalendarPricesRepo {
       out.push({ cell, outcome, price });
     }
     return out;
-  }
-
-  /** Spec §7 "a fresh price superseding a reused row deletes that row" (writeTile does it inline). Fresh rows are never deleted. */
-  supersedeReused(executionId: string, providerId: ProviderId, cell: CellKey): void {
-    this.db.raw
-      .prepare(
-        `DELETE FROM calendar_prices WHERE execution_id = @executionId AND provider_id = @providerId AND origin = @origin AND destination = @destination AND departure_date = @departureDate AND return_date = @returnDate AND reused_from_execution_id IS NOT NULL`,
-      )
-      .run({ executionId, providerId, ...cell });
   }
 
   latestPerCell(definitionId: string, cabin: Cabin, space: ResolvedSpace | null): CalendarPriceRow[] {

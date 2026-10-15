@@ -1,6 +1,7 @@
 import { type CellKey, cellKeyString, fixedClock, type ProviderId, rollUp } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { insertCalendarPrice } from '../src/internal/priceRow.js';
 import { RowRejected } from '../src/internal/validate.js';
 import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
 import { CellsRepo } from '../src/repositories/cells.js';
@@ -112,9 +113,11 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
   });
 
   it('roll-ups are atomic: a SQL failure inside the write leaves no partial rows', () => {
-    const { db, clock, executionId, cells, executions } = setup();
+    const { db, executionId, cells, executions } = setup();
     executions.incrementAutoResume(executionId);
-    new CalendarPricesRepo(db, clock, opts).insert(executionId, [calendarPrice(B)]); // a fresh price for B already exists
+    // why: a raw price row with no outcome behind it (corruption the repositories never write) makes the tile's insert
+    // for B fail UNIQUE after A's rows are written, so the rollback is observable.
+    insertCalendarPrice(db, executionId, calendarPrice(B));
     let thrown: unknown;
     try {
       cells.writeTile(

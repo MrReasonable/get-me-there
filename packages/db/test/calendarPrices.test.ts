@@ -1,11 +1,12 @@
-import { asIsoDate, fixedClock } from '@gmt/core';
+import { asIata, asIsoDate, cellKeyString, fixedClock, rollUp } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
+import { CellsRepo } from '../src/repositories/cells.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
 import { at, count, freshDb, sqliteCode, T0 } from './helpers/db.js';
-import { calendarPrice, cell, newExecution } from './helpers/factories.js';
+import { calendarPrice, cell, EWR, newExecution, withNights } from './helpers/factories.js';
 
 function setup(allowSynthetic = false) {
   const db = freshDb();
@@ -237,5 +238,89 @@ describe('plan Review Focus 5: a SqliteError inside a repository transaction', (
     const text = executions.get(executionId)?.errorText ?? '';
     expect(text).toContain('UNIQUE constraint failed: calendar_prices.');
     expect(text).not.toMatch(/SECRET|marker=|pw@/);
+  });
+});
+
+describe('CalendarPricesRepo.insert is a prices-only tile write (spec §3, §7 atomic unit; ruling 2026-10-15)', () => {
+  const outcomesRepo = (db: Db, allowSynthetic = false) =>
+    new CellsRepo(db, fixedClock(T0), { allowSynthetic });
+
+  it('seeds the cell when absent and stores a priced outcome whose min_pence and provenance are the row’s; roll-up equals core', () => {
+    const { db, repo, executionId } = setup();
+    const c = cell();
+    repo.insert(executionId, [calendarPrice(c, { pricePence: 39_900, priceNativeMinor: 39_900 })]);
+    const cells = outcomesRepo(db);
+    expect(cells.outcomes(executionId, { cells: [c] })).toEqual([
+      expect.objectContaining({
+        stage: 'discovery',
+        providerId: 'travelpayouts',
+        status: 'priced',
+        reason: null,
+        minPence: 39_900,
+        fetchedAt: T0,
+        cabin: 'economy',
+        pointOfSale: 'unknown',
+        sourceKind: 'authorised-cached',
+        reusedFromExecutionId: null,
+      }),
+    ]);
+    const stored = cells.rollUps(executionId).get(cellKeyString(c))?.discovery;
+    expect(stored).toEqual({ status: 'priced', reason: null, minPence: 39_900 });
+    expect(stored).toEqual(rollUp(cells.outcomes(executionId, { stage: 'discovery', cells: [c] })));
+  });
+
+  it('merges over a seeded outcome and keeps the other providers’ outcomes in the roll-up', () => {
+    const { db, repo, executionId } = setup();
+    const cells = outcomesRepo(db);
+    const c = cell();
+    cells.seed(executionId, [withNights(c)], ['travelpayouts', 'searchapi']);
+    repo.insert(executionId, [calendarPrice(c)]);
+    expect(cells.outcomes(executionId, { cells: [c] }).map((o) => [o.providerId, o.status])).toEqual([
+      ['searchapi', 'not_run'],
+      ['travelpayouts', 'priced'],
+    ]);
+    const stored = cells.rollUps(executionId).get(cellKeyString(c))?.discovery;
+    expect(stored).toEqual(rollUp(cells.outcomes(executionId, { stage: 'discovery', cells: [c] })));
+    expect(stored?.status).toBe('priced');
+  });
+
+  it.each([
+    ['an origin outside the definition', cell(asIata('LCY'))],
+    ['a destination outside the definition', cell(undefined, asIata('BOS'))],
+    ['a departure before the resolved window', cell(undefined, undefined, '2026-10-20', '2026-11-03')],
+    ['a departure after the resolved window', cell(undefined, undefined, '2027-04-21', '2027-05-05')],
+    ['too few nights', cell(undefined, undefined, '2027-03-14', '2027-03-23')],
+    ['too many nights', cell(undefined, undefined, '2027-03-14', '2027-04-05')],
+  ])('refuses a row for %s and writes nothing', (_name, c) => {
+    const { db, repo, executionId } = setup();
+    expect(() => repo.insert(executionId, [calendarPrice(cell()), calendarPrice(c)])).toThrow(
+      expect.objectContaining({ rule: 'cell-outside-definition' }),
+    );
+    expect([count(db, 'calendar_prices'), count(db, 'cell_outcomes'), count(db, 'search_cells')]).toEqual([
+      0, 0, 0,
+    ]);
+  });
+
+  it('a child execution accepts only its own cell', () => {
+    const { db, clock } = setup();
+    const own = cell();
+    const child = newExecution(db, clock, { cell: own }).execution.id;
+    const repo = new CalendarPricesRepo(db, clock, { allowSynthetic: false });
+    expect(() => repo.insert(child, [calendarPrice(cell(undefined, EWR))])).toThrow(
+      expect.objectContaining({ rule: 'cell-outside-definition' }),
+    );
+    repo.insert(child, [calendarPrice(own)]);
+    expect(
+      outcomesRepo(db)
+        .outcomes(child)
+        .map((o) => o.status),
+    ).toEqual(['priced']);
+  });
+
+  it('refuses an unknown execution', () => {
+    const { repo } = setup();
+    expect(() => repo.insert('no-such-execution', [calendarPrice(cell())])).toThrow(
+      expect.objectContaining({ rule: 'missing' }),
+    );
   });
 });

@@ -7,7 +7,6 @@ import {
   type Clock,
   cellKeyString,
   type IsoDate,
-  mergeWithinProvider,
   type NoDataReason,
   type ProviderId,
   type RollUp,
@@ -34,6 +33,17 @@ import {
   toCellKey,
   toOutcome,
 } from '../internal/outcomeRow.js';
+import {
+  assertOutcomeProvenance,
+  assertOutcomeReason,
+  DELETE_FRESH_PRICE_SQL,
+  DELETE_REUSED_PRICE_SQL,
+  nextOutcome,
+  readOutcome,
+  SELECT_OUTCOME_SQL,
+  storeOutcome,
+  TILE_STATUSES,
+} from '../internal/outcomeWrite.js';
 import {
   type CalendarPriceDbRow,
   insertCalendarPrice,
@@ -123,86 +133,6 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
   // why: spec §3 reason never holds a vendor message; not_run carries none (prov-r3-003).
   if (status === 'not_run' && reason !== null)
     throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
-}
-
-type Incoming = TileWrite['outcomes'][number];
-const SELECT_OUTCOME_SQL = `SELECT * FROM cell_outcomes WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
-const UPDATE_OUTCOME_SQL = `
-UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = @lastError, fetched_at = @fetchedAt, min_pence = @minPence,
-  cabin = @cabin, point_of_sale = @pointOfSale, source_kind = @sourceKind, attempts = @attempts, reused_from_execution_id = @reusedFromExecutionId
-WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
-const DELETE_FRESH_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NULL`;
-const DELETE_REUSED_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NOT NULL`;
-const TILE_STATUSES = ['priced', 'empty', 'no_data'] as const;
-
-/**
- * The outcome to store when `incoming` (fresh) meets `existing` (ruling 3, spec §6.6). Over not_run, skipped or a reused
- * copy the fresh outcome replaces the row (an error never does: it only counts an attempt); fresh on fresh goes through
- * core's mergeWithinProvider. Attempts are the existing count plus one when this pass failed.
- */
-function nextOutcome(existing: CellOutcome, incoming: CellOutcome, failedPass: boolean): CellOutcome {
-  const attempts = existing.attempts + (failedPass ? 1 : 0);
-  if (existing.status === 'not_run' || existing.status === 'skipped') return { ...incoming, attempts };
-  // why: an error never displaces a stronger result, reused or fresh (plan merge rule, prov-r2-003): the existing outcome
-  // stays, with its reused price row, and only the attempt is counted. Decided here so it does not hang on core's reading.
-  if (incoming.status === 'error' && existing.status !== 'error') return { ...existing, attempts };
-  if (existing.reusedFromExecutionId !== null) return { ...incoming, attempts };
-  const merged = mergeWithinProvider(existing, incoming);
-  // why: when the merge keeps an error, the newest vendor message is the useful one; status, reason and minPence stay core's.
-  return {
-    ...merged,
-    attempts,
-    lastError:
-      merged.status === 'error' && incoming.status === 'error' ? incoming.lastError : merged.lastError,
-  };
-}
-
-function storeOutcome(db: Db, o: CellOutcome): void {
-  db.raw.prepare(UPDATE_OUTCOME_SQL).run({
-    ...keyParams(o.executionId, o),
-    stage: o.stage,
-    providerId: o.providerId,
-    status: o.status,
-    reason: o.reason,
-    lastError: o.lastError === null ? null : stripUrlsInText(o.lastError),
-    fetchedAt: o.fetchedAt,
-    minPence: o.minPence,
-    cabin: o.cabin,
-    pointOfSale: o.pointOfSale,
-    sourceKind: o.sourceKind,
-    attempts: o.attempts,
-    reusedFromExecutionId: o.reusedFromExecutionId,
-  });
-}
-
-/** Ruling 2026-10-15: the closed set of priced reasons; offers-dropped counts are positive and unpadded. */
-const PRICED_REASON =
-  /^(?:partial-expansion|offers-dropped:[1-9][0-9]*|partial-expansion;offers-dropped:[1-9][0-9]*)$/;
-
-/**
- * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:
- * priced → null | 'partial-expansion' | 'offers-dropped:n' | 'partial-expansion;offers-dropped:n',
- * empty → null, no_data → null | 'cabin-not-offered'.
- */
-function assertOutcomeReason(o: { status: CellOutcomeStatus; reason: string | null } & CellKey): void {
-  const ok =
-    o.reason === null ||
-    (o.status === 'priced' && PRICED_REASON.test(o.reason)) ||
-    (o.status === 'no_data' && o.reason === 'cabin-not-offered');
-  if (!ok || (o.status !== 'priced' && o.status !== 'empty' && o.status !== 'no_data'))
-    throw new RowRejected(
-      'outcome-reason',
-      `${cellKeyString(o)} ${o.status} cannot carry reason ${String(o.reason)}`,
-    );
-}
-
-/** Ruling 5: a fetched terminal outcome carries the provenance reuse matches on. */
-function assertOutcomeProvenance(o: Incoming): void {
-  if (o.fetchedAt === null || o.cabin === null || o.pointOfSale === null || o.sourceKind === null)
-    throw new RowRejected(
-      'outcome-provenance',
-      `${cellKeyString(o)} ${o.status} needs fetchedAt, cabin, pointOfSale and sourceKind`,
-    );
 }
 
 /** Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. */
@@ -610,12 +540,7 @@ export class CellsRepo {
 
   /** The current outcome row inside the caller's transaction; a missing seeded row is a rejection. */
   private current(executionId: string, c: CellKey, stage: Stage, providerId: ProviderId): CellOutcome {
-    const r = this.db.raw
-      .prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL)
-      .get({ ...keyParams(executionId, c), stage, providerId });
-    if (r === undefined)
-      throw new RowRejected('missing', `no seeded ${stage} outcome for ${providerId} at ${cellKeyString(c)}`);
-    return toOutcome(r);
+    return readOutcome(this.db, executionId, c, stage, providerId);
   }
 
   /**
