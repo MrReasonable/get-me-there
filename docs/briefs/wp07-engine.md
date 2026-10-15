@@ -286,7 +286,7 @@ export interface CalendarPriceInsert { providerId; sourceKind; cabin; cell: Cell
 export interface CalendarPriceRow extends CalendarPriceInsert { id: number; executionId: string; provenance: Provenance }
 export interface VerifiedCellWrite { cell: CellKey; outcome: TileWrite['outcomes'][number]; itineraries: Array<{ itinerary: NormalisedItinerary; offers: Array<{ offer: Offer; observation: ObservationFields & { provenance: Provenance; suppliedFields: SuppliedField[]; partialExpansion: boolean } }> }> }   // best_observation_id = the cheapest observation written; the write applies the §6.6 monotone merge and never downgrades priced to empty
 export interface ReusedCopy { cell: CellKey; outcome: CellOutcome; price: CalendarPriceRow | null }
-export class CellsRepo { seed(executionId, cells: Cell[], discoveryProviders: ProviderId[]): void; seedVerification(executionId, selected: Array<{ cell: CellKey; reason: SelectionReason }>, allCells: CellKey[], verificationProviders: ProviderId[]): void; outcomes(executionId, filter?: { stage?: Stage; providerId?: ProviderId; cells?: CellKey[] }): CellOutcome[]; resumable(executionId, stage, providerId, manual: boolean): CellKey[]; markDeparted(executionId, today: IsoDate): number; markNoData(executionId, stage, providerId, reason: NoDataReason): number; writeTile(executionId, providerId, w: TileWrite): void; writeTileError(executionId, providerId, cells: CellKey[], reason: string, lastError: string | null): void; writeVerifiedCell(executionId, providerId, w: VerifiedCellWrite): void; setOutcome(executionId, cell, stage, providerId, patch: Partial<CellOutcome> & { incrementAttempts?: boolean }): void; setOutcomesForProvider(executionId, stage, providerId, from: CellOutcomeStatus[], to: { status; reason }): number; copyReused(executionId, providerId, copies: ReusedCopy[]): void; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets: Buckets; total }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }>; hasVerificationOutcomes(executionId): boolean }
+export class CellsRepo { seed(executionId, cells: Cell[], discoveryProviders: ProviderId[]): void; seedVerification(executionId, selected: Array<{ cell: CellKey; reason: SelectionReason }>, allCells: CellKey[], verificationProviders: ProviderId[]): void; outcomes(executionId, filter?: { stage?: Stage; providerId?: ProviderId; cells?: CellKey[] }): CellOutcome[]; resumable(executionId, stage, providerId, manual: boolean): CellKey[]; markDeparted(executionId, today: IsoDate): number; markNoData(executionId, stage, providerId, reason: NoDataReason): number; writeTile(executionId, providerId, w: TileWrite): void; writeTileError(executionId, providerId, cells: CellKey[], reason: string, lastError: string | null): void; writeVerifiedCell(executionId, providerId, w: VerifiedCellWrite): void; setOutcome(executionId, cell, stage, providerId, patch: Partial<CellOutcome> & { incrementAttempts?: boolean }): void; setOutcomesForProvider(executionId, stage, providerId, from: CellOutcomeStatus[], to: { status; reason }): number; copyReused(executionId, providerId, copies: ReusedCopy[], criteria: ReuseCriteria): void; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets: Buckets; total }>>; selected(executionId): Array<{ cell: CellKey; reason: SelectionReason }>; hasVerificationOutcomes(executionId): boolean }
 export class CalendarPricesRepo { insert(executionId, rows: CalendarPriceInsert[]): number[]; latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[] /* reused excluded */; previousFor(definitionId, providerId, cabin, cell, before: IsoDateTime, notOlderThan: IsoDateTime): CalendarPriceRow | null; reuseCandidates(definitionId, providerId, cabin, pointOfSale, sourceKind, cells: CellKey[], newerThan: IsoDateTime): ReusedCopy[]; history(origin, destination, cabin, opts?: { definitionId?: string }): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> /* per provider, one point per execution fetch: the minimum across the pair's cells (within the definition's resolved space when given); reused rows excluded */; belowVerified(definitionId, cabin, space, thresholdPence): CalendarPriceRow[] }
 export interface ObservationRow extends Observation { offer: Offer & { id: number }; itinerary: NormalisedItinerary; cell: Cell; seller: string }
 export class ItinerariesRepo { upsertItinerary(it: NormalisedItinerary): void; recordObservation(offer: Offer, obs: Omit<Observation, 'id' | 'offerId'>): { offerId: number; observationId: number }; get(hash): (NormalisedItinerary & { firstSeenAt }) | null; observationsForDefinition(definitionId, opts: { executionIds: string[] | 'all'; space: ResolvedSpace | null; cabin: Cabin; includeChildren: boolean }): ObservationRow[]; writtenBy(executionId): ObservationRow[]; previousObservation(offerId: number, before: IsoDateTime): Observation | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: HistoryPoint[] }>; latestVerificationOutcomeForCell(definitionId, cell, cabin: Cabin): CellOutcome | null; bestObservationForCell(executionId, cell): number | null }
@@ -3222,8 +3222,8 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 - Modify: `packages/engine/src/stages/discovery.ts` (`runDiscoveryProvider` calls `applyReuse`)
 
 **Interfaces:**
-- Consumes: `CalendarPricesRepo.reuseCandidates`, `CellsRepo.copyReused`, `ReusedCopy`.
-- Produces: `REUSE_TOLERANCE`, `refreshHoursOf(snapshot, providerId)`, `reuseCutoff(now, hours)`, `reusableFor(ctx, definitionId, snapshot, providerId, info, cells)`, `applyReuse(ctx, run, providerId, info): number`.
+- Consumes: `CalendarPricesRepo.reuseCandidates`, `CellsRepo.copyReused`, `ReusedCopy`, `ReuseCriteria`.
+- Produces: `REUSE_TOLERANCE`, `refreshHoursOf(snapshot, providerId)`, `reuseCutoff(now, hours)`, `reuseCriteriaFor(ctx, snapshot, providerId, info)`, `reusableFor(ctx, definitionId, snapshot, providerId, info, cells)`, `applyReuse(ctx, run, providerId, info): number`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3385,7 +3385,7 @@ Expected: FAIL, `Cannot find module '../src/stages/reuse.js'`.
 
 ```ts
 import { DEFAULT_DISCOVERY_REFRESH_HOURS, type CapabilityInfo, type CellKey, type DefinitionSnapshot, type IsoDateTime, type ProviderId } from '@gmt/core';
-import type { ReusedCopy } from '@gmt/db';
+import type { ReuseCriteria, ReusedCopy } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import type { RunState } from '../run.js';
 
@@ -3407,10 +3407,15 @@ export function reuseCutoff(now: IsoDateTime, refreshHours: number): IsoDateTime
  * original fetched_at is newer than the cutoff. The same query feeds the estimate (spec §8.1).
  * Only priced | empty | no_data copies are returned, whatever the repository hands back.
  */
+/** The spec §8.1 reuse predicate as data: the repository re-checks every copy against it before writing (plan decision 22). */
+export function reuseCriteriaFor(ctx: EngineContext, snapshot: Pick<DefinitionSnapshot, 'providers'>, providerId: ProviderId, info: CapabilityInfo): ReuseCriteria {
+  return { pointOfSale: ctx.pointOfSaleOf(providerId), sourceKind: info.sourceKind, newerThan: reuseCutoff(ctx.clock.now(), refreshHoursOf(snapshot, providerId)) };
+}
+
 export function reusableFor(ctx: EngineContext, definitionId: string, snapshot: DefinitionSnapshot, providerId: ProviderId, info: CapabilityInfo, cells: readonly CellKey[]): ReusedCopy[] {
   if (cells.length === 0) return [];
-  const cutoff = reuseCutoff(ctx.clock.now(), refreshHoursOf(snapshot, providerId));
-  const candidates = ctx.repos.calendarPrices.reuseCandidates(definitionId, providerId, snapshot.cabin, ctx.pointOfSaleOf(providerId), info.sourceKind, [...cells], cutoff);
+  const c = reuseCriteriaFor(ctx, snapshot, providerId, info);
+  const candidates = ctx.repos.calendarPrices.reuseCandidates(definitionId, providerId, snapshot.cabin, c.pointOfSale, c.sourceKind, [...cells], c.newerThan);
   // why: belt and braces on the repository's predicate — error and not_run are never copied (spec §9 item 4)
   return candidates.filter((c) => c.outcome.status === 'priced' || c.outcome.status === 'empty' || c.outcome.status === 'no_data');
 }
@@ -3425,7 +3430,7 @@ export function applyReuse(ctx: EngineContext, run: RunState, providerId: Provid
   if (run.isChild) return 0; // why: spec §6.7 child executions have no discovery
   const notRun = ctx.repos.cells.outcomes(run.executionId, { stage: 'discovery', providerId }).filter((o) => o.status === 'not_run');
   const copies = reusableFor(ctx, run.definitionId, run.snapshot, providerId, info, notRun);
-  if (copies.length > 0) ctx.repos.cells.copyReused(run.executionId, providerId, copies);
+  if (copies.length > 0) ctx.repos.cells.copyReused(run.executionId, providerId, copies, reuseCriteriaFor(ctx, run.snapshot, providerId, info));
   return copies.length;
 }
 ```
