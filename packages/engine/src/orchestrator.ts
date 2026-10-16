@@ -1,4 +1,5 @@
-import { ACTIVE_STATUSES } from '@gmt/core';
+import { ACTIVE_STATUSES, type CellKey } from '@gmt/core';
+import { verifyCellExecution } from './child.js';
 import type { EngineContext } from './context.js';
 import { createRegistry } from './registry.js';
 import { resumeExecution } from './resume.js';
@@ -10,6 +11,8 @@ import type { StartOptions, StartResult } from './types.js';
 export interface Orchestrator {
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
+  /** Spec §8.1 single-cell verification (POST /cells/verify): a child execution for one cell. */
+  verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
   /** Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel. */
   cancel(executionId: string): Promise<boolean>;
   /** Aborts every pass as SIGTERM (cells in flight → not_run, status interrupted) and waits for them. */
@@ -22,6 +25,7 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
   return {
     start: (id, opts) => startExecution(ctx, reg, id, opts),
     resume: (id, opts) => resumeExecution(ctx, reg, id, opts),
+    verifyCell: (id, cell) => verifyCellExecution(ctx, reg, id, cell),
     cancel: async (id) => {
       const live = reg.get(id);
       if (live !== undefined) {

@@ -115,6 +115,13 @@ export function finalStatus(
         },
       };
     }
+    case 'child-cap':
+      // why: ruling 7 — a child never pauses on a cap; it ends, with the scope in the log and this text on the row
+      return {
+        status: 'cancelled',
+        patch: { finishedAt: now, resumeAfter: null, errorText: CHILD_CAP_REACHED },
+        notice: null,
+      };
     case 'all-disabled':
       return {
         status: 'paused_error',
@@ -187,3 +194,6 @@ export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
   run.log.warn({ breaks }, 'parity break');
   return { kind: 'parity_break', detail: `${breaks.join('. ')}.` };
 }
+
+/** The error_text of a child execution that reached a cap (ruling 7). */
+export const CHILD_CAP_REACHED = 'child cap reached';

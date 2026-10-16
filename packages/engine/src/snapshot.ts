@@ -1,5 +1,6 @@
 import {
   type Cell,
+  type CellKey,
   cellKeyString,
   type DefinitionSnapshot,
   generateCells,
@@ -78,4 +79,29 @@ export function buildSnapshot(
     droppedAlwaysInclude: def.verification.alwaysInclude.filter((c) => !inSpace.has(cellKeyString(c))),
   };
   return { snapshot, cells, notes };
+}
+
+/**
+ * Spec §8.1 single-cell verification: a child skips discovery, `alwaysInclude = [cell]`, `maxCells = 1`, `topN = 1`
+ * (decision 17), and its own call cap `maxCalls` (ruling 7: the per-cell estimate × ESTIMATE_RETRY_FACTOR, bounded by
+ * the parent's headroom); the rest of the definition's budget is inherited (decision 14); provider and global caps are
+ * shared.
+ */
+export function childSnapshot(
+  parent: DefinitionSnapshot,
+  cell: CellKey,
+  maxCalls: number,
+): DefinitionSnapshot {
+  const key = {
+    origin: cell.origin,
+    destination: cell.destination,
+    departureDate: cell.departureDate,
+    returnDate: cell.returnDate,
+  };
+  return {
+    ...parent,
+    providers: { ...parent.providers, discovery: [] },
+    verification: { ...parent.verification, alwaysInclude: [key], maxCells: 1, topN: 1 },
+    budget: { ...parent.budget, maxCalls },
+  };
 }

@@ -24,6 +24,7 @@ export type StopReason =
   | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime | null }
   | { kind: 'budget'; error: BudgetExceeded; resumeAfter: IsoDateTime | null }
   | { kind: 'all-disabled'; stage: Stage }
+  | { kind: 'child-cap'; error: BudgetExceeded }
   | { kind: 'fatal'; message: string };
 
 /**
@@ -265,6 +266,13 @@ export function applyBudgetBreach(
       { stage, scope: err.scope, cap: err.cap, current: err.current, requested: err.requested },
       'budget cap reached',
     );
+  if (run.isChild) {
+    // why: ruling 7 — a child never pauses: its cell is skipped for budget, the child ends cancelled, the parent's cell
+    // stays unverified and a new child can be started by hand
+    for (const id of stageProviders(run, stage)) budgetOut(ctx, run, stage, id);
+    stopRun(run, { kind: 'child-cap', error: err });
+    return;
+  }
   if (
     err.scope === 'execution-calls' ||
     err.scope === 'execution-free-calls' ||
