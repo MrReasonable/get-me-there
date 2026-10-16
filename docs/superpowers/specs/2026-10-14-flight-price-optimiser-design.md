@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 20.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 21.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -244,8 +244,8 @@ verification as a free history source (§7 `route_price_history`).
     no call is made and parity is unaffected.
   - `error`: `reason` is the `ProviderError.kind`, or `fx-unavailable`,
     `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
-    `unmappable-carrier`; the vendor's message, URL-stripped, is in
-    `last_error`, never in `reason`.
+    `no-priced-options`, `unmappable-carrier`; the vendor's message,
+    URL-stripped, is in `last_error`, never in `reason`.
   - `skipped`: `reason ∈ not_selected | budget | provider_disabled | departed`.
   - Coverage is always shown as **six buckets**: priced, no fares (`empty`),
     no cached data (`no_data`), error, skipped (reasons in the drill-down),
@@ -661,6 +661,9 @@ unknown IATA rejected.
 ```ts
 evaluateConstraints(it, offer, c: Constraints, supplied: readonly SuppliedField[]): Verdicts
 verdictClass(v): 'verified' | 'partially-verified' | 'failed'
+// An offer whose `price` is not a supplied field (a chain step the final step did not confirm) is classed
+// `unverified` with the label "price not confirmed by the final step", whatever the constraints say (plan decision 37).
+// Calendar prices reach GBP through core's exported `priceInGbp` (the same rules as normaliseOffer's money step).
 ```
 
 Evaluated **at read time** against the current definition, using the
@@ -906,8 +909,8 @@ are `toISOString()` text; booleans are integers 0/1.
   min_pence, cabin, point_of_sale, source_kind, reused_from_execution_id
   NULL (always the execution that fetched the price). Seeded at start (§3). **Resume** selects, per `(stage,
   provider)`, outcomes with status `not_run`, or `error` with `attempts <
-  3` and reason ∉ {auth, quota, parse, no-return-legs, fx-unavailable,
-  currency-unsupported, unknown-airport-tz}, or `skipped:budget` when
+  3` and reason ∉ {auth, quota, parse, no-return-legs, no-priced-options,
+  fx-unavailable, currency-unsupported, unknown-airport-tz}, or `skipped:budget` when
   headroom exists; a **manual** resume additionally selects
   `skipped:provider_disabled` and `error` with reasons auth/quota/parse
   (re-enabling the provider for that pass); never rewrites `priced | empty
@@ -1072,7 +1075,8 @@ completed
 | `ProviderError` rate-limit/upstream/network after retries | `error`, attempts+1 | continue |
 | `ProviderError` parse | `error`, attempts+1; 2 consecutive for one provider (counted in ledger finalisation order) → provider disabled for the run, remaining cells `skipped:provider_disabled` | continue other providers; if none remain, `paused_error` + notify |
 | `ProviderError` auth or quota on **any** call | provider disabled for the run; remaining cells `skipped:provider_disabled` | continue other providers; if none remain, `paused_error` + notify |
-| `ProviderError` upstream with reason `no-return-legs` | `error`, non-retryable on resume | continue |
+| `ProviderError` upstream with reason `no-return-legs` or `no-priced-options` | `error`, non-retryable on resume | continue |
+| `BudgetExceeded` on a new reservation | the cell stays `not_run`; calls already reserved finish and write (plan decision 25) | `paused_budget` per §5.3; sibling calls are never aborted |
 | `limiter-timeout` | cell returns to `not_run` | `paused_error` with `resume_after` = window reopen; a **one-shot croner job** resumes it at that instant (re-registered at boot, cancelled on cancel or manual resume) |
 | `BudgetExceeded` provider-month / provider-lifetime, other providers remain in the stage | remaining cells for that provider and stage `skipped:budget` | continue; notify once; no one-shot job |
 | `BudgetExceeded` provider-month / provider-lifetime, no other provider remains | remaining cells `skipped:budget` | `paused_budget` with `resume_after` = next cap window start; a one-shot job resumes it; exempt from the stale-run supersede while `resume_after` is in the future |
@@ -1618,6 +1622,14 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 21: engine reasons and verdicts (2026-10-16)
+
+§3, §7, §8.1: `no-priced-options` joins the closed error-reason list and the
+non-retryable set; a budget stop refuses new reservations only (decision
+25). §6.2: an offer whose price the final step did not confirm is classed
+`unverified` ("price not confirmed by the final step"); calendar prices use
+core's `priceInGbp`.
 
 ### Revision 20: provider table age cell (2026-10-15)
 
