@@ -67,8 +67,10 @@ export function storeOutcome(db: Db, o: CellOutcome): void {
 }
 
 /** Ruling 2026-10-15: the closed set of priced reasons; offers-dropped counts are positive and unpadded. */
+// Decision 19's closed set, with decision 45's `price-unconfirmed`: ';'-joined parts in the order partial-expansion,
+// price-unconfirmed, offers-dropped:n, at least one.
 export const PRICED_REASON =
-  /^(?:partial-expansion|offers-dropped:[1-9][0-9]*|partial-expansion;offers-dropped:[1-9][0-9]*)$/;
+  /^(?=[^;])(?:partial-expansion(?:;(?=.)|$))?(?:price-unconfirmed(?:;(?=.)|$))?(?:offers-dropped:[1-9][0-9]*)?$/;
 
 /**
  * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:

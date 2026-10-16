@@ -23,6 +23,19 @@ export function isPartialExpansion(reason: string | null): boolean {
   return (reason ?? '').split(';').includes(PARTIAL_EXPANSION);
 }
 
+/**
+ * Decision 45: the priced-reason part meaning "no offer of this outcome had its price confirmed by the final step"
+ * (every observation lacks `price` among its supplied fields). The outcome keeps the cheapest unconfirmed price as its
+ * `minPence`; the roll-up's `minPence` counts only confirmed outcomes, so a verified cell never shows an unconfirmed
+ * fare as its itinerary-search price. Parts are ordered partial-expansion, price-unconfirmed, offers-dropped:n.
+ */
+export const PRICE_UNCONFIRMED = 'price-unconfirmed';
+
+/** True when a priced reason says no price of the outcome was confirmed (decision 45). */
+export function isPriceUnconfirmed(reason: string | null): boolean {
+  return (reason ?? '').split(';').includes(PRICE_UNCONFIRMED);
+}
+
 /** `reason` with `partial-expansion` added as its first part (the combined form keeps offers-dropped). */
 function withPartialExpansion(reason: string | null): string {
   if (reason === null) return PARTIAL_EXPANSION;
@@ -58,7 +71,9 @@ function isSkipReason(r: string | null): r is SkipReason {
  * `mixed`; `no_data` carries `cabin-not-offered` only in the all-not-offered case, else null;
  * `skipped` carries the highest-priority skip reason; `not_run` and `empty` carry null.
  * `minPence` is the minimum over `priced` outcomes ("the minimum over rows actually written",
- * spec §5.6), else `null`.
+ * spec §5.6) whose price was confirmed, else `null`; when every priced outcome is `price-unconfirmed`
+ * the roll-up is `priced` with `minPence` null and `price-unconfirmed` among its reason's parts
+ * (decision 45: the itinerary-search price is never an unconfirmed fare).
  *
  * Throws on a `skipped` outcome whose reason is not a `SkipReason` and on a `priced` outcome with
  * no `minPence`: both are broken invariants (spec §3) that must not be rolled up silently.
@@ -76,10 +91,16 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
       if (o.minPence === null) {
         throw new Error('a priced outcome has no minPence (spec §3: priced means a price was written)');
       }
-      min = Math.min(min, o.minPence);
+      if (!isPriceUnconfirmed(o.reason)) min = Math.min(min, o.minPence);
     }
     const partial = priced.some((o) => isPartialExpansion(o.reason));
-    return { status: 'priced', reason: partial ? PARTIAL_EXPANSION : null, minPence: min };
+    const unconfirmed = min === Number.POSITIVE_INFINITY;
+    const parts = [...(partial ? [PARTIAL_EXPANSION] : []), ...(unconfirmed ? [PRICE_UNCONFIRMED] : [])];
+    return {
+      status: 'priced',
+      reason: parts.length === 0 ? null : parts.join(';'),
+      minPence: unconfirmed ? null : min,
+    };
   }
   if (of('not_run').length > 0) return { status: 'not_run', reason: null, minPence: null };
   const errors = of('error');
@@ -173,7 +194,11 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
   }
   if (ra !== rb) return ra > rb ? a : b;
   if (a.status === 'priced') {
-    const source = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
+    // why: decision 45 — a confirmed price beats an unconfirmed one whatever the amounts
+    const ua = isPriceUnconfirmed(a.reason);
+    const ub = isPriceUnconfirmed(b.reason);
+    const cheaper = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
+    const source = ua === ub ? cheaper : ua ? b : a;
     // why: offers-dropped:n describes the source's own fetch and stays with it; partial-expansion is a
     // property of the cell's data and survives the merge whichever input carried it (ruling 2026-10-15).
     const partial = isPartialExpansion(a.reason) || isPartialExpansion(b.reason);

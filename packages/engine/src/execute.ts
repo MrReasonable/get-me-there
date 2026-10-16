@@ -4,12 +4,14 @@ import type { EngineContext } from './context.js';
 import { notifyOperator } from './notify.js';
 import { errorText, type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
+import { runVerification } from './stages/verification.js';
 import { breachText, formatInstant } from './text.js';
 
-/** Runs one pass: discovery, then finish. Any error a stage lets escape stops the pass as fatal. */
+/** Runs one pass: discovery, then verification (spec §8.1 order), then finish. A stage error that escapes stops the pass as fatal. */
 export async function execute(ctx: EngineContext, run: RunState): Promise<void> {
   try {
     await runDiscovery(ctx, run);
+    if (run.stop === null) await runVerification(ctx, run);
   } catch (err) {
     stopRun(run, { kind: 'fatal', message: errorText(err) });
   }

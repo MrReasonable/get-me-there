@@ -1,6 +1,7 @@
 import {
   type Cabin,
   type CapabilityInfo,
+  type CellKey,
   type Clock,
   cellKeyString,
   type ErrorReason,
@@ -9,10 +10,17 @@ import {
   type IsoDateTime,
   LINK_ALLOWLIST,
   NormalisationError,
+  type NormalisedItinerary,
+  normaliseOffer,
+  type ObservationFields,
+  type Offer,
   type PointOfSale,
+  type Provenance,
   type ProviderId,
   priceInGbp,
   type RawCalendarPrice,
+  type RawOffer,
+  type SuppliedField,
   stripUrlsInText,
   validateVendorUrl,
 } from '@gmt/core';
@@ -154,5 +162,80 @@ export function normaliseCalendarPrice(
     maxAgeHours: c.info.maxAgeHours === 'unknown' ? null : c.info.maxAgeHours,
     vendorLink: vendorLinkOf(raw.vendorLink, c.providerId),
     reusedFromExecutionId: null,
+  };
+}
+
+export interface OfferContext {
+  providerId: ProviderId;
+  info: CapabilityInfo;
+  cabin: Cabin;
+  pointOfSale: PointOfSale;
+  fetchedAt: IsoDateTime;
+  suppliedFields: readonly SuppliedField[];
+  partialExpansion: boolean;
+}
+
+export interface OfferWrite {
+  itinerary: NormalisedItinerary;
+  offer: Offer;
+  observation: ObservationFields & {
+    provenance: Provenance;
+    suppliedFields: SuppliedField[];
+    partialExpansion: boolean;
+  };
+}
+
+/**
+ * One raw offer → one observation write, or the reason it is dropped (spec §5.6). Everything is core's normaliseOffer
+ * — airport zones, local times, hashing, the cell match, money with the FX flag, evidenced cabins, the validated
+ * booking — fed the airports repository and the shared rateFor (one money pipeline, arch-013); only the provenance is
+ * stamped here.
+ */
+export function offerWrite(
+  raw: RawOffer,
+  cell: CellKey,
+  c: OfferContext,
+  deps: RepoDeps,
+): OfferWrite | PriceRefusal {
+  let r: ReturnType<typeof normaliseOffer>;
+  try {
+    r = normaliseOffer(raw, cell, {
+      providerId: c.providerId,
+      cabin: c.cabin,
+      tzOf: (iata) => deps.airports.tzOf(iata),
+      rateFor: (cur) => rateFor(deps, cur),
+    });
+  } catch (err) {
+    // why: decision 45 — core's normaliseOffer rethrows toGbp's RangeError; a malformed amount drops one offer
+    const refusal = refusalOf(err);
+    if (refusal === null) throw err;
+    return refusal;
+  }
+  if (!r.ok) return { reason: r.error.reason, message: r.error.message };
+  // why: decision 27 — a price no seller listing confirmed is stored as unverified: without 'price' and 'segmentCabins'
+  // in its supplied fields (and no cabin evidence), so the cabin verdict and any price constraint read unverified and
+  // the row is never a verified fare
+  const suppliedFields = raw.verified
+    ? [...c.suppliedFields]
+    : c.suppliedFields.filter((f) => f !== 'price' && f !== 'segmentCabins');
+  const observation = raw.verified ? r.observation : { ...r.observation, segmentCabins: null };
+  const provenance: Provenance = {
+    providerId: c.providerId,
+    sourceKind: c.info.sourceKind,
+    fetchedAt: c.fetchedAt,
+    maxAgeHours: c.info.maxAgeHours,
+    fx: r.observation.fx,
+    pointOfSale: c.pointOfSale,
+    cabin: r.offer.cabin,
+  };
+  return {
+    itinerary: r.itinerary,
+    offer: r.offer,
+    observation: {
+      ...observation,
+      provenance,
+      suppliedFields,
+      partialExpansion: c.partialExpansion,
+    },
   };
 }

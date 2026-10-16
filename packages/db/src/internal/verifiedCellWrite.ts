@@ -1,4 +1,11 @@
-import { type CellOutcome, type Clock, cellKeyString, isPartialExpansion, type ProviderId } from '@gmt/core';
+import {
+  type CellOutcome,
+  type Clock,
+  cellKeyString,
+  isPartialExpansion,
+  isPriceUnconfirmed,
+  type ProviderId,
+} from '@gmt/core';
 import type { Db } from '../client.js';
 import { ExecutionsRepo } from '../repositories/executions.js';
 import { ItinerariesRepo } from '../repositories/itineraries.js';
@@ -16,9 +23,15 @@ import { assertErrorReason, assertProviderAllowed, assertProviderKind, RowReject
 
 // Spec §7 atomic unit "one verified cell": validation, then one transaction (arch-M4).
 
+/** 1 when the cell's current best observation had its price confirmed (`price` among its supplied fields), else 0. */
+const CONFIRMED_SQL = `(EXISTS (SELECT 1 FROM price_observations po, json_each(po.supplied_fields_json) f
+  WHERE po.id = search_cells.best_observation_id AND f.value = 'price'))`;
+
 /**
  * Spec §7 atomic unit: one verified cell's itineraries, segments, offers, observations, outcome, best_observation_id
- * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest observation written (ruling 13).
+ * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest confirmed observation written,
+ * else the cheapest unconfirmed one (ruling 13, decision 45), and min_pence follows the same choice; an outcome with no
+ * confirmed observation carries `price-unconfirmed` in its reason.
  */
 export function writeVerifiedCellRows(
   db: Db,
@@ -80,7 +93,15 @@ export function writeVerifiedCellRows(
       `${key} reason ${String(o.reason)} disagrees with its observations' partialExpansion flags`,
     );
   if (offers.length > 0) {
-    const cheapest = Math.min(...offers.map((x) => x.observation.pricePence));
+    const confirmed = offers.filter((x) => x.observation.suppliedFields.includes('price'));
+    if ((confirmed.length === 0) !== isPriceUnconfirmed(o.reason))
+      throw new RowRejected(
+        'price-unconfirmed',
+        `${key} reason ${String(o.reason)} disagrees with its observations' confirmed prices (decision 45)`,
+      );
+    const cheapest = Math.min(
+      ...(confirmed.length > 0 ? confirmed : offers).map((x) => x.observation.pricePence),
+    );
     const oldest = offers.map((x) => x.observation.provenance.fetchedAt).sort()[0];
     if (o.minPence !== cheapest)
       throw new RowRejected(
@@ -95,15 +116,21 @@ export function writeVerifiedCellRows(
   }
   const itineraries = new ItinerariesRepo(db, clock, { allowSynthetic });
   db.transaction(() => {
-    let best: { id: number; pence: number } | null = null;
+    let best: { id: number; pence: number; confirmed: boolean } | null = null;
     for (const x of offers) {
       itineraries.upsertItinerary(x.itinerary);
       const { observationId: id } = itineraries.recordObservation(x.offer, {
         ...x.observation,
         executionId,
       });
-      if (best === null || x.observation.pricePence < best.pence)
-        best = { id, pence: x.observation.pricePence };
+      const confirmed = x.observation.suppliedFields.includes('price');
+      // why: decision 45 — the cheapest confirmed observation, else the cheapest unconfirmed one
+      if (
+        best === null ||
+        (confirmed && !best.confirmed) ||
+        (confirmed === best.confirmed && x.observation.pricePence < best.pence)
+      )
+        best = { id, pence: x.observation.pricePence, confirmed };
     }
     const existing = readOutcome(db, executionId, w.cell, 'verification', providerId);
     // why: an error carries no fetched data, so it stores no provenance, as writeTileError does (prov-M5).
@@ -121,9 +148,16 @@ export function writeVerifiedCellRows(
     if (best !== null) {
       db.raw
         .prepare(
-          `UPDATE search_cells SET best_observation_id = @bestId WHERE ${CELL_WHERE} AND (best_observation_id IS NULL OR (SELECT price_pence FROM price_observations WHERE id = search_cells.best_observation_id) > @bestPence)`,
+          `UPDATE search_cells SET best_observation_id = @bestId WHERE ${CELL_WHERE} AND (best_observation_id IS NULL
+             OR (@bestConfirmed = 1 AND NOT ${CONFIRMED_SQL})
+             OR (@bestConfirmed = ${CONFIRMED_SQL} AND (SELECT price_pence FROM price_observations WHERE id = search_cells.best_observation_id) > @bestPence))`,
         )
-        .run({ ...keyParams(executionId, w.cell), bestId: best.id, bestPence: best.pence });
+        .run({
+          ...keyParams(executionId, w.cell),
+          bestId: best.id,
+          bestPence: best.pence,
+          bestConfirmed: best.confirmed ? 1 : 0,
+        });
     }
     storeRollUps(db, executionId, 'verification', [w.cell]);
     if (o.status !== 'error') new ExecutionsRepo(db, clock).resetAutoResume(executionId);

@@ -126,6 +126,7 @@ export const constraintNameSchema = z.enum([
   'checkedBagRequired',
   'minCheckedBags',
   'maxPricePence',
+  'priceConfirmed',
 ]);
 export const verdictSchema = z.enum(['pass', 'fail', 'unverified']);
 export const verdictsSchema = z.partialRecord(constraintNameSchema, verdictSchema);

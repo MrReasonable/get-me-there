@@ -97,7 +97,11 @@ export interface Observation extends ObservationFields {
   partialExpansion: boolean;
 }
 export type Verdict = 'pass' | 'fail' | 'unverified';
-export type ConstraintName = keyof Constraints | 'cabin';
+/**
+ * `cabin` and `priceConfirmed` are judged on every offer whatever the definition sets; `priceConfirmed` is present only
+ * as `unverified`, for an offer whose price no seller listing confirmed (decision 37).
+ */
+export type ConstraintName = keyof Constraints | 'cabin' | 'priceConfirmed';
 export type Verdicts = Partial<Record<ConstraintName, Verdict>>;
 export type VerdictClass = 'verified' | 'partially-verified' | 'failed';
 /** API values; the UI labels them "itinerary-search basis" and "calendar basis". Spec §6.9. */
