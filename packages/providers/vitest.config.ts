@@ -21,6 +21,8 @@ export default defineConfig({
         // (WP6 ts2-006); a glob threshold applies to the files it matches, beside the package-wide floor.
         'src/travelpayouts/**': { lines: 95, branches: 90, functions: 95, statements: 95 },
         'src/shared/**': { lines: 95, branches: 90, functions: 95, statements: 95 },
+        // why: the SearchApi adapter holds to its own floor so the package average cannot mask it (plan decision 31).
+        'src/searchapi/**': { lines: 90, branches: 80, functions: 90, statements: 90 },
       },
     },
   },

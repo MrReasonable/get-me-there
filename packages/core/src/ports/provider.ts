@@ -120,6 +120,12 @@ export interface RawOffer {
   selfTransfer?: boolean;
   booking: { kind: 'get'; url: string } | { kind: 'post'; url: string; postData: string } | { kind: 'none' };
   bookingExpiresAt?: IsoDateTime;
+  /**
+   * True only when a seller listing confirmed this price (SearchApi step 3); false for a price the vendor declares
+   * without one (a SearchApi step-2 option). The engine writes an unverified offer with `unverified` set and never
+   * as a verified fare (plan decisions 27 and 29).
+   */
+  verified: boolean;
 }
 /** offers: every return option of every expanded outbound, one RawOffer each; the cheapest per outbound is the step-3 candidate. */
 export interface ItinerarySearchResult {

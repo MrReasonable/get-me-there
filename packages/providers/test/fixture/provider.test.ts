@@ -393,6 +393,7 @@ describe('fixture verification through the real http-kit and msw', () => {
       currency: 'GBP',
       taxesIncluded: true,
       booking: { kind: 'none' },
+      verified: true,
       baggage: { cabinBag: 'included', checkedBags: 1 },
       outbound: [
         {

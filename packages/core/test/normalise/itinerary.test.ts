@@ -89,8 +89,9 @@ describe('normaliseOffer: identity (spec §6.4 matrix through the full step)', (
     });
   });
 
-  it('price, cabin, seller, provider, booking and currency do not change identity', () => {
+  it('price, cabin, seller, provider, booking, currency and verified do not change identity', () => {
     const other = offer({
+      verified: false,
       seller: 'Some OTA',
       amountMinor: 999_999,
       currency: 'CNY',
