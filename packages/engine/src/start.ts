@@ -32,7 +32,7 @@ export async function startExecution(
     return refused('not_found', `definition ${definitionId} not found`, { definitionId });
   if (ctx.repos.executions.activeParent(def.id) !== null)
     return refused('active', 'another execution of this definition is active', { definitionId });
-  const built = buildSnapshot(ctx, def);
+  const built = buildSnapshot(ctx, def, opts.trigger);
   const discovery = built.snapshot.providers.discovery;
   let exec: Execution;
   try {
@@ -49,6 +49,10 @@ export async function startExecution(
         status: 'running',
       });
       ctx.repos.cells.seed(e.id, built.cells, discovery);
+      // why: spec rev 10 — a provider that does not sell the snapshot's cabin is never called; its cells are no_data
+      for (const id of discovery)
+        if (!(ctx.providers.get(id)?.cabins ?? []).includes(built.snapshot.cabin))
+          ctx.repos.cells.markNoData(e.id, 'discovery', id, 'cabin-not-offered');
       return e;
     });
   } catch (err) {
@@ -57,7 +61,10 @@ export async function startExecution(
     throw err;
   }
   const run = newRun(ctx, exec, { manual: false, fresh: true, blocked: new Set() });
-  run.log.info({ trigger: opts.trigger, cells: built.cells.length }, 'execution: started');
+  run.log.info(
+    { trigger: opts.trigger, cells: built.cells.length, notes: built.notes },
+    'execution: started',
+  );
   reg.launch(run, () => execute(ctx, run));
   return { ok: true, executionId: exec.id };
 }
