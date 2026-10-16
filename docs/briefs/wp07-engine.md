@@ -5,7 +5,7 @@ owner: opus
 depends_on: [1, 2, 3, 4, 5, 6]
 spec_sections: ["§3 (cell outcome seeding)", "§5.3 (budget stops, rev 18)", "§5.6", "§6.2 (verdict classes)", "§6.7 (selection once, child executions, rev 18)", "§6.9 (results basis inputs)", "§7 (transactions, resume query, boot order, migrations)", "§8.1", "§8.2", "§8.3 (LogNotifier only)", "§9 item 4 layer A", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, search-strategy-reviewer, cost-and-budget-reviewer, provenance-auditor, data-model-reviewer, product-owner]
-status: draft
+status: reviewed
 ---
 
 # WP7 — `@gmt/engine` with layer-A tests
@@ -24,7 +24,8 @@ Build the execution engine of spec §8 (orchestrator, discovery and verification
 - The §5.6 normalisation step: airport tz from `AirportsRepo`, one FX lookup (`rateFor`, `FX_MAX_RATE_AGE_DAYS`) feeding core's `normaliseOffer` for offers and core's `priceInGbp` (its money step, exported here) for calendar prices, one calendar price per cell per tile, `offers-dropped:n`, the adapters' `cellIssues` and `truncated` (decisions 28, 30), `RawOffer.verified` (decisions 27, 29), `cabin-not-offered` seeding (`CellsRepo.markNoData`), `route_price_history` upserts of GBP points from `ItinerarySearchResult.routeHistory` (none when the vendor supplies none, decision 40).
 - Bounded pools per provider `CONCURRENCY` (an in-package helper), one intake switch per pass and per (stage, provider) lane, and one abort signal per pass that only cancel, SIGTERM and a fatal database error raise (decision 25: a reservation that passed every cap is honoured).
 - FX refresh through http-kit under the id `fx` (never ledgered), a daily system job plus a one-shot a minute after boot when no rate is a day fresh, and a daily maintenance job that calls WP3's `runMaintenance`. `boot()` makes no network call.
-- The core, db and api changes decisions 25, 32 and 37 give this package, each with its own tests: in `@gmt/core`, `no-priced-options` joins the closed `ErrorReason` list (Task 7.4), `TRUNCATED_NOTE` and the money step `priceInGbp` are exported (Task 7.5), `evaluateConstraints` judges `priceConfirmed` on every offer whose `price` is not a supplied field (Task 7.8), `SearchDefinition.confirmedCalls` and the api-contract fields for confirmed calls (Task 7.13), and `coverageCheckResponseSchema`'s `cachedRows` becomes nullable with `calls` documented as tiles (Task 7.18); in `@gmt/db`, `ERROR_REASONS` and the resume query's non-retryable list gain `no-priced-options` (Task 7.4), and migration `0001_confirmed_calls` with the schema column, the row mapping and `DefinitionsRepo.setConfirmed` (Task 7.13); in `apps/api`, `httpLimitsFor` takes `fx` from the engine's `fxHttpLimits` (Task 7.19, once the barrel exports it; decision 32) and the tool test counts two migrations (Task 7.13); the root `vitest.aliases.ts` loses the `@gmt/engine/testing` alias that pointed at a file that never exists (Task 7.1).
+- The repository-wide cast check `scripts/check-casts.mjs` with its test, the root `pnpm casts` script and a CI step (decision 45; Task 7.20), which other packages' briefs use.
+- The core, db and api changes decisions 25, 32, 37, 45 and 47 give this package, each with its own tests: core's `microGbpToPence` (Task 7.1), `isTruncated` beside `TRUNCATED_NOTE` (Task 7.5), the `price-unconfirmed` priced-reason part with `isPriceUnconfirmed` and a roll-up price over confirmed outcomes only, and db's matching priced-reason set and confirmed-first `best_observation_id` (Task 7.8); and in `@gmt/core`, `no-priced-options` joins the closed `ErrorReason` list (Task 7.4), `TRUNCATED_NOTE` and the money step `priceInGbp` are exported (Task 7.5), `evaluateConstraints` judges `priceConfirmed` on every offer whose `price` is not a supplied field (Task 7.8), `SearchDefinition.confirmedCalls` and the api-contract fields for confirmed calls (Task 7.13), and `coverageCheckResponseSchema`'s `cachedRows` becomes nullable with `calls` documented as tiles (Task 7.18); in `@gmt/db`, `ERROR_REASONS` and the resume query's non-retryable list gain `no-priced-options` (Task 7.4), and migration `0001_confirmed_calls` with the schema column, the row mapping and `DefinitionsRepo.setConfirmed` (Task 7.13); in `apps/api`, `httpLimitsFor` takes `fx` from the engine's `fxHttpLimits` (Task 7.19, once the barrel exports it; decision 32) and the tool test counts two migrations (Task 7.13); the root `vitest.aliases.ts` loses the `@gmt/engine/testing` alias that pointed at a file that never exists (Task 7.1).
 - Layer-A tests under `packages/engine/test/` with the harness in `test/support/` (never `src/`): WP4's fixture router reached through http-kit's `inProcessHosts`, WP4's scenario rules through `scenarioRequest`/`releaseRequest`, real http-kit, real `SqliteBudgetGuard` from `budgetConfigFromConfig(config)`, `openDatabase(':memory:')` + `applyMigrations(MIGRATIONS_DIR)` + `createRepos`, `fixedClock`, fake timers where http-kit backs off, capturing `Logger` and `Notifier`, and the network guards of `@gmt/providers/testing` from the vitest setup file. One test per §8.1 error-table row in both stages plus every §9 item 4 layer-A item.
 
 **Out**
@@ -33,7 +34,7 @@ Build the execution engine of spec §8 (orchestrator, discovery and verification
 - Routes, the 409/422 HTTP mapping of `StartResult`, `needsConfirmation` on `PUT`, refusing a schedule whose provider-month scope does not fit (decision 25, from the `budgetFit` this package returns), the `app_lock` heartbeat, the WAL checkpoint and lock release at shutdown, pino construction and `redact` paths: WP8 (`apps/api`).
 - Repositories, schema, migrations, the cap predicates inside `reserve`, the compare-and-set SQL, the boot-sweep SQL, `runMaintenance`: WP3 (`@gmt/db`).
 - http-kit, the fixture provider and its fixture tree, error classification by status: WP4 (`@gmt/providers`).
-- `RawOffer.verified` (WP5 Task 5.0): a type-only core addition this package consumes; `CellIssue`, `cellIssues` and `truncated` are on main with WP6. Discovery queries are per airport pair (decision 34: no definition-wide origins on the query; Travelpayouts costs `O × D × M` free calls a scan, 28 for the worked example, with no cache-dedup saving assumed).
+- `RawOffer.verified` (WP5), `CellIssue`, `cellIssues` and `truncated` (WP6): core port fields on main that this package reads. Discovery queries are per airport pair (decision 34: no definition-wide origins on the query; Travelpayouts costs `O × D × M` free calls a scan, 28 for the worked example, with no cache-dedup saving assumed).
 - The pure domain functions (`resolveWindow`, `generateCells`, `selectCandidates`, `rollUp`, `normaliseOffer`, `toGbp`, `validateVendorUrl`, `formatPence`, `stripControlChars`, …): WP1 and WP2 (`@gmt/core`).
 - Layer-B tests (the real adapters replaying recorded fixtures, with their own harness) and estimate-versus-actual parity per real adapter: WP13; per-adapter `plan()` and `estimate()` parity against msw hits: WP5 and WP6.
 
@@ -45,7 +46,7 @@ Build the execution engine of spec §8 (orchestrator, discovery and verification
 | §5.3 (rev 18) | A reservation that passed every cap is honoured and its result written; a budget stop refuses only new reservations (decision 25). |
 | §5.4 | `no-return-legs` and `no-priced-options` are never retried by a resume, each stored as its own reason (decision 37); a chain stopped by budget or cancel returns the offers it paid for, and they are written (decision 27). |
 | §5.6 | Normalise every raw price and offer: tz from the airports repository, one money step (`priceInGbp`) with `FX_MAX_RATE_AGE_DAYS`, ECB currencies only, one calendar price per (provider, cell) per tile, `offers-dropped:n`, cabin evidence on the observation; FX refreshed daily by a job that runs after boot. |
-| §6.2 | An offer whose price no seller listing confirmed is never classed verified: `priceConfirmed` reads `unverified` whatever the constraints (decision 37). |
+| §6.2 (rev 21) | An offer whose price no seller listing confirmed is never classed verified: `priceConfirmed` reads `unverified` whatever the constraints (decision 37); a verified cell's price and best observation are the cheapest confirmed ones, and a cell with none has no itinerary-search price (decision 45). |
 | §6.7 (rev 18) | Selection runs once per execution, guarded by the existence of verification outcomes, never choosing a departed cell; a child execution bypasses it (`alwaysInclude = [cell]`, `maxCells = 1`, no discovery), its call cap derives from its cell's estimate and the parent's headroom with `CHILD_MAX_CALLS` as the floor, and it never pauses. |
 | §6.9 | The engine writes what results need: `best_observation_id` (the cheapest observation written, verdict-independent), child observations reachable through `observationsForDefinition`, verification outcomes that `latestVerificationOutcomeForCell` reads, reused calendar rows carrying the original `fetched_at`. |
 | §7 (rev 10) | `route_price_history` upserted from each verification's `routeHistory`; atomic units (seeding with the execution row; each tile; selection + verification seeding; each reused cell; each verified cell; a resume's claim with its departed marking); the resume query per (stage, provider); the boot `running → interrupted` update; synchronous transaction callbacks; committed migrations (0001 adds `search_definitions.confirmed_calls`, decision 37). |
@@ -55,11 +56,11 @@ Build the execution engine of spec §8 (orchestrator, discovery and verification
 | §9 item 4 | Layer A: every listed behaviour as a test through the fixture provider at `fixture.local`. |
 | §14 | `executionId`, `definitionId`, `providerId` on engine log lines; no full URLs. |
 
-The brief follows plan decisions 1–41 and the spec at revision 20. Spec revision 18 folded decision 25 into §5.3 and §6.7; where the spec's text still differs from a decision (the §8.1 error-table rows that abort in-flight siblings on a budget stop; §3's error-reason list without `no-priced-options`), this brief follows the decision and §11 lists the text that needs the matching revision.
+The brief follows plan decisions 1–47 and the spec at revision 21, which folded decisions 25 and 37 into §3, §5.3, §6.2, §6.7, §7 and §8.1. Where the spec's text still differs from a decision (decision 45's confirmed-only cell price and the truncated-tile reuse rule), this brief follows the decision and §11 lists the text that needs the matching revision.
 
 ## 4. Interfaces consumed
 
-Copied verbatim from the plan's "Cross-package contracts" at its current head (decisions 1–41), then the places where the merged code on main is narrower or wider than that text, then the contract addition of decisions 27 and 29 this package consumes before WP5 merges. Every signature the tasks use matches main.
+Copied verbatim from the plan's "Cross-package contracts" at its current head (decisions 1–47), then the places where the merged code on main is narrower or wider than that text. WP5 and WP6 are on main, so every signature the tasks use, `RawOffer.verified` included, matches main as it is.
 
 #### Identifiers and dates (`@gmt/core` `types/ids.ts`, WP0)
 
@@ -212,7 +213,7 @@ export type BudgetScope =
   | { kind: 'global-month' };
 export interface Usage { calls: number; costMicroGbp: number; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
 // cap is null for a window the plan does not use (a month scope on a lifetime plan, and vice versa) and for a scope with no cap configured.
-// Per-execution caps come from the execution's snapshot budget (search_executions.definition_snapshot_json → budget), never from config at reserve time; child executions carry { maxCalls: ceil(perCellEstimate × ESTIMATE_RETRY_FACTOR) bounded by the parent's remaining headroom (decision 25; CHILD_MAX_CALLS is the floor), maxFreeCalls: 0, maxCostMicroGbp: 0 } in their snapshot. Config EXECUTION_MAX_* are the defaults a new definition is created with.
+// Per-execution caps come from the execution's snapshot budget (search_executions.definition_snapshot_json → budget), never from config at reserve time; child executions inherit the definition's budget with only maxCalls replaced by max(CHILD_MAX_CALLS, min(perCellEstimate × ESTIMATE_RETRY_FACTOR, the parent's remaining headroom)) (decision 25) in their snapshot. Config EXECUTION_MAX_* are the defaults a new definition is created with.
 ```
 
 #### Logger and clock (`ports/logger.ts`, `ports/clock.ts`, WP0)
@@ -284,7 +285,7 @@ export interface Airport { iata: Iata; icao: string | null; name: string; city: 
 export interface AirportsDataset { version: string; airports: Array<Omit<Airport, 'source' | 'datasetVersion'>>; metros: Record<string, string[]> /* metro → airports, from the vendored attributed list */ }
 export class AirportsRepo { exists(iata): boolean; get(iata): Airport | null; search(q: string, limit: number): Airport[]; metroOf(iata): string | null; airportsOfMetro(code: string): Iata[]; sharedMetro(iatas: Iata[]): string | null; count(): number; upsertAll(dataset: AirportsDataset): void; datasetVersion(): string | null; tzOf(iata): string | null }
 export class FxRepo { rateNano(date: IsoDate, currency: string): number | null; latest(currency: string, maxAgeDays: number, today: IsoDate): { rateNano: number; date: IsoDate; source: string } | null; upsert(rows: Array<{ date: IsoDate; currency: string; rateNano: number; source: string }>): void }
-export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmedCost(id, pence: number | null): void }
+export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?: { includeDeleted?: boolean }): SearchDefinition[]; softDelete(id): void; setConfirmed(id, confirmed: { pence: number; calls: number } | null): void /* decision 43 */ }
 export type ExecutionCreateInput = { definitionId: string; isChild: boolean; cell: CellKey | null; snapshot: DefinitionSnapshot; estimate: Estimate | null; trigger: Execution['trigger']; status: 'pending' | 'running' | ExecutionStatus & `skipped_${string}` }
 export type ExecutionPatch = Partial<Pick<Execution, 'stage' | 'resumeAfter' | 'errorText' | 'startedAt' | 'finishedAt' | 'cancelRequested' | 'estimate' | 'snapshot'>>
 export class ExecutionsRepo { create(input: ExecutionCreateInput): Execution; get(id): Execution | null; listForDefinition(definitionId, opts: { limit: number; includeChildren: boolean }): Execution[]; listByStatus(statuses: ExecutionStatus[]): Execution[]; activeParent(definitionId): Execution | null; activeChild(definitionId, cell: CellKey): Execution | null; latestCompleted(definitionId): Execution | null; claimResume(id): boolean; setStatus(id, status: ExecutionStatus, patch?: ExecutionPatch): void; patch(id, patch: ExecutionPatch): void; requestCancel(id): void; bootSweep(bootAt: IsoDateTime): { interrupted: string[] }; incrementAutoResume(id): number; resetAutoResume(id): void; lastScheduledFiring(definitionId): IsoDateTime | null }
@@ -386,7 +387,7 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 - `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput plus `confirmedCostPence?: number`, the explicit confirmation from the create click; `bookingLinks` forced true when verification includes `searchapi`; origins/destinations disjoint; `topN ≤ maxCells`; `alwaysInclude.length ≤ maxCells`); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` `SearchDefinition & { budgetFit: BudgetFit; estimate: Estimate | null; needsConfirmation: { estimateMicroGbp: number; confirmedCostPence: number | null } | null; notices: string[] }`; `budgetFitSchema` `{ fits: boolean; runsPerMonth: number; perScope: Array<{ scope: string; estimated: number; cap: number | null; fits: boolean }> }`; `estimateSchema` (= `Estimate`) `{ cells: number; perProvider: Array<{ providerId; stage: Stage; calls: number; planCalls: number; costMicroGbp: number; costPence: number; seconds: number; blocked: string | null }>; totalCalls: number; totalPlanCalls: number; totalCostMicroGbp: number; totalCostPence: number; seconds: number; assumptions: string[]; windowClamped: boolean; retryFactor: number }` (`planCalls` is pre-factor, for the overrun check); `POST /api/definitions/estimate` (body: `definitionCreateRequestSchema`, unsaved) and `POST /api/definitions/:id/estimate` both → `estimateResponseSchema` `{ estimate: Estimate; budgetFit: BudgetFit }` (so the form shows both before the create click); `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month: IsoMonth; cachedRows: number; cellsInBand: number }> }>; calls: number; notes: string[] }`.
 - `system.ts`: `healthResponseSchema = z.union([healthPublicSchema, healthDetailSchema])` where public is `{ ok: boolean; degraded: boolean }` and detail `{ ok; degraded; db: { ok; path: never /* no path leaks */; sizeBytes }; providers: Array<{ providerId; configured; healthy: boolean | null }>; scheduler: { jobCount; nextRun; lastExecutionAt; degraded; blockedSince: IsoDateTime | null } }`; `providersResponseSchema` `{ providers: Array<{ providerId; displayName; enabled; capabilities: { discovery: CapabilityInfo | null; verification: CapabilityInfo | null }; plan: PlanId | 'free' | 'synthetic'; usage: Usage[]; excludedFromSchedule: boolean; notices: string[] }>; synthetic: boolean; presets: { policy: Pick<VerificationPolicy, 'maxCells' | 'topN' | 'expandTop' | 'bookingLinks'>; providers: ProvidersConfig; budget: ExecutionBudget; discoveryRefreshHours: number; schedulerTimezone: string }; pointOfSale: string }`; `budgetResponseSchema` `{ scopes: Usage[]; monthlyCapMicroGbp; monthlyCapPence; fixedFeesMicroGbp; ceilingNote: string }`; `schedulerJobsResponseSchema` `{ jobs: Array<SchedulerJob> }` with `schedulerJobSchema` exported and `SchedulerJob = { id: string; kind: 'definition' | 'resume'; definitionId: string; executionId: string | null; cron: string | null; tz: string; nextRun: IsoDateTime | null }`; `toolRecordRequestSchema` `{ budget: number; origins: Iata[]; destinations: Iata[]; month: IsoMonth }`; `toolSmokeRequestSchema` `{ origin: Iata; destination: Iata }`; `toolRunResponseSchema` `{ exitCode: number; summary: string; lines: string[]; fixturesWritten: string[] }`.
 
-#### Decisions taken at reconciliation (plan, verbatim, in number order: 1–41)
+#### Decisions taken at reconciliation (plan, verbatim, in number order: 1–47)
 
 1. `iataSchema` upper-cases input; `PointOfSale` is any ISO alpha-2 code or `'unknown'`; `CellKey` is defined once; `cellKeyString` moves to WP0; `Buckets`, `Estimate`, `BudgetFit`, `SchedulerJob`, `DigestItem`, `Firing`, `AlertCandidate`, `PriorFiring` are defined above.
 2. `BudgetGuard.reserve` and `recordCacheHit` carry `tileIndex` (spec rev 10). `'fx'` is never ledgered and goes through http-kit (spec §5.6 corrected). Frankfurter's host is `api.frankfurter.dev` (`/v1/latest?from=GBP`); the old `.app` host redirects, and http-kit refuses redirects.
@@ -429,6 +430,12 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 39. (From the WP6 branch review) The recorded metro tiles also show rows whose return leg lands at a different airport of the metro (the link's `t=` token encodes the itinerary), so attributing a metro row by `origin_airport` produced the wrong cell, a second reason for decision 34. The adapter parses the return airport from the token and drops any row that is not a closed round trip for the pair as a per-cell issue (`parse`, detail `return-airport-mismatch`); a replay test pins that every airport-tile row is closed. TP-21 (JFK→LON) is metro evidence, not an airport tile. The recording tool uses the adapter's limits, URL builder and the shared money helper (decision 32 done).
 40. (From the WP5 implementation against the live recordings) SearchApi's `price_insights` route-level series is best-effort: the recorded step-1 response (`sort_by=price`, `separate_tickets=1`) carries none, so the adapter returns an empty route history with an informational note and no error; WP10's route-level chart shows "no history supplied by the vendor" when empty. The recordings also put flight options under `other_flights` only; the adapter reads both `best_flights` and `other_flights`.
 41. (From the WP5 branch review) A rate-limit or limiter-timeout in the middle of an itinerary chain propagates as decision 17 requires, so the step-2 offers already paid for are discarded and the cell is re-billed on resume; accepted as a rare residual (the alternative, carrying offers on a ProviderError, would blur the error contract). A step-2 fare dropped for a missing airline marks the result partial when returns were priced. A calendar row carrying both `has_no_flights` and a price is a conflicting entry, never "no fares".
+42. (From the WP9 and WP10 brief revisions) The api-contract gains: `confirmedCalls` beside `confirmedCostPence` on definition create and confirm (WP8 fills from decision 37's column); `expandTop` on the execution summary ("outbounds each"); `verify: { maxCalls, headroomCalls }` on the cell detail (WP7 exposes a dry run of the child-cap calculation); `priceConfirmed` on itinerary history points; `historyPointResponseSchema` with `stale` and `truncated` (the db type keeps `historyPointSchema`). WP9's Task 9.0 (`truncated`, departure-date range filter, `formatAgo`) lands before WP8's results routes. Web names shared across WP9/WP10: `formatIsoDateShort`/`formatIsoDateLong`/`formatWeekday`, `COPY.truncatedNote`, PriceCell's `truncated` prop and `compact` variant, `ViewHeader variant="span"`.
+43. (From the WP7 round-2 revision) Core exports `priceInGbp` for calendar money; `setConfirmed(definitionId, { pence, calls })` replaces `setConfirmedCost`; `Engine.start` takes `confirmCalls`; a confirmation covers a run only when both pence and calls suffice; a child's cap is max(CHILD_MAX_CALLS, min(estimate, headroom)) with headroom net of other active children; a start whose every discovery provider is blocked is refused; a provider blocked at start is excluded from estimate totals; stale paused runs are cancelled, not replaced off-schedule; the cast check is an AST script; `apps/api` wiring takes `fxHttpLimits` from the engine. WP8 stores both confirmation figures, judges discovery overrun on tiles and derives `truncated` from `TRUNCATED_NOTE`; WP9/WP11 render null `cachedRows` as "not checked", coverage `calls` as tiles and the `priceConfirmed` label.
+44. (From the WP9 round-2 review) Staleness uses the fetch age: a price is stale when (now − fetchedAt) plus its known `maxAgeHours` exceeds the threshold; when the vendor's age is `'unknown'` only the fetch age counts and the price carries the label "vendor's cache age unknown" instead of being marked stale (WP8 fills `stale` by this rule; the stale banner says "older than one refresh cycle" only for rows stale by fetch age). An offer whose price the final step did not confirm shows the badge "price not confirmed by the final step" wherever it renders (table, headline, other sellers), never only in the expanded row. Confirmation and Run now send `confirmedCalls`/`confirmCalls` with pence. Estimates are worded "about N calls (hard stop M)", never "up to". A metro code typed into an airport field expands to its member airports on Enter or Add, the same as picking it from the list. No lint-suppression comments anywhere; a scrollable table uses a labelled focusable region without one.
+45. (From the WP7 round-3 review) Prices from a truncated tile are never reused: the engine's reuse filter excludes outcomes whose last_error starts with `TRUNCATED_NOTE`. A verified cell's `verification_min_pence` counts only confirmed prices (null when none) and `best_observation_id` prefers the cheapest confirmed observation, falling back to the cheapest unconfirmed; verified-basis views therefore never show an unconfirmed fare as the itinerary-search price. `Engine.childCapPreview(definitionId, cell): { maxCalls, headroomCalls }` uses the same calculation the child gets. A malformed offer amount fails only its cell (`parse`), like calendar prices. The cast check is a committed `scripts/check-casts.mjs` with its own test, run by `pnpm casts` and CI, and it fails on an empty file list.
+46. (From the WP9 round-2 review) WP9's shell is the base WP10 extends, never replaces. Date formats in format.ts: `formatIsoDate` '14 Mar 2027', `formatIsoDateShort` '14 Mar', `formatIsoDateLong` 'Sun 14 Mar 2027', `formatWeekday` 'Sun' (one month and weekday table). PriceCell `compact` keeps the amount with '≈', a short provider badge, the destination code and the stale/truncated/unconfirmed marks, and hides source words, age line and destination note; WP10 adds props to PriceCell rather than replacing it. `ViewHeader variant="span"` is the cross-execution shape. `scripts/check-boundaries.mjs` also rejects `biome-ignore` and `eslint-disable` comments in every package; scrollable tables use a labelled region without `tabIndex`. The airport-literal check matches only string literals and template text, with a committed list of non-airport words (ISO, SQL, GMT, ALL, APG, …) that later briefs extend in their own diffs. Web types derive from the contract (no hand-written `BudgetFit`, `PlanId`, `BucketName`); `DEFAULT_DISCOVERY_REFRESH_HOURS` comes from core.
+47. (From the WP7 round-3 and WP5 fix reviews) Core exports `isTruncated(reason: string | null)` beside `TRUNCATED_NOTE`, the one prefix check every reader uses. One `microGbpToPence` rounding helper in core replaces the six inline copies. A segment has no operating flight number field, so a codeshare keeps the operating carrier only (recorded Phase 4 gap). WP8's brief must replace `setConfirmedCost` with `setConfirmed` and send calls (its review round picks this up). http-kit's 200-character cap on vendor messages stays (it bounds `last_error`).
 
 #### Where main differs from the text above (the code wins)
 
@@ -441,29 +448,28 @@ export function buildDigest(rule: AlertRule, firings: Firing[], ctx: { execution
 - `@gmt/db` also exports `budgetConfigFromConfig(config)` (the fixture entry only under `syntheticAllowed`, `costPerCallMicroGbp` = `FIXTURE_COST_MICRO_GBP`, a fixed `monthlyCallCap` of 100 000), `effectiveCallCap` and `MIGRATIONS_DIR`. `NotificationsRepo.wasSent` counts `sent` rows only, so a failed send is retried at the next occurrence. `SqliteResponseCache.set` requires a 64-hex key.
 - `@gmt/providers/fixture` exports `fixtureRouter(root, gate)`, `defaultFixtureRoot()`, `FIXTURE_TILE_DAYS`, `FixtureRule`, `FixtureResponse`, `scenarioRequest(rules)` and `releaseRequest(id, respond?)`; the fixture's tile results report `ProviderError`s as `tile-error` and let `AbortedError` and `BudgetExceeded` propagate. The `partial` rule removes the failed options from the answer. `@gmt/providers/testing` exports `installNetworkGuards`, `guardedServer`, `takeStrays`, `hangUntilAborted`, `respondAfter`; it is the only module that imports msw (decision 20). `HttpKitDeps.inProcessHosts` may name only `fixture.local`; `fx` goes to global fetch.
 - `coverageCheckResponseSchema` declares `cachedRows: positiveInt`; Task 7.18 makes it `positiveInt.nullable()` (decisions 25, 37) and documents `calls` as the tiles requested.
-- `DefinitionsRepo.setConfirmedCost(id, pence)` is the only confirmation writer on main and `search_definitions` has no calls column; Task 7.13 adds migration 0001 and replaces the method with `setConfirmed(id, { pence, calls } | null)`, which writes both in one statement (decision 37).
+- The plan's repository contract already names `setConfirmed(id, { pence, calls } | null)` (decision 43); the code on main still has `setConfirmedCost(id, pence)` and no calls column, so Task 7.13 adds migration 0001 and replaces the method, writing both in one statement.
 - `ErrorReason` is `ProviderErrorKind | NormalisationReason`, and db's `ERROR_REASONS` and the resume query's non-retryable list mirror it; Task 7.4 adds `no-priced-options` to all three (decision 37). `ProviderError.reason` is a free string the adapters set (`no-return-legs`, `no-priced-options`).
 - WP6's Travelpayouts adapter is on main: one query per airport pair (decision 34); a tile stopped at the page cap reports `truncated: true` and each unread covered cell as a `cellIssues` entry (`upstream`, detail `pagination truncated at 3 pages`); a row that is not a closed round trip for the pair is a `parse` cell issue with detail `return-airport-mismatch` (decision 39); each row's `providerObservedAt` is the day its link's `search_date` names (decision 35), which the calendar write stores unchanged. SearchApi's route-level series may be empty (decision 40), which upserts nothing.
 
-#### Contract addition consumed before WP5 merges (plan decisions 27, 29; WP5 Task 5.0 adds it to `packages/core/src/ports/provider.ts`)
+#### The port fields WP5 and WP6 added (on main)
 
-```ts
-export interface RawOffer { /* … as above … */ verified: boolean }   // true only when a seller listing confirmed the price; the fixture provider states true (decision 31)
-```
+`RawOffer.verified: boolean` (decisions 27, 29; the fixture states `true`, decision 31), `CellIssue`, `DiscoveryTileResult.cellIssues` and `truncated` (decisions 28, 30). The engine's reading of them: a `cellIssues` entry makes its cell `priced` with `offers-dropped:n` when the tile also priced it, else `error` with the issue's reason and its detail in `last_error`, never `no_data`; a `truncated` tile's priced cells carry core's `TRUNCATED_NOTE` ("cheapest of the rows read") leading `last_error`, which every reader tests with core's `isTruncated` (WP8 maps it to `truncated: true`; decisions 36, 37, 47), and such a price is never reused, so the label is never lost to a copy (decision 45); an offer with `verified: false` is written without `price` and `segmentCabins` in its supplied fields and without cabin evidence, so core's `evaluateConstraints` reads `priceConfirmed: 'unverified'` ("price not confirmed by the final step") and `cabin: 'unverified'` whatever the constraints, and the row can never class as verified (decision 37); the cell's price and best observation are the cheapest confirmed ones, and a cell with no confirmed offer is `priced` with `price-unconfirmed` and no roll-up price (decision 45). WP5's chain propagates a mid-chain rate limit as a `ProviderError` (decision 41), which the engine records as that cell's error and retries on resume.
 
-`CellIssue`, `DiscoveryTileResult.cellIssues` and `truncated` (decisions 28, 30) are on main with WP6. The engine's reading of all three: a `cellIssues` entry makes its cell `priced` with `offers-dropped:n` when the tile also priced it, else `error` with the issue's reason and its detail in `last_error`, never `no_data`; a `truncated` tile's priced cells carry core's `TRUNCATED_NOTE` ("cheapest of the rows read") leading `last_error`, which WP8 maps to `truncated: true` on calendar-basis rows and price cells (decisions 36, 37); an offer with `verified: false` is written without `price` and `segmentCabins` in its supplied fields and without cabin evidence, so core's `evaluateConstraints` reads `priceConfirmed: 'unverified'` ("price not confirmed by the final step") and `cabin: 'unverified'` whatever the constraints, and the row can never class as verified (decision 37).
+Staleness (decision 44) is computed on read by WP8 from each row's `fetchedAt` and `maxAgeHours`; the engine computes no price staleness and passes both unchanged (`maxAgeHours` null when the vendor's age is `'unknown'`, so WP8 counts the fetch age alone and labels the row), reused rows keeping the fetching execution's `fetchedAt`. Its own age rules are about runs and reuse: a run is stale past 0.9 × its discovery refresh, and reuse takes a price whose fetch age is below that (spec §8.2).
 
 ## 5. Interfaces produced
 
-The plan's "Engine" contract, with the places decisions 25 and 37 change it (EngineOptions carries no cost; a child's `maxCalls` is computed with the `CHILD_MAX_CALLS` floor; a start confirms calls as well as pence):
+The plan's "Engine" contract, with the places decisions 25, 37 and 45 change it (EngineOptions carries no cost; a child's `maxCalls` is computed with the `CHILD_MAX_CALLS` floor; a start confirms calls as well as pence, through one `StartOptions`; `childCapPreview` shows a child's cap beforehand):
 
 ```ts
 export interface EngineDeps { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; notifiers: Notifier[]; clock: Clock; log: Logger }
 export interface EngineOptions { alerts?: AlertsStepHook; providerConcurrency?: Partial<Record<ProviderId, number>> /* tests; production reads config limits */ }
 export type AlertsStepHook = (deps: EngineDeps, executionId: string) => Promise<{ digests: number; events: number }>;   // WP11 provides runAlerts; default noAlerts
+export interface StartOptions { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number }   // declared once in src/types.ts
 export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled'; message: string; details: unknown };
 export type { Estimate, BudgetFit, SchedulerJob, CoverageCheckRequest, CoverageCheckResponse } from '@gmt/core';
-export interface Engine { boot(): Promise<void>; shutdown(): Promise<void>; start(definitionId, opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number }): Promise<StartResult>; resume(executionId, opts: { manual: boolean }): Promise<StartResult>; cancel(executionId): Promise<boolean>; verifyCell(definitionId, cell: CellKey): Promise<StartResult>; estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate; estimateRemaining(executionId): Estimate; budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit; coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>; scheduler: { register(def: SearchDefinition): void; unregister(definitionId): void; jobs(): SchedulerJob[]; tick(definitionId): Promise<void>; blockedSince(): IsoDateTime | null }; status(): { running: string[]; degraded: boolean; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null } }
+export interface Engine { boot(): Promise<void>; shutdown(): Promise<void>; start(definitionId, opts: StartOptions): Promise<StartResult>; resume(executionId, opts: { manual: boolean }): Promise<StartResult>; cancel(executionId): Promise<boolean>; verifyCell(definitionId, cell: CellKey): Promise<StartResult>; childCapPreview(definitionId, cell: CellKey): { maxCalls: number; headroomCalls: number }; estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate; estimateRemaining(executionId): Estimate; budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit; coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>; scheduler: { register(def: SearchDefinition): void; unregister(definitionId): void; jobs(): SchedulerJob[]; tick(definitionId): Promise<void>; blockedSince(): IsoDateTime | null }; status(): { running: string[]; degraded: boolean; nextRun: IsoDateTime | null; lastExecutionAt: IsoDateTime | null } }
 export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   // boot() makes no network call (the FX refresh is a scheduled job that runs after boot)
 export function parseCron(expr: string, tz: string): { ok: true; next: (from: Date) => Date | null } | { ok: false; reason: string };
 export class LogNotifier implements Notifier { constructor(log: Logger) }
@@ -475,7 +481,7 @@ export function fxHttpLimits(cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeou
 // Rules settled: manual resume of a paused_budget parent checks the definition's CURRENT budget (only `budget`) and writes it into the snapshot in the claim transaction. Executions whose definition is soft-deleted are never auto-resumed and never scheduled.
 ```
 
-What the API reads from these values: `Engine.estimate` is the worst case without reuse (ruling 9: its `totalCostPence` and `totalCalls` are what `confirmed_cost_pence` and `confirmed_calls` record, through `DefinitionsRepo.setConfirmed`) with `perProvider[].blocked` filled from the pre-start check and the totals summed over the lines that would run (cost-r1-014); the estimate a start stores applies reuse and is compared against the stored confirmation, pence and calls. The coverage check's `cachedRows` is null for a month it could not fully check, and its `calls` counts tiles requested. `budgetFit` is without reuse, counts discovery at most once per refresh window, adds every other enabled scheduled definition to the `provider-month:<id>`/`provider-lifetime:<id>` and `global-month` scopes, and reports `runsPerMonth` unrounded; WP8 refuses enabling or changing a schedule while a provider-month scope does not fit (decision 25). `scheduler.blockedSince()` is the oldest "schedule blocked since" among definitions whose last tick was blocked (by an active execution or a refused resume), cleared by a tick that starts or resumes. A scheduled start that no configured provider can run is refused with code `disabled` (a configuration problem, not a cap) and notifies once per definition. A start whose every discovery provider is blocked for budget, with no cell always included, is refused with code `cap` (it would search nothing). `scheduler.tick` does nothing for a definition without a schedule; a stale paused run is cancelled with error_text `SUPERSEDED` and never replaced off the cron. Internal helpers (`createOrchestrator`, `buildContext`, `runPool`, …) are not exported from the barrel.
+What the API reads from these values: `Engine.estimate` is the worst case without reuse (ruling 9: its `totalCostPence` and `totalCalls` are what `confirmed_cost_pence` and `confirmed_calls` record, through `DefinitionsRepo.setConfirmed`) with `perProvider[].blocked` filled from the pre-start check and the totals summed over the lines that would run (cost-r1-014); the estimate a start stores applies reuse and is compared against the stored confirmation, pence and calls. The coverage check's `cachedRows` is null for a month it could not fully check, and its `calls` counts tiles requested. The cell detail's `verify: { maxCalls, headroomCalls }` comes from `childCapPreview`, which sizes the cap exactly as the child would be sized (decisions 42, 45). `budgetFit` is without reuse, counts discovery at most once per refresh window, adds every other enabled scheduled definition to the `provider-month:<id>`/`provider-lifetime:<id>` and `global-month` scopes, and reports `runsPerMonth` unrounded; WP8 refuses enabling or changing a schedule while a provider-month scope does not fit (decision 25). `scheduler.blockedSince()` is the oldest "schedule blocked since" among definitions whose last tick was blocked (by an active execution or a refused resume), cleared by a tick that starts or resumes. A scheduled start that no configured provider can run is refused with code `disabled` (a configuration problem, not a cap) and notifies once per definition. A start whose every discovery provider is blocked for budget, with no cell always included, is refused with code `cap` (it would search nothing). `scheduler.tick` does nothing for a definition without a schedule; a stale paused run is cancelled with error_text `SUPERSEDED` and never replaced off the cron. Internal helpers (`createOrchestrator`, `buildContext`, `runPool`, …) are not exported from the barrel.
 
 ## 6. Library notes
 
@@ -489,7 +495,7 @@ Verified on 2026-10-14 against the sources named; what the table marks as exerci
 | `better-sqlite3` | 13.0.3 (dev only) | Tests construct `new Database.SqliteError(message, code)` to simulate `SQLITE_FULL` (Review Focus 5) and type reads with `db.raw.prepare<Params, Row>(sql)` (WP3's pattern; no `as`). `src/` never imports it; it detects a unique-index clash by `err.code === 'SQLITE_CONSTRAINT_UNIQUE'`. | WP3 pins the version; README "class SqliteError", `@types/better-sqlite3` `Statement<BindParameters, Result>` |
 | `vitest` | 5.0.4 | `vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })`, `vi.setSystemTime`, `vi.advanceTimersByTimeAsync`, `vi.isFakeTimers`, `vi.useRealTimers`, `vi.waitFor` (advances fake timers by its interval), `vi.stubGlobal('fetch', …)` / `vi.unstubAllGlobals`, `vi.spyOn`, `vi.fn`; `setupFiles`; after-hooks run in reverse registration order, so the setup file's harness cleanup runs before the network guard's stray check. | context7 `/vitest-dev/vitest` `docs/api/vi.md` ("vi.waitFor", "toFake") and `docs/guide/mocking/timers.md` as cited by the first draft; `vi.stubGlobal`, `vi.isFakeTimers`, `setupFiles` and the after-hook order exercised by this revision's assembly run |
 | `drizzle-kit` | 0.31.11 (db dev) | `pnpm --filter @gmt/db exec drizzle-kit generate --name confirmed_calls` writes `drizzle/0001_confirmed_calls.sql`, `drizzle/meta/0001_snapshot.json` (the schema after the change) and the journal entry. For a new column with a table-level `check()`, the generated SQL rebuilds the table (`__new_search_definitions`) and its `INSERT … SELECT` names the new column in the old table, which has none, so the migration would fail; Task 7.13 keeps the generated snapshot and journal and replaces the SQL with one `ALTER TABLE … ADD … CONSTRAINT … CHECK(…)` (SQLite accepts a CHECK on an added column, and no foreign key is touched). | run on 2026-10-15 in this revision's assembly; the migration test applies 0001 to a database made at 0000 |
-| `typescript` | 5.9.3 (root dev) | The definition-of-done cast check parses every touched file with `ts.createSourceFile` and reports each `AsExpression` or `TypeAssertionExpression` whose type is not `const`, so prose, strings and renamed imports never match and every type spelling does. | run in this revision's assembly, including a planted `as string`, `<number>` and `as readonly string[]` |
+| `typescript` | 5.9.3 (root dev) | `scripts/check-casts.mjs` parses every scanned file with `ts.createSourceFile` (TSX for `.tsx`) and reports each `AsExpression` or `TypeAssertionExpression` whose type is not `const`; `import ts from 'typescript'` works from an ESM script. | run in this revision's assembly over 284 files, and by its own test with planted casts |
 | frankfurter | HTTP API | `GET https://api.frankfurter.dev/v1/latest?from=GBP` returns `{ amount: number (1), base: string ("GBP"), date: string ("YYYY-MM-DD"), rates: Record<string, number> }`, where `rates[C]` is units of `C` per 1 GBP. **`https://api.frankfurter.app/latest?from=GBP` answers `301 Moved Permanently` to the `.dev/v1` URL**, and http-kit sends `redirect: 'error'`, so the engine calls the `.dev/v1` URL and the `fx` host allowlist is `api.frankfurter.dev` (decision 2). `fx` requests are never ledgered. Tests answer it with `vi.stubGlobal('fetch')` (test/support/fx.ts), because decision 20 keeps msw inside `@gmt/providers/testing` and http-kit's in-process seam names `fixture.local` only. | WebFetch of both URLs, 2026-10-14 |
 
 ## 7. Files
@@ -500,29 +506,29 @@ Verified on 2026-10-14 against the sources named; what the table marks as exerci
 - `src/engine.ts` — `createEngine`, `statusOf`. `src/alertsStep.ts` — `noAlerts`. `src/context.ts` — `EngineContext`, `EngineHooks`, `ProviderRunLimits`, `buildContext`. `src/pool.ts` — `runPool`. `src/registry.ts` — passes running in this process. `src/text.ts` — `scopeName`, `scopeAmount`, `breachText`, `formatInstant`.
 - `src/run.ts` — `RunState`, `StopReason`, `Lane`, `newRun`, `stopRun`, `laneFor`, `markRemaining`, `runnableCells`, `errorText`, `onFailure`, `disableProvider`, `budgetOut`, `applyBudgetBreach`, `settleLane`.
 - `src/snapshot.ts` — `buildSnapshot`, `childSnapshot`. `src/orchestrator.ts` — `createOrchestrator`. `src/execute.ts` — `execute`, `alertsStep`, `finalStatus`, `parityNotice`, `calendarOnlyNotice`, `finish`, `CHILD_CAP_REACHED`.
-- `src/start.ts` — `startExecution`, `recordSkipped`, `confirmationNeeded`, `Confirmation`, `nothingToSearch`, `SOFT_CONFIRM_CALL_SHARE`, `refused`, `isUniqueViolation`. `src/child.ts` — `verifyCellExecution`, `childMaxCalls`. `src/resume.ts` — `resumeExecution`, `olderThanRefresh`, `isStalePaused`, `supersede`, `SUPERSEDED`, `NEVER_STARTED`. `src/tick.ts` — `tickDefinition`.
+- `src/types.ts` also declares `StartOptions`. `src/start.ts` — `startExecution`, `recordSkipped`, `confirmationNeeded`, `Confirmation`, `nothingToSearch`, `SOFT_CONFIRM_CALL_SHARE`, `refused`, `isUniqueViolation`. `src/child.ts` — `verifyCellExecution`, `sizeChild`, `childCapPreview`, `childMaxCalls`. `src/resume.ts` — `resumeExecution`, `olderThanRefresh`, `isStalePaused`, `supersede`, `SUPERSEDED`, `NEVER_STARTED`. `src/tick.ts` — `tickDefinition`.
 - `src/stages/discovery.ts` (`runDiscovery`, `planTiles`, `discoveryQuery`, `commitTile`, `normaliseDeps`), `src/stages/verification.ts` (`runVerification`, `itineraryQuery`, `pricedReason`, `commitVerifiedCell`, `routeHistoryRows`), `src/stages/reuse.ts` (`applyReuse`, `reusableFor`, `reuseCriteriaFor`, `reuseCutoff`, `refreshHoursOf`, `REUSE_TOLERANCE`).
-- `src/normalise.ts` — `rateFor`, `calendarPriceInGbp`, `PriceRefusal`, `reduceTile`, `vendorLinkOf`, `normaliseCalendarPrice`, `offerWrite`, `FX_SOURCE`.
+- `src/normalise.ts` — `rateFor`, `calendarPriceInGbp`, `refusalOf`, `PriceRefusal`, `reduceTile`, `vendorLinkOf`, `normaliseCalendarPrice`, `offerWrite`, `FX_SOURCE`.
 - `src/estimate.ts` — `estimateStart`, `estimateRemainingFor`, `scheduleLoad`, `monthlyLoad`, `otherSchedules`, `budgetFitFor`, `addPass`, `withBlocked`, `SECONDS_PER_CALL`. `src/budgetCheck.ts` — `checkBudget`, `reservedForSchedules`, `spendOf`, `breachMessage`. `src/errors.ts` — `classifyFailure`, `addSeconds`.
 - `src/notify.ts` — `notifyOperator`. `src/notifiers/operatorTemplates.ts` — `renderOperatorMessage`, `OPERATOR_KINDS`, `cleanLine`, `cleanText`. `src/notifiers/log.ts` — `LogNotifier`, `containsSynthetic`.
 - `src/fx/limits.ts` — `fxHttpLimits` (decision 32).
 - `src/scheduler/parseCron.ts` — `parseCron`, `isValidTimeZone`, `previousFiring`, `firingsBetween`, `runsPerMonth`. `src/scheduler/scheduler.ts` — `createScheduler`. `src/boot.ts` — `bootEngine`. `src/coverageCheck.ts` — `countCachedCells`, `coverageCheckWith`, `coverageCheckFor`. `src/fx/refresh.ts` — `refreshFx`, `parseFrankfurter`, `FRANKFURTER_LATEST_URL`. `src/maintenance.ts` — `runMaintenanceJob`, `runSystemJob`, `FX_REFRESH_CRON`, `MAINTENANCE_CRON`.
-- `test/support/setup.ts` (network guards, harness cleanup), `test/support/harness.ts` (the layer-A harness, the worked example and `refusedWith`), `test/support/wrappers.ts` (fixture decorators, id `fixture`), `test/support/fx.ts` (frankfurter on stubbed fetch); 24 `test/*.test.ts` files, one or two per task as named there.
+- `test/support/setup.ts` (network guards, harness cleanup), `test/support/harness.ts` (the layer-A harness, the worked example and `refusedWith`), `test/support/wrappers.ts` (fixture decorators, id `fixture`), `test/support/fx.ts` (frankfurter on stubbed fetch); 25 `test/*.test.ts` files, one or two per task as named there (with WP0's `smoke.test.ts`, 26 run).
 
 **Create** (outside the engine)
 
-- `packages/core/src/labels/truncated.ts` — `TRUNCATED_NOTE` (Task 7.5). Tests: `packages/core/test/types/errorReason.test.ts` (7.4), `test/labels/truncated.test.ts` and `test/normalise/priceInGbp.test.ts` (7.5), `test/constraints/priceConfirmed.test.ts` (7.8), `test/api-contract/confirmedCalls.test.ts` (7.13), `test/api-contract/coverageCheck.test.ts` (7.18).
-- `packages/db/drizzle/0001_confirmed_calls.sql` with the generated `drizzle/meta/0001_snapshot.json` and journal entry (7.13). Tests: `packages/db/test/cells.noPricedOptions.test.ts` (7.4), `test/migration0001.test.ts` (7.13).
+- `scripts/check-casts.mjs` (Task 7.20). `packages/core/src/labels/truncated.ts` — `TRUNCATED_NOTE`, `isTruncated` (Task 7.5). Tests: `packages/core/test/config/microGbpToPence.test.ts` (7.1), `packages/core/test/types/errorReason.test.ts` (7.4), `test/labels/truncated.test.ts` and `test/normalise/priceInGbp.test.ts` (7.5), `test/constraints/priceConfirmed.test.ts` and `test/coverage/priceUnconfirmed.test.ts` (7.8), `test/api-contract/confirmedCalls.test.ts` (7.13), `test/api-contract/coverageCheck.test.ts` (7.18).
+- `packages/db/drizzle/0001_confirmed_calls.sql` with the generated `drizzle/meta/0001_snapshot.json` and journal entry (7.13). Tests: `packages/db/test/cells.noPricedOptions.test.ts` (7.4), `test/cells.priceUnconfirmed.test.ts` (7.8), `test/migration0001.test.ts` (7.13).
 
 **Modify**
 
 - `packages/engine/package.json` — remove `pino` (unused by `src/`); add dev dependencies `better-sqlite3@13.0.3` and `@types/better-sqlite3@9.6.0` (tests only); `nodemailer` and `@types/nodemailer` stay for WP11 untouched; no `./testing` export (the harness is test-only). Run `pnpm install` so the lockfile follows.
 - `packages/engine/vitest.config.ts` — `setupFiles: ['test/support/setup.ts']`; coverage over `src/**` minus barrels at 85/70/85/85.
 - `packages/engine/src/index.ts` — the barrel (Task 7.19).
-- `packages/core/src/types/execution.ts` (`NoPricedOptionsReason` in `ErrorReason`, 7.4); `src/index.ts` (exports `TRUNCATED_NOTE`, `priceInGbp`, `RateLookup`, 7.5); `src/normalise/money.ts` (`priceInGbp`) and `src/normalise/itinerary.ts` (uses it, 7.5); `src/types/itinerary.ts`, `src/constraints/labels.ts`, `src/constraints/evaluate.ts`, `src/api-contract/common.ts` (`priceConfirmed`, 7.8); `src/types/definition.ts`, `src/api-contract/definitions.ts`, `src/api-contract/executions.ts` (confirmed calls, 7.13; `cachedRows` nullable and `calls` as tiles, 7.18).
-- `packages/db/src/internal/enums.ts` and `src/repositories/cells.ts` (`no-priced-options`, 7.4); `src/schema/searchDefinitions.ts`, `src/internal/definitionRow.ts`, `src/repositories/definitions.ts` (`confirmed_calls`, `setConfirmed`, 7.13); `test/definitions.test.ts`, `test/barrel.test.ts`, `test/client.test.ts` (7.13).
+- `packages/core/src/config/presets.ts` (`microGbpToPence`, 7.1); `src/types/execution.ts` (`NoPricedOptionsReason` in `ErrorReason`, 7.4); `src/coverage/rollUp.ts` (`PRICE_UNCONFIRMED`, `isPriceUnconfirmed`, the confirmed-only roll-up price and merge, 7.8); `src/index.ts` (exports `TRUNCATED_NOTE`, `priceInGbp`, `RateLookup`, 7.5); `src/normalise/money.ts` (`priceInGbp`) and `src/normalise/itinerary.ts` (uses it, 7.5); `src/types/itinerary.ts`, `src/constraints/labels.ts`, `src/constraints/evaluate.ts`, `src/api-contract/common.ts` (`priceConfirmed`, 7.8); `src/types/definition.ts`, `src/api-contract/definitions.ts`, `src/api-contract/executions.ts` (confirmed calls, 7.13; `cachedRows` nullable and `calls` as tiles, 7.18).
+- `packages/db/src/internal/enums.ts` and `src/repositories/cells.ts` (`no-priced-options`, 7.4); `src/internal/outcomeWrite.ts` (`PRICED_REASON` with `price-unconfirmed`) and `src/internal/verifiedCellWrite.ts` (confirmed-first min and `best_observation_id`, 7.8); `src/schema/searchDefinitions.ts`, `src/internal/definitionRow.ts`, `src/repositories/definitions.ts` (`confirmed_calls`, `setConfirmed`, 7.13); `test/definitions.test.ts`, `test/barrel.test.ts`, `test/client.test.ts` (7.13).
 - `apps/api/src/wiring.ts` (`fx: fxHttpLimits(timing)`, 7.19, when the barrel exports it); `apps/api/test/bootstrap/tool.test.ts` (two migrations, 7.13).
-- `vitest.aliases.ts` (the `@gmt/engine/testing` alias removed, 7.1).
+- `vitest.aliases.ts` (the `@gmt/engine/testing` alias removed, 7.1); root `package.json` (`"casts"`) and `.github/workflows/ci.yml` (`pnpm casts` after boundaries, 7.20).
 
 Blocks for files outside the engine are unified diffs against main (`— apply this patch`, `git apply` from the repository root), so each shows exactly the lines it changes; engine files are given whole or as declarations.
 
@@ -532,7 +538,7 @@ Blocks for files outside the engine are unified diffs against main (`— apply t
 
 Conventions for every task:
 
-- **Preconditions.** WP7 is dispatched once WP5 and WP6 are on main (front matter `depends_on`). Before Task 7.1, `grep -n "verified: boolean" packages/core/src/ports/provider.ts` (WP5 Task 5.0, decisions 27 and 29) and `grep -nE "cellIssues\?|truncated\?" packages/core/src/ports/provider.ts` (WP6, merged) each print a match, and `grep -n definitionOrigins packages/core/src/ports/provider.ts` prints nothing (decision 34: queries are per airport pair). If one does not, stop and report: the engine reads those fields.
+- **Preconditions.** WP5 and WP6 are on main (front matter `depends_on`): `grep -n "verified: boolean" packages/core/src/ports/provider.ts` and `grep -nE "cellIssues\?|truncated\?" packages/core/src/ports/provider.ts` each print a match, and `grep -n definitionOrigins packages/core/src/ports/provider.ts` prints nothing (decision 34: queries are per airport pair). If one does not, stop and report: the engine reads those fields.
 - **Code blocks.** Every block is complete and formatted as Biome leaves it, labelled by the line above it: `(new file)`; `— replace the file`; `— the import block becomes` (replace every import line at the top of the file with the block); `— replace or add these declarations` (each top-level declaration in the block, with its doc comment, replaces the declaration of the same name; one the file does not have yet goes directly after the declaration before it in the block, else at the end of the file); `— apply this patch` (a unified diff against the file as main or the previous task left it, for files outside the engine: save it and run `git apply <file>` from the repository root). Engine test files are always shown whole.
 - **Runs.** Per-task runs use `pnpm --filter @gmt/engine exec vitest run <files>` (no coverage threshold on a partial run, decision 8), and `pnpm --filter <package> exec vitest run <files>` for the core, db and api tests a task names. Run `pnpm lint:fix` and `pnpm -r typecheck` before each commit. Every commit message starts `wp07:` and ends with the attribution line `MrReasonable <4990954+MrReasonable@users.noreply.github.com>`.
 - **Rules the code keeps.** No `as` except `as const` and `satisfies` (instants through `isoDateTimeOfEpochMs`, SQL rows through `prepare<Params, Row>`, unknown values through zod or narrowing); no non-null assertions; `import type` for types; relative imports with `.js`. The only provider a test registers is the fixture provider under its own id `fixture` (sourceKind `synthetic`, behind the synthetic gate); a test that needs another behaviour wraps it (`test/support/wrappers.ts`) and keeps that id. A test never hides an assertion behind `if (!r.ok)` or a branch: refusals go through the harness's `refusedWith(r, code)`, which throws when the start went ahead (test-strategy-reviewer-029). Engine tests never import msw: the setup file installs `@gmt/providers/testing`'s guards and frankfurter is answered on stubbed fetch.
@@ -540,19 +546,38 @@ Conventions for every task:
 ### Task 7.1: Resume after k of n tiles issues n−k (first failing test), with the layer-A harness and the pool
 
 **Files:**
-- Modify: `packages/engine/package.json`, `packages/engine/vitest.config.ts`, `vitest.aliases.ts` (the root alias for `@gmt/engine/testing`, a path that never exists, is removed: the harness is test-only; arch-r2-011)
-- Create: `packages/engine/test/support/setup.ts`, `test/support/harness.ts`, `test/resume-k-of-n.test.ts`, `test/pool.test.ts`, `test/context.test.ts`
+- Modify: `packages/engine/package.json`, `packages/engine/vitest.config.ts`, `packages/core/src/config/presets.ts` (`microGbpToPence`), `vitest.aliases.ts` (the root alias for `@gmt/engine/testing`, a path that never exists, is removed: the harness is test-only; arch-r2-011)
+- Create: `packages/engine/test/support/setup.ts`, `test/support/harness.ts`, `test/resume-k-of-n.test.ts`, `test/pool.test.ts`, `test/context.test.ts`; `packages/core/test/config/microGbpToPence.test.ts`
 - Create: `packages/engine/src/types.ts`, `src/alertsStep.ts`, `src/context.ts`, `src/fx/limits.ts`, `src/pool.ts`, `src/text.ts`, `src/run.ts`, `src/registry.ts`, `src/snapshot.ts`, `src/normalise.ts`, `src/stages/discovery.ts`, `src/execute.ts`, `src/start.ts`, `src/resume.ts`, `src/orchestrator.ts`
 
 **Interfaces:**
 - Consumes: §4 (core types and ports, `budgetConfigFromConfig`, `MIGRATIONS_DIR`, `fixtureRouter`, `scenarioRequest`, `releaseRequest`, `installNetworkGuards`).
-- Produces: `src/types.ts` as §5; `buildContext(deps, options?)` with limits read from `budgetConfigFromConfig(config)` (arch-014, ruling 3) and a refusal of the fixture provider without the synthetic gate (prov-wp07-012); `runPool(items, concurrency, intake, worker)`; the pass state with an intake switch and an abort signal that only cancel, SIGTERM and fatal raise (decision 25); `planTiles` asserting that tiles partition the cells (ssr-06); `commitTile` sending normalisation errors through `writeTileError` in the tile's transaction (po-009, prov-wp07-001); start creating, seeding and running the execution in one `BEGIN IMMEDIATE` (ssr-07); `createOrchestrator(ctx)` with `start`, `resume`, `shutdown`, `running`; `fxHttpLimits(config)`, the FX client's http-kit policy, which decision 32 moves into this package beside the client (the harness uses it here; `apps/api`'s `httpLimitsFor` switches to it in Task 7.19, once the barrel exports it); the harness API every later task uses, with `refusedWith`.
+- Produces: `src/types.ts` as §5, with `StartOptions` declared once for every start signature (arch-r3-007); core's `microGbpToPence`, the one micro-GBP-to-pence rounding (up) every money figure here uses (decision 47); `buildContext(deps, options?)` with limits read from `budgetConfigFromConfig(config)` (arch-014, ruling 3) and a refusal of the fixture provider without the synthetic gate (prov-wp07-012); `runPool(items, concurrency, intake, worker)`; the pass state with an intake switch and an abort signal that only cancel, SIGTERM and fatal raise (decision 25); `planTiles` asserting that tiles partition the cells (ssr-06); `commitTile` sending normalisation errors through `writeTileError` in the tile's transaction (po-009, prov-wp07-001); start creating, seeding and running the execution in one `BEGIN IMMEDIATE` (ssr-07); `createOrchestrator(ctx)` with `start`, `resume`, `shutdown`, `running`; `fxHttpLimits(config)`, the FX client's http-kit policy, which decision 32 moves into this package beside the client (the harness uses it here; `apps/api`'s `httpLimitsFor` switches to it in Task 7.19, once the barrel exports it); the harness API every later task uses, with `refusedWith`.
 
 The harness is complete here; later tasks only call it. It lives under `test/support/` so `src/` holds production code only (ruling 1): the worked-example airports, `vi` and the providers' testing subpath never enter `src/`, and the src greps of §10 hold. It builds the guard from `budgetConfigFromConfig(config)` and overrides only the fixture's call cap, which no config field sets; it registers the fixture provider alone. `fakeTimers: true` fakes timers at the harness's `now` so http-kit's backoff and limiter, croner and the fixed clock agree; `waitForSettled` and `drive` advance them. `close()` releases holds, shuts every tracked orchestrator or engine down and closes the database; the setup file closes every open harness after each test, so a test that fails half-way never leaves a pass writing to a closed database. `tileRequests` reads `LedgerRepo.countsFor` (distinct tiles plus cache hits, the parity count); `count(table)` is a typed row count. Its `fixtureBillable` and `fixtureWindow` options change only the guard's view of the fixture, standing in for a free provider (Task 7.10) and a lifetime plan (Task 7.13), since no stub may take a real provider id.
 
 `test/context.test.ts` pins the engine-level synthetic gate (prov-wp07-012, test-strategy-reviewer-023): a production-shaped config (no `ALLOW_FIXTURE_PROVIDER`) with the fixture provider registered makes `buildContext` throw the spec §5.5 message, with no request, ledger row, price or execution afterwards (Task 7.19 asserts the same of `createEngine`). Seen failing first: delete the eager `for (const id of providers.keys()) limitsOf(id);` line from `buildContext` and the test fails with "expected [Function] to throw an error"; restore it.
 
 - [ ] **Step 1: Write the failing tests**
+
+`packages/core/test/config/microGbpToPence.test.ts` (new file):
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { microGbpToPence, PENCE_TO_MICRO } from '../../src/config/presets.js';
+import * as core from '../../src/index.js';
+
+describe('microGbpToPence (decision 47)', () => {
+  it('rounds up to the whole penny, so a cost is never shown below what it is', () => {
+    expect(microGbpToPence(0)).toBe(0);
+    expect(microGbpToPence(1)).toBe(1);
+    expect(microGbpToPence(PENCE_TO_MICRO)).toBe(1);
+    expect(microGbpToPence(PENCE_TO_MICRO + 1)).toBe(2);
+    expect(microGbpToPence(7680)).toBe(1);
+    expect(core.microGbpToPence).toBe(microGbpToPence);
+  });
+});
+```
 
 `packages/engine/package.json` — replace the file:
 
@@ -799,7 +824,7 @@ import { expect, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
 import { fxHttpLimits } from '../../src/fx/limits.js';
 import { createOrchestrator, type Orchestrator } from '../../src/orchestrator.js';
-import type { EngineDeps, EngineOptions, StartResult } from '../../src/types.js';
+import type { EngineDeps, EngineOptions, StartOptions, StartResult } from '../../src/types.js';
 
 // --- the worked example (docs/briefs/README.md: London → New York only) ---
 export const LHR = asIata('LHR');
@@ -1094,13 +1119,10 @@ export interface Harness {
   drive<T>(p: Promise<T>): Promise<T>;
   runToCompletion(
     engine: {
-      start(
-        id: string,
-        o: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
-      ): Promise<StartResult>;
+      start(id: string, o: StartOptions): Promise<StartResult>;
     },
     definitionId: string,
-    opts?: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
+    opts?: StartOptions,
   ): Promise<Execution>;
   /** CellsRepo.outcomes with a status filter applied here (the repository filters by stage, provider and cells only). */
   outcomes(
@@ -1494,6 +1516,25 @@ Expected: FAIL, `Cannot find module '../../src/context.js'` imported from the ha
 
 - [ ] **Step 3: Implement**
 
+`packages/core/src/config/presets.ts` — apply this patch:
+
+```diff
+--- a/packages/core/src/config/presets.ts
++++ b/packages/core/src/config/presets.ts
+@@ -15,6 +15,11 @@
+ }
+ 
+ export const PENCE_TO_MICRO = 10_000;
++
++/** Micro-GBP to whole pence, rounded up: the one money rounding for estimates, caps and confirmations (decision 47). */
++export function microGbpToPence(micro: number): number {
++  return Math.ceil(micro / PENCE_TO_MICRO);
++}
+ 
+ export type PlanPreset = ProviderLimits & {
+   monthlySpendCapMicroGbp: number;
+```
+
 `packages/engine/src/alertsStep.ts` (new file):
 
 ```ts
@@ -1858,14 +1899,11 @@ import { createRegistry } from './registry.js';
 import { resumeExecution } from './resume.js';
 import { stopRun } from './run.js';
 import { startExecution } from './start.js';
-import type { StartResult } from './types.js';
+import type { StartOptions, StartResult } from './types.js';
 
 /** The execution half of the Engine; createEngine (Task 7.19) adds estimates, scheduler, boot and status. */
 export interface Orchestrator {
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number },
-  ): Promise<StartResult>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   /** Aborts every pass as SIGTERM (cells in flight → not_run, status interrupted) and waits for them. */
   shutdown(): Promise<void>;
@@ -2514,7 +2552,7 @@ import { execute } from './execute.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
 import { buildSnapshot } from './snapshot.js';
-import type { StartResult } from './types.js';
+import type { StartOptions, StartResult } from './types.js';
 
 /** A refused StartResult. */
 export function refused(
@@ -2535,7 +2573,7 @@ export async function startExecution(
   ctx: EngineContext,
   reg: RunRegistry,
   definitionId: string,
-  opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number },
+  opts: StartOptions,
 ): Promise<StartResult> {
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
@@ -2580,7 +2618,7 @@ import {
   type BudgetScopeKind,
   formatPence,
   type IsoDateTime,
-  PENCE_TO_MICRO,
+  microGbpToPence,
   type ProviderId,
 } from '@gmt/core';
 
@@ -2613,7 +2651,7 @@ export function scopeName(scope: BudgetScopeKind, providerId: ProviderId | null)
 
 /** A cap figure with its unit: pounds for cost scopes (micro-GBP rounded up to the penny), "N calls" otherwise (arch-018). */
 export function scopeAmount(scope: BudgetScopeKind, n: number): string {
-  if (isCostScope(scope)) return formatPence(Math.ceil(n / PENCE_TO_MICRO));
+  if (isCostScope(scope)) return formatPence(microGbpToPence(n));
   return `${n} ${n === 1 ? 'call' : 'calls'}`;
 }
 
@@ -2708,6 +2746,11 @@ export interface EngineOptions {
 }
 
 /** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
+/** The options of a start (spec §8.1): who started it and, for a manual start, the confirmation it carries. */
+export interface StartOptions {
+  trigger: 'manual' | 'schedule';
+  confirmCostPence?: number;
+}
 export type StartResult =
   | { ok: true; executionId: string }
   | {
@@ -2721,10 +2764,7 @@ export type StartResult =
 export interface Engine {
   boot(): Promise<void>;
   shutdown(): Promise<void>;
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number },
-  ): Promise<StartResult>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   cancel(executionId: string): Promise<boolean>;
   verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
@@ -2750,13 +2790,13 @@ export interface Engine {
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `pnpm --filter @gmt/engine exec vitest run resume-k-of-n pool context`
-Expected: PASS, 6 tests (1 in `resume-k-of-n.test.ts`, 4 in `pool.test.ts`, 1 in `context.test.ts`).
+Run: `pnpm --filter @gmt/engine exec vitest run resume-k-of-n pool context && pnpm --filter @gmt/core exec vitest run config/microGbpToPence`
+Expected: PASS, 6 engine tests and the core test (1 in `resume-k-of-n.test.ts`, 4 in `pool.test.ts`, 1 in `context.test.ts`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/engine pnpm-lock.yaml vitest.aliases.ts && git commit -m "wp07: layer-A harness, pool and discovery pass; resume after k of n tiles issues n-k; synthetic gate pinned
+git add packages/engine packages/core pnpm-lock.yaml vitest.aliases.ts && git commit -m "wp07: layer-A harness, pool and discovery pass; resume after k of n tiles issues n-k; synthetic gate pinned
 
 MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 ```
@@ -3703,7 +3743,7 @@ export async function startExecution(
   ctx: EngineContext,
   reg: RunRegistry,
   definitionId: string,
-  opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number },
+  opts: StartOptions,
 ): Promise<StartResult> {
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
@@ -3771,7 +3811,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 - Consumes: `ProviderError`, `BudgetExceeded`, `AbortedError`, `ErrorReason`, `CellsRepo.writeTileError/setOutcome`, WP4's scenario rules (`FIXTURE_RULES`, `tileRule`).
 - Produces: `classifyFailure(err, aborted, now): FailureDecision`, `addSeconds(at, s)` (through `isoDateTimeOfEpochMs`), `disableProvider(run, providerId, why)`, `settleLane`, `Orchestrator.cancel(executionId): Promise<boolean>`; core's `ErrorReason` with `no-priced-options` and db's lists that follow it.
 
-The stored reason is the error kind, except an `upstream` error whose `reason` is `no-return-legs` or `no-priced-options`: each is its own reason in core's closed `ErrorReason` list (decision 37), and db's `ERROR_REASONS` (an `exhaustive<ErrorReason>()` list, so it fails to compile without it) and the resume query's `NON_RETRYABLE` list gain it, so neither an automatic nor a manual resume selects it and every reason-keyed reader (roll-ups, the coverage buckets, View D, WP8's filters) sees it for what it is (prov-wp07-006, arch-r2-005). The URL-free vendor message goes to `last_error` (decision 24's machine cause). A disabled provider stops taking tiles and a tile already in flight finishes and is written (decision 25). The streak test asserts that both parse errors happened, on the first LHR and the first LGW tile, and the limiter test asserts the exact not_run set (all 56 cells, one tile at a time), so a rule that matched nothing cannot pass (test-strategy-reviewer-028). The error-table files run under fake timers, so http-kit's 1–6 s backoff costs no wall time (test-strategy-reviewer-003).
+The stored reason is the error kind, except an `upstream` error whose `reason` is `no-return-legs` or `no-priced-options`: each is its own reason in core's closed `ErrorReason` list (decision 37), and db's `ERROR_REASONS` (an `exhaustive<ErrorReason>()` list, so it fails to compile without it) and the resume query's `NON_RETRYABLE` list gain it, so neither an automatic nor a manual resume selects it and every reason-keyed reader (roll-ups, the coverage buckets, View D, WP8's filters) sees it for what it is (prov-wp07-006, arch-r2-005). The URL-free vendor message goes to `last_error` (decision 24's machine cause). A disabled provider stops taking tiles and a tile already in flight finishes and is written (decision 25). The streak test asserts that both parse errors happened, on the first LHR and the first LGW tile, and the limiter test asserts the exact not_run set (all 56 cells, one tile at a time), so a rule that matched nothing cannot pass (test-strategy-reviewer-028). The in-flight test waits until the held LGW tile has reached the router before it releases it, so the tile really was in flight when the provider was disabled (test-strategy-reviewer-r3-004). The error-table files run under fake timers, so http-kit's 1–6 s backoff costs no wall time (test-strategy-reviewer-003).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4007,6 +4047,11 @@ describe('error table, discovery stage: non-retryable kinds', () => {
     });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.outcomes(r.executionId, { status: 'error' }).length).toBeGreaterThan(0));
+    // why: the LGW tile must be held, in flight, before the release; one requested after it would not be in flight
+    // when the provider was disabled (test-strategy-reviewer-r3-004)
+    await vi.waitFor(() =>
+      expect(h.requests.some((q) => q.kind === 'calendar' && q.pair === 'LGW-JFK')).toBe(true),
+    );
     await h.releaseHolds();
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('paused_error');
@@ -4355,14 +4400,11 @@ import { createRegistry } from './registry.js';
 import { resumeExecution } from './resume.js';
 import { stopRun } from './run.js';
 import { startExecution } from './start.js';
-import type { StartResult } from './types.js';
+import type { StartOptions, StartResult } from './types.js';
 
 /** The execution half of the Engine; createEngine (Task 7.19) adds estimates, scheduler, boot and status. */
 export interface Orchestrator {
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number },
-  ): Promise<StartResult>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   /** Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel. */
   cancel(executionId: string): Promise<boolean>;
@@ -4573,9 +4615,9 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 
 **Interfaces:**
 - Consumes: `FxRepo.latest/upsert`, `validateVendorUrl`, `CellIssue`, `DiscoveryTileResult.cellIssues/truncated` (decisions 28, 30), `RawCalendarPrice.providerObservedAt` (decision 35).
-- Produces: `rateFor(deps, currency)` (the one FX lookup, also core's `NormaliseDeps.rateFor` in Task 7.8), `calendarPriceInGbp` returning the price or a `PriceRefusal`, `ReducedTile` with `'mixed-currency'`, `FX_SOURCE`, `commitTile` honouring `cellIssues` and `truncated`; core's `priceInGbp(amount, rateFor)` and `TRUNCATED_NOTE` (decision 37).
+- Produces: `rateFor(deps, currency)` (the one FX lookup, also core's `NormaliseDeps.rateFor` in Task 7.8), `calendarPriceInGbp` returning the price or a `PriceRefusal`, `ReducedTile` with `'mixed-currency'`, `FX_SOURCE`, `commitTile` honouring `cellIssues` and `truncated`; core's `priceInGbp(amount, rateFor)`, `TRUNCATED_NOTE` and `isTruncated(lastError)` (decisions 37, 47).
 
-There is one money pipeline (arch-013, ruling 2, arch-r2-002): core's money step, exported here as `priceInGbp`, is what `normaliseOffer` runs for offers (Task 7.8) and what `calendarPriceInGbp` runs for a calendar price's bare amount, over the same `rateFor`: GBP passes through, an amount that is not a non-negative integer is a `RangeError`, outside the ECB list → `currency-unsupported`, no rate within `FX_MAX_RATE_AGE_DAYS` → `fx-unavailable`. The engine turns a `NormalisationError` into that cell's error and a `RangeError` into that cell's `parse` error, so one malformed vendor amount never stops the run as fatal. A row's `providerObservedAt` (for Travelpayouts, the day its link's `search_date` names; decision 35) is stored unchanged. A truncated tile's priced cells carry core's `TRUNCATED_NOTE` leading `last_error`, read back through `CellsRepo.outcomes`, the path WP8 maps to `truncated: true` (decisions 36, 37; prov-wp07-r2-002). A tile answers in one currency, so a tile's cells all convert or all fail; two currencies in one tile are a parse error for its cells. The mixed-currency test runs `commitTile` over cells still `not_run` (a held tile), because an error never displaces a priced cell; over a priced cell it only counts an attempt (ssr-02).
+There is one money pipeline (arch-013, ruling 2, arch-r2-002): core's money step, exported here as `priceInGbp`, is what `normaliseOffer` runs for offers (Task 7.8) and what `calendarPriceInGbp` runs for a calendar price's bare amount, over the same `rateFor`: GBP passes through, an amount that is not a non-negative integer is a `RangeError`, outside the ECB list → `currency-unsupported`, no rate within `FX_MAX_RATE_AGE_DAYS` → `fx-unavailable`. The engine turns a `NormalisationError` into that cell's error and a `RangeError` into that cell's `parse` error, so one malformed vendor amount never stops the run as fatal. A row's `providerObservedAt` (for Travelpayouts, the day its link's `search_date` names; decision 35) is stored unchanged. A truncated tile's priced cells carry core's `TRUNCATED_NOTE` leading `last_error`, read back through `CellsRepo.outcomes` and tested with core's `isTruncated`, the one reader check (WP8 maps it to `truncated: true`; decisions 36, 37, 47; prov-wp07-r2-002, arch-r3-003). The refusal policy for a price that cannot be normalised is one function, `refusalOf`, which offers use too (Task 7.8). A tile answers in one currency, so a tile's cells all convert or all fail; two currencies in one tile are a parse error for its cells. The mixed-currency test runs `commitTile` over cells still `not_run` (a held tile), because an error never displaces a priced cell; over a priced cell it only counts an attempt (ssr-02).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4584,12 +4626,20 @@ There is one money pipeline (arch-013, ruling 2, arch-r2-002): core's money step
 ```ts
 import { describe, expect, it } from 'vitest';
 import * as core from '../../src/index.js';
-import { TRUNCATED_NOTE } from '../../src/labels/truncated.js';
+import { isTruncated, TRUNCATED_NOTE } from '../../src/labels/truncated.js';
 
 describe('TRUNCATED_NOTE (decisions 30, 36, 37)', () => {
   it('is the exact label the engine writes and WP8 matches, exported from the barrel', () => {
     expect(TRUNCATED_NOTE).toBe('cheapest of the rows read');
     expect(core.TRUNCATED_NOTE).toBe(TRUNCATED_NOTE);
+  });
+  it('isTruncated reads the label at the start of last_error only (decision 47)', () => {
+    expect(isTruncated('cheapest of the rows read')).toBe(true);
+    expect(isTruncated('cheapest of the rows read; a row without a price')).toBe(true);
+    expect(isTruncated('a row without a price; cheapest of the rows read')).toBe(false);
+    expect(isTruncated(null)).toBe(false);
+    expect(isTruncated('')).toBe(false);
+    expect(core.isTruncated).toBe(isTruncated);
   });
 });
 ```
@@ -4657,7 +4707,7 @@ describe('priceInGbp (spec §5.6, §6.3; arch-r2-002)', () => {
 `packages/engine/test/normalise-calendar.test.ts` (new file):
 
 ```ts
-import { asIsoDate, asIsoDateTime, cellKeyString, type RawCalendarPrice, TRUNCATED_NOTE } from '@gmt/core';
+import { asIsoDate, asIsoDateTime, cellKeyString, isTruncated, type RawCalendarPrice } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { calendarPriceInGbp, FX_SOURCE, reduceTile, vendorLinkOf } from '../src/normalise.js';
@@ -4948,11 +4998,11 @@ describe('discovery normalisation through the engine', () => {
       reason: null,
       lastError: 'cheapest of the rows read',
     });
-    // why: WP8 reads outcomes through this repository and maps a last_error starting with core's TRUNCATED_NOTE to
-    // `truncated` (decisions 36, 37), so the label must lead the column read back there
+    // why: WP8 reads outcomes through this repository and maps them with core's isTruncated to `truncated`
+    // (decisions 36, 37, 47), so the label must lead the column read back there
     const read = h.repos.cells.outcomes(e.id, { stage: 'discovery', cells: [cell] });
     expect(read).toHaveLength(1);
-    expect(read[0]?.lastError?.startsWith(TRUNCATED_NOTE)).toBe(true);
+    expect(isTruncated(read[0]?.lastError ?? null)).toBe(true);
     expect(byCell.get(cellKeyString(eight))).toMatchObject({
       status: 'error',
       reason: 'upstream',
@@ -4978,7 +5028,7 @@ Expected: FAIL: the core tests fail with `priceInGbp is not a function` (4) and 
  export * from './dates/epochDay.js';
  export * from './errors.js';
  export * from './labels/age.js';
-+export { TRUNCATED_NOTE } from './labels/truncated.js';
++export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
  export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
  export { itineraryHash } from './normalise/hashing.js';
  export { type NormaliseDeps, normaliseOffer } from './normalise/itinerary.js';
@@ -4999,6 +5049,11 @@ Expected: FAIL: the core tests fail with `priceInGbp is not a function` (4) and 
  * it to `truncated: true` (decision 36), which the UI renders with this text.
  */
 export const TRUNCATED_NOTE = 'cheapest of the rows read';
+
+/** True when an outcome's `last_error` carries the truncation label: the one reader check (decision 47). */
+export function isTruncated(reason: string | null): boolean {
+  return reason?.startsWith(TRUNCATED_NOTE) ?? false;
+}
 ```
 
 `packages/core/src/normalise/itinerary.ts` — apply this patch:
@@ -5146,17 +5201,27 @@ export function calendarPriceInGbp(
   try {
     return priceInGbp({ amountMinor, currency }, (c) => rateFor(deps, c));
   } catch (err) {
-    if (err instanceof NormalisationError)
+    const refusal = refusalOf(err);
+    if (refusal?.reason === 'fx-unavailable')
       return {
-        reason: err.reason,
-        message:
-          err.reason === 'fx-unavailable'
-            ? `${err.message}: no ECB rate in the last ${deps.fxMaxRateAgeDays} days`
-            : err.message,
+        ...refusal,
+        message: `${refusal.message}: no ECB rate in the last ${deps.fxMaxRateAgeDays} days`,
       };
-    if (err instanceof RangeError) return { reason: 'parse', message: stripUrlsInText(err.message) };
+    if (refusal !== null) return refusal;
     throw err;
   }
+}
+
+/**
+ * The one policy for a price that cannot be normalised, shared by calendar prices and offers (arch-r2-002, decision
+ * 45): a NormalisationError keeps its reason; a RangeError (an amount that is not a non-negative integer, or one whose
+ * conversion overflows) is `parse`, one malformed vendor row, never a fatal stop. Anything else is not a price problem
+ * and is rethrown by the caller.
+ */
+export function refusalOf(err: unknown): PriceRefusal | null {
+  if (err instanceof NormalisationError) return { reason: err.reason, message: err.message };
+  if (err instanceof RangeError) return { reason: 'parse', message: stripUrlsInText(err.message) };
+  return null;
 }
 
 export type ReducedTile =
@@ -5639,14 +5704,14 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 - Consumes: `CalendarPricesRepo.reuseCandidates`, `CellsRepo.copyReused(executionId, providerId, copies, criteria)`, `ReuseCriteria`, `DEFAULT_DISCOVERY_REFRESH_HOURS` (decisions 21, 22).
 - Produces: `REUSE_TOLERANCE`, `refreshHoursOf(snapshot, providerId)`, `reuseCutoff(now, hours)`, `reuseCriteriaFor(ctx, snapshot, providerId, info)`, `reusableFor(ctx, definitionId, snapshot, providerId, criteria, cells)`, `applyReuse(ctx, run, providerId, info): number`.
 
-`applyReuse` computes the criteria once and hands the same object to the query and to the repository's re-check (arch-024). The DST test sits where wall-clock arithmetic would change the answer: across the spring change, 150.5 elapsed hours must reuse and 151.5 must not (test-strategy-reviewer-007); one refusal test per criterion the engine controls (cabin, definition, point of sale, source kind). The point of sale reuse matches on is an engine rule known before any call (`ctx.pointOfSaleOf`: SearchApi's configured `POINT_OF_SALE`, `unknown` for the others); a test pins it against what the fixture echoes on every row, so a mismatch can never make reuse refuse every copy unnoticed (arch-r2-013; WP5's adapter test pins SearchApi's echo).
+`applyReuse` computes the criteria once and hands the same object to the query and to the repository's re-check (arch-024). The DST test sits where wall-clock arithmetic would change the answer: across the spring change, 150.5 elapsed hours must reuse and 151.5 must not (test-strategy-reviewer-007); one refusal test per criterion the engine controls (cabin, definition, point of sale, source kind). The point of sale reuse matches on is an engine rule known before any call (`ctx.pointOfSaleOf`: SearchApi's configured `POINT_OF_SALE`, `unknown` for the others); a test pins it against what the fixture echoes on every row, so a mismatch can never make reuse refuse every copy unnoticed (arch-r2-013; WP5's adapter test pins SearchApi's echo). A price from a truncated tile is never reused: a copy would carry no "cheapest of the rows read" label, so its cell is fetched again (decision 45, prov-wp07-r3-001).
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/engine/test/reuse.test.ts` (new file):
 
 ```ts
-import { asIsoDate, asIsoDateTime, cellKeyString } from '@gmt/core';
+import { asIsoDate, asIsoDateTime, cellKeyString, isTruncated } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { newRun } from '../src/run.js';
@@ -5663,6 +5728,7 @@ import {
   LHR,
   tileRule,
 } from './support/harness.js';
+import { mapTiles } from './support/wrappers.js';
 
 /** Every price row of an execution, reused copies included, as (cell, fetched_at, reused_from). */
 const allPriceRows = (h: Harness, executionId: string) =>
@@ -5702,6 +5768,34 @@ describe('reuse per cell (spec §8.1 "reuse, per cell")', () => {
     expect(p2.map(({ cell, f }) => ({ cell, f }))).toEqual(p1.map(({ cell, f }) => ({ cell, f }))); // same cells, same fetched_at
     expect(p2.every((r) => r.ru === one.id)).toBe(true);
     expect(h.repos.calendarPrices.fetchedBy(two.id)).toEqual([]); // fetchedBy excludes reused rows
+  });
+
+  it('never reuses a price from a truncated tile: the next run fetches the cell again and keeps the label (decision 45)', async () => {
+    // why: the first tile stops at its page cap; a copy would drop "cheapest of the rows read" (prov-wp07-r3-001)
+    const h = createHarness({
+      transformFixture: (p) =>
+        mapTiles(p, (r) => (r.kind === 'tile' && r.index === 0 ? { ...r, truncated: true } : r)),
+    });
+    const def = h.createDefinition();
+    const one = await h.runToCompletion(h.orch(), def.id);
+    const truncated = new Set(
+      h
+        .outcomes(one.id, { stage: 'discovery', status: 'priced' })
+        .filter((o) => isTruncated(o.lastError))
+        .map(cellKeyString),
+    );
+    expect(truncated.size).toBe(14);
+    h.clock.advance(HOUR);
+    const two = await h.runToCompletion(h.orch(), def.id);
+    expect(h.tileRequests(two.id)).toBe(1);
+    const o2 = h.outcomes(two.id, { stage: 'discovery' });
+    expect(
+      o2.filter((o) => truncated.has(cellKeyString(o))).every((o) => o.reusedFromExecutionId === null),
+    ).toBe(true);
+    expect(
+      o2.filter((o) => !truncated.has(cellKeyString(o))).every((o) => o.reusedFromExecutionId === one.id),
+    ).toBe(true);
+    expect(o2.filter((o) => isTruncated(o.lastError))).toHaveLength(14);
   });
 
   it('at 152 h nothing is reused and every tile is requested again', async () => {
@@ -5936,6 +6030,7 @@ import {
   type DefinitionSnapshot,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
+  isTruncated,
   type ProviderId,
 } from '@gmt/core';
 import type { ReuseCriteria, ReusedCopy } from '@gmt/db';
@@ -6000,9 +6095,13 @@ export function reusableFor(
     [...cells],
     criteria.newerThan,
   );
-  // why: belt and braces on the repository's predicate — error and not_run are never copied (spec §9 item 4)
+  // why: belt and braces on the repository's predicate — error and not_run are never copied (spec §9 item 4); and a
+  // price from a truncated tile is the cheapest of the rows read, which a copy would no longer say, so its cell is
+  // fetched again (decision 45)
   return candidates.filter(
-    (c) => c.outcome.status === 'priced' || c.outcome.status === 'empty' || c.outcome.status === 'no_data',
+    (c) =>
+      (c.outcome.status === 'priced' || c.outcome.status === 'empty' || c.outcome.status === 'no_data') &&
+      !isTruncated(c.outcome.lastError),
   );
 }
 
@@ -6031,7 +6130,7 @@ export function applyReuse(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/engine exec vitest run reuse`
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -6044,8 +6143,8 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 ### Task 7.8: Verification stage — selection once, offer normalisation, the verified-cell write, route history
 
 **Files:**
-- Create: `packages/engine/src/stages/verification.ts`, `test/verification.test.ts`; `packages/core/test/constraints/priceConfirmed.test.ts`
-- Modify: `packages/engine/src/normalise.ts` (`offerWrite`), `src/execute.ts` (run verification after discovery); `packages/core/src/types/itinerary.ts` (`ConstraintName` gains `priceConfirmed`), `src/constraints/evaluate.ts`, `src/constraints/labels.ts`, `src/api-contract/common.ts` (`constraintNameSchema`)
+- Create: `packages/engine/src/stages/verification.ts`, `test/verification.test.ts`; `packages/core/test/constraints/priceConfirmed.test.ts`, `packages/core/test/coverage/priceUnconfirmed.test.ts`; `packages/db/test/cells.priceUnconfirmed.test.ts`
+- Modify: `packages/engine/src/normalise.ts` (`offerWrite`), `src/execute.ts` (run verification after discovery); `packages/core/src/types/itinerary.ts` (`ConstraintName` gains `priceConfirmed`), `src/constraints/evaluate.ts`, `src/constraints/labels.ts`, `src/api-contract/common.ts` (`constraintNameSchema`), `src/coverage/rollUp.ts` (`PRICE_UNCONFIRMED`, `isPriceUnconfirmed`, confirmed-only roll-up price and merge); `packages/db/src/internal/outcomeWrite.ts` (`PRICED_REASON`), `src/internal/verifiedCellWrite.ts` (confirmed-first min and best)
 
 **Interfaces:**
 - Consumes: `selectCandidates`, `generateCells`, `normaliseOffer(raw, cell, deps)`, `PARTIAL_EXPANSION`, `isPartialExpansion`, `CellsRepo.seedVerification/hasVerificationOutcomes/markNoData/markDeparted/writeVerifiedCell/rollUps/selected`, `VerifiedCellWrite`, `RoutePriceHistoryRepo.upsert`, `ItinerarySearchResult.routeHistory/pointOfSale/coverage/partial`, `RawOffer.verified`, WP4 rules `partial` and `empty`.
@@ -6056,6 +6155,8 @@ Rules this task pins, each with its test:
 - Offers go through core's `normaliseOffer` alone, fed `AirportsRepo.tzOf` and `rateFor` (no pre-checks, no second money step, arch-013).
 - `empty` only for coverage `empty` with no offer and no failed expansion; coverage `priced` or a partial expansion without an offer is an `upstream` error naming the contradiction (prov-wp07-005).
 - An offer with `verified: false` is written without `price` and `segmentCabins` in its supplied fields and without cabin evidence (decisions 27, 29). Decision 37 makes that visible: core's `evaluateConstraints` judges `priceConfirmed` on every offer, present only as `'unverified'` when `price` is not a supplied field, labelled "price not confirmed by the final step", so such a row is at best `partially-verified` whatever the definition's constraints (prov-wp07-r2-004). Verdicts are computed at read time (WP8, WP11), so the test reads the rows back through `ItinerariesRepo.writtenBy` and evaluates them as they will. The classing lives in core's `constraints/` (where `verdictClass` and `evaluateConstraints` are), which `results/` reads.
+- Decision 45 carries the same rule to the cell (prov-wp07-r3-002): the outcome's price is the cheapest confirmed offer, falling back to the cheapest unconfirmed one only when there is none, in which case the priced reason gains `price-unconfirmed` (decision 19's closed set, ordered partial-expansion, price-unconfirmed, offers-dropped:n). Core's `rollUp` counts only confirmed outcomes in the roll-up price, so `verification_min_pence` is null for a cell with no confirmed offer, and a merge keeps a confirmed outcome over a cheaper unconfirmed one; db checks the reason against the observations and sets `best_observation_id` to the cheapest confirmed observation, else the cheapest unconfirmed one, across passes too. Verified-basis views therefore never show an unconfirmed fare as the itinerary-search price.
+- A malformed offer amount (negative, non-integer, or a conversion past `Number.MAX_SAFE_INTEGER`) is a `RangeError` from core's money step, which `normaliseOffer` rethrows; `offerWrite` maps it through the shared `refusalOf` to `parse`, so it drops one offer, counted in `offers-dropped:n`, or fails only its cell when it was the only one, as on the calendar path — never a fatal stop of the run (decision 45, arch-r2-002, prov-wp07-r3-004).
 - A result that resolves after a stop is written; only a fatal stop writes nothing more (decisions 25, 27): a chain stopped by cancel returns the step-2 offers it paid for.
 - Route history stores only the points the vendor gave in GBP; the others are dropped, counted and logged (ruling 2, prov-wp07-007).
 - Selection never chooses a cell whose departure date has arrived, `alwaysInclude` members included, and marks them `skipped:departed` in the selection transaction (ssr-05).
@@ -6118,6 +6219,209 @@ describe('priceConfirmed (decision 37: a price no seller listing confirmed)', ()
       cabin: 'pass',
       priceConfirmed: 'unverified',
     });
+  });
+});
+```
+
+`packages/core/test/coverage/priceUnconfirmed.test.ts` (new file):
+
+```ts
+import { describe, expect, it } from 'vitest';
+import {
+  isPriceUnconfirmed,
+  mergeWithinProvider,
+  PRICE_UNCONFIRMED,
+  rollUp,
+} from '../../src/coverage/rollUp.js';
+import { key, outcome } from '../helpers/space.js';
+
+const K = key('LHR', 'JFK', '2027-03-01', '2027-03-08');
+const priced = (minPence: number, reason: string | null = null) => outcome(K, 'priced', { minPence, reason });
+
+describe('price-unconfirmed (decision 45)', () => {
+  it('is a priced-reason part, read like partial-expansion', () => {
+    expect(PRICE_UNCONFIRMED).toBe('price-unconfirmed');
+    expect(isPriceUnconfirmed('price-unconfirmed')).toBe(true);
+    expect(isPriceUnconfirmed('partial-expansion;price-unconfirmed;offers-dropped:2')).toBe(true);
+    expect(isPriceUnconfirmed('partial-expansion')).toBe(false);
+    expect(isPriceUnconfirmed(null)).toBe(false);
+  });
+  it('the roll-up price counts only confirmed outcomes; with none it is priced, unpriced and says so', () => {
+    expect(rollUp([priced(30_000, 'price-unconfirmed'), priced(41_200)])).toEqual({
+      status: 'priced',
+      reason: null,
+      minPence: 41_200,
+    });
+    expect(rollUp([priced(30_000, 'price-unconfirmed')])).toEqual({
+      status: 'priced',
+      reason: 'price-unconfirmed',
+      minPence: null,
+    });
+    expect(rollUp([priced(30_000, 'partial-expansion;price-unconfirmed;offers-dropped:1')])).toEqual({
+      status: 'priced',
+      reason: 'partial-expansion;price-unconfirmed',
+      minPence: null,
+    });
+  });
+  it('a merge keeps the confirmed outcome over a cheaper unconfirmed one, in both argument orders', () => {
+    const confirmed = priced(41_200);
+    const unconfirmed = priced(30_000, 'price-unconfirmed');
+    expect(mergeWithinProvider(confirmed, unconfirmed)).toEqual(confirmed);
+    expect(mergeWithinProvider(unconfirmed, confirmed)).toEqual(confirmed);
+    const cheaper = priced(29_000, 'price-unconfirmed');
+    expect(mergeWithinProvider(unconfirmed, cheaper)).toEqual(cheaper);
+  });
+});
+```
+
+`packages/db/test/cells.priceUnconfirmed.test.ts` (new file):
+
+```ts
+import { type CellKey, cellKeyString, fixedClock } from '@gmt/core';
+import { describe, expect, it } from 'vitest';
+import { RowRejected } from '../src/internal/validate.js';
+import { CellsRepo } from '../src/repositories/cells.js';
+import { ItinerariesRepo } from '../src/repositories/itineraries.js';
+import type { VerifiedCellWrite } from '../src/types.js';
+import { freshDb, T0 } from './helpers/db.js';
+import { cell, EWR, itinerary, newExecution, observationWrite, withNights } from './helpers/factories.js';
+
+const CONFIRMED = ['segments', 'segmentTimes', 'segmentCabins', 'price', 'seller', 'baggage'] as const;
+const UNCONFIRMED = ['segments', 'segmentTimes', 'seller', 'baggage'] as const;
+
+function seeded() {
+  const db = freshDb();
+  const clock = fixedClock(T0);
+  const { execution } = newExecution(db, clock);
+  const cells = new CellsRepo(db, clock, { allowSynthetic: false });
+  const repo = new ItinerariesRepo(db, clock, { allowSynthetic: false });
+  const all = [cell(), cell(undefined, EWR)];
+  cells.seed(execution.id, all.map(withNights), []);
+  cells.seedVerification(execution.id, [{ cell: cell(), reason: 'top_n' }], all, ['searchapi']);
+  return { executionId: execution.id, cells, repo };
+}
+
+/** One verified cell with one offer per entry; `minPence` and `reason` as the engine computes them (decision 45). */
+function write(
+  c: CellKey,
+  offers: Array<{ seller: string; pence: number; confirmed: boolean }>,
+  reason: string | null,
+  minPence: number,
+): VerifiedCellWrite {
+  const hash = 'a'.repeat(64);
+  return {
+    cell: c,
+    outcome: {
+      ...c,
+      status: 'priced',
+      reason,
+      lastError: null,
+      fetchedAt: T0,
+      minPence,
+      cabin: 'economy',
+      pointOfSale: 'GB',
+      sourceKind: 'scraped-search',
+    },
+    itineraries: [
+      {
+        itinerary: itinerary(hash, c),
+        offers: offers.map((o) => ({
+          offer: { itineraryHash: hash, providerId: 'searchapi', seller: o.seller, cabin: 'economy' },
+          observation: observationWrite({
+            pricePence: o.pence,
+            priceNativeMinor: o.pence,
+            suppliedFields: [...(o.confirmed ? CONFIRMED : UNCONFIRMED)],
+            segmentCabins: o.confirmed ? ['economy', 'economy'] : null,
+          }),
+        })),
+      },
+    ],
+  };
+}
+
+const bestPrice = (repo: ItinerariesRepo, executionId: string, c: CellKey) => {
+  const id = repo.bestObservationForCell(executionId, c);
+  return repo.writtenBy(executionId).find((o) => o.id === id)?.pricePence ?? null;
+};
+
+describe('confirmed prices in a verified cell (decision 45)', () => {
+  it('a cheaper unconfirmed offer never becomes the cell price or its best observation', () => {
+    const { executionId, cells, repo } = seeded();
+    cells.writeVerifiedCell(
+      executionId,
+      'searchapi',
+      write(
+        cell(),
+        [
+          { seller: 'Mytrip', pence: 30_000, confirmed: false },
+          { seller: 'British Airways', pence: 41_200, confirmed: true },
+        ],
+        null,
+        41_200,
+      ),
+    );
+    expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification).toEqual({
+      status: 'priced',
+      reason: null,
+      minPence: 41_200,
+    });
+    expect(bestPrice(repo, executionId, cell())).toBe(41_200);
+  });
+
+  it('with no confirmed offer the outcome says price-unconfirmed, the roll-up has no price, and best falls back to the cheapest', () => {
+    const { executionId, cells, repo } = seeded();
+    const offers = [
+      { seller: 'Mytrip', pence: 30_000, confirmed: false },
+      { seller: 'Kiwi', pence: 33_000, confirmed: false },
+    ];
+    expect(() =>
+      cells.writeVerifiedCell(executionId, 'searchapi', write(cell(), offers, null, 30_000)),
+    ).toThrow(RowRejected);
+    cells.writeVerifiedCell(executionId, 'searchapi', write(cell(), offers, 'price-unconfirmed', 30_000));
+    expect(cells.outcomes(executionId, { stage: 'verification', cells: [cell()] })[0]).toMatchObject({
+      status: 'priced',
+      reason: 'price-unconfirmed',
+      minPence: 30_000,
+    });
+    expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification).toEqual({
+      status: 'priced',
+      reason: 'price-unconfirmed',
+      minPence: null,
+    });
+    expect(bestPrice(repo, executionId, cell())).toBe(30_000);
+  });
+
+  it('a later confirmed write replaces an unconfirmed best even when dearer; a cheaper unconfirmed one never displaces it', () => {
+    const { executionId, cells, repo } = seeded();
+    cells.writeVerifiedCell(
+      executionId,
+      'searchapi',
+      write(cell(), [{ seller: 'Mytrip', pence: 30_000, confirmed: false }], 'price-unconfirmed', 30_000),
+    );
+    cells.writeVerifiedCell(
+      executionId,
+      'searchapi',
+      write(cell(), [{ seller: 'British Airways', pence: 45_000, confirmed: true }], null, 45_000),
+    );
+    expect(bestPrice(repo, executionId, cell())).toBe(45_000);
+    cells.writeVerifiedCell(
+      executionId,
+      'searchapi',
+      write(cell(), [{ seller: 'Kiwi', pence: 20_000, confirmed: false }], 'price-unconfirmed', 20_000),
+    );
+    expect(bestPrice(repo, executionId, cell())).toBe(45_000);
+    expect(cells.rollUps(executionId).get(cellKeyString(cell()))?.verification.minPence).toBe(45_000);
+  });
+
+  it('the closed priced-reason set accepts the part in its place only', () => {
+    const { executionId, cells } = seeded();
+    const bad = write(
+      cell(),
+      [{ seller: 'Mytrip', pence: 30_000, confirmed: false }],
+      'offers-dropped:1;price-unconfirmed',
+      30_000,
+    );
+    expect(() => cells.writeVerifiedCell(executionId, 'searchapi', bad)).toThrow(RowRejected);
   });
 });
 ```
@@ -6318,14 +6622,46 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
     return { h, e: await h.runToCompletion(h.orch(), def(h, two).id) };
   };
 
-  it('pricedReason is the closed set of decision 19', () => {
+  it('pricedReason is the closed set of decisions 19 and 45', () => {
     expect([
       pricedReason(false, 0),
       pricedReason(true, 0),
       pricedReason(false, 2),
       pricedReason(true, 1),
-    ]).toEqual([null, 'partial-expansion', 'offers-dropped:2', 'partial-expansion;offers-dropped:1']);
+      pricedReason(false, 0, true),
+      pricedReason(true, 3, true),
+    ]).toEqual([
+      null,
+      'partial-expansion',
+      'offers-dropped:2',
+      'partial-expansion;offers-dropped:1',
+      'price-unconfirmed',
+      'partial-expansion;price-unconfirmed;offers-dropped:3',
+    ]);
   });
+
+  it.each([
+    ['a negative amount', -1],
+    ['an amount whose conversion overflows', Number.MAX_SAFE_INTEGER],
+  ])(
+    '%s drops only its offer (parse), beside a good one; the run is never paused (decision 45)',
+    async (_n, amountMinor) => {
+      // why: a USD amount converts through toGbp, whose overflow guard is the RangeError a real vendor amount can reach
+      const h = createHarness({
+        transformFixture: (p) =>
+          mapOffers(p, (o, i) => (i === 0 ? { ...o, amountMinor, currency: 'USD' } : o)),
+      });
+      // why: 2 GBP per USD, so the largest safe amount converts past Number.MAX_SAFE_INTEGER
+      h.repos.fx.upsert([
+        { date: h.clock.todayLondon(), currency: 'USD', rateNano: 2_000_000_000, source: 'ecb' },
+      ]);
+      const e = await h.runToCompletion(h.orch(), def(h, two).id);
+      expect(e.status).toBe('completed');
+      const v = searched(h, e.id);
+      expect(v).toHaveLength(2);
+      expect(v.every((o) => o.status === 'priced' && o.reason === 'offers-dropped:1')).toBe(true);
+    },
+  );
 
   it('one bad offer among several is dropped and counted: priced with offers-dropped:1 (expandTop 2: the fixture answers two offers)', async () => {
     const { h, e } = await run({
@@ -6433,6 +6769,36 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
       expect(verdictClass(v)).toBe('partially-verified');
       expect(unverifiedNames(v)).toContain('priceConfirmed');
     }
+    // why: decision 45 — a cell with no confirmed price is priced but has no itinerary-search price in its roll-up
+    const cells = searched(h, e.id);
+    expect(cells).toHaveLength(2);
+    expect(cells.every((o) => o.status === 'priced' && o.reason === 'price-unconfirmed')).toBe(true);
+    for (const o of cells)
+      expect(h.repos.cells.rollUps(e.id).get(cellKeyString(o))?.verification).toEqual({
+        status: 'priced',
+        reason: 'price-unconfirmed',
+        minPence: null,
+      });
+  });
+
+  it('a cheaper unconfirmed offer never becomes the cell price: the cheapest confirmed one does (decision 45)', async () => {
+    const { h, e } = await run({
+      transformFixture: (p) =>
+        mapOffers(p, (o, i) => (i === 0 ? { ...o, verified: false, amountMinor: 100 } : o)),
+    });
+    const v = searched(h, e.id);
+    expect(v).toHaveLength(2);
+    for (const o of v) {
+      const confirmed = h.repos.itineraries
+        .writtenBy(e.id)
+        .filter((r) => cellKeyString(r.cell) === cellKeyString(o) && r.suppliedFields.includes('price'));
+      expect(confirmed.length).toBeGreaterThan(0);
+      const min = Math.min(...confirmed.map((r) => r.pricePence));
+      expect(o).toMatchObject({ status: 'priced', reason: null, minPence: min });
+      expect(h.repos.cells.rollUps(e.id).get(cellKeyString(o))?.verification.minPence).toBe(min);
+      const best = h.repos.itineraries.bestObservationForCell(e.id, o);
+      expect(confirmed.find((r) => r.id === best)?.pricePence).toBe(min);
+    }
   });
 
   it('a chain stopped by cancel resolves with the offers it already paid for, and they are written (decisions 25, 27)', async () => {
@@ -6471,8 +6837,9 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('cancelled');
     const v = searched(h, e.id);
+    // why: step-2 offers are unconfirmed (decision 27), so the cell is also price-unconfirmed (decision 45)
     expect(v.filter((o) => o.status === 'priced')).toEqual([
-      expect.objectContaining({ reason: 'partial-expansion' }),
+      expect.objectContaining({ reason: 'partial-expansion;price-unconfirmed' }),
     ]);
     expect(v.filter((o) => o.status === 'not_run')).toHaveLength(1);
     expect(h.count('price_observations', e.id)).toBeGreaterThan(0);
@@ -6525,8 +6892,8 @@ describe('route price history (spec §7 rev 10)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @gmt/engine exec vitest run verification && pnpm --filter @gmt/core exec vitest run constraints/priceConfirmed`
-Expected: FAIL, `Cannot find module '../src/stages/verification.js'`; the core test fails with `expected { cabin: 'pass' } to deeply equal { cabin: 'pass', priceConfirmed: 'unverified' }`.
+Run: `pnpm --filter @gmt/engine exec vitest run verification && pnpm --filter @gmt/core exec vitest run constraints/priceConfirmed coverage/priceUnconfirmed && pnpm --filter @gmt/db exec vitest run cells.priceUnconfirmed`
+Expected: FAIL, `Cannot find module '../src/stages/verification.js'`; core fails in 5 tests, among them `expected { cabin: 'pass' } to deeply equal { cabin: 'pass', priceConfirmed: 'unverified' }` and `expected undefined to be 'price-unconfirmed'`; db's `cells.priceUnconfirmed` fails in 3, the first with `expected function to throw an error, but it didn't`.
 
 - [ ] **Step 3: Implement**
 
@@ -6596,6 +6963,76 @@ Expected: FAIL, `Cannot find module '../src/stages/verification.js'`; the core t
  ] as const satisfies readonly ConstraintName[];
 ```
 
+`packages/core/src/coverage/rollUp.ts` — apply this patch:
+
+```diff
+--- a/packages/core/src/coverage/rollUp.ts
++++ b/packages/core/src/coverage/rollUp.ts
+@@ -23,6 +23,19 @@
+   return (reason ?? '').split(';').includes(PARTIAL_EXPANSION);
+ }
+ 
++/**
++ * Decision 45: the priced-reason part meaning "no offer of this outcome had its price confirmed by the final step"
++ * (every observation lacks `price` among its supplied fields). The outcome keeps the cheapest unconfirmed price as its
++ * `minPence`; the roll-up's `minPence` counts only confirmed outcomes, so a verified cell never shows an unconfirmed
++ * fare as its itinerary-search price. Parts are ordered partial-expansion, price-unconfirmed, offers-dropped:n.
++ */
++export const PRICE_UNCONFIRMED = 'price-unconfirmed';
++
++/** True when a priced reason says no price of the outcome was confirmed (decision 45). */
++export function isPriceUnconfirmed(reason: string | null): boolean {
++  return (reason ?? '').split(';').includes(PRICE_UNCONFIRMED);
++}
++
+ /** `reason` with `partial-expansion` added as its first part (the combined form keeps offers-dropped). */
+ function withPartialExpansion(reason: string | null): string {
+   if (reason === null) return PARTIAL_EXPANSION;
+@@ -58,7 +71,9 @@
+  * `mixed`; `no_data` carries `cabin-not-offered` only in the all-not-offered case, else null;
+  * `skipped` carries the highest-priority skip reason; `not_run` and `empty` carry null.
+  * `minPence` is the minimum over `priced` outcomes ("the minimum over rows actually written",
+- * spec §5.6), else `null`.
++ * spec §5.6) whose price was confirmed, else `null`; when every priced outcome is `price-unconfirmed`
++ * the roll-up is `priced` with `minPence` null and `price-unconfirmed` among its reason's parts
++ * (decision 45: the itinerary-search price is never an unconfirmed fare).
+  *
+  * Throws on a `skipped` outcome whose reason is not a `SkipReason` and on a `priced` outcome with
+  * no `minPence`: both are broken invariants (spec §3) that must not be rolled up silently.
+@@ -76,10 +91,16 @@
+       if (o.minPence === null) {
+         throw new Error('a priced outcome has no minPence (spec §3: priced means a price was written)');
+       }
+-      min = Math.min(min, o.minPence);
++      if (!isPriceUnconfirmed(o.reason)) min = Math.min(min, o.minPence);
+     }
+     const partial = priced.some((o) => isPartialExpansion(o.reason));
+-    return { status: 'priced', reason: partial ? PARTIAL_EXPANSION : null, minPence: min };
++    const unconfirmed = min === Number.POSITIVE_INFINITY;
++    const parts = [...(partial ? [PARTIAL_EXPANSION] : []), ...(unconfirmed ? [PRICE_UNCONFIRMED] : [])];
++    return {
++      status: 'priced',
++      reason: parts.length === 0 ? null : parts.join(';'),
++      minPence: unconfirmed ? null : min,
++    };
+   }
+   if (of('not_run').length > 0) return { status: 'not_run', reason: null, minPence: null };
+   const errors = of('error');
+@@ -173,7 +194,11 @@
+   }
+   if (ra !== rb) return ra > rb ? a : b;
+   if (a.status === 'priced') {
+-    const source = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
++    // why: decision 45 — a confirmed price beats an unconfirmed one whatever the amounts
++    const ua = isPriceUnconfirmed(a.reason);
++    const ub = isPriceUnconfirmed(b.reason);
++    const cheaper = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
++    const source = ua === ub ? cheaper : ua ? b : a;
+     // why: offers-dropped:n describes the source's own fetch and stays with it; partial-expansion is a
+     // property of the cell's data and survives the merge whichever input carried it (ruling 2026-10-15).
+     const partial = isPartialExpansion(a.reason) || isPartialExpansion(b.reason);
+```
+
 `packages/core/src/types/itinerary.ts` — apply this patch:
 
 ```diff
@@ -6614,6 +7051,123 @@ Expected: FAIL, `Cannot find module '../src/stages/verification.js'`; the core t
  export type Verdicts = Partial<Record<ConstraintName, Verdict>>;
  export type VerdictClass = 'verified' | 'partially-verified' | 'failed';
  /** API values; the UI labels them "itinerary-search basis" and "calendar basis". Spec §6.9. */
+```
+
+`packages/db/src/internal/outcomeWrite.ts` — apply this patch:
+
+```diff
+--- a/packages/db/src/internal/outcomeWrite.ts
++++ b/packages/db/src/internal/outcomeWrite.ts
+@@ -67,8 +67,10 @@
+ }
+ 
+ /** Ruling 2026-10-15: the closed set of priced reasons; offers-dropped counts are positive and unpadded. */
++// Decision 19's closed set, with decision 45's `price-unconfirmed`: ';'-joined parts in the order partial-expansion,
++// price-unconfirmed, offers-dropped:n, at least one.
+ export const PRICED_REASON =
+-  /^(?:partial-expansion|offers-dropped:[1-9][0-9]*|partial-expansion;offers-dropped:[1-9][0-9]*)$/;
++  /^(?=[^;])(?:partial-expansion(?:;(?=.)|$))?(?:price-unconfirmed(?:;(?=.)|$))?(?:offers-dropped:[1-9][0-9]*)?$/;
+ 
+ /**
+  * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:
+```
+
+`packages/db/src/internal/verifiedCellWrite.ts` — apply this patch:
+
+```diff
+--- a/packages/db/src/internal/verifiedCellWrite.ts
++++ b/packages/db/src/internal/verifiedCellWrite.ts
+@@ -1,4 +1,11 @@
+-import { type CellOutcome, type Clock, cellKeyString, isPartialExpansion, type ProviderId } from '@gmt/core';
++import {
++  type CellOutcome,
++  type Clock,
++  cellKeyString,
++  isPartialExpansion,
++  isPriceUnconfirmed,
++  type ProviderId,
++} from '@gmt/core';
+ import type { Db } from '../client.js';
+ import { ExecutionsRepo } from '../repositories/executions.js';
+ import { ItinerariesRepo } from '../repositories/itineraries.js';
+@@ -16,9 +23,15 @@
+ 
+ // Spec §7 atomic unit "one verified cell": validation, then one transaction (arch-M4).
+ 
++/** 1 when the cell's current best observation had its price confirmed (`price` among its supplied fields), else 0. */
++const CONFIRMED_SQL = `(EXISTS (SELECT 1 FROM price_observations po, json_each(po.supplied_fields_json) f
++  WHERE po.id = search_cells.best_observation_id AND f.value = 'price'))`;
++
+ /**
+  * Spec §7 atomic unit: one verified cell's itineraries, segments, offers, observations, outcome, best_observation_id
+- * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest observation written (ruling 13).
++ * and roll-up. Merged like writeTile (ruling 3); best_observation_id is the cheapest confirmed observation written,
++ * else the cheapest unconfirmed one (ruling 13, decision 45), and min_pence follows the same choice; an outcome with no
++ * confirmed observation carries `price-unconfirmed` in its reason.
+  */
+ export function writeVerifiedCellRows(
+   db: Db,
+@@ -80,7 +93,15 @@
+       `${key} reason ${String(o.reason)} disagrees with its observations' partialExpansion flags`,
+     );
+   if (offers.length > 0) {
+-    const cheapest = Math.min(...offers.map((x) => x.observation.pricePence));
++    const confirmed = offers.filter((x) => x.observation.suppliedFields.includes('price'));
++    if ((confirmed.length === 0) !== isPriceUnconfirmed(o.reason))
++      throw new RowRejected(
++        'price-unconfirmed',
++        `${key} reason ${String(o.reason)} disagrees with its observations' confirmed prices (decision 45)`,
++      );
++    const cheapest = Math.min(
++      ...(confirmed.length > 0 ? confirmed : offers).map((x) => x.observation.pricePence),
++    );
+     const oldest = offers.map((x) => x.observation.provenance.fetchedAt).sort()[0];
+     if (o.minPence !== cheapest)
+       throw new RowRejected(
+@@ -95,15 +116,21 @@
+   }
+   const itineraries = new ItinerariesRepo(db, clock, { allowSynthetic });
+   db.transaction(() => {
+-    let best: { id: number; pence: number } | null = null;
++    let best: { id: number; pence: number; confirmed: boolean } | null = null;
+     for (const x of offers) {
+       itineraries.upsertItinerary(x.itinerary);
+       const { observationId: id } = itineraries.recordObservation(x.offer, {
+         ...x.observation,
+         executionId,
+       });
+-      if (best === null || x.observation.pricePence < best.pence)
+-        best = { id, pence: x.observation.pricePence };
++      const confirmed = x.observation.suppliedFields.includes('price');
++      // why: decision 45 — the cheapest confirmed observation, else the cheapest unconfirmed one
++      if (
++        best === null ||
++        (confirmed && !best.confirmed) ||
++        (confirmed === best.confirmed && x.observation.pricePence < best.pence)
++      )
++        best = { id, pence: x.observation.pricePence, confirmed };
+     }
+     const existing = readOutcome(db, executionId, w.cell, 'verification', providerId);
+     // why: an error carries no fetched data, so it stores no provenance, as writeTileError does (prov-M5).
+@@ -121,9 +148,16 @@
+     if (best !== null) {
+       db.raw
+         .prepare(
+-          `UPDATE search_cells SET best_observation_id = @bestId WHERE ${CELL_WHERE} AND (best_observation_id IS NULL OR (SELECT price_pence FROM price_observations WHERE id = search_cells.best_observation_id) > @bestPence)`,
++          `UPDATE search_cells SET best_observation_id = @bestId WHERE ${CELL_WHERE} AND (best_observation_id IS NULL
++             OR (@bestConfirmed = 1 AND NOT ${CONFIRMED_SQL})
++             OR (@bestConfirmed = ${CONFIRMED_SQL} AND (SELECT price_pence FROM price_observations WHERE id = search_cells.best_observation_id) > @bestPence))`,
+         )
+-        .run({ ...keyParams(executionId, w.cell), bestId: best.id, bestPence: best.pence });
++        .run({
++          ...keyParams(executionId, w.cell),
++          bestId: best.id,
++          bestPence: best.pence,
++          bestConfirmed: best.confirmed ? 1 : 0,
++        });
+     }
+     storeRollUps(db, executionId, 'verification', [w.cell]);
+     if (o.status !== 'error') new ExecutionsRepo(db, clock).resetAutoResume(executionId);
 ```
 
 `packages/engine/src/execute.ts` — the import block becomes:
@@ -6709,14 +7263,22 @@ export function offerWrite(
   cell: CellKey,
   c: OfferContext,
   deps: RepoDeps,
-): OfferWrite | NormalisationError {
-  const r = normaliseOffer(raw, cell, {
-    providerId: c.providerId,
-    cabin: c.cabin,
-    tzOf: (iata) => deps.airports.tzOf(iata),
-    rateFor: (cur) => rateFor(deps, cur),
-  });
-  if (!r.ok) return r.error;
+): OfferWrite | PriceRefusal {
+  let r: ReturnType<typeof normaliseOffer>;
+  try {
+    r = normaliseOffer(raw, cell, {
+      providerId: c.providerId,
+      cabin: c.cabin,
+      tzOf: (iata) => deps.airports.tzOf(iata),
+      rateFor: (cur) => rateFor(deps, cur),
+    });
+  } catch (err) {
+    // why: decision 45 — core's normaliseOffer rethrows toGbp's RangeError; a malformed amount drops one offer
+    const refusal = refusalOf(err);
+    if (refusal === null) throw err;
+    return refusal;
+  }
+  if (!r.ok) return { reason: r.error.reason, message: r.error.message };
   // why: decision 27 — a price no seller listing confirmed is stored as unverified: without 'price' and 'segmentCabins'
   // in its supplied fields (and no cabin evidence), so the cabin verdict and any price constraint read unverified and
   // the row is never a verified fare
@@ -6758,15 +7320,15 @@ import {
   generateCells,
   type ItineraryQuery,
   type ItinerarySearchResult,
-  NormalisationError,
   PARTIAL_EXPANSION,
+  PRICE_UNCONFIRMED,
   type ProviderId,
   type RollUp,
   selectCandidates,
 } from '@gmt/core';
 import type { VerifiedCellWrite } from '@gmt/db';
 import type { EngineContext } from '../context.js';
-import { offerWrite } from '../normalise.js';
+import { offerWrite, type PriceRefusal } from '../normalise.js';
 import { runPool } from '../pool.js';
 import {
   laneFor,
@@ -6800,9 +7362,10 @@ export function itineraryQuery(snapshot: DefinitionSnapshot, cell: CellKey): Iti
  * The priced-outcome reason of decision 19's closed set: null, `partial-expansion`, `offers-dropped:n` or
  * `partial-expansion;offers-dropped:n` (core's PARTIAL_EXPANSION, `;` as the separator).
  */
-export function pricedReason(partial: boolean, dropped: number): string | null {
+export function pricedReason(partial: boolean, dropped: number, unconfirmed = false): string | null {
   const parts = [
     ...(partial ? [PARTIAL_EXPANSION] : []),
+    ...(unconfirmed ? [PRICE_UNCONFIRMED] : []),
     ...(dropped > 0 ? [`offers-dropped:${dropped}`] : []),
   ];
   return parts.length === 0 ? null : parts.join(';');
@@ -6969,11 +7532,12 @@ export function commitVerifiedCell(
   const groups = new Map<string, VerifiedCellWrite['itineraries'][number]>();
   let written = 0;
   let minPence: number | null = null;
+  let minConfirmed: number | null = null;
   let dropped = 0;
-  let firstFailure: NormalisationError | null = null;
+  let firstFailure: PriceRefusal | null = null;
   for (const raw of result.offers) {
     const w = offerWrite(raw, cell, oc, deps);
-    if (w instanceof NormalisationError) {
+    if ('reason' in w) {
       dropped += 1;
       firstFailure ??= w;
       continue;
@@ -6983,6 +7547,9 @@ export function commitVerifiedCell(
     groups.set(w.itinerary.hash, g);
     written += 1;
     minPence = minPence === null ? w.observation.pricePence : Math.min(minPence, w.observation.pricePence);
+    if (w.observation.suppliedFields.includes('price'))
+      minConfirmed =
+        minConfirmed === null ? w.observation.pricePence : Math.min(minConfirmed, w.observation.pricePence);
   }
   const base = {
     origin: cell.origin,
@@ -6999,9 +7566,11 @@ export function commitVerifiedCell(
     outcome = {
       ...base,
       status: 'priced',
-      reason: pricedReason(result.partial, dropped),
+      // why: decision 45 — the cell's price is the cheapest confirmed one; with none it is the cheapest unconfirmed one,
+      // marked price-unconfirmed so the roll-up shows no itinerary-search price
+      reason: pricedReason(result.partial, dropped, minConfirmed === null),
       lastError: firstFailure?.message ?? null,
-      minPence,
+      minPence: minConfirmed ?? minPence,
     };
   else if (firstFailure !== null)
     outcome = {
@@ -7049,13 +7618,13 @@ export function commitVerifiedCell(
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/engine exec vitest run verification && pnpm --filter @gmt/core test`
-Expected: PASS, 17 engine tests; core's suite green at its 100% thresholds.
+Run: `pnpm --filter @gmt/engine exec vitest run verification && pnpm --filter @gmt/core test && pnpm --filter @gmt/db test`
+Expected: PASS, 20 engine tests; core's suite green at its 100% thresholds; db green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/engine packages/core && git commit -m "wp07: verification stage with once-only selection, offer normalisation, verified-cell write, GBP route history; priceConfirmed verdict
+git add packages/engine packages/core packages/db && git commit -m "wp07: verification stage with once-only selection, offer normalisation, verified-cell write, GBP route history; priceConfirmed verdict, confirmed-only cell price
 
 MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 ```
@@ -7923,7 +8492,7 @@ import {
   type BudgetScopeKind,
   formatPence,
   type IsoDateTime,
-  PENCE_TO_MICRO,
+  microGbpToPence,
   type ProviderId,
 } from '@gmt/core';
 
@@ -7956,7 +8525,7 @@ export function scopeName(scope: BudgetScopeKind, providerId: ProviderId | null)
 
 /** A cap figure with its unit: pounds for cost scopes (micro-GBP rounded up to the penny), "N calls" otherwise (arch-018). */
 export function scopeAmount(scope: BudgetScopeKind, n: number): string {
-  if (isCostScope(scope)) return formatPence(Math.ceil(n / PENCE_TO_MICRO));
+  if (isCostScope(scope)) return formatPence(microGbpToPence(n));
   return `${n} ${n === 1 ? 'call' : 'calls'}`;
 }
 
@@ -7991,7 +8560,7 @@ export function formatInstant(at: IsoDateTime, tz: string): string {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/engine exec vitest run budget-breach error-table-discovery error-table-verification`
-Expected: PASS, 44 tests (15 + 18 + 11).
+Expected: PASS, 44 tests (15 + 18 + 11). Then see the alerts guard tested: change the first line of `alertsStep` in `src/execute.ts`, `if (run.stop !== null && run.stop.kind !== 'budget') return false;`, to `if (run.stop?.kind === 'fatal') return false;` and run `budget-breach` again: the paused-for-errors, cancel and SIGTERM tests fail (`expected "vi.fn()" to not be called`); restore the line (test-strategy-reviewer-r3-001).
 
 - [ ] **Step 5: Commit**
 
@@ -8516,7 +9085,7 @@ import {
   cellKeyString,
   type DefinitionSnapshot,
   type Execution,
-  PENCE_TO_MICRO,
+  microGbpToPence,
   type ProviderId,
   type SearchDefinition,
   type SourceKind,
@@ -8564,7 +9133,7 @@ function assemble(
       calls: Math.ceil(l.rawCalls * f),
       planCalls: l.rawCalls,
       costMicroGbp,
-      costPence: Math.ceil(costMicroGbp / PENCE_TO_MICRO),
+      costPence: microGbpToPence(costMicroGbp),
       seconds: Math.ceil(l.rawSeconds * f),
       blocked: null,
     };
@@ -8576,7 +9145,7 @@ function assemble(
     totalCalls: perProvider.reduce((a, p) => a + p.calls, 0),
     totalPlanCalls: perProvider.reduce((a, p) => a + p.planCalls, 0),
     totalCostMicroGbp,
-    totalCostPence: Math.ceil(totalCostMicroGbp / PENCE_TO_MICRO),
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
     seconds: perProvider.reduce((a, p) => a + p.seconds, 0),
     assumptions: [`every call count includes the retry factor ${f}`, ...assumptions],
     windowClamped,
@@ -9016,7 +9585,7 @@ import { execute } from './execute.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
 import { buildSnapshot } from './snapshot.js';
-import type { StartResult } from './types.js';
+import type { StartOptions, StartResult } from './types.js';
 ```
 
 `packages/engine/src/start.ts` — replace or add these declarations:
@@ -9027,7 +9596,7 @@ export async function startExecution(
   ctx: EngineContext,
   reg: RunRegistry,
   definitionId: string,
-  opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number },
+  opts: StartOptions,
 ): Promise<StartResult> {
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
@@ -10093,6 +10662,10 @@ Expected: FAIL: the engine fails with `Cannot find module '../src/budgetCheck.js
 `packages/db/drizzle/0001_confirmed_calls.sql` (new file):
 
 ```sql
+-- why: hand-written (decision 37). drizzle-kit 0.31 generates a table rebuild for this change whose INSERT … SELECT reads
+-- confirmed_calls from the old table, which has none, and a rebuild drops a table other tables reference, inside the
+-- migrator's transaction where PRAGMA foreign_keys has no effect. One ADD COLUMN with a column CHECK is the same schema;
+-- the generated meta/0001_snapshot.json records it as a table-level check, which is equivalent. Do not regenerate.
 ALTER TABLE `search_definitions` ADD `confirmed_calls` integer CONSTRAINT "search_definitions_confirmed_calls_ck" CHECK(confirmed_calls IS NULL OR (typeof(confirmed_calls) = 'integer' AND confirmed_calls >= 0));
 ```
 
@@ -10512,31 +11085,13 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<ProviderId, stri
     totalCalls: runs.reduce((a, p) => a + p.calls, 0),
     totalPlanCalls: runs.reduce((a, p) => a + p.planCalls, 0),
     totalCostMicroGbp,
-    totalCostPence: Math.ceil(totalCostMicroGbp / PENCE_TO_MICRO),
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
     seconds: runs.reduce((a, p) => a + p.seconds, 0),
     assumptions:
       runs.length === perProvider.length
         ? e.assumptions
         : [...e.assumptions, 'totals leave out the providers a budget cap blocks'],
   };
-}
-```
-
-`packages/engine/src/orchestrator.ts` — replace or add these declarations:
-
-```ts
-/** The execution half of the Engine; createEngine (Task 7.19) adds estimates, scheduler, boot and status. */
-export interface Orchestrator {
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
-  ): Promise<StartResult>;
-  resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
-  /** Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel. */
-  cancel(executionId: string): Promise<boolean>;
-  /** Aborts every pass as SIGTERM (cells in flight → not_run, status interrupted) and waits for them. */
-  shutdown(): Promise<void>;
-  running(): string[];
 }
 ```
 
@@ -10566,6 +11121,7 @@ import {
   type DefinitionSnapshot,
   type Execution,
   formatPence,
+  microGbpToPence,
   PENCE_TO_MICRO,
   type ProviderId,
   type SearchDefinition,
@@ -10578,7 +11134,7 @@ import { notifyOperator } from './notify.js';
 import type { RunRegistry } from './registry.js';
 import { markRemaining, newRun } from './run.js';
 import { buildSnapshot } from './snapshot.js';
-import type { Estimate, StartResult } from './types.js';
+import type { Estimate, StartOptions, StartResult } from './types.js';
 
 /** A refused StartResult. */
 export function refused(
@@ -10682,7 +11238,7 @@ export function confirmationNeeded(
     confirmed.calls >= totalCalls
   )
     return null;
-  const estimatePence = Math.ceil(cost / PENCE_TO_MICRO);
+  const estimatePence = microGbpToPence(cost);
   const reason = overPence
     ? `the estimate of ${formatPence(estimatePence)} is above the confirmation threshold`
     : `this run needs ${heavy.join(' and ')}`;
@@ -10720,7 +11276,7 @@ export async function startExecution(
   ctx: EngineContext,
   reg: RunRegistry,
   definitionId: string,
-  opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
+  opts: StartOptions,
 ): Promise<StartResult> {
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
@@ -10900,6 +11456,15 @@ export interface EngineOptions {
 }
 
 /** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
+/**
+ * The options of a start (spec §8.1): who started it and, for a manual start, the confirmation it carries, pence and
+ * calls together (decision 37).
+ */
+export interface StartOptions {
+  trigger: 'manual' | 'schedule';
+  confirmCostPence?: number;
+  confirmCalls?: number;
+}
 export type StartResult =
   | { ok: true; executionId: string }
   | {
@@ -10913,10 +11478,7 @@ export type StartResult =
 export interface Engine {
   boot(): Promise<void>;
   shutdown(): Promise<void>;
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
-  ): Promise<StartResult>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   cancel(executionId: string): Promise<boolean>;
   verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
@@ -11262,7 +11824,7 @@ import {
   cellKeyString,
   type DefinitionSnapshot,
   type Execution,
-  PENCE_TO_MICRO,
+  microGbpToPence,
   type ProviderId,
   type SearchDefinition,
   type SourceKind,
@@ -11310,7 +11872,7 @@ function assemble(
       calls: Math.ceil(l.rawCalls * f),
       planCalls: l.rawCalls,
       costMicroGbp,
-      costPence: Math.ceil(costMicroGbp / PENCE_TO_MICRO),
+      costPence: microGbpToPence(costMicroGbp),
       seconds: Math.ceil(l.rawSeconds * f),
       blocked: null,
     };
@@ -11322,7 +11884,7 @@ function assemble(
     totalCalls: perProvider.reduce((a, p) => a + p.calls, 0),
     totalPlanCalls: perProvider.reduce((a, p) => a + p.planCalls, 0),
     totalCostMicroGbp,
-    totalCostPence: Math.ceil(totalCostMicroGbp / PENCE_TO_MICRO),
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
     seconds: perProvider.reduce((a, p) => a + p.seconds, 0),
     assumptions: [`every call count includes the retry factor ${f}`, ...assumptions],
     windowClamped,
@@ -11623,7 +12185,7 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
       l.calls += p.calls;
       l.planCalls += p.planCalls;
       l.costMicroGbp += p.costMicroGbp;
-      l.costPence = Math.ceil(l.costMicroGbp / PENCE_TO_MICRO);
+      l.costPence = microGbpToPence(l.costMicroGbp);
       l.seconds += p.seconds;
     }
   }
@@ -11634,7 +12196,7 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
     totalCalls: lines.reduce((a, p) => a + p.calls, 0),
     totalPlanCalls: lines.reduce((a, p) => a + p.planCalls, 0),
     totalCostMicroGbp,
-    totalCostPence: Math.ceil(totalCostMicroGbp / PENCE_TO_MICRO),
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
     seconds: lines.reduce((a, p) => a + p.seconds, 0),
     assumptions: [...stored.assumptions, `a resumed pass planned ${pass.totalPlanCalls} more calls`],
   };
@@ -11654,7 +12216,7 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<ProviderId, stri
     totalCalls: runs.reduce((a, p) => a + p.calls, 0),
     totalPlanCalls: runs.reduce((a, p) => a + p.planCalls, 0),
     totalCostMicroGbp,
-    totalCostPence: Math.ceil(totalCostMicroGbp / PENCE_TO_MICRO),
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
     seconds: runs.reduce((a, p) => a + p.seconds, 0),
     assumptions:
       runs.length === perProvider.length
@@ -11818,9 +12380,9 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 
 **Interfaces:**
 - Consumes: `ExecutionsRepo.create({ isChild: true, cell, trigger })/activeChild/activeParent/latestCompleted`, `BudgetGuard.usage({ kind: 'execution-calls', executionId })`, `ItinerariesRepo.observationsForDefinition/latestVerificationOutcomeForCell`, `AirportsRepo.exists`.
-- Produces: `verifyCellExecution(ctx, reg, definitionId, cell)`, `childMaxCalls(ctx, definitionId, definitionMaxCalls, perCellBilledCalls)`, `childSnapshot(parent, cell, maxCalls)`, `Orchestrator.verifyCell`.
+- Produces: `verifyCellExecution(ctx, reg, definitionId, cell)`, `sizeChild(ctx, def, snapshot, cell)`, `childCapPreview(ctx, definitionId, cell)`, `childMaxCalls(ctx, definitionId, definitionMaxCalls, perCellBilledCalls)`, `childSnapshot(parent, cell, maxCalls)`, `Orchestrator.verifyCell`.
 
-Ruling 7 and spec rev 18 (cost-r1-006, ssr-10, ssr2-01, decision 37): a child's `maxCalls` is `max(CHILD_MAX_CALLS, min(per-cell estimate × ESTIMATE_RETRY_FACTOR, headroom))`. The fixture, like SearchApi, estimates 1 + 2 × expandTop calls: 4 at expandTop 1, raised to the floor of 6; 9 at expandTop 3. The headroom is the active parent's remaining execution calls (else the definition's `maxCalls`) less what the definition's other active children may still spend, so two children never size themselves against the same calls (cost-r2-001); a cell that needs more than its cap is refused with code `cap`, naming the room left. The floor can pass the parent's headroom by at most `CHILD_MAX_CALLS` a child, so `CHILD_MAX_CALLS` is the per-child bound on that excess (cost-r2-003), and provider-month and global caps bound every call. The rest of the budget is inherited (decision 14). A child never pauses: any cap breach ends it `cancelled` with errorText `child cap reached` and its cell `skipped:budget` (the closed skip reason that says why it was not searched); the parent's cell stays unverified, no operator notice is sent (the operator started it), and a new child of the same cell can start at once. A departed cell is refused like one outside the space. The never-pauses test asserts the breach came before any fixture call: the child's ledger holds only the six pre-spent rows and no itinerary request was made (test-strategy-reviewer-030).
+Ruling 7 and spec rev 18 (cost-r1-006, ssr-10, ssr2-01, decision 37): a child's `maxCalls` is `max(CHILD_MAX_CALLS, min(per-cell estimate × ESTIMATE_RETRY_FACTOR, headroom))`. The fixture, like SearchApi, estimates 1 + 2 × expandTop calls: 4 at expandTop 1, raised to the floor of 6; 9 at expandTop 3. The headroom is the active parent's remaining execution calls (else the definition's `maxCalls`) less what the definition's other active children may still spend, so two children never size themselves against the same calls (cost-r2-001); a cell that needs more than its cap is refused with code `cap`, naming the room left. The floor can pass the parent's headroom by at most `CHILD_MAX_CALLS` a child, so `CHILD_MAX_CALLS` is the per-child bound on that excess (cost-r2-003), and provider-month and global caps bound every call. The rest of the budget is inherited (decision 14). A child never pauses: any cap breach ends it `cancelled` with errorText `child cap reached` and its cell `skipped:budget` (the closed skip reason that says why it was not searched); the parent's cell stays unverified, no operator notice is sent (the operator started it), and a new child of the same cell can start at once. A departed cell is refused like one outside the space. `childCapPreview` (decisions 42, 45) answers `{ maxCalls, headroomCalls }` for the cell detail's verify button through `sizeChild`, the same calculation `verifyCell` sizes the child with; a test pins that the preview equals the snapshot cap of the child created next (prov-wp07-r3-003). The never-pauses test asserts the breach came before any fixture call: the child's ledger holds only the six pre-spent rows and no itinerary request was made (test-strategy-reviewer-030).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -11829,6 +12391,8 @@ Ruling 7 and spec rev 18 (cost-r1-006, ssr-10, ssr2-01, decision 37): a child's 
 ```ts
 import { asIsoDate, asIsoDateTime, cellKeyString } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
+import { childCapPreview } from '../src/child.js';
+import { buildContext } from '../src/context.js';
 import {
   baseDefinition,
   createHarness,
@@ -11961,6 +12525,33 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     expect((await h.waitForSettled(again.executionId)).status).toBe('completed');
   });
 
+  it('childCapPreview shows the cap and headroom the next child gets, by the same calculation (decision 45)', async () => {
+    const h = createHarness();
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
+    const ctx = buildContext(h.deps, h.options);
+    const o = h.orch();
+    const def = verifying(h, {
+      verification: { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 3, bookingLinks: true },
+    });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({ maxCalls: 9, headroomCalls: 1000 });
+    const parent = await o.start(def.id, { trigger: 'manual' });
+    if (!parent.ok) throw new Error(parent.message);
+    h.spendLedger({ providerId: 'fixture', rows: 991, costMicroGbpEach: 0, executionId: parent.executionId });
+    const preview = childCapPreview(ctx, def.id, cell);
+    expect(preview).toEqual({ maxCalls: 9, headroomCalls: 9 });
+    const r = await o.verifyCell(def.id, cell);
+    if (!r.ok) throw new Error(r.message);
+    expect(h.repos.executions.get(r.executionId)?.snapshot.budget.maxCalls).toBe(preview.maxCalls);
+    expect(() => childCapPreview(ctx, 'no-such-definition', cell)).toThrow('not found');
+    expect(() =>
+      childCapPreview(ctx, def.id, {
+        ...cell,
+        departureDate: asIsoDate('2027-01-04'),
+        returnDate: asIsoDate('2027-01-11'),
+      }),
+    ).toThrow('not in the current search space');
+  });
+
   it('allows at most one active child per cell', async () => {
     const h = createHarness();
     await h.fixtureScenario([itineraryRule(FIXTURE_RULES.hold)]);
@@ -12027,7 +12618,15 @@ Expected: FAIL, `o.verifyCell is not a function` (and `h.orch().verifyCell` in e
 `packages/engine/src/child.ts` (new file):
 
 ```ts
-import { ACTIVE_STATUSES, type CellKey, cellKeyString, type Execution } from '@gmt/core';
+import {
+  ACTIVE_STATUSES,
+  type Cell,
+  type CellKey,
+  cellKeyString,
+  type DefinitionSnapshot,
+  type Execution,
+  type SearchDefinition,
+} from '@gmt/core';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { estimateStart, withBlocked } from './estimate.js';
@@ -12073,6 +12672,42 @@ export function childMaxCalls(
 }
 
 /**
+ * The child cap of one cell: its per-cell billed estimate (`need`, × ESTIMATE_RETRY_FACTOR) through childMaxCalls. The
+ * one calculation verifyCell sizes a child with and childCapPreview shows beforehand (decisions 42, 45).
+ */
+export function sizeChild(
+  ctx: EngineContext,
+  def: SearchDefinition,
+  snapshot: DefinitionSnapshot,
+  cell: Cell,
+): { maxCalls: number; headroom: number; need: number } {
+  const sized = estimateStart(ctx, childSnapshot(snapshot, cell, def.budget.maxCalls), [cell], null);
+  const need = sized.perProvider
+    .filter((p) => ctx.limitsOf(p.providerId).billed)
+    .reduce((a, p) => a + p.calls, 0);
+  return { ...childMaxCalls(ctx, def.id, def.budget.maxCalls, need), need };
+}
+
+/**
+ * Decision 45: the cap a child of `cell` would get now and the headroom it is drawn from, for the cell detail's verify
+ * button (decisions 38, 42), by the same calculation verifyCell uses. Throws for a definition that does not exist or a
+ * cell outside its current search space, which have no verify button.
+ */
+export function childCapPreview(
+  ctx: EngineContext,
+  definitionId: string,
+  cell: CellKey,
+): { maxCalls: number; headroomCalls: number } {
+  const def = ctx.repos.definitions.get(definitionId);
+  if (def === null || def.deletedAt !== null) throw new Error(`definition ${definitionId} not found`);
+  const built = buildSnapshot(ctx, def, 'manual');
+  const match = built.cells.find((c) => cellKeyString(c) === cellKeyString(cell));
+  if (match === undefined) throw new Error('the cell is not in the current search space');
+  const { maxCalls, headroom } = sizeChild(ctx, def, built.snapshot, match);
+  return { maxCalls, headroomCalls: headroom };
+}
+
+/**
  * Spec §8.1 `POST /cells/verify`: validates that the cell is in generateCells(current resolved space), has not departed
  * and its airports exist, then creates a child execution (is_child = 1, cell columns set), seeded and running in one
  * transaction. At most one active child per cell (the child partial unique index backs this up). A child never pauses
@@ -12101,11 +12736,7 @@ export async function verifyCellExecution(
     return refused('window', 'the cell is not in the current search space', { cell });
   if (ctx.repos.executions.activeChild(def.id, cell) !== null)
     return refused('active', 'this cell is already being verified', { cell });
-  const sized = estimateStart(ctx, childSnapshot(built.snapshot, match, def.budget.maxCalls), [match], null);
-  const need = sized.perProvider
-    .filter((p) => ctx.limitsOf(p.providerId).billed)
-    .reduce((a, p) => a + p.calls, 0);
-  const { maxCalls, headroom } = childMaxCalls(ctx, def.id, def.budget.maxCalls, need);
+  const { maxCalls, headroom, need } = sizeChild(ctx, def, built.snapshot, match);
   const snapshot = childSnapshot(built.snapshot, match, maxCalls);
   const planned = estimateStart(ctx, snapshot, [match], null);
   const check = checkBudget(ctx, spendOf(planned), snapshot.budget, null, def.id);
@@ -12241,14 +12872,11 @@ import { createRegistry } from './registry.js';
 import { resumeExecution } from './resume.js';
 import { stopRun } from './run.js';
 import { startExecution } from './start.js';
-import type { StartResult } from './types.js';
+import type { StartOptions, StartResult } from './types.js';
 
 /** The execution half of the Engine; createEngine (Task 7.19) adds estimates, scheduler, boot and status. */
 export interface Orchestrator {
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
-  ): Promise<StartResult>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   /** Spec §8.1 single-cell verification (POST /cells/verify): a child execution for one cell. */
   verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
@@ -12409,7 +13037,7 @@ export function childSnapshot(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/engine exec vitest run child verification budget-breach`
-Expected: PASS, 51 tests (8 + 17 + 15, and the 11 of `error-table-verification.test.ts`, which the `verification` filter also matches).
+Expected: PASS, 54 tests (9 + 20 + 15, and the 11 of `error-table-verification.test.ts`, which the `verification` filter also matches).
 
 - [ ] **Step 5: Commit**
 
@@ -12849,14 +13477,11 @@ import { resumeExecution } from './resume.js';
 import { stopRun } from './run.js';
 import { startExecution } from './start.js';
 import { tickDefinition } from './tick.js';
-import type { StartResult } from './types.js';
+import type { StartOptions, StartResult } from './types.js';
 
 /** The execution half of the Engine; createEngine (Task 7.19) adds estimates, scheduler, boot and status. */
 export interface Orchestrator {
-  start(
-    definitionId: string,
-    opts: { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number },
-  ): Promise<StartResult>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   /** Spec §8.1 single-cell verification (POST /cells/verify): a child execution for one cell. */
   verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
@@ -13838,14 +14463,14 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 - Consumes: `ExecutionsRepo.bootSweep/listByStatus/listForDefinition/lastScheduledFiring/incrementAutoResume`, `LedgerRepo.sweepPending`, `FxRepo.latest`, `previousFiring`, `recordSkipped`, `isStalePaused`, `formatInstant`, every earlier module.
 - Produces: `createEngine(deps, options?)` exactly as §5; `bootEngine(ctx, orch, sched)`; `statusOf(ctx, orch, sched)`; `NEVER_STARTED`; the package barrel, with `fxHttpLimits`, which `apps/api`'s `httpLimitsFor` now uses in place of its inline `fx` entry, so one copy of the FX http policy is live (decision 32, arch-r2-004).
 
-Boot (spec §8.1, fake timers throughout so croner never runs on the real clock, test-strategy-reviewer-004): a stale paused run is superseded at boot instead of re-registering its one-shot, whether or not its definition has a schedule, and a one-shot that fires for a run gone stale supersedes it and starts nothing (ruling 10, ssr-11, ssr2-06); with `AUTO_RESUME` on, an interrupted run older than its discovery refresh allows is superseded rather than resumed from weeks-old prices, the same age rule as a paused one (ssr2-09); `skipped_missed` is recorded only when no tick ran at the firing — a scheduled execution created at or after it, or one active at that instant, means the tick ran (ssr-16) — and only for a firing after the definition was last changed, since the schedule may not have existed at an earlier one (ssr2-11), and names the firing in the schedule's time zone (po-015); when no FX rate is a day fresh, the refresh runs a minute after boot, never inside it (po-011); the no-network test checks the router's requests of every kind, the ledger, the frankfurter stub and the strays (test-strategy-reviewer-011). An execution row that was never seeded (left by a version that created it before seeding) is cancelled on resume with `NEVER_STARTED`, never completed empty (ssr-07). `Engine.estimate` is the worst case without reuse with `blocked` filled and the totals over what would run (ruling 9, cost-r1-014); `createEngine` refuses the fixture provider under a production config, as `buildContext` does (prov-wp07-012); an unsaved definition gets placeholder metadata and is estimated with no definition id (arch-021). Shutdown leaves the WAL checkpoint to WP8's shutdown, which owns the process and the driver (arch-020).
+Boot (spec §8.1, fake timers throughout so croner never runs on the real clock, test-strategy-reviewer-004): a stale paused run is superseded at boot instead of re-registering its one-shot, whether or not its definition has a schedule, and a one-shot that fires for a run gone stale supersedes it and starts nothing (ruling 10, ssr-11, ssr2-06); with `AUTO_RESUME` on, an interrupted run older than its discovery refresh allows is superseded rather than resumed from weeks-old prices, the same age rule as a paused one (ssr2-09); `skipped_missed` is recorded only when no tick ran at the firing — a scheduled execution created at or after it, or one active at that instant, means the tick ran (ssr-16) — and only for a firing after the definition was last changed, since the schedule may not have existed at an earlier one (ssr2-11), and names the firing in the schedule's time zone (po-015); when no FX rate is a day fresh, the refresh runs a minute after boot, never inside it (po-011); the no-network test checks the router's requests of every kind, the ledger, the frankfurter stub and the strays (test-strategy-reviewer-011). An execution row that was never seeded (left by a version that created it before seeding) is cancelled on resume with `NEVER_STARTED`, never completed empty (ssr-07). `Engine.estimate` is the worst case without reuse with `blocked` filled and the totals over what would run (ruling 9, cost-r1-014); `createEngine` refuses the fixture provider under a production config, as `buildContext` does, with nothing requested, executed or notified afterwards; seen failing first by the same mutation as Task 7.1 (delete the eager `limitsOf` loop in `buildContext`: "expected [Function] to throw an error"), and the rest of the suite is its positive control (prov-wp07-012, test-strategy-reviewer-r3-005); `Engine.childCapPreview` is wired to Task 7.15's function; an unsaved definition gets placeholder metadata and is estimated with no definition id (arch-021). Shutdown leaves the WAL checkpoint to WP8's shutdown, which owns the process and the driver (arch-020).
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/engine/test/boot.test.ts` (new file):
 
 ```ts
-import { asIsoDateTime, parseConfig, type SearchDefinition } from '@gmt/core';
+import { asIsoDate, asIsoDateTime, parseConfig, type SearchDefinition } from '@gmt/core';
 import { takeStrays } from '@gmt/providers/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
@@ -13911,10 +14536,15 @@ describe('createEngine', () => {
       { realpath: (p) => p },
     );
     if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+    // why: this suite's other tests are the positive control: the same deps under the harness's open gate build an engine
     expect(() => createEngine({ ...h.deps, config: parsed.config }, h.options)).toThrow(
       'the fixture provider is registered but syntheticAllowed(config) is false (spec §5.5)',
     );
+    // nothing ran: no request, no execution, no notification (test-strategy-reviewer-r3-005)
+    expect(h.requests).toEqual([]);
     expect(h.count('provider_requests')).toBe(0);
+    expect(h.repos.executions.listByStatus(['pending', 'running', 'interrupted'])).toEqual([]);
+    expect(h.notifications).toEqual([]);
   });
 });
 
@@ -14237,6 +14867,13 @@ describe('shutdown and status', () => {
     } = def;
     expect(e.estimate(unsaved, h.clock.todayLondon()).totalPlanCalls).toBe(4); // POST /api/definitions/estimate: an unsaved DefinitionInput
     expect(e.budgetFit(def).runsPerMonth).toBe(52 / 12);
+    const one = {
+      origin: LHR,
+      destination: JFK,
+      departureDate: asIsoDate('2026-11-03'),
+      returnDate: asIsoDate('2026-11-10'),
+    };
+    expect(e.childCapPreview(def.id, one)).toEqual({ maxCalls: 6, headroomCalls: 1000 }); // decision 45
     expect(
       (
         await e.coverageCheck({
@@ -14290,7 +14927,7 @@ Expected: FAIL, `createEngine` is not exported from `../src/index.js`.
  import {
    createHttpKit,
    type FixtureRecorder,
-@@ -154,17 +155,8 @@
+@@ -161,17 +162,8 @@
      ...(config.providers.travelpayouts === null
        ? {}
        : { travelpayouts: travelpayoutsHttpLimits(config.providers.travelpayouts.limits, config) }),
@@ -14464,6 +15101,7 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
 import type { DefinitionInput, SearchDefinition } from '@gmt/core';
 import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
+import { childCapPreview } from './child.js';
 import { buildContext, type EngineContext } from './context.js';
 import { coverageCheckFor } from './coverageCheck.js';
 import { budgetFitFor, estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
@@ -14581,6 +15219,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     resume: (id, opts) => orch.resume(id, opts),
     cancel: (id) => orch.cancel(id),
     verifyCell: (id, cell) => orch.verifyCell(id, cell),
+    childCapPreview: (id, cell) => childCapPreview(ctx, id, cell),
     estimate: (input, today) => {
       // why: ruling 9 — the save-time estimate is the worst case without reuse; it is what confirmed_cost_pence records
       const { def } = asDefinition(ctx, input);
@@ -14772,6 +15411,117 @@ export async function resumeExecution(
 export const NEVER_STARTED = 'never finished starting and was cancelled';
 ```
 
+`packages/engine/src/types.ts` — replace the file:
+
+```ts
+import type {
+  BudgetFit,
+  BudgetGuard,
+  CellKey,
+  Clock,
+  Config,
+  CoverageCheckRequest,
+  CoverageCheckResponse,
+  DefinitionInput,
+  Estimate,
+  FlightProvider,
+  IsoDate,
+  IsoDateTime,
+  Logger,
+  Notifier,
+  ProviderId,
+  ResponseCache,
+  SchedulerJob,
+  SearchDefinition,
+} from '@gmt/core';
+import type { Db, Repos } from '@gmt/db';
+import type { HttpKit } from '@gmt/providers';
+
+// why: core already exports these five as types (plan decisions 16 and 17); the engine re-exports core's, never its own copies
+export type {
+  BudgetFit,
+  CoverageCheckRequest,
+  CoverageCheckResponse,
+  Estimate,
+  SchedulerJob,
+} from '@gmt/core';
+
+/** Ports the engine is built on; constructed by the api bootstraps (WP4b/WP8) or the layer-A harness. Plan contract "Engine". */
+export interface EngineDeps {
+  config: Config;
+  db: Db;
+  repos: Repos;
+  budget: BudgetGuard;
+  cache: ResponseCache;
+  http: HttpKit;
+  providers: FlightProvider[];
+  notifiers: Notifier[];
+  clock: Clock;
+  log: Logger;
+}
+/** The alerts step of spec §8.1 ("alerts: evaluateAlertRules → persist events → notify digests"); WP11 provides runAlerts. */
+export type AlertsStepHook = (
+  deps: EngineDeps,
+  executionId: string,
+) => Promise<{ digests: number; events: number }>;
+/**
+ * Engine options. Every cost and limit comes from `config` (ruling 3); `providerConcurrency` overrides the pool size per
+ * provider and is passed only by tests.
+ */
+export interface EngineOptions {
+  alerts?: AlertsStepHook;
+  providerConcurrency?: Partial<Record<ProviderId, number>>;
+}
+
+/** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
+/**
+ * The options of a start (spec §8.1): who started it and, for a manual start, the confirmation it carries, pence and
+ * calls together (decision 37).
+ */
+export interface StartOptions {
+  trigger: 'manual' | 'schedule';
+  confirmCostPence?: number;
+  confirmCalls?: number;
+}
+export type StartResult =
+  | { ok: true; executionId: string }
+  | {
+      ok: false;
+      code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled';
+      message: string;
+      details: unknown;
+    };
+
+/** The plan's "Engine" contract. */
+export interface Engine {
+  boot(): Promise<void>;
+  shutdown(): Promise<void>;
+  start(definitionId: string, opts: StartOptions): Promise<StartResult>;
+  resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
+  cancel(executionId: string): Promise<boolean>;
+  verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
+  /** Decision 45: the cap and headroom a child of `cell` would get now, by verifyCell's own calculation. */
+  childCapPreview(definitionId: string, cell: CellKey): { maxCalls: number; headroomCalls: number };
+  estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;
+  estimateRemaining(executionId: string): Estimate;
+  budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;
+  coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;
+  scheduler: {
+    register(def: SearchDefinition): void;
+    unregister(definitionId: string): void;
+    jobs(): SchedulerJob[];
+    tick(definitionId: string): Promise<void>;
+    blockedSince(): IsoDateTime | null;
+  };
+  status(): {
+    running: string[];
+    degraded: boolean;
+    nextRun: IsoDateTime | null;
+    lastExecutionAt: IsoDateTime | null;
+  };
+}
+```
+
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/engine exec vitest run boot`
@@ -14785,18 +15535,101 @@ git add packages/engine apps/api && git commit -m "wp07: createEngine with boot 
 MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 ```
 
-### Task 7.20: §14 log fields, and the banned-word sweep over every string the engine emits
+### Task 7.20: §14 log fields, the banned-word sweep over every string the engine emits, and the repository cast check
 
 **Files:**
-- Create: `packages/engine/test/logs-and-words.test.ts`
+- Create: `packages/engine/test/logs-and-words.test.ts`, `packages/engine/test/check-casts.test.ts`, `scripts/check-casts.mjs`
+- Modify: root `package.json` (`"casts"`), `.github/workflows/ci.yml` (`pnpm casts` after `pnpm boundaries`)
 
 **Interfaces:**
 - Consumes: `findBannedWords`, `BANNED_WORD_ALLOWLIST`, `renderOperatorMessage`, `OPERATOR_KINDS`, `coverageCheckWith`, `estimateStart`, every `StartResult` refusal.
-- Produces: nothing new; it fails if a later edit adds a banned word or drops a log binding.
+- Produces: the sweeps, which fail if a later edit adds a banned word or drops a log binding; `scripts/check-casts.mjs`, run by `pnpm casts` and CI (decision 45).
+
+`scripts/check-casts.mjs` enforces "no `as` except `as const`" over every workspace `src` and `test` tree (`.ts` and `.tsx`; core's brand mint helpers in `types/ids.ts` excepted) with the TypeScript parser, so prose, strings and renamed imports never match and every type spelling does, lower-case and angle-bracket ones included; it exits 1 on a cast and on an empty file list, so a pathspec typo or a run from the wrong directory never passes (arch-r3-001, test-strategy-reviewer-r3-002). Its test plants casts and non-casts in temporary files and runs it on the repository; non-null assertions stay Biome's (`noNonNullAssertion`, an error in `pnpm lint`). Other briefs' greps and WP9's own guard defer to it (§11).
 
 The sweep collects what the engine emitted at runtime — notification subjects and bodies, log messages and their string fields, cell reasons and last errors, refusal messages, coverage notes and estimate assumptions — from runs that error in both stages, disable a provider, pause for a cap with the calendar-only notice, break parity and refuse; it asserts each expected notice kind was emitted and that the sweep saw more than 100 strings, so a renamed message cannot pass it vacuously (test-strategy-reviewer-017). The binding check asserts every listed provider message occurred at least once.
 
 - [ ] **Step 1: Write the test**
+
+`packages/engine/test/check-casts.test.ts` (new file):
+
+```ts
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+
+// why: the cast check is the project's one enforcement of "no `as` except `as const`" (decision 45); this pins what it
+// catches and what it lets through, and that it never passes on an empty file list
+const REPO = fileURLToPath(new URL('../../../', import.meta.url));
+const SCRIPT = join(REPO, 'scripts', 'check-casts.mjs');
+const dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+function check(files: Record<string, string>, cwd = REPO) {
+  const dir = mkdtempSync(join(tmpdir(), 'casts-'));
+  dirs.push(dir);
+  const paths = Object.entries(files).map(([name, text]) => {
+    const p = join(dir, name);
+    writeFileSync(p, text);
+    return p;
+  });
+  return spawnSync(process.execPath, [SCRIPT, ...paths], { cwd, encoding: 'utf8', timeout: 60_000 });
+}
+
+describe('scripts/check-casts.mjs', () => {
+  it('fails on `as string`, `<number>x` and `as readonly string[]`, naming each line', () => {
+    const r = check({
+      'a.ts':
+        'const y: unknown = 1;\nexport const a = y as string;\nexport const b = <number>y;\nexport const c = y as readonly string[];\n',
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('a.ts:2: y as string');
+    expect(r.stderr).toContain('a.ts:3: <number>y');
+    expect(r.stderr).toContain('a.ts:4: y as readonly string[]');
+  });
+  it('passes `as const`, `satisfies`, renamed imports and exports, and prose or strings with " as "', () => {
+    const r = check({
+      'b.ts': [
+        "import { readFileSync as read } from 'node:fs';",
+        'export { read as readAgain };',
+        "export const k = ['a'] as const;",
+        'export const s = { n: 1 } satisfies { n: number };',
+        '// treated as unverified, as Foo would be',
+        "export const t = 'x as Foo';",
+        'export const u = `y as Foo`;',
+      ].join('\n'),
+    });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+  it('checks .tsx with the JSX parser', () => {
+    const r = check({ 'c.tsx': 'const v: unknown = 1;\nexport const el = <div>{v as string}</div>;\n' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('c.tsx:2: v as string');
+  });
+  it('refuses an empty file list instead of passing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'casts-empty-'));
+    dirs.push(dir);
+    // why: outside a git work tree with no files given, git lists nothing (or fails); either way the check must fail
+    const r = spawnSync('git', ['init', '-q'], { cwd: dir });
+    expect(r.status).toBe(0);
+    const empty = spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toContain('no files to scan');
+  });
+  it('the repository itself has no cast (the `pnpm casts` gate)', () => {
+    const r = spawnSync(process.execPath, [SCRIPT], { cwd: REPO, encoding: 'utf8', timeout: 120_000 });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/^check-casts: [1-9][0-9]+ files, 0 casts/);
+  });
+});
+```
 
 `packages/engine/test/logs-and-words.test.ts` (new file):
 
@@ -14987,18 +15820,119 @@ describe('spec §11: no banned word in any string the engine emits, swept at run
 
 - [ ] **Step 2: Run the test, then see it fail**
 
-Run: `pnpm --filter @gmt/engine exec vitest run logs-and-words`
-Expected: PASS, 3 tests. To see it fail, change `SUBJECTS.interrupted` in `src/notifiers/operatorTemplates.ts` to `'live run interrupted'` and run it again: the template test fails naming `interrupted subject`. Restore it. A banned word found here is fixed in the string's source module, never in an allowlist.
+Run: `pnpm --filter @gmt/engine exec vitest run logs-and-words check-casts`
+Expected: the 5 cast-check tests FAIL, `Cannot find module '…/scripts/check-casts.mjs'`; the 3 sweep tests PASS. To see it fail, change `SUBJECTS.interrupted` in `src/notifiers/operatorTemplates.ts` to `'live run interrupted'` and run it again: the template test fails naming `interrupted subject`. Restore it. A banned word found here is fixed in the string's source module, never in an allowlist.
 
-- [ ] **Step 3: Run the whole package with coverage**
+- [ ] **Step 3: Add the cast check**
+
+`.github/workflows/ci.yml` — apply this patch:
+
+```diff
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -16,6 +16,7 @@
+       - run: pnpm install --frozen-lockfile
+       - run: pnpm lint
+       - run: pnpm boundaries
++      - run: pnpm casts
+       - run: pnpm -r typecheck
+       - run: pnpm test:coverage
+       - run: pnpm secret-scan
+```
+
+`package.json` — apply this patch:
+
+```diff
+--- a/package.json
++++ b/package.json
+@@ -13,6 +13,7 @@
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "boundaries": "node scripts/check-boundaries.mjs",
++    "casts": "node scripts/check-casts.mjs",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "mutate": "pnpm --filter @gmt/core mutate",
+```
+
+`scripts/check-casts.mjs` (new file):
+
+```js
+#!/usr/bin/env node
+// The project rule "no `as` except `as const`" (plan Global Constraints; decisions 43, 45), checked with the TypeScript
+// parser rather than a grep, so prose, strings and renamed imports never match and every type spelling does. Reports
+// each `x as T` whose T is not `const` and each `<T>x`, as file:line: text, and exits 1 when it finds one — or when it
+// was given no file at all, so a pathspec typo or a run from the wrong directory can never pass by scanning nothing.
+//
+// Usage: node scripts/check-casts.mjs [file …]
+// With no arguments it scans every tracked or new .ts/.tsx file under packages/*/{src,test} and apps/*/{src,test}.
+// packages/core/src/types/ids.ts is the one exception: its as* helpers are the brand mint sites the rule allows.
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+
+const EXEMPT = new Set(['packages/core/src/types/ids.ts']);
+
+function defaultFiles() {
+  const out = execFileSync(
+    'git',
+    [
+      'ls-files',
+      '--cached',
+      '--others',
+      '--exclude-standard',
+      '--',
+      'packages/*/src/**/*.ts',
+      'packages/*/test/**/*.ts',
+      'apps/*/src/**/*.ts',
+      'apps/*/src/**/*.tsx',
+      'apps/*/test/**/*.ts',
+      'apps/*/test/**/*.tsx',
+    ],
+    { encoding: 'utf8' },
+  );
+  return out.split('\n').filter((f) => f !== '' && !EXEMPT.has(f));
+}
+
+/** Every non-`as const` assertion in one file, as "file:line: text". */
+export function castsIn(file, text) {
+  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const src = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const found = [];
+  const walk = (n) => {
+    if ((ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) && n.type.getText(src) !== 'const') {
+      const line = src.getLineAndCharacterOfPosition(n.getStart(src)).line + 1;
+      found.push(`${file}:${line}: ${n.getText(src).replace(/\s+/g, ' ').slice(0, 100)}`);
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(src);
+  return found;
+}
+
+const files = process.argv.length > 2 ? process.argv.slice(2) : defaultFiles();
+if (files.length === 0) {
+  console.error('check-casts: no files to scan; refusing to pass on an empty list');
+  process.exit(1);
+}
+const found = files.flatMap((f) => castsIn(f, readFileSync(f, 'utf8')));
+for (const line of found) console.error(line);
+console.log(`check-casts: ${files.length} files, ${found.length} casts`);
+process.exit(found.length === 0 ? 0 : 1);
+```
+
+Run: `pnpm --filter @gmt/engine exec vitest run logs-and-words check-casts && pnpm casts`
+Expected: PASS, 8 tests; `pnpm casts` prints `check-casts: N files, 0 casts` and exits 0.
+
+- [ ] **Step 4: Run the whole package with coverage**
 
 Run: `pnpm --filter @gmt/engine test`
-Expected: every test file passes (25 files, 255 tests); the coverage summary meets lines ≥ 85, branches ≥ 70, functions ≥ 85, statements ≥ 85 for `src/**` (barrels excluded). If a threshold fails, add a test for the uncovered branch named in the report; never lower the threshold.
+Expected: every test file passes (26 files: the 25 this brief creates and WP0's smoke test; 265 tests); the coverage summary meets lines ≥ 85, branches ≥ 70, functions ≥ 85, statements ≥ 85 for `src/**` (barrels excluded). If a threshold fails, add a test for the uncovered branch named in the report; never lower the threshold.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add packages/engine && git commit -m "wp07: log binding and banned-word sweeps over engine output collected at runtime
+git add packages/engine scripts package.json .github && git commit -m "wp07: log binding and banned-word sweeps over engine output; repository cast check in pnpm casts and CI
 
 MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 ```
@@ -15018,9 +15952,9 @@ Run from the repository root on the WP7 branch:
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/engine test` | every file under `packages/engine/test/` passes (25 files, 255 tests); coverage for `packages/engine/src/**` (barrels excluded) at lines ≥ 85 %, branches ≥ 70 %, functions ≥ 85 %, statements ≥ 85 %, enforced by `packages/engine/vitest.config.ts`; Vitest exits 0. Every engine test is layer A (layer B is WP13's), so this is also the layer-A suite |
+| `pnpm --filter @gmt/engine test` | every file under `packages/engine/test/` passes (26 files: the 25 this brief creates and WP0's smoke test; 265 tests); coverage for `packages/engine/src/**` (barrels excluded) at lines ≥ 85 %, branches ≥ 70 %, functions ≥ 85 %, statements ≥ 85 %, enforced by `packages/engine/vitest.config.ts`; Vitest exits 0. Every engine test is layer A (layer B is WP13's), so this is also the layer-A suite |
 | `for i in 1 2 3; do pnpm --filter @gmt/engine exec vitest run --coverage.enabled=false \|\| exit 1; done` | three consecutive green runs (the hold/release, fake-timer and concurrency tests are deterministic) |
-| `TZ=America/Los_Angeles pnpm --filter @gmt/engine exec vitest run --coverage.enabled=false` and the same with `TZ=Asia/Tokyo` | 255 passed each: no engine test depends on the machine's zone (London dates come from instants through core, test-strategy-reviewer-033) |
+| `TZ=America/Los_Angeles pnpm --filter @gmt/engine exec vitest run --coverage.enabled=false` and the same with `TZ=Asia/Tokyo` | 265 passed each: no engine test depends on the machine's zone (London dates come from instants through core, test-strategy-reviewer-033) |
 | `pnpm lint` | `biome check .` reports no errors |
 | `pnpm -r typecheck` | exit 0 for every package (src and test, each package's `tsconfig.test.json`) |
 | `pnpm boundaries` | exit 0 (engine imports only `@gmt/core`, `@gmt/db`, `@gmt/providers`; no msw outside providers' testing subpath) |
@@ -15028,40 +15962,17 @@ Run from the repository root on the WP7 branch:
 | `grep -rn "process\.env" packages/engine/src` | no output |
 | `grep -rnwE "LHR\|LGW\|JFK\|EWR\|LON\|NYC" packages/engine/src` | no output (airport codes appear only in `packages/engine/test/`) |
 | `grep -rnE "from '(msw\|vitest)\|@gmt/providers/(testing\|fixture)" packages/engine/src` | no output (the harness and every test library stay in `test/`) |
-| the cast check below | exit 0, no output: no `as` but `as const` and no `<T>x` in the engine, core, db or api sources and tests (core's brand mint helpers in `types/ids.ts` excepted, as the project rule allows). It parses with the TypeScript compiler instead of a grep, so prose, strings and renamed imports never match and every type spelling does, lower-case ones included (test-strategy-reviewer-024, arch-r2-010) |
+| `pnpm casts` | `check-casts: N files, 0 casts`, exit 0: no `as` but `as const` and no `<T>x` in any workspace `src` or `test` tree (core's brand mint helpers in `types/ids.ts` excepted). The committed `scripts/check-casts.mjs` (Task 7.20) parses with the TypeScript compiler, so prose, strings and renamed imports never match and every type spelling does; it fails on an empty file list, and CI runs it after `pnpm boundaries` |
 | `grep -rn "api.frankfurter.app" packages/engine/src` | no output (the `.dev/v1` URL is used; decision 2) |
 | `pnpm test` (root) | every package green, so WP7 broke nothing it consumes |
-
-The cast check:
-
-```sh
-node -e '
-const ts = require("typescript");
-const fs = require("fs");
-let bad = 0;
-for (const f of process.argv.slice(1)) {
-  const src = ts.createSourceFile(f, fs.readFileSync(f, "utf8"), ts.ScriptTarget.Latest, true);
-  const walk = (n) => {
-    if ((ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) && n.type.getText(src) !== "const") {
-      bad += 1;
-      console.log(`${f}:${src.getLineAndCharacterOfPosition(n.getStart(src)).line + 1}: ${n.getText(src).slice(0, 100)}`);
-    }
-    ts.forEachChild(n, walk);
-  };
-  walk(src);
-}
-process.exit(bad === 0 ? 0 : 1);
-' $(git ls-files --cached --others --exclude-standard -- 'packages/engine/*.ts' 'packages/core/*.ts' 'packages/db/*.ts' 'apps/api/*.ts' ':!packages/core/src/types/ids.ts')
-```
 
 Every task's checkboxes are ticked; every commit message starts `wp07:`.
 
 ## 11. Open questions
 
-None requires the operator's judgment: plan decisions 25 and 37 settle every design question the reviews raised. Recorded for the plan, which has not yet recorded them:
+None requires the operator's judgment: plan decisions 25, 37, 43, 45 and 47 settle every design question the reviews raised. Recorded for the plan and the other briefs, which have not yet recorded them:
 
-1. **Spec text.** Spec §8.1's error-table rows for `global-month` and `execution-*` ("in-flight … siblings aborted → not_run") and §9 item 4's "stopping breach aborts siblings → not_run" still need decision 25's wording (revision 18 changed §5.3 and §6.7 only). §3's error-reason list and §7's never-resumed list need `no-priced-options` (decision 37). §5.6 can name core's `priceInGbp` as the one money step for offers and calendar prices, and §6.2 the `priceConfirmed` verdict.
-2. **Plan contract text.** The Budget port comment gives a child `maxFreeCalls: 0, maxCostMicroGbp: 0`, while the Engine contract (line 630) and this brief inherit the definition's budget with only `maxCalls` replaced (decision 14); §5 shows what this package produces. The Engine contract's `start` options need `confirmCalls`.
-3. **Consumers of the contract changes.** WP8 stores a confirmation with `DefinitionsRepo.setConfirmed(id, { pence, calls })` (the estimate's `totalCostPence` and `totalCalls`), asks again when an edit raises either, passes `confirmCalls` on a manual start, and judges discovery overrun on distinct tiles (`countsFor(...).perProvider[].tiles` against the discovery `planCalls`), never on calls, since a paging provider spends a call a page (cost-r1-007); its `truncated` flag comes from `TRUNCATED_NOTE` (decision 36). WP9 renders a null `cachedRows` as "not checked" (not `?? 0`) and labels the coverage check's `calls` as tiles, and shows confirmation calls (decision 36). WP11's digests carry the `truncated` caveat and the `priceConfirmed` label. WP5's adapter test pins that SearchApi echoes the configured point of sale, which reuse matching assumes (`ctx.pointOfSaleOf`).
-4. **Dispatch.** The front matter keeps `depends_on: [1, 2, 3, 4, 5, 6]`: WP6 is on main; of WP5 the engine reads only `RawOffer.verified` (Task 5.0). WP13 builds its own layer-B harness: this package exports no `./testing` subpath, and Task 7.1 removes the alias that named one.
-5. **Decision 32 follow-up.** WP7 adds no ledger repository method, so the tool-credit query decision 32 assigns "when WP7 touches the ledger repo" stays with WP4b's inline SQL.
+1. **Spec text.** Revision 21 has `no-priced-options`, the budget-stop rule and the `priceConfirmed` classing. Still to fold in: decision 45's cell rule (a verified cell's price and best observation are the cheapest confirmed ones; with none, the outcome carries `price-unconfirmed` and `verification_min_pence` is null) in §3, §6.6 and §7, the `price-unconfirmed` part in §3's priced-reason set, and "a price from a truncated tile is never reused" in §8.1's reuse rule.
+2. **Plan contract text.** The Budget port comment still gives a child `maxFreeCalls: 0, maxCostMicroGbp: 0`, while the Engine contract and this brief inherit the definition's budget with only `maxCalls` replaced (decision 14). The Engine contract can name `StartOptions` and `childCapPreview` as §5 does.
+3. **Consumers.** WP8's brief must replace `setConfirmedCost` with `setConfirmed` (decision 47) before it is dispatched, read `truncated` with core's `isTruncated`, fill the cell detail's `verify` from `Engine.childCapPreview` (decision 42), treat a priced verification roll-up with a null price (`price-unconfirmed`) as "price not confirmed", and convert money with core's `microGbpToPence`. WP9's `castOffenders` guard and the greps in WP2, WP6, WP8 and WP11 defer to `pnpm casts`.
+4. **Decision 32 follow-up.** WP7 adds no ledger repository method, so the tool-credit query decision 32 assigns "when WP7 touches the ledger repo" stays with WP4b's inline SQL.

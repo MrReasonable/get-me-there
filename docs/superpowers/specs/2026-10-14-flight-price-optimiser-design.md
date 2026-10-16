@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 21.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 22.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -1622,6 +1622,13 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 22: unconfirmed and truncated prices (2026-10-16)
+
+§3, §6.6, §7: a priced outcome's reason may carry `price-unconfirmed`; a
+cell's verification price counts only prices the final step confirmed, and
+shows "price not confirmed" when it has none. §8.1: a price from a
+truncated tile is never reused. (Plan decisions 45 and 48.)
 
 ### Revision 21: engine reasons and verdicts (2026-10-16)
 
