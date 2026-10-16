@@ -1,6 +1,7 @@
 import type { ExecutionStatus, IsoDateTime, OperatorMessageKind } from '@gmt/core';
 import type { ExecutionPatch } from '@gmt/db';
 import type { EngineContext } from './context.js';
+import { notifyOperator } from './notify.js';
 import { errorText, type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { breachText, formatInstant } from './text.js';
@@ -90,11 +91,24 @@ export function finalStatus(
   }
 }
 
-/** Writes the pass's final status. The status write is the last act (Task 7.2 puts notifications before it). */
+/**
+ * Writes the pass's final status after sending its notices. The status write is the last act, so anyone who observes a
+ * final status also observes every write and notification of the pass.
+ */
 export async function finish(ctx: EngineContext, run: RunState): Promise<void> {
-  const { status, patch } = finalStatus(run.stop, ctx.clock.now(), run.snapshot.scheduleTz);
+  const { status, patch, notice } = finalStatus(run.stop, ctx.clock.now(), run.snapshot.scheduleTz);
+  const notices = notice === null ? [...run.notices] : [...run.notices, notice];
+  const name = ctx.repos.definitions.get(run.definitionId)?.name ?? run.snapshot.name;
+  for (const n of notices) {
+    await notifyOperator(ctx, n.kind, {
+      executionId: run.executionId,
+      definitionId: run.definitionId,
+      definitionName: name,
+      detail: n.detail,
+    });
+  }
   ctx.repos.executions.setStatus(run.executionId, status, patch);
   if (patch.resumeAfter !== undefined && patch.resumeAfter !== null)
     ctx.hooks.scheduleResume(run.executionId, run.definitionId, patch.resumeAfter);
-  run.log.info({ status }, 'execution: pass finished');
+  run.log.info({ status, notices: notices.map((n) => n.kind) }, 'execution: pass finished');
 }
