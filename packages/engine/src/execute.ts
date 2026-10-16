@@ -7,7 +7,10 @@ import { runDiscovery } from './stages/discovery.js';
 import { runVerification } from './stages/verification.js';
 import { breachText, formatInstant } from './text.js';
 
-/** Runs one pass: discovery, then verification (spec §8.1 order), then finish. A stage error that escapes stops the pass as fatal. */
+/**
+ * Runs one pass: discovery, verification (spec §8.1 order), the alerts step, then finish. A stage error that escapes
+ * stops the pass as fatal.
+ */
 export async function execute(ctx: EngineContext, run: RunState): Promise<void> {
   try {
     await runDiscovery(ctx, run);
@@ -15,7 +18,44 @@ export async function execute(ctx: EngineContext, run: RunState): Promise<void> 
   } catch (err) {
     stopRun(run, { kind: 'fatal', message: errorText(err) });
   }
-  await finish(ctx, run);
+  const alertsRan = await alertsStep(ctx, run);
+  await finish(ctx, run, alertsRan);
+}
+
+/**
+ * Spec §8.1 "alerts: evaluateAlertRules → persist events → notify digests", through the AlertsStepHook (WP11's
+ * runAlerts). Decision 25: it runs when the pass completed and when it paused for a cap window (paused_budget), over
+ * what the execution has written; WP11 keeps one digest per rule per execution, so a later pass of the same execution
+ * never repeats one. A failing hook is logged and never pauses a finished search. Returns whether the step ran.
+ */
+export async function alertsStep(ctx: EngineContext, run: RunState): Promise<boolean> {
+  if (run.stop !== null && run.stop.kind !== 'budget') return false;
+  try {
+    const r = await ctx.alertsStep(ctx.deps, run.executionId);
+    run.log.info({ digests: r.digests, events: r.events }, 'alerts: step done');
+    return true;
+  } catch (err) {
+    run.log.error({ err: errorText(err) }, 'alerts: step failed');
+    return false;
+  }
+}
+
+/**
+ * Spec §6.8/§8.1 "When verification is budget-skipped the operator is told 'alerts running on calendar basis only'":
+ * only from a pass whose alerts step actually ran (po-001), whose verification has skipped:budget cells, for a
+ * definition with an alert rule.
+ */
+export function calendarOnlyNotice(ctx: EngineContext, run: RunState, alertsRan: boolean): Notice | null {
+  if (!alertsRan) return null;
+  if (!ctx.repos.alerts.rules(run.definitionId).some((r) => r.enabled)) return null;
+  const skipped = ctx.repos.cells
+    .outcomes(run.executionId, { stage: 'verification' })
+    .filter((o) => o.status === 'skipped' && o.reason === 'budget').length;
+  if (skipped === 0) return null;
+  return {
+    kind: 'alerts_calendar_only',
+    detail: `${skipped} selected ${skipped === 1 ? 'cell was' : 'cells were'} skipped for budget, so the alert rules judged their calendar prices only.`,
+  };
 }
 
 export interface Notice {
@@ -65,7 +105,7 @@ export function finalStatus(
       const when =
         stop.resumeAfter === null
           ? 'It needs a cap change, or a manual resume after editing the definition.'
-          : `It resumes automatically on ${formatInstant(stop.resumeAfter, tz)}, when the cap window reopens.`;
+          : `It resumes automatically on ${formatInstant(stop.resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
       return {
         status: 'paused_budget',
         patch: { resumeAfter: stop.resumeAfter },
@@ -97,9 +137,11 @@ export function finalStatus(
  * Writes the pass's final status after sending its notices. The status write is the last act, so anyone who observes a
  * final status also observes every write and notification of the pass.
  */
-export async function finish(ctx: EngineContext, run: RunState): Promise<void> {
+export async function finish(ctx: EngineContext, run: RunState, alertsRan: boolean): Promise<void> {
   const { status, patch, notice } = finalStatus(run.stop, ctx.clock.now(), run.snapshot.scheduleTz);
   const notices = notice === null ? [...run.notices] : [...run.notices, notice];
+  const calendarOnly = calendarOnlyNotice(ctx, run, alertsRan);
+  if (calendarOnly !== null) notices.push(calendarOnly);
   const name = ctx.repos.definitions.get(run.definitionId)?.name ?? run.snapshot.name;
   for (const n of notices) {
     await notifyOperator(ctx, n.kind, {

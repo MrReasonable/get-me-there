@@ -51,7 +51,7 @@ export function breachText(
   return `${scopeName(scope, providerId)} is ${scopeAmount(scope, cap)}; ${scopeAmount(scope, used)} used; ${needsLabel} ${scopeAmount(scope, needs)}`;
 }
 
-/** An instant as a readable local date and time in `tz`, e.g. "Mon 19 Oct 2026, 05:00 (Europe/London)" (po-015). */
+/** An instant as a readable local date and time in `tz`, e.g. "Mon, 19 Oct 2026, 05:00 (Europe/London)" (po-015). */
 export function formatInstant(at: IsoDateTime, tz: string): string {
   const f = new Intl.DateTimeFormat('en-GB', {
     timeZone: tz,

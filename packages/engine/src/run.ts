@@ -1,5 +1,6 @@
 import {
   type BudgetExceeded,
+  type BudgetScope,
   type CellKey,
   cellKeyString,
   type DefinitionSnapshot,
@@ -14,6 +15,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { classifyFailure } from './errors.js';
+import { breachText } from './text.js';
 
 /** Why a pass stopped early. Each maps to one execution status in execute.ts `finalStatus` (spec §8.1 error table). */
 export type StopReason =
@@ -212,14 +214,81 @@ export function onFailure(
       stopRun(run, { kind: 'limiter-timeout', resumeAfter: d.resumeAfter });
       return;
     case 'budget':
-      // Task 7.10 replaces this case with applyBudgetBreach (the per-scope rows of the table).
-      stopRun(run, { kind: 'budget', error: d.error, resumeAfter: null });
+      applyBudgetBreach(ctx, run, providerId, stage, d.error);
       return;
     case 'fatal':
       log.error({ stage, err: d.message }, 'unexpected failure; pausing');
       stopRun(run, { kind: 'fatal', message: d.message });
       return;
   }
+}
+
+function stageProviders(run: RunState, stage: Stage): readonly ProviderId[] {
+  return stage === 'discovery' ? run.snapshot.providers.discovery : run.snapshot.providers.verification;
+}
+
+/**
+ * Takes one provider out of a stage for budget: its lane stops taking cells and its idle `not_run` cells become
+ * skipped:budget now; calls already in flight passed every cap when they reserved, so they finish and are written
+ * (decision 25); settleLane marks what is still not_run once the pool drains.
+ */
+export function budgetOut(ctx: EngineContext, run: RunState, stage: Stage, providerId: ProviderId): void {
+  const lane = laneFor(run, stage, providerId);
+  if (lane.budgetOut) return;
+  lane.budgetOut = true;
+  lane.intake.abort();
+  markRemaining(ctx, run, stage, providerId, 'budget', lane.inFlight);
+}
+
+/**
+ * Spec §8.1 error table, BudgetExceeded rows, with decision 25 (a reservation that passed every cap is honoured; only
+ * new reservations are refused; nothing in flight is aborted):
+ * - execution-*: the pass takes no new work; cells not started stay not_run; paused_budget, no one-shot job.
+ * - provider-month / provider-lifetime: that provider's remaining cells in the stage skipped:budget; others remain →
+ *   continue and notify once; none remain → paused_budget, resume_after = the provider's next window start (a
+ *   lifetime window has none, so no one-shot job).
+ * - global-month: billed providers' remaining cells skipped:budget; a free provider remains → continue; else
+ *   paused_budget at the global window start.
+ * BudgetExceeded is never recorded as a cell error.
+ */
+export function applyBudgetBreach(
+  ctx: EngineContext,
+  run: RunState,
+  providerId: ProviderId,
+  stage: Stage,
+  err: BudgetExceeded,
+): void {
+  run.log
+    .child({ providerId })
+    .warn(
+      { stage, scope: err.scope, cap: err.cap, current: err.current, requested: err.requested },
+      'budget cap reached',
+    );
+  if (
+    err.scope === 'execution-calls' ||
+    err.scope === 'execution-free-calls' ||
+    err.scope === 'execution-cost'
+  ) {
+    stopRun(run, { kind: 'budget', error: err, resumeAfter: null });
+    return;
+  }
+  const ids = stageProviders(run, stage);
+  const global = err.scope === 'global-month';
+  const affected = global ? ids.filter((id) => ctx.limitsOf(id).billed) : [providerId];
+  for (const id of affected) budgetOut(ctx, run, stage, id);
+  // why: ssr2-02 — a provider the pre-start or resume check blocked for budget does not remain in the stage either
+  const remaining = ids.filter(
+    (id) => !run.disabled.has(id) && !run.blocked.has(id) && !laneFor(run, stage, id).budgetOut,
+  );
+  if (remaining.length === 0) {
+    const scope: BudgetScope = global ? { kind: 'global-month' } : { kind: err.scope, providerId };
+    stopRun(run, { kind: 'budget', error: err, resumeAfter: ctx.budget.usage(scope).windowEnd });
+    return;
+  }
+  run.notices.push({
+    kind: 'provider_capped',
+    detail: `${affected.join(', ')}: ${breachText(err.scope, providerId, err.cap, err.current, err.requested, 'the next call needed')}. Its remaining ${stage} cells are skipped (budget) in this run and the other providers continue.`,
+  });
 }
 
 /**
@@ -237,7 +306,8 @@ export function disableProvider(run: RunState, providerId: ProviderId, why: stri
   run.log.warn({ providerId, why }, 'provider disabled for the run');
 }
 
-/** After a lane's pool drains: a disabled provider's remaining cells become skipped:provider_disabled (spec §8.1). */
+/** After a lane's pool drains: budget and disable marking of whatever is still not_run (spec §8.1 "remaining cells …"). */
 export function settleLane(ctx: EngineContext, run: RunState, stage: Stage, providerId: ProviderId): void {
+  if (laneFor(run, stage, providerId).budgetOut) markRemaining(ctx, run, stage, providerId, 'budget');
   if (run.disabled.has(providerId)) markRemaining(ctx, run, stage, providerId, 'provider_disabled');
 }
