@@ -12,6 +12,12 @@ const CABIN_BY_TRAVEL_CLASS: Readonly<Record<string, Cabin>> = {
 // why: core's rule (canonicalFlightNumber): the designator must contain a letter, so "0938" is never carrier "09".
 const FLIGHT_RE = /^([A-Z][A-Z0-9]|[0-9][A-Z])\s*(\d{1,4})$/;
 
+/** A vendor designator split at core's rule, or passed whole (both parts) so core rejects it as unmappable. */
+function splitDesignator(raw: string): { carrier: string; number: string } {
+  const m = FLIGHT_RE.exec(raw.trim().toUpperCase());
+  return { carrier: m?.[1] ?? raw, number: m?.[2] ?? raw };
+}
+
 /**
  * A vendor segment as a `RawSegment`, raw only (spec §5.2): vendor local times as given; the cabin only when a
  * recognised class is stated; the flight number split at the designator when it matches core's rule, otherwise
@@ -19,12 +25,6 @@ const FLIGHT_RE = /^([A-Z][A-Z0-9]|[0-9][A-Z])\s*(\d{1,4})$/;
  * only brand mint site; a vendor place id that is not an IATA code returns null and the caller drops and counts
  * the option.
  */
-/** A vendor designator split at core's rule, or passed whole (both parts) so core rejects it as unmappable. */
-function splitDesignator(raw: string): { carrier: string; number: string } {
-  const m = FLIGHT_RE.exec(raw.trim().toUpperCase());
-  return { carrier: m?.[1] ?? raw, number: m?.[2] ?? raw };
-}
-
 export function toRawSegment(s: VendorSegment): RawSegment | null {
   const from = iataSchema.safeParse(s.departure_airport.id);
   const to = iataSchema.safeParse(s.arrival_airport.id);
