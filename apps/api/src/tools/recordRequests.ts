@@ -4,7 +4,7 @@
  * airport, every code arrives as an argument.
  */
 import { asIata, asIsoMonth, type Config, daysBetween, type IsoDate, isoDateSchema } from '@gmt/core';
-import { type HttpKitDeps, travelpayoutsHttpLimits } from '@gmt/providers';
+import { type HttpKitDeps, searchApiHttpLimits, travelpayoutsHttpLimits } from '@gmt/providers';
 import { buildRequestUrl, PAGE_LIMIT } from '@gmt/providers/recording';
 
 export const SA_URL = 'https://www.searchapi.io/api/v1/search';
@@ -40,10 +40,9 @@ export interface CellDates {
 
 /**
  * Vendor limits while recording, from the configured provider limits (no preset fallback: the tool's
- * precheck has refused a missing provider). why: httpLimitsFor gains these providers only when WP5/WP6
- * add their lines; WP4b records before either exists. Costs equal the guard's configured per-call rates,
- * which reserve requires (WP3 rule 'cost'; Travelpayouts is free, cost 0 in the preset and not configurable). Follow-up
- * (arch M-5): WP5 replaces the searchapi entry with `searchApiHttpLimits(…)`.
+ * precheck has refused a missing provider). Both entries are the adapters' own limits (plan decision 23), so hosts,
+ * billing mode, the per-call cost the guard requires (WP3 rule 'cost') and SearchApi's 401 classifier have one
+ * definition.
  */
 export function recordingLimits(
   tp: NonNullable<Config['providers']['travelpayouts']>,
@@ -54,15 +53,7 @@ export function recordingLimits(
   return {
     // why: the adapter's own limits (plan decision 32): hosts, the 600/min clamp, billing mode and the 60 s 429 fallback have one definition.
     travelpayouts: travelpayoutsHttpLimits(tp.limits, t),
-    searchapi: {
-      hosts: ['www.searchapi.io'],
-      ratePerMinute: sa.limits.ratePerMinute,
-      ratePerHour: sa.limits.ratePerHour,
-      concurrency: sa.limits.concurrency,
-      billable: 'http-200',
-      costPerCallMicroGbp: sa.limits.costPerCallMicroGbp,
-      ...t,
-    },
+    searchapi: searchApiHttpLimits(sa.limits, t),
   };
 }
 
