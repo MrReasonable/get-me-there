@@ -5,7 +5,8 @@
 // was given no file at all, so a pathspec typo or a run from the wrong directory can never pass by scanning nothing.
 //
 // Usage: node scripts/check-casts.mjs [file …]
-// With no arguments it scans every tracked or new .ts/.tsx file under packages/*/{src,test} and apps/*/{src,test}.
+// With no arguments it scans every tracked or new .ts/.tsx file under packages/*/{src,test} and apps/*/{src,test}, at
+// any depth, plus the package-root and repository-root .ts config files.
 // packages/core/src/types/ids.ts is the one exception: its as* helpers are the brand mint sites the rule allows.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -22,12 +23,16 @@ function defaultFiles() {
       '--others',
       '--exclude-standard',
       '--',
-      'packages/*/src/**/*.ts',
-      'packages/*/test/**/*.ts',
-      'apps/*/src/**/*.ts',
-      'apps/*/src/**/*.tsx',
-      'apps/*/test/**/*.ts',
-      'apps/*/test/**/*.tsx',
+      // why: `:(glob)` makes `**/` match zero or more directories; a plain pathspec needs at least one, so files
+      // directly under src/ or test/ were never scanned (code-architect review 1)
+      ...['packages', 'apps'].flatMap((root) => [
+        `:(glob)${root}/*/src/**/*.ts`,
+        `:(glob)${root}/*/src/**/*.tsx`,
+        `:(glob)${root}/*/test/**/*.ts`,
+        `:(glob)${root}/*/test/**/*.tsx`,
+        `:(glob)${root}/*/*.ts`,
+      ]),
+      ':(glob)*.ts',
     ],
     { encoding: 'utf8' },
   );

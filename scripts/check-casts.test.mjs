@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -32,15 +32,24 @@ function check(files, cwd = REPO) {
 }
 
 describe('scripts/check-casts.mjs', () => {
-  it('fails on `as string`, `<number>x` and `as readonly string[]`, naming each line', () => {
+  it('fails on `as string`, `<number>x`, `as readonly string[]` and `as unknown as Foo`, naming each line', () => {
     const r = check({
-      'a.ts':
-        'const y: unknown = 1;\nexport const a = y as string;\nexport const b = <number>y;\nexport const c = y as readonly string[];\n',
+      'a.ts': [
+        'const y: unknown = 1;',
+        'export const a = y as string;',
+        'export const b = <number>y;',
+        'export const c = y as readonly string[];',
+        'export const d = y as unknown as Map<string, number>;',
+        '',
+      ].join('\n'),
     });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('a.ts:2: y as string');
     expect(r.stderr).toContain('a.ts:3: <number>y');
     expect(r.stderr).toContain('a.ts:4: y as readonly string[]');
+    // why: the double cast is the commonest way round a refused single one; both of its assertions are reported
+    expect(r.stderr).toContain('a.ts:5: y as unknown as Map<string, number>');
+    expect(r.stderr).toContain('a.ts:5: y as unknown\n');
   });
   it('passes `as const`, `satisfies`, renamed imports and exports, and prose or strings with " as "', () => {
     const r = check({
@@ -72,10 +81,33 @@ describe('scripts/check-casts.mjs', () => {
     expect(empty.status).toBe(1);
     expect(empty.stderr).toContain('no files to scan');
   });
-  it('the repository itself has no cast (the `pnpm casts` gate)', () => {
-    const r = spawnSync(process.execPath, [SCRIPT], { cwd: REPO, encoding: 'utf8', timeout: 120_000 });
-    expect(r.stderr).toBe('');
-    expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/^check-casts: [1-9][0-9]+ files, 0 casts/);
+  it('with no arguments scans files directly under src/ and test/, nested ones and package-root config files', () => {
+    // why: plain git pathspecs need a subdirectory to match `src/**/*.ts`, so files directly under src/ were never read
+    // (code-architect review 1); a temporary repository pins every location the default list must reach
+    const dir = mkdtempSync(join(tmpdir(), 'casts-repo-'));
+    dirs.push(dir);
+    expect(spawnSync('git', ['init', '-q'], { cwd: dir }).status).toBe(0);
+    const cast = 'const v: unknown = 1;\nexport const w = v as string;\n';
+    const planted = [
+      'packages/x/src/top.ts',
+      'packages/x/src/deep/nested.ts',
+      'packages/x/test/top.test.ts',
+      'packages/x/vitest.config.ts',
+      'apps/y/src/view.tsx',
+      'apps/y/test/view.test.tsx',
+      'apps/y/vitest.config.ts',
+      'vitest.config.ts',
+    ];
+    for (const f of planted) {
+      mkdirSync(join(dir, dirname(f)), { recursive: true });
+      writeFileSync(join(dir, f), cast);
+    }
+    mkdirSync(join(dir, 'packages/core/src/types'), { recursive: true });
+    writeFileSync(join(dir, 'packages/core/src/types/ids.ts'), cast);
+    const r = spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
+    expect(r.status).toBe(1);
+    for (const f of planted) expect(r.stderr).toContain(`${f}:2: v as string`);
+    expect(r.stderr).not.toContain('packages/core/src/types/ids.ts');
+    expect(r.stdout).toContain(`check-casts: ${planted.length} files, ${planted.length} casts`);
   });
 });
