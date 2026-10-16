@@ -16,8 +16,8 @@ const CABIN_NOT_OFFERED: NoDataReason = 'cabin-not-offered';
  */
 export const PARTIAL_EXPANSION = 'partial-expansion';
 /**
- * True when a priced reason marks a truncated expansion. A priced reason is `;`-joined parts: null,
- * `partial-expansion`, `offers-dropped:n` or `partial-expansion;offers-dropped:n` (ruling 2026-10-15).
+ * True when a priced reason marks a truncated expansion. A priced reason is null or `;`-joined parts in the order
+ * partial-expansion, price-unconfirmed, offers-dropped:n (ruling 2026-10-15, decisions 45 and 48; `pricedReason`).
  */
 export function isPartialExpansion(reason: string | null): boolean {
   return (reason ?? '').split(';').includes(PARTIAL_EXPANSION);
@@ -34,6 +34,22 @@ export const PRICE_UNCONFIRMED = 'price-unconfirmed';
 /** True when a priced reason says no price of the outcome was confirmed (decision 45). */
 export function isPriceUnconfirmed(reason: string | null): boolean {
   return (reason ?? '').split(';').includes(PRICE_UNCONFIRMED);
+}
+
+/**
+ * The one writer of a priced reason (decisions 19, 45, 48): null when no part applies, else the `;`-joined parts in the
+ * order partial-expansion, price-unconfirmed, offers-dropped:n, the grammar db's PRICED_REASON check enforces.
+ * `isPartialExpansion` and `isPriceUnconfirmed` read it back. Both engine stages and `rollUp` build reasons here.
+ */
+export function pricedReason(partial: boolean, unconfirmed: boolean, dropped: number): string | null {
+  if (!Number.isSafeInteger(dropped) || dropped < 0)
+    throw new RangeError(`offers-dropped must be a non-negative integer, got ${String(dropped)}`);
+  const parts = [
+    ...(partial ? [PARTIAL_EXPANSION] : []),
+    ...(unconfirmed ? [PRICE_UNCONFIRMED] : []),
+    ...(dropped > 0 ? [`offers-dropped:${dropped}`] : []),
+  ];
+  return parts.length === 0 ? null : parts.join(';');
 }
 
 /** `reason` with `partial-expansion` added as its first part (the combined form keeps offers-dropped). */
@@ -95,10 +111,10 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
     }
     const partial = priced.some((o) => isPartialExpansion(o.reason));
     const unconfirmed = min === Number.POSITIVE_INFINITY;
-    const parts = [...(partial ? [PARTIAL_EXPANSION] : []), ...(unconfirmed ? [PRICE_UNCONFIRMED] : [])];
     return {
       status: 'priced',
-      reason: parts.length === 0 ? null : parts.join(';'),
+      // why: offers-dropped:n stays per outcome; the roll-up carries only the two cell-level parts
+      reason: pricedReason(partial, unconfirmed, 0),
       minPence: unconfirmed ? null : min,
     };
   }

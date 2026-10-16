@@ -7,9 +7,8 @@ import {
   generateCells,
   type ItineraryQuery,
   type ItinerarySearchResult,
-  PARTIAL_EXPANSION,
-  PRICE_UNCONFIRMED,
   type ProviderId,
+  pricedReason,
   type RollUp,
   selectCandidates,
 } from '@gmt/core';
@@ -43,19 +42,6 @@ export function itineraryQuery(snapshot: DefinitionSnapshot, cell: CellKey): Iti
     bookingLinks: p.bookingLinks,
     ...(p.maxStops !== undefined ? { maxStops: p.maxStops } : {}),
   };
-}
-
-/**
- * The priced-outcome reason of decision 19's closed set: null, `partial-expansion`, `offers-dropped:n` or
- * `partial-expansion;offers-dropped:n` (core's PARTIAL_EXPANSION, `;` as the separator).
- */
-export function pricedReason(partial: boolean, dropped: number, unconfirmed = false): string | null {
-  const parts = [
-    ...(partial ? [PARTIAL_EXPANSION] : []),
-    ...(unconfirmed ? [PRICE_UNCONFIRMED] : []),
-    ...(dropped > 0 ? [`offers-dropped:${dropped}`] : []),
-  ];
-  return parts.length === 0 ? null : parts.join(';');
 }
 
 function discoveryRollUps(ctx: EngineContext, executionId: string): Map<string, RollUp> {
@@ -190,9 +176,10 @@ export function routeHistoryRows(
 
 /**
  * Writes one verified cell atomically (spec §7: itinerary, segments, offer, observation, outcome, best_observation_id,
- * roll-up; the repository sets best_observation_id to the cheapest observation written and never downgrades priced to
- * empty; verdicts are read-time). Spec §3, §5.4, §5.6: `priced` iff ≥ 1 offer survives normalisation, reason from
- * `pricedReason`; `error` with the first normalisation reason when offers existed but none survived; `empty` only when
+ * roll-up; the repository sets best_observation_id to the cheapest confirmed observation written, else the cheapest
+ * unconfirmed one (decision 45), and never downgrades priced to empty; verdicts are read-time). Spec §3, §5.4, §5.6:
+ * `priced` iff ≥ 1 offer survives normalisation, reason from core's `pricedReason` (`price-unconfirmed` when no
+ * surviving offer had its price confirmed); `error` with the first normalisation reason when offers existed but none survived; `empty` only when
  * the provider answered coverage `empty` with no offers and no failed expansion. A result claiming priced coverage or
  * a partial expansion with no offer is a contract breach, recorded as `error` upstream, never as positive evidence of
  * no fares (prov-wp07-005).
@@ -255,7 +242,7 @@ export function commitVerifiedCell(
       status: 'priced',
       // why: decision 45 — the cell's price is the cheapest confirmed one; with none it is the cheapest unconfirmed one,
       // marked price-unconfirmed so the roll-up shows no itinerary-search price
-      reason: pricedReason(result.partial, dropped, minConfirmed === null),
+      reason: pricedReason(result.partial, minConfirmed === null, dropped),
       lastError: firstFailure?.message ?? null,
       minPence: minConfirmed ?? minPence,
     };

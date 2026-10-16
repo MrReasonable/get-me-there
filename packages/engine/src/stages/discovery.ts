@@ -10,6 +10,7 @@ import {
   type Iata,
   ProviderError,
   type ProviderId,
+  pricedReason,
   type TilePlan,
   TRUNCATED_NOTE,
 } from '@gmt/core';
@@ -270,7 +271,7 @@ export function commitTile(
       write.outcomes.push({
         ...base,
         status: 'priced',
-        reason: dropped > 0 ? `offers-dropped:${dropped}` : null,
+        reason: pricedReason(false, false, dropped),
         lastError: notes.length > 0 ? notes.join('; ') : null,
         minPence: price.pricePence,
       });

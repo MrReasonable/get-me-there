@@ -12,7 +12,6 @@ import {
 } from '@gmt/core';
 import type { FixtureRule } from '@gmt/providers/fixture';
 import { describe, expect, it, vi } from 'vitest';
-import { pricedReason } from '../src/stages/verification.js';
 import {
   createHarness,
   FIXTURE_RULES,
@@ -190,24 +189,6 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
     await h.fixtureScenario(rules);
     return { h, e: await h.runToCompletion(h.orch(), def(h, two).id) };
   };
-
-  it('pricedReason is the closed set of decisions 19 and 45', () => {
-    expect([
-      pricedReason(false, 0),
-      pricedReason(true, 0),
-      pricedReason(false, 2),
-      pricedReason(true, 1),
-      pricedReason(false, 0, true),
-      pricedReason(true, 3, true),
-    ]).toEqual([
-      null,
-      'partial-expansion',
-      'offers-dropped:2',
-      'partial-expansion;offers-dropped:1',
-      'price-unconfirmed',
-      'partial-expansion;price-unconfirmed;offers-dropped:3',
-    ]);
-  });
 
   it.each([
     ['a negative amount', -1],

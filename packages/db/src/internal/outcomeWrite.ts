@@ -74,7 +74,7 @@ export const PRICED_REASON =
 
 /**
  * Spec §3: `reason` never holds a vendor message (prov-r2-004). A fetched outcome's reason is closed per status:
- * priced → null | 'partial-expansion' | 'offers-dropped:n' | 'partial-expansion;offers-dropped:n',
+ * priced → null | PRICED_REASON (core's `pricedReason` writes it),
  * empty → null, no_data → null | 'cabin-not-offered'.
  */
 export function assertOutcomeReason(o: { status: CellOutcomeStatus; reason: string | null } & CellKey): void {
