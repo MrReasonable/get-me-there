@@ -18,6 +18,7 @@ import type { EngineContext } from '../context.js';
 import { normaliseCalendarPrice, type RepoDeps, reduceTile } from '../normalise.js';
 import { runPool } from '../pool.js';
 import { laneFor, onFailure, type RunState, runnableCells, settleLane, stopRun } from '../run.js';
+import { applyReuse } from './reuse.js';
 
 export interface PlannedTile {
   plan: TilePlan;
@@ -124,6 +125,13 @@ async function runDiscoveryProvider(
 ): Promise<void> {
   const cap = ctx.providers.get(providerId)?.discovery;
   if (cap === undefined) return;
+  if (!run.disabled.has(providerId)) {
+    const reused = applyReuse(ctx, run, providerId, cap.info);
+    if (reused > 0)
+      run.log
+        .child({ providerId })
+        .info({ stage: 'discovery', reused }, 'discovery: reused cells from earlier runs');
+  }
   const cells = runnableCells(ctx, run, 'discovery', providerId);
   if (cells.length > 0) await fetchTiles(ctx, run, providerId, cap, cells);
   settleLane(ctx, run, 'discovery', providerId);
