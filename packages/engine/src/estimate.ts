@@ -352,6 +352,36 @@ export function budgetFitFor(
 }
 
 /**
+ * The stored estimate after a resumed pass: its plan added line by line (cost-r1-009), so View D's overrun rule
+ * (ledger calls > pre-factor plan + 10%) judges every pass the execution made, retries included.
+ */
+export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
+  if (stored === null) return pass;
+  const lines = stored.perProvider.map((l) => ({ ...l }));
+  for (const p of pass.perProvider) {
+    const l = lines.find((x) => x.providerId === p.providerId && x.stage === p.stage);
+    if (l === undefined) lines.push({ ...p });
+    else {
+      l.calls += p.calls;
+      l.planCalls += p.planCalls;
+      l.costMicroGbp += p.costMicroGbp;
+      l.costPence = microGbpToPence(l.costMicroGbp);
+      l.seconds += p.seconds;
+    }
+  }
+  const totalCostMicroGbp = lines.reduce((a, p) => a + p.costMicroGbp, 0);
+  return {
+    ...stored,
+    perProvider: lines,
+    totalCalls: lines.reduce((a, p) => a + p.calls, 0),
+    totalPlanCalls: lines.reduce((a, p) => a + p.planCalls, 0),
+    totalCostMicroGbp,
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
+    seconds: lines.reduce((a, p) => a + p.seconds, 0),
+    assumptions: [...stored.assumptions, `a resumed pass planned ${pass.totalPlanCalls} more calls`],
+  };
+}
+/**
  * The estimate with each line's `blocked` scope set from a budget check, and the totals summed over the lines that will
  * run, so the figure shown, stored and confirmed is the runnable one and a blocked provider's plan never inflates the
  * overrun baseline (cost-r1-014). Blocked lines keep their figures, so the form still shows what they would need.

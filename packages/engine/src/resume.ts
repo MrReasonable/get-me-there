@@ -1,14 +1,28 @@
 import { RESUMABLE_STATUSES } from '@gmt/core';
+import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
+import { addPass, estimateRemainingFor, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
 import type { RunRegistry } from './registry.js';
-import { newRun } from './run.js';
-import { refused } from './start.js';
+import { markRemaining, newRun } from './run.js';
+import { confirmationNeeded, nothingToSearch, refused } from './start.js';
 import type { StartResult } from './types.js';
 
 /**
- * Spec §8.1 "Resume is a compare-and-set": only one claimer of an execution proceeds; the one-shot job is cancelled in
- * the same step; the new pass re-plans over the resume query only (spec §7).
+ * Spec §8.1 "Resume": allowed on interrupted | paused_* | cancelled, and on completed when retryable errors remain
+ * (retry-errors). It is a compare-and-set — the tick, the one-shot job, boot auto-resume and /resume all go through it,
+ * so losers get code `active` (409). /resume is also refused while another execution of the definition is active, and
+ * an execution whose definition was soft-deleted is never resumed (plan decision 5).
+ *
+ * Order: the per-scope cap check uses estimateRemaining, which leaves out the cells whose departure date has arrived
+ * (po-016); a manual resume of a paused_budget parent checks against the definition's current `budget` (and nothing
+ * else), which needs the stored confirmation, pence and calls, when it raises the spend (cost-r1-005, decision 37); a
+ * resume whose remaining discovery is all blocked, before any selection and with no price yet, is refused like a
+ * start (ssr2-03). Nothing is written to the execution until the claim succeeds (ssr-09, arch-r2-006): marking the
+ * departed cells skipped:departed, the refreshed budget, the blocked providers' cells (skipped:budget, cost-r1-001) and
+ * the pass's runnable plan added to the stored estimate (cost-r1-009, cost-r1-014) all go into the same transaction as
+ * the compare-and-set. An automatic resume of a paused_error with nothing resumable leaves it as it is, unclaimed
+ * (ruling 10); a manual resume re-admits the providers disabled in the previous pass.
  */
 export async function resumeExecution(
   ctx: EngineContext,
@@ -18,17 +32,97 @@ export async function resumeExecution(
 ): Promise<StartResult> {
   const exec = ctx.repos.executions.get(executionId);
   if (exec === null) return refused('not_found', `execution ${executionId} not found`, { executionId });
+  const def = ctx.repos.definitions.get(exec.definitionId);
+  if (def === null || def.deletedAt !== null)
+    return refused('not_found', 'the definition of this execution was deleted', {
+      executionId,
+      definitionId: exec.definitionId,
+    });
   if (reg.get(executionId) !== undefined || !RESUMABLE_STATUSES.includes(exec.status))
     return refused('active', `execution is ${exec.status} and cannot be resumed`, { status: exec.status });
-  if (!ctx.repos.executions.claimResume(executionId))
-    return refused('active', 'another resume claimed this execution first', { executionId });
-  ctx.hooks.cancelResume(executionId);
+  const other =
+    exec.isChild && exec.cell !== null
+      ? ctx.repos.executions.activeChild(exec.definitionId, exec.cell)
+      : ctx.repos.executions.activeParent(exec.definitionId);
+  if (other !== null && other.id !== exec.id)
+    return refused('active', 'another execution of this definition is active', {
+      activeExecutionId: other.id,
+    });
+
+  const refresh = opts.manual && exec.status === 'paused_budget' && !exec.isChild;
+  const current = refresh ? { ...exec, snapshot: { ...exec.snapshot, budget: def.budget } } : exec;
+  const remaining = estimateRemainingFor(ctx, current, opts.manual);
+  const needed = remaining.perProvider.filter((p) => p.calls > 0);
+  if (needed.length === 0 && current.status === 'completed')
+    return refused('active', 'nothing left to retry on this execution', { executionId });
+  if (needed.length === 0 && !opts.manual && current.status === 'paused_error')
+    return refused(
+      'active',
+      'nothing can resume automatically; a manual resume retries the providers that were disabled',
+      { executionId },
+    );
+  const check = checkBudget(
+    ctx,
+    spendOf(remaining),
+    current.snapshot.budget,
+    current.id,
+    current.definitionId,
+  );
+  const pass = withBlocked(remaining, check.blockedBy);
+  const starved =
+    !ctx.repos.cells.hasVerificationOutcomes(executionId) &&
+    !ctx.repos.cells.outcomes(executionId, { stage: 'discovery' }).some((o) => o.status === 'priced') &&
+    nothingToSearch(current.snapshot, { perProvider: needed }, check.blocked);
+  if ((needed.length > 0 && needed.every((p) => check.blocked.has(p.providerId))) || starved)
+    return refused('cap', `budget cap: ${breachMessage(check.breaches)}`, { breaches: check.breaches });
+  const raised = refresh && JSON.stringify(def.budget) !== JSON.stringify(exec.snapshot.budget);
+  if (raised) {
+    const confirm = confirmationNeeded(ctx, pass, check.blocked, {
+      pence: def.confirmedCostPence,
+      calls: def.confirmedCalls,
+    });
+    if (confirm !== null)
+      return refused(
+        'confirm',
+        `${confirm.reason} under the raised budget and the definition's confirmation does not cover it`,
+        {
+          estimateMicroGbp: confirm.estimateMicroGbp,
+          estimatePence: confirm.estimatePence,
+          calls: confirm.calls,
+          totalCalls: confirm.totalCalls,
+        },
+      );
+  }
+  let departed = 0;
+  const claimed = ctx.db.immediateTransaction(() => {
+    if (!ctx.repos.executions.claimResume(executionId)) return false;
+    departed = ctx.repos.cells.markDeparted(executionId, ctx.clock.todayLondon());
+    ctx.repos.executions.patch(executionId, {
+      estimate: addPass(current.estimate, pass),
+      ...(refresh ? { snapshot: current.snapshot } : {}),
+    });
+    for (const id of check.blocked) {
+      if (current.snapshot.providers.discovery.includes(id))
+        markRemaining(ctx, { executionId }, 'discovery', id, 'budget');
+      if (
+        current.snapshot.providers.verification.includes(id) &&
+        ctx.repos.cells.hasVerificationOutcomes(executionId)
+      )
+        markRemaining(ctx, { executionId }, 'verification', id, 'budget');
+    }
+    return true;
+  });
+  if (!claimed) return refused('active', 'another resume claimed this execution first', { executionId });
+  ctx.hooks.cancelResume(executionId); // why: spec §8.1 "cancelling the one-shot job in the same step"
   const run = newRun(
     ctx,
-    { ...exec, status: 'running' },
-    { manual: opts.manual, fresh: false, blocked: new Set() },
+    { ...current, status: 'running' },
+    { manual: opts.manual, fresh: false, blocked: check.blocked },
   );
-  run.log.info({ manual: opts.manual, autoResumeCount: exec.autoResumeCount }, 'execution: resumed');
+  run.log.info(
+    { manual: opts.manual, autoResumeCount: current.autoResumeCount, departed, blocked: [...check.blocked] },
+    'execution: resumed',
+  );
   reg.launch(run, () => execute(ctx, run));
   return { ok: true, executionId };
 }
