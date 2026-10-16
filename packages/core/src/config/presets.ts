@@ -16,6 +16,11 @@ export interface ProviderLimits {
 
 export const PENCE_TO_MICRO = 10_000;
 
+/** Micro-GBP to whole pence, rounded up: the one money rounding for estimates, caps and confirmations (decision 47). */
+export function microGbpToPence(micro: number): number {
+  return Math.ceil(micro / PENCE_TO_MICRO);
+}
+
 export type PlanPreset = ProviderLimits & {
   monthlySpendCapMicroGbp: number;
   executionMaxCalls: number;
