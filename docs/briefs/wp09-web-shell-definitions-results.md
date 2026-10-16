@@ -5,7 +5,7 @@ owner: sonnet
 depends_on: [8]
 spec_sections: ["§11", "§6.5", "§6.9", "§3", "§5.5", "§9 item 6"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, persona-flexible-traveller, provenance-auditor, product-owner, security-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP9 — web: shell, status bar, Definitions, Results, Coverage, Providers
@@ -24,26 +24,26 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 - Routing and persisted view state in **URL search params** on the single path `/` (the API is under `/api`) (`?view=results&def=<id>&basis=calendar&sort=price.asc&f.stops=1`). Filter and sort state survives every view switch because nav links carry every parameter except `view`.
 - `api/client.ts`: the one `fetch` in the app, typed by the route's own contract schema, checked against `core/api-contract` `ROUTES`, `X-Requested-With: get-me-there` and `Content-Type: application/json` on every mutation, every response parsed with the contract **in every build mode** (decision 36).
 - Components: `Provenance`, `PriceCell` (the only component that prints a price: table, headline, adjusted column, other sellers, calendar gap; it carries "≈", the unconfirmed-price badge, "stale", "vendor's cache age unknown", the truncated note, and decision 46's `compact` variant), `PriceBoundary`, `AppBoundary`, `StatusBar`, `ViewHeader` (with `variant="span"` for WP10's cross-execution views), `ClassBadge`, `VerdictList`, `BookingAction`, `SearchLink`, `SyntheticBanner`, `Nav`, `DefinitionSelector`, `Loading`, `LoadError`.
-- `copy.ts`: the string catalogue every component imports; the banned-word test walks it; an AST source guard rejects literal copy in `.tsx` (lettered string props on components included), casts and lint or type-check suppression comments anywhere in `src` and `test`, and money formatting or a "£" literal outside `PriceCell`, the catalogue and the cost views; a rendered-DOM sweep checks every view for banned words and for "£" outside a price or a cost.
+- `copy.ts`: the string catalogue every component imports; the banned-word test walks it; an AST source guard rejects literal copy in `.tsx` (lettered string props on components included), and money formatting or a "£" literal outside `PriceCell`, the catalogue and the cost views (casts are `pnpm casts`, suppressions `pnpm boundaries`); a rendered-DOM sweep checks every view for banned words and for "£" outside a price or a cost.
 - `format.ts`: the one date-formatting module of the web app (decision 46): `formatIsoDate` (`14 Mar 2027`), `formatIsoDateShort` (`14 Mar`), `formatIsoDateLong` (`Sun 14 Mar 2027`) and `formatWeekday` (`Sun`) from one month and weekday table; WP10 imports them.
 - View A Results (spec §11, §6.5, §6.9), View D Coverage, Providers view, Definitions form (spec §11).
-- `scripts/check-boundaries.mjs` gains the place-name check over the string literals, template text and JSX text of `apps/web/src` and `apps/api/src`, allowlisting exactly `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts` with a committed list of non-airport words (decisions 36, 46), and rejects `biome-ignore` and `eslint-disable` comments in every package's `src` and `test` (decision 46); a scripted test runs it against planted trees.
+- `scripts/check-boundaries.mjs` gains the place-name check over the string literals, template text and JSX text of `apps/web/src` and `apps/api/src`, allowlisting exactly `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts` with a committed list of non-airport words (decisions 36, 46), and is the one suppression check: `biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` and `@ts-nocheck` comments are refused in every package's `src` and `test` (decisions 46, 49), so the nine `@ts-expect-error` type tests already on main in core and db are restructured without one; its test is `scripts/check-boundaries.test.mjs`, run by a new root Vitest project `scripts` (decision 49).
 - Tests per spec §9 item 6 for these views.
 
 **Out**
 
 - View B Calendar, View C Duration, History, the Playwright fixture-mode smoke, and the browser-timezone test of review focus 3: **WP10**. WP9 ships routes for Calendar, Duration and History that render "This view is not available yet."; WP10 replaces all three and imports `format.ts` (`formatIsoDateShort`, `formatIsoDateLong`, `formatWeekday`), `COPY.truncatedNote`, `PriceCell`'s `truncated` prop and `compact` variant, and `ViewHeader`'s `variant="span"`.
 - Alerts view and alert rule forms: **WP11** (WP9 ships its nav entry with the same placeholder).
-- Every API route, its validation and its strings (`basisReason`, error messages, the zero-cap message, search-link labels), and filling `truncated`: **WP8**. The web only renders them.
+- Every API route, its validation and its strings (`basisReason`, error messages, the zero-cap message, search-link labels), filling `truncated` and `expandTop`, and `stale` by fetch age (spec rev 23 §3): **WP8**. The web only renders them.
 - `sortRows`, `filterRows`, `bandCheapest`, `resultRowKey`, `searchLinkFor`, `validateVendorUrl` (WP2) and `cellKeyString` (WP0) in `@gmt/core`. The web calls them, never reimplements them; Task 9.0 extends `filterRows` in core itself.
-- WP7's contract changes, preconditions here (WP9 depends on WP8, which depends on WP7): `cachedRows: number | null` (Task 7.18, decision 25); `priceConfirmed` in `ConstraintName`, `constraintNameSchema` and `CONSTRAINT_LABELS` ("price not confirmed by the final step", Task 7.8, decision 37); `confirmedCalls` on the definition create, update and response bodies and in `needsConfirmation` (with `totalCalls`), and `confirmCalls` on the start request (Task 7.13, decisions 37, 43).
+- WP7's changes, preconditions here (WP9 depends on WP8, which depends on WP7): core's `microGbpToPence` (Task 7.1, decisions 47, 49), the one micro-GBP→pence rounding (up), which every conversion here uses; `cachedRows: number | null` (Task 7.18, decision 25); `priceConfirmed` in `ConstraintName`, `constraintNameSchema` and `CONSTRAINT_LABELS` ("price not confirmed by the final step", Task 7.8, decision 37); `confirmedCalls` on the definition create, update and response bodies and in `needsConfirmation` (with `totalCalls`), and `confirmCalls` on the start request (Task 7.13, decisions 37, 43).
 - `docs/examples/london-new-york.json`, `docs/setup.md` and the test that `EXAMPLE_DEFINITION` equals the JSON: **WP12**. WP9 writes a stand-in copy of the JSON only if the file is absent when it runs (WP12 depends on WP9), with WP12's exact content.
 - Serving the built `dist/` at `/` (every API route is under `/api`): **WP8**.
 - Phase 4 (decision 36): a max-travel-time filter and a prefilled Google Flights deep link for calendar rows.
 
 ## 3. Spec sections
 
-Spec revision 21 and plan decisions 1–46 (rulings of review rounds 1 and 2: decisions 36, 42, 44, 46) as on main on 2026-10-16.
+Spec revision 23 and plan decisions 1–49 (rulings of review rounds 1–3: decisions 36, 42, 44, 46, 48, 49) as on main on 2026-10-16.
 
 - **§11 banned words** — "exhaustive", "all combinations", "every combination", "live", "bookable", "guaranteed", "real-time" never appear in user-facing text; "verified" only beside class-`verified` values; stage counts say "itinerary-searched".
 - **§11 layout** — nav for all views owned by WP9; definition selector; status bar on every view; per-view header (executions shown, status, age, stale label, banner when not completed); the two-line Results header; empty state for no providers; red synthetic banner.
@@ -56,7 +56,7 @@ Spec revision 21 and plan decisions 1–46 (rulings of review rounds 1 and 2: de
 - **§11 accessibility** — 375px layout; keyboard-operable table; visible focus; labelled controls; no colour-only meaning.
 - **§6.5** — all sorting and filtering client-side with the shared core functions, composing without refetch. Stale rows keep their place in the server's ranking and are labelled, never demoted; the `hideStale` filter is the operator's opt-in.
 - **§6.9** — basis switch with the reason; `failed` excluded by default and included by filter; the search link labelled "search link, not a fare link" on every row whose booking is `none` (shown in every expanded row).
-- **§3** — the two label formats from `core` (`formatAgeFull`, `formatAgeCompact`); staleness by fetch age, and a vendor age of `'unknown'` labelled "vendor's cache age unknown" rather than marked stale (decision 44; WP8 fills `stale` by this rule); six coverage buckets; "searched" only in View D; "itinerary-searched K of N selected".
+- **§3** — the two label formats from `core` (`formatAgeFull`, `formatAgeCompact`); staleness by fetch age, and a vendor age of `'unknown'` aged by fetch time and labelled "vendor's cache age unknown" rather than marked stale (spec rev 23 §3, decision 44; WP8 fills `stale` by this rule, §13); six coverage buckets; "searched" only in View D; "itinerary-searched K of N selected".
 - **§6.2 (rev 21)** — an offer whose price the final step did not confirm is classed `unverified` on `priceConfirmed`; the web shows "price not confirmed by the final step" as the first mark beside the price wherever it renders (decision 44).
 - **§5.5** — the synthetic banner is data-driven; a negative test asserts its absence for real data.
 - **§9 item 6** — price lacking provenance fails to render; synthetic banner present and absent; distinct text for pass/fail/unverified; keyboard operation; 375px assertion that price, provenance and the class badge stay visible; banned-word test with word boundaries and an allowlist; booking links with `rel="noopener noreferrer"`, host shown, POST bookings as forms, no auto-navigation; View D sums.
@@ -117,6 +117,7 @@ export function londonDateOf(instant: IsoDateTime): IsoDate;
 export function formatPence(pence: number): string;   // the single money formatter (web and email)
 export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // priceConfirmed: 'price not confirmed by the final step' (WP7 Task 7.8)
 export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
+export const PENCE_TO_MICRO = 10_000; export function microGbpToPence(micro: number): number;   // rounds up; WP7 Task 7.1 (decisions 47, 49)
 export const BANNED_WORD_ALLOWLIST: readonly string[]; export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
 export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted';
 export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[];
@@ -193,6 +194,7 @@ export type ViewId; export const VIEWS; export function parseView(v): ViewId; ex
 export function parseCarriers(s): { codes; ignored }; export function carriersText(s): string;   // src/state/carriers.ts
 export function useSynced(value, means): [text, setText];   // src/hooks/useSynced.ts
 // src/views/Definitions/fields.tsx: FieldErrors, NumberField, PoundsField, TimeWindowField, AirlinesField, Check
+// src/views/Definitions/Confirmation.tsx: CreateConfirmation({ estimate, fresh, hardStop, onCreate }), Reconfirmation({ definition, onConfirm })
 export type SortDir; export interface ResultsUiState; export const SORT_KEYS, CLASSES, DEFAULT_CLASSES; export function parseResultsState, resultsStatePatch, parseBasis, parseSelectedRow, setFilter, activeFilterCount;
 // apps/web/src/now.tsx, src/hooks/useMediaQuery.ts
 export const NowContext; export function useNow(); export function useMediaQuery(q); export const NARROW_QUERY;
@@ -215,8 +217,8 @@ Versions from the plan's Task 0.1 list. Verified on 2026-10-14 with context7 aga
 - **msw 3.0.3.** `setupServer(...handlers)` from `msw/node`; `http.get/post/put/all`, `HttpResponse.json(body, { status })`, `HttpResponse.error()`, `new HttpResponse(text, { status })`; `server.listen({ onUnhandledFrame: 'error' })` (msw 3's name for the unmatched-request policy), `server.use`, `resetHandlers`, `close`. A catch-all `http.all('*', …)` registered last records any unmatched request and answers with a network error, so nothing reaches the network (decision 18) and afterEach fails the test. Requests use absolute URLs (the client builds `new URL(path, window.location.origin)`).
 - **vitest 5.0.4.** `test.environment`, `environmentOptions`, `setupFiles`, `coverage.thresholds` with glob keys for per-file floors; `vi.spyOn`, `vi.stubEnv` / `vi.unstubAllEnvs`, `vi.useFakeTimers({ toFake })`, `vi.advanceTimersByTimeAsync`.
 - **zod 4.6.7.** `z.input<S>` (request bodies and fixture overrides: plain strings) and `z.output<S>` (parsed responses: brands); `ZodArray` and `.element` (the client's schema identity check); `.safeParse`; `z.enum(...).options`.
-- **typescript 5.9.3** (the workspace root's devDependency): the source guard parses with `ts.createSourceFile` and walks `JsxText`, string and template literals, `AsExpression`, `TypeAssertionExpression`, call expressions and import specifiers, and reads comments with `ts.getLeadingCommentRanges` over every token (`node.getChildren()`); a comment alone in JSX braces belongs to no token's trivia, so those are matched directly. `scripts/check-boundaries.mjs` imports it the same way (`import ts from 'typescript'`) to read only literals.
-- **node:child_process `spawnSync`** runs the boundary script against a scratch tree (`mkdtempSync` in `os.tmpdir()`), since the script exits the process and cannot be imported.
+- **typescript 5.9.3** (the workspace root's devDependency): the source guard parses with `ts.createSourceFile` and walks `JsxText`, string and template literals, `AsExpression`, `TypeAssertionExpression`, call expressions and import specifiers, and reads comments with `ts.getLeadingCommentRanges` over every token (`node.getChildren()`); a comment alone in JSX braces belongs to no token's trivia, so those are matched directly. `scripts/check-boundaries.mjs` imports it the same way (`import ts from 'typescript'`) to read only literals; its suppression check is one regex over comment syntax.
+- **node:child_process `spawnSync`** runs the boundary script against a scratch tree (`mkdtempSync` in `os.tmpdir()`), since the script exits the process and cannot be imported; the test is plain `.mjs` under a root Vitest project `scripts` (`scripts/vitest.config.mjs`, `environment: 'node'`, added to the root `projects`). **`Reflect.apply(fn, thisArg, args)`** passes an ill-typed argument to a runtime guard without a cast or a suppression, and **`expectTypeOf<T>().toBeNever()`** (vitest) states a compile-time rejection that `tsc` checks.
 
 ## 7. Files
 
@@ -241,14 +243,14 @@ src/views/Providers/ProvidersView.tsx
 src/views/Definitions/DefinitionsView.tsx  src/views/Definitions/DefinitionForm.tsx
 src/views/Definitions/AirportListInput.tsx  src/views/Definitions/AdvancedFields.tsx
 src/views/Definitions/CoverageCheck.tsx  src/views/Definitions/EstimatePanel.tsx  src/views/Definitions/draft.ts
-src/views/Definitions/fields.tsx
+src/views/Definitions/fields.tsx  src/views/Definitions/Confirmation.tsx
 test/guards.ts  test/msw/server.ts  test/msw/handlers.ts  test/fixtures.ts  test/render.tsx  test/viewport.ts
 packages/core/test/results/webAdditions.test.ts
 ```
 
 **Create (stand-in, WP12 owns it):** `docs/examples/london-new-york.json`, only when absent (Task 9.12).
 
-**Modify:** `apps/web/tsconfig.json`, `apps/web/tsconfig.test.json`, `apps/web/vitest.config.ts`, `apps/web/test/setup.ts` (WP0 files, modified: `package.json`, `src/index.ts`, its `exports` block and `test/smoke.test.ts` stay as WP0 wrote them; every dependency the web needs is already pinned there); `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/results.ts`, `packages/core/src/results/types.ts`, `packages/core/src/results/filter.ts`, `packages/core/src/labels/age.ts`, `packages/core/test/helpers/rows.ts`, `packages/core/test/api-contract/contract.test.ts` (Task 9.0); `scripts/check-boundaries.mjs` (Task 9.12).
+**Modify:** `apps/web/tsconfig.json`, `apps/web/tsconfig.test.json`, `apps/web/vitest.config.ts`, `apps/web/test/setup.ts` (WP0 files, modified: `package.json`, `src/index.ts`, its `exports` block and `test/smoke.test.ts` stay as WP0 wrote them; every dependency the web needs is already pinned there); `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/results.ts`, `packages/core/src/results/types.ts`, `packages/core/src/results/filter.ts`, `packages/core/src/labels/age.ts`, `packages/core/test/helpers/rows.ts`, `packages/core/test/api-contract/contract.test.ts` (Task 9.0); `scripts/check-boundaries.mjs`, the root `vitest.config.ts` (the `scripts` project) and the five core and db test files that held `@ts-expect-error` (Task 9.12). **Create (root):** `scripts/vitest.config.mjs`, `scripts/check-boundaries.test.mjs` (Task 9.12).
 
 **Test:**
 
@@ -269,7 +271,7 @@ test/views/results/basisAndGap.test.tsx           Task 9.9
 test/views/coverage.test.tsx                      Task 9.10
 test/views/providers.test.tsx                     Task 9.11
 test/views/definitions/form.test.tsx              Task 9.12
-test/placeCheck.test.ts                           Task 9.12
+scripts/check-boundaries.test.mjs                 Task 9.12 (root Vitest project `scripts`)
 test/views/definitions/create.test.tsx            Task 9.13
 test/copy/renderedSweep.test.tsx                  Task 9.14
 ```
@@ -278,7 +280,7 @@ Every focused run in the tasks uses `pnpm --filter @gmt/web exec vitest run <fil
 
 ## 8. Tasks
 
-A label `` `path` (new file): `` or `` `path` — replace the file: `` introduces a whole file. A pair `` `path` — find: `` / `` `path` — replace with: `` replaces exactly one occurrence of the found text. Paths without a leading `apps/`, `packages/`, `docs/` or `scripts/` are under `apps/web/`. Preconditions: WP7 Tasks 7.8 (`priceConfirmed`), 7.13 (`confirmedCalls`, `confirmCalls`, `needsConfirmation.totalCalls`) and 7.18 (`cachedRows` nullable) are on main; WP9 depends on WP8, which depends on WP7.
+A label `` `path` (new file): `` or `` `path` — replace the file: `` introduces a whole file. A pair `` `path` — find: `` / `` `path` — replace with: `` replaces exactly one occurrence of the found text. Paths without a leading `apps/`, `packages/`, `docs/`, `scripts/` or `./` (the repository root) are under `apps/web/`. Preconditions: WP7 Tasks 7.1 (`microGbpToPence`), 7.8 (`priceConfirmed`), 7.13 (`confirmedCalls`, `confirmCalls`, `needsConfirmation.totalCalls`) and 7.18 (`cachedRows` nullable) are on main; WP9 depends on WP8, which depends on WP7.
 
 ### Task 9.0: Core additions: `truncated` on every price, the run's `expandTop`, the departure-date filter, the age phrases
 
@@ -1418,7 +1420,7 @@ export function useNow(): IsoDateTime {
 `src/format.ts` (new file; decision 38: the one date-formatting module, WP10 imports it):
 
 ```ts
-import { formatPence, type IsoDate, toEpochDay } from '@gmt/core';
+import { formatPence, type IsoDate, microGbpToPence, toEpochDay } from '@gmt/core';
 
 // why: core's formatPence (src/text/money.ts: en-GB grouping, throws on non-integer or negative) is the
 // single money formatter for web and email; re-exported so components keep one import site.
@@ -1433,11 +1435,11 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 /** Indexed by (epoch day + 4) mod 7: 1970-01-01, epoch day 0, was a Thursday. */
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
-/** Integer micro-GBP → pence (rounded up, so a cost is never understated) → "£…". */
+/** Integer micro-GBP → pence through core's `microGbpToPence` (rounded up, so a cost is never understated; decision 49) → "£…". */
 export function formatMicroGbp(micro: number): string {
   if (!Number.isInteger(micro) || micro < 0)
     throw new RangeError(`micro-GBP must be a non-negative integer, got ${micro}`);
-  return formatPence(Math.ceil(micro / 10_000));
+  return formatPence(microGbpToPence(micro));
 }
 
 /** Date form, "2027-03-14" → "14 Mar 2027", by string slicing only; anything malformed is returned as given. */
@@ -2269,16 +2271,16 @@ Expected: PASS, 17 + 7 + 2 tests.
 git add apps/web && git commit -m "wp09: web config, copy catalogue, date formats, provenance-checked price cell"
 ```
 
-### Task 9.2: Banned words over the catalogue; AST guards for copy, suppressions and money
+### Task 9.2: Banned words over the catalogue; AST guards for copy and money
 
 **Files:**
 - Test: `test/copy/catalogue.test.ts`, `test/copy/sourceGuard.test.ts`
 
 **Interfaces:**
 - Consumes: `BANNED_WORD_ALLOWLIST`, `findBannedWords` (WP0, the single allowlist every package passes); `COPY` (Task 9.1); the TypeScript compiler API (`typescript`, the workspace root's pinned devDependency).
-- Produces: `copyOffenders`, `moneyOffenders`, `suppressionOffenders` (exported from the test file for its own planted-offender test); nothing in `src`.
+- Produces: `copyOffenders`, `moneyOffenders` (exported from the test file for its own planted-offender test); nothing in `src`.
 
-Chosen approach (spec §9 item 6 "over every string in apps/web/src"): the **catalogue** `src/copy.ts` holds all copy, and guards make that true. (1) The catalogue test walks every string and calls every function entry with sample arguments, failing when a function has no sample; it also pins the confirmation wording "about N calls (hard stop M)", never "up to" (decision 44). (2) The source guard parses every file with the TypeScript compiler, not a regex (reviews tsr-007, arch-018), and fails on: JSX text containing a letter, on one line or many; a lettered string or template literal rendered as a JSX child, including through a ternary, `&&`, `||` or `??` (a comparison such as `kind === 'calendar'` renders nothing and is not flagged); a lettered literal in a copy attribute (`aria-label`, `title`, `placeholder`, `alt`, `label`, …) or in any prop of a component other than identifier props (`id`, `className`, `variant`, …; review tsr2-008). Casts are not this file's job: decision 48 makes the committed `scripts/check-casts.mjs` (`pnpm casts`, WP7, in CI) the one cast check for every package, and §10 runs it. (3) It fails on any lint or type-check suppression comment (`biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`) in `src` and `test`, including a comment alone in JSX braces (decision 46, reviews arch-r2-003, tsr2-001). (4) It fails, outside `PriceCell` and the views that show costs and caps, on a call to `formatPence` or `formatMicroGbp` (bare or through a namespace) and on an import of either (renamed or not), and outside `copy.ts` and `format.ts` on any string or template literal holding "£" (reviews tsr-003, prov-r2-007, tsr2-008). A value passed through a variable is the accepted gap: Task 9.14's rendered sweep checks every view's DOM for "£" outside a price or a `[data-cost]` element.
+Chosen approach (spec §9 item 6 "over every string in apps/web/src"): the **catalogue** `src/copy.ts` holds all copy, and guards make that true. (1) The catalogue test walks every string and calls every function entry with sample arguments, failing when a function has no sample; it also pins the confirmation wording "about N calls (hard stop M)", never "up to" (decision 44). (2) The source guard parses every file with the TypeScript compiler, not a regex (reviews tsr-007, arch-018), and fails on: JSX text containing a letter, on one line or many; a lettered string or template literal rendered as a JSX child, including through a ternary, `&&`, `||` or `??` (a comparison such as `kind === 'calendar'` renders nothing and is not flagged); a lettered literal in a copy attribute (`aria-label`, `title`, `placeholder`, `alt`, `label`, …) or in any prop of a component other than identifier props (`id`, `className`, `variant`, …; review tsr2-008). Casts are not this file's job: decision 48 makes the committed `scripts/check-casts.mjs` (`pnpm casts`, WP7, in CI) the one cast check for every package, and §10 runs it. Suppression comments are not this file's job either: decision 49 makes `scripts/check-boundaries.mjs` the one suppression check for every package (Task 9.12). (3) It fails, outside `PriceCell` and the views that show costs and caps, on a call to `formatPence` or `formatMicroGbp` (bare or through a namespace) and on an import of either (renamed or not), and outside `copy.ts` and `format.ts` on any string or template literal holding "£" (reviews tsr-003, prov-r2-007, tsr2-008). A value passed through a variable is the accepted gap: Task 9.14's rendered sweep checks every view's DOM for "£" outside a price or a `[data-cost]` element.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2540,7 +2542,7 @@ const MONEY_FILES = new Set([
   'src/components/PriceCell.tsx',
   'src/components/StatusBar.tsx',
   'src/views/Coverage/CoverageView.tsx',
-  'src/views/Definitions/DefinitionForm.tsx',
+  'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
 ]);
 
@@ -2659,34 +2661,7 @@ export function moneyOffenders(file: string, text: string): string[] {
   return out;
 }
 
-/** Lint and type-check suppressions (project rule, decision 46): none, in any comment, in src or test. */
-const SUPPRESSION = /biome-ignore|eslint-disable|@ts-ignore|@ts-expect-error|@ts-nocheck/;
-
-/** Every comment of a file: the trivia before each token, plus comments alone in JSX braces. */
-export function suppressionOffenders(file: string, text: string): string[] {
-  const sf = parse(file, text);
-  const seen = new Set<number>();
-  const out: string[] = [];
-  const visit = (n: ts.Node): void => {
-    for (const c of ts.getLeadingCommentRanges(text, n.getFullStart()) ?? []) {
-      if (seen.has(c.pos)) continue;
-      seen.add(c.pos);
-      const comment = text.slice(c.pos, c.end);
-      if (SUPPRESSION.test(comment)) out.push(`${file}: ${comment.trim()}`);
-    }
-    for (const child of n.getChildren(sf)) visit(child);
-  };
-  visit(sf);
-  // why: a comment alone in JSX braces is not trivia of any token the walk visits, so those are matched directly.
-  for (const m of text.matchAll(/\{\s*(\/\*[\s\S]*?\*\/)\s*\}/g)) {
-    const comment = m[1] ?? '';
-    if (SUPPRESSION.test(comment) && !out.includes(`${file}: ${comment.trim()}`))
-      out.push(`${file}: ${comment.trim()}`);
-  }
-  return out;
-}
-
-describe('source guards (spec §11 copy, decision 46 suppressions, spec §9 item 6 prices)', () => {
+describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
   const src = sources('src');
   const tests = sources('test');
 
@@ -2699,10 +2674,6 @@ describe('source guards (spec §11 copy, decision 46 suppressions, spec §9 item
     expect(src.filter((s) => s.file.endsWith('.tsx')).flatMap((s) => copyOffenders(s.file, s.text))).toEqual(
       [],
     );
-  });
-
-  it('no lint or type-check suppression comment in src or test', () => {
-    expect([...src, ...tests].flatMap((s) => suppressionOffenders(s.file, s.text))).toEqual([]);
   });
 
   it('money is formatted only by PriceCell and the cost and cap views', () => {
@@ -2733,39 +2704,30 @@ describe('source guards (spec §11 copy, decision 46 suppressions, spec §9 item
     expect(copyOffenders('planted.tsx', 'const g = <Heading text="Cheapest" id="h1" />;')).toEqual([
       'planted.tsx: prop text="Cheapest"',
     ]);
-    const suppressed = [
-      ['// biome', '-ignore lint/x: y'].join(''),
-      'const a = 1;',
-      ['/* eslint', '-disable */'].join(''),
-      ['// @ts', '-expect-error'].join(''),
-      // why: assembled from pieces so this file itself holds no suppression comment for the guard to find.
-      ['const b = <p>{/* @ts-', 'ignore */}</p>;'].join(''),
-    ].join('\n');
-    expect(suppressionOffenders('planted.tsx', suppressed)).toHaveLength(4);
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-These are guards over code that already exists, so prove each one bites. Temporarily add `planted: 'live prices',` and ``plantedFn: (n: number) => `${n}`,`` to `COPY` in `src/copy.ts`; in `PriceBoundary`'s fallback, put `{failedOnce ? 'Price hidden' : null}` (with `const failedOnce = true;`) after the message; and put a `// biome-ignore lint/style/useConst: planted` line above the context default in `src/now.tsx`.
+These are guards over code that already exists, so prove each one bites. Temporarily add `planted: 'live prices',` and ``plantedFn: (n: number) => `${n}`,`` to `COPY` in `src/copy.ts`; in `PriceBoundary`'s fallback, put `{failedOnce ? 'Price hidden' : null}` (with `const failedOnce = true;`) after the message.
 
 Run: `pnpm --filter @gmt/web exec vitest run test/copy`
-Expected: FAIL, four tests: "every function entry has sample arguments" (`COPY.plantedFn is a function with no entry in SAMPLES`), "no string contains a banned word" (`planted: "live" in "live prices"`), "no literal copy in any component" (`src/components/PriceBoundary.tsx: literal child "Price hidden"`) and "no lint or type-check suppression comment" (`src/now.tsx: // biome-ignore …`).
+Expected: FAIL, three tests: "every function entry has sample arguments" (`COPY.plantedFn is a function with no entry in SAMPLES`), "no string contains a banned word" (`planted: "live" in "live prices"`), and "no literal copy in any component" (`src/components/PriceBoundary.tsx: literal child "Price hidden"`).
 
 - [ ] **Step 3: Implement**
 
-Remove the four planted lines. No other production code: the catalogue exists from Task 9.1. Any real copy the test flags is reworded in `src/copy.ts`; the allowlist is core's and is not extended from the web.
+Remove the three planted lines. No other production code: the catalogue exists from Task 9.1. Any real copy the test flags is reworded in `src/copy.ts`; the allowlist is core's and is not extended from the web.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/copy`
-Expected: PASS, 6 + 5 tests.
+Expected: PASS, 6 + 4 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp09: banned-word catalogue test; AST guards for literal copy, suppressions and money formatting"
+git add apps/web && git commit -m "wp09: banned-word catalogue test; AST guards for literal copy and money formatting"
 ```
 
 ### Task 9.3: Schema-typed API client from ROUTES, parsed in every mode; test API on msw
@@ -2779,7 +2741,7 @@ git add apps/web && git commit -m "wp09: banned-word catalogue test; AST guards 
 - Consumes: `apiContract.ROUTES`, `apiContract.errorEnvelopeSchema`, the response and request schemas named in §4, `ResultRow`, `ResultBasis`; `ZodArray` from zod.
 - Produces: `ApiError`, `FieldError`, `findRoute`, `fillPath`, `call`, `api`, `qk`, `POLL_MS`, the query hooks, `useExecutionActions` (whose start sends `confirmCostPence` and `confirmCalls`, decision 43), the response and request-body types (`BudgetFit` re-exported from core, review arch-015), the fixture builders, `server`, `fixtureFor`.
 
-Decisions. **The endpoint names its schema** (review arch-002): `call(schema, method, path, opts)` returns `z.output<typeof schema>`, checks that `schema` is the ROUTES entry's response schema (or an array of the same element, for `GET /api/definitions`), and parses with it; no generic is chosen by the caller and nothing is cast. **Every response is parsed in every build mode** (decision 36): payloads are at most 1000 rows, and an unparsed production response would give the views data no test ever saw. A contract break is an `ApiError` with code `contract`, which every view shows as its load error, so a row without provenance blanks nothing and prints no price. Non-2xx bodies become `ApiError` with the envelope's code and its contract-parsed `details.fields` (no re-validation by hand); a body that is not JSON is `malformed`; a failed fetch is `network`; a non-JSON error page is `http`. **Request bodies are the schemas' input types** (plain strings, `DefinitionBody` and friends): the operator's draft is unvalidated until the API parses it, so the web never mints a brand. **Fixtures** are built through the contract schemas from input-shaped overrides (review tsr-006), agree on one small definition of 126 cells, and use the spec rev 15 provenance: a SearchApi itinerary price has `maxAgeHours: 'unknown'` (decision 24) and `stale: false`, since staleness is by fetch age and an unknown vendor age is a label (decision 44). The stored definition carries `confirmedCalls` and the execution summary `expandTop` (decisions 42, 43). **The test API** fails a test on any unmatched request through a catch-all handler (review tsr-004, decision 18), and on any `console.error` the test did not announce.
+Decisions. **The endpoint names its schema** (review arch-002): `call(schema, method, path, opts)` returns `z.output<typeof schema>`, checks that `schema` is the ROUTES entry's response schema (or an array of the same element, for `GET /api/definitions`), and parses with it; no generic is chosen by the caller and nothing is cast. **Every response is parsed in every build mode** (decision 36): payloads are at most 1000 rows, and an unparsed production response would give the views data no test ever saw. A contract break is an `ApiError` with code `contract`, which every view shows as its load error, so a row without provenance blanks nothing and prints no price. Non-2xx bodies become `ApiError` with the envelope's code and its contract-parsed `details.fields` (no re-validation by hand); a body that is not JSON is `malformed`; a failed fetch is `network`; a non-JSON error page is `http`. **Request bodies are the schemas' input types** (plain strings, `DefinitionBody` and friends): the operator's draft is unvalidated until the API parses it, so the web never mints a brand. **Fixtures** are built through the contract schemas from input-shaped overrides (review tsr-006), agree on one small definition of 126 cells, and use the spec rev 15 provenance: a SearchApi itinerary price has `maxAgeHours: 'unknown'` (decision 24) and `stale: false`, since staleness is by fetch age and an unknown vendor age is a label (decision 44). The stored definition carries `confirmedCalls` and the execution summary `expandTop` (decisions 42, 43); a usage row's `costPence` comes from core's `microGbpToPence`, as every conversion does (decision 49). **The test API** fails a test on any unmatched request through a catch-all handler (review tsr-004, decision 18), and on any `console.error` the test did not announce.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3319,7 +3281,7 @@ export function useExecutionActions() {
 `test/fixtures.ts` (new file; worked example only: LHR, LGW → JFK, EWR; carrier `ZZ` and hub `BBB` are synthetic codes):
 
 ```ts
-import { apiContract } from '@gmt/core';
+import { apiContract, microGbpToPence } from '@gmt/core';
 import type { z } from 'zod';
 import type {
   AirportsResponse,
@@ -3700,7 +3662,7 @@ export function usage(
     scope,
     calls,
     costMicroGbp,
-    costPence: Math.ceil(costMicroGbp / 10_000),
+    costPence: microGbpToPence(costMicroGbp),
     cap,
     windowStart: start,
     windowEnd: end,
@@ -7913,7 +7875,7 @@ git add apps/web && git commit -m "wp09: View A table, headline through PriceCel
 - Consumes: `useCalendarGap`, `useExecutionActions` (Task 9.3); `calendarGapResponseSchema` (with `truncated` on every price cell); `resultsResponse.verificationProviderConfigured`; `apiContract.resultBasisSchema`; `cellKeyString` (WP0); `LoadError` (Task 9.5).
 - Produces: `BasisSwitch({ basis, reason })`, `CalendarGapBanner({ definitionId })`, final `ResultsView`.
 
-The banner's lead is pluralised and says the calendar prices are unchecked against the constraints (review PFT-11); both prices render through `PriceCell`, a truncated tile's price says "cheapest of the rows read", and a failed request shows its error in the banner's place instead of looking like "no gap" (review prov-019). Without a verification provider the gap query is never run: the test settles the client and checks the query's update count is 0.
+The banner's lead is pluralised and says the calendar prices are unchecked against the constraints (review PFT-11); both prices render through `PriceCell`, a truncated tile's price says "cheapest of the rows read", and a failed request shows its error in the banner's place instead of looking like "no gap" (review prov-019). Without a verification provider the gap query is never run: the test settles the client and checks the query's update count is 0. The gap's prices carry no unconfirmed badge, and a comment in the banner says why: `cheapestVerified` is chosen from class-verified rows only and an unconfirmed price is never class verified (decision 37), while the cells are discovery prices with the calendar marker (review prov-wp09-r3-002).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -8147,6 +8109,10 @@ export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
   const data = gap.data;
   if (data === undefined || data.cells.length === 0 || data.cheapestVerified === null) return null;
   const cv = data.cheapestVerified;
+  // why: no unconfirmed badge on these prices. cheapestVerified is chosen from class-verified rows only (WP8),
+  // and a price the final step did not confirm is never class verified (decision 37); the calendar prices are
+  // discovery prices, which carry the calendar marker instead. Should the selection rule change, the gap contract
+  // must carry the unverified names and this PriceCell must pass `unconfirmed` (review prov-wp09-r3-002).
   return (
     <section
       aria-label={COPY.calendarGapList}
@@ -9135,16 +9101,16 @@ git add apps/web && git commit -m "wp09: Providers view with plan words, capabil
 ### Task 9.12: Definitions form: airports, defaults, money in pounds, advanced fold, example import; the place-name check
 
 **Files:**
-- Create: `src/example.ts`, `src/views/Definitions/draft.ts`, `src/views/Definitions/fields.tsx`, `src/views/Definitions/AirportListInput.tsx`, `src/views/Definitions/AdvancedFields.tsx`, `src/views/Definitions/CoverageCheck.tsx`, `src/views/Definitions/EstimatePanel.tsx`, `src/views/Definitions/DefinitionForm.tsx`
+- Create: `src/example.ts`, `src/views/Definitions/draft.ts`, `src/views/Definitions/fields.tsx`, `src/views/Definitions/AirportListInput.tsx`, `src/views/Definitions/AdvancedFields.tsx`, `src/views/Definitions/CoverageCheck.tsx`, `src/views/Definitions/EstimatePanel.tsx`, `src/views/Definitions/Confirmation.tsx`, `src/views/Definitions/DefinitionForm.tsx`; `scripts/vitest.config.mjs`
 - Create (stand-in, owned by WP12): `docs/examples/london-new-york.json`, only if it does not exist yet; WP12 overwrites it and asserts the import still resolves.
-- Modify: `scripts/check-boundaries.mjs`
-- Test: `test/views/definitions/form.test.tsx`, `test/placeCheck.test.ts`
+- Modify: `scripts/check-boundaries.mjs`; the root `vitest.config.ts` (the `scripts` project); `packages/core/test/dates/epochDay.test.ts`, `packages/core/test/space/validate.test.ts`, `packages/db/test/enums.test.ts`, `packages/db/test/barrel.test.ts`, `packages/db/test/client.test.ts` (their `@ts-expect-error` comments, decision 49)
+- Test: `test/views/definitions/form.test.tsx`, `scripts/check-boundaries.test.mjs`
 
 **Interfaces:**
 - Consumes: `api`, `useAirportSearch`, `ApiError`, `FieldError`, `DefinitionBody`, `CoverageCheckBody` (Task 9.3); `withKey` (Task 9.4); `providersResponse.presets`; `apiContract.definitionCreateRequestSchema` (parses the example), `cabinSchema`; `resolveWindow`, `londonDateOf`; 422 `details.fields`; `coverageCheckResponseSchema` with `cachedRows: number | null` (WP7 Task 7.18).
-- Produces: `EXAMPLE_DEFINITION`, `EXAMPLE_LABEL`, `Draft`, `DraftWindow`, `DEFAULT_RELATIVE`, `EMPTY_ABSOLUTE`, `defaultDraft`, `definitionToDraft`, `draftToRequest`, `applyExample`, `normaliseIata`, `confirmationPence`, `AIRPORT_DEBOUNCE_MS`, `AirportListInput`, `AdvancedFields`, and in `fields.tsx` the shared primitives `FieldErrors`, `NumberField`, `PoundsField`, `TimeWindowField`, `AirlinesField`, `Check` (review arch-r2-008), `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel`, `DefinitionForm({ existing, providers })`. Task 9.13 tests the coverage-check, estimate, create and confirmation flows through `DefinitionsView`.
+- Produces: `EXAMPLE_DEFINITION`, `EXAMPLE_LABEL`, `Draft`, `DraftWindow`, `DEFAULT_RELATIVE`, `EMPTY_ABSOLUTE`, `defaultDraft`, `definitionToDraft`, `draftToRequest`, `applyExample`, `normaliseIata`, `AIRPORT_DEBOUNCE_MS`, `AirportListInput`, `AdvancedFields`, and in `fields.tsx` the shared primitives `FieldErrors`, `NumberField`, `PoundsField`, `TimeWindowField`, `AirlinesField`, `Check` (review arch-r2-008), `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel`, `CreateConfirmation`, `Reconfirmation` (in `Confirmation.tsx`, out of the form, review arch-r3-005), `DefinitionForm({ existing, providers })`. Task 9.13 tests the coverage-check, estimate, create and confirmation flows through `DefinitionsView`.
 
-Decisions. **The draft is the create schema's input type** (plain strings), sent as is; the API's parse is the validator, so the form mints no brand and casts nothing (review arch-004). **`enabled` is carried** through the draft and shown as a checkbox, so saving an edit never re-enables a stopped definition (review po-011). **The field primitives live in `fields.tsx`**, used by the form and its fold; `PoundsField` and `AirlinesField` follow their values through `useSynced`, and `AirlinesField` parses with `parseCarriers`, showing entries that are not codes as ignored (review arch-r2-009). **Money is entered in pounds everywhere** (price ceiling, maximum cost per run, the maximum-price constraint, onward cost) and sent as integer pence; the journey limit shows its minutes as hours beside the field (reviews po-012, PFT-09). **Airports**: a three-letter code is upper-cased on blur, other text only trimmed; Enter adds without a blur; a duplicate is refused; a metro code the airports table maps (its rows carry `metro`) expands to its member airports on Enter or Add, asking the table directly when the autocomplete has not answered yet, and says so (decision 44, reviews PFT-07, tsr2-005); the autocomplete test steps the debounce on fake timers (review tsr2-009); the API's field errors appear under the field they name, linked with `aria-describedby` and `aria-invalid`, and in a summary (review tsr-013); chip remove buttons are 44 px; the native datalist is the accepted autocomplete for now. **Window**: the relative fields show the dates they resolve to today, and switching mode keeps the other mode's values: the form holds the inactive window in its own state and restores it on toggle (review PFT-08; pinned by "switching the window mode keeps the other mode values"). **The coverage check** shows "cells with a price of cells in your nights range" per pair and month; a month the check could not read (`cachedRows: null`, decision 25) or that a pair's response omits is "not checked", in distinct styling, never 0 (reviews po-001, prov-002, UI-1, PFT-06, prov-021); its call count is labelled as tile requests (decision 37); a result made for other airports or dates is marked out of date. **Estimate before the confirmation**: the estimate ("about 154 calls (hard stop 2000), £0.02 per run", the hard stop being the run budget's call cap, decision 44) and every budget scope (fit or not) render above the create button, "Create and confirm about 154 calls (hard stop 2000), £0.02 per run"; the click sends `confirmedCostPence` and `confirmedCalls` (decisions 42, 43); a re-confirmation states and sends the contract's `needsConfirmation.totalCalls` with the pence; editing after an estimate replaces the button with "show the estimate again" (review UI-11). **The example**: `src/example.ts` is the one web file that may name the example's places, and the import button reads its label from there (decision 36); `scripts/check-boundaries.mjs` now fails on an airport code or a metro city name in a string literal, template text or JSX text of `apps/web/src` or `apps/api/src` outside the two allowlisted files (comments and identifiers are not read, so words like ISO and ALL never collide), with a committed list of non-airport words later packages extend in their own diffs; and on a `biome-ignore` or `eslint-disable` comment in any package's `src` or `test` (decision 46). `test/placeCheck.test.ts` runs the script against scratch trees with planted files (review tsr2-012).
+Decisions. **The draft is the create schema's input type** (plain strings), sent as is; the API's parse is the validator, so the form mints no brand and casts nothing (review arch-004). **`enabled` is carried** through the draft and shown as a checkbox, so saving an edit never re-enables a stopped definition (review po-011). **The field primitives live in `fields.tsx`**, used by the form and its fold; `PoundsField` and `AirlinesField` follow their values through `useSynced`, and `AirlinesField` parses with `parseCarriers`, showing entries that are not codes as ignored (review arch-r2-009). **The time-window boxes follow the draft** when it changes elsewhere, so Import example shows its 06:00–23:00 arrival window and the form never sends a window it does not show (review arch-r3-004). **Money is entered in pounds everywhere**, converted exactly to pence (and to micro-GBP for the run budget's cost cap through `PENCE_TO_MICRO`), and every micro-GBP figure shown or confirmed is core's `microGbpToPence`, which rounds up (decision 49; review arch-r3-001) (price ceiling, maximum cost per run, the maximum-price constraint, onward cost) and sent as integer pence; the journey limit shows its minutes as hours beside the field (reviews po-012, PFT-09). **Airports**: a three-letter code is upper-cased on blur, other text only trimmed; Enter adds without a blur; a duplicate is refused; a metro code the airports table maps (its rows carry `metro`) expands to its member airports on Enter or Add, asking the table directly when the autocomplete has not answered yet, and says so (decision 44, reviews PFT-07, tsr2-005); the autocomplete test steps the debounce on fake timers (review tsr2-009); the API's field errors appear under the field they name, linked with `aria-describedby` and `aria-invalid`, and in a summary (review tsr-013); chip remove buttons are 44 px; the native datalist is the accepted autocomplete for now. **Window**: the relative fields show the dates they resolve to today, and switching mode keeps the other mode's values: the form holds the inactive window in its own state and restores it on toggle (review PFT-08; pinned by "switching the window mode keeps the other mode values"). **The coverage check** shows "cells with a price of cells in your nights range" per pair and month; a month the check could not read (`cachedRows: null`, decision 25) or that a pair's response omits is "not checked", in distinct styling, never 0 (reviews po-001, prov-002, UI-1, PFT-06, prov-021); its call count is labelled as tile requests (decision 37); a result made for other airports or dates is marked out of date. **Estimate before the confirmation**: the estimate ("about 154 calls (hard stop 2000), £0.02 per run", the hard stop being the run budget's call cap, decision 44) and every budget scope (fit or not) render above the create button, "Create and confirm about 154 calls (hard stop 2000), £0.02 per run"; the click sends `confirmedCostPence` and `confirmedCalls` (decisions 42, 43); a re-confirmation states and sends the contract's `needsConfirmation.totalCalls` with the pence; editing after an estimate replaces the button with "show the estimate again" (review UI-11). **The example**: `src/example.ts` is the one web file that may name the example's places, and the import button reads its label from there (decision 36); `scripts/check-boundaries.mjs` now fails on an airport code or a metro city name in a string literal, template text or JSX text of `apps/web/src` or `apps/api/src` outside the two allowlisted files (comments and identifiers are not read, so words like ISO and ALL never collide), with a committed list of non-airport words later packages extend in their own diffs; and, as the one suppression check, on a `biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck` comment in any package's `src` or `test` (decisions 46, 49). `scripts/check-boundaries.test.mjs`, under the root Vitest project `scripts`, runs the script against scratch trees with planted files (reviews tsr2-012, arch-r3-006).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9496,6 +9462,22 @@ describe('per-destination fields and the example (spec §11)', () => {
     expect(bodies[0]).not.toHaveProperty('confirmedCostPence');
   });
 
+  it('the time-window boxes follow the draft: Import example shows its 06:00–23:00 arrival window (review arch-r3-004)', async () => {
+    const bodies = estimateBodies();
+    const { user } = renderForm();
+    await user.click(screen.getByText('Advanced: constraints and policy'));
+    const from = `${CONSTRAINT_LABELS.arrivalWindowLocal} from`;
+    const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
+    await user.clear(screen.getByLabelText(from));
+    await user.clear(screen.getByLabelText(to));
+    expect([fieldValue(from), fieldValue(to)]).toEqual(['', '']);
+    await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
+    expect([fieldValue(from), fieldValue(to)]).toEqual(['06:00', '23:00']);
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toMatchObject({ constraints: { arrivalWindowLocal: { from: '06:00', to: '23:00' } } });
+  });
+
   it('"import example" loads the route, window, nights, cabin and constraints of docs/examples/london-new-york.json', async () => {
     const { user } = renderForm();
     await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
@@ -9596,11 +9578,6 @@ export function normaliseIata(s: string): string {
   return /^[A-Za-z]{3}$/.test(t) ? t.toUpperCase() : t;
 }
 
-/** Spec §11: the create click confirms ceil(estimateMicroGbp / 10 000) pence. */
-export function confirmationPence(estimateMicroGbp: number): number {
-  return Math.ceil(estimateMicroGbp / 10_000);
-}
-
 /** Spec §11 defaults; providers, policy, budget and time zone come from the plan preset (`/api/providers` presets). */
 export function defaultDraft(presets: ProvidersResponse['presets']): Draft {
   return {
@@ -9684,7 +9661,7 @@ export function draftToRequest(d: Draft): Draft {
 `src/views/Definitions/fields.tsx` (new file):
 
 ```tsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { COPY } from '../../copy.js';
 import { parsePoundsToPence, penceToPoundsInput, poundsText } from '../../format.js';
 import { useSynced } from '../../hooks/useSynced.js';
@@ -9798,6 +9775,12 @@ export function TimeWindowField({
 }) {
   const [from, setFrom] = useState(value?.from ?? '');
   const [to, setTo] = useState(value?.to ?? '');
+  // why: the boxes follow the draft when it changes elsewhere (Import example), so the form never holds a
+  // window it does not show (review arch-r3-004); one end typed alone leaves the value, and so the boxes, as they are.
+  useEffect(() => {
+    setFrom(value?.from ?? '');
+    setTo(value?.to ?? '');
+  }, [value?.from, value?.to]);
   // why: the constraint exists only with both ends; one end alone stays local until the other is filled or cleared.
   const sync = (f: string, t: string) => {
     if (f !== '' && t !== '') onChange({ from: f, to: t });
@@ -10064,7 +10047,7 @@ export function AirportListInput({ id, label, addLabel, codes, onChange, errors 
 `src/views/Definitions/AdvancedFields.tsx` (new file):
 
 ```tsx
-import type { ProviderId } from '@gmt/core';
+import { microGbpToPence, PENCE_TO_MICRO, type ProviderId } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 import { withKey } from '../../state/withKey.js';
@@ -10308,9 +10291,9 @@ export function AdvancedFields({
         <PoundsField
           id="b-cost"
           label={COPY.maxCost}
-          pence={Math.floor(draft.budget.maxCostMicroGbp / 10_000)}
+          pence={microGbpToPence(draft.budget.maxCostMicroGbp)}
           onChange={(p) =>
-            setDraft({ ...draft, budget: { ...draft.budget, maxCostMicroGbp: (p ?? 0) * 10_000 } })
+            setDraft({ ...draft, budget: { ...draft.budget, maxCostMicroGbp: (p ?? 0) * PENCE_TO_MICRO } })
           }
         />
       </fieldset>
@@ -10528,10 +10511,102 @@ export function BudgetFitPanel({ fit }: { fit: BudgetFit }) {
 }
 ```
 
+`src/views/Definitions/Confirmation.tsx` (new file):
+
+```tsx
+import { microGbpToPence } from '@gmt/core';
+import type { DefinitionResponse, EstimateResponse } from '../../api/types.js';
+import { COPY } from '../../copy.js';
+import { formatMicroGbp, formatPence } from '../../format.js';
+import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
+
+const button = 'min-h-11 rounded border border-slate-700 px-3';
+
+/**
+ * Spec §11 / §8.1, a new definition: the estimate and every budget scope, then the create click, which is
+ * the explicit confirmation of the calls and the pounds it names (decisions 42–44). An estimate made for
+ * an earlier draft offers no button, only "show the estimate again" (review UI-11).
+ */
+export function CreateConfirmation({
+  estimate,
+  fresh,
+  hardStop,
+  onCreate,
+}: {
+  estimate: EstimateResponse;
+  fresh: boolean;
+  /** The run budget's call cap, the runtime limit beside the estimate. */
+  hardStop: number;
+  onCreate: () => void;
+}) {
+  return (
+    <>
+      <EstimatePanel estimate={estimate.estimate} hardStop={hardStop} />
+      <BudgetFitPanel fit={estimate.budgetFit} />
+      {fresh ? (
+        <button
+          type="button"
+          data-cost=""
+          className="min-h-11 rounded bg-slate-900 px-3 text-white"
+          onClick={onCreate}
+        >
+          {COPY.createConfirm(
+            estimate.estimate.totalCalls,
+            hardStop,
+            formatPence(microGbpToPence(estimate.estimate.totalCostMicroGbp)),
+          )}
+        </button>
+      ) : (
+        <p role="status" className="font-medium">
+          {COPY.estimateStale}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * A saved definition whose estimate rose above what was confirmed (`needsConfirmation`): the new calls
+ * and pounds against the old, and one click that confirms both (decisions 42, 43).
+ */
+export function Reconfirmation({
+  definition,
+  onConfirm,
+}: {
+  definition: DefinitionResponse;
+  onConfirm: (v: { pence: number; calls: number }) => void;
+}) {
+  const n = definition.needsConfirmation;
+  if (n === null) return null;
+  const pence = microGbpToPence(n.estimateMicroGbp);
+  return (
+    <div role="alert" data-cost="" className="rounded border border-amber-700 bg-amber-50 p-2">
+      <p>
+        {COPY.needsConfirmation({
+          calls: n.totalCalls,
+          cap: definition.budget.maxCalls,
+          estimate: formatMicroGbp(n.estimateMicroGbp),
+          confirmed:
+            n.confirmedCostPence === null
+              ? COPY.none
+              : COPY.confirmedWas(
+                  n.confirmedCalls === null ? COPY.none : String(n.confirmedCalls),
+                  formatPence(n.confirmedCostPence),
+                ),
+        })}
+      </p>
+      <button type="button" className={button} onClick={() => onConfirm({ pence, calls: n.totalCalls })}>
+        {COPY.confirmNew(n.totalCalls, definition.budget.maxCalls, formatPence(pence))}
+      </button>
+    </div>
+  );
+}
+```
+
 `src/views/Definitions/DefinitionForm.tsx` (new file):
 
 ```tsx
-import { apiContract, londonDateOf, resolveWindow } from '@gmt/core';
+import { apiContract, londonDateOf, microGbpToPence, resolveWindow } from '@gmt/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError, type FieldError } from '../../api/client.js';
@@ -10539,16 +10614,16 @@ import { api } from '../../api/endpoints.js';
 import type { DefinitionResponse, EstimateResponse, ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../example.js';
-import { formatIsoDate, formatMicroGbp, formatPence } from '../../format.js';
+import { formatIsoDate } from '../../format.js';
 import { useNow } from '../../now.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { withKey } from '../../state/withKey.js';
 import { AdvancedFields, type ProviderCapabilities } from './AdvancedFields.js';
 import { AirportListInput } from './AirportListInput.js';
+import { CreateConfirmation, Reconfirmation } from './Confirmation.js';
 import { CoverageCheck } from './CoverageCheck.js';
 import {
   applyExample,
-  confirmationPence,
   DEFAULT_RELATIVE,
   type Draft,
   type DraftWindow,
@@ -10648,7 +10723,7 @@ export function DefinitionForm({
     mutationFn: (e: EstimateResponse) =>
       api.createDefinition({
         ...draftToRequest(draft),
-        confirmedCostPence: confirmationPence(e.estimate.totalCostMicroGbp),
+        confirmedCostPence: microGbpToPence(e.estimate.totalCostMicroGbp),
         // why: decisions 42, 43: the calls the operator saw are confirmed with the pence; one without the other covers no run.
         confirmedCalls: e.estimate.totalCalls,
       }),
@@ -10676,7 +10751,6 @@ export function DefinitionForm({
     setOtherWindow(w);
     setDraft({ ...draft, window: otherWindow });
   };
-  const n = saved?.needsConfirmation ?? null;
   const fresh = estimate !== null && estimatedFor === current;
   const nightsErrors = (field: 'minNights' | 'maxNights') => errorsFor(fieldErrors, field);
   return (
@@ -10866,63 +10940,15 @@ export function DefinitionForm({
         </button>
       )}
       {saved === null && estimate !== null ? (
-        <>
-          <EstimatePanel estimate={estimate.estimate} hardStop={draft.budget.maxCalls} />
-          <BudgetFitPanel fit={estimate.budgetFit} />
-          {fresh ? (
-            <button
-              type="button"
-              data-cost=""
-              className="min-h-11 rounded bg-slate-900 px-3 text-white"
-              onClick={() => create.mutate(estimate)}
-            >
-              {COPY.createConfirm(
-                estimate.estimate.totalCalls,
-                draft.budget.maxCalls,
-                formatPence(confirmationPence(estimate.estimate.totalCostMicroGbp)),
-              )}
-            </button>
-          ) : (
-            <p role="status" className="font-medium">
-              {COPY.estimateStale}
-            </p>
-          )}
-        </>
+        <CreateConfirmation
+          estimate={estimate}
+          fresh={fresh}
+          hardStop={draft.budget.maxCalls}
+          onCreate={() => create.mutate(estimate)}
+        />
       ) : null}
-      {saved !== null && n !== null ? (
-        <div role="alert" data-cost="" className="rounded border border-amber-700 bg-amber-50 p-2">
-          <p>
-            {COPY.needsConfirmation({
-              calls: n.totalCalls,
-              cap: saved.budget.maxCalls,
-              estimate: formatMicroGbp(n.estimateMicroGbp),
-              confirmed:
-                n.confirmedCostPence === null
-                  ? COPY.none
-                  : COPY.confirmedWas(
-                      n.confirmedCalls === null ? COPY.none : String(n.confirmedCalls),
-                      formatPence(n.confirmedCostPence),
-                    ),
-            })}
-          </p>
-          <button
-            type="button"
-            className={button}
-            onClick={() =>
-              confirm.mutate({
-                id: saved.id,
-                pence: confirmationPence(n.estimateMicroGbp),
-                calls: n.totalCalls,
-              })
-            }
-          >
-            {COPY.confirmNew(
-              n.totalCalls,
-              saved.budget.maxCalls,
-              formatPence(confirmationPence(n.estimateMicroGbp)),
-            )}
-          </button>
-        </div>
+      {saved !== null ? (
+        <Reconfirmation definition={saved} onConfirm={(v) => confirm.mutate({ id: saved.id, ...v })} />
       ) : null}
       {saved?.estimate ? <EstimatePanel estimate={saved.estimate} hardStop={saved.budget.maxCalls} /> : null}
       {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}
@@ -10943,7 +10969,7 @@ export function DefinitionForm({
 ```js
 // outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
-// worked-example files, and on a lint-suppression comment in any package's src or test.
+// worked-example files, and on a lint or type-check suppression comment in any package's src or test.
 ```
 
 `scripts/check-boundaries.mjs` — find:
@@ -11077,15 +11103,15 @@ for (const tree of PLACE_TREES) {
   }
 }
 
-// why: decision 46: no lint-suppression comment in any package; a rule that must bend is changed in biome.json
-// with a plan decision, never silenced in place.
-const SUPPRESSION_COMMENT =
-  /\/\/[^\n]*\b(biome-ignore|eslint-disable)|\/\*(?:(?!\*\/)[\s\S])*\b(biome-ignore|eslint-disable)/;
+// why: decisions 46, 49: the one suppression check. No lint or type-check suppression comment in any package's
+// src or test; no scoped lint override is granted, so code that needed one is restructured instead.
+const SUPPRESSIONS = '(?:biome-ignore|eslint-disable|@ts-ignore|@ts-expect-error|@ts-nocheck)';
+const SUPPRESSION_COMMENT = new RegExp(`//[^\\n]*${SUPPRESSIONS}|/\\*(?:(?!\\*/)[\\s\\S])*${SUPPRESSIONS}`);
 for (const dir of Object.values(dirs)) {
   for (const tree of ['src', 'test']) {
     for (const f of walk(join(dir, tree))) {
       if (SUPPRESSION_COMMENT.test(readFileSync(f, 'utf8'))) {
-        console.error(`${f} has a lint-suppression comment (decision 46)`);
+        console.error(`${f} has a lint or type-check suppression comment (decisions 46, 49)`);
         bad++;
       }
     }
@@ -11094,9 +11120,210 @@ for (const dir of Object.values(dirs)) {
 process.exit(bad ? 1 : 0);
 ```
 
-`test/placeCheck.test.ts` (new file):
+The suppression check now covers `@ts-expect-error`, which core's and db's merged tests used for nine type tests. Each is restructured without one: a runtime guard is called through `Reflect.apply`, which passes the ill-typed argument untyped (no cast); the `exhaustive` compile-time rejection is stated with `expectTypeOf<…>().toBeNever()`, which `tsc` checks; and the barrel test reads the barrel source for `ProviderBudget`.
+
+`packages/core/test/dates/epochDay.test.ts` — find:
 
 ```ts
+    (bad: string) => {
+      // @ts-expect-error a plain string is not an IsoDate; the runtime guard is what is under test
+      expect(() => toEpochDay(bad)).toThrow(RangeError);
+    },
+```
+
+`packages/core/test/dates/epochDay.test.ts` — replace with:
+
+```ts
+    (bad: string) => {
+      // why: a plain string is not an IsoDate; Reflect.apply passes it untyped, since the runtime guard is under test.
+      expect(() => Reflect.apply(toEpochDay, undefined, [bad])).toThrow(RangeError);
+    },
+```
+
+`packages/core/test/dates/epochDay.test.ts` — find:
+
+```ts
+    const bad: string = '2027-02-29';
+    // @ts-expect-error a plain string is not an IsoDate; the runtime guard is what is under test
+    expect(() => monthOf(bad)).toThrow(RangeError);
+  });
+```
+
+`packages/core/test/dates/epochDay.test.ts` — replace with:
+
+```ts
+    const bad: string = '2027-02-29';
+    // why: a plain string is not an IsoDate; Reflect.apply passes it untyped, since the runtime guard is under test.
+    expect(() => Reflect.apply(monthOf, undefined, [bad])).toThrow(RangeError);
+  });
+```
+
+`packages/core/test/space/validate.test.ts` — find:
+
+```ts
+      const origins: string[] = ['lhr', 'LGW'];
+      // @ts-expect-error a plain string[] is not Iata[]; this is a row written around the schema
+      expect(fields({ ...base, origins })).toEqual([
+        { field: 'origins.0', message: 'lhr is not a three-letter upper-case IATA code' },
+```
+
+`packages/core/test/space/validate.test.ts` — replace with:
+
+```ts
+      const origins: string[] = ['lhr', 'LGW'];
+      // why: a plain string[] is not Iata[]; this is a row written around the schema, passed untyped by Reflect.apply.
+      expect(Reflect.apply(fields, undefined, [{ ...base, origins }])).toEqual([
+        { field: 'origins.0', message: 'lhr is not a three-letter upper-case IATA code' },
+```
+
+`packages/db/test/enums.test.ts` — find:
+
+```ts
+import { apiContract, cabinSchema, providerIdSchema, sourceKindSchema } from '@gmt/core';
+import { describe, expect, it } from 'vitest';
+import {
+```
+
+`packages/db/test/enums.test.ts` — replace with:
+
+```ts
+import { apiContract, cabinSchema, providerIdSchema, sourceKindSchema } from '@gmt/core';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import {
+```
+
+`packages/db/test/enums.test.ts` — find:
+
+```ts
+    expect(exhaustive<'a' | 'b'>()(['a', 'b'] as const)).toEqual(['a', 'b']);
+    // @ts-expect-error a list missing a member of the union does not compile
+    exhaustive<'a' | 'b'>()(['a'] as const);
+  });
+```
+
+`packages/db/test/enums.test.ts` — replace with:
+
+```ts
+    expect(exhaustive<'a' | 'b'>()(['a', 'b'] as const)).toEqual(['a', 'b']);
+    // why: the list parameter of a list missing a member is `never`, so no such call compiles; checked by tsc.
+    const ab = exhaustive<'a' | 'b'>();
+    expectTypeOf<Parameters<typeof ab<readonly ['a']>>[0]>().toBeNever();
+    expectTypeOf<Parameters<typeof ab<readonly ['a', 'b']>>[0]>().not.toBeNever();
+  });
+```
+
+`packages/db/test/barrel.test.ts` — find:
+
+```ts
+import { fixedClock } from '@gmt/core';
+```
+
+`packages/db/test/barrel.test.ts` — replace with:
+
+```ts
+import { readFileSync } from 'node:fs';
+import { fixedClock } from '@gmt/core';
+```
+
+`packages/db/test/barrel.test.ts` — find:
+
+```ts
+    );
+    // @ts-expect-error ProviderBudget is the guard's internal entry type, not part of the contract
+    const leaked = (x?: db.ProviderBudget) => x;
+    expect(leaked()).toBeUndefined();
+  });
+```
+
+`packages/db/test/barrel.test.ts` — replace with:
+
+```ts
+    );
+    // why: ProviderBudget is the guard's internal entry type, not part of the contract; the barrel never names it.
+    expect(readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')).not.toMatch(
+      /\bProviderBudget\b/,
+    );
+  });
+```
+
+`packages/db/test/client.test.ts` — find:
+
+```ts
+    const db = openDatabase(':memory:');
+    // @ts-expect-error async callbacks are rejected by the type and at runtime
+    expect(() => db.transaction(async () => 1)).toThrow(/synchronous/);
+    // @ts-expect-error same guard on the BEGIN IMMEDIATE variant
+    expect(() => db.immediateTransaction(async () => 1)).toThrow(/synchronous/);
+    expect(db.transaction(() => 41 + 1)).toBe(42);
+```
+
+`packages/db/test/client.test.ts` — replace with:
+
+```ts
+    const db = openDatabase(':memory:');
+    // why: the type rejects an async callback; Reflect.apply passes one untyped so the runtime guard is what is tested.
+    expect(() => Reflect.apply(db.transaction, db, [async () => 1])).toThrow(/synchronous/);
+    expect(() => Reflect.apply(db.immediateTransaction, db, [async () => 1])).toThrow(/synchronous/);
+    expect(db.transaction(() => 41 + 1)).toBe(42);
+```
+
+`packages/db/test/client.test.ts` — find:
+
+```ts
+    applyMigrations(db, MIGRATIONS_DIR);
+    // @ts-expect-error repository transaction callbacks are typed to return non-Promise values (Task 0.10's conditional type)
+    expect(() => db.transaction(async () => insertLedgerRow(db))).toThrow(/synchronous/);
+    // why: better-sqlite3 runs the callback up to its first await, so the insert happened; the rollback must undo it.
+    expect(count(db, 'provider_requests')).toBe(0);
+    // @ts-expect-error the same guard on the BEGIN IMMEDIATE variant (ruling 14)
+    expect(() => db.immediateTransaction(async () => insertLedgerRow(db))).toThrow(/synchronous/);
+    expect(count(db, 'provider_requests')).toBe(0);
+```
+
+`packages/db/test/client.test.ts` — replace with:
+
+```ts
+    applyMigrations(db, MIGRATIONS_DIR);
+    // why: callbacks are typed to return non-Promise values (Task 0.10's conditional type); Reflect.apply bypasses the type.
+    expect(() => Reflect.apply(db.transaction, db, [async () => insertLedgerRow(db)])).toThrow(/synchronous/);
+    // why: better-sqlite3 runs the callback up to its first await, so the insert happened; the rollback must undo it.
+    expect(count(db, 'provider_requests')).toBe(0);
+    // why: the same guard on the BEGIN IMMEDIATE variant (ruling 14).
+    expect(() => Reflect.apply(db.immediateTransaction, db, [async () => insertLedgerRow(db)])).toThrow(
+      /synchronous/,
+    );
+    expect(count(db, 'provider_requests')).toBe(0);
+```
+`scripts/vitest.config.mjs` (new file):
+
+```js
+import { defineConfig } from 'vitest/config';
+
+// The root Vitest project for repository scripts (decision 49): their tests sit beside them as scripts/*.test.mjs.
+export default defineConfig({
+  test: {
+    name: 'scripts',
+    include: ['*.test.mjs'],
+    environment: 'node',
+  },
+});
+```
+
+`./vitest.config.ts` — find:
+
+```ts
+    projects: ['packages/*/vitest.config.ts', 'apps/*/vitest.config.ts'],
+```
+
+`./vitest.config.ts` — replace with:
+
+```ts
+    projects: ['packages/*/vitest.config.ts', 'apps/*/vitest.config.ts', 'scripts/vitest.config.mjs'],
+```
+
+`scripts/check-boundaries.test.mjs` (new file):
+
+```js
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11104,8 +11331,9 @@ import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 // why: the boundary script guards the whole repository, so it is run, not imported (it exits the process);
-// a scratch tree holds only what it reads, with planted files (review tsr2-012).
-const REPO = resolve(import.meta.dirname, '../../..');
+// a scratch tree holds only what it reads, with planted files (reviews tsr2-012, arch-r3-006; decision 49:
+// tests of root scripts live beside them in scripts/*.test.mjs, run by the root Vitest project `scripts`).
+const REPO = resolve(import.meta.dirname, '..');
 const SCRIPT = join(REPO, 'scripts/check-boundaries.mjs');
 const PACKAGES = [
   'packages/core',
@@ -11115,9 +11343,10 @@ const PACKAGES = [
   'apps/api',
   'apps/web',
 ];
-let scratch: string | null = null;
+let scratch = null;
 
-function tree(files: Record<string, string>): string {
+/** A scratch repository with every package.json, the airports data and the given files. */
+function tree(files) {
   const root = mkdtempSync(join(tmpdir(), 'gmt-boundaries-'));
   for (const p of PACKAGES) {
     mkdirSync(join(root, p), { recursive: true });
@@ -11135,7 +11364,7 @@ function tree(files: Record<string, string>): string {
   return root;
 }
 
-const run = (root: string) => spawnSync(process.execPath, [SCRIPT], { cwd: root, encoding: 'utf8' });
+const run = (root) => spawnSync(process.execPath, [SCRIPT], { cwd: root, encoding: 'utf8' });
 
 afterEach(() => {
   if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
@@ -11167,23 +11396,29 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     expect(r.stderr).toContain('apps/api/src/planted.ts names the city New York');
   });
 
-  it('a lint-suppression comment in any package fails', () => {
-    const r = run(tree({ 'packages/db/test/x.test.ts': ['// biome', '-ignore lint/x: y\n'].join('') }));
+  it.each([
+    ['packages/db/test/x.test.ts', ['// biome', '-ignore lint/x: y'].join('')],
+    ['packages/engine/src/y.ts', ['// @ts', '-expect-error why'].join('')],
+    ['apps/web/src/z.tsx', ['const a = <p>{/* @ts', '-ignore */}</p>;'].join('')],
+    ['packages/core/src/w.ts', ['/* eslint', '-disable */'].join('')],
+    ['apps/api/test/v.test.ts', ['// @ts', '-nocheck'].join('')],
+  ])('a suppression comment fails in any package: %s', (path, text) => {
+    const r = run(tree({ [path]: `${text}\n` }));
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('packages/db/test/x.test.ts has a lint-suppression comment');
+    expect(r.stderr).toContain(`${path} has a lint or type-check suppression comment`);
   });
 });
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/definitions/form.test.tsx test/placeCheck.test.ts test/copy && pnpm boundaries`
-Expected: PASS, 22 + 3 tests; `pnpm boundaries` exits 0.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/definitions/form.test.tsx test/copy && pnpm exec vitest run --project scripts && pnpm --filter @gmt/core exec vitest run test/dates test/space && pnpm --filter @gmt/db exec vitest run test/enums.test.ts test/barrel.test.ts test/client.test.ts && pnpm -r typecheck && pnpm boundaries`
+Expected: PASS, 23 web tests and 7 script tests; the core and db tests still pass; typecheck holds the `expectTypeOf` check; `pnpm boundaries` exits 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web docs/examples scripts/check-boundaries.mjs && git commit -m "wp09: Definitions form in pounds, metro expansion, confirmations with calls; place and suppression checks"
+git add apps/web docs/examples scripts vitest.config.ts packages/core/test packages/db/test && git commit -m "wp09: Definitions form in pounds, metro expansion, confirmations with calls; place and suppression checks"
 ```
 
 ### Task 9.13: Definitions view, estimate-then-create flow, final App wiring
@@ -11649,7 +11884,7 @@ export function App() {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/definitions test/app test/copy`
-Expected: PASS, 13 + 22 + 11 tests.
+Expected: PASS, 13 + 23 + 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -11775,7 +12010,7 @@ Restore `statusBarLabel: 'Run status'`. No other production change; any real hit
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/copy`
-Expected: PASS, 6 + 5 + 8 tests.
+Expected: PASS, 6 + 4 + 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -11798,9 +12033,9 @@ Run from the repository root, in order; each must give the stated outcome.
 1. `pnpm install --frozen-lockfile` → exits 0 (no dependency changes: WP0 pinned every web dependency).
 2. `pnpm lint:fix && pnpm lint` → `biome check` reports no errors.
 3. `pnpm --filter @gmt/web typecheck` → exits 0 (both `tsconfig.json` and `tsconfig.test.json`). `pnpm -r typecheck` → exits 0.
-4. `pnpm --filter @gmt/web test` → 230 tests pass in 19 files, none skipped, and the coverage report meets **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` and **100% on every metric** for `Provenance.tsx`, `PriceCell.tsx`, `PriceBoundary.tsx`, `BookingAction.tsx`, `urlState.ts` and `resultsState.ts`, with no threshold error. The floors are the spec §9 web floors; the 100% files are the ones whose gaps would be provenance, link or state gaps.
-5. `pnpm --filter @gmt/core test` → 100% on every metric with Task 9.0's additions and the four `test:tz` runs green. `pnpm test` → every package green with its thresholds.
-6. `pnpm boundaries` → exits 0: `@gmt/web` imports no workspace package except `@gmt/core`; no airport code or metro city name appears in a string literal of `apps/web/src` or `apps/api/src` outside `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts`; no package's `src` or `test` holds a `biome-ignore` or `eslint-disable` comment.
+4. `pnpm --filter @gmt/web test` → 227 tests pass in 18 files, none skipped, and the coverage report meets **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` and **100% on every metric** for `Provenance.tsx`, `PriceCell.tsx`, `PriceBoundary.tsx`, `BookingAction.tsx`, `urlState.ts` and `resultsState.ts`, with no threshold error. The floors are the spec §9 web floors; the 100% files are the ones whose gaps would be provenance, link or state gaps.
+5. `pnpm --filter @gmt/core test` → 100% on every metric with Task 9.0's additions and the four `test:tz` runs green. `pnpm exec vitest run --project scripts` → the boundary script's 7 tests pass. `pnpm test` → every package and the `scripts` project green with their thresholds.
+6. `pnpm boundaries` → exits 0: `@gmt/web` imports no workspace package except `@gmt/core`; no airport code or metro city name appears in a string literal of `apps/web/src` or `apps/api/src` outside `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts`; no package's `src` or `test` holds a `biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck` comment (the one suppression check, decision 49).
 7. `pnpm casts` (WP7's `scripts/check-casts.mjs`, decision 48) → exits 0: no `as` except `as const`, and no angle-bracket assertion, in `apps/web` or Task 9.0's core files.
 8. `pnpm --filter @gmt/web build` → exits 0 and writes `apps/web/dist/index.html` plus hashed assets under `apps/web/dist/assets/`.
 9. `grep -rn "style={" apps/web/src` → no output (spec §4 CSP `default-src 'self'` blocks inline styles).
@@ -11809,14 +12044,17 @@ Run from the repository root, in order; each must give the stated outcome.
 
 ## 11. Open questions
 
-None requires the operator's judgement. The items review rounds 1 and 2 marked "needs judgment" were ruled by the operator (decisions 36, 42, 44, 46, 48) and are folded into the tasks: the headline through `PriceCell`, following the filters (Task 9.8); contract parsing in every mode (Task 9.3); the place-name check on string literals with a committed word list, and no suppression comments anywhere (Tasks 9.2, 9.12); the departure-date filter and the run's `expandTop` in core (Task 9.0); staleness by fetch age with "vendor's cache age unknown" as a label (Tasks 9.1, 9.8); the unconfirmed-price badge wherever a price renders, never a double negative (Tasks 9.1, 9.7, 9.8); calls sent and stated with every confirmation, worded "about N calls (hard stop M)" (Tasks 9.6, 9.12, 9.13); metro codes expanding on Enter or Add (Task 9.12); the shared names of decision 46 (`format.ts`, `PriceCell` `compact`, `ViewHeader variant="span"`); the `/providers` error state and the synthetic tests (Tasks 9.5, 9.8, 9.13); "searched" kept with "with a price" beside it (Task 9.10); the provider's own search link kept, a Google Flights deep link and a max-travel-time filter in Phase 4 (decision 36); the native datalist accepted.
+None requires the operator's judgement. The items review rounds 1 and 2 marked "needs judgment" were ruled by the operator (decisions 36, 42, 44, 46, 48, 49) and are folded into the tasks: the headline through `PriceCell`, following the filters (Task 9.8); contract parsing in every mode (Task 9.3); the place-name check on string literals with a committed word list, and one suppression check in the boundary script for every package (Task 9.12); the departure-date filter and the run's `expandTop` in core (Task 9.0); staleness by fetch age with "vendor's cache age unknown" as a label (Tasks 9.1, 9.8); the unconfirmed-price badge wherever a price renders, never a double negative, and why the calendar gap needs none (Tasks 9.1, 9.7, 9.8, 9.9); one micro-GBP→pence rounding, core's `microGbpToPence` (Tasks 9.1, 9.3, 9.12); calls sent and stated with every confirmation, worded "about N calls (hard stop M)" (Tasks 9.6, 9.12, 9.13); metro codes expanding on Enter or Add (Task 9.12); the shared names of decision 46 (`format.ts`, `PriceCell` `compact`, `ViewHeader variant="span"`); the `/providers` error state and the synthetic tests (Tasks 9.5, 9.8, 9.13); "searched" kept with "with a price" beside it (Task 9.10); the provider's own search link kept, a Google Flights deep link and a max-travel-time filter in Phase 4 (decision 36); the native datalist accepted.
 
 ## 12. Changes outside `apps/web`
 
 - `packages/core` (Task 9.0): `truncated: z.boolean()` on `priceCellSchema` and `resultRowSchema`; `expandTop` on `executionSummarySchema`; `ResultFilters.departure` and its check in `filterRows`; `formatAgo` and `formatFetchedAgo` exported from `labels/age.ts` (the private `ago` is gone); `test/helpers/rows.ts` and `test/api-contract/contract.test.ts` gain `truncated: false`; a new `test/results/webAdditions.test.ts`. Recorded in decisions 36 and 42.
-- `scripts/check-boundaries.mjs` (Task 9.12): the place-name check over string literals (decisions 36, 46), reading the airports dataset and `metros.json` from `packages/db/data` with `NOT_AIRPORT_WORDS`, and the suppression-comment check (decision 46); `apps/web/test/placeCheck.test.ts` runs it against scratch trees.
+- `scripts/check-boundaries.mjs` (Task 9.12): the place-name check over string literals (decisions 36, 46), reading the airports dataset and `metros.json` from `packages/db/data` with `NOT_AIRPORT_WORDS`, and the one suppression-comment check over five tokens (decisions 46, 49); `scripts/check-boundaries.test.mjs` runs it against scratch trees, under the new root Vitest project `scripts` (`scripts/vitest.config.mjs`, added to the root `vitest.config.ts`).
+- `packages/core/test/dates/epochDay.test.ts`, `packages/core/test/space/validate.test.ts`, `packages/db/test/enums.test.ts`, `packages/db/test/barrel.test.ts`, `packages/db/test/client.test.ts` (Task 9.12): their nine `@ts-expect-error` type tests restructured (`Reflect.apply`, `expectTypeOf`, a barrel-source assertion), so the suppression check passes on main (decision 49).
 - `docs/examples/london-new-york.json` (Task 9.12): a stand-in only when absent; WP12 owns it.
 
 ## 13. For the plan (not yet recorded there)
 
-1. **Decision 44 and 46 on the scrollable table.** Decision 44 says "a labelled focusable region" and decision 46 "a labelled region without `tabIndex`". This brief follows decision 46 (View D's table scrolls in a labelled `section` without `tabIndex`; current browsers make a scrollable box keyboard-focusable themselves); decision 44's wording could say the same.
+1. **WP10 and WP11 restructure their suppressed code.** Once this brief's check lands, `pnpm boundaries` fails on any suppression comment (decision 49). WP10 as written puts four `// biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole` comments on its APG grid, and WP11's definition of done keeps "the one biome-ignore in templates.ts"; both revisions restructure that code instead (for the grid, an interactive element carrying the role, or the grid built on a `table` the rule accepts). WP10 Task 10.4 also still lists `PriceCellProps.compact` as its own product; WP9 now produces it (decision 46), so WP10 adds props to WP9's `PriceCell` rather than producing one.
+2. **WP8's staleness follows spec rev 23 §3.** The WP8 brief's `staleness()` still returns `stale: true` for an unknown vendor age and says "unknown age is stale"; decision 44 and spec rev 23 make an unknown vendor age aged by fetch time and labelled, not stale. WP9's fixtures (`stale: false` with `ageHours: 'unknown'`) and its stale banner assume the new rule, so WP8's revision must adopt it before WP9's views meet real data.
+3. **WP7's cast-check test location.** Decision 49 puts tests of root scripts in `scripts/*.test.mjs` under the `scripts` project this brief creates; WP7's `scripts/check-casts.mjs` test is briefed at `packages/engine/test/check-casts.test.ts` and moves beside its script when either package next touches it.
