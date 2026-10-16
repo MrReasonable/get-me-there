@@ -1,7 +1,7 @@
 import { PLAN_PRESETS } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpKitRequest } from '../../src/http/types.js';
-import { classifySearchApiError, searchApiHttpLimits } from '../../src/searchapi/errors.js';
+import { classifySearchApiError, searchApiHttpLimits } from '../../src/searchapi/limits.js';
 import { authHeaders, SEARCHAPI_ENDPOINT_PATH } from '../../src/searchapi/params.js';
 import { asProviderError } from '../support/guards.js';
 import { server } from '../support/msw.js';

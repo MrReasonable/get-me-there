@@ -1,4 +1,4 @@
-// The google_flights step parsers and the route-history conversion, beside the chain that calls them (review arch 2).
+// The google_flights step parsers and the route-history conversion, beside the chain that calls them.
 import { type ItinerarySearchResult, isoDateSchema } from '@gmt/core';
 import { parseError, parseVendor } from '../shared/errors.js';
 import { majorToMinor } from '../shared/money.js';

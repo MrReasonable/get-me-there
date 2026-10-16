@@ -1,3 +1,7 @@
+/**
+ * SearchApi HTTP limits for http-kit, with the classifier they carry (spec §5.2, §5.3). The module name follows
+ * travelpayouts/limits.ts; registered by apps/api httpLimitsFor (Task 5.10).
+ */
 import { type Config, ProviderError, type ProviderLimits } from '@gmt/core';
 import type { ProviderHttpLimits, ResponseFacts } from '../http/types.js';
 import { isRecord } from '../util.js';

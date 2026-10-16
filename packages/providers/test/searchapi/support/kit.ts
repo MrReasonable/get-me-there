@@ -2,7 +2,7 @@
 import { PLAN_PRESETS, type ProviderContext } from '@gmt/core';
 import type { ProviderHttpLimits } from '../../../src/http/types.js';
 import { assertRequestAllowed } from '../../../src/params/allowlist.js';
-import { searchApiHttpLimits } from '../../../src/searchapi/errors.js';
+import { searchApiHttpLimits } from '../../../src/searchapi/limits.js';
 import { SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS } from '../../../src/searchapi/params.js';
 import { type FakeBudget, type LedgerEvent, makeKit, SENTINELS } from '../../fakes.js';
 

@@ -16,8 +16,8 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertRequestAllowed, loadParamsAllowlist } from '../../src/params/allowlist.js';
 import { fetchCalendarTile, outboundBlockDays, planRectangles } from '../../src/searchapi/calendar.js';
-import { classifySearchApiError } from '../../src/searchapi/errors.js';
 import { searchItinerary } from '../../src/searchapi/itinerary.js';
+import { classifySearchApiError } from '../../src/searchapi/limits.js';
 import { authHeaders, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS } from '../../src/searchapi/params.js';
 import { SEARCHAPI_SUPPLIED_FIELDS } from '../../src/searchapi/provider.js';
 import {
