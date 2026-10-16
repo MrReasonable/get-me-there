@@ -15,5 +15,6 @@ export type {
   EngineOptions,
   Estimate,
   SchedulerJob,
+  StartOptions,
   StartResult,
 } from './types.js';

@@ -11,13 +11,15 @@ import {
   type SearchDefinition,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import type { StartOptions } from './types.js';
 
 export interface BuiltSnapshot {
   snapshot: DefinitionSnapshot;
   cells: Cell[];
   notes: string[];
 }
-export type Trigger = 'manual' | 'schedule';
+/** Who started the run; the same union as `StartOptions['trigger']`, never restated (code-architect review 17). */
+export type Trigger = StartOptions['trigger'];
 
 /**
  * Resolves the window in Europe/London and freezes the definition into an execution snapshot (spec §6.1 "frozen into

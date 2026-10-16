@@ -57,7 +57,6 @@ export interface EngineOptions {
   providerConcurrency?: Partial<Record<ProviderId, number>>;
 }
 
-/** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
 /**
  * The options of a start (spec §8.1): who started it and, for a manual start, the confirmation it carries, pence and
  * calls together (decision 37).
@@ -67,6 +66,7 @@ export interface StartOptions {
   confirmCostPence?: number;
   confirmCalls?: number;
 }
+/** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
 export type StartResult =
   | { ok: true; executionId: string }
   | {
