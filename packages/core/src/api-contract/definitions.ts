@@ -203,9 +203,14 @@ export const coverageCheckResponseSchema = z.object({
     z.object({
       origin: iataSchema,
       destination: iataSchema,
-      months: z.array(z.object({ month: isoMonthSchema, cachedRows: positiveInt, cellsInBand: positiveInt })),
+      // cachedRows: distinct in-band cells with a cached price; null when the month was not fully checked: a tile covering
+      // it failed, or left cells unread (decisions 25, 37)
+      months: z.array(
+        z.object({ month: isoMonthSchema, cachedRows: positiveInt.nullable(), cellsInBand: positiveInt }),
+      ),
     }),
   ),
+  // calls: the tiles the check requested (decision 37); a cached tile costs no upstream call and a tile may page
   calls: positiveInt,
   notes: z.array(z.string()),
 });
