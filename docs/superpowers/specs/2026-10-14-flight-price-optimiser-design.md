@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 22.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 23.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -261,8 +261,9 @@ verification as a free history source (§7 `route_price_history`).
   **"itinerary-searched"**.
 - **Provenance** — `{ providerId, sourceKind, fetchedAt, providerObservedAt?, maxAgeHours: number | 'unknown', fx: { converted: false } | { converted: true; rateNano; rateDate; source }, pointOfSale: <ISO 3166-1 alpha-2, the vendor's echo of `POINT_OF_SALE`> | 'unknown', cabin }`.
 - **Effective age** — `providerObservedAt` age if present; else `fetchedAt`
-  age + `maxAgeHours`; else (`'unknown'`) unknown, treated as stale and
-  labelled. Two label formats are defined once in `core`: the full form
+  age + `maxAgeHours`; else (`'unknown'`) the `fetchedAt` age alone, labelled
+  "vendor's cache age unknown" and never marked stale on that account (a
+  price is stale only when its known age exceeds the threshold). Two label formats are defined once in `core`: the full form
   "fetched 2h ago · provider age unknown (≤7d before that)" for tooltips,
   headers and email, and the compact row form "2h ago · ≤7d" for table
   cells and calendar days.
@@ -1622,6 +1623,12 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 23: unknown vendor age (2026-10-16)
+
+§3: a price whose vendor cache age is unknown is aged by `fetchedAt` alone,
+labelled "vendor's cache age unknown", and not marked stale for that reason
+(plan decision 44).
 
 ### Revision 22: unconfirmed and truncated prices (2026-10-16)
 
