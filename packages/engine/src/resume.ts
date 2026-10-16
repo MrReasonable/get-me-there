@@ -57,6 +57,16 @@ export async function resumeExecution(
       activeExecutionId: other.id,
     });
 
+  // why: ssr-07 — a row left by a version that created it before seeding has no cells; resuming it would end
+  // completed with nothing searched, so it is cancelled instead
+  if (!exec.isChild && ctx.repos.cells.rollUps(executionId).size === 0) {
+    ctx.repos.executions.setStatus(executionId, 'cancelled', {
+      finishedAt: ctx.clock.now(),
+      resumeAfter: null,
+      errorText: NEVER_STARTED,
+    });
+    return refused('not_found', `this execution ${NEVER_STARTED}; start a new run`, { executionId });
+  }
   const refresh = opts.manual && exec.status === 'paused_budget' && !exec.isChild;
   const current = refresh ? { ...exec, snapshot: { ...exec.snapshot, budget: def.budget } } : exec;
   const remaining = estimateRemainingFor(ctx, current, opts.manual);
@@ -134,6 +144,9 @@ export async function resumeExecution(
   reg.launch(run, () => execute(ctx, run));
   return { ok: true, executionId };
 }
+
+/** error_text of an execution cancelled because it was never seeded (ssr-07). */
+export const NEVER_STARTED = 'never finished starting and was cancelled';
 
 const PAUSED: readonly ExecutionStatus[] = ['paused_budget', 'paused_error'];
 

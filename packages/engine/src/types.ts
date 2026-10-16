@@ -84,6 +84,8 @@ export interface Engine {
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   cancel(executionId: string): Promise<boolean>;
   verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
+  /** Decision 45: the cap and headroom a child of `cell` would get now, by verifyCell's own calculation. */
+  childCapPreview(definitionId: string, cell: CellKey): { maxCalls: number; headroomCalls: number };
   estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;
   estimateRemaining(executionId: string): Estimate;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;
