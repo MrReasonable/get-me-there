@@ -21,8 +21,9 @@ import {
 const kinds = (h: Harness) => h.notifications.map((m) => m.kind);
 const spent = (h: Harness, id: string) =>
   h.ledgerRows(id).filter((r) => r.endpointPath !== '/test-spend' && r.outcome !== 'cache_hit');
-// why: a small call cap makes the run ask for confirmation (ruling 6, Task 7.13); every start here confirms up front
-const confirmed = { trigger: 'manual', confirmCostPence: 100 } as const;
+// why: a small call cap makes the run ask for confirmation (ruling 6, Task 7.13); every start here confirms its pence and
+// calls up front (decision 37)
+const confirmed = { trigger: 'manual', confirmCostPence: 100, confirmCalls: 1000 } as const;
 const twoPairs = (h: Harness, patch = {}) =>
   h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], ...patch });
 const rule = (h: Harness, definitionId: string) =>

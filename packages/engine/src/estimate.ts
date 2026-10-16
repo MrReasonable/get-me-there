@@ -350,3 +350,27 @@ export function budgetFitFor(
   scope('global-month', fixed + cost, ctx.config.spend.monthlyCapMicroGbp);
   return { fits: perScope.every((x) => x.fits), runsPerMonth: own.runsPerMonth, perScope };
 }
+
+/**
+ * The estimate with each line's `blocked` scope set from a budget check, and the totals summed over the lines that will
+ * run, so the figure shown, stored and confirmed is the runnable one and a blocked provider's plan never inflates the
+ * overrun baseline (cost-r1-014). Blocked lines keep their figures, so the form still shows what they would need.
+ */
+export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<ProviderId, string>): Estimate {
+  const perProvider = e.perProvider.map((p) => ({ ...p, blocked: blockedBy.get(p.providerId) ?? null }));
+  const runs = perProvider.filter((p) => p.blocked === null);
+  const totalCostMicroGbp = runs.reduce((a, p) => a + p.costMicroGbp, 0);
+  return {
+    ...e,
+    perProvider,
+    totalCalls: runs.reduce((a, p) => a + p.calls, 0),
+    totalPlanCalls: runs.reduce((a, p) => a + p.planCalls, 0),
+    totalCostMicroGbp,
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
+    seconds: runs.reduce((a, p) => a + p.seconds, 0),
+    assumptions:
+      runs.length === perProvider.length
+        ? e.assumptions
+        : [...e.assumptions, 'totals leave out the providers a budget cap blocks'],
+  };
+}

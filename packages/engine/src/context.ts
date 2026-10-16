@@ -19,6 +19,8 @@ import type { AlertsStepHook, EngineDeps, EngineOptions } from './types.js';
 export interface EngineHooks {
   scheduleResume(executionId: string, definitionId: string, at: IsoDateTime): void;
   cancelResume(executionId: string): void;
+  /** Removes a definition's cron job; called when the engine itself disables a schedule (spec §6.1 zero-cell window). */
+  unregisterSchedule(definitionId: string): void;
 }
 
 /**
@@ -102,6 +104,10 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     // engine rule known before any call (reuse matching); reuse.test.ts pins it against the fixture's echo, and WP5's
     // adapter test pins SearchApi's echo (arch-r2-013)
     pointOfSaleOf: (id) => (id === 'searchapi' ? config.pointOfSale : 'unknown'),
-    hooks: { scheduleResume: () => undefined, cancelResume: () => undefined },
+    hooks: {
+      scheduleResume: () => undefined,
+      cancelResume: () => undefined,
+      unregisterSchedule: () => undefined,
+    },
   };
 }

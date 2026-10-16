@@ -151,8 +151,8 @@ export function markRemaining(
 }
 
 /**
- * Cells of (stage, provider) this pass should fetch: the spec §7 resume query (which never returns `no-return-legs` or
- * `no-priced-options` errors, decision 37).
+ * Cells of (stage, provider) this pass should fetch: none for a provider disabled or blocked for budget in this pass;
+ * otherwise the spec §7 resume query (which never returns `no-return-legs` or `no-priced-options` errors, decision 37).
  */
 export function runnableCells(
   ctx: EngineContext,
@@ -160,7 +160,8 @@ export function runnableCells(
   stage: Stage,
   providerId: ProviderId,
 ): CellKey[] {
-  if (run.disabled.has(providerId)) return [];
+  // why: a provider the pre-start or resume check blocked for budget makes no call in this pass (cost-r1-001)
+  if (run.disabled.has(providerId) || run.blocked.has(providerId)) return [];
   return ctx.repos.cells.resumable(run.executionId, stage, providerId, run.manual);
 }
 

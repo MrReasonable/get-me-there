@@ -37,7 +37,10 @@ const params = (d: DefinitionInput, updatedAt: IsoDateTime): Record<string, unkn
   updatedAt,
 });
 
-/** Spec §7 `search_definitions`, soft-deleted. `confirmed_cost_pence` is set by `create` or `setConfirmedCost`, never by `update`. */
+/**
+ * Spec §7 `search_definitions`, soft-deleted. `confirmed_cost_pence` and `confirmed_calls` (decision 37) are set together
+ * by `create` or `setConfirmed`, never by `update`.
+ */
 export class DefinitionsRepo {
   constructor(
     private readonly db: Db,
@@ -45,24 +48,28 @@ export class DefinitionsRepo {
   ) {}
 
   /** Decision 14: the create click's confirmation is stored in the same INSERT, so it can never be lost between two writes. */
-  create(input: DefinitionInput & { confirmedCostPence?: number }): SearchDefinition {
-    const { confirmedCostPence, ...definition } = input;
+  create(
+    input: DefinitionInput & { confirmedCostPence?: number; confirmedCalls?: number },
+  ): SearchDefinition {
+    const { confirmedCostPence, confirmedCalls, ...definition } = input;
     validate(definition);
     assertNullableInt('confirmed_cost_pence', confirmedCostPence ?? null);
+    assertNullableInt('confirmed_calls', confirmedCalls ?? null);
     const id = randomUUID();
     const now = this.clock.now();
     this.db.raw
       .prepare(
         `INSERT INTO search_definitions (id, created_at, name, origins_json, destinations_json, window_json, min_nights, max_nights, cabin, constraints_json,
-          verification_policy_json, budget_json, providers_json, destination_notes_json, onward_cost_json, schedule_cron, schedule_tz, confirmed_cost_pence, enabled, updated_at)
+          verification_policy_json, budget_json, providers_json, destination_notes_json, onward_cost_json, schedule_cron, schedule_tz, confirmed_cost_pence, confirmed_calls, enabled, updated_at)
          VALUES (@id, @createdAt, @name, @origins, @destinations, @window, @minNights, @maxNights, @cabin, @constraints, @verification, @budget, @providers,
-          @destinationNotes, @onwardCost, @scheduleCron, @scheduleTz, @confirmedCostPence, @enabled, @updatedAt)`,
+          @destinationNotes, @onwardCost, @scheduleCron, @scheduleTz, @confirmedCostPence, @confirmedCalls, @enabled, @updatedAt)`,
       )
       .run({
         id,
         createdAt: now,
         ...params(definition, now),
         confirmedCostPence: confirmedCostPence ?? null,
+        confirmedCalls: confirmedCalls ?? null,
       });
     return this.mustGet(id);
   }
@@ -71,6 +78,7 @@ export class DefinitionsRepo {
     const {
       id: _id,
       confirmedCostPence: _c,
+      confirmedCalls: _cc,
       createdAt: _ca,
       updatedAt: _u,
       deletedAt,
@@ -119,13 +127,19 @@ export class DefinitionsRepo {
       throw new RowRejected('missing', `definition ${id} does not exist`);
   }
 
-  /** Spec §7: set only from an explicit operator confirmation, never recomputed automatically. */
-  setConfirmedCost(id: string, pence: number | null): void {
-    assertNullableInt('confirmed_cost_pence', pence);
+  /**
+   * Spec §7, decision 37: the pence and the calls of one explicit operator confirmation, written together in one
+   * statement and never recomputed automatically; null clears both.
+   */
+  setConfirmed(id: string, confirmed: { pence: number; calls: number } | null): void {
+    assertNullableInt('confirmed_cost_pence', confirmed?.pence ?? null);
+    assertNullableInt('confirmed_calls', confirmed?.calls ?? null);
     if (
       this.db.raw
-        .prepare('UPDATE search_definitions SET confirmed_cost_pence = ?, updated_at = ? WHERE id = ?')
-        .run(pence, this.clock.now(), id).changes === 0
+        .prepare(
+          'UPDATE search_definitions SET confirmed_cost_pence = ?, confirmed_calls = ?, updated_at = ? WHERE id = ?',
+        )
+        .run(confirmed?.pence ?? null, confirmed?.calls ?? null, this.clock.now(), id).changes === 0
     ) {
       throw new RowRejected('missing', `definition ${id} does not exist`);
     }

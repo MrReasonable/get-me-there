@@ -50,6 +50,10 @@ export const executionResponseSchema = z.object({
   overrun: z.boolean(),
   disabledProviders: z.array(providerIdSchema),
 });
-export const startExecutionRequestSchema = z.object({ confirmCostPence: moneyPenceSchema.optional() });
+/** Decision 37: a manual start confirms the pence and the calls the operator saw; one without the other covers nothing. */
+export const startExecutionRequestSchema = z.object({
+  confirmCostPence: moneyPenceSchema.optional(),
+  confirmCalls: z.number().int().min(0).optional(),
+});
 export const startExecutionResponseSchema = z.object({ executionId: z.string() });
 export const verifyCellRequestSchema = z.object({ definitionId: z.string(), cell: cellKeySchema });
