@@ -1,10 +1,18 @@
-import { RESUMABLE_STATUSES } from '@gmt/core';
+import {
+  DEFAULT_DISCOVERY_REFRESH_HOURS,
+  type Execution,
+  type ExecutionStatus,
+  type IsoDateTime,
+  RESUMABLE_STATUSES,
+} from '@gmt/core';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { addPass, estimateRemainingFor, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
+import type { Orchestrator } from './orchestrator.js';
 import type { RunRegistry } from './registry.js';
 import { markRemaining, newRun } from './run.js';
+import { REUSE_TOLERANCE, refreshHoursOf } from './stages/reuse.js';
 import { confirmationNeeded, nothingToSearch, refused } from './start.js';
 import type { StartResult } from './types.js';
 
@@ -125,4 +133,59 @@ export async function resumeExecution(
   );
   reg.launch(run, () => execute(ctx, run));
   return { ok: true, executionId };
+}
+
+const PAUSED: readonly ExecutionStatus[] = ['paused_budget', 'paused_error'];
+
+/**
+ * Ruling 10: older than 0.9 × the shortest discoveryRefreshHours of the snapshot's discovery providers (168 h by
+ * default), so the weekly tick supersedes a run that paused seconds after the previous firing, DST-shortened weeks
+ * included. Age is elapsed time from started_at.
+ */
+export function olderThanRefresh(
+  exec: Pick<Execution, 'startedAt' | 'createdAt' | 'snapshot'>,
+  now: IsoDateTime,
+): boolean {
+  const ids = exec.snapshot.providers.discovery;
+  const hours =
+    ids.length === 0
+      ? DEFAULT_DISCOVERY_REFRESH_HOURS
+      : Math.min(...ids.map((id) => refreshHoursOf(exec.snapshot, id)));
+  return Date.parse(now) - Date.parse(exec.startedAt ?? exec.createdAt) > REUSE_TOLERANCE * hours * 3_600_000;
+}
+
+/**
+ * Spec §8.1/§8.2: "any paused run older than discoveryRefreshHours whose resume_after is not in the future is cancelled
+ * and a fresh run started" (olderThanRefresh, ruling 10).
+ */
+export function isStalePaused(
+  exec: Pick<Execution, 'status' | 'resumeAfter' | 'startedAt' | 'createdAt' | 'snapshot'>,
+  now: IsoDateTime,
+): boolean {
+  if (!PAUSED.includes(exec.status)) return false;
+  if (exec.resumeAfter !== null && exec.resumeAfter > now) return false;
+  return olderThanRefresh(exec, now);
+}
+
+/** error_text of a run cancelled because it went stale (spec §8.2 supersede; ssr2-06, ssr2-09). */
+export const SUPERSEDED =
+  'superseded: older than its discovery refresh allows; the next run starts with fresh prices';
+
+/**
+ * Cancels a stale run (its one-shot job with it) and records why. It never starts a run: the tick starts the fresh one
+ * at a scheduled firing, and for a definition without a schedule the next run is the operator's (ssr2-06). False when
+ * the run was no longer active.
+ */
+export async function supersede(
+  ctx: EngineContext,
+  orch: Pick<Orchestrator, 'cancel'>,
+  exec: Pick<Execution, 'id' | 'definitionId' | 'startedAt'>,
+): Promise<boolean> {
+  if (!(await orch.cancel(exec.id))) return false;
+  ctx.repos.executions.patch(exec.id, { errorText: SUPERSEDED });
+  ctx.log.info(
+    { executionId: exec.id, definitionId: exec.definitionId, startedAt: exec.startedAt },
+    'execution: superseded a stale run',
+  );
+  return true;
 }
