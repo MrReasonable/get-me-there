@@ -1,5 +1,4 @@
 import {
-  AbortedError,
   type BudgetExceeded,
   type CellKey,
   cellKeyString,
@@ -14,6 +13,7 @@ import {
   stripUrlsInText,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import { classifyFailure } from './errors.js';
 
 /** Why a pass stopped early. Each maps to one execution status in execute.ts `finalStatus` (spec §8.1 error table). */
 export type StopReason =
@@ -148,7 +148,10 @@ export function markRemaining(
   return rows.length;
 }
 
-/** Cells of (stage, provider) this pass should fetch: the spec §7 resume query. */
+/**
+ * Cells of (stage, provider) this pass should fetch: the spec §7 resume query (which never returns `no-return-legs` or
+ * `no-priced-options` errors, decision 37).
+ */
 export function runnableCells(
   ctx: EngineContext,
   run: RunState,
@@ -165,21 +168,76 @@ export function errorText(err: unknown): string {
 }
 
 /**
- * Handles a failed tile or cell call. Task 7.1: an abort leaves the cells `not_run` (nothing was written); anything
- * else stops the pass as fatal. Task 7.4 replaces this with the full error table.
+ * Applies the spec §8.1 error table to one failed tile (discovery) or cell (verification) call. The cells of the call
+ * are `cells`; nothing has been written for them yet.
  */
 export function onFailure(
-  _ctx: EngineContext,
+  ctx: EngineContext,
   run: RunState,
   providerId: ProviderId,
   stage: Stage,
   cells: readonly CellKey[],
   err: unknown,
 ): void {
-  if (err instanceof AbortedError || run.controller.signal.aborted) return;
-  run.log.warn(
-    { providerId, stage, cells: cells.length, err: errorText(err) },
-    'call failed; stopping the pass',
-  );
-  stopRun(run, { kind: 'fatal', message: errorText(err) });
+  const d = classifyFailure(err, run.controller.signal.aborted, ctx.clock.now());
+  const log = run.log.child({ providerId });
+  switch (d.kind) {
+    case 'abort':
+      return; // why: spec §3 "a cell interrupted mid-flight returns to not_run" — nothing was written, so it still is
+    case 'cell-error': {
+      if (stage === 'discovery')
+        ctx.repos.cells.writeTileError(run.executionId, providerId, [...cells], d.reason, d.lastError);
+      else {
+        ctx.db.transaction(() => {
+          for (const cell of cells)
+            ctx.repos.cells.setOutcome(run.executionId, cell, stage, providerId, {
+              status: 'error',
+              reason: d.reason,
+              lastError: d.lastError,
+              incrementAttempts: true,
+            });
+        });
+      }
+      // why: spec §8.1 "2 consecutive [parse errors] for one provider (counted in ledger finalisation order)";
+      // calls settle in finalisation order, and any other outcome breaks the streak
+      const streak = d.parse ? (run.parseStreak.get(providerId) ?? 0) + 1 : 0;
+      run.parseStreak.set(providerId, streak);
+      log.warn({ stage, reason: d.reason, cells: cells.length, parseStreak: streak }, 'cells marked error');
+      if (d.disableProvider) disableProvider(run, providerId, `an ${d.reason} error`);
+      else if (streak >= 2) disableProvider(run, providerId, 'two consecutive parse errors');
+      return;
+    }
+    case 'limiter-timeout':
+      log.warn({ stage, resumeAfter: d.resumeAfter }, 'limiter deadline passed; pausing');
+      stopRun(run, { kind: 'limiter-timeout', resumeAfter: d.resumeAfter });
+      return;
+    case 'budget':
+      // Task 7.10 replaces this case with applyBudgetBreach (the per-scope rows of the table).
+      stopRun(run, { kind: 'budget', error: d.error, resumeAfter: null });
+      return;
+    case 'fatal':
+      log.error({ stage, err: d.message }, 'unexpected failure; pausing');
+      stopRun(run, { kind: 'fatal', message: d.message });
+      return;
+  }
+}
+
+/**
+ * Spec §8.1 "provider disabled for the run": its lanes stop taking cells; calls already in flight finish and are
+ * written (decision 25); settleLane marks what is left skipped:provider_disabled once the pool drains.
+ */
+export function disableProvider(run: RunState, providerId: ProviderId, why: string): void {
+  if (run.disabled.has(providerId)) return;
+  run.disabled.add(providerId);
+  for (const [key, lane] of run.lanes) if (key.endsWith(`|${providerId}`)) lane.intake.abort();
+  run.notices.push({
+    kind: 'provider_disabled',
+    detail: `${providerId} was disabled for this run after ${why}; its remaining cells are skipped (provider disabled).`,
+  });
+  run.log.warn({ providerId, why }, 'provider disabled for the run');
+}
+
+/** After a lane's pool drains: a disabled provider's remaining cells become skipped:provider_disabled (spec §8.1). */
+export function settleLane(ctx: EngineContext, run: RunState, stage: Stage, providerId: ProviderId): void {
+  if (run.disabled.has(providerId)) markRemaining(ctx, run, stage, providerId, 'provider_disabled');
 }

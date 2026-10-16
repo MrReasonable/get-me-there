@@ -1,3 +1,4 @@
+import { ACTIVE_STATUSES } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { createRegistry } from './registry.js';
 import { resumeExecution } from './resume.js';
@@ -9,6 +10,8 @@ import type { StartOptions, StartResult } from './types.js';
 export interface Orchestrator {
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
+  /** Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel. */
+  cancel(executionId: string): Promise<boolean>;
   /** Aborts every pass as SIGTERM (cells in flight → not_run, status interrupted) and waits for them. */
   shutdown(): Promise<void>;
   running(): string[];
@@ -19,6 +22,19 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
   return {
     start: (id, opts) => startExecution(ctx, reg, id, opts),
     resume: (id, opts) => resumeExecution(ctx, reg, id, opts),
+    cancel: async (id) => {
+      const live = reg.get(id);
+      if (live !== undefined) {
+        stopRun(live, { kind: 'cancel' });
+        await reg.done(id);
+        return true;
+      }
+      const exec = ctx.repos.executions.get(id);
+      if (exec === null || !ACTIVE_STATUSES.includes(exec.status)) return false;
+      ctx.hooks.cancelResume(id); // why: spec §8.1 one-shot job "cancelled on cancel"
+      ctx.repos.executions.setStatus(id, 'cancelled', { finishedAt: ctx.clock.now(), resumeAfter: null });
+      return true;
+    },
     shutdown: async () => {
       for (const run of reg.all()) stopRun(run, { kind: 'sigterm' });
       await reg.settleAll();

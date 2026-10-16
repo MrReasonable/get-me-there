@@ -36,8 +36,13 @@ export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'er
 export type SkipReason = 'not_selected' | 'budget' | 'provider_disabled' | 'departed';
 /** A provider whose `cabins` excludes the definition's cabin: every cell no_data, no call. Spec §3. */
 export type NoDataReason = 'cabin-not-offered';
+/**
+ * Spec §5.4: step 1 returned options and none was priced. Its own reason (decision 37), so every reason-keyed reader sees
+ * it; never retried by a resume, automatic or manual (only a single-cell verification searches the cell again).
+ */
+export type NoPricedOptionsReason = 'no-priced-options';
 /** The vendor message goes to lastError, never to reason. Spec §3. */
-export type ErrorReason = ProviderErrorKind | NormalisationReason;
+export type ErrorReason = ProviderErrorKind | NormalisationReason | NoPricedOptionsReason;
 
 /** Spec §7 `cell_outcomes`: per (execution, cell, stage, provider). */
 export interface CellOutcome extends CellKey {

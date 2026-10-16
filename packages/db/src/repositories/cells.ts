@@ -108,12 +108,16 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
     throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
 }
 
-/** Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. */
+/**
+ * Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. `no-priced-options`
+ * (spec §5.4, decision 37) is never retried by either.
+ */
 const NON_RETRYABLE = [
   'auth',
   'quota',
   'parse',
   'no-return-legs',
+  'no-priced-options',
   'fx-unavailable',
   'currency-unsupported',
   'unknown-airport-tz',

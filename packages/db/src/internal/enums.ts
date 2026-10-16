@@ -95,6 +95,7 @@ export const ERROR_REASONS = exhaustive<ErrorReason>()([
   'unmappable-carrier',
   'bad-local-time',
   'cell-mismatch',
+  'no-priced-options',
 ] as const);
 /** Spec §3: the reasons a no_data outcome written without a fetch may carry (markNoData). */
 export const NO_DATA_REASONS = exhaustive<NoDataReason>()(['cabin-not-offered'] as const);
