@@ -10,38 +10,38 @@ status: draft
 
 # WP10 — web: Calendar (View B), Duration (View C), History, Playwright smoke
 
-Reconciled on 2026-10-15 against spec revision 20, the plan's "Global Constraints", "API contract", "Web" and "Decisions taken at reconciliation" 1–39 (decision 38 holds this brief's round-1 rulings), the real `@gmt/core` on `main` (`d4256d5`: `api-contract/results.ts`, `labels/age.ts`, `dates/epochDay.ts`), and the WP9 brief as revised under decisions 36 and 38. Round 1 of review (24 High, 46 Medium, 32 Low) is folded into the sections below.
+Reconciled on 2026-10-16 against spec revision 23, the plan's "Global Constraints", "API contract", "Web" and "Decisions taken at reconciliation" 1–49 (38 holds this brief's round-1 rulings; 42, 44, 46, 48 and 49 the shared names and rules it now follows), the real `@gmt/core` on `main`, WP9's committed revision after its round 3 (`main` at `1f0ace4`: the shell WP10 extends, never replaces, decision 46) and WP7's changes that WP9 also takes as preconditions (Tasks 7.1, 7.8, 7.13, 7.18, and `pnpm casts`). Round 1 of review (24 High, 46 Medium, 32 Low) is folded into the sections below.
 
 ## 1. Goal
 
-Replace WP9's three WP10 placeholders with the calendar heatmap (View B), the price-by-stay-length chart (View C) and the price history view, where every price carries provenance (the route-level series has the spec's exemption), "not searched" never looks like "no flights", coverage is visible without reading counts, and the browser's timezone never moves a date; add the core contract fields these views need, and one Playwright smoke that drives the real api in fixture mode.
+Replace WP9's three "not available yet" views with the calendar heatmap (View B), the price-by-stay-length chart (View C) and the price history view, where every price carries provenance (the route-level series has the spec's exemption), "not searched" never looks like "no flights", an unconfirmed price never looks confirmed, coverage is visible without reading counts, and the browser's timezone never moves a date; add the core contract fields these views need, and one Playwright smoke that drives the real api in fixture mode.
 
 ## 2. Scope
 
 **In**
 
-- **Contract additions in `@gmt/core` `api-contract/results.ts`** (plan decision 38; WP8 fills them, §13): per-series `searched` flags and the `cell` of each per-nights minimum in the duration analysis; `stale` and `truncated` on history points as the api sends them (`historyPointResponseSchema`; the stored `historyPointSchema` that `@gmt/db` returns is unchanged); `priceConfirmed` on itinerary history points; `verify` (the child's call cap and each verification provider's calls left this month) on the cell detail.
+- **Contract additions in `@gmt/core` `api-contract/results.ts`** (decisions 38, 42, 48; WP8 fills them, §13): per-series `searched` flags and the `cell` of each per-nights minimum in the duration analysis; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses, while the stored `historyPointSchema` that `@gmt/db` returns is unchanged; `priceConfirmed` on itinerary history points; `verify: { maxCalls, headroomCalls }` on the cell detail (WP7's `childCapPreview`); `verification.unconfirmed` on the calendar day (selected cells priced with no confirmed price, decision 48).
 - **View B Calendar** (`apps/web/src/views/Calendar/*`):
-  - Each day shows one price by the spec §11 precedence (core's `compareAges`; a SearchApi verified price has age `'unknown'`), through PriceCell's compact form: price, stale label, short provider badge, compact age, dashed outline for calendar prices, destination; then the stay of the cheapest cell, "cached from £X" when the shown verified price hides a cheaper calendar price, and a coverage cue ("S/M searched", 11 px, with a solid or striped swatch). Everything else is in the side panel.
+  - Each day shows one price by the spec §11 precedence (core's `compareAges`; a SearchApi verified price has age `'unknown'`) through WP9's PriceCell `compact` form (decision 46: the amount with "≈", a short provider badge, the destination code, the stale, truncated, unconfirmed and "vendor's cache age unknown" marks; source, age and note in its title); then the stay of the cheapest cell, "cached from £X" when the shown verified price hides a cheaper calendar price, and a coverage cue ("S/M searched", 11 px, with a solid or striped swatch). Everything else is in the side panel.
   - Colour by one basis at a time. The default basis is the calendar basis unless days showing a class-verified price are a strict majority, judged over all destinations. Quintile bands with a numeric legend; fewer than ten days or a spread under 10% gives one flat shade and the legend says why; days of the other basis are hatched.
-  - Days without a price show distinct glyphs with text for `empty`, `no_data`, `error`, `skipped` and `not_run`; a day no run reaches says "not searched yet"; only a definition without a discovery provider says "no discovery provider configured".
+  - Days without a price show distinct glyphs with text for `empty`, `no_data`, `error`, `skipped` and `not_run`; a day no run reaches says "not searched yet"; only a definition without a discovery provider says "no discovery provider configured". A day whose itinerary search priced cells but confirmed none of their prices says "price not confirmed" (decision 48).
   - A per-destination filter. The contract carries coverage counts per day, not per destination, so a filtered day shows no glyph and no fraction and says "coverage counts cover all destinations".
   - A bucket total that disagrees with its buckets shows "counts inconsistent".
   - Filter, basis and (at phone width) month live in the URL. At phone width one month is drawn at a time as a compact grid.
-  - Keyboard: an APG grid with arrows, Home/End, PageUp/PageDown, Enter/Space and visible focus.
-  - Side panel: the day's six-bucket marker and its prices with full provenance; a cell picker; the cell's outcomes per run (newest first, the latest run marked, reasons in words); its prices; the per-cell verify action through WP9's `useExecutionActions().verify`, with the child's call cap and the month's calls left beside it, a named budget-cap refusal, and the button hidden without a verification provider.
+  - Keyboard: each month is a table of day buttons with a roving `tabIndex`; arrows, Home/End and PageUp/PageDown move focus, Enter and Space open the day; visible focus.
+  - Side panel: the day's six-bucket marker (with the unconfirmed cells) and its prices with full provenance; a cell picker; the cell's outcomes per run (newest first, the latest run marked, reasons in words, "price not confirmed" beside a priced verification outcome whose reason carries `price-unconfirmed`); its prices; the per-cell verify action through WP9's `useExecutionActions().verify`, with the child's hard stop and the calls of headroom left beside it, a named budget-cap refusal, and the button hidden without a verification provider.
 - **View C Duration** (`apps/web/src/views/Duration/*`): Recharts 3 bars per nights for the verified series and one calendar series per provider, labelled from the prices' own provenance with `n` in the label, the tooltip and a note defining it; per-series gaps ("not searched" / "searched, no price", "not itinerary-searched" / "itinerary-searched, no price"); "ns" on the axis for a nights value no series searched; stale minima drawn faded with a heavy outline; a table with destination, note, `n` and departure date per minimum, each nights value linking to Results filtered to it.
-- **History** (`apps/web/src/views/History/*`): route history by pair (or all pairs overlaid), the pair in the URL; fetch-time series (calendar per provider; itinerary offers split into confirmed and "price not confirmed by the final step", dashed) joined only between consecutive scheduled runs (gap ≤ 1.5 × the refresh period); Google's indicative route-level series in its own chart, price by travel date; tables of every point with stale and "cheapest of the rows read" labels; the cross-execution ViewHeader; an itinerary heading from the cached Results row.
-- **Review focus 3** (dates): the weekday, month and instant forms join WP9's `src/format.ts` (the one date-formatting module, plan decision 38); `src/lib/time.ts` parses instants; a no-Date guard over `apps/web/src`; a TZ suite under `America/Los_Angeles` and `Asia/Tokyo` covering the calendar grid and WP9's Results date columns.
-- **Copy** in WP9's `src/copy.ts`: `providerShort`, `calendarView`, `durationView`, `historyView`, with SAMPLES in WP9's catalogue test.
-- **WP9 files extended** (§12): `format.ts`, `copy.ts`, `api/{types,endpoints,queries}.ts`, `components/{PriceCell,Provenance}.tsx`, `App.tsx`, `views/Results/ExpandedRow.tsx`, `test/msw/handlers.ts`, `test/copy/catalogue.test.ts`, `test/app/shell.test.tsx`, `vitest.config.ts`, `vite.config.ts`, `tsconfig.json`, `package.json`.
+- **History** (`apps/web/src/views/History/*`): route history by pair (or all pairs overlaid), the pair in the URL; fetch-time series (calendar per provider; itinerary offers split into confirmed and "price not confirmed by the final step", dashed) joined only between consecutive scheduled runs (gap ≤ 1.5 × the refresh period); Google's indicative route-level series in its own chart, price by travel date; tables of every point with stale and "cheapest of the rows read" labels; WP9's `ViewHeader variant="span"`; an itinerary heading from the cached Results row.
+- **Review focus 3** (dates): the grid and instant forms join WP9's `src/format.ts` on its one month and weekday table (decisions 38, 46); `src/lib/time.ts` turns instants into epoch milliseconds; a guard against `Date` objects over `apps/web/src`; a TZ suite under `America/Los_Angeles` and `Asia/Tokyo` covering the calendar grid and WP9's Results date columns.
+- **Copy** in WP9's `src/copy.ts`: `calendarView`, `durationView`, `historyView`, with SAMPLES in WP9's catalogue test.
+- **WP9 files extended** (§12): `format.ts`, `copy.ts`, `api/{types,endpoints,queries}.ts`, `App.tsx`, `views/Results/ExpandedRow.tsx`, `test/msw/handlers.ts`, `test/copy/{catalogue,sourceGuard}.test.ts`, `test/copy/renderedSweep.test.tsx`, `test/app/shell.test.tsx`, `vitest.config.ts`, `vite.config.ts`, `tsconfig.test.json`, `package.json`. PriceCell and ViewHeader are used as WP9 ships them.
 - **Playwright smoke in fixture mode**: Results, Calendar, Duration and History in a real browser on the synthetic run, plus a 375 px project; excluded from `pnpm test`.
 
 **Out**
 
-- **WP9:** the shell, nav, status bar, `ViewHeader` (including its `ageHours: number | 'unknown'` and cross-execution variant), `Provenance`, `PriceCell`'s full form and its `truncated` prop, `PriceBoundary`, the client, `COPY` base entries (including `truncatedNote`), `NowContext`, `format.ts`'s `formatIsoDate`/`formatIsoDateShort`, URL state, Definitions, Results, Coverage, Providers, and the msw test API. WP10 edits only the WP9 files named in §12.
-- **WP8:** every route; filling the fields this brief adds (§13); `stale`, `ageHours` and `truncated` per price; the in-process fixture host (WP4b's wiring).
-- **WP7:** the child call cap and the dry-run that WP8 reads for `verify` (§13).
+- **WP9:** the shell, nav, status bar, `ViewHeader` (with `variant="span"`), `Provenance`, `PriceCell` (with `compact`, `truncated`, `unconfirmed`), `PriceBoundary`, the client, `COPY` base entries (`truncatedNote`, `providerShort`, `priceNotConfirmed`, `vendorAgeUnknown`, `spanExecutions`), `NowContext`, `format.ts`'s `formatIsoDate`/`formatIsoDateShort`/`formatIsoDateLong`/`formatWeekday`, URL state, Definitions, Results, Coverage, Providers, the msw test API and its guards, and the boundary script's place-name and suppression checks. WP10 edits only the WP9 files named in §12.
+- **WP8:** every route; filling the fields this brief adds (§13); `stale` by fetch age (decision 44), `ageHours` and `truncated` per price; the in-process fixture host (WP4b's wiring).
+- **WP7:** `Engine.childCapPreview` behind `verify`, the `price-unconfirmed` priced reason and `isPriceUnconfirmed`, `microGbpToPence`, and `scripts/check-casts.mjs` (preconditions, as for WP9).
 - **WP0/WP1:** everything else in `@gmt/core` the views consume.
 - **WP11:** the Alerts view.
 
@@ -50,158 +50,146 @@ Replace WP9's three WP10 placeholders with the calendar heatmap (View B), the pr
 - **§11 View B:** precedence (a fresh class-verified price, else the fresher of a stale verified price and the cheapest calendar price, unknown age losing to known, else glyphs); colour by one basis on a quintile scale over that basis's visible days, fallback days hatched and named in the legend; the six-bucket marker "P priced · E no fares · X no cached data · R error · S skipped · U not searched of M" and "itinerary-searched K of N selected +C on demand"; distinct glyphs; a numeric legend; a per-destination filter; a side panel with cells, outcomes and verify.
 - **§11 View C:** bars per nights with axis titles (nights, £); "min among verified (class verified, n=…)" and calendar per provider; `n` in label and tooltip; explicit empty and loading states; gaps for unsearched nights; no interpolation.
 - **§11 History:** one series per provider and kind; x is `fetchedAt` for provider series and the point's own `date` for the route-level series; gaps; reused rows excluded (by the api); axis titles; empty state.
-- **§11 vocabulary and provenance:** "Google date grid via SearchApi", "Google Flights via SearchApi", "Aviasales cache", "itinerary-search basis"; provenance on every price visible without hover; dashed outline and "constraints not checked" for calendar prices; destination and the operator's note; every view header names its executions, status, age and stale label. Accessibility: keyboard-operable calendar, visible focus, labelled controls, no colour-only meaning.
-- **§8.1:** `stale` per price comes from the api; stale prices are labelled, never hidden; unknown age loses to known; ties go to verified. Single-cell verification: the child's call cap and the hidden action without a verification provider.
-- **§3:** six buckets summing to M; reused counted inside its bucket; "verified" only for the class; stage counts say "itinerary-searched". SearchApi itinerary prices carry `maxAgeHours: 'unknown'` (rev 15).
+- **§11 vocabulary and provenance:** "Google date grid via SearchApi", "Google Flights via SearchApi", "Aviasales cache", "itinerary-search basis"; provenance on every price visible without hover (the calendar day uses decision 46's compact form); dashed outline and "constraints not checked" for calendar prices; destination and the operator's note; every view header names its executions, status, age and stale label. Accessibility: keyboard-operable calendar, visible focus, labelled controls, no colour-only meaning.
+- **§3 (rev 23), §8.1:** `stale` per price comes from the api, by fetch age plus any known vendor age; a vendor age of `'unknown'` is labelled "vendor's cache age unknown", never called stale for that reason (decision 44); stale prices are labelled, never hidden; unknown age loses to known in the precedence; ties go to verified. Single-cell verification: the child's cap and the hidden action without a verification provider.
+- **§3, §6.6, §7 (rev 22):** a priced outcome's reason may carry `price-unconfirmed`; a cell's verification price counts only confirmed prices and shows "price not confirmed" when it has none (decisions 45, 48).
+- **§3:** six buckets summing to M; reused counted inside its bucket; "verified" only for the class; stage counts say "itinerary-searched".
 - **§10:** calendar, duration-analysis, cells, `/cells/verify`, itinerary and route history, all under `/api`.
 - **§9 item 6:** View B states including the partial-day six-bucket marker and the per-basis scale with hatched fallback days; chart empty and loading states; the numeric legend; keyboard operation; banned words; a price lacking provenance fails to render; one Playwright smoke in fixture mode. (§9 item 6 and the §16 table say "five-way marker"; spec §3 defines six buckets, §13.)
 - **§5.5:** synthetic data is labelled on every view beside the red banner.
-- **Plan decisions consumed:** 14 (`resultRowKey`, `?row=`), 15 (route history one point per run), 21 (`DEFAULT_DISCOVERY_REFRESH_HOURS`), 24 (SearchApi itinerary age unknown), 25 (child caps, budget stops), 27 and 37 (unconfirmed offers stored unverified, "price not confirmed by the final step"), 30 and 36 (`truncated`, "cheapest of the rows read"; one PriceCell for every price; contract parsing in production), 38 (this brief's rulings).
+- **Plan decisions consumed:** 14 (`resultRowKey`, `?row=`), 15 (route history one point per run), 21 (`DEFAULT_DISCOVERY_REFRESH_HOURS`), 24 (SearchApi itinerary age unknown), 25 and 43 (child caps), 27 and 37 (unconfirmed offers, "price not confirmed by the final step"), 30, 36 and 47 (`truncated`, "cheapest of the rows read"), 38 (this brief's rulings), 42 (the contract fields and the names shared with WP9), 44 (staleness by fetch age; no suppressions; "hard stop", never "up to"), 45 and 48 (`price-unconfirmed`, `childCapPreview`, `pnpm casts`), 46 (WP9 is the base; one date table; PriceCell `compact`; `ViewHeader variant="span"`; no lint suppressions; the place-name word list).
 
 ## 4. Interfaces consumed
 
-From `@gmt/core` on `main` (real signatures):
+From `@gmt/core` on `main`, with WP9's Task 9.0 and WP7's Tasks 7.1, 7.8, 7.13 and 7.18 applied (both are preconditions of this package):
 
 ```ts
-// types/ids.ts
-export type Iata = string & { readonly __brand: 'Iata' };
-export type IsoDate = string & { readonly __brand: 'IsoDate' };
-export type IsoMonth = string & { readonly __brand: 'IsoMonth' };
-export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' };
-export const isoDateSchema;   // z.string().refine(real YYYY-MM-DD).transform(→ IsoDate): the one brand mint WP10's src uses (monthDays)
-export const isoDateTimeSchema;   // the toISOString form only
-export function asIata(s: string): Iata; export function asIsoDate(s: string): IsoDate; export function asIsoMonth(s: string): IsoMonth; // tests and seeds
+// types/ids.ts: brands come from these helpers (tests) or zod parsing (src); the web's src mints none by hand
+export type Iata = string & { readonly __brand: 'Iata' }; export type IsoDate = string & { readonly __brand: 'IsoDate' };
+export type IsoMonth = string & { readonly __brand: 'IsoMonth' }; export type IsoDateTime = string & { readonly __brand: 'IsoDateTime' };
+export const isoDateSchema, isoDateTimeSchema;   // z schemas over a plain string
+export const asIata, asIsoDate, asIsoMonth, asIsoDateTime;   // tests and seeds
 export const isoDateTimeOfEpochMs: (ms: number) => IsoDateTime;
 // types/provenance.ts, types/definition.ts, types/execution.ts
 export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
-export interface Provenance { providerId; sourceKind; fetchedAt: IsoDateTime; providerObservedAt?: IsoDateTime; maxAgeHours: number | 'unknown'; fx: FxInfo; pointOfSale: PointOfSale; cabin: Cabin }
-export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
-export interface Cell extends CellKey { nights: number }
+export interface Provenance { providerId; sourceKind; fetchedAt: IsoDateTime; providerObservedAt?: IsoDateTime; maxAgeHours: number | 'unknown'; fx: FxInfo; pointOfSale; cabin }
+export const provenanceSchema: z.ZodType<Provenance>;
+export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate } export interface Cell extends CellKey { nights: number }
 export function cellKeyString(c: CellKey): string;
 export interface ProvidersConfig { discovery: ProviderId[]; verification: ProviderId[]; discoveryRefreshHours: Partial<Record<ProviderId, number>> }
 export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }
 // dates/epochDay.ts
-export function toEpochDay(date: IsoDate): number; export function fromEpochDay(day: number): IsoDate;
-export function addDays(date: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number; export function monthOf(date: IsoDate): IsoMonth;
+export function toEpochDay(d: IsoDate): number; export function fromEpochDay(day: number): IsoDate; export function addDays(d: IsoDate, n: number): IsoDate;
+export function daysBetween(a: IsoDate, b: IsoDate): number; export function monthOf(d: IsoDate): IsoMonth;
 // labels/age.ts
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;
-export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown';
-export function formatDuration(hours: number): string; export function formatAgeFull(a: EffectiveAge): string; export function formatAgeCompact(a: EffectiveAge): string;
-export function compareAges(a: EffectiveAge, b: EffectiveAge): number;   // < 0 when a is fresher; unknown loses to any known; two unknowns tie
-// alerts/evaluate.ts (plan decision 21), results/rowKey.ts, text/money.ts, text/bannedWords.ts
-export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
-export function resultRowKey(row: Pick<ResultRow, 'itineraryHash' | 'calendarPriceId'>): string;
-export function formatPence(pence: number): string;
+export function effectiveAge(p, now: IsoDateTime): EffectiveAge; export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown';
+export function formatDuration(hours: number): string; export function formatAgeFull(a: EffectiveAge): string; export function compareAges(a: EffectiveAge, b: EffectiveAge): number;
+// coverage/rollUp.ts (WP7 Task 7.8, decision 48)
+export const PRICE_UNCONFIRMED = 'price-unconfirmed'; export function isPriceUnconfirmed(reason: string | null): boolean;
+// alerts/evaluate.ts, results/rowKey.ts, text/bannedWords.ts
+export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168; export function resultRowKey(row): string;
 export const BANNED_WORD_ALLOWLIST: readonly string[]; export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
-export type CalendarDay = z.infer<typeof apiContract.calendarDaySchema>;
-export * as apiContract from './api-contract/index.js';
+export type CalendarDay = z.infer<typeof apiContract.calendarDaySchema>; export * as apiContract;
 ```
 
-From `api-contract/results.ts` on `main` (verbatim shapes; Task 10.1 changes the four marked ⊕):
+From `api-contract/results.ts` (verbatim shapes; Task 10.1 changes the five marked ⊕):
 
 ```ts
+priceCellSchema { pricePence; provenance; stale; ageHours: number | 'unknown'; truncated }   // truncated: WP9 Task 9.0
 const pricedCell = priceCellSchema.extend({ cell: cellSchema });
-calendarDaySchema { date: IsoDate; discovery: Array<{ providerId; buckets: Buckets; total }>; verification: { selected; itinerarySearched; onDemand };
+⊕ calendarDaySchema { date; discovery: Array<{ providerId; buckets; total }>; verification: { selected; itinerarySearched; onDemand };
   cheapestVerified: (PriceCell & { cell; itineraryHash }) | null; cheapestPartiallyVerified: (PriceCell & { cell; itineraryHash; count }) | null;
-  cheapestCalendar: (PriceCell & { cell }) | null; byDestination: Array<{ destination: Iata; cheapestVerified: PriceCell | null; cheapestCalendar: PriceCell | null }> }
-calendarResponseSchema { days; executions: ExecutionSummary[]; staleAfterHours: number; calendarStaleAfterHours: z.partialRecord(ProviderId, number) }
+  cheapestCalendar: (PriceCell & { cell }) | null; byDestination: Array<{ destination; cheapestVerified: PriceCell | null; cheapestCalendar: PriceCell | null }> }
+calendarResponseSchema { days; executions: ExecutionSummary[]; staleAfterHours; calendarStaleAfterHours: z.partialRecord(ProviderId, number) }
 ⊕ durationAnalysisResponseSchema { byNights: Array<{ nights; minVerified: (PriceCell & { n }) | null; minCalendar: Array<{ providerId; price: PriceCell; n }>; searched: boolean }>; executions }
-cellOutcomeSchema = CellKey & { executionId; stage; providerId; status: 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped'; reason: string | null; attempts; lastError: string | null; fetchedAt: IsoDateTime | null; minPence; cabin; pointOfSale; sourceKind; reusedFromExecutionId: string | null }
-⊕ cellDetailResponseSchema { cell: Cell; outcomes: CellOutcome[]; calendarPrices: Array<PriceCell & { executionId; calendarPriceId }>; observations: ResultRow[] }
-⊕ historyPointSchema { at: IsoDateTime; pricePence; provenance }    // @gmt/db's offerHistory and route history return this type
+cellOutcomeSchema = CellKey & { executionId; stage; providerId; status; reason: string | null; attempts; lastError: string | null; fetchedAt: IsoDateTime | null; minPence; cabin; pointOfSale; sourceKind; reusedFromExecutionId: string | null }
+⊕ cellDetailResponseSchema { cell; outcomes: CellOutcome[]; calendarPrices: Array<PriceCell & { executionId; calendarPriceId }>; observations: ResultRow[] }
+historyPointSchema { at: IsoDateTime; pricePence; provenance }    // @gmt/db's offerHistory and route history return this type
 routeSeriesPointSchema { date: IsoDate; pricePence; fetchedAt: IsoDateTime; providerId; sourceKind }
 ⊕ itineraryHistoryResponseSchema { itineraryHash; series: Array<{ providerId; seller; cabin; points: HistoryPoint[] }> }
 ⊕ routeHistoryResponseSchema { origin; destination; calendarSeries: Array<{ providerId; cabin; points: Array<HistoryPoint & { cell; executionId }> }>; routeSeries: Array<{ providerId; cabin: Cabin | 'unknown'; points: RouteSeriesPoint[] }> }
-executionSummarySchema { id; status; isChild; startedAt: IsoDateTime | null; finishedAt: IsoDateTime | null; ageHours: number | 'unknown' }   // newest first
+executionSummarySchema { id; status; isChild; startedAt: IsoDateTime | null; finishedAt: IsoDateTime | null; ageHours: number | 'unknown'; expandTop }   // newest first
 ```
 
-From WP9 (`docs/briefs/wp09-web-shell-definitions-results.md`, real names; the four lines marked ★ are WP9's revisions under decisions 36 and 38, which WP10 builds on):
+From WP9 (`docs/briefs/wp09-web-shell-definitions-results.md` as committed, §5; real names):
 
 ```ts
-// src/copy.ts
-export const COPY: { loading; loadFailed(m); actionFailed(m); priceWithheld; placeholder(wp); provider: Record<ProviderId, string>;
-  source: Record<SourceKind, string>; classLabel: Record<VerdictClass | 'unchecked', string>; basisName: { verified: 'itinerary-search basis'; calendar: 'calendar basis' };
-  bucket: { priced; empty: 'no fares'; no_data: 'no cached data'; error; skipped; not_run: 'not searched' }; reusedNote(n); stageName; statusName; stale; staleView;
-  constraintsNotChecked; fxApprox; fxTitle(d, s); cabinName: Record<Cabin, string>; verifyCell; verifyStarted; none; importExample; runNow; syntheticBanner; … } as const;
-★ COPY.truncatedNote: 'cheapest of the rows read'                                     // decision 36
-// src/format.ts (the web's one date-formatting module, decision 38)
-export function formatIsoDate(d: string): string;        // '2027-03-14' → '14 Mar 2027', string slicing
-★ export function formatIsoDateShort(d: string): string; // '2027-03-14' → '14 Mar'
-export { formatPence };
+// src/format.ts: the web's one date-formatting module, one month and weekday table (decision 46)
+export { formatPence }; export function formatIsoDate(d: string): string;   // "14 Mar 2027"
+export function formatIsoDateShort(d: string): string;   // "14 Mar"
+export function formatIsoDateLong(d: IsoDate): string;   // "Sun 14 Mar 2027"
+export function formatWeekday(d: IsoDate): string;       // "Sun"
+// src/copy.ts (as const): loading, loadFailed(m), actionFailed(m), placeholder ("This view is not available yet."), provider, source, stale, staleView,
+//   vendorAgeUnknown, priceNotConfirmed, truncatedNote, providerShort, classLabel, basisName, bucket, reusedNote(n), stageName, cabinName,
+//   spanExecutions(n), executionsShown, verifyCell, verifyStarted, none, advanced, headlineLead, …
 // src/components
-export interface PriceCellProps { pricePence: number; provenance: Provenance | undefined; calendar: boolean; stale: boolean; destination?: string | undefined; destinationNote?: string | null | undefined;
-★   truncated?: boolean | undefined }                                                  // decision 36: renders COPY.truncatedNote
-export function PriceCell(props: PriceCellProps): JSX.Element;      // throws without valid provenance; renders data-testid="provenance"
-export interface ProvenanceProps { provenance: Provenance | undefined; calendar: boolean; destination?: string | undefined; destinationNote?: string | null | undefined }
-export class PriceBoundary;                                           // renders COPY.priceWithheld (role="alert") instead of a broken price
-★ export type ViewHeaderProps = { title: string; executions: ReadonlyArray<Pick<ExecutionSummary, 'id' | 'status' | 'ageHours'>>; stale: boolean }
-★   | { title: string; span: { runs: number; firstAt: IsoDateTime; lastAt: IsoDateTime } | null; stale: boolean };   // decision 38 cross-execution variant
-export function ViewHeader(props: ViewHeaderProps): JSX.Element;    // executions line "showing run <id8> (<status>, <age>)"; stale line COPY.staleView
+export interface PriceCellProps { pricePence: number; provenance: unknown; calendar: boolean; stale: boolean; truncated?: boolean; unconfirmed?: boolean;
+  destination?: string | undefined; destinationNote?: string | null | undefined; notSeenInLatestHours?; qualifier?; besideColumns?: boolean; compact?: boolean; fullAge?: boolean }
+export function PriceCell(props: PriceCellProps): JSX.Element;   // data-testid="price-cell"; the full form holds Provenance (data-testid="provenance")
+export class PriceBoundary;   // COPY.priceWithheld (role="alert"), reported through console.error
+export function ViewHeader(props: { title: string; executions: readonly HeaderRun[]; stale: boolean; variant?: 'single' | 'span' }): JSX.Element;
+export type HeaderRun = Pick<ExecutionSummary, 'id' | 'status' | 'isChild' | 'startedAt' | 'ageHours'>;
 // src/api
-export class ApiError extends Error { readonly status: number; readonly code: string; readonly details: unknown }
-export async function call<T>(method: Method, path: string, opts?: { params?; query?; body? }): Promise<T>;   // parses with the route's contract schema
-export const api: { providers(); …; verifyCell(body: { definitionId: string; cell: CellKey }) };
-export const qk: { providers; definitions; results(id, basis); execution(id); coverage(id); calendarGap(id); airports(q) };
-export function useProviders(); export function useExecutionActions(): { cancel; resume; start; verify: UseMutationResult<…, { definitionId: string; cell: CellKey }> };
-export type ProvidersResponse; export type DefinitionResponse; export type ResultsResponse; export type ExecutionSummary; export type PriceCellData; export type ResultRow;
+export class ApiError extends Error { readonly status: number; readonly code: string }
+export async function call<S extends z.ZodType>(schema: S, method: Method, path: string, opts?: CallOptions): Promise<z.output<S>>;   // checks the pair against ROUTES, parses in every mode
+export const api: { providers(); …; verifyCell(body: VerifyCellBody) }; export const qk: { …; results(id, basis) };
+export const POLL_MS = 2_000; export function useProviders(); export function useExecutionActions(): { cancel; resume; start; verify };
+export type ProvidersResponse, DefinitionResponse, ResultsResponse, ExecutionSummary, PriceCellData, ResultRow, VerifyCellBody /* z.input */;
 // src/now.tsx, src/hooks/useMediaQuery.ts, src/state/urlState.ts
-export function useNow(): IsoDateTime; export const NARROW_QUERY = '(max-width: 639px)'; export function useMediaQuery(q: string): boolean;
-export function useSearchParams(): URLSearchParams; export function updateSearchParams(patch: Record<string, string | null>, mode?: 'push' | 'replace'): void;
-export function hrefWith(patch: Record<string, string | null>): string; export function navigateTo(patch: Record<string, string | null>): (e: MouseEvent<HTMLAnchorElement>) => void;
-// Results URL keys: f.nights = '<min>-<max>'; row = resultRowKey
+export function useNow(): IsoDateTime; export const NARROW_QUERY; export function useMediaQuery(q: string): boolean;
+export function useSearchParams(): URLSearchParams; export function updateSearchParams(patch, mode?: 'push' | 'replace'): void;
+export function hrefWith(patch): string; export function navigateTo(patch): (e) => void;   // Results URL keys: f.nights = '<min>-<max>', row = resultRowKey
 // test/
-export const API = 'http://localhost:3000/api';   // test/fixtures.ts; handler URLs append only the route tail
-export const provSearch: Provenance; export const provCalendar: Provenance; export const summary: (status?, ageHours?) => ExecutionSummary;
-export function definition(over?); export function resultsResponse(over?); export function verifiedRow(over?); export function calendarRow(over?); export function providersResponse(over?);
-export const NOW: IsoDateTime;   // '2026-10-14T15:00:00.000Z'
-export function renderWithProviders(ui, opts?: { search?: string }): RenderResult & { user; client: QueryClient };
-export const server;             // started in test/setup.ts; unhandled requests are errors (msw 3: onUnhandledFrame: 'error')
-export function setViewportWidth(px: number): void;   // test/viewport.ts; setup starts every test at 1280
+export const API = 'http://localhost:3000/api'; export const provSearch, provCalendar, provSynthetic: ProvenanceInput;   // test/fixtures.ts, wire form
+export function summary(over?: Partial<z.input<typeof executionSummarySchema>>): ExecutionSummary; export function definition(over?); export function resultsResponse(over?);
+export function verifiedRow(over?); export function calendarRow(over?); export function providersResponse(over?);
+export const NOW: IsoDateTime; export type ProvenanceInput; export function renderWithProviders(ui, opts?: { search?; fakeTimers? }): RenderResult & { user; client };   // test/render.tsx
+export const server;   // a catch-all records any unmatched request; test/setup.ts fails the test on it and on any console.error
+export function expectConsoleErrors(pattern: RegExp): void;   // test/guards.ts
+export function setViewportWidth(px: number): void;   // test/viewport.ts
 ```
 
-WP9's guards that WP10 passes: the source guard (no literal JSX text or literal `aria-label`/`title`/`placeholder`/`alt`/`label` with a letter in any `.tsx`); the catalogue test (every `COPY` function sampled, no banned word, "verified" only on allowed paths); the rendered-DOM sweep over every view.
+WP9's guards WP10 passes: the AST source guard (no literal copy in JSX or in lettered props of components, money formatted only in its allowlisted files, "£" only in the catalogue and the formatter); the catalogue test; the rendered-DOM sweep (no banned word; every "£" inside a PriceCell, a cost or a label); `pnpm boundaries` (the one suppression check, decision 49: no `biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck` in any package; and no place name in an `apps/web/src` string literal outside `example.ts`, with a committed non-airport word list); `pnpm casts`.
 
 ## 5. Interfaces produced
 
 ```ts
 // @gmt/core api-contract/results.ts (Task 10.1)
 export const historyPointResponseSchema;   // historyPointSchema + { stale: boolean; truncated: boolean }
+// calendarDaySchema.verification.unconfirmed: number
 // durationAnalysisResponseSchema.byNights[]: minVerified: (PriceCell & { cell; n }) | null; minCalendar[].price: PriceCell & { cell };
 //   searched: { verification: boolean; discovery: Array<{ providerId; searched: boolean }> }
 // itineraryHistoryResponseSchema.series[].points: Array<HistoryPointResponse & { priceConfirmed: boolean }>
 // routeHistoryResponseSchema.calendarSeries[].points: Array<HistoryPointResponse & { cell; executionId }>
-// cellDetailResponseSchema.verify: { maxCalls: number; providers: Array<{ providerId; monthCallsLeft: number | null }> } | null
-// src/format.ts (appended to WP9's module)
-export const WEEKDAYS: readonly ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-export function weekdayIndex(d: IsoDate): number;           // Monday = 0
-export function formatDayOfMonth(d: IsoDate): string;       // '14'
-export function formatDayShort(d: IsoDate): string;         // 'Sun 14 Mar'
-export function formatDayLong(d: IsoDate): string;          // 'Sun 14 Mar 2027'
-export function formatIsoMonth(m: IsoMonth): string;        // 'March 2027'
+// cellDetailResponseSchema.verify: { maxCalls: number; headroomCalls: number } | null
+// src/format.ts (appended to WP9's module, reading its one month and weekday table)
+export function weekdayIndex(d: IsoDate): number;            // Monday = 0
+export const WEEK_HEADERS: readonly string[];                 // ['Mon', …, 'Sun']
+export function formatDayOfMonth(d: IsoDate): string;        // '14'
+export function formatDayShort(d: IsoDate): string;          // 'Sun 14 Mar'
+export function formatIsoMonth(m: IsoMonth): string;         // 'Mar 2027'
 export function monthDays(m: IsoMonth): IsoDate[];
-export function formatInstantLondon(ms: number): string;    // '14 Mar 2027, 15:00' (Europe/London)
+export function formatInstantLondon(ms: number): string;     // '14 Mar 2027 15:00' (Europe/London)
 export function formatInstantDateLondon(ms: number): string; // '14 Mar 2027' (Europe/London)
 // src/lib
 export function instantMs(t: string): number; export function dateMs(d: IsoDate): number; export function dateOfMs(ms: number): IsoDate;   // time.ts
 export function discoverySourceLabel(providerId: ProviderId, providers: ProvidersResponse | undefined): string; export function sourceLabelOf(kinds: Iterable<SourceKind>): string;   // sources.ts
 export const SERIES_COLOURS; export function seriesColour(i: number): string;   // palette.ts
 // src/api
-export type CalendarResponse, DurationResponse, CellDetailResponse, ItineraryHistoryResponse, RouteHistoryResponse; export type { CalendarDay } from '@gmt/core';
+export type { CalendarDay }; export type CalendarResponse, DurationResponse, CellDetailResponse, ItineraryHistoryResponse, RouteHistoryResponse;
 api.calendar(id); api.durationAnalysis(id); api.cellDetail(id, cell); api.itineraryHistory(hash); api.routeHistory(origin, destination, cabin);
 qk.calendar(id); qk.duration(id); qk.cell(id, key); qk.itineraryHistory(hash); qk.routeHistory(origin, destination, cabin);
 export function whileRunning(data): number | false; export function useCalendar(id); export function useDurationAnalysis(id);
 export function useCellDetail(id, cell: CellKey | null); export function useRouteHistories(pairs, cabin, enabled); export function useItineraryHistory(hash: string | null);
-// src/components/PriceCell.tsx, Provenance.tsx
-PriceCellProps.compact?: boolean; ProvenanceProps.compact?: boolean;   // the calendar day form
 // src/views/Calendar
 export type DayPrice; export interface DaySlice; export interface GridDay; export type GlyphStatus; export type DayBasis;
 export function bucketTotal(b); export function searchedCount(b); export function countsConsistent(d); export function formatDiscoveryMarker(d); export function formatVerificationMarker(v);
 export function totalReused(slices); export type Coverage; export function coverageOf(slice): Coverage; export interface SliceOptions; export function sliceForDestination(day, destination, o): DaySlice;
 export function DayMarker({ slice }); export function ReusedNote({ count }); export function CoverageCue({ coverage });
-export type GlyphReason; export type DayDisplay; export function resolveDayDisplay(slice, now): DayDisplay; export interface CalendarModel;
-export function buildCalendarModel(days, colourBasis, now): CalendarModel; export function defaultColourBasis(days, hasVerification, now): DayBasis;
+export type GlyphReason; export type DayDisplay; export function resolveDayDisplay(slice, now): DayDisplay; export function defaultColourBasis(days, hasVerification, now): DayBasis;
+export interface CalendarModel; export function buildCalendarModel(days, colourBasis, now): CalendarModel;   // model.ts
 export type Band; export type ScaleMode; export interface LegendEntry; export interface QuintileScale; export const MIN_BANDED_DAYS = 10;
 export const BAND_CLASSES; export const FLAT_CLASS; export const PRICELESS_CLASS; export function quintileBand(sorted, v): Band; export function buildScale(values): QuintileScale;
 export const FOCUS_RING; export function targetOf(date, key): IsoDate | null; export function CalendarGrid({ days, model, months, destinationNotes, onOpen });
@@ -219,27 +207,28 @@ export function linesFromRoute(resp, providers, pair?): { fetch: PlotLine[]; rou
 export function historySpan(lines); export function newestAllStale(lines); export function HistoryChart; export function RouteChart; export function HistoryTable; export function RouteTable;
 export const HISTORY_PARAMS; export const MAX_OVERLAY_PAIRS = 6; export function historyHref(hash): string; export function findCachedRow(entries, hash); export function HistoryView({ definition });
 // src/copy.ts
-COPY.providerShort, COPY.calendarView, COPY.durationView, COPY.historyView
+COPY.calendarView, COPY.durationView, COPY.historyView
+// DOM markers WP9's rendered sweep accepts for "£" outside a PriceCell (Task 10.12): [data-scale] (legend ranges, chart axes and tooltips), [data-indicative] (route-level rows)
 ```
 
 ## 6. Library notes
 
-Versions are from plan Task 0.1 (already in `apps/web/package.json` on `main`). Everything below was checked on 2026-10-15 against the installed packages in a scratch assembly of this brief (§10).
+Versions are from plan Task 0.1 (already in `apps/web/package.json`). Everything below was checked on 2026-10-16 against the installed packages in a scratch assembly of this brief on `main` with WP9's committed code applied (§10).
 
 - **recharts 3.10.1:**
   - Components used: `BarChart`, `Bar` (function `dataKey`, `name`, `isAnimationActive={false}`, `<Cell>` children for per-entry `fillOpacity`, `stroke`, `strokeWidth`), `LineChart`, `Line` (per-line `data`, function `dataKey`, `connectNulls={false}`, `strokeDasharray`), `XAxis`/`YAxis` (`label={{ value, position, angle, offset }}`, `tickFormatter`, `type="number"`, `scale="time"`, `domain={['dataMin', 'dataMax']}`, `allowDuplicatedCategory={false}`), `Tooltip` (`content` receives `TooltipContentProps` with `active` and `label`), `Legend`, `CartesianGrid`, `ResponsiveContainer`.
-  - Rendered DOM the tests read: the chart surface is `svg[role="application"]` (legend icons are `svg.recharts-surface` too); each drawn bar is a `path.recharts-rectangle` inside `g.recharts-bar`, and a `null` value draws none; extra props on `<Cell>` (`data-stale`) pass to the path; a line is `path.recharts-line-curve` whose `d` has one `M` per unbroken segment, and a line with one point draws no curve.
-  - History has no tooltip: with one `data` array per line on a time axis, a shared tooltip pairs points by index, not by time; the tables are the record of every point.
+  - Rendered DOM the tests read: the chart surface is `svg[role="application"]` (legend icons are `svg.recharts-surface` too); each drawn bar is a `path.recharts-rectangle` inside `g.recharts-bar`, and a `null` value draws none (a 0 draws none visibly either, so a value test guards it); extra props on `<Cell>` (`data-stale`) pass to the path; a line is `path.recharts-line-curve` whose `d` has one `M` per unbroken segment, and a line with one point draws no curve.
+  - History has no tooltip: with one `data` array per line on a time axis a shared tooltip pairs points by index, not by time; the tables are the record of every point.
   - jsdom: `ResponsiveContainer` measures its container with `getBoundingClientRect()` and observes it with `ResizeObserver`; `test/setup-charts.ts` installs a no-op `ResizeObserver` (a class implementing the interface, no cast) and sizes only `.recharts-responsive-container` at 800×320.
-- **@playwright/test 1.64.1:** `defineConfig`, `devices['Desktop Chrome']`, `projects[]` with `grep`, `grepInvert` and `dependencies`, `webServer` as an array (`env` merges over `process.env`); locators `getByRole`, `getByTestId`, `getByText`, `locator`; `toBeVisible`, `toContainText`, `toHaveClass`, `toHaveCount`, `toHaveCSS`, `expect(fn).toPass({ timeout })`; `page.evaluate` for the scroll-width check.
+- **Biome 2.5.15 and the calendar's markup:** `useSemanticElements` wants a `<table>`, `<tr>` and `<td>` where ARIA `grid`, `row` and `gridcell` roles sit on divs, and `noNoninteractiveElementToInteractiveRole` refuses those roles on table elements, so an APG `role="grid"` cannot be written without a suppression, which decisions 46 and 49 forbid (no scoped lint override is granted either). Each month is therefore a native table (its caption names it) whose data days are `<button>`s with a roving `tabIndex`: the table gives rows, columns and headers to assistive technology, the buttons give focus and activation, and the arrow, Home/End and PageUp/PageDown keys move focus between them. A button holds phrasing content only, so the day's parts are `span`s.
+- **@playwright/test 1.64.1:** `defineConfig`, `devices['Desktop Chrome']`, `projects[]` with `grep`, `grepInvert` and `dependencies`, `webServer` as an array (`env` merges over `process.env`); locators `getByRole`, `getByTestId`, `getByText`, `locator(…, { hasText })`; `toBeVisible`, `toContainText`, `toHaveClass`, `toHaveCount`, `toHaveCSS`, `expect(fn).toPass({ timeout })`; `page.evaluate` for the scroll-width check.
 - **vite 8.3.4:** `preview.proxy` defaults to `server.proxy`, so `vite preview` reuses the dev proxy; the proxy target reads `GMT_API_ORIGIN`.
 - **react 19.3.1:** `useState`, `useRef`, `useEffect`, `useMemo`, `useId`.
 - **@tanstack/react-query 5.104.2:** `useQuery({ queryKey, queryFn, enabled, refetchInterval: (query) => … })`, `useQueries({ queries })`, `useQueryClient().getQueriesData<T>({ queryKey })`, `setQueryData` (tests).
-- **msw 3.0.3:** WP9's `server`; tests prepend `server.use(http.get(\`${API}/…\`, …))` with `HttpResponse.json(body, { status })` and `delay(…)`. msw 3 names the unhandled-request option `onUnhandledFrame` (`lib/_chunks/shared-options.d.ts`); WP9's setup must pass `onUnhandledFrame: 'error'` (its current text says `onUnhandledRequest`, which msw 3 does not type and ignores).
-- **vitest 5.0.4:** `pool: 'forks'` (assigning `process.env.TZ` in a forked worker re-detects the zone); `setupFiles` run before the test file is imported; coverage `thresholds` accept glob keys with their own floors; under jsdom, `fileURLToPath(new URL(…, import.meta.url))` throws ("The URL must be of scheme file"), so file-reading tests use `import.meta.dirname`.
-- **zod 4.6.7:** builders parse through `apiContract.*Schema.parse`; `z.input<typeof schema>` types a builder argument that accepts plain strings.
-- **Intl:** `Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', … }).format(epochMs)` takes a number, so `format.ts` never builds a `Date`.
-- **Biome 2.5.15:** `noNoninteractiveElementToInteractiveRole` flags the APG grid roles on `<table>`/`<td>`; the grid carries one `// biome-ignore` comment on each `role` attribute with the reason, the only suppressions in WP10.
+- **msw 3.0.3:** WP9's `server` and catch-all; tests prepend `server.use(http.get(\`${API}/…\`, …))` with `HttpResponse.json(body, { status })` and `delay(…)`. Every route a WP10 view calls has a default handler (`test/msw/wp10Handlers.ts`), because an unmatched request fails the test.
+- **vitest 5.0.4:** `pool: 'forks'` (assigning `process.env.TZ` in a forked worker re-detects the zone); `setupFiles` run before the test file is imported; coverage `thresholds` accept glob keys with their own floors; under jsdom a file-reading test uses `import.meta.dirname`.
+- **zod 4.6.7:** builders parse through `apiContract.*Schema.parse` (and `provenanceSchema.parse` for provenance), so a contract change breaks at the fixture; `z.input<typeof schema>` types a builder argument that accepts plain strings.
+- **Intl:** `Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year, month: '2-digit', day: '2-digit', hour, minute, hourCycle: 'h23' }).formatToParts(epochMs)`: numeric parts only, so month names come from WP9's one table, and nothing builds a `Date`.
 - **dataviz skill:** axis titles with units, one legend per chart, no dual axes, a sequential single hue for the heatmap with a clearly tinted lightest band, a categorical palette for series, and a dash or outline style backing every colour.
 
 ## 7. Files
@@ -252,7 +241,7 @@ Versions are from plan Task 0.1 (already in `apps/web/package.json` on `main`). 
 - `apps/web/src/views/Duration/{data.ts,DurationChart.tsx,DurationView.tsx}`
 - `apps/web/src/views/History/{lines.ts,HistoryChart.tsx,HistoryView.tsx}`
 - `apps/web/test/fixtures.wp10.ts`, `apps/web/test/msw/wp10Handlers.ts`, `apps/web/test/setup-tz.ts`, `apps/web/test/setup-charts.ts`
-- `apps/web/test/lib/{dates,time,sources,noDateParsing}.test.ts`, `apps/web/test/components/priceCellCompact.test.tsx`
+- `apps/web/test/lib/{dates,time,sources,noDateParsing}.test.ts`
 - `apps/web/test/views/calendar/{marker.test.tsx,display.test.ts,scale.test.ts,grid.test.tsx,panel.test.tsx,view.test.tsx}`
 - `apps/web/test/views/duration.test.tsx`, `apps/web/test/views/history.test.tsx`, `apps/web/test/app/wp10Wiring.test.tsx`, `apps/web/test/tz/dates.tz.test.tsx`
 - `apps/web/playwright.config.ts`, `apps/web/e2e/smoke.spec.ts`, `apps/web/e2e/prepare-db.mjs`
@@ -264,7 +253,7 @@ Versions are from plan Task 0.1 (already in `apps/web/package.json` on `main`). 
 
 ## 8. Tasks
 
-Every command runs from the repository root. Focused runs use `pnpm --filter @gmt/web exec vitest run <files>`, which skips the coverage thresholds (plan decision 8). In the tests, `API`, `definition`, `summary`, `provSearch`, `provCalendar`, `verifiedRow`, `calendarRow`, `resultsResponse` and `providersResponse` come from WP9's `test/fixtures.ts`; `NOW` and `renderWithProviders` from `test/render.tsx`; `server` from `test/msw/server.ts`; `setViewportWidth` from `test/viewport.ts`. No `as` appears anywhere except `as const` and `satisfies`.
+Every command runs from the repository root. Focused runs use `pnpm --filter @gmt/web exec vitest run <files>`, which skips the coverage thresholds (plan decision 8). In the tests, `API`, `definition`, `summary`, `provSearch`, `provCalendar`, `provSynthetic`, `verifiedRow`, `calendarRow`, `resultsResponse` and `providersResponse` come from WP9's `test/fixtures.ts`; `NOW` and `renderWithProviders` from `test/render.tsx`; `server` from `test/msw/server.ts`; `expectConsoleErrors` from `test/guards.ts`; `setViewportWidth` from `test/viewport.ts`. A label `` `path` — find: `` followed by `` `path` — replace with: `` replaces exactly one occurrence of the found text in a WP9 file, as in WP9's brief. No `as` appears anywhere except `as const` and `satisfies` (`pnpm casts`), and no comment suppresses a lint or type rule.
 
 ### Task 10.1: Contract additions in core (first failing test)
 
@@ -273,10 +262,10 @@ Every command runs from the repository root. Focused runs use `pnpm --filter @gm
 - Modify: `packages/core/src/api-contract/results.ts`
 
 **Interfaces:**
-- Consumes: `priceCellSchema` (with WP9's `truncated`, decision 36), `cellSchema`, `providerIdSchema`, `executionSummarySchema`, `historyPointSchema`.
-- Produces: the per-series `searched` and the minimum's `cell` in `durationAnalysisResponseSchema`; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses; `priceConfirmed` on itinerary history points; `verify` on `cellDetailResponseSchema` (plan decision 38).
+- Consumes: `priceCellSchema` (with WP9 Task 9.0's `truncated`), `cellSchema`, `providerIdSchema`, `executionSummarySchema`, `historyPointSchema`.
+- Produces: `calendarDaySchema.verification.unconfirmed`; the per-series `searched` and the minimum's `cell` in `durationAnalysisResponseSchema`; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses; `priceConfirmed` on itinerary history points; `verify: { maxCalls, headroomCalls }` on `cellDetailResponseSchema` (decisions 38, 42, 48).
 
-Why each field exists: the duration view must say "not itinerary-searched" where only discovery ran (one flag per nights value cannot), and must name the departure date and destination of each minimum; history points must carry the same `stale` and "cheapest of the rows read" labels as every other price; unconfirmed offers must be told apart from confirmed ones; the verify button must show what the child may spend. `historyPointSchema` itself is unchanged because `@gmt/db`'s `offerHistory` and route history return its type; WP8 adds the flags when it answers.
+Why each field exists: the calendar day must say "price not confirmed" when its itinerary search priced cells but confirmed none of their prices (decision 48; the day carries counts, not outcome reasons); the duration view must say "not itinerary-searched" where only discovery ran (one flag per nights value cannot), and must name the departure date and destination of each minimum; history points must carry the same `stale` and "cheapest of the rows read" labels as every other price; unconfirmed offers must be told apart from confirmed ones; the verify button must show the hard stop the child would get and the calls of headroom left (WP7's `childCapPreview`, decisions 42, 45). `historyPointSchema` itself is unchanged because `@gmt/db`'s `offerHistory` and route history return its type; WP8 adds the flags when it answers.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -285,6 +274,7 @@ Why each field exists: the duration view must say "not itinerary-searched" where
 ```ts
 import { describe, expect, it } from 'vitest';
 import {
+  calendarDaySchema,
   cellDetailResponseSchema,
   durationAnalysisResponseSchema,
   historyPointSchema,
@@ -292,7 +282,7 @@ import {
   routeHistoryResponseSchema,
 } from '../../src/api-contract/index.js';
 
-// WP10's contract additions (plan decision 38; spec §11 View B, View C, History). WP8 fills every field.
+// WP10's contract additions (plan decisions 38, 42, 48; spec §11 View B, View C, History). WP8 fills every field.
 const provenance = {
   providerId: 'travelpayouts',
   sourceKind: 'authorised-cached',
@@ -374,13 +364,28 @@ describe('WP10 contract additions (plan decision 38)', () => {
     const detail = { cell, outcomes: [], calendarPrices: [], observations: [] };
     expect(cellDetailResponseSchema.safeParse(detail).success).toBe(false);
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify: null }).success).toBe(true);
-    const verify = { maxCalls: 6, providers: [{ providerId: 'searchapi', monthCallsLeft: 9385 }] };
+    const verify = { maxCalls: 6, headroomCalls: 1840 };
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify }).success).toBe(true);
-    const uncapped = { maxCalls: 6, providers: [{ providerId: 'searchapi', monthCallsLeft: null }] };
-    expect(cellDetailResponseSchema.safeParse({ ...detail, verify: uncapped }).success).toBe(true);
     expect(
       cellDetailResponseSchema.safeParse({ ...detail, verify: { ...verify, maxCalls: -1 } }).success,
     ).toBe(false);
+    expect(cellDetailResponseSchema.safeParse({ ...detail, verify: { maxCalls: 6 } }).success).toBe(false);
+  });
+
+  it('a calendar day counts its selected cells whose itinerary search priced nothing the final step confirmed', () => {
+    const day = {
+      date: '2027-03-14',
+      discovery: [],
+      verification: { selected: 2, itinerarySearched: 2, onDemand: 0 },
+      cheapestVerified: null,
+      cheapestPartiallyVerified: null,
+      cheapestCalendar: null,
+      byDestination: [],
+    };
+    expect(calendarDaySchema.safeParse(day).success).toBe(false);
+    expect(
+      calendarDaySchema.safeParse({ ...day, verification: { ...day.verification, unconfirmed: 1 } }).success,
+    ).toBe(true);
   });
 });
 ```
@@ -388,13 +393,43 @@ describe('WP10 contract additions (plan decision 38)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/api-contract/wp10.test.ts`
-Expected: FAIL, 4 of 4: the duration case with `expected false to be true` (the per-series `searched` object is refused), the other three with `expected true to be false` (the old schemas accept a point without `stale`, an offer without `priceConfirmed` and a detail without `verify`).
+Expected: FAIL, 5 of 5: the duration case with `expected false to be true` (the per-series `searched` object is refused), the other four with `expected true to be false` (the old schemas accept a point without `stale`, an offer without `priceConfirmed`, a detail without `verify` and a day without `unconfirmed`).
 
 - [ ] **Step 3: Implement**
 
-In `packages/core/src/api-contract/results.ts`, replace `durationAnalysisResponseSchema` with:
+`packages/core/src/api-contract/results.ts` (after WP9's Task 9.0):
+
+`packages/core/src/api-contract/results.ts` — find:
 
 ```ts
+  discovery: z.array(z.object({ providerId: providerIdSchema, buckets: bucketsSchema, total: count })),
+  verification: z.object({ selected: count, itinerarySearched: count, onDemand: count }),
+  cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+  discovery: z.array(z.object({ providerId: providerIdSchema, buckets: bucketsSchema, total: count })),
+  /**
+   * `unconfirmed`: selected cells of the day whose verification outcome is priced with no confirmed price (every
+   * offer's price unconfirmed by the final step, reason part `price-unconfirmed`; plan decisions 45, 48).
+   */
+  verification: z.object({ selected: count, itinerarySearched: count, onDemand: count, unconfirmed: count }),
+  cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
+```
+
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+});
+export const durationAnalysisResponseSchema = z.object({
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+});
 /**
  * Spec §11 View C per nights value. Each minimum carries the cell it came from (plan decision 38), so the view can name
  * its departure date and destination. `searched` is per series: a series' flag is true when at least one of its
@@ -402,8 +437,21 @@ In `packages/core/src/api-contract/results.ts`, replace `durationAnalysisRespons
  * discovery: that provider's outcome), so "not searched" and "searched, no price" stay distinct per series.
  */
 export const durationAnalysisResponseSchema = z.object({
-  byNights: z.array(
-    z.object({
+```
+
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+      nights: count,
+      minVerified: priceCellSchema.extend({ n: count }).nullable(),
+      minCalendar: z.array(z.object({ providerId: providerIdSchema, price: priceCellSchema, n: count })),
+      searched: z.boolean(),
+    }),
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
       nights: count,
       /** n = cells of this nights value with a class-verified price */
       minVerified: pricedCell.extend({ n: count }).nullable(),
@@ -414,34 +462,43 @@ export const durationAnalysisResponseSchema = z.object({
         discovery: z.array(z.object({ providerId: providerIdSchema, searched: z.boolean() })),
       }),
     }),
-  ),
-  executions: z.array(executionSummarySchema),
+```
+
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+  observations: z.array(resultRowSchema),
 });
 ```
 
-Add `verify` as the last field of `cellDetailResponseSchema`, after `observations`:
+`packages/core/src/api-contract/results.ts` — replace with:
 
 ```ts
+  observations: z.array(resultRowSchema),
   /**
-   * What the per-cell verify action would spend now (spec §8.1, plan decision 25): the child execution's call cap and
-   * each verification provider's calls left this month (null when that provider has no monthly cap). Null when the
-   * definition has no verification provider.
+   * What the per-cell verify action would spend now (spec §8.1; plan decisions 42, 45): WP7's childCapPreview, the
+   * child's hard stop and the calls of budget headroom left for it. Null when the definition has no verification
+   * provider.
    */
-  verify: z
-    .object({
-      maxCalls: count,
-      providers: z.array(z.object({ providerId: providerIdSchema, monthCallsLeft: count.nullable() })),
-    })
-    .nullable(),
+  verify: z.object({ maxCalls: count, headroomCalls: count }).nullable(),
 });
 ```
 
-After `historyPointSchema`, add:
+`packages/core/src/api-contract/results.ts` — find:
 
 ```ts
+  provenance: provenanceSchema,
+});
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+  provenance: provenanceSchema,
+});
 /**
- * A history point as the api sends it: the stored point plus `stale` (spec §8.1, the same rule as any price of its
- * kind) and `truncated` (plan decisions 30 and 36: from a page-capped tile, "cheapest of the rows read").
+ * A history point as the api sends it: the stored point plus `stale` (spec §3 and plan decision 44: by fetch age plus
+ * any known vendor age) and `truncated` (decisions 30, 36: "cheapest of the rows read"). The db keeps historyPointSchema.
  */
 export const historyPointResponseSchema = historyPointSchema.extend({
   stale: z.boolean(),
@@ -449,12 +506,45 @@ export const historyPointResponseSchema = historyPointSchema.extend({
 });
 ```
 
-and use it in both history responses: `itineraryHistoryResponseSchema.series[].points` becomes `z.array(historyPointResponseSchema.extend({ priceConfirmed: z.boolean() }))` (with the doc comment `/** priceConfirmed: false for a step-2 offer the final step did not confirm (plan decisions 27, 37) */` above it), and `routeHistoryResponseSchema.calendarSeries[].points` becomes `z.array(historyPointResponseSchema.extend({ cell: cellSchema, executionId: z.string() }))`. `HistoryPoint`, `RouteSeriesPoint` and `CalendarDay` keep their exports.
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+      cabin: cabinSchema,
+      points: z.array(historyPointSchema),
+    }),
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+      cabin: cabinSchema,
+      /** priceConfirmed: false for an offer whose price the final step did not confirm (decisions 27, 37) */
+      points: z.array(historyPointResponseSchema.extend({ priceConfirmed: z.boolean() })),
+    }),
+```
+
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+      cabin: cabinSchema,
+      points: z.array(historyPointSchema.extend({ cell: cellSchema, executionId: z.string() })),
+    }),
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+      cabin: cabinSchema,
+      points: z.array(historyPointResponseSchema.extend({ cell: cellSchema, executionId: z.string() })),
+    }),
+```
+
+`HistoryPoint`, `RouteSeriesPoint` and `CalendarDay` keep their exports.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/api-contract`
-Expected: PASS, 3 files (`contract.test.ts`, `types.test.ts`, `wp10.test.ts`), 15 tests.
+Expected: PASS; `wp10.test.ts` passes 5 tests and the other contract files are unchanged.
 
 Run: `pnpm -r typecheck`
 Expected: clean. `@gmt/db` still compiles because `HistoryPoint` is unchanged; nothing on `main` reads the changed duration, history or cell-detail shapes yet (WP8 is the first producer, §13).
@@ -462,20 +552,22 @@ Expected: clean. `@gmt/db` still compiles because `HistoryPoint` is unchanged; n
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp10: contract fields for per-series searched, minimum cells, history stale/truncated/confirmed and verify cost"
+git add packages/core && git commit -m "wp10: contract fields for unconfirmed days, per-series searched, minimum cells, history stale/truncated/confirmed, verify"
 ```
 
-### Task 10.2: Date forms in format.ts, instant helpers, and the no-Date guard (review focus 3, part 1)
+### Task 10.2: Grid and instant forms in format.ts, instant helpers, and the Date guard (review focus 3, part 1)
 
 **Files:**
 - Create: `apps/web/src/lib/time.ts`, `apps/web/test/lib/{dates.test.ts,time.test.ts,noDateParsing.test.ts}`
-- Modify: `apps/web/src/format.ts` (WP9's; the import line and an appended block)
+- Modify (WP9): `apps/web/src/format.ts` (its import line, and a block appended after its last function)
 
 **Interfaces:**
-- Consumes: `toEpochDay`, `fromEpochDay`, `addDays`, `monthOf`, `isoDateSchema`, `isoDateTimeSchema`; WP9's `formatIsoDate`, `formatIsoDateShort`.
-- Produces: `WEEKDAYS`, `weekdayIndex`, `formatDayOfMonth`, `formatDayShort`, `formatDayLong`, `formatIsoMonth`, `monthDays`, `formatInstantLondon`, `formatInstantDateLondon` (in `format.ts`); `instantMs`, `dateMs`, `dateOfMs` (in `lib/time.ts`).
+- Consumes: `toEpochDay`, `addDays`, `monthOf`, `isoDateSchema`, `isoDateTimeSchema`, `fromEpochDay`; WP9's `formatIsoDate`, `formatIsoDateShort`, `formatIsoDateLong`, `formatWeekday` and its private `MONTHS` and `WEEKDAYS` table.
+- Produces: `weekdayIndex`, `WEEK_HEADERS`, `formatDayOfMonth`, `formatDayShort`, `formatIsoMonth`, `monthDays`, `formatInstantLondon`, `formatInstantDateLondon` (in `format.ts`); `instantMs`, `dateMs`, `dateOfMs` (in `lib/time.ts`).
 
-Plan decision 38: one date-formatting module. The weekday forms build on WP9's `formatIsoDate` and `formatIsoDateShort`, so Results and Calendar share one month table and one parser. `lib/time.ts` only parses instants and does epoch-day arithmetic; it formats nothing.
+Decisions 38 and 46: one date-formatting module with one month and weekday table. WP10 adds no table: the grid's Monday-first headers and the month caption read WP9's `WEEKDAYS` and `MONTHS`, and the instant forms take only numeric parts from `Intl` (Europe/London) and print them with `formatIsoDate`. `lib/time.ts` only turns instants into epoch milliseconds and does epoch-day arithmetic; it formats nothing.
+
+The guard forbids `Date` objects, not epoch arithmetic: a `Date` renders in the browser's zone through its local getters and `toLocale*String`, while `Date.parse`, `Date.UTC` and `Date.now` return milliseconds, which carry no zone. Only WP9's `now.tsx` builds one.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -485,19 +577,20 @@ Plan decision 38: one date-formatting module. The weekday forms build on WP9's `
 import { asIsoDate, asIsoMonth } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
-  formatDayLong,
   formatDayOfMonth,
   formatDayShort,
   formatInstantDateLondon,
   formatInstantLondon,
+  formatIsoDateLong,
   formatIsoMonth,
   monthDays,
+  WEEK_HEADERS,
   weekdayIndex,
 } from '../../src/format.js';
 
 const d = asIsoDate;
 
-describe('date-only forms from YYYY-MM-DD strings, in WP9 format.ts (spec §6.1, review focus 3, plan decision 38)', () => {
+describe('WP10’s date forms in WP9’s format.ts (spec §6.1, review focus 3, decisions 38, 46)', () => {
   it('weekday from the epoch day, Monday = 0, negative epoch days included', () => {
     expect(weekdayIndex(d('1970-01-01'))).toBe(3); // Thursday
     expect(weekdayIndex(d('2027-03-01'))).toBe(0); // Monday
@@ -505,12 +598,13 @@ describe('date-only forms from YYYY-MM-DD strings, in WP9 format.ts (spec §6.1,
     expect(weekdayIndex(d('2027-03-28'))).toBe(6); // Sunday, the UK DST change
     expect(weekdayIndex(d('1969-12-31'))).toBe(2); // Wednesday
   });
-  it('short and long forms build on WP9 formatIsoDate and formatIsoDateShort', () => {
+  it('the grid forms read WP9’s one month and weekday table (decision 46)', () => {
+    expect(WEEK_HEADERS).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
     expect(formatDayShort(d('2027-03-14'))).toBe('Sun 14 Mar');
-    expect(formatDayLong(d('2027-03-14'))).toBe('Sun 14 Mar 2027');
-    expect(formatDayLong(d('2028-02-29'))).toBe('Tue 29 Feb 2028');
+    expect(formatIsoDateLong(d('2027-03-14'))).toBe('Sun 14 Mar 2027');
+    expect(formatIsoDateLong(d('2028-02-29'))).toBe('Tue 29 Feb 2028');
     expect(formatDayOfMonth(d('2027-03-04'))).toBe('4');
-    expect(formatIsoMonth(asIsoMonth('2027-03'))).toBe('March 2027');
+    expect(formatIsoMonth(asIsoMonth('2027-03'))).toBe('Mar 2027');
   });
   it('lists the days of a month, leap February included', () => {
     expect(monthDays(asIsoMonth('2027-02'))).toHaveLength(28);
@@ -519,8 +613,8 @@ describe('date-only forms from YYYY-MM-DD strings, in WP9 format.ts (spec §6.1,
     expect(leap[28]).toBe('2028-02-29');
   });
   it('formats instants in Europe/London whatever the process zone, with the year', () => {
-    expect(formatInstantLondon(Date.UTC(2027, 2, 14, 15))).toMatch(/^14 Mar 2027,? 15:00$/); // GMT
-    expect(formatInstantLondon(Date.UTC(2027, 6, 1, 15))).toMatch(/^1 Jul 2027,? 16:00$/); // BST
+    expect(formatInstantLondon(Date.UTC(2027, 2, 14, 15))).toBe('14 Mar 2027 15:00'); // GMT
+    expect(formatInstantLondon(Date.UTC(2027, 6, 1, 15))).toBe('1 Jul 2027 16:00'); // BST
     expect(formatInstantDateLondon(Date.UTC(2027, 2, 28, 23, 30))).toBe('29 Mar 2027'); // BST: already the 29th
   });
 });
@@ -555,17 +649,14 @@ import { describe, expect, it } from 'vitest';
 
 // why: under jsdom `new URL(…, import.meta.url)` is not a file: URL that node:url accepts; import.meta.dirname is a path.
 const SRC = join(import.meta.dirname, '..', '..', 'src');
-// why: a Date built from 'YYYY-MM-DD' is UTC midnight and renders as the previous day west of Greenwich; local getters
-// shift instants the same way. Only these two files may touch Date, and neither ever receives a date-only string:
-// lib/time.ts parses toISOString instants; now.tsx (WP9) reads the current instant. format.ts formats instants with
-// Intl.DateTimeFormat#format(epochMs), which needs no Date.
-const ALLOWLIST = new Set(['lib/time.ts', 'now.tsx']);
+// why: a Date object renders in the browser's zone: built from 'YYYY-MM-DD' it is UTC midnight, and its local getters
+// and toLocale*String show the previous day west of Greenwich. So no file but now.tsx (WP9: the current instant) builds a
+// Date. Date.parse, Date.UTC and Date.now return epoch milliseconds, which carry no zone, so they are not hazards; the
+// formatters take those milliseconds into an Intl.DateTimeFormat with an explicit timeZone (src/format.ts).
+const ALLOWLIST = new Set(['now.tsx']);
 const FORBIDDEN: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'new Date(', re: /\bnew\s+Date\s*\(/g },
   { name: 'Date(', re: /(?<![.\w])Date\s*\(/g },
-  { name: 'Date.parse(', re: /\bDate\s*\.\s*parse\s*\(/g },
-  { name: 'Date.UTC(', re: /\bDate\s*\.\s*UTC\s*\(/g },
-  { name: 'Date.now(', re: /\bDate\s*\.\s*now\s*\(/g },
   {
     name: 'local date getter',
     re: /\.\s*(getDate|getDay|getMonth|getFullYear|getHours|getMinutes|getTimezoneOffset)\s*\(/g,
@@ -599,13 +690,12 @@ function walk(dir: string): string[] {
   });
 }
 
-describe('no Date parsing outside the allowlisted helpers (review focus 3)', () => {
+describe('no Date object outside WP9’s clock (review focus 3)', () => {
   it('the scanner finds each forbidden form, across lines, and ignores comments and string helpers', () => {
     expect(scan(`const d = new Date('2027-03-14');`)).toEqual(['1: Date(', '1: new Date(']);
     expect(scan(`const d = new\n  Date(\n'2027-03-14');`)).toEqual(['1: new Date(', '2: Date(']);
-    expect(scan(`const t = Date.parse(day.date);`)).toEqual(['1: Date.parse(']);
-    expect(scan(`const t = Date.UTC(2027, 2, 14);`)).toEqual(['1: Date.UTC(']);
-    expect(scan(`const t = Date.now();`)).toEqual(['1: Date.now(']);
+    // why: epoch milliseconds carry no zone; only a Date object (or a library around one) can shift a day.
+    expect(scan(`const t = Date.parse(day.at) + Date.UTC(2027, 2, 14) + Date.now();`)).toEqual([]);
     expect(scan(`const s = Date();`)).toEqual(['1: Date(']);
     expect(scan(`const n = when.getDate();`)).toEqual(['1: local date getter']);
     expect(scan(`label = x.toLocaleDateString('en-GB');`)).toEqual(['1: toLocale*String(']);
@@ -615,7 +705,7 @@ describe('no Date parsing outside the allowlisted helpers (review focus 3)', () 
     ).toEqual([]);
     expect(scan(`const ok = formatDayShort(day.date); const url = 'http://x//y';`)).toEqual([]);
   });
-  it('finds no Date use in apps/web/src outside the allowlist', () => {
+  it('finds no Date object in apps/web/src outside the allowlist', () => {
     const files = walk(SRC);
     expect(files.length).toBeGreaterThan(20); // why: a wrong SRC path must not make this vacuous
     const hits = files
@@ -623,8 +713,8 @@ describe('no Date parsing outside the allowlisted helpers (review focus 3)', () 
       .flatMap((f) => scan(readFileSync(f, 'utf8')).map((h) => `${relative(SRC, f)}:${h}`));
     expect(hits).toEqual([]);
   });
-  it('the allowlist is exactly the two helpers, and both exist', () => {
-    expect([...ALLOWLIST]).toEqual(['lib/time.ts', 'now.tsx']);
+  it('the allowlist is exactly WP9’s clock, and it exists', () => {
+    expect([...ALLOWLIST]).toEqual(['now.tsx']);
     for (const f of ALLOWLIST) expect(statSync(join(SRC, f)).isFile()).toBe(true);
   });
 });
@@ -633,11 +723,17 @@ describe('no Date parsing outside the allowlisted helpers (review focus 3)', () 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/lib`
-Expected: FAIL. `dates.test.ts` fails with `formatDayShort is not a function` (and its siblings); `time.test.ts` with `Failed to resolve import "../../src/lib/time.js"`; `noDateParsing.test.ts` on "the allowlist is exactly the two helpers, and both exist" (`ENOENT … lib/time.ts`). The guard's scan of WP9's files passes: WP9 builds a `Date` only in `now.tsx`. If it lists a WP9 file, do not edit that file: report it to the WP9 owner, because WP10 changes only the WP9 files named in §12.
+Expected: FAIL. `dates.test.ts` fails with `TypeError: weekdayIndex is not a function` (and `formatDayShort`, `monthDays`, …); `time.test.ts` with `Failed to resolve import "../../src/lib/time.js"`. `noDateParsing.test.ts` passes already: it guards code that exists (WP9's code builds a `Date` only in `now.tsx`), and its planted cases are what prove it bites. If it lists a WP9 file, report it to the WP9 owner rather than editing that file.
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/format.ts`: replace the first import line with
+`src/format.ts` — find:
+
+```ts
+import { formatPence, type IsoDate, microGbpToPence, toEpochDay } from '@gmt/core';
+```
+
+`src/format.ts` — replace with:
 
 ```ts
 import {
@@ -646,102 +742,88 @@ import {
   type IsoDate,
   type IsoMonth,
   isoDateSchema,
+  microGbpToPence,
   monthOf,
   toEpochDay,
 } from '@gmt/core';
 ```
 
-and append at the end of the file:
+`src/format.ts` — find:
 
 ```ts
-// --- WP10: weekday, month and instant forms (plan decision 38: this is the web's one date-formatting module) ---
-// Date-only values render from their YYYY-MM-DD strings and core's epoch-day arithmetic only, so no browser timezone
-// can move a day (spec §6.1, review focus 3). Instants format in Europe/London with Intl, which takes epoch
-// milliseconds directly, so nothing here constructs a Date.
+  return penceToPoundsInput(parsePoundsToPence(input));
+}
+```
 
-/** Monday-first weekday abbreviations (grid headers and day labels). */
-export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
-const MONTHS_LONG = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-] as const;
+`src/format.ts` — replace with:
 
-/** Weekday of a date with Monday = 0, from the epoch day. */
+```ts
+  return penceToPoundsInput(parsePoundsToPence(input));
+}
+
+// --- WP10: calendar-grid and instant forms (decisions 38, 46: this module, its one month and weekday table) ---
+
+/** Weekday with Monday = 0, the calendar grid's column, from core's epoch day (1970-01-01 was a Thursday, index 3). */
 export function weekdayIndex(d: IsoDate): number {
-  // why: epoch day 0 (1970-01-01) was a Thursday, index 3; the double modulo keeps negative epoch days in range.
   return (((toEpochDay(d) + 3) % 7) + 7) % 7;
 }
 
-function weekdayName(d: IsoDate): string {
-  const name = WEEKDAYS[weekdayIndex(d)];
-  if (name === undefined) throw new RangeError(`weekday out of range for ${d}`);
-  return name;
-}
+/** The grid's Monday-first column headers, read from the one weekday table. */
+export const WEEK_HEADERS: readonly string[] = [1, 2, 3, 4, 5, 6, 0].map((i) => WEEKDAYS[i] ?? '');
 
-/** '2027-03-14' → '14' (the grid's day number). */
+/** "2027-03-14" → "14", the grid's day number. */
 export function formatDayOfMonth(d: IsoDate): string {
   return String(Number(d.slice(8, 10)));
 }
 
-/** '2027-03-14' → 'Sun 14 Mar' (day cells, the panel's cell picker, chart tooltips). */
+/** "2027-03-14" → "Sun 14 Mar" (day cells, the panel's cell picker, chart tooltips). */
 export function formatDayShort(d: IsoDate): string {
-  return `${weekdayName(d)} ${formatIsoDateShort(d)}`;
+  return `${formatWeekday(d)} ${formatIsoDateShort(d)}`;
 }
 
-/** '2027-03-14' → 'Sun 14 Mar 2027' (panel title, screen-reader day names, tables). */
-export function formatDayLong(d: IsoDate): string {
-  return `${weekdayName(d)} ${formatIsoDate(d)}`;
-}
-
-/** '2027-03' → 'March 2027'. */
+/** "2027-03" → "Mar 2027" (month grids); malformed input is returned as given. */
 export function formatIsoMonth(m: IsoMonth): string {
-  const name = MONTHS_LONG[Number(m.slice(5, 7)) - 1];
-  if (name === undefined) throw new RangeError(`month out of range: ${m}`);
-  return `${name} ${m.slice(0, 4)}`;
+  const month = MONTHS[Number(m.slice(5, 7)) - 1];
+  return month === undefined ? m : `${month} ${m.slice(0, 4)}`;
 }
 
-/** Every date of a month, in order, by epoch-day steps. */
+/** Every date of a month, in order, by epoch-day steps; isoDateSchema validates and brands the first day. */
 export function monthDays(m: IsoMonth): IsoDate[] {
   const out: IsoDate[] = [];
-  // why: isoDateSchema validates and brands the first of the month; no cast and no Date.
   for (let d = isoDateSchema.parse(`${m}-01`); monthOf(d) === m; d = addDays(d, 1)) out.push(d);
   return out;
 }
 
-const LONDON_DATE = new Intl.DateTimeFormat('en-GB', {
+// why: numeric parts only, so the month name comes from the one table above, never from Intl; Intl takes epoch ms,
+// so nothing here builds a Date. Europe/London is the app's reference zone (spec §6.1).
+const LONDON_PARTS = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/London',
-  day: 'numeric',
-  month: 'short',
   year: 'numeric',
-});
-const LONDON_DATE_TIME = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Europe/London',
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
   hour: '2-digit',
   minute: '2-digit',
   hourCycle: 'h23',
 });
 
-/** Epoch ms → '14 Mar 2027, 15:00' in Europe/London (history tables, the panel's fetched column). */
-export function formatInstantLondon(ms: number): string {
-  return LONDON_DATE_TIME.format(ms);
+function londonParts(ms: number): { date: string; time: string } {
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    LONDON_PARTS.formatToParts(ms).find((p) => p.type === type)?.value ?? '';
+  return {
+    date: `${part('year')}-${part('month')}-${part('day')}`,
+    time: `${part('hour')}:${part('minute')}`,
+  };
 }
 
-/** Epoch ms → '14 Mar 2027' in Europe/London (the History fetch axis). */
+/** Epoch ms → "14 Mar 2027 15:00" in Europe/London (history tables, the panel's fetched column). */
+export function formatInstantLondon(ms: number): string {
+  const { date, time } = londonParts(ms);
+  return `${formatIsoDate(date)} ${time}`;
+}
+
+/** Epoch ms → "14 Mar 2027" in Europe/London (the History fetch axis, run dates). */
 export function formatInstantDateLondon(ms: number): string {
-  return LONDON_DATE.format(ms);
+  return formatIsoDate(londonParts(ms).date);
 }
 ```
 
@@ -750,8 +832,8 @@ export function formatInstantDateLondon(ms: number): string {
 ```ts
 import { fromEpochDay, type IsoDate, isoDateTimeSchema, toEpochDay } from '@gmt/core';
 
-// With src/now.tsx, the only file in apps/web/src that may parse or construct a Date (review focus 3;
-// test/lib/noDateParsing.test.ts). Inputs are toISOString instants or epoch-day integers; a date-only string is refused.
+// Instants as epoch milliseconds, which carry no zone (review focus 3; test/lib/noDateParsing.test.ts forbids Date
+// objects outside src/now.tsx). Inputs are toISOString instants or epoch-day integers; a date-only string is refused.
 
 const DAY_MS = 86_400_000;
 
@@ -780,7 +862,7 @@ Expected: PASS, 3 files, 9 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp10: weekday, month and instant forms in format.ts, instant helpers, no-Date guard (review focus 3)"
+git add apps/web && git commit -m "wp10: grid and instant forms on format.ts's one table, instant helpers, Date guard (review focus 3)"
 ```
 
 ### Task 10.3: API wiring, copy, fixtures, source labels and the six-bucket marker
@@ -790,14 +872,14 @@ git add apps/web && git commit -m "wp10: weekday, month and instant forms in for
 - Modify (WP9): `apps/web/src/api/{types.ts,endpoints.ts,queries.ts}`, `apps/web/src/copy.ts`, `apps/web/test/msw/handlers.ts`, `apps/web/test/copy/catalogue.test.ts`
 
 **Interfaces:**
-- Consumes: the Task 10.1 schemas through `z.infer`; `call`, `useProviders`, `useExecutionActions`; `COPY.source`, `COPY.provider`, `COPY.reusedNote`; WP9's `provSearch`, `provCalendar`, `summary`; core's `isoDateTimeOfEpochMs`, `effectiveAge`, `worstCaseAgeHours`.
-- Produces: the WP10 `api.*`, `qk.*` and query hooks with `whileRunning`; `COPY.providerShort`, `COPY.calendarView`, `COPY.durationView`, `COPY.historyView`; `discoverySourceLabel`, `sourceLabelOf`; `DaySlice`, `DayPrice`, `GridDay`, `GlyphStatus`, `DayBasis`, `bucketTotal`, `searchedCount`, `countsConsistent`, `formatDiscoveryMarker`, `formatVerificationMarker`, `totalReused`, `Coverage`, `coverageOf`, `SliceOptions`, `sliceForDestination`, `DayMarker`, `ReusedNote`; the WP10 test builders and default handlers.
+- Consumes: the Task 10.1 schemas through `z.output`; `call(schema, …)`, `POLL_MS`, `useProviders`, `useExecutionActions`; `COPY.source`, `COPY.provider`, `COPY.reusedNote`; WP9's `provSearch`, `provCalendar`, `provSynthetic` (wire form), `summary`; core's `provenanceSchema`, `isoDateTimeOfEpochMs`, `effectiveAge`, `worstCaseAgeHours`.
+- Produces: the WP10 `api.*`, `qk.*` and query hooks with `whileRunning`; `COPY.calendarView`, `COPY.durationView`, `COPY.historyView`; `discoverySourceLabel`, `sourceLabelOf`; `DaySlice`, `DayPrice`, `GridDay`, `GlyphStatus`, `DayBasis`, `bucketTotal`, `searchedCount`, `countsConsistent`, `formatDiscoveryMarker`, `formatVerificationMarker`, `totalReused`, `Coverage`, `coverageOf`, `SliceOptions`, `sliceForDestination`, `DayMarker`, `ReusedNote`; the WP10 test builders and default handlers.
 
 The marker is the spec's six-bucket marker (spec §3 defines six buckets; §9 item 6's "five-way" is a wording slip, §13). Its total M is the api's `total`; when that disagrees with the six buckets' sum the line says "counts inconsistent" (plan decision 38). Discovery counts carry only a providerId, so their source label comes from the provider's discovery capability in GET /api/providers, not from a table in code.
 
 - [ ] **Step 1: Write the failing tests**
 
-`apps/web/test/fixtures.wp10.ts` (WP10's builders over WP9's `test/fixtures.ts`; each contract shape goes through its schema):
+`apps/web/test/fixtures.wp10.ts` (WP10's builders over WP9's `test/fixtures.ts`; each contract shape, provenance included, goes through its schema):
 
 ```ts
 import {
@@ -813,6 +895,7 @@ import {
   isoDateTimeOfEpochMs,
   type Provenance,
   type ProviderId,
+  provenanceSchema,
   worstCaseAgeHours,
 } from '@gmt/core';
 import type { z } from 'zod';
@@ -827,8 +910,8 @@ import type {
 } from '../src/api/types.js';
 import { type SliceOptions, sliceForDestination } from '../src/views/Calendar/marker.js';
 import type { DaySlice, GridDay } from '../src/views/Calendar/types.js';
-import { provCalendar, provSearch, summary } from './fixtures.js';
-import { NOW } from './render.js';
+import { provCalendar, provSearch, provSynthetic, summary } from './fixtures.js';
+import { NOW, type ProvenanceInput } from './render.js';
 
 // WP10's builders on top of WP9's test/fixtures.ts (provenance and execution builders come from there). Every builder
 // that returns a contract shape runs it through the contract schema, so a schema change breaks here, at the fixture.
@@ -859,30 +942,29 @@ export function keyOf(c: Cell): CellKey {
   };
 }
 
+/** WP9's wire-form provenance, re-dated and parsed through core's schema (brands minted by zod, never by hand). */
+function prov(base: ProvenanceInput, h: number, over: Partial<ProvenanceInput> = {}): Provenance {
+  return provenanceSchema.parse({ ...base, fetchedAt: hoursBefore(h), ...over });
+}
+
 /** SearchApi itinerary provenance as stored: maxAgeHours 'unknown' (spec rev 15 §3, plan decision 24). */
 export function provItinerary(h: number): Provenance {
-  return { ...provSearch, fetchedAt: hoursBefore(h), maxAgeHours: 'unknown' };
+  return prov(provSearch, h, { maxAgeHours: 'unknown' });
 }
 
 /** A known-age itinerary provenance; no current provider produces one, so only the precedence tie test uses it. */
 export function provItineraryKnownAge(h: number, maxAgeHours: number): Provenance {
-  return { ...provSearch, fetchedAt: hoursBefore(h), maxAgeHours };
+  return prov(provSearch, h, { maxAgeHours });
 }
 
 /** Travelpayouts calendar provenance fetched h hours before NOW. */
 export function provCalendarAt(h: number, maxAgeHours: number | 'unknown' = 48): Provenance {
-  return { ...provCalendar, fetchedAt: hoursBefore(h), maxAgeHours };
+  return prov(provCalendar, h, { maxAgeHours });
 }
 
-/** The fixture provider's synthetic provenance (spec §5.5: providerId fixture ⇔ sourceKind synthetic). */
-export function provSynthetic(h: number): Provenance {
-  return {
-    ...provCalendar,
-    providerId: 'fixture',
-    sourceKind: 'synthetic',
-    fetchedAt: hoursBefore(h),
-    maxAgeHours: 0,
-  };
+/** The fixture provider's synthetic provenance, from WP9's provSynthetic (spec §5.5). */
+export function provSyntheticAt(h: number): Provenance {
+  return prov(provSynthetic, h);
 }
 
 /** A day price as calendarDaySchema sends it, its age from core's effective-age rule. */
@@ -939,7 +1021,7 @@ export function day(date: string, partial: Partial<Omit<CalendarDay, 'date'>> = 
   return apiContract.calendarDaySchema.parse({
     date,
     discovery: [],
-    verification: { selected: 0, itinerarySearched: 0, onDemand: 0 },
+    verification: { selected: 0, itinerarySearched: 0, onDemand: 0, unconfirmed: 0 },
     cheapestVerified: null,
     cheapestPartiallyVerified: null,
     cheapestCalendar: null,
@@ -1059,7 +1141,7 @@ export function cellDetail(c: Cell, over: Partial<CellDetailResponse> = {}): Cel
     outcomes: [],
     calendarPrices: [],
     observations: [],
-    verify: { maxCalls: 6, providers: [{ providerId: 'searchapi', monthCallsLeft: 9385 }] },
+    verify: { maxCalls: 6, headroomCalls: 1840 },
     ...over,
   });
 }
@@ -1313,9 +1395,9 @@ describe('six-bucket day counts (spec §11 View B, §3)', () => {
   });
 
   it('formats the itinerary-search line separately, and says when no verification provider exists', () => {
-    expect(formatVerificationMarker({ selected: 10, itinerarySearched: 1, onDemand: 2 })).toBe(
-      'itinerary-searched 1 of 10 selected +2 on demand',
-    );
+    expect(
+      formatVerificationMarker({ selected: 10, itinerarySearched: 1, onDemand: 2, unconfirmed: 0 }),
+    ).toBe('itinerary-searched 1 of 10 selected +2 on demand');
     expect(formatVerificationMarker(null)).toBe('itinerary search: no verification provider configured');
   });
 
@@ -1335,7 +1417,7 @@ describe('six-bucket day counts (spec §11 View B, §3)', () => {
       <DayMarker
         slice={slice({
           discovery: [disc('travelpayouts', partial), disc('searchapi', { priced: 12 })],
-          verification: { selected: 10, itinerarySearched: 1, onDemand: 2 },
+          verification: { selected: 10, itinerarySearched: 1, onDemand: 2, unconfirmed: 0 },
         })}
       />,
     );
@@ -1416,52 +1498,103 @@ Expected: FAIL, both files: `Failed to resolve import "../../src/lib/sources.js"
 `apps/web/src/api/types.ts`: append
 
 ```ts
-// WP10 routes (plan "API contract", results.ts, with WP10's additions of plan decision 38).
-export type CalendarResponse = z.infer<typeof apiContract.calendarResponseSchema>;
+// WP10 routes (plan "API contract", results.ts, with WP10's additions of decisions 38, 42 and 48).
 export type { CalendarDay } from '@gmt/core';
-export type DurationResponse = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
-export type CellDetailResponse = z.infer<typeof apiContract.cellDetailResponseSchema>;
-export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
-export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
+export type CalendarResponse = z.output<typeof apiContract.calendarResponseSchema>;
+export type DurationResponse = z.output<typeof apiContract.durationAnalysisResponseSchema>;
+export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseSchema>;
+export type ItineraryHistoryResponse = z.output<typeof apiContract.itineraryHistoryResponseSchema>;
+export type RouteHistoryResponse = z.output<typeof apiContract.routeHistoryResponseSchema>;
 ```
 
-`apps/web/src/api/endpoints.ts`: import `type Cabin` beside `CellKey` from `@gmt/core`, add `CalendarResponse`, `CellDetailResponse`, `DurationResponse`, `ItineraryHistoryResponse` and `RouteHistoryResponse` to the type import, and add these members at the end of `api`:
+`apps/web/src/api/endpoints.ts`: each WP10 route names its contract schema, which WP9's `call` checks against `ROUTES` and parses with.
+
+`src/api/endpoints.ts` — find:
 
 ```ts
+import { apiContract as c } from '@gmt/core';
+import { call } from './client.js';
+```
+
+`src/api/endpoints.ts` — replace with:
+
+```ts
+import { type Cabin, type CellKey, apiContract as c } from '@gmt/core';
+import { call } from './client.js';
+```
+
+`src/api/endpoints.ts` — find:
+
+```ts
+  airports: (q: string) => call(c.airportsResponseSchema, 'GET', '/api/airports', { query: { q } }),
+};
+```
+
+`src/api/endpoints.ts` — replace with:
+
+```ts
+  airports: (q: string) => call(c.airportsResponseSchema, 'GET', '/api/airports', { query: { q } }),
   // WP10 (spec §10): the calendar route takes no query; both bases come back per day.
   calendar: (id: string) =>
-    call<CalendarResponse>('GET', '/api/definitions/:id/calendar', { params: { id } }),
+    call(c.calendarResponseSchema, 'GET', '/api/definitions/:id/calendar', { params: { id } }),
   durationAnalysis: (id: string) =>
-    call<DurationResponse>('GET', '/api/definitions/:id/duration-analysis', { params: { id } }),
-  cellDetail: (id: string, c: CellKey) =>
-    call<CellDetailResponse>(
+    call(c.durationAnalysisResponseSchema, 'GET', '/api/definitions/:id/duration-analysis', {
+      params: { id },
+    }),
+  cellDetail: (id: string, k: CellKey) =>
+    call(
+      c.cellDetailResponseSchema,
       'GET',
       '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
       {
         params: {
           id,
-          origin: c.origin,
-          destination: c.destination,
-          departureDate: c.departureDate,
-          returnDate: c.returnDate,
+          origin: k.origin,
+          destination: k.destination,
+          departureDate: k.departureDate,
+          returnDate: k.returnDate,
         },
       },
     ),
   itineraryHistory: (hash: string) =>
-    call<ItineraryHistoryResponse>('GET', '/api/itineraries/:hash/history', { params: { hash } }),
-  // why: routeHistoryQuerySchema { cabin?: Cabin 
+    call(c.itineraryHistoryResponseSchema, 'GET', '/api/itineraries/:hash/history', { params: { hash } }),
+  // why: routeHistoryQuerySchema { cabin?: Cabin }; the view always passes the definition's cabin.
+  routeHistory: (origin: string, destination: string, cabin: Cabin) =>
+    call(c.routeHistoryResponseSchema, 'GET', '/api/routes/:origin/:destination/history', {
+      params: { origin, destination },
+      query: { cabin },
+    }),
+};
 ```
 
-`apps/web/src/api/queries.ts`: change the first two imports to
+`apps/web/src/api/queries.ts`: the WP10 keys, every WP10 prefix in `useExecutionActions`' refresh (a start, cancel, resume or single-cell verify refreshes every WP10 view, po-wp10-006), and the WP10 hooks, polling at WP9's `POLL_MS` while the newest run is pending or running.
+
+`src/api/queries.ts` — find:
+
+```ts
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from './endpoints.js';
+```
+
+`src/api/queries.ts` — replace with:
 
 ```ts
 import { type Cabin, type CellKey, cellKeyString, type Iata } from '@gmt/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from './endpoints.js';
 ```
 
-add to `qk`
+`src/api/queries.ts` — find:
 
 ```ts
+  airports: (q: string) => ['airports', q] as const,
+};
+```
+
+`src/api/queries.ts` — replace with:
+
+```ts
+  airports: (q: string) => ['airports', q] as const,
   // WP10
   calendar: (id: string) => ['calendar', id] as const,
   duration: (id: string) => ['duration', id] as const,
@@ -1469,22 +1602,60 @@ add to `qk`
   itineraryHistory: (hash: string) => ['history', 'itinerary', hash] as const,
   routeHistory: (origin: string, destination: string, cabin: string) =>
     ['history', 'route', origin, destination, cabin] as const,
+};
 ```
 
-add `['calendar'], ['duration'], ['cell'], ['history']` to the list `useExecutionActions`'s `refresh` invalidates, so a start, cancel, resume or single-cell verify refreshes every WP10 view (po-wp10-006), and append
+`src/api/queries.ts` — find:
 
 ```ts
+    await Promise.all(
+      [['results'], ['execution'], ['coverage'], ['calendar-gap']].map((queryKey) =>
+        qc.invalidateQueries({ queryKey }),
+      ),
+    );
+```
+
+`src/api/queries.ts` — replace with:
+
+```ts
+    await Promise.all(
+      [
+        ['results'],
+        ['execution'],
+        ['coverage'],
+        ['calendar-gap'],
+        ['calendar'],
+        ['duration'],
+        ['cell'],
+        ['history'],
+      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
+    );
+```
+
+`src/api/queries.ts` — find:
+
+```ts
+  };
+}
+```
+
+`src/api/queries.ts` — replace with:
+
+```ts
+  };
+}
+
 // --- WP10 queries ---
 
 /**
- * Refetch every 2 s while the newest execution a response names is pending or running, the cadence the status bar
- * polls at, so the heatmap and the duration chart fill in during a run (spec §10 "updates during run").
+ * Refetch every POLL_MS while the newest run a response names is pending or running, the status bar's cadence, so
+ * the heatmap and the duration chart fill in during a run (spec §10 "updates during run").
  */
 export function whileRunning(
   data: { executions: ReadonlyArray<{ status: string }> } | undefined,
 ): number | false {
   const latest = data?.executions[0];
-  return latest !== undefined && POLLING.has(latest.status) ? 2_000 : false;
+  return latest !== undefined && POLLING.has(latest.status) ? POLL_MS : false;
 }
 
 /** View B data (spec §10 calendar route). */
@@ -1540,15 +1711,20 @@ export function useItineraryHistory(hash: string | null) {
 }
 ```
 
-`apps/web/src/copy.ts`: append inside `COPY`, before `} as const;`:
+`apps/web/src/copy.ts`: the WP10 catalogue, inside `COPY` before its closing `} as const;`. WP9 already holds `providerShort`, `truncatedNote`, `priceNotConfirmed`, `vendorAgeUnknown` and `spanExecutions`, which WP10 reuses.
+
+`src/copy.ts` — find:
 
 ```ts
-  // --- WP10 (spec §11 View B, View C, History; plan decision 38) ---
-  /** The compact badge of a calendar day (PriceCell's compact form); "synthetic" is never abbreviated (spec §5.5). */
-  providerShort: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'synthetic' } satisfies Record<
-    ProviderId,
-    string
-  >,
+  none: 'none',
+} as const;
+```
+
+`src/copy.ts` — replace with:
+
+```ts
+  none: 'none',
+  // --- WP10 (spec §11 View B, View C, History; plan decisions 38, 44, 46, 48) ---
   calendarView: {
     title: 'Calendar',
     discoveryMarker: (
@@ -1581,7 +1757,10 @@ export function useItineraryHistory(hash: string | null) {
     colourBy: 'Colour by',
     empty: 'No days to show yet. The calendar fills in as cells are searched.',
     staleLine: (stale: number, shown: number, verifiedAfter: string) =>
-      `${stale} of ${shown} shown prices are stale (itinerary prices after ${verifiedAfter}; calendar prices after their provider's refresh interval plus its age bound)`,
+      `${stale} of ${shown} shown prices are stale by fetch age plus any known vendor age (itinerary prices after ${verifiedAfter}, calendar prices after their provider's refresh interval)`,
+    unconfirmedShort: 'price not confirmed',
+    unconfirmedCells: (n: number) =>
+      `price not confirmed: ${n} itinerary-searched ${n === 1 ? 'cell' : 'cells'} priced nothing the final step confirmed`,
     monthNav: 'Month',
     previousMonth: 'Previous month',
     nextMonth: 'Next month',
@@ -1601,12 +1780,15 @@ export function useItineraryHistory(hash: string | null) {
         `hatched: ${days} ${days === 1 ? 'day shows' : 'days show'} a ${shown === 'verified' ? 'class-verified' : 'calendar'} price instead and ${days === 1 ? 'is' : 'are'} not on this scale`,
       priceless: 'grey with a label: no price for this day',
       dashed: 'dashed outline: a calendar price; constraints not checked',
-      stale: 'stale: older than one refresh cycle; shown and labelled, never hidden',
+      stale:
+        'stale: older than one refresh cycle by fetch age plus any known vendor age; shown and labelled, never hidden. A price whose vendor age is unknown says "vendor\'s cache age unknown" instead',
       coverageFull:
         'S/M searched with a solid square: every cell of the day searched (priced, no fares or no cached data) by its best-covered source',
       coveragePartial:
         'S/M searched with a striped square: part of the day not searched; per-source counts are in the panel',
       cachedFrom: 'cached from £X: a cheaper calendar price exists for this day; constraints not checked',
+      unconfirmed:
+        'price not confirmed: an itinerary search priced this day, but the final step confirmed none of its prices',
       truncated: 'cheapest of the rows read: the provider returned more rows than were read for that month',
       stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
       filtered:
@@ -1660,6 +1842,7 @@ export function useItineraryHistory(hash: string | null) {
         'bad-local-time': 'a flight time could not be read',
         'cell-mismatch': 'the answer was for different dates or airports',
         'partial-expansion': 'some outbound flights could not be expanded',
+        'price-unconfirmed': 'price not confirmed by the final step',
       },
       offersDropped: (n: number) => `${n} ${n === 1 ? 'offer' : 'offers'} could not be read and were dropped`,
       reasonRaw: (reason: string) => `other: ${reason}`,
@@ -1670,11 +1853,9 @@ export function useItineraryHistory(hash: string | null) {
       calendarPriceRun: (run: string) => `calendar price · ${run}`,
       observation: (seller: string, cls: string) => `itinerary offer · ${seller} · ${cls}`,
       showInResults: 'show in results',
-      verifyCost: (maxCalls: number, left: string) =>
-        `uses up to ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${left}`,
-      monthLeft: (provider: string, left: number) => `${provider}: ${left} left this month`,
-      noMonthCap: (provider: string) => `${provider}: no monthly cap`,
-      verifyNoHeadroom: 'No calls left for this search this month.',
+      verifyCost: (maxCalls: number, headroom: number) =>
+        `hard stop ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${headroom} ${headroom === 1 ? 'call' : 'calls'} of budget headroom left`,
+      verifyNoHeadroom: 'No budget headroom left for this search.',
       verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
       verifyConflict: 'An itinerary search for this cell is already running.',
     },
@@ -1703,7 +1884,7 @@ export function useItineraryHistory(hash: string | null) {
     itinerarySearchedNoPrice: 'itinerary-searched, no price',
     tableCaption: 'Cheapest found per stay length, with provenance',
     staleLine: (stale: number, shown: number) =>
-      `${stale} of ${shown} shown prices are stale (older than one refresh cycle)`,
+      `${stale} of ${shown} shown prices are stale (older than one refresh cycle by fetch age)`,
     empty:
       "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
   },
@@ -1739,6 +1920,8 @@ export function useItineraryHistory(hash: string | null) {
       `Itinerary ${hash}: open it from a Results row to see its route and dates`,
     itineraryHash: (hash: string) => `itinerary ${hash}`,
     backToRoute: 'Show route history',
+    spanLine: (points: number, from: string, to: string) =>
+      `${points} ${points === 1 ? 'fetch' : 'fetches'} shown, ${from} to ${to}`,
     tableCaption: (series: string) => `${series}: every point, with provenance`,
     whenColumn: 'Fetched (Europe/London)',
     travelDateColumn: 'Travel date',
@@ -1750,11 +1933,22 @@ export function useItineraryHistory(hash: string | null) {
     rowLink: 'price history',
     empty: 'No price history yet for this selection. Each run adds a point.',
   },
+} as const;
 ```
 
-`apps/web/test/copy/catalogue.test.ts`: add to `SAMPLES`
+`apps/web/test/copy/catalogue.test.ts`: SAMPLES for every new function, and the "verified" allowlist gains seven paths, each naming the class ("class-verified", "partially verified") or sitting beside a class-verified value.
+
+`test/copy/catalogue.test.ts` — find:
 
 ```ts
+  confirmNew: [154, 2000, '£2'],
+};
+```
+
+`test/copy/catalogue.test.ts` — replace with:
+
+```ts
+  confirmNew: [154, 2000, '£2'],
   // WP10 (Task 10.3)
   'calendarView.discoveryMarker': [{ priced: 1, empty: 2, no_data: 3, error: 4, skipped: 5, not_run: 6 }, 21],
   'calendarView.verificationMarker': [1, 10, 2],
@@ -1768,6 +1962,7 @@ export function useItineraryHistory(hash: string | null) {
   'calendarView.stay': [14, '28 Mar'],
   'calendarView.searchedFraction': [12, 48],
   'calendarView.staleLine': [3, 40, '8d'],
+  'calendarView.unconfirmedCells': [2],
   'calendarView.legend.scaleQuintile': ['itinerary-search basis', 12],
   'calendarView.legend.scaleFlatFew': ['calendar basis', 4, 10],
   'calendarView.legend.scaleFlatNarrow': ['calendar basis', 20, '£400', '£430'],
@@ -1784,9 +1979,7 @@ export function useItineraryHistory(hash: string | null) {
   'calendarView.panel.reusedFrom': ['run 7 Oct 2026'],
   'calendarView.panel.calendarPriceRun': ['run 7 Oct 2026'],
   'calendarView.panel.observation': ['Example Air', 'verified'],
-  'calendarView.panel.verifyCost': [6, 'SearchApi: 9385 left this month'],
-  'calendarView.panel.monthLeft': ['SearchApi', 9385],
-  'calendarView.panel.noMonthCap': ['SearchApi'],
+  'calendarView.panel.verifyCost': [6, 1840],
   'calendarView.panel.verifyCapRefused': ['budget cap: provider-month:searchapi 10000 of 10000 calls'],
   'durationView.tickNotSearched': [13],
   'durationView.verifiedSeries': [3],
@@ -1809,17 +2002,67 @@ export function useItineraryHistory(hash: string | null) {
   'historyView.itineraryHeading': ['LHR→JFK', 'Sun 14 Mar 2027', 'Sun 28 Mar 2027', 'ZZ'],
   'historyView.itineraryUnknown': ['abc123'],
   'historyView.itineraryHash': ['abc123'],
+  'historyView.spanLine': [3, '23 Sep 2026', '14 Oct 2026'],
   'historyView.tableCaption': ["Google's indicative route-level series"],
   'historyView.routeProvenance': [
     'Google Flights via SearchApi',
     'cabin not stated',
     'fetched 2h ago · provider age unknown',
   ],
+};
 ```
 
-and extend the "verified" test's `allowed` set with `'calendarView.partlyVerified'`, `'calendarView.legend.hatched'`, `'calendarView.panel.dayVerified'`, `'calendarView.panel.dayPartlyVerified'`, `'calendarView.panel.observation'`, `'durationView.verifiedSeries'` and `'durationView.verifiedShort'`. Each names the class ("class-verified", "partially verified") or sits beside a class-verified value.
+`test/copy/catalogue.test.ts` — find:
 
-`apps/web/test/msw/handlers.ts`: import `wp10Handlers` from `./wp10Handlers.js` and put `...wp10Handlers,` first in `handlers`. WP9's rendered-copy sweep then meets real WP10 content instead of unhandled requests.
+```ts
+      'headlineRest',
+    ]);
+```
+
+`test/copy/catalogue.test.ts` — replace with:
+
+```ts
+      'headlineRest',
+      // WP10: each names the class or sits beside a class-verified value (spec §11 View B, View C wording)
+      'calendarView.partlyVerified',
+      'calendarView.legend.hatched',
+      'calendarView.panel.dayVerified',
+      'calendarView.panel.dayPartlyVerified',
+      'calendarView.panel.observation',
+      'durationView.verifiedSeries',
+      'durationView.verifiedShort',
+    ]);
+```
+
+`apps/web/test/msw/handlers.ts`: WP9's rendered sweep and shell tests then meet real WP10 content, and WP9's catch-all never sees a WP10 request.
+
+`test/msw/handlers.ts` — find:
+
+```ts
+} from '../fixtures.js';
+```
+
+`test/msw/handlers.ts` — replace with:
+
+```ts
+} from '../fixtures.js';
+import { wp10Handlers } from './wp10Handlers.js';
+```
+
+`test/msw/handlers.ts` — find:
+
+```ts
+export const handlers = [
+  http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
+```
+
+`test/msw/handlers.ts` — replace with:
+
+```ts
+export const handlers = [
+  ...wp10Handlers,
+  http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
+```
 
 `apps/web/src/lib/sources.ts`:
 
@@ -2027,6 +2270,9 @@ export function DayMarker({ slice }: { slice: DaySlice }) {
         </ul>
       )}
       <p>{formatVerificationMarker(slice.verification)}</p>
+      {slice.verification !== null && slice.verification.unconfirmed > 0 ? (
+        <p className="font-semibold">{C.unconfirmedCells(slice.verification.unconfirmed)}</p>
+      ) : null}
       {slice.cheapestPartiallyVerified !== null ? (
         <p>{C.partlyVerified(slice.cheapestPartiallyVerified.count)}</p>
       ) : null}
@@ -2044,10 +2290,10 @@ export function ReusedNote({ count }: { count: number }) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/lib/sources.test.ts test/views/calendar/marker.test.tsx test/copy`
-Expected: PASS. Sources 5 tests, marker 9; in `test/copy` the catalogue (every new function sampled, no banned word, "verified" only on allowed paths), the source guard and the rendered sweep pass.
+Expected: PASS. Sources 5 tests, marker 9; in `test/copy` the catalogue (every new function sampled, no banned word, "verified" only on allowed paths), the source guard and the rendered sweep pass (the WP10 routes still render WP9's placeholder until Task 10.12).
 
-Run: `pnpm -r typecheck`
-Expected: clean.
+Run: `pnpm --filter @gmt/web typecheck`
+Expected: exit 0.
 
 - [ ] **Step 5: Commit**
 
@@ -2055,181 +2301,7 @@ Expected: clean.
 git add apps/web && git commit -m "wp10: WP10 endpoints and polling queries, copy, test builders, source labels, six-bucket day marker"
 ```
 
-### Task 10.4: PriceCell's compact form (the calendar day)
-
-**Files:**
-- Create: `apps/web/test/components/priceCellCompact.test.tsx`
-- Modify (WP9): `apps/web/src/components/PriceCell.tsx`, `apps/web/src/components/Provenance.tsx`
-
-**Interfaces:**
-- Consumes: `assertProvenance`, `effectiveAge`, `formatAgeCompact`, `formatAgeFull`, `COPY.providerShort`, `COPY.truncatedNote` (WP9).
-- Produces: `PriceCellProps.compact`, `ProvenanceProps.compact`.
-
-Plan decisions 36 and 38: every price goes through PriceCell, and a day cell shows price, compact badge, stay and coverage cue with details in the panel. The compact form keeps the price, the stale label, a short provider badge ("synthetic" is never shortened), the compact age, "≈" for FX, the dashed outline for calendar prices and the destination visible; the source in words, "constraints not checked" and the operator's note go to the title and to screen-reader text, and in full to the side panel. At phone width the age is screen-reader only (the day is about 48 px wide).
-
-- [ ] **Step 1: Write the failing test**
-
-`apps/web/test/components/priceCellCompact.test.tsx`:
-
-```tsx
-import { describe, expect, it } from 'vitest';
-import { PriceCell } from '../../src/components/PriceCell.js';
-import { provCalendarAt, provItinerary, provSynthetic } from '../fixtures.wp10.js';
-import { renderWithProviders } from '../render.js';
-
-describe('PriceCell compact form, the calendar day (plan decisions 36, 38)', () => {
-  it('keeps price, stale, short badge, compact age and destination visible; the rest in the title and screen-reader text', () => {
-    const { getByTestId, getByText } = renderWithProviders(
-      <PriceCell
-        compact
-        pricePence={41200}
-        provenance={provCalendarAt(2)}
-        calendar
-        stale
-        destination="JFK"
-        destinationNote="onward leg not included"
-      />,
-    );
-    const prov = getByTestId('provenance');
-    expect(getByText('£412')).toBeInTheDocument();
-    expect(getByText('stale')).toBeInTheDocument();
-    expect(prov).toHaveClass('border-dashed');
-    expect(getByText('TP')).toBeInTheDocument();
-    expect(getByText('2h ago · ≤2d')).toBeInTheDocument();
-    expect(getByText('JFK')).toBeInTheDocument();
-    expect(prov.getAttribute('title')).toBe(
-      'Aviasales cache · constraints not checked · onward leg not included · fetched 2h ago · provider age unknown (≤2d before that)',
-    );
-    expect(prov).toHaveTextContent('Aviasales cache · constraints not checked · onward leg not included');
-  });
-  it('an itinerary price has no dashed outline; a synthetic price is never abbreviated', () => {
-    const first = renderWithProviders(
-      <PriceCell compact pricePence={52000} provenance={provItinerary(5)} calendar={false} stale={false} />,
-    );
-    expect(first.getByTestId('provenance')).not.toHaveClass('border-dashed');
-    expect(first.getByText('SA')).toBeInTheDocument();
-    first.unmount();
-    const second = renderWithProviders(
-      <PriceCell compact pricePence={30000} provenance={provSynthetic(1)} calendar stale={false} />,
-    );
-    expect(second.getByText('synthetic')).toBeInTheDocument();
-  });
-  it('says "cheapest of the rows read" for a price from a page-capped tile', () => {
-    const { getByText } = renderWithProviders(
-      <PriceCell
-        compact
-        truncated
-        pricePence={41200}
-        provenance={provCalendarAt(2)}
-        calendar
-        stale={false}
-      />,
-    );
-    expect(getByText('cheapest of the rows read')).toBeInTheDocument();
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `pnpm --filter @gmt/web exec vitest run test/components/priceCellCompact.test.tsx`
-Expected: FAIL, 2 of 3: `Unable to find an element with the text: TP` and `… SA` (the full form renders "Travelpayouts" and "SearchApi"). The third passes already: `truncated` is WP9's (decision 36).
-
-- [ ] **Step 3: Implement**
-
-`apps/web/src/components/PriceCell.tsx` (WP9's component with the `compact` prop added; `truncated` is WP9's):
-
-```tsx
-import type { Provenance as ProvenanceT } from '@gmt/core';
-import { COPY } from '../copy.js';
-import { formatPence } from '../format.js';
-import { assertProvenance, Provenance } from './Provenance.js';
-
-export interface PriceCellProps {
-  pricePence: number;
-  provenance: ProvenanceT | undefined;
-  calendar: boolean;
-  stale: boolean;
-  destination?: string | undefined;
-  destinationNote?: string | null | undefined;
-  /** Plan decisions 30 and 36: a price from a page-capped tile reads "cheapest of the rows read". */
-  truncated?: boolean | undefined;
-  /**
-   * WP10 (plan decision 38): the calendar day form. Price, stale label, a short provider badge and the compact age stay
-   * visible; the source in words, "constraints not checked" and the operator's note move to the title and to
-   * screen-reader text, and in full to the side panel.
-   */
-  compact?: boolean | undefined;
-}
-
-/** The only component that prints a price. Wrap it in PriceBoundary. Spec §11, §9 item 6. */
-export function PriceCell(props: PriceCellProps) {
-  // why: validate before formatting, so a bare number can never reach the DOM even for one frame.
-  assertProvenance(props.provenance);
-  return (
-    <span className="flex flex-col gap-0.5">
-      <span className={`font-semibold tabular-nums ${props.compact === true ? 'text-sm' : ''}`}>
-        {formatPence(props.pricePence)}
-        {props.stale ? (
-          <span className="ml-1 rounded bg-amber-200 px-1 text-xs font-normal">{COPY.stale}</span>
-        ) : null}
-      </span>
-      {props.truncated === true ? <span className="text-[11px] italic">{COPY.truncatedNote}</span> : null}
-      <Provenance
-        provenance={props.provenance}
-        calendar={props.calendar}
-        destination={props.destination}
-        destinationNote={props.destinationNote}
-        compact={props.compact}
-      />
-    </span>
-  );
-}
-```
-
-`apps/web/src/components/Provenance.tsx`: add `/** WP10: the calendar day form (see PriceCell). */ compact?: boolean | undefined;` to `ProvenanceProps`, take `compact` in the parameter list, and put this branch after `fxTitle` is computed, before the full form's `return`:
-
-```tsx
-  if (compact === true) {
-    // why: plan decision 38 — a calendar day keeps price, a short badge, the compact age and the destination; the
-    // rest is in the title, in screen-reader text and in the side panel, so the heatmap stays readable.
-    const hidden = [
-      COPY.source[p.sourceKind],
-      calendar ? COPY.constraintsNotChecked : null,
-      destinationNote ?? null,
-    ];
-    const details = hidden.filter((x): x is string => x !== null && x !== '').join(' · ');
-    return (
-      <span
-        data-testid="provenance"
-        data-variant="compact"
-        title={`${details} · ${formatAgeFull(age)}`}
-        className={`inline-flex flex-wrap items-center gap-1 text-[11px] text-slate-800 ${calendar ? 'rounded border border-dashed border-slate-600 px-0.5' : ''}`}
-      >
-        <span className="rounded bg-slate-200 px-0.5 font-medium text-slate-900">
-          {COPY.providerShort[p.providerId]}
-        </span>
-        <span className="max-sm:sr-only">{formatAgeCompact(age)}</span>
-        {fxTitle !== null ? <span title={fxTitle}>{COPY.fxApprox}</span> : null}
-        {destination !== undefined ? <span>{destination}</span> : null}
-        <span className="sr-only">{fxTitle === null ? details : `${details} · ${fxTitle}`}</span>
-      </span>
-    );
-  }
-```
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/web exec vitest run test/components test/copy`
-Expected: PASS: the compact file 3 tests, WP9's provenance tests unchanged, and the source guard (no literal JSX text).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/web && git commit -m "wp10: PriceCell compact form for calendar days (decisions 36, 38)"
-```
-
-### Task 10.5: Day display: precedence, glyphs, default basis
+### Task 10.4: Day display: precedence, glyphs, default basis
 
 **Files:**
 - Create: `apps/web/src/views/Calendar/display.ts`, `apps/web/test/views/calendar/display.test.ts`
@@ -2550,7 +2622,7 @@ Expected: PASS, 15 tests.
 git add apps/web && git commit -m "wp10: day precedence, skipped and not-searched states, default colour basis (spec §11, §8.1, decision 38)"
 ```
 
-### Task 10.6: Scale, flat scale and the calendar model
+### Task 10.5: Scale, flat scale and the calendar model
 
 **Files:**
 - Create: `apps/web/src/views/Calendar/{scale.ts,model.ts}`, `apps/web/test/views/calendar/scale.test.ts`
@@ -2856,16 +2928,19 @@ Expected: PASS: marker 9, display 15, scale 9.
 git add apps/web && git commit -m "wp10: quintile and flat scales per basis, calendar model with hatched and stale counts"
 ```
 
-### Task 10.7: Calendar grid, coverage cue, legend and keyboard
+### Task 10.6: Calendar grid, coverage cue, legend and keyboard
 
 **Files:**
 - Create: `apps/web/src/views/Calendar/{CoverageCue.tsx,CalendarGrid.tsx,CalendarLegend.tsx,calendar.css}`, `apps/web/test/views/calendar/grid.test.tsx`
+- Modify (WP9): `apps/web/test/copy/sourceGuard.test.ts` (money files and non-copy props)
 
 **Interfaces:**
-- Consumes: `CalendarModel`, `GridDay`, `coverageOf`, `BAND_CLASSES`, `FLAT_CLASS`, `PRICELESS_CLASS`, `MIN_BANDED_DAYS`; WP9's `PriceCell` (compact), `PriceBoundary`, `COPY`; the `format.ts` forms; `addDays`, `monthOf`.
+- Consumes: `CalendarModel`, `GridDay`, `coverageOf`, `BAND_CLASSES`, `FLAT_CLASS`, `PRICELESS_CLASS`, `MIN_BANDED_DAYS`; WP9's `PriceCell` (`compact`), `PriceBoundary`, `COPY`; the `format.ts` forms (`WEEK_HEADERS`, `formatIsoMonth`, `formatIsoDateLong`, …); `addDays`, `monthOf`.
 - Produces: `FOCUS_RING`, `targetOf`, `CalendarGrid({ days, model, months, destinationNotes, onOpen })`, `CoverageCue({ coverage })`, `CalendarLegend({ model, filtered })`.
 
-The grid follows the APG grid pattern: one `role="grid"` table per drawn month, `role="gridcell"` days with a roving `tabIndex`; arrows move by a day or a week across drawn months, Home and End to Monday and Sunday, PageUp and PageDown to the same day of the month before or after; focus moves only to a drawn day with data. A day shows its number, PriceCell's compact form, the stay ("14n · back 28 Mar", or "stay: see panel" for a per-destination price, which has no cell), "cached from" with the cheaper calendar price's own compact PriceCell, and the coverage cue. Every meaning has text or a pattern: band number and "not on the colour scale" in screen-reader text, hatching, swatches and glyphs with words. The legend sits above the grid.
+Each drawn month is a native table (its caption is its accessible name) with Monday-first column headers; each data day is a `<button>` with a roving `tabIndex` (§6: an ARIA `grid` cannot be written without a lint suppression). Arrows move by a day or a week across drawn months, Home and End to Monday and Sunday, PageUp and PageDown to the same day of the month before or after; focus moves only to a drawn day with data; Enter and Space are the button's own activation. A day shows its number, WP9's PriceCell `compact` form, the stay ("14n · back 28 Mar", or "stay: see panel" for a per-destination price, which has no cell), "cached from" with the cheaper calendar price's own compact PriceCell, "price not confirmed" when its itinerary search confirmed no price (decision 48), and the coverage cue. Every meaning has text or a pattern: band number and "not on the colour scale" in screen-reader text, hatching, swatches and glyphs with words. The legend sits above the grid and carries `data-scale`: its band ranges are scale values, never fares, which WP9's rendered sweep accepts outside a PriceCell (Task 10.12).
+
+WP9's source guard allows money formatting only in named files; the legend (band ranges) and the two chart files (axes, tooltips, the indicative route-level series) join the list, and Recharts' identifier props (`dataKey`, `scale`, `verticalAlign`) and `data-*` attributes join its non-copy props.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2886,9 +2961,10 @@ import {
   priceAt,
   provCalendarAt,
   provItinerary,
-  provSynthetic,
+  provSyntheticAt,
   slice,
 } from '../../fixtures.wp10.js';
+import { expectConsoleErrors } from '../../guards.js';
 import { NOW, renderWithProviders } from '../../render.js';
 
 const vDay = (date: string, pence: number): GridDay =>
@@ -2924,10 +3000,21 @@ function renderGrid(
   );
   return { onOpen, ...r };
 }
-function dayCell(date: string): HTMLTableCellElement {
-  const el = document.querySelector(`[data-date="${date}"]`);
-  if (!(el instanceof HTMLTableCellElement)) throw new Error(`no day cell ${date}`);
+/** A day's button: the grid is a table of days, each a button with a roving tabIndex. */
+function dayCell(date: string): HTMLButtonElement {
+  const el = document.querySelector(`button[data-date="${date}"]`);
+  if (!(el instanceof HTMLButtonElement)) throw new Error(`no day ${date}`);
   return el;
+}
+/** The weekday column of a day (Monday = 0). */
+function column(date: string): number {
+  const td = dayCell(date).closest('td');
+  if (td === null) throw new Error(`day ${date} is outside a table cell`);
+  return td.cellIndex;
+}
+/** The compact PriceCell of a day, or of an element inside one. */
+function priceCellIn(el: HTMLElement): HTMLElement {
+  return within(el).getByTestId('price-cell');
 }
 
 describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', () => {
@@ -2943,9 +3030,10 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
         onOpen={vi.fn()}
       />,
     );
-    expect(dayCell('2027-03-14').cellIndex).toBe(6); // Sunday
-    expect(getByRole('grid', { name: 'March 2027' })).toContainElement(dayCell('2027-03-14'));
-    expect(queryByRole('grid', { name: 'April 2027' })).toBeNull();
+    expect(column('2027-03-14')).toBe(6); // Sunday
+    expect(getByRole('table', { name: 'Mar 2027' })).toContainElement(dayCell('2027-03-14'));
+    expect(getByRole('columnheader', { name: 'Mon' })).toBeInTheDocument();
+    expect(queryByRole('table', { name: 'Apr 2027' })).toBeNull();
   });
 
   it('colours by one basis in quintiles; other-basis days are hatched, excluded and named in the numeric legend', () => {
@@ -2986,7 +3074,8 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     const legend = getByTestId('calendar-legend');
     for (const text of [
       'dashed outline: a calendar price; constraints not checked',
-      'stale: older than one refresh cycle; shown and labelled, never hidden',
+      'stale: older than one refresh cycle by fetch age plus any known vendor age',
+      'price not confirmed: an itinerary search priced this day',
       'S/M searched with a striped square',
       'cached from £X',
       'cheapest of the rows read',
@@ -3003,19 +3092,21 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
       JFK: 'onward leg not included',
     });
     const v = within(dayCell('2027-03-08'));
-    const prov = v.getByTestId('provenance');
-    expect(prov).toHaveAttribute('data-variant', 'compact');
-    expect(prov).not.toHaveClass('border-dashed');
-    expect(prov).toHaveTextContent('SA');
-    expect(prov.getAttribute('title')).toContain('Google Flights via SearchApi');
-    expect(prov.getAttribute('title')).toContain('onward leg not included');
-    expect(prov).toHaveTextContent('JFK');
+    // why: WP9's compact PriceCell (decision 46): amount, short badge, destination, marks; the rest in its title.
+    const price = priceCellIn(dayCell('2027-03-08'));
+    expect(price).not.toHaveClass('border-dashed');
+    expect(price).toHaveTextContent('SA');
+    expect(price).toHaveTextContent('JFK');
+    expect(price).toHaveTextContent("vendor's cache age unknown"); // decision 44: labelled, not called stale
+    expect(price.getAttribute('title')).toContain('Google Flights via SearchApi');
+    expect(price.getAttribute('title')).toContain('onward leg not included');
+    expect(v.queryByTestId('provenance')).toBeNull();
     expect(v.getByTestId('day-stay')).toHaveTextContent('14n · back 22 Mar');
     expect(v.getByTestId('coverage-cue')).toHaveTextContent('48/48 searched');
     expect(v.getByTestId('coverage-cue')).toHaveAttribute('data-coverage', 'full');
     const c = within(dayCell('2027-03-09'));
-    expect(c.getByTestId('provenance')).toHaveClass('border-dashed');
-    expect(c.getByTestId('provenance')).toHaveTextContent('constraints not checked'); // screen-reader text
+    expect(priceCellIn(dayCell('2027-03-09'))).toHaveClass('border-dashed');
+    expect(priceCellIn(dayCell('2027-03-09')).getAttribute('title')).toContain('constraints not checked');
     expect(dayCell('2027-03-09')).toHaveTextContent('stale');
     expect(dayCell('2027-03-09')).toHaveTextContent('£300');
     expect(c.getByTestId('coverage-cue')).toHaveTextContent('24/48 searched');
@@ -3032,7 +3123,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     const cached = within(dayCell('2027-03-08')).getByTestId('cached-from');
     expect(cached).toHaveTextContent('cached from');
     expect(cached).toHaveTextContent('£410');
-    expect(within(cached).getByTestId('provenance')).toHaveClass('border-dashed');
+    expect(priceCellIn(cached)).toHaveClass('border-dashed');
   });
 
   it('a price from a page-capped tile says "cheapest of the rows read" (plan decisions 30, 36)', () => {
@@ -3044,14 +3135,14 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     renderGrid(
       [
         gridDay('2027-03-09', {
-          cheapestCalendar: priceAt(30000, provSynthetic(1), false, cellAt('2027-03-09', 14)),
+          cheapestCalendar: priceAt(30000, provSyntheticAt(1), false, cellAt('2027-03-09', 14)),
         }),
       ],
       'calendar',
     );
-    const prov = within(dayCell('2027-03-09')).getByTestId('provenance');
-    expect(prov).toHaveTextContent('synthetic');
-    expect(prov).toHaveTextContent('synthetic fixture data');
+    const price = priceCellIn(dayCell('2027-03-09'));
+    expect(price).toHaveTextContent('synthetic');
+    expect(price.getAttribute('title')).toContain('synthetic fixture data');
   });
 
   it('a total that disagrees with its buckets shows "counts inconsistent" instead of a fraction', () => {
@@ -3070,7 +3161,8 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
   });
 
   it('withholds a day price that arrives without provenance', () => {
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // why: PriceBoundary reports the withheld price through console.error, which WP9's harness fails on unless announced.
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
     const prevent = (e: ErrorEvent) => e.preventDefault();
     window.addEventListener('error', prevent);
     try {
@@ -3082,8 +3174,37 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
       expect(dayCell('2027-03-08')).not.toHaveTextContent('£400');
     } finally {
       window.removeEventListener('error', prevent);
-      errors.mockRestore();
     }
+  });
+
+  it('a day whose itinerary search confirmed no price says "price not confirmed" (decision 48)', () => {
+    renderGrid(
+      [
+        gridDay('2027-03-08', {
+          cheapestCalendar: priceAt(41200, provCalendarAt(2), false, cellAt('2027-03-08', 14)),
+          verification: { selected: 2, itinerarySearched: 2, onDemand: 0, unconfirmed: 1 },
+          discovery: [disc('travelpayouts', { priced: 48 })],
+        }),
+        gridDay('2027-03-09', {
+          verification: { selected: 1, itinerarySearched: 1, onDemand: 0, unconfirmed: 1 },
+          discovery: [disc('travelpayouts', { no_data: 48 })],
+        }),
+        gridDay('2027-03-10', {
+          cheapestVerified: priceAt(52000, provItinerary(5), false, cellAt('2027-03-10', 14)),
+          verification: { selected: 2, itinerarySearched: 2, onDemand: 0, unconfirmed: 1 },
+          discovery: [disc('searchapi', { priced: 48 })],
+        }),
+      ],
+      'calendar',
+    );
+    expect(within(dayCell('2027-03-08')).getByTestId('day-unconfirmed')).toHaveTextContent(
+      'price not confirmed',
+    );
+    expect(within(dayCell('2027-03-09')).getByTestId('day-unconfirmed')).toHaveTextContent(
+      'price not confirmed',
+    );
+    // why: a confirmed class-verified price is the day's itinerary-search price; other cells' unconfirmed prices are in the panel.
+    expect(within(dayCell('2027-03-10')).queryByTestId('day-unconfirmed')).toBeNull();
   });
 
   it('days without a price show distinct glyphs with text, never blank; a skipped-only day says skipped', () => {
@@ -3146,7 +3267,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     const { onOpen, user } = renderGrid(dates.map((d) => vDay(d, 40000)));
     await user.tab();
     expect(dayCell('2027-03-03')).toHaveFocus();
-    expect(document.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(1);
+    expect(document.querySelectorAll('button[data-date][tabindex="0"]')).toHaveLength(1);
     dayCell('2027-03-30').focus();
     await user.keyboard('{ArrowRight}');
     expect(dayCell('2027-03-31')).toHaveFocus();
@@ -3229,21 +3350,21 @@ export function CoverageCue({ coverage }: { coverage: Coverage }) {
   if (coverage.kind === 'none') return null;
   if (coverage.kind !== 'fraction') {
     return (
-      <p data-testid="coverage-cue" className="text-[11px] italic">
+      <span data-testid="coverage-cue" className="block text-[11px] italic">
         {coverage.kind === 'inconsistent' ? C.countsInconsistent : C.countsAllDestinations}
-      </p>
+      </span>
     );
   }
   const full = coverage.searched === coverage.total;
   return (
-    <p
+    <span
       data-testid="coverage-cue"
       data-coverage={full ? 'full' : 'partial'}
       className="flex items-center gap-1 text-[11px]"
     >
       <span aria-hidden="true" className={`cov-swatch ${full ? 'cov-full' : 'cov-partial'}`} />
       {C.searchedFraction(coverage.searched, coverage.total)}
-    </p>
+    </span>
   );
 }
 ```
@@ -3257,12 +3378,12 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import {
-  formatDayLong,
   formatDayOfMonth,
+  formatIsoDateLong,
   formatIsoDateShort,
   formatIsoMonth,
   monthDays,
-  WEEKDAYS,
+  WEEK_HEADERS,
   weekdayIndex,
 } from '../../format.js';
 import { CoverageCue } from './CoverageCue.js';
@@ -3329,7 +3450,7 @@ export function CalendarGrid({ days, model, months, destinationNotes, onOpen }: 
   const byDate = new Map(days.map((d) => [d.date, d]));
   const shown = new Set(months);
   const [focusDate, setFocusDate] = useState<IsoDate | null>(null);
-  const refs = useRef(new Map<IsoDate, HTMLTableCellElement>());
+  const refs = useRef(new Map<IsoDate, HTMLButtonElement>());
   // why: the tab stop is the focused day if it is still drawn, else the first drawn day.
   const firstShown = days.find((d) => shown.has(monthOf(d.date)))?.date ?? null;
   const tabStop =
@@ -3339,12 +3460,8 @@ export function CalendarGrid({ days, model, months, destinationNotes, onOpen }: 
     const disp = model.displays.get(date);
     onOpen(date, disp?.kind === 'price' ? disp.price.cell : null);
   };
-  const onKeyDown = (date: IsoDate) => (e: KeyboardEvent<HTMLTableCellElement>) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      open(date);
-      return;
-    }
+  // why: Enter and Space are the button's own activation (its onClick); the keys below move focus.
+  const onKeyDown = (date: IsoDate) => (e: KeyboardEvent<HTMLButtonElement>) => {
     const next = targetOf(date, e.key);
     if (next === null) return;
     e.preventDefault();
@@ -3358,17 +3475,11 @@ export function CalendarGrid({ days, model, months, destinationNotes, onOpen }: 
   return (
     <div className="flex flex-col gap-6">
       {months.map((m) => (
-        <table
-          key={m}
-          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the APG grid pattern on a month table (spec §11)
-          role="grid"
-          aria-label={formatIsoMonth(m)}
-          className="w-full table-fixed border-separate border-spacing-1"
-        >
+        <table key={m} className="w-full table-fixed border-separate border-spacing-1">
           <caption className="text-left font-semibold">{formatIsoMonth(m)}</caption>
           <thead>
             <tr>
-              {WEEKDAYS.map((w) => (
+              {WEEK_HEADERS.map((w) => (
                 <th key={w} scope="col" className="text-xs font-medium">
                   {w}
                 </th>
@@ -3379,29 +3490,12 @@ export function CalendarGrid({ days, model, months, destinationNotes, onOpen }: 
             {weeksOf(m).map((week) => (
               <tr key={week.find((d) => d !== null) ?? m}>
                 {week.map((date, i) => {
-                  if (date === null) {
-                    return (
-                      <td
-                        key={`pad-${m}-${i}`}
-                        // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: a padding cell of the APG grid
-                        role="gridcell"
-                        tabIndex={-1}
-                        aria-hidden="true"
-                      />
-                    );
-                  }
+                  if (date === null) return <td key={`pad-${m}-${i}`} />;
                   const gd = byDate.get(date);
                   if (gd === undefined) {
+                    // why: outside the window or the api's days: only the day number, never a price or a glyph.
                     return (
-                      <td
-                        key={date}
-                        // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: a day outside the data, still a cell of the APG grid
-                        role="gridcell"
-                        tabIndex={-1}
-                        aria-disabled="true"
-                        className="align-top text-xs text-slate-500"
-                      >
-                        {/* why: outside the window or the api's days: only the day number, never a price or a glyph */}
+                      <td key={date} className="align-top text-xs text-slate-500">
                         {formatDayOfMonth(date)}
                       </td>
                     );
@@ -3420,36 +3514,36 @@ export function CalendarGrid({ days, model, months, destinationNotes, onOpen }: 
                           ? 'day-hatched'
                           : PRICELESS_CLASS;
                   return (
-                    <td
-                      key={date}
-                      // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: a day of the APG grid, focused by roving tabindex
-                      role="gridcell"
-                      data-date={date}
-                      data-basis={disp.kind === 'price' ? disp.basis : 'none'}
-                      data-band={band ?? (flat ? 'flat' : '')}
-                      tabIndex={date === tabStop ? 0 : -1}
-                      ref={(el) => {
-                        if (el) refs.current.set(date, el);
-                        else refs.current.delete(date);
-                      }}
-                      onKeyDown={onKeyDown(date)}
-                      onFocus={() => setFocusDate(date)}
-                      onClick={() => {
-                        setFocusDate(date);
-                        open(date);
-                      }}
-                      className={`cursor-pointer rounded p-1 text-left align-top ${FOCUS_RING} ${fill}`}
-                    >
-                      <span className="block text-xs font-semibold">
-                        <span aria-hidden="true">{formatDayOfMonth(date)}</span>
-                        <span className="sr-only">{formatDayLong(date)}</span>
-                      </span>
-                      <DayBody display={disp} slice={gd.slice} notes={destinationNotes} />
-                      {band !== undefined ? (
-                        <span className="sr-only">{COPY.calendarView.bandAria(band)}</span>
-                      ) : null}
-                      {flat ? <span className="sr-only">{COPY.calendarView.flatAria}</span> : null}
-                      {hatched ? <span className="sr-only">{COPY.calendarView.hatchedAria}</span> : null}
+                    <td key={date} className="align-top">
+                      <button
+                        type="button"
+                        data-date={date}
+                        data-basis={disp.kind === 'price' ? disp.basis : 'none'}
+                        data-band={band ?? (flat ? 'flat' : '')}
+                        tabIndex={date === tabStop ? 0 : -1}
+                        ref={(el) => {
+                          if (el) refs.current.set(date, el);
+                          else refs.current.delete(date);
+                        }}
+                        onKeyDown={onKeyDown(date)}
+                        onFocus={() => setFocusDate(date)}
+                        onClick={() => {
+                          setFocusDate(date);
+                          open(date);
+                        }}
+                        className={`block h-full w-full min-w-0 cursor-pointer rounded p-1 text-left ${FOCUS_RING} ${fill}`}
+                      >
+                        <span className="block text-xs font-semibold">
+                          <span aria-hidden="true">{formatDayOfMonth(date)}</span>
+                          <span className="sr-only">{formatIsoDateLong(date)}</span>
+                        </span>
+                        <DayBody display={disp} slice={gd.slice} notes={destinationNotes} />
+                        {band !== undefined ? (
+                          <span className="sr-only">{COPY.calendarView.bandAria(band)}</span>
+                        ) : null}
+                        {flat ? <span className="sr-only">{COPY.calendarView.flatAria}</span> : null}
+                        {hatched ? <span className="sr-only">{COPY.calendarView.hatchedAria}</span> : null}
+                      </button>
                     </td>
                   );
                 })}
@@ -3467,24 +3561,26 @@ function DayBody(props: { display: DayDisplay; slice: DaySlice; notes: Partial<R
   if (display.kind === 'price') return <DayPriceBlock display={display} slice={slice} notes={notes} />;
   const C = COPY.calendarView;
   return (
-    <div className="text-[11px]">
+    <span className="block text-[11px]">
+      <Unconfirmed slice={slice} />
       <GlyphList glyphs={display.glyphs} />
-      {display.reason === 'no-run' ? <p>{C.noRunCoversDay}</p> : null}
-      {display.reason === 'no-provider' ? <p>{C.noDiscoveryProvider}</p> : null}
+      {display.reason === 'no-run' ? <span className="block">{C.noRunCoversDay}</span> : null}
+      {display.reason === 'no-provider' ? <span className="block">{C.noDiscoveryProvider}</span> : null}
       {display.reason === 'filtered' && slice.destination !== null ? (
         <>
-          <p>{C.noPriceForDestination(slice.destination)}</p>
-          <p className="italic">{C.countsAllDestinations}</p>
+          <span className="block">{C.noPriceForDestination(slice.destination)}</span>
+          <span className="block italic">{C.countsAllDestinations}</span>
         </>
       ) : null}
-    </div>
+    </span>
   );
 }
 
 /**
- * The day's price in PriceCell's compact form (plan decisions 36 and 38): price, stale label, short provider badge,
- * compact age, dashed outline for calendar prices, the destination; then the stay, any cheaper cached fare, and the
- * coverage cue. Everything else is in the side panel. A price without provenance is withheld (spec §9 item 6).
+ * The day's price in WP9's PriceCell compact form (decisions 36, 38, 46): the amount with "≈", a short provider badge,
+ * the destination code and the stale, truncated and unconfirmed marks, with source, age and note in its title; then
+ * the stay, any cheaper cached fare and the coverage cue. Everything else is in the side panel. A price without
+ * provenance is withheld (spec §9 item 6).
  */
 function DayPriceBlock(props: {
   display: Extract<DayDisplay, { kind: 'price' }>;
@@ -3500,8 +3596,9 @@ function DayPriceBlock(props: {
   const note = destination === undefined ? null : (notes[destination] ?? null);
   const cached = display.cheaperCached;
   return (
-    <div data-testid="day-price-block" className="flex flex-col gap-0.5 text-xs">
+    <span data-testid="day-price-block" className="flex flex-col gap-0.5 text-xs">
       <span className="sr-only">{isCalendar ? C.calendarPrice : COPY.classLabel.verified}</span>
+      <Unconfirmed slice={slice} />
       <PriceBoundary>
         <PriceCell
           compact
@@ -3514,11 +3611,11 @@ function DayPriceBlock(props: {
           destinationNote={note}
         />
       </PriceBoundary>
-      <p data-testid="day-stay" className="text-[11px]">
+      <span data-testid="day-stay" className="block text-[11px]">
         {p.cell === null ? C.stayInPanel : C.stay(p.cell.nights, formatIsoDateShort(p.cell.returnDate))}
-      </p>
+      </span>
       {cached !== null ? (
-        <div data-testid="cached-from" className="text-[11px]">
+        <span data-testid="cached-from" className="block text-[11px]">
           <span>{C.cachedFrom}</span>
           <PriceBoundary>
             <PriceCell
@@ -3530,26 +3627,40 @@ function DayPriceBlock(props: {
               truncated={cached.truncated}
             />
           </PriceBoundary>
-        </div>
+        </span>
       ) : null}
       <CoverageCue coverage={coverageOf(slice)} />
-    </div>
+    </span>
+  );
+}
+
+/**
+ * Decision 48: a day whose itinerary search priced cells but confirmed no price says "price not confirmed", so it never
+ * reads as "nothing found" or as a confirmed fare. Only when the day shows no class-verified price.
+ */
+function Unconfirmed({ slice }: { slice: DaySlice }) {
+  const n = slice.verification?.unconfirmed ?? 0;
+  if (n === 0 || slice.cheapestVerified !== null) return null;
+  return (
+    <span data-testid="day-unconfirmed" className="block text-[11px] font-semibold">
+      {COPY.calendarView.unconfirmedShort}
+    </span>
   );
 }
 
 function GlyphList({ glyphs }: { glyphs: readonly GlyphStatus[] }) {
   if (glyphs.length === 0) return null;
   return (
-    <ul className="flex flex-wrap gap-1">
+    <span className="flex flex-wrap gap-1">
       {glyphs.map((g) => (
-        <li key={g} data-glyph={g}>
+        <span key={g} data-glyph={g}>
           <span aria-hidden="true" className="font-bold">
             {COPY.calendarView.glyphSymbol[g]}
           </span>{' '}
           {COPY.bucket[g]}
-        </li>
+        </span>
       ))}
-    </ul>
+    </span>
   );
 }
 ```
@@ -3579,7 +3690,12 @@ export function CalendarLegend({ model, filtered }: { model: CalendarModel; filt
   const range =
     s.minPence !== null && s.maxPence !== null ? [formatPence(s.minPence), formatPence(s.maxPence)] : null;
   return (
-    <section aria-label={L.title} data-testid="calendar-legend" className="flex flex-col gap-1 text-sm">
+    <section
+      aria-label={L.title}
+      data-testid="calendar-legend"
+      data-scale
+      className="flex flex-col gap-1 text-sm"
+    >
       <p>
         {s.mode === 'quintile'
           ? L.scaleQuintile(basis, s.count)
@@ -3628,6 +3744,7 @@ export function CalendarLegend({ model, filtered }: { model: CalendarModel; filt
           {L.coveragePartial}
         </li>
         <li>{L.cachedFrom}</li>
+        <li>{L.unconfirmed}</li>
         <li>{L.truncated}</li>
         <li>{L.stay}</li>
         {filtered ? <li>{L.filtered}</li> : null}
@@ -3646,30 +3763,88 @@ export function CalendarLegend({ model, filtered }: { model: CalendarModel; filt
 }
 ```
 
+`test/copy/sourceGuard.test.ts` — find:
+
+```ts
+  'src/views/Definitions/EstimatePanel.tsx',
+]);
+```
+
+`test/copy/sourceGuard.test.ts` — replace with:
+
+```ts
+  'src/views/Definitions/EstimatePanel.tsx',
+  // WP10: scale values, never fares: the heatmap legend's band ranges and the charts' axes and tooltips (their
+  // DOM sits in [data-scale]); the indicative route-level series, which spec §11 exempts from full provenance.
+  'src/views/Calendar/CalendarLegend.tsx',
+  'src/views/Duration/DurationChart.tsx',
+  'src/views/History/HistoryChart.tsx',
+]);
+```
+
+`test/copy/sourceGuard.test.ts` — find:
+
+```ts
+  'value',
+]);
+```
+
+`test/copy/sourceGuard.test.ts` — replace with:
+
+```ts
+  'value',
+  // WP10: Recharts' identifier props (a data field, an axis scale, a legend position), never copy
+  'dataKey',
+  'scale',
+  'verticalAlign',
+]);
+```
+
+`test/copy/sourceGuard.test.ts` — find:
+
+```ts
+      else if (slot !== null && COPY_ATTRS.has(slot.attr)) out.push(`${file}: ${slot.attr}="${lit}"`);
+      else if (slot !== null && onComponent(n) && !NON_COPY_PROPS.has(slot.attr))
+        out.push(`${file}: prop ${slot.attr}="${lit}"`);
+```
+
+`test/copy/sourceGuard.test.ts` — replace with:
+
+```ts
+      else if (slot !== null && COPY_ATTRS.has(slot.attr)) out.push(`${file}: ${slot.attr}="${lit}"`);
+      else if (
+        slot !== null &&
+        onComponent(n) &&
+        !NON_COPY_PROPS.has(slot.attr) &&
+        !slot.attr.startsWith('data-')
+      )
+        out.push(`${file}: prop ${slot.attr}="${lit}"`);
+```
+
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/grid.test.tsx test/copy`
-Expected: PASS. The grid file passes 13 tests; the source guard passes.
+Expected: PASS. The grid file passes 14 tests; the source guard passes.
 
 Run: `pnpm lint`
-Expected: no errors. The four `biome-ignore` comments on the grid's `role` attributes (table, padding cell, out-of-data day, day) are the only suppressions.
+Expected: no errors, with no suppression comment (`pnpm boundaries` rejects one).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp10: calendar grid with compact prices, coverage cue, flat and hatched scales, full legend, APG keys"
+git add apps/web && git commit -m "wp10: calendar month tables of day buttons, compact prices, coverage cue, flat and hatched scales, full legend"
 ```
 
-### Task 10.8: Side panel: the day, the cell's outcomes and prices, per-cell verify with its cost
+### Task 10.7: Side panel: the day, the cell's outcomes and prices, per-cell verify with its cost
 
 **Files:**
 - Create: `apps/web/src/views/Calendar/CellPanel.tsx`, `apps/web/test/views/calendar/panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `useCellDetail`, WP9's `useExecutionActions().verify`, `ApiError`, `resultRowKey`, `hrefWith`/`navigateTo` and WP9's `?row=`, `PriceCell`, `PriceBoundary`, `DayMarker`, `cellKeyString`, `addDays`, `daysBetween`, the `format.ts` forms, `instantMs`.
+- Consumes: `useCellDetail`, WP9's `useExecutionActions().verify`, `ApiError`, `resultRowKey`, `hrefWith`/`navigateTo` and WP9's `?row=`, `PriceCell`, `PriceBoundary`, `DayMarker`, `cellKeyString`, `isPriceUnconfirmed`, `addDays`, `daysBetween`, the `format.ts` forms, `instantMs`.
 - Produces: `cellsForDay`, `orderOutcomes`, `reasonText`, `noHeadroom`, `CellPanel({ definition, date, slice, executions, initialCell, onClose })`.
 
-The panel opens on the day: its six-bucket marker per provider (with the partially-verified count) and its prices with full provenance, then the cell picker. The cell route returns outcomes from every run of the definition, so rows are ordered by the calendar response's run list (newest first), the latest run is marked, runs are named by start date, reasons are in words (spec §3's closed lists; an unknown reason is shown as it came), and the vendor detail (`lastError`) has its own column. Verify goes through WP9's single action, whose refresh now covers the WP10 queries; beside it, "uses up to N calls · SearchApi: M left this month" from the cell detail's `verify` (plan decision 38); a 409 `active` says a search is already running, a 409 `cap` names the cap with WP8's message, and with no calls left the button is disabled with the reason.
+The panel opens on the day: its six-bucket marker per provider (with the partially-verified count and, decision 48, the cells whose itinerary search confirmed no price) and its prices with full provenance, then the cell picker. The cell route returns outcomes from every run of the definition, so rows are ordered by the calendar response's run list (newest first), the latest run is marked, runs are named by start date, reasons are in words (each `;`-joined part of a priced reason, decisions 19 and 48; an unknown reason is shown as it came), a priced outcome whose reason carries `price-unconfirmed` says "price not confirmed" beside its status, and the vendor detail (`lastError`) has its own column. Verify goes through WP9's single action, whose refresh now covers the WP10 queries; beside it, "hard stop N calls · M calls of budget headroom left" from the cell detail's `verify` (decisions 42, 45; decision 44 words a cap as a hard stop); a 409 `active` says a search is already running, a 409 `cap` names the cap with WP8's message, and with no headroom the button is disabled with the reason.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3680,6 +3855,7 @@ import { asIsoDate, resultRowKey } from '@gmt/core';
 import { waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import {
   CellPanel,
   cellsForDay,
@@ -3706,12 +3882,12 @@ import { renderWithProviders } from '../../render.js';
 
 const c = cellAt('2027-03-14', 14);
 const date = asIsoDate('2027-03-14');
-const earlier = {
-  ...summary('completed', 170),
+const earlier = summary({
   id: 'exec-0000',
+  ageHours: 170,
   startedAt: hoursBefore(172),
   finishedAt: hoursBefore(171),
-};
+});
 const executions = [summary(), earlier];
 const observation = verifiedRow({ cell: c, seller: 'Example Air', pricePence: 52000 });
 const detail = cellDetail(c, {
@@ -3735,7 +3911,7 @@ const detail = cellDetail(c, {
 const cellRoute = `${API}/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`;
 const daySlice = slice({
   discovery: [disc('travelpayouts', { priced: 40, no_data: 8 })],
-  verification: { selected: 10, itinerarySearched: 1, onDemand: 0 },
+  verification: { selected: 10, itinerarySearched: 1, onDemand: 0, unconfirmed: 0 },
   cheapestCalendar: priceAt(41200, provCalendarAt(2), false, c),
 });
 
@@ -3777,16 +3953,15 @@ describe('outcome order and reason words (prov-011, ui-r1-012)', () => {
     expect(reasonText('offers-dropped:3')).toBe('3 offers could not be read and were dropped');
     expect(reasonText('something-new')).toBe('other: something-new');
     expect(reasonText(null)).toBe('—');
+    expect(reasonText('partial-expansion;price-unconfirmed;offers-dropped:2')).toBe(
+      'some outbound flights could not be expanded; price not confirmed by the final step; 2 offers could not be read and were dropped',
+    );
   });
-  it('no headroom: a zero cap, or every provider out of calls this month', () => {
+  it('no headroom: a zero cap or no calls of headroom left (WP7 childCapPreview)', () => {
     expect(noHeadroom(null)).toBe(false);
-    expect(noHeadroom({ maxCalls: 0, providers: [] })).toBe(true);
-    expect(noHeadroom({ maxCalls: 6, providers: [{ providerId: 'searchapi', monthCallsLeft: 0 }] })).toBe(
-      true,
-    );
-    expect(noHeadroom({ maxCalls: 6, providers: [{ providerId: 'searchapi', monthCallsLeft: null }] })).toBe(
-      false,
-    );
+    expect(noHeadroom({ maxCalls: 0, headroomCalls: 40 })).toBe(true);
+    expect(noHeadroom({ maxCalls: 6, headroomCalls: 0 })).toBe(true);
+    expect(noHeadroom({ maxCalls: 6, headroomCalls: 1840 })).toBe(false);
   });
 });
 
@@ -3817,6 +3992,28 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
       /itinerary search.*SearchApi.*skipped.*stopped: a budget cap was reached/,
     );
     expect(rows[2]).toHaveTextContent(/run 7 Oct 2026.*discovery/);
+  });
+
+  it('a priced verification with no confirmed price says "price not confirmed" in the outcome and the day (decision 48)', async () => {
+    const unconfirmed = cellDetail(c, {
+      outcomes: [
+        outcome(c, 'verification', 'searchapi', 'priced', { reason: 'partial-expansion;price-unconfirmed' }),
+      ],
+    });
+    server.use(http.get(cellRoute, () => HttpResponse.json(unconfirmed)));
+    const day = slice({
+      discovery: [disc('travelpayouts', { priced: 48 })],
+      verification: { selected: 1, itinerarySearched: 1, onDemand: 0, unconfirmed: 1 },
+    });
+    const { findByRole, getByRole } = renderPanel(definition(), day);
+    const row = within(await findByRole('table')).getAllByRole('row')[1];
+    expect(row).toHaveTextContent(/priced.*price not confirmed/);
+    expect(row).toHaveTextContent(
+      'some outbound flights could not be expanded; price not confirmed by the final step',
+    );
+    expect(within(getByRole('region', { name: 'This day' })).getByTestId('day-marker')).toHaveTextContent(
+      'price not confirmed: 1 itinerary-searched cell priced nothing the final step confirmed',
+    );
   });
 
   it('shows every cell price with provenance and the rows-read note; an offer links to its Results row', async () => {
@@ -3858,7 +4055,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     });
     const { findByRole, queryByRole } = renderPanel(def);
     await findByRole('table');
-    expect(queryByRole('button', { name: 'Search this cell for itineraries' })).toBeNull();
+    expect(queryByRole('button', { name: COPY.verifyCell })).toBeNull();
   });
 
   it('verify shows what it may spend, posts through WP9’s action, and names a running search or a budget cap', async () => {
@@ -3872,10 +4069,10 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     );
     const { findByTestId, findByText, getByRole, user } = renderPanel();
     expect(await findByTestId('verify-cost')).toHaveTextContent(
-      'uses up to 6 calls · SearchApi: 9385 left this month',
+      'hard stop 6 calls · 1840 calls of budget headroom left',
     );
-    await user.click(getByRole('button', { name: 'Search this cell for itineraries' }));
-    expect(await findByText('Itinerary search started for this cell.')).toBeInTheDocument();
+    await user.click(getByRole('button', { name: COPY.verifyCell }));
+    expect(await findByText(COPY.verifyStarted)).toBeInTheDocument();
     expect(posted).toEqual({ definitionId: 'def-0001', cell: keyOf(c) });
 
     server.use(
@@ -3883,7 +4080,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ error: { code: 'active', message: 'child active' } }, { status: 409 }),
       ),
     );
-    await user.click(getByRole('button', { name: 'Search this cell for itineraries' }));
+    await user.click(getByRole('button', { name: COPY.verifyCell }));
     expect(await findByText('An itinerary search for this cell is already running.')).toBeInTheDocument();
 
     const capMessage = 'budget cap: provider-month:searchapi 10000 of 10000 calls';
@@ -3892,22 +4089,22 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ error: { code: 'cap', message: capMessage } }, { status: 409 }),
       ),
     );
-    await user.click(getByRole('button', { name: 'Search this cell for itineraries' }));
+    await user.click(getByRole('button', { name: COPY.verifyCell }));
     expect(await findByText(`Refused by a budget cap: ${capMessage}`)).toBeInTheDocument();
   });
 
-  it('with no calls left this month the button is disabled and says why', async () => {
+  it('with no headroom left the button is disabled and says why', async () => {
     server.use(
       http.get(cellRoute, () =>
         HttpResponse.json({
           ...detail,
-          verify: { maxCalls: 6, providers: [{ providerId: 'searchapi', monthCallsLeft: 0 }] },
+          verify: { maxCalls: 6, headroomCalls: 0 },
         }),
       ),
     );
     const { findByText, getByRole } = renderPanel();
-    expect(await findByText('No calls left for this search this month.')).toBeInTheDocument();
-    expect(getByRole('button', { name: 'Search this cell for itineraries' })).toBeDisabled();
+    expect(await findByText('No budget headroom left for this search.')).toBeInTheDocument();
+    expect(getByRole('button', { name: COPY.verifyCell })).toBeDisabled();
   });
 
   it('the cell picker lists origins × destinations × nights for the day and fetches the chosen cell', async () => {
@@ -3953,7 +4150,15 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Calendar/CellP
 `apps/web/src/views/Calendar/CellPanel.tsx`:
 
 ```tsx
-import { addDays, type CellKey, cellKeyString, daysBetween, type IsoDate, resultRowKey } from '@gmt/core';
+import {
+  addDays,
+  type CellKey,
+  cellKeyString,
+  daysBetween,
+  type IsoDate,
+  isPriceUnconfirmed,
+  resultRowKey,
+} from '@gmt/core';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { useCellDetail, useExecutionActions } from '../../api/queries.js';
@@ -3961,7 +4166,12 @@ import type { CellDetailResponse, DefinitionResponse, ExecutionSummary } from '.
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatDayLong, formatDayShort, formatInstantDateLondon, formatInstantLondon } from '../../format.js';
+import {
+  formatDayShort,
+  formatInstantDateLondon,
+  formatInstantLondon,
+  formatIsoDateLong,
+} from '../../format.js';
 import { instantMs } from '../../lib/time.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { DayMarker } from './DayMarker.js';
@@ -4002,10 +4212,15 @@ export function orderOutcomes(
 /** An outcome reason in operator words (spec §3 reason lists); an unknown reason is shown as it came. */
 export function reasonText(reason: string | null): string {
   if (reason === null) return P.dash;
-  const dropped = /^offers-dropped:(\d+)$/.exec(reason);
+  // why: priced reasons join their parts with ';' (decisions 19, 48: partial-expansion;price-unconfirmed;offers-dropped:n).
+  return reason.split(';').map(reasonPart).join('; ');
+}
+
+function reasonPart(part: string): string {
+  const dropped = /^offers-dropped:(\d+)$/.exec(part);
   if (dropped?.[1] !== undefined) return P.offersDropped(Number(dropped[1]));
-  const known = Object.entries(P.reasons).find(([k]) => k === reason);
-  return known === undefined ? P.reasonRaw(reason) : known[1];
+  const known = Object.entries(P.reasons).find(([k]) => k === part);
+  return known === undefined ? P.reasonRaw(part) : known[1];
 }
 
 /** "run 14 Mar 2027" for a run the response lists, else the run id's head. */
@@ -4068,7 +4283,7 @@ export function CellPanel({ definition, date, slice, executions, initialCell, on
     >
       <div className="flex items-start justify-between gap-2">
         <h2 id={headingId} ref={headingRef} tabIndex={-1} className="text-lg font-semibold">
-          {P.title(formatDayLong(date))}
+          {P.title(formatIsoDateLong(date))}
         </h2>
         <button type="button" onClick={onClose} className="rounded border px-2">
           {P.close}
@@ -4128,23 +4343,21 @@ export function CellPanel({ definition, date, slice, executions, initialCell, on
 
 type VerifyInfo = CellDetailResponse['verify'];
 
-/** True when the child could make no call: a zero cap, or no verification provider has calls left this month. */
+/** True when the child could make no call: a zero cap or no budget headroom left (WP7's childCapPreview). */
 export function noHeadroom(v: VerifyInfo): boolean {
   if (v === null) return false;
-  return v.maxCalls === 0 || v.providers.every((p) => p.monthCallsLeft === 0);
+  return v.maxCalls === 0 || v.headroomCalls === 0;
 }
 
-/** "uses up to N calls · SearchApi: M left this month" beside the button (plan decision 38, spec §8.1 child cap). */
+/**
+ * "hard stop N calls · M calls of budget headroom left" beside the button (decisions 38, 42, 45: WP7's childCapPreview;
+ * decision 44: a cap is stated as a hard stop, never "up to").
+ */
 function VerifyCost({ verify }: { verify: VerifyInfo }) {
   if (verify === null) return null;
-  const left = verify.providers.map((p) =>
-    p.monthCallsLeft === null
-      ? P.noMonthCap(COPY.provider[p.providerId])
-      : P.monthLeft(COPY.provider[p.providerId], p.monthCallsLeft),
-  );
   return (
     <p data-testid="verify-cost" className="text-xs">
-      {P.verifyCost(verify.maxCalls, left.join(' · '))}
+      {P.verifyCost(verify.maxCalls, verify.headroomCalls)}
       {noHeadroom(verify) ? <span className="block font-medium">{P.verifyNoHeadroom}</span> : null}
     </p>
   );
@@ -4250,7 +4463,13 @@ function CellDetailBody(props: {
                 </td>
                 <td>{COPY.stageName[o.stage]}</td>
                 <td>{COPY.provider[o.providerId]}</td>
-                <td>{COPY.bucket[o.status]}</td>
+                <td>
+                  {COPY.bucket[o.status]}
+                  {/* why: decision 48: a priced verification outcome with no confirmed price says so beside its status */}
+                  {o.status === 'priced' && isPriceUnconfirmed(o.reason) ? (
+                    <span className="block font-semibold">{COPY.calendarView.unconfirmedShort}</span>
+                  ) : null}
+                </td>
                 <td>{reasonText(o.reason)}</td>
                 <td>{o.attempts}</td>
                 <td>{o.fetchedAt === null ? P.dash : formatInstantLondon(instantMs(o.fetchedAt))}</td>
@@ -4321,7 +4540,7 @@ function CellDetailBody(props: {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/panel.test.tsx test/copy`
-Expected: PASS. The panel file passes 12 tests.
+Expected: PASS. The panel file passes 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4329,16 +4548,16 @@ Expected: PASS. The panel file passes 12 tests.
 git add apps/web && git commit -m "wp10: side panel with the day, ordered outcomes, provenance-checked prices and costed per-cell verify"
 ```
 
-### Task 10.9: Calendar view (data, URL state, basis, phone width, states)
+### Task 10.8: Calendar view (data, URL state, basis, phone width, states)
 
 **Files:**
 - Create: `apps/web/src/views/Calendar/CalendarView.tsx`, `apps/web/test/views/calendar/view.test.tsx`
 
 **Interfaces:**
-- Consumes: `useCalendar`, `whileRunning`, `ViewHeader` (executions variant), `useNow`, `useMediaQuery`/`NARROW_QUERY`, `useSearchParams`/`updateSearchParams`, `CalendarGrid`, `CalendarLegend`, `CellPanel`, `buildCalendarModel`, `defaultColourBasis`, `sliceForDestination`, `totalReused`, `ReusedNote`, `formatDuration`.
+- Consumes: `useCalendar`, `whileRunning`, `ViewHeader` (`variant="span"`), `useNow`, `useMediaQuery`/`NARROW_QUERY`, `useSearchParams`/`updateSearchParams`, `CalendarGrid`, `CalendarLegend`, `CellPanel`, `buildCalendarModel`, `defaultColourBasis`, `sliceForDestination`, `totalReused`, `ReusedNote`, `formatDuration`.
 - Produces: `CALENDAR_PARAMS`, `parseDestination`, `parseBasis`, `CalendarView({ definition })`.
 
-The destination filter (`cal.dest`), the chosen basis (`cal.basis`) and the phone-width month (`cal.month`) live in the URL like WP9's Results state, so they survive navigation and links. The default basis is judged over all destinations, so a filter change never flips what the colours mean. Below the header, "N of M shown prices are stale" names the itinerary threshold from the response; the header's stale flag is set only when every shown price is stale. The query refetches every 2 s while the newest run is pending or running.
+The destination filter (`cal.dest`), the chosen basis (`cal.basis`) and the phone-width month (`cal.month`) live in the URL like WP9's Results state, so they survive navigation and links. The default basis is judged over all destinations, so a filter change never flips what the colours mean. The header is WP9's `variant="span"` (a calendar spans runs). Below it, "N of M shown prices are stale" (by fetch age plus any known vendor age, decision 44) names the itinerary threshold from the response; the header's stale flag is set only when every shown price is stale. The query refetches every 2 s while the newest run is pending or running.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4351,6 +4570,7 @@ import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { whileRunning } from '../../../src/api/queries.js';
 import type { CalendarDay } from '../../../src/api/types.js';
+import { COPY } from '../../../src/copy.js';
 import { CalendarView } from '../../../src/views/Calendar/CalendarView.js';
 import { API, definition, summary } from '../../fixtures.js';
 import {
@@ -4416,7 +4636,7 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     );
     const { getByRole, findByRole } = renderWithProviders(<CalendarView definition={definition()} />);
     expect(getByRole('status')).toHaveTextContent('Loading…');
-    expect(await findByRole('grid', { name: 'March 2027' })).toBeInTheDocument();
+    expect(await findByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
   });
 
   it('shows an error state naming the failure', async () => {
@@ -4441,14 +4661,18 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     serve([mixedDay]);
     const { findByText, getByText } = renderWithProviders(<CalendarView definition={definition()} />);
     expect(await findByText('(3 reused from earlier runs)')).toBeInTheDocument();
-    expect(getByText('showing run exec-000 (completed, 2h ago)')).toBeInTheDocument();
+    // why: WP9's span header names the runs by start time and says no single run status applies.
+    expect(getByText(COPY.spanExecutions(1))).toBeInTheDocument();
+    expect(getByText(/14 Oct 2026 12:00 UTC/)).toBeInTheDocument();
   });
 
   it('says how many shown prices are stale; the header stale flag only when every one is', async () => {
     serve([calendarDay('2027-03-01', true), calendarDay('2027-03-02')]);
     const first = renderWithProviders(<CalendarView definition={definition()} />);
     expect(
-      await first.findByText(/^1 of 2 shown prices are stale \(itinerary prices after 8d;/),
+      await first.findByText(
+        /^1 of 2 shown prices are stale by fetch age plus any known vendor age \(itinerary prices after 8d,/,
+      ),
     ).toBeInTheDocument();
     expect(first.queryByText('Every row here is older than one refresh cycle.')).toBeNull();
     first.unmount();
@@ -4462,7 +4686,7 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     const { findByRole, getByLabelText, user } = renderWithProviders(
       <CalendarView definition={definition()} />,
     );
-    await findByRole('grid', { name: 'March 2027' });
+    await findByRole('table', { name: 'Mar 2027' });
     expect(within(at('2027-03-14')).getByTestId('day-price-block')).toHaveTextContent('£399');
     await user.selectOptions(getByLabelText('Destination'), 'JFK');
     expect(param('cal.dest')).toBe('JFK');
@@ -4526,19 +4750,19 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     const { findByRole, getAllByRole, getByRole, user } = renderWithProviders(
       <CalendarView definition={definition()} />,
     );
-    await findByRole('grid', { name: 'March 2027' });
-    expect(getAllByRole('grid')).toHaveLength(1);
+    await findByRole('table', { name: 'Mar 2027' });
+    expect(getAllByRole('table')).toHaveLength(1);
     expect(getByRole('button', { name: 'Previous month' })).toBeDisabled();
     await user.click(getByRole('button', { name: 'Next month' }));
     expect(param('cal.month')).toBe('2027-04');
-    expect(getByRole('grid', { name: 'April 2027' })).toBeInTheDocument();
-    expect(getAllByRole('grid')).toHaveLength(1);
+    expect(getByRole('table', { name: 'Apr 2027' })).toBeInTheDocument();
+    expect(getAllByRole('table')).toHaveLength(1);
   });
 
   it('Enter opens the side panel for the day; Escape closes it and focus returns to the day', async () => {
     serve([mixedDay]);
     const { findByRole, queryByRole, user } = renderWithProviders(<CalendarView definition={definition()} />);
-    await findByRole('grid', { name: 'March 2027' });
+    await findByRole('table', { name: 'Mar 2027' });
     // why: focus the day directly; tabbing would first reach the filter controls above the grid.
     at('2027-03-14').focus();
     await user.keyboard('{Enter}');
@@ -4549,9 +4773,9 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
   });
 
   it('refetches every 2 s while the newest run is pending or running, and stops after (po-wp10-006)', () => {
-    expect(whileRunning({ executions: [summary('running')] })).toBe(2_000);
-    expect(whileRunning({ executions: [summary('pending')] })).toBe(2_000);
-    expect(whileRunning({ executions: [summary('completed')] })).toBe(false);
+    expect(whileRunning({ executions: [summary({ status: 'running' })] })).toBe(2_000);
+    expect(whileRunning({ executions: [summary({ status: 'pending' })] })).toBe(2_000);
+    expect(whileRunning({ executions: [summary({ status: 'completed' })] })).toBe(false);
     expect(whileRunning({ executions: [] })).toBe(false);
     expect(whileRunning(undefined)).toBe(false);
   });
@@ -4652,6 +4876,7 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
   return (
     <section aria-label={C.title} className="flex flex-col gap-4">
       <ViewHeader
+        variant="span"
         title={C.title}
         executions={q.data.executions}
         stale={model.shownPrices > 0 && model.stalePrices === model.shownPrices}
@@ -4750,7 +4975,7 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar test/copy`
-Expected: PASS. The calendar files pass 70 tests (marker 9, display 15, scale 9, grid 13, panel 12, view 12).
+Expected: PASS. The calendar files pass 72 tests (marker 9, display 15, scale 9, grid 14, panel 13, view 12).
 
 - [ ] **Step 5: Commit**
 
@@ -4758,7 +4983,7 @@ Expected: PASS. The calendar files pass 70 tests (marker 9, display 15, scale 9,
 git add apps/web && git commit -m "wp10: calendar view with URL state, stable default basis, stale line, phone month grid, polling"
 ```
 
-### Task 10.10: TZ suite, chart setup and the web test config (review focus 3, pinned)
+### Task 10.9: TZ suite, chart setup and the web test config (review focus 3, pinned)
 
 **Files:**
 - Create: `apps/web/test/setup-tz.ts`, `apps/web/test/setup-charts.ts`, `apps/web/test/tz/dates.tz.test.tsx`
@@ -4778,7 +5003,7 @@ The suite proves the zone two ways. The `test:tz` script runs the TZ suite and t
 import { asIata, asIsoDate, asIsoMonth } from '@gmt/core';
 import { HttpResponse, http } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { formatDayLong, formatIsoDate, WEEKDAYS } from '../../src/format.js';
+import { formatIsoDate, formatIsoDateLong, WEEK_HEADERS } from '../../src/format.js';
 import { CalendarGrid } from '../../src/views/Calendar/CalendarGrid.js';
 import { buildCalendarModel } from '../../src/views/Calendar/model.js';
 import { ResultsView } from '../../src/views/Results/ResultsView.js';
@@ -4798,13 +5023,17 @@ const NAIVE_SHIFT = {
 /** The negative control (TS-11): what a Date-based formatter would print. Test code only; src may not do this. */
 const naiveDayLong = (iso: string) => {
   const d = new Date(iso);
-  return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}`;
+  return `${WEEK_HEADERS[(d.getDay() + 6) % 7]} ${d.getDate()}`;
 };
 
-function cell(date: string): HTMLTableCellElement {
-  const el = document.querySelector(`[data-date="${date}"]`);
-  if (!(el instanceof HTMLTableCellElement)) throw new Error(`no day cell ${date}`);
+/** A day's button and its weekday column (Monday = 0). */
+function cell(date: string): HTMLButtonElement {
+  const el = document.querySelector(`button[data-date="${date}"]`);
+  if (!(el instanceof HTMLButtonElement)) throw new Error(`no day ${date}`);
   return el;
+}
+function column(date: string): number {
+  return cell(date).closest('td')?.cellIndex ?? -1;
 }
 
 describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) => {
@@ -4829,10 +5058,10 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
   });
 
   it('formatting comes from the string: DST-change days and the leap day keep their date and weekday', () => {
-    expect(formatDayLong(asIsoDate('2027-03-14'))).toBe('Sun 14 Mar 2027'); // US DST starts
-    expect(formatDayLong(asIsoDate('2027-03-28'))).toBe('Sun 28 Mar 2027'); // UK DST starts
-    expect(formatDayLong(asIsoDate('2027-10-31'))).toBe('Sun 31 Oct 2027'); // UK DST ends
-    expect(formatDayLong(asIsoDate('2028-02-29'))).toBe('Tue 29 Feb 2028');
+    expect(formatIsoDateLong(asIsoDate('2027-03-14'))).toBe('Sun 14 Mar 2027'); // US DST starts
+    expect(formatIsoDateLong(asIsoDate('2027-03-28'))).toBe('Sun 28 Mar 2027'); // UK DST starts
+    expect(formatIsoDateLong(asIsoDate('2027-10-31'))).toBe('Sun 31 Oct 2027'); // UK DST ends
+    expect(formatIsoDateLong(asIsoDate('2028-02-29'))).toBe('Tue 29 Feb 2028');
     expect(formatIsoDate('2027-03-14')).toBe('14 Mar 2027'); // WP9's Results form, the same module
   });
 
@@ -4849,14 +5078,14 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
         onOpen={() => undefined}
       />,
     );
-    expect(cell('2027-03-13').cellIndex).toBe(5);
-    expect(cell('2027-03-14').cellIndex).toBe(6);
-    expect(cell('2027-03-15').cellIndex).toBe(0);
+    expect(column('2027-03-13')).toBe(5);
+    expect(column('2027-03-14')).toBe(6);
+    expect(column('2027-03-15')).toBe(0);
     expect(cell('2027-03-14').querySelector('[aria-hidden="true"]')?.textContent).toBe('14');
     expect(cell('2027-03-14')).toHaveTextContent('Sun 14 Mar 2027');
     expect(cell('2027-03-28')).toHaveTextContent('Sun 28 Mar 2027');
-    expect(cell('2027-04-01').closest('table')).toHaveAccessibleName('April 2027');
-    expect(cell('2027-04-01').cellIndex).toBe(3);
+    expect(cell('2027-04-01').closest('table')).toHaveAccessibleName('Apr 2027');
+    expect(column('2027-04-01')).toBe(3);
   });
 
   it('the Results date columns render departure and return from their strings', async () => {
@@ -4901,7 +5130,7 @@ Expected: FAIL on "the zone is in effect" (`expected 'Europe/London' to be 'Amer
 Run: `pnpm --filter @gmt/web run test:tz`
 Expected: FAIL with `Missing script: "test:tz"`.
 
-Manual mutation, once: in `format.ts` replace `formatDayLong`'s body with the `Date`-based `naiveDayLong` of the test file and rerun `test:tz`; the Los Angeles run must go red on the grid and formatting tests. Restore the file.
+Manual mutation, once: in `format.ts` replace `formatIsoDateLong`'s body with the `Date`-based `naiveDayLong` of the test file and rerun `test:tz`; the Los Angeles run must go red on the grid and formatting tests. Restore the file.
 
 - [ ] **Step 3: Implement**
 
@@ -4940,27 +5169,34 @@ HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect(thi
 };
 ```
 
-`apps/web/vitest.config.ts` (WP9's file; keep its other keys, set `pool`, `exclude` and `setupFiles`, and add the glob floors):
+`apps/web/vitest.config.ts` (WP9's: `pool`, `exclude`, the setup order and the view-model floors beside WP9's 100% files):
+
+`vitest.config.ts` — find:
 
 ```ts
-import { fileURLToPath } from 'node:url';
-import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vitest/config';
+const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
+```
 
-/** WP10: the pure view-model modules carry their own floors above the package's (TS-8). */
-const VIEW_MODEL_FLOOR = { lines: 95, branches: 85, functions: 95, statements: 95 };
+`vitest.config.ts` — replace with:
 
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: { '@gmt/core': fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url)) },
-  },
-  test: {
-    name: 'web',
-    environment: 'jsdom',
-    // why: an absolute origin so the client's new URL(path, origin) gives msw an interceptable absolute URL.
+```ts
+const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
+/** WP10's pure view-model modules carry their own floor above the package's (review TS-8). */
+const VIEW_MODEL = { lines: 95, branches: 85, functions: 95, statements: 95 };
+```
+
+`vitest.config.ts` — find:
+
+```ts
     environmentOptions: { jsdom: { url: 'http://localhost:3000/' } },
-    include: ['test/**/*.test.{ts,tsx}'],
+    setupFiles: ['test/setup.ts'],
+    coverage: {
+```
+
+`vitest.config.ts` — replace with:
+
+```ts
+    environmentOptions: { jsdom: { url: 'http://localhost:3000/' } },
     // why: forks keep each worker a separate Node process, where assigning process.env.TZ re-detects the zone (review focus 3).
     pool: 'forks',
     // why: the Playwright smoke lives in e2e/ and runs only through `pnpm --filter @gmt/web e2e` (spec §9 item 6).
@@ -4968,31 +5204,46 @@ export default defineConfig({
     // why: setup-tz first so the zone is set before anything touches Date; setup-charts sizes Recharts in jsdom.
     setupFiles: ['test/setup-tz.ts', 'test/setup.ts', 'test/setup-charts.ts'],
     coverage: {
-      provider: 'v8',
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx', 'src/vite-env.d.ts'],
-      thresholds: {
-        lines: 70,
-        branches: 60,
-        functions: 70,
-        statements: 70,
-        'src/lib/**': VIEW_MODEL_FLOOR,
-        'src/views/{Calendar,Duration,History}/*.ts': VIEW_MODEL_FLOOR,
-      },
-    },
-  },
-});
 ```
 
-`apps/web/package.json` scripts (set these four, keep WP9's others):
+`vitest.config.ts` — find:
+
+```ts
+        'src/state/{urlState,resultsState}.ts': FULL,
+      },
+```
+
+`vitest.config.ts` — replace with:
+
+```ts
+        'src/state/{urlState,resultsState}.ts': FULL,
+        'src/lib/**': VIEW_MODEL,
+        'src/views/{Calendar,Duration,History}/*.ts': VIEW_MODEL,
+      },
+```
+
+`apps/web/package.json` (WP0's, which WP9 keeps; WP10 changes `test` and `e2e` and adds `test:tz` and `e2e:install`):
+
+`apps/web/package.json` — find:
 
 ```json
-{
-  "test": "vitest run --coverage && pnpm run test:tz",
-  "test:tz": "GMT_TEST_TZ=America/Los_Angeles vitest run test/tz test/views/calendar && GMT_TEST_TZ=Asia/Tokyo vitest run test/tz test/views/calendar",
-  "e2e": "pnpm --workspace-root run build && playwright test",
-  "e2e:install": "playwright install chromium"
-}
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --coverage",
+    "dev": "vite",
+    "e2e": "playwright test"
+  },
+```
+
+`apps/web/package.json` — replace with:
+
+```json
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --coverage && pnpm run test:tz",
+    "dev": "vite",
+    "e2e": "pnpm --workspace-root run build && playwright test",
+    "test:tz": "GMT_TEST_TZ=America/Los_Angeles vitest run test/tz test/views/calendar && GMT_TEST_TZ=Asia/Tokyo vitest run test/tz test/views/calendar",
+    "e2e:install": "playwright install chromium"
+  },
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -5001,7 +5252,7 @@ Run: `pnpm --filter @gmt/web exec vitest run test/tz`
 Expected: PASS, 10 tests (5 per zone).
 
 Run: `pnpm --filter @gmt/web run test:tz`
-Expected: two passing runs, each listing `test/tz/dates.tz.test.tsx` and the six `test/views/calendar/*` files, 80 tests each.
+Expected: two passing runs, each listing `test/tz/dates.tz.test.tsx` and the six `test/views/calendar/*` files, 82 tests each.
 
 - [ ] **Step 5: Commit**
 
@@ -5009,16 +5260,16 @@ Expected: two passing runs, each listing `test/tz/dates.tz.test.tsx` and the six
 git add apps/web && git commit -m "wp10: TZ suite under Los Angeles and Tokyo, chart setup, forks pool and view-model coverage floors"
 ```
 
-### Task 10.11: View C Duration (Recharts 3)
+### Task 10.10: View C Duration (Recharts 3)
 
 **Files:**
 - Create: `apps/web/src/views/Duration/{data.ts,DurationChart.tsx,DurationView.tsx}`, `apps/web/test/views/duration.test.tsx`
 
 **Interfaces:**
-- Consumes: `useDurationAnalysis`, `ViewHeader`, `PriceCell`, `PriceBoundary`, `formatPence`, `formatDayShort`, `sourceLabelOf`, `seriesColour`, `hrefWith`/`navigateTo` and WP9's `f.nights`; recharts `BarChart`, `Bar`, `Cell`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
+- Consumes: `useDurationAnalysis`, `ViewHeader` (`variant="span"`), `PriceCell`, `PriceBoundary`, `formatPence`, `formatDayShort`, `sourceLabelOf`, `seriesColour`, `hrefWith`/`navigateTo` and WP9's `f.nights`; recharts `BarChart`, `Bar`, `Cell`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
 - Produces: `DurationPrice`, `DurationCell`, `DurationRow`, `DurationSeries`, `DurationData`, `buildDurationData`, `barValue`, `gapLabel`, `rowAt`, `DurationTooltip`, `DurationChart`, `DurationTable`, `DurationView`; `src/lib/palette.ts`.
 
-One row per nights value in `[minNights, maxNights]`. Each series cell carries its own `searched` flag from the contract, so a gap reads "not searched" or "searched, no price" for a calendar series and "not itinerary-searched" or "itinerary-searched, no price" for the verified series; a nights value the api omits was searched by nothing. A gap is `null`: Recharts draws no bar, never a zero bar, never an interpolated one, and the x axis marks "ns" where no series searched. Series names come from their prices' provenance. The note under the title defines `n` ("priced cells behind each minimum"; the legend's `n` sums over stay lengths). The tooltip finds its row by the axis label in the data it already holds, so no chart payload is cast. A stale minimum is drawn at 30% opacity with a 2 px black outline. The table is the chart's text alternative (`aria-describedby`); each nights value links to Results with `f.nights=<n>-<n>`.
+One row per nights value in `[minNights, maxNights]`. Each series cell carries its own `searched` flag from the contract, so a gap reads "not searched" or "searched, no price" for a calendar series and "not itinerary-searched" or "itinerary-searched, no price" for the verified series; a nights value the api omits was searched by nothing. A gap is `null`: Recharts draws no bar, never a zero bar, never an interpolated one, and the x axis marks "ns" where no series searched. Series names come from their prices' provenance. The note under the title defines `n` ("priced cells behind each minimum"; the legend's `n` sums over stay lengths). The tooltip finds its row by the axis label in the data it already holds, so no chart payload is cast. A stale minimum is drawn at 30% opacity with a 2 px black outline. The chart's `figure` carries `data-scale` (its axes and tooltip are scale values). The table is the chart's text alternative (`aria-describedby`); each nights value links to Results with `f.nights=<n>-<n>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5032,7 +5283,7 @@ import { DurationTooltip } from '../../src/views/Duration/DurationChart.js';
 import { DurationView } from '../../src/views/Duration/DurationView.js';
 import { barValue, buildDurationData, gapLabel } from '../../src/views/Duration/data.js';
 import { API, definition } from '../fixtures.js';
-import { bare, cellAt, durationResponse, night, priceAt, provSynthetic } from '../fixtures.wp10.js';
+import { bare, cellAt, durationResponse, night, priceAt, provSyntheticAt } from '../fixtures.wp10.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 
@@ -5109,7 +5360,7 @@ describe('duration data (spec §11 View C; plan decision 38)', () => {
         minCalendar: [
           {
             providerId: 'fixture',
-            price: { ...bare(priceAt(30000, provSynthetic(1), false, at)), cell: at },
+            price: { ...bare(priceAt(30000, provSyntheticAt(1), false, at)), cell: at },
             n: 2,
           },
         ],
@@ -5224,7 +5475,7 @@ describe('Duration view (spec §11 View C)', () => {
                 {
                   providerId: 'travelpayouts',
                   price: {
-                    ...bare(priceAt(41200, provSynthetic(400), true, cellAt('2027-03-14', 10))),
+                    ...bare(priceAt(41200, provSyntheticAt(400), true, cellAt('2027-03-14', 10))),
                     cell: cellAt('2027-03-14', 10),
                   },
                   n: 5,
@@ -5295,7 +5546,7 @@ describe('Duration view (spec §11 View C)', () => {
     );
     expect(
       await renderWithProviders(<DurationView definition={def} />).findByText(
-        '1 of 2 shown prices are stale (older than one refresh cycle)',
+        '1 of 2 shown prices are stale (older than one refresh cycle by fetch age)',
       ),
     ).toBeInTheDocument();
   });
@@ -5524,7 +5775,7 @@ export function DurationTooltip(props: {
 export function DurationChart({ data, tableId }: { data: DurationData; tableId: string }) {
   const captionId = useId();
   return (
-    <figure aria-labelledby={captionId} aria-describedby={tableId} className="flex flex-col gap-1">
+    <figure data-scale aria-labelledby={captionId} aria-describedby={tableId} className="flex flex-col gap-1">
       <figcaption id={captionId} className="font-medium">
         {D.chartTitle}
       </figcaption>
@@ -5685,6 +5936,7 @@ export function DurationView({ definition }: { definition: DefinitionResponse })
   return (
     <section aria-label={COPY.durationView.title} className="flex flex-col gap-4">
       <ViewHeader
+        variant="span"
         title={COPY.durationView.title}
         executions={q.data.executions}
         stale={prices.length > 0 && stale === prices.length}
@@ -5714,13 +5966,13 @@ Expected: PASS. The duration file passes 14 tests. Mutation check, once: make `b
 git add apps/web && git commit -m "wp10: duration view with per-series gaps, ns ticks, stale bars, n defined, links to Results (spec §11 View C)"
 ```
 
-### Task 10.12: History view
+### Task 10.11: History view
 
 **Files:**
 - Create: `apps/web/src/views/History/{lines.ts,HistoryChart.tsx,HistoryView.tsx}`, `apps/web/test/views/history.test.tsx`
 
 **Interfaces:**
-- Consumes: `useRouteHistories`, `useItineraryHistory`, `qk.results` (cache lookup), `DEFAULT_DISCOVERY_REFRESH_HOURS`, `cellKeyString`, `instantMs`, `dateMs`, `dateOfMs`, the `format.ts` forms, `effectiveAge`, `formatAgeFull`, `PriceCell`, `PriceBoundary`, `sourceLabelOf`, `seriesColour`, `ViewHeader` (cross-execution variant), `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`; recharts `LineChart`, `Line`, `XAxis`, `YAxis`, `CartesianGrid`, `Legend`, `ResponsiveContainer`.
+- Consumes: `useRouteHistories`, `useItineraryHistory`, `qk.results` (cache lookup), `DEFAULT_DISCOVERY_REFRESH_HOURS`, `cellKeyString`, `instantMs`, `dateMs`, `dateOfMs`, the `format.ts` forms, `effectiveAge`, `formatAgeFull`, `PriceCell`, `PriceBoundary`, `sourceLabelOf`, `seriesColour`, `useCalendar` (the definition's runs for the header), `ViewHeader` (`variant="span"`), `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`; recharts `LineChart`, `Line`, `XAxis`, `YAxis`, `CartesianGrid`, `Legend`, `ResponsiveContainer`.
 - Produces: `RoutePoint`, `PlotPoint`, `PlotLine`, `RoutePlotPoint`, `RouteLine`, `CONNECT_FACTOR`, `refreshHoursOf`, `runCadenceHours`, `connectLimitMs`, `withGaps`, `linesFromRoute`, `linesFromItinerary`, `historySpan`, `newestAllStale`, `HistoryChart`, `RouteChart`, `HistoryTable`, `RouteTable`, `HISTORY_PARAMS`, `MAX_OVERLAY_PAIRS`, `historyHref`, `findCachedRow`, `HistoryView`.
 
 **Two charts (plan decision 38).** Fetch-time series (calendar per provider, itinerary offers) are plotted at `fetchedAt` on a Europe/London date axis. Google's indicative route-level series is a different quantity (price by travel date for the route as a whole), so it gets its own chart with a date axis (`dateMs`, ticks as dates with the year) and its own tables.
@@ -5729,7 +5981,7 @@ git add apps/web && git commit -m "wp10: duration view with per-series gaps, ns 
 
 **Provenance.** Every fetch-time point renders through PriceCell with its own `stale` and `truncated` from the contract. A calendar point names its cheapest searched cell and says when that cell differs from the previous point's. An offer the final step did not confirm sits in its own dashed series named "… · price not confirmed by the final step" and says so in its row. Route-level points carry no cabin, so (spec §11) they show the amount with "indicative route-level series", the cabin as the vendor gave it ("cabin not stated" for `unknown`) and the fetched age, never a PriceCell.
 
-**State.** The pair (`hist.pair`, or `all` for the overlay of up to six pairs) and the itinerary (`hash`) live in the URL. In itinerary mode the heading names the route, dates and carriers of the Results row with that hash from the query cache (the operator arrived from it); without it the heading says how to get them. The header is WP9's cross-execution `ViewHeader`: how many runs the lines span, first and last fetch, stale when every series' newest point is stale. No tooltip (§6).
+**State.** The pair (`hist.pair`, or `all` for the overlay of up to six pairs) and the itinerary (`hash`) live in the URL. In itinerary mode the heading names the route, dates and carriers of the Results row with that hash from the query cache (the operator arrived from it); without it the heading says how to get them. The header is WP9's `ViewHeader variant="span"` over the definition's runs (the history responses name none, so they come from its calendar response), stale when every series' newest point is stale; a WP10 line below it gives how many fetches the lines hold and their first and last date. Both chart figures carry `data-scale` and each route-level row `data-indicative`, the two markers WP9's rendered sweep accepts for "£" outside a PriceCell (Task 10.12). No tooltip (§6).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5741,6 +5993,7 @@ import { waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { qk } from '../../src/api/queries.js';
+import { COPY } from '../../src/copy.js';
 import { HISTORY_PARAMS, HistoryView, historyHref } from '../../src/views/History/HistoryView.js';
 import {
   connectLimitMs,
@@ -6017,13 +6270,13 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
 
   it('the header spans the runs shown (the cross-execution ViewHeader)', async () => {
     server.use(http.get(routeRoute, () => HttpResponse.json(threeRuns)));
-    const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    const { findByRole, findByText, getByText } = renderWithProviders(
+      <HistoryView definition={definition()} />,
+    );
     await findByRole('figure', { name: 'Price by fetch date' });
-    // why: the wording is WP9's ViewHeader's; WP10 checks it receives the span (3 runs, first and last fetch dates).
-    const header = (await findByRole('heading', { name: 'History', level: 2 })).parentElement;
-    expect(header).toHaveTextContent('3');
-    expect(header).toHaveTextContent('23 Sep 2026');
-    expect(header).toHaveTextContent('14 Oct 2026');
+    // why: WP9's span header names the definition's runs (from its calendar response); WP10's line gives the points' range.
+    expect(await findByText(COPY.spanExecutions(1))).toBeInTheDocument();
+    expect(getByText('3 fetches shown, 23 Sep 2026 to 14 Oct 2026')).toBeInTheDocument();
   });
 
   it('itinerary mode names the trip from the cached Results row and draws unconfirmed prices dashed and labelled', async () => {
@@ -6390,11 +6643,11 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import {
-  formatDayLong,
   formatDayShort,
   formatInstantDateLondon,
   formatInstantLondon,
   formatIsoDate,
+  formatIsoDateLong,
   formatPence,
 } from '../../format.js';
 import { seriesColour } from '../../lib/palette.js';
@@ -6421,7 +6674,12 @@ const routeValue = (p: RoutePlotPoint) => p.pricePence;
 export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; tablesId: string }) {
   const captionId = useId();
   return (
-    <figure aria-labelledby={captionId} aria-describedby={tablesId} className="flex flex-col gap-1">
+    <figure
+      data-scale
+      aria-labelledby={captionId}
+      aria-describedby={tablesId}
+      className="flex flex-col gap-1"
+    >
       <figcaption id={captionId} className="font-medium">
         {H.fetchChartTitle}
       </figcaption>
@@ -6477,7 +6735,12 @@ export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; 
 export function RouteChart({ lines, tablesId }: { lines: readonly RouteLine[]; tablesId: string }) {
   const captionId = useId();
   return (
-    <figure aria-labelledby={captionId} aria-describedby={tablesId} className="flex flex-col gap-1">
+    <figure
+      data-scale
+      aria-labelledby={captionId}
+      aria-describedby={tablesId}
+      className="flex flex-col gap-1"
+    >
       <figcaption id={captionId} className="font-medium">
         {H.routeChartTitle}
       </figcaption>
@@ -6612,8 +6875,8 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
         </thead>
         <tbody>
           {points.map((p) => (
-            <tr key={p.t}>
-              <td>{formatDayLong(p.route.date)}</td>
+            <tr key={p.t} data-indicative>
+              <td>{formatIsoDateLong(p.route.date)}</td>
               <td>{formatPence(p.pricePence)}</td>
               <td>
                 {H.routeProvenance(
@@ -6637,11 +6900,12 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
 import type { Iata } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useId } from 'react';
-import { useItineraryHistory, useRouteHistories } from '../../api/queries.js';
+import { useCalendar, useItineraryHistory, useRouteHistories } from '../../api/queries.js';
 import type { DefinitionResponse, ResultRow, ResultsResponse } from '../../api/types.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
 import { COPY } from '../../copy.js';
-import { formatDayLong } from '../../format.js';
+import { formatInstantDateLondon, formatIsoDateLong } from '../../format.js';
+import { instantMs } from '../../lib/time.js';
 import { useNow } from '../../now.js';
 import { hrefWith, navigateTo, updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { HistoryChart, HistoryTable, RouteChart, RouteTable } from './HistoryChart.js';
@@ -6725,8 +6989,8 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
         ? H.itineraryUnknown(hash)
         : H.itineraryHeading(
             `${row.cell.origin}→${row.cell.destination}`,
-            formatDayLong(row.cell.departureDate),
-            formatDayLong(row.cell.returnDate),
+            formatIsoDateLong(row.cell.departureDate),
+            formatIsoDateLong(row.cell.returnDate),
             row.carriers.join(', '),
           );
   } else {
@@ -6741,11 +7005,22 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
     });
   }
   const span = historySpan(fetchLines);
+  const runs = useCalendar(definition.id).data?.executions ?? [];
   const notes = definition.destinationNotes;
 
   return (
     <section aria-label={H.title} className="flex flex-col gap-4">
-      <ViewHeader title={H.title} span={span} stale={newestAllStale(fetchLines)} />
+      {/* why: the history responses name no runs; the definition's runs come from its calendar response (WP9's span variant) */}
+      <ViewHeader title={H.title} variant="span" executions={runs} stale={newestAllStale(fetchLines)} />
+      {span !== null ? (
+        <p className="text-sm">
+          {H.spanLine(
+            span.runs,
+            formatInstantDateLondon(instantMs(span.firstAt)),
+            formatInstantDateLondon(instantMs(span.lastAt)),
+          )}
+        </p>
+      ) : null}
       {hash !== null ? (
         <div>
           <p className="font-medium">{heading}</p>
@@ -6821,17 +7096,17 @@ Expected: PASS. The history file passes 18 tests. Mutation check, once: set `con
 git add apps/web && git commit -m "wp10: history with fetch-time and indicative route-level charts, run-to-run joins, unconfirmed offers dashed"
 ```
 
-### Task 10.13: Wire the views into WP9's shell, and link Results to history
+### Task 10.12: Wire the views into WP9's shell, and link Results to history
 
 **Files:**
 - Create: `apps/web/test/app/wp10Wiring.test.tsx`
-- Modify (WP9): `apps/web/src/App.tsx`, `apps/web/src/views/Results/ExpandedRow.tsx`, `apps/web/test/app/shell.test.tsx`
+- Modify (WP9): `apps/web/src/App.tsx`, `apps/web/src/copy.ts` (the calendar placeholder hint goes), `apps/web/src/views/Results/ExpandedRow.tsx`, `apps/web/test/app/shell.test.tsx`, `apps/web/test/copy/renderedSweep.test.tsx`
 
 **Interfaces:**
 - Consumes: `App`, `ExpandedRow`, `COPY.placeholder`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`, `historyHref`, `HISTORY_PARAMS`, `navigateTo`.
 - Produces: the Calendar, Duration and History views behind WP9's nav; the "price history" link on expanded rows that have an itinerary hash.
 
-The wiring test renders each view through `App` on the default handlers, asserts it drew its real content (a grid and legend; a chart figure and table; both history charts), checks that WP9's placeholder text is gone using `COPY.placeholder('WP10')` itself, and sweeps the rendered copy for banned words.
+The wiring test renders each view through `App` on the default handlers, asserts it drew its real content (a grid and legend; a chart figure and table; both history charts), checks that WP9's placeholder text is gone using `COPY.placeholder` itself, and sweeps the rendered copy for banned words.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6861,10 +7136,10 @@ describe('WP10 views in the shell: no placeholder left, real content, no banned 
     const { findByRole, getByTestId, queryByText } = renderWithProviders(<App />, {
       search: '?view=calendar&def=def-0001',
     });
-    expect(await findByRole('grid', { name: 'March 2027' })).toBeInTheDocument();
+    expect(await findByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
     expect(getByTestId('calendar-legend')).toBeInTheDocument();
     expect(getByTestId('day-price-block')).toHaveTextContent('£412');
-    expect(queryByText(COPY.placeholder('WP10'))).toBeNull();
+    expect(queryByText(COPY.placeholder)).toBeNull();
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 
@@ -6876,7 +7151,7 @@ describe('WP10 views in the shell: no placeholder left, real content, no banned 
     expect(
       getByRole('table', { name: 'Cheapest found per stay length, with provenance' }),
     ).toBeInTheDocument();
-    expect(queryByText(COPY.placeholder('WP10'))).toBeNull();
+    expect(queryByText(COPY.placeholder)).toBeNull();
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 
@@ -6888,7 +7163,7 @@ describe('WP10 views in the shell: no placeholder left, real content, no banned 
     expect(
       getByRole('figure', { name: "Google's indicative route-level series: price by travel date" }),
     ).toBeInTheDocument();
-    expect(queryByText(COPY.placeholder('WP10'))).toBeNull();
+    expect(queryByText(COPY.placeholder)).toBeNull();
     expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 
@@ -6927,30 +7202,119 @@ Expected: FAIL, 4 of 4: the three view tests time out on `findByRole` (the place
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/App.tsx`: import the three views, widen `needsDefinition` and replace the WP10 placeholder line:
+`apps/web/src/App.tsx`: the three views replace WP9's placeholder (which stays for Alerts, WP11's) and need a definition like Results:
+
+`src/App.tsx` — find:
 
 ```tsx
-import { CalendarView } from './views/Calendar/CalendarView.js';
-import { DurationView } from './views/Duration/DurationView.js';
-import { HistoryView } from './views/History/HistoryView.js';
-
-const needsDefinition =
-  view === 'results' || view === 'coverage' || view === 'calendar' || view === 'duration' || view === 'history';
-
-// in place of {view === 'calendar' || view === 'duration' || view === 'history' ? <Placeholder wp="WP10" /> : null}
-{view === 'calendar' && selected !== null ? (
-  // why: a new definition starts with no panel open and its own filter defaults.
-  <CalendarView key={selected.id} definition={selected} />
-) : null}
-{view === 'duration' && selected !== null ? <DurationView definition={selected} /> : null}
-{view === 'history' && selected !== null ? <HistoryView definition={selected} /> : null}
+import { parseView } from './state/view.js';
+import { CoverageView } from './views/Coverage/CoverageView.js';
+import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
+import { Placeholder } from './views/Placeholder.js';
 ```
 
-WP9's `Placeholder` stays for Alerts (WP11 replaces it).
-
-`apps/web/src/views/Results/ExpandedRow.tsx`: import `navigateTo` from `../../state/urlState.js` and `HISTORY_PARAMS`, `historyHref` from `../History/HistoryView.js`, and after `<SearchLink link={row.searchLink} />` add:
+`src/App.tsx` — replace with:
 
 ```tsx
+import { parseView } from './state/view.js';
+import { CalendarView } from './views/Calendar/CalendarView.js';
+import { CoverageView } from './views/Coverage/CoverageView.js';
+import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
+import { DurationView } from './views/Duration/DurationView.js';
+import { HistoryView } from './views/History/HistoryView.js';
+import { Placeholder } from './views/Placeholder.js';
+```
+
+`src/App.tsx` — find:
+
+```tsx
+  const noProviders = providers.data !== undefined && !providers.data.providers.some((p) => p.enabled);
+  const needsDefinition = view === 'results' || view === 'coverage';
+  return (
+```
+
+`src/App.tsx` — replace with:
+
+```tsx
+  const noProviders = providers.data !== undefined && !providers.data.providers.some((p) => p.enabled);
+  const needsDefinition =
+    view === 'results' ||
+    view === 'coverage' ||
+    view === 'calendar' ||
+    view === 'duration' ||
+    view === 'history';
+  return (
+```
+
+`src/App.tsx` — find:
+
+```tsx
+          {view === 'coverage' && selected !== null ? <CoverageView definition={selected} /> : null}
+          {view === 'calendar' || view === 'duration' || view === 'history' || view === 'alerts' ? (
+            <Placeholder hint={view === 'calendar' ? COPY.calendarPlaceholderHint : null} />
+          ) : null}
+          {view === 'definitions' ? <DefinitionsView /> : null}
+```
+
+`src/App.tsx` — replace with:
+
+```tsx
+          {view === 'coverage' && selected !== null ? <CoverageView definition={selected} /> : null}
+          {view === 'calendar' && selected !== null ? (
+            // why: a new definition starts with no panel open and its own filter defaults.
+            <CalendarView key={selected.id} definition={selected} />
+          ) : null}
+          {view === 'duration' && selected !== null ? <DurationView definition={selected} /> : null}
+          {view === 'history' && selected !== null ? <HistoryView definition={selected} /> : null}
+          {view === 'alerts' ? <Placeholder /> : null}
+          {view === 'definitions' ? <DefinitionsView /> : null}
+```
+
+`apps/web/src/copy.ts`: the placeholder's calendar hint has no reader left.
+
+`src/copy.ts` — find:
+
+```ts
+  placeholder: 'This view is not available yet.',
+  calendarPlaceholderHint:
+    'Until it is, the Results filters slice the window by month: set "Departs on or after" and "Departs on or before".',
+  definitionSelectorLabel: 'Search definition',
+```
+
+`src/copy.ts` — replace with:
+
+```ts
+  placeholder: 'This view is not available yet.',
+  definitionSelectorLabel: 'Search definition',
+```
+
+`apps/web/src/views/Results/ExpandedRow.tsx`: the "price history" link after the search link, for a row with an itinerary:
+
+`src/views/Results/ExpandedRow.tsx` — find:
+
+```tsx
+import { useNow } from '../../now.js';
+```
+
+`src/views/Results/ExpandedRow.tsx` — replace with:
+
+```tsx
+import { useNow } from '../../now.js';
+import { navigateTo } from '../../state/urlState.js';
+import { HISTORY_PARAMS, historyHref } from '../History/HistoryView.js';
+```
+
+`src/views/Results/ExpandedRow.tsx` — find:
+
+```tsx
+        <SearchLink link={row.searchLink} providerId={providerId} />
+      </div>
+```
+
+`src/views/Results/ExpandedRow.tsx` — replace with:
+
+```tsx
+        <SearchLink link={row.searchLink} providerId={providerId} />
         {row.itineraryHash !== null ? (
           <a
             href={historyHref(row.itineraryHash)}
@@ -6960,16 +7324,105 @@ WP9's `Placeholder` stays for Alerts (WP11 replaces it).
             {COPY.historyView.rowLink}
           </a>
         ) : null}
+      </div>
 ```
 
-`apps/web/test/app/shell.test.tsx`: in "nav lists every view and keeps filters when switching", replace the placeholder assertion after the Calendar click with
+`apps/web/test/app/shell.test.tsx`: Calendar now renders its month tables, and only Alerts is a placeholder:
 
-```ts
+`test/app/shell.test.tsx` — find:
+
+```tsx
+    expect(window.location.search).toBe('?view=calendar&def=def-0001&f.stops=1');
+    expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
+```
+
+`test/app/shell.test.tsx` — replace with:
+
+```tsx
+    expect(window.location.search).toBe('?view=calendar&def=def-0001&f.stops=1');
     // why: WP10 replaced the placeholder; the default msw handlers serve the calendar.
-    expect(await screen.findByRole('grid', { name: 'March 2027' })).toBeInTheDocument();
+    expect(await screen.findByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
 ```
 
-and delete the test "Duration and History are WP10 placeholders" (the wiring test covers both views).
+`test/app/shell.test.tsx` — find:
+
+```tsx
+
+  it.each(['duration', 'history', 'alerts'])(
+    '%s is a placeholder that names no work package',
+    async (view) => {
+      renderWithProviders(<App />, { search: `?view=${view}` });
+      expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
+      expect(screen.queryByText(/WP1/)).toBeNull();
+    },
+  );
+```
+
+`test/app/shell.test.tsx` — replace with:
+
+```tsx
+
+  it.each(['alerts'])('%s is a placeholder that names no work package', async (view) => {
+    renderWithProviders(<App />, { search: `?view=${view}` });
+    expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/WP1/)).toBeNull();
+  });
+```
+
+`test/app/shell.test.tsx` — find:
+
+```tsx
+    await screen.findByLabelText('Search definition');
+    await screen.findByText('This view is not available yet.');
+    expect(screen.queryByText(/Synthetic data/)).toBeNull();
+```
+
+`test/app/shell.test.tsx` — replace with:
+
+```tsx
+    await screen.findByLabelText('Search definition');
+    await screen.findByRole('table', { name: 'Mar 2027' });
+    expect(screen.queryByText(/Synthetic data/)).toBeNull();
+```
+
+`apps/web/test/copy/renderedSweep.test.tsx`: the sweep, which now visits the real WP10 views, accepts "£" in `[data-scale]` and `[data-indicative]` as well:
+
+`test/copy/renderedSweep.test.tsx` — find:
+
+```tsx
+ * Every "£" in the DOM sits inside a PriceCell (a fare, with provenance), a [data-cost] element (a cost
+ * or a cap) or a form label ("Max price (£)"), on every view (reviews tsr-003, prov-r2-007).
+ */
+```
+
+`test/copy/renderedSweep.test.tsx` — replace with:
+
+```tsx
+ * Every "£" in the DOM sits inside a PriceCell (a fare, with provenance), a [data-cost] element (a cost
+ * or a cap), a [data-scale] element (WP10: a heatmap legend range or a chart axis or tooltip, never a fare), a
+ * [data-indicative] row (WP10: Google's indicative route-level series, exempt from full provenance by spec §11)
+ * or a form label ("Max price (£)"), on every view (reviews tsr-003, prov-r2-007).
+ */
+```
+
+`test/copy/renderedSweep.test.tsx` — find:
+
+```tsx
+      n.textContent?.includes('£') &&
+      host?.closest('[data-testid="price-cell"], [data-cost], label') === null
+    ) {
+```
+
+`test/copy/renderedSweep.test.tsx` — replace with:
+
+```tsx
+      n.textContent?.includes('£') &&
+      host?.closest('[data-testid="price-cell"], [data-cost], [data-scale], [data-indicative], label') ===
+        null
+    ) {
+```
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -6982,14 +7435,14 @@ Expected: PASS: the wiring file 4 tests, WP9's shell, copy (catalogue, source gu
 git add apps/web && git commit -m "wp10: calendar, duration and history in the shell; results link to itinerary history"
 ```
 
-### Task 10.14: Playwright smoke in fixture mode (spec §9 item 6)
+### Task 10.13: Playwright smoke in fixture mode (spec §9 item 6)
 
 **Files:**
 - Create: `apps/web/playwright.config.ts`, `apps/web/e2e/smoke.spec.ts`, `apps/web/e2e/prepare-db.mjs`
-- Modify (WP9): `apps/web/vite.config.ts` (proxy target), `apps/web/tsconfig.json` (`include`); root `.gitignore`
+- Modify (WP9): `apps/web/vite.config.ts` (proxy target), `apps/web/tsconfig.test.json` (`include`); root `.gitignore`
 
 **Interfaces:**
-- Consumes: `pnpm --filter @gmt/api start` (WP8); fixture mode per spec §5.5 (WP4b's wiring reaches the fixture host through http-kit's gated `inProcessHosts`, plan decision 7); WP9's `COPY`, the Definitions form's checkbox ids `p-d-<providerId>` and `p-v-<providerId>`, and the Results headline "cheapest found £…".
+- Consumes: `pnpm --filter @gmt/api start` (WP8); fixture mode per spec §5.5 (WP4b's wiring reaches the fixture host through http-kit's gated `inProcessHosts`, plan decision 7); WP9's `COPY`, the Definitions form's advanced fold (`COPY.advanced`) with its checkbox ids `p-d-<providerId>` and `p-v-<providerId>`, its "Import example (…)", "Create and confirm about …" and "Run now (…)" buttons, and the Results headline led by `COPY.headlineLead`.
 - Produces: `pnpm --filter @gmt/web e2e`, excluded from `pnpm test` (vitest `exclude: ['e2e/**']`; the root runs vitest only).
 
 The smoke drives the real api in fixture mode and the built SPA through `vite preview`, whose proxy is WP9's `server.proxy` pointed at `GMT_API_ORIGIN`. The api environment meets `syntheticAllowed` (spec §5.5): `NODE_ENV=development`, `ALLOW_FIXTURE_PROVIDER=i-understand-this-is-fake`, a `.fixture.db` path, no `IN_CONTAINER`; it binds loopback (no auth, spec §4), disables auto-resume and raises the confirmation threshold so the run starts without a cost prompt. The desktop project runs the whole flow: Results headline and banner, then the Calendar (a grid, a priced day with the synthetic badge, the legend, a computed `outline-style` on the focused day), the Duration figure and table, and History's fetch-time figure and table, each naming the synthetic source. The phone project (375 × 812, after the desktop one) checks one month, the month buttons, the legend and no horizontal page scroll.
@@ -7008,17 +7461,19 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
   page,
 }) => {
   await page.goto('/?view=definitions');
-  await page.getByRole('button', { name: COPY.importExample }).click();
+  await page.getByRole('button', { name: /^Import example/ }).click();
+  // why: the provider checkboxes sit in WP9's advanced fold.
+  await page.getByText(COPY.advanced).click();
   // why: the example JSON names the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
   for (const prefix of ['p-d-', 'p-v-']) {
     for (const box of await page.locator(`input[type="checkbox"][id^="${prefix}"]`).all())
       await box.uncheck();
     await page.locator(`#${prefix}fixture`).check();
   }
-  await page.getByRole('button', { name: /^Create and confirm up to/ }).click();
-  await page.getByRole('button', { name: COPY.runNow }).click();
+  await page.getByRole('button', { name: /^Create and confirm about/ }).click();
+  await page.getByRole('button', { name: /^Run now/ }).click();
 
-  const headline = page.getByText(/^cheapest found £\d/);
+  const headline = page.locator('p', { hasText: COPY.headlineLead }).first();
   await expect(async () => {
     await page.goto('/?view=results');
     await expect(headline).toBeVisible({ timeout: 2_000 });
@@ -7170,19 +7625,61 @@ export default defineConfig({
 });
 ```
 
-`apps/web/vite.config.ts` (WP9): add above `defineConfig`
+`apps/web/vite.config.ts` (WP9):
+
+`vite.config.ts` — find:
 
 ```ts
+ */
+export default defineConfig({
+```
+
+`vite.config.ts` — replace with:
+
+```ts
+ */
 /**
- * The api the dev and preview servers proxy /api to. The Playwright smoke (WP10) points the preview at its own
+ * The api the dev and preview servers proxy /api to. The Playwright smoke (WP10) points `vite preview` at its own
  * fixture-mode api with GMT_API_ORIGIN; dev keeps the default. preview.proxy inherits server.proxy.
  */
 const API_ORIGIN = process.env.GMT_API_ORIGIN ?? 'http://localhost:3000';
+
+export default defineConfig({
 ```
 
-and set the proxy entry to `proxy: { [API_PREFIX]: { target: API_ORIGIN } },`. Nothing else in the file changes.
+`vite.config.ts` — find:
 
-`apps/web/tsconfig.json` (WP9): add `"e2e"` and `"playwright.config.ts"` to `include`, so `pnpm -r typecheck` covers the smoke and its config under the same strict rules.
+```ts
+    // why: no changeOrigin, so the api sees Host localhost:5173, which spec §4 allowlists in development.
+    proxy: { '/api': { target: 'http://localhost:3000' } },
+  },
+```
+
+`vite.config.ts` — replace with:
+
+```ts
+    // why: no changeOrigin, so the api sees Host localhost:5173, which spec §4 allowlists in development.
+    proxy: { '/api': { target: API_ORIGIN } },
+  },
+```
+
+`apps/web/tsconfig.test.json` (WP9's test project, which `pnpm --filter @gmt/web typecheck` runs): the smoke and its config are type-checked under the same strict rules.
+
+`tsconfig.test.json` — find:
+
+```json
+  },
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts"]
+}
+```
+
+`tsconfig.test.json` — replace with:
+
+```json
+  },
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts", "e2e", "playwright.config.ts"]
+}
+```
 
 Root `.gitignore`: add
 
@@ -7215,45 +7712,48 @@ git add apps/web .gitignore && git commit -m "wp10: Playwright smoke in fixture 
 ## 9. Pinned review-focus tests
 
 - **Review focus 3** (plan: "The browser runs outside Europe/London … a day never shifts by one. Owner: WP10"):
-  - **Task 10.10**, `test/tz/dates.tz.test.tsx`, under `America/Los_Angeles` and `Asia/Tokyo`, in-process per `describe.each` block and as whole processes via `pnpm --filter @gmt/web run test:tz` (`GMT_TEST_TZ` copied to `process.env.TZ` in `test/setup-tz.ts`). In each zone: the zone took effect; the negative control shows a naive `Date` moves the day (and, west of Greenwich, mislabels the US DST day); the US and UK DST days and the leap day keep their date and weekday; the calendar grid puts each day under its own weekday and month; WP9's Results renders departure and return from their strings. A recorded manual mutation turns the suite red.
-  - **Task 10.2**, `test/lib/noDateParsing.test.ts`, fails on any `new Date(`, `Date(`, `Date.parse(`, `Date.UTC(`, `Date.now(`, local date getter, `toLocale*String(` or date-library import anywhere in `apps/web/src` outside `lib/time.ts` and `now.tsx`, scanning whole files with comments blanked; its positive cases (including a call split across lines) keep it from being vacuous.
+  - **Task 10.9**, `test/tz/dates.tz.test.tsx`, under `America/Los_Angeles` and `Asia/Tokyo`, in-process per `describe.each` block and as whole processes via `pnpm --filter @gmt/web run test:tz` (`GMT_TEST_TZ` copied to `process.env.TZ` in `test/setup-tz.ts`). In each zone: the zone took effect; the negative control shows a naive `Date` moves the day (and, west of Greenwich, mislabels the US DST day); the US and UK DST days and the leap day keep their date and weekday; the calendar grid puts each day under its own weekday and month; WP9's Results renders departure and return from their strings. A recorded manual mutation turns the suite red.
+  - **Task 10.2**, `test/lib/noDateParsing.test.ts`, fails on any `new Date(`, `Date(` call, local date getter, `toLocale*String(` or date-library import anywhere in `apps/web/src` outside WP9's `now.tsx`, scanning whole files with comments blanked; its planted cases (a call split across lines, a commented one, epoch arithmetic that must pass) keep it from being vacuous.
 
 ## 10. Definition of done
 
 | Command | Expected |
 |---|---|
 | `pnpm --filter @gmt/core test` | Every core test passes at core's 100% thresholds, including `test/api-contract/wp10.test.ts`. |
-| `pnpm --filter @gmt/web test` | Every web test passes. Coverage meets the package floors (lines, functions, statements ≥ 70%, branches ≥ 60%) and the WP10 floors on `src/lib/**` and `src/views/{Calendar,Duration,History}/*.ts` (lines, functions, statements ≥ 95%, branches ≥ 85%). Then `test:tz` prints two passing runs (Los Angeles, Tokyo). |
+| `pnpm --filter @gmt/web typecheck` | Exit 0 for `tsconfig.json` and `tsconfig.test.json` (which now covers `e2e/` and `playwright.config.ts`). |
+| `pnpm --filter @gmt/web test` | Every web test passes. Coverage meets the package floors (lines, functions, statements ≥ 70%, branches ≥ 60%), WP9's 100% files, and the WP10 floors on `src/lib/**` and `src/views/{Calendar,Duration,History}/*.ts` (lines, functions, statements ≥ 95%, branches ≥ 85%). Then `test:tz` prints two passing runs (Los Angeles, Tokyo). |
 | `pnpm test` | The root run passes and lists no `e2e/` file. |
-| `pnpm --filter @gmt/web exec vitest run test/copy` | PASS: catalogue (every new function sampled, no banned word, "verified" only on allowed paths), source guard, rendered sweep over every view. |
-| `pnpm --filter @gmt/web exec vitest run test/lib/noDateParsing.test.ts` | PASS. |
+| `pnpm --filter @gmt/web exec vitest run test/copy` | PASS: catalogue (every new function sampled, no banned word, "verified" only on allowed paths), source guard (no literal copy; money only in its files), rendered sweep over every view (no banned word; "£" only in a price, a cost, a scale or an indicative row). |
 | `pnpm --filter @gmt/web e2e` | `2 passed`. |
 | `pnpm lint` | Biome reports no errors. |
-| `pnpm -r typecheck` | Clean, including `@gmt/db` (its `HistoryPoint` is unchanged), the web tests, `e2e/` and `playwright.config.ts`. |
-| `pnpm boundaries` | Exit 0: `@gmt/web` imports only `@gmt/core` among workspace packages; no `process.env` under `apps/web/src`; no airport literal in `apps/web/src` outside `example.ts`. |
-| `grep -rnE '\bas [A-Z(]' <the files of §7 Create>` | No line (no casts; WP10 uses only `as const` and `satisfies`). |
+| `pnpm -r typecheck` | Exit 0, including `@gmt/db` (its `HistoryPoint` is unchanged). |
+| `pnpm boundaries` | Exit 0: `@gmt/web` imports only `@gmt/core` among workspace packages; no `process.env` under `apps/web/src`; no place name in an `apps/web/src` string literal outside `example.ts` (WP10's literals need no new entry in the committed non-airport word list); no lint or type-check suppression comment in any package (decision 49). |
+| `pnpm casts` | Exit 0: no `as` except `as const`, and no angle-bracket assertion, in any WP10 file (decision 48). |
 
-**Assembly record (2026-10-15, scratch worktree of `main` at `d4256d5`).** The brief's code was applied on top of a snapshot of WP9's assembled shell, with WP9's pending revisions stubbed as §4 marks them (★: `ViewHeader`'s union, `formatIsoDateShort`, `COPY.truncatedNote`, `priceCellSchema.truncated` and `PriceCell`'s `truncated`). Tasks 10.1–10.13 ran in order; each red step failed as quoted (Task 10.1: 4 of 4 against `main`'s `results.ts`). Final state: `pnpm -r typecheck` exit 0; `pnpm lint` clean (461 files); `pnpm boundaries` exit 0; `pnpm --filter @gmt/core test` 721 tests at 100%; `pnpm --filter @gmt/db test` 263 tests; `pnpm --filter @gmt/web test` 30 files, 233 tests (WP10's 15 files hold 133 of them), coverage 93.6% lines and 83.8% branches overall, every WP10 floor met, then `test:tz` 80 tests in each zone. Task 10.14 was type-checked and linted but not run: WP8's api is not on `main`. Four WP9 issues surfaced on the way and were patched only in the scratch copy; they are WP9's to fix (§11).
+**Assembly record (2026-10-16, scratch worktree of `main` at `1f0ace4`).** Preconditions applied first: WP7's `packages/core` and `packages/db` changes of Tasks 7.1, 7.8, 7.13 and 7.18 with their core tests, and `scripts/check-casts.mjs` with the `casts` script (Task 7.20); then every code block of WP9's committed brief (round 3) in task order (its baseline reproduced: 227 web tests in 18 files, lint, typecheck, boundaries and casts clean). Then this brief, task by task; every red step failed as quoted (Task 10.1: 5 of 5 against the baseline schema). Final state: `pnpm -r typecheck` exit 0; `pnpm lint` clean (528 files); `pnpm boundaries` exit 0 with no word-list change; `pnpm casts` 364 files, 0 casts; `pnpm --filter @gmt/core test` 47 files, 739 tests, 100% on every metric; `pnpm --filter @gmt/web test` 32 files, 357 tests (WP10's 14 files hold 132), coverage 96.9% lines and 89.8% branches overall with every floor met, then `test:tz` 82 tests in each zone. The two recorded mutations turn their tests red. Task 10.13 was type-checked and linted but not run: WP8's api is not on `main`. Every whole-file code block in this brief is byte-identical to the assembled file, and every find text occurs exactly once in WP9's assembled file.
 
 ## 11. Open questions
 
-None for WP10. Four WP9 items surfaced in assembly, for the WP9 author (not WP10 work): `test/setup.ts` passes `onUnhandledRequest`, which msw 3 does not have (it is `onUnhandledFrame`, so unhandled requests currently only warn); `test/copy/sourceGuard.test.ts` and `test/api/client.test.ts` (through `vite.config.ts`'s `CORE_SRC`) call `fileURLToPath(new URL(…, import.meta.url))`, which throws under jsdom, where `import.meta.dirname` works; `test/views/results/expanded.test.tsx`'s other-offer literal lacks `notSeenInLatest`; `ClassBadge`, `Provenance`'s FX span and `form.test.tsx`'s `valueOf` fail Biome (`useAriaPropsSupportedByRole`, `noShadowRestrictedNames`). The ★ names in §4 are the ones WP10 calls; if WP9's revision names them differently, only the import sites change.
+None. The smoke (Task 10.13) is the one step not yet run end to end; it needs WP8's api.
 
 ## 12. Changes outside WP10's own files
 
-- `packages/core/src/api-contract/results.ts` (Task 10.1): the plan decision 38 fields, plus `priceConfirmed` and `verify`, which §13 asks the plan to record.
-- WP9's `src/format.ts` (Task 10.2): the weekday, month and instant forms.
+- `packages/core/src/api-contract/results.ts` (Task 10.1): decision 42's fields (`verify: { maxCalls, headroomCalls }`, `priceConfirmed`, `historyPointResponseSchema`), decision 38's duration fields, and `calendarDaySchema.verification.unconfirmed` (decision 48's day-cell rule; §13).
+- WP9's `src/format.ts` (Task 10.2): the grid and instant forms on its one month and weekday table.
 - WP9's `src/api/{types,endpoints,queries}.ts`, `src/copy.ts`, `test/msw/handlers.ts`, `test/copy/catalogue.test.ts` (Task 10.3): WP10 routes and hooks, `useExecutionActions`' refresh list, copy, default handlers, SAMPLES and the "verified" allowlist.
-- WP9's `src/components/{PriceCell,Provenance}.tsx` (Task 10.4): the `compact` form.
-- WP9's `vitest.config.ts` and `package.json` (Task 10.10): `pool: 'forks'`, `exclude`, `setupFiles`, glob floors; `test`, `test:tz`, `e2e`, `e2e:install`.
-- WP9's `src/App.tsx`, `src/views/Results/ExpandedRow.tsx`, `test/app/shell.test.tsx` (Task 10.13).
-- WP9's `vite.config.ts`, `tsconfig.json`, and the root `.gitignore` (Task 10.14).
+- WP9's `test/copy/sourceGuard.test.ts` (Task 10.6): the legend and the two chart files may format money (scale values and the indicative series, never fares); Recharts' `dataKey`, `scale` and `verticalAlign` and `data-*` attributes are non-copy props.
+- WP9's `vitest.config.ts` and WP0's `package.json` (Task 10.9): `pool: 'forks'`, `exclude`, setup order, view-model floors; `test`, `test:tz`, `e2e`, `e2e:install`.
+- WP9's `src/App.tsx`, `src/copy.ts` (the unused calendar hint), `src/views/Results/ExpandedRow.tsx`, `test/app/shell.test.tsx`, `test/copy/renderedSweep.test.tsx` (`[data-scale]`, `[data-indicative]`) (Task 10.12).
+- WP9's `vite.config.ts`, `tsconfig.test.json`, and the root `.gitignore` (Task 10.13).
 
 ## 13. For the plan and the WP8 brief (not yet recorded there)
 
-1. **WP8 fills WP10's contract fields** (decision 38 names the first three; these are the rules WP8 needs):
+1. **WP8 fills WP10's contract fields** (decisions 38, 42 and 48 name them; these are the rules WP8 needs):
    - `durationAnalysisResponseSchema.byNights[]`: `minVerified` and `minCalendar[].price` carry the `cell` of the minimum; `n` is the number of cells of that nights value with a class-verified price (verified) or that the provider priced (calendar); `searched.verification` is true when any verification outcome of that nights value is `priced`, `empty` or `no_data`; `searched.discovery[]` lists every discovery provider of the definition with the same rule for its own outcomes.
-   - `historyPointResponseSchema`: `stale` by the same §8.1 rule as any price of its kind (`STALE_AFTER_HOURS` for offers; `discoveryRefreshHours + maxAgeHours` for calendar points); `truncated` as for price cells (decision 36).
-   - Not yet in the plan: `priceConfirmed` on itinerary history points (the stored observation's step-3 confirmation, decisions 27 and 37), and `cellDetailResponseSchema.verify` (`maxCalls`: the child cap WP7 would give the cell now, decision 25; `providers[].monthCallsLeft`: each verification provider's provider-month cap minus its calls, `null` when uncapped; `null` without a verification provider). `verify` needs a WP7 dry-run of `childMaxCalls` over `estimateStart` that WP8 can call; WP7's brief does not expose one yet.
+   - `historyPointResponseSchema`: `stale` by decision 44's rule for its kind; `truncated` from core's `isTruncated` (decision 47).
+   - `priceConfirmed` on itinerary history points: the stored observation's step-3 confirmation (decisions 27, 37).
+   - `cellDetailResponseSchema.verify`: `Engine.childCapPreview(definitionId, cell)`, or `null` without a verification provider (decisions 42, 45).
+   - Not yet in the plan: `calendarDaySchema.verification.unconfirmed`, the count of the day's selected cells whose verification roll-up is priced with no confirmed price (reason part `price-unconfirmed`, `verification_min_pence` null; decision 48). The day carries counts, not outcome reasons, so without it a day cell could not say "price not confirmed".
 2. **Per-destination coverage and stay on a filtered day.** `calendarDaySchema.byDestination[]` carries prices only, so a filtered day can show neither that destination's glyphs and coverage nor the stay of its price; WP10 says "coverage counts cover all destinations" and "stay: see panel" instead (decision 38's fallback). Adding `discovery` buckets and `cell` to each `byDestination` entry (WP0 contract, WP8) would let the filter show both.
-3. **Spec wording at the next revision:** §9 item 6 and the §16 table say "five-way" day marker where §3 defines six buckets; §11 View B's glyph list gains `skipped`, and its quintile scale gains the flat cases (decision 38); §11 History gains the separate route-level chart and the run-to-run join rule; §11's "provenance on every price, visible without hover" gains decision 38's calendar-day form (badge, compact age, dashed outline and destination on the day; source in words, "constraints not checked" and the note in the title, screen-reader text and the panel).
+3. **The calendar's markup.** Decisions 46 and 49's no-suppression rule and Biome's two a11y rules leave no way to write an ARIA `role="grid"`; each month is a captioned table of day buttons with the APG keys instead (§6). The plan's "keyboard-operable calendar" wording holds; "APG grid" in decision 38's context should read "table of day buttons".
+4. **Spec wording at the next revision:** §9 item 6 and the §16 table say "five-way" day marker where §3 defines six buckets; §11 View B's glyph list gains `skipped` and "price not confirmed", and its quintile scale gains the flat cases (decision 38); §11 History gains the separate route-level chart and the run-to-run join rule; §11's "provenance on every price, visible without hover" names decision 46's compact day form.
