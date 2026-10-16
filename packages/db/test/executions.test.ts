@@ -1,6 +1,5 @@
 import { Worker } from 'node:worker_threads';
 import { ACTIVE_STATUSES, fixedClock } from '@gmt/core';
-import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { RowCorrupt } from '../src/internal/read.js';
 import { RowRejected } from '../src/internal/validate.js';
@@ -10,13 +9,16 @@ import { ACTIVE_STATUS_SQL } from '../src/schema/checks.js';
 import { at, freshDb, openTracked, T0, tmpDbPath } from './helpers/db.js';
 import { cell, EWR, exampleDefinitionInput, newExecution, snapshotOf } from './helpers/factories.js';
 
-/** test-005: 'ok' when the call succeeds, 'unique' on a unique violation; any other failure is rethrown. */
+/**
+ * test-005: 'ok' when the call succeeds, 'unique' when `create` reports the active-execution clash as
+ * `RowRejected('active')` (the engine never reads driver codes; code-architect review 3); any other failure is rethrown.
+ */
 function attempt(fn: () => unknown): 'ok' | 'unique' {
   try {
     fn();
     return 'ok';
   } catch (e) {
-    if (e instanceof Database.SqliteError && e.code === 'SQLITE_CONSTRAINT_UNIQUE') return 'unique';
+    if (e instanceof RowRejected && e.rule === 'active') return 'unique';
     throw e;
   }
 }

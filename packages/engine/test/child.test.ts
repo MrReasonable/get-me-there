@@ -11,6 +11,7 @@ import {
   JFK,
   LHR,
   noVerification,
+  refusedWith,
   withVerification,
 } from './support/harness.js';
 
@@ -172,6 +173,19 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     expect(await o.verifyCell(def.id, cell)).toMatchObject({ ok: false, code: 'active' });
     const other = await o.verifyCell(def.id, { ...cell, returnDate: asIsoDate('2026-11-11') });
     expect(other.ok).toBe(true);
+  });
+
+  it('a child that loses the race to the one-active-child index is refused with code active (code-architect review 3)', async () => {
+    const h = createHarness();
+    await h.fixtureScenario([itineraryRule(FIXTURE_RULES.hold)]);
+    const def = verifying(h);
+    const o = h.orch();
+    expect((await o.verifyCell(def.id, cell)).ok).toBe(true);
+    // why: the read-side check races a concurrent request; hiding the first child from it makes the insert hit the index
+    vi.spyOn(h.repos.executions, 'activeChild').mockReturnValue(null);
+    expect(refusedWith(await o.verifyCell(def.id, cell), 'active')).toBe(
+      'this cell is already being verified',
+    );
   });
 
   it('refuses a cell outside the current space or already departed, and a definition without a verification provider, with code window', async () => {

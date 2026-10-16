@@ -7,6 +7,7 @@ import {
   type ProviderId,
   type SearchDefinition,
 } from '@gmt/core';
+import { RowRejected } from '@gmt/db';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { estimateStart, withBlocked } from './estimate.js';
@@ -26,9 +27,12 @@ export function refused(
   return { ok: false, code, message, details };
 }
 
-/** better-sqlite3 reports a partial-unique-index clash (spec §7 one active parent, one active child per cell) as SQLITE_CONSTRAINT_UNIQUE. */
-export function isUniqueViolation(err: unknown): boolean {
-  return err instanceof Error && 'code' in err && err.code === 'SQLITE_CONSTRAINT_UNIQUE';
+/**
+ * A start or child that lost the race to spec §7's partial unique indexes (one active parent, one active child per
+ * cell): `ExecutionsRepo.create` reports it as `RowRejected` rule `active`, so the engine never reads a driver code.
+ */
+export function isActiveClash(err: unknown): boolean {
+  return err instanceof RowRejected && err.rule === 'active';
 }
 
 /**
@@ -260,7 +264,7 @@ export async function startExecution(
       return e;
     });
   } catch (err) {
-    if (isUniqueViolation(err))
+    if (isActiveClash(err))
       return refused('active', 'another execution of this definition is active', { definitionId });
     throw err;
   }

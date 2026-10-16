@@ -40,6 +40,20 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
     expect(await orch.start(def.id, { trigger: 'manual' })).toMatchObject({ ok: false, code: 'active' });
   });
 
+  it('active: a start that loses the race to the one-active-parent index → code active (db reports it, code-architect review 3)', async () => {
+    const h = createHarness();
+    await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
+    const orch = h.orch();
+    const def = h.createDefinition();
+    expect((await orch.start(def.id, { trigger: 'manual' })).ok).toBe(true);
+    // why: the read-side check races a concurrent start; hiding the first run from it makes the insert hit the index
+    vi.spyOn(h.repos.executions, 'activeParent').mockReturnValue(null);
+    expect(refusedWith(await orch.start(def.id, { trigger: 'manual' }), 'active')).toBe(
+      'another execution of this definition is active',
+    );
+    expect(executions(h, def.id)).toHaveLength(1);
+  });
+
   it('cap: nothing can run → code cap naming the cap and the figures with units; no execution is created', async () => {
     const h = createHarness();
     const def = h.createDefinition({ budget: noCalls });

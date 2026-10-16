@@ -14,7 +14,7 @@ import { execute } from './execute.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
 import { buildSnapshot, childSnapshot } from './snapshot.js';
-import { isUniqueViolation, refused } from './start.js';
+import { isActiveClash, refused } from './start.js';
 import type { StartResult } from './types.js';
 
 /** Billed calls an execution may still make under its own snapshot cap. */
@@ -148,7 +148,7 @@ export async function verifyCellExecution(
       return e;
     });
   } catch (err) {
-    if (isUniqueViolation(err)) return refused('active', 'this cell is already being verified', { cell });
+    if (isActiveClash(err)) return refused('active', 'this cell is already being verified', { cell });
     throw err;
   }
   const run = newRun(ctx, exec, { manual: false, fresh: true, blocked: check.blocked });
