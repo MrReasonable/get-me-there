@@ -1,5 +1,6 @@
 import type { Execution } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import { estimateStart } from './estimate.js';
 import { execute } from './execute.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
@@ -34,6 +35,8 @@ export async function startExecution(
     return refused('active', 'another execution of this definition is active', { definitionId });
   const built = buildSnapshot(ctx, def, opts.trigger);
   const discovery = built.snapshot.providers.discovery;
+  // why: the run-time estimate applies the same reuse query as the run (spec §8.1); it is the overrun baseline
+  const estimate = estimateStart(ctx, built.snapshot, built.cells, def.id);
   let exec: Execution;
   try {
     // why: spec §7 atomic unit "seeding search_cells + discovery cell_outcomes at start" — the row is created running and
@@ -44,7 +47,7 @@ export async function startExecution(
         isChild: false,
         cell: null,
         snapshot: built.snapshot,
-        estimate: null,
+        estimate,
         trigger: opts.trigger,
         status: 'running',
       });

@@ -3,6 +3,7 @@ import {
   cellKeyString,
   type DefinitionSnapshot,
   generateCells,
+  type IsoDate,
   type ProviderId,
   type ResolvedSpace,
   resolveWindow,
@@ -25,14 +26,16 @@ export type Trigger = 'manual' | 'schedule';
  * - providers: only those registered with the capability; a scheduled run also leaves out a provider marked
  *   excludedFromSchedule (spec §8.2 "scheduled runs exclude SearchApi on trial");
  * - alwaysInclude: members that slid out of a relative window are dropped with a note (spec §6.1).
+ * `today` defaults to the clock's London date; `Engine.estimate` passes the form's date.
  */
 export function buildSnapshot(
   ctx: EngineContext,
   def: SearchDefinition,
   trigger: Trigger = 'manual',
+  today: IsoDate = ctx.clock.todayLondon(),
 ): BuiltSnapshot {
   const notes: string[] = [];
-  const w = resolveWindow(def.window, ctx.clock.todayLondon());
+  const w = resolveWindow(def.window, today);
   if (w.clamped) notes.push('window clamped to start tomorrow');
   const resolved: ResolvedSpace = {
     origins: def.origins,

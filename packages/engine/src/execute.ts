@@ -140,6 +140,8 @@ export function finalStatus(
 export async function finish(ctx: EngineContext, run: RunState, alertsRan: boolean): Promise<void> {
   const { status, patch, notice } = finalStatus(run.stop, ctx.clock.now(), run.snapshot.scheduleTz);
   const notices = notice === null ? [...run.notices] : [...run.notices, notice];
+  const parity = parityNotice(ctx, run);
+  if (parity !== null) notices.push(parity);
   const calendarOnly = calendarOnlyNotice(ctx, run, alertsRan);
   if (calendarOnly !== null) notices.push(calendarOnly);
   const name = ctx.repos.definitions.get(run.definitionId)?.name ?? run.snapshot.name;
@@ -155,4 +157,33 @@ export async function finish(ctx: EngineContext, run: RunState, alertsRan: boole
   if (patch.resumeAfter !== undefined && patch.resumeAfter !== null)
     ctx.hooks.scheduleResume(run.executionId, run.definitionId, patch.resumeAfter);
   run.log.info({ status, notices: notices.map((n) => n.kind) }, 'execution: pass finished');
+}
+
+/**
+ * Spec §8.1 "Parity = distinct tile requests (first-attempt ledger rows + cache hits) for one uninterrupted pass = plan
+ * length; a parity break raises an operator notification". Judged per discovery provider on the first pass only, from
+ * the ledger's per-provider, per-stage counts (LedgerRepo.countsFor, distinct tile indexes).
+ */
+export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
+  if (!run.fresh || run.stop !== null) return null;
+  const counts = ctx.repos.ledger.countsFor(run.executionId).perProvider;
+  const breaks: string[] = [];
+  for (const [providerId, planned] of run.plannedTiles) {
+    // why: a disabled or budget-capped provider stops requesting its planned tiles by design, which is not a parity break
+    if (
+      planned === 0 ||
+      run.disabled.has(providerId) ||
+      run.lanes.get(`discovery|${providerId}`)?.budgetOut === true
+    )
+      continue;
+    const row = counts.find((c) => c.providerId === providerId && c.stage === 'discovery');
+    const distinct = (row?.tiles ?? 0) + (row?.cacheHits ?? 0);
+    if (distinct !== planned)
+      breaks.push(
+        `${providerId}: planned ${planned} tile requests; the ledger shows ${distinct} (first attempts plus cache hits)`,
+      );
+  }
+  if (breaks.length === 0) return null;
+  run.log.warn({ breaks }, 'parity break');
+  return { kind: 'parity_break', detail: `${breaks.join('. ')}.` };
 }
