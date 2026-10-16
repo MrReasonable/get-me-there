@@ -14,6 +14,7 @@ import {
 } from '@gmt/core';
 import type { VerifiedCellWrite } from '@gmt/db';
 import type { EngineContext } from '../context.js';
+import { lineKey } from '../lines.js';
 import { offerWrite, type PriceRefusal } from '../normalise.js';
 import { runPool } from '../pool.js';
 import {
@@ -79,7 +80,8 @@ function persistSelection(ctx: EngineContext, run: RunState, ids: readonly Provi
     for (const id of ids) {
       if (!(ctx.providers.get(id)?.cabins ?? []).includes(run.snapshot.cabin))
         ctx.repos.cells.markNoData(run.executionId, 'verification', id, 'cabin-not-offered');
-      else if (run.blocked.has(id)) markRemaining(ctx, run, 'verification', id, 'budget');
+      else if (run.blocked.has(lineKey('verification', id)))
+        markRemaining(ctx, run, 'verification', id, 'budget');
       else if (run.disabled.has(id)) markRemaining(ctx, run, 'verification', id, 'provider_disabled');
     }
   });

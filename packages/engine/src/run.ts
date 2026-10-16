@@ -15,6 +15,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { classifyFailure } from './errors.js';
+import { type LineKey, lineKey } from './lines.js';
 import { breachText } from './text.js';
 
 /** Why a pass stopped early. Each maps to one execution status in execute.ts `finalStatus` (spec §8.1 error table). */
@@ -58,7 +59,8 @@ export interface RunState {
   /** True for the first pass started by start()/verifyCell(); parity is judged only on such passes. */
   readonly fresh: boolean;
   /** Providers the pre-start (or resume) budget check excluded from this pass. */
-  readonly blocked: ReadonlySet<ProviderId>;
+  /** The (stage, provider) lines the pre-start or resume check blocked for budget (ruling 2). */
+  readonly blocked: ReadonlySet<LineKey>;
   /** Aborts calls in flight (cancel, SIGTERM, fatal); every provider call of the pass gets its signal. */
   readonly controller: AbortController;
   /** Stops new work for the whole pass (every stop). */
@@ -77,7 +79,7 @@ export interface RunState {
 export function newRun(
   ctx: EngineContext,
   exec: Execution,
-  opts: { manual: boolean; fresh: boolean; blocked: ReadonlySet<ProviderId> },
+  opts: { manual: boolean; fresh: boolean; blocked: ReadonlySet<LineKey> },
 ): RunState {
   return {
     executionId: exec.id,
@@ -178,7 +180,7 @@ export function runnableCells(
   providerId: ProviderId,
 ): CellKey[] {
   // why: a provider the pre-start or resume check blocked for budget makes no call in this pass (cost-r1-001)
-  if (run.disabled.has(providerId) || run.blocked.has(providerId)) return [];
+  if (run.disabled.has(providerId) || run.blocked.has(lineKey(stage, providerId))) return [];
   return resumableCells(ctx, run.executionId, stage, providerId, run.manual);
 }
 
@@ -303,7 +305,8 @@ export function applyBudgetBreach(
   for (const id of affected) budgetOut(ctx, run, stage, id);
   // why: ssr2-02 — a provider the pre-start or resume check blocked for budget does not remain in the stage either
   const remaining = ids.filter(
-    (id) => !run.disabled.has(id) && !run.blocked.has(id) && !laneFor(run, stage, id).budgetOut,
+    (id) =>
+      !run.disabled.has(id) && !run.blocked.has(lineKey(stage, id)) && !laneFor(run, stage, id).budgetOut,
   );
   if (remaining.length === 0) {
     const scope: BudgetScope = global ? { kind: 'global-month' } : { kind: err.scope, providerId };

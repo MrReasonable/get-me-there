@@ -2,6 +2,7 @@ import { asIsoDateTime, BudgetExceeded, type Execution, type ProviderId } from '
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { finalStatus } from '../src/execute.js';
+import { lineKey } from '../src/lines.js';
 import { renderOperatorMessage } from '../src/notifiers/operatorTemplates.js';
 import { createOrchestrator, type Orchestrator } from '../src/orchestrator.js';
 import { applyBudgetBreach, newRun } from '../src/run.js';
@@ -116,7 +117,11 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
         providers: { ...exec.snapshot.providers, discovery: ['fixture', 'travelpayouts'] },
       },
     };
-    const run = newRun(ctx, two, { manual: false, fresh: false, blocked: new Set(blocked) });
+    const run = newRun(ctx, two, {
+      manual: false,
+      fresh: false,
+      blocked: new Set(blocked.map((id) => lineKey('discovery', id))),
+    });
     const err = new BudgetExceeded({
       scope: 'provider-month',
       providerId: 'fixture',

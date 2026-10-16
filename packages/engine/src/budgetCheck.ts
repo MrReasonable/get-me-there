@@ -1,6 +1,7 @@
 import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { monthlyLoad, otherSchedules, scheduleLoad } from './estimate.js';
+import { type LineKey, lineKey } from './lines.js';
 import { firingsBetween } from './scheduler/parseCron.js';
 import { breachText } from './text.js';
 import type { Estimate } from './types.js';
@@ -20,10 +21,13 @@ export interface Breach {
   reserved: number;
   estimated: number;
 }
-/** `blockedBy` names the first scope that blocked each provider (Estimate.perProvider[].blocked). */
+/**
+ * The (stage, provider) lines a run may not call (ruling 2); `blockedBy` names the first scope that blocked each line
+ * (Estimate.perProvider[].blocked).
+ */
 export interface BudgetCheck {
-  blocked: Set<ProviderId>;
-  blockedBy: Map<ProviderId, string>;
+  blocked: Set<LineKey>;
+  blockedBy: Map<LineKey, string>;
   breaches: Breach[];
 }
 
@@ -68,9 +72,10 @@ export function reservedForSchedules(
 }
 
 /**
- * Spec §8.1 pre-start: for every scope, usage(scope) + estimate(scope) ≤ cap. A breach on a billed scope
- * (execution-calls, execution-cost, global-month) blocks every billed provider; a breach on execution-free-calls
- * blocks the free providers; a provider-month/lifetime breach blocks that provider. A cap of 0 refuses any non-zero
+ * Spec §8.1 pre-start: for every scope, usage(scope) + estimate(scope) ≤ cap. Blocking is per (stage, provider) line,
+ * and a line that needs no call (every cell reused, or a cabin the provider does not sell) is never blocked (ruling 2):
+ * a breach on a billed scope (execution-calls, execution-cost, global-month) blocks every billed line that needs calls;
+ * a breach on execution-free-calls the free ones; a provider-month/lifetime breach that provider's lines. A cap of 0 refuses any non-zero
  * need; zero-cost needs pass (spec §5.3). With `executionId` the execution scopes include what this execution already
  * spent (resume). Provider-month scopes count the headroom other scheduled runs hold in this window (ruling 5).
  */
@@ -81,8 +86,8 @@ export function checkBudget(
   executionId: string | null,
   definitionId: string | null,
 ): BudgetCheck {
-  const blocked = new Set<ProviderId>();
-  const blockedBy = new Map<ProviderId, string>();
+  const blocked = new Set<LineKey>();
+  const blockedBy = new Map<LineKey, string>();
   const breaches: Breach[] = [];
   const billed = spend.filter((s) => ctx.limitsOf(s.providerId).billed);
   const free = spend.filter((s) => !ctx.limitsOf(s.providerId).billed);
@@ -96,14 +101,16 @@ export function checkBudget(
     current: number,
     reserved: number,
     estimated: number,
-    affected: readonly ProviderId[],
+    affected: readonly PlannedSpend[],
   ) => {
     if (cap === null || estimated === 0) return;
     if (current + reserved + estimated <= cap) return;
     breaches.push({ scope, providerId, cap, current, reserved, estimated });
-    for (const id of affected) {
-      blocked.add(id);
-      if (!blockedBy.has(id)) blockedBy.set(id, scope);
+    for (const s of affected) {
+      if (s.calls === 0) continue; // why: ruling 2 — a line that makes no call never spends, so it is never blocked
+      const key = lineKey(s.stage, s.providerId);
+      blocked.add(key);
+      if (!blockedBy.has(key)) blockedBy.set(key, scope);
     }
   };
   const execUsage = (kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost') =>
@@ -115,7 +122,7 @@ export function checkBudget(
     execUsage('execution-calls').calls,
     0,
     total(billed, (s) => s.calls),
-    ids(billed),
+    billed,
   );
   check(
     'execution-free-calls',
@@ -124,7 +131,7 @@ export function checkBudget(
     execUsage('execution-free-calls').calls,
     0,
     total(free, (s) => s.calls),
-    ids(free),
+    free,
   );
   check(
     'execution-cost',
@@ -133,23 +140,21 @@ export function checkBudget(
     execUsage('execution-cost').costMicroGbp,
     0,
     total(billed, (s) => s.costMicroGbp),
-    ids(billed),
+    billed,
   );
   for (const id of ids(spend)) {
     const kind = ctx.limitsOf(id).window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
     const u = ctx.budget.usage({ kind, providerId: id });
     const reserved = kind === 'provider-month' ? reservedForSchedules(ctx, id, definitionId, u.windowEnd) : 0;
+    const lines = spend.filter((s) => s.providerId === id);
     check(
       kind,
       id,
       u.cap,
       u.calls,
       reserved,
-      total(
-        spend.filter((s) => s.providerId === id),
-        (s) => s.calls,
-      ),
-      [id],
+      total(lines, (s) => s.calls),
+      lines,
     );
   }
   const g = ctx.budget.usage({ kind: 'global-month' });
@@ -160,7 +165,7 @@ export function checkBudget(
     g.costMicroGbp,
     0,
     total(billed, (s) => s.costMicroGbp),
-    ids(billed),
+    billed,
   );
   return { blocked, blockedBy, breaches };
 }

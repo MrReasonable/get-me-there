@@ -12,10 +12,12 @@ import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { estimateStart, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
+import { type LineKey, lineKey } from './lines.js';
 import { notifyOperator } from './notify.js';
 import type { RunRegistry } from './registry.js';
-import { markRemaining, newRun } from './run.js';
+import { newRun } from './run.js';
 import { buildSnapshot } from './snapshot.js';
+import { skipBlockedDiscovery } from './stages/reuse.js';
 import type { Estimate, StartOptions, StartResult } from './types.js';
 
 /** A refused StartResult. */
@@ -90,7 +92,7 @@ export async function recordSkipped(
 export function confirmationNeeded(
   ctx: EngineContext,
   estimate: Estimate,
-  blocked: ReadonlySet<ProviderId>,
+  blocked: ReadonlySet<LineKey>,
   confirmed: Confirmation,
 ): {
   estimateMicroGbp: number;
@@ -99,7 +101,7 @@ export function confirmationNeeded(
   totalCalls: number;
   reason: string;
 } | null {
-  const runnable = estimate.perProvider.filter((p) => !blocked.has(p.providerId));
+  const runnable = estimate.perProvider.filter((p) => !blocked.has(lineKey(p.stage, p.providerId)));
   const cost = runnable.reduce((a, p) => a + p.costMicroGbp, 0);
   const totalCalls = runnable.reduce((a, p) => a + p.calls, 0);
   const calls = new Map<ProviderId, number>();
@@ -133,20 +135,19 @@ export function confirmationNeeded(
 /**
  * ssr2-03: a run whose every discovery line is blocked for budget would select only `alwaysInclude` cells, so with
  * none it would search nothing and end `completed`. A line that needs no call (every cell reused, or a cabin the
- * provider does not sell) is never blocked, so reused prices still feed selection.
+ * provider does not sell) is never blocked (checkBudget, ruling 2), so reused prices still feed selection.
  */
 export function nothingToSearch(
   snapshot: Pick<DefinitionSnapshot, 'verification'>,
   estimate: Pick<Estimate, 'perProvider'>,
-  blocked: ReadonlySet<ProviderId>,
+  blocked: ReadonlySet<LineKey>,
 ): boolean {
   const all = estimate.perProvider;
-  if (all.length > 0 && all.every((p) => blocked.has(p.providerId))) return true;
+  const isBlocked = (p: (typeof all)[number]) => blocked.has(lineKey(p.stage, p.providerId));
+  if (all.length > 0 && all.every(isBlocked)) return true;
   const discovery = all.filter((p) => p.stage === 'discovery');
   return (
-    snapshot.verification.alwaysInclude.length === 0 &&
-    discovery.length > 0 &&
-    discovery.every((p) => blocked.has(p.providerId))
+    snapshot.verification.alwaysInclude.length === 0 && discovery.length > 0 && discovery.every(isBlocked)
   );
 }
 
@@ -216,7 +217,7 @@ export async function startExecution(
   const check = checkBudget(ctx, spendOf(planned), snapshot.budget, null, def.id);
   const estimate = withBlocked(planned, check.blockedBy);
   if (nothingToSearch(snapshot, planned, check.blocked)) {
-    const starved = all.some((id) => !check.blocked.has(id));
+    const starved = planned.perProvider.some((p) => !check.blocked.has(lineKey(p.stage, p.providerId)));
     const message = `budget cap: ${breachMessage(check.breaches)}${starved ? '; every discovery provider is blocked, so nothing would be searched' : ''}`;
     if (scheduled) await recordSkipped(ctx, def, snapshot, estimate, 'skipped_budget', `The ${message}.`);
     return refused('cap', message, { breaches: check.breaches });
@@ -259,7 +260,8 @@ export async function startExecution(
         // why: spec rev 10 — a provider that does not sell the snapshot's cabin is never called; its cells are no_data
         if (!(ctx.providers.get(id)?.cabins ?? []).includes(snapshot.cabin))
           ctx.repos.cells.markNoData(e.id, 'discovery', id, 'cabin-not-offered');
-        else if (check.blocked.has(id)) markRemaining(ctx, { executionId: e.id }, 'discovery', id, 'budget');
+        else if (check.blocked.has(lineKey('discovery', id)))
+          skipBlockedDiscovery(ctx, { executionId: e.id, definitionId: def.id, snapshot }, id);
       }
       return e;
     });

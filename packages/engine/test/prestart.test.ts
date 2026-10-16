@@ -1,9 +1,10 @@
 import { asIsoDate, type Estimate, type ProviderId } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { reservedForSchedules } from '../src/budgetCheck.js';
+import { checkBudget, reservedForSchedules } from '../src/budgetCheck.js';
 import { buildContext } from '../src/context.js';
 import { withBlocked } from '../src/estimate.js';
+import { lineKey } from '../src/lines.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { nothingToSearch } from '../src/start.js';
 import {
@@ -142,6 +143,55 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
     expect((await h.orch().start(def.id, { trigger: 'manual' })).ok).toBe(true); // 12 + 9 + 3 ≤ 30
   });
 
+  it('a fully reusable discovery line is never blocked: a provider-month breach on verification still starts a calendar-basis run on reused prices (ruling 2, ssr I2)', async () => {
+    const h = createHarness({ fixtureMonthlyCallCap: 40 });
+    const confirm = { trigger: 'manual', confirmCostPence: 100, confirmCalls: 1000 } as const;
+    const def = h.createDefinition({ providers: withVerification() });
+    const first = await h.runToCompletion(h.orch(), def.id, confirm);
+    expect(first.status).toBe('completed');
+    const used = h.deps.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).calls;
+    h.spendLedger({ providerId: 'fixture', rows: 40 - used, costMicroGbpEach: 0 }); // the month's calls are gone
+    const before = h.requests.length;
+    const second = await h.runToCompletion(h.orch(), def.id, confirm);
+    expect(second.status).toBe('completed');
+    expect(second.estimate?.perProvider.map((p) => [p.stage, p.calls, p.blocked])).toEqual([
+      ['discovery', 0, null],
+      ['verification', expect.any(Number), 'provider-month'],
+    ]);
+    const discovery = h.outcomes(second.id, { stage: 'discovery' });
+    expect(discovery).toHaveLength(28);
+    expect(discovery.every((o) => o.reusedFromExecutionId === first.id)).toBe(true);
+    const verification = h.outcomes(second.id, { stage: 'verification' });
+    // why: selection still runs on the reused prices; the selected cells are the ones the blocked line skips
+    expect(verification.filter((o) => o.reason === 'budget')).toHaveLength(2);
+    expect(
+      verification.every(
+        (o) => o.status === 'skipped' && ['budget', 'not_selected'].includes(o.reason ?? ''),
+      ),
+    ).toBe(true);
+    expect(h.requests.length).toBe(before);
+  });
+
+  it('checkBudget blocks per (provider, stage) line and never a line that needs no call (ruling 2)', () => {
+    const h = createHarness({ fixtureMonthlyCallCap: 10 });
+    const ctx = buildContext(h.deps, h.options);
+    const spend = [
+      { providerId: 'fixture', stage: 'discovery', calls: 0, costMicroGbp: 0 },
+      { providerId: 'fixture', stage: 'verification', calls: 12, costMicroGbp: 0 },
+    ] as const;
+    const check = checkBudget(
+      ctx,
+      spend,
+      { maxCalls: 1000, maxFreeCalls: 1000, maxCostMicroGbp: 10 ** 9 },
+      null,
+      null,
+    );
+    expect(check.breaches.map((b) => b.scope)).toEqual(['provider-month']);
+    expect(check.blocked.has(lineKey('verification', 'fixture'))).toBe(true);
+    expect(check.blocked.has(lineKey('discovery', 'fixture'))).toBe(false);
+    expect([...check.blockedBy]).toEqual([[lineKey('verification', 'fixture'), 'provider-month']]);
+  });
+
   it('every discovery provider blocked and nothing always included → nothing would be searched, so the start is refused (ssr2-03)', () => {
     const verification = { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 1, bookingLinks: true };
     const line = (providerId: ProviderId, stage: 'discovery' | 'verification', calls: number) => ({
@@ -161,17 +211,27 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
       departureDate: asIsoDate('2026-11-03'),
       returnDate: asIsoDate('2026-11-10'),
     };
-    expect(nothingToSearch({ verification }, { perProvider: lines }, new Set(['travelpayouts']))).toBe(true);
+    expect(
+      nothingToSearch(
+        { verification },
+        { perProvider: lines },
+        new Set([lineKey('discovery', 'travelpayouts')]),
+      ),
+    ).toBe(true);
     expect(
       nothingToSearch(
         { verification: { ...verification, alwaysInclude: [cell] } },
         { perProvider: lines },
-        new Set(['travelpayouts']),
+        new Set([lineKey('discovery', 'travelpayouts')]),
       ),
     ).toBe(false);
     expect(nothingToSearch({ verification }, { perProvider: lines }, new Set())).toBe(false);
     expect(
-      nothingToSearch({ verification }, { perProvider: lines }, new Set(['travelpayouts', 'fixture'])),
+      nothingToSearch(
+        { verification },
+        { perProvider: lines },
+        new Set([lineKey('discovery', 'travelpayouts'), lineKey('verification', 'fixture')]),
+      ),
     ).toBe(true);
     // a discovery line needing no call (every cell reused) is never blocked, so reused prices still feed selection
     const reused = [line('travelpayouts', 'discovery', 0), line('fixture', 'verification', 8)];
@@ -201,7 +261,7 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
       windowClamped: false,
       retryFactor: 1.2,
     };
-    const shown = withBlocked(est, new Map([['searchapi', 'provider-month']]));
+    const shown = withBlocked(est, new Map([[lineKey('discovery', 'searchapi'), 'provider-month']]));
     expect(shown.perProvider.map((p) => [p.providerId, p.blocked, p.calls])).toEqual([
       ['fixture', null, 3],
       ['searchapi', 'provider-month', 60],
@@ -213,7 +273,7 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
       totalCostPence: 1,
       seconds: 2,
     });
-    expect(shown.assumptions).toContain('totals leave out the providers a budget cap blocks');
+    expect(shown.assumptions).toContain('totals leave out the provider lines a budget cap blocks');
     expect(withBlocked(est, new Map())).toEqual(est);
   });
 });

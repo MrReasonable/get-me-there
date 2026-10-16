@@ -11,6 +11,7 @@ import {
   type Stage,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import { type LineKey, lineKey } from './lines.js';
 import { resumableCells } from './run.js';
 import { runsPerMonth } from './scheduler/parseCron.js';
 import { buildSnapshot } from './snapshot.js';
@@ -384,8 +385,11 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
  * run, so the figure shown, stored and confirmed is the runnable one and a blocked provider's plan never inflates the
  * overrun baseline (cost-r1-014). Blocked lines keep their figures, so the form still shows what they would need.
  */
-export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<ProviderId, string>): Estimate {
-  const perProvider = e.perProvider.map((p) => ({ ...p, blocked: blockedBy.get(p.providerId) ?? null }));
+export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>): Estimate {
+  const perProvider = e.perProvider.map((p) => ({
+    ...p,
+    blocked: blockedBy.get(lineKey(p.stage, p.providerId)) ?? null,
+  }));
   const runs = perProvider.filter((p) => p.blocked === null);
   const totalCostMicroGbp = runs.reduce((a, p) => a + p.costMicroGbp, 0);
   return {
@@ -399,6 +403,6 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<ProviderId, stri
     assumptions:
       runs.length === perProvider.length
         ? e.assumptions
-        : [...e.assumptions, 'totals leave out the providers a budget cap blocks'],
+        : [...e.assumptions, 'totals leave out the provider lines a budget cap blocks'],
   };
 }

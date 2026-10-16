@@ -2,8 +2,9 @@ import { asIsoDate, asIsoDateTime, cellKeyString, isTruncated } from '@gmt/core'
 import { describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { newRun } from '../src/run.js';
+import { buildSnapshot } from '../src/snapshot.js';
 import { commitTile, discoveryQuery } from '../src/stages/discovery.js';
-import { applyReuse, reuseCriteriaFor, reuseCutoff } from '../src/stages/reuse.js';
+import { applyReuse, reuseCriteriaFor, reuseCutoff, skipBlockedDiscovery } from '../src/stages/reuse.js';
 import {
   createHarness,
   discoveryOf,
@@ -247,5 +248,37 @@ describe('the point of sale reuse matches on (arch-r2-013)', () => {
     expect(priced).toHaveLength(28);
     expect(priced.every((o) => o.pointOfSale === expected)).toBe(true);
     expect(h.repos.calendarPrices.fetchedBy(e.id).every((r) => r.pointOfSale === expected)).toBe(true);
+  });
+
+  it('a blocked discovery line copies its reusable cells before the rest become skipped:budget (ruling 2, ssr I2)', async () => {
+    const h = createHarness({ fakeTimers: true });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-09', FIXTURE_RULES.upstream, 3)]);
+    const def = h.createDefinition();
+    const one = await h.runToCompletion(h.orch(), def.id);
+    expect(h.outcomes(one.id, { status: 'priced' })).toHaveLength(14);
+    h.clock.advance(HOUR);
+    const ctx = buildContext(h.deps, h.options);
+    const { snapshot, cells } = buildSnapshot(ctx, def);
+    // why: the seeding transaction of a start (or a resume's claim) as the engine runs it, with the line blocked
+    const e = ctx.db.immediateTransaction(() => {
+      const created = h.repos.executions.create({
+        definitionId: def.id,
+        isChild: false,
+        cell: null,
+        snapshot,
+        estimate: null,
+        trigger: 'manual',
+        status: 'running',
+      });
+      h.repos.cells.seed(created.id, cells, ['fixture']);
+      expect(
+        skipBlockedDiscovery(ctx, { executionId: created.id, definitionId: def.id, snapshot }, 'fixture'),
+      ).toBe(14);
+      return created;
+    });
+    const after = h.outcomes(e.id, { stage: 'discovery' });
+    expect(after.filter((o) => o.reusedFromExecutionId === one.id)).toHaveLength(14);
+    expect(after.filter((o) => o.status === 'skipped' && o.reason === 'budget')).toHaveLength(14);
+    expect(after.filter((o) => o.status === 'not_run')).toHaveLength(0);
   });
 });

@@ -11,6 +11,7 @@ import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { estimateStart, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
+import { lineKey } from './lines.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
 import { buildSnapshot, childSnapshot } from './snapshot.js';
@@ -121,7 +122,7 @@ export async function verifyCellExecution(
   const planned = estimateStart(ctx, snapshot, [match], null);
   const check = checkBudget(ctx, spendOf(planned), snapshot.budget, null, def.id);
   const estimate = withBlocked(planned, check.blockedBy);
-  if (snapshot.providers.verification.every((id) => check.blocked.has(id))) {
+  if (snapshot.providers.verification.every((id) => check.blocked.has(lineKey('verification', id)))) {
     const room =
       headroom < need
         ? `; the budget left for verifying single cells has room for ${headroom} of the ${need} calls this cell needs`

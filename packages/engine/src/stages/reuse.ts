@@ -10,7 +10,7 @@ import {
 } from '@gmt/core';
 import type { ReuseCriteria, ReusedCopy } from '@gmt/db';
 import type { EngineContext } from '../context.js';
-import type { RunState } from '../run.js';
+import { markRemaining, type RunState } from '../run.js';
 
 /** Spec §8.2: "reuse iff age < 0.9 × refresh, so a weekly cron refreshes weekly" (tested at 151 h, 152 h and a DST interval). */
 export const REUSE_TOLERANCE = 0.9;
@@ -80,6 +80,9 @@ export function reusableFor(
   );
 }
 
+/** What reuse needs of a pass or of a start's seeding transaction (a fresh start or a resume claim, ruling 2). */
+export type ReuseScope = Pick<RunState, 'executionId' | 'definitionId' | 'snapshot' | 'isChild'>;
+
 /**
  * Copies every reusable outcome (and its price row) into this execution for the provider's `not_run` discovery cells.
  * The repository re-checks each copy against the same criteria, keeps the original fetched_at and provenance and names
@@ -87,7 +90,7 @@ export function reusableFor(
  */
 export function applyReuse(
   ctx: EngineContext,
-  run: RunState,
+  run: ReuseScope,
   providerId: ProviderId,
   info: CapabilityInfo,
 ): number {
@@ -99,4 +102,20 @@ export function applyReuse(
   const copies = reusableFor(ctx, run.definitionId, run.snapshot, providerId, criteria, notRun);
   if (copies.length > 0) ctx.repos.cells.copyReused(run.executionId, providerId, copies, criteria);
   return copies.length;
+}
+
+/**
+ * A discovery line the budget check blocked (ruling 2, ssr I2): its reusable cells are copied first, and only the
+ * cells still `not_run` become skipped:budget, so a blocked provider never discards a free, still-fresh price. Runs
+ * inside the start's seeding transaction and the resume's claim. Returns the cells reused.
+ */
+export function skipBlockedDiscovery(
+  ctx: EngineContext,
+  scope: Omit<ReuseScope, 'isChild'>,
+  providerId: ProviderId,
+): number {
+  const info = ctx.providers.get(providerId)?.discovery?.info;
+  const reused = info === undefined ? 0 : applyReuse(ctx, { ...scope, isChild: false }, providerId, info);
+  markRemaining(ctx, scope, 'discovery', providerId, 'budget');
+  return reused;
 }

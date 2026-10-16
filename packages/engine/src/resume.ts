@@ -9,10 +9,11 @@ import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { addPass, estimateRemainingFor, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
+import { lineKey } from './lines.js';
 import type { Orchestrator } from './orchestrator.js';
 import type { RunRegistry } from './registry.js';
 import { markRemaining, newRun } from './run.js';
-import { REUSE_TOLERANCE, refreshHoursOf } from './stages/reuse.js';
+import { REUSE_TOLERANCE, refreshHoursOf, skipBlockedDiscovery } from './stages/reuse.js';
 import { confirmationNeeded, nothingToSearch, refused } from './start.js';
 import type { StartResult } from './types.js';
 
@@ -27,7 +28,8 @@ import type { StartResult } from './types.js';
  * else), which needs the stored confirmation, pence and calls, when it raises the spend (cost-r1-005, decision 37); a
  * resume whose remaining discovery is all blocked, before any selection and with no price yet, is refused like a
  * start (ssr2-03). Nothing is written to the execution until the claim succeeds (ssr-09, arch-r2-006): marking the
- * departed cells skipped:departed, the refreshed budget, the blocked providers' cells (skipped:budget, cost-r1-001) and
+ * departed cells skipped:departed, the refreshed budget, the blocked lines' cells (reuse first, then skipped:budget;
+ * cost-r1-001, ruling 2) and
  * the pass's runnable plan added to the stored estimate (cost-r1-009, cost-r1-014) all go into the same transaction as
  * the compare-and-set. An automatic resume of a paused_error with nothing resumable leaves it as it is, unclaimed
  * (ruling 10); a manual resume re-admits the providers disabled in the previous pass.
@@ -91,7 +93,8 @@ export async function resumeExecution(
     !ctx.repos.cells.hasVerificationOutcomes(executionId) &&
     !ctx.repos.cells.outcomes(executionId, { stage: 'discovery' }).some((o) => o.status === 'priced') &&
     nothingToSearch(current.snapshot, { perProvider: needed }, check.blocked);
-  if ((needed.length > 0 && needed.every((p) => check.blocked.has(p.providerId))) || starved)
+  const isBlocked = (p: (typeof needed)[number]) => check.blocked.has(lineKey(p.stage, p.providerId));
+  if ((needed.length > 0 && needed.every(isBlocked)) || starved)
     return refused('cap', `budget cap: ${breachMessage(check.breaches)}`, { breaches: check.breaches });
   const raised = refresh && JSON.stringify(def.budget) !== JSON.stringify(exec.snapshot.budget);
   if (raised) {
@@ -119,15 +122,18 @@ export async function resumeExecution(
       estimate: addPass(current.estimate, pass),
       ...(refresh ? { snapshot: current.snapshot } : {}),
     });
-    for (const id of check.blocked) {
-      if (current.snapshot.providers.discovery.includes(id))
-        markRemaining(ctx, { executionId }, 'discovery', id, 'budget');
-      if (
-        current.snapshot.providers.verification.includes(id) &&
-        ctx.repos.cells.hasVerificationOutcomes(executionId)
-      )
-        markRemaining(ctx, { executionId }, 'verification', id, 'budget');
-    }
+    // why: ruling 2 — a blocked discovery line copies its reusable cells before the rest become skipped:budget
+    for (const id of current.snapshot.providers.discovery)
+      if (check.blocked.has(lineKey('discovery', id)))
+        skipBlockedDiscovery(
+          ctx,
+          { executionId, definitionId: current.definitionId, snapshot: current.snapshot },
+          id,
+        );
+    if (ctx.repos.cells.hasVerificationOutcomes(executionId))
+      for (const id of current.snapshot.providers.verification)
+        if (check.blocked.has(lineKey('verification', id)))
+          markRemaining(ctx, { executionId }, 'verification', id, 'budget');
     return true;
   });
   if (!claimed) return refused('active', 'another resume claimed this execution first', { executionId });
