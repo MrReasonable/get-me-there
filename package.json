@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "boundaries": "node scripts/check-boundaries.mjs",
+    "casts": "node scripts/check-casts.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "mutate": "pnpm --filter @gmt/core mutate",

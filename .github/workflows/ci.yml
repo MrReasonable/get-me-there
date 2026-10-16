@@ -16,6 +16,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm boundaries
+      - run: pnpm casts
       - run: pnpm -r typecheck
       - run: pnpm test:coverage
       - run: pnpm secret-scan
