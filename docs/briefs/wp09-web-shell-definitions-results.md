@@ -18,16 +18,16 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 
 **In**
 
-- Core additions the views need (Task 9.0, plan decision 36): `truncated: boolean` on `priceCellSchema` and `resultRowSchema`; a departure-date range in core's `ResultFilters` and `filterRows`; `formatAgo` and `formatFetchedAgo` beside core's other age labels. WP8 fills `truncated`; Task 9.0 lands before WP8's results routes (§13).
+- Core additions the views need (Task 9.0, decisions 36 and 42): `truncated: boolean` on `priceCellSchema` and `resultRowSchema`; `expandTop` on `executionSummarySchema` (the shown run's own policy); a departure-date range in core's `ResultFilters` and `filterRows`; `formatAgo` and `formatFetchedAgo` beside core's other age labels. WP8 fills the new fields; Task 9.0 lands before WP8's results routes (decision 42).
 - `apps/web` build and test setup on WP0's scaffold (modified, not replaced): Vite 8, React 19, Tailwind 4 (CSS-first), Vitest 5 in jsdom, Testing Library, `msw` 3 for the API, coverage held at 100% for the provenance, booking and URL-state files.
 - Shell: `main.tsx`, `App.tsx`, navigation for every view (Results, Calendar, Duration, History, Coverage, Definitions, Alerts, Providers), definition selector, status bar, red synthetic banner, an error state when `GET /api/providers` fails, empty state for no providers, a top-level error boundary.
 - Routing and persisted view state in **URL search params** on the single path `/` (the API is under `/api`) (`?view=results&def=<id>&basis=calendar&sort=price.asc&f.stops=1`). Filter and sort state survives every view switch because nav links carry every parameter except `view`.
 - `api/client.ts`: the one `fetch` in the app, typed by the route's own contract schema, checked against `core/api-contract` `ROUTES`, `X-Requested-With: get-me-there` and `Content-Type: application/json` on every mutation, every response parsed with the contract **in every build mode** (decision 36).
-- Components: `Provenance`, `PriceCell` (the only component that prints a price: table, headline, adjusted column, other sellers, calendar gap), `PriceBoundary`, `AppBoundary`, `StatusBar`, `ViewHeader` (with the cross-execution variant WP10 uses), `ClassBadge`, `VerdictList`, `BookingAction`, `SearchLink`, `SyntheticBanner`, `Nav`, `DefinitionSelector`, `Loading`, `LoadError`.
-- `copy.ts`: the string catalogue every component imports; the banned-word test walks it, an AST source guard rejects literal copy in `.tsx`, casts anywhere in `src` and `test`, and money formatting outside `PriceCell` and the cost views; a rendered-DOM sweep checks every view.
-- `format.ts`: the one date-formatting module of the web app, short (`14 Mar 2027`) and long (`Sun 14 Mar 2027`) forms from one month table; WP10 imports it (decision 38).
+- Components: `Provenance`, `PriceCell` (the only component that prints a price: table, headline, adjusted column, other sellers, calendar gap; it carries "≈", the unconfirmed-price badge, "stale", "vendor's cache age unknown", the truncated note, and decision 46's `compact` variant), `PriceBoundary`, `AppBoundary`, `StatusBar`, `ViewHeader` (with `variant="span"` for WP10's cross-execution views), `ClassBadge`, `VerdictList`, `BookingAction`, `SearchLink`, `SyntheticBanner`, `Nav`, `DefinitionSelector`, `Loading`, `LoadError`.
+- `copy.ts`: the string catalogue every component imports; the banned-word test walks it; an AST source guard rejects literal copy in `.tsx` (lettered string props on components included), casts and lint or type-check suppression comments anywhere in `src` and `test`, and money formatting or a "£" literal outside `PriceCell`, the catalogue and the cost views; a rendered-DOM sweep checks every view for banned words and for "£" outside a price or a cost.
+- `format.ts`: the one date-formatting module of the web app (decision 46): `formatIsoDate` (`14 Mar 2027`), `formatIsoDateShort` (`14 Mar`), `formatIsoDateLong` (`Sun 14 Mar 2027`) and `formatWeekday` (`Sun`) from one month and weekday table; WP10 imports them.
 - View A Results (spec §11, §6.5, §6.9), View D Coverage, Providers view, Definitions form (spec §11).
-- `scripts/check-boundaries.mjs` gains the airport-literal check over `apps/web/src` and `apps/api/src`, allowlisting exactly `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts` (decision 36).
+- `scripts/check-boundaries.mjs` gains the place-name check over the string literals, template text and JSX text of `apps/web/src` and `apps/api/src`, allowlisting exactly `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts` with a committed list of non-airport words (decisions 36, 46), and rejects `biome-ignore` and `eslint-disable` comments in every package's `src` and `test` (decision 46); a scripted test runs it against planted trees.
 - Tests per spec §9 item 6 for these views.
 
 **Out**
@@ -36,12 +36,14 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 - Alerts view and alert rule forms: **WP11** (WP9 ships its nav entry with the same placeholder).
 - Every API route, its validation and its strings (`basisReason`, error messages, the zero-cap message, search-link labels), and filling `truncated`: **WP8**. The web only renders them.
 - `sortRows`, `filterRows`, `bandCheapest`, `resultRowKey`, `searchLinkFor`, `validateVendorUrl` (WP2) and `cellKeyString` (WP0) in `@gmt/core`. The web calls them, never reimplements them; Task 9.0 extends `filterRows` in core itself.
-- `coverageCheckResponseSchema.cachedRows` becoming `number | null`: **WP7** Task 7.18 (decision 25), a precondition here.
+- WP7's contract changes, preconditions here (WP9 depends on WP8, which depends on WP7): `cachedRows: number | null` (Task 7.18, decision 25); `priceConfirmed` in `ConstraintName`, `constraintNameSchema` and `CONSTRAINT_LABELS` ("price not confirmed by the final step", Task 7.8, decision 37); `confirmedCalls` on the definition create, update and response bodies and in `needsConfirmation` (with `totalCalls`), and `confirmCalls` on the start request (Task 7.13, decisions 37, 43).
 - `docs/examples/london-new-york.json`, `docs/setup.md` and the test that `EXAMPLE_DEFINITION` equals the JSON: **WP12**. WP9 writes a stand-in copy of the JSON only if the file is absent when it runs (WP12 depends on WP9), with WP12's exact content.
 - Serving the built `dist/` at `/` (every API route is under `/api`): **WP8**.
 - Phase 4 (decision 36): a max-travel-time filter and a prefilled Google Flights deep link for calendar rows.
 
 ## 3. Spec sections
+
+Spec revision 21 and plan decisions 1–46 (rulings of review rounds 1 and 2: decisions 36, 42, 44, 46) as on main on 2026-10-16.
 
 - **§11 banned words** — "exhaustive", "all combinations", "every combination", "live", "bookable", "guaranteed", "real-time" never appear in user-facing text; "verified" only beside class-`verified` values; stage counts say "itinerary-searched".
 - **§11 layout** — nav for all views owned by WP9; definition selector; status bar on every view; per-view header (executions shown, status, age, stale label, banner when not completed); the two-line Results header; empty state for no providers; red synthetic banner.
@@ -54,13 +56,14 @@ Ship the Vite + React 19 single-page app under `apps/web` with the shell, the st
 - **§11 accessibility** — 375px layout; keyboard-operable table; visible focus; labelled controls; no colour-only meaning.
 - **§6.5** — all sorting and filtering client-side with the shared core functions, composing without refetch. Stale rows keep their place in the server's ranking and are labelled, never demoted; the `hideStale` filter is the operator's opt-in.
 - **§6.9** — basis switch with the reason; `failed` excluded by default and included by filter; the search link labelled "search link, not a fare link" on every row whose booking is `none` (shown in every expanded row).
-- **§3** — the two label formats from `core` (`formatAgeFull`, `formatAgeCompact`); `maxAgeHours: 'unknown'` labelled, treated as stale; six coverage buckets; "searched" only in View D; "itinerary-searched".
+- **§3** — the two label formats from `core` (`formatAgeFull`, `formatAgeCompact`); staleness by fetch age, and a vendor age of `'unknown'` labelled "vendor's cache age unknown" rather than marked stale (decision 44; WP8 fills `stale` by this rule); six coverage buckets; "searched" only in View D; "itinerary-searched K of N selected".
+- **§6.2 (rev 21)** — an offer whose price the final step did not confirm is classed `unverified` on `priceConfirmed`; the web shows "price not confirmed by the final step" as the first mark beside the price wherever it renders (decision 44).
 - **§5.5** — the synthetic banner is data-driven; a negative test asserts its absence for real data.
 - **§9 item 6** — price lacking provenance fails to render; synthetic banner present and absent; distinct text for pass/fail/unverified; keyboard operation; 375px assertion that price, provenance and the class badge stay visible; banned-word test with word boundaries and an allowlist; booking links with `rel="noopener noreferrer"`, host shown, POST bookings as forms, no auto-navigation; View D sums.
 
 ## 4. Interfaces consumed
 
-From `@gmt/core` as merged on main (WP0, WP1, WP2), plus Task 9.0's additions (marked) and WP7's `cachedRows` change (marked). Signatures as the code declares them:
+From `@gmt/core` as merged on main (WP0, WP1, WP2), plus Task 9.0's additions and WP7's contract changes (each marked). Signatures as the code declares them:
 
 ```ts
 // types/ids.ts (WP0): brands are minted only by these helpers or by zod parsing (decision 15); the web mints none
@@ -89,7 +92,7 @@ export const ACTIVE_STATUSES: readonly ExecutionStatus[];   // pending, running,
 export type Stage = 'discovery' | 'verification';
 export interface Buckets { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number; reused: number }
 export type Booking = { kind: 'get'; url: string; host: string } | { kind: 'post'; url: string; postData: string; host: string } | { kind: 'none' };
-export type Verdict = 'pass' | 'fail' | 'unverified'; export type ConstraintName = keyof Constraints | 'cabin';
+export type Verdict = 'pass' | 'fail' | 'unverified'; export type ConstraintName = keyof Constraints | 'cabin' | 'priceConfirmed' /* WP7 Task 7.8 */;
 export type Verdicts = Partial<Record<ConstraintName, Verdict>>; export type VerdictClass = 'verified' | 'partially-verified' | 'failed';
 export type ResultBasis = 'verified' | 'calendar';   // the UI labels them "itinerary-search basis" and "calendar basis"
 export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
@@ -112,7 +115,8 @@ export function londonDateOf(instant: IsoDateTime): IsoDate;
 
 // text, constraints, results, normalise (WP0, WP2)
 export function formatPence(pence: number): string;   // the single money formatter (web and email)
-export const CONSTRAINT_LABELS: Record<ConstraintName, string>;
+export const CONSTRAINT_LABELS: Record<ConstraintName, string>;   // priceConfirmed: 'price not confirmed by the final step' (WP7 Task 7.8)
+export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;
 export const BANNED_WORD_ALLOWLIST: readonly string[]; export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word: string; index: number }>;
 export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' | 'stops' | 'adjusted';
 export interface ResultFilters { verdictClass?: Array<VerdictClass | 'unchecked'>; unverified?: ConstraintName[]; providerId?: ProviderId[];
@@ -123,15 +127,16 @@ export function bandCheapest(rows: ResultRow[], bandHours: number): Set<string>;
 export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export function validateVendorUrl(url: string, allowlist: readonly string[]): Booking;
 export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url: string; host: string; label: string } | null;
 export type { BudgetFit, CoverageCheckRequest, CoverageCheckResponse, DefinitionResponse, ResultRow } /* z.infer of the contract */;
+export interface Buckets { priced; empty; no_data; error; skipped; not_run; reused }   // the web's BucketName is Exclude<keyof Buckets, 'reused'>
 export * as apiContract;   // every schema below and ROUTES: readonly RouteDef[]
 ```
 
 From `apiContract` (`packages/core/src/api-contract`, every path under `/api`); where WP8's brief and this contract differ, the contract is followed. `RouteDef` is `{ method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; request?: z.ZodType; query?: z.ZodType; response: z.ZodType; auth }`; `ROUTES` builds `GET /api/definitions` as `definitionResponseSchema.array()`.
 
-- `common.ts`: `errorEnvelopeSchema` `{ error: { code; message; details?: { fields?: Array<{ field; message }> } & Record<string, unknown> } }`; `ageHoursSchema` `number | 'unknown'`; `priceCellSchema` `{ pricePence, provenance, stale, ageHours, truncated /* Task 9.0 */ }`; `coverageSummarySchema` `{ buckets, total, selected, itinerarySearched, onDemand, reused }`; `executionSummarySchema` `{ id, status, isChild, startedAt: IsoDateTime | null, finishedAt: IsoDateTime | null, ageHours: number | 'unknown' }` (lists newest first); `usageSchema` `{ scope; calls; costMicroGbp; costPence; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }`; `cellKeySchema`, `cellSchema`; `constraintNameSchema`, `verdictClassSchema`, `resultBasisSchema` (z.enum, `.options` used for every list the web shows).
+- `common.ts`: `errorEnvelopeSchema` `{ error: { code; message; details?: { fields?: Array<{ field; message }> } & Record<string, unknown> } }`; `ageHoursSchema` `number | 'unknown'`; `priceCellSchema` `{ pricePence, provenance, stale, ageHours, truncated /* Task 9.0 */ }`; `coverageSummarySchema` `{ buckets, total, selected, itinerarySearched, onDemand, reused }`; `executionSummarySchema` `{ id, status, isChild, startedAt: IsoDateTime | null, finishedAt: IsoDateTime | null, ageHours: number | 'unknown', expandTop /* Task 9.0, decision 42 */ }` (lists newest first); `usageSchema` `{ scope; calls; costMicroGbp; costPence; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }`; `cellKeySchema`, `cellSchema`; `constraintNameSchema` (with `priceConfirmed`, WP7 Task 7.8), `verdictClassSchema`, `resultBasisSchema` (z.enum, `.options` used for every list the web shows).
 - `airports.ts`: `GET /api/airports?q=` → `Array<{ iata, name, city, country, tz, metro: string | null }>`.
-- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput fields plus `confirmedCostPence?`, refined); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` (fields + `confirmedCostPence: number | null`, `id`, `createdAt`, `updatedAt`, `deletedAt`, `budgetFit`, `estimate: Estimate | null`, `needsConfirmation: { estimateMicroGbp; confirmedCostPence: number | null } | null`, `notices`); `budgetFitSchema` `{ fits, runsPerMonth, perScope: Array<{ scope, estimated, cap: number | null, fits }> }`; `estimateSchema` `{ cells, perProvider: Array<{ providerId, stage, calls, planCalls, costMicroGbp, costPence, seconds, blocked: string | null }>, totalCalls, totalPlanCalls, totalCostMicroGbp, totalCostPence, seconds, assumptions, windowClamped, retryFactor }`; `estimateResponseSchema` `{ estimate, budgetFit }` from `POST /api/definitions/estimate` (unsaved body); `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month: IsoMonth; cachedRows: number | null /* WP7 Task 7.18 */; cellsInBand }> }>; calls; notes }`.
-- `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell, status, stage: Stage | null, reason: string | null, resumeAfter: IsoDateTime | null, trigger, startedAt, finishedAt, errorText, progress: Array<{ stage, providerId, buckets, total }>, budget: Usage[], estimate, ledger, parityBreak, overrun, disabledProviders }` (also the body of cancel and resume); `startExecutionRequestSchema` `{ confirmCostPence? }`; `startExecutionResponseSchema` `{ executionId }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }`.
+- `definitions.ts`: `definitionCreateRequestSchema` (DefinitionInput fields plus `confirmedCostPence?` and `confirmedCalls?` (WP7 Task 7.13), refined); `definitionUpdateRequestSchema` (partial); `definitionResponseSchema` (fields + `confirmedCostPence: number | null`, `confirmedCalls: number | null`, `id`, `createdAt`, `updatedAt`, `deletedAt`, `budgetFit`, `estimate: Estimate | null`, `needsConfirmation: { estimateMicroGbp; totalCalls; confirmedCostPence: number | null; confirmedCalls: number | null } | null`, `notices`); `budgetFitSchema` `{ fits, runsPerMonth, perScope: Array<{ scope, estimated, cap: number | null, fits }> }`; `estimateSchema` `{ cells, perProvider: Array<{ providerId, stage, calls, planCalls, costMicroGbp, costPence, seconds, blocked: string | null }>, totalCalls, totalPlanCalls, totalCostMicroGbp, totalCostPence, seconds, assumptions, windowClamped, retryFactor }`; `estimateResponseSchema` `{ estimate, budgetFit }` from `POST /api/definitions/estimate` (unsaved body); `coverageCheckRequestSchema` `{ origins, destinations, window, minNights, maxNights }`; `coverageCheckResponseSchema` `{ pairs: Array<{ origin, destination, months: Array<{ month: IsoMonth; cachedRows: number | null /* WP7 Task 7.18 */; cellsInBand }> }>; calls; notes }`.
+- `executions.ts`: `executionResponseSchema` `{ id, definitionId, isChild, cell, status, stage: Stage | null, reason: string | null, resumeAfter: IsoDateTime | null, trigger, startedAt, finishedAt, errorText, progress: Array<{ stage, providerId, buckets, total }>, budget: Usage[], estimate, ledger, parityBreak, overrun, disabledProviders }` (also the body of cancel and resume); `startExecutionRequestSchema` `{ confirmCostPence?, confirmCalls? }` (WP7 Task 7.13; a confirmation covers a run only with both, decision 43); `startExecutionResponseSchema` `{ executionId }`; `verifyCellRequestSchema` `{ definitionId, cell: CellKey }`.
 - `results.ts`: `resultRowSchema` (with `truncated` from Task 9.0, `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `booking`, `searchLink: { url; host; label } | null`, `otherOffers[]` each with `stale`, `ageHours`, `verdictClass`, `unverified`, `notSeenInLatest: { ageHours } | null`, `notSeenInLatest`, `adjustedPence`, `destinationNote`, `executionId`, `calendarPriceId`, `observationId`); `resultsResponseSchema` `{ rows, total, truncated, basis, basisReason, executions, coverage, excludedByCurrentSpace, verificationProviderConfigured, cheapest: ResultRow | null }`; `coverageResponseSchema` `{ executionId, summary, perStage: Array<{ stage, providerId, buckets, total, requests: { calls, cacheHits, costMicroGbp, planCalls: number | null }, overrun, parityBreak }>, selectedNotReached: Array<{ cell, reason: 'not_run' | 'skipped:budget' }>, errors: Array<{ cell, stage, providerId, reason, lastError: string | null, attempts, retryable }>, scheduleBlockedSince: IsoDateTime | null }`; `calendarGapResponseSchema` `{ cheapestVerified: (PriceCell & { cell; itineraryHash }) | null; cells: Array<{ cell; calendar: PriceCell; verifyAvailable }> }`.
 - `system.ts`: `providersResponseSchema` `{ providers: Array<{ providerId, displayName, enabled, capabilities: { discovery: CapabilityInfo | null, verification: CapabilityInfo | null }, plan: 'trial' | '40usd' | 'free' | 'synthetic', usage: Usage[], excludedFromSchedule, notices }>, synthetic, presets: { policy: { maxCells, topN, expandTop, bookingLinks }, providers, budget, discoveryRefreshHours, schedulerTimezone }, pointOfSale }`.
 
@@ -145,19 +150,21 @@ Later packages (WP10, WP11, WP12) rely on these names.
 
 ```ts
 // @gmt/core (Task 9.0)
-priceCellSchema.truncated; resultRowSchema.truncated; ResultFilters.departure; formatAgo(hours); formatFetchedAgo(age);
+priceCellSchema.truncated; resultRowSchema.truncated; executionSummarySchema.expandTop; ResultFilters.departure; formatAgo(hours); formatFetchedAgo(age);
 // apps/web/src/copy.ts
 export const COPY: { /* the full catalogue, Task 9.1 */ };
 // apps/web/src/example.ts
 export const EXAMPLE_DEFINITION: z.output<typeof apiContract.definitionCreateRequestSchema>;   // parsed from docs/examples/london-new-york.json
 export const EXAMPLE_LABEL: string;   // the example's route in words; the one web file allowed to name its places
-// apps/web/src/format.ts (decision 38: the one date-formatting module; WP10 imports it)
-export { formatPence }; export function formatMicroGbp(micro: number): string; export function formatIsoDateShort(d: string): string;   // "14 Mar 2027"
-export function formatWeekday(d: IsoDate): string;     // "Sun"
+// apps/web/src/format.ts (decisions 38, 46: the one date-formatting module, one month and weekday table; WP10 imports it)
+export { formatPence }; export function formatMicroGbp(micro: number): string;
+export function formatIsoDate(d: string): string;        // "14 Mar 2027"
+export function formatIsoDateShort(d: string): string;   // "14 Mar"
 export function formatIsoDateLong(d: IsoDate): string;   // "Sun 14 Mar 2027"
+export function formatWeekday(d: IsoDate): string;       // "Sun"
 export function formatInstantUtc(iso: string): string;  // "14 Oct 2026 12:00 UTC"
 export function formatLocalDateTime(local: string): string; export function formatMinutes(m: number): string; export function formatSeconds(s: number): string;
-export function penceToPoundsInput(p: number | undefined): string; export function parsePoundsToPence(s: string): number | undefined;
+export function penceToPoundsInput(p: number | undefined): string; export function parsePoundsToPence(s: string): number | undefined; export function poundsText(s: string): string;
 // apps/web/src/api/client.ts
 export class ApiError extends Error { readonly status: number; readonly code: string; fieldErrors(): FieldError[] }   // code: envelope code | 'http' | 'malformed' | 'contract' | 'network'
 export function findRoute(method: Method, path: string): apiContract.RouteDef; export function fillPath(path: string, params: Record<string, string>): string;
@@ -167,40 +174,49 @@ export const api: { providers, definitions, estimateDraft, createDefinition, upd
   execution, cancel, resume, verifyCell, results, coverage, calendarGap, airports };
 export const qk; export const POLL_MS = 2_000; export function useProviders(); useDefinitions(); useResults(defId, basis); useExecution(id);
 export function useCoverage(defId); useCalendarGap(defId, enabled); useAirportSearch(q); useExecutionActions();
-export type DefinitionBody, DefinitionUpdateBody, CoverageCheckBody, VerifyCellBody /* z.input of the request schemas */, ExecutionSummary, ...;
+export type DefinitionBody, DefinitionUpdateBody, CoverageCheckBody, VerifyCellBody, StartExecutionBody /* z.input of the request schemas */, ExecutionSummary, ...;
 // apps/web/src/components/*
 export function PriceCell(props: PriceCellProps): JSX.Element;   // the only component that prints a price; props.provenance: unknown;
-  // props: pricePence, calendar, stale, truncated?, destination?, destinationNote?, notSeenInLatestHours?, qualifier?, compact?, fullAge?
+  // props: pricePence, calendar, stale, truncated?, unconfirmed?, destination?, destinationNote?, notSeenInLatestHours?, qualifier?,
+  //   besideColumns? (the wide Results table: source and age only), compact? (decision 46: amount with "≈", short provider badge,
+  //   destination code, stale/truncated/unconfirmed marks; source, age and note in the title), fullAge?; WP10 adds props here
+export function priceUnconfirmed(r: { unverified: readonly ConstraintName[]; verdicts?: Verdicts }): boolean;
 COPY.truncatedNote;   // 'cheapest of the rows read' (decision 36)
 export function Provenance(props: ProvenanceProps): JSX.Element; export function assertProvenance(p: unknown): Provenance; export class MissingProvenanceError;
 export class PriceBoundary; export class AppBoundary; export function Loading(); export function LoadError({ error, retry });
-export function ViewHeader(props: { title; executions: readonly ExecutionSummary[]; stale; variant?: 'single' | 'span' }): JSX.Element;
-export function StatusBar(props: { definition; showRunNow }); export function ClassBadge, VerdictList, BookingAction, SearchLink, safeVendorUrl, SyntheticBanner, Nav, DefinitionSelector;
+export function ViewHeader(props: { title; executions: readonly HeaderRun[]; stale; variant?: 'single' | 'span' }): JSX.Element;
+export type HeaderRun = Pick<ExecutionSummary, 'id' | 'status' | 'isChild' | 'startedAt' | 'ageHours'>;
+export function StatusBar(props: { definition; showRunNow }); export const near: (used: number, cap: number | null) => boolean; export function ClassBadge, VerdictList, BookingAction, SearchLink, safeVendorUrl, SyntheticBanner, Nav, DefinitionSelector;
 // apps/web/src/state/*
 export function useSearchParams(): URLSearchParams; export function updateSearchParams(patch, mode?): void; export function hrefWith(patch): string; export function navigateTo(patch): (e: NavClick) => void;
 export type ViewId; export const VIEWS; export function parseView(v): ViewId; export function withKey(obj, key, value); export function oneOf(set);
+export function parseCarriers(s): { codes; ignored }; export function carriersText(s): string;   // src/state/carriers.ts
+export function useSynced(value, means): [text, setText];   // src/hooks/useSynced.ts
+// src/views/Definitions/fields.tsx: FieldErrors, NumberField, PoundsField, TimeWindowField, AirlinesField, Check
 export type SortDir; export interface ResultsUiState; export const SORT_KEYS, CLASSES, DEFAULT_CLASSES; export function parseResultsState, resultsStatePatch, parseBasis, parseSelectedRow, setFilter, activeFilterCount;
 // apps/web/src/now.tsx, src/hooks/useMediaQuery.ts
 export const NowContext; export function useNow(); export function useMediaQuery(q); export const NARROW_QUERY;
 // apps/web/test/*
-export function renderWithProviders(ui, opts?); export const NOW; export type ProvenanceInput; export const server; export function expectConsoleErrors(); fixture builders; setViewportWidth(px)
+export function renderWithProviders(ui, opts?: { search?; fakeTimers? }); export function settled(client): Promise<void>; export const NOW; export type ProvenanceInput; export const server;
+export function expectConsoleErrors(pattern: RegExp); fixture builders; setViewportWidth(px)
 ```
 
 ## 6. Library notes
 
-Versions from the plan's Task 0.1 list. Verified on 2026-10-14 with context7 against the sources named, and on 2026-10-15 by assembling this brief on a scratch checkout of main (every command of §10 green).
+Versions from the plan's Task 0.1 list. Verified on 2026-10-14 with context7 against the sources named, and on 2026-10-16 by assembling this brief on a scratch checkout of main (every command of §10 green).
 
 - **react 19.3.1, react-dom 19.3.1.** `createRoot(el).render(<StrictMode>…)`; error boundaries are class components with `static getDerivedStateFromError` and `componentDidCatch(error, info)` (react.dev `reference/react/Component`; the boundary reports through `console.error`, which the test setup records and fails on unless the test calls `expectConsoleErrors()`). `useSyncExternalStore(subscribe, getSnapshot)` for the URL and `matchMedia` stores; `createContext` for the table's sort and band marks. `@types/react` 19.3.0 declares `rel` on `<form>`, so no attribute object is needed.
 - **vite 8.3.4 + @vitejs/plugin-react 6.1.2.** `defineConfig({ plugins, resolve: { alias }, server: { proxy: { '/api': { target } } } })` (vite.dev `config/server-options`). `vite.config.ts` uses the workspace's `gmtAliases` from `vitest.aliases.ts` (the same as every package's `vitest.config.ts`), so `vite build` reads core from source; the assembly run built `dist/index.html` and `dist/assets/*` with it. Vite imports JSON (`import x from '…json' with { type: 'json' }`, `resolveJsonModule`) from inside the workspace root. No `changeOrigin`: the api sees `Host: localhost:5173`, which spec §4 allows under `NODE_ENV=development`.
 - **tailwindcss 4.3.3 + @tailwindcss/vite 4.3.3.** CSS-first: `@import "tailwindcss";` in `src/styles.css`; no config file. `min-h-11` is 2.75rem = 44 px, the touch-target floor. No inline `style` props (spec §4 CSP `default-src 'self'`).
 - **@tanstack/react-query 5.104.2.** `useQuery({ queryKey, queryFn, enabled, refetchInterval: (query) => … })`, `useMutation`, `invalidateQueries({ queryKey })`. Query functions do not forward TanStack's `AbortSignal` to `fetch` (`// why:` in the client). Polling tests fake `setTimeout`, `setInterval`, `clearTimeout` and `clearInterval` together: with the clear functions real, the cleared interval keeps firing on the real clock.
 - **@tanstack/react-table 9.3.1** (v9: `tableFeatures({ rowExpandingFeature })`, `createColumnHelper<typeof features, ResultRow>()`, `helper.display`, `useTable({ features, columns, data, getRowId, getRowCanExpand, state: { expanded }, onExpandedChange })`, `<table.FlexRender header|cell />`). No sorted or filtered row models: rows arrive filtered and sorted by core. Column definitions must stay stable across a sort change or the header remounts and loses keyboard focus, so sort state and band marks travel through React context.
-- **@testing-library/react 16.3.3**, **@testing-library/dom 10.4.1** (its peer, already in WP0's package.json), **@testing-library/user-event 14.6.8** (`user.type`, `user.paste`, `user.tab`, `user.keyboard`, `user.selectOptions`, `user.clear`), **@testing-library/jest-dom 7.0.1** (`toHaveClass`, `toHaveValue`, `toBeDisabled`, …). Vitest runs without globals, so `test/setup.ts` calls `cleanup()`. A `type="date"` input is driven with `fireEvent.change` (a date input commits a whole value).
+- **@testing-library/react 16.3.3**, **@testing-library/dom 10.4.1** (its peer, already in WP0's package.json), **@testing-library/user-event 14.6.8** (`user.type`, `user.paste`, `user.tab`, `user.keyboard`, `user.selectOptions`, `user.clear`), **@testing-library/jest-dom 7.0.1** (`toHaveClass`, `toHaveValue`, `toBeDisabled`, …). Vitest runs without globals, so `test/setup.ts` calls `cleanup()`. A `type="date"` input is driven with `fireEvent.change` (a date input commits a whole value). With fake timers, `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })` (the `fakeTimers` option of `renderWithProviders`) so typing does not stall, and the debounce is stepped with `vi.advanceTimersByTimeAsync`.
 - **jsdom 30.1.2** with `environmentOptions.jsdom.url = 'http://localhost:3000/'`. jsdom has no `matchMedia` (`test/viewport.ts` installs one) and no `scrollIntoView` (stubbed). Under jsdom `import.meta.url` is not a `file:` URL, so a test that reads files uses `import.meta.dirname`.
 - **msw 3.0.3.** `setupServer(...handlers)` from `msw/node`; `http.get/post/put/all`, `HttpResponse.json(body, { status })`, `HttpResponse.error()`, `new HttpResponse(text, { status })`; `server.listen({ onUnhandledFrame: 'error' })` (msw 3's name for the unmatched-request policy), `server.use`, `resetHandlers`, `close`. A catch-all `http.all('*', …)` registered last records any unmatched request and answers with a network error, so nothing reaches the network (decision 18) and afterEach fails the test. Requests use absolute URLs (the client builds `new URL(path, window.location.origin)`).
 - **vitest 5.0.4.** `test.environment`, `environmentOptions`, `setupFiles`, `coverage.thresholds` with glob keys for per-file floors; `vi.spyOn`, `vi.stubEnv` / `vi.unstubAllEnvs`, `vi.useFakeTimers({ toFake })`, `vi.advanceTimersByTimeAsync`.
 - **zod 4.6.7.** `z.input<S>` (request bodies and fixture overrides: plain strings) and `z.output<S>` (parsed responses: brands); `ZodArray` and `.element` (the client's schema identity check); `.safeParse`; `z.enum(...).options`.
-- **typescript 5.9.3** (the workspace root's devDependency): the source guard parses with `ts.createSourceFile` and walks `JsxText`, string and template literals, `AsExpression`, `TypeAssertionExpression` and call expressions.
+- **typescript 5.9.3** (the workspace root's devDependency): the source guard parses with `ts.createSourceFile` and walks `JsxText`, string and template literals, `AsExpression`, `TypeAssertionExpression`, call expressions and import specifiers, and reads comments with `ts.getLeadingCommentRanges` over every token (`node.getChildren()`); a comment alone in JSX braces belongs to no token's trivia, so those are matched directly. `scripts/check-boundaries.mjs` imports it the same way (`import ts from 'typescript'`) to read only literals.
+- **node:child_process `spawnSync`** runs the boundary script against a scratch tree (`mkdtempSync` in `os.tmpdir()`), since the script exits the process and cannot be imported.
 
 ## 7. Files
 
@@ -209,8 +225,8 @@ Versions from the plan's Task 0.1 list. Verified on 2026-10-14 with context7 aga
 ```
 index.html  vite.config.ts
 src/main.tsx  src/App.tsx  src/styles.css  src/copy.ts  src/format.ts  src/now.tsx  src/example.ts
-src/hooks/useMediaQuery.ts
-src/state/urlState.ts  src/state/view.ts  src/state/withKey.ts  src/state/resultsState.ts
+src/hooks/useMediaQuery.ts  src/hooks/useSynced.ts
+src/state/urlState.ts  src/state/view.ts  src/state/withKey.ts  src/state/resultsState.ts  src/state/carriers.ts
 src/api/client.ts  src/api/endpoints.ts  src/api/types.ts  src/api/queries.ts
 src/components/Provenance.tsx  src/components/PriceCell.tsx  src/components/PriceBoundary.tsx  src/components/AppBoundary.tsx
 src/components/ClassBadge.tsx  src/components/VerdictList.tsx  src/components/BookingAction.tsx  src/components/LoadState.tsx
@@ -225,6 +241,7 @@ src/views/Providers/ProvidersView.tsx
 src/views/Definitions/DefinitionsView.tsx  src/views/Definitions/DefinitionForm.tsx
 src/views/Definitions/AirportListInput.tsx  src/views/Definitions/AdvancedFields.tsx
 src/views/Definitions/CoverageCheck.tsx  src/views/Definitions/EstimatePanel.tsx  src/views/Definitions/draft.ts
+src/views/Definitions/fields.tsx
 test/guards.ts  test/msw/server.ts  test/msw/handlers.ts  test/fixtures.ts  test/render.tsx  test/viewport.ts
 packages/core/test/results/webAdditions.test.ts
 ```
@@ -252,6 +269,7 @@ test/views/results/basisAndGap.test.tsx           Task 9.9
 test/views/coverage.test.tsx                      Task 9.10
 test/views/providers.test.tsx                     Task 9.11
 test/views/definitions/form.test.tsx              Task 9.12
+test/placeCheck.test.ts                           Task 9.12
 test/views/definitions/create.test.tsx            Task 9.13
 test/copy/renderedSweep.test.tsx                  Task 9.14
 ```
@@ -260,11 +278,11 @@ Every focused run in the tasks uses `pnpm --filter @gmt/web exec vitest run <fil
 
 ## 8. Tasks
 
-A label `` `path` (new file): `` or `` `path` — replace the file: `` introduces a whole file. A pair `` `path` — find: `` / `` `path` — replace with: `` replaces exactly one occurrence of the found text. Paths without a leading `apps/`, `packages/`, `docs/` or `scripts/` are under `apps/web/`. Precondition: WP7 Task 7.18 has made `cachedRows` nullable (decision 25); WP9 depends on WP8, which depends on WP7.
+A label `` `path` (new file): `` or `` `path` — replace the file: `` introduces a whole file. A pair `` `path` — find: `` / `` `path` — replace with: `` replaces exactly one occurrence of the found text. Paths without a leading `apps/`, `packages/`, `docs/` or `scripts/` are under `apps/web/`. Preconditions: WP7 Tasks 7.8 (`priceConfirmed`), 7.13 (`confirmedCalls`, `confirmCalls`, `needsConfirmation.totalCalls`) and 7.18 (`cachedRows` nullable) are on main; WP9 depends on WP8, which depends on WP7.
 
-### Task 9.0: Core additions: `truncated` on every price, the departure-date filter, the age phrases
+### Task 9.0: Core additions: `truncated` on every price, the run's `expandTop`, the departure-date filter, the age phrases
 
-Decision 36 puts three small things in `@gmt/core` that the views need and WP8 and WP11 share: the contract's `truncated` flag (WP8 fills it from an outcome's `last_error` starting with core's `TRUNCATED_NOTE`, decision 37), a departure-date range in `ResultFilters` (pure, inclusive, string-compared ISO dates), and the two relative-age phrases the Fetched column and headers print. This task lands first and on its own commit, ahead of WP8's results routes (§13). Core stays at 100% coverage.
+Decisions 36 and 42 put four small things in `@gmt/core` that the views need and WP8, WP10 and WP11 share: the contract's `truncated` flag (WP8 fills it from an outcome's `last_error` starting with core's `TRUNCATED_NOTE`, decision 37), `expandTop` on the execution summary (the shown run's own "outbounds each", never the current definition's), a departure-date range in `ResultFilters` (pure, inclusive, string-compared ISO dates), and the two relative-age phrases the Fetched column and headers print (one name each: `formatAgo` replaces the private `ago`). This task lands first and on its own commit, ahead of WP8's results routes (decision 42). Core stays at 100% coverage.
 
 **Files:**
 - Modify: `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/results.ts`, `packages/core/src/results/types.ts`, `packages/core/src/results/filter.ts`, `packages/core/src/labels/age.ts`, `packages/core/test/helpers/rows.ts`, `packages/core/test/api-contract/contract.test.ts`
@@ -272,7 +290,7 @@ Decision 36 puts three small things in `@gmt/core` that the views need and WP8 a
 
 **Interfaces:**
 - Consumes: `priceCellSchema`, `resultRowSchema`, `ResultFilters`, `filterRows`, `effectiveAge`, `formatAgeFull`, the core test helpers `row` and `calendarRow` (WP0, WP2).
-- Produces: `priceCellSchema.truncated`, `resultRowSchema.truncated`, `ResultFilters.departure`, `formatAgo`, `formatFetchedAgo` (barrel: `export *` from `labels/age.ts` already re-exports them).
+- Produces: `priceCellSchema.truncated`, `resultRowSchema.truncated`, `executionSummarySchema.expandTop`, `ResultFilters.departure`, `formatAgo`, `formatFetchedAgo` (barrel: `export *` from `labels/age.ts` already re-exports them).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -280,7 +298,7 @@ Decision 36 puts three small things in `@gmt/core` that the views need and WP8 a
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { priceCellSchema, resultRowSchema } from '../../src/api-contract/index.js';
+import { executionSummarySchema, priceCellSchema, resultRowSchema } from '../../src/api-contract/index.js';
 import { effectiveAge, formatAgeFull, formatAgo, formatFetchedAgo } from '../../src/labels/age.js';
 import { filterRows } from '../../src/results/filter.js';
 import { asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
@@ -311,7 +329,7 @@ describe('truncated flag on every price (decisions 30 and 36)', () => {
 describe('departure-date range filter (spec §6.5 filters, decision 36)', () => {
   const on = (d: string) => row({ itineraryHash: d, cell: { departureDate: d } });
   const rows = [on('2027-02-28'), on('2027-03-01'), on('2027-03-31'), on('2027-04-01')];
-  const names = (rs: typeof rows) => rs.map((r) => r.itineraryHash);
+  const names = (rs: ReturnType<typeof row>[]) => rs.map((r) => r.itineraryHash);
 
   it('keeps rows departing inside the range, both ends inclusive', () => {
     const march = { from: asIsoDate('2027-03-01'), to: asIsoDate('2027-03-31') };
@@ -319,9 +337,32 @@ describe('departure-date range filter (spec §6.5 filters, decision 36)', () => 
   });
 
   it('composes with the other filters (AND), and an absent range keeps every row', () => {
-    const one = { from: asIsoDate('2027-03-01'), to: asIsoDate('2027-03-01') };
-    expect(names(filterRows(rows, { departure: one, maxPricePence: 1 }))).toEqual([]);
+    const priced = [
+      row({ itineraryHash: 'in-cheap', pricePence: 100, cell: { departureDate: '2027-03-10' } }),
+      row({ itineraryHash: 'in-dear', pricePence: 900, cell: { departureDate: '2027-03-11' } }),
+      row({ itineraryHash: 'out-cheap', pricePence: 100, cell: { departureDate: '2027-04-10' } }),
+    ];
+    const march = { from: asIsoDate('2027-03-01'), to: asIsoDate('2027-03-31') };
+    expect(names(filterRows(priced, { departure: march, maxPricePence: 500 }))).toEqual(['in-cheap']);
     expect(filterRows(rows, {})).toHaveLength(4);
+  });
+});
+
+describe('the execution summary carries the run own expandTop (decision 42)', () => {
+  it('requires a positive integer', () => {
+    const s = {
+      id: 'e',
+      status: 'completed',
+      isChild: false,
+      startedAt: null,
+      finishedAt: null,
+      ageHours: 2,
+      expandTop: 2,
+    };
+    expect(executionSummarySchema.parse(s).expandTop).toBe(2);
+    const { expandTop: _drop, ...bare } = s;
+    expect(executionSummarySchema.safeParse(bare).success).toBe(false);
+    expect(executionSummarySchema.safeParse({ ...s, expandTop: 0 }).success).toBe(false);
   });
 });
 
@@ -342,7 +383,7 @@ describe('relative-age phrases shared by web and email (spec §3)', () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/results/webAdditions.test.ts`
-Expected: FAIL: the import of `formatAgo` and `formatFetchedAgo` does not resolve (`formatAgo is not a function`), `calendarRow({ truncated: true }).truncated` is `undefined`, and the departure test keeps all four rows.
+Expected: FAIL: the import of `formatAgo` and `formatFetchedAgo` does not resolve (`formatAgo is not a function`), `calendarRow({ truncated: true }).truncated` is `undefined`, the departure tests keep rows outside the range, and an execution summary without `expandTop` still parses.
 
 - [ ] **Step 3: Implement**
 
@@ -471,40 +512,123 @@ export function filterRows(rows: ResultRow[], f: ResultFilters): ResultRow[] {
 }
 ```
 
-`packages/core/src/labels/age.ts` — find:
+`packages/core/src/api-contract/common.ts` — find:
 
 ```ts
-function ago(hours: number): string {
-  return hours < 1 ? 'just now' : `${formatDuration(hours)} ago`;
-}
+  finishedAt: isoDateTimeSchema.nullable(),
+  ageHours: ageHoursSchema,
+});
 ```
 
-`packages/core/src/labels/age.ts` — replace with:
+`packages/core/src/api-contract/common.ts` — replace with:
 
 ```ts
+  finishedAt: isoDateTimeSchema.nullable(),
+  ageHours: ageHoursSchema,
+  /** The run's own policy, "(E outbounds each)" in the Results header (decision 42); never the current definition's. */
+  expandTop: z.number().int().min(1),
+});
+```
+
+`packages/core/src/labels/age.ts` — replace the file:
+
+```ts
+import type { IsoDateTime } from '../types/ids.js';
+import type { Provenance } from '../types/provenance.js';
+
+/** Spec §3 "Effective age" and the two label formats, defined once here for web, api and email. */
+export type EffectiveAge =
+  | { kind: 'observed'; fetchedHours: number; observedHours: number }
+  | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number }
+  | { kind: 'unknown'; fetchedHours: number };
+
+/** Whole hours between two instants, never negative (a vendor clock ahead of ours reads as 0). */
+function hoursBetween(earlier: IsoDateTime, later: IsoDateTime): number {
+  const ms = new Date(later).getTime() - new Date(earlier).getTime();
+  return Math.max(0, Math.floor(ms / 3_600_000));
+}
+
+export function effectiveAge(
+  p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>,
+  now: IsoDateTime,
+): EffectiveAge {
+  const fetchedHours = hoursBetween(p.fetchedAt, now);
+  if (p.providerObservedAt !== undefined) {
+    return { kind: 'observed', fetchedHours, observedHours: hoursBetween(p.providerObservedAt, now) };
+  }
+  if (p.maxAgeHours === 'unknown') return { kind: 'unknown', fetchedHours };
+  return { kind: 'bounded', fetchedHours, maxAgeHours: p.maxAgeHours };
+}
+
+/** The age a careful reader should assume: observed age, or fetched age plus the provider's bound. */
+export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown' {
+  switch (a.kind) {
+    case 'observed':
+      return a.observedHours;
+    case 'bounded':
+      return a.fetchedHours + a.maxAgeHours;
+    case 'unknown':
+      return 'unknown';
+  }
+}
+
+/** "just now" under an hour; hours to 47h; days to 13d; weeks after. */
+export function formatDuration(hours: number): string {
+  if (hours < 1) return 'just now';
+  if (hours < 48) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `${days}d`;
+  return `${Math.floor(days / 7)}w`;
+}
+
 /** "just now", "5h ago", "3d ago": the one relative-age phrase (web columns, headers, email). Spec §3. */
 export function formatAgo(hours: number): string {
   return hours < 1 ? 'just now' : `${formatDuration(hours)} ago`;
 }
 
-const ago = formatAgo;
-
 /** The fetch age alone, "fetched 2h ago": the Results table's Fetched column (spec §11). */
 export function formatFetchedAgo(a: EffectiveAge): string {
-  return `fetched ${ago(a.fetchedHours)}`;
+  return `fetched ${formatAgo(a.fetchedHours)}`;
 }
-```
 
-`packages/core/src/labels/age.ts` — find:
-
-```ts
-  const fetched = `fetched ${ago(a.fetchedHours)}`;
-```
-
-`packages/core/src/labels/age.ts` — replace with:
-
-```ts
+/** Tooltip, header and email form, e.g. "fetched 2h ago · provider age unknown (≤7d before that)". */
+export function formatAgeFull(a: EffectiveAge): string {
   const fetched = formatFetchedAgo(a);
+  switch (a.kind) {
+    case 'observed':
+      return `${fetched} · observed ${formatAgo(a.observedHours)}`;
+    case 'bounded':
+      // why: maxAgeHours 0 is an interactive search at request time; there is no bound to show.
+      return a.maxAgeHours === 0
+        ? fetched
+        : `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
+    case 'unknown':
+      return `${fetched} · provider age unknown`;
+  }
+}
+
+/** Table-cell and calendar-day form, e.g. "2h ago · ≤7d". */
+export function formatAgeCompact(a: EffectiveAge): string {
+  const fetched = formatAgo(a.fetchedHours);
+  switch (a.kind) {
+    case 'observed':
+      return `${fetched} · obs ${formatDuration(a.observedHours)}`;
+    case 'bounded':
+      return a.maxAgeHours === 0 ? fetched : `${fetched} · ≤${formatDuration(a.maxAgeHours)}`;
+    case 'unknown':
+      return `${fetched} · age unknown`;
+  }
+}
+
+/** Sort comparator: fresher first; an unknown age loses to any known age; two unknowns tie. Spec §8.1. */
+export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
+  const wa = worstCaseAgeHours(a);
+  const wb = worstCaseAgeHours(b);
+  if (wa === 'unknown' && wb === 'unknown') return 0;
+  if (wa === 'unknown') return 1;
+  if (wb === 'unknown') return -1;
+  return wa - wb;
+}
 ```
 
 The existing core fixtures gain the flag, since a row or price without it no longer parses.
@@ -576,7 +700,7 @@ The existing core fixtures gain the flag, since a row or price without it no lon
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/results test/api-contract test/labels && pnpm --filter @gmt/core test && pnpm --filter @gmt/core typecheck`
-Expected: PASS; the new file has 5 tests; `pnpm --filter @gmt/core test` keeps 100% on every metric and the four `test:tz` runs pass.
+Expected: PASS; the new file has 6 tests; `pnpm --filter @gmt/core test` keeps 100% on every metric and the four `test:tz` runs pass.
 
 - [ ] **Step 5: Commit**
 
@@ -592,10 +716,10 @@ git add packages/core && git commit -m "wp09: core truncated flag on prices, dep
 - Test: `test/components/provenance.test.tsx`, `test/format.test.ts`
 
 **Interfaces:**
-- Consumes: `provenanceSchema`, `Provenance`, `effectiveAge`, `formatAgeCompact`, `formatAgeFull`, `formatAgo`, `formatPence`, `toEpochDay`, `isoDateTimeOfEpochMs`, `asIsoDateTime`, `CONSTRAINT_LABELS` (WP0, WP2, Task 9.0).
-- Produces: `COPY`, the `format.ts` functions (§5), `NowContext`, `useNow`, `Provenance`, `PriceCell`, `PriceBoundary`, `assertProvenance`, `MissingProvenanceError`, `renderWithProviders`, `NOW`, `ProvenanceInput`, `setViewportWidth`, `expectConsoleErrors`, `drainGuards`.
+- Consumes: `provenanceSchema`, `Provenance`, `effectiveAge`, `formatAgeCompact`, `formatAgeFull`, `formatAgo`, `formatPence`, `toEpochDay`, `isoDateTimeOfEpochMs`, `asIsoDateTime`, `CONSTRAINT_LABELS` (with WP7's `priceConfirmed`), `Buckets`, `ConstraintName`, `Verdicts` (WP0, WP2, WP7, Task 9.0).
+- Produces: `COPY`, `BucketName`, the `format.ts` functions (§5), `NowContext`, `useNow`, `Provenance`, `isCalendarPrice`, `PriceCell`, `priceUnconfirmed`, `PriceBoundary`, `assertProvenance`, `MissingProvenanceError`, `renderWithProviders`, `settled`, `NOW`, `ProvenanceInput`, `setViewportWidth`, `expectConsoleErrors`, `drainGuards`.
 
-`PriceCell` is the one place a price is printed (the Critical of review round 1): table rows, the Results headline, the adjusted column, other sellers and the calendar-gap banner all render through it, so the "≈" marker, the provider badge, the source, the age, the stale chip, the calendar marker, the truncated note and the not-seen note exist once. The "≈" sits on the amount, with a spoken-only explanation, so a converted price is never read as exact. Inside the Results table, whose Provider and Destination columns sit beside it, the line shows only source and age (the `compact` variant, which WP10's calendar day cells use too); at 375px, where those columns move out, the line is complete. A calendar source kind (`authorised-cached`, `scraped-aggregate`) always gets the calendar marker, whatever the caller passes. `assertProvenance` also rejects a `fixture` provider without the `synthetic` source kind and the reverse (spec §5.5).
+`PriceCell` is the one place a price is printed (the Critical of review round 1): table rows, the Results headline, the adjusted column, other sellers and the calendar-gap banner all render through it, so every mark exists once. In order after the amount: the "≈" on the amount, with a spoken-only explanation, so a converted price is never read as exact; then **"price not confirmed by the final step"** as the first badge whenever the final step did not confirm the price (decision 44; `priceUnconfirmed` reads core's `priceConfirmed` verdict or unverified name; the words are core's label); then "stale" for a price stale by fetch age; then **"vendor's cache age unknown"** for a vendor age of `'unknown'`, which is a label, not staleness (decision 44); then the provenance line, the truncated note and the not-seen note. Two variants: `besideColumns`, inside the wide Results table, whose Provider and Destination columns sit beside it, so the line shows only source and age (ruling on UI-14; at 375px, where those columns move out, the line is complete); and decision 46's `compact`, which WP10's calendar day cells use: the amount with "≈", a short provider badge, the destination code and the marks, with source words, age and note in the title. WP10 adds props to `PriceCell`, never a second price component. A calendar source kind (`authorised-cached`, `scraped-aggregate`) always gets the calendar marker, whatever the caller passes. `assertProvenance` also rejects a `fixture` provider without the `synthetic` source kind and the reverse (spec §5.5). `format.ts` gives the four date forms of decision 46 from one month and weekday table. The test guards fail a test on any `console.error` it did not announce with `expectConsoleErrors(pattern)`, on an announced one that never came, and (from Task 9.3) on any unmatched request; `settled(client)` waits for the query client to go quiet before a negative request count.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -663,7 +787,7 @@ class Catch extends Component<{ children: ReactNode; onError: (e: unknown) => vo
 
 describe('a price without provenance fails to render (spec §9 item 6; WP9 first failing test)', () => {
   it('PriceCell inside PriceBoundary shows the withheld message and never the number', () => {
-    expectConsoleErrors();
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
     renderWithProviders(
       <PriceBoundary>
         <PriceCell pricePence={41200} provenance={undefined} calendar={false} stale={false} />
@@ -674,7 +798,7 @@ describe('a price without provenance fails to render (spec §9 item 6; WP9 first
   });
 
   it('a provenance missing fetchedAt is treated exactly like no provenance (nothing is defaulted)', () => {
-    expectConsoleErrors();
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
     const { fetchedAt: _drop, ...partial } = searchProvenance;
     renderWithProviders(
       <PriceBoundary>
@@ -686,7 +810,7 @@ describe('a price without provenance fails to render (spec §9 item 6; WP9 first
   });
 
   it('Provenance on its own throws MissingProvenanceError', () => {
-    expectConsoleErrors();
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
     const errors: unknown[] = [];
     renderWithProviders(
       <Catch onError={(e) => errors.push(e)}>
@@ -813,7 +937,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
         stale={false}
         destination="JFK"
         notSeenInLatestHours={72}
-        compact
+        besideColumns
       />,
     );
     const line = screen.getByTestId('provenance');
@@ -825,6 +949,72 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
       <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale={false} fullAge />,
     );
     expect(screen.getByText(ages(searchProvenance).full)).toBeInTheDocument();
+  });
+
+  it('an unknown vendor age is labelled "vendor\'s cache age unknown", and the price is not called stale (decision 44)', () => {
+    renderWithProviders(
+      <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale={false} />,
+    );
+    expect(screen.getByText("vendor's cache age unknown")).toBeInTheDocument();
+    expect(screen.queryByText('stale')).toBeNull();
+  });
+
+  it('a stale price with a known age says "stale" and carries no unknown-age label', () => {
+    renderWithProviders(<PriceCell pricePence={39950} provenance={calendarProvenance} calendar stale />);
+    expect(screen.getByText('stale')).toBeInTheDocument();
+    expect(screen.queryByText("vendor's cache age unknown")).toBeNull();
+  });
+
+  it('an unconfirmed price says so first, beside the amount, before any other mark (decision 44)', () => {
+    renderWithProviders(
+      <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale unconfirmed />,
+    );
+    const amount = screen.getByTestId('price-cell').firstElementChild;
+    const marks = [...(amount?.querySelectorAll('span') ?? [])].map((m) => m.textContent);
+    expect(marks.slice(0, 2)).toEqual(['price not confirmed by the final step', 'stale']);
+  });
+
+  it('decision 46 compact: amount with "≈", short provider badge, destination and marks; source, age and note in the title', () => {
+    renderWithProviders(
+      <PriceCell
+        pricePence={39950}
+        provenance={calendarProvenance}
+        calendar
+        stale
+        truncated
+        unconfirmed
+        destination="EWR"
+        destinationNote="onward leg not included"
+        compact
+      />,
+    );
+    const cell = screen.getByTestId('price-cell');
+    expect(cell).toHaveTextContent('≈');
+    expect(within(cell).getByText('TP')).toBeInTheDocument();
+    expect(within(cell).getByText('EWR')).toBeInTheDocument();
+    expect(within(cell).getByText('stale')).toBeInTheDocument();
+    expect(within(cell).getByText('cheapest of the rows read')).toBeInTheDocument();
+    expect(within(cell).getByText('price not confirmed by the final step')).toBeInTheDocument();
+    expect(within(cell).queryByText('Aviasales cache')).toBeNull();
+    expect(within(cell).queryByText('onward leg not included')).toBeNull();
+    expect(screen.queryByTestId('provenance')).toBeNull();
+    const { full } = ages(calendarProvenance);
+    expect(cell.getAttribute('title')).toBe(
+      `Travelpayouts · Aviasales cache · ${full} · constraints not checked · onward leg not included`,
+    );
+    expect(cell.className).toContain('border-dashed');
+  });
+
+  it('compact itinerary price without a destination or note: badge only, title without the calendar words', () => {
+    renderWithProviders(
+      <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale={false} compact />,
+    );
+    const cell = screen.getByTestId('price-cell');
+    expect(within(cell).getByText('SA')).toBeInTheDocument();
+    expect(cell.getAttribute('title')).toBe(
+      `SearchApi · Google Flights via SearchApi · ${ages(searchProvenance).full}`,
+    );
+    expect(cell.className).not.toContain('border-dashed');
   });
 
   it('the tests clock is the fixed NOW', () => {
@@ -840,6 +1030,7 @@ import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   formatInstantUtc,
+  formatIsoDate,
   formatIsoDateLong,
   formatIsoDateShort,
   formatLocalDateTime,
@@ -852,10 +1043,12 @@ import {
 } from '../src/format.js';
 
 describe('the one date-formatting module (decision 38; WP10 imports it)', () => {
-  it('short form from the YYYY-MM-DD string, never through Date', () => {
-    expect(formatIsoDateShort('2027-03-14')).toBe('14 Mar 2027');
-    expect(formatIsoDateShort('2027-12-01')).toBe('1 Dec 2027');
+  it('date and short forms from the YYYY-MM-DD string, never through Date', () => {
+    expect(formatIsoDateShort('2027-03-14')).toBe('14 Mar');
     expect(formatIsoDateShort('not a date')).toBe('not a date');
+    expect(formatIsoDate('2027-03-14')).toBe('14 Mar 2027');
+    expect(formatIsoDate('2027-12-01')).toBe('1 Dec 2027');
+    expect(formatIsoDate('not a date')).toBe('not a date');
   });
 
   it('long form adds the weekday from epoch-day arithmetic, across month, year and leap boundaries', () => {
@@ -1065,28 +1258,35 @@ export default defineConfig({
  * Failures that would otherwise be swallowed: an unmatched request (TanStack Query turns it into a
  * query error, so a negative assertion could pass vacuously, review tsr-004) and console.error
  * (React act warnings, boundary reports). test/setup.ts throws in afterEach when either occurred,
- * unless the test called expectConsoleErrors() for console.error it causes on purpose.
+ * unless the test announced, with expectConsoleErrors(pattern), the console.error it causes on purpose;
+ * an error that does not match the pattern still fails, and so does a pattern that never occurred
+ * (review tsr2-006).
  */
 export const unhandled: string[] = [];
 export const consoleErrors: unknown[][] = [];
-let consoleErrorsExpected = false;
+let expected: RegExp | null = null;
 
-/** A test that renders a broken price or a crashing view expects console.error; call it first. */
-export function expectConsoleErrors(): void {
-  consoleErrorsExpected = true;
+/** A test that renders a broken price or a crashing view announces the console.error it expects. */
+export function expectConsoleErrors(pattern: RegExp): void {
+  expected = pattern;
 }
 
-/** Resets the per-test state and returns what the finished test left behind. */
-export function drainGuards(): { unhandled: string[]; consoleErrors: unknown[][]; expected: boolean } {
-  const out = {
-    unhandled: [...unhandled],
-    consoleErrors: [...consoleErrors],
-    expected: consoleErrorsExpected,
-  };
+/** What the finished test left behind that should fail it; resets the per-test state. */
+export function drainGuards(): string[] {
+  const text = consoleErrors.map((a) => a.map(String).join(' '));
+  const problems = [
+    ...unhandled.map((u) => `request no handler matched: ${u}`),
+    ...text
+      .filter((t) => expected === null || !expected.test(t))
+      .map((t) => `console.error during the test: ${t}`),
+    ...(expected !== null && !text.some((t) => expected?.test(t) === true)
+      ? [`expected console.error ${expected} never occurred`]
+      : []),
+  ];
   unhandled.length = 0;
   consoleErrors.length = 0;
-  consoleErrorsExpected = false;
-  return out;
+  expected = null;
+  return problems;
 }
 ```
 
@@ -1110,12 +1310,8 @@ afterEach(() => {
   // why: Vitest runs without globals, so RTL's automatic cleanup never registers.
   cleanup();
   vi.restoreAllMocks();
-  const left = drainGuards();
-  if (!left.expected && left.consoleErrors.length > 0) {
-    throw new Error(
-      `console.error during the test: ${left.consoleErrors.map((a) => a.map(String).join(' ')).join(' | ')}`,
-    );
-  }
+  const problems = drainGuards();
+  if (problems.length > 0) throw new Error(problems.join(' | '));
 });
 ```
 
@@ -1151,16 +1347,20 @@ export function setViewportWidth(px: number): void {
 ```tsx
 import { asIsoDateTime, type IsoDateTime, type Provenance } from '@gmt/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
+import { vi } from 'vitest';
 import { NowContext } from '../src/now.js';
 
 /** The fixed "now" of every web test; fixtures are dated relative to it. */
 export const NOW: IsoDateTime = asIsoDateTime('2026-10-14T15:00:00.000Z');
 
-/** Renders with a fresh QueryClient (no retries), a fixed clock and the given search string. */
-export function renderWithProviders(ui: ReactElement, opts: { search?: string } = {}) {
+/**
+ * Renders with a fresh QueryClient (no retries), a fixed clock and the given search string. With
+ * `fakeTimers`, user-event advances Vitest's fake clock, so a debounce is stepped explicitly.
+ */
+export function renderWithProviders(ui: ReactElement, opts: { search?: string; fakeTimers?: boolean } = {}) {
   window.history.replaceState(null, '', `/${opts.search ?? ''}`);
   const client = new QueryClient({
     defaultOptions: {
@@ -1168,13 +1368,25 @@ export function renderWithProviders(ui: ReactElement, opts: { search?: string } 
       mutations: { retry: false },
     },
   });
-  const user = userEvent.setup();
+  const user =
+    opts.fakeTimers === true ? userEvent.setup({ advanceTimers: vi.advanceTimersByTime }) : userEvent.setup();
   const result = render(
     <QueryClientProvider client={client}>
       <NowContext.Provider value={() => NOW}>{ui}</NowContext.Provider>
     </QueryClientProvider>,
   );
   return { ...result, user, client };
+}
+
+/**
+ * Waits until no query or mutation is in flight, then one more macrotask, so a negative request-count
+ * assertion runs after any request the last event could have caused (review tsr2-002).
+ */
+export async function settled(client: QueryClient): Promise<void> {
+  await waitFor(() => {
+    if (client.isFetching() + client.isMutating() > 0) throw new Error('requests in flight');
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /**
@@ -1228,12 +1440,20 @@ export function formatMicroGbp(micro: number): string {
   return formatPence(Math.ceil(micro / 10_000));
 }
 
-/** Short form, "2027-03-14" → "14 Mar 2027", by string slicing only; anything malformed is returned as given. */
-export function formatIsoDateShort(d: string): string {
+/** Date form, "2027-03-14" → "14 Mar 2027", by string slicing only; anything malformed is returned as given. */
+export function formatIsoDate(d: string): string {
   const [y, m, day] = d.split('-');
   const month = MONTHS[Number(m) - 1];
   if (y === undefined || day === undefined || month === undefined) return d;
   return `${Number(day)} ${month} ${y}`;
+}
+
+/** Short form without the year, "2027-03-14" → "14 Mar" (day cells, segment times); malformed input is returned as given. */
+export function formatIsoDateShort(d: string): string {
+  const [, m, day] = d.split('-');
+  const month = MONTHS[Number(m) - 1];
+  if (day === undefined || month === undefined) return d;
+  return `${Number(day)} ${month}`;
 }
 
 /** Weekday form, "2027-03-14" → "Sun", from core's epoch-day arithmetic (never a Date). */
@@ -1243,20 +1463,19 @@ export function formatWeekday(d: IsoDate): string {
 
 /** Long form with the weekday, "2027-03-14" → "Sun 14 Mar 2027". */
 export function formatIsoDateLong(d: IsoDate): string {
-  return `${formatWeekday(d)} ${formatIsoDateShort(d)}`;
+  return `${formatWeekday(d)} ${formatIsoDate(d)}`;
 }
 
 /** A run's UTC instant, "2026-10-14T12:00:00.000Z" → "14 Oct 2026 12:00 UTC" (labelled UTC, never shifted). */
 export function formatInstantUtc(iso: string): string {
-  return `${formatIsoDateShort(iso.slice(0, 10))} ${iso.slice(11, 16)} UTC`;
+  return `${formatIsoDate(iso.slice(0, 10))} ${iso.slice(11, 16)} UTC`;
 }
 
 /** Segment local time "2027-03-14T10:25" → "14 Mar 10:25" (wall time at the airport, spec §6.4). */
 export function formatLocalDateTime(local: string): string {
   const [date, time] = local.split('T');
   if (date === undefined || time === undefined) return local;
-  const full = formatIsoDateShort(date);
-  return `${full.slice(0, full.lastIndexOf(' '))} ${time}`;
+  return `${formatIsoDateShort(date)} ${time}`;
 }
 
 /** 905 → "15h 05m". */
@@ -1287,12 +1506,19 @@ export function parsePoundsToPence(input: string): number | undefined {
   const fraction = (m[2] ?? '').padEnd(2, '0');
   return Number(m[1]) * 100 + Number(fraction);
 }
+
+/** A typed pounds string in its canonical form ("450.5" → "450.50", junk → ""): what useSynced compares. */
+export function poundsText(input: string): string {
+  return penceToPoundsInput(parsePoundsToPence(input));
+}
 ```
 
 `src/copy.ts` (new file; the whole catalogue, later tasks only import from it):
 
 ```ts
 import {
+  type apiContract,
+  type Buckets,
   type Cabin,
   CONSTRAINT_LABELS,
   type ConstraintName,
@@ -1304,10 +1530,12 @@ import {
   type Verdict,
   type VerdictClass,
 } from '@gmt/core';
+import type { z } from 'zod';
 
-/** Plan ids the providers response carries (core api-contract `system.ts`). */
-type PlanId = 'trial' | '40usd' | 'free' | 'synthetic';
-type BucketName = 'priced' | 'empty' | 'no_data' | 'error' | 'skipped' | 'not_run';
+/** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
+type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
+/** The six coverage buckets; `reused` is a count beside them, not a bucket (spec §3). */
+export type BucketName = Exclude<keyof Buckets, 'reused'>;
 
 /**
  * Every user-facing string of the web app. Spec §11: the banned-word list applies to all copy,
@@ -1331,6 +1559,8 @@ export const COPY = {
     providers: 'Providers',
   },
   placeholder: 'This view is not available yet.',
+  calendarPlaceholderHint:
+    'Until it is, the Results filters slice the window by month: set "Departs on or after" and "Departs on or before".',
   definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No search definitions yet. Create one under Definitions.',
   definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',
@@ -1364,10 +1594,17 @@ export const COPY = {
   constraintsNotChecked: 'constraints not checked',
   notChecked: 'not checked',
   stale: 'stale',
+  vendorAgeUnknown: "vendor's cache age unknown",
+  // why: core's label, so web, email and the verdict list say the same words (decisions 37, 44).
+  priceNotConfirmed: CONSTRAINT_LABELS.priceConfirmed,
   staleView: 'Every row here is older than one refresh cycle.',
   bandCheapest: 'cheapest in its 6h travel-time band',
   notSeenInLatest: (age: string) => `not seen in latest search (${age})`,
   truncatedNote: 'cheapest of the rows read',
+  providerShort: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'synthetic' } satisfies Record<
+    ProviderId,
+    string
+  >,
   ageUnknown: 'age unknown',
   agoOf: (hours: number | 'unknown') => (hours === 'unknown' ? 'age unknown' : formatAgo(hours)),
   adjustedQualifier: 'incl. operator-entered onward cost',
@@ -1464,7 +1701,8 @@ export const COPY = {
     `run started ${started} (${status}, ${age})`,
   childExecutionItem: (started: string, status: string, age: string) =>
     `itinerary search for one cell, started ${started} (${status}, ${age})`,
-  notStarted: 'not started',
+  executionNotStarted: (status: string) => `run not started yet (${status})`,
+  childExecutionNotStarted: (status: string) => `itinerary search for one cell, not started yet (${status})`,
   spanExecutions: (n: number) => `across ${n} ${n === 1 ? 'run' : 'runs'}; no single run status applies`,
   notCompletedBanner: (status: string) => `The latest run is ${status}; these results may be partial.`,
   noExecution: 'No run yet for this definition.',
@@ -1496,6 +1734,15 @@ export const COPY = {
     notRun: number;
   }) =>
     `${p.stage} · ${p.provider}: ${p.verb} ${p.done} of ${p.total} cells (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
+  progressSelected: (p: {
+    provider: string;
+    done: number;
+    selected: number;
+    error: number;
+    skipped: number;
+    notRun: number;
+  }) =>
+    `itinerary search · ${p.provider}: itinerary-searched ${p.done} of ${p.selected} selected (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
   progressVerb: { discovery: 'searched', verification: 'itinerary-searched' } satisfies Record<Stage, string>,
   progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
   spendRunCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} billed calls`,
@@ -1514,7 +1761,8 @@ export const COPY = {
   cancel: 'Cancel',
   confirmCancel: 'Confirm: cancel this run',
   keepRunning: 'Keep running',
-  runNow: (calls: number, cost: string) => `Run now (up to ${calls} calls, ${cost})`,
+  runNow: (calls: number, cap: number, cost: string) =>
+    `Run now (about ${calls} calls (hard stop ${cap}), ${cost})`,
   runNowUnestimated: 'Run now',
   runNowBlocked: 'The estimate is above what you confirmed; confirm it under Definitions before running.',
 
@@ -1599,7 +1847,8 @@ export const COPY = {
   coverageScroll: 'Coverage counts (scrolls sideways on a narrow screen)',
   coverageLegend: 'What the columns mean',
   bucketHelp: {
-    priced: 'priced: the provider returned a price for exactly this cell.',
+    priced:
+      'priced: the provider returned a price for exactly this cell; for itinerary search that may be a price not confirmed by the final step.',
     empty: 'no fares: the provider said there are no fares for this cell.',
     no_data: 'no cached data: asked, nothing returned; this is not evidence that no flights exist.',
     error: 'error: the request failed; the error list below says why.',
@@ -1664,8 +1913,7 @@ export const COPY = {
   removeAirport: (code: string) => `Remove ${code}`,
   iataFormat: 'An airport code is three letters.',
   duplicateAirport: (code: string) => `${code} is already in the list.`,
-  metroCode: (code: string, airports: string) => `${code} is a city code for ${airports}.`,
-  addMetro: (airports: string) => `Add ${airports}`,
+  metroExpanded: (code: string, airports: string) => `${code} is a city code: added ${airports}.`,
   airportOption: (name: string, city: string, country: string) => `${name}, ${city}, ${country}`,
   destinationNote: (iata: string) => `Note for ${iata} (shown on every row)`,
   onwardCost: (iata: string) => `Onward cost to ${iata} in £ (optional, shown as a separate adjusted column)`,
@@ -1726,8 +1974,8 @@ export const COPY = {
   showEstimate: 'Show estimate',
   estimateStale: 'The draft changed since this estimate; show the estimate again before creating.',
   save: 'Save changes',
-  createConfirm: (calls: number, amount: string) =>
-    `Create and confirm up to ${calls} calls, ${amount} per run`,
+  createConfirm: (calls: number, cap: number, amount: string) =>
+    `Create and confirm about ${calls} calls (hard stop ${cap}), ${amount} per run`,
   created: 'Created. Scheduled runs use the calls and cost you confirmed.',
   saved: 'Saved.',
   fieldErrorsHeading: 'Fix these before saving:',
@@ -1736,8 +1984,8 @@ export const COPY = {
   estimateCells: (n: number) => `${n} cells`,
   estimateRow: (provider: string, stage: string, calls: number, cost: string, time: string) =>
     `${provider} ${stage}: ${calls} calls · ${cost} · about ${time}`,
-  estimateTotal: (calls: number, cost: string, time: string) =>
-    `total ${calls} calls, ${cost} per run · about ${time}`,
+  estimateTotal: (calls: number, cap: number, cost: string, time: string) =>
+    `about ${calls} calls (hard stop ${cap}), ${cost} per run · about ${time}`,
   windowClamped: 'The window was moved to start tomorrow.',
   estimateBlocked: (reason: string) => `blocked: ${reason}`,
   definitionNotices: 'Notices for this definition',
@@ -1747,10 +1995,11 @@ export const COPY = {
   budgetScope: (scope: string, estimated: number, cap: string) =>
     `${scope}: ${estimated} estimated a month, cap ${cap}`,
   overCap: 'over the cap',
-  needsConfirmation: (calls: string, estimate: string, confirmed: string) =>
-    `The new estimate (up to ${calls} calls, ${estimate} per run) is above what you confirmed (${confirmed}). Scheduled runs are skipped until you confirm.`,
-  callsUnknown: 'an unstated number of',
-  confirmNew: (calls: string, amount: string) => `Confirm up to ${calls} calls, ${amount} per run`,
+  needsConfirmation: (p: { calls: number; cap: number; estimate: string; confirmed: string }) =>
+    `The new estimate, about ${p.calls} calls (hard stop ${p.cap}) and ${p.estimate} per run, is above what you confirmed (${p.confirmed}). Scheduled runs are skipped until you confirm.`,
+  confirmedWas: (calls: string, amount: string) => `${calls} calls, ${amount}`,
+  confirmNew: (calls: number, cap: number, amount: string) =>
+    `Confirm about ${calls} calls (hard stop ${cap}), ${amount} per run`,
   none: 'none',
 } as const;
 ```
@@ -1795,6 +2044,11 @@ export function assertProvenance(p: unknown): ProvenanceT {
 /** Source kinds that only ever carry calendar prices (spec §2): they always get the calendar marker. */
 const CALENDAR_SOURCES: ReadonlySet<SourceKind> = new Set(['authorised-cached', 'scraped-aggregate']);
 
+/** True for a price the caller marks as calendar basis or whose source kind only carries calendar prices. */
+export function isCalendarPrice(p: ProvenanceT, calendar: boolean): boolean {
+  return calendar || CALENDAR_SOURCES.has(p.sourceKind);
+}
+
 export interface ProvenanceProps {
   /** Validated here: anything that is not a complete provenance throws MissingProvenanceError. */
   provenance: unknown;
@@ -1802,7 +2056,7 @@ export interface ProvenanceProps {
   calendar: boolean;
   destination?: string | undefined;
   destinationNote?: string | null | undefined;
-  /** False only inside the Results table, whose Provider column already names the provider (ruling on UI-14). */
+  /** False only beside the wide Results table's columns, whose Provider column already names the provider (ruling on UI-14). */
   showProvider?: boolean;
   /** Headers show the full age form visibly (spec §3, §11); rows show the compact form with the full one as title. */
   fullAge?: boolean;
@@ -1820,7 +2074,7 @@ export function Provenance({
   const now = useNow();
   const p = assertProvenance(provenance);
   const age = effectiveAge(p, now);
-  const isCalendar = calendar || CALENDAR_SOURCES.has(p.sourceKind);
+  const isCalendar = isCalendarPrice(p, calendar);
   return (
     <span
       data-testid="provenance"
@@ -1848,9 +2102,19 @@ export function Provenance({
 `src/components/PriceCell.tsx` (new file):
 
 ```tsx
+import { type ConstraintName, effectiveAge, formatAgeFull, type Verdicts } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { formatPence } from '../format.js';
-import { assertProvenance, Provenance } from './Provenance.js';
+import { useNow } from '../now.js';
+import { assertProvenance, isCalendarPrice, Provenance } from './Provenance.js';
+
+/**
+ * True when the final step did not confirm the price (decisions 37, 44): core judges `priceConfirmed`
+ * only as `unverified`, so either the verdict or the unverified list says so.
+ */
+export function priceUnconfirmed(r: { unverified: readonly ConstraintName[]; verdicts?: Verdicts }): boolean {
+  return r.unverified.includes('priceConfirmed') || r.verdicts?.priceConfirmed === 'unverified';
+}
 
 export interface PriceCellProps {
   pricePence: number;
@@ -1860,32 +2124,59 @@ export interface PriceCellProps {
   stale: boolean;
   /** The price is the cheapest of the rows a truncated tile read (decision 36). */
   truncated?: boolean;
+  /** The final step did not confirm the price: the primary badge, beside the amount (decision 44). */
+  unconfirmed?: boolean;
   destination?: string | undefined;
   destinationNote?: string | null | undefined;
   /** The row's `notSeenInLatest.ageHours`, when the latest search no longer returned it. */
   notSeenInLatestHours?: number | 'unknown' | null;
   /** A words-only qualifier after the amount, e.g. the adjusted price's "incl. operator-entered onward cost". */
   qualifier?: string;
+  /** Beside the wide Results table's columns: the Provider and Destination columns carry those, so the line omits them. */
+  besideColumns?: boolean;
   /**
-   * Compact variant: the line shows source and age only, for a place whose surroundings already name the
-   * provider and destination (the wide Results table's columns; WP10's calendar day cells).
+   * Decision 46's compact variant (WP10's calendar day cells): the amount with "≈", a short provider badge,
+   * the destination code and the stale, truncated and unconfirmed marks; source words, the age line and the
+   * destination note move to the title. WP10 adds props here, never a second price component.
    */
   compact?: boolean;
   /** Headers: the full age form, visible (spec §11). */
   fullAge?: boolean;
 }
 
+const badge = 'ml-1 rounded px-1 text-xs font-normal';
+
 /**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
- * sits on the amount, so a converted price can never be read as an exact pound figure.
+ * sits on the amount, so a converted price can never be read as exact. An unconfirmed price says so
+ * first; a stale one says "stale"; a price whose vendor age is unknown is labelled, not called stale
+ * (decision 44: staleness is by fetch age).
  */
 export function PriceCell(props: PriceCellProps) {
+  const now = useNow();
   // why: validate before formatting, so a bare number can never reach the DOM even for one frame.
   const p = assertProvenance(props.provenance);
+  const age = effectiveAge(p, now);
   const fxTitle = p.fx.converted ? COPY.fxTitle(p.fx.rateDate, p.fx.source) : null;
   const notSeen = props.notSeenInLatestHours ?? null;
+  const compact = props.compact === true;
+  const calendar = isCalendarPrice(p, props.calendar);
+  const detail = [
+    COPY.provider[p.providerId],
+    COPY.source[p.sourceKind],
+    formatAgeFull(age),
+    ...(calendar ? [COPY.constraintsNotChecked] : []),
+  ];
   return (
-    <span data-testid="price-cell" className="flex flex-col gap-0.5">
+    <span
+      data-testid="price-cell"
+      title={
+        compact
+          ? [...detail, ...(props.destinationNote ? [props.destinationNote] : [])].join(' · ')
+          : undefined
+      }
+      className={`flex flex-col gap-0.5 ${compact && calendar ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
+    >
       <span className="font-semibold tabular-nums">
         {fxTitle !== null ? (
           <>
@@ -1899,18 +2190,31 @@ export function PriceCell(props: PriceCellProps) {
         {props.qualifier !== undefined ? (
           <span className="ml-1 text-xs font-normal">{props.qualifier}</span>
         ) : null}
-        {props.stale ? (
-          <span className="ml-1 rounded bg-amber-200 px-1 text-xs font-normal">{COPY.stale}</span>
+        {props.unconfirmed === true ? (
+          <span className={`${badge} border border-red-800 bg-red-50 font-semibold text-red-900`}>
+            {COPY.priceNotConfirmed}
+          </span>
+        ) : null}
+        {props.stale ? <span className={`${badge} bg-amber-200`}>{COPY.stale}</span> : null}
+        {age.kind === 'unknown' ? (
+          <span className={`${badge} bg-slate-100`}>{COPY.vendorAgeUnknown}</span>
         ) : null}
       </span>
-      <Provenance
-        provenance={p}
-        calendar={props.calendar}
-        destination={props.compact === true ? undefined : props.destination}
-        destinationNote={props.destinationNote}
-        showProvider={props.compact !== true}
-        fullAge={props.fullAge === true}
-      />
+      {compact ? (
+        <span className="inline-flex gap-1 text-xs">
+          <span className="rounded bg-slate-200 px-1 font-medium">{COPY.providerShort[p.providerId]}</span>
+          {props.destination !== undefined ? <span>{props.destination}</span> : null}
+        </span>
+      ) : (
+        <Provenance
+          provenance={p}
+          calendar={props.calendar}
+          destination={props.besideColumns === true ? undefined : props.destination}
+          destinationNote={props.destinationNote}
+          showProvider={props.besideColumns !== true}
+          fullAge={props.fullAge === true}
+        />
+      )}
       {props.truncated === true ? <span className="text-xs font-medium">{COPY.truncatedNote}</span> : null}
       {notSeen !== null ? <span className="text-xs">{COPY.notSeenInLatest(COPY.agoOf(notSeen))}</span> : null}
     </span>
@@ -1957,7 +2261,7 @@ export class PriceBoundary extends Component<{ children: ReactNode }, State> {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/components/provenance.test.tsx test/format.test.ts test/smoke.test.ts`
-Expected: PASS, 12 + 7 + 2 tests.
+Expected: PASS, 17 + 7 + 2 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1965,16 +2269,16 @@ Expected: PASS, 12 + 7 + 2 tests.
 git add apps/web && git commit -m "wp09: web config, copy catalogue, date formats, provenance-checked price cell"
 ```
 
-### Task 9.2: Banned words over the catalogue; AST guards for copy, casts and money
+### Task 9.2: Banned words over the catalogue; AST guards for copy, suppressions and money
 
 **Files:**
 - Test: `test/copy/catalogue.test.ts`, `test/copy/sourceGuard.test.ts`
 
 **Interfaces:**
 - Consumes: `BANNED_WORD_ALLOWLIST`, `findBannedWords` (WP0, the single allowlist every package passes); `COPY` (Task 9.1); the TypeScript compiler API (`typescript`, the workspace root's pinned devDependency).
-- Produces: `copyOffenders`, `castOffenders`, `moneyOffenders` (exported from the test file for its own planted-offender test); nothing in `src`.
+- Produces: `copyOffenders`, `moneyOffenders`, `suppressionOffenders` (exported from the test file for its own planted-offender test); nothing in `src`.
 
-Chosen approach (spec §9 item 6 "over every string in apps/web/src"): the **catalogue** `src/copy.ts` holds all copy, and guards make that true. (1) The catalogue test walks every string and calls every function entry with sample arguments, failing when a function has no sample. (2) The source guard parses every file with the TypeScript compiler, not a regex (reviews tsr-007, arch-018), and fails on: JSX text containing a letter, on one line or many; a lettered string or template literal rendered as a JSX child, including through a ternary, `&&`, `||` or `??` (a comparison such as `kind === 'calendar'` renders nothing and is not flagged); a lettered literal in a copy attribute (`aria-label`, `title`, `placeholder`, `alt`, `label`, …). (3) It fails on every `as` cast except `as const`, and every angle-bracket assertion, in `src` and in `test` (project rule; `tsconfig.test.json` type-checks the tests, and this enforces the rule rather than a DoD grep). (4) It fails on a call to `formatPence` or `formatMicroGbp` outside `PriceCell` and the views that show costs and caps (review tsr-003), so a fare printed without provenance cannot creep in. Task 9.14 adds a sweep over the rendered DOM of every view.
+Chosen approach (spec §9 item 6 "over every string in apps/web/src"): the **catalogue** `src/copy.ts` holds all copy, and guards make that true. (1) The catalogue test walks every string and calls every function entry with sample arguments, failing when a function has no sample; it also pins the confirmation wording "about N calls (hard stop M)", never "up to" (decision 44). (2) The source guard parses every file with the TypeScript compiler, not a regex (reviews tsr-007, arch-018), and fails on: JSX text containing a letter, on one line or many; a lettered string or template literal rendered as a JSX child, including through a ternary, `&&`, `||` or `??` (a comparison such as `kind === 'calendar'` renders nothing and is not flagged); a lettered literal in a copy attribute (`aria-label`, `title`, `placeholder`, `alt`, `label`, …) or in any prop of a component other than identifier props (`id`, `className`, `variant`, …; review tsr2-008). Casts are not this file's job: decision 48 makes the committed `scripts/check-casts.mjs` (`pnpm casts`, WP7, in CI) the one cast check for every package, and §10 runs it. (3) It fails on any lint or type-check suppression comment (`biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`) in `src` and `test`, including a comment alone in JSX braces (decision 46, reviews arch-r2-003, tsr2-001). (4) It fails, outside `PriceCell` and the views that show costs and caps, on a call to `formatPence` or `formatMicroGbp` (bare or through a namespace) and on an import of either (renamed or not), and outside `copy.ts` and `format.ts` on any string or template literal holding "£" (reviews tsr-003, prov-r2-007, tsr2-008). A value passed through a variable is the accepted gap: Task 9.14's rendered sweep checks every view's DOM for "£" outside a price or a `[data-cost]` element.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1987,6 +2291,11 @@ import { COPY } from '../../src/copy.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[]> = {
+  confirmedWas: ['154', '£1'],
+  metroExpanded: ['LON', 'LHR, LGW'],
+  progressSelected: [{ provider: 'SearchApi', done: 8, selected: 10, error: 1, skipped: 116, notRun: 2 }],
+  childExecutionNotStarted: ['pending'],
+  executionNotStarted: ['pending'],
   loadFailed: ['network error'],
   actionFailed: ['409 conflict'],
   providersUnknown: ['HTTP 500'],
@@ -2051,7 +2360,7 @@ const SAMPLES: Record<string, unknown[]> = {
   resumesAt: ['1 Nov 2026 00:00 UTC'],
   scheduleBlocked: ['14 Oct 2026'],
   childRun: ['running'],
-  runNow: [154, '£0'],
+  runNow: [154, 2000, '£0'],
   filtersSummary: [2],
   carriersIgnored: ['BRITISH'],
   segment: ['ZZ', 117, 'LHR', '14 Mar 10:25', 'JFK', '14 Mar 13:20'],
@@ -2080,8 +2389,6 @@ const SAMPLES: Record<string, unknown[]> = {
   editDefinition: ['Worked example'],
   removeAirport: ['LHR'],
   duplicateAirport: ['LHR'],
-  metroCode: ['LON', 'LHR, LGW'],
-  addMetro: ['LHR, LGW'],
   airportOption: ['Heathrow', 'London', 'United Kingdom'],
   destinationNote: ['JFK'],
   onwardCost: ['JFK'],
@@ -2093,17 +2400,17 @@ const SAMPLES: Record<string, unknown[]> = {
   coverageCheckCalls: [14],
   cachedOf: [5, 372],
   importExample: ['the worked example'],
-  createConfirm: [154, '£0'],
+  createConfirm: [154, 2000, '£0'],
   fieldError: ['origins.0', 'LON is a city code'],
   estimateCells: [126],
   estimateRow: ['SearchApi', 'discovery', 92, '£0', '30m'],
-  estimateTotal: [154, '£0', '45m'],
+  estimateTotal: [154, 2000, '£0', '45m'],
   estimateBlocked: ['searchapi provider-month cap 10000, estimated 12000'],
   budgetFitOk: [4],
   budgetFitWarn: [4],
   budgetScope: ['provider-month:searchapi', 616, '10000'],
-  needsConfirmation: ['154', '£2', '£1'],
-  confirmNew: ['154', '£2'],
+  needsConfirmation: [{ calls: 154, cap: 2000, estimate: '£2', confirmed: '120 calls, £1' }],
+  confirmNew: [154, 2000, '£2'],
 };
 
 interface Collected {
@@ -2172,9 +2479,19 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(COPY.progressVerb.verification).toBe('itinerary-searched');
   });
 
-  it('confirmation copy states calls as well as pounds (decision 36)', () => {
-    expect(COPY.createConfirm(154, '£0')).toBe('Create and confirm up to 154 calls, £0 per run');
-    expect(COPY.confirmNew('154', '£2')).toBe('Confirm up to 154 calls, £2 per run');
+  it('confirmations state the estimated calls with the hard stop, and pounds (decisions 36, 44)', () => {
+    expect(COPY.createConfirm(154, 2000, '£0')).toBe(
+      'Create and confirm about 154 calls (hard stop 2000), £0 per run',
+    );
+    expect(COPY.confirmNew(154, 2000, '£2')).toBe('Confirm about 154 calls (hard stop 2000), £2 per run');
+    expect(COPY.runNow(154, 2000, '£0')).toBe('Run now (about 154 calls (hard stop 2000), £0)');
+    const copy = [
+      COPY.createConfirm(1, 2, '£0'),
+      COPY.confirmNew(1, 2, '£0'),
+      COPY.runNow(1, 2, '£0'),
+      COPY.estimateTotal(1, 2, '£0', '1m'),
+    ];
+    expect(copy.filter((c) => /\bup to\b/.test(c))).toEqual([]);
   });
 
   it('the guard itself works: a planted banned word is found', () => {
@@ -2273,6 +2590,27 @@ function jsxSlot(n: ts.Node): 'child' | { attr: string } | null {
   return ts.isJsxElement(p.parent) || ts.isJsxFragment(p.parent) ? 'child' : null;
 }
 
+/** Props of a component (a capitalised JSX tag) that carry identifiers or tokens, never copy. */
+const NON_COPY_PROPS = new Set([
+  'id',
+  'className',
+  'variant',
+  'type',
+  'name',
+  'role',
+  'key',
+  'htmlFor',
+  'inputMode',
+  'value',
+]);
+
+/** True when the literal is an attribute value on a component (`<Heading text="…">`), not on an HTML element. */
+function onComponent(n: ts.Node): boolean {
+  let p: ts.Node | undefined = n.parent;
+  while (p !== undefined && !ts.isJsxOpeningElement(p) && !ts.isJsxSelfClosingElement(p)) p = p.parent;
+  return p !== undefined && /^[A-Z]/.test(p.tagName.getText());
+}
+
 /** Literal copy in a .tsx file: JSX text with a letter, or a lettered literal rendered as a child or a copy attribute. */
 export function copyOffenders(file: string, text: string): string[] {
   const out: string[] = [];
@@ -2283,6 +2621,8 @@ export function copyOffenders(file: string, text: string): string[] {
       const slot = jsxSlot(n);
       if (slot === 'child') out.push(`${file}: literal child "${lit}"`);
       else if (slot !== null && COPY_ATTRS.has(slot.attr)) out.push(`${file}: ${slot.attr}="${lit}"`);
+      else if (slot !== null && onComponent(n) && !NON_COPY_PROPS.has(slot.attr))
+        out.push(`${file}: prop ${slot.attr}="${lit}"`);
     }
     ts.forEachChild(n, visit);
   };
@@ -2290,33 +2630,63 @@ export function copyOffenders(file: string, text: string): string[] {
   return out;
 }
 
-/** Every `as` cast except `as const`, and every angle-bracket assertion (project rule: no casts). */
-export function castOffenders(file: string, text: string): string[] {
-  const out: string[] = [];
-  const sf = parse(file, text);
-  const visit = (n: ts.Node): void => {
-    if (ts.isAsExpression(n) && n.type.getText(sf) !== 'const') out.push(`${file}: ${n.getText(sf)}`);
-    if (ts.isTypeAssertionExpression(n)) out.push(`${file}: ${n.getText(sf)}`);
-    ts.forEachChild(n, visit);
-  };
-  visit(sf);
-  return out;
-}
+/** Files whose string literals may hold a pound sign: the catalogue (labels such as "Max price (£)") and the formatter. */
+const POUND_FILES = new Set(['src/copy.ts', 'src/format.ts']);
 
-/** Calls to a money formatter outside the allowlisted files: a price printed without PriceCell (review tsr-003). */
+/**
+ * A price printed without PriceCell (reviews tsr-003, prov-r2-007, tsr2-008): outside the allowlisted
+ * files, any call to a money formatter (bare or through a namespace), any import of one (renamed or
+ * not), and outside the catalogue any string or template literal holding "£". A value passed through
+ * a variable to a non-allowlisted file is the accepted gap; the rendered sweep of Task 9.14 checks the DOM.
+ */
 export function moneyOffenders(file: string, text: string): string[] {
-  if (MONEY_FILES.has(file)) return [];
   const out: string[] = [];
+  const money = !MONEY_FILES.has(file);
   const visit = (n: ts.Node): void => {
-    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && MONEY_FORMATTERS.has(n.expression.text))
-      out.push(`${file}: ${n.expression.text}(…)`);
+    if (money && ts.isCallExpression(n)) {
+      const callee = ts.isPropertyAccessExpression(n.expression) ? n.expression.name : n.expression;
+      if (ts.isIdentifier(callee) && MONEY_FORMATTERS.has(callee.text))
+        out.push(`${file}: ${callee.text}(…)`);
+    }
+    if (money && ts.isImportSpecifier(n) && MONEY_FORMATTERS.has((n.propertyName ?? n.name).text)) {
+      out.push(`${file}: imports ${(n.propertyName ?? n.name).text}`);
+    }
+    const lit = literalText(n);
+    if (lit?.includes('£') && !POUND_FILES.has(file)) out.push(`${file}: "£" in "${lit}"`);
     ts.forEachChild(n, visit);
   };
   visit(parse(file, text));
   return out;
 }
 
-describe('source guards (spec §11 copy, project no-cast rule, spec §9 item 6 prices)', () => {
+/** Lint and type-check suppressions (project rule, decision 46): none, in any comment, in src or test. */
+const SUPPRESSION = /biome-ignore|eslint-disable|@ts-ignore|@ts-expect-error|@ts-nocheck/;
+
+/** Every comment of a file: the trivia before each token, plus comments alone in JSX braces. */
+export function suppressionOffenders(file: string, text: string): string[] {
+  const sf = parse(file, text);
+  const seen = new Set<number>();
+  const out: string[] = [];
+  const visit = (n: ts.Node): void => {
+    for (const c of ts.getLeadingCommentRanges(text, n.getFullStart()) ?? []) {
+      if (seen.has(c.pos)) continue;
+      seen.add(c.pos);
+      const comment = text.slice(c.pos, c.end);
+      if (SUPPRESSION.test(comment)) out.push(`${file}: ${comment.trim()}`);
+    }
+    for (const child of n.getChildren(sf)) visit(child);
+  };
+  visit(sf);
+  // why: a comment alone in JSX braces is not trivia of any token the walk visits, so those are matched directly.
+  for (const m of text.matchAll(/\{\s*(\/\*[\s\S]*?\*\/)\s*\}/g)) {
+    const comment = m[1] ?? '';
+    if (SUPPRESSION.test(comment) && !out.includes(`${file}: ${comment.trim()}`))
+      out.push(`${file}: ${comment.trim()}`);
+  }
+  return out;
+}
+
+describe('source guards (spec §11 copy, decision 46 suppressions, spec §9 item 6 prices)', () => {
   const src = sources('src');
   const tests = sources('test');
 
@@ -2331,8 +2701,8 @@ describe('source guards (spec §11 copy, project no-cast rule, spec §9 item 6 p
     );
   });
 
-  it('no casts in src or test, except `as const`', () => {
-    expect([...src, ...tests].flatMap((s) => castOffenders(s.file, s.text))).toEqual([]);
+  it('no lint or type-check suppression comment in src or test', () => {
+    expect([...src, ...tests].flatMap((s) => suppressionOffenders(s.file, s.text))).toEqual([]);
   });
 
   it('money is formatted only by PriceCell and the cost and cap views', () => {
@@ -2352,20 +2722,36 @@ describe('source guards (spec §11 copy, project no-cast rule, spec §9 item 6 p
     expect(copyOffenders('ok.tsx', 'const e = <p className="text-sm">{COPY.loading}{\' \'}</p>;')).toEqual(
       [],
     );
-    expect(castOffenders('planted.ts', 'const x = y as string; const z = [1] as const;')).toEqual([
-      'planted.ts: y as string',
-    ]);
     expect(moneyOffenders('src/views/Elsewhere.tsx', 'formatPence(100);')).toHaveLength(1);
+    expect(
+      moneyOffenders(
+        'src/views/Elsewhere.tsx',
+        "import { formatPence as fp } from '../format.js'; fmt.formatMicroGbp(1);",
+      ),
+    ).toEqual(['src/views/Elsewhere.tsx: imports formatPence', 'src/views/Elsewhere.tsx: formatMicroGbp(…)']);
+    expect(moneyOffenders('src/views/Elsewhere.tsx', ['const p = `£$', '{n}`;'].join(''))).toHaveLength(1);
+    expect(copyOffenders('planted.tsx', 'const g = <Heading text="Cheapest" id="h1" />;')).toEqual([
+      'planted.tsx: prop text="Cheapest"',
+    ]);
+    const suppressed = [
+      ['// biome', '-ignore lint/x: y'].join(''),
+      'const a = 1;',
+      ['/* eslint', '-disable */'].join(''),
+      ['// @ts', '-expect-error'].join(''),
+      // why: assembled from pieces so this file itself holds no suppression comment for the guard to find.
+      ['const b = <p>{/* @ts-', 'ignore */}</p>;'].join(''),
+    ].join('\n');
+    expect(suppressionOffenders('planted.tsx', suppressed)).toHaveLength(4);
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-These are guards over code that already exists, so prove each one bites. Temporarily add `planted: 'live prices',` and ``plantedFn: (n: number) => `${n}`,`` to `COPY` in `src/copy.ts`; in `PriceBoundary`'s fallback, put `{failedOnce ? 'Price hidden' : null}` (with `const failedOnce = true;`) after the message; and in `src/now.tsx` write `() => new Date().toISOString() as IsoDateTime` as the context default.
+These are guards over code that already exists, so prove each one bites. Temporarily add `planted: 'live prices',` and ``plantedFn: (n: number) => `${n}`,`` to `COPY` in `src/copy.ts`; in `PriceBoundary`'s fallback, put `{failedOnce ? 'Price hidden' : null}` (with `const failedOnce = true;`) after the message; and put a `// biome-ignore lint/style/useConst: planted` line above the context default in `src/now.tsx`.
 
 Run: `pnpm --filter @gmt/web exec vitest run test/copy`
-Expected: FAIL, four tests: "every function entry has sample arguments" (`COPY.plantedFn is a function with no entry in SAMPLES`), "no string contains a banned word" (`planted: "live" in "live prices"`), "no literal copy in any component" (`src/components/PriceBoundary.tsx: literal child "Price hidden"`), and "no casts in src or test" (`src/now.tsx: new Date().toISOString() as IsoDateTime`).
+Expected: FAIL, four tests: "every function entry has sample arguments" (`COPY.plantedFn is a function with no entry in SAMPLES`), "no string contains a banned word" (`planted: "live" in "live prices"`), "no literal copy in any component" (`src/components/PriceBoundary.tsx: literal child "Price hidden"`) and "no lint or type-check suppression comment" (`src/now.tsx: // biome-ignore …`).
 
 - [ ] **Step 3: Implement**
 
@@ -2379,7 +2765,7 @@ Expected: PASS, 6 + 5 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web && git commit -m "wp09: banned-word catalogue test; AST guards for literal copy, casts and money formatting"
+git add apps/web && git commit -m "wp09: banned-word catalogue test; AST guards for literal copy, suppressions and money formatting"
 ```
 
 ### Task 9.3: Schema-typed API client from ROUTES, parsed in every mode; test API on msw
@@ -2391,9 +2777,9 @@ git add apps/web && git commit -m "wp09: banned-word catalogue test; AST guards 
 
 **Interfaces:**
 - Consumes: `apiContract.ROUTES`, `apiContract.errorEnvelopeSchema`, the response and request schemas named in §4, `ResultRow`, `ResultBasis`; `ZodArray` from zod.
-- Produces: `ApiError`, `FieldError`, `findRoute`, `fillPath`, `call`, `api`, `qk`, `POLL_MS`, the query hooks, `useExecutionActions`, the response and request-body types, the fixture builders, `server`, `fixtureFor`.
+- Produces: `ApiError`, `FieldError`, `findRoute`, `fillPath`, `call`, `api`, `qk`, `POLL_MS`, the query hooks, `useExecutionActions` (whose start sends `confirmCostPence` and `confirmCalls`, decision 43), the response and request-body types (`BudgetFit` re-exported from core, review arch-015), the fixture builders, `server`, `fixtureFor`.
 
-Decisions. **The endpoint names its schema** (review arch-002): `call(schema, method, path, opts)` returns `z.output<typeof schema>`, checks that `schema` is the ROUTES entry's response schema (or an array of the same element, for `GET /api/definitions`), and parses with it; no generic is chosen by the caller and nothing is cast. **Every response is parsed in every build mode** (decision 36): payloads are at most 1000 rows, and an unparsed production response would give the views data no test ever saw. A contract break is an `ApiError` with code `contract`, which every view shows as its load error, so a row without provenance blanks nothing and prints no price. Non-2xx bodies become `ApiError` with the envelope's code and its contract-parsed `details.fields` (no re-validation by hand); a body that is not JSON is `malformed`; a failed fetch is `network`; a non-JSON error page is `http`. **Request bodies are the schemas' input types** (plain strings, `DefinitionBody` and friends): the operator's draft is unvalidated until the API parses it, so the web never mints a brand. **Fixtures** are built through the contract schemas from input-shaped overrides (review tsr-006), agree on one small definition of 126 cells, and use the spec rev 15 provenance: a SearchApi itinerary price has `maxAgeHours: 'unknown'` (decision 24). **The test API** fails a test on any unmatched request through a catch-all handler (review tsr-004, decision 18), and on any `console.error` the test did not announce.
+Decisions. **The endpoint names its schema** (review arch-002): `call(schema, method, path, opts)` returns `z.output<typeof schema>`, checks that `schema` is the ROUTES entry's response schema (or an array of the same element, for `GET /api/definitions`), and parses with it; no generic is chosen by the caller and nothing is cast. **Every response is parsed in every build mode** (decision 36): payloads are at most 1000 rows, and an unparsed production response would give the views data no test ever saw. A contract break is an `ApiError` with code `contract`, which every view shows as its load error, so a row without provenance blanks nothing and prints no price. Non-2xx bodies become `ApiError` with the envelope's code and its contract-parsed `details.fields` (no re-validation by hand); a body that is not JSON is `malformed`; a failed fetch is `network`; a non-JSON error page is `http`. **Request bodies are the schemas' input types** (plain strings, `DefinitionBody` and friends): the operator's draft is unvalidated until the API parses it, so the web never mints a brand. **Fixtures** are built through the contract schemas from input-shaped overrides (review tsr-006), agree on one small definition of 126 cells, and use the spec rev 15 provenance: a SearchApi itinerary price has `maxAgeHours: 'unknown'` (decision 24) and `stale: false`, since staleness is by fetch age and an unknown vendor age is a label (decision 44). The stored definition carries `confirmedCalls` and the execution summary `expandTop` (decisions 42, 43). **The test API** fails a test on any unmatched request through a catch-all handler (review tsr-004, decision 18), and on any `console.error` the test did not announce.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2402,7 +2788,7 @@ Decisions. **The endpoint names its schema** (review arch-002): `call(schema, me
 ```ts
 import { apiContract } from '@gmt/core';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ApiError, call, findRoute } from '../../src/api/client.js';
 import { api } from '../../src/api/endpoints.js';
 import { API, calendarRow, resultsResponse } from '../fixtures.js';
@@ -2433,14 +2819,11 @@ describe('api client (derived from core/api-contract ROUTES)', () => {
     expect(r.rows).toHaveLength(1);
   });
 
-  it('rejects a response that breaks the contract (a row without provenance), in production as in development', async () => {
+  it('rejects a response that breaks the contract (a row without provenance); there is no mode gate to stub', async () => {
     const { provenance: _drop, ...bare } = calendarRow();
     const body = { ...resultsResponse(), rows: [bare] };
     server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(body)));
-    vi.stubEnv('DEV', false);
-    vi.stubEnv('PROD', true);
     const err = await failure(api.results('d1', null));
-    vi.unstubAllEnvs();
     expect(err.code).toBe('contract');
     expect(err.message).toMatch(
       /GET \/api\/definitions\/:id\/results response does not match core\/api-contract: rows\.0\.provenance/,
@@ -2544,69 +2927,58 @@ describe('api client (derived from core/api-contract ROUTES)', () => {
 `test/harness.test.ts`:
 
 ```ts
+import { apiContract } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import * as fx from './fixtures.js';
-import { drainGuards } from './guards.js';
+import { drainGuards, expectConsoleErrors } from './guards.js';
 
-describe('test harness (reviews tsr-004, tsr-006)', () => {
-  it('every fixture builder parses through its contract schema with its defaults', () => {
-    const built = [
-      fx.verifiedRow(),
-      fx.partialRow(),
-      fx.failedRow(),
-      fx.calendarRow(),
-      fx.summary(),
-      fx.resultsResponse(),
-      fx.estimate(),
-      fx.definition(),
-      fx.providersResponse(),
-      fx.execution(),
-      fx.coverageResponse(),
-      fx.calendarGap(),
-      fx.coverageCheck(),
-      fx.airports,
-    ];
-    expect(built.every((b) => b !== undefined)).toBe(true);
-  });
-
-  it('a fixture that drifts from the contract fails at build time', () => {
-    expect(() => fx.verifiedRow({ pricePence: 412.5 })).toThrow();
-    expect(() =>
-      fx.verifiedRow({
-        otherOffers: [
-          {
-            seller: 'x',
-            pricePence: 1,
-            provenance: fx.provSearch,
-            booking: { kind: 'none' },
-            stale: false,
-            ageHours: 1,
-            verdictClass: 'verified',
-            unverified: [],
-            notSeenInLatest: null,
-          },
-        ],
-      }),
-    ).not.toThrow();
-  });
-
-  it('the fixtures agree on one small definition: 126 cells', () => {
+describe('test harness (reviews tsr-004, tsr-006, tsr2-006, tsr2-010)', () => {
+  it('the fixtures agree on one small definition: 126 cells, the run policy and the stored confirmation', () => {
     expect([
       fx.resultsResponse().coverage.total,
       fx.coverageResponse().summary.total,
       fx.estimate().cells,
     ]).toEqual([126, 126, 126]);
+    expect([fx.summary().expandTop, fx.definition().verification.expandTop]).toEqual([2, 2]);
+    expect([fx.definition().confirmedCalls, fx.estimate().totalCalls]).toEqual([154, 154]);
+  });
+
+  it('a fixture that drifts from the contract fails at build time', () => {
+    const offer = {
+      seller: 'x',
+      pricePence: 1,
+      provenance: fx.provSearch,
+      booking: { kind: 'none' as const },
+      stale: false,
+      ageHours: 1,
+      verdictClass: 'verified' as const,
+      unverified: [],
+      notSeenInLatest: null,
+    };
+    expect(() => fx.verifiedRow({ otherOffers: [offer] })).not.toThrow();
+    const { notSeenInLatest: _drop, ...withoutNotSeen } = offer;
+    expect(
+      apiContract.resultRowSchema.safeParse({ ...fx.verifiedRow(), otherOffers: [withoutNotSeen] }).success,
+    ).toBe(false);
+    const { fetchedAt: _fetched, ...noFetchedAt } = fx.provSearch;
+    expect(() => fx.verifiedRow({ provenance: noFetchedAt })).toThrow(/fetchedAt/);
+    expect(() => fx.verifiedRow({ pricePence: 412.5 })).toThrow();
   });
 
   it('an unmatched request is recorded by the catch-all, so afterEach fails the test', async () => {
     await fetch('http://localhost:3000/api/not-handled').catch(() => undefined);
-    const left = drainGuards();
-    expect(left.unhandled).toEqual(['GET http://localhost:3000/api/not-handled']);
+    expect(drainGuards()).toEqual(['request no handler matched: GET http://localhost:3000/api/not-handled']);
   });
 
-  it('console.error is recorded, so afterEach fails the test unless it was expected', () => {
+  it('an unannounced console.error fails the test; an announced one passes; an announced one that never came fails', () => {
     console.error('planted');
-    expect(drainGuards().consoleErrors).toEqual([['planted']]);
+    expect(drainGuards()).toEqual(['console.error during the test: planted']);
+    expectConsoleErrors(/price withheld/);
+    console.error('[price withheld] boom');
+    console.error('Warning: unrelated');
+    expect(drainGuards()).toEqual(['console.error during the test: Warning: unrelated']);
+    expectConsoleErrors(/price withheld/);
+    expect(drainGuards()).toEqual(['expected console.error /price withheld/ never occurred']);
   });
 });
 ```
@@ -2616,9 +2988,7 @@ describe('test harness (reviews tsr-004, tsr-006)', () => {
 Run: `pnpm --filter @gmt/web exec vitest run test/api/client.test.ts test/harness.test.ts`
 Expected: FAIL with `Failed to resolve import "../../src/api/client.js"` (and `../fixtures.js`).
 
-- [ ] **Step 2b: Prove production parsing is what bites**
-
-After Step 3, temporarily wrap the `schema.safeParse` block in `call` in `if (import.meta.env.DEV) { … }` and return `body.value` otherwise (the first draft's gate). Run the client test: "rejects a response that breaks the contract … in production as in development" fails with `expected an ApiError, got null`, because with `DEV` stubbed false the bare row came back unparsed. Remove the gate.
+There is no mode gate to stub: `src` never reads `import.meta.env` (§10 item 9 greps for it), so the contract test needs no `vi.stubEnv` (review tsr2-011).
 
 - [ ] **Step 3: Implement**
 
@@ -2760,14 +3130,13 @@ import type { apiContract, ResultBasis } from '@gmt/core';
 import type { z } from 'zod';
 
 // why: core already exports these inferred contract types (decision 17); one import site per type.
-export type { CoverageCheckResponse, DefinitionResponse, ResultRow } from '@gmt/core';
+export type { BudgetFit, CoverageCheckResponse, DefinitionResponse, ResultRow } from '@gmt/core';
 
 /** Response types: the z.output of each contract schema (plan "API contract"). */
 export type ProvidersResponse = z.output<typeof apiContract.providersResponseSchema>;
 export type ProviderEntry = ProvidersResponse['providers'][number];
 export type Estimate = z.output<typeof apiContract.estimateSchema>;
 export type EstimateResponse = z.output<typeof apiContract.estimateResponseSchema>;
-export type BudgetFit = z.output<typeof apiContract.budgetFitSchema>;
 export type ExecutionResponse = z.output<typeof apiContract.executionResponseSchema>;
 export type StartExecutionResponse = z.output<typeof apiContract.startExecutionResponseSchema>;
 export type ResultsResponse = z.output<typeof apiContract.resultsResponseSchema>;
@@ -2787,6 +3156,7 @@ export type DefinitionBody = z.input<typeof apiContract.definitionCreateRequestS
 export type DefinitionUpdateBody = z.input<typeof apiContract.definitionUpdateRequestSchema>;
 export type CoverageCheckBody = z.input<typeof apiContract.coverageCheckRequestSchema>;
 export type VerifyCellBody = z.input<typeof apiContract.verifyCellRequestSchema>;
+export type StartExecutionBody = z.input<typeof apiContract.startExecutionRequestSchema>;
 ```
 
 `src/api/endpoints.ts` (new file):
@@ -2799,6 +3169,7 @@ import type {
   CoverageCheckBody,
   DefinitionBody,
   DefinitionUpdateBody,
+  StartExecutionBody,
   VerifyCellBody,
 } from './types.js';
 
@@ -2817,7 +3188,7 @@ export const api = {
     call(c.definitionResponseSchema, 'PUT', '/api/definitions/:id', { params: { id }, body }),
   coverageCheck: (body: CoverageCheckBody) =>
     call(c.coverageCheckResponseSchema, 'POST', '/api/definitions/coverage-check', { body }),
-  startExecution: (id: string, body: { confirmCostPence?: number }) =>
+  startExecution: (id: string, body: StartExecutionBody) =>
     call(c.startExecutionResponseSchema, 'POST', '/api/definitions/:id/executions', { params: { id }, body }),
   execution: (id: string) =>
     call(c.executionResponseSchema, 'GET', '/api/executions/:id', { params: { id } }),
@@ -2932,8 +3303,12 @@ export function useExecutionActions() {
     cancel: useMutation({ mutationFn: (id: string) => api.cancel(id), onSuccess: refresh }),
     resume: useMutation({ mutationFn: (id: string) => api.resume(id), onSuccess: refresh }),
     start: useMutation({
-      mutationFn: (v: { id: string; confirmCostPence: number | null }) =>
-        api.startExecution(v.id, v.confirmCostPence === null ? {} : { confirmCostPence: v.confirmCostPence }),
+      // why: decision 43: a confirmation covers a run only with both its pence and its calls, so both are sent when stored.
+      mutationFn: (v: { id: string; confirmCostPence: number | null; confirmCalls: number | null }) =>
+        api.startExecution(v.id, {
+          ...(v.confirmCostPence === null ? {} : { confirmCostPence: v.confirmCostPence }),
+          ...(v.confirmCalls === null ? {} : { confirmCalls: v.confirmCalls }),
+        }),
       onSuccess: refresh,
     }),
     verify: useMutation({ mutationFn: (v: VerifyCellBody) => api.verifyCell(v), onSuccess: refresh }),
@@ -3180,6 +3555,8 @@ export function summary(over: Partial<In<typeof apiContract.executionSummarySche
     startedAt: '2026-10-14T12:00:00.000Z',
     finishedAt: '2026-10-14T13:00:00.000Z',
     ageHours: 2,
+    // the run's own policy (decision 42); the definition() fixture's current expandTop is also 2
+    expandTop: 2,
     ...over,
   });
 }
@@ -3294,6 +3671,7 @@ export function definition(
     scheduleCron: '0 5 * * 1',
     scheduleTz: 'Europe/London',
     confirmedCostPence: 0,
+    confirmedCalls: 154,
     enabled: true,
     createdAt: '2026-10-14T09:00:00.000Z',
     updatedAt: '2026-10-14T09:00:00.000Z',
@@ -3658,13 +4036,8 @@ afterEach(() => {
   // why: per-test handlers prepended with server.use() must not leak into the next test.
   server.resetHandlers();
   vi.restoreAllMocks();
-  const left = drainGuards();
-  if (left.unhandled.length > 0) throw new Error(`requests no handler matched: ${left.unhandled.join(', ')}`);
-  if (!left.expected && left.consoleErrors.length > 0) {
-    throw new Error(
-      `console.error during the test: ${left.consoleErrors.map((a) => a.map(String).join(' ')).join(' | ')}`,
-    );
-  }
+  const problems = drainGuards();
+  if (problems.length > 0) throw new Error(problems.join(' | '));
 });
 afterAll(() => server.close());
 // why: jsdom has no scrollIntoView; the ?row= test spies on this stub.
@@ -3675,7 +4048,7 @@ if (typeof Element.prototype.scrollIntoView !== 'function')
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/api test/harness.test.ts test/components test/copy test/format.test.ts`
-Expected: PASS, 12 + 5 tests in the new files and every earlier test still green. A failure naming a field in "response does not match core/api-contract" means a fixture differs from the merged schema: fix the fixture (never loosen the schema).
+Expected: PASS, 12 + 4 tests in the new files and every earlier test still green. A failure naming a field in "response does not match core/api-contract" means a fixture differs from the merged schema: fix the fixture (never loosen the schema).
 
 - [ ] **Step 5: Commit**
 
@@ -3686,14 +4059,14 @@ git add apps/web && git commit -m "wp09: schema-typed API client parsed in every
 ### Task 9.4: URL state: view, definition, basis, sort and filters
 
 **Files:**
-- Create: `src/state/urlState.ts`, `src/state/view.ts`, `src/state/withKey.ts`, `src/state/resultsState.ts`, `src/hooks/useMediaQuery.ts`
+- Create: `src/state/urlState.ts`, `src/state/view.ts`, `src/state/withKey.ts`, `src/state/resultsState.ts`, `src/state/carriers.ts`, `src/hooks/useMediaQuery.ts`, `src/hooks/useSynced.ts`
 - Test: `test/state/resultsState.test.ts`
 
 **Interfaces:**
 - Consumes: `SortKey`, `ResultFilters` (with Task 9.0's `departure`), `apiContract.verdictClassSchema`, `providerIdSchema`, `constraintNameSchema`, `cellKeySchema` (its `destination` and `departureDate` parse URL tokens into the branded types).
-- Produces: `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`, `NavClick`, `ViewId`, `VIEWS`, `parseView`, `withKey`, `oneOf`, `SortDir`, `ResultsUiState`, `SORT_KEYS`, `CLASSES`, `DEFAULT_CLASSES`, `parseResultsState`, `resultsStatePatch`, `parseBasis`, `parseSelectedRow`, `setFilter`, `activeFilterCount`, `useMediaQuery`, `NARROW_QUERY`.
+- Produces: `useSearchParams`, `updateSearchParams`, `hrefWith`, `navigateTo`, `NavClick`, `ViewId`, `VIEWS`, `parseView`, `withKey`, `oneOf`, `SortDir`, `ResultsUiState`, `SORT_KEYS`, `CLASSES`, `DEFAULT_CLASSES`, `parseResultsState`, `resultsStatePatch`, `parseBasis`, `parseSelectedRow`, `setFilter`, `activeFilterCount`, `parseCarriers`, `carriersText`, `useMediaQuery`, `NARROW_QUERY`, `useSynced`.
 
-Decision (spec §11 "filter and sort state persists across views"): **URL search params**. They survive view switches (nav links copy every parameter except `view`), reloads and bookmarks, and need no store library. Keys: `view`, `def`, `basis`, `sort` (`price.asc`; absent = the server's class-then-price ranking), `f.class` (absent = spec §6.9's default, every class except `failed`), `f.provider`, `f.stops`, `f.carriers`, `f.dest`, `f.maxPrice` (pence), `f.nights` (`10-14`), `f.depart` (`2027-03-01..2027-03-31`), `f.stale` (`hide`), `f.unverified`, and `row=<resultRowKey>`, which selects, expands and scrolls to one results row (plan "Web"; email links use it). Every list the parser accepts comes from the contract's enums (review arch-010), and every token is parsed by a core schema or a type guard, so no value is cast into a brand or a union. `withKey` is the one helper that sets or removes an optional key; the filters and the Definitions draft both use it.
+Decision (spec §11 "filter and sort state persists across views"): **URL search params**. They survive view switches (nav links copy every parameter except `view`), reloads and bookmarks, and need no store library. Keys: `view`, `def`, `basis`, `sort` (`price.asc`; absent = the server's class-then-price ranking), `f.class` (absent = spec §6.9's default, every class except `failed`), `f.provider`, `f.stops`, `f.carriers`, `f.dest`, `f.maxPrice` (pence), `f.nights` (`10-14`), `f.depart` (`2027-03-01..2027-03-31`), `f.stale` (`hide`), `f.unverified`, and `row=<resultRowKey>`, which selects, expands and scrolls to one results row (plan "Web"; email links use it). Every list the parser accepts comes from the contract's enums (review arch-010), and every token is parsed by a core schema or a type guard, so no value is cast into a brand or a union. `withKey` is the one helper that sets or removes an optional key, `parseCarriers` the one carriers parser and `useSynced` the one way a typed box follows its value; the Results filters and the Definitions form share all three (review arch-r2-009).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4087,6 +4460,45 @@ export function resultsStatePatch(s: ResultsUiState): Record<string, string | nu
 }
 ```
 
+`src/state/carriers.ts` (new file):
+
+```ts
+/** Spec §6.5 carriers, typed as comma-separated two-character codes (Results filter and the airline constraints). */
+/** Splits a carriers box into codes and the entries it ignores, which callers show, never silently drop. */
+export function parseCarriers(s: string): { codes: string[]; ignored: string[] } {
+  const entries = s
+    .split(',')
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => c.length > 0);
+  return {
+    codes: entries.filter((c) => /^[A-Z0-9]{2}$/.test(c)),
+    ignored: entries.filter((c) => !/^[A-Z0-9]{2}$/.test(c)),
+  };
+}
+
+/** The codes a carriers box means, comma-joined: what useSynced compares. */
+export function carriersText(input: string): string {
+  return parseCarriers(input).codes.join(',');
+}
+```
+
+`src/hooks/useSynced.ts` (new file):
+
+```ts
+import { useEffect, useState } from 'react';
+
+/**
+ * A typed box that follows its value when it changes elsewhere (Clear filters, the back button, an import)
+ * but keeps what the operator typed while that text already means the value ("zz, British" for carriers ZZ;
+ * "450.5" for 45050 pence). `means` turns the text into the value's string form.
+ */
+export function useSynced(urlValue: string, means: (text: string) => string): [string, (v: string) => void] {
+  const [text, setText] = useState(urlValue);
+  useEffect(() => setText((t) => (means(t) === urlValue ? t : urlValue)), [urlValue, means]);
+  return [text, setText];
+}
+```
+
 `src/hooks/useMediaQuery.ts` (new file):
 
 ```ts
@@ -4128,7 +4540,7 @@ git add apps/web && git commit -m "wp09: URL-held view, basis, sort and filter s
 - Consumes: `useProviders`, `useDefinitions` (Task 9.3); URL state (Task 9.4).
 - Produces: `App`, `Nav`, `DefinitionSelector`, `SyntheticBanner`, `Loading`, `LoadError`, `AppBoundary`, `Placeholder`. This task's `App` shows the placeholder for every view; Task 9.13 gives the final file with the status bar and the views (the views are tested directly until then).
 
-Decisions. **A failed `GET /api/providers` is an error state** (decision 36): the page says provider status is unknown, so whether its prices are synthetic is unknown, instead of a silently absent banner. The banner itself follows `/providers`'s `synthetic`, and Task 9.8 also raises it from the data: any result row whose source kind is synthetic. **The placeholder names no work package** ("This view is not available yet."; review UI-12), and a `def=` that names a missing definition says so, distinct from "no definitions yet". **Every nav target is at least 44 px tall** (`min-h-11`; review UI-15). **A top-level boundary** around the views keeps a render error from blanking the page (review tsr-002).
+Decisions. **A failed `GET /api/providers` is an error state** (decision 36): the page says provider status is unknown, so whether its prices are synthetic is unknown, instead of a silently absent banner. The banner itself follows `/providers`'s `synthetic`, and Task 9.8 also raises it from the data: any result row whose source kind is synthetic. **The placeholder names no work package** ("This view is not available yet."; review UI-12), and on Calendar it says the Results departure-date filters slice the window by month meanwhile (review PFT-14); a `def=` that names a missing definition says so, distinct from "no definitions yet". **Every nav target is at least 44 px tall** (`min-h-11`; review UI-15). **A top-level boundary** around the views keeps a render error from blanking the page (review tsr-002).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4253,7 +4665,7 @@ describe('the page never blanks (review tsr-002)', () => {
   }
 
   it('a render error inside the views shows a message, not an empty page', () => {
-    expectConsoleErrors();
+    expectConsoleErrors(/render failed/);
     renderWithProviders(
       <AppBoundary>
         <Broken />
@@ -4418,9 +4830,17 @@ export class AppBoundary extends Component<{ children: ReactNode }, { failed: bo
 ```tsx
 import { COPY } from '../copy.js';
 
-/** Route body for a view another work package owns (WP10: Calendar, Duration, History; WP11: Alerts). */
-export function Placeholder() {
-  return <p className="p-4 text-slate-700">{COPY.placeholder}</p>;
+/**
+ * Route body for a view another work package owns (WP10: Calendar, Duration, History; WP11: Alerts).
+ * `hint` names what to use meanwhile (the Calendar's month slicing is the Results departure filter).
+ */
+export function Placeholder({ hint = null }: { hint?: string | null }) {
+  return (
+    <div className="space-y-1 p-4 text-slate-700">
+      <p>{COPY.placeholder}</p>
+      {hint !== null ? <p className="text-sm">{hint}</p> : null}
+    </div>
+  );
 }
 ```
 
@@ -4479,7 +4899,7 @@ export function App() {
           {needsDefinition && definitions.data !== undefined && selected === null ? (
             <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
           ) : null}
-          {needsDefinition && selected === null ? null : <Placeholder />}
+          {needsDefinition && selected === null ? null : <Placeholder hint={view === 'calendar' ? COPY.calendarPlaceholderHint : null} />}
         </AppBoundary>
       </main>
     </div>
@@ -4532,7 +4952,7 @@ git add apps/web && git commit -m "wp09: shell with nav, selector, synthetic ban
 - Consumes: `useResults`, `useExecution`, `useCoverage`, `useExecutionActions`, `POLL_MS` (Task 9.3); `ACTIVE_STATUSES`, `apiContract.providerIdSchema` (WP0); `coverage.scheduleBlockedSince`, newest-first `executions` with `isChild`, flat `Usage` rows with scope labels (`execution-calls`, `execution-free-calls`, `execution-cost`, `global-month`, `provider-month:<id>`), `execution.resumeAfter`, `definition.estimate`, `definition.needsConfirmation`.
 - Produces: `StatusBar({ definition, showRunNow })`, `ViewHeader({ title, executions, stale, variant? })`.
 
-Decisions. **Progress is one line per stage × provider**, never summed across providers (review po-002), and "done" counts only outcomes a provider answered or failed on: priced, no fares, no cached data, error (decision 36). Skipped and not-searched cells are stated beside it, so the three always add up to the cell count; the verification line says "itinerary-searched" (spec §3). Each line is a `progressbar` with value and maximum. **Spend** shows the run's calls, free calls and cost, the global month in pounds, and every `provider-month:<id>` call cap, which is the hard stop on the $40 plan where marginal cost is £0 (review po-003); a figure at or above 80% of its cap is marked "near cap". **The bar follows the newest parent run** (review po-009); an active one-cell child gets its own line, so a paused parent keeps its Resume. `paused_budget` shows when it resumes. **Run now** names its worst case from the stored estimate ("Run now (up to 154 calls, £0)"), is disabled while the estimate is above the confirmation, and appears only on Results and Definitions (`showRunNow`). **Cancel asks once more.** The status text sits in a polite live region. **ViewHeader** names runs by start time (UTC, labelled), never an id slice; ages may be `'unknown'` and say so; the not-completed banner follows the newest parent run; `variant="span"`, which WP10's cross-execution views use (decision 38), states that no single run status applies and shows no banner. Providers and Definitions show configuration, not a run, so they have no run header; the status bar names the run on those views.
+Decisions. **Progress is one line per stage × provider**, never summed across providers (review po-002), and "done" counts only outcomes a provider answered or failed on: priced, no fares, no cached data, error (decision 36). Skipped and not-searched cells are stated beside it; the verification line reads "itinerary-searched K of N selected" with N from the results response's coverage (spec §3, §11; review prov-r2-009). Each line is a `progressbar` with value and maximum. **Spend** shows the run's calls, free calls and cost, the global month in pounds, and every `provider-month:<id>` call cap, which is the hard stop on the $40 plan where marginal cost is £0 (review po-003); a figure at or above 80% of its cap is marked "near cap" (any use of a zero cap counts; a null cap reads "no cap" and is never near). **The bar follows the newest parent run** (review po-009); an active one-cell child gets its own line, so a paused parent keeps its Resume. `paused_budget` shows when it resumes. **Run now** names the stored estimate and the run's hard stop ("Run now (about 154 calls (hard stop 2000), £0)", decision 44), sends the stored `confirmCostPence` and `confirmCalls` (decision 43: a confirmation covers a run only with both), is disabled while the estimate is above the confirmation, and appears only on Results and Definitions (`showRunNow`). **Cancel asks once more.** The status text sits in a polite live region. **ViewHeader** names runs by start time (UTC, labelled), never an id slice; a run with no start says "not started yet" with no age (review prov-r2-011); ages may be `'unknown'` and say so; it reads only `HeaderRun`'s fields, so View D can build its row from the execution itself; the not-completed banner follows the newest parent run; `variant="span"`, which WP10's cross-execution views use (decision 38), states that no single run status applies and shows no banner. Providers and Definitions show configuration, not a run, so they have no run header; the status bar names the run on those views.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4543,9 +4963,17 @@ import { act, screen } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../src/api/queries.js';
-import { StatusBar } from '../../src/components/StatusBar.js';
+import { near, StatusBar } from '../../src/components/StatusBar.js';
 import { ViewHeader } from '../../src/components/ViewHeader.js';
-import { API, coverageResponse, definition, execution, resultsResponse, summary } from '../fixtures.js';
+import {
+  API,
+  coverageResponse,
+  definition,
+  execution,
+  resultsResponse,
+  summary,
+  usage,
+} from '../fixtures.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 
@@ -4563,11 +4991,12 @@ describe('status bar (spec §11)', () => {
     const lines = screen.getAllByRole('progressbar');
     expect(lines.map((l) => l.textContent)).toEqual([
       'discovery · Travelpayouts: searched 116 of 126 cells (6 error) · 0 skipped · 10 not searched',
-      'itinerary search · SearchApi: itinerary-searched 0 of 126 cells (0 error) · 116 skipped · 10 not searched',
+      'itinerary search · SearchApi: itinerary-searched 0 of 10 selected (0 error) · 116 skipped · 10 not searched',
     ]);
+    // why: the itinerary-search line counts against the selected cells (spec §3), from the results response.
     expect(lines.map((l) => [l.getAttribute('aria-valuenow'), l.getAttribute('aria-valuemax')])).toEqual([
       ['116', '126'],
-      ['0', '126'],
+      ['0', '10'],
     ]);
   });
 
@@ -4666,8 +5095,9 @@ describe('status bar (spec §11)', () => {
     );
     const { user } = renderWithProviders(bar({ confirmedCostPence: 0 }));
     expect(await screen.findByText('No run yet for this definition.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Run now (up to 154 calls, £0)' }));
-    await expect.poll(() => bodies).toEqual([{ confirmCostPence: 0 }]);
+    await user.click(screen.getByRole('button', { name: 'Run now (about 154 calls (hard stop 2000), £0)' }));
+    // why: decision 43: the stored confirmation covers a run only with both its pence and its calls.
+    await expect.poll(() => bodies).toEqual([{ confirmCostPence: 0, confirmCalls: 154 }]);
   });
 
   it('Run now is disabled while the estimate is above the confirmation, and absent where the view does not offer it', async () => {
@@ -4677,7 +5107,14 @@ describe('status bar (spec §11)', () => {
       ),
     );
     const { unmount } = renderWithProviders(
-      bar({ needsConfirmation: { estimateMicroGbp: 2_500_000, confirmedCostPence: 100 } }),
+      bar({
+        needsConfirmation: {
+          estimateMicroGbp: 2_500_000,
+          totalCalls: 300,
+          confirmedCostPence: 100,
+          confirmedCalls: 154,
+        },
+      }),
     );
     expect(await screen.findByRole('button', { name: /Run now/ })).toBeDisabled();
     expect(
@@ -4689,6 +5126,27 @@ describe('status bar (spec §11)', () => {
     renderWithProviders(bar({}, false));
     await screen.findByText('No run yet for this definition.');
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+  });
+
+  it.each<[number, number | null, boolean]>([
+    [79, 100, false],
+    [80, 100, true],
+    [1, 0, true],
+    [0, 0, false],
+    [5, null, false],
+  ])('near cap: %i used of %s is %s (review tsr2-013)', (used, cap, expected) => {
+    expect(near(used, cap)).toBe(expected);
+  });
+
+  it('a null cap reads "no cap" and is never marked near', async () => {
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(execution({ budget: [usage('execution-calls', 5, null)] })),
+      ),
+    );
+    renderWithProviders(bar());
+    const line = await screen.findByText('this run: 5 of no cap billed calls');
+    expect(line).not.toHaveTextContent('near cap');
   });
 
   it('follows the newest parent run; an active one-cell child is its own line (review po-009)', async () => {
@@ -4776,12 +5234,13 @@ describe('view header (spec §11)', () => {
       <ViewHeader
         title="Results"
         stale={false}
-        executions={[summary({ id: 'c1', isChild: true, status: 'running', startedAt: null }), summary()]}
+        executions={[summary({ id: 'c1', isChild: true, status: 'pending', startedAt: null }), summary()]}
       />,
     );
     expect(screen.queryByRole('status')).toBeNull();
+    // why: a run with no start has no age to give (review prov-r2-011).
     expect(
-      screen.getByText(/itinerary search for one cell, started not started \(running, 2h ago\)/),
+      screen.getByText(/itinerary search for one cell, not started yet \(pending\), run started/),
     ).toBeInTheDocument();
   });
 
@@ -4821,7 +5280,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
-import { formatInstantUtc, formatIsoDateShort, formatMicroGbp } from '../format.js';
+import { formatInstantUtc, formatIsoDate, formatMicroGbp } from '../format.js';
 import { parseBasis } from '../state/resultsState.js';
 import { useSearchParams } from '../state/urlState.js';
 
@@ -4833,19 +5292,29 @@ const NEAR_CAP = 0.8;
  * Spec §11 progress, one line per stage × provider (never summed across providers). "Done" counts
  * only outcomes a provider answered or failed on: priced, no fares, no cached data, error (decision 36);
  * skipped and not-searched cells are stated beside it, so the three always add up to the cell count.
+ * The itinerary-search line counts against the selected cells, "itinerary-searched K of N selected"
+ * (spec §3, §11), when the results response gives N.
  */
-function progressLines(e: ExecutionResponse) {
-  return e.progress.map((p) => ({
-    key: `${p.stage}-${p.providerId}`,
-    stage: COPY.stageName[p.stage],
-    provider: COPY.provider[p.providerId],
-    verb: COPY.progressVerb[p.stage],
-    done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
-    total: p.total,
-    error: p.buckets.error,
-    skipped: p.buckets.skipped,
-    notRun: p.buckets.not_run,
-  }));
+function progressLines(e: ExecutionResponse, selected: number | null) {
+  return e.progress.map((p) => {
+    const l = {
+      stage: COPY.stageName[p.stage],
+      provider: COPY.provider[p.providerId],
+      verb: COPY.progressVerb[p.stage],
+      done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
+      total: p.total,
+      error: p.buckets.error,
+      skipped: p.buckets.skipped,
+      notRun: p.buckets.not_run,
+    };
+    const bySelection = p.stage === 'verification' && selected !== null;
+    return {
+      ...l,
+      key: `${p.stage}-${p.providerId}`,
+      max: bySelection ? selected : p.total,
+      text: bySelection ? COPY.progressSelected({ ...l, selected }) : COPY.progress(l),
+    };
+  });
 }
 
 /** Usage rows carry WP8's scope label (`execution-calls`, `global-month`, `provider-month:searchapi`). */
@@ -4855,11 +5324,14 @@ function usageOf(e: ExecutionResponse, label: string): UsageRow | null {
 
 const capText = (cap: number | null, fmt: (n: number) => string): string =>
   cap === null ? COPY.noCap : fmt(cap);
-const near = (used: number, cap: number | null): boolean => cap !== null && cap > 0 && used >= cap * NEAR_CAP;
+/** At or above 80% of the cap; any use of a zero cap counts (it is already over); no cap is never near. */
+export const near = (used: number, cap: number | null): boolean =>
+  cap !== null && used > 0 && used >= cap * NEAR_CAP;
 
 function Spend({ text, used, cap }: { text: string; used: number; cap: number | null }) {
+  // why: data-cost marks a cost or cap figure, never a fare; the rendered sweep allows "£" only in a PriceCell or here.
   return (
-    <span>
+    <span data-cost="">
       {text}
       {near(used, cap) ? (
         <span className="ml-1 rounded bg-amber-200 px-1 font-medium">{COPY.nearCap}</span>
@@ -4951,16 +5423,16 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
         {child !== null ? <span>{COPY.childRun(COPY.statusName[child.status])}</span> : null}
       </span>
       {e !== undefined
-        ? progressLines(e).map((l) => (
+        ? progressLines(e, results.data?.coverage.selected ?? null).map((l) => (
             <span
               key={l.key}
               role="progressbar"
               aria-label={COPY.progressLabel(l.stage, l.provider)}
               aria-valuemin={0}
-              aria-valuemax={l.total}
+              aria-valuemax={l.max}
               aria-valuenow={l.done}
             >
-              {COPY.progress(l)}
+              {l.text}
             </span>
           ))
         : null}
@@ -4994,9 +5466,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
       ) : null}
       {e ? <ProviderMonths e={e} /> : null}
       {blockedSince !== null ? (
-        <span className="font-medium">
-          {COPY.scheduleBlocked(formatIsoDateShort(blockedSince.slice(0, 10)))}
-        </span>
+        <span className="font-medium">{COPY.scheduleBlocked(formatIsoDate(blockedSince.slice(0, 10)))}</span>
       ) : null}
       {e && (e.status === 'paused_budget' || e.status === 'paused_error') ? (
         <button
@@ -5041,15 +5511,24 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
         <>
           <button
             type="button"
+            data-cost=""
             className="min-h-11 rounded border border-slate-500 px-3 disabled:opacity-60"
             disabled={definition.needsConfirmation !== null}
             onClick={() =>
-              actions.start.mutate({ id: definition.id, confirmCostPence: definition.confirmedCostPence })
+              actions.start.mutate({
+                id: definition.id,
+                confirmCostPence: definition.confirmedCostPence,
+                confirmCalls: definition.confirmedCalls,
+              })
             }
           >
             {est === null
               ? COPY.runNowUnestimated
-              : COPY.runNow(est.totalCalls, formatMicroGbp(est.totalCostMicroGbp))}
+              : COPY.runNow(
+                  est.totalCalls,
+                  definition.budget.maxCalls,
+                  formatMicroGbp(est.totalCostMicroGbp),
+                )}
           </button>
           {definition.needsConfirmation !== null ? <span>{COPY.runNowBlocked}</span> : null}
         </>
@@ -5073,8 +5552,8 @@ import { formatInstantUtc } from '../format.js';
 
 export interface ViewHeaderProps {
   title: string;
-  /** ExecutionSummary rows, newest first (plan "API contract"); `ageHours` may be 'unknown'. */
-  executions: readonly ExecutionSummary[];
+  /** ExecutionSummary rows, newest first (plan "API contract"); `ageHours` may be 'unknown'. Only these fields are read. */
+  executions: readonly HeaderRun[];
   stale: boolean;
   /**
    * 'span': a cross-execution view (decision 38; WP10's Calendar, Duration and History): the runs are
@@ -5083,10 +5562,16 @@ export interface ViewHeaderProps {
   variant?: 'single' | 'span';
 }
 
-function itemText(e: ExecutionSummary): string {
-  const started = e.startedAt === null ? COPY.notStarted : formatInstantUtc(e.startedAt);
+/** The fields of an ExecutionSummary the header names. */
+export type HeaderRun = Pick<ExecutionSummary, 'id' | 'status' | 'isChild' | 'startedAt' | 'ageHours'>;
+
+/** A run with no start has no age to give: it says "not started yet" (review prov-r2-011). */
+function itemText(e: HeaderRun): string {
+  const status = COPY.statusName[e.status];
+  if (e.startedAt === null)
+    return e.isChild ? COPY.childExecutionNotStarted(status) : COPY.executionNotStarted(status);
   const make = e.isChild ? COPY.childExecutionItem : COPY.executionItem;
-  return make(started, COPY.statusName[e.status], COPY.agoOf(e.ageHours));
+  return make(formatInstantUtc(e.startedAt), status, COPY.agoOf(e.ageHours));
 }
 
 /**
@@ -5126,7 +5611,7 @@ export function ViewHeader({ title, executions, stale, variant = 'single' }: Vie
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/components/statusBar.test.tsx test/copy`
-Expected: PASS, 14 tests.
+Expected: PASS, 20 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -5144,14 +5629,14 @@ git add apps/web && git commit -m "wp09: status bar per stage and provider, prov
 - Consumes: `ResultRow` (with `layovers`, `seller`, `baggage`, `fareConditions`, `selfTransfer`, `otherOffers[].notSeenInLatest`), `Booking`, `Verdicts`, `apiContract.constraintNameSchema`, `validateVendorUrl`, `LINK_ALLOWLIST`, `effectiveAge`, `formatFetchedAgo`; `PriceCell`, `PriceBoundary` (Task 9.1); `useExecutionActions` (Task 9.3).
 - Produces: `ClassBadge({ cls })`, `VerdictList({ verdicts, unverified })`, `BookingAction({ booking, providerId })`, `SearchLink({ link, providerId })`, `safeVendorUrl(url, statedHost, providerId)`, `rowName(row)`, `ExpandedRow({ row, extras, verificationConfigured, definitionId })`.
 
-Decisions. **Verdicts** list every constraint in core's order with a distinct glyph, word and style; a constraint the row lists as `unverified` but whose verdict is missing is shown unverified, never dropped (review tsr-014). The visible "glyph label: word" text is the accessible text: no `aria-label` on list items or badges (review UI-9); the badge carries a spoken-only "verdict class:" prefix. **Links**: core's spec §5.2 validator with the provider's allowlist (`https:`, no userinfo, no port, length cap, allowlisted host), then the URL's host must equal the stated host the operator sees (review arch-009). **The search link shows core's label as the API sent it**, so "cabin not prefilled" reaches the operator (review arch-008); a prefilled Google Flights link for calendar rows is Phase 4 (decision 36). **One labelled region per row** with plain blocks and `h3` headings inside. **Other sellers** render through `PriceCell` with their own not-seen-in-latest note (review prov-008). **The 375px summary** repeats the moved columns, the adjusted price through `PriceCell` with the "incl. operator-entered onward cost" qualifier, so it carries "≈" and "stale" (review prov-009). **Per-cell verify** says it uses billed calls; its call cap is not in the contract (§13).
+Decisions. **Verdicts** list every constraint in core's order with a distinct glyph, word and style; a constraint the row lists as `unverified` but whose verdict is missing is shown unverified, never dropped (review tsr-014); `priceConfirmed` shows its label alone, "? price not confirmed by the final step", never "…: unverified" (decision 44). The visible "glyph label: word" text is the accessible text: no `aria-label` on list items or badges (review UI-9); the badge carries a spoken-only "verdict class:" prefix. **Links**: core's spec §5.2 validator with the provider's allowlist (`https:`, no userinfo, no port, length cap, allowlisted host), then the URL's host must equal the stated host the operator sees (review arch-009). **The search link shows core's label as the API sent it**, so "cabin not prefilled" reaches the operator (review arch-008); a prefilled Google Flights link for calendar rows is Phase 4 (decision 36). **One labelled region per row** with plain blocks and `h3` headings inside. **Other sellers** render through `PriceCell` with their own not-seen-in-latest note (review prov-008) and the unconfirmed-price badge when the final step did not confirm their price; `priceConfirmed` is kept out of their "unverified: …" list, which would repeat it as a double negative (decision 44). **The 375px summary** repeats the moved columns, the adjusted price through `PriceCell` with the "incl. operator-entered onward cost" qualifier, so it carries "≈" and "stale" (review prov-009). **Per-cell verify** says it uses billed calls; its call cap and headroom (decision 42's cell-detail `verify`) are WP10's side panel.
 
 - [ ] **Step 1: Write the failing test**
 
 `test/views/results/expanded.test.tsx`:
 
 ```tsx
-import { CONSTRAINT_LABELS, searchLinkFor } from '@gmt/core';
+import { CONSTRAINT_LABELS, effectiveAge, formatAgo, formatFetchedAgo, searchLinkFor } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
@@ -5159,7 +5644,7 @@ import { BookingAction, SearchLink, safeVendorUrl } from '../../../src/component
 import { ExpandedRow } from '../../../src/views/Results/ExpandedRow.js';
 import { API, calendarRow, failedRow, fxConverted, provSearch, verifiedRow } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
-import { renderWithProviders } from '../../render.js';
+import { NOW, renderWithProviders } from '../../render.js';
 
 const render = (
   row: Parameters<typeof ExpandedRow>[0]['row'],
@@ -5175,6 +5660,7 @@ const render = (
     />,
   );
 const L = CONSTRAINT_LABELS;
+const provenanceOf = () => verifiedRow().provenance;
 
 describe('verdicts: distinct text for pass / fail / unverified (spec §9 item 6)', () => {
   it('each verdict has its own glyph and word, in core constraint order, and its own style', () => {
@@ -5187,6 +5673,21 @@ describe('verdicts: distinct text for pass / fail / unverified (spec §9 item 6)
     ]);
     expect(items.map((i) => i.getAttribute('aria-label'))).toEqual([null, null, null]);
     expect(new Set(items.map((i) => i.className)).size).toBe(3);
+  });
+
+  it('an unconfirmed price reads as its label alone, never "…: unverified" (decision 44)', () => {
+    render(
+      verifiedRow({
+        verdictClass: 'partially-verified',
+        verdicts: { cabin: 'pass', priceConfirmed: 'unverified' },
+        unverified: ['priceConfirmed'],
+      }),
+    );
+    const items = within(screen.getByRole('list', { name: 'Constraint verdicts' })).getAllByRole('listitem');
+    expect(items.map((i) => i.textContent)).toEqual([
+      `✓ ${L.cabin}: pass`,
+      '? price not confirmed by the final step',
+    ]);
   });
 
   it('a constraint listed as unverified but missing from verdicts is shown unverified, never dropped (review tsr-014)', () => {
@@ -5349,7 +5850,7 @@ describe('itinerary detail (spec §11 expanded row)', () => {
             stale: false,
             ageHours: 'unknown',
             verdictClass: 'partially-verified',
-            unverified: ['checkedBagRequired'],
+            unverified: ['checkedBagRequired', 'priceConfirmed'],
             notSeenInLatest: { ageHours: 72 },
           },
         ],
@@ -5360,7 +5861,12 @@ describe('itinerary detail (spec §11 expanded row)', () => {
     expect(within(others).getByText('Google Flights via SearchApi')).toBeInTheDocument();
     expect(within(others).getByTestId('class-badge')).toHaveTextContent('partially verified');
     expect(within(others).getByText(`unverified: ${L.checkedBagRequired}`)).toBeInTheDocument();
-    expect(within(others).getByText('not seen in latest search (3d ago)')).toBeInTheDocument();
+    expect(within(others).getByText(`not seen in latest search (${formatAgo(72)})`)).toBeInTheDocument();
+    expect(formatAgo(72)).toBe('3d ago');
+    // why: an other seller whose price the final step did not confirm says so beside its price (decision 44).
+    expect(
+      within(within(others).getByTestId('price-cell')).getByText('price not confirmed by the final step'),
+    ).toBeInTheDocument();
   });
 
   it('at 375px the summary repeats the moved columns, the adjusted price through PriceCell with "≈" and "stale" (review prov-009)', () => {
@@ -5377,7 +5883,7 @@ describe('itinerary detail (spec §11 expanded row)', () => {
     expect(adjusted).toHaveTextContent('≈');
     expect(adjusted).toHaveTextContent('£450');
     expect(adjusted).toHaveTextContent('stale');
-    expect(screen.getByText('fetched 5h ago')).toBeInTheDocument();
+    expect(screen.getByText(formatFetchedAgo(effectiveAge(provenanceOf(), NOW)))).toBeInTheDocument();
   });
 });
 
@@ -5471,7 +5977,8 @@ const STYLE: Record<Verdict, string> = {
 /**
  * Every verdict with a distinct glyph and word (spec §9 item 6), in core's constraint order. A
  * constraint the row lists as unverified but whose verdict is absent is shown as unverified, never
- * dropped, so a missing verdict can never read as satisfied (review tsr-014).
+ * dropped, so a missing verdict can never read as satisfied (review tsr-014). `priceConfirmed` shows its
+ * label alone ("price not confirmed by the final step"), never "…: unverified".
  */
 export function VerdictList({
   verdicts,
@@ -5492,7 +5999,10 @@ export function VerdictList({
       {entries.map(([name, v]) => (
         <li key={name} data-verdict={v} className={STYLE[v]}>
           <span aria-hidden="true">{COPY.verdictGlyph[v]}</span>{' '}
-          {COPY.verdictLine(COPY.constraint[name], COPY.verdictWord[v])}
+          {/* why: this label already says the price was not confirmed; ": unverified" after it would be a double negative (decision 44). */}
+          {name === 'priceConfirmed'
+            ? COPY.constraint[name]
+            : COPY.verdictLine(COPY.constraint[name], COPY.verdictWord[v])}
         </li>
       ))}
     </ul>
@@ -5584,10 +6094,10 @@ import type { ResultRow } from '../../api/types.js';
 import { BookingAction, SearchLink } from '../../components/BookingAction.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
+import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
 import { VerdictList } from '../../components/VerdictList.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDateShort, formatLocalDateTime, formatMinutes } from '../../format.js';
+import { formatIsoDate, formatLocalDateTime, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
 
 type Segment = NonNullable<ResultRow['outbound']>[number];
@@ -5616,8 +6126,8 @@ function Segments({ segments }: { segments: readonly Segment[] | null }) {
 export function rowName(row: ResultRow): string {
   return COPY.rowName(
     row.cell.destination,
-    formatIsoDateShort(row.cell.departureDate),
-    formatIsoDateShort(row.cell.returnDate),
+    formatIsoDate(row.cell.departureDate),
+    formatIsoDate(row.cell.returnDate),
   );
 }
 
@@ -5667,6 +6177,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
                       calendar={row.basis === 'calendar'}
                       stale={row.stale}
                       truncated={row.truncated}
+                      unconfirmed={priceUnconfirmed(row)}
                       qualifier={COPY.adjustedQualifier}
                     />
                   </PriceBoundary>
@@ -5744,11 +6255,20 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
                     calendar={false}
                     stale={o.stale}
                     notSeenInLatestHours={o.notSeenInLatest?.ageHours ?? null}
+                    unconfirmed={priceUnconfirmed(o)}
                   />
                 </PriceBoundary>
                 <ClassBadge cls={o.verdictClass} />
-                {o.unverified.length > 0 ? (
-                  <span>{COPY.unverifiedList(o.unverified.map((n) => COPY.constraint[n]).join(', '))}</span>
+                {/* why: priceConfirmed is the badge on the price; listing it as "unverified: price not confirmed…" would be a double negative. */}
+                {o.unverified.some((n) => n !== 'priceConfirmed') ? (
+                  <span>
+                    {COPY.unverifiedList(
+                      o.unverified
+                        .filter((n) => n !== 'priceConfirmed')
+                        .map((n) => COPY.constraint[n])
+                        .join(', '),
+                    )}
+                  </span>
                 ) : null}
                 <BookingAction booking={o.booking} providerId={o.provenance.providerId} />
               </li>
@@ -5779,7 +6299,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results/expanded.test.tsx test/copy`
-Expected: PASS, 16 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -5794,10 +6314,10 @@ git add apps/web && git commit -m "wp09: expanded row with verdicts, validated b
 - Test: `test/views/results/table.test.tsx`
 
 **Interfaces:**
-- Consumes: `sortRows`, `filterRows` (with `departure`), `bandCheapest`, `resultRowKey`, `SortKey`, `effectiveAge`, `formatFetchedAgo`, `apiContract.constraintNameSchema`, `cellKeySchema`; TanStack Table v9 (Library notes); `ExpandedRow`, `rowName` (Task 9.7); `ViewHeader` (Task 9.6); `SyntheticBanner`, `Loading`, `LoadError` (Task 9.5); `useProviders`, `useResults` (Task 9.3); URL state (Task 9.4).
-- Produces: `ResultsTable`, `WIDE_COLUMNS`, `NARROW_COLUMNS`, `SORT_LABEL`, `rowId`, `ResultsHeader({ data, definition, filteredFirst })`, `Filters({ state, rows, calendarBasis, narrow })`, `parseCarriers`, `ResultsView({ definition })` (Task 9.9 gives its final form).
+- Consumes: `sortRows`, `filterRows` (with `departure`), `bandCheapest`, `resultRowKey`, `SortKey`, `effectiveAge`, `formatFetchedAgo`, `apiContract.constraintNameSchema`, `cellKeySchema`, `ExecutionSummary.expandTop` (Task 9.0); `parseCarriers`, `carriersText`, `useSynced` (Task 9.4); `priceUnconfirmed` (Task 9.1); `useCalendarGap` (Task 9.3); TanStack Table v9 (Library notes); `ExpandedRow`, `rowName` (Task 9.7); `ViewHeader` (Task 9.6); `SyntheticBanner`, `Loading`, `LoadError` (Task 9.5); `useProviders`, `useResults` (Task 9.3); URL state (Task 9.4).
+- Produces: `ResultsTable`, `WIDE_COLUMNS`, `NARROW_COLUMNS`, `SORT_LABEL`, `rowId`, `ResultsHeader({ data, filteredFirst })`, `Filters({ state, rows, calendarBasis, narrow })`, `ResultsView({ definition })` (Task 9.9 gives its final form).
 
-Decisions. **Columns stay as the spec mandates** (ruling on UI-14); in the wide table the price line shows source and age only, since Provider and Destination are columns beside it. **The headline is a `PriceCell`** with the provider badge, source, the full age visible (spec §3 "full form … in headers"), "≈", "stale", "cheapest of the rows read" and the not-seen note (the Critical, reviews arch-001, prov-003, po-004, UI-2, PFT-01). **It follows the filters**: it is the first row of the filtered set in server order, and when the filters leave nothing the API's overall cheapest is shown labelled "overall, filters not applied" (decision 36). **Line 2** shows "(E outbounds each)" only when the definition has not changed since the shown run started, since the run's snapshot is not in the contract (review prov-018, §13). **`failed` is hidden by default** (core's default, spec §6.9): the class boxes show the default ticked, the count of hidden failed rows is stated, and one click shows them (reviews tsr-001, po-008, prov-014). **When filters are active** the page says "showing X of Y rows (filters active)", and how many stale rows `hideStale` hid (review prov-013). **Empty states** differ: no rows from the run points to Coverage; rows filtered to nothing say so and offer Clear (review UI-5). **The order is always stated**: "server ranking (class, then price)" or the chosen column, and a non-price sort over a truncated page says it sorts within the cheapest rows (review PFT-04). **At 375px** the sort is a select and the filters fold into a closed `<details>` with an active count (review UI-7). **Filters**: checkboxes, selects and dates apply on change; typed boxes apply on Enter, on Apply and on leaving the box; a blank nights end takes the data's own range, not an invented 90 (review UI-8); carrier entries that are not codes are shown as ignored (review PFT-12); a departure-date range (decision 36). **Keyboard**: sort state and band marks reach the cells through context, so a header keeps focus after Enter. **A synthetic row** raises the red banner whatever `/providers` said (review prov-005). Every "£" on the page sits inside a `PriceCell` (review tsr-003).
+Decisions. **Columns stay as the spec mandates** (ruling on UI-14); in the wide table the price line shows source and age only, since Provider and Destination are columns beside it. **The headline is a `PriceCell`** with the provider badge, source, the full age visible (spec §3 "full form … in headers"), "≈", "stale", "cheapest of the rows read" and the not-seen note (the Critical, reviews arch-001, prov-003, po-004, UI-2, PFT-01). **It follows the filters**: it is the first row of the filtered set in server order, and when the filters leave nothing the API's overall cheapest is shown labelled "overall, filters not applied" (decision 36). **Line 2** shows "(E outbounds each)" from the shown run's own execution summary (decision 42), so an edited definition never misdescribes a past run (reviews prov-018, prov-r2-010). **`failed` is hidden by default** (core's default, spec §6.9): the class boxes show the default ticked, the count of hidden failed rows is stated, and one click shows them (reviews tsr-001, po-008, prov-014). **When filters are active** the page says "showing X of Y rows (filters active)", and how many stale rows `hideStale` hid (review prov-013). **Empty states** differ: no rows from the run points to Coverage; rows filtered to nothing say so and offer Clear (review UI-5). **The order is always stated**: "server ranking (class, then price)" or the chosen column, and a non-price sort over a truncated page says it sorts within the cheapest rows (review PFT-04). **At 375px** the sort is a select and the filters fold into a closed `<details>` with an active count (review UI-7). **Filters**: checkboxes, selects and dates apply on change; typed boxes apply on Enter, on Apply and on leaving the box; a blank nights end takes the data's own range, not an invented 90 (review UI-8); carrier entries that are not codes are shown as ignored (review PFT-12); a departure-date range (decision 36). **Keyboard**: sort state and band marks reach the cells through context, so a header keeps focus after Enter. **An unconfirmed price** carries "price not confirmed by the final step" as its first badge in the table row, the adjusted column and the headline (decision 44). **A page of itinerary rows of unknown vendor age** is labelled per price and never called stale (decision 44). **Any synthetic provenance** the page received (rows, other sellers, the overall cheapest, the calendar-gap prices) raises the red banner whatever `/providers` said (reviews prov-005, prov-r2-008); real rows raise none. **A schema-valid row whose provenance pairs `fixture` with a non-synthetic source** withholds only its own price (review tsr2-003). Negative request counts are read after `settled(client)` (review tsr2-002).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5811,6 +6331,7 @@ import {
   effectiveAge,
   filterRows,
   formatAgeFull,
+  formatFetchedAgo,
   type ResultFilters,
   resultRowKey,
   type SortKey,
@@ -5820,7 +6341,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import type { ResultRow } from '../../../src/api/types.js';
-import { formatIsoDateShort } from '../../../src/format.js';
+import { formatIsoDate } from '../../../src/format.js';
 import { parseResultsState, SORT_KEYS } from '../../../src/state/resultsState.js';
 import { ResultsView } from '../../../src/views/Results/ResultsView.js';
 import {
@@ -5832,12 +6353,15 @@ import {
   fxConverted,
   partialRow,
   provCalendar,
+  provSearch,
   provSynthetic,
   resultsResponse,
+  summary,
   verifiedRow,
 } from '../../fixtures.js';
+import { expectConsoleErrors } from '../../guards.js';
 import { server } from '../../msw/server.js';
-import { NOW, renderWithProviders } from '../../render.js';
+import { NOW, renderWithProviders, settled } from '../../render.js';
 import { setViewportWidth } from '../../viewport.js';
 
 /** Counts GET /results so tests can prove sorting and filtering never refetch (spec §6.5). */
@@ -5869,7 +6393,7 @@ const rowNames = () =>
       ?.replace(/^(Show|Hide) details for /, ''),
   );
 const nameOf = (r: ResultRow) =>
-  `${r.cell.destination} ${formatIsoDateShort(r.cell.departureDate)} to ${formatIsoDateShort(r.cell.returnDate)}`;
+  `${r.cell.destination} ${formatIsoDate(r.cell.departureDate)} to ${formatIsoDate(r.cell.returnDate)}`;
 const url = () => new URLSearchParams(window.location.search);
 
 /** Five rows with distinct keys for every sort column. */
@@ -6012,12 +6536,14 @@ describe('View A header (spec §11 two lines)', () => {
     expect(screen.getByText('overall, filters not applied')).toBeInTheDocument();
   });
 
-  it('"(E outbounds each)" only when the definition has not changed since the run started (review prov-018)', async () => {
-    countResults();
+  it('"(E outbounds each)" is the shown run own policy, even after the definition changed (decision 42)', async () => {
+    countResults(resultsResponse({ executions: [summary({ expandTop: 3 })] }));
     view('?view=results', definition({ updatedAt: '2026-10-14T12:30:00.000Z' }));
     await table();
     expect(
-      screen.getByRole('link', { name: /itinerary-searched 8 of 10 selected \+1 on demand$/ }),
+      screen.getByRole('link', {
+        name: /itinerary-searched 8 of 10 selected \(3 outbounds each\) \+1 on demand$/,
+      }),
     ).toBeInTheDocument();
   });
 
@@ -6047,9 +6573,10 @@ describe('client-side sort and filter (spec §6.5)', () => {
     ),
   )('sort=%s.%s matches core sortRows over filterRows, without a refetch', async (key, dir) => {
     const hits = countResults(resultsResponse({ rows: five }));
-    view(`?view=results&sort=${key}.${dir}`);
+    const { client } = view(`?view=results&sort=${key}.${dir}`);
     await table();
     expect(rowNames()).toEqual(sortRows(filterRows(five, {}), key, dir).map(nameOf));
+    await settled(client);
     expect(hits.n).toBe(1);
   });
 
@@ -6081,7 +6608,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
 
   it('sorting and filtering compose without refetching, and live in the URL', async () => {
     const hits = countResults();
-    const { user } = view();
+    const { user, client } = view();
     await table();
     await user.click(screen.getByRole('button', { name: 'Sort by Price, ascending' }));
     expect(rowNames()[0]).toBe(nameOf(partialRow()));
@@ -6090,6 +6617,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
     expect(dataRows()).toHaveLength(1);
     expect(url().get('f.class')).toBe('verified,unchecked');
     expect(screen.getByText('showing 1 of 2 rows (filters active)')).toBeInTheDocument();
+    await settled(client);
     expect(hits.n).toBe(1);
   });
 
@@ -6153,12 +6681,13 @@ describe('client-side sort and filter (spec §6.5)', () => {
     'the %s filter applies through the URL, as core filterRows would',
     async (_label, param, act, filters) => {
       const hits = countResults(resultsResponse({ rows: five }));
-      const { user } = view();
+      const { user, client } = view();
       await table();
       await act(user);
       expect(url().get(param)).not.toBeNull();
       expect(parseResultsState(url()).filters).toEqual(filters);
       expect(rowNames()).toEqual(filterRows(five, filters).map(nameOf));
+      await settled(client);
       expect(hits.n).toBe(1);
     },
   );
@@ -6264,41 +6793,86 @@ describe('empty, loading and error states (reviews UI-5, tsr-011, tsr-002)', () 
     expect(await table()).toBeInTheDocument();
   });
 
-  it('a row without provenance fails the whole response, in production too: an alert and no price (spec §9 item 6)', async () => {
+  it('a row without provenance fails the whole response (parsed in every mode): an alert and no price (spec §9 item 6)', async () => {
     const { provenance: _drop, ...bare } = calendarRow();
     server.use(
       http.get(`${API}/definitions/:id/results`, () =>
         HttpResponse.json({ ...resultsResponse(), rows: [verifiedRow(), bare] }),
       ),
     );
-    vi.stubEnv('DEV', false);
     view();
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /does not match core\/api-contract: rows\.1\.provenance/,
     );
-    vi.unstubAllEnvs();
     expect(screen.queryByText(/£/)).toBeNull();
   });
 
-  it('every "£" on the page sits inside a PriceCell (review tsr-003)', async () => {
-    countResults(
-      resultsResponse({ rows: [...five, verifiedRow({ itineraryHash: 'adj', adjustedPence: 47000 })] }),
-    );
-    const { user } = view();
+  it('a schema-valid row whose provenance pairs the fixture provider with a non-synthetic source withholds only its own price', async () => {
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
+    const odd = verifiedRow({
+      itineraryHash: 'odd',
+      pricePence: 45600,
+      provenance: { ...provSearch, providerId: 'fixture' },
+    });
+    countResults(resultsResponse({ rows: [verifiedRow(), odd] }));
+    view();
     await table();
-    for (const b of screen.getAllByRole('button', { name: /Show details/ })) await user.click(b);
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const outside: string[] = [];
-    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
-      if (
-        n.textContent?.includes('£') &&
-        n.parentElement?.closest('[data-testid="price-cell"]') === null &&
-        n.parentElement?.closest('label') === null
-      ) {
-        outside.push(n.textContent);
-      }
-    }
-    expect(outside).toEqual([]);
+    const withheld = dataRows()[1];
+    if (withheld === undefined) throw new Error('no second row');
+    expect(within(withheld).getByRole('alert')).toHaveTextContent('price withheld: provenance missing');
+    expect(within(withheld).queryByText(/£/)).toBeNull();
+    expect(within(dataRows()[0] ?? document.body).getByText('£412')).toBeInTheDocument();
+  });
+
+  it('every Fetched cell is core formatFetchedAgo of its row (review tsr2-007)', async () => {
+    countResults(resultsResponse({ rows: five }));
+    view();
+    await table();
+    const fetchedColumn = headers().indexOf('Fetched');
+    const cells = dataRows().map((r) => r.querySelectorAll('td')[fetchedColumn]?.textContent);
+    expect(cells).toEqual(filterRows(five, {}).map((r) => formatFetchedAgo(effectiveAge(r.provenance, NOW))));
+    expect(cells[0]).toBe('fetched 5h ago');
+  });
+
+  it('a page of itinerary rows of unknown vendor age is labelled, not called stale (decision 44)', async () => {
+    countResults(resultsResponse({ rows: [verifiedRow(), partialRow()] }));
+    view();
+    await table();
+    expect(screen.getAllByText("vendor's cache age unknown")).toHaveLength(3);
+    expect(screen.queryByText('Every row here is older than one refresh cycle.')).toBeNull();
+  });
+
+  it('an unconfirmed price says so in the table row and the headline, as the first mark (decision 44)', async () => {
+    const unconfirmed = partialRow({
+      verdicts: { cabin: 'pass', priceConfirmed: 'unverified' },
+      unverified: ['priceConfirmed'],
+    });
+    countResults(resultsResponse({ rows: [unconfirmed], cheapest: unconfirmed }));
+    view();
+    await table();
+    const headline = screen.getByText('cheapest found').parentElement;
+    expect(
+      within(headline ?? document.body).getByText('price not confirmed by the final step'),
+    ).toBeInTheDocument();
+    expect(
+      within(dataRows()[0] ?? document.body).getByText('price not confirmed by the final step'),
+    ).toBeInTheDocument();
+  });
+
+  it('negative: real rows raise no synthetic banner and say no "synthetic fixture data" (spec §5.5)', async () => {
+    countResults(resultsResponse({ rows: [verifiedRow(), calendarRow()] }));
+    view();
+    await table();
+    expect(screen.queryByText(/Synthetic data/)).toBeNull();
+    expect(screen.queryByText('synthetic fixture data')).toBeNull();
+  });
+
+  it('a synthetic price only in the overall cheapest still raises the banner (review prov-r2-008)', async () => {
+    const synthetic = calendarRow({ provenance: provSynthetic, searchLink: null });
+    countResults(resultsResponse({ rows: [verifiedRow()], cheapest: synthetic }));
+    view();
+    await table();
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
   it('a synthetic row raises the red banner whatever /providers says, and says "synthetic fixture data" (review prov-005)', async () => {
@@ -6369,7 +6943,7 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Results/Result
 
 - [ ] **Step 2b: Prove sorting never refetches**
 
-After Step 3, temporarily make `onSort` in `ResultsView` call `void results.refetch()` after it updates the URL (a "fresh data on every sort" regression). Run the table test: "sorting and filtering compose without refetching, and live in the URL" fails with `expected 2 to be 1` at `hits.n`. Remove the call.
+After Step 3, temporarily make `onSort` in `ResultsView` call `void results.refetch()` after it updates the URL (a "fresh data on every sort" regression). Run the table test: "sorting and filtering compose without refetching, and live in the URL" fails with `expected 2 to be 1` at `hits.n` (read after `settled`, so the late request is counted). Remove the call.
 
 - [ ] **Step 3: Implement**
 
@@ -6388,9 +6962,9 @@ import { createContext, Fragment, useContext, useEffect, useMemo, useState } fro
 import type { ResultRow } from '../../api/types.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
+import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDateShort, formatMinutes } from '../../format.js';
+import { formatIsoDate, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
 import { SORT_KEYS, type SortDir } from '../../state/resultsState.js';
 import { ExpandedRow, rowName } from './ExpandedRow.js';
@@ -6516,7 +7090,8 @@ function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
           destination={row.cell.destination}
           destinationNote={row.destinationNote}
           notSeenInLatestHours={row.notSeenInLatest?.ageHours ?? null}
-          compact={!narrow}
+          besideColumns={!narrow}
+          unconfirmed={priceUnconfirmed(row)}
         />
       </PriceBoundary>
       {row.basis === 'calendar' && row.notApplied.length > 0 ? (
@@ -6541,7 +7116,8 @@ function AdjustedColumn({ row }: { row: ResultRow }) {
         stale={row.stale}
         truncated={row.truncated}
         qualifier={COPY.adjustedQualifier}
-        compact
+        besideColumns
+        unconfirmed={priceUnconfirmed(row)}
       />
     </PriceBoundary>
   );
@@ -6555,9 +7131,9 @@ function cellFor(id: ColumnId, r: ResultRow, narrow: boolean) {
     case 'totalTime':
       return <span>{r.totalMinutes === null ? COPY.notChecked : formatMinutes(r.totalMinutes)}</span>;
     case 'departure':
-      return <span>{formatIsoDateShort(r.cell.departureDate)}</span>;
+      return <span>{formatIsoDate(r.cell.departureDate)}</span>;
     case 'return':
-      return <span>{formatIsoDateShort(r.cell.returnDate)}</span>;
+      return <span>{formatIsoDate(r.cell.returnDate)}</span>;
     case 'nights':
       return <span>{COPY.nightsValue(r.cell.nights)}</span>;
     case 'destination':
@@ -6730,11 +7306,11 @@ export function ResultsTable({
 `src/views/Results/ResultsHeader.tsx` (new file):
 
 ```tsx
-import type { DefinitionResponse, ResultRow, ResultsResponse } from '../../api/types.js';
+import type { ResultRow, ResultsResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
+import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDateShort } from '../../format.js';
+import { formatIsoDate } from '../../format.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 
 /**
@@ -6755,6 +7331,7 @@ function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
           calendar={row.basis === 'calendar'}
           stale={row.stale}
           truncated={row.truncated}
+          unconfirmed={priceUnconfirmed(row)}
           destinationNote={row.destinationNote}
           notSeenInLatestHours={row.notSeenInLatest?.ageHours ?? null}
           fullAge
@@ -6764,8 +7341,8 @@ function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
         {COPY.headlineRest({
           destination: row.cell.destination,
           dates: COPY.dateRange(
-            formatIsoDateShort(row.cell.departureDate),
-            formatIsoDateShort(row.cell.returnDate),
+            formatIsoDate(row.cell.departureDate),
+            formatIsoDate(row.cell.returnDate),
             row.cell.nights,
           ),
           basis: COPY.basisName[row.basis],
@@ -6779,13 +7356,12 @@ function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
 
 export interface ResultsHeaderProps {
   data: ResultsResponse;
-  definition: DefinitionResponse;
   /** The first row of the filtered set in server order (decision 36); null when the filters leave none. */
   filteredFirst: ResultRow | null;
 }
 
 /** Spec §11: the two-line Results header, plus the truncation and current-space notes. */
-export function ResultsHeader({ data, definition, filteredFirst }: ResultsHeaderProps) {
+export function ResultsHeader({ data, filteredFirst }: ResultsHeaderProps) {
   // why: the headline follows what the operator is looking at; when the filters leave nothing, the API's
   // overall cheapest is shown and labelled as such, never passed off as matching the filters.
   const headline = filteredFirst ?? data.cheapest;
@@ -6793,9 +7369,8 @@ export function ResultsHeader({ data, definition, filteredFirst }: ResultsHeader
   const c = data.coverage;
   const b = c.buckets;
   const latestParent = data.executions.find((e) => !e.isChild);
-  // why: expandTop is the current definition's; it describes the shown run only if the definition has not
-  // changed since that run started (the run's snapshot is not in the contract; §13 records the gap).
-  const expandKnown = latestParent?.startedAt != null && definition.updatedAt <= latestParent.startedAt;
+  // why: "(E outbounds each)" is the shown run's own policy from its summary (decision 42), never the
+  // current definition's, which the operator may have edited since.
   const itinerary = { searched: c.itinerarySearched, selected: c.selected, onDemand: c.onDemand };
   const line2 =
     COPY.coverageLine({
@@ -6810,8 +7385,8 @@ export function ResultsHeader({ data, definition, filteredFirst }: ResultsHeader
     }) +
     (!data.verificationProviderConfigured
       ? COPY.noItinerarySearch
-      : expandKnown
-        ? COPY.itineraryLineExpand({ ...itinerary, expandTop: definition.verification.expandTop })
+      : latestParent !== undefined
+        ? COPY.itineraryLineExpand({ ...itinerary, expandTop: latestParent.expandTop })
         : COPY.itineraryLine(itinerary));
   return (
     <div className="space-y-1">
@@ -6842,10 +7417,12 @@ export function ResultsHeader({ data, definition, filteredFirst }: ResultsHeader
 
 ```tsx
 import { apiContract, type ResultFilters } from '@gmt/core';
-import { type FormEvent, useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import type { ResultRow } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { parsePoundsToPence, penceToPoundsInput } from '../../format.js';
+import { parsePoundsToPence, penceToPoundsInput, poundsText } from '../../format.js';
+import { useSynced } from '../../hooks/useSynced.js';
+import { carriersText, parseCarriers } from '../../state/carriers.js';
 import {
   activeFilterCount,
   CLASSES,
@@ -6865,30 +7442,6 @@ const unique = <T,>(xs: readonly T[]): T[] => [...new Set(xs)];
 const intOrUndefined = (s: string): number | undefined =>
   /^\d+$/.test(s.trim()) ? Number(s.trim()) : undefined;
 
-/** Splits the carriers box into codes it can filter by and entries it ignores (shown, never silently dropped). */
-export function parseCarriers(s: string): { codes: string[]; ignored: string[] } {
-  const entries = s
-    .split(',')
-    .map((c) => c.trim().toUpperCase())
-    .filter((c) => c.length > 0);
-  return {
-    codes: entries.filter((c) => /^[A-Z0-9]{2}$/.test(c)),
-    ignored: entries.filter((c) => !/^[A-Z0-9]{2}$/.test(c)),
-  };
-}
-
-/**
- * A text box that follows the URL when it changes elsewhere (Clear filters, back button) but keeps
- * what the operator typed while that text already means the URL's value ("zz, British" for carriers ZZ).
- */
-function useSynced(urlValue: string, means: (text: string) => string): [string, (v: string) => void] {
-  const [text, setText] = useState(urlValue);
-  useEffect(() => setText((t) => (means(t) === urlValue ? t : urlValue)), [urlValue, means]);
-  return [text, setText];
-}
-
-const carriersMeaning = (t: string) => parseCarriers(t).codes.join(',');
-const poundsMeaning = (t: string) => penceToPoundsInput(parsePoundsToPence(t));
 const intMeaning = (t: string) => {
   const n = intOrUndefined(t);
   return n === undefined ? '' : String(n);
@@ -6911,8 +7464,8 @@ export interface FiltersProps {
 export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
   const f = state.filters;
   const apply = (next: ResultFilters) => updateSearchParams(resultsStatePatch({ ...state, filters: next }));
-  const [carriers, setCarriers] = useSynced((f.carriers ?? []).join(','), carriersMeaning);
-  const [maxPrice, setMaxPrice] = useSynced(penceToPoundsInput(f.maxPricePence), poundsMeaning);
+  const [carriers, setCarriers] = useSynced((f.carriers ?? []).join(','), carriersText);
+  const [maxPrice, setMaxPrice] = useSynced(penceToPoundsInput(f.maxPricePence), poundsText);
   const [nightsMin, setNightsMin] = useSynced(f.nights === undefined ? '' : String(f.nights.min), intMeaning);
   const [nightsMax, setNightsMax] = useSynced(f.nights === undefined ? '' : String(f.nights.max), intMeaning);
   const providers = unique(rows.map((r) => r.provenance.providerId));
@@ -7148,8 +7701,8 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
 ```tsx
 import { bandCheapest, filterRows, type SortKey, sortRows } from '@gmt/core';
 import { useCallback, useMemo } from 'react';
-import { useProviders, useResults } from '../../api/queries.js';
-import type { DefinitionResponse } from '../../api/types.js';
+import { useCalendarGap, useProviders, useResults } from '../../api/queries.js';
+import type { CalendarGapResponse, DefinitionResponse, ResultsResponse } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
@@ -7200,6 +7753,24 @@ function SortSelect({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
+/**
+ * Every provenance a Results page received: rows, their other sellers, the overall cheapest and the
+ * calendar-gap prices. Any synthetic one raises the red banner, whatever /providers said (spec §5.5).
+ */
+function anySynthetic(data: ResultsResponse, gap: CalendarGapResponse | undefined): boolean {
+  const rows = data.cheapest === null ? data.rows : [...data.rows, data.cheapest];
+  const kinds = [
+    ...rows.flatMap((r) => [r.provenance, ...r.otherOffers.map((o) => o.provenance)]),
+    ...(gap === undefined
+      ? []
+      : [
+          ...gap.cells.map((c) => c.calendar.provenance),
+          ...(gap.cheapestVerified === null ? [] : [gap.cheapestVerified.provenance]),
+        ]),
+  ].map((p) => p.sourceKind);
+  return kinds.includes('synthetic');
+}
+
 /** View A (spec §11): one fetch per basis; every sort and filter is core's pure function over that page. */
 export function ResultsView({ definition }: { definition: DefinitionResponse }) {
   const params = useSearchParams();
@@ -7207,6 +7778,8 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const ui = useMemo(() => parseResultsState(params), [params]);
   const results = useResults(definition.id, basis);
   const providers = useProviders();
+  // why: the same cached query the calendar-gap banner reads; it only runs when a verification provider is configured.
+  const gap = useCalendarGap(definition.id, results.data?.verificationProviderConfigured === true);
   const narrow = useMediaQuery(NARROW_QUERY);
   const { filtered, rows, banded } = useMemo(() => {
     if (results.data === undefined) return { filtered: [], rows: [], banded: new Set<string>() };
@@ -7240,8 +7813,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const failedHidden =
     f.verdictClass === undefined ? data.rows.filter((r) => r.verdictClass === 'failed').length : 0;
   const staleHidden = f.hideStale === true ? data.rows.filter((r) => r.stale).length : 0;
-  const synthetic =
-    providers.data?.synthetic !== true && data.rows.some((r) => r.provenance.sourceKind === 'synthetic');
+  const synthetic = providers.data?.synthetic !== true && anySynthetic(data, gap.data);
   const order =
     ui.sort === null ? COPY.serverOrder : COPY.sortOption(SORT_LABEL[ui.sort.key], COPY.sortDir[ui.sort.dir]);
   return (
@@ -7252,7 +7824,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
         executions={data.executions}
         stale={data.rows.length > 0 && data.rows.every((r) => r.stale)}
       />
-      <ResultsHeader data={data} definition={definition} filteredFirst={filtered[0] ?? null} />
+      <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} />
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} narrow={narrow} />
       <div className="flex flex-wrap items-end gap-3 text-sm">
         {narrow ? (
@@ -7322,7 +7894,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 47 + 16 tests.
+Expected: PASS, 52 + 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -7341,7 +7913,7 @@ git add apps/web && git commit -m "wp09: View A table, headline through PriceCel
 - Consumes: `useCalendarGap`, `useExecutionActions` (Task 9.3); `calendarGapResponseSchema` (with `truncated` on every price cell); `resultsResponse.verificationProviderConfigured`; `apiContract.resultBasisSchema`; `cellKeyString` (WP0); `LoadError` (Task 9.5).
 - Produces: `BasisSwitch({ basis, reason })`, `CalendarGapBanner({ definitionId })`, final `ResultsView`.
 
-The banner's lead is pluralised and says the calendar prices are unchecked against the constraints (review PFT-11); both prices render through `PriceCell`, a truncated tile's price says "cheapest of the rows read", and a failed request shows its error in the banner's place instead of looking like "no gap" (review prov-019).
+The banner's lead is pluralised and says the calendar prices are unchecked against the constraints (review PFT-11); both prices render through `PriceCell`, a truncated tile's price says "cheapest of the rows read", and a failed request shows its error in the banner's place instead of looking like "no gap" (review prov-019). Without a verification provider the gap query is never run: the test settles the client and checks the query's update count is 0.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7352,6 +7924,7 @@ import { CONSTRAINT_LABELS } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { qk } from '../../../src/api/queries.js';
 import { ResultsView } from '../../../src/views/Results/ResultsView.js';
 import {
   API,
@@ -7363,7 +7936,7 @@ import {
   resultsResponse,
 } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
-import { renderWithProviders } from '../../render.js';
+import { renderWithProviders, settled } from '../../render.js';
 
 const calendarOnly = definition({
   providers: {
@@ -7437,7 +8010,8 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
       ),
     ).toBeInTheDocument();
     const prices = within(banner).getAllByTestId('price-cell');
-    expect(prices.map((p) => p.firstElementChild?.textContent)).toEqual(['£412', '£399']);
+    expect(prices.map((p) => p.firstElementChild?.firstChild?.textContent)).toEqual(['£412', '£399']);
+    expect(within(banner).getByText("vendor's cache age unknown")).toBeInTheDocument();
     expect(within(banner).getByText('Google Flights via SearchApi')).toBeInTheDocument();
     expect(within(banner).getByText('Aviasales cache')).toBeInTheDocument();
     await user.click(
@@ -7494,10 +8068,15 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
         return HttpResponse.json(calendarGap());
       }),
     );
-    renderWithProviders(<ResultsView definition={calendarOnly} />);
+    const { client } = renderWithProviders(<ResultsView definition={calendarOnly} />);
     await screen.findByRole('table', { name: 'Round trips found' });
     expect(screen.queryByRole('region', { name: 'Cells to search' })).toBeNull();
+    // why: settle first, so a request the render fired late would be counted (review tsr2-002).
+    await settled(client);
     expect(gapHits).toBe(0);
+    expect(
+      client.getQueryCache().find({ queryKey: qk.calendarGap(calendarOnly.id) })?.state.dataUpdateCount ?? 0,
+    ).toBe(0);
   });
 });
 ```
@@ -7506,6 +8085,10 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results/basisAndGap.test.tsx`
 Expected: FAIL: `Unable to find an element with the text: no verification provider configured` (the first test) and `Unable to find role="region" and name "Cells to search"` (the third).
+
+- [ ] **Step 2b: Prove the "never requested" check bites**
+
+After Step 3, temporarily pass `true` instead of `results.data?.verificationProviderConfigured === true` to `useCalendarGap` in `ResultsView`. Run the test: "is hidden, and never requested, without a verification provider" fails with `expected 1 to be 0` at `gapHits`, read after `settled(client)`. Restore the condition.
 
 - [ ] **Step 3: Implement**
 
@@ -7549,7 +8132,7 @@ import { LoadError } from '../../components/LoadState.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDateShort } from '../../format.js';
+import { formatIsoDate } from '../../format.js';
 
 /**
  * Spec §11: "N cells have calendar prices below your cheapest verified (£X)" with per-cell verify.
@@ -7590,8 +8173,8 @@ export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
               <span>
                 {COPY.coverageCheckPair(c.cell.origin, c.cell.destination)}{' '}
                 {COPY.dateRange(
-                  formatIsoDateShort(c.cell.departureDate),
-                  formatIsoDateShort(c.cell.returnDate),
+                  formatIsoDate(c.cell.departureDate),
+                  formatIsoDate(c.cell.returnDate),
                   nights,
                 )}
               </span>
@@ -7630,8 +8213,8 @@ export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
 ```tsx
 import { bandCheapest, filterRows, type SortKey, sortRows } from '@gmt/core';
 import { useCallback, useMemo } from 'react';
-import { useProviders, useResults } from '../../api/queries.js';
-import type { DefinitionResponse } from '../../api/types.js';
+import { useCalendarGap, useProviders, useResults } from '../../api/queries.js';
+import type { CalendarGapResponse, DefinitionResponse, ResultsResponse } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
@@ -7684,6 +8267,24 @@ function SortSelect({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
+/**
+ * Every provenance a Results page received: rows, their other sellers, the overall cheapest and the
+ * calendar-gap prices. Any synthetic one raises the red banner, whatever /providers said (spec §5.5).
+ */
+function anySynthetic(data: ResultsResponse, gap: CalendarGapResponse | undefined): boolean {
+  const rows = data.cheapest === null ? data.rows : [...data.rows, data.cheapest];
+  const kinds = [
+    ...rows.flatMap((r) => [r.provenance, ...r.otherOffers.map((o) => o.provenance)]),
+    ...(gap === undefined
+      ? []
+      : [
+          ...gap.cells.map((c) => c.calendar.provenance),
+          ...(gap.cheapestVerified === null ? [] : [gap.cheapestVerified.provenance]),
+        ]),
+  ].map((p) => p.sourceKind);
+  return kinds.includes('synthetic');
+}
+
 /** View A (spec §11): one fetch per basis; every sort and filter is core's pure function over that page. */
 export function ResultsView({ definition }: { definition: DefinitionResponse }) {
   const params = useSearchParams();
@@ -7691,6 +8292,8 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const ui = useMemo(() => parseResultsState(params), [params]);
   const results = useResults(definition.id, basis);
   const providers = useProviders();
+  // why: the same cached query the calendar-gap banner reads; it only runs when a verification provider is configured.
+  const gap = useCalendarGap(definition.id, results.data?.verificationProviderConfigured === true);
   const narrow = useMediaQuery(NARROW_QUERY);
   const { filtered, rows, banded } = useMemo(() => {
     if (results.data === undefined) return { filtered: [], rows: [], banded: new Set<string>() };
@@ -7724,8 +8327,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const failedHidden =
     f.verdictClass === undefined ? data.rows.filter((r) => r.verdictClass === 'failed').length : 0;
   const staleHidden = f.hideStale === true ? data.rows.filter((r) => r.stale).length : 0;
-  const synthetic =
-    providers.data?.synthetic !== true && data.rows.some((r) => r.provenance.sourceKind === 'synthetic');
+  const synthetic = providers.data?.synthetic !== true && anySynthetic(data, gap.data);
   const order =
     ui.sort === null ? COPY.serverOrder : COPY.sortOption(SORT_LABEL[ui.sort.key], COPY.sortDir[ui.sort.dir]);
   return (
@@ -7736,7 +8338,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
         executions={data.executions}
         stale={data.rows.length > 0 && data.rows.every((r) => r.stale)}
       />
-      <ResultsHeader data={data} definition={definition} filteredFirst={filtered[0] ?? null} />
+      <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} />
       <BasisSwitch basis={data.basis} reason={data.basisReason} />
       {verificationConfigured ? <CalendarGapBanner definitionId={definition.id} /> : null}
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} narrow={narrow} />
@@ -7808,7 +8410,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/results test/copy`
-Expected: PASS, 6 + 47 + 16 tests.
+Expected: PASS, 6 + 52 + 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -7823,10 +8425,10 @@ git add apps/web && git commit -m "wp09: basis switch and calendar-gap banner wi
 - Test: `test/views/coverage.test.tsx`
 
 **Interfaces:**
-- Consumes: `useCoverage`, `useExecution`, `useExecutionActions` (Task 9.3); `coverageResponseSchema`; `ViewHeader` (Task 9.6); `Loading`, `LoadError` (Task 9.5); `useNow` (Task 9.1).
+- Consumes: `useCoverage`, `useExecution`, `useExecutionActions` (Task 9.3); `coverageResponseSchema`; `ViewHeader`, `HeaderRun` (Task 9.6); `Loading`, `LoadError` (Task 9.5); `useNow`, `BucketName` (Task 9.1); `DEFAULT_DISCOVERY_REFRESH_HOURS` (core).
 - Produces: `CoverageView({ definition })`.
 
-Decisions. **"Searched" keeps the spec's definition** (priced + no fares + no cached data, computed here, never taken on trust) and **"with a price"** (priced of every cell) sits beside it, so 40 cells of "no cached data" cannot read as coverage (decision 36, review PFT-10). **A legend defines every bucket**, saying that "not searched" is not "no fares" and that "no cached data" is "asked, nothing returned" (review UI-6). **The header names the run these counts come from** (`coverage.executionId`), with its own status and age from `GET /api/executions/:id`, and is stale when that run is older than the definition's quickest discovery refresh interval (reviews prov-011, po-013). The table sits in a focusable, labelled region that scrolls sideways at 375px; with no run there is an empty state.
+Decisions. **"Searched" keeps the spec's definition** (priced + no fares + no cached data, computed here, never taken on trust) and **"with a price"** (priced of every cell) sits beside it, so 40 cells of "no cached data" cannot read as coverage (decision 36, review PFT-10). **A legend defines every bucket**, saying that "not searched" is not "no fares" and that "no cached data" is "asked, nothing returned" (review UI-6). **The header names the run these counts come from** (`coverage.executionId`), with its own status and age from `GET /api/executions/:id`, and is stale when that run is older than the definition's quickest discovery refresh interval, with core's `DEFAULT_DISCOVERY_REFRESH_HOURS` only for a provider that names none (reviews prov-011, po-013, arch-r2-005, prov-r2-012). The six buckets are typed from core's `Buckets` (decision 46). The "priced" legend says an itinerary-search price may be one the final step did not confirm (decision 48); View D shows counts, never a blank price. The table sits in a labelled region without `tabIndex` that scrolls sideways at 375px (decision 46: no suppression comment; browsers make a scrollable box keyboard-focusable themselves); with no run there is an empty state.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7910,12 +8512,14 @@ describe('View D (spec §11, §6.6)', () => {
     ]);
   });
 
-  it('the table scrolls sideways in a focusable labelled region, and a legend defines every bucket (review UI-6)', async () => {
+  it('the table scrolls sideways in a labelled region, and a legend defines every bucket (review UI-6)', async () => {
     render();
     const region = await screen.findByRole('region', {
       name: 'Coverage counts (scrolls sideways on a narrow screen)',
     });
-    expect(region).toHaveAttribute('tabindex', '0');
+    // why: decision 46: a labelled region without tabIndex; the browser makes the scroll box focusable itself.
+    expect(region).not.toHaveAttribute('tabindex');
+    expect(region.className).toContain('overflow-x-auto');
     const legend = screen.getByRole('list', { name: 'What the columns mean' });
     expect(
       within(legend).getByText('not searched: not asked yet. Different from no fares: nobody has looked.'),
@@ -8086,27 +8690,27 @@ Expected: FAIL with `Failed to resolve import "../../src/views/Coverage/Coverage
 `src/views/Coverage/CoverageView.tsx` (new file; the sum-mismatch alert sits in the requests cell so every row keeps its column count):
 
 ```tsx
-import type { CellKey, IsoDateTime } from '@gmt/core';
+import { type CellKey, DEFAULT_DISCOVERY_REFRESH_HOURS, type IsoDateTime } from '@gmt/core';
 import { useCoverage, useExecution, useExecutionActions } from '../../api/queries.js';
-import type { DefinitionResponse, ExecutionSummary } from '../../api/types.js';
+import type { DefinitionResponse } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
-import { ViewHeader } from '../../components/ViewHeader.js';
-import { COPY } from '../../copy.js';
-import { formatIsoDateShort, formatMicroGbp } from '../../format.js';
+import { type HeaderRun, ViewHeader } from '../../components/ViewHeader.js';
+import { type BucketName, COPY } from '../../copy.js';
+import { formatIsoDate, formatMicroGbp } from '../../format.js';
 import { useNow } from '../../now.js';
 
 /** Spec §3 / §6.6: the six buckets, which sum to the cell count. */
-const BUCKETS = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run'] as const;
-/** Fallback refresh interval when a definition names none (core's DEFAULT_DISCOVERY_REFRESH_HOURS). */
-const DEFAULT_REFRESH_HOURS = 168;
+const BUCKETS = [
+  'priced',
+  'empty',
+  'no_data',
+  'error',
+  'skipped',
+  'not_run',
+] as const satisfies readonly BucketName[];
 
 const cellText = (c: CellKey) =>
-  COPY.cellLabel(
-    c.origin,
-    c.destination,
-    formatIsoDateShort(c.departureDate),
-    formatIsoDateShort(c.returnDate),
-  );
+  COPY.cellLabel(c.origin, c.destination, formatIsoDate(c.departureDate), formatIsoDate(c.returnDate));
 /** The two reasons the contract allows (`'not_run' | 'skipped:budget'`), each in words. */
 const reasonText = (r: 'not_run' | 'skipped:budget') =>
   r === 'skipped:budget' ? COPY.reasonBudget : COPY.reasonNotRun;
@@ -8128,7 +8732,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
   const c = coverage.data;
   const r = run.data;
   const at = r ? (r.finishedAt ?? r.startedAt) : null;
-  const header: ExecutionSummary[] =
+  const header: HeaderRun[] =
     r === undefined
       ? []
       : [
@@ -8137,17 +8741,15 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
             status: r.status,
             isChild: r.isChild,
             startedAt: r.startedAt,
-            finishedAt: r.finishedAt,
             ageHours: at === null ? 'unknown' : hoursSince(at, now),
           },
         ];
-  // why: stale means older than one refresh cycle of the definition's quickest-refreshing discovery provider.
-  const refresh = Math.min(
-    ...definition.providers.discovery.map(
-      (p) => definition.providers.discoveryRefreshHours[p] ?? DEFAULT_REFRESH_HOURS,
-    ),
-    DEFAULT_REFRESH_HOURS,
+  // why: stale means older than one refresh cycle of the definition's quickest-refreshing discovery provider;
+  // core's default stands in only for a provider that names no interval, or when there is no discovery provider.
+  const intervals = definition.providers.discovery.map(
+    (p) => definition.providers.discoveryRefreshHours[p] ?? DEFAULT_DISCOVERY_REFRESH_HOURS,
   );
+  const refresh = intervals.length === 0 ? DEFAULT_DISCOVERY_REFRESH_HOURS : Math.min(...intervals);
   const stale = header[0] !== undefined && header[0].ageHours !== 'unknown' && header[0].ageHours > refresh;
   const retryable = c.errors.some((e) => e.retryable);
   return (
@@ -8156,8 +8758,8 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
       {c.perStage.length === 0 ? (
         <p>{COPY.coverageEmpty}</p>
       ) : (
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard to scroll it (WCAG 2.1.1).
-        <section aria-label={COPY.coverageScroll} tabIndex={0} className="overflow-x-auto">
+        // why: a labelled region without tabIndex (decision 46); browsers make a scrollable overflow box keyboard-focusable themselves.
+        <section aria-label={COPY.coverageScroll} className="overflow-x-auto">
           <table aria-label={COPY.coverageHeading} className="border-collapse text-sm">
             <thead>
               <tr>
@@ -8208,7 +8810,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
                     <td className="p-1 text-right tabular-nums">
                       {COPY.withPriceValue(s.buckets.priced, s.total)}
                     </td>
-                    <td className="p-1">
+                    <td className="p-1" data-cost="">
                       {COPY.requestRow(
                         s.requests.calls,
                         planned,
@@ -8315,6 +8917,7 @@ The plan id is shown in words (review po-013). A SearchApi itinerary capability 
 `test/views/providers.test.tsx`:
 
 ```tsx
+import { formatDuration } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -8339,7 +8942,7 @@ describe('Providers view (spec §10, §11)', () => {
     expect(within(searchapi).getByText('plan: SearchApi $40 a month')).toBeInTheDocument();
     expect(
       within(searchapi).getByText(
-        'Discovery: Google date grid via SearchApi · prices up to 24h old when fetched',
+        `Discovery: Google date grid via SearchApi · prices up to ${formatDuration(24)} old when fetched`,
       ),
     ).toBeInTheDocument();
     expect(
@@ -8350,10 +8953,13 @@ describe('Providers view (spec §10, §11)', () => {
     ).toBeInTheDocument();
     const tp = screen.getByRole('region', { name: 'Travelpayouts' });
     expect(
-      within(tp).getByText('Discovery: Aviasales cache · prices up to 2d old when fetched'),
+      within(tp).getByText(
+        `Discovery: Aviasales cache · prices up to ${formatDuration(48)} old when fetched`,
+      ),
     ).toBeInTheDocument();
     expect(within(tp).getByText('Aviasales cache of recent user searches')).toBeInTheDocument();
     expect(within(tp).getByText('plan: free')).toBeInTheDocument();
+    expect(formatDuration(48)).toBe('2d'); // canary for the format
   });
 
   it("shows each provider's notices (the zero-cap message) and marks unconfigured providers", async () => {
@@ -8439,7 +9045,7 @@ import { useProviders } from '../../api/queries.js';
 import type { UsageRow } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDateShort } from '../../format.js';
+import { formatIsoDate } from '../../format.js';
 
 function maxAgeText(h: CapabilityInfo['maxAgeHours']): string {
   if (h === 'unknown') return COPY.maxAgeUnknown;
@@ -8463,8 +9069,8 @@ function usageText(u: UsageRow): string {
   return COPY.usageWindow(
     u.calls,
     cap,
-    formatIsoDateShort(u.windowStart.slice(0, 10)),
-    formatIsoDateShort(u.windowEnd.slice(0, 10)),
+    formatIsoDate(u.windowStart.slice(0, 10)),
+    formatIsoDate(u.windowEnd.slice(0, 10)),
   );
 }
 
@@ -8529,16 +9135,16 @@ git add apps/web && git commit -m "wp09: Providers view with plan words, capabil
 ### Task 9.12: Definitions form: airports, defaults, money in pounds, advanced fold, example import; the place-name check
 
 **Files:**
-- Create: `src/example.ts`, `src/views/Definitions/draft.ts`, `src/views/Definitions/AirportListInput.tsx`, `src/views/Definitions/AdvancedFields.tsx`, `src/views/Definitions/CoverageCheck.tsx`, `src/views/Definitions/EstimatePanel.tsx`, `src/views/Definitions/DefinitionForm.tsx`
+- Create: `src/example.ts`, `src/views/Definitions/draft.ts`, `src/views/Definitions/fields.tsx`, `src/views/Definitions/AirportListInput.tsx`, `src/views/Definitions/AdvancedFields.tsx`, `src/views/Definitions/CoverageCheck.tsx`, `src/views/Definitions/EstimatePanel.tsx`, `src/views/Definitions/DefinitionForm.tsx`
 - Create (stand-in, owned by WP12): `docs/examples/london-new-york.json`, only if it does not exist yet; WP12 overwrites it and asserts the import still resolves.
 - Modify: `scripts/check-boundaries.mjs`
-- Test: `test/views/definitions/form.test.tsx`
+- Test: `test/views/definitions/form.test.tsx`, `test/placeCheck.test.ts`
 
 **Interfaces:**
 - Consumes: `api`, `useAirportSearch`, `ApiError`, `FieldError`, `DefinitionBody`, `CoverageCheckBody` (Task 9.3); `withKey` (Task 9.4); `providersResponse.presets`; `apiContract.definitionCreateRequestSchema` (parses the example), `cabinSchema`; `resolveWindow`, `londonDateOf`; 422 `details.fields`; `coverageCheckResponseSchema` with `cachedRows: number | null` (WP7 Task 7.18).
-- Produces: `EXAMPLE_DEFINITION`, `EXAMPLE_LABEL`, `Draft`, `DraftWindow`, `DEFAULT_RELATIVE`, `EMPTY_ABSOLUTE`, `defaultDraft`, `definitionToDraft`, `draftToRequest`, `applyExample`, `normaliseIata`, `confirmationPence`, `AIRPORT_DEBOUNCE_MS`, `AirportListInput`, `AdvancedFields`, `NumberField`, `PoundsField`, `FieldErrors`, `Check`, `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel`, `DefinitionForm({ existing, providers })`. Task 9.13 tests the coverage-check, estimate, create and confirmation flows through `DefinitionsView`.
+- Produces: `EXAMPLE_DEFINITION`, `EXAMPLE_LABEL`, `Draft`, `DraftWindow`, `DEFAULT_RELATIVE`, `EMPTY_ABSOLUTE`, `defaultDraft`, `definitionToDraft`, `draftToRequest`, `applyExample`, `normaliseIata`, `confirmationPence`, `AIRPORT_DEBOUNCE_MS`, `AirportListInput`, `AdvancedFields`, and in `fields.tsx` the shared primitives `FieldErrors`, `NumberField`, `PoundsField`, `TimeWindowField`, `AirlinesField`, `Check` (review arch-r2-008), `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel`, `DefinitionForm({ existing, providers })`. Task 9.13 tests the coverage-check, estimate, create and confirmation flows through `DefinitionsView`.
 
-Decisions. **The draft is the create schema's input type** (plain strings), sent as is; the API's parse is the validator, so the form mints no brand and casts nothing (review arch-004). **`enabled` is carried** through the draft and shown as a checkbox, so saving an edit never re-enables a stopped definition (review po-011). **Money is entered in pounds everywhere** (price ceiling, maximum cost per run, the maximum-price constraint, onward cost) and sent as integer pence; the journey limit shows its minutes as hours beside the field (reviews po-012, PFT-09). **Airports**: a three-letter code is upper-cased on blur, other text only trimmed; Enter adds without a blur; a duplicate is refused; a metro code the airports table maps (its rows carry `metro`) is offered as its airports at once (review PFT-07); the API's field errors appear under the field they name, linked with `aria-describedby` and `aria-invalid`, and in a summary (review tsr-013); chip remove buttons are 44 px; the native datalist is the accepted autocomplete for now. **Window**: the relative fields show the dates they resolve to today, and switching mode keeps the other mode's values (review PFT-08). **The coverage check** shows "cells with a price of cells in your nights range" per pair and month; a month the check could not read (`cachedRows: null`, decision 25) or that a pair's response omits is "not checked", in distinct styling, never 0 (reviews po-001, prov-002, UI-1, PFT-06, prov-021); its call count is labelled as tile requests (decision 37); a result made for other airports or dates is marked out of date. **Estimate before the confirmation**: the estimate and every budget scope (fit or not) render above the create button, whose label states calls and pounds ("Create and confirm up to 154 calls, £0.02 per run", decision 36); editing after an estimate replaces the button with "show the estimate again" (review UI-11). **The example**: `src/example.ts` is the one web file that may name the example's places, and the import button reads its label from there (decision 36); `scripts/check-boundaries.mjs` now fails on an airport code or a metro city name anywhere in `apps/web/src` or `apps/api/src` outside the two allowlisted files.
+Decisions. **The draft is the create schema's input type** (plain strings), sent as is; the API's parse is the validator, so the form mints no brand and casts nothing (review arch-004). **`enabled` is carried** through the draft and shown as a checkbox, so saving an edit never re-enables a stopped definition (review po-011). **The field primitives live in `fields.tsx`**, used by the form and its fold; `PoundsField` and `AirlinesField` follow their values through `useSynced`, and `AirlinesField` parses with `parseCarriers`, showing entries that are not codes as ignored (review arch-r2-009). **Money is entered in pounds everywhere** (price ceiling, maximum cost per run, the maximum-price constraint, onward cost) and sent as integer pence; the journey limit shows its minutes as hours beside the field (reviews po-012, PFT-09). **Airports**: a three-letter code is upper-cased on blur, other text only trimmed; Enter adds without a blur; a duplicate is refused; a metro code the airports table maps (its rows carry `metro`) expands to its member airports on Enter or Add, asking the table directly when the autocomplete has not answered yet, and says so (decision 44, reviews PFT-07, tsr2-005); the autocomplete test steps the debounce on fake timers (review tsr2-009); the API's field errors appear under the field they name, linked with `aria-describedby` and `aria-invalid`, and in a summary (review tsr-013); chip remove buttons are 44 px; the native datalist is the accepted autocomplete for now. **Window**: the relative fields show the dates they resolve to today, and switching mode keeps the other mode's values: the form holds the inactive window in its own state and restores it on toggle (review PFT-08; pinned by "switching the window mode keeps the other mode values"). **The coverage check** shows "cells with a price of cells in your nights range" per pair and month; a month the check could not read (`cachedRows: null`, decision 25) or that a pair's response omits is "not checked", in distinct styling, never 0 (reviews po-001, prov-002, UI-1, PFT-06, prov-021); its call count is labelled as tile requests (decision 37); a result made for other airports or dates is marked out of date. **Estimate before the confirmation**: the estimate ("about 154 calls (hard stop 2000), £0.02 per run", the hard stop being the run budget's call cap, decision 44) and every budget scope (fit or not) render above the create button, "Create and confirm about 154 calls (hard stop 2000), £0.02 per run"; the click sends `confirmedCostPence` and `confirmedCalls` (decisions 42, 43); a re-confirmation states and sends the contract's `needsConfirmation.totalCalls` with the pence; editing after an estimate replaces the button with "show the estimate again" (review UI-11). **The example**: `src/example.ts` is the one web file that may name the example's places, and the import button reads its label from there (decision 36); `scripts/check-boundaries.mjs` now fails on an airport code or a metro city name in a string literal, template text or JSX text of `apps/web/src` or `apps/api/src` outside the two allowlisted files (comments and identifiers are not read, so words like ISO and ALL never collide), with a committed list of non-airport words later packages extend in their own diffs; and on a `biome-ignore` or `eslint-disable` comment in any package's `src` or `test` (decision 46). `test/placeCheck.test.ts` runs the script against scratch trees with planted files (review tsr2-012).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -8546,10 +9152,11 @@ Decisions. **The draft is the create schema's input type** (plain strings), sent
 
 ```tsx
 import { CONSTRAINT_LABELS } from '@gmt/core';
-import { screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
+import { AIRPORT_DEBOUNCE_MS } from '../../../src/views/Definitions/AirportListInput.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import {
   defaultDraft,
@@ -8557,9 +9164,11 @@ import {
   draftToRequest,
   normaliseIata,
 } from '../../../src/views/Definitions/draft.js';
-import { API, definition, estimate, providersResponse } from '../../fixtures.js';
+import { API, airports, definition, estimate, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
+
+afterEach(() => vi.useRealTimers());
 
 const renderForm = (existing: ReturnType<typeof definition> | null = null) =>
   renderWithProviders(<DefinitionForm existing={existing} providers={providersResponse()} />);
@@ -8656,6 +9265,18 @@ describe('Definitions form defaults (spec §11)', () => {
     });
   });
 
+  it('airline constraints parse like the carriers filter: codes kept, other entries shown as ignored (review arch-r2-009)', async () => {
+    const bodies = estimateBodies();
+    const { user } = renderForm();
+    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.type(screen.getByLabelText(CONSTRAINT_LABELS.includeAirlines), 'zz, British');
+    await user.tab();
+    expect(screen.getByText('ignored, not two-character carrier codes: BRITISH')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toMatchObject({ constraints: { includeAirlines: ['ZZ'] } });
+  });
+
   it('switching the window mode keeps the other mode values (review PFT-08)', async () => {
     const { user } = renderForm();
     await user.clear(screen.getByLabelText('Starts in (days)'));
@@ -8726,48 +9347,63 @@ describe('airport entry (review focus 1)', () => {
     expect(input.getAttribute('aria-describedby')).toContain('origins-errors');
   });
 
-  it('autocompletes from GET /api/airports?q=', async () => {
+  it('autocompletes from GET /api/airports?q= once the debounce has passed', async () => {
+    // why: fake the clear functions too, or a cleared debounce timer still fires on the real clock.
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      shouldAdvanceTime: true,
+    });
     const queries: string[] = [];
     server.use(
       http.get(`${API}/airports`, ({ request }) => {
         queries.push(new URL(request.url).searchParams.get('q') ?? '');
-        return HttpResponse.json([
-          {
-            iata: 'LHR',
-            name: 'Heathrow',
-            city: 'London',
-            country: 'United Kingdom',
-            tz: 'Europe/London',
-            metro: 'LON',
-          },
-          {
-            iata: 'LGW',
-            name: 'Gatwick',
-            city: 'London',
-            country: 'United Kingdom',
-            tz: 'Europe/London',
-            metro: 'LON',
-          },
-        ]);
+        return HttpResponse.json(airports);
       }),
     );
-    const { user } = renderForm();
+    const { user } = renderWithProviders(<DefinitionForm existing={null} providers={providersResponse()} />, {
+      fakeTimers: true,
+    });
     await user.type(screen.getByLabelText('Origins'), 'lon');
-    await expect.poll(() => document.querySelectorAll('#origins-options option').length).toBe(2);
+    expect(queries).toEqual([]);
+    await act(() => vi.advanceTimersByTimeAsync(AIRPORT_DEBOUNCE_MS));
+    await waitFor(() => expect(document.querySelectorAll('#origins-options option')).toHaveLength(2));
     const options = [...document.querySelectorAll('#origins-options option')].map(
       (o) => `${o.getAttribute('value')} ${o.textContent}`,
     );
     expect(options).toEqual(['LHR Heathrow, London, United Kingdom', 'LGW Gatwick, London, United Kingdom']);
-    expect(queries.at(-1)).toBe('lon');
+    expect(queries).toEqual(['lon']);
+    vi.useRealTimers();
   });
 
-  it('a metro code the airports table maps is offered as its airports at once (review PFT-07)', async () => {
+  it.each([
+    [
+      'Enter',
+      async (u: ReturnType<typeof renderForm>['user']) =>
+        u.type(screen.getByLabelText('Origins'), 'lon{Enter}'),
+    ],
+    [
+      'Add',
+      async (u: ReturnType<typeof renderForm>['user']) => {
+        await u.type(screen.getByLabelText('Origins'), 'LON');
+        await u.click(screen.getByRole('button', { name: 'Add origin' }));
+      },
+    ],
+  ])(
+    'a metro code expands to its member airports on %s, before the autocomplete answers (decision 44)',
+    async (_how, act) => {
+      const { user } = renderForm();
+      await act(user);
+      await waitFor(() => expect(chipCodes('Origins')).toEqual(['LHR', 'LGW']));
+      expect(screen.getByRole('status')).toHaveTextContent('LON is a city code: added LHR, LGW.');
+      expect(chipCodes('Origins')).not.toContain('LON');
+    },
+  );
+
+  it('a code the airports table does not map is added as typed and left to the API to judge', async () => {
+    server.use(http.get(`${API}/airports`, () => HttpResponse.json([])));
     const { user } = renderForm();
-    await user.type(screen.getByLabelText('Origins'), 'LON');
-    const addBoth = await screen.findByRole('button', { name: 'Add LHR, LGW' });
-    expect(addBoth.parentElement).toHaveTextContent('LON is a city code for LHR, LGW.');
-    await user.click(addBoth);
-    expect(chipCodes('Origins')).toEqual(['LHR', 'LGW']);
+    await user.type(screen.getByLabelText('Destinations'), 'jfk{Enter}');
+    await waitFor(() => expect(chipCodes('Destinations')).toEqual(['JFK']));
   });
 });
 
@@ -9045,166 +9681,17 @@ export function draftToRequest(d: Draft): Draft {
 }
 ```
 
-`src/views/Definitions/AirportListInput.tsx` (new file):
+`src/views/Definitions/fields.tsx` (new file):
 
 ```tsx
-import { useEffect, useState } from 'react';
-import { useAirportSearch } from '../../api/queries.js';
+import { useState } from 'react';
 import { COPY } from '../../copy.js';
-import { normaliseIata } from './draft.js';
+import { parsePoundsToPence, penceToPoundsInput, poundsText } from '../../format.js';
+import { useSynced } from '../../hooks/useSynced.js';
+import { carriersText, parseCarriers } from '../../state/carriers.js';
 
-/** Waits `ms` after the last keystroke before the autocomplete query runs. */
-export const AIRPORT_DEBOUNCE_MS = 200;
+// The Definitions form's field primitives (review arch-r2-008): the form and its advanced fold both use them.
 
-function useDebounced(value: string, ms: number): string {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-export interface AirportListInputProps {
-  id: 'origins' | 'destinations';
-  label: string;
-  addLabel: string;
-  codes: readonly string[];
-  onChange: (codes: string[]) => void;
-  /** Messages from the API's 422 `details.fields` for this field, e.g. the metro-code message. */
-  errors: readonly string[];
-}
-
-/**
- * Operator-entered airports with airport-table autocomplete; no preset airports (spec §1, §11).
- * A metro code the airports table maps (its rows carry `metro`) is offered as its airports at once,
- * instead of failing only after "Show estimate" (review PFT-07). Errors are tied to the input with
- * aria-describedby and aria-invalid. The native datalist is the accepted autocomplete for now.
- */
-export function AirportListInput({ id, label, addLabel, codes, onChange, errors }: AirportListInputProps) {
-  const [text, setText] = useState('');
-  const [localError, setLocalError] = useState<string | null>(null);
-  const query = useDebounced(text.trim(), AIRPORT_DEBOUNCE_MS);
-  const suggestions = useAirportSearch(query);
-  const typed = normaliseIata(text);
-  const metroAirports = (suggestions.data ?? [])
-    .filter((a) => a.metro === typed && a.iata !== typed)
-    .map((a) => a.iata);
-  const add = (list: readonly string[]) => {
-    const fresh = list.filter((c) => !codes.includes(c));
-    if (fresh.length === 0) {
-      setLocalError(COPY.duplicateAirport(list.join(', ')));
-      return;
-    }
-    setLocalError(null);
-    onChange([...codes, ...fresh]);
-    setText('');
-  };
-  const addTyped = () => {
-    const code = normaliseIata(text);
-    setText(code);
-    if (!/^[A-Z]{3}$/.test(code)) {
-      setLocalError(COPY.iataFormat);
-      return;
-    }
-    add([code]);
-  };
-  const messages = [...(localError === null ? [] : [localError]), ...errors];
-  const errorId = `${id}-errors`;
-  return (
-    <fieldset className="flex flex-col gap-1">
-      <legend className="font-semibold">{label}</legend>
-      {/* why: the chip list has no label of its own, so getByLabelText(label) finds only the input */}
-      <ul className="flex flex-wrap gap-1">
-        {codes.map((c) => (
-          <li key={c} className="flex items-center gap-1 rounded bg-slate-200 px-1">
-            <span>{c}</span>
-            <button
-              type="button"
-              aria-label={COPY.removeAirport(c)}
-              className="min-h-11 min-w-11"
-              onClick={() => onChange(codes.filter((x) => x !== c))}
-            >
-              {'×'}
-            </button>
-          </li>
-        ))}
-      </ul>
-      <span className="flex gap-1">
-        <label htmlFor={`${id}-input`} className="sr-only">
-          {label}
-        </label>
-        <input
-          id={`${id}-input`}
-          list={`${id}-options`}
-          value={text}
-          aria-invalid={messages.length > 0}
-          aria-describedby={messages.length > 0 ? `${id}-help ${errorId}` : `${id}-help`}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => setText((t) => normaliseIata(t))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              addTyped();
-            }
-          }}
-          className="min-h-11 rounded border border-slate-400 px-1"
-        />
-        <button
-          type="button"
-          aria-label={addLabel}
-          onClick={addTyped}
-          className="min-h-11 rounded border border-slate-500 px-3"
-        >
-          {COPY.addAirport}
-        </button>
-      </span>
-      {metroAirports.length > 0 ? (
-        <span className="flex flex-wrap items-center gap-1 text-sm">
-          {COPY.metroCode(typed, metroAirports.join(', '))}
-          <button
-            type="button"
-            className="min-h-11 rounded border border-slate-500 px-3"
-            onClick={() => add(metroAirports)}
-          >
-            {COPY.addMetro(metroAirports.join(', '))}
-          </button>
-        </span>
-      ) : null}
-      <datalist id={`${id}-options`}>
-        {(suggestions.data ?? []).map((a) => (
-          <option key={a.iata} value={a.iata}>
-            {COPY.airportOption(a.name, a.city, a.country)}
-          </option>
-        ))}
-      </datalist>
-      <span id={`${id}-help`} className="text-xs text-slate-700">
-        {COPY.airportInputHelp}
-      </span>
-      {messages.length > 0 ? (
-        <div id={errorId} role="alert" className="text-red-800">
-          {messages.map((m) => (
-            <p key={m}>{m}</p>
-          ))}
-        </div>
-      ) : null}
-    </fieldset>
-  );
-}
-```
-
-`src/views/Definitions/AdvancedFields.tsx` (new file):
-
-```tsx
-import type { ProviderId } from '@gmt/core';
-import { useEffect, useState } from 'react';
-import { COPY } from '../../copy.js';
-import { formatMinutes, parsePoundsToPence, penceToPoundsInput } from '../../format.js';
-import { withKey } from '../../state/withKey.js';
-import type { Draft } from './draft.js';
-
-type DraftConstraints = Draft['constraints'];
-type DraftPolicy = Draft['verification'];
 const input = 'min-h-11 rounded border border-slate-400 px-1';
 
 /** Error messages under a field, tied to its input by id (review tsr-013). */
@@ -9278,10 +9765,7 @@ export function PoundsField({
   pence: number | undefined;
   onChange: (p: number | undefined) => void;
 }) {
-  const [text, setText] = useState(penceToPoundsInput(pence));
-  useEffect(() => {
-    setText((t) => (parsePoundsToPence(t) === pence ? t : penceToPoundsInput(pence)));
-  }, [pence]);
+  const [text, setText] = useSynced(penceToPoundsInput(pence), poundsText);
   return (
     <span className="flex flex-col">
       <label htmlFor={id}>{label}</label>
@@ -9300,7 +9784,8 @@ export function PoundsField({
   );
 }
 
-function TimeWindowField({
+/** A local time window; the constraint exists only once both ends are set. */
+export function TimeWindowField({
   id,
   name,
   value,
@@ -9350,7 +9835,11 @@ function TimeWindowField({
   );
 }
 
-function AirlinesField({
+/**
+ * Comma-separated carrier codes, parsed like the Results carriers filter: two-character codes only,
+ * other entries shown as ignored rather than stored (review arch-r2-009).
+ */
+export function AirlinesField({
   id,
   label,
   value,
@@ -9361,20 +9850,18 @@ function AirlinesField({
   value: string[] | undefined;
   onChange: (v: string[] | undefined) => void;
 }) {
-  const [text, setText] = useState((value ?? []).join(', '));
+  const [text, setText] = useSynced((value ?? []).join(','), carriersText);
+  const ignored = parseCarriers(text).ignored;
   return (
     <span className="flex flex-col">
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
         value={text}
-        aria-describedby={`${id}-help`}
+        aria-describedby={ignored.length > 0 ? `${id}-help ${id}-ignored` : `${id}-help`}
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
-          const codes = text
-            .split(',')
-            .map((c) => c.trim().toUpperCase())
-            .filter((c) => c.length > 0);
+          const codes = parseCarriers(text).codes;
           onChange(codes.length > 0 ? codes : undefined);
         }}
         className={input}
@@ -9382,6 +9869,11 @@ function AirlinesField({
       <span id={`${id}-help`} className="text-xs">
         {COPY.airlinesHelp}
       </span>
+      {ignored.length > 0 ? (
+        <span id={`${id}-ignored`} className="text-xs text-red-800">
+          {COPY.carriersIgnored(ignored.join(', '))}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -9413,6 +9905,175 @@ export function Check({
     </span>
   );
 }
+```
+
+`src/views/Definitions/AirportListInput.tsx` (new file):
+
+```tsx
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { api } from '../../api/endpoints.js';
+import { qk, useAirportSearch } from '../../api/queries.js';
+import { COPY } from '../../copy.js';
+import { normaliseIata } from './draft.js';
+
+/** Waits `ms` after the last keystroke before the autocomplete query runs. */
+export const AIRPORT_DEBOUNCE_MS = 200;
+
+function useDebounced(value: string, ms: number): string {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+export interface AirportListInputProps {
+  id: 'origins' | 'destinations';
+  label: string;
+  addLabel: string;
+  codes: readonly string[];
+  onChange: (codes: string[]) => void;
+  /** Messages from the API's 422 `details.fields` for this field, e.g. the metro-code message. */
+  errors: readonly string[];
+}
+
+/**
+ * Operator-entered airports with airport-table autocomplete; no preset airports (spec §1, §11).
+ * A metro code the airports table maps (its rows carry `metro`) expands to its member airports on Enter
+ * or Add, the same as picking them from the list, instead of failing only after "Show estimate"
+ * (decision 44, reviews PFT-07, tsr2-005); the table is asked directly when the autocomplete has not
+ * answered yet. A code the table does not know is left to the API, the validator. Errors are tied to the input with
+ * aria-describedby and aria-invalid. The native datalist is the accepted autocomplete for now.
+ */
+export function AirportListInput({ id, label, addLabel, codes, onChange, errors }: AirportListInputProps) {
+  const [text, setText] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+  const query = useDebounced(text.trim(), AIRPORT_DEBOUNCE_MS);
+  const suggestions = useAirportSearch(query);
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const add = (list: readonly string[]) => {
+    const fresh = list.filter((c) => !codes.includes(c));
+    if (fresh.length === 0) {
+      setLocalError(COPY.duplicateAirport(list.join(', ')));
+      return;
+    }
+    setLocalError(null);
+    onChange([...codes, ...fresh]);
+    setText('');
+  };
+  const addTyped = async () => {
+    const code = normaliseIata(text);
+    setText(code);
+    setExpanded(null);
+    if (!/^[A-Z]{3}$/.test(code)) {
+      setLocalError(COPY.iataFormat);
+      return;
+    }
+    // why: the same cached query the autocomplete uses; a failed lookup adds the code and leaves it to the API.
+    const rows = await qc
+      .fetchQuery({ queryKey: qk.airports(code), queryFn: () => api.airports(code), staleTime: 60_000 })
+      .catch(() => []);
+    const members = rows.filter((a) => a.metro === code && a.iata !== code).map((a) => a.iata);
+    if (members.length === 0) {
+      add([code]);
+      return;
+    }
+    add(members);
+    setExpanded(COPY.metroExpanded(code, members.join(', ')));
+  };
+  const messages = [...(localError === null ? [] : [localError]), ...errors];
+  const errorId = `${id}-errors`;
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="font-semibold">{label}</legend>
+      {/* why: the chip list has no label of its own, so getByLabelText(label) finds only the input */}
+      <ul className="flex flex-wrap gap-1">
+        {codes.map((c) => (
+          <li key={c} className="flex items-center gap-1 rounded bg-slate-200 px-1">
+            <span>{c}</span>
+            <button
+              type="button"
+              aria-label={COPY.removeAirport(c)}
+              className="min-h-11 min-w-11"
+              onClick={() => onChange(codes.filter((x) => x !== c))}
+            >
+              {'×'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <span className="flex gap-1">
+        <label htmlFor={`${id}-input`} className="sr-only">
+          {label}
+        </label>
+        <input
+          id={`${id}-input`}
+          list={`${id}-options`}
+          value={text}
+          aria-invalid={messages.length > 0}
+          aria-describedby={messages.length > 0 ? `${id}-help ${errorId}` : `${id}-help`}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => setText((t) => normaliseIata(t))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void addTyped();
+            }
+          }}
+          className="min-h-11 rounded border border-slate-400 px-1"
+        />
+        <button
+          type="button"
+          aria-label={addLabel}
+          onClick={() => void addTyped()}
+          className="min-h-11 rounded border border-slate-500 px-3"
+        >
+          {COPY.addAirport}
+        </button>
+      </span>
+      {expanded !== null ? (
+        <p role="status" className="text-sm">
+          {expanded}
+        </p>
+      ) : null}
+      <datalist id={`${id}-options`}>
+        {(suggestions.data ?? []).map((a) => (
+          <option key={a.iata} value={a.iata}>
+            {COPY.airportOption(a.name, a.city, a.country)}
+          </option>
+        ))}
+      </datalist>
+      <span id={`${id}-help`} className="text-xs text-slate-700">
+        {COPY.airportInputHelp}
+      </span>
+      {messages.length > 0 ? (
+        <div id={errorId} role="alert" className="text-red-800">
+          {messages.map((m) => (
+            <p key={m}>{m}</p>
+          ))}
+        </div>
+      ) : null}
+    </fieldset>
+  );
+}
+```
+
+`src/views/Definitions/AdvancedFields.tsx` (new file):
+
+```tsx
+import type { ProviderId } from '@gmt/core';
+import { COPY } from '../../copy.js';
+import { formatMinutes } from '../../format.js';
+import { withKey } from '../../state/withKey.js';
+import type { Draft } from './draft.js';
+import { AirlinesField, Check, NumberField, PoundsField, TimeWindowField } from './fields.js';
+
+type DraftConstraints = Draft['constraints'];
+type DraftPolicy = Draft['verification'];
+const input = 'min-h-11 rounded border border-slate-400 px-1';
 
 export interface ProviderCapabilities {
   id: ProviderId;
@@ -9793,10 +10454,12 @@ import { COPY } from '../../copy.js';
 import { formatMicroGbp, formatSeconds } from '../../format.js';
 
 /** Spec §11: the estimate shown before the operator confirms (POST /api/definitions/estimate for an unsaved body). */
-export function EstimatePanel({ estimate }: { estimate: Estimate }) {
+/** `hardStop` is the run budget's call cap, the runtime limit beside the estimate (decision 44). */
+export function EstimatePanel({ estimate, hardStop }: { estimate: Estimate; hardStop: number }) {
   const e = estimate;
   return (
     <section
+      data-cost=""
       aria-label={COPY.estimateHeading}
       className="space-y-1 rounded border border-slate-300 p-2 text-sm"
     >
@@ -9819,7 +10482,12 @@ export function EstimatePanel({ estimate }: { estimate: Estimate }) {
         ))}
       </ul>
       <p className="font-medium">
-        {COPY.estimateTotal(e.totalCalls, formatMicroGbp(e.totalCostMicroGbp), formatSeconds(e.seconds))}
+        {COPY.estimateTotal(
+          e.totalCalls,
+          hardStop,
+          formatMicroGbp(e.totalCostMicroGbp),
+          formatSeconds(e.seconds),
+        )}
       </p>
       {e.windowClamped ? <p>{COPY.windowClamped}</p> : null}
       {e.assumptions.length > 0 ? (
@@ -9871,17 +10539,11 @@ import { api } from '../../api/endpoints.js';
 import type { DefinitionResponse, EstimateResponse, ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../example.js';
-import { formatIsoDateShort, formatMicroGbp, formatPence } from '../../format.js';
+import { formatIsoDate, formatMicroGbp, formatPence } from '../../format.js';
 import { useNow } from '../../now.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { withKey } from '../../state/withKey.js';
-import {
-  AdvancedFields,
-  FieldErrors,
-  NumberField,
-  PoundsField,
-  type ProviderCapabilities,
-} from './AdvancedFields.js';
+import { AdvancedFields, type ProviderCapabilities } from './AdvancedFields.js';
 import { AirportListInput } from './AirportListInput.js';
 import { CoverageCheck } from './CoverageCheck.js';
 import {
@@ -9896,6 +10558,7 @@ import {
   EMPTY_ABSOLUTE,
 } from './draft.js';
 import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
+import { FieldErrors, NumberField, PoundsField } from './fields.js';
 
 /** Field errors whose path is `field` or starts with `field.` (422 `details.fields`). */
 const errorsFor = (errors: readonly FieldError[], field: string) =>
@@ -9914,7 +10577,7 @@ function ResolvedWindow({ window: w }: { window: DraftWindow }) {
   );
   return (
     <p className="w-full text-xs">
-      {COPY.resolvedWindow(formatIsoDateShort(r.departureFrom), formatIsoDateShort(r.departureTo))}
+      {COPY.resolvedWindow(formatIsoDate(r.departureFrom), formatIsoDate(r.departureTo))}
     </p>
   );
 }
@@ -9922,7 +10585,8 @@ function ResolvedWindow({ window: w }: { window: DraftWindow }) {
 /**
  * Spec §11 Definitions form. New definition: "Show estimate" calls POST /api/definitions/estimate
  * with the unsaved body and shows the estimate and budgetFit; "Create and confirm" (below them) is
- * the explicit confirmation, a POST carrying confirmedCostPence = ceil(estimate / 10 000) (spec §8.1),
+ * the explicit confirmation, a POST carrying confirmedCostPence = ceil(estimate / 10 000) (spec §8.1)
+ * and confirmedCalls = the estimate's calls (decisions 42, 43),
  * labelled with the calls and the pounds it commits to (decision 36). Editing the draft after an
  * estimate hides Create and says why. Saved definition: "Save changes" PUTs; a needsConfirmation
  * response asks again before scheduled runs proceed.
@@ -9985,6 +10649,8 @@ export function DefinitionForm({
       api.createDefinition({
         ...draftToRequest(draft),
         confirmedCostPence: confirmationPence(e.estimate.totalCostMicroGbp),
+        // why: decisions 42, 43: the calls the operator saw are confirmed with the pence; one without the other covers no run.
+        confirmedCalls: e.estimate.totalCalls,
       }),
     onSuccess: (d) => {
       accept(d, COPY.created);
@@ -9999,8 +10665,8 @@ export function DefinitionForm({
     onError,
   });
   const confirm = useMutation({
-    mutationFn: (v: { id: string; pence: number }) =>
-      api.updateDefinition(v.id, { confirmedCostPence: v.pence }),
+    mutationFn: (v: { id: string; pence: number; calls: number }) =>
+      api.updateDefinition(v.id, { confirmedCostPence: v.pence, confirmedCalls: v.calls }),
     onSuccess: (d) => accept(d, COPY.saved),
     onError,
   });
@@ -10201,16 +10867,18 @@ export function DefinitionForm({
       )}
       {saved === null && estimate !== null ? (
         <>
-          <EstimatePanel estimate={estimate.estimate} />
+          <EstimatePanel estimate={estimate.estimate} hardStop={draft.budget.maxCalls} />
           <BudgetFitPanel fit={estimate.budgetFit} />
           {fresh ? (
             <button
               type="button"
+              data-cost=""
               className="min-h-11 rounded bg-slate-900 px-3 text-white"
               onClick={() => create.mutate(estimate)}
             >
               {COPY.createConfirm(
                 estimate.estimate.totalCalls,
+                draft.budget.maxCalls,
                 formatPence(confirmationPence(estimate.estimate.totalCostMicroGbp)),
               )}
             </button>
@@ -10222,27 +10890,41 @@ export function DefinitionForm({
         </>
       ) : null}
       {saved !== null && n !== null ? (
-        <div role="alert" className="rounded border border-amber-700 bg-amber-50 p-2">
+        <div role="alert" data-cost="" className="rounded border border-amber-700 bg-amber-50 p-2">
           <p>
-            {COPY.needsConfirmation(
-              saved.estimate === null ? COPY.callsUnknown : String(saved.estimate.totalCalls),
-              formatMicroGbp(n.estimateMicroGbp),
-              n.confirmedCostPence === null ? COPY.none : formatPence(n.confirmedCostPence),
-            )}
+            {COPY.needsConfirmation({
+              calls: n.totalCalls,
+              cap: saved.budget.maxCalls,
+              estimate: formatMicroGbp(n.estimateMicroGbp),
+              confirmed:
+                n.confirmedCostPence === null
+                  ? COPY.none
+                  : COPY.confirmedWas(
+                      n.confirmedCalls === null ? COPY.none : String(n.confirmedCalls),
+                      formatPence(n.confirmedCostPence),
+                    ),
+            })}
           </p>
           <button
             type="button"
             className={button}
-            onClick={() => confirm.mutate({ id: saved.id, pence: confirmationPence(n.estimateMicroGbp) })}
+            onClick={() =>
+              confirm.mutate({
+                id: saved.id,
+                pence: confirmationPence(n.estimateMicroGbp),
+                calls: n.totalCalls,
+              })
+            }
           >
             {COPY.confirmNew(
-              saved.estimate === null ? COPY.callsUnknown : String(saved.estimate.totalCalls),
+              n.totalCalls,
+              saved.budget.maxCalls,
               formatPence(confirmationPence(n.estimateMicroGbp)),
             )}
           </button>
         </div>
       ) : null}
-      {saved?.estimate ? <EstimatePanel estimate={saved.estimate} /> : null}
+      {saved?.estimate ? <EstimatePanel estimate={saved.estimate} hardStop={saved.budget.maxCalls} /> : null}
       {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}
       {notice !== null ? <p role="status">{notice}</p> : null}
     </form>
@@ -10259,8 +10941,22 @@ export function DefinitionForm({
 `scripts/check-boundaries.mjs` — replace with:
 
 ```js
-// outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, and on
-// an airport code or a metro city name in apps/web/src or apps/api/src outside the two worked-example files.
+// outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
+// an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
+// worked-example files, and on a lint-suppression comment in any package's src or test.
+```
+
+`scripts/check-boundaries.mjs` — find:
+
+```js
+import { join } from 'node:path';
+```
+
+`scripts/check-boundaries.mjs` — replace with:
+
+```js
+import { join } from 'node:path';
+import ts from 'typescript';
 ```
 
 `scripts/check-boundaries.mjs` — find:
@@ -10273,8 +10969,46 @@ const CORE_ALLOWED_EXTERNAL = ['zod', '@noble/hashes', '@date-fns/tz'];
 
 ```js
 const CORE_ALLOWED_EXTERNAL = ['zod', '@noble/hashes', '@date-fns/tz'];
-// Three-letter words in code and comments that are also dataset airport codes; a new one is added here with a reason.
-const NOT_AIRPORT_WORDS = ['API', 'CLI', 'DIR', 'DOM', 'GBP', 'GET', 'NOT', 'WAL'];
+// Three-letter words that appear in string literals and are also dataset airport codes (decision 46): currencies,
+// HTTP, formats, standards and plain English. A later package adds the words it needs here, in its own diff.
+const NOT_AIRPORT_WORDS = [
+  'ALL',
+  'AND',
+  'API',
+  'APG',
+  'BST',
+  'CAP',
+  'CET',
+  'CLI',
+  'CSS',
+  'CSV',
+  'DIR',
+  'DOM',
+  'END',
+  'ENV',
+  'EST',
+  'FOR',
+  'GBP',
+  'GET',
+  'GMT',
+  'ISO',
+  'KEY',
+  'MAX',
+  'MIN',
+  'NEW',
+  'NOT',
+  'OFF',
+  'OUT',
+  'PDF',
+  'PNG',
+  'POS',
+  'RUN',
+  'SQL',
+  'SRC',
+  'SVG',
+  'TOP',
+  'WAL',
+];
 ```
 
 `scripts/check-boundaries.mjs` — find:
@@ -10286,9 +11020,10 @@ process.exit(bad ? 1 : 0);
 `scripts/check-boundaries.mjs` — replace with:
 
 ```js
-// why: spec §1 and plan decision 36: nothing about a specific place exists in application code. Codes come from
-// the shipped airports dataset and metro list; city names are those of every metro's airports. Only these two
-// files may name the worked example's places.
+// why: spec §1 and plan decisions 36, 46: nothing about a specific place exists in application code. A place
+// lives in data, so only string literals, template text and JSX text are read (comments and identifiers are
+// not): an airport or metro code from the shipped dataset, or the city name of any metro's airports. Only these
+// two files may name the worked example's places.
 const PLACE_ALLOWLIST = ['apps/web/src/example.ts', 'apps/api/src/tools/workedExample.ts'];
 const PLACE_TREES = ['apps/web/src', 'apps/api/src'];
 const NOT_AIRPORTS = new Set(NOT_AIRPORT_WORDS);
@@ -10298,39 +11033,157 @@ const airports = JSON.parse(readFileSync(join(dataDir, airportsFile), 'utf8')).a
 const metros = JSON.parse(readFileSync(join(dataDir, 'metros.json'), 'utf8')).metros;
 const codes = new Set([...airports.map((a) => a.iata), ...Object.keys(metros)]);
 const metroAirports = new Set(Object.values(metros).flat());
-const cities = new Set(airports.filter((a) => metroAirports.has(a.iata) && a.city !== '').map((a) => a.city));
+const cities = [
+  ...new Set(airports.filter((a) => metroAirports.has(a.iata) && a.city !== '').map((a) => a.city)),
+];
 const cityPattern = new RegExp(
-  `(?<![/\\w])(${[...cities].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?!\\w)`,
+  `(?<![/\\w])(${cities.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?!\\w)`,
   'g',
 );
+
+/** The text a file renders or stores: string literals, template pieces and JSX text, never comments or names. */
+function literalTexts(file, src) {
+  const kind = file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
+  const out = [];
+  const visit = (n) => {
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isJsxText(n)) out.push(n.text);
+    else if (ts.isTemplateExpression(n)) out.push(n.head.text, ...n.templateSpans.map((s) => s.literal.text));
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** Every place name a file's literals hold. */
+function placeOffenders(file, src) {
+  const out = [];
+  for (const text of literalTexts(file, src)) {
+    for (const m of text.matchAll(/(?<![\w-])[A-Z]{3}(?![\w-])/g)) {
+      if (codes.has(m[0]) && !NOT_AIRPORTS.has(m[0])) out.push(`${file} names the airport code ${m[0]}`);
+    }
+    for (const m of text.matchAll(cityPattern)) out.push(`${file} names the city ${m[1]}`);
+  }
+  return out;
+}
+
 for (const tree of PLACE_TREES) {
   for (const f of walk(tree)) {
     if (PLACE_ALLOWLIST.includes(f)) continue;
-    const src = readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/(?<![\w-])[A-Z]{3}(?![\w-])/g)) {
-      if (codes.has(m[0]) && !NOT_AIRPORTS.has(m[0])) {
-        console.error(`${f} names the airport code ${m[0]}; only ${PLACE_ALLOWLIST.join(' and ')} may`);
+    for (const problem of placeOffenders(f, readFileSync(f, 'utf8'))) {
+      console.error(`${problem}; only ${PLACE_ALLOWLIST.join(' and ')} may`);
+      bad++;
+    }
+  }
+}
+
+// why: decision 46: no lint-suppression comment in any package; a rule that must bend is changed in biome.json
+// with a plan decision, never silenced in place.
+const SUPPRESSION_COMMENT =
+  /\/\/[^\n]*\b(biome-ignore|eslint-disable)|\/\*(?:(?!\*\/)[\s\S])*\b(biome-ignore|eslint-disable)/;
+for (const dir of Object.values(dirs)) {
+  for (const tree of ['src', 'test']) {
+    for (const f of walk(join(dir, tree))) {
+      if (SUPPRESSION_COMMENT.test(readFileSync(f, 'utf8'))) {
+        console.error(`${f} has a lint-suppression comment (decision 46)`);
         bad++;
       }
-    }
-    for (const m of src.matchAll(cityPattern)) {
-      console.error(`${f} names the city ${m[1]}; only ${PLACE_ALLOWLIST.join(' and ')} may`);
-      bad++;
     }
   }
 }
 process.exit(bad ? 1 : 0);
 ```
 
+`test/placeCheck.test.ts` (new file):
+
+```ts
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+
+// why: the boundary script guards the whole repository, so it is run, not imported (it exits the process);
+// a scratch tree holds only what it reads, with planted files (review tsr2-012).
+const REPO = resolve(import.meta.dirname, '../../..');
+const SCRIPT = join(REPO, 'scripts/check-boundaries.mjs');
+const PACKAGES = [
+  'packages/core',
+  'packages/db',
+  'packages/providers',
+  'packages/engine',
+  'apps/api',
+  'apps/web',
+];
+let scratch: string | null = null;
+
+function tree(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), 'gmt-boundaries-'));
+  for (const p of PACKAGES) {
+    mkdirSync(join(root, p), { recursive: true });
+    copyFileSync(join(REPO, p, 'package.json'), join(root, p, 'package.json'));
+  }
+  mkdirSync(join(root, 'packages/db/data'), { recursive: true });
+  for (const f of readdirSync(join(REPO, 'packages/db/data')).filter((n) => n.endsWith('.json'))) {
+    copyFileSync(join(REPO, 'packages/db/data', f), join(root, 'packages/db/data', f));
+  }
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  }
+  scratch = root;
+  return root;
+}
+
+const run = (root: string) => spawnSync(process.execPath, [SCRIPT], { cwd: root, encoding: 'utf8' });
+
+afterEach(() => {
+  if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
+  scratch = null;
+});
+
+describe('scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46)', () => {
+  it('a clean tree passes, with codes and cities in comments, identifiers and the two allowlisted files', () => {
+    const r = run(
+      tree({
+        'apps/web/src/ok.ts':
+          "// a JFK comment and London in prose\nconst ISO = 'ISO date'; export const ALL = 'ALL';\n",
+        'apps/web/src/example.ts': "export const EXAMPLE_LABEL = 'London to New York'; const a = 'JFK';\n",
+        'apps/api/src/tools/workedExample.ts': "export const X = ['LHR', 'JFK'];\n",
+      }),
+    );
+    expect([r.status, r.stderr]).toEqual([0, '']);
+  });
+
+  it('an airport code or a metro city in a string literal fails, in web and api alike', () => {
+    const r = run(
+      tree({
+        'apps/web/src/planted.tsx': "export const p = <p>{'from JFK'}</p>;\n",
+        'apps/api/src/planted.ts': ['export const c = `New York $', '{1}`;\n'].join(''),
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/planted.tsx names the airport code JFK');
+    expect(r.stderr).toContain('apps/api/src/planted.ts names the city New York');
+  });
+
+  it('a lint-suppression comment in any package fails', () => {
+    const r = run(tree({ 'packages/db/test/x.test.ts': ['// biome', '-ignore lint/x: y\n'].join('') }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('packages/db/test/x.test.ts has a lint-suppression comment');
+  });
+});
+```
+
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/web exec vitest run test/views/definitions/form.test.tsx test/copy && pnpm boundaries`
-Expected: PASS, 19 tests; `pnpm boundaries` exits 0. Prove the place check bites: `echo "export const x = 'JFK'; // New York" > apps/web/src/planted.ts && pnpm boundaries` exits 1 naming the airport code JFK and the city New York; delete the file.
+Run: `pnpm --filter @gmt/web exec vitest run test/views/definitions/form.test.tsx test/placeCheck.test.ts test/copy && pnpm boundaries`
+Expected: PASS, 22 + 3 tests; `pnpm boundaries` exits 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web docs/examples scripts/check-boundaries.mjs && git commit -m "wp09: Definitions form in pounds, airport entry, coverage check with not-checked months; place-name check"
+git add apps/web docs/examples scripts/check-boundaries.mjs && git commit -m "wp09: Definitions form in pounds, metro expansion, confirmations with calls; place and suppression checks"
 ```
 
 ### Task 9.13: Definitions view, estimate-then-create flow, final App wiring
@@ -10344,7 +11197,7 @@ git add apps/web docs/examples scripts/check-boundaries.mjs && git commit -m "wp
 - Consumes: `DefinitionForm`, `CoverageCheck`, `EstimatePanel`, `BudgetFitPanel` (Task 9.12); every view of Tasks 9.5–9.11; `StatusBar` (Task 9.6); `POST /api/definitions/estimate` (`{ estimate, budgetFit }`), `POST /api/definitions` (with `confirmedCostPence?`), `PUT /api/definitions/:id` (`needsConfirmation`, `notices`).
 - Produces: `DefinitionsView()`, the final `App()`.
 
-The confirmation keeps both of decision 25's triggers visible: the create button and the re-confirmation state calls and pounds, since on the $40 plan the pounds are £0 and the calls are what is committed. The contract carries no `confirmedCalls` yet (§13).
+The confirmation keeps both of decision 25's triggers visible and sent: the create button and the re-confirmation state about-calls with the hard stop and pounds, and send `confirmedCalls` beside `confirmedCostPence`, since on the $40 plan the pounds are £0 and the calls are what is committed (decisions 42–44). With `/providers` synthetic and real rows the red banner shows once.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -10475,7 +11328,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
 });
 
 describe('estimate, then the create click as the explicit confirmation (spec §8.1, §11)', () => {
-  it('estimates the unsaved body; Create, below the estimate, names calls and pounds and POSTs confirmedCostPence', async () => {
+  it('estimates the unsaved body; Create, below the estimate, names calls and pounds and POSTs both confirmation figures', async () => {
     const estimates: unknown[] = [];
     const creates: unknown[] = [];
     server.use(
@@ -10495,21 +11348,28 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     const panel = await screen.findByRole('region', { name: 'Estimate' });
     expect(within(panel).getByText('126 cells')).toBeInTheDocument();
     expect(within(panel).getByText('Travelpayouts discovery: 14 calls · £0 · about 20s')).toBeInTheDocument();
-    expect(within(panel).getByText('total 154 calls, £0.02 per run · about 10m')).toBeInTheDocument();
+    expect(
+      within(panel).getByText('about 154 calls (hard stop 2000), £0.02 per run · about 10m'),
+    ).toBeInTheDocument();
     expect(
       screen.getByText('provider-month:searchapi: 616 estimated a month, cap 10000'),
     ).toBeInTheDocument();
     expect(estimates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: true });
     expect(estimates[0]).not.toHaveProperty('confirmedCostPence');
     const createButton = screen.getByRole('button', {
-      name: 'Create and confirm up to 154 calls, £0.02 per run',
+      name: 'Create and confirm about 154 calls (hard stop 2000), £0.02 per run',
     });
     // why: the operator sees the breakdown before the amount they confirm (review UI-11).
     expect(panel.compareDocumentPosition(createButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(creates).toEqual([]);
     await user.click(createButton);
     await expect.poll(() => creates.length).toBe(1);
-    expect(creates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: true, confirmedCostPence: 2 });
+    expect(creates[0]).toMatchObject({
+      origins: ['LHR', 'LGW'],
+      enabled: true,
+      confirmedCostPence: 2,
+      confirmedCalls: 154,
+    });
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Created. Scheduled runs use the calls and cost you confirmed.',
     );
@@ -10561,8 +11421,15 @@ describe('saved definitions (spec §8.1)', () => {
         puts.push(await request.json());
         return HttpResponse.json(
           puts.length === 1
-            ? definition({ needsConfirmation: { estimateMicroGbp: 2_500_000, confirmedCostPence: 100 } })
-            : definition({ confirmedCostPence: 250 }),
+            ? definition({
+                needsConfirmation: {
+                  estimateMicroGbp: 2_500_000,
+                  totalCalls: 300,
+                  confirmedCostPence: 100,
+                  confirmedCalls: 154,
+                },
+              })
+            : definition({ confirmedCostPence: 250, confirmedCalls: 300 }),
         );
       }),
     );
@@ -10570,12 +11437,15 @@ describe('saved definitions (spec §8.1)', () => {
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
     expect(
       await screen.findByText(
-        'The new estimate (up to 154 calls, £2.50 per run) is above what you confirmed (£1). Scheduled runs are skipped until you confirm.',
+        'The new estimate, about 300 calls (hard stop 2000) and £2.50 per run, is above what you confirmed (154 calls, £1). Scheduled runs are skipped until you confirm.',
       ),
     ).toBeInTheDocument();
     expect(puts[0]).not.toHaveProperty('confirmedCostPence');
-    await user.click(screen.getByRole('button', { name: 'Confirm up to 154 calls, £2.50 per run' }));
-    await expect.poll(() => puts.at(-1)).toEqual({ confirmedCostPence: 250 });
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm about 300 calls (hard stop 2000), £2.50 per run' }),
+    );
+    // why: the call trigger comes from the contract's needsConfirmation (decisions 42, 43), never from a stale estimate.
+    await expect.poll(() => puts.at(-1)).toEqual({ confirmedCostPence: 250, confirmedCalls: 300 });
   });
 
   it("shows the definition's notices from the API", async () => {
@@ -10618,6 +11488,13 @@ describe('the App (spec §11 layout)', () => {
     expect(screen.getByRole('checkbox', { name: 'partially verified' })).toBeChecked();
   });
 
+  it('with /providers synthetic and real rows the red banner shows once (spec §5.5)', async () => {
+    server.use(http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))));
+    renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
+    await screen.findByRole('table', { name: 'Round trips found' });
+    expect(screen.getAllByText(/Synthetic data: the fixture provider is enabled/)).toHaveLength(1);
+  });
+
   it('Coverage is reachable from the Results header link', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
     await user.click(await screen.findByRole('link', { name: /^discovery: / }));
@@ -10633,7 +11510,7 @@ Expected: FAIL with `Failed to resolve import "../../../src/views/Definitions/De
 
 - [ ] **Step 2b: Prove the create click is the confirmation**
 
-After Step 3, temporarily drop `confirmedCostPence` from the body `create` sends in `DefinitionForm`. Run the create test: "estimates the unsaved body; Create … POSTs confirmedCostPence" fails at `toMatchObject` on `creates[0]` (missing `confirmedCostPence: 2`). Restore it.
+After Step 3, temporarily drop `confirmedCalls` from the body `create` sends in `DefinitionForm`. Run the create test: "estimates the unsaved body; Create … POSTs both confirmation figures" fails at `toMatchObject` on `creates[0]` (missing `confirmedCalls: 154`). Restore it.
 
 - [ ] **Step 3: Implement**
 
@@ -10758,7 +11635,7 @@ export function App() {
           {view === 'results' && selected !== null ? <ResultsView definition={selected} /> : null}
           {view === 'coverage' && selected !== null ? <CoverageView definition={selected} /> : null}
           {view === 'calendar' || view === 'duration' || view === 'history' || view === 'alerts' ? (
-            <Placeholder />
+            <Placeholder hint={view === 'calendar' ? COPY.calendarPlaceholderHint : null} />
           ) : null}
           {view === 'definitions' ? <DefinitionsView /> : null}
           {view === 'providers' ? <ProvidersView /> : null}
@@ -10772,7 +11649,7 @@ export function App() {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/definitions test/app test/copy`
-Expected: PASS, 12 + 19 + 11 tests.
+Expected: PASS, 13 + 22 + 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -10789,7 +11666,7 @@ git add apps/web && git commit -m "wp09: Definitions view, create-and-confirm in
 - Consumes: `App` (Task 9.13), `findBannedWords`, `BANNED_WORD_ALLOWLIST` (WP0).
 - Produces: nothing new; closes spec §9 item 6's banned-word row for WP9's views.
 
-Every view renders with `synthetic: true`, a paused run, every verdict class in the URL (core hides `failed` by default, spec §6.9, so the URL asks for all four), a truncated calendar row, the calendar-gap banner, every results row expanded, and the Definitions advanced fold open; the sweep reads the text and every `title`, `aria-label`, `placeholder` and `alt`.
+Every view renders with `synthetic: true`, a paused run, every verdict class in the URL (core hides `failed` by default, spec §6.9, so the URL asks for all four), a truncated calendar row, the calendar-gap banner, every results row expanded, and the Definitions advanced fold open; the sweep reads the text and every `title`, `aria-label`, `placeholder` and `alt`, and checks that every "£" in the DOM sits inside a `PriceCell`, a `[data-cost]` element (a cost or cap: the status bar's spend, Run now, the estimate, View D's ledger cost, the confirmation) or a form label (reviews tsr-003, prov-r2-007).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -10824,7 +11701,26 @@ function renderedCopy(): string {
   return [document.body.textContent ?? '', ...attrs].join('\n');
 }
 
-describe('rendered views contain no banned word (spec §11, §9 item 6)', () => {
+/**
+ * Every "£" in the DOM sits inside a PriceCell (a fare, with provenance), a [data-cost] element (a cost
+ * or a cap) or a form label ("Max price (£)"), on every view (reviews tsr-003, prov-r2-007).
+ */
+function poundsOutsidePrices(): string[] {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const outside: string[] = [];
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    const host = n.parentElement;
+    if (
+      n.textContent?.includes('£') &&
+      host?.closest('[data-testid="price-cell"], [data-cost], label') === null
+    ) {
+      outside.push(n.textContent);
+    }
+  }
+  return outside;
+}
+
+describe('rendered views contain no banned word, and no "£" outside a price or a cost (spec §11, §9 item 6)', () => {
   for (const view of VIEWS) {
     it(`view=${view}`, async () => {
       server.use(
@@ -10859,6 +11755,7 @@ describe('rendered views contain no banned word (spec §11, §9 item 6)', () => 
         await user.click(await screen.findByText('Advanced: constraints and policy'));
       const hits = findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST);
       expect(hits.map((h) => h.word)).toEqual([]);
+      expect(poundsOutsidePrices()).toEqual([]);
     });
   }
 });
@@ -10890,7 +11787,7 @@ git add apps/web && git commit -m "wp09: banned-word sweep over every rendered v
 
 The plan's Review Focus lines this package owns:
 
-- **Review focus 1 (WP9 half): "Operator types a lowercase or metropolitan IATA code (`lhr`, `LON`, `NYC`) into the Definitions form or the example JSON. Expected: upper-cased before validation; a metro code is rejected with a message naming it as a city code and listing the airports the table maps to it."** WP1 owns the rejection and its message; WP9 owns the form. Pinned in Task 9.12, `test/views/definitions/form.test.tsx`: "upper-cases a three-letter code on blur, and only a three-letter code", "Enter adds without a blur, a pasted " lgw " is trimmed, and a duplicate is refused", "a metro code the airports table maps is offered as its airports at once", and the field-error table whose first case is the API's `origins.0` metro-code message under Origins, linked to the input. The API's `iataSchema` also upper-cases, so the blur rule is the visible half, not the only one. The example JSON path is covered by `EXAMPLE_DEFINITION` being parsed through `definitionCreateRequestSchema` at load; WP12's test keeps the JSON and the import equal.
+- **Review focus 1 (WP9 half): "Operator types a lowercase or metropolitan IATA code (`lhr`, `LON`, `NYC`) into the Definitions form or the example JSON. Expected: upper-cased before validation; a metro code is rejected with a message naming it as a city code and listing the airports the table maps to it."** WP1 owns the rejection and its message; WP9 owns the form, where decision 44 goes one step further: a metro code the airports table maps expands to its member airports on Enter or Add and says so. Pinned in Task 9.12, `test/views/definitions/form.test.tsx`: "upper-cases a three-letter code on blur, and only a three-letter code", "Enter adds without a blur, a pasted " lgw " is trimmed, and a duplicate is refused", "a metro code expands to its member airports on Enter / on Add, before the autocomplete answers", and the field-error table whose first case is the API's `origins.0` metro-code message under Origins, linked to the input (the API stays the validator for a code the table does not know). The API's `iataSchema` also upper-cases, so the blur rule is the visible half, not the only one. The example JSON path is covered by `EXAMPLE_DEFINITION` being parsed through `definitionCreateRequestSchema` at load; WP12's test keeps the JSON and the import equal.
 
 Review focus 3 (browser outside Europe/London) is WP10's; every date the web prints goes through `format.ts`, which formats by string slicing and epoch-day arithmetic, never through `Date`, so WP10's `TZ` test covers the Results date columns without a change here.
 
@@ -10901,29 +11798,25 @@ Run from the repository root, in order; each must give the stated outcome.
 1. `pnpm install --frozen-lockfile` → exits 0 (no dependency changes: WP0 pinned every web dependency).
 2. `pnpm lint:fix && pnpm lint` → `biome check` reports no errors.
 3. `pnpm --filter @gmt/web typecheck` → exits 0 (both `tsconfig.json` and `tsconfig.test.json`). `pnpm -r typecheck` → exits 0.
-4. `pnpm --filter @gmt/web test` → 207 tests pass in 18 files, none skipped, and the coverage report meets **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` and **100% on every metric** for `Provenance.tsx`, `PriceCell.tsx`, `PriceBoundary.tsx`, `BookingAction.tsx`, `urlState.ts` and `resultsState.ts`, with no threshold error. The floors are the spec §9 web floors; the 100% files are the ones whose gaps would be provenance, link or state gaps.
+4. `pnpm --filter @gmt/web test` → 230 tests pass in 19 files, none skipped, and the coverage report meets **lines ≥ 70%, statements ≥ 70%, functions ≥ 70%, branches ≥ 60%** for `apps/web/src` and **100% on every metric** for `Provenance.tsx`, `PriceCell.tsx`, `PriceBoundary.tsx`, `BookingAction.tsx`, `urlState.ts` and `resultsState.ts`, with no threshold error. The floors are the spec §9 web floors; the 100% files are the ones whose gaps would be provenance, link or state gaps.
 5. `pnpm --filter @gmt/core test` → 100% on every metric with Task 9.0's additions and the four `test:tz` runs green. `pnpm test` → every package green with its thresholds.
-6. `pnpm boundaries` → exits 0: `@gmt/web` imports no workspace package except `@gmt/core`, and no airport code or metro city name appears in `apps/web/src` or `apps/api/src` outside `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts`.
-7. `pnpm --filter @gmt/web build` → exits 0 and writes `apps/web/dist/index.html` plus hashed assets under `apps/web/dist/assets/`.
-8. `grep -rn "style={" apps/web/src` → no output (spec §4 CSP `default-src 'self'` blocks inline styles).
-9. `grep -rn "process\.env\|import\.meta\.env" apps/web/src` → no output (no mode gate: responses are parsed in every mode).
-10. The source guard of Task 9.2 is the cast, copy and money check (no `as` except `as const` in `src` or `test`); the rendered sweep of Task 9.14 and the catalogue test are the banned-word checks.
+6. `pnpm boundaries` → exits 0: `@gmt/web` imports no workspace package except `@gmt/core`; no airport code or metro city name appears in a string literal of `apps/web/src` or `apps/api/src` outside `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts`; no package's `src` or `test` holds a `biome-ignore` or `eslint-disable` comment.
+7. `pnpm casts` (WP7's `scripts/check-casts.mjs`, decision 48) → exits 0: no `as` except `as const`, and no angle-bracket assertion, in `apps/web` or Task 9.0's core files.
+8. `pnpm --filter @gmt/web build` → exits 0 and writes `apps/web/dist/index.html` plus hashed assets under `apps/web/dist/assets/`.
+9. `grep -rn "style={" apps/web/src` → no output (spec §4 CSP `default-src 'self'` blocks inline styles).
+10. `grep -rn "process\.env\|import\.meta\.env" apps/web/src` → no output (no mode gate: responses are parsed in every mode).
 11. With WP8 merged: `pnpm dev`, open `http://localhost:5173/?view=providers` (API calls go to `/api` through the Vite proxy) with `ALLOW_FIXTURE_PROVIDER=i-understand-this-is-fake`, `NODE_ENV=development`, `DATABASE_PATH=./data/dev.fixture.db` → the red synthetic banner shows on every view; without those three variables and with `TRAVELPAYOUTS_TOKEN` set → no banner, and "Check free coverage" on Definitions returns a table. Record both screenshots in the PR.
 
 ## 11. Open questions
 
-None requires the operator's judgement. The review round 1 items marked "needs judgment" were ruled by the operator and are folded into the tasks: the headline through `PriceCell`, following the filters (Task 9.8); contract parsing in every mode (Task 9.3); the place-name check (Task 9.12); the departure-date filter in core (Task 9.0); SearchApi itinerary age `'unknown'` (Tasks 9.1, 9.3, 9.11); calls beside pounds in every confirmation (Tasks 9.6, 9.12, 9.13); the `/providers` error state and the synthetic-row test (Tasks 9.5, 9.8); "searched" kept with "with a price" beside it and status-bar totals over answered outcomes only (Tasks 9.6, 9.10); `truncated` rendered as "cheapest of the rows read" (Tasks 9.0, 9.1, 9.8, 9.9); the provider's own search link kept, a Google Flights deep link deferred (Task 9.7); spec-mandated columns with a source-and-age line in the wide table, 44 px targets, the native datalist (Tasks 9.1, 9.5, 9.8, 9.12).
+None requires the operator's judgement. The items review rounds 1 and 2 marked "needs judgment" were ruled by the operator (decisions 36, 42, 44, 46, 48) and are folded into the tasks: the headline through `PriceCell`, following the filters (Task 9.8); contract parsing in every mode (Task 9.3); the place-name check on string literals with a committed word list, and no suppression comments anywhere (Tasks 9.2, 9.12); the departure-date filter and the run's `expandTop` in core (Task 9.0); staleness by fetch age with "vendor's cache age unknown" as a label (Tasks 9.1, 9.8); the unconfirmed-price badge wherever a price renders, never a double negative (Tasks 9.1, 9.7, 9.8); calls sent and stated with every confirmation, worded "about N calls (hard stop M)" (Tasks 9.6, 9.12, 9.13); metro codes expanding on Enter or Add (Task 9.12); the shared names of decision 46 (`format.ts`, `PriceCell` `compact`, `ViewHeader variant="span"`); the `/providers` error state and the synthetic tests (Tasks 9.5, 9.8, 9.13); "searched" kept with "with a price" beside it (Task 9.10); the provider's own search link kept, a Google Flights deep link and a max-travel-time filter in Phase 4 (decision 36); the native datalist accepted.
 
 ## 12. Changes outside `apps/web`
 
-- `packages/core` (Task 9.0): `truncated: z.boolean()` on `priceCellSchema` and `resultRowSchema`; `ResultFilters.departure` and its check in `filterRows`; `formatAgo` and `formatFetchedAgo` exported from `labels/age.ts` (`formatAgeFull` now uses the latter); `test/helpers/rows.ts` and `test/api-contract/contract.test.ts` gain `truncated: false`; a new `test/results/webAdditions.test.ts`. Recorded in decision 36.
-- `scripts/check-boundaries.mjs` (Task 9.12): the place-name check (decision 36), reading the airports dataset and `metros.json` from `packages/db/data`, with `NOT_AIRPORT_WORDS` for three-letter words that collide with airport codes.
+- `packages/core` (Task 9.0): `truncated: z.boolean()` on `priceCellSchema` and `resultRowSchema`; `expandTop` on `executionSummarySchema`; `ResultFilters.departure` and its check in `filterRows`; `formatAgo` and `formatFetchedAgo` exported from `labels/age.ts` (the private `ago` is gone); `test/helpers/rows.ts` and `test/api-contract/contract.test.ts` gain `truncated: false`; a new `test/results/webAdditions.test.ts`. Recorded in decisions 36 and 42.
+- `scripts/check-boundaries.mjs` (Task 9.12): the place-name check over string literals (decisions 36, 46), reading the airports dataset and `metros.json` from `packages/db/data` with `NOT_AIRPORT_WORDS`, and the suppression-comment check (decision 46); `apps/web/test/placeCheck.test.ts` runs it against scratch trees.
 - `docs/examples/london-new-york.json` (Task 9.12): a stand-in only when absent; WP12 owns it.
 
 ## 13. For the plan (not yet recorded there)
 
-1. **Dispatch order for the contract additions.** Task 9.0 makes `truncated` required on every price cell and result row; WP8's results, calendar, duration and calendar-gap routes must fill it, so Task 9.0 lands on main before WP8's Task 8.11 and 8.12 (it touches only core and has no web dependency). Decision 38's WP10 contract additions have the same shape.
-2. **`confirmedCalls` in the contract.** Decision 37 adds `confirmed_calls` beside `confirmed_cost_pence`, and decision 25 triggers confirmation on calls as well as pence, but `definitionCreateRequestSchema`, `definitionUpdateRequestSchema` and `needsConfirmation` carry pence only. The web states calls in every confirmation (from the estimate) and sends `confirmedCostPence`; the contract owner adds `confirmedCalls?` to both request bodies and the trigger to `needsConfirmation`, and the create and confirm clicks then send `estimate.totalCalls`.
-3. **The run's own `expandTop`.** The Results header's "(E outbounds each)" can only come from the current definition; WP9 shows it only when the definition is unchanged since the run started. `coverageSummarySchema` (or the execution summary) should carry the snapshot's `expandTop`.
-4. **A per-cell verify estimate.** The verify buttons say they use billed calls but the contract has no per-cell call cap or remaining headroom; decision 38 asks WP10's button to show both, so the contract needs the field (WP8 can compute it from decision 25's child cap).
-5. **Plan "Web" paragraph.** It still says the boundary script allowlists `docs/examples/` and `apps/web/src/example.ts`; decision 36 allowlists exactly `apps/web/src/example.ts` and `apps/api/src/tools/workedExample.ts` and scans only `apps/web/src` and `apps/api/src`. The paragraph should be reworded to match.
+1. **Decision 44 and 46 on the scrollable table.** Decision 44 says "a labelled focusable region" and decision 46 "a labelled region without `tabIndex`". This brief follows decision 46 (View D's table scrolls in a labelled `section` without `tabIndex`; current browsers make a scrollable box keyboard-focusable themselves); decision 44's wording could say the same.
