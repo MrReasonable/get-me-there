@@ -4,9 +4,9 @@ import type { Orchestrator } from './orchestrator.js';
 import { isStalePaused, supersede } from './resume.js';
 
 /**
- * Spec §8.2 tick, in order: (1) cancel and supersede a stale paused run (isStalePaused); (2) resume a paused_error
- * whose resume_after has passed, or a paused_budget whose remaining estimate now passes the cap check (both through
- * the compare-and-set); (3) any other active execution, or a resume that was refused, blocks the schedule — recorded
+ * Spec §8.2 tick, in order: (1) cancel and supersede a stale paused run (isStalePaused); (2) resume a paused_error or
+ * paused_budget whose resume_after has passed, through the compare-and-set and its cap check (an execution-* budget
+ * pause has no resume_after and waits for a manual /resume, ruling 4); (3) any other active execution, or a resume that was refused, blocks the schedule — recorded
  * in `blocked` as "schedule blocked since <date>" (ssr-19); (4) otherwise pre-start checks and start. A tick that
  * starts or resumes clears the definition's entry. A deleted or disabled definition is never scheduled (decision 5),
  * and a definition without a schedule is never ticked: a stale run's one-shot job supersedes it without a tick
@@ -35,9 +35,12 @@ export async function tickDefinition(
     if (isStalePaused(active, now)) {
       await supersede(ctx, orch, active);
     } else if (
-      (active.status === 'paused_error' && active.resumeAfter !== null && active.resumeAfter <= now) ||
-      active.status === 'paused_budget'
+      (active.status === 'paused_error' || active.status === 'paused_budget') &&
+      active.resumeAfter !== null &&
+      active.resumeAfter <= now
     ) {
+      // why: ruling 4 — only a pause with a window to reopen (a provider or global cap, resume_after set) resumes
+      // automatically; an execution-* paused_budget has none and needs a manual /resume (spec §8.1, cost I-1)
       const r = await orch.resume(active.id, { manual: false });
       log.info(
         { executionId: active.id, status: active.status, result: r.ok ? 'resumed' : r.code },

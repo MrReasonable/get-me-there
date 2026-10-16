@@ -1,6 +1,8 @@
-import { asIsoDateTime } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
+import { asIsoDateTime, type IsoDateTime } from '@gmt/core';
+import { describe, expect, it, vi } from 'vitest';
+import { buildContext } from '../src/context.js';
 import { isStalePaused, SUPERSEDED } from '../src/resume.js';
+import { tickDefinition } from '../src/tick.js';
 import {
   createHarness,
   FIXTURE_COST_MICRO_GBP,
@@ -118,6 +120,26 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
     await o.tick(def.id);
     expect(o.blockedSince()).toBeNull();
     expect((await h.waitForSettled(e.id)).status).toBe('completed');
+  });
+
+  it('never resumes an execution-* paused_budget (no resume_after): it needs a manual /resume, so the schedule is blocked (ruling 4, cost I-1)', async () => {
+    const h = createHarness({ fixtureConcurrency: 1 });
+    // why: the start needs 5 of 6 calls; 3 spent by a concurrent pass leave room for 3 of the 4 tiles
+    const def = twoPairs(h, { budget: { maxCalls: 6, maxFreeCalls: 1000, maxCostMicroGbp: 1_000_000_000 } });
+    h.onStageStart('discovery', (id) =>
+      h.spendLedger({ providerId: 'fixture', rows: 3, costMicroGbpEach: 0, executionId: id }),
+    );
+    const e = await h.runToCompletion(h.orch(), def.id);
+    h.clearHooks();
+    expect(e).toMatchObject({ status: 'paused_budget', resumeAfter: null });
+    const ctx = buildContext(h.deps, h.options);
+    const orch = h.orch();
+    const resume = vi.fn(orch.resume);
+    const blocked = new Map<string, IsoDateTime>();
+    await tickDefinition(ctx, { start: orch.start, resume, cancel: orch.cancel }, def.id, blocked);
+    expect(resume).not.toHaveBeenCalled();
+    expect(blocked.get(def.id)).toBe(h.clock.now());
+    expect(h.repos.executions.get(e.id)?.status).toBe('paused_budget');
   });
 
   it('cancels and supersedes a paused run older than 0.9 × discoveryRefreshHours whose resume_after is not in the future', async () => {
