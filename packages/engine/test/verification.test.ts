@@ -12,6 +12,10 @@ import {
 } from '@gmt/core';
 import type { FixtureRule } from '@gmt/providers/fixture';
 import { describe, expect, it, vi } from 'vitest';
+import { buildContext } from '../src/context.js';
+import { newRun } from '../src/run.js';
+import { buildSnapshot } from '../src/snapshot.js';
+import { runVerification } from '../src/stages/verification.js';
 import {
   createHarness,
   FIXTURE_RULES,
@@ -22,6 +26,7 @@ import {
   LGW,
   LHR,
   verificationOf,
+  verificationOnly,
   withVerification,
 } from './support/harness.js';
 import { mapOffers, mapResult } from './support/wrappers.js';
@@ -436,5 +441,34 @@ describe('route price history (spec §7 rev 10)', () => {
         (l) => l.msg === 'verification: route history points not in GBP dropped' && l.fields.dropped === 1,
       ),
     ).toBe(true);
+  });
+
+  it("falls back to the stride when no discovery provider sells the snapshot's cabin (ruling 3, ssr I3)", async () => {
+    const h = createHarness();
+    const d = h.createDefinition({ providers: verificationOnly() });
+    const ctx = buildContext(h.deps, h.options);
+    const built = buildSnapshot(ctx, d);
+    // why: layer A registers only the fixture, so the discovery provider that does not sell the cabin exists in the
+    // snapshot alone (an unregistered id sells nothing), the way the trial preset's economy-only discovery would
+    const snapshot = {
+      ...built.snapshot,
+      providers: { ...built.snapshot.providers, discovery: ['travelpayouts' as const] },
+    };
+    const exec = ctx.db.immediateTransaction(() => {
+      const e = h.repos.executions.create({
+        definitionId: d.id,
+        isChild: false,
+        cell: null,
+        snapshot,
+        estimate: null,
+        trigger: 'manual',
+        status: 'running',
+      });
+      h.repos.cells.seed(e.id, built.cells, []);
+      return e;
+    });
+    await runVerification(ctx, newRun(ctx, exec, { manual: false, fresh: true, blocked: new Set() }));
+    expect(h.repos.cells.selected(exec.id).map((x) => x.reason)).toEqual(['stride', 'stride']);
+    expect(h.requests.filter((q) => q.kind === 'itinerary').length).toBeGreaterThan(0);
   });
 });

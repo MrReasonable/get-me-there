@@ -16,7 +16,7 @@ import { type LineKey, lineKey } from './lines.js';
 import { notifyOperator } from './notify.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
-import { buildSnapshot } from './snapshot.js';
+import { buildSnapshot, sellsCabin } from './snapshot.js';
 import { skipBlockedDiscovery } from './stages/reuse.js';
 import type { Estimate, StartOptions, StartResult } from './types.js';
 
@@ -258,7 +258,7 @@ export async function startExecution(
       ctx.repos.cells.seed(e.id, cells, discovery);
       for (const id of discovery) {
         // why: spec rev 10 — a provider that does not sell the snapshot's cabin is never called; its cells are no_data
-        if (!(ctx.providers.get(id)?.cabins ?? []).includes(snapshot.cabin))
+        if (!sellsCabin(ctx, id, snapshot.cabin))
           ctx.repos.cells.markNoData(e.id, 'discovery', id, 'cabin-not-offered');
         else if (check.blocked.has(lineKey('discovery', id)))
           skipBlockedDiscovery(ctx, { executionId: e.id, definitionId: def.id, snapshot }, id);

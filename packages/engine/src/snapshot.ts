@@ -1,4 +1,5 @@
 import {
+  type Cabin,
   type Cell,
   type CellKey,
   cellKeyString,
@@ -18,6 +19,14 @@ export interface BuiltSnapshot {
   cells: Cell[];
   notes: string[];
 }
+/**
+ * Spec rev 10: whether a provider sells the snapshot's cabin. One that does not is never called: its cells are
+ * no_data:cabin-not-offered, and it does not count as a discovery provider for selection (ruling 3, ssr I3).
+ */
+export function sellsCabin(ctx: EngineContext, providerId: ProviderId, cabin: Cabin): boolean {
+  return (ctx.providers.get(providerId)?.cabins ?? []).includes(cabin);
+}
+
 /** Who started the run; the same union as `StartOptions['trigger']`, never restated (code-architect review 17). */
 export type Trigger = StartOptions['trigger'];
 

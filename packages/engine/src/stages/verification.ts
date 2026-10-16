@@ -26,6 +26,7 @@ import {
   settleLane,
   stopRun,
 } from '../run.js';
+import { sellsCabin } from '../snapshot.js';
 import { normaliseDeps } from './discovery.js';
 
 /** The itinerary query for one cell from the frozen snapshot (spec §5.1 ItineraryQuery). */
@@ -52,7 +53,8 @@ function discoveryRollUps(ctx: EngineContext, executionId: string): Map<string, 
 /**
  * Spec §6.7: selection once, persisted with verification seeding in one transaction (spec §7); cells whose departure
  * date has arrived are never candidates (spec §8.1 departed, ssr-05) and are marked skipped:departed in the same
- * transaction; providers that do not sell the cabin, or are blocked for budget or disabled, are marked too. A child
+ * transaction; providers that do not sell the cabin, or are blocked for budget or disabled, are marked too. Only the
+ * discovery providers that sell the cabin count for step 5's "no discovery provider" stride (ruling 3). A child
  * bypasses selection.
  */
 function persistSelection(ctx: EngineContext, run: RunState, ids: readonly ProviderId[]): void {
@@ -72,13 +74,15 @@ function persistSelection(ctx: EngineContext, run: RunState, ids: readonly Provi
           policy,
           generateCells(run.snapshot.resolved).filter(live),
           discoveryRollUps(ctx, run.executionId),
-          run.snapshot.providers.discovery.length > 0,
+          // why: ruling 3 — a discovery provider that does not sell the cabin prices nothing, so with no other the
+          // step-5 stride applies rather than an empty ranking (ssr I3)
+          run.snapshot.providers.discovery.some((id) => sellsCabin(ctx, id, run.snapshot.cabin)),
         );
   ctx.db.transaction(() => {
     ctx.repos.cells.seedVerification(run.executionId, selection, allCells, [...ids]);
     ctx.repos.cells.markDeparted(run.executionId, today);
     for (const id of ids) {
-      if (!(ctx.providers.get(id)?.cabins ?? []).includes(run.snapshot.cabin))
+      if (!sellsCabin(ctx, id, run.snapshot.cabin))
         ctx.repos.cells.markNoData(run.executionId, 'verification', id, 'cabin-not-offered');
       else if (run.blocked.has(lineKey('verification', id)))
         markRemaining(ctx, run, 'verification', id, 'budget');
