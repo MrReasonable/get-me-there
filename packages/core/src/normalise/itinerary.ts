@@ -16,7 +16,7 @@ import type { Cabin, FxInfo, ProviderId } from '../types/provenance.js';
 import { canonicalCarrier, canonicalFlightNumber } from './carrier.js';
 import { itineraryHash } from './hashing.js';
 import { localMinute, requireZone, vendorInstant, wallToInstant } from './localTime.js';
-import { ECB_CURRENCIES, toGbp } from './money.js';
+import { priceInGbp } from './money.js';
 import { LINK_ALLOWLIST, validateVendorUrl } from './vendorUrl.js';
 
 /** What the pure normaliser needs from the engine (which reads the airports and FX repositories). */
@@ -133,16 +133,9 @@ function directionMinutes(direction: NonEmpty<TimedSegment>): number {
   return Math.round((lastOf(direction).arriveMs - direction[0].departMs) / MINUTE_MS);
 }
 
+// why: arch-r2-002 — the money step is priceInGbp, shared with the engine's calendar prices, so the two cannot diverge
 function money(raw: RawOffer, deps: NormaliseDeps): { pricePence: number; fx: FxInfo } {
-  const currency = raw.currency.toUpperCase();
-  if (currency === 'GBP') return { pricePence: toGbp(raw.amountMinor, 'GBP', 1), fx: { converted: false } };
-  if (!ECB_CURRENCIES.includes(currency)) throw new NormalisationError('currency-unsupported', currency);
-  const rate = deps.rateFor(currency);
-  if (rate === null) throw new NormalisationError('fx-unavailable', currency);
-  return {
-    pricePence: toGbp(raw.amountMinor, currency, rate.rateNano),
-    fx: { converted: true, rateNano: rate.rateNano, rateDate: rate.rateDate, source: rate.source },
-  };
+  return priceInGbp(raw, (currency) => deps.rateFor(currency));
 }
 
 /**

@@ -1,5 +1,6 @@
 import {
   type CapabilityInfo,
+  type CellIssue,
   type CellKey,
   cellKeyString,
   type DefinitionSnapshot,
@@ -7,10 +8,10 @@ import {
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type Iata,
-  NormalisationError,
   ProviderError,
   type ProviderId,
   type TilePlan,
+  TRUNCATED_NOTE,
 } from '@gmt/core';
 import type { TileWrite } from '@gmt/db';
 import type { EngineContext } from '../context.js';
@@ -173,10 +174,16 @@ async function fetchTiles(
 }
 
 /**
- * Writes one tile atomically (spec §7 "each tile's prices, outcomes and roll-ups"): covered cells with a price that
- * normalises → priced; in noFares → empty; otherwise → no_data (not evidence of no flights). Cells whose price cannot
- * be normalised become `error` with the normalisation reason through writeTileError, in the same transaction
- * (WP3's writeTile takes only priced, empty and no_data; po-009). The repository resets auto_resume_count in it.
+ * Writes one tile atomically (spec §7 "each tile's prices, outcomes and roll-ups"). Per covered cell:
+ * - a price that normalises → `priced` (reason `offers-dropped:n` when the adapter also reported rows it dropped for
+ *   that cell in `cellIssues`, decision 28; last_error "cheapest of the rows read" when the tile is `truncated`,
+ *   decision 30);
+ * - a price that cannot be normalised → `error` with the normalisation reason;
+ * - no price but a `cellIssues` entry (rows dropped or a cell left unread) → `error` with the issue's reason and detail,
+ *   never `no_data` (spec §8.1);
+ * - in noFares → `empty`; otherwise → `no_data` (not evidence of no flights).
+ * Errors go through writeTileError in the same transaction (WP3's writeTile takes only priced, empty and no_data;
+ * po-009). The repository resets auto_resume_count in it.
  */
 export function commitTile(
   ctx: EngineContext,
@@ -186,8 +193,28 @@ export function commitTile(
   result: Extract<DiscoveryTileResult, { kind: 'tile' }>,
 ): void {
   const reduced = reduceTile(result.prices);
+  if (reduced.kind === 'mixed-currency') {
+    // why: two currencies in one response means it was misread; treat it as the vendor-shape error it is
+    const err = new ProviderError({
+      kind: 'parse',
+      retryable: false,
+      providerId,
+      message: `tile ${result.index} mixed currencies: ${reduced.currencies.join(', ')}`,
+    });
+    onFailure(ctx, run, providerId, 'discovery', result.coveredCells, err);
+    return;
+  }
   const pointOfSale = result.pointOfSale; // why: spec rev 10 — the adapter states the point of sale of what it fetched
   const noFares = new Set(result.noFares.map(cellKeyString));
+  const issues = new Map<string, CellIssue>();
+  for (const i of result.cellIssues ?? []) {
+    const key = cellKeyString(i.cell);
+    const seen = issues.get(key);
+    issues.set(
+      key,
+      seen === undefined ? i : { ...seen, offersDropped: seen.offersDropped + i.offersDropped },
+    );
+  }
   const write: TileWrite = {
     tileIndex: result.index,
     cells: [],
@@ -195,7 +222,12 @@ export function commitTile(
     outcomes: [],
     discards: reduced.discarded,
   };
-  const failed = new Map<string, { cells: CellKey[]; message: string }>();
+  const failed = new Map<string, { reason: string; lastError: string; cells: CellKey[] }>();
+  const fail = (cell: CellKey, reason: string, lastError: string): void => {
+    const group = failed.get(`${reason}\n${lastError}`) ?? { reason, lastError, cells: [] };
+    group.cells.push(cell);
+    failed.set(`${reason}\n${lastError}`, group);
+  };
   for (const cell of result.coveredCells) {
     const key = cellKeyString(cell);
     const base = {
@@ -209,26 +241,34 @@ export function commitTile(
       sourceKind: info.sourceKind,
     };
     const raw = reduced.perCell.get(key);
+    const issue = issues.get(key);
     if (raw !== undefined) {
       const price = normaliseCalendarPrice(
         raw,
         { providerId, info, cabin: run.snapshot.cabin, pointOfSale, fetchedAt: result.fetchedAt },
         normaliseDeps(ctx),
       );
-      if (price instanceof NormalisationError) {
-        const group = failed.get(price.reason) ?? { cells: [], message: price.message };
-        group.cells.push(cell);
-        failed.set(price.reason, group);
+      if ('reason' in price) {
+        fail(cell, price.reason, price.message);
         continue;
       }
+      const dropped = issue?.offersDropped ?? 0;
+      // why: decision 30 — a truncated tile's price is the cheapest of the rows read, said on the cell (no new reason)
+      const notes = [
+        ...(result.truncated === true ? [TRUNCATED_NOTE] : []),
+        ...(issue === undefined ? [] : [issue.detail]),
+      ];
       write.prices.push(price);
       write.outcomes.push({
         ...base,
         status: 'priced',
-        reason: null,
-        lastError: null,
+        reason: dropped > 0 ? `offers-dropped:${dropped}` : null,
+        lastError: notes.length > 0 ? notes.join('; ') : null,
         minPence: price.pricePence,
       });
+    } else if (issue !== undefined) {
+      fail(cell, issue.reason, issue.detail);
+      continue;
     } else if (noFares.has(key))
       write.outcomes.push({ ...base, status: 'empty', reason: null, lastError: null, minPence: null });
     else write.outcomes.push({ ...base, status: 'no_data', reason: null, lastError: null, minPence: null });
@@ -236,8 +276,8 @@ export function commitTile(
   }
   ctx.db.transaction(() => {
     if (write.cells.length > 0) ctx.repos.cells.writeTile(run.executionId, providerId, write);
-    for (const [reason, g] of failed)
-      ctx.repos.cells.writeTileError(run.executionId, providerId, g.cells, reason, g.message);
+    for (const g of failed.values())
+      ctx.repos.cells.writeTileError(run.executionId, providerId, g.cells, g.reason, g.lastError);
   });
   run.parseStreak.set(providerId, 0);
   if (reduced.discarded > 0 || result.notes.length > 0 || failed.size > 0) {
@@ -246,7 +286,7 @@ export function commitTile(
         tileIndex: result.index,
         discarded: reduced.discarded,
         notes: result.notes,
-        normalisationErrors: [...failed.keys()],
+        cellErrors: [...failed.values()].map((g) => g.reason),
       },
       'discovery: tile reduced',
     );
