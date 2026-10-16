@@ -86,6 +86,30 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     expect(later.every((o) => o.status === 'priced')).toBe(true);
   });
 
+  it('never re-fetches a departed cell whatever its outcome: departed retryable errors become skipped:departed, and the pass plans exactly what the cap check counted (ruling 1, ssr I1)', async () => {
+    const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
+    await h.fixtureScenario([
+      tileRule('LHR', '2026-11-02', FIXTURE_RULES.upstream, 3),
+      tileRule('LHR', '2026-11-09', FIXTURE_RULES.upstream, 3),
+    ]);
+    const e = await h.runToCompletion(h.orch(), twoPairs(h).id);
+    expect(e.status).toBe('completed');
+    expect(h.outcomes(e.id, { status: 'error' })).toHaveLength(28);
+    h.clock.set(asIsoDateTime('2026-11-09T10:00:00.000Z')); // today (London) = 2026-11-09: 16 errored cells departed
+    const before = h.requests.length;
+    expect(await h.orch().resume(e.id, { manual: false })).toEqual({ ok: true, executionId: e.id });
+    const after = await h.waitForSettled(e.id);
+    const fetched = h.requests.slice(before).filter((q) => q.kind === 'calendar');
+    expect(fetched.length).toBeGreaterThan(0);
+    expect(fetched.every((q) => (q.params.departFrom ?? '') > '2026-11-09')).toBe(true);
+    const departed = h.outcomes(e.id).filter((o) => o.origin === LHR && o.departureDate <= '2026-11-09');
+    expect(departed).toHaveLength(16);
+    expect(departed.every((o) => o.status === 'skipped' && o.reason === 'departed')).toBe(true);
+    // why: the cap check's estimate and the pass read one predicate, so the stored plan grew by exactly the tiles fetched
+    expect((after.estimate?.totalPlanCalls ?? 0) - (e.estimate?.totalPlanCalls ?? 0)).toBe(fetched.length);
+    expect(fetched).toHaveLength(1);
+  });
+
   it('a refused resume writes nothing: departed cells stay as they were until a resume is claimed (arch-r2-006)', async () => {
     const h = createHarness({ fixtureConcurrency: 1 });
     const def = twoPairs(h, { budget: { maxCalls: 6, maxFreeCalls: 1000, maxCostMicroGbp: 1_000_000_000 } });

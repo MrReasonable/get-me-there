@@ -11,6 +11,7 @@ import {
   type Stage,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import { resumableCells } from './run.js';
 import { runsPerMonth } from './scheduler/parseCron.js';
 import { buildSnapshot } from './snapshot.js';
 import { planTiles } from './stages/discovery.js';
@@ -211,15 +212,12 @@ function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefin
 
 /**
  * Spec §8.1 "estimateRemaining (resumable tiles + remaining selected cells × estimate × factor)", over the cells the
- * resumed pass will fetch: the spec §7 resume query (which never returns `no-return-legs` or `no-priced-options` errors,
- * decision 37) less the cells whose departure date has arrived, which a resume marks skipped:departed before its pass
- * (po-016), so this read needs no write first (arch-r2-006).
+ * resumed pass will fetch, read through `resumableCells`, the pass's own predicate: departed cells are left out
+ * (po-016) and marked skipped:departed only in the claim, so this read needs no write first (arch-r2-006).
  */
 export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual: boolean): Estimate {
   const snapshot = exec.snapshot;
-  const today = ctx.clock.todayLondon();
-  const remaining = (stage: Stage, id: ProviderId) =>
-    ctx.repos.cells.resumable(exec.id, stage, id, manual).filter((c) => c.departureDate > today);
+  const remaining = (stage: Stage, id: ProviderId) => resumableCells(ctx, exec.id, stage, id, manual);
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {

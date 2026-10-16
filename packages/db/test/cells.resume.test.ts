@@ -156,4 +156,39 @@ describe('markDeparted (spec §8.1 "Before planning … become skipped:departed"
     });
     expect(repo.markDeparted(executionId, asIsoDate('2026-10-15'))).toBe(0);
   });
+
+  it('turns error outcomes departing on or before today into skipped:departed, retryable or not (ruling 1, ssr I1)', () => {
+    const d14 = cell(undefined, undefined, '2026-10-14', '2026-10-28');
+    const d15 = cell(undefined, undefined, '2026-10-15', '2026-10-29');
+    const d16 = cell(undefined, undefined, '2026-10-16', '2026-10-30');
+    const { db, executionId, repo } = setup([d14, d15, d16]);
+    rawOutcome(db, executionId, d14, 'discovery', 'searchapi', {
+      status: 'error',
+      reason: 'upstream',
+      attempts: 1,
+    });
+    rawOutcome(db, executionId, d15, 'discovery', 'searchapi', {
+      status: 'error',
+      reason: 'no-return-legs',
+      attempts: 1,
+    });
+    rawOutcome(db, executionId, d16, 'discovery', 'searchapi', {
+      status: 'error',
+      reason: 'upstream',
+      attempts: 1,
+    });
+    expect(repo.markDeparted(executionId, asIsoDate('2026-10-15'))).toBe(2);
+    expect(
+      repo
+        .outcomes(executionId, { stage: 'discovery' })
+        .map((o) => [o.departureDate, o.status, o.reason, o.attempts]),
+    ).toEqual([
+      ['2026-10-14', 'skipped', 'departed', 1],
+      ['2026-10-15', 'skipped', 'departed', 1],
+      ['2026-10-16', 'error', 'upstream', 1],
+    ]);
+    expect(repo.resumable(executionId, 'discovery', 'searchapi', true).map((c) => c.departureDate)).toEqual([
+      '2026-10-16',
+    ]);
+  });
 });

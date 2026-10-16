@@ -152,9 +152,25 @@ export function markRemaining(
 }
 
 /**
- * Cells of (stage, provider) this pass should fetch: none for a provider disabled or blocked for budget in this pass;
- * otherwise the spec §7 resume query (which never returns `no-return-legs` or `no-priced-options` errors, decision 37).
+ * The spec §7 resume query (which never returns `no-return-legs` or `no-priced-options` errors, decision 37) less any
+ * cell whose departure date has arrived. A resume marks those skipped:departed in its claim (ruling 1); this read is
+ * the one predicate both the cap check's `estimateRemainingFor` and the pass's `runnableCells` use, so the pass plans
+ * exactly the calls the check counted (ssr I1).
  */
+export function resumableCells(
+  ctx: EngineContext,
+  executionId: string,
+  stage: Stage,
+  providerId: ProviderId,
+  manual: boolean,
+): CellKey[] {
+  const today = ctx.clock.todayLondon();
+  return ctx.repos.cells
+    .resumable(executionId, stage, providerId, manual)
+    .filter((c) => c.departureDate > today);
+}
+
+/** Cells of (stage, provider) this pass should fetch: none for a provider disabled or blocked for budget in this pass. */
 export function runnableCells(
   ctx: EngineContext,
   run: RunState,
@@ -163,7 +179,7 @@ export function runnableCells(
 ): CellKey[] {
   // why: a provider the pre-start or resume check blocked for budget makes no call in this pass (cost-r1-001)
   if (run.disabled.has(providerId) || run.blocked.has(providerId)) return [];
-  return ctx.repos.cells.resumable(run.executionId, stage, providerId, run.manual);
+  return resumableCells(ctx, run.executionId, stage, providerId, run.manual);
 }
 
 /** Message text for any thrown value, URL-free (spec §5.3 secret scrubbing). */
