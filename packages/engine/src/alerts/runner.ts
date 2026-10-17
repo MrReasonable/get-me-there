@@ -22,7 +22,7 @@ import { LogNotifier } from '../notifiers/log.js';
 import type { AlertsPass } from '../types.js';
 import type { AlertRunContext, AlertRunnerDeps } from './context.js';
 import { cellOf, type FiringMarks, marksFor, rowKeyOf } from './marks.js';
-import { calendarPool, type Pool, rowRef } from './pools.js';
+import { calendarPool, type Pool, rowRef, verifiedPool } from './pools.js';
 import { cellLine, renderBody, renderSubject } from './templates.js';
 
 export type { AlertRunnerDeps } from './context.js';
@@ -63,9 +63,7 @@ export async function runAlerts(
     const poolFor = (basis: ResultBasis): Pool => {
       const cached = pools.get(basis);
       if (cached !== undefined) return cached;
-      // why: the itinerary-search pool is gathered from Task 11.3 on; until then a verified rule has no candidates.
-      const pool: Pool =
-        basis === 'calendar' ? calendarPool(ctx) : { candidates: [], previous: new Map(), unconfirmed: 0 };
+      const pool = basis === 'calendar' ? calendarPool(ctx) : verifiedPool(ctx);
       pools.set(basis, pool);
       return pool;
     };
