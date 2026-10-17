@@ -96,7 +96,14 @@ export async function resumeExecution(
   const isBlocked = (p: (typeof needed)[number]) => check.blocked.has(lineKey(p.stage, p.providerId));
   if ((needed.length > 0 && needed.every(isBlocked)) || starved)
     return refused('cap', `budget cap: ${breachMessage(check.breaches)}`, { breaches: check.breaches });
-  const raised = refresh && JSON.stringify(def.budget) !== JSON.stringify(exec.snapshot.budget);
+  // why: field by field, so key order never matters and a lowered or unchanged cap is not a raise (code-architect
+  // review 10); any cap that rose needs the stored confirmation
+  const was = exec.snapshot.budget;
+  const raised =
+    refresh &&
+    (def.budget.maxCalls > was.maxCalls ||
+      def.budget.maxFreeCalls > was.maxFreeCalls ||
+      def.budget.maxCostMicroGbp > was.maxCostMicroGbp);
   if (raised) {
     const confirm = confirmationNeeded(ctx, pass, check.blocked, {
       pence: def.confirmedCostPence,

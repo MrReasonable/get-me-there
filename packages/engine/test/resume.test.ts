@@ -249,6 +249,30 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     expect((await h.waitForSettled(e.id)).status).toBe('completed');
   });
 
+  it('a manual resume under a budget that changed without any cap rising needs no new confirmation (code-architect review 10)', async () => {
+    const h = createHarness({
+      fixtureConcurrency: 1,
+      fixtureMonthlyCallCap: 20,
+      now: asIsoDateTime('2026-10-28T09:00:00.000Z'),
+      env: { SOFT_CONFIRM_PENCE: '0' },
+    });
+    h.onStageStart('discovery', () =>
+      h.spendLedger({ providerId: 'fixture', rows: 19, costMicroGbpEach: FIXTURE_COST_MICRO_GBP }),
+    );
+    const def = twoPairs(h);
+    const e = await h.runToCompletion(h.orch(), def.id, confirmed);
+    h.clearHooks();
+    expect(e.status).toBe('paused_budget');
+    if (e.resumeAfter === null) throw new Error('expected resume_after');
+    h.clock.set(e.resumeAfter);
+    // why: a lower cost cap is a change but not a raise, so the operator's earlier confirmation still stands
+    h.repos.definitions.update(def.id, {
+      budget: { maxCalls: 1000, maxFreeCalls: 1000, maxCostMicroGbp: 900_000_000 },
+    });
+    expect(await h.orch().resume(e.id, { manual: true })).toEqual({ ok: true, executionId: e.id });
+    expect((await h.waitForSettled(e.id)).status).toBe('completed');
+  });
+
   it('a completed execution whose only errors are no-priced-options has nothing to retry; its stored estimate is unchanged (decision 37, ssr2-04)', async () => {
     const err = new ProviderError({
       kind: 'upstream',
