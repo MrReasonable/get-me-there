@@ -1,7 +1,7 @@
 /**
- * The tools reachable while the app holds app_lock (spec §7, §10): WP4b's `runRecord`, the same function the tool
- * bootstrap runs, over the app's own ports, with its output collected into the api-contract tool response. WP13 owns
- * smoke.
+ * The tools reachable while the app holds app_lock (spec §7, §10): WP4b's `runRecord` and WP13's `runSmoke`, the same
+ * functions the tool bootstrap runs, over the app's own ports, with their output collected into the api-contract tool
+ * response.
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -13,6 +13,7 @@ import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { recordPrecheck, runRecord } from './record.js';
 import type { RecordCli } from './recordPlan.js';
+import { runSmoke } from './smoke.js';
 import { EXIT } from './types.js';
 
 /** Every file under `root`, or none when it does not exist yet. */
@@ -23,10 +24,11 @@ function filesUnder(root: string): string[] {
     .map((e) => join(e.parentPath, e.name));
 }
 
-function refused(exitCode: number, line: string): ToolRunResponse {
+/** A refusal before the tool runs, in the tool response shape, for either tool. */
+function refused(name: 'record' | 'smoke', exitCode: number, line: string): ToolRunResponse {
   return {
     exitCode,
-    summary: API_TEXT.toolSummary('record', exitCode, 0),
+    summary: API_TEXT.toolSummary(name, exitCode, 0),
     lines: [line],
     fixturesWritten: [],
   };
@@ -49,12 +51,13 @@ export function inProcessTools(ports: Ports, opts: InProcessOptions = {}): HttpT
   const run = opts.runRecord ?? runRecord;
   return {
     record: async (args: ToolRecordRequest, signal: AbortSignal) => {
-      if (syntheticAllowed(ports.config)) return refused(EXIT.refusedTestEnv, API_TEXT.toolSynthetic);
+      if (syntheticAllowed(ports.config))
+        return refused('record', EXIT.refusedTestEnv, API_TEXT.toolSynthetic('record'));
       const cli: RecordCli = { args, dryRun: false, confirmRerun: false, out: null };
       const target = recordingTarget(cli, opts.recording);
-      if ('refusal' in target) return refused(EXIT.usage, target.refusal);
+      if ('refusal' in target) return refused('record', EXIT.usage, target.refusal);
       const precheck = recordPrecheck(ports.config);
-      if (precheck !== null) return refused(EXIT.badConfig, precheck);
+      if (precheck !== null) return refused('record', EXIT.badConfig, precheck);
       const lines: string[] = [];
       const keep = (l: string) => lines.push(safeMessage(l, ports.secrets));
       const before = new Set(filesUnder(target.root));
@@ -74,6 +77,22 @@ export function inProcessTools(ports: Ports, opts: InProcessOptions = {}): HttpT
         lines,
         fixturesWritten,
       };
+    },
+    // why: the app's ports and ledger; no fixtures (the route says so), no --confirm-rerun over HTTP, the synthetic
+    // gate refused with the CLI's code 70 (WP13)
+    smoke: async (args, signal) => {
+      if (syntheticAllowed(ports.config))
+        return refused('smoke', EXIT.refusedTestEnv, API_TEXT.toolSynthetic('smoke'));
+      const r = await runSmoke(
+        ports,
+        {
+          args: { origin: args.origin, destination: args.destination, budget: args.budget },
+          confirmRerun: false,
+          dryRun: args.dryRun === true,
+        },
+        { signal, fixtures: null },
+      );
+      return { exitCode: r.exitCode, summary: r.summary, lines: r.lines, fixturesWritten: [] };
     },
   };
 }
