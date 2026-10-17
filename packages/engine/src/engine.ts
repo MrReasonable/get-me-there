@@ -119,7 +119,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     start: (id, opts) => orch.start(id, opts),
     resume: (id, opts) => orch.resume(id, opts),
     cancel: (id) => orch.cancel(id),
-    verifyCell: (id, cell) => orch.verifyCell(id, cell),
+    verifyCell: (id, cell, opts) => orch.verifyCell(id, cell, opts),
     childCapPreview: (id, cell) => childCapPreview(ctx, id, cell),
     estimate: (input, today) => {
       // why: ruling 9 — the save-time estimate is the worst case without reuse; it is what confirmed_cost_pence records

@@ -1,5 +1,6 @@
 import { asIsoDate, asIsoDateTime, cellKeyString } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { childCapPreview } from '../src/child.js';
 import { buildContext } from '../src/context.js';
 import {
@@ -164,6 +165,23 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
         returnDate: asIsoDate('2027-01-11'),
       }),
     ).toEqual({ ok: false, code: 'window', message: 'the cell is not in the current search space' });
+  });
+
+  it('asks for confirmation above SOFT_CONFIRM like any execution, and runs once the cost and calls are confirmed (cost M-1)', async () => {
+    const h = createHarness({ env: { SOFT_CONFIRM_PENCE: '0' } });
+    const def = verifying(h);
+    const o = h.orch();
+    const details = z.object({ estimatePence: z.number(), totalCalls: z.number() });
+    const refusal = await o.verifyCell(def.id, cell);
+    expect(refusedWith(refusal, 'confirm')).toContain('has not been confirmed');
+    if (refusal.ok) throw new Error('expected a refusal');
+    const seen = details.parse(refusal.details);
+    expect(h.requests).toEqual([]);
+    const r = await o.verifyCell(def.id, cell, {
+      confirmCostPence: seen.estimatePence,
+      confirmCalls: seen.totalCalls,
+    });
+    expect(r.ok).toBe(true);
   });
 
   it('allows at most one active child per cell', async () => {

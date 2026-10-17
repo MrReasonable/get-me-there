@@ -15,8 +15,8 @@ import { lineKey } from './lines.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
 import { type BuiltSnapshot, buildSnapshot, childSnapshot } from './snapshot.js';
-import { isActiveClash, refused } from './start.js';
-import type { ChildCapPreview, StartResult } from './types.js';
+import { confirmationNeeded, isActiveClash, refused } from './start.js';
+import type { ChildCapPreview, StartResult, VerifyCellOptions } from './types.js';
 
 /** Billed calls an execution may still make under its own snapshot cap. */
 function callsLeft(ctx: EngineContext, e: Execution): number {
@@ -96,7 +96,7 @@ export function childCapPreview(ctx: EngineContext, definitionId: string, cell: 
 /**
  * Spec §8.1 `POST /cells/verify`: validates that the cell is in generateCells(current resolved space), has not departed
  * and its airports exist, then creates a child execution (is_child = 1, cell columns set), seeded and running in one
- * transaction. At most one active child per cell (the child partial unique index backs this up). A child never pauses
+ * transaction, after the SOFT_CONFIRM check a start makes. At most one active child per cell (the child partial unique index backs this up). A child never pauses
  * (ruling 7, run.ts applyBudgetBreach).
  */
 export async function verifyCellExecution(
@@ -104,6 +104,7 @@ export async function verifyCellExecution(
   reg: RunRegistry,
   definitionId: string,
   cell: CellKey,
+  opts: VerifyCellOptions = {},
 ): Promise<StartResult> {
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
@@ -138,6 +139,18 @@ export async function verifyCellExecution(
       need,
     });
   }
+  // why: spec §8.1 asks before any execution estimated above SOFT_CONFIRM, a child included (cost M-1)
+  const confirm = confirmationNeeded(ctx, estimate, check.blocked, {
+    pence: opts.confirmCostPence ?? null,
+    calls: opts.confirmCalls ?? null,
+  });
+  if (confirm !== null)
+    return refused('confirm', `${confirm.reason} and has not been confirmed`, {
+      estimateMicroGbp: confirm.estimateMicroGbp,
+      estimatePence: confirm.estimatePence,
+      calls: confirm.calls,
+      totalCalls: confirm.totalCalls,
+    });
   let exec: Execution;
   try {
     exec = ctx.db.immediateTransaction(() => {

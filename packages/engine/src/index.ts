@@ -18,4 +18,5 @@ export type {
   SchedulerJob,
   StartOptions,
   StartResult,
+  VerifyCellOptions,
 } from './types.js';

@@ -66,6 +66,9 @@ export interface StartOptions {
   confirmCostPence?: number;
   confirmCalls?: number;
 }
+/** The confirmation a single-cell verification carries, as a manual start's (cost M-1). */
+export type VerifyCellOptions = Omit<StartOptions, 'trigger'>;
+
 /** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
 export type StartResult =
   | { ok: true; executionId: string }
@@ -91,7 +94,8 @@ export interface Engine {
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   cancel(executionId: string): Promise<boolean>;
-  verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
+  /** Spec §8.1 single-cell verification; above SOFT_CONFIRM it needs the confirmation a start would (cost M-1). */
+  verifyCell(definitionId: string, cell: CellKey, opts?: VerifyCellOptions): Promise<StartResult>;
   /** Decision 45: the cap and headroom a child of `cell` would get now, by verifyCell's own calculation. */
   childCapPreview(definitionId: string, cell: CellKey): ChildCapPreview;
   estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;

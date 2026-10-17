@@ -6,14 +6,14 @@ import { resumeExecution } from './resume.js';
 import { stopRun } from './run.js';
 import { startExecution } from './start.js';
 import { tickDefinition } from './tick.js';
-import type { StartOptions, StartResult } from './types.js';
+import type { StartOptions, StartResult, VerifyCellOptions } from './types.js';
 
 /** The execution half of the Engine; createEngine (Task 7.19) adds estimates, scheduler, boot and status. */
 export interface Orchestrator {
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   /** Spec §8.1 single-cell verification (POST /cells/verify): a child execution for one cell. */
-  verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
+  verifyCell(definitionId: string, cell: CellKey, opts?: VerifyCellOptions): Promise<StartResult>;
   /** Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel. */
   cancel(executionId: string): Promise<boolean>;
   /** Spec §8.2 tick for one definition. */
@@ -31,7 +31,7 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
   const self: Orchestrator = {
     start: (id, opts) => startExecution(ctx, reg, id, opts),
     resume: (id, opts) => resumeExecution(ctx, reg, id, opts),
-    verifyCell: (id, cell) => verifyCellExecution(ctx, reg, id, cell),
+    verifyCell: (id, cell, opts) => verifyCellExecution(ctx, reg, id, cell, opts),
     cancel: async (id) => {
       const live = reg.get(id);
       if (live !== undefined) {
