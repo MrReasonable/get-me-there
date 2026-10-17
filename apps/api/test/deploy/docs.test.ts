@@ -195,6 +195,21 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(flat).toContain('The cron user must be in the `docker` group');
   });
 
+  it('prunes host copies only after the new backup is on the host (CodeRabbit batch 3)', () => {
+    // why: `docker compose cp` exits 0 even when it copies nothing, so the prune must check the new file first
+    const line = /^15 3 \* \* \* .*$/m.exec(setup)?.[0] ?? '';
+    const check = line.indexOf('&& test -s "/var/backups/get-me-there/$new"');
+    const prune = line.indexOf(
+      "&& find /var/backups/get-me-there -name 'get-me-there-*.db' -mtime +30 -delete",
+    );
+    expect(check).toBeGreaterThan(line.indexOf('docker compose cp app:/data/backups/.'));
+    expect(prune).toBeGreaterThan(check);
+    expect(line).toContain('&& test -n "$new"');
+    // why: cron turns an unescaped % into a newline
+    expect(line).not.toContain('%');
+    expect(flat).toContain('The prune runs only when the new backup is on the host and not empty');
+  });
+
   it('documents the in-process shutdown deadline beside the 90 s stale-lock takeover', () => {
     // why: review devops M4 — the deadline (25 s) sits below compose's 30 s grace period
     const seconds = SHUTDOWN_DEADLINE_MS / 1000;
