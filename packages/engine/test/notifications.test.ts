@@ -8,6 +8,7 @@ import {
   capturingLogger,
   createHarness,
   type Harness,
+  HOUR,
   JFK,
   LHR,
   type LogLine,
@@ -94,7 +95,7 @@ describe('operator notifications (spec §8.1 "deduplicated per execution and kin
     expect(h.repos.notifications.wasSent('paused_budget', id, definitionId)).toBe(true);
   });
 
-  it('a second execution of the same definition is told again: the key is (kind, execution), not kind alone (test-strategy-reviewer-025)', async () => {
+  it('a second execution of the same definition is told on a later London day, not the same day (decision 56; test-strategy-reviewer-025)', async () => {
     const h = createHarness();
     const first = await anExecution(h);
     const def = h.repos.definitions.get(first.definitionId);
@@ -108,11 +109,15 @@ describe('operator notifications (spec §8.1 "deduplicated per execution and kin
       detail: 'cap',
     });
     expect(await notifyOperator(ctx, 'paused_budget', p(first.id))).toBe(true);
+    expect(await notifyOperator(ctx, 'paused_budget', p(second.id))).toBe(false);
+    expect(await notifyOperator(ctx, 'paused_error', p(second.id))).toBe(true); // another kind is told
+    h.clock.advance(24 * HOUR);
     expect(await notifyOperator(ctx, 'paused_budget', p(second.id))).toBe(true);
     expect(await notifyOperator(ctx, 'paused_budget', p(second.id))).toBe(false);
-    expect(h.notifications.map((m) => m.body.split('\n').at(-1))).toEqual([
-      `Execution: ${first.id}`,
-      `Execution: ${second.id}`,
+    expect(h.notifications.map((m) => [m.kind, m.body.split('\n').at(-1)])).toEqual([
+      ['paused_budget', `Execution: ${first.id}`],
+      ['paused_error', `Execution: ${second.id}`],
+      ['paused_budget', `Execution: ${second.id}`],
     ]);
   });
 

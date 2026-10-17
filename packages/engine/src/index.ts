@@ -15,6 +15,18 @@ export { createEngine } from './engine.js';
 export { confirmationOf } from './estimate.js';
 export { fxHttpLimits } from './fx/limits.js';
 export { type LineKey, lineKey } from './lines.js';
+export {
+  EmailNotifier,
+  type EmailNotifierOptions,
+  type MailMessage,
+  type MailTransport,
+  SMTP_TIMEOUTS,
+  type SmtpConfig,
+  type SmtpTransportOptions,
+  smtpTransportOptions,
+  type TransportFactory,
+} from './notifiers/email.js';
+export { buildNotifiers } from './notifiers/index.js';
 export { LogNotifier } from './notifiers/log.js';
 export { renderOperatorMessage } from './notifiers/operatorTemplates.js';
 export { parseCron } from './scheduler/parseCron.js';

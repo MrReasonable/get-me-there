@@ -1,4 +1,4 @@
-import type { OperatorMessage, OperatorMessageKind } from '@gmt/core';
+import { londonDateOf, type OperatorMessage, type OperatorMessageKind } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { type MessageParams, renderOperatorMessage } from './notifiers/operatorTemplates.js';
@@ -9,15 +9,24 @@ export interface NotifyParams extends MessageParams {
 
 /**
  * Sends one operator notification to every notifier, at most once per (kind, execution) — per (kind, definition) when
- * there is no execution (spec §8.1 "deduplicated per execution and kind"). Returns false when deduplicated. Never
- * throws: a failing notifier is logged and recorded as failed, because a notification must not stop a run.
+ * there is no execution (spec §8.1 "deduplicated per execution and kind") — and at most once per kind per definition
+ * per London day (decision 56), so a pause-and-resume loop cannot flood the inbox. Returns false when deduplicated.
+ * Never throws: a failing notifier is logged and recorded as failed, because a notification must not stop a run.
  */
 export async function notifyOperator(
-  ctx: Pick<EngineContext, 'repos' | 'notifiers' | 'log'>,
+  ctx: Pick<EngineContext, 'repos' | 'notifiers' | 'log' | 'clock'>,
   kind: OperatorMessageKind,
   p: NotifyParams,
 ): Promise<boolean> {
   if (ctx.repos.notifications.wasSent(kind, p.executionId, p.definitionId)) return false;
+  const last = ctx.repos.notifications.lastSent(kind, p.definitionId);
+  if (last !== null && londonDateOf(last) === ctx.clock.todayLondon()) {
+    ctx.log.info(
+      { kind, executionId: p.executionId, definitionId: p.definitionId },
+      'operator notification already sent today',
+    );
+    return false;
+  }
   const { subject, body } = renderOperatorMessage(kind, p);
   const message: OperatorMessage = {
     kind,
