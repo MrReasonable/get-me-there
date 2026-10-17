@@ -148,6 +148,10 @@ export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRender
     definitionName: 'London to New York (worked example)',
     appBaseUrl: null,
     now: NOW,
+    marks: new Map(),
+    budgetStop: null,
+    verificationNotRun: false,
+    unconfirmed: 0,
     ...over,
   };
 }

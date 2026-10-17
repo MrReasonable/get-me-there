@@ -18,6 +18,7 @@ import {
   type ResultBasis,
   type Segment,
   sourceLabel,
+  TRUNCATED_NOTE,
   validateVendorUrl,
 } from '@gmt/core';
 import { stripControl } from '../text.js';
@@ -43,12 +44,20 @@ export const NO_MARKS: ItemMarks = {
   previousConverted: false,
 };
 
-/** Everything renderBody needs; the digest items carry segments, expiry and the row key (plan decision 14). Task 11.7 adds the marks. */
+/** Everything renderBody needs; the digest items carry segments, expiry and the row key (plan decision 14). */
 export interface DigestRenderInput {
   digest: AlertDigest;
   definitionName: string;
   appBaseUrl: string | null;
   now: IsoDateTime;
+  /** Per `DigestItem.rowKey`; an item without an entry has no marks. */
+  marks: ReadonlyMap<string, ItemMarks>;
+  /** Only when the pass stopped on a budget cap: the cell searches it left undone (decisions 25, 59). */
+  budgetStop: { unsearched: number } | null;
+  /** The itinerary-search stage never ran although a verification provider is configured (any cause). */
+  verificationNotRun: boolean;
+  /** Fares of this run left out of the itinerary-search basis because the final step did not confirm their price. */
+  unconfirmed: number;
 }
 
 /** Longest provider-supplied string printed (seller, carrier, definition name): a hostile value cannot flood an email (sec-007). */
@@ -140,10 +149,15 @@ function gapText(gap: number): string {
     : `fetched ${formatDuration(gap)} before this price`;
 }
 
-function previousLine(item: DigestItem): string | null {
+/** The previous price with '≈' when it was FX-converted (decision 59). */
+function previousPrice(item: DigestItem, input: DigestRenderInput, pence: number): string {
+  return `${(input.marks.get(item.rowKey) ?? NO_MARKS).previousConverted ? '≈' : ''}${formatPence(pence)}`;
+}
+
+function previousLine(item: DigestItem, input: DigestRenderInput): string | null {
   if (item.previousPricePence === null) return null;
   const gap = item.fetchGapHours === null ? '' : `, ${gapText(item.fetchGapHours)}`;
-  return `   Previous: ${formatPence(item.previousPricePence)}${gap}`;
+  return `   Previous: ${previousPrice(item, input, item.previousPricePence)}${gap}`;
 }
 
 function segmentLine(s: Segment): string {
@@ -199,9 +213,26 @@ function linkLine(item: DigestItem, input: DigestRenderInput): string {
   return item.verdictClass === 'unchecked' ? searchLine(item) : verifiedLinkLine(item, input);
 }
 
-/** The marks a reader needs beside the price (decisions 37, 44), in a fixed order; Task 11.7 adds the runner's. */
-function notesOf(item: DigestItem, _input: DigestRenderInput): string[] {
-  return item.unverified.includes('priceConfirmed') ? [CONSTRAINT_LABELS.priceConfirmed] : [];
+/** "3h ago", or "just now" under an hour. */
+function agoText(at: IsoDateTime, now: IsoDateTime): string {
+  const h = hoursSince(at, now);
+  return h < 1 ? 'just now' : `${formatDuration(h)} ago`;
+}
+
+/** The marks a reader needs beside the price (spec §3, §8.1; decisions 30, 37, 44, 54, 55), in a fixed order. */
+function notesOf(item: DigestItem, input: DigestRenderInput): string[] {
+  const m = input.marks.get(item.rowKey) ?? NO_MARKS;
+  const notes: string[] = [];
+  if (item.unverified.includes('priceConfirmed')) notes.push(CONSTRAINT_LABELS.priceConfirmed);
+  if (m.truncated) notes.push(TRUNCATED_NOTE);
+  if (m.notSeenInLatest !== null)
+    notes.push(
+      m.notSeenInLatest.at === null
+        ? 'not seen in latest search'
+        : `not seen in latest search (${agoText(m.notSeenInLatest.at, input.now)})`,
+    );
+  if (m.stale !== null) notes.push(`stale: older than ${m.stale.thresholdHours}h`);
+  return notes;
 }
 
 function itemLines(n: number, item: DigestItem, input: DigestRenderInput): string[] {
@@ -210,7 +241,7 @@ function itemLines(n: number, item: DigestItem, input: DigestRenderInput): strin
     `   Why: ${stripControl(item.firingReason)}`,
     ...basisLines(item),
   ];
-  const prev = previousLine(item);
+  const prev = previousLine(item, input);
   if (prev !== null) lines.push(prev);
   lines.push(`   Provenance: ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}`);
   const notes = notesOf(item, input);
@@ -240,7 +271,12 @@ function ruleText(r: AlertRule): string {
   return `${what} · ${basis} · cooldown ${r.cooldownHours}h`;
 }
 
-function coverageText(c: AlertDigest['coverageCaveat']): string {
+function coverageText(c: AlertDigest['coverageCaveat'], input: DigestRenderInput): string {
+  // why: decision 59 — a cause is named only when the pass did stop on a budget cap (review PA2-1)
+  if (input.verificationNotRun)
+    return input.budgetStop === null
+      ? 'Coverage: itinerary search not run'
+      : 'Coverage: itinerary search not run (a budget cap stopped the run during discovery)';
   return c === null
     ? 'Coverage: itinerary-searched 0 cells (no verification provider configured)'
     : `Coverage: itinerary-searched ${c.itinerarySearched} of ${c.selected} cells, ${c.expandTop} outbounds each`;
@@ -251,7 +287,7 @@ function newItemLine(item: DigestItem, input: DigestRenderInput): string {
   const prev =
     item.previousPricePence === null
       ? ''
-      : ` · previous ${formatPence(item.previousPricePence)}${item.fetchGapHours === null ? '' : `, ${gapText(item.fetchGapHours)}`}`;
+      : ` · previous ${previousPrice(item, input, item.previousPricePence)}${item.fetchGapHours === null ? '' : `, ${gapText(item.fetchGapHours)}`}`;
   const notes = notesOf(item, input);
   return `- ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}${prev}${notes.length > 0 ? ` · ${notes.join('; ')}` : ''}`;
 }
@@ -270,6 +306,24 @@ export function renderBody(input: DigestRenderInput): string {
     if (d.newRestCount > 0) lines.push(`and ${d.newRestCount} more new cells`);
     lines.push('');
   }
-  lines.push(coverageText(d.coverageCaveat), `Rule: ${ruleText(d.rule)}`);
+  if (input.unconfirmed > 0) {
+    const n = input.unconfirmed;
+    lines.push(
+      `Unconfirmed: ${n} ${n === 1 ? 'fare' : 'fares'} in this run had no price confirmed by the final step; they are never alerted.`,
+    );
+  }
+  const stop = input.budgetStop;
+  if (stop !== null && stop.unsearched > 0) {
+    const n = stop.unsearched;
+    const count = `${input.verificationNotRun ? 'at least ' : ''}${n} cell ${n === 1 ? 'search' : 'searches'}`;
+    lines.push(
+      `Not searched: a budget cap left ${count} of this run undone; the prices above come from the cells that were searched.`,
+    );
+  } else if (stop !== null && input.verificationNotRun) {
+    lines.push(
+      'Not searched: a budget cap stopped this run before its itinerary search; the prices above are calendar prices only.',
+    );
+  }
+  lines.push(coverageText(d.coverageCaveat, input), `Rule: ${ruleText(d.rule)}`);
   return lines.join('\n');
 }

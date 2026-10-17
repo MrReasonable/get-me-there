@@ -24,7 +24,7 @@ import {
 import { LogNotifier } from '../notifiers/log.js';
 import type { AlertsPass } from '../types.js';
 import type { AlertRunContext, AlertRunnerDeps } from './context.js';
-import { cellOf, type FiringMarks, marksFor, rowKeyOf } from './marks.js';
+import { cellOf, type FiringMarks, marksFor, passFacts, rowKeyOf } from './marks.js';
 import { calendarPool, type Pool, rowRef, rowRefOf, verifiedPool } from './pools.js';
 import { cellLine, renderBody, renderSubject } from './templates.js';
 
@@ -255,11 +255,16 @@ async function deliver(
         ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, run.pool, run.marks, 'queued', digestId)),
     ),
   );
+  const facts = passFacts(ctx);
   const body = renderBody({
     digest,
     definitionName: ctx.definition.name,
     appBaseUrl: ctx.deps.config.appBaseUrl,
     now: ctx.now,
+    marks: run.marks,
+    budgetStop: facts.budgetStop,
+    verificationNotRun: facts.verificationNotRun,
+    unconfirmed: run.pool.unconfirmed,
   });
   const outcome = await sendToAll(ctx.deps.notifiers, {
     kind: 'digest',
