@@ -15,12 +15,18 @@ export const errorEnvelopeSchema = z.object({
 export const moneyPenceSchema = z.number().int().min(0);
 export const microGbpSchema = z.number().int().min(0);
 export const ageHoursSchema = z.union([z.number().int().min(0), z.literal('unknown')]);
-/** Every price on the wire: amount, provenance, staleness, effective age. */
+/**
+ * Every price on the wire: amount, provenance, staleness, effective age, and `truncated`: true when
+ * the price came from a discovery tile the pagination cap stopped early, so it is only the
+ * cheapest of the rows read (decisions 30 and 36; WP8 derives it from the outcome's `last_error`
+ * starting with core's `TRUNCATED_NOTE`). Never defaulted: a price without the flag is invalid.
+ */
 export const priceCellSchema = z.object({
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
   stale: z.boolean(),
   ageHours: ageHoursSchema,
+  truncated: z.boolean(),
 });
 const count = z.number().int().min(0);
 export const bucketsSchema: z.ZodType<Buckets> = z.object({
@@ -73,6 +79,8 @@ export const executionSummarySchema = z.object({
   startedAt: isoDateTimeSchema.nullable(),
   finishedAt: isoDateTimeSchema.nullable(),
   ageHours: ageHoursSchema,
+  /** The run's own policy, "(E outbounds each)" in the Results header (decision 42); never the current definition's. */
+  expandTop: z.number().int().min(1),
 });
 export const usageSchema = z.object({
   scope: z.string(),

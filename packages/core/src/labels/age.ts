@@ -46,16 +46,22 @@ export function formatDuration(hours: number): string {
   return `${Math.floor(days / 7)}w`;
 }
 
-function ago(hours: number): string {
+/** "just now", "5h ago", "3d ago": the one relative-age phrase (web columns, headers, email). Spec §3. */
+export function formatAgo(hours: number): string {
   return hours < 1 ? 'just now' : `${formatDuration(hours)} ago`;
+}
+
+/** The fetch age alone, "fetched 2h ago": the Results table's Fetched column (spec §11). */
+export function formatFetchedAgo(a: EffectiveAge): string {
+  return `fetched ${formatAgo(a.fetchedHours)}`;
 }
 
 /** Tooltip, header and email form, e.g. "fetched 2h ago · provider age unknown (≤7d before that)". */
 export function formatAgeFull(a: EffectiveAge): string {
-  const fetched = `fetched ${ago(a.fetchedHours)}`;
+  const fetched = formatFetchedAgo(a);
   switch (a.kind) {
     case 'observed':
-      return `${fetched} · observed ${ago(a.observedHours)}`;
+      return `${fetched} · observed ${formatAgo(a.observedHours)}`;
     case 'bounded':
       // why: maxAgeHours 0 is an interactive search at request time; there is no bound to show.
       return a.maxAgeHours === 0
@@ -68,7 +74,7 @@ export function formatAgeFull(a: EffectiveAge): string {
 
 /** Table-cell and calendar-day form, e.g. "2h ago · ≤7d". */
 export function formatAgeCompact(a: EffectiveAge): string {
-  const fetched = ago(a.fetchedHours);
+  const fetched = formatAgo(a.fetchedHours);
   switch (a.kind) {
     case 'observed':
       return `${fetched} · obs ${formatDuration(a.observedHours)}`;

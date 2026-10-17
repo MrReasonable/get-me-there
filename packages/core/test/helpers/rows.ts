@@ -35,6 +35,7 @@ export function row(over: Over = {}): ResultRow {
     },
     stale: false,
     ageHours: 2,
+    truncated: false,
     cell: {
       origin: 'LHR',
       destination: 'JFK',

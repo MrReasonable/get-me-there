@@ -64,16 +64,12 @@ describe('api-contract (spec §10)', () => {
     expect(ROUTES.filter((r) => r.auth === 'public').map((r) => r.path)).toEqual(['/api/health']);
   });
   it('every price-bearing response requires provenance', () => {
-    expect(priceCellSchema.safeParse({ pricePence: 41200, stale: false, ageHours: 2 }).success).toBe(false);
-    expect(
-      priceCellSchema.safeParse({ pricePence: 41200, provenance, stale: false, ageHours: 2 }).success,
-    ).toBe(true);
-    expect(
-      priceCellSchema.safeParse({ pricePence: 412.5, provenance, stale: false, ageHours: 2 }).success,
-    ).toBe(false);
-    expect(
-      priceCellSchema.safeParse({ pricePence: 41200, provenance, stale: true, ageHours: 'unknown' }).success,
-    ).toBe(true);
+    const cell = { pricePence: 41200, provenance, stale: false, ageHours: 2, truncated: false };
+    const { provenance: _drop, ...bare } = cell;
+    expect(priceCellSchema.safeParse(bare).success).toBe(false);
+    expect(priceCellSchema.safeParse(cell).success).toBe(true);
+    expect(priceCellSchema.safeParse({ ...cell, pricePence: 412.5 }).success).toBe(false);
+    expect(priceCellSchema.safeParse({ ...cell, stale: true, ageHours: 'unknown' }).success).toBe(true);
   });
   it('a result row without provenance is rejected', () => {
     const row = {
@@ -83,6 +79,7 @@ describe('api-contract (spec §10)', () => {
       pricePence: 41200,
       stale: false,
       ageHours: 2,
+      truncated: false,
       cell: {
         origin: 'LHR',
         destination: 'JFK',

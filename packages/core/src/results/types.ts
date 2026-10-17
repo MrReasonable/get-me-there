@@ -1,5 +1,5 @@
 import type { ResultRow } from '../api-contract/results.js';
-import type { Iata } from '../types/ids.js';
+import type { Iata, IsoDate } from '../types/ids.js';
 import type { ConstraintName, VerdictClass } from '../types/itinerary.js';
 import type { ProviderId } from '../types/provenance.js';
 
@@ -13,7 +13,8 @@ export type SortKey = 'price' | 'totalTime' | 'departure' | 'return' | 'nights' 
 /**
  * Spec §6.5 filters, composed with AND. `verdictClass` absent means "every class except
  * `failed`" (spec §6.9: failed excluded by default, included by filter). `unverified` keeps a row
- * that leaves any of the named constraints unverified.
+ * that leaves any of the named constraints unverified. `departure` keeps rows whose departure date
+ * lies in `[from, to]`, both ends inclusive (decision 36: "only March" without leaving the table).
  */
 export interface ResultFilters {
   verdictClass?: Array<VerdictClass | 'unchecked'>;
@@ -25,4 +26,5 @@ export interface ResultFilters {
   maxPricePence?: number;
   nights?: { min: number; max: number };
   hideStale?: boolean;
+  departure?: { from: IsoDate; to: IsoDate };
 }

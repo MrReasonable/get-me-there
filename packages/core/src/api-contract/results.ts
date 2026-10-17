@@ -33,6 +33,8 @@ export const resultRowSchema = z.object({
   provenance: provenanceSchema,
   stale: z.boolean(),
   ageHours: ageHoursSchema,
+  /** Calendar basis: the price is the cheapest of the rows a truncated tile read (decision 36); false for itinerary rows. */
+  truncated: z.boolean(),
   cell: cellSchema,
   outbound: z.array(segmentSchema).nullable(),
   inbound: z.array(segmentSchema).nullable(),
