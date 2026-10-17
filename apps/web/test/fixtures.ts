@@ -289,7 +289,7 @@ export function resultsResponse(
   });
 }
 
-export function estimate(over: Partial<Estimate> = {}): Estimate {
+export function estimate(over: Partial<In<typeof apiContract.estimateSchema>> = {}): Estimate {
   return apiContract.estimateSchema.parse({
     cells: 126,
     perProvider: [
