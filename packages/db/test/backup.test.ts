@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fixedClock } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { backupDatabase, integrityCheck } from '../src/backup.js';
+import { backupDatabase, checkBackup, integrityCheck } from '../src/backup.js';
 import { at, count, freshDb, openTracked, T0, tmpDir } from './helpers/db.js';
 
 const NAME = 'get-me-there-2026-10-14T12-00-00-000Z.db';
@@ -152,6 +152,29 @@ describe('backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14)', (
     expect(readdirSync(join(dir, 'b2'))).toEqual([]);
     expect(() => backupDatabase(live().path, join(dir, 'b3'), { keep: 0, clock: fixedClock(T0) })).toThrow(
       RangeError,
+    );
+  });
+});
+
+describe('checkBackup (spec §13 "Restore"; the one rule scripts/check-backup.mjs uses)', () => {
+  it('accepts a good backup and returns nothing', () => {
+    const { path, backups } = live();
+    const { file } = backupDatabase(path, backups, { keep: 5, clock: fixedClock(T0) });
+    expect(checkBackup(file)).toBeUndefined();
+  });
+
+  it('throws for a file that is not a database and for one that does not exist', () => {
+    const dir = tmpDir();
+    const bad = join(dir, 'bad.db');
+    writeFileSync(bad, 'not a database '.repeat(200));
+    expect(() => checkBackup(bad)).toThrow(/not a database/);
+    expect(() => checkBackup(join(dir, 'absent.db'))).toThrow();
+  });
+
+  it('throws naming the verdict when integrity_check says anything but ok', () => {
+    const { path } = live();
+    expect(() => checkBackup(path, () => '*** in database main ***')).toThrow(
+      'integrity_check returned *** in database main ***',
     );
   });
 });

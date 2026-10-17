@@ -5,6 +5,7 @@
 // Exit codes from the plan's single table (apps/api EXIT): 0 ok, 64 usage, 74 the backup is unusable; 1 when the
 // built packages cannot be loaded.
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const USAGE = 'usage: node scripts/check-backup.mjs <backup file>';
 
@@ -15,11 +16,12 @@ function message(err) {
 
 async function main() {
   let EXIT;
-  let Database;
+  let checkBackup;
   try {
+    // why: no rule of its own, like backup.mjs: the exit codes and the integrity check are apps/api's and @gmt/db's.
+    const requireFromApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
     ({ EXIT } = await import(new URL('../apps/api/dist/tools/types.js', import.meta.url).href));
-    // why: resolve from packages/db, the one workspace package that depends on better-sqlite3 (as the prebuilt check).
-    Database = createRequire(new URL('../packages/db/package.json', import.meta.url))('better-sqlite3');
+    ({ checkBackup } = await import(pathToFileURL(requireFromApi.resolve('@gmt/db')).href));
   } catch (err) {
     process.stderr.write(`check-backup: cannot load the built packages (run pnpm build): ${message(err)}\n`);
     return 1;
@@ -31,14 +33,7 @@ async function main() {
     return EXIT.usage;
   }
   try {
-    const db = new Database(file, { readonly: true, fileMustExist: true });
-    let verdict;
-    try {
-      verdict = String(db.pragma('integrity_check', { simple: true }));
-    } finally {
-      db.close();
-    }
-    if (verdict !== 'ok') throw new Error(`integrity_check returned ${verdict}`);
+    checkBackup(file);
     process.stdout.write(`${JSON.stringify({ ok: true, file })}\n`);
     return EXIT.ok;
   } catch (err) {
