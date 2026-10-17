@@ -9,7 +9,9 @@ import { bootApp, type RunningApp } from '../../src/bootstrap/app.js';
 import { type AssetPaths, assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
 import { loadConfigFromEnv } from '../../src/wiring.js';
+import { errorOf } from '../helpers/contract.js';
 import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
+import { exampleDefinitionInput } from '../helpers/examples.js';
 import { basic, captureLines } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
@@ -83,6 +85,26 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
           }),
         ).toThrow();
       }
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('production refuses a definition naming the fixture provider with 422 unknown_provider', async () => {
+    const running = await bootWith(envFor({}));
+    try {
+      const refused = await running.app.request('http://localhost:3000/api/definitions', {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3000',
+          authorization: basic('operator', SENTINEL_AUTH),
+          'content-type': 'application/json',
+          'x-requested-with': 'get-me-there',
+        },
+        body: JSON.stringify(exampleDefinitionInput()),
+      });
+      expect(refused.status).toBe(422);
+      expect((await errorOf(refused)).code).toBe('unknown_provider');
     } finally {
       await running.close();
     }
