@@ -20,11 +20,62 @@ const FORBIDDEN: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'date library import', re: /from\s+['"](dayjs|moment|date-fns|luxon)(\/[^'"]*)?['"]/g },
 ];
 
-/** Comments are blanked (newlines kept, so line numbers hold) before scanning: a comment is never a hit. */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
+/**
+ * Comments are blanked (newlines kept, so line numbers hold) before scanning: a comment is never a hit. A `//` or
+ * `/*` inside a string or template literal is text, not a comment, so the code after it is still scanned. Code inside
+ * a template's `${ }` is code. (A regex literal holding a quote is not modelled; no file under src/ has one.)
+ */
+export function stripComments(source: string): string {
+  const out: string[] = [];
+  // why: each open template literal remembers the brace depth of its current `${ }`, so the matching `}` returns to the template.
+  const templates: number[] = [];
+  let depth = 0;
+  let i = 0;
+  const blank = (c: string) => (c === '\n' ? '\n' : ' ');
+  while (i < source.length) {
+    const c = source.charAt(i);
+    const next = source.charAt(i + 1);
+    if (c === '/' && next === '/') {
+      while (i < source.length && source.charAt(i) !== '\n') {
+        out.push(' ');
+        i++;
+      }
+    } else if (c === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      for (; i < stop; i++) out.push(blank(source.charAt(i)));
+    } else if (c === "'" || c === '"') {
+      out.push(c);
+      i++;
+      while (i < source.length && source.charAt(i) !== c && source.charAt(i) !== '\n') {
+        if (source.charAt(i) === '\\') out.push(source.charAt(i++));
+        out.push(source.charAt(i++));
+      }
+      if (i < source.length) out.push(source.charAt(i++));
+    } else if (c === '`' || (c === '}' && templates.at(-1) === depth)) {
+      // inside template text until the closing backtick, or until a `${` opens code again
+      if (c === '}') templates.pop();
+      out.push(c);
+      i++;
+      while (i < source.length && source.charAt(i) !== '`') {
+        if (source.charAt(i) === '\\') out.push(source.charAt(i++));
+        else if (source.charAt(i) === '$' && source.charAt(i + 1) === '{') {
+          out.push('${');
+          i += 2;
+          templates.push(depth);
+          break;
+        }
+        out.push(source.charAt(i++));
+      }
+      if (source.charAt(i) === '`') out.push(source.charAt(i++));
+    } else {
+      if (c === '{') depth++;
+      if (c === '}') depth--;
+      out.push(c);
+      i++;
+    }
+  }
+  return out.join('');
 }
 
 /** Every forbidden use in a file's text, scanned whole (a call split across lines is still found), with its line. */
@@ -59,6 +110,12 @@ describe('no Date object outside WP9’s clock (review focus 3)', () => {
       scan(`// new Date('2027-03-14')\n/* Date.parse(x) */ const ok = formatDayShort(day.date);`),
     ).toEqual([]);
     expect(scan(`const ok = formatDayShort(day.date); const url = 'http://x//y';`)).toEqual([]);
+    // why: a `//` inside a string is text, so a Date after it on the same line is still found (CodeRabbit, major)
+    expect(scan(`const url = 'http://x//y'; new Date()`)).toEqual(['1: Date(', '1: new Date(']);
+    expect(scan('const u = "a//b"; const d = new Date();')).toEqual(['1: Date(', '1: new Date(']);
+    expect(scan(`const u = \`a//$${'{'}new Date()}//b\`;`)).toEqual(['1: Date(', '1: new Date(']);
+    expect(scan("const s = 'it\\'s // here'; new Date()")).toEqual(['1: Date(', '1: new Date(']);
+    expect(scan('/* a */ const d = new Date(); // tail Date()')).toEqual(['1: Date(', '1: new Date(']);
   });
   it('finds no Date object in apps/web/src outside the allowlist', () => {
     const files = walk(SRC);
