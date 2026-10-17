@@ -491,6 +491,18 @@ describe('client-side sort and filter (spec §6.5)', () => {
     expect(screen.getByLabelText('Max price (£)')).toBeInvalid();
   });
 
+  it('an invalid nights box alone, with a valid price, leaves the active filters unchanged', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const { user, client } = view('?view=results&f.maxPrice=48000&f.nights=10-14');
+    await table();
+    await user.clear(screen.getByLabelText('Min nights'));
+    await user.type(screen.getByLabelText('Min nights'), 'x{Enter}');
+    await settled(client);
+    expect(screen.getByLabelText('Max price (£)')).toBeValid();
+    expect(url().get('f.maxPrice')).toBe('48000');
+    expect(url().get('f.nights')).toBe('10-14');
+  });
+
   it('a filter value from the URL stays in its option list when no shown row has it', async () => {
     countResults(resultsResponse({ rows: [verifiedRow()] }));
     view('?view=results&f.provider=travelpayouts&f.dest=EWR&f.unverified=cabin');
