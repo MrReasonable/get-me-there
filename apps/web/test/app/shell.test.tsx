@@ -26,7 +26,8 @@ describe('shell (spec §11 layout)', () => {
     }
     await user.click(within(nav).getByRole('link', { name: 'Calendar' }));
     expect(window.location.search).toBe('?view=calendar&def=def-0001&f.stops=1');
-    expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
+    // why: WP10 replaced the placeholder; the default msw handlers serve the calendar.
+    expect(await screen.findByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
   });
 
@@ -41,14 +42,11 @@ describe('shell (spec §11 layout)', () => {
     expect(screen.getByRole('main')).toHaveAttribute('id', 'main');
   });
 
-  it.each(['duration', 'history', 'alerts'])(
-    '%s is a placeholder that names no work package',
-    async (view) => {
-      renderWithProviders(<App />, { search: `?view=${view}` });
-      expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
-      expect(screen.queryByText(/WP1/)).toBeNull();
-    },
-  );
+  it.each(['alerts'])('%s is a placeholder that names no work package', async (view) => {
+    renderWithProviders(<App />, { search: `?view=${view}` });
+    expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/WP1/)).toBeNull();
+  });
 
   it('definition selector lists definitions and writes def= to the URL', async () => {
     server.use(
@@ -73,7 +71,7 @@ describe('shell (spec §11 layout)', () => {
   it('negative: no synthetic banner and no provider alert for real data', async () => {
     renderWithProviders(<App />, { search: '?view=calendar' });
     await screen.findByLabelText('Search definition');
-    await screen.findByText('This view is not available yet.');
+    await screen.findByRole('table', { name: 'Mar 2027' });
     expect(screen.queryByText(/Synthetic data/)).toBeNull();
     expect(screen.queryByText(/Provider status unknown/)).toBeNull();
   });

@@ -8,8 +8,11 @@ import { SyntheticBanner } from './components/SyntheticBanner.js';
 import { COPY } from './copy.js';
 import { useSearchParams } from './state/urlState.js';
 import { parseView } from './state/view.js';
+import { CalendarView } from './views/Calendar/CalendarView.js';
 import { CoverageView } from './views/Coverage/CoverageView.js';
 import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
+import { DurationView } from './views/Duration/DurationView.js';
+import { HistoryView } from './views/History/HistoryView.js';
 import { Placeholder } from './views/Placeholder.js';
 import { ProvidersView } from './views/Providers/ProvidersView.js';
 import { ResultsView } from './views/Results/ResultsView.js';
@@ -29,7 +32,12 @@ export function App() {
   const selectedId = requested ?? list[0]?.id ?? null;
   const selected = list.find((d) => d.id === selectedId) ?? null;
   const noProviders = providers.data !== undefined && !providers.data.providers.some((p) => p.enabled);
-  const needsDefinition = view === 'results' || view === 'coverage';
+  const needsDefinition =
+    view === 'results' ||
+    view === 'coverage' ||
+    view === 'calendar' ||
+    view === 'duration' ||
+    view === 'history';
   return (
     <div className="min-h-screen bg-white text-slate-900">
       {providers.data?.synthetic === true ? <SyntheticBanner /> : null}
@@ -63,9 +71,13 @@ export function App() {
           ) : null}
           {view === 'results' && selected !== null ? <ResultsView definition={selected} /> : null}
           {view === 'coverage' && selected !== null ? <CoverageView definition={selected} /> : null}
-          {view === 'calendar' || view === 'duration' || view === 'history' || view === 'alerts' ? (
-            <Placeholder hint={view === 'calendar' ? COPY.calendarPlaceholderHint : null} />
+          {view === 'calendar' && selected !== null ? (
+            // why: a new definition starts with no panel open and its own filter defaults.
+            <CalendarView key={selected.id} definition={selected} />
           ) : null}
+          {view === 'duration' && selected !== null ? <DurationView definition={selected} /> : null}
+          {view === 'history' && selected !== null ? <HistoryView definition={selected} /> : null}
+          {view === 'alerts' ? <Placeholder /> : null}
           {view === 'definitions' ? <DefinitionsView /> : null}
           {view === 'providers' ? <ProvidersView /> : null}
         </AppBoundary>

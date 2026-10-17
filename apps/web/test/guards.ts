@@ -32,3 +32,36 @@ export function drainGuards(): string[] {
   expected = null;
   return problems;
 }
+
+// The rendered-copy sweep's two collectors, shared by WP9's sweep and WP10's wiring test (review arch2-012).
+
+/** Every visible string plus the attributes a screen reader or tooltip shows. */
+export function renderedCopy(): string {
+  const attrs = [...document.body.querySelectorAll('[title], [aria-label], [placeholder], [alt]')].flatMap(
+    (el) => ['title', 'aria-label', 'placeholder', 'alt'].map((a) => el.getAttribute(a) ?? ''),
+  );
+  return [document.body.textContent ?? '', ...attrs].join('\n');
+}
+
+/**
+ * Every "£" in the DOM sits inside a PriceCell (a fare, with provenance), a [data-cost] element (a cost
+ * or a cap), a [data-scale] element (WP10: the heatmap legend's band ranges, scale values only; no fare is ever
+ * exempt, chart tooltips included, and chart axes print no "£": plan decision 52), a [data-indicative] row (WP10:
+ * a route-level series, exempt from full provenance by spec §11) or a form label ("Max price (£)"), on every view
+ * (reviews tsr-003, prov-r2-007).
+ */
+export function poundsOutsidePrices(): string[] {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const outside: string[] = [];
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    const host = n.parentElement;
+    if (
+      n.textContent?.includes('£') &&
+      host?.closest('[data-testid="price-cell"], [data-cost], [data-scale], [data-indicative], label') ===
+        null
+    ) {
+      outside.push(n.textContent);
+    }
+  }
+  return outside;
+}

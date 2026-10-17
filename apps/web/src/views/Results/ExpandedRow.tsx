@@ -10,6 +10,8 @@ import { VerifyCellButton } from '../../components/VerifyCellButton.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatLocalDateTime, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
+import { HISTORY_PARAMS, historyHref } from '../../state/links.js';
+import { navigateTo } from '../../state/urlState.js';
 
 type Segment = NonNullable<ResultRow['outbound']>[number];
 
@@ -158,6 +160,15 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
         {row.seller !== null ? <p>{COPY.seller(row.seller)}</p> : null}
         <BookingAction booking={row.booking} providerId={providerId} />
         <SearchLink link={row.searchLink} providerId={providerId} />
+        {row.itineraryHash !== null ? (
+          <a
+            href={historyHref(row.itineraryHash)}
+            onClick={navigateTo({ view: 'history', [HISTORY_PARAMS.hash]: row.itineraryHash })}
+            className="block underline"
+          >
+            {COPY.historyView.rowLink}
+          </a>
+        ) : null}
       </div>
       {row.otherOffers.length > 0 ? (
         <div>

@@ -57,8 +57,6 @@ export const COPY = {
     providers: 'Providers',
   },
   placeholder: 'This view is not available yet.',
-  calendarPlaceholderHint:
-    'Until it is, the Results filters slice the window by month: set "Departs on or after" and "Departs on or before".',
   definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No search definitions yet. Create one under Definitions.',
   definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',
