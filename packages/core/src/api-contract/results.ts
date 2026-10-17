@@ -220,6 +220,11 @@ export const cellOutcomeSchema = cellKeySchema.extend({
   attempts: count,
   lastError: z.string().nullable(),
   fetchedAt: isoDateTimeSchema.nullable(),
+  /**
+   * The outcome's stored minimum, a coverage diagnostic only (review prov M4): it carries no FX flag, staleness or age,
+   * so a client never renders it as a fare. The cell's prices are `calendarPrices` and `observations`, each with full
+   * provenance; WP10's price guard renders only those.
+   */
   minPence: moneyPenceSchema.nullable(),
   cabin: cabinSchema.nullable(),
   pointOfSale: pointOfSaleSchema.nullable(),
