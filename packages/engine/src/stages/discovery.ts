@@ -280,7 +280,12 @@ export function commitTile(
       continue;
     } else if (noFares.has(key))
       write.outcomes.push({ ...base, status: 'empty', reason: null, lastError: null, minPence: null });
-    else write.outcomes.push({ ...base, status: 'no_data', reason: null, lastError: null, minPence: null });
+    else if (result.truncated === true) {
+      // why: decision 30 asks the adapter to list unread cells in cellIssues; one it left out may still sit on an
+      // unread page, so it is an error (fetched again), never reusable no_data, as the coverage check judges it (prov M1)
+      fail(cell, 'upstream', 'pagination truncated: cell left unread');
+      continue;
+    } else write.outcomes.push({ ...base, status: 'no_data', reason: null, lastError: null, minPence: null });
     write.cells.push(cell);
   }
   ctx.db.transaction(() => {

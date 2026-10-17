@@ -300,4 +300,32 @@ describe('discovery normalisation through the engine', () => {
       lastError: 'left unread by the page cap',
     });
   });
+
+  it('a truncated tile that leaves an unread cell out of cellIssues still never makes it reusable no_data (prov M1)', async () => {
+    const eight = { ...cell, returnDate: asIsoDate('2026-11-10') };
+    const h = createHarness({
+      transformFixture: (p) =>
+        mapTiles(p, (r) =>
+          r.kind !== 'tile'
+            ? r
+            : {
+                ...r,
+                truncated: true,
+                prices: r.prices.filter((x) => cellKeyString(x) === cellKeyString(cell)),
+                cellIssues: [],
+              },
+        ),
+    });
+    const e = await h.runToCompletion(
+      h.orch(),
+      h.createDefinition({ window: { kind: 'absolute', from: cell.departureDate, to: cell.departureDate } })
+        .id,
+    );
+    // why: the coverage check treats such a cell as not checked; the outcome must agree, so it is fetched again
+    expect(h.outcomes(e.id).find((o) => cellKeyString(o) === cellKeyString(eight))).toMatchObject({
+      status: 'error',
+      reason: 'upstream',
+      lastError: 'pagination truncated: cell left unread',
+    });
+  });
 });
