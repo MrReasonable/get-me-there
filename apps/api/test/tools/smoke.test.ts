@@ -441,6 +441,58 @@ describe('checklist FAIL branches (negative controls)', () => {
     expect(c?.detail).toContain(detail);
   });
 
+  it('ledger: a final vendor call that threw (a Travelpayouts 401) is matched by its own ledger row and reported as the error it was (re-review)', async () => {
+    const ports = smokePorts();
+    const { r } = await smoke(ports, cli(), {
+      failOn: (u) =>
+        u.hostname === 'api.travelpayouts.com' ? { status: 401, body: { error: 'refused' } } : undefined,
+    });
+    const ledger = check(r.checks, 'ledger');
+    expect(ledger?.status).toBe('pass');
+    // why: the thrown 401 is an answer: collected by the smoke's kit wrapper and matched to its ledger row
+    expect(ledger?.detail).toContain(
+      'travelpayouts 1 tile, 1 answer(s) matched in the ledger by endpoint and status, 0 retried attempt(s)',
+    );
+    expect(r.reports[0]).toMatchObject({ providerId: 'travelpayouts', status: 'error' });
+    expect(r.reports[0]?.detail).toMatch(/^auth/);
+    expect(r.exitCode).toBe(EXIT.failed);
+  });
+
+  it('ledger fails when the row of that thrown final answer is missing from the ledger (re-review)', async () => {
+    const ports = smokePorts();
+    const { r } = await smoke(ports, cli(), {
+      failOn: (u) =>
+        u.hostname === 'api.travelpayouts.com' ? { status: 401, body: { error: 'refused' } } : undefined,
+    });
+    const executionId = r.executionId ?? '';
+    // why: the row the guard wrote for the 401 is removed, as a ledger that lost it would look
+    const removed = ports.db.raw
+      .prepare('DELETE FROM provider_requests WHERE execution_id = ? AND http_status = 401')
+      .run(executionId).changes;
+    expect(removed).toBe(1);
+    const c = check(
+      checklist({
+        ports,
+        q: smokeQuery(asIsoDate('2027-02-10'), LHR, JFK),
+        executionId,
+        runStart: NOW,
+        cap: 4,
+        configured: ['travelpayouts'],
+        found: new Map(),
+        itinerary: null,
+        seen: [],
+        answers: [
+          { providerId: 'travelpayouts', endpointPath: '/aviasales/v3/prices_for_dates', status: 401 },
+        ],
+      }),
+      'ledger',
+    );
+    expect(c?.status).toBe('fail');
+    expect(c?.detail).toContain(
+      'travelpayouts: 1 answer(s) (/aviasales/v3/prices_for_dates HTTP 401) missing from the ledger',
+    );
+  });
+
   it('ledger fails when an answer the run received has no ledger row of its own endpoint and status', async () => {
     const { input } = await base();
     const answer = {
