@@ -1,5 +1,5 @@
 /** Spec §10 `/coverage` (View D). Separate from `coverage.ts` so `results.ts` → `coverage.ts` stays acyclic. */
-import { type apiContract, type CellOutcome, type SearchDefinition, selectedNotReached } from '@gmt/core';
+import { type apiContract, type SearchDefinition, selectedNotReached } from '@gmt/core';
 import { retriedOnResume } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';
@@ -8,24 +8,20 @@ import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { coverageSummaryFor } from './coverage.js';
 import { executionResponse, overrunOf, planCallsOf } from './executions.js';
+import { EXECUTIONS_LIMIT } from './results.js';
 import { withNights } from './rows.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
-/**
- * What a manual resume would pick up again: WP3's `retriedOnResume`, the predicate the resume query is built from
- * (review arch-005), so View D's "retry" and the resume never disagree.
- */
-export function retryable(o: Pick<CellOutcome, 'status' | 'reason' | 'attempts'>): boolean {
-  return retriedOnResume(o, true);
-}
-
 /**
  * Spec §10 `GET /coverage` (View D) for the latest parent execution: six buckets per stage × provider with request
  * counts, the overrun flag (decision 43: discovery on tiles) and the parity flag, selected-but-not-reached cells,
  * errors with retry. 404 `no_execution` before the first run (the contract names one execution).
  */
 export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: Engine): CoverageResponse {
-  const all = ports.repos.executions.listForDefinition(def.id, { limit: 500, includeChildren: true });
+  const all = ports.repos.executions.listForDefinition(def.id, {
+    limit: EXECUTIONS_LIMIT,
+    includeChildren: true,
+  });
   const parent = all.find((e) => !e.isChild) ?? null;
   if (parent === null) throw new ApiError(404, 'no_execution', API_TEXT.noExecution);
   const summary = coverageSummaryFor(parent, all, ports);
@@ -65,7 +61,9 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         reason: o.reason,
         lastError: o.lastError,
         attempts: o.attempts,
-        retryable: retryable(o),
+        // why: what a manual resume would pick up again: WP3's retriedOnResume, the predicate the resume query is built
+        // from (review arch-005), so View D's "retry" and the resume never disagree.
+        retryable: retriedOnResume(o, true),
       })),
     scheduleBlockedSince: engine.scheduler.blockedSince(),
   };
