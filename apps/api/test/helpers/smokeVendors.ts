@@ -22,6 +22,8 @@ export interface SmokeVendorOptions {
   tpTruncated?: boolean;
   /** Travelpayouts adds a row with an unusable price for a covered cell (a per-cell issue, decision 24). */
   tpBadPrice?: boolean;
+  /** The currency Travelpayouts states for its rows (default `gbp`); the smoke compares GBP only. */
+  tpCurrency?: string;
   /** A failure for the chosen request: an HTTP status with a body, or a socket error. */
   failOn?: (url: URL) => { status: number; body: unknown } | 'network' | undefined;
 }
@@ -83,7 +85,7 @@ function tpAnswer(url: URL, o: SmokeVendorOptions): Response {
   }
   return json({
     success: true,
-    currency: 'gbp',
+    currency: o.tpCurrency ?? 'gbp',
     data: [
       row(dep, ret, 412, `${destination}${origin}`),
       // why: an open-jaw row (back to another London airport) the adapter must drop and report (decision 39)

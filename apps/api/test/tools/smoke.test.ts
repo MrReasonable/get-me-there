@@ -259,6 +259,17 @@ describe('runSmoke (spec §9 item 7)', () => {
     },
   );
 
+  it('1: a price in another currency is an error, never shown as pence (core priceInGbp, code-architect M1)', async () => {
+    const { r } = await smoke(smokePorts(), cli(), { tpCurrency: 'usd' });
+    expect(r.reports[0]).toMatchObject({
+      providerId: 'travelpayouts',
+      status: 'error',
+      cheapest: null,
+      detail: 'price in USD; the smoke compares GBP only',
+    });
+    expect(r.exitCode).toBe(EXIT.failed);
+  });
+
   it('a truncated tile\'s cheapest reads "cheapest of the rows read" (decision 30)', async () => {
     const { r, urls } = await smoke(smokePorts(), cli(), { tpTruncated: true });
     expect(urls.filter((u) => u.hostname === 'api.travelpayouts.com')).toHaveLength(3);

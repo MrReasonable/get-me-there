@@ -29,8 +29,10 @@ import {
   type IsoDateTime,
   type ItineraryQuery,
   type ItinerarySearchResult,
+  NormalisationError,
   type Provenance,
   ProviderError,
+  priceInGbp,
   type ResponseCache,
   type TilePlan,
 } from '@gmt/core';
@@ -159,8 +161,17 @@ function priceOf(
   pointOfSale: string,
   extra: { displayName: string; confirmed: boolean | null; truncated: boolean },
 ): SmokePrice | string {
-  // why: both adapters ask for GBP (spec §5.2); the smoke compares pence only and reports any other currency.
-  if (p.currency.toUpperCase() !== 'GBP') return `price in ${p.currency}; the smoke compares GBP only`;
+  // why: both adapters ask for GBP (spec §5.2). Core's one money step (spec §5.6) passes GBP through with its integer
+  // check; with no rate lookup, any other currency throws, and the smoke reports it instead of comparing (arch M1).
+  let money: ReturnType<typeof priceInGbp>;
+  try {
+    money = priceInGbp(p, () => null);
+  } catch (e) {
+    if (e instanceof NormalisationError)
+      return `price in ${p.currency.toUpperCase()}; the smoke compares GBP only`;
+    if (e instanceof RangeError) return `unusable amount ${p.amountMinor} ${p.currency.toUpperCase()}`;
+    throw e;
+  }
   const cell: CellKey = {
     origin: p.origin,
     destination: p.destination,
@@ -168,7 +179,7 @@ function priceOf(
     returnDate: p.returnDate,
   };
   return {
-    pricePence: p.amountMinor,
+    pricePence: money.pricePence,
     cell,
     nights: daysBetween(cell.departureDate, cell.returnDate),
     displayName: extra.displayName,
@@ -180,7 +191,7 @@ function priceOf(
       fetchedAt,
       ...(p.providerObservedAt === undefined ? {} : { providerObservedAt: p.providerObservedAt }),
       maxAgeHours: info.maxAgeHours,
-      fx: { converted: false },
+      fx: money.fx,
       pointOfSale,
       cabin: SMOKE_CABIN,
     },
