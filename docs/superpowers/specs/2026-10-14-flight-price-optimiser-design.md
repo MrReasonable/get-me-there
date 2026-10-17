@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 28.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 29.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -261,7 +261,7 @@ verification as a free history source (§7 `route_price_history`).
   `partially-verified`, `failed`; calendar prices are `unchecked`. The word
   "verified" is reserved for the class. Stage counts use
   **"itinerary-searched"**.
-- **Provenance** — `{ providerId, sourceKind, fetchedAt, providerObservedAt?, maxAgeHours: number | 'unknown', fx: { converted: false } | { converted: true; rateNano; rateDate; source }, pointOfSale: <ISO 3166-1 alpha-2, the vendor's echo of `POINT_OF_SALE`> | 'unknown', cabin }`.
+- **Provenance** — `{ providerId, sourceKind, fetchedAt, providerObservedAt?, maxAgeHours: number | 'unknown', fx: { converted: false } | { converted: true; rateNano; rateDate; source }, pointOfSale: PointOfSale, cabin }`, where `PointOfSale` is the ISO 3166-1 alpha-2 code the vendor echoes for `POINT_OF_SALE`, or `'unknown'`.
 - **Effective age** — `providerObservedAt` age if present; else `fetchedAt`
   age + `maxAgeHours`; else (`'unknown'`) the `fetchedAt` age alone, labelled
   "vendor's cache age unknown" and never marked stale on that account (a
@@ -1229,8 +1229,8 @@ under the §5.2 tilings measured by the spike:
 
 | Config | Per run | Per month (weekly) | Fits |
 |---|---|---|---|
-| £0 Travelpayouts, `month` tiles | `O × D × M` free calls (worked example 28) | ~60 | yes, cap 50,000; usefulness is whatever the coverage check reports for the pairs |
-| SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | see `docs/scheduling.md` (generated) | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,090/run) or daily runs (~4,300/month) |
+| £0 Travelpayouts, `month` tiles | `O × D × M` free calls (worked example 28; 34 with the 1.2 retry reserve) | ~148 (34 × 4.33 weekly runs; every weekly firing refetches, since 168 h is past the 0.9 × 168 = 151.2 h reuse threshold; ~121 before the reserve) | yes, cap 50,000; usefulness is whatever the coverage check reports for the pairs |
+| SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | see `docs/scheduling.md` (generated) | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,084/run planned) or daily runs (~2,330/month with the reserve: discovery refetches once per weekly refresh, at most 5 times a month, and itinerary searches run daily) |
 | SearchApi trial | one discovery exceeds 100 | — | spike and smoke only; scheduled runs exclude SearchApi on `trial` |
 
 There is no built-in definition with airports in it. The Definitions form
@@ -1448,7 +1448,13 @@ face still shows the provider's short mark, the destination, a short age
 line from `core` ("5d old", "≤2d old", "age unknown", or the "vendor's
 cache age unknown" badge) and, on a calendar price, "not checked"; the
 title attribute may carry the long form, never the only form, and these
-faces keep their tested contrast and their fit at 375px. Each row also carries the operator's per-destination note from
+faces keep their tested contrast and their fit at 375px. Every such face is
+a variant of `PriceCell`, never a second price renderer: `PriceCell`
+validates the complete provenance (provider, source kind, fetched and
+observed time, point of sale, FX status) before it prints an amount, and a
+face keeps "≈" on a converted price. Point of sale is validated on every
+price but is not a face item: it is one install-wide setting (§12
+`POINT_OF_SALE`), or `'unknown'` where the vendor ignores it. Each row also carries the operator's per-destination note from
 the definition (free text such as "onward leg not included") on every row
 for that destination. Optional operator-entered onward cost per destination
 renders as an "adjusted" column, labelled operator-entered, sortable, never
@@ -1723,6 +1729,22 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 29: CodeRabbit batch 3 (2026-10-17)
+
+Folded in from CodeRabbit's third batch (scripts, live docs, and the brief
+findings checked against shipped code). §3: the provenance record's point
+of sale is named as a type, so the declaration is one code span. §5.3
+Egress: http-kit refuses a query parameter named like a credential, whatever
+its value (`departure_token` and `booking_token` excepted). §7:
+`route_price_history` stores each point's point of sale (migration 0004;
+older rows read 'unknown') and every point's FX status reads "not
+converted". §8.2: the £0 Travelpayouts cadence row is ~148 calls a month
+(every weekly firing refetches), and the daily SearchApi headroom is
+~2,330 a month, both from the budget-fit formula. §11: compact price faces
+are `PriceCell` variants that validate the complete provenance; point of
+sale is validated, not a face item. §12: the hourly email ceiling counts
+sent and in-flight emails only; a failed send gives its slot back.
 
 ### Revision 28: final whole-branch review (2026-10-17)
 

@@ -20,6 +20,16 @@ describe('docs/scheduling.md cadence table (spec §8.2; decisions 25, 34)', { ti
     expect(table).toContain('| 30.42 |');
   }, 60_000);
 
+  it('the spec §8.2 £0 row states the monthly Travelpayouts calls the budget fit computes (CodeRabbit batch 3)', () => {
+    const monthly = /\| £0: Travelpayouts only, weekly \|[^\n]*\| Travelpayouts ([\d,]+) of /.exec(
+      renderCadenceTable(),
+    )?.[1];
+    const spec = read('docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md');
+    const row = spec.split('\n').find((l) => l.startsWith('| £0 Travelpayouts, `month` tiles |')) ?? '';
+    expect(monthly).toBeDefined();
+    expect(row.split(' | ')[2]).toMatch(new RegExp(`^~${monthly} \\(`));
+  }, 60_000);
+
   it('names each SearchApi plan by its preset id, as docs/api-limits.md does, never by a price (CodeRabbit batch 3)', () => {
     const table = renderCadenceTable();
     expect(table).not.toContain('$40');
