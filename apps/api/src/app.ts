@@ -54,8 +54,8 @@ async function readBody(c: Context<AppEnv>): Promise<{ ok: true; value: unknown 
 /**
  * The single HTTP surface (spec §10): one Hono app mounting every ROUTES entry from `@gmt/core` api-contract (paths
  * carry `/api`), each body and query validated once by its handler against the entry's own schemas (decision 54), the
- * error envelope, the spec §4 hardening and the auth gate. A handler whose schemas are not its ROUTES entry's refuses
- * to build.
+ * error envelope, the spec §4 hardening and the auth gate. Strict: a ROUTES entry without a handler (unless another
+ * package owns it), a handler without a ROUTES entry, or a handler whose schemas are not its entry's refuses to build.
  */
 export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}): Hono<AppEnv> {
   const routes = options.routes ?? apiContract.ROUTES;
@@ -94,11 +94,17 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
     }),
   );
   app.use(`${API_PREFIX}/*`, mutatingRequestCheck());
+  const routeKeys = new Set(routes.map((r) => `${r.method} ${r.path}`));
+  for (const key of Object.keys(HANDLERS)) {
+    // why: a handler for a route the contract no longer has is dead code the web client cannot reach.
+    if (!routeKeys.has(key)) throw new Error(`no route for handler ${key}`);
+  }
   for (const route of routes) {
     const key = `${route.method} ${route.path}`;
+    if (OWNED_ELSEWHERE.has(key)) continue; // why: another package mounts it (plan decision 4: smoke is WP13's)
     const handler = HANDLERS[key];
-    // why: Task 8.15 makes mounting strict once every handler exists; until then an unmapped entry answers 404.
-    if (handler === undefined || OWNED_ELSEWHERE.has(key)) continue;
+    // why: spec §10 is the route table; an entry without a handler is a contract the api does not honour.
+    if (handler === undefined) throw new Error(`no handler for ${key}`);
     // why: the handler validates with the schemas it was typed against; they must be the entry's own objects.
     if (handler.request !== (route.request ?? NO_INPUT) || handler.query !== (route.query ?? NO_INPUT))
       throw new Error(`handler for ${key} validates with schemas other than its ROUTES entry's`);
