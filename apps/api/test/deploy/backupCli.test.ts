@@ -12,7 +12,7 @@ import { tempDir } from '../helpers/tmp.js';
 import { REPO } from './files.js';
 
 beforeAll(() => {
-  execFileSync('pnpm', ['--filter', '@gmt/api...', 'build'], { cwd: REPO, stdio: 'ignore' });
+  execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], { cwd: REPO, stdio: 'ignore' });
 }, 300_000);
 
 function run(script: string, args: string[], env: Record<string, string> = {}) {

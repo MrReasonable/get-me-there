@@ -32,7 +32,7 @@ afterEach(() => {
 
 // why: both CLIs load the built packages and apps/api's build (as they do in the image), so those are built first.
 beforeAll(() => {
-  execFileSync('pnpm', ['--filter', '@gmt/api...', 'build'], { cwd: REPO, stdio: 'ignore' });
+  execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], { cwd: REPO, stdio: 'ignore' });
 }, 300_000);
 
 function tempDir() {
