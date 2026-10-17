@@ -11,9 +11,9 @@ import {
   DEFAULT_CLASSES,
   type ResultsUiState,
   resultsStatePatch,
-  setFilter,
 } from '../../state/resultsState.js';
 import { updateSearchParams } from '../../state/urlState.js';
+import { withKey } from '../../state/withKey.js';
 
 function toggle<T extends string>(list: readonly T[], v: T): T[] | undefined {
   const next = list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
@@ -69,9 +69,9 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
         ? undefined
         : { min: min ?? Math.min(...nights, max ?? 0), max: max ?? Math.max(...nights, min ?? 0) };
     const codes = parseCarriers(carriers).codes;
-    let next = setFilter(base, 'carriers', codes.length > 0 ? codes : undefined);
-    next = setFilter(next, 'maxPricePence', parsePoundsToPence(maxPrice));
-    return setFilter(
+    let next = withKey(base, 'carriers', codes.length > 0 ? codes : undefined);
+    next = withKey(next, 'maxPricePence', parsePoundsToPence(maxPrice));
+    return withKey(
       next,
       'nights',
       range === undefined
@@ -98,18 +98,18 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
       const other = end === 'from' ? current?.to : current?.from;
       const bound = end === 'from' ? first : last;
       if (other === undefined || bound === undefined) {
-        apply(setFilter(f, 'departure', undefined));
+        apply(withKey(f, 'departure', undefined));
         return;
       }
       apply(
-        setFilter(f, 'departure', end === 'from' ? { from: bound, to: other } : { from: other, to: bound }),
+        withKey(f, 'departure', end === 'from' ? { from: bound, to: other } : { from: other, to: bound }),
       );
       return;
     }
     const from = end === 'from' ? parsed.data : (current?.from ?? first);
     const to = end === 'to' ? parsed.data : (current?.to ?? last);
     if (from === undefined || to === undefined) return;
-    apply(setFilter(f, 'departure', from <= to ? { from, to } : { from: to, to: from }));
+    apply(withKey(f, 'departure', from <= to ? { from, to } : { from: to, to: from }));
   };
 
   return (
@@ -129,7 +129,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
               <input
                 type="checkbox"
                 checked={classes.includes(c)}
-                onChange={() => apply(setFilter(f, 'verdictClass', toggle(classes, c)))}
+                onChange={() => apply(withKey(f, 'verdictClass', toggle(classes, c)))}
               />
               {COPY.classLabel[c]}
             </label>
@@ -142,7 +142,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
               <input
                 type="checkbox"
                 checked={f.providerId?.includes(p) ?? false}
-                onChange={() => apply(setFilter(f, 'providerId', toggle(f.providerId ?? [], p)))}
+                onChange={() => apply(withKey(f, 'providerId', toggle(f.providerId ?? [], p)))}
               />
               {COPY.provider[p]}
             </label>
@@ -155,7 +155,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
               <input
                 type="checkbox"
                 checked={f.destination?.includes(d) ?? false}
-                onChange={() => apply(setFilter(f, 'destination', toggle(f.destination ?? [], d)))}
+                onChange={() => apply(withKey(f, 'destination', toggle(f.destination ?? [], d)))}
               />
               {d}
             </label>
@@ -168,7 +168,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             className={field}
             disabled={calendarBasis}
             value={f.maxStops === undefined ? '' : String(f.maxStops)}
-            onChange={(e) => apply(setFilter(f, 'maxStops', intOrUndefined(e.target.value)))}
+            onChange={(e) => apply(withKey(f, 'maxStops', intOrUndefined(e.target.value)))}
           >
             <option value="">{COPY.any}</option>
             <option value="0">0</option>
@@ -271,7 +271,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
           <input
             type="checkbox"
             checked={f.hideStale === true}
-            onChange={() => apply(setFilter(f, 'hideStale', f.hideStale === true ? undefined : true))}
+            onChange={() => apply(withKey(f, 'hideStale', f.hideStale === true ? undefined : true))}
           />
           {COPY.filterHideStale}
         </label>
@@ -285,7 +285,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             value={f.unverified?.[0] ?? ''}
             onChange={(e) => {
               const name = apiContract.constraintNameSchema.safeParse(e.target.value);
-              apply(setFilter(f, 'unverified', name.success ? [name.data] : undefined));
+              apply(withKey(f, 'unverified', name.success ? [name.data] : undefined));
             }}
           >
             <option value="">{COPY.any}</option>

@@ -1,4 +1,4 @@
-import { oneOf } from './withKey.js';
+import { oneOf } from './oneOf.js';
 
 /** Every view of spec §11; WP9 owns the nav for all of them. */
 export type ViewId =

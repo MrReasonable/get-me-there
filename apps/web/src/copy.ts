@@ -9,6 +9,7 @@ import {
   type ProviderId,
   type SourceKind,
   type Stage,
+  TRUNCATED_NOTE,
   type Verdict,
   type VerdictClass,
 } from '@gmt/core';
@@ -84,9 +85,9 @@ export const COPY = {
   // why: core's label, so web, email and the verdict list say the same words (decisions 37, 44).
   priceNotConfirmed: CONSTRAINT_LABELS.priceConfirmed,
   staleView: 'Every row here is older than one refresh cycle.',
-  bandCheapest: 'cheapest in its 6h travel-time band',
+  bandCheapest: (hours: number) => `cheapest in its ${hours}h travel-time band`,
   notSeenInLatest: (age: string) => `not seen in latest search (${age})`,
-  truncatedNote: 'cheapest of the rows read',
+  truncatedNote: TRUNCATED_NOTE,
   // why: a newer parent search found this cell empty; the price stays visible, ranked after current rows (decision 54, 57).
   superseded: 'superseded by a later search',
   providerShort: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'synthetic' } satisfies Record<

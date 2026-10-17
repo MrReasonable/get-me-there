@@ -8,7 +8,7 @@ export interface ViewHeaderProps {
   executions: readonly HeaderRun[];
   stale: boolean;
   /**
-   * 'span': a cross-execution view (decision 38; WP10's Calendar, Duration and History): the runs are
+   * 'span': a cross-execution view (decisions 42, 46; WP10's Calendar, Duration and History): the runs are
    * named and no single run status or not-completed banner applies. Default 'single'.
    */
   variant?: 'single' | 'span';

@@ -1,6 +1,7 @@
 import { apiContract, type ResultFilters, type SortKey } from '@gmt/core';
 import type { Basis } from '../api/types.js';
-import { oneOf, withKey } from './withKey.js';
+import { oneOf } from './oneOf.js';
+import { withKey } from './withKey.js';
 
 /** sortRows's direction parameter (plan "Core domain functions": `dir: 'asc' | 'desc'`). */
 export type SortDir = 'asc' | 'desc';
@@ -37,15 +38,6 @@ const list = (v: string | null): string[] => (v ? v.split(',').filter((s) => s.l
 const int = (v: string | null): number | undefined => (v !== null && /^\d+$/.test(v) ? Number(v) : undefined);
 const CARRIER = /^[A-Z0-9]{2}$/;
 
-/** Returns the filters with `key` set, or removed when `value` is undefined. */
-export function setFilter<K extends keyof ResultFilters>(
-  f: ResultFilters,
-  key: K,
-  value: ResultFilters[K] | undefined,
-): ResultFilters {
-  return withKey(f, key, value);
-}
-
 export function parseBasis(v: string | null): Basis | null {
   return v === 'verified' || v === 'calendar' ? v : null;
 }
@@ -74,33 +66,33 @@ export function parseResultsState(p: URLSearchParams): ResultsUiState {
   }
   let f: ResultFilters = {};
   const classes = list(p.get('f.class')).filter(isClass);
-  if (classes.length > 0) f = setFilter(f, 'verdictClass', classes);
+  if (classes.length > 0) f = withKey(f, 'verdictClass', classes);
   const providers = list(p.get('f.provider')).filter(isProvider);
-  if (providers.length > 0) f = setFilter(f, 'providerId', providers);
-  f = setFilter(f, 'maxStops', int(p.get('f.stops')));
+  if (providers.length > 0) f = withKey(f, 'providerId', providers);
+  f = withKey(f, 'maxStops', int(p.get('f.stops')));
   const carriers = list(p.get('f.carriers')).filter((c) => CARRIER.test(c));
-  if (carriers.length > 0) f = setFilter(f, 'carriers', carriers);
+  if (carriers.length > 0) f = withKey(f, 'carriers', carriers);
   // why: the URL is operator-editable; only codes core's iataSchema accepts become the Iata the filter takes.
   const dests = list(p.get('f.dest')).flatMap((c) => {
     const r = apiContract.cellKeySchema.shape.destination.safeParse(c);
     return r.success && c === r.data ? [r.data] : [];
   });
-  if (dests.length > 0) f = setFilter(f, 'destination', dests);
-  f = setFilter(f, 'maxPricePence', int(p.get('f.maxPrice')));
+  if (dests.length > 0) f = withKey(f, 'destination', dests);
+  f = withKey(f, 'maxPricePence', int(p.get('f.maxPrice')));
   const nights = /^(\d+)-(\d+)$/.exec(p.get('f.nights') ?? '');
   if (nights?.[1] !== undefined && nights[2] !== undefined && Number(nights[1]) <= Number(nights[2])) {
-    f = setFilter(f, 'nights', { min: Number(nights[1]), max: Number(nights[2]) });
+    f = withKey(f, 'nights', { min: Number(nights[1]), max: Number(nights[2]) });
   }
   const [from, to] = (p.get('f.depart') ?? '').split('..');
   const dateOf = apiContract.cellKeySchema.shape.departureDate;
   const fromDate = dateOf.safeParse(from);
   const toDate = dateOf.safeParse(to);
   if (fromDate.success && toDate.success && fromDate.data <= toDate.data) {
-    f = setFilter(f, 'departure', { from: fromDate.data, to: toDate.data });
+    f = withKey(f, 'departure', { from: fromDate.data, to: toDate.data });
   }
-  if (p.get('f.stale') === 'hide') f = setFilter(f, 'hideStale', true);
+  if (p.get('f.stale') === 'hide') f = withKey(f, 'hideStale', true);
   const unverified = list(p.get('f.unverified')).filter(isConstraint);
-  if (unverified.length > 0) f = setFilter(f, 'unverified', unverified);
+  if (unverified.length > 0) f = withKey(f, 'unverified', unverified);
   return { sort, filters: f };
 }
 

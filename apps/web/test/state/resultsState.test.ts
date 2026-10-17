@@ -1,3 +1,4 @@
+import type { ResultFilters } from '@gmt/core';
 import { asIata, asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -8,7 +9,6 @@ import {
   parseSelectedRow,
   type ResultsUiState,
   resultsStatePatch,
-  setFilter,
 } from '../../src/state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams } from '../../src/state/urlState.js';
 import { parseView } from '../../src/state/view.js';
@@ -62,10 +62,11 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     ).toEqual({});
   });
 
-  it('setFilter and withKey add and remove keys without leaving undefined behind', () => {
-    const a = setFilter({}, 'maxStops', 0);
+  it('withKey adds and removes keys without leaving undefined behind', () => {
+    const none: ResultFilters = {};
+    const a = withKey(none, 'maxStops', 0);
     expect(a).toEqual({ maxStops: 0 });
-    expect(Object.keys(setFilter(a, 'maxStops', undefined))).toEqual([]);
+    expect(Object.keys(withKey(a, 'maxStops', undefined))).toEqual([]);
     expect(withKey({ a: 1, b: 2 }, 'b', undefined)).toEqual({ a: 1 });
     expect(activeFilterCount(full.filters)).toBe(10);
   });

@@ -19,7 +19,8 @@ export function useSearchParams(): URLSearchParams {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
-function merged(patch: Record<string, string | null>): string {
+/** The href for the current URL with `patch` applied (null deletes); every other parameter is kept. */
+export function hrefWith(patch: Record<string, string | null>): string {
   const p = new URLSearchParams(window.location.search);
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) p.delete(k);
@@ -28,17 +29,12 @@ function merged(patch: Record<string, string | null>): string {
   return `${window.location.pathname}?${p.toString()}`;
 }
 
-/** The href for the current URL with `patch` applied (null deletes); every other parameter is kept. */
-export function hrefWith(patch: Record<string, string | null>): string {
-  return merged(patch);
-}
-
 /** Applies `patch` to the URL: `push` for navigation, `replace` for filter edits. */
 export function updateSearchParams(
   patch: Record<string, string | null>,
   mode: 'push' | 'replace' = 'replace',
 ): void {
-  const url = merged(patch);
+  const url = hrefWith(patch);
   if (mode === 'push') window.history.pushState(null, '', url);
   else window.history.replaceState(null, '', url);
   for (const l of listeners) l();

@@ -54,6 +54,9 @@ export const WIDE_COLUMNS: readonly ColumnId[] = [
   'adjusted',
 ];
 /** Spec §11 at 375px: price with provenance, the class badge, dates and stops stay in the primary row. */
+/** The travel-time band `bandCheapest` marks within, in hours (spec §6.5); the one place the width is stated. */
+export const BAND_HOURS = 6;
+
 export const NARROW_COLUMNS: readonly ColumnId[] = [
   'expand',
   'price',
@@ -149,7 +152,7 @@ function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
           {COPY.notApplied(row.notApplied.map((n) => COPY.constraint[n]).join(', '))}
         </span>
       ) : null}
-      {banded ? <span className="text-xs font-medium">{COPY.bandCheapest}</span> : null}
+      {banded ? <span className="text-xs font-medium">{COPY.bandCheapest(BAND_HOURS)}</span> : null}
     </div>
   );
 }

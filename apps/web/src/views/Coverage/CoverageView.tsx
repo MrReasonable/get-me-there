@@ -1,4 +1,4 @@
-import { type CellKey, DEFAULT_DISCOVERY_REFRESH_HOURS, type IsoDateTime } from '@gmt/core';
+import { type CellKey, DEFAULT_DISCOVERY_REFRESH_HOURS, hoursSince } from '@gmt/core';
 import { useCoverage, useExecution, useExecutionActions } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
@@ -22,9 +22,6 @@ const cellText = (c: CellKey) =>
 /** The two reasons the contract allows (`'not_run' | 'skipped:budget'`), each in words. */
 const reasonText = (r: 'not_run' | 'skipped:budget') =>
   r === 'skipped:budget' ? COPY.reasonBudget : COPY.reasonNotRun;
-const hoursSince = (at: IsoDateTime, now: IsoDateTime) =>
-  Math.max(0, Math.floor((Date.parse(now) - Date.parse(at)) / 3_600_000));
-
 /**
  * View D (spec §11): per stage × provider counts, estimate vs ledger, selected-not-reached, flags,
  * errors with retry. The header names the run these counts come from (coverage.executionId) with

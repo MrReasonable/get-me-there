@@ -10,6 +10,7 @@ const SAMPLES: Record<string, unknown[]> = {
   childExecutionNotStarted: ['pending'],
   executionNotStarted: ['pending'],
   loadFailed: ['network error'],
+  bandCheapest: [6],
   verifyCellFor: ['LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)'],
   verifyStartedFor: ['LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)'],
   actionFailed: ['409 conflict'],

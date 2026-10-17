@@ -7,6 +7,7 @@ import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
 import { COPY } from '../../copy.js';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
+import { oneOf } from '../../state/oneOf.js';
 import {
   activeFilterCount,
   CLASSES,
@@ -15,18 +16,16 @@ import {
   parseSelectedRow,
   resultsStatePatch,
   SORT_KEYS,
-  setFilter,
 } from '../../state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams, useSearchParams } from '../../state/urlState.js';
-import { oneOf } from '../../state/withKey.js';
+import { withKey } from '../../state/withKey.js';
 import { BasisSwitch } from './BasisSwitch.js';
 import { CalendarGapBanner } from './CalendarGapBanner.js';
 import { Filters } from './Filters.js';
 import { ResultsHeader } from './ResultsHeader.js';
-import { ResultsTable, SORT_LABEL } from './ResultsTable.js';
+import { BAND_HOURS, ResultsTable, SORT_LABEL } from './ResultsTable.js';
 
 /** Spec §6.5: travel-time band width for bandCheapest. */
-const BAND_HOURS = 6;
 const SORT_VALUES = SORT_KEYS.flatMap((k) => [`${k}.asc`, `${k}.desc`]);
 const isSortValue = oneOf(SORT_VALUES);
 
@@ -150,7 +149,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
               className="min-h-11 rounded border border-slate-500 px-3"
               onClick={() =>
                 updateSearchParams(
-                  resultsStatePatch({ ...ui, filters: setFilter(f, 'verdictClass', [...CLASSES]) }),
+                  resultsStatePatch({ ...ui, filters: withKey(f, 'verdictClass', [...CLASSES]) }),
                 )
               }
             >
