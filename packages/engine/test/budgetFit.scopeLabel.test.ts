@@ -1,7 +1,7 @@
 // budgetFit names every scope through core's budgetScopeLabel (plan decision 57), so the api's schedule refusal and
 // the web's usage rows match it by construction. core's label is wrapped here with a marker: any scope name budgetFit
 // builds on its own lacks the marker and fails.
-import type { BudgetScope } from '@gmt/core';
+import { type BudgetScope, budgetScopeLabel } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 
 describe('budgetFit scope names come from core budgetScopeLabel (plan decision 57)', () => {
@@ -33,4 +33,17 @@ describe('budgetFit scope names come from core budgetScopeLabel (plan decision 5
       vi.resetModules();
     }
   });
+});
+
+// budgetFit has no execution, so it passes executionId '' for the three execution scopes. The label must never read the
+// id, or that sentinel would leak into the names the api matches on.
+describe('budgetScopeLabel ignores the execution id for the scopes budgetFit builds', () => {
+  it.each(['execution-calls', 'execution-free-calls', 'execution-cost'] as const)(
+    '%s is the same for the empty sentinel and a real execution id',
+    (kind) => {
+      const empty = budgetScopeLabel({ kind, executionId: '' });
+      expect(budgetScopeLabel({ kind, executionId: 'f347f809-1870-42f8-94d3-b90dd2b89671' })).toBe(empty);
+      expect(empty).toBe(kind);
+    },
+  );
 });

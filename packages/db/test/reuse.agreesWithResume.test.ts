@@ -23,17 +23,20 @@ const ALL_CASES = OUTCOME_STATUSES.flatMap((status) =>
   REASONS.flatMap((reason) => [0, 2, 3].map((attempts) => ({ status, reason, attempts }))),
 );
 
-/** The table's own CHECK constraints decide which status/reason pairs can exist; only those rows are cases. */
+/**
+ * The table's own CHECK constraints decide which status/reason pairs can exist; only those rows are cases. One
+ * database serves every probe: rawOutcome overwrites the same row, and a rejected UPDATE leaves it unchanged.
+ */
+const probeDb = freshDb();
+const probeExecution = newExecution(probeDb, fixedClock(T0)).execution.id;
+new CellsRepo(probeDb, fixedClock(T0), { allowSynthetic: false }).seed(
+  probeExecution,
+  [withNights(P)],
+  [PROVIDER],
+);
 const storable = (c: (typeof ALL_CASES)[number]): boolean => {
-  const db = freshDb();
-  const { execution } = newExecution(db, fixedClock(T0));
-  new CellsRepo(db, fixedClock(T0), { allowSynthetic: false }).seed(
-    execution.id,
-    [withNights(P)],
-    [PROVIDER],
-  );
   try {
-    rawOutcome(db, execution.id, P, 'discovery', PROVIDER, c);
+    rawOutcome(probeDb, probeExecution, P, 'discovery', PROVIDER, c);
     return true;
   } catch {
     return false;
