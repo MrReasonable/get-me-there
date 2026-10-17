@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { checkBudget, reservedForSchedules } from '../src/budgetCheck.js';
 import { buildContext } from '../src/context.js';
-import { withBlocked } from '../src/estimate.js';
+import { confirmationOf, withBlocked } from '../src/estimate.js';
 import { lineKey } from '../src/lines.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { nothingToSearch } from '../src/start.js';
@@ -276,6 +276,10 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
     });
     expect(shown.assumptions).toContain('totals leave out the provider lines a budget cap blocks');
     expect(withBlocked(est, new Map())).toEqual(est);
+    // why: cost M-2 — the confirmation a definition stores is the worst case over every line, blocked ones included, so
+    // next month's run with the provider back is still covered: 1 + 1 pence (rounded up per line) and 3 + 60 calls
+    expect(confirmationOf(shown)).toEqual({ pence: 2, calls: 63 });
+    expect(confirmationOf(shown)).toEqual(confirmationOf(est));
   });
 });
 

@@ -290,3 +290,14 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
         : [...e.assumptions, 'totals leave out the provider lines a budget cap blocks'],
   };
 }
+
+/**
+ * What a definition's stored confirmation (`DefinitionsRepo.setConfirmed`) records for an estimate: the worst case over
+ * every line, blocked ones included (ruling 9, cost M-2). The shown totals leave out the lines a cap blocks today, and
+ * a confirmation of those alone would no longer cover next month's scheduled run with the provider back, which would
+ * then be skipped_confirm for no reason. WP8 stores this, never the shown totals.
+ */
+export function confirmationOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number } {
+  const all = totalsOf(e.perProvider);
+  return { pence: all.totalCostPence, calls: all.totalCalls };
+}

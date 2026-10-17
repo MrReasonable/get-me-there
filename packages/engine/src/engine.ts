@@ -122,7 +122,8 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     verifyCell: (id, cell, opts) => orch.verifyCell(id, cell, opts),
     childCapPreview: (id, cell) => childCapPreview(ctx, id, cell),
     estimate: (input, today) => {
-      // why: ruling 9 — the save-time estimate is the worst case without reuse; it is what confirmed_cost_pence records
+      // why: ruling 9 — the save-time estimate is the worst case without reuse; confirmationOf(it), every line
+      // included, is what setConfirmed records (cost M-2)
       const { def } = asDefinition(ctx, input);
       const b = buildSnapshot(ctx, def, 'manual', today);
       const est = estimateStart(ctx, b.snapshot, b.cells, null);
