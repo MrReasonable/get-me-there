@@ -325,6 +325,34 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     );
   });
 
+  it('a calendar price of unknown vendor age shows the unknown-age badge and "not checked", never a second age (ruling 3)', () => {
+    renderWithProviders(
+      <PriceCell
+        pricePence={30000}
+        provenance={{ ...calendarProvenance, maxAgeHours: 'unknown', fx: { converted: false } }}
+        calendar
+        stale={false}
+        compact
+      />,
+    );
+    const cell = screen.getByTestId('price-cell');
+    expect(within(cell).getByText("vendor's cache age unknown")).toBeInTheDocument();
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^not checked$/);
+  });
+
+  it('an itinerary price of known age shows its short age alone, with no "not checked" (ruling 3)', () => {
+    renderWithProviders(
+      <PriceCell
+        pricePence={41200}
+        provenance={{ ...searchProvenance, maxAgeHours: 48 }}
+        calendar={false}
+        stale={false}
+        compact
+      />,
+    );
+    expect(within(screen.getByTestId('price-cell')).getByTestId('face-age')).toHaveTextContent(/^≤2d old$/);
+  });
+
   it('the tests clock is the fixed NOW', () => {
     expect(NOW).toBe(asIsoDateTime('2026-10-14T15:00:00.000Z'));
   });
