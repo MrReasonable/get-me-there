@@ -294,6 +294,17 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     expect(whileRunning({ executions: [summary({ status: 'running' })] })).toBe(2_000);
     expect(whileRunning({ executions: [summary({ status: 'pending' })] })).toBe(2_000);
     expect(whileRunning({ executions: [summary({ status: 'completed' })] })).toBe(false);
+    // why: only the newest run decides; an older running run must not keep the poll alive, nor an older finished one stop it
+    expect(
+      whileRunning({
+        executions: [summary({ status: 'completed' }), summary({ id: 'exec-0000', status: 'running' })],
+      }),
+    ).toBe(false);
+    expect(
+      whileRunning({
+        executions: [summary({ status: 'running' }), summary({ id: 'exec-0000', status: 'completed' })],
+      }),
+    ).toBe(2_000);
     expect(whileRunning({ executions: [] })).toBe(false);
     expect(whileRunning(undefined)).toBe(false);
   });
