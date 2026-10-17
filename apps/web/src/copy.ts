@@ -714,7 +714,7 @@ export const COPY = {
     title: 'Duration',
     chartTitle: 'Cheapest found by stay length',
     chartNote:
-      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A star on the axis (13*) = no source searched that stay length. A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
+      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A tick marked with a star (*) = no source searched that stay length. A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
     xAxis: 'nights',
     yAxis: 'price (GBP)',
     tickNotSearched: (nights: number) => `${nights}*`,

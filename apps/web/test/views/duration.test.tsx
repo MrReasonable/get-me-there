@@ -210,6 +210,8 @@ describe('Duration view (spec §11 View C)', () => {
     const svg = figure.querySelector('svg[role="application"]');
     expect(svg?.textContent).toContain('nights');
     expect(svg?.textContent).toContain('13*');
+    // why: UI-008: the note's example is a symbol, never a numeral the chart may show as a searched tick.
+    expect(COPY.durationView.chartNote).not.toMatch(/\d+\*/);
     expect(svg?.textContent).toContain('14*');
     expect(svg?.textContent).not.toContain('11*');
     // why: decision 52 — axis ticks print pounds without the sign; the figure carries no sweep exemption.
