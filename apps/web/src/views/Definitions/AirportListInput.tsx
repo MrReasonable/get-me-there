@@ -45,7 +45,10 @@ export function AirportListInput({ id, label, addLabel, codes, onChange, errors 
   // why: addTyped awaits a lookup, so `add` must read the list and the change handler of the render that is current
   // when the answer arrives, not those of the render that started it (a second add in between would be overwritten).
   const latest = useRef({ codes, onChange });
-  latest.current = { codes, onChange };
+  // why: written after commit, not during render, so a render React discards can never leave its props here.
+  useEffect(() => {
+    latest.current = { codes, onChange };
+  });
   /** Adds the codes not already listed; false (with the duplicate error) when there were none to add. */
   const add = (list: readonly string[]): boolean => {
     const current = latest.current.codes;
