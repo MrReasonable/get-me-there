@@ -8,6 +8,25 @@ const DIR = join(import.meta.dirname, '..', '.github', 'workflows');
 const files = readdirSync(DIR).filter((f) => /\.ya?ml$/.test(f));
 const text = (f) => readFileSync(join(DIR, f), 'utf8');
 
+const MIN_MAJOR = { 'actions/checkout': 6, 'actions/setup-node': 6, 'pnpm/action-setup': 6 };
+/** Every non-local `uses:` must be `owner/repo@<40-hex SHA> # vX.Y.Z`, and a known action's tag must be a Node 24 major. */
+function pinProblems(t) {
+  const problems = [];
+  for (const [, ref, rest] of t.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+)(.*)$/gm)) {
+    if (ref.startsWith('./')) continue;
+    const m = /^(\S+)@([0-9a-f]{40})$/.exec(ref);
+    const tag = /^\s+# (v\d+\.\d+\.\d+)/.exec(rest)?.[1];
+    if (!m || !tag) {
+      problems.push(`${ref}${rest}: not a full SHA with a # vX.Y.Z comment`);
+      continue;
+    }
+    const min = MIN_MAJOR[m[1]];
+    if (min !== undefined && Number(tag.slice(1).split('.')[0]) < min)
+      problems.push(`${m[1]} ${tag}: before Node 24`);
+  }
+  return problems;
+}
+
 describe('GitHub workflows (least privilege)', () => {
   it('finds at least one workflow', () => {
     expect(files.length).toBeGreaterThan(0);
@@ -32,18 +51,26 @@ describe('GitHub workflows (least privilege)', () => {
   // release that runs on Node 24, and runners are pinned rather than floating on ubuntu-latest.
   it.each(files)('%s pins actions by SHA at Node 24 releases and runners to ubuntu-24.04', (f) => {
     const t = text(f);
-    const uses = [...t.matchAll(/uses: (\S+)@([0-9a-f]+) # (\S+)/g)];
-    expect(uses.length).toBeGreaterThan(0);
-    for (const [, action, sha] of uses) expect(sha, action).toMatch(/^[0-9a-f]{40}$/);
-    const minimum = { 'actions/checkout': 6, 'actions/setup-node': 6, 'pnpm/action-setup': 6 };
-    for (const [, action, , tag] of uses)
-      if (action in minimum)
-        expect(Number(tag.replace(/^v/, '').split('.')[0]), `${action} ${tag}`).toBeGreaterThanOrEqual(
-          minimum[action],
-        );
+    expect(pinProblems(t)).toEqual([]);
+    expect([...t.matchAll(/^\s*(?:-\s+)?uses:/gm)].length).toBeGreaterThan(0);
     const runners = [...t.matchAll(/^\s*runs-on: (\S+)/gm)].map((m) => m[1]);
     expect(runners.length).toBeGreaterThan(0);
     for (const r of runners) expect(r).toBe('ubuntu-24.04');
+  });
+
+  const SHA = '3d3c42e5aac5ba805825da76410c181273ba90b1';
+  it.each([
+    ['an unpinned tag', 'uses: actions/checkout@v4'],
+    ['a short SHA', 'uses: actions/checkout@3d3c42e # v7.0.1'],
+    ['a SHA without the tag comment', `uses: actions/checkout@${SHA}`],
+    ['a release that runs on Node 20', `uses: actions/checkout@${SHA} # v4.4.0`],
+  ])('the pin check fails for %s', (_name, line) => {
+    expect(pinProblems(`steps:\n  - ${line}\n`)).not.toEqual([]);
+  });
+  it('the pin check accepts a full SHA with a Node 24 tag comment and skips local actions', () => {
+    expect(pinProblems(`steps:\n  - uses: actions/checkout@${SHA} # v7.0.1\n  - uses: ./local\n`)).toEqual(
+      [],
+    );
   });
 
   it('the docker job proves the container refuses the recording tool, and its image scan prunes only the pnpm store', () => {
