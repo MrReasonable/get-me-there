@@ -224,15 +224,23 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     expect(all).toEqual([...OPERATOR_DOCS, ...RESEARCH_NOTES].sort());
   });
 
-  it.each(OPERATOR_DOCS)('%s contains no banned word', (file) => {
-    const text = read(`docs/${file}`);
+  it('the root README points a fresh clone at setup section 1 and the other operator docs (devops-final-006)', () => {
+    const readme = read('README.md');
+    expect(readme).toContain('docs/setup.md');
+    expect(readme).toContain('section 1');
+    for (const doc of ['docs/api-limits.md', 'docs/scheduling.md', 'docs/providers.md'])
+      expect(readme).toContain(doc);
+  });
+
+  it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'README.md'])('%s contains no banned word', (path) => {
+    const text = read(path);
     const hits = findBannedWords(text, BANNED_WORD_ALLOWLIST).map(
       (h) => `${h.word} @${h.index}: …${text.slice(Math.max(0, h.index - 30), h.index + 30)}…`,
     );
     expect(hits).toEqual([]);
   });
 
-  it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'docs/examples/london-new-york.json'])(
+  it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'README.md', 'docs/examples/london-new-york.json'])(
     '%s names no airport or metro code but the worked example’s',
     (path) => {
       const dataset = loadAirportsDataset(AIRPORTS_DATA_DIR);
