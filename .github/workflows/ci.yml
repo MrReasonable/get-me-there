@@ -19,6 +19,7 @@ jobs:
       - run: pnpm casts
       - run: pnpm -r typecheck
       - run: pnpm test:coverage
+      - run: pnpm --filter @gmt/web test
       - run: pnpm secret-scan
       - name: secret scan catches a planted fixture
         run: |
