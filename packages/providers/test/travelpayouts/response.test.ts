@@ -366,18 +366,20 @@ describe('searchedAt (the row age, decision 35)', () => {
 const linkOf = (out: string, back: string, carrier = 'UA'): string =>
   `/search/X?t=${carrier}18146070001814617500000475${out}18158511001815894900000430${back}_1d1bd24f_58507&search_date=14102026`;
 
+// why: connections use QQQ and XXX, codes no airport in the dataset uses, so the tests name no place outside the
+// London → New York example (CodeRabbit batch 3); the open-jaw return ends at LGW, the example's other origin.
 describe('itineraryOf (decision 35: both airport chains of the link t token)', () => {
   it.each([
     ['direct', linkOf('LHREWR', 'EWRLHR'), { out: ['LHR', 'EWR'], back: ['EWR', 'LHR'] }],
     [
       'with connections',
-      linkOf('LHRFRAEWR', 'EWRFRALCY'),
-      { out: ['LHR', 'FRA', 'EWR'], back: ['EWR', 'FRA', 'LCY'] },
+      linkOf('LHRQQQEWR', 'EWRQQQLGW'),
+      { out: ['LHR', 'QQQ', 'EWR'], back: ['EWR', 'QQQ', 'LGW'] },
     ],
     [
       'a carrier code with a digit',
-      linkOf('LGWKEFJFK', 'JFKKEFLGW', 'S7'),
-      { out: ['LGW', 'KEF', 'JFK'], back: ['JFK', 'KEF', 'LGW'] },
+      linkOf('LGWXXXJFK', 'JFKXXXLGW', 'S7'),
+      { out: ['LGW', 'XXX', 'JFK'], back: ['JFK', 'XXX', 'LGW'] },
     ],
     ['one direction only', '/search/X?t=UA18146070001814617500000475LHREWR_abc', null],
     ['no t token', '/search/X?search_date=14102026', null],

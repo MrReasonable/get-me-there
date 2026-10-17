@@ -3,7 +3,7 @@
 // Spec §5.3: CI runs the same secret scan over fixtures/. Values come from the environment so the
 // scan can be run locally with the real .env loaded; in CI the env has no secrets and only the
 // shape rules apply.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { secretForms as formsOf } from '../packages/providers/src/http/secretForms.ts';
 
@@ -32,11 +32,17 @@ function* walk(dir) {
 
 let failures = 0;
 for (const root of roots) {
-  let files = [];
+  // why: only a root that is itself absent is skipped (spec §5.3: before WP4 there is none). lstat, so a root that is
+  // a dangling symlink counts as present; any error while walking an existing root (a broken link, an unreadable
+  // directory, a loop) fails the scan rather than dropping the root and printing "clean" (CodeRabbit batch 3).
+  if (lstatSync(root, { throwIfNoEntry: false }) === undefined) continue;
+  let files;
   try {
     files = [...walk(root)];
-  } catch {
-    continue; // the root does not exist yet (before WP4)
+  } catch (err) {
+    const code = err instanceof Error && 'code' in err ? err.code : 'error';
+    console.error(`secret scan: cannot read every file under ${root} (${code}); refusing to pass`);
+    process.exit(1);
   }
   for (const f of files) {
     const text = readFileSync(f, 'utf8');

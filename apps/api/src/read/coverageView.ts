@@ -8,7 +8,6 @@ import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { coverageSummaryFor } from './coverage.js';
 import { executionResponse, overrunOf, planCallsOf } from './executions.js';
-import { EXECUTIONS_LIMIT } from './results.js';
 import { withNights } from './rows.js';
 import { currentSpace } from './space.js';
 
@@ -19,10 +18,8 @@ export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema
  * errors with retry. 404 `no_execution` before the first run (the contract names one execution).
  */
 export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: Engine): CoverageResponse {
-  const all = ports.repos.executions.listForDefinition(def.id, {
-    limit: EXECUTIONS_LIMIT,
-    includeChildren: true,
-  });
+  // why: every execution, never the newest N, so no run is silently dropped (CodeRabbit batch 3)
+  const all = ports.repos.executions.listForDefinition(def.id, { limit: 'all', includeChildren: true });
   const parent = all.find((e) => !e.isChild) ?? null;
   if (parent === null) throw new ApiError(404, 'no_execution', API_TEXT.noExecution);
   const summary = coverageSummaryFor(parent, all, ports, currentSpace(def, ports.clock.todayLondon()));

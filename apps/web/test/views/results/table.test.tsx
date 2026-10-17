@@ -532,6 +532,15 @@ describe('client-side sort and filter (spec §6.5)', () => {
     expect(screen.getByLabelText('Max price (£)')).toHaveValue('');
   });
 
+  it('the hidden-stale count counts only rows hide-stale removed, never stale rows another filter already hid (CodeRabbit batch 3)', async () => {
+    // h4 is stale at £450; a second stale row at £900 is above the max price, so the price filter hides it anyway
+    const dear = verifiedRow({ itineraryHash: 'h6', pricePence: 90000, stale: true });
+    countResults(resultsResponse({ rows: [...five, dear] }));
+    view('?view=results&f.stale=hide&f.maxPrice=48000');
+    await table();
+    expect(screen.getByText('1 stale row hidden')).toBeInTheDocument();
+  });
+
   it('filters survive a remount because they are in the URL', async () => {
     countResults();
     const first = view('?view=results&f.class=partially-verified');

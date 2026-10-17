@@ -86,6 +86,50 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
     });
   });
 
+  // why: CodeRabbit batch 3 — options are read one by one: a wrongly shaped option is dropped and counted, never the
+  // whole step; when every option is malformed the step is a parse fault, never "no options" (empty)
+  it('a wrongly shaped step-1 option beside a valid one is dropped and counted; the chain goes on (synthetic)', async () => {
+    chain(
+      { ...ECHO, best_flights: [A, { flights: 'none', price: 'cheap' }], other_flights: ['x'] },
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: ok(bookingBody([agent(573)])) },
+    );
+    const res = await searchItinerary(deps(), q1, ctx());
+    expect(res.coverage).toBe('priced');
+    expect(res.notes).toContain('dropped-malformed-option-step1:2');
+    // why: PR #3 review — a dropped option's fare may be the cheapest, so the result is never complete (spec §3
+    // partial-expansion: the outbound it names could not be expanded)
+    expect(res.partial).toBe(true);
+  });
+
+  it('a wrongly shaped step-2 option is dropped and counted, and the result is partial: a fare is missing (synthetic)', async () => {
+    chain(
+      flightsBody([A]),
+      { dA: ok({ ...ECHO, best_flights: [option(IN_1, 600, { booking_token: 'b1' }), { price: 'cheap' }] }) },
+      { b1: ok(bookingBody([agent(573)])) },
+    );
+    const res = await searchItinerary(deps(), q1, ctx());
+    expect(res).toMatchObject({ coverage: 'priced', partial: true });
+    expect(res.notes).toContain('dropped-malformed-option-step2:1');
+  });
+
+  it('a chain with no malformed option stays complete (synthetic)', async () => {
+    chain(
+      flightsBody([A]),
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: ok(bookingBody([agent(573)])) },
+    );
+    expect((await searchItinerary(deps(), q1, ctx())).partial).toBe(false);
+  });
+
+  it('a step 1 whose every option is malformed → parse, never coverage empty (synthetic)', async () => {
+    chain({ ...ECHO, best_flights: [{ flights: 'none' }, 7] }, {});
+    await expect(searchItinerary(deps(), CELL_QUERY, ctx())).rejects.toMatchObject({
+      kind: 'parse',
+      message: expect.stringMatching(/\[malformed-flights\]/),
+    });
+  });
+
   it('other_flights alone is read (synthetic)', async () => {
     chain(
       { ...ECHO, other_flights: [A] },

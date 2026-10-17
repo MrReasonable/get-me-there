@@ -29,12 +29,15 @@ describe('PriceCell face (phone day cell)', () => {
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
     // why: the unknown age is now words on the face (ruling 3), so it has no glyph of its own.
     // why: an unknown vendor age says nothing of when the price was fetched, so the face leads with the fetch age.
+    // why: spec §11 — the face shows the destination beside the provider's mark, since touch has no title and a
+    // definition with two destinations would otherwise show a price without its airport (CodeRabbit batch 3)
     expect(hidden).toEqual([
       '≈',
       '≠◷…↺◌',
-      COPY.providerMark.searchapi,
+      `${COPY.providerMark.searchapi} EWR`,
       expect.stringMatching(/^fetched .+ ago · age unknown$/),
     ]);
+    expect(within(cell).getByTestId('face-provider')).toHaveTextContent(/^SA EWR$/);
     expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^fetched .+ ago · age unknown$/);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);

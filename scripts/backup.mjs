@@ -79,6 +79,8 @@ async function main() {
     process.stderr.write(`backup: cannot load the built packages (run pnpm build): ${message(err)}\n`);
     return 1;
   }
+  // why: an operator script is a command-line entry point, like the bootstraps, so it may read the environment (plan
+  // decision 9; scripts/check-boundaries.mjs allows exactly apps/api/src/bootstrap/ and scripts/*.mjs). The one read.
   const args = parseArgs(process.argv.slice(2), process.env.DATABASE_PATH, mods);
   if (!args.ok) {
     process.stderr.write(`${USAGE}\n${args.reason}\n`);

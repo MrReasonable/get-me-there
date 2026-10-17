@@ -194,7 +194,8 @@ and inside the container, loopback is the container itself, so a mail catcher on
 unreachable and mail fails when it is sent; use `implicit` or `starttls` here (`none` is for the
 local mail catcher of section 12). `ALERT_EMAIL_MAX_PER_HOUR`
 (default 20) caps outgoing email: beyond it a message is logged and dropped, and the alerts it
-carried stay queued with the reason shown in the Alerts view.
+carried stay queued with the reason shown in the Alerts view. Only emails sent (or being sent) count: a failed send
+does not use up the hour, so an SMTP outage shows its own error, never "ceiling reached".
 
 Set `APP_BASE_URL` to the `https://` address you type (for example
 `APP_BASE_URL=https://flights.example.com` or your `https://…ts.net` name) so alert emails
@@ -293,11 +294,11 @@ runs as `node` inside:
 
 ```cron
 MAILTO=operator@example.com
-15 3 * * * operator cd /opt/get-me-there && umask 077 && out="$(docker compose exec -T app node scripts/backup.mjs)" && logger -t get-me-there-backup "$out" && docker compose cp app:/data/backups/. /var/backups/get-me-there/ && find /var/backups/get-me-there -name 'get-me-there-*.db' -mtime +30 -delete
+15 3 * * * operator cd /opt/get-me-there && umask 077 && out="$(docker compose exec -T app node scripts/backup.mjs)" && logger -t get-me-there-backup "$out" && docker compose cp app:/data/backups/. /var/backups/get-me-there/ && new="$(echo "$out" | sed -n 's/.*"file":"[^"]*\/\([^"/]*\)".*/\1/p')" && test -n "$new" && test -s "/var/backups/get-me-there/$new" && find /var/backups/get-me-there -name 'get-me-there-*.db' -mtime +30 -delete
 ```
 
 `umask 077` keeps the host copies readable by you alone (they hold your whole price and alert
-history and your alert addresses). Each step runs only if the one before succeeded. The backup line goes to the system log
+history and your alert addresses). Each step runs only if the one before succeeded. The prune runs only when the new backup is on the host and not empty: the line takes the new file's name from the backup's output and checks the host copy, because `docker compose cp` succeeds even when it copies nothing. The backup line goes to the system log
 (`journalctl -t get-me-there-backup`); a failing step makes cron mail its error to `MAILTO`, if the host can
 send mail. If it cannot, append `&& curl -fsS https://hc-ping.com/<your-check-id>` (or any
 dead-man's-switch service) so you hear about a backup that did not happen. The thing to watch

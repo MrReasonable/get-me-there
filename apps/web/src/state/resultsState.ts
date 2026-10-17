@@ -75,8 +75,11 @@ export function parseResultsState(p: URLSearchParams): ResultsUiState {
   const rawSort = p.get('sort');
   let sort: ResultsUiState['sort'] = null;
   if (rawSort !== null) {
-    const [k, d] = rawSort.split('.');
-    if (k !== undefined && isSortKey(k) && (d === 'asc' || d === 'desc')) sort = { key: k, dir: d };
+    // why: exactly two segments; `price.asc.extra` is malformed, never trimmed to `price.asc` (CodeRabbit batch 3)
+    const parts = rawSort.split('.');
+    const [k, d] = parts;
+    if (parts.length === 2 && k !== undefined && isSortKey(k) && (d === 'asc' || d === 'desc'))
+      sort = { key: k, dir: d };
   }
   let f: ResultFilters = {};
   const classes = list(p.get('f.class')).filter(isClass);
@@ -99,11 +102,13 @@ export function parseResultsState(p: URLSearchParams): ResultsUiState {
   if (nightsMin !== undefined && nightsMax !== undefined && nightsMin <= nightsMax) {
     f = withKey(f, 'nights', { min: nightsMin, max: nightsMax });
   }
-  const [from, to] = (p.get('f.depart') ?? '').split('..');
+  // why: exactly two dates; a third `..` segment makes the range malformed (CodeRabbit batch 3)
+  const range = (p.get('f.depart') ?? '').split('..');
+  const [from, to] = range;
   const dateOf = apiContract.cellKeySchema.shape.departureDate;
   const fromDate = dateOf.safeParse(from);
   const toDate = dateOf.safeParse(to);
-  if (fromDate.success && toDate.success && fromDate.data <= toDate.data) {
+  if (range.length === 2 && fromDate.success && toDate.success && fromDate.data <= toDate.data) {
     f = withKey(f, 'departure', { from: fromDate.data, to: toDate.data });
   }
   if (p.get('f.stale') === 'hide') f = withKey(f, 'hideStale', true);

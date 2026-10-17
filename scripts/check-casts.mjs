@@ -5,14 +5,15 @@
 // was given no file at all, so a pathspec typo or a run from the wrong directory can never pass by scanning nothing.
 //
 // Usage: node scripts/check-casts.mjs [file …]
-// With no arguments it scans every tracked or new .ts/.tsx file under packages/*/{src,test} and apps/*/{src,test}, at
-// any depth, plus the package-root and repository-root .ts config files.
+// With no arguments it scans every tracked or new .ts/.tsx/.mts/.cts file anywhere under packages/* and apps/* (src,
+// test, e2e, scripts and root configs alike) and at the repository root, never under dist/ or node_modules/.
 // packages/core/src/types/ids.ts is the one exception: its as* helpers are the brand mint sites the rule allows.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
 const EXEMPT = new Set(['packages/core/src/types/ids.ts']);
+const TS_EXTENSIONS = ['ts', 'tsx', 'mts', 'cts'];
 
 function defaultFiles() {
   const out = execFileSync(
@@ -24,15 +25,14 @@ function defaultFiles() {
       '--exclude-standard',
       '--',
       // why: `:(glob)` makes `**/` match zero or more directories; a plain pathspec needs at least one, so files
-      // directly under src/ or test/ were never scanned (code-architect review 1)
-      ...['packages', 'apps'].flatMap((root) => [
-        `:(glob)${root}/*/src/**/*.ts`,
-        `:(glob)${root}/*/src/**/*.tsx`,
-        `:(glob)${root}/*/test/**/*.ts`,
-        `:(glob)${root}/*/test/**/*.tsx`,
-        `:(glob)${root}/*/*.ts`,
-      ]),
-      ':(glob)*.ts',
+      // directly under src/ or test/ were never scanned (code-architect review 1). Every directory of a package
+      // counts (e2e specs, scripts, root configs) and every TypeScript extension, as the boundary check reads them
+      // (CodeRabbit batch 3); generated and installed trees are excluded even when nothing ignores them.
+      ...['packages/*/**', 'apps/*/**', '.'].flatMap((root) =>
+        TS_EXTENSIONS.map((ext) => `:(glob)${root === '.' ? '' : `${root}/`}*.${ext}`),
+      ),
+      ':(exclude,glob)**/dist/**',
+      ':(exclude,glob)**/node_modules/**',
     ],
     { encoding: 'utf8' },
   );

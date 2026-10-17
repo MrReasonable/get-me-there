@@ -149,6 +149,34 @@ describe('shell (spec §11 layout)', () => {
   });
 });
 
+describe('a failed definitions load never reads as "no definitions" (CodeRabbit batch 3)', () => {
+  it('shows the load error with a retry, and the header selector says nothing rather than "none yet"', async () => {
+    server.use(
+      http.get(`${API}/definitions`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'defs boom' } }, { status: 500 }),
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=results' });
+    expect(await screen.findByText('Could not load: defs boom')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText(COPY.noDefinitions)).not.toBeInTheDocument();
+  });
+
+  it('while the definitions load, the main region says so and the header does not say there are none', () => {
+    server.use(http.get(`${API}/definitions`, () => new Promise<never>(() => undefined)));
+    renderWithProviders(<App />, { search: '?view=results' });
+    expect(screen.queryByText(COPY.noDefinitions)).not.toBeInTheDocument();
+    // why: PR #3 review — with the selector hidden and nothing selected, the main region was blank while loading
+    expect(within(screen.getByRole('main')).getByText(COPY.loading)).toBeInTheDocument();
+  });
+
+  it('once the definitions load, the loading line goes', async () => {
+    renderWithProviders(<App />, { search: '?view=definitions' });
+    await screen.findByLabelText(COPY.definitionSelectorLabel);
+    expect(within(screen.getByRole('main')).queryByText(COPY.loading)).not.toBeInTheDocument();
+  });
+});
+
 describe('the page never blanks (review tsr-002)', () => {
   function Broken(): never {
     throw new Error('render failed');

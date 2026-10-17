@@ -292,9 +292,11 @@ export const historyPointResponseSchema = historyPointSchema.extend({
   truncated: z.boolean(),
 });
 /**
- * A point of a vendor's price-history series for one searched trip; no full provenance (spec §11), plotted by `date`.
- * `currency` is the literal 'GBP': only vendor-stated GBP points are stored (the repository refuses any other, prov-004),
- * so a point is never FX-converted and never carries "≈".
+ * A point of a vendor's price-history series for one searched trip, plotted by `date` and labelled indicative (spec
+ * §11). It carries the provenance every price carries (spec §3): provider, source kind, fetch time, point of sale (the
+ * point of sale of the search that returned it; 'unknown' for points stored before it was recorded) and FX status.
+ * `currency` is the literal 'GBP' and `fx` is always unconverted: only vendor-stated GBP points are stored (the
+ * repository refuses any other, prov-004), so a point never carries "≈".
  */
 export const routeSeriesPointSchema = z.object({
   date: isoDateSchema,
@@ -303,6 +305,8 @@ export const routeSeriesPointSchema = z.object({
   fetchedAt: isoDateTimeSchema,
   providerId: providerIdSchema,
   sourceKind: sourceKindSchema,
+  pointOfSale: pointOfSaleSchema,
+  fx: z.strictObject({ converted: z.literal(false) }),
 });
 /**
  * One itinerary's offer history. `cell` and `carriers` name it (plan decision 52: the heading and every price's

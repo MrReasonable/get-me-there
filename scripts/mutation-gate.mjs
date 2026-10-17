@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Ruling 10 (plan decision 67): Stryker counts a timed-out mutant as detected, so a machine under load after the dry run
 // turns surviving mutants into "Timeout" and lifts the score towards 100%. None of the mutated modules can loop forever,
-// so a timeout is noise, not detection: `pnpm mutate` fails when timed-out mutants exceed 5% of those tested.
+// so a timeout is noise, not detection: `pnpm mutate` fails when timed-out mutants exceed 5% of those tested, and when
+// the report holds no tested mutant at all.
 // Usage: node scripts/mutation-gate.mjs <stryker json report>
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   const { timedOut, tested, share } = timeoutShare(report);
+  // why: an empty, truncated or all-error report (or a changed schema without files[*].mutants) has share 0 and
+  // would read as "within 5%"; a run that tested nothing proves nothing, so it fails (CodeRabbit batch 3).
+  if (tested === 0) {
+    console.error(`mutation gate: the report at ${path} holds no tested mutant; refusing to pass`);
+    process.exit(1);
+  }
   if (share > MAX_TIMEOUT_SHARE) {
     console.error(
       `mutation gate: ${timedOut} of ${tested} tested mutants timed out (${(share * 100).toFixed(1)}%, above ${MAX_TIMEOUT_SHARE * 100}%); the score is not trustworthy. Rerun with no other suite or build in flight.`,

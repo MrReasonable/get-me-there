@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -109,6 +117,20 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     expect(r.stderr).toContain('apps/api/src/planted.ts names the city New York');
   });
 
+  it('both codes of a hyphenated route such as LHR-JFK fail (CodeRabbit batch 3)', () => {
+    const r = run(
+      tree({
+        'apps/api/src/route.ts': "export const key = 'LHR-JFK';\n",
+        'apps/web/src/range.tsx': "export const p = <p>{'LGW-EWR-x'}</p>;\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/api/src/route.ts names the airport code LHR');
+    expect(r.stderr).toContain('apps/api/src/route.ts names the airport code JFK');
+    expect(r.stderr).toContain('apps/web/src/range.tsx names the airport code LGW');
+    expect(r.stderr).toContain('apps/web/src/range.tsx names the airport code EWR');
+  });
+
   it.each([
     ['packages/db/test/x.test.ts', ['// biome', '-ignore lint/x: y'].join('')],
     ['packages/engine/src/y.ts', ['// @ts', '-expect-error why'].join('')],
@@ -121,5 +143,150 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     const r = run(tree({ [path]: `${text}\n` }));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(`${path} has a lint or type-check suppression comment`);
+  });
+});
+
+/** A package manifest from the repository with extra fields merged into it, as planted file text. */
+function manifest(pkgDir, extra) {
+  const real = JSON.parse(readFileSync(join(REPO, pkgDir, 'package.json'), 'utf8'));
+  const merged = { ...real };
+  for (const [field, deps] of Object.entries(extra)) merged[field] = { ...(real[field] ?? {}), ...deps };
+  return JSON.stringify(merged);
+}
+
+// why: CodeRabbit batch 3 — every rule the script enforces has a planted violation here, asserting its own stderr
+// line, so a regression in any one check fails a test (the place and suppression checks are covered above).
+describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20)', {
+  timeout: 60_000,
+}, () => {
+  it('a static import across the graph fails: web may import only @gmt/core', () => {
+    const r = run(
+      tree({
+        'apps/web/src/a.ts': "import { x } from '@gmt/db';\nexport { y } from '@gmt/engine';\n",
+        'apps/web/src/ok.ts': "import { z } from '@gmt/core';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/a.ts imports @gmt/db');
+    expect(r.stderr).toContain('apps/web/src/a.ts imports @gmt/engine');
+    expect(r.stderr).not.toContain('ok.ts');
+  });
+
+  it('a dynamic or side-effect import across the graph fails too (CodeRabbit batch 3)', () => {
+    const r = run(
+      tree({
+        'apps/web/src/lazy.ts': "export const load = () => import('@gmt/engine');\n",
+        'apps/web/src/spaced.ts': "export const load = async () => await import ( '@gmt/providers' );\n",
+        'apps/web/src/side.ts': "import '@gmt/db';\n",
+        'apps/web/src/ok.ts': "import '@gmt/core';\nexport const c = () => import('@gmt/core');\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/lazy.ts imports @gmt/engine');
+    expect(r.stderr).toContain('apps/web/src/spaced.ts imports @gmt/providers');
+    expect(r.stderr).toContain('apps/web/src/side.ts imports @gmt/db');
+    expect(r.stderr).not.toContain('ok.ts');
+  });
+
+  // why: PR #3 review — the import graph is read from the parsed source, so a dynamic import with a template literal
+  // counts, and an import written in a comment or a string does not
+  it('a dynamic import with a template literal fails; an import in a comment or a string does not', () => {
+    const r = run(
+      tree({
+        'apps/web/src/tpl.ts': 'export const load = () => import(`@gmt/engine`);\n',
+        'apps/web/src/prose.ts':
+          "// import '@gmt/db' was the old way\n/* import { x } from '@gmt/db'; */\nexport const hint = \"import('@gmt/db')\";\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/tpl.ts imports @gmt/engine');
+    expect(r.stderr).not.toContain('prose.ts');
+  });
+
+  it('a dynamic import whose specifier is computed fails, since its edge cannot be checked', () => {
+    const r = run(tree({ 'apps/web/src/computed.ts': 'export const load = (n: string) => import(n);\n' }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'apps/web/src/computed.ts has a dynamic import whose specifier is computed, so its package edge cannot be checked',
+    );
+  });
+
+  it('a manifest dependency across the graph fails, and core may depend only on its allowlisted externals', () => {
+    const r = run(
+      tree({
+        'apps/web/package.json': manifest('apps/web', { dependencies: { '@gmt/engine': 'workspace:*' } }),
+        'packages/core/package.json': manifest('packages/core', { dependencies: { 'left-pad': '1.3.0' } }),
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('@gmt/web may not depend on @gmt/engine');
+    expect(r.stderr).toContain('@gmt/core may not depend on left-pad');
+  });
+
+  it('process.env outside the api bootstrap fails, in any package', () => {
+    const r = run(
+      tree({
+        'packages/core/src/a.ts': 'export const a = process.env.X;\n',
+        'apps/api/src/routes/b.ts': 'export const b = process.env.Y;\n',
+        'apps/api/src/bootstrap/start.ts': 'export const ok = process.env.Z;\n',
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('packages/core/src/a.ts reads process.env outside apps/api/src/bootstrap/');
+    expect(r.stderr).toContain('apps/api/src/routes/b.ts reads process.env outside apps/api/src/bootstrap/');
+    expect(r.stderr).not.toContain('apps/api/src/bootstrap/start.ts');
+  });
+
+  it('process.env is allowed in exactly apps/api/src/bootstrap/ and the scripts/*.mjs entry points (CodeRabbit batch 3)', () => {
+    const r = run(
+      tree({
+        'apps/api/src/bootstrap/tool.ts': 'export const ok = process.env.A;\n',
+        'scripts/backup.mjs': 'const db = process.env.DATABASE_PATH;\n',
+        // a directory named bootstrap anywhere else is not the bootstrap
+        'apps/api/src/routes/bootstrap/x.ts': 'export const x = process.env.B;\n',
+        'packages/db/src/bootstrap/y.ts': 'export const y = process.env.C;\n',
+        // only top-level .mjs files under scripts/ are entry points
+        'scripts/lib/helper.mjs': 'export const h = process.env.D;\n',
+        'scripts/op.js': 'const o = process.env.E;\n',
+      }),
+    );
+    expect(r.status).toBe(1);
+    for (const f of [
+      'apps/api/src/routes/bootstrap/x.ts',
+      'packages/db/src/bootstrap/y.ts',
+      'scripts/lib/helper.mjs',
+      'scripts/op.js',
+    ])
+      expect(r.stderr).toContain(`${f} reads process.env outside apps/api/src/bootstrap/ and scripts/*.mjs`);
+    expect(r.stderr).not.toContain('apps/api/src/bootstrap/tool.ts');
+    expect(r.stderr).not.toContain('scripts/backup.mjs');
+  });
+
+  it('msw imported outside packages/providers/src/testing/ fails; inside it passes', () => {
+    const r = run(
+      tree({
+        'packages/engine/src/m.ts': "import { http } from 'msw';\n",
+        'packages/providers/src/testing/server.ts': "import { setupServer } from 'msw/node';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'packages/engine/src/m.ts imports msw outside packages/providers/src/testing/',
+    );
+    expect(r.stderr).not.toContain('packages/providers/src/testing/server.ts');
+  });
+
+  it('msw in the apps/api manifests or tests fails: api tests reach it only through @gmt/providers/testing', () => {
+    const r = run(
+      tree({
+        'apps/api/package.json': manifest('apps/api', { devDependencies: { msw: '2.0.0' } }),
+        'apps/api/test/x.test.ts': "import { http } from 'msw';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('@gmt/api lists msw in devDependencies; use @gmt/providers/testing');
+    expect(r.stderr).toContain(
+      'apps/api/test/x.test.ts imports msw; apps/api tests use @gmt/providers/testing',
+    );
   });
 });

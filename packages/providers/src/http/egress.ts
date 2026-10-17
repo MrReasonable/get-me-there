@@ -5,6 +5,51 @@ import { containsSecret } from './scrub.js';
 import type { HttpKitDeps, HttpKitRequest, ProviderHttpLimits } from './types.js';
 
 const PATH_ONLY = /^\/[^?#]*$/;
+/**
+ * Words that mark a query parameter as a credential, compared after splitting the name into lower-case words at every
+ * non-letter and at camelCase (`apiKey` → api, key; `SECRET_KEY_BASE` → secret, key, base). why: the value check knows only
+ * the configured secrets, so an unconfigured key in `?api_key=…` would pass, reach fetch and could be recorded; every
+ * credential this app holds goes in a header (spec §5.3), so a name holding one of these words is refused whatever
+ * its value (CodeRabbit batch 3, PR #3 review: names and suffixes, not one exact list).
+ */
+export const CREDENTIAL_WORDS: ReadonlySet<string> = new Set([
+  'accesskey',
+  'accesstoken',
+  'apikey',
+  'apitoken',
+  'auth',
+  'authorization',
+  'authtoken',
+  'bearer',
+  'credential',
+  'credentials',
+  'key',
+  'keys',
+  'pass',
+  'passwd',
+  'password',
+  'privatekey',
+  'secret',
+  'secretkey',
+  'secrets',
+  'session',
+  'sessiontoken',
+  'signature',
+  'token',
+  'tokens',
+]);
+/** SearchApi's itinerary tokens (spec §5.4): chain state, not credentials, so these exact names alone are allowed. */
+export const ALLOWED_TOKEN_PARAMS: ReadonlySet<string> = new Set(['booking_token', 'departure_token']);
+
+/** True when a query parameter name holds a credential word and is not one of the exact itinerary-token names. */
+export function isCredentialParam(name: string): boolean {
+  if (ALLOWED_TOKEN_PARAMS.has(name)) return false;
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z]+/);
+  return words.some((w) => CREDENTIAL_WORDS.has(w));
+}
 /** Shortest secret http-kit accepts; matches scripts/secret-scan.mjs (sec-003). */
 export const MIN_SECRET_LENGTH = 8;
 
@@ -45,7 +90,8 @@ export function assertKitConfig(
  * Spec §5.3 "Egress", checked before the cache, the ledger or the network: the provider has limits; no secret in
  * any form appears in the URL (checked first, so a key in a hostname never reaches a message); no userinfo; no
  * explicit port; https (plain http only for the fixture provider at fixture.local); the hostname is exactly in the
- * provider's allowlist (URL normalises case); `endpointPath` equals the URL path; `fx` and `fixture` requests carry
+ * provider's allowlist (URL normalises case); no query parameter is named like a credential (isCredentialParam);
+ * `endpointPath` equals the URL path; `fx` and `fixture` requests carry
  * no credential header (ruling 13).
  */
 export function assertEgress(
@@ -69,6 +115,8 @@ export function assertEgress(
   const u = r.url;
   if (containsSecret(u.href, secrets)) deny('a credential appears in the URL');
   if (u.username !== '' || u.password !== '') deny('userinfo in URL');
+  for (const name of u.searchParams.keys())
+    if (isCredentialParam(name)) deny(`credential query parameter ${name.toLowerCase()}`);
   if (u.port !== '') deny('explicit port');
   const schemeOk =
     u.protocol === 'https:' ||

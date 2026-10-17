@@ -94,6 +94,21 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     ).toEqual({});
   });
 
+  it('rejects surplus tokens: a sort or departure range with an extra segment is malformed, not trimmed (CodeRabbit batch 3)', () => {
+    for (const q of [
+      'sort=price.asc.extra',
+      'sort=price.asc.',
+      'f.depart=2027-03-01..2027-03-31..extra',
+      'f.depart=2027-03-01..2027-03-31..',
+    ])
+      expect(parseResultsState(new URLSearchParams(q)), q).toEqual({ sort: null, filters: {} });
+    // the exact forms still parse
+    expect(parseResultsState(new URLSearchParams('sort=price.asc&f.depart=2027-03-01..2027-03-31'))).toEqual({
+      sort: { key: 'price', dir: 'asc' },
+      filters: { departure: { from: asIsoDate('2027-03-01'), to: asIsoDate('2027-03-31') } },
+    });
+  });
+
   it('withKey adds and removes keys without leaving undefined behind', () => {
     const none: ResultFilters = {};
     const a = withKey(none, 'maxStops', 0);

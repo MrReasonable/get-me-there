@@ -315,6 +315,24 @@ describe('View D (spec §11, §6.6)', () => {
     expect(within(errors).getByRole('listitem')).toHaveTextContent('no reason recorded after 3 attempts');
   });
 
+  it('a failed load of the run the counts come from shows the reason and a retry, never counts without their run (CodeRabbit batch 3)', async () => {
+    let fail = true;
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        fail
+          ? HttpResponse.json({ error: { code: 'internal', message: 'run boom' } }, { status: 500 })
+          : HttpResponse.json(execution({ status: 'completed' })),
+      ),
+    );
+    const { user } = render();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load: run boom');
+    expect(screen.queryByRole('table', { name: COPY.coverageHeading })).not.toBeInTheDocument();
+    fail = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('a failed load shows the reason and a retry', async () => {
     server.use(
       http.get(`${API}/definitions/:id/coverage`, () =>

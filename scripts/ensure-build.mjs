@@ -3,27 +3,24 @@
 // is newer than the last one. The CLI tests (scripts/backup.test.mjs, apps/api/test/deploy/backupCli.test.ts) call
 // this instead of building themselves, so two test processes never run tsc over the same dist at once (review
 // code-architect M5). Development and CI only; the image does not carry this script. Logic: ensure-build-lib.mjs.
-import { execFileSync } from 'node:child_process';
-import { rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { acquire, needsBuild } from './ensure-build-lib.mjs';
+import { lockPathFor, needsBuild, underLock } from './ensure-build-lib.mjs';
 
 const REPO = join(import.meta.dirname, '..');
 const STAMP = join(REPO, 'node_modules', '.gmt-build-stamp');
-// why: keyed by checkout, so the main checkout and a worktree never wait on each other.
-const LOCK = join(tmpdir(), `gmt-build-${Buffer.from(REPO).toString('hex').slice(-24)}.lock`);
+const LOCK = lockPathFor(REPO);
 
-acquire(LOCK);
-try {
+// why: the lock records this process as its owner. The build is a spawned child, so the event loop stays free: the
+// lock is released on success, on failure and on SIGINT, SIGTERM or SIGHUP (which also stop the build), and a SIGKILL
+// leaves a lock whose dead pid the next run takes over at once (ensure-build-lib.mjs).
+await underLock(LOCK, async (run) => {
   if (needsBuild(REPO, STAMP)) {
-    execFileSync('pnpm', ['--filter', '@gmt/api...', 'build'], { cwd: REPO, stdio: 'ignore' });
+    await run('pnpm', ['--filter', '@gmt/api...', 'build'], { cwd: REPO, stdio: 'ignore' });
     writeFileSync(STAMP, '');
     utimesSync(STAMP, new Date(), new Date());
     console.log('built');
   } else {
     console.log('build up to date');
   }
-} finally {
-  rmSync(LOCK, { recursive: true, force: true });
-}
+});

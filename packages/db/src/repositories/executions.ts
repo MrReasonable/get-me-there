@@ -195,14 +195,24 @@ export class ExecutionsRepo {
     return r === undefined ? null : toExecution(r);
   }
 
-  /** Newest first by creation. */
-  listForDefinition(definitionId: string, opts: { limit: number; includeChildren: boolean }): Execution[] {
-    return this.db.raw
-      .prepare<Record<string, unknown>, ExecutionDbRow>(
-        `SELECT * FROM search_executions WHERE definition_id = @definitionId AND (@children = 1 OR is_child = 0) ORDER BY created_at DESC, rowid DESC LIMIT @limit`,
-      )
-      .all({ definitionId, children: opts.includeChildren ? 1 : 0, limit: opts.limit })
-      .map(toExecution);
+  /** Newest first by creation; `limit: 'all'` reads every one (the read routes, which must never drop a run). */
+  listForDefinition(
+    definitionId: string,
+    opts: { limit: number | 'all'; includeChildren: boolean },
+  ): Execution[] {
+    return (
+      this.db.raw
+        .prepare<Record<string, unknown>, ExecutionDbRow>(
+          `SELECT * FROM search_executions WHERE definition_id = @definitionId AND (@children = 1 OR is_child = 0) ORDER BY created_at DESC, rowid DESC LIMIT @limit`,
+        )
+        // why: SQLite reads a negative LIMIT as no limit
+        .all({
+          definitionId,
+          children: opts.includeChildren ? 1 : 0,
+          limit: opts.limit === 'all' ? -1 : opts.limit,
+        })
+        .map(toExecution)
+    );
   }
 
   /** Executions in any of the statuses, oldest first (boot auto-resume, one-shot re-registration). */

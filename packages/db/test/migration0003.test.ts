@@ -8,15 +8,16 @@ import { RoutePriceHistoryRepo } from '../src/repositories/routePriceHistory.js'
 import { openTracked, sqliteCode, T0, tmpDbPath, tmpDir } from './helpers/db.js';
 
 const TAG = '0003_route_history_by_trip';
+const LATER = '0004_route_history_point_of_sale';
 
 /** A copy of the migrations folder that stops at 0002, as an install made before this migration has it. */
 function upTo0002(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  rmSync(join(dir, `${TAG}.sql`));
+  for (const tag of [TAG, LATER]) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
-  journal.entries = journal.entries.filter((e) => e.tag !== TAG);
+  journal.entries = journal.entries.filter((e) => e.tag !== TAG && e.tag !== LATER);
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
 }
@@ -30,7 +31,7 @@ describe('migration 0003: route price history keyed by trip (ruling 6, spec §7 
     );
     insertOld.run('2026-09-01', 48_000, T0);
     insertOld.run('2026-09-02', 47_500, T0);
-    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG]);
+    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG, LATER]);
     applyMigrations(db, MIGRATIONS_DIR);
     const rows = db.raw
       .prepare(
@@ -64,6 +65,7 @@ describe('migration 0003: route price history keyed by trip (ruling 6, spec §7 
         lowestPricePence: 46_000,
         currency: 'GBP',
         fetchedAt: T0,
+        pointOfSale: 'GB',
       },
     ]);
     expect(repo.series(asIata('LHR'), asIata('JFK'), 'searchapi', 'unknown').map((s) => s.trip)).toEqual([

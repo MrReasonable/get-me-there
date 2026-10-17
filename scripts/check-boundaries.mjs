@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Enforces the spec §4 import graph by reading every package.json `dependencies` and every
-// `import ... from '@gmt/…'` under src/. Fails on any edge not in ALLOWED, on `process.env`
-// outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
+// Enforces the spec §4 import graph by reading every package.json `dependencies` and every import of '@gmt/…' under
+// src/, from the parsed source (static, side-effect, require and dynamic imports alike; never comments or strings). Fails on any edge not in ALLOWED, on `process.env`
+// outside apps/api/src/bootstrap/ and the scripts/*.mjs entry points, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
 // worked-example files, and on a lint or type-check suppression comment anywhere in a package (root configs and e2e folders included).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -65,10 +65,44 @@ const dirs = {
   '@gmt/api': 'apps/api',
   '@gmt/web': 'apps/web',
 };
-// The only files that may read process.env: the app and tool bootstraps (wiring and logger take the env as an argument).
-const ENV_READERS = ['/bootstrap/'];
-// Any static, side-effect or dynamic import of msw.
-const MSW_IMPORT = /(from\s+|import\s*\(\s*|import\s+)['"]msw/;
+// why: the only code that may read process.env is a command-line entry point: the app and tool bootstraps under
+// exactly apps/api/src/bootstrap/ (wiring and logger take the env as an argument), and the operator scripts directly
+// under scripts/ (backup.mjs reads DATABASE_PATH as the bootstrap does; secret-scan.mjs reads the configured secret
+// values). Anchored to the path start, so a directory named bootstrap elsewhere (apps/api/src/routes/bootstrap/) or a
+// helper nested under scripts/ is not an entry point (CodeRabbit batch 3).
+const ENV_READER = /^(?:apps\/api\/src\/bootstrap\/.+|scripts\/[^/]+\.mjs)$/;
+const ENV_RULE = 'apps/api/src/bootstrap/ and scripts/*.mjs entry points';
+/**
+ * Every module specifier a file imports, read from the parsed source: static imports and re-exports, bare side-effect
+ * imports, `import x = require()`, `require()`, `import()` types and dynamic `import()` with a string or template
+ * literal. A dynamic import whose specifier is computed is returned as null (it cannot be checked). why: PR #3 review —
+ * a text scan missed import(`@gmt/engine`) and read an import written in a comment as real.
+ */
+function importsOf(file, src) {
+  const kind = file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
+  const out = [];
+  const literal = (n) =>
+    n !== undefined && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) ? n.text : null;
+  const visit = (n) => {
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier !== undefined)
+      out.push(literal(n.moduleSpecifier));
+    else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference))
+      out.push(literal(n.moduleReference.expression));
+    else if (ts.isImportTypeNode(n) && ts.isLiteralTypeNode(n.argument))
+      out.push(literal(n.argument.literal));
+    else if (
+      ts.isCallExpression(n) &&
+      (n.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(n.expression) && n.expression.text === 'require'))
+    )
+      out.push(literal(n.arguments[0]));
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+const isMsw = (spec) => spec === 'msw' || spec.startsWith('msw/');
 
 // why: installed dependencies are never source, at any depth. Build output and reports are generated only directly
 // under a package root, so they are skipped there by path and never by bare name (packages/core/src/coverage/ is
@@ -105,21 +139,41 @@ for (const [name, dir] of Object.entries(dirs)) {
   }
   for (const f of walk(join(dir, 'src'))) {
     const src = readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/from\s+['"](@gmt\/[a-z]+)/g)) {
-      if (!ALLOWED[name].includes(m[1])) {
-        console.error(`${f} imports ${m[1]}`);
+    const specs = importsOf(f, src);
+    for (const spec of specs) {
+      if (spec === null) {
+        console.error(
+          `${f} has a dynamic import whose specifier is computed, so its package edge cannot be checked`,
+        );
+        bad++;
+        continue;
+      }
+      const pkg = /^(@gmt\/[a-z]+)/.exec(spec)?.[1];
+      if (pkg !== undefined && !ALLOWED[name].includes(pkg)) {
+        console.error(`${f} imports ${pkg}`);
         bad++;
       }
     }
-    if (/process\.env/.test(src) && (name !== '@gmt/api' || !ENV_READERS.some((p) => f.includes(p)))) {
-      console.error(`${f} reads process.env outside apps/api/src/bootstrap/`);
+    if (/process\.env/.test(src) && !ENV_READER.test(f)) {
+      console.error(`${f} reads process.env outside ${ENV_RULE}`);
       bad++;
     }
     // why: plan decision 7 — @gmt/providers/testing is the only production-tree module that imports msw, in every package
-    if (!(name === '@gmt/providers' && f.includes('/src/testing/')) && MSW_IMPORT.test(src)) {
+    if (
+      !(name === '@gmt/providers' && f.includes('/src/testing/')) &&
+      specs.some((x) => x !== null && isMsw(x))
+    ) {
       console.error(`${f} imports msw outside packages/providers/src/testing/`);
       bad++;
     }
+  }
+}
+// The operator scripts are source too; their tests are not scanned, as no package's test/ tree is.
+for (const f of walk('scripts')) {
+  if (/\.test\.mjs$/.test(f)) continue;
+  if (/process\.env/.test(readFileSync(f, 'utf8')) && !ENV_READER.test(f)) {
+    console.error(`${f} reads process.env outside ${ENV_RULE}`);
+    bad++;
   }
 }
 // why: plan decision 20 — apps/api tests reach msw only through @gmt/providers/testing (its network guards), never directly
@@ -131,7 +185,7 @@ for (const field of ['dependencies', 'devDependencies']) {
   }
 }
 for (const f of walk('apps/api/test')) {
-  if (MSW_IMPORT.test(readFileSync(f, 'utf8'))) {
+  if (importsOf(f, readFileSync(f, 'utf8')).some((x) => x !== null && isMsw(x))) {
     console.error(`${f} imports msw; apps/api tests use @gmt/providers/testing`);
     bad++;
   }
@@ -175,7 +229,9 @@ function literalTexts(file, src) {
 function placeOffenders(file, src) {
   const out = [];
   for (const text of literalTexts(file, src)) {
-    for (const m of text.matchAll(/(?<![\w-])[A-Z]{3}(?![\w-])/g)) {
+    // why: a hyphen is a boundary, so both codes of a route key such as 'LHR-JFK' are read (CodeRabbit batch 3);
+    // words that then match are listed in NOT_AIRPORT_WORDS
+    for (const m of text.matchAll(/(?<!\w)[A-Z]{3}(?!\w)/g)) {
       if (codes.has(m[0]) && !NOT_AIRPORTS.has(m[0])) out.push(`${file} names the airport code ${m[0]}`);
     }
     for (const m of text.matchAll(cityPattern)) out.push(`${file} names the city ${m[1]}`);

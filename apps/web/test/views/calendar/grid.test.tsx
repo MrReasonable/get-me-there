@@ -120,6 +120,12 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(legend).toHaveTextContent(
       'hatched: 1 day shows a calendar price instead and is not on this scale',
     );
+    // why: CodeRabbit batch 3 — the sweep's [data-scale] exemption covers the scale values only (plan decision 52),
+    // never the legend's explanatory text or anything else a future change puts in the legend
+    expect(legend).not.toHaveAttribute('data-scale');
+    const scaled = [...legend.querySelectorAll('[data-scale]')].map((e) => e.textContent ?? '');
+    expect(scaled).toHaveLength(5);
+    for (const t of scaled) expect(t).toMatch(/^band [1-5]: £[\d,]+–£[\d,]+ \(\d+ days?\)$/);
     first.unmount();
 
     const second = renderGrid(days, 'calendar');
@@ -140,7 +146,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
       'stale: older than one refresh cycle by fetch age plus any known vendor age',
       'price not confirmed: an itinerary search priced this day',
       'striped square: part of the day not searched',
-      'cached from £X',
+      '"cached from" and a price: a cheaper calendar price exists for this day',
       'cheapest of the rows read',
       'Nn · back <date>',
       '– skipped (a budget stop, a disabled provider or a passed date; reasons in the panel)',

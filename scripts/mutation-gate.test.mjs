@@ -51,6 +51,20 @@ describe('mutation gate: timed-out mutants (ruling 10)', { timeout: 60_000 }, ()
     expect(r.status).toBe(1);
   });
 
+  it('fails when no mutant was tested: an empty, truncated or all-error report never passes (CodeRabbit batch 3)', () => {
+    for (const r of [
+      report([]),
+      {},
+      { files: {} },
+      { files: { 'src/a.ts': {} } },
+      report(['CompileError', 'Ignored']),
+    ]) {
+      const out = run(r);
+      expect(out.status, JSON.stringify(r)).toBe(1);
+      expect(out.stderr).toContain('holds no tested mutant');
+    }
+  });
+
   it('core runs Stryker sandboxed with explicit timeouts and concurrency 2, then the gate', () => {
     const dir = resolve(import.meta.dirname, '../packages/core');
     const cfg = JSON.parse(readFileSync(join(dir, 'stryker.config.json'), 'utf8'));

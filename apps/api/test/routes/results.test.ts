@@ -600,3 +600,21 @@ describe('review focus 4: the definition is edited after the rows were written',
     }
   });
 });
+
+// why: CodeRabbit batch 3 — the read routes took only the newest 500 executions, so past that many (a daily schedule
+// with on-demand children reaches it within a year) older prices vanished without `truncated`, and a request for an
+// older run's `executionId` answered 404 although the run exists. Every execution of the definition is read.
+describe('GET /definitions/:id/results with more executions than any fixed cap', { timeout: 60_000 }, () => {
+  it('still returns the oldest run’s rows, and finds that run by executionId', async () => {
+    const { x, def, s } = await world();
+    for (let i = 0; i < 520; i++)
+      s.execution(`N${i}`, { def, status: 'completed', startedAt: at(-1), finishedAt: at(-1) });
+    const all = await results(x, def.id);
+    // why: PR #3 review — every run is listed, so a cap anywhere below the count fails here, not only one that drops E1
+    expect(all.executions).toHaveLength(521);
+    expect(all.rows.map((row) => row.itineraryHash)).toEqual(['hV', 'hP', 'hF']);
+    const oldest = await results(x, def.id, `?executionId=${s.id('E1')}`);
+    expect(oldest.rows.map((row) => row.itineraryHash)).toEqual(['hV', 'hP', 'hF']);
+    expect(oldest.executions.map((e) => e.id)).toEqual([s.id('E1')]);
+  });
+});

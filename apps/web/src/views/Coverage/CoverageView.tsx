@@ -112,21 +112,22 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
   const actions = useExecutionActions();
   if (coverage.error) return <LoadError error={coverage.error} retry={() => void coverage.refetch()} />;
   if (coverage.data === undefined) return <Loading />;
+  // why: the header names the run the counts come from; counts without their run's identity, status and age would read
+  // as complete, so a failed run load is shown with a retry and the counts wait for the run (CodeRabbit batch 3)
+  if (run.error) return <LoadError error={run.error} retry={() => void run.refetch()} />;
+  if (run.data === undefined) return <Loading />;
   const c = coverage.data;
   const r = run.data;
-  const at = r ? (r.finishedAt ?? r.startedAt) : null;
-  const header: HeaderRun[] =
-    r === undefined
-      ? []
-      : [
-          {
-            id: r.id,
-            status: r.status,
-            isChild: r.isChild,
-            startedAt: r.startedAt,
-            ageHours: at === null ? 'unknown' : hoursSince(at, now),
-          },
-        ];
+  const at = r.finishedAt ?? r.startedAt;
+  const header: HeaderRun[] = [
+    {
+      id: r.id,
+      status: r.status,
+      isChild: r.isChild,
+      startedAt: r.startedAt,
+      ageHours: at === null ? 'unknown' : hoursSince(at, now),
+    },
+  ];
   // why: stale means older than one refresh cycle of the definition's quickest-refreshing discovery provider;
   // core's default stands in only for a provider that names no interval, or when there is no discovery provider.
   const intervals = definition.providers.discovery.map(

@@ -377,6 +377,29 @@ describe('fetchTile parsing (spec §5.2), synthetic shapes', () => {
     expect(res.cellIssues ?? []).toEqual([]);
   });
 
+  // why: CodeRabbit batch 3 — the envelope is strict, but each entry is read on its own: one wrongly shaped entry is
+  // dropped and counted, never the whole tile; a grid whose every entry is malformed is still a parse fault
+  it('drops and counts wrongly shaped entries beside valid ones; the tile keeps the rest (synthetic)', async () => {
+    const plan = smallPlan();
+    const [a] = plan.coveredCells;
+    if (a === undefined) throw new Error('cells');
+    const body: { calendar: unknown[] } = gridFor(plan);
+    body.calendar.push({ departure: a.departureDate, return: a.returnDate, price: 'cheap' }, 'not an entry', {
+      departure: 20261102,
+    });
+    answer(ok(body));
+    const res = await tileOf(plan);
+    expect(res.prices).toHaveLength(plan.coveredCells.length);
+    expect(res.notes).toContain('dropped-malformed-entry:3');
+  });
+
+  it('a grid whose every entry is malformed → parse, never an empty or absent tile (synthetic)', async () => {
+    answer(ok({ ...ECHO, calendar: [{ departure: 1 }, 'x', { departure: '2026-11-02', price: 'cheap' }] }));
+    const e = await errorOf(smallPlan());
+    expect(e).toMatchObject({ kind: 'parse', retryable: false });
+    expect(e.message).toMatch(/\[malformed-calendar\]/);
+  });
+
   it('duplicates pass through so the engine keeps the minimum: a cheaper second entry is returned (synthetic)', async () => {
     const plan = smallPlan();
     const [a] = plan.coveredCells;

@@ -1,4 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -83,5 +85,108 @@ describe('GitHub workflows (least privilege)', () => {
 
   it('the docker job builds on the default builder, so the image is in the daemon the later steps run', () => {
     expect(text('ci.yml')).not.toContain('docker/setup-buildx-action');
+  });
+});
+
+// why: CodeRabbit batch 3 — the image-history check matched only NAME=value, so a credential baked in another shape
+// (an `ENV NAME value` layer, a JSON "token": value) passed; and the compose step's throwaway credentials are said to
+// be CI-only and never a real value. The check's own grep patterns are run over sample history lines here.
+// why: ruling 11: each case spawns grep; 60 s survives a loaded runner.
+describe('the docker job keeps credentials out of the image history', { timeout: 60_000 }, () => {
+  const ci = text('ci.yml');
+  const line = ci.split('\n').find((l) => l.includes('docker history --no-trunc get-me-there:local')) ?? '';
+  const patterns = [...line.matchAll(/-e '([^']+)'/g)].map((m) => m[1]);
+  const hits = (sample) =>
+    spawnSync('grep', ['-Ei', ...patterns.flatMap((p) => ['-e', p])], {
+      input: `${sample}\n`,
+      encoding: 'utf8',
+      timeout: 30_000,
+    }).status === 0;
+
+  // why: PR #3 re-review — grep printed each matching history line, so a real hit would write the credential into a
+  // public CI log. The step's own line runs here against a stub docker whose history holds a planted credential: it
+  // must fail and say how many lines matched, and its output must hold no part of the planted value.
+  it('a planted credential fails the step without any part of it reaching the log', () => {
+    const stub = mkdtempSync(join(tmpdir(), 'gmt-docker-stub-'));
+    try {
+      const planted = 'PLANTEDzq7Xv9Lm2Rk4Tw8Yp';
+      writeFileSync(
+        join(stub, 'docker'),
+        `#!/bin/sh\nprintf '%s\\n' 'ENV NODE_ENV=production' 'ENV SEARCHAPI_KEY=${planted}'\n`,
+      );
+      chmodSync(join(stub, 'docker'), 0o755);
+      const r = spawnSync('/bin/sh', ['-c', line.trim()], {
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: { PATH: `${stub}:/usr/bin:/bin` },
+      });
+      const output = `${r.stdout}${r.stderr}`;
+      expect(r.status).toBe(1);
+      expect(output).toContain('1 credential-like line');
+      for (let i = 0; i + 4 <= planted.length; i++) expect(output).not.toContain(planted.slice(i, i + 4));
+      expect(output).not.toContain('SEARCHAPI_KEY');
+    } finally {
+      rmSync(stub, { recursive: true, force: true });
+    }
+  });
+
+  it('a clean history passes the step silently', () => {
+    const stub = mkdtempSync(join(tmpdir(), 'gmt-docker-stub-'));
+    try {
+      writeFileSync(join(stub, 'docker'), "#!/bin/sh\nprintf '%s\\n' 'ENV NODE_ENV=production'\n");
+      chmodSync(join(stub, 'docker'), 0o755);
+      const r = spawnSync('/bin/sh', ['-c', line.trim()], {
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: { PATH: `${stub}:/usr/bin:/bin` },
+      });
+      expect([r.status, r.stdout, r.stderr]).toEqual([0, '', '']);
+    } finally {
+      rmSync(stub, { recursive: true, force: true });
+    }
+  });
+
+  it('greps with explicit -e patterns', () => {
+    expect(patterns.length).toBeGreaterThan(1);
+  });
+
+  // why: PR #3 review — a suffixed name (SECRET_KEY_BASE) slipped past both patterns; each credential word is tried
+  // inside a longer name, in the = form and in the ENV space form
+  const WORDS = ['token', 'key', 'pass', 'passwd', 'password', 'secret', 'auth', 'bearer', 'credential'];
+  it.each(
+    WORDS.flatMap((w) => [
+      `ENV X_${w.toUpperCase()}_BASE=value`,
+      `ENV ${w.toUpperCase()}_FILE value`,
+      `ENV app_${w}=value`,
+    ]),
+  )('flags %s', (sample) => {
+    expect(hits(sample)).toBe(true);
+  });
+
+  it.each([
+    'ENV SECRET_KEY_BASE=value',
+    'ENV AWS_ACCESS_KEY_ID=AKIA0000',
+    'ENV SEARCHAPI_KEY=sk-123456',
+    '/bin/sh -c #(nop)  ENV APP_BASIC_AUTH_PASS hunter2-value',
+    'ENV TRAVELPAYOUTS_TOKEN abc123',
+    'ARG SMTP_PASS=abc',
+    'LABEL config={"token": "abc"}',
+    'ENV client_secret: abc',
+  ])('flags %s', (sample) => {
+    expect(hits(sample)).toBe(true);
+  });
+
+  it.each([
+    'RUN /bin/sh -c pnpm install --frozen-lockfile',
+    'ENV NODE_ENV=production',
+    'ENV PNPM_HOME=/pnpm',
+    'COPY --chown=node:node packages/ ./packages/',
+    'LABEL org.opencontainers.image.description=no secret is baked in',
+  ])('passes %s', (sample) => {
+    expect(hits(sample)).toBe(false);
+  });
+
+  it("says the compose step's credentials are throwaway CI values that must never match a real credential", () => {
+    expect(ci).toContain('# why: CI-only throwaway values that must never match a real credential');
   });
 });

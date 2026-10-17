@@ -18,6 +18,22 @@ const WORKED_EXAMPLE = ['LHR', 'LGW', 'JFK', 'EWR', 'LON', 'NYC'];
 /** Capitalised words in the docs that happen to be IATA codes too; extend only with a word, never a place. */
 const NOT_PLACES = ['API', 'DIR', 'GBP', 'GET', 'PWD', 'TLS', 'VPS', 'WAL'];
 
+/**
+ * Cells in one markdown table row. Every unescaped pipe is a column break, inside inline code too (as markdown tables
+ * read it); a pipe is escaped, and so text, only when an odd number of backslashes precedes it (in `\\|` the first
+ * backslash escapes the second, so the pipe still breaks the column).
+ */
+function tableCells(line: string): number {
+  const body = line.replace(/^\|/, '').replace(/(?<!\\)((?:\\\\)*)\|$/, '$1');
+  let breaks = 0;
+  let slashes = 0;
+  for (const ch of body) {
+    if (ch === '|' && slashes % 2 === 0) breaks += 1;
+    slashes = ch === '\\' ? slashes + 1 : 0;
+  }
+  return breaks + 1;
+}
+
 const example: unknown = JSON.parse(read('docs/examples/london-new-york.json'));
 
 describe('the example definition (spec §1, §11)', () => {
@@ -187,12 +203,29 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(flat).toContain('`SMTP_TLS=none` is accepted only for a loopback host');
     expect(flat).toContain('inside the container, loopback is the container itself');
     expect(flat).toContain('mail fails when it is sent');
+    // why: CodeRabbit batch 3 — the spec §12 ceiling counts delivered mail; the doc says a failure does not use it up
+    expect(flat).toContain('a failed send does not use up the hour');
   });
 
   it('gets the pre-migration backup off the volume and tells the cron user how to reach docker', () => {
     // why: review devops M3 and M5
     expect(flat).toContain('run the cron command of section 6 once by hand');
     expect(flat).toContain('The cron user must be in the `docker` group');
+  });
+
+  it('prunes host copies only after the new backup is on the host (CodeRabbit batch 3)', () => {
+    // why: `docker compose cp` exits 0 even when it copies nothing, so the prune must check the new file first
+    const line = /^15 3 \* \* \* .*$/m.exec(setup)?.[0] ?? '';
+    const check = line.indexOf('&& test -s "/var/backups/get-me-there/$new"');
+    const prune = line.indexOf(
+      "&& find /var/backups/get-me-there -name 'get-me-there-*.db' -mtime +30 -delete",
+    );
+    expect(check).toBeGreaterThan(line.indexOf('docker compose cp app:/data/backups/.'));
+    expect(prune).toBeGreaterThan(check);
+    expect(line).toContain('&& test -n "$new"');
+    // why: cron turns an unescaped % into a newline
+    expect(line).not.toContain('%');
+    expect(flat).toContain('The prune runs only when the new backup is on the host and not empty');
   });
 
   it('documents the in-process shutdown deadline beside the 90 s stale-lock takeover', () => {
@@ -233,6 +266,17 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
   });
 });
 
+describe('the plan’s exit-code line (decision 65, CodeRabbit batch 3)', () => {
+  it('says 65 refuses a recording or smoke run for spend, as setup.md and EXIT do, without the banned word', () => {
+    const plan = read('docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md');
+    const line = /^\/\/ Exit codes \(one table for every CLI\):.*$/m.exec(plan)?.[0] ?? '';
+    expect(line).toContain(
+      `${EXIT.spendRefused} \`spendRefused\`: a recording or smoke run refused for spend: credits already ledgered to earlier tool runs plus this run's worst case exceed \`--budget\` without \`--confirm-rerun\`, or a provider window with less room than the run's worst case;`,
+    );
+    expect(findBannedWords(line, BANNED_WORD_ALLOWLIST)).toEqual([]);
+  });
+});
+
 describe('operator docs (spec §11 banned words; spec §1 worked example only)', () => {
   it('covers every docs/*.md: the operator docs and the research notes', () => {
     const all = readdirSync(join(REPO, 'docs'))
@@ -248,6 +292,48 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     for (const doc of ['docs/api-limits.md', 'docs/scheduling.md', 'docs/providers.md'])
       expect(readme).toContain(doc);
   });
+
+  // why: CodeRabbit batch 3 — a reader cannot reach the operator's notes, so a doc states what was found and points
+  // at nothing outside the repository
+  it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
+    '%s points at no private notes',
+    (path) => {
+      expect(read(path)).not.toMatch(/private notes|\.local\/share/i);
+    },
+  );
+
+  // why: PR #3 review — the counter replaced inline code before counting, so an unescaped pipe inside `a|b` (which
+  // markdown reads as a column break) was hidden and a malformed row passed; only an escaped \| is not a break
+  it('the cell counter counts an unescaped pipe inside inline code as a column, and an escaped one as text', () => {
+    expect(tableCells('| a | b |')).toBe(2);
+    expect(tableCells('| a | `x|y` |')).toBe(3);
+    expect(tableCells('| a | `x\\|y` |')).toBe(2);
+    expect(tableCells('| a | x \\| y |')).toBe(2);
+    // why: PR #3 re-review — a pipe is escaped only after an odd number of backslashes; in `\\|` the first backslash
+    // escapes the second, so the pipe still breaks the column
+    expect(tableCells('| a | x \\\\| y |')).toBe(3);
+    expect(tableCells('| a | x \\\\\\| y |')).toBe(2);
+  });
+
+  // why: CodeRabbit batch 3 — a providers.md row had one cell fewer than its header, so its verdict sat under
+  // "Authorised source?"; every table row in every doc has its header's cell count
+  it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
+    '%s: every table row has as many cells as its header',
+    (path) => {
+      const cells = tableCells;
+      const bad: string[] = [];
+      let header: number | null = null;
+      for (const [i, line] of read(path).split('\n').entries()) {
+        if (!line.startsWith('|')) {
+          header = null;
+          continue;
+        }
+        if (header === null) header = cells(line);
+        else if (cells(line) !== header) bad.push(`line ${i + 1}: ${cells(line)} cells, header ${header}`);
+      }
+      expect(bad).toEqual([]);
+    },
+  );
 
   it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'README.md'])('%s contains no banned word', (path) => {
     const text = read(path);

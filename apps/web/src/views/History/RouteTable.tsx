@@ -6,11 +6,12 @@ import type { RouteLine } from './lines.js';
 const H = COPY.historyView;
 
 /**
- * Every point of one vendor price-history line for one searched trip (ruling 6). Spec §11 exempts these from full
- * provenance, so each row shows the amount (vendor-stated GBP, prov-004) with its source, "indicative", the trip, the
- * cabin, the fetched age and "stale" by fetch age (decision 54), never a PriceCell; the
- * row is marked `data-indicative`, the rendered sweep's one exemption besides the legend's scale (plan decision 52).
- * The only History file allowed to format money.
+ * Every point of one vendor price-history line for one searched trip (ruling 6). The series is the vendor's indicative
+ * history, not a fare, so it is never drawn through PriceCell (spec §11, plan decisions 38, 52). Its points carry the
+ * full provenance (spec §3; CodeRabbit batch 3), and each row shows the amount (vendor-stated GBP, prov-004, so FX status
+ * "not converted") with its source, "indicative", the trip, the cabin, the point of sale, the fetched age and "stale"
+ * by fetch age (decision 54). The row is marked `data-indicative`, the rendered sweep's one exemption besides the
+ * legend's scale (plan decision 52). The only History file allowed to format money.
  */
 export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime }) {
   const points = line.points.flatMap((p) => (p.kind === 'price' ? [p] : []));
@@ -42,6 +43,7 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
                   sourceLabel(p.route),
                   line.trip,
                   cabin,
+                  p.route.pointOfSale,
                   formatAgeFull(effectiveAge({ fetchedAt: p.route.fetchedAt, maxAgeHours: 'unknown' }, now)),
                 )}
               </td>

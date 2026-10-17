@@ -98,6 +98,15 @@ describe('scripts/check-casts.mjs', { timeout: 60_000 }, () => {
       'apps/y/test/view.test.tsx',
       'apps/y/vitest.config.ts',
       'vitest.config.ts',
+      // CodeRabbit batch 3: e2e specs, .mts/.cts modules and root .mts/.cts/.tsx files are code too
+      'apps/y/e2e/smoke.spec.ts',
+      'apps/y/e2e/deep/helper.tsx',
+      'packages/x/src/esm.mts',
+      'packages/x/scripts/tool.cts',
+      'packages/x/vite.config.mts',
+      'root.config.mts',
+      'root.config.cts',
+      'root.tsx',
     ];
     for (const f of planted) {
       mkdirSync(join(dir, dirname(f)), { recursive: true });
@@ -105,10 +114,21 @@ describe('scripts/check-casts.mjs', { timeout: 60_000 }, () => {
     }
     mkdirSync(join(dir, 'packages/core/src/types'), { recursive: true });
     writeFileSync(join(dir, 'packages/core/src/types/ids.ts'), cast);
+    // generated and installed trees are never read, even when nothing ignores them
+    for (const f of [
+      'packages/x/dist/out.ts',
+      'apps/y/node_modules/dep/index.ts',
+      'node_modules/dep/a.mts',
+    ]) {
+      mkdirSync(join(dir, dirname(f)), { recursive: true });
+      writeFileSync(join(dir, f), cast);
+    }
     const r = spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
     expect(r.status).toBe(1);
     for (const f of planted) expect(r.stderr).toContain(`${f}:2: v as string`);
     expect(r.stderr).not.toContain('packages/core/src/types/ids.ts');
+    expect(r.stderr).not.toContain('dist/');
+    expect(r.stderr).not.toContain('node_modules/');
     expect(r.stdout).toContain(`check-casts: ${planted.length} files, ${planted.length} casts`);
   });
 });
