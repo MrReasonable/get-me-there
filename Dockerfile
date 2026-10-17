@@ -81,10 +81,10 @@ VOLUME ["/data"]
 # files (plan decision 26).
 USER node
 EXPOSE 3000
-# why: liveness only (plan decision 63): a 2xx answer from /api/health is healthy; a `degraded` detail
+# why: liveness only (plan decision 63): a 2xx answer from /api/health with `ok: true` (the database answers) is healthy; a `degraded` detail
 # (scheduler jobs missing, a stuck run) shows in the UI and the logs and is never a restart trigger.
 # The start period 240 s covers the read-only app_lock wait (up to 90 s behind another app's lock,
 # 60 s behind a tool's, plan decision 53), the pre-migration backup, migrations and airport seeding.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=240s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => r.ok ? r.json() : { ok: false }).then((b) => process.exit(b.ok === true ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "apps/api/dist/bootstrap/start.js"]

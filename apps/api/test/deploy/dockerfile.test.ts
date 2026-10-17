@@ -56,6 +56,11 @@ describe('Dockerfile (spec §13, §5.5, §9 item 8)', () => {
     expect(Number(/--start-period=(\d+)s/.exec(hc ?? '')?.[1])).toBeGreaterThanOrEqual(180);
     expect(hc).toContain('CMD ["node", "-e",');
     expect(hc).toContain("fetch('http://127.0.0.1:3000/api/health')");
+    // why: review code-architect M3 — /api/health answers 200 with {"ok":false} when the database check fails, so the
+    // check reads `ok`; `degraded` stays out of it (decision 63) and Docker never restarts on unhealthy.
+    expect(hc).toContain('r.json()');
+    expect(hc).toContain('b.ok === true');
+    expect(hc).not.toContain('degraded');
   });
 
   it("starts WP8's process entry from its build output", () => {

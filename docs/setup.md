@@ -414,7 +414,9 @@ migrations and the first airport seeding.
 - **Start at boot.** `restart: unless-stopped` brings the app back after a reboot only if the
   Docker daemon itself starts at boot: `sudo systemctl enable docker` on Linux.
 - **Health.** `docker compose ps` shows `healthy` while `GET /api/health` answers; that is a
-  liveness check only, and Docker does not restart an unhealthy container. Signed in,
+  liveness check only, and Docker does not restart an unhealthy container. It reads the answer's
+  `ok` flag, so a database that cannot answer `select 1` shows as `unhealthy`; `degraded` never
+  does. Signed in,
   `curl -u operator http://127.0.0.1:3000/api/health` adds the detail: the database, each
   provider, and the scheduler's job count, next run, last run and `degraded` flag. A
   `degraded` app (scheduled jobs missing, a run stuck past `STUCK_AFTER_HOURS`) keeps serving;
