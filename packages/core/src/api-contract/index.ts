@@ -23,6 +23,7 @@ import {
 } from './executions.js';
 import {
   calendarGapResponseSchema,
+  calendarQuerySchema,
   calendarResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
@@ -98,7 +99,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('POST', '/executions/:id/resume', executionResponseSchema),
   route('POST', '/cells/verify', startExecutionResponseSchema, { request: verifyCellRequestSchema }),
   route('GET', '/definitions/:id/results', resultsResponseSchema, { query: resultsQuerySchema }),
-  route('GET', '/definitions/:id/calendar', calendarResponseSchema),
+  route('GET', '/definitions/:id/calendar', calendarResponseSchema, { query: calendarQuerySchema }),
   route('GET', '/definitions/:id/duration-analysis', durationAnalysisResponseSchema),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
   route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),

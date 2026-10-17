@@ -104,14 +104,31 @@ export const resultsResponseSchema = z.object({
   cheapest: resultRowSchema.nullable(),
 });
 const pricedCell = priceCellSchema.extend({ cell: cellSchema });
+/**
+ * Plan decision 54 on the views' figures. A verified-basis minimum the latest search no longer returned carries
+ * `notSeenInLatest` (the same shape as a results row's); a calendar-basis price whose cell a newer parent execution
+ * found empty or no_data is `superseded` (WP8 ranks such prices after current ones).
+ */
+const notSeenInLatest = z.object({ ageHours: ageHoursSchema }).nullable();
+const verifiedFigure = pricedCell.extend({ itineraryHash: z.string(), notSeenInLatest });
+const calendarFigure = pricedCell.extend({ superseded: z.boolean() });
 export const calendarDaySchema = z.object({
   /** departure date */
   date: isoDateSchema,
   discovery: z.array(z.object({ providerId: providerIdSchema, buckets: bucketsSchema, total: count })),
-  verification: z.object({ selected: count, itinerarySearched: count, onDemand: count }),
-  cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
-  cheapestPartiallyVerified: pricedCell.extend({ itineraryHash: z.string(), count }).nullable(),
-  cheapestCalendar: pricedCell.nullable(),
+  /**
+   * `unconfirmedCells`: cells of the day whose itinerary search priced but confirmed no price (reason part
+   * `price-unconfirmed`; plan decisions 45, 48, 51), for the destination the request names, else every destination.
+   */
+  verification: z.object({
+    selected: count,
+    itinerarySearched: count,
+    onDemand: count,
+    unconfirmedCells: count,
+  }),
+  cheapestVerified: verifiedFigure.nullable(),
+  cheapestPartiallyVerified: verifiedFigure.extend({ count }).nullable(),
+  cheapestCalendar: calendarFigure.nullable(),
   byDestination: z.array(
     z.object({
       destination: iataSchema,
@@ -120,19 +137,37 @@ export const calendarDaySchema = z.object({
     }),
   ),
 });
+/**
+ * Plan decision 53: the calendar route's optional destination. With it, every day's buckets, selection counts, minimums
+ * and `unconfirmedCells` cover that destination's cells only, so a filtered calendar is as honest as the unfiltered one.
+ */
+export const calendarQuerySchema = z.object({ destination: iataSchema.optional() });
 export const calendarResponseSchema = z.object({
   days: z.array(calendarDaySchema),
   executions: z.array(executionSummarySchema),
   staleAfterHours: count,
   calendarStaleAfterHours: z.partialRecord(providerIdSchema, count),
 });
+/**
+ * Spec §11 View C per nights value. Each minimum carries the cell it came from (plan decision 38), so the view can name
+ * its departure date and destination. `searched` counts per series: `total` is the cells of this nights value in the
+ * series' scope (verification: the selected cells; discovery: every cell) and `searched` those whose outcome is
+ * `priced`, `empty` or `no_data` (verification: any verification provider's outcome; discovery: that provider's), so
+ * "not searched", "searched k of N" and "searched, no price" stay distinct per series.
+ */
+const searchedCount = z.object({ searched: count, total: count });
 export const durationAnalysisResponseSchema = z.object({
   byNights: z.array(
     z.object({
       nights: count,
-      minVerified: priceCellSchema.extend({ n: count }).nullable(),
-      minCalendar: z.array(z.object({ providerId: providerIdSchema, price: priceCellSchema, n: count })),
-      searched: z.boolean(),
+      /** n = cells of this nights value with a class-verified price */
+      minVerified: pricedCell.extend({ n: count, notSeenInLatest }).nullable(),
+      /** n = cells of this nights value the provider priced */
+      minCalendar: z.array(z.object({ providerId: providerIdSchema, price: calendarFigure, n: count })),
+      searched: z.object({
+        verification: searchedCount,
+        discovery: z.array(searchedCount.extend({ providerId: providerIdSchema })),
+      }),
     }),
   ),
   executions: z.array(executionSummarySchema),
@@ -171,7 +206,7 @@ export const coverageResponseSchema = z.object({
   scheduleBlockedSince: isoDateTimeSchema.nullable(),
 });
 export const calendarGapResponseSchema = z.object({
-  cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
+  cheapestVerified: verifiedFigure.nullable(),
   cells: z.array(z.object({ cell: cellSchema, calendar: priceCellSchema, verifyAvailable: z.boolean() })),
 });
 export const cellOutcomeSchema = cellKeySchema.extend({
@@ -192,15 +227,34 @@ export const cellOutcomeSchema = cellKeySchema.extend({
 export const cellDetailResponseSchema = z.object({
   cell: cellSchema,
   outcomes: z.array(cellOutcomeSchema),
+  /** `superseded` (decision 54): a newer parent execution found this cell empty or no_data. */
   calendarPrices: z.array(
-    priceCellSchema.extend({ executionId: z.string(), calendarPriceId: z.number().int() }),
+    priceCellSchema.extend({
+      executionId: z.string(),
+      calendarPriceId: z.number().int(),
+      superseded: z.boolean(),
+    }),
   ),
   observations: z.array(resultRowSchema),
+  /**
+   * What the per-cell verify action would spend now (spec §8.1; plan decisions 42, 45): WP7's childCapPreview, the
+   * child's hard stop and the calls of budget headroom left for it. Null when the definition has no verification
+   * provider.
+   */
+  verify: z.object({ maxCalls: count, headroomCalls: count }).nullable(),
 });
 export const historyPointSchema = z.object({
   at: isoDateTimeSchema,
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
+});
+/**
+ * A history point as the api sends it: the stored point plus `stale` (spec §3 and plan decision 44: by fetch age plus
+ * any known vendor age) and `truncated` (decisions 30, 36: "cheapest of the rows read"). The db keeps historyPointSchema.
+ */
+export const historyPointResponseSchema = historyPointSchema.extend({
+  stale: z.boolean(),
+  truncated: z.boolean(),
 });
 /** No cabin, so no full provenance; plotted by `date`. */
 export const routeSeriesPointSchema = z.object({
@@ -210,14 +264,24 @@ export const routeSeriesPointSchema = z.object({
   providerId: providerIdSchema,
   sourceKind: sourceKindSchema,
 });
+/**
+ * One itinerary's offer history. `cell` and `carriers` name it (plan decision 52: the heading and every price's
+ * destination come from the api, never from a cached Results row). Each point names the execution that fetched it,
+ * so lines join only consecutive runs of the definition (decision 52).
+ */
 export const itineraryHistoryResponseSchema = z.object({
   itineraryHash: z.string(),
+  cell: cellSchema,
+  carriers: z.array(z.string()),
   series: z.array(
     z.object({
       providerId: providerIdSchema,
       seller: z.string(),
       cabin: cabinSchema,
-      points: z.array(historyPointSchema),
+      /** priceConfirmed: false for an offer whose price the final step did not confirm (decisions 27, 37) */
+      points: z.array(
+        historyPointResponseSchema.extend({ priceConfirmed: z.boolean(), executionId: z.string() }),
+      ),
     }),
   ),
 });
@@ -230,14 +294,15 @@ export const routeHistoryResponseSchema = z.object({
     z.object({
       providerId: providerIdSchema,
       cabin: cabinSchema,
-      points: z.array(historyPointSchema.extend({ cell: cellSchema, executionId: z.string() })),
+      points: z.array(historyPointResponseSchema.extend({ cell: cellSchema, executionId: z.string() })),
     }),
   ),
   routeSeries: z.array(
     z.object({
       providerId: providerIdSchema,
       cabin: z.union([cabinSchema, z.literal('unknown')]),
-      points: z.array(routeSeriesPointSchema),
+      /** `stale` by fetch age (decision 54); the stored point type is unchanged */
+      points: z.array(routeSeriesPointSchema.extend({ stale: z.boolean() })),
     }),
   ),
 });
