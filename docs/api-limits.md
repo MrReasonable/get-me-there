@@ -87,8 +87,9 @@ window's start and end with calls and cost so far.
   SearchApi" (calendar) and "Google Flights via SearchApi" (itinerary search).
 - `google_flights_calendar` (discovery): at most 200 date combinations per call (HTTP 400
   above that), one airport per side (city codes are rejected), 9 to 29 seconds per call. The
-  app tiles 8 outbound days by the return span the nights band needs, 21 calls per airport pair
-  for the worked example's 182-day window and 10–21 nights, 84 for its 4 pairs.
+  app tiles 9 outbound days by the 20-day return span the 10–21-night band needs (180
+  combinations), 21 calls per airport pair for the worked example's 182-day window, 84 for its
+  4 pairs.
 - `google_flights` (verification): three steps per cell, `1 + expandTop × 2` calls, 5 at the
   default `expandTop` of 2. Step 3 can show an online agency below the airline's fare, so it
   always runs. Some options carry no price and are skipped.
