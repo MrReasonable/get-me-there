@@ -128,7 +128,7 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     const { findByText, getByText } = renderWithProviders(<CalendarView definition={definition()} />);
     expect(await findByText('(3 reused from earlier runs)')).toBeInTheDocument();
     // why: WP9's span header names the runs by start time and says no single run status applies.
-    expect(getByText(COPY.spanExecutions(1))).toBeInTheDocument();
+    expect(getByText(COPY.spanExecutions(1, 0))).toBeInTheDocument();
     expect(getByText(/14 Oct 2026 13:00 Europe\/London/)).toBeInTheDocument();
   });
 

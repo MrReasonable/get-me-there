@@ -228,7 +228,9 @@ export const COPY = {
     `itinerary search for one cell, started ${started} (${status}, ${age})`,
   executionNotStarted: (status: string) => `run not started yet (${status})`,
   childExecutionNotStarted: (status: string) => `itinerary search for one cell, not started yet (${status})`,
-  spanExecutions: (n: number) => `across ${n} ${n === 1 ? 'run' : 'runs'}; no single run status applies`,
+  // why: UI-010: "run" means a parent run everywhere; on-demand searches are counted apart.
+  spanExecutions: (runs: number, onDemand: number) =>
+    `across ${runs} ${runs === 1 ? 'run' : 'runs'}${onDemand === 0 ? '' : ` and ${onDemand} on-demand ${onDemand === 1 ? 'search' : 'searches'}`}; no single run status applies`,
   notCompletedBanner: (status: string) => `The latest run is ${status}; these results may be partial.`,
   noExecution: 'No run yet for this definition.',
   statusName: {
@@ -776,6 +778,9 @@ export const COPY = {
       `cheapest searched cell ${origin}→${destination} ${dep}–${ret}`,
     cellChanged: 'a different cell from the previous point',
     routePicker: 'Route',
+    // why: UI-010: the route view plots calendar series only, so it says where an itinerary offer's history is.
+    offersPerItinerary:
+      "Itinerary offers are shown per itinerary: open a row's price history in Results to see one.",
     pairOption: (origin: string, destination: string) => `${origin}→${destination}`,
     allPairs: (shown: number, total: number) =>
       shown === total ? 'All pairs' : `All pairs (first ${shown} of ${total})`,
@@ -783,8 +788,8 @@ export const COPY = {
       `${route} · ${departs} to ${back} · ${carriers}`,
     itineraryHash: (hash: string) => `itinerary ${hash}`,
     backToRoute: 'Show route history',
-    spanLine: (points: number, from: string, to: string) =>
-      `${points} ${points === 1 ? 'run' : 'runs'} shown, ${from} to ${to}`,
+    spanLine: (runs: number, onDemand: number, from: string, to: string) =>
+      `${runs} ${runs === 1 ? 'run' : 'runs'}${onDemand === 0 ? '' : ` and ${onDemand} on-demand ${onDemand === 1 ? 'search' : 'searches'}`} shown, ${from} to ${to}`,
     tableCaption: (series: string) => `${series}: every point, with provenance`,
     chartScroll: (title: string) => `${title}, chart (scrolls sideways on a narrow screen)`,
     tableScroll: (series: string) => `${series}: table of points (scrolls)`,

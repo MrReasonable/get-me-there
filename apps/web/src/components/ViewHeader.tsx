@@ -42,7 +42,12 @@ export function ViewHeader({ title, executions, stale, variant = 'single' }: Vie
         {executions.length === 0 ? COPY.noExecution : COPY.executionsShown(list)}
       </p>
       {span && executions.length > 0 ? (
-        <p className="text-sm text-slate-700">{COPY.spanExecutions(executions.length)}</p>
+        <p className="text-sm text-slate-700">
+          {COPY.spanExecutions(
+            executions.filter((e) => !e.isChild).length,
+            executions.filter((e) => e.isChild).length,
+          )}
+        </p>
       ) : null}
       {stale ? (
         <p className="text-sm">

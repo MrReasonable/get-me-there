@@ -61,7 +61,7 @@ const SAMPLES: Record<string, unknown[]> = {
   executionsShown: ['run started 14 Oct 2026 13:00 Europe/London (completed, 2h ago)'],
   executionItem: ['14 Oct 2026 13:00 Europe/London', 'completed', '2h ago'],
   childExecutionItem: ['14 Oct 2026 13:00 Europe/London', 'running', 'just now'],
-  spanExecutions: [3],
+  spanExecutions: [3, 1],
   notCompletedBanner: ['running'],
   progress: [
     {
@@ -196,7 +196,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'historyView.allPairs': [4, 4],
   'historyView.itineraryHeading': ['LHR→JFK', 'Sun 14 Mar 2027', 'Sun 28 Mar 2027', 'BA'],
   'historyView.itineraryHash': ['abc123'],
-  'historyView.spanLine': [3, '23 Sep 2026', '14 Oct 2026'],
+  'historyView.spanLine': [3, 0, '23 Sep 2026', '14 Oct 2026'],
   'historyView.chartScroll': ['Price by fetch date'],
   'historyView.tableScroll': ["Google's price history for 5–15 Nov · economy, indicative"],
   'historyView.tableCaption': ["Google's price history for 5–15 Nov · economy, indicative"],

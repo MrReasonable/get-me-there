@@ -189,12 +189,20 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
       ),
     ).toEqual({ fetch: [], route: [] });
     const { fetch } = linesFromRoute(threeRuns, order);
-    expect(historySpan(fetch)).toEqual({
+    expect(historySpan(fetch, new Set())).toEqual({
       runs: 3,
+      onDemand: 0,
       firstAt: fetchPoint(500, 1).at,
       lastAt: fetchPoint(2, 1).at,
     });
-    expect(historySpan([])).toBeNull();
+    // why: UI-010: a point an on-demand child fetched is counted as an on-demand search, never as a run.
+    const [firstPoint] = fetch[0]?.points.filter((p) => p.kind === 'price') ?? [];
+    const childId = firstPoint?.kind === 'price' ? firstPoint.executionId : '';
+    expect(historySpan(fetch, new Set([childId]))).toMatchObject({ runs: 2, onDemand: 1 });
+    expect(COPY.historyView.spanLine(1, 1, '1 Oct', '2 Oct')).toBe(
+      '1 run and 1 on-demand search shown, 1 Oct to 2 Oct',
+    );
+    expect(historySpan([], new Set())).toBeNull();
     expect(newestAllStale(fetch)).toBe(false);
     const stale = linesFromRoute(
       routeHistory({
@@ -423,6 +431,17 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(within(routeTable).queryAllByTestId('provenance')).toHaveLength(0);
   });
 
+  it('"run" means a parent run: on-demand searches are counted apart, and the route view says where offers live (UI-010)', async () => {
+    serveRuns([...RUNS, summary({ id: 'child-1', isChild: true })]);
+    server.use(http.get(routeRoute, () => HttpResponse.json(threeRuns)));
+    const { findByText, getByText } = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(
+      await findByText('across 4 runs and 1 on-demand search; no single run status applies'),
+    ).toBeInTheDocument();
+    // why: the route view plots calendar series only; a class-verified offer's history is per itinerary, from Results.
+    expect(getByText(COPY.historyView.offersPerItinerary)).toBeInTheDocument();
+  });
+
   it('the header names the definition’s runs from the executions list the status bar uses, never the calendar (decision 52)', async () => {
     const paths: string[] = [];
     serveRuns();
@@ -437,7 +456,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
       <HistoryView definition={definition()} />,
     );
     await findByRole('figure', { name: 'Price by fetch date' });
-    expect(await findByText(COPY.spanExecutions(4))).toBeInTheDocument();
+    expect(await findByText(COPY.spanExecutions(4, 0))).toBeInTheDocument();
     expect(getByText('3 runs shown, 23 Sep 2026 to 14 Oct 2026')).toBeInTheDocument();
     expect(getByText(/run started 14 Oct 2026 \d\d:00 Europe\/London/)).toBeInTheDocument();
     expect(paths).toEqual([]);

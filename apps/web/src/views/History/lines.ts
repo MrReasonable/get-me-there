@@ -298,7 +298,9 @@ export function itineraryHeading(resp: Pick<ItineraryHistoryResponse, 'cell' | '
 /** What the cross-execution header shows (plan decision 38): how many runs the lines span, first and last fetch. */
 export function historySpan(
   lines: readonly PlotLine[],
-): { runs: number; firstAt: IsoDateTime; lastAt: IsoDateTime } | null {
+  /** UI-010: executions that are on-demand children, counted as searches, never as runs. */
+  childIds: ReadonlySet<string>,
+): { runs: number; onDemand: number; firstAt: IsoDateTime; lastAt: IsoDateTime } | null {
   const priced = lines.flatMap((l) => l.points.flatMap((p) => (p.kind === 'price' ? [p] : [])));
   const first = priced.reduce<(typeof priced)[number] | null>(
     (a, p) => (a === null || p.t < a.t ? p : a),
@@ -309,7 +311,9 @@ export function historySpan(
     null,
   );
   if (first === null || last === null) return null;
-  return { runs: new Set(priced.map((p) => p.executionId)).size, firstAt: first.at, lastAt: last.at };
+  const ids = new Set(priced.map((p) => p.executionId));
+  const onDemand = [...ids].filter((id) => childIds.has(id)).length;
+  return { runs: ids.size - onDemand, onDemand, firstAt: first.at, lastAt: last.at };
 }
 
 /** The header's stale flag: true when every series' newest point is stale. */
