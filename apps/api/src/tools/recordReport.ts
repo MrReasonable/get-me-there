@@ -1,5 +1,6 @@
 /** Assessment and the human report of a recording run (spec §9 item 7; brief WP4b Task 12b reads these lines). */
 import { existsSync, readFileSync } from 'node:fs';
+import { formatPence } from '@gmt/core';
 import type { PlannedCall, RecordArgs } from './recordPlan.js';
 import { bookingOptions, calendarIsEmpty, dataRowCount, isRecord } from './recordRequests.js';
 import type { RecordedCall, RecordSummary } from './types.js';
@@ -120,7 +121,8 @@ function callLine(
     : `${c.id} ${String(c.status)}${c.detail === null ? '' : ` (${c.detail})`}`;
 }
 
-const pounds = (pence: number | null): string => (pence === null ? '—' : (pence / 100).toFixed(2));
+// why: ca-004: core's formatPence is the one money formatter for operator-facing text (plan, Core domain functions).
+const pounds = (pence: number | null): string => (pence === null ? '—' : formatPence(pence));
 
 /** Human summary printed after a run. */
 export function formatSummary(

@@ -312,6 +312,8 @@ describe('runTool success paths', { timeout: 60_000 }, () => {
     expect(await runTool('record', ROUTE, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain('required calls: all as expected');
     expect(h.text()).toContain('ledger: SearchApi 4 credit(s) of budget 5; Travelpayouts 21 free call(s)');
+    // why: ca-004: chain prices go through core's one money formatter (£, grouping), never a float's toFixed(2).
+    expect(h.text()).toMatch(/chain prices \(GBP, diagnostics only\): step 1 £\d[\d,]*(\.\d\d)?, step 2 £\d/);
     expect(filesUnder(h.root).filter((f) => f.endsWith('.json') && !f.endsWith('.raw.json'))).toHaveLength(
       29,
     ); // 27 recordings + 2 allowlists
