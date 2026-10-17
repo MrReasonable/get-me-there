@@ -165,8 +165,8 @@ describe('parseConfig (spec §12)', () => {
       SMTP_PORT: '465',
       SMTP_USER: 'u',
       SMTP_PASS: 'p',
-      ALERT_EMAIL_TO: 'a@b.c',
-      ALERT_EMAIL_FROM: 'x@b.c',
+      ALERT_EMAIL_TO: 'a@example.com',
+      ALERT_EMAIL_FROM: 'x@example.com',
     };
     expect(ok({ ...minimal, ...smtp }).smtp?.tls).toBe('implicit');
     expect(ok({ ...minimal, ...smtp, SMTP_TLS: 'starttls' }).smtp?.tls).toBe('starttls');
@@ -221,8 +221,8 @@ describe('parseConfig (spec §12)', () => {
       SMTP_PORT: 'abc',
       SMTP_USER: 'u',
       SMTP_PASS: 'p',
-      ALERT_EMAIL_TO: 'a@b.c',
-      ALERT_EMAIL_FROM: 'x@b.c',
+      ALERT_EMAIL_TO: 'a@example.com',
+      ALERT_EMAIL_FROM: 'x@example.com',
     };
     expect(errors({ ...minimal, ...smtp })).toEqual(['SMTP_PORT']);
   });

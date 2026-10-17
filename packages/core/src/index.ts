@@ -6,6 +6,7 @@ export { buildDigest } from './alerts/digest.js';
 export { DEFAULT_DISCOVERY_REFRESH_HOURS, evaluateAlertRules } from './alerts/evaluate.js';
 // Inferred contract types that other packages name in signatures (the schemas stay under `apiContract`).
 export type {
+  AlertEventPayload,
   BudgetFit,
   CalendarDay,
   CoverageCheckRequest,
@@ -29,6 +30,7 @@ export * from './coverage/rollUp.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
 export * from './labels/age.js';
+export { SOURCE_LABELS, sourceLabel } from './labels/source.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
 export { itineraryHash } from './normalise/hashing.js';

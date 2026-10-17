@@ -23,6 +23,11 @@ export interface AlertRule {
   enabled: boolean;
 }
 export type AlertRuleInput = Omit<AlertRule, 'id'>;
+/**
+ * Spec §7 `alert_events.status`, decision 56: `queued` is written before the email is sent and stays when the send
+ * fails (the next pass sends it), `notified` once a notifier accepted it, `suppressed` by the §6.8 cooldown.
+ */
+export type AlertEventStatus = 'queued' | 'notified' | 'suppressed';
 /** Spec §7 `alert_events`. */
 export interface AlertEvent {
   id: number;
@@ -32,7 +37,7 @@ export interface AlertEvent {
   calendarPriceId: number | null;
   dedupKey: string;
   firedAt: IsoDateTime;
-  status: 'sent' | 'failed' | 'suppressed';
+  status: AlertEventStatus;
   reason: string | null;
   payload: unknown;
 }
