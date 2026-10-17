@@ -1,21 +1,5 @@
 import { type OperatorMessageKind, stripControlChars, stripUrlsInText } from '@gmt/core';
 
-/** Every operator-notification kind of spec §8.1 "Operator notifications" (core's OperatorMessageKind). */
-export const OPERATOR_KINDS: readonly OperatorMessageKind[] = [
-  'paused_budget',
-  'paused_error',
-  'skipped_budget',
-  'skipped_confirm',
-  'skipped_window',
-  'skipped_missed',
-  'interrupted',
-  'provider_disabled',
-  'provider_capped',
-  'parity_break',
-  'alerts_calendar_only',
-  'crash_loop',
-];
-
 // why: spec §11 banned words apply to engine templates; every string here is covered by the banned-word test in
 // notifications.test.ts and the runtime sweep of Task 7.20. "Budget cap" covers call caps and spend caps alike; the
 // detail line names which one and its figures (po-015).
@@ -33,6 +17,20 @@ const SUBJECTS: Readonly<Record<OperatorMessageKind, string>> = {
   parity_break: 'request count differs from the plan',
   alerts_calendar_only: 'alerts running on calendar basis only',
 };
+/** The keys of a record keyed by a string union, typed as that union (for…in over a Record<K, …> yields K). */
+function keysOf<K extends string>(r: Readonly<Record<K, unknown>>): K[] {
+  const out: K[] = [];
+  for (const k in r) out.push(k);
+  return out;
+}
+
+/**
+ * Every operator-notification kind of spec §8.1 "Operator notifications" (core's OperatorMessageKind), read from
+ * SUBJECTS, which the compiler makes name every kind; so a new kind can never be missing here, and the banned-word
+ * sweeps that iterate this list never skip one (code-architect review 13).
+ */
+export const OPERATOR_KINDS: readonly OperatorMessageKind[] = keysOf(SUBJECTS);
+
 const GUIDANCE: Readonly<Record<OperatorMessageKind, string>> = {
   paused_budget:
     'Raise the cap, or wait for the automatic resume if the line above names one; Resume is on the status bar.',
