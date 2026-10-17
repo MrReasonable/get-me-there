@@ -99,25 +99,29 @@ function EventRow(props: { e: AlertEvent; ruleText: string; now: IsoDateTime }) 
 export function EventsTable(props: { events: readonly AlertEvent[]; ruleText: ReadonlyMap<string, string> }) {
   const now = useNow();
   if (props.events.length === 0) return <p>{C.noEvents}</p>;
+  // why: UI-009: eight columns, two PriceCells a row; at 375 px the table scrolls in its own labelled region, as the
+  // Results, Coverage, Duration and calendar-panel tables do, never the page body.
   return (
-    <table aria-label={C.eventsTable}>
-      <thead>
-        <tr>
-          <th scope="col">{C.colFired}</th>
-          <th scope="col">{C.colRule}</th>
-          <th scope="col">{C.colStatus}</th>
-          <th scope="col">{C.colTrip}</th>
-          <th scope="col">{C.colPrice}</th>
-          <th scope="col">{C.colPrevious}</th>
-          <th scope="col">{C.colClass}</th>
-          <th scope="col">{C.colReason}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {props.events.map((e) => (
-          <EventRow key={e.id} e={e} ruleText={props.ruleText.get(e.ruleId) ?? e.ruleId} now={now} />
-        ))}
-      </tbody>
-    </table>
+    <section aria-label={C.eventsScroll} className="overflow-x-auto">
+      <table aria-label={C.eventsTable}>
+        <thead>
+          <tr>
+            <th scope="col">{C.colFired}</th>
+            <th scope="col">{C.colRule}</th>
+            <th scope="col">{C.colStatus}</th>
+            <th scope="col">{C.colTrip}</th>
+            <th scope="col">{C.colPrice}</th>
+            <th scope="col">{C.colPrevious}</th>
+            <th scope="col">{C.colClass}</th>
+            <th scope="col">{C.colReason}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {props.events.map((e) => (
+            <EventRow key={e.id} e={e} ruleText={props.ruleText.get(e.ruleId) ?? e.ruleId} now={now} />
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

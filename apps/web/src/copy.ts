@@ -830,6 +830,7 @@ export const COPY = {
     noRules: 'No alert rules for this definition yet.',
     eventsHeading: 'Alert events',
     eventsTable: 'Alert events',
+    eventsScroll: 'Alert events (scrolls sideways on a narrow screen)',
     noEvents: 'No alerts have fired for this definition yet.',
     colFired: 'Fired',
     colRule: 'Rule',

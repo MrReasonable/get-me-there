@@ -58,7 +58,11 @@ export function AlertsView(props: { definitionId: string }) {
               <li key={r.id} className="flex gap-2">
                 {/* why: decision 55 — a rule's threshold is a price quoted in text, which WP9's sweep allows inside [data-quote] */}
                 <span data-quote>{ruleText.get(r.id)}</span>
-                <button type="button" onClick={() => remove.mutate(r.id)}>
+                <button
+                  type="button"
+                  className="min-h-11 rounded border border-slate-500 px-3"
+                  onClick={() => remove.mutate(r.id)}
+                >
                   {C.deleteRule}
                 </button>
               </li>
