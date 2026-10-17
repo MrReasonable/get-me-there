@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
@@ -19,6 +19,18 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
     const db = openDatabase(join(tmpDir(), 'x.test.db'));
     expect(db.raw.pragma('journal_mode', { simple: true })).toBe('wal');
     db.close();
+  });
+  it('checkpoint() truncates the WAL of a file db and is a no-op in memory (one home for the pragma)', () => {
+    const path = join(tmpDir(), 'cp.test.db');
+    const db = openDatabase(path);
+    db.raw.exec('CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1)');
+    expect(statSync(`${path}-wal`).size).toBeGreaterThan(0);
+    db.checkpoint();
+    expect(statSync(`${path}-wal`).size).toBe(0);
+    db.close();
+    const mem = openDatabase(':memory:');
+    expect(() => mem.checkpoint()).not.toThrow();
+    mem.close();
   });
   it('transaction callbacks must be synchronous (better-sqlite3 commits at the first await)', () => {
     const db = openDatabase(':memory:');

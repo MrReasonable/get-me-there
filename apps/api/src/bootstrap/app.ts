@@ -153,13 +153,18 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       close: async () => {
         if (closed) return;
         closed = true;
-        await closeServer(bound?.server ?? null); // stop accepting
-        await engine.shutdown();
         clearInterval(beat);
-        // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
-        ports.db.raw.pragma('wal_checkpoint(TRUNCATE)');
-        lock.release();
-        ports.db.close();
+        // why: review arch Minor: a shutdown or checkpoint that throws must still release the lock and close the
+        // handle, or the next start waits out APP_LOCK_WAIT_MS on a lock nobody holds.
+        try {
+          await closeServer(bound?.server ?? null); // stop accepting
+          await engine.shutdown();
+          // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
+          ports.db.checkpoint();
+        } finally {
+          lock.release();
+          ports.db.close();
+        }
         log.info({}, 'shutdown complete');
       },
     };

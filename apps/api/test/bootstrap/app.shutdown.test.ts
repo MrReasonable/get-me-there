@@ -78,12 +78,11 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     expect(heartbeat).toHaveBeenCalledTimes(1);
 
     const shutdown = vi.spyOn(running.engine, 'shutdown');
-    const pragma = vi.spyOn(running.ports.db.raw, 'pragma');
+    const checkpoint = vi.spyOn(running.ports.db, 'checkpoint');
     const release = vi.spyOn(AppLock.prototype, 'release');
     const close = vi.spyOn(running.ports.db, 'close');
     await running.close();
-    const checkpointIndex = pragma.mock.calls.findIndex(([src]) => String(src).startsWith('wal_checkpoint'));
-    const checkpointOrder = pragma.mock.invocationCallOrder[checkpointIndex] ?? Number.NaN;
+    const checkpointOrder = first(checkpoint.mock.invocationCallOrder);
     expect(first(shutdown.mock.invocationCallOrder)).toBeLessThan(checkpointOrder);
     expect(checkpointOrder).toBeLessThan(first(release.mock.invocationCallOrder));
     expect(first(release.mock.invocationCallOrder)).toBeLessThan(first(close.mock.invocationCallOrder));
@@ -94,6 +93,24 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     expect(!existsSync(wal) || statSync(wal).size === 0).toBe(true);
     await running.close(); // idempotent
     expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('a shutdown that throws still clears the heartbeat, releases the lock and closes the database (review arch Minor)', async () => {
+    const dbPath = join(tempDir('gmt-sd-'), 's.db');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const timers = intervalSpies();
+    const running = await bootApp({
+      config: devConfig(dbPath),
+      log: createLogger({ logLevel: 'error' }),
+      listen: false,
+      assets: assetPaths(),
+    });
+    vi.spyOn(running.engine, 'shutdown').mockRejectedValue(new Error('engine shutdown failed'));
+    const close = vi.spyOn(running.ports.db, 'close');
+    await expect(running.close()).rejects.toThrow('engine shutdown failed');
+    expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat());
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(lockRow(dbPath)).toBeNull();
   });
 
   it('a boot that fails after taking the lock releases it and stops the heartbeat (review arch-008)', async () => {
