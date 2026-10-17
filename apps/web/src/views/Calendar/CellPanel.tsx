@@ -105,7 +105,17 @@ export function CellPanel(props: CellPanelProps) {
           <button
             type="button"
             disabled={!canPressVerify(detail.data, verify.isPending)}
-            onClick={() => verify.mutate({ definitionId: definition.id, cell: selected })}
+            onClick={() =>
+              verify.mutate({
+                definitionId: definition.id,
+                cell: selected,
+                // why: cost-004: the click confirms the hard stop shown above (and £0, so a priced estimate still asks),
+                // so a cap-share soft confirm on a small trial window never dead-ends the button.
+                ...(detail.data?.verify
+                  ? { confirmCalls: detail.data.verify.maxCalls, confirmCostPence: 0 }
+                  : {}),
+              })
+            }
             className="self-start rounded bg-slate-900 px-3 py-1 text-white disabled:bg-slate-400"
           >
             {COPY.verifyCellFor(verifyCellName(selected))}
@@ -148,10 +158,15 @@ export function CellPanel(props: CellPanelProps) {
   );
 }
 
-/** A refusal in words: a running child, a named budget cap (409 `cap`, WP8 passes the engine's message), or else. */
+/**
+ * A refusal in words: a named budget cap (409 `cap`) or a confirmation the click did not cover (409 `confirm`, with the
+ * engine's estimate, cost-004), each with WP8's message; a running child (409 `active`); or else.
+ */
 function verifyError(error: Error): string {
   if (error instanceof ApiError && error.status === 409) {
-    return error.code === 'cap' ? P.verifyCapRefused(error.message) : P.verifyConflict;
+    if (error.code === 'cap') return P.verifyCapRefused(error.message);
+    if (error.code === 'confirm') return P.verifyConfirmRefused(error.message);
+    return P.verifyConflict;
   }
   return COPY.actionFailed(error.message);
 }

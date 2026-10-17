@@ -680,6 +680,7 @@ export const COPY = {
       verifyNoHeadroom: 'No budget headroom left for this search.',
       verifyCostLoading: 'Loading what this search may spend…',
       verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
+      verifyConfirmRefused: (message: string) => `Needs confirmation: ${message}`,
       verifyConflict: 'An itinerary search for this cell is already running.',
     },
   },

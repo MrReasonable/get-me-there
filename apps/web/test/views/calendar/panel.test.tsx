@@ -321,7 +321,13 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     );
     await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
     expect(await findByText(COPY.verifyStartedFor(verifyCellName(c)))).toBeInTheDocument();
-    expect(posted).toEqual({ definitionId: 'def-0001', cell: keyOf(c) });
+    // why: cost-004: the click confirms the hard stop the panel showed, so a cap-share soft confirm never dead-ends it.
+    expect(posted).toEqual({
+      definitionId: 'def-0001',
+      cell: keyOf(c),
+      confirmCalls: 6,
+      confirmCostPence: 0,
+    });
 
     server.use(
       http.post(`${API}/cells/verify`, () =>
@@ -339,6 +345,19 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     );
     await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
     expect(await findByText(`Refused by a budget cap: ${capMessage}`)).toBeInTheDocument();
+
+    // why: cost-004: a 409 'confirm' is a confirmation the click did not cover, never "already running".
+    const confirmMessage =
+      'the estimate of £1.20 is above the confirmation threshold and has not been confirmed';
+    server.use(
+      http.post(`${API}/cells/verify`, () =>
+        HttpResponse.json({ error: { code: 'confirm', message: confirmMessage } }, { status: 409 }),
+      ),
+    );
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
+    expect(
+      await findByText(COPY.calendarView.panel.verifyConfirmRefused(confirmMessage)),
+    ).toBeInTheDocument();
   });
 
   it('while the cell detail loads, verify is disabled and says its cost is loading (ui-r2-007)', async () => {
