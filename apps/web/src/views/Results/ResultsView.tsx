@@ -85,15 +85,23 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   // why: the same cached query the calendar-gap banner reads; it only runs when a verification provider is configured.
   const gap = useCalendarGap(definition.id, results.data?.verificationProviderConfigured === true);
   const narrow = useMediaQuery(NARROW_QUERY);
-  const { filtered, rows, banded } = useMemo(() => {
-    if (results.data === undefined) return { filtered: [], rows: [], banded: new Set<string>() };
+  const { filtered, rows, banded, staleHidden } = useMemo(() => {
+    if (results.data === undefined)
+      return { filtered: [], rows: [], banded: new Set<string>(), staleHidden: 0 };
     const kept = filterRows(results.data.rows, ui.filters);
     // why: band over the filtered set, so "cheapest in its band" means among the rows the operator is looking at.
     const marked = bandCheapest(kept, BAND_HOURS);
+    // why: the rows hide-stale removed are those the other filters keep and it drops, so a stale row another filter
+    // already hid is never counted as hidden by it (CodeRabbit batch 3)
+    const hidden =
+      ui.filters.hideStale === true
+        ? filterRows(results.data.rows, withKey(ui.filters, 'hideStale', undefined)).length - kept.length
+        : 0;
     return {
       filtered: kept,
       rows: ui.sort === null ? kept : sortRows(kept, ui.sort.key, ui.sort.dir),
       banded: marked,
+      staleHidden: hidden,
     };
   }, [results.data, ui]);
   const setSort = useCallback((value: string) => {
@@ -116,7 +124,6 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const f = ui.filters;
   const failedHidden =
     f.verdictClass === undefined ? data.rows.filter((r) => r.verdictClass === 'failed').length : 0;
-  const staleHidden = f.hideStale === true ? data.rows.filter((r) => r.stale).length : 0;
   const synthetic = providers.data?.synthetic !== true && anySynthetic(data, gap.data);
   const order =
     ui.sort === null ? COPY.serverOrder : COPY.sortOption(SORT_LABEL[ui.sort.key], COPY.sortDir[ui.sort.dir]);
