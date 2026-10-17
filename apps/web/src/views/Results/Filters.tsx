@@ -8,7 +8,7 @@ import { carriersText, parseCarriers } from '../../state/carriers.js';
 import {
   activeFilterCount,
   CLASSES,
-  DEFAULT_CLASSES,
+  effectiveClasses,
   type ResultsUiState,
   resultsStatePatch,
 } from '../../state/resultsState.js';
@@ -21,8 +21,11 @@ function toggle<T extends string>(list: readonly T[], v: T): T[] | undefined {
 }
 
 const unique = <T,>(xs: readonly T[]): T[] => [...new Set(xs)];
-const intOrUndefined = (s: string): number | undefined =>
-  /^\d+$/.test(s.trim()) ? Number(s.trim()) : undefined;
+// why: a typed whole number beyond 2^53 would round into a different limit, so it is invalid like any other bad text.
+const intOrUndefined = (s: string): number | undefined => {
+  const n = Number(s.trim());
+  return /^\d+$/.test(s.trim()) && Number.isSafeInteger(n) ? n : undefined;
+};
 
 const intMeaning = (t: string) => {
   const n = intOrUndefined(t);
@@ -50,12 +53,13 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
   const [maxPrice, setMaxPrice] = useSynced(penceToPoundsInput(f.maxPricePence), poundsText);
   const [nightsMin, setNightsMin] = useSynced(f.nights === undefined ? '' : String(f.nights.min), intMeaning);
   const [nightsMax, setNightsMax] = useSynced(f.nights === undefined ? '' : String(f.nights.max), intMeaning);
-  const providers = unique(rows.map((r) => r.provenance.providerId));
-  const destinations = unique(rows.map((r) => r.cell.destination));
-  const constraints = apiContract.constraintNameSchema.options.filter((c) =>
-    rows.some((r) => r.unverified.includes(c)),
+  // why: a value the URL filters on stays in its list even when no shown row has it, so it can still be seen and unticked.
+  const providers = unique([...rows.map((r) => r.provenance.providerId), ...(f.providerId ?? [])]);
+  const destinations = unique([...rows.map((r) => r.cell.destination), ...(f.destination ?? [])]);
+  const constraints = apiContract.constraintNameSchema.options.filter(
+    (c) => rows.some((r) => r.unverified.includes(c)) || (f.unverified?.includes(c) ?? false),
   );
-  const classes = f.verdictClass ?? DEFAULT_CLASSES;
+  const classes = effectiveClasses(f);
   const nights = rows.map((r) => r.cell.nights);
   const dates = rows.map((r) => r.cell.departureDate).sort();
   const ignored = parseCarriers(carriers).ignored;
@@ -83,9 +87,13 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
   const priceInvalid = maxPrice.trim() !== '' && parsePoundsToPence(maxPrice) === undefined;
   const nightsMinInvalid = nightsMin.trim() !== '' && intOrUndefined(nightsMin) === undefined;
   const nightsMaxInvalid = nightsMax.trim() !== '' && intOrUndefined(nightsMax) === undefined;
+  // why: while any typed box is invalid nothing typed is applied, so an active filter is never dropped by bad text (UI-8).
+  const applyTyped = () => {
+    if (!(priceInvalid || nightsMinInvalid || nightsMaxInvalid)) apply(typed(f));
+  };
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    apply(typed(f));
+    applyTyped();
   };
   const setDeparture = (end: 'from' | 'to', value: string) => {
     const parsed = apiContract.cellKeySchema.shape.departureDate.safeParse(value);
@@ -185,7 +193,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             value={carriers}
             aria-describedby={ignored.length > 0 ? 'filter-carriers-ignored' : undefined}
             onChange={(e) => setCarriers(e.target.value)}
-            onBlur={() => apply(typed(f))}
+            onBlur={applyTyped}
           />
           {ignored.length > 0 ? (
             <span id="filter-carriers-ignored" className="text-xs text-red-800">
@@ -203,7 +211,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             inputMode="decimal"
             value={maxPrice}
             onChange={(e) => setMaxPrice(e.target.value)}
-            onBlur={() => apply(typed(f))}
+            onBlur={applyTyped}
           />
           {priceInvalid ? (
             <span id="filter-max-price-error" role="alert" className="text-xs text-red-800">
@@ -221,7 +229,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             inputMode="numeric"
             value={nightsMin}
             onChange={(e) => setNightsMin(e.target.value)}
-            onBlur={() => apply(typed(f))}
+            onBlur={applyTyped}
           />
           {nightsMinInvalid ? (
             <span id="filter-nights-min-error" role="alert" className="text-xs text-red-800">
@@ -239,7 +247,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             inputMode="numeric"
             value={nightsMax}
             onChange={(e) => setNightsMax(e.target.value)}
-            onBlur={() => apply(typed(f))}
+            onBlur={applyTyped}
           />
           {nightsMaxInvalid ? (
             <span id="filter-nights-max-error" role="alert" className="text-xs text-red-800">

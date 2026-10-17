@@ -1,9 +1,10 @@
-import { asIata } from '@gmt/core';
+import { asIata, asIsoDateTime } from '@gmt/core';
 import { waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 import { HISTORY_PARAMS, historyHref } from '../../src/state/links.js';
+import { HistoryChart } from '../../src/views/History/HistoryChart.js';
 import { HistoryView } from '../../src/views/History/HistoryView.js';
 import {
   assignColours,
@@ -15,11 +16,20 @@ import {
   linesFromItinerary,
   linesFromRoute,
   newestAllStale,
+  type PlotLine,
+  type PlotPoint,
   runOrder,
   withBreaks,
 } from '../../src/views/History/lines.js';
 import { API, definition, resultsResponse, summary } from '../fixtures.js';
-import { cellAt, fetchPoint, itineraryHistory, routeHistory, runsAt } from '../fixtures.wp10.js';
+import {
+  cellAt,
+  fetchPoint,
+  itineraryHistory,
+  provCalendarAt,
+  routeHistory,
+  runsAt,
+} from '../fixtures.wp10.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 
@@ -393,6 +403,57 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(chart.querySelectorAll('circle[data-stale="true"]')).toHaveLength(1);
     expect(chart.querySelector('circle[data-stale="true"]')).toHaveAttribute('fill', '#ffffff');
     expect(chart.querySelectorAll('circle[data-stale="false"]').length).toBeGreaterThan(0);
+  });
+
+  it('a failed runs query is shown, not read as a definition with no runs (route and itinerary history)', async () => {
+    server.use(
+      http.get(routeRoute, () => HttpResponse.json(threeRuns)),
+      http.get(itineraryRoute, () => HttpResponse.json(itineraryHistory())),
+      http.get(resultsRoute, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'runs down' } }, { status: 500 }),
+      ),
+    );
+    const route = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(await route.findByRole('alert')).toHaveTextContent('Could not load: runs down');
+    route.unmount();
+    const itinerary = renderWithProviders(<HistoryView definition={definition()} />, {
+      search: '?hash=h1',
+    });
+    expect(await itinerary.findByRole('alert')).toHaveTextContent('Could not load: runs down');
+  });
+
+  it('a gap point draws no dot: only priced points get one, so no phantom fetch sits at the top of the plot', async () => {
+    const at = asIsoDateTime('2026-10-12T15:00:00.000Z');
+    const priced = (t: number, executionId: string): PlotPoint => ({
+      kind: 'price',
+      t,
+      at,
+      executionId,
+      pricePence: 41200,
+      provenance: provCalendarAt(2),
+      stale: false,
+      truncated: false,
+      cell: null,
+      cellChanged: false,
+      priceConfirmed: true,
+    });
+    const line: PlotLine = {
+      key: 'travelpayouts|calendar',
+      kind: 'calendar',
+      providerId: 'travelpayouts',
+      name: 'Travelpayouts calendar',
+      colour: 0,
+      points: [
+        priced(Date.parse('2026-10-01T00:00:00.000Z'), 'a'),
+        { kind: 'gap', t: Date.parse('2026-10-05T00:00:00.000Z'), pricePence: null },
+        priced(Date.parse('2026-10-10T00:00:00.000Z'), 'b'),
+      ],
+    };
+    const { findByRole } = renderWithProviders(<HistoryChart lines={[line]} tablesId="tables" />);
+    const chart = await findByRole('figure', { name: 'Price by fetch date' });
+    await waitFor(() => expect(chart.querySelectorAll('circle[data-stale]').length).toBeGreaterThan(0));
+    expect(chart.querySelectorAll('circle[data-stale]')).toHaveLength(2);
+    for (const c of chart.querySelectorAll('circle[data-stale]')) expect(c).toHaveAttribute('cy');
   });
 
   it('tables every point: provider prices through PriceCell with stale and rows-read labels and the changed cell; route rows labelled indicative', async () => {

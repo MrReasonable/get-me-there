@@ -314,8 +314,10 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
       tools: (p) => inProcessTools(p),
     });
   } catch (err) {
-    log.error({ err: { message: safeMessage(err, secrets) } }, 'boot failed');
-    throw err;
+    const message = safeMessage(err, secrets);
+    log.error({ err: { message } }, 'boot failed');
+    // why: start.ts prints this error's message to stderr (the container log), so it is rethrown already scrubbed.
+    throw new BootError(message, err instanceof BootError ? err.exitCode : EXIT.failed);
   }
   log.info({ port: running.port, bindAddress: config.bindAddress }, 'listening');
   const stop = shutdownHandler(running, log, secrets);

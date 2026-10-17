@@ -41,6 +41,23 @@ describe('test harness (reviews tsr-004, tsr-006, tsr2-006, tsr2-010)', () => {
     expect(drainGuards()).toEqual(['request no handler matched: GET http://localhost:3000/api/not-handled']);
   });
 
+  it('an announced global or sticky pattern matches every console.error it should, whatever its lastIndex', () => {
+    // why: RegExp.test on a g or y pattern advances lastIndex, so a second matching message used to read as unexpected
+    expectConsoleErrors(/boom/g);
+    console.error('boom one');
+    console.error('boom two');
+    console.error('boom three');
+    expect(drainGuards()).toEqual([]);
+  });
+
+  it('a sticky pattern still matches only from the start of the message', () => {
+    expectConsoleErrors(/boom/y);
+    console.error('boom one');
+    console.error('boom two');
+    console.error('unexpected boom');
+    expect(drainGuards()).toEqual(['console.error during the test: unexpected boom']);
+  });
+
   it('an unannounced console.error fails the test; an announced one passes; an announced one that never came fails', () => {
     console.error('planted');
     expect(drainGuards()).toEqual(['console.error during the test: planted']);

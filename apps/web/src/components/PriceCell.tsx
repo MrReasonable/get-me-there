@@ -1,4 +1,4 @@
-import { effectiveAge, formatAgeFull, formatAgeShort, sourceLabel } from '@gmt/core';
+import { effectiveAge, formatAgeFull, formatAgeShort, formatFetchedAgo, sourceLabel } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
@@ -103,7 +103,8 @@ export function PriceCell(props: PriceCellProps) {
         </span>
         {/* why: ruling 3: the age and the unchecked mark on the face; 10px words of at most 7 characters fit 45 px */}
         <span aria-hidden="true" data-testid="face-age" className="block text-[10px] font-normal">
-          {formatAgeShort(age)}
+          {/* why: an unknown vendor age says nothing of when the price was fetched, so the fetch age leads (hard rule: fetched time without hover) */}
+          {age.kind === 'unknown' ? `${formatFetchedAgo(age)} · ${formatAgeShort(age)}` : formatAgeShort(age)}
         </span>
         {calendar ? (
           <span aria-hidden="true" data-testid="face-unchecked" className="block text-[10px] font-normal">
@@ -155,11 +156,11 @@ export function PriceCell(props: PriceCellProps) {
           {props.destination !== undefined ? <span>{props.destination}</span> : null}
         </span>
       ) : null}
-      {/* why: ruling 3: an unknown age is already the visible badge above; any other age is a short line on the face */}
-      {compact && (age.kind !== 'unknown' || calendar) ? (
+      {/* why: ruling 3: the short age line is always on the face; an unknown vendor age is the badge above, and the line then says when the price was fetched, which no hover is needed to read */}
+      {compact ? (
         <span data-testid="face-age" className="text-[11px]">
           {[
-            ...(age.kind !== 'unknown' ? [formatAgeShort(age)] : []),
+            age.kind !== 'unknown' ? formatAgeShort(age) : formatFetchedAgo(age),
             ...(calendar ? [COPY.notChecked] : []),
           ].join(' · ')}
         </span>

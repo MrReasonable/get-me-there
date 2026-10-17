@@ -97,6 +97,8 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
                       stale={row.stale}
                       truncated={row.truncated}
                       superseded={row.superseded}
+                      destinationNote={row.destinationNote}
+                      notSeenInLatestHours={row.notSeenInLatest?.ageHours ?? null}
                       unconfirmed={priceUnconfirmed(row)}
                       qualifier={COPY.adjustedQualifier}
                     />

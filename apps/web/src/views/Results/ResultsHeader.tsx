@@ -78,7 +78,8 @@ export function ResultsHeader({ data, filteredFirst }: ResultsHeaderProps) {
       total: c.total,
       reused: c.reused,
     }) +
-    (!data.verificationProviderConfigured
+    // why: the line describes the shown run, so the current configuration only speaks when the run itinerary-searched nothing.
+    (!data.verificationProviderConfigured && c.itinerarySearched === 0 && c.onDemand === 0
       ? COPY.noItinerarySearch
       : latestParent !== undefined
         ? COPY.itineraryLineExpand({ ...itinerary, expandTop: latestParent.expandTop })

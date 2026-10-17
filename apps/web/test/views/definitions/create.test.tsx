@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
+import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
 import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';
@@ -104,6 +105,29 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
     ).toBeInTheDocument();
   });
 
+  it('editing while the check is in flight marks the answer out of date: it describes the body that was sent', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API}/definitions/coverage-check`, async () => {
+        await gate;
+        return HttpResponse.json(coverageCheck());
+      }),
+    );
+    const { user } = renderWithProviders(<DefinitionsView />);
+    await user.click(await screen.findByRole('button', { name: importButton }));
+    await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
+    await user.clear(screen.getByLabelText('Max nights'));
+    await user.type(screen.getByLabelText('Max nights'), '14');
+    release();
+    await screen.findByRole('table', { name: 'Check free coverage' });
+    expect(
+      screen.getByText('The airports, window or nights changed since this check; run it again.'),
+    ).toBeInTheDocument();
+  });
+
   it('says what it needs when Travelpayouts is not configured', async () => {
     const base = providersResponse();
     server.use(
@@ -198,6 +222,50 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     expect(await screen.findByRole('button', { name: /Create and confirm/ })).toBeInTheDocument();
   });
 
+  it('editing while the estimate is in flight leaves Create hidden: the estimate is recorded for the draft that was sent', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sent: unknown[] = [];
+    server.use(
+      http.post(`${API}/definitions/estimate`, async ({ request }) => {
+        sent.push(await request.json());
+        await gate;
+        return HttpResponse.json(estimateBody());
+      }),
+    );
+    const { user } = renderWithProviders(<DefinitionsView />);
+    await importAndEstimate(user);
+    await expect.poll(() => sent.length).toBe(1);
+    // why: the form fields stay editable while the request is in flight
+    await user.clear(screen.getByLabelText('Max nights'));
+    await user.type(screen.getByLabelText('Max nights'), '14');
+    release();
+    expect(
+      await screen.findByText(
+        'The draft changed since this estimate; show the estimate again before creating.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create and confirm/ })).toBeNull();
+  });
+
+  it('Create sends the body that was estimated, with the confirmation of that estimate', async () => {
+    const created: unknown[] = [];
+    server.use(
+      http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())),
+      http.post(`${API}/definitions`, async ({ request }) => {
+        created.push(await request.json());
+        return HttpResponse.json(definition());
+      }),
+    );
+    const { user } = renderWithProviders(<DefinitionsView />);
+    await importAndEstimate(user);
+    await user.click(await screen.findByRole('button', { name: /^Create and confirm/ }));
+    await expect.poll(() => created.length).toBe(1);
+    expect(created[0]).toMatchObject({ minNights: 10, maxNights: 21, confirmedCalls: 154 });
+  });
+
   it('a budgetFit miss is shown as an alert before the create click', async () => {
     server.use(
       http.post(`${API}/definitions/estimate`, () =>
@@ -267,6 +335,25 @@ describe('saved definitions (spec §8.1)', () => {
     expect(within(list).getByText('alerts running on calendar basis only')).toBeInTheDocument();
   });
 
+  it('an edit= link to a definition that does not exist says so instead of showing a blank create form', async () => {
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=no-such-definition' });
+    expect(await screen.findByRole('alert')).toHaveTextContent(COPY.definitionNotFound);
+    // why: no create flow behind a dead link: nothing to estimate or confirm
+    expect(screen.queryByRole('button', { name: 'Show estimate' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Create and confirm/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+  });
+
+  it('edit=new and an existing definition show no not-found alert', async () => {
+    const first = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=new' });
+    await screen.findByRole('button', { name: importButton });
+    expect(screen.queryByText(COPY.definitionNotFound)).toBeNull();
+    first.unmount();
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
+    await screen.findByRole('button', { name: 'Save changes' });
+    expect(screen.queryByText(COPY.definitionNotFound)).toBeNull();
+  });
+
   it('a failed definitions load shows the reason and a retry', async () => {
     server.use(
       http.get(`${API}/definitions`, () =>
@@ -297,10 +384,40 @@ describe('the App (spec §11 layout)', () => {
   });
 
   it('with /providers synthetic and real rows the red banner shows once (spec §5.5)', async () => {
-    server.use(http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))));
+    const base = providersResponse();
+    const [real] = base.providers;
+    if (real === undefined) throw new Error('the providers fixture has a real provider');
+    // why: the mixed case the title names: the fixture provider (synthetic source kind) listed beside the real ones
+    const fixtureRow = {
+      ...real,
+      providerId: 'fixture' as const,
+      displayName: 'Fixture',
+      plan: 'synthetic' as const,
+      capNote: null,
+      usage: [],
+      capabilities: {
+        discovery: {
+          sourceKind: 'synthetic' as const,
+          provenanceNote: 'synthetic fixture data',
+          maxAgeHours: 1,
+        },
+        verification: null,
+      },
+    };
+    server.use(
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json(providersResponse({ synthetic: true, providers: [...base.providers, fixtureRow] })),
+      ),
+    );
     renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
     await screen.findByRole('table', { name: 'Round trips found' });
     expect(screen.getAllByText(/Synthetic data: the fixture provider is enabled/)).toHaveLength(1);
+  });
+
+  it('with /providers real only (synthetic: false) there is no banner', async () => {
+    renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
+    await screen.findByRole('table', { name: 'Round trips found' });
+    expect(screen.queryByText(/Synthetic data: the fixture provider is enabled/)).toBeNull();
   });
 
   it('Coverage is reachable from the Results header link', async () => {

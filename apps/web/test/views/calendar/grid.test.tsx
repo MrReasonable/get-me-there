@@ -239,6 +239,34 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     );
   });
 
+  it('a priceless day with inconsistent counts says so on desktop, and shows no outcome glyph', () => {
+    renderGrid([gridDay('2027-03-09', { discovery: [disc('travelpayouts', { empty: 1 }, 0)] })]);
+    const cell = dayCell('2027-03-09');
+    expect(cell).toHaveTextContent('counts inconsistent');
+    expect(cell.querySelector('[data-glyph]')).toBeNull();
+  });
+
+  it('at phone width a day with inconsistent counts carries its own mark, priced or not', () => {
+    renderGrid(
+      [
+        gridDay('2027-03-09', {
+          cheapestCalendar: priceAt(30000, provCalendarAt(1), false, cellAt('2027-03-09', 14)),
+          discovery: [disc('travelpayouts', { priced: 10 }, 48)],
+        }),
+        gridDay('2027-03-10', { discovery: [disc('travelpayouts', { empty: 1 }, 0)] }),
+      ],
+      'calendar',
+      {},
+      true,
+    );
+    for (const d of ['2027-03-09', '2027-03-10']) {
+      const mark = dayCell(d).querySelector('[data-coverage="inconsistent"]');
+      expect(mark, d).not.toBeNull();
+      expect(mark).toHaveTextContent('counts inconsistent');
+      expect(dayCell(d).querySelector('[data-glyph]')).toBeNull();
+    }
+  });
+
   it('withholds a day price that arrives without provenance', () => {
     // why: PriceBoundary reports the withheld price through console.error, which WP9's harness fails on unless announced.
     expectConsoleErrors(/price withheld|price rendered without valid provenance/);

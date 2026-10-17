@@ -32,7 +32,8 @@ export function CoverageCheck({ draft, available }: { draft: Draft; available: b
   const [checkedFor, setCheckedFor] = useState<string | null>(null);
   const check = useMutation({
     mutationFn: (b: CoverageCheckBody) => api.coverageCheck(b),
-    onSuccess: () => setCheckedFor(signature),
+    // why: the variables are the body that was sent; the render's signature may already be an edited draft's.
+    onSuccess: (_data, sent) => setCheckedFor(JSON.stringify(sent)),
   });
   if (!available) return <p className="text-sm">{COPY.coverageCheckNeedsTravelpayouts}</p>;
   const months = [...new Set((check.data?.pairs ?? []).flatMap((p) => p.months.map((m) => m.month)))].sort();

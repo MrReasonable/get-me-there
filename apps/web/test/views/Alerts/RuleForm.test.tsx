@@ -81,10 +81,10 @@ describe('Alerts rule form (spec §6.8, §11)', () => {
     });
 
     await user.selectOptions(screen.getByLabelText(C.ruleType), 'dropAbs');
-    await user.type(screen.getByLabelText(C.threshold), '20.50');
+    await user.type(screen.getByLabelText(C.threshold), '4.35');
     await user.click(screen.getByRole('button', { name: C.addRule }));
     await waitFor(() => expect(posted).toHaveLength(2));
-    expect(posted[1]?.body).toMatchObject({ type: 'dropAbs', thresholdPence: 2050, pct: null });
+    expect(posted[1]?.body).toMatchObject({ type: 'dropAbs', thresholdPence: 435, pct: null });
   });
 
   it('invalid input is rejected by alertRuleInputSchema with a field message and nothing is sent', async () => {

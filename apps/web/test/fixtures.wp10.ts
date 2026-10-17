@@ -12,6 +12,7 @@ import {
   type Provenance,
   type ProviderId,
   provenanceSchema,
+  type SourceKind,
   worstCaseAgeHours,
 } from '@gmt/core';
 import type { z } from 'zod';
@@ -287,6 +288,16 @@ export function outcome(
   over: Partial<Outcome> = {},
 ): Outcome {
   const priced = status === 'priced';
+  // why: the provider and the source kind agree (spec §5.5, §5.6): SearchApi's calendar is an aggregate, its itinerary
+  // search a search; Travelpayouts is the authorised cache; the fixture provider is synthetic. `over` is the escape hatch.
+  const kind: SourceKind =
+    providerId === 'searchapi'
+      ? stage === 'verification'
+        ? 'scraped-search'
+        : 'scraped-aggregate'
+      : providerId === 'fixture'
+        ? 'synthetic'
+        : 'authorised-cached';
   return {
     ...keyOf(c),
     executionId: 'exec-0001',
@@ -300,7 +311,7 @@ export function outcome(
     minPence: priced ? 41200 : null,
     cabin: priced ? 'economy' : null,
     pointOfSale: priced ? 'unknown' : null,
-    sourceKind: priced ? 'authorised-cached' : null,
+    sourceKind: priced ? kind : null,
     reusedFromExecutionId: null,
     ...over,
   };

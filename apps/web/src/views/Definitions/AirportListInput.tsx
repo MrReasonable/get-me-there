@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/endpoints.js';
 import { qk, useAirportSearch } from '../../api/queries.js';
 import { COPY } from '../../copy.js';
@@ -42,15 +42,28 @@ export function AirportListInput({ id, label, addLabel, codes, onChange, errors 
   const suggestions = useAirportSearch(query);
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState<string | null>(null);
-  const add = (list: readonly string[]) => {
-    const fresh = list.filter((c) => !codes.includes(c));
+  // why: addTyped awaits a lookup, so `add` must read the list and the change handler of the render that is current
+  // when the answer arrives, not those of the render that started it (a second add in between would be overwritten).
+  const latest = useRef({ codes, onChange });
+  // why: written after commit, not during render, so a render React discards can never leave its props here.
+  useEffect(() => {
+    latest.current = { codes, onChange };
+  });
+  /** Adds the codes not already listed; false (with the duplicate error) when there were none to add. */
+  const add = (list: readonly string[]): boolean => {
+    const current = latest.current.codes;
+    const fresh = list.filter((c) => !current.includes(c));
     if (fresh.length === 0) {
       setLocalError(COPY.duplicateAirport(list.join(', ')));
-      return;
+      return false;
     }
     setLocalError(null);
-    onChange([...codes, ...fresh]);
+    const next = [...current, ...fresh];
+    // why: a further add before the parent re-renders must build on this list, not the previous render's
+    latest.current = { codes: next, onChange: latest.current.onChange };
+    latest.current.onChange(next);
     setText('');
+    return true;
   };
   const addTyped = async () => {
     const code = normaliseIata(text);
@@ -69,8 +82,8 @@ export function AirportListInput({ id, label, addLabel, codes, onChange, errors 
       add([code]);
       return;
     }
-    add(members);
-    setExpanded(COPY.metroExpanded(code, members.join(', ')));
+    // why: the status says the metro code expanded only when it added something; a duplicate error says the opposite
+    if (add(members)) setExpanded(COPY.metroExpanded(code, members.join(', ')));
   };
   const messages = [...(localError === null ? [] : [localError]), ...errors];
   const errorId = `${id}-errors`;

@@ -28,8 +28,14 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).not.toHaveClass('border-dashed');
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
     // why: the unknown age is now words on the face (ruling 3), so it has no glyph of its own.
-    expect(hidden).toEqual(['≈', '≠◷…↺◌', COPY.providerMark.searchapi, 'age unknown']);
-    expect(within(cell).getByTestId('face-age')).toHaveTextContent('age unknown');
+    // why: an unknown vendor age says nothing of when the price was fetched, so the face leads with the fetch age.
+    expect(hidden).toEqual([
+      '≈',
+      '≠◷…↺◌',
+      COPY.providerMark.searchapi,
+      expect.stringMatching(/^fetched .+ ago · age unknown$/),
+    ]);
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^fetched .+ ago · age unknown$/);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [

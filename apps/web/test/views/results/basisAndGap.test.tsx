@@ -30,6 +30,8 @@ const calendarResults = () =>
     basisReason: 'no verification provider configured',
     rows: [calendarRow()],
     verificationProviderConfigured: false,
+    // why: a definition with no verification provider has itinerary-searched nothing
+    coverage: { ...resultsResponse().coverage, selected: 0, itinerarySearched: 0, onDemand: 0 },
   });
 
 describe('basis (spec §6.9)', () => {
@@ -47,6 +49,20 @@ describe('basis (spec §6.9)', () => {
     await user.click(screen.getByRole('radio', { name: 'itinerary-search basis' }));
     expect(new URLSearchParams(window.location.search).get('basis')).toBe('verified');
     await expect.poll(() => urls).toEqual(['', '?basis=verified']);
+  });
+
+  it("the shown run's own itinerary-search counts stay when the provider has since been unconfigured", async () => {
+    const base = resultsResponse();
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json({ ...base, verificationProviderConfigured: false }),
+      ),
+    );
+    renderWithProviders(<ResultsView definition={calendarOnly} />);
+    await screen.findByRole('table', { name: 'Round trips found' });
+    // why: the run itinerary-searched 8 of 10 cells; removing the key afterwards does not un-search them
+    expect(screen.getByRole('link', { name: /itinerary-searched 8 of 10 selected/ })).toBeInTheDocument();
+    expect(screen.queryByText(/itinerary search not configured/)).toBeNull();
   });
 
   it('calendar headline and coverage line when no verification provider is configured', async () => {

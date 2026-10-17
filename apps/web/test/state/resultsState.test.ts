@@ -1,9 +1,10 @@
 import type { ResultFilters } from '@gmt/core';
-import { asIata, asIsoDate } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
+import { asIata, asIsoDate, filterRows } from '@gmt/core';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   activeFilterCount,
   DEFAULT_CLASSES,
+  effectiveClasses,
   nightsFilterPatch,
   parseBasis,
   parseResultsState,
@@ -13,7 +14,8 @@ import {
 } from '../../src/state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams } from '../../src/state/urlState.js';
 import { parseView } from '../../src/state/view.js';
-import { withKey } from '../../src/state/withKey.js';
+import { type OptionalKeys, withKey } from '../../src/state/withKey.js';
+import { calendarRow, failedRow, partialRow, verifiedRow } from '../fixtures.js';
 
 const full: ResultsUiState = {
   sort: { key: 'totalTime', dir: 'desc' },
@@ -49,6 +51,35 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect(DEFAULT_CLASSES).toEqual(['verified', 'partially-verified', 'unchecked']);
   });
 
+  it('a URL without f.class applies the default classes: the effective classes and the rows kept, failed ones dropped', () => {
+    const bare = parseResultsState(new URLSearchParams());
+    expect(effectiveClasses(bare.filters)).toEqual(['verified', 'partially-verified', 'unchecked']);
+    const rows = [verifiedRow(), partialRow(), failedRow(), calendarRow()];
+    expect(filterRows(rows, bare.filters).map((r) => r.verdictClass)).toEqual([
+      'verified',
+      'partially-verified',
+      'unchecked',
+    ]);
+    // why: an explicit class list replaces the default, so the failed rows come back only on request
+    const withFailed = parseResultsState(new URLSearchParams('f.class=failed'));
+    expect(effectiveClasses(withFailed.filters)).toEqual(['failed']);
+    expect(filterRows(rows, withFailed.filters).map((r) => r.verdictClass)).toEqual(['failed']);
+  });
+
+  it('numeric filter limits that are not safe integers are dropped, never rounded into a different limit', () => {
+    // 9007199254740993 rounds to 9007199254740992 as a Number; an overlong digit string becomes Infinity
+    const unsafe = '9007199254740993';
+    const huge = '9'.repeat(400);
+    expect(parseResultsState(new URLSearchParams(`f.maxPrice=${unsafe}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.maxPrice=${huge}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.stops=${unsafe}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.nights=10-${unsafe}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.nights=${unsafe}-${huge}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams('f.maxPrice=9007199254740991')).filters).toEqual({
+      maxPricePence: 9007199254740991,
+    });
+  });
+
   it('ignores malformed values instead of guessing', () => {
     const s = parseResultsState(
       new URLSearchParams(
@@ -68,7 +99,14 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     const a = withKey(none, 'maxStops', 0);
     expect(a).toEqual({ maxStops: 0 });
     expect(Object.keys(withKey(a, 'maxStops', undefined))).toEqual([]);
-    expect(withKey({ a: 1, b: 2 }, 'b', undefined)).toEqual({ a: 1 });
+    const both: { a: number; b?: number } = { a: 1, b: 2 };
+    expect(withKey(both, 'b', undefined)).toEqual({ a: 1 });
+    // why: a required key cannot be deleted. These are compile-time checks (tsconfig.test.json runs tsc over tests):
+    // `undefined` is accepted only for the keys OptionalKeys names, so withKey({ id: 'x' }, 'id', undefined) does not compile.
+    expectTypeOf<OptionalKeys<{ id: string; note?: string }>>().toEqualTypeOf<'note'>();
+    expectTypeOf<OptionalKeys<{ id: string }>>().toEqualTypeOf<never>();
+    // a required key typed `string | undefined` is not optional either, so it cannot be removed through undefined
+    expectTypeOf<OptionalKeys<{ id: string | undefined; note?: string }>>().toEqualTypeOf<'note'>();
     expect(activeFilterCount(full.filters)).toBe(10);
   });
 
@@ -97,6 +135,15 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect(window.location.search).toBe('?view=coverage&def=d1&sort=price.asc&f.stops=1');
     updateSearchParams({ view: 'results' });
     expect(parseResultsState(new URLSearchParams(window.location.search)).filters).toEqual({ maxStops: 1 });
+  });
+
+  it('updating search parameters keeps the URL fragment', () => {
+    window.history.replaceState(null, '', '/?view=results&f.stops=1#details');
+    expect(hrefWith({ view: 'coverage' })).toBe('/?view=coverage&f.stops=1#details');
+    updateSearchParams({ 'f.stops': null });
+    expect(window.location.search).toBe('?view=results');
+    expect(window.location.hash).toBe('#details');
+    window.history.replaceState(null, '', '/');
   });
 
   it('a nav click navigates in place; a modified click is left to the browser', () => {

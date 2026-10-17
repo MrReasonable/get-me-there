@@ -102,7 +102,19 @@ export async function call<S extends z.ZodType>(
       `${method} ${path} could not reach the server: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
-  const body = parseJson(await res.text());
+  // why: fetch resolves when the headers arrive; the body can still fail (a dropped connection), and that is a network
+  // failure like any other, never a bare TypeError escaping the client's ApiError contract.
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    throw new ApiError(
+      0,
+      'network',
+      `${method} ${path} lost the connection while reading the response: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  const body = parseJson(text);
   if (!res.ok) {
     const envelope = apiContract.errorEnvelopeSchema.safeParse(body.ok ? body.value : null);
     if (envelope.success) {

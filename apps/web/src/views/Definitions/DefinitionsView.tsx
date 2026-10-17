@@ -19,9 +19,12 @@ export function DefinitionsView() {
   if (providers.data === undefined || definitions.data === undefined) return <Loading />;
   const current = definitions.data.filter((d) => d.deletedAt === null);
   const existing = editing === 'new' ? null : (current.find((d) => d.id === editing) ?? null);
+  // why: an old link to a deleted or unknown definition must not look like a fresh create form (a duplicate waiting to happen).
+  const missing = editing !== 'new' && existing === null;
   return (
     <div className="space-y-3">
       <h2 className="text-xl font-semibold">{COPY.definitionsHeading}</h2>
+      {missing ? <p role="alert">{COPY.definitionNotFound}</p> : null}
       <ul aria-label={COPY.definitionsList} className="flex flex-wrap gap-2 text-sm">
         <li>
           <a
@@ -47,7 +50,7 @@ export function DefinitionsView() {
         ))}
       </ul>
       {/* why: keyed by the URL's edit value, so a create that stays on edit=new keeps its confirmation notice */}
-      <DefinitionForm key={editing} existing={existing} providers={providers.data} />
+      {missing ? null : <DefinitionForm key={editing} existing={existing} providers={providers.data} />}
     </div>
   );
 }

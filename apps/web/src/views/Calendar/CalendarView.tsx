@@ -1,4 +1,12 @@
-import { type CellKey, formatDuration, type Iata, type IsoDate, type IsoMonth, monthOf } from '@gmt/core';
+import {
+  type CellKey,
+  cellKeyString,
+  formatDuration,
+  type Iata,
+  type IsoDate,
+  type IsoMonth,
+  monthOf,
+} from '@gmt/core';
 import { useMemo, useState } from 'react';
 import { useCalendar } from '../../api/queries.js';
 import type { CalendarDay, DefinitionResponse } from '../../api/types.js';
@@ -176,6 +184,8 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
       )}
       {open !== null && openSlice !== undefined ? (
         <CellPanel
+          // why: the panel keeps its selected cell in state, so a different day or cell must mount a fresh panel.
+          key={`${open.date}|${open.cell === null ? '' : cellKeyString(open.cell)}`}
           definition={definition}
           date={open.date}
           slice={openSlice}

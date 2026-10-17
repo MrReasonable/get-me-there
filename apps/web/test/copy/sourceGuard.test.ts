@@ -189,6 +189,11 @@ describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
     expect(src.flatMap((s) => moneyOffenders(s.file, s.text))).toEqual([]);
   });
 
+  it('every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file', () => {
+    const files = new Set(src.map((s) => s.file));
+    expect([...MONEY_FILES, ...POUND_FILES].filter((f) => !files.has(f))).toEqual([]);
+  });
+
   it('the guards catch planted offenders, multi-line and conditional ones included', () => {
     const planted = [
       'const a = <p>\n  Live fares\n</p>;',

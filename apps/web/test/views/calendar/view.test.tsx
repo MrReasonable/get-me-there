@@ -9,6 +9,7 @@ import { API, definition, summary } from '../../fixtures.js';
 import {
   calendarResponse,
   cellAt,
+  cellDetail,
   day,
   disc,
   priceAt,
@@ -260,10 +261,50 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     expect(at('2027-03-14')).toHaveFocus();
   });
 
+  it('opening a different day while the panel is open shows that day, its cell and its detail (the panel remounts)', async () => {
+    serve([calendarDay('2027-03-14'), calendarDay('2027-03-15')]);
+    const asked: string[] = [];
+    server.use(
+      http.get(
+        `${API}/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`,
+        ({ params }) => {
+          asked.push(String(params.departureDate));
+          return HttpResponse.json(
+            cellDetail(
+              cellAt(String(params.departureDate), 14, String(params.origin), String(params.destination)),
+            ),
+          );
+        },
+      ),
+    );
+    const { findByRole, user } = renderWithProviders(<CalendarView definition={definition()} />);
+    await findByRole('table', { name: 'Mar 2027' });
+    await user.click(at('2027-03-14'));
+    await findByRole('dialog', { name: 'Departing Sun 14 Mar 2027' });
+    await waitFor(() => expect(asked).toContain('2027-03-14'));
+    await user.click(at('2027-03-15'));
+    await findByRole('dialog', { name: 'Departing Mon 15 Mar 2027' });
+    // why: a panel that kept the earlier day's selection would never ask for the new day's cell
+    await waitFor(() => expect(asked).toContain('2027-03-15'));
+    const picker = within(within(document.body).getByRole('dialog')).getByRole('combobox');
+    expect(picker).not.toHaveValue('');
+  });
+
   it('refetches every 2 s while the newest run is pending or running, and stops after (po-wp10-006)', () => {
     expect(whileRunning({ executions: [summary({ status: 'running' })] })).toBe(2_000);
     expect(whileRunning({ executions: [summary({ status: 'pending' })] })).toBe(2_000);
     expect(whileRunning({ executions: [summary({ status: 'completed' })] })).toBe(false);
+    // why: only the newest run decides; an older running run must not keep the poll alive, nor an older finished one stop it
+    expect(
+      whileRunning({
+        executions: [summary({ status: 'completed' }), summary({ id: 'exec-0000', status: 'running' })],
+      }),
+    ).toBe(false);
+    expect(
+      whileRunning({
+        executions: [summary({ status: 'running' }), summary({ id: 'exec-0000', status: 'completed' })],
+      }),
+    ).toBe(2_000);
     expect(whileRunning({ executions: [] })).toBe(false);
     expect(whileRunning(undefined)).toBe(false);
   });

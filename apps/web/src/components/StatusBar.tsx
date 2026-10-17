@@ -6,7 +6,7 @@ import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/typ
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
-import { parseBasis } from '../state/resultsState.js';
+import { BASIS_PARAM, parseBasis } from '../state/resultsState.js';
 import { useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
 
@@ -104,7 +104,7 @@ export interface StatusBarProps {
 /** Spec §11 status bar, on every view: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
 export function StatusBar({ definition, showRunNow }: StatusBarProps) {
   const params = useSearchParams();
-  const results = useResults(definition?.id ?? null, parseBasis(params.get('basis')));
+  const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];
   // why: lists are newest first; the bar follows the newest parent run, and a one-cell child is a separate line.
   const latestId = executions.find((x) => !x.isChild)?.id ?? null;
@@ -113,8 +113,16 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
   const coverage = useCoverage(definition?.id ?? null);
   const actions = useExecutionActions();
   const qc = useQueryClient();
-  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  // why: the confirmation is bound to the run it was opened for; if the bar moves to another run, it must be asked again.
+  const [confirmingCancelId, setConfirmingCancelId] = useState<string | null>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
+  // why: a confirmation belongs to the run on display; once another run (or none) is shown it is abandoned, and coming
+  // back to the first run must ask for Cancel again rather than revive it.
+  const displayedId = execution.data?.id;
+  useEffect(() => {
+    setConfirmingCancelId((open) => (open !== null && open !== displayedId ? null : open));
+    return () => setConfirmingCancelId(null);
+  }, [displayedId]);
 
   // why: when a polled run changes status, the rows and coverage it produced change too.
   const status = execution.data?.status;
@@ -145,6 +153,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
     if (results.error) void results.refetch();
     if (execution.error) void execution.refetch();
   };
+  const confirmingCancel = e !== undefined && confirmingCancelId === e.id;
   const canResume = e !== undefined && RESUMABLE_ACTIVE.has(e.status);
   const busy = (m: { isPending: boolean }) => (m.isPending ? true : undefined);
 
@@ -195,7 +204,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
           <button
             type="button"
             className="min-h-11 rounded border border-slate-500 px-3"
-            onClick={() => setConfirmingCancel(true)}
+            onClick={() => setConfirmingCancelId(e.id)}
           >
             {COPY.cancel}
           </button>
@@ -208,7 +217,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
               disabled={actions.cancel.isPending}
               aria-busy={busy(actions.cancel)}
               onClick={() => {
-                setConfirmingCancel(false);
+                setConfirmingCancelId(null);
                 actions.cancel.mutate(e.id);
               }}
             >
@@ -217,7 +226,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
             <button
               type="button"
               className="min-h-11 rounded border border-slate-500 px-3"
-              onClick={() => setConfirmingCancel(false)}
+              onClick={() => setConfirmingCancelId(null)}
             >
               {COPY.keepRunning}
             </button>

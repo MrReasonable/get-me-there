@@ -23,6 +23,7 @@ export function DayBody(props: {
       <GlyphList glyphs={display.glyphs} />
       {display.reason === 'no-run' ? <span className="block">{C.noRunCoversDay}</span> : null}
       {display.reason === 'no-provider' ? <span className="block">{C.noDiscoveryProvider}</span> : null}
+      {display.reason === 'inconsistent' ? <span className="block">{C.countsInconsistent}</span> : null}
       {/* why: ui-r2-003, ruling 4: a grey day's glyph counts are its buckets, so it needs no second cue */}
     </span>
   );
@@ -44,6 +45,7 @@ export function PhoneDayBody(props: {
   const C = COPY.calendarView;
   const coverage = coverageOf(slice);
   const partial = coverage.kind === 'fraction' && coverage.searched < coverage.total;
+  const inconsistent = coverage.kind === 'inconsistent';
   const unconfirmed = showsUnconfirmed(slice);
   const marks = (
     <>
@@ -51,6 +53,12 @@ export function PhoneDayBody(props: {
         <span data-testid="day-unconfirmed">
           <span aria-hidden="true">{COPY.priceMarkGlyph.unconfirmed}</span>
           <span className="sr-only">{C.unconfirmedShort}</span>
+        </span>
+      ) : null}
+      {inconsistent ? (
+        <span data-coverage="inconsistent">
+          <span aria-hidden="true">{C.phoneMark.inconsistent}</span>
+          <span className="sr-only">{C.countsInconsistent}</span>
         </span>
       ) : null}
       {partial ? (

@@ -50,6 +50,10 @@ function isStalePoint(payload: unknown): boolean {
  */
 function fetchDot(colour: string) {
   return function FetchDot(props: DotItemDotProps) {
+    // why: a gap point has no price, so no fetch happened there; without cy a circle would sit at the plot's top edge
+    // and read as a fresh fetch at the axis maximum.
+    if (typeof props.cx !== 'number' || typeof props.cy !== 'number' || !Number.isFinite(props.cy))
+      return null;
     const stale = isStalePoint(props.payload);
     return (
       <circle

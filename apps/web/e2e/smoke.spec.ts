@@ -1,5 +1,5 @@
 import { SOURCE_LABELS } from '@gmt/core';
-import { expect, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import { COPY } from '../src/copy.js';
 import { SMOKE } from './selectors.js';
 
@@ -91,10 +91,23 @@ test('at 375px the calendar shows one month of compact days, nothing spilling ou
   await expect(face.getByTestId('price-cell')).toHaveAttribute('title', new RegExp(COPY.provider.fixture));
 });
 
-test('at 375px the nav shows every view in at most two rows, and Results and Alerts never scroll the page sideways (UI-005, UI-009, UI-011) @phone', async ({
+/** What each view shows only once its data has loaded: a named heading, table or row, never a timeout. */
+const LOADED: Record<string, (page: Page) => Locator> = {
+  results: (p) => p.getByRole('table', { name: COPY.resultsTableLabel }),
+  calendar: (p) => p.getByRole('table', { name: SMOKE.monthTable }),
+  duration: (p) => p.getByRole('table', { name: COPY.durationView.tableCaption }),
+  history: (p) => p.getByRole('figure', { name: COPY.historyView.fetchChartTitle }),
+  coverage: (p) => p.getByRole('table', { name: COPY.coverageHeading }),
+  definitions: (p) => p.getByRole('button', { name: COPY.showEstimate }),
+  // why: the fixture run fires no alert, so the loaded Alerts view is the one that says there are no rules yet
+  alerts: (p) => p.getByText(COPY.alertsView.noRules),
+  providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),
+};
+
+test('at 375px the nav shows every view in at most two rows, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
   page,
 }) => {
-  for (const view of ['results', 'alerts']) {
+  for (const [view, loaded] of Object.entries(LOADED)) {
     await page.goto(`/?view=${view}`);
     const nav = page.getByRole('navigation', { name: COPY.navLabel });
     await expect(nav).toBeVisible();
@@ -102,9 +115,9 @@ test('at 375px the nav shows every view in at most two rows, and Results and Ale
     const box = await nav.boundingBox();
     // why: two rows of 44 px links and their gap; a third row would push the content down for nothing.
     expect(box?.height ?? 0).toBeLessThanOrEqual(2 * 44 + 8);
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(overflow).toBeLessThanOrEqual(0);
+    // why: measured only after the view's own content is on the page, never on its loading state
+    await expect(loaded(page).first(), view).toBeVisible();
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(scrollWidth, view).toBeLessThanOrEqual(375);
   }
 });

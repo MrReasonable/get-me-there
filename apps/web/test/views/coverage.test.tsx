@@ -44,8 +44,9 @@ describe('View D (spec §11, §6.6)', () => {
                   {
                     stage: 'verification',
                     providerId: 'searchapi',
-                    buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 },
-                    total: 1,
+                    // why: a different count in every bucket, so a swapped or shifted column cannot read as right
+                    buckets: { priced: 1, empty: 2, no_data: 3, error: 4, skipped: 5, not_run: 6, reused: 0 },
+                    total: 21,
                     requests: { calls: 3, cacheHits: 0, costMicroGbp: 0 },
                   },
                 ],
@@ -63,10 +64,26 @@ describe('View D (spec §11, §6.6)', () => {
     expect(row).toHaveTextContent('SearchApi');
     expect(row).toHaveTextContent('completed');
     expect(row).toHaveTextContent('3 calls');
-    // why: its own buckets: one priced cell of one
-    expect([...(row?.querySelectorAll('td') ?? [])].map((c) => c.textContent)).toEqual(
-      expect.arrayContaining(['1', '0']),
-    );
+    // why: its own buckets, in the column order of the table's header (priced, no fares, no cached data, error, skipped, not searched)
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+    expect(headers.slice(4, 10)).toEqual([
+      'priced',
+      'no fares',
+      'no cached data',
+      'error',
+      'skipped',
+      'not searched',
+    ]);
+    expect([...(row?.querySelectorAll('td') ?? [])].slice(3, 9).map((c) => c.textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+    ]);
   });
 
   it('says when no on-demand search has run', async () => {
@@ -244,10 +261,13 @@ describe('View D (spec §11, §6.6)', () => {
       ),
     );
     render();
-    expect(
-      await screen.findByText('Overrun: tiles requested exceed the plan by more than 10%.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Parity break: tile requests differ from the plan.')).toBeInTheDocument();
+    // why: withStage patches the discovery row only, so the flags must sit in that row and in no other
+    const table = await screen.findByRole('table', { name: 'Coverage' });
+    const [discovery, itinerary] = within(table).getAllByRole('row').slice(1);
+    if (discovery === undefined || itinerary === undefined) throw new Error('two stage rows');
+    expect(discovery).toHaveTextContent('Overrun: tiles requested exceed the plan by more than 10%.');
+    expect(discovery).toHaveTextContent('Parity break: tile requests differ from the plan.');
+    expect(itinerary).not.toHaveTextContent(/Overrun|Parity break/);
     expect(screen.getByText('(4 reused from earlier runs)')).toBeInTheDocument();
   });
 

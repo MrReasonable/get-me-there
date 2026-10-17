@@ -8,7 +8,7 @@ import { formatInstantDateLondon } from '../../format.js';
 import { instantMs } from '../../lib/time.js';
 import { useNow } from '../../now.js';
 import { HISTORY_PARAMS } from '../../state/links.js';
-import { parseBasis } from '../../state/resultsState.js';
+import { BASIS_PARAM, parseBasis } from '../../state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { HistoryChart, HistoryTable, RouteChart } from './HistoryChart.js';
 import {
@@ -52,7 +52,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
   const shownPairs = overlay ? pairs.slice(0, MAX_OVERLAY_PAIRS) : chosen === undefined ? [] : [chosen];
   const routes = useRouteHistories(shownPairs, definition.cabin, hash === null);
   const itinerary = useItineraryHistory(hash);
-  const runs = useResults(definition.id, parseBasis(params.get('basis')));
+  const runs = useResults(definition.id, parseBasis(params.get(BASIS_PARAM)));
   const executions = runs.data?.executions ?? [];
   const order = runOrder(executions);
 
@@ -64,7 +64,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
   let heading: string | null = null;
   if (hash !== null) {
     pending = itinerary.isPending || runs.isPending;
-    error = itinerary.error;
+    error = itinerary.error ?? runs.error;
     if (itinerary.data !== undefined) {
       fetchLines = linesFromItinerary(itinerary.data, order);
       // why: decision 52, review prov-005: destination and heading come from the api, on a bookmark too.
@@ -73,7 +73,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
     }
   } else {
     pending = routes.some((r) => r.isPending) || runs.isPending;
-    error = routes.find((r) => r.error !== null)?.error ?? null;
+    error = routes.find((r) => r.error !== null)?.error ?? runs.error;
     const lines = linesForPairs(
       routes.map((r) => r.data),
       shownPairs,

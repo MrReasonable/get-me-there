@@ -14,7 +14,7 @@ import {
   usage,
 } from '../fixtures.js';
 import { server } from '../msw/server.js';
-import { renderWithProviders } from '../render.js';
+import { renderWithProviders, settled } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
 
 const bar = (over: Parameters<typeof definition>[0] = {}, showRunNow = true) => (
@@ -69,6 +69,59 @@ describe('status bar (spec §11)', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await user.click(screen.getByRole('button', { name: 'Confirm: cancel this run' }));
     await expect.poll(() => seen).toEqual(['exec-0001 get-me-there']);
+  });
+
+  it('a confirmation opened for one run cannot cancel a newer run that replaced it (cancel bound to the selected run)', async () => {
+    const cancelled: string[] = [];
+    let newest = 'exec-0001';
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: [summary({ id: newest, status: 'running' })] })),
+      ),
+      http.get(`${API}/executions/:id`, ({ params }) =>
+        HttpResponse.json(execution({ id: String(params.id) })),
+      ),
+      http.post(`${API}/executions/:id/cancel`, ({ params }) => {
+        cancelled.push(String(params.id));
+        return HttpResponse.json(execution({ id: String(params.id), status: 'cancelled' }));
+      }),
+    );
+    const { user, client } = renderWithProviders(bar());
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Confirm: cancel this run' })).toBeInTheDocument();
+    // why: a newer run starts while the confirmation is open; the bar now follows that run.
+    newest = 'exec-0002';
+    await client.invalidateQueries({ queryKey: ['results'] });
+    // the open confirmation was for exec-0001, so it is gone and Cancel must be asked for again
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm: cancel this run' })).toBeNull();
+    expect(cancelled).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm: cancel this run' }));
+    await expect.poll(() => cancelled).toEqual(['exec-0002']);
+  });
+
+  it('returning to a run whose confirmation was abandoned does not bring the old confirmation back', async () => {
+    let newest = 'exec-0001';
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: [summary({ id: newest, status: 'running' })] })),
+      ),
+      http.get(`${API}/executions/:id`, ({ params }) =>
+        HttpResponse.json(execution({ id: String(params.id) })),
+      ),
+    );
+    const { user, client } = renderWithProviders(bar());
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    newest = 'exec-0002';
+    await client.invalidateQueries({ queryKey: ['results'] });
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    newest = 'exec-0001';
+    await client.invalidateQueries({ queryKey: ['results'] });
+    // why: back on the first run, Cancel must be asked for again; the earlier confirmation was abandoned
+    await settled(client);
+    expect(screen.queryByRole('button', { name: 'Confirm: cancel this run' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
   it('a failed action is announced (cancel answered 409)', async () => {
@@ -173,14 +226,16 @@ describe('status bar (spec §11)', () => {
         return HttpResponse.json({ executionId: 'exec-0002' });
       }),
     );
-    const { user } = renderWithProviders(bar());
+    const { user, client } = renderWithProviders(bar());
     await user.click(await screen.findByRole('button', { name: /Run now/ }));
     const working = await screen.findByRole('button', { name: 'Working…' });
     expect(working).toBeDisabled();
     expect(working).toHaveAttribute('aria-busy', 'true');
     await user.click(working);
     release();
-    await expect.poll(() => posts).toBe(1);
+    // why: wait until the mutation and every refetch it caused settled, so a late second POST would be counted.
+    await settled(client);
+    expect(posts).toBe(1);
   });
 
   it('at 375px the numbers of a finished run fold into one disclosure; an active run keeps them open (UI-14, UI-006)', async () => {

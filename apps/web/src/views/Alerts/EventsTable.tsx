@@ -19,7 +19,7 @@ import { useNow } from '../../now.js';
 
 const C = COPY.alertsView;
 
-/** Core's payload schema (decision 56: one schema, no local copy); a payload of another shape parses to null. */
+/** Core's payload schema (decision 56: one schema, no local copy); a payload of another shape parses to null, shown as invalid. */
 function payloadOf(e: AlertEvent): AlertEventPayload | null {
   const p = apiContract.alertEventPayloadSchema.safeParse(e.payload);
   return p.success ? p.data : null;
@@ -52,10 +52,10 @@ function EventRow(props: { e: AlertEvent; ruleText: string; now: IsoDateTime }) 
         <span data-quote>{props.ruleText}</span>
       </td>
       <td>{C.status[e.status]}</td>
-      <td>{p === null ? C.notRecorded : p.isNew ? `${p.route} · ${C.listedAsNew}` : p.route}</td>
+      <td>{p === null ? C.payloadInvalid : p.isNew ? `${p.route} · ${C.listedAsNew}` : p.route}</td>
       <td>
         {p === null ? (
-          C.notRecorded
+          C.payloadInvalid
         ) : (
           <PriceBoundary>
             <PriceCell
@@ -73,7 +73,7 @@ function EventRow(props: { e: AlertEvent; ruleText: string; now: IsoDateTime }) 
       </td>
       <td>
         {p === null ? (
-          C.notRecorded
+          C.payloadInvalid
         ) : p.previous === null ? (
           C.noPrevious
         ) : (
@@ -87,10 +87,11 @@ function EventRow(props: { e: AlertEvent; ruleText: string; now: IsoDateTime }) 
           </PriceBoundary>
         )}
       </td>
-      <td>{p === null ? C.notRecorded : classText(p)}</td>
+      <td>{p === null ? C.payloadInvalid : classText(p)}</td>
       <td>
         {/* why: decision 55 — spec §6.8 reason text quotes the prices the rule judged; each fare is also a PriceCell */}
-        <span data-quote>{e.reason ?? C.noReason}</span>
+        {/* why: a reason quotes a price; with no valid payload there is no PriceCell for it, so the reason is withheld */}
+        {p === null ? C.reasonWithheld : <span data-quote>{e.reason ?? C.noReason}</span>}
       </td>
     </tr>
   );

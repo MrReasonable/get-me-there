@@ -47,6 +47,8 @@ export function CellPanel(props: CellPanelProps) {
   const verify = useExecutionActions().verify;
   const canVerify = definition.providers.verification.length > 0;
   const key = selected === null ? '' : cellKeyString(selected);
+  // why: the cell the last verify was sent for; the mutation's own status says nothing about which cell that was.
+  const [submittedKey, setSubmittedKey] = useState<string | null>(null);
   const selectedIndex = cells.findIndex((c) => cellKeyString(c) === key);
   const notes = definition.destinationNotes;
 
@@ -105,7 +107,8 @@ export function CellPanel(props: CellPanelProps) {
           <button
             type="button"
             disabled={!canPressVerify(detail.data, verify.isPending)}
-            onClick={() =>
+            onClick={() => {
+              setSubmittedKey(key);
               verify.mutate({
                 definitionId: definition.id,
                 cell: selected,
@@ -114,14 +117,17 @@ export function CellPanel(props: CellPanelProps) {
                 ...(detail.data?.verify
                   ? { confirmCalls: detail.data.verify.maxCalls, confirmCostPence: 0 }
                   : {}),
-              })
-            }
+              });
+            }}
             className="self-start rounded bg-slate-900 px-3 py-1 text-white disabled:bg-slate-400"
           >
             {COPY.verifyCellFor(verifyCellName(selected))}
           </button>
-          {verify.isSuccess ? <p role="status">{COPY.verifyStartedFor(verifyCellName(selected))}</p> : null}
-          {verify.isError ? <p role="alert">{verifyError(verify.error)}</p> : null}
+          {/* why: the status belongs to the cell that was submitted; another picked cell shows none */}
+          {verify.isSuccess && submittedKey === key ? (
+            <p role="status">{COPY.verifyStartedFor(verifyCellName(selected))}</p>
+          ) : null}
+          {verify.isError && submittedKey === key ? <p role="alert">{verifyError(verify.error)}</p> : null}
         </div>
       ) : null}
     </>

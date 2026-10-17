@@ -136,6 +136,14 @@ describe('days without a price (spec §11 View B, plan decision 38)', () => {
       reason: 'counts',
     });
   });
+  it('a day whose counts disagree with their total shows no outcome glyphs: it is inconsistent, never "no fares"', () => {
+    // why: total 0 with one "no fares" cell would otherwise read as a searched day with no flights
+    expect(resolveDayDisplay(slice({ discovery: [disc('travelpayouts', { empty: 1 }, 0)] }), NOW)).toEqual({
+      kind: 'glyphs',
+      glyphs: [],
+      reason: 'inconsistent',
+    });
+  });
   it('a configured definition whose day no run has reached is not searched, not "no provider" (po-wp10-001)', () => {
     expect(resolveDayDisplay(slice({ discovery: [] }), NOW)).toEqual({
       kind: 'glyphs',

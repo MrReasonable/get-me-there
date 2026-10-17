@@ -36,11 +36,19 @@ describe.each(bands)('PriceCell inside band %i (review ui C1)', (band) => {
       expect(cell.className).toContain('border-dashed');
       expect(cell.className).toContain('border-current');
       const { fill, text } = BAND_COLOURS[band];
-      expect(contrast(fill, text)).toBeGreaterThanOrEqual(3);
+      // why: the face's spans inherit the band's text colour, so this is the contrast of the face's own text (spec: 4.5:1)
+      expect(contrast(fill, text)).toBeGreaterThanOrEqual(4.5);
       const badges = [...container.querySelectorAll('span')].filter((e) =>
         Object.keys(BADGE_FILLS).some((f) => e.classList.contains(f)),
       );
       if (form === 'compact') expect(badges.length).toBeGreaterThanOrEqual(3);
+      else {
+        // why: the face renders no badge, so the loop below would run zero times; a future badge on it must be covered
+        expect(badges).toHaveLength(0);
+        // the face's own text takes the band's text colour: no span may set a light class of its own
+        for (const e of cell.querySelectorAll('span'))
+          expect(e.className, e.textContent ?? '').not.toMatch(/\btext-(white|slate-(50|100|200|300))\b/);
+      }
       for (const b of badges) {
         expect(b.className, b.textContent ?? '').toMatch(/text-(slate|red)-900/);
         const f = Object.keys(BADGE_FILLS).find((k) => b.classList.contains(k));

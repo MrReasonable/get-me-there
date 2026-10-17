@@ -12,7 +12,16 @@ let expected: RegExp | null = null;
 
 /** A test that renders a broken price or a crashing view announces the console.error it expects. */
 export function expectConsoleErrors(pattern: RegExp): void {
-  expected = pattern;
+  // why: a g pattern would carry lastIndex between messages; the copy drops g but keeps y (start-anchored matching),
+  // and `matches` resets lastIndex before every test so each message is judged alone.
+  expected = new RegExp(pattern.source, pattern.flags.replace('g', ''));
+}
+
+/** One message against the expected pattern, from the start: a sticky pattern's lastIndex is reset every time. */
+function hit(re: RegExp | null, text: string): boolean {
+  if (re === null) return false;
+  re.lastIndex = 0;
+  return re.test(text);
 }
 
 /** What the finished test left behind that should fail it; resets the per-test state. */
@@ -21,9 +30,9 @@ export function drainGuards(): string[] {
   const problems = [
     ...unhandled.map((u) => `request no handler matched: ${u}`),
     ...text
-      .filter((t) => expected === null || !expected.test(t))
+      .filter((t) => expected === null || !hit(expected, t))
       .map((t) => `console.error during the test: ${t}`),
-    ...(expected !== null && !text.some((t) => expected?.test(t) === true)
+    ...(expected !== null && !text.some((t) => hit(expected, t))
       ? [`expected console.error ${expected} never occurred`]
       : []),
   ];

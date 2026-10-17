@@ -115,6 +115,21 @@ describe('api client (derived from core/api-contract ROUTES)', () => {
     ['a 200 body that is not JSON', () => new HttpResponse('{"rows":', { status: 200 }), 200, 'malformed'],
     ['a 204 with no body', () => new HttpResponse(null, { status: 204 }), 204, 'contract'],
     ['a network failure', () => HttpResponse.error(), 0, 'network'],
+    [
+      'a connection that drops while the body is read',
+      () =>
+        new HttpResponse(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"providers":'));
+              controller.error(new Error('connection reset'));
+            },
+          }),
+          { status: 200 },
+        ),
+      0,
+      'network',
+    ],
   ])('maps %s to an ApiError, never a bare SyntaxError', async (_label, reply, status, code) => {
     server.use(http.get(`${API}/providers`, reply));
     const err = await failure(api.providers());

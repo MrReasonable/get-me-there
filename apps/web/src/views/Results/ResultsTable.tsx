@@ -187,6 +187,8 @@ function AdjustedColumn({ row }: { row: ResultRow }) {
         stale={row.stale}
         truncated={row.truncated}
         superseded={row.superseded}
+        destinationNote={row.destinationNote}
+        notSeenInLatestHours={row.notSeenInLatest?.ageHours ?? null}
         qualifier={COPY.adjustedQualifier}
         besideColumns
         unconfirmed={priceUnconfirmed(row)}

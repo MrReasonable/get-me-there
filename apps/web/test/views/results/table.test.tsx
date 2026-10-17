@@ -148,6 +148,28 @@ describe('View A columns (spec §11)', () => {
     expect(adjusted).toHaveTextContent('£450');
   });
 
+  it("the adjusted price carries the row's destination note and its not-seen mark, like the price beside it", async () => {
+    countResults(
+      resultsResponse({
+        rows: [
+          verifiedRow({
+            adjustedPence: 45000,
+            destinationNote: 'onward leg not included',
+            notSeenInLatest: { ageHours: 30 },
+          }),
+        ],
+      }),
+    );
+    view();
+    await table();
+    const adjusted = screen
+      .getByText('incl. operator-entered onward cost')
+      .closest('[data-testid="price-cell"]');
+    if (adjusted === null) throw new Error('adjusted price not in a PriceCell');
+    expect(adjusted).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(adjusted).toHaveTextContent('onward leg not included');
+  });
+
   it('wide: the price line shows source and age only, since Provider and Destination are columns (ruling on UI-14)', async () => {
     countResults();
     view();
@@ -451,6 +473,42 @@ describe('client-side sort and filter (spec §6.5)', () => {
     await user.type(screen.getByLabelText('Min nights'), '1x');
     expect(screen.getByLabelText('Min nights')).toBeInvalid();
     expect(screen.getByText('not a whole number')).toBeInTheDocument();
+  });
+
+  it('an invalid typed box leaves the active filters as they were: leaving the box or Enter applies nothing (UI-8)', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const { user } = view('?view=results&f.maxPrice=48000&f.nights=10-14');
+    await table();
+    await user.clear(screen.getByLabelText('Max price (£)'));
+    await user.type(screen.getByLabelText('Max price (£)'), 'abc');
+    await user.tab();
+    // why: before the fix the cap vanished from the URL, so rows above it came back while the alert still showed
+    expect(url().get('f.maxPrice')).toBe('48000');
+    expect(url().get('f.nights')).toBe('10-14');
+    await user.type(screen.getByLabelText('Min nights'), 'x{Enter}');
+    expect(url().get('f.maxPrice')).toBe('48000');
+    expect(url().get('f.nights')).toBe('10-14');
+    expect(screen.getByLabelText('Max price (£)')).toBeInvalid();
+  });
+
+  it('an invalid nights box alone, with a valid price, leaves the active filters unchanged', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const { user, client } = view('?view=results&f.maxPrice=48000&f.nights=10-14');
+    await table();
+    await user.clear(screen.getByLabelText('Min nights'));
+    await user.type(screen.getByLabelText('Min nights'), 'x{Enter}');
+    await settled(client);
+    expect(screen.getByLabelText('Max price (£)')).toBeValid();
+    expect(url().get('f.maxPrice')).toBe('48000');
+    expect(url().get('f.nights')).toBe('10-14');
+  });
+
+  it('a filter value from the URL stays in its option list when no shown row has it', async () => {
+    countResults(resultsResponse({ rows: [verifiedRow()] }));
+    view('?view=results&f.provider=travelpayouts&f.dest=EWR&f.unverified=cabin');
+    expect(await screen.findByRole('checkbox', { name: 'Travelpayouts' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'EWR' })).toBeChecked();
+    expect(screen.getByLabelText('Has this constraint unverified')).toHaveValue('cabin');
   });
 
   it('carriers: codes apply on leaving the box; entries that are not codes are shown as ignored (review PFT-12)', async () => {

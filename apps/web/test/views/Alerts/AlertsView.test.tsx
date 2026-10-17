@@ -179,15 +179,51 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     expect(prices.map((p) => p.textContent?.match(/£\d+/)?.[0])).toEqual(['£412', '£468']);
   });
 
-  it('a payload of another shape shows "not recorded" and no price', async () => {
+  it('a payload of another shape shows an invalid-record error, no price, and withholds the reason that quotes one', async () => {
     const [sent] = events;
     if (sent === undefined) throw new Error('events');
     const oldShape = { ...sent, payload: { label: 'old shape' } };
     withData(rules, [oldShape]);
     renderWithProviders(<AlertsView definitionId="def-1" />);
     const table = await screen.findByRole('table', { name: C.eventsTable });
-    expect(within(table).getAllByText(C.notRecorded)).toHaveLength(4);
+    expect(within(table).getAllByText(C.payloadInvalid)).toHaveLength(4);
+    expect(within(table).getByText(C.reasonWithheld)).toBeInTheDocument();
+    expect(within(table).queryByText(sent.reason)).toBeNull();
     expect(within(table).queryByTestId('price-cell')).toBeNull();
+  });
+
+  it('a failed rules load shows the error and a retry, never "no rules"', async () => {
+    withData();
+    server.use(http.get(`${API}/alerts`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
+    const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
+    const alert = await screen.findByText(/^Could not load:/);
+    expect(alert).toBeInTheDocument();
+    expect(screen.queryByText(C.noRules)).toBeNull();
+    server.use(http.get(`${API}/alerts`, () => HttpResponse.json(rules)));
+    await user.click(screen.getByRole('button', { name: COPY.retryLoad }));
+    expect((await screen.findAllByText(describeRule({ ...rules[0] }))).length).toBeGreaterThan(0);
+  });
+
+  it('a failed events load shows the error and a retry, never "no alerts have fired"', async () => {
+    withData();
+    server.use(http.get(`${API}/alerts/events`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
+    const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
+    expect(await screen.findByText(/^Could not load:/)).toBeInTheDocument();
+    expect(screen.queryByText(C.noEvents)).toBeNull();
+    server.use(http.get(`${API}/alerts/events`, () => HttpResponse.json(events)));
+    await user.click(screen.getByRole('button', { name: COPY.retryLoad }));
+    expect(await screen.findByRole('table', { name: C.eventsTable })).toBeInTheDocument();
+  });
+
+  it('a delete that failed is announced and the rule stays listed', async () => {
+    withData();
+    server.use(http.delete(`${API}/alerts/:id`, () => HttpResponse.json({ error: 'nope' }, { status: 500 })));
+    const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
+    const [first] = await screen.findAllByRole('button', { name: C.deleteRule });
+    if (first === undefined) throw new Error('delete button');
+    await user.click(first);
+    expect(await screen.findByText(/^That did not work:/)).toBeInTheDocument();
+    expect(screen.getAllByText(describeRule({ ...rules[0] })).length).toBeGreaterThan(0);
   });
 
   it('empty states', async () => {
@@ -201,6 +237,11 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     withData();
     const { container } = renderWithProviders(<AlertsView definitionId="def-1" />);
     await screen.findByRole('table', { name: C.eventsTable });
-    expect(findBannedWords(container.textContent ?? '', BANNED_WORD_ALLOWLIST)).toEqual([]);
+    // why: textContent glues adjacent cells together ("sent" + "verified" = "sentverified"), so a banned word beside a
+    // neighbour's letters would escape the word-boundary match; the text nodes are joined with spaces instead.
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const parts: string[] = [];
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) parts.push(n.textContent ?? '');
+    expect(findBannedWords(parts.join(' '), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 });
