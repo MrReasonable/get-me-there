@@ -6,12 +6,13 @@ import { FX_SOURCE } from '../normalise.js';
 /**
  * frankfurter's latest ECB reference rates against GBP. Verified 2026-10-14: the `.app` host answers 301 to this URL,
  * and http-kit sends `redirect: 'error'`, so the engine calls `.dev/v1` directly and the `fx` host allowlist is
- * `api.frankfurter.dev` (plan decision 2). Body: `{ amount, base, date, rates }` where `rates[C]` is units of C per 1 GBP.
+ * `api.frankfurter.dev` (plan decision 2). Body: `{ amount, base, date, rates }` where `rates[C]` is units of C per `amount`
+ * GBP; the schema pins `amount` to 1, which the stored rate assumes (prov M2).
  */
 export const FRANKFURTER_LATEST_URL = 'https://api.frankfurter.dev/v1/latest?from=GBP';
 
 const frankfurterSchema = z.object({
-  amount: z.number(),
+  amount: z.literal(1),
   base: z.literal('GBP'),
   date: isoDateSchema,
   rates: z.record(z.string(), z.number().positive().finite()),

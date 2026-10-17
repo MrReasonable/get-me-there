@@ -39,6 +39,8 @@ describe('FX refresh (spec §5.3 "FX refresh goes through http-kit under the id 
     ['no rates', { amount: 1, base: 'GBP', date: '2026-10-14' }],
     ['a bad date', { ...body, date: '14/10/2026' }],
     ['a non-positive rate', { ...body, rates: { USD: 0 } }],
+    // why: rates[C] is units of C per `amount` GBP; the stored rate assumes 1, so any other amount is refused (prov M2)
+    ['an amount other than 1', { ...body, amount: 100 }],
   ])('rejects %s as a parse error and stores nothing', async (_n, bad) => {
     expect(parseFrankfurter(bad)).toBeInstanceOf(ProviderError);
     const h = createHarness();
