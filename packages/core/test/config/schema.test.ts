@@ -72,6 +72,16 @@ describe('parseConfig (spec §12)', () => {
       'ALLOW_UNAUTHENTICATED',
     ]);
   });
+  it('refuses SEARCHAPI_TRIAL_USED on a monthly plan, naming both fields: it would be silently ignored (cost-007)', () => {
+    const sa = { ...minimal, SEARCHAPI_KEY: 'k'.repeat(32) };
+    expect(errors({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' })).toEqual([
+      'SEARCHAPI_TRIAL_USED',
+    ]);
+    const r = parseConfig({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' }, { realpath });
+    expect(r.ok ? '' : r.errors[0]?.message).toContain('SEARCHAPI_PLAN');
+    expect(ok({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }).providers.searchapi?.trialUsed).toBe(0);
+    expect(ok({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }).providers.searchapi?.trialUsed).toBe(9);
+  });
   it('fills the 40usd preset and lets variables override', () => {
     const c = ok({ ...minimal, SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });
     expect(c.providers.searchapi?.limits).toMatchObject({

@@ -287,6 +287,13 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
             planFixedMicroGbp: r.pence('SEARCHAPI_PLAN_FIXED_PENCE') ?? preset.planFixedMicroGbp,
           },
         };
+  // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
+  // switch to the subscription would be silently ignored; spec §12: a variable that cannot apply fails boot, named.
+  if (searchapi !== null && searchapi.limits.window === 'month' && searchapi.trialUsed > 0)
+    r.fail(
+      'SEARCHAPI_TRIAL_USED',
+      `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
+    );
   const billedPreset = searchapi === null ? null : preset;
   // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
   const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };
