@@ -44,6 +44,24 @@ describe('Providers view (spec §10, §11)', () => {
     expect(formatDuration(48)).toBe('2d'); // canary for the format
   });
 
+  it("heads each card with the provider's name, the one the status bar and filters use; the source labels stay on the capability lines (UI-003)", async () => {
+    const base = providersResponse();
+    server.use(
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json({
+          ...base,
+          providers: base.providers.map((p) =>
+            p.providerId === 'travelpayouts' ? { ...p, displayName: 'Aviasales cache' } : p,
+          ),
+        }),
+      ),
+    );
+    renderWithProviders(<ProvidersView />);
+    const tp = await screen.findByRole('region', { name: 'Travelpayouts' });
+    expect(within(tp).getByRole('heading', { level: 3 })).toHaveTextContent(/^Travelpayouts /);
+    expect(within(tp).getByText(/^Discovery: Aviasales cache/)).toBeInTheDocument();
+  });
+
   it('names the call cap that governs a £0-per-call plan as a plain line, never an alert (ruling 5)', async () => {
     renderWithProviders(<ProvidersView />);
     const searchapi = await screen.findByRole('region', { name: 'SearchApi' });

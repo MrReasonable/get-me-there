@@ -62,13 +62,15 @@ export function ProvidersView() {
     <div className="space-y-3 text-sm">
       <h2 className="text-xl font-semibold">{COPY.providersHeading}</h2>
       {q.data.providers.map((p) => (
+        // why: UI-003: the card is headed by the provider's name, the word the status bar, filters and marks use; the
+        // source labels (the API's displayName among them) stay on the capability lines.
         <section
           key={p.providerId}
-          aria-label={p.displayName}
+          aria-label={COPY.provider[p.providerId]}
           className="rounded border border-slate-300 p-2"
         >
           <h3 className="font-semibold">
-            {p.displayName}{' '}
+            {COPY.provider[p.providerId]}{' '}
             <span className="font-normal">{p.enabled ? COPY.providerEnabled : COPY.providerDisabled}</span>
           </h3>
           {p.notices.map((n) => (
