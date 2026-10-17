@@ -188,6 +188,29 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     expect(r.stderr).not.toContain('ok.ts');
   });
 
+  // why: PR #3 review — the import graph is read from the parsed source, so a dynamic import with a template literal
+  // counts, and an import written in a comment or a string does not
+  it('a dynamic import with a template literal fails; an import in a comment or a string does not', () => {
+    const r = run(
+      tree({
+        'apps/web/src/tpl.ts': 'export const load = () => import(`@gmt/engine`);\n',
+        'apps/web/src/prose.ts':
+          "// import '@gmt/db' was the old way\n/* import { x } from '@gmt/db'; */\nexport const hint = \"import('@gmt/db')\";\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/tpl.ts imports @gmt/engine');
+    expect(r.stderr).not.toContain('prose.ts');
+  });
+
+  it('a dynamic import whose specifier is computed fails, since its edge cannot be checked', () => {
+    const r = run(tree({ 'apps/web/src/computed.ts': 'export const load = (n: string) => import(n);\n' }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'apps/web/src/computed.ts has a dynamic import whose specifier is computed, so its package edge cannot be checked',
+    );
+  });
+
   it('a manifest dependency across the graph fails, and core may depend only on its allowlisted externals', () => {
     const r = run(
       tree({
