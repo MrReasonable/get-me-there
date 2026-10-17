@@ -81,7 +81,8 @@ jobs:
           # why: a credential in any shape a layer can hold: NAME=value, NAME: value or "name": value, and an ENV layer's
           # space form (ENV NAME value), the whole name matched so a suffixed one (SECRET_KEY_BASE) counts too
           # (CodeRabbit batch 3, PR #3 review)
-          if docker history --no-trunc get-me-there:local | grep -Ei -e '(token|key|pass(wd|word)?|secret|auth|bearer|credential)[a-z0-9_]*"?[[:space:]]*[=:]' -e 'ENV[[:space:]]+[a-z0-9_]*(token|key|pass|secret|auth|bearer|credential)[a-z0-9_]*[[:space:]]+[^[:space:]]'; then exit 1; fi
+          # why: grep counts, never prints: a real hit must not write the credential into a public CI log (PR #3 re-review)
+          n="$(docker history --no-trunc get-me-there:local | grep -Eic -e '(token|key|pass(wd|word)?|secret|auth|bearer|credential)[a-z0-9_]*"?[[:space:]]*[=:]' -e 'ENV[[:space:]]+[a-z0-9_]*(token|key|pass|secret|auth|bearer|credential)[a-z0-9_]*[[:space:]]+[^[:space:]]')" || true; if [ "${n:-0}" -gt 0 ]; then echo "image history: $n credential-like line(s) found; not shown" >&2; exit 1; fi
       - name: Compose boots it healthy with the documented three-line .env
         run: |
           # why: CI-only throwaway values that must never match a real credential; the token is a dummy and boot makes no

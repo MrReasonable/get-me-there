@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -101,6 +102,49 @@ describe('the docker job keeps credentials out of the image history', { timeout:
       encoding: 'utf8',
       timeout: 30_000,
     }).status === 0;
+
+  // why: PR #3 re-review — grep printed each matching history line, so a real hit would write the credential into a
+  // public CI log. The step's own line runs here against a stub docker whose history holds a planted credential: it
+  // must fail and say how many lines matched, and its output must hold no part of the planted value.
+  it('a planted credential fails the step without any part of it reaching the log', () => {
+    const stub = mkdtempSync(join(tmpdir(), 'gmt-docker-stub-'));
+    try {
+      const planted = 'PLANTEDzq7Xv9Lm2Rk4Tw8Yp';
+      writeFileSync(
+        join(stub, 'docker'),
+        `#!/bin/sh\nprintf '%s\\n' 'ENV NODE_ENV=production' 'ENV SEARCHAPI_KEY=${planted}'\n`,
+      );
+      chmodSync(join(stub, 'docker'), 0o755);
+      const r = spawnSync('/bin/sh', ['-c', line.trim()], {
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: { PATH: `${stub}:/usr/bin:/bin` },
+      });
+      const output = `${r.stdout}${r.stderr}`;
+      expect(r.status).toBe(1);
+      expect(output).toContain('1 credential-like line');
+      for (let i = 0; i + 4 <= planted.length; i++) expect(output).not.toContain(planted.slice(i, i + 4));
+      expect(output).not.toContain('SEARCHAPI_KEY');
+    } finally {
+      rmSync(stub, { recursive: true, force: true });
+    }
+  });
+
+  it('a clean history passes the step silently', () => {
+    const stub = mkdtempSync(join(tmpdir(), 'gmt-docker-stub-'));
+    try {
+      writeFileSync(join(stub, 'docker'), "#!/bin/sh\nprintf '%s\\n' 'ENV NODE_ENV=production'\n");
+      chmodSync(join(stub, 'docker'), 0o755);
+      const r = spawnSync('/bin/sh', ['-c', line.trim()], {
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: { PATH: `${stub}:/usr/bin:/bin` },
+      });
+      expect([r.status, r.stdout, r.stderr]).toEqual([0, '', '']);
+    } finally {
+      rmSync(stub, { recursive: true, force: true });
+    }
+  });
 
   it('greps with explicit -e patterns', () => {
     expect(patterns.length).toBeGreaterThan(1);
