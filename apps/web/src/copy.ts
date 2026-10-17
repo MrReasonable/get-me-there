@@ -353,6 +353,8 @@ export const COPY = {
   requestRow: (calls: number, planned: string, hits: number, cost: string) =>
     `${calls} of ${planned} planned calls · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
   errorsHeading: 'Errors',
+  // why: the contract's error reason is nullable; an unrecorded reason is said, never shown as an empty string.
+  noReasonRecorded: 'no reason recorded',
   errorRow: (reason: string, attempts: number) =>
     `${reason} after ${attempts} attempt${attempts === 1 ? '' : 's'}`,
   lastError: (message: string) => `(${message})`,
