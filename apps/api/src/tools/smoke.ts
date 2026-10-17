@@ -40,7 +40,7 @@ import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_CABIN, SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
-import { type Answer, checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
+import { type Answer, checklist, openJawOnly, type Seen, type SmokeCheck } from './smokeChecks.js';
 import {
   openHiddenExecution,
   spendPosition,
@@ -72,7 +72,10 @@ export interface SmokePrice {
   provenance: Provenance;
   /** False for an itinerary offer the final step did not confirm; true for a confirmed offer; calendar prices: null. */
   confirmed: boolean | null;
-  /** The tile stopped at its page cap: the cheapest of the rows read (decision 30). */
+  /**
+   * The cheapest of the rows read, not of the tile (decision 30): the tile stopped at its page cap, or a covered cell had
+   * rows the adapter could not use for another reason than an open-jaw drop (provenance review, fix round 1).
+   */
   truncated: boolean;
 }
 export interface SmokeProviderReport {
@@ -201,7 +204,7 @@ function priceOf(
 
 /**
  * `£412 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Aviasales cache · fetched … · observed …`, with "cheapest of the rows
- * read" for a truncated tile (decision 30) and the decision-44 label for an unconfirmed offer.
+ * read" for a truncated or partly unusable tile (decision 30) and the decision-44 label for an unconfirmed offer.
  */
 export function describePrice(p: SmokePrice, now: IsoDateTime): string {
   const c = p.cell;
@@ -314,7 +317,9 @@ async function discover(
   const priced = priceOf(provider, cap.info, cheapestRaw, result.fetchedAt, result.pointOfSale, {
     displayName: provider.displayName,
     confirmed: null,
-    truncated: result.truncated === true,
+    // why: unusable rows (bad price, bad link) leave a covered cell's cheapest unknown, like a page never read; open-jaw
+    // rows were never this route's, so dropping them leaves the price whole (decision 39)
+    truncated: result.truncated === true || issues.some((x) => !openJawOnly(x.detail)),
   });
   if (typeof priced === 'string') return { report: report('error', priced), plans, tile: result };
   return {

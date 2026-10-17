@@ -315,6 +315,16 @@ describe('runSmoke (spec §9 item 7)', () => {
     },
   );
 
+  it('a tile with unusable rows in a covered cell prices "the cheapest of the rows read" too, not only a truncated one (provenance review)', async () => {
+    const { r } = await smoke(smokePorts(), cli(), { tpBadPrice: true });
+    expect(lineOf(r, 'travelpayouts discovery: priced')).toContain('£412 (cheapest of the rows read)');
+  });
+
+  it('an open-jaw drop alone leaves the price unqualified: those rows were never the route asked for (decision 39)', async () => {
+    const { r } = await smoke(smokePorts());
+    expect(lineOf(r, 'travelpayouts discovery: priced')).not.toContain('(cheapest of the rows read)');
+  });
+
   it('1: a price in another currency is an error, never shown as pence (core priceInGbp, code-architect M1)', async () => {
     const { r } = await smoke(smokePorts(), cli(), { tpCurrency: 'usd' });
     expect(r.reports[0]).toMatchObject({

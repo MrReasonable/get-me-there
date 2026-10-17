@@ -76,7 +76,7 @@ const SOURCE_KIND: Record<`${Vendor} ${SmokeProviderReport['stage']}`, SourceKin
 const pence = (major: number | undefined): number | null =>
   major === undefined ? null : majorToMinor(major, 'GBP');
 /** A WP6 per-cell issue that only reports open-jaw rows (its detail names no other cause). */
-const openJawOnly = (detail: string): boolean => /^travelpayouts: [^;]*\[open-jaw\]$/.test(detail);
+export const openJawOnly = (detail: string): boolean => /^travelpayouts: [^;]*\[open-jaw\]$/.test(detail);
 /** The open-jaw row count in a WP6 per-cell issue detail ("2 rows were not the closed round trip … [open-jaw]"). */
 const openJawRows = (detail: string): number =>
   Number(/(\d+) rows? were not the closed round trip[^;]*\[open-jaw\]/.exec(detail)?.[1] ?? 0);
