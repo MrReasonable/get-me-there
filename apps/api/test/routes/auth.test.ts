@@ -125,6 +125,22 @@ describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
   });
 });
 
+describe('the Basic scheme is case-insensitive (RFC 7235; security review Minor 2)', () => {
+  it.each(['basic', 'BASIC', 'bAsIc'])('accepts the %s scheme with a valid credential', async (scheme) => {
+    const x = await harness();
+    const token = RIGHT.slice('Basic '.length);
+    const res = await x.request('/api/providers', { headers: { authorization: `${scheme} ${token}` } });
+    expect(res.status).toBe(200);
+  });
+  it('still refuses another scheme', async () => {
+    const x = await harness();
+    const token = RIGHT.slice('Basic '.length);
+    expect(
+      (await x.request('/api/providers', { headers: { authorization: `Bearer ${token}` } })).status,
+    ).toBe(401);
+  });
+});
+
 describe('static files and SPA fallback (spec §4, §13)', () => {
   function webRoot(dir = tempDir('gmt-web-')): string {
     mkdirSync(dir, { recursive: true });

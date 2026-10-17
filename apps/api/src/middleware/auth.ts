@@ -20,8 +20,10 @@ export function credentialsMatch(
   expected: { user: string; pass: Secret },
 ): 'absent' | 'valid' | 'invalid' {
   if (header === undefined) return 'absent';
-  if (!header.startsWith('Basic ')) return 'invalid';
-  const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8');
+  // why: RFC 7235 auth schemes are case-insensitive, so `basic` is the same scheme (security review Minor 2).
+  const scheme = /^basic +/i.exec(header);
+  if (scheme === null) return 'invalid';
+  const decoded = Buffer.from(header.slice(scheme[0].length), 'base64').toString('utf8');
   const colon = decoded.indexOf(':');
   if (colon < 0) return 'invalid';
   const userOk = timingSafeEqual(digest(decoded.slice(0, colon)), digest(expected.user));
