@@ -43,13 +43,11 @@ const PRIVATE = [
   'parseVendorTime',
   'localMinute',
   'requireZone',
-  'hoursSince',
   'priceOf',
   'span',
   'need',
   'compareRows',
   'compareText',
-  'CONSTRAINT_NAMES',
   // module exports that no other package reads, so they stay out of the barrel
   'MIN_REPEAT_DROP_PENCE',
   'MIN_REPEAT_DROP_PERCENT',

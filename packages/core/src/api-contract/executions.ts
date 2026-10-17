@@ -56,4 +56,10 @@ export const startExecutionRequestSchema = z.object({
   confirmCalls: z.number().int().min(0).optional(),
 });
 export const startExecutionResponseSchema = z.object({ executionId: z.string() });
-export const verifyCellRequestSchema = z.object({ definitionId: z.string(), cell: cellKeySchema });
+/** WP7: a single-cell verification above SOFT_CONFIRM needs the confirmation a start would, pence and calls together. */
+export const verifyCellRequestSchema = z.object({
+  definitionId: z.string(),
+  cell: cellKeySchema,
+  confirmCostPence: moneyPenceSchema.optional(),
+  confirmCalls: z.number().int().min(0).optional(),
+});

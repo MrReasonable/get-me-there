@@ -701,7 +701,16 @@ describe('ItinerariesRepo reads', () => {
         providerId: 'searchapi',
         seller: 'British Airways',
         cabin: 'economy',
-        points: [{ at: T0, pricePence: 41_200, provenance: SEARCHAPI_PROVENANCE }],
+        points: [
+          {
+            at: T0,
+            pricePence: 41_200,
+            provenance: SEARCHAPI_PROVENANCE,
+            // why: the observation's own supplied fields, which the api reads as priceConfirmed (plan decision 42)
+            suppliedFields: ['segments', 'segmentTimes', 'segmentCabins', 'price', 'seller', 'baggage'],
+            executionId,
+          },
+        ],
       },
     ]);
     expect(repo.latestVerificationOutcomeForCell(definition.id, cell(), 'economy')).toMatchObject({

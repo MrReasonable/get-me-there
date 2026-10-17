@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LINK_ALLOWLIST, validateVendorUrl } from '../normalise/vendorUrl.js';
 import type { Buckets } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { cabinSchema, provenanceSchema, providerIdSchema } from '../types/provenance.js';
@@ -52,9 +53,30 @@ export const cronSchema = z
   .min(9)
   .max(100)
   .regex(/^[\d*/,\-\s]+$/, 'cron: digits, * / , - and spaces only; validated by the scheduler');
-export const bookingSchema = z.discriminatedUnion('kind', [
+/** Every host a vendor or search link may name (spec §5.2), across providers. */
+const LINK_HOSTS: readonly string[] = Object.values(LINK_ALLOWLIST).flat();
+/**
+ * Spec §5.2 vendor links, re-validated on the wire (plan decision 54): https, no userinfo, no port, a host equal to or
+ * under a `LINK_ALLOWLIST` entry. A stored value that fails never reaches a client as a link.
+ */
+export const vendorLinkSchema = z
+  .url()
+  .refine(
+    (u) => validateVendorUrl(u, LINK_HOSTS).kind !== 'none',
+    'link must be https on an allowlisted host',
+  );
+/**
+ * The booking as an adapter stored it (spec §6.3): any URL. The db reads with this, so one bad stored link never fails a
+ * whole page; the api re-validates it and the wire schema below refuses it (plan decision 54).
+ */
+export const storedBookingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('get'), url: z.url(), host: z.string() }),
   z.object({ kind: z.literal('post'), url: z.url(), postData: z.string(), host: z.string() }),
+  z.object({ kind: z.literal('none') }),
+]);
+export const bookingSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('get'), url: vendorLinkSchema, host: z.string() }),
+  z.object({ kind: z.literal('post'), url: vendorLinkSchema, postData: z.string(), host: z.string() }),
   z.object({ kind: z.literal('none') }),
 ]);
 export const executionStatusSchema = z.enum([

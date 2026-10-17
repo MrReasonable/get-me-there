@@ -111,6 +111,7 @@ describe('api-contract (spec §10)', () => {
       },
       otherOffers: [],
       notSeenInLatest: null,
+      superseded: false,
       adjustedPence: null,
       destinationNote: null,
       executionId: 'e1',

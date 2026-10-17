@@ -101,6 +101,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'openDatabase',
         'pendingMigrations',
         'readOnlyLockState',
+        'retriedOnResume',
         'runMaintenance',
         'sanityCheckAirports',
         'seedAirports',

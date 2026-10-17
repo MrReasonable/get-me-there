@@ -1,4 +1,4 @@
-import { effectiveAge, formatDuration } from '../labels/age.js';
+import { formatDuration, hoursSince } from '../labels/age.js';
 import { formatPence } from '../text/money.js';
 import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
 import { cellKeyString } from '../types/definition.js';
@@ -9,11 +9,6 @@ import type { Provenance } from '../types/provenance.js';
 export const MIN_REPEAT_DROP_PENCE = 1_000;
 /** … and at least 5% of the last fired price, whichever is larger. */
 export const MIN_REPEAT_DROP_PERCENT = 5;
-
-/** Whole hours from `at` to `now`, clamped at 0 through core's `effectiveAge` (plan review focus 2). */
-export function hoursSince(at: IsoDateTime, now: IsoDateTime): number {
-  return effectiveAge({ fetchedAt: at, maxAgeHours: 'unknown' }, now).fetchedHours;
-}
 
 /**
  * A whole-hour span as the operator reads it, in the same units as core's age labels (spec §3):

@@ -127,11 +127,23 @@ const refineDefinition = (
     });
   }
 };
+/**
+ * A stored definition may be a draft without airports (spec §10: `POST /definitions` with no body creates the plan
+ * default, which names none, spec §1), so the stored and response shapes accept empty airport lists; a create or
+ * update body still needs at least one of each.
+ */
+const storedFields = {
+  ...definitionFields,
+  origins: z.array(iataSchema),
+  destinations: z.array(iataSchema),
+};
 /** The unrefined field shape: used to read stored rows back, where the save-time policy refinements must not run. */
 export const definitionShapeSchema = z
-  .object(definitionFields)
+  .object(storedFields)
   .omit({ confirmedCostPence: true, confirmedCalls: true });
 export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
+/** `POST /definitions` takes no body (the plan default, a draft) or a create body; one object, so handlers can name it. */
+export const definitionCreateOptionalSchema = definitionCreateRequestSchema.optional();
 export const definitionUpdateRequestSchema = z.object(definitionFields).partial();
 
 export const budgetFitSchema = z.object({
@@ -172,7 +184,7 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
 /** Both estimate routes return the estimate with its budget fit, so the form shows both before the create click. */
 export const estimateResponseSchema = z.object({ estimate: estimateSchema, budgetFit: budgetFitSchema });
 export const definitionResponseSchema = z.object({
-  ...definitionFields,
+  ...storedFields,
   confirmedCostPence: moneyPenceSchema.nullable(),
   confirmedCalls: positiveInt.nullable(),
   id: z.string(),

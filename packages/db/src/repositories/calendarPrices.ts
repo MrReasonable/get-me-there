@@ -189,6 +189,20 @@ export class CalendarPricesRepo {
     };
   }
 
+  /**
+   * Every price row this execution holds: the ones it fetched and the reused copies it made (each keeping its source's
+   * fetch time and `reusedFromExecutionId`). A run's own view (plan decision 58): its coverage counts a reused cell as
+   * priced, so its prices must include that cell's price.
+   */
+  heldBy(executionId: string): CalendarPriceRow[] {
+    return this.db.raw
+      .prepare<[string], CalendarPriceDbRow>(
+        'SELECT * FROM calendar_prices WHERE execution_id = ? ORDER BY id',
+      )
+      .all(executionId)
+      .map(toCalendarPriceRow);
+  }
+
   /** Prices this execution fetched itself (reused copies excluded): the calendar-basis alert candidates (spec §6.8). */
   fetchedBy(executionId: string): CalendarPriceRow[] {
     return this.db.raw

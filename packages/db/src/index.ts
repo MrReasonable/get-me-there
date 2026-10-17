@@ -21,7 +21,7 @@ export { createRepos, type Repos } from './repos.js';
 export { AirportsRepo } from './repositories/airports.js';
 export { AlertsRepo } from './repositories/alerts.js';
 export { CalendarPricesRepo } from './repositories/calendarPrices.js';
-export { CellsRepo } from './repositories/cells.js';
+export { CellsRepo, retriedOnResume } from './repositories/cells.js';
 export { DefinitionsRepo } from './repositories/definitions.js';
 export { ExecutionsRepo } from './repositories/executions.js';
 export { FxRepo } from './repositories/fx.js';
@@ -44,6 +44,7 @@ export type {
   ExecutionCreateInput,
   ExecutionPatch,
   ObservationRow,
+  OfferHistoryPoint,
   RepoOptions,
   ReuseCriteria,
   ReusedCopy,

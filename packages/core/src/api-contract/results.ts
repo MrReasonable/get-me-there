@@ -18,12 +18,14 @@ import {
   resultBasisSchema,
   segmentSchema,
   stageSchema,
+  vendorLinkSchema,
   verdictClassSchema,
   verdictsSchema,
 } from './common.js';
 
 const count = z.number().int().min(0);
-const searchLinkSchema = z.object({ url: z.url(), host: z.string(), label: z.string() }).nullable();
+/** A vendor search link (spec §5.2): re-validated on the wire like a booking link (plan decision 54). */
+const searchLinkSchema = z.object({ url: vendorLinkSchema, host: z.string(), label: z.string() }).nullable();
 /** Spec §6.5 / §6.9: one row per itinerary (or calendar cell), provenance on every price. */
 export const resultRowSchema = z.object({
   itineraryHash: z.string().nullable(),
@@ -80,6 +82,11 @@ export const resultRowSchema = z.object({
     }),
   ),
   notSeenInLatest: z.object({ ageHours: ageHoursSchema }).nullable(),
+  /**
+   * Plan decision 54, as on the views' calendar figures: a calendar-basis row whose cell a newer parent execution found
+   * empty or no_data, ranked after every current price. Always false on the verified basis.
+   */
+  superseded: z.boolean(),
   adjustedPence: moneyPenceSchema.nullable(),
   destinationNote: z.string().nullable(),
   executionId: z.string(),
@@ -129,13 +136,7 @@ export const calendarDaySchema = z.object({
   cheapestVerified: verifiedFigure.nullable(),
   cheapestPartiallyVerified: verifiedFigure.extend({ count }).nullable(),
   cheapestCalendar: calendarFigure.nullable(),
-  byDestination: z.array(
-    z.object({
-      destination: iataSchema,
-      cheapestVerified: priceCellSchema.nullable(),
-      cheapestCalendar: priceCellSchema.nullable(),
-    }),
-  ),
+  // why: plan decision 58: no per-destination figures; `?destination=` (decision 53) scopes the whole day instead.
 });
 /**
  * Plan decision 53: the calendar route's optional destination. With it, every day's buckets, selection counts, minimums

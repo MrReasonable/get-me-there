@@ -22,7 +22,7 @@ export * from './config/schema.js';
 export * from './config/secret.js';
 export * from './config/synthetic.js';
 export { evaluateConstraints } from './constraints/evaluate.js';
-export { CONSTRAINT_LABELS } from './constraints/labels.js';
+export { CONSTRAINT_LABELS, CONSTRAINT_NAMES } from './constraints/labels.js';
 export { unverifiedNames, verdictClass } from './constraints/verdictClass.js';
 export * from './coverage/buckets.js';
 export * from './coverage/rollUp.js';

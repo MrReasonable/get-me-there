@@ -40,6 +40,14 @@ export interface ProviderRunLimits {
   billed: boolean;
 }
 
+/**
+ * The cap scope a provider's calls count against, from its plan window (spec §5.3): the one mapping the engine and the
+ * api share (plan decision 58).
+ */
+export function capKindOf(window: 'month' | 'lifetime'): 'provider-month' | 'provider-lifetime' {
+  return window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
+}
+
 /** What every engine module receives. Built once per engine by buildContext. */
 export interface EngineContext {
   readonly deps: EngineDeps;
@@ -83,7 +91,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       ratePerMinute: b.ratePerMinute,
       ratePerHour: b.ratePerHour,
       window: b.window,
-      capKind: b.window === 'lifetime' ? 'provider-lifetime' : 'provider-month',
+      capKind: capKindOf(b.window),
       planFixedMicroGbp: b.planFixedMicroGbp,
       excludedFromSchedule: b.excludedFromSchedule,
       billed: b.billable,

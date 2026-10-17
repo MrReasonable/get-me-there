@@ -7,9 +7,12 @@ export type EffectiveAge =
   | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number }
   | { kind: 'unknown'; fetchedHours: number };
 
-/** Whole hours between two instants, never negative (a vendor clock ahead of ours reads as 0). */
-function hoursBetween(earlier: IsoDateTime, later: IsoDateTime): number {
-  const ms = new Date(later).getTime() - new Date(earlier).getTime();
+/**
+ * Whole hours from `from` to `now`, never negative (a vendor clock ahead of ours reads as 0). The one whole-hour age
+ * helper: provenance ages here, and the api's and the alerts' ages outside a provenance (plan decision 59).
+ */
+export function hoursSince(from: IsoDateTime, now: IsoDateTime): number {
+  const ms = new Date(now).getTime() - new Date(from).getTime();
   return Math.max(0, Math.floor(ms / 3_600_000));
 }
 
@@ -17,24 +20,45 @@ export function effectiveAge(
   p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>,
   now: IsoDateTime,
 ): EffectiveAge {
-  const fetchedHours = hoursBetween(p.fetchedAt, now);
+  const fetchedHours = hoursSince(p.fetchedAt, now);
   if (p.providerObservedAt !== undefined) {
-    return { kind: 'observed', fetchedHours, observedHours: hoursBetween(p.providerObservedAt, now) };
+    // why: plan decision 58: a vendor cannot have observed a price after we fetched it, so an observed time later than
+    // the fetch (a vendor clock or data error) never makes the price look younger than the fetch.
+    const observedHours = Math.max(hoursSince(p.providerObservedAt, now), fetchedHours);
+    return { kind: 'observed', fetchedHours, observedHours };
   }
   if (p.maxAgeHours === 'unknown') return { kind: 'unknown', fetchedHours };
   return { kind: 'bounded', fetchedHours, maxAgeHours: p.maxAgeHours };
 }
 
-/** The age a careful reader should assume: observed age, or fetched age plus the provider's bound. */
-export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown' {
+/**
+ * The effective age of spec §3 (revision 23, plan decisions 44, 53, 58): the observed age (never younger than the fetch
+ * age, `effectiveAge` clamps it) when the vendor dates the price,
+ * else the fetch age plus the provider's bound, else (the vendor's age unknown) the fetch age alone. The labels say
+ * "vendor's cache age unknown" for the last case; this number never pretends to know more.
+ */
+export function worstCaseAgeHours(a: EffectiveAge): number {
   switch (a.kind) {
     case 'observed':
       return a.observedHours;
     case 'bounded':
       return a.fetchedHours + a.maxAgeHours;
     case 'unknown':
-      return 'unknown';
+      return a.fetchedHours;
   }
+}
+
+/**
+ * The one staleness rule (spec §3, plan decisions 44, 54, 55): stale when the effective age exceeds the threshold. An
+ * unknown vendor age counts the fetch age alone, so it is never stale on that account; every package that marks a price
+ * stale (the api's rows and history points, WP11's alerts) calls this.
+ */
+export function isStale(
+  p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>,
+  now: IsoDateTime,
+  thresholdHours: number,
+): boolean {
+  return worstCaseAgeHours(effectiveAge(p, now)) > thresholdHours;
 }
 
 /** "just now" under an hour; hours to 47h; days to 13d; weeks after. */
@@ -56,7 +80,10 @@ export function formatFetchedAgo(a: EffectiveAge): string {
   return `fetched ${formatAgo(a.fetchedHours)}`;
 }
 
-/** Tooltip, header and email form, e.g. "fetched 2h ago · provider age unknown (≤7d before that)". */
+/**
+ * Tooltip, header and email form, e.g. "fetched 2h ago · provider age unknown (≤7d before that)", or, when the vendor
+ * gives no age at all, "fetched 2h ago · vendor's cache age unknown" (spec §3 rev 23, decision 55).
+ */
 export function formatAgeFull(a: EffectiveAge): string {
   const fetched = formatFetchedAgo(a);
   switch (a.kind) {
@@ -68,7 +95,7 @@ export function formatAgeFull(a: EffectiveAge): string {
         ? fetched
         : `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
     case 'unknown':
-      return `${fetched} · provider age unknown`;
+      return `${fetched} · vendor's cache age unknown`;
   }
 }
 
@@ -87,10 +114,10 @@ export function formatAgeCompact(a: EffectiveAge): string {
 
 /** Sort comparator: fresher first; an unknown age loses to any known age; two unknowns tie. Spec §8.1. */
 export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
-  const wa = worstCaseAgeHours(a);
-  const wb = worstCaseAgeHours(b);
-  if (wa === 'unknown' && wb === 'unknown') return 0;
-  if (wa === 'unknown') return 1;
-  if (wb === 'unknown') return -1;
-  return wa - wb;
+  // why: the ordering rule is about what is known, not about the number: an unknown vendor age loses to any known one
+  // even when its fetch age is smaller (spec §8.1).
+  if (a.kind === 'unknown' && b.kind === 'unknown') return 0;
+  if (a.kind === 'unknown') return 1;
+  if (b.kind === 'unknown') return -1;
+  return worstCaseAgeHours(a) - worstCaseAgeHours(b);
 }

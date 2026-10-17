@@ -112,7 +112,7 @@ export const readBaggage = (column: string, v: unknown): BaggageSnapshot =>
 export const readFareConditions = (column: string, v: unknown): FareConditions =>
   parseWith(column, apiContract.resultRowSchema.shape.fareConditions.unwrap(), v);
 export const readBooking = (column: string, text: string): Booking =>
-  parseWith(column, apiContract.bookingSchema, readJson(column, text));
+  parseWith(column, apiContract.storedBookingSchema, readJson(column, text));
 export const readEstimate = (column: string, text: string): Estimate =>
   parseWith(column, apiContract.estimateSchema, readJson(column, text));
 

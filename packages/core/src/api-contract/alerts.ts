@@ -62,3 +62,5 @@ export const alertEventsQuerySchema = z.object({
   definitionId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
 });
+/** `GET /alerts?definitionId=`: one object, so handlers can name it. */
+export const alertRulesQuerySchema = alertEventsQuerySchema.pick({ definitionId: true });

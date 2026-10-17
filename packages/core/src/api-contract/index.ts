@@ -5,11 +5,13 @@ import {
   alertEventsQuerySchema,
   alertRuleInputSchema,
   alertRuleSchema,
+  alertRulesQuerySchema,
   alertRuleUpdateRequestSchema,
 } from './alerts.js';
 import {
   coverageCheckRequestSchema,
   coverageCheckResponseSchema,
+  definitionCreateOptionalSchema,
   definitionCreateRequestSchema,
   definitionResponseSchema,
   definitionUpdateRequestSchema,
@@ -80,9 +82,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/airports', airportsResponseSchema, { query: airportsQuerySchema }),
   route('GET', '/providers', providersResponseSchema),
   route('GET', '/definitions', definitionResponseSchema.array()),
-  route('POST', '/definitions', definitionResponseSchema, {
-    request: definitionCreateRequestSchema.optional(),
-  }),
+  route('POST', '/definitions', definitionResponseSchema, { request: definitionCreateOptionalSchema }),
   route('POST', '/definitions/estimate', estimateResponseSchema, { request: definitionCreateRequestSchema }),
   route('POST', '/definitions/coverage-check', coverageCheckResponseSchema, {
     request: coverageCheckRequestSchema,
@@ -114,9 +114,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/routes/:origin/:destination/history', routeHistoryResponseSchema, {
     query: routeHistoryQuerySchema,
   }),
-  route('GET', '/alerts', alertRuleSchema.array(), {
-    query: alertEventsQuerySchema.pick({ definitionId: true }),
-  }),
+  route('GET', '/alerts', alertRuleSchema.array(), { query: alertRulesQuerySchema }),
   route('POST', '/alerts', alertRuleSchema, { request: alertRuleInputSchema }),
   route('PUT', '/alerts/:id', alertRuleSchema, { request: alertRuleUpdateRequestSchema }),
   route('DELETE', '/alerts/:id', alertRuleSchema),

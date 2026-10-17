@@ -8,6 +8,7 @@ import type {
   Execution,
   ExecutionStatus,
   FxInfo,
+  HistoryPoint,
   Iata,
   IsoDateTime,
   NormalisedItinerary,
@@ -146,4 +147,12 @@ export interface ObservationRow extends Observation {
   itinerary: NormalisedItinerary;
   cell: Cell;
   seller: string;
+}
+/**
+ * One `offerHistory` point: the stored history point plus the observation's supplied fields (plan decision 42) and the
+ * execution that wrote it (decision 52: History joins only consecutive runs).
+ */
+export interface OfferHistoryPoint extends HistoryPoint {
+  suppliedFields: SuppliedField[];
+  executionId: string;
 }

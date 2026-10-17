@@ -68,6 +68,7 @@ export function row(over: Over = {}): ResultRow {
     },
     otherOffers: [],
     notSeenInLatest: null,
+    superseded: false,
     adjustedPence: null,
     destinationNote: null,
     executionId: 'ex-2',
