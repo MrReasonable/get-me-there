@@ -19,29 +19,25 @@ const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
 const NEAR_CAP = 0.8;
 
 /**
- * Spec §11 progress, one line per stage × provider (never summed across providers). The bar counts
- * attempts, labelled "attempted": priced, no fares, no cached data, error (decision 36), since "searched" is View D's
- * word and excludes errors;
- * skipped and not-searched cells are stated beside it, so the three always add up to the cell count.
- * The itinerary-search line counts against the selected cells, "itinerary-searched K of N selected"
- * (spec §3, §11), when the results response gives N.
+ * Spec §11 progress, one line per stage × provider (never summed across providers). Ruling 4 (decision 67): the line
+ * names the six buckets, so a run whose cells mostly came back "no cached data" never reads as fully covered; the
+ * "searched" umbrella appears only in View D beside its breakdown (spec §3, §6.6). The progress bar's value is the
+ * cells answered or failed so far (priced, no fares, no cached data, error), which only a screen reader's number uses.
+ * The itinerary-search line counts against the selected cells (spec §3, §11) when the results response gives N.
  */
 function progressLines(e: ExecutionResponse, selected: number | null) {
   return e.progress.map((p) => {
     const l = {
       stage: COPY.stageName[p.stage],
       provider: COPY.provider[p.providerId],
-      verb: COPY.progressVerb[p.stage],
-      done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
+      buckets: p.buckets,
       total: p.total,
-      error: p.buckets.error,
-      skipped: p.buckets.skipped,
-      notRun: p.buckets.not_run,
     };
     const bySelection = p.stage === 'verification' && selected !== null;
     return {
       ...l,
       key: `${p.stage}-${p.providerId}`,
+      done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
       max: bySelection ? selected : p.total,
       text: bySelection ? COPY.progressSelected({ ...l, selected }) : COPY.progress(l),
     };
@@ -71,14 +67,27 @@ function Spend({ text, used, cap }: { text: string; used: number; cap: number | 
   );
 }
 
-/** `provider-month:<id>` rows: the call cap is the hard stop on a subscription plan (spec §1, §5.3). */
-function ProviderMonths({ e }: { e: ExecutionResponse }) {
+/**
+ * Each provider's binding window (ruling 2, decision 67): the API sends only the window the plan uses, the month on a
+ * monthly plan and the lifetime on the trial, so the bar renders whichever arrives, worded as the Providers view words
+ * it, and the near-cap mark reads that window's cap. The call cap is the hard stop (spec §1, §5.3).
+ */
+function ProviderWindows({ e }: { e: ExecutionResponse }) {
   return apiContract.providerIdSchema.options.map((providerId) => {
-    const u = usageOf(e, budgetScopeLabel({ kind: 'provider-month', providerId }));
-    return u === null ? null : (
+    const provider = COPY.provider[providerId];
+    const month = usageOf(e, budgetScopeLabel({ kind: 'provider-month', providerId }));
+    const lifetime = usageOf(e, budgetScopeLabel({ kind: 'provider-lifetime', providerId }));
+    const u = lifetime ?? month;
+    if (u === null) return null;
+    const cap = capText(u.cap, String);
+    return (
       <Spend
         key={providerId}
-        text={COPY.spendProviderMonth(COPY.provider[providerId], u.calls, capText(u.cap, String))}
+        text={
+          lifetime !== null
+            ? COPY.spendProviderLifetime(provider, u.calls, cap)
+            : COPY.spendProviderMonth(provider, u.calls, cap)
+        }
         used={u.calls}
         cap={u.cap}
       />
@@ -245,8 +254,9 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
         ) : null}
       </div>
       {e !== undefined ? (
-        // why: on a phone the numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay visible above.
-        <details open={!narrow} className="text-sm">
+        // why: on a phone a finished run's numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay
+        // visible above. An active or paused run keeps them open (ruling 15, UI-006): spend is never hidden while it grows.
+        <details open={!narrow || active} className="text-sm">
           <summary className="min-h-11 cursor-pointer py-2">{COPY.runDetails}</summary>
           <div className="flex flex-wrap items-center gap-3">
             {progressLines(e, results.data?.coverage.selected ?? null).map((l) => (
@@ -293,7 +303,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
                 cap={month.cap}
               />
             ) : null}
-            <ProviderMonths e={e} />
+            <ProviderWindows e={e} />
           </div>
         </details>
       ) : null}

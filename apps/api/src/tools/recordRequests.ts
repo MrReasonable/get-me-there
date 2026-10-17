@@ -1,13 +1,27 @@
 /**
- * Hand-built vendor requests and response readers for record:fixtures (brief section 6, spec §5.2,
- * §5.4, docs/providers.md). Credentials go in headers only (spec §2 fact 8); nothing here is an
+ * Vendor requests and response readers for record:fixtures (brief section 6, spec §5.2, §5.4, docs/providers.md).
+ * Every request is built by the adapters' own builders (plan decision 32, ruling 18), so a recording sends exactly what
+ * the adapter sends. Credentials go in headers only (spec §2 fact 8); nothing here is an
  * airport, every code arrives as an argument.
  */
-import { asIata, asIsoMonth, type Config, daysBetween, type IsoDate, isoDateSchema } from '@gmt/core';
+import {
+  asIata,
+  asIsoMonth,
+  type Cabin,
+  type Config,
+  daysBetween,
+  type IsoDate,
+  isoDateSchema,
+} from '@gmt/core';
 import { type HttpKitDeps, searchApiHttpLimits, travelpayoutsHttpLimits } from '@gmt/providers';
-import { buildRequestUrl, PAGE_LIMIT } from '@gmt/providers/recording';
+import {
+  buildRequestUrl,
+  PAGE_LIMIT,
+  searchApiCalendarParams,
+  searchApiFlightsParams,
+  searchApiUrl,
+} from '@gmt/providers/recording';
 
-export const SA_URL = 'https://www.searchapi.io/api/v1/search';
 /** Spec §5.2 measured page size: the adapter's own constant, so recorded and replayed pages cannot drift apart. */
 export const TP_PAGE_LIMIT = PAGE_LIMIT;
 /** Deliberately invalid credentials for the 401 probes; not secrets, never real keys. */
@@ -15,14 +29,7 @@ export const INVALID_SEARCHAPI_KEY = 'invalid-key-for-401-recording';
 export const INVALID_TRAVELPAYOUTS_TOKEN = 'invalid-token-for-401-recording';
 
 /** The worked example's cabin, sent as SearchApi `travel_class` on every request (spec §5.4, plan decision 20). */
-export const RECORD_TRAVEL_CLASS = 'economy';
-
-/** Passengers on every SearchApi request, sent explicitly (plan decision 24; vendor default 1). */
-export const RECORD_ADULTS = '1';
-/** google_flights only (plan decision 24): results sorted by price. */
-export const RECORD_SORT_BY = 'price';
-/** Both engines (plan decisions 24 and 29; the vendor documents it for both): separate-ticket itineraries excluded. */
-export const RECORD_SEPARATE_TICKETS = '1';
+export const RECORD_TRAVEL_CLASS: Cabin = 'economy';
 
 /** A calendar rectangle (spec §5.2): outbound and return date ranges, both inclusive. */
 export interface Rect {
@@ -65,63 +72,50 @@ export function tpUrl(origin: string, destination: string, month: string, page: 
   );
 }
 
-export function saUrl(params: Readonly<Record<string, string>>): URL {
-  const url = new URL(SA_URL);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  return url;
+/**
+ * The SearchApi request for one planned call, built by the adapter's own builders (ruling 18 of decision 67): a
+ * calendar rectangle, or one cell's step with its token. `pointOfSale` is POINT_OF_SALE as configured.
+ */
+export function saCalendarUrl(origin: string, destination: string, r: Rect, pointOfSale: string): URL {
+  return searchApiUrl(
+    searchApiCalendarParams(
+      { origin: asIata(origin), destination: asIata(destination), cabin: RECORD_TRAVEL_CLASS },
+      {
+        kind: 'rectangle',
+        departFrom: r.outFrom,
+        departTo: r.outTo,
+        returnFrom: r.retFrom,
+        returnTo: r.retTo,
+      },
+      pointOfSale,
+    ),
+  );
 }
 
-/** google_flights_calendar over one rectangle. outbound_date/return_date are required by the docs. */
-export function calendarParams(
-  origin: string,
-  destination: string,
-  r: Rect,
-  gl: string,
-): Record<string, string> {
-  return {
-    engine: 'google_flights_calendar',
-    departure_id: origin,
-    arrival_id: destination,
-    outbound_date: r.outFrom,
-    outbound_date_start: r.outFrom,
-    outbound_date_end: r.outTo,
-    return_date: r.retFrom,
-    return_date_start: r.retFrom,
-    return_date_end: r.retTo,
-    flight_type: 'round_trip',
-    travel_class: RECORD_TRAVEL_CLASS,
-    adults: RECORD_ADULTS,
-    separate_tickets: RECORD_SEPARATE_TICKETS,
-    currency: 'GBP',
-    gl,
-    hl: 'en',
-  };
-}
-
-/** google_flights for one cell; steps 2 and 3 add one token (spec §5.4). */
-export function flightsParams(
+export function saFlightsUrl(
   origin: string,
   destination: string,
   cell: CellDates,
-  gl: string,
-  token: Readonly<Record<string, string>>,
-): Record<string, string> {
-  return {
-    engine: 'google_flights',
-    departure_id: origin,
-    arrival_id: destination,
-    outbound_date: cell.departure,
-    return_date: cell.return,
-    flight_type: 'round_trip',
-    travel_class: RECORD_TRAVEL_CLASS,
-    adults: RECORD_ADULTS,
-    sort_by: RECORD_SORT_BY,
-    separate_tickets: RECORD_SEPARATE_TICKETS,
-    currency: 'GBP',
-    gl,
-    hl: 'en',
-    ...token,
-  };
+  pointOfSale: string,
+  token?: { departure_token: string } | { booking_token: string },
+): URL {
+  return searchApiUrl(
+    searchApiFlightsParams(
+      {
+        origin: asIata(origin),
+        destination: asIata(destination),
+        departureDate: cell.departure,
+        returnDate: cell.return,
+        cabin: RECORD_TRAVEL_CLASS,
+        adults: 1,
+        currency: 'GBP',
+        expandTop: 1,
+        bookingLinks: true,
+      },
+      pointOfSale,
+      token,
+    ),
+  );
 }
 
 /** Plain-object guard for vendor JSON; the one copy the record tool's modules share. */

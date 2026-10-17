@@ -42,7 +42,9 @@ function holdAppLock(dbPath: string, stale: boolean): void {
   db.close();
 }
 
-describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
+// why: ruling 11: each case spawns the tool bootstrap under node with tsx (up to about 1.6 s unloaded); 60 s survives
+// a loaded runner; the slowest cases set their own 60 s as well.
+describe('tool bootstrap as a real process (spec §5.5, §7)', { timeout: 60_000 }, () => {
   it('NODE_ENV=test → exit 70, nothing opened', () => {
     const dbPath = freshDbPath();
     const r = spawnTool(toolEnv(dbPath, { NODE_ENV: 'test' }));

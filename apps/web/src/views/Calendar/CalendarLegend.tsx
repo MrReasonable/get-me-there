@@ -7,7 +7,7 @@ import type { DayBasis } from './types.js';
 
 /**
  * Numeric legend (spec §11 View B): the basis on the scale and how it is banded (or why it is flat), each band's pence
- * range and day count, the hatched days and the glyphs stay open; the explanations of the marks (dashed, stale,
+ * range and day count, the hatched days, the dashed outline and the glyphs stay open; the explanations of the marks (stale,
  * coverage cue, "cached from", "cheapest of the rows read", the stay, the band number and the phone glyphs) fold into "What the marks mean" (review ui-r2-006), so a phone reaches the grid soon.
  * `data-scale` marks the legend's scale values, the one exemption the rendered sweep grants (plan decision 52).
  */
@@ -62,6 +62,8 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
           {L.priceless}
         </li>
       </ul>
+      {/* why: UI-F3: the dashed outline is the face's "constraints not checked" cue, so its key is never folded away */}
+      <p>{L.dashed}</p>
       <p>{L.glyphs}</p>
       <ul className="flex flex-wrap gap-x-4">
         {GLYPH_ORDER.map((g) => (
@@ -74,12 +76,7 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
       <details>
         <summary className="cursor-pointer">{L.more}</summary>
         <ul className="flex flex-col gap-0.5">
-          <li>{L.dashed}</li>
           <li>{L.stale}</li>
-          <li>
-            <span aria-hidden="true" className="cov-swatch cov-full mr-1 align-middle" />
-            {L.coverageFull}
-          </li>
           <li>
             <span aria-hidden="true" className="cov-swatch cov-partial mr-1 align-middle" />
             {L.coveragePartial}

@@ -43,6 +43,8 @@ export const providersResponseSchema = z.object({
       usage: z.array(usageSchema),
       excludedFromSchedule: z.boolean(),
       notices: z.array(z.string()),
+      /** Ruling 5: on a billed plan whose calls cost £0, which call cap is the hard stop; null otherwise. */
+      capNote: z.string().nullable(),
     }),
   ),
   synthetic: z.boolean(),

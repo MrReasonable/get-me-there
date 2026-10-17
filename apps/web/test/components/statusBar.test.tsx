@@ -24,14 +24,14 @@ const bar = (over: Parameters<typeof definition>[0] = {}, showRunNow = true) => 
 afterEach(() => vi.useRealTimers());
 
 describe('status bar (spec §11)', () => {
-  it('one honest progress line per stage × provider: answered cells, skipped and not searched always add up', async () => {
+  it('one honest progress line per stage × provider: the six buckets, never an "attempted" umbrella (ruling 4)', async () => {
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
     renderWithProviders(bar());
     expect(await screen.findByText('running')).toBeInTheDocument();
     const lines = screen.getAllByRole('progressbar');
     expect(lines.map((l) => l.textContent)).toEqual([
-      'discovery · Travelpayouts: attempted 116 of 126 cells (6 error) · 0 skipped · 10 not searched',
-      'itinerary search · SearchApi: attempted 0 of 10 selected (0 error) · 116 skipped · 10 not searched',
+      'discovery · Travelpayouts: 60 priced · 10 no fares · 40 no cached data · 6 error · 0 skipped · 10 not searched of 126 cells',
+      'itinerary search · SearchApi: 0 priced · 0 no fares · 0 no cached data · 0 error of 10 selected · 116 skipped · 10 not searched',
     ]);
     // why: screen readers announce a progressbar's value text, not its child text, so the unsearched count must be in it.
     expect(lines.map((l) => l.getAttribute('aria-valuetext'))).toEqual(lines.map((l) => l.textContent));
@@ -183,14 +183,21 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => posts).toBe(1);
   });
 
-  it('at 375px the numbers fold into one disclosure; status and Cancel stay visible (UI-14)', async () => {
+  it('at 375px the numbers of a finished run fold into one disclosure; an active run keeps them open (UI-14, UI-006)', async () => {
     setViewportWidth(375);
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
-    renderWithProviders(bar());
+    const first = renderWithProviders(bar());
     await screen.findByText('running');
-    const details = screen.getByText('Progress and spend').closest('details');
-    expect(details).not.toHaveAttribute('open');
+    // why: ruling 15: spend against the cap is never folded away while it can still grow.
+    expect(screen.getByText('Progress and spend').closest('details')).toHaveAttribute('open');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    first.unmount();
+    server.use(
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'completed' }))),
+    );
+    renderWithProviders(bar());
+    await screen.findByText('completed');
+    expect(screen.getByText('Progress and spend').closest('details')).not.toHaveAttribute('open');
   });
 
   it('shows "schedule blocked since <date>" from coverage.scheduleBlockedSince', async () => {
@@ -257,6 +264,33 @@ describe('status bar (spec §11)', () => {
     [5, null, false],
   ])('near cap: %i used of %s is %s (review tsr2-013)', (used, cap, expected) => {
     expect(near(used, cap)).toBe(expected);
+  });
+
+  it("a trial plan shows SearchApi's lifetime window, worded as Providers words it, and marks it near cap (ruling 2, F2)", async () => {
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            budget: [
+              usage('provider-lifetime:searchapi', 20, 24),
+              usage(
+                'provider-month:travelpayouts',
+                2,
+                50000,
+                0,
+                '2026-10-01T00:00:00.000Z',
+                '2026-11-01T00:00:00.000Z',
+              ),
+            ],
+          }),
+        ),
+      ),
+    );
+    renderWithProviders(bar());
+    const line = await screen.findByText("SearchApi 20 of 24 calls over the plan's lifetime");
+    expect(line).toHaveTextContent('near cap');
+    expect(screen.getByText('this month: Travelpayouts 2 of 50000 calls')).not.toHaveTextContent('near cap');
+    expect(screen.queryByText(/no cap/)).toBeNull();
   });
 
   it('a null cap reads "no cap" and is never marked near', async () => {

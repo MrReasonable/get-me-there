@@ -32,10 +32,11 @@ export function credentialsMatch(
 }
 
 /**
- * Spec §4 and plan decision 54: 5 failed sign-ins a minute per client IP (TRUST_PROXY-aware, see `clientIpFrom`). In
- * memory: one process, one operator. why: no global bucket, because anyone who can reach the port could then keep the
- * operator out by spending it; and a correct credential always succeeds, so the limit slows guessing without ever
- * locking the operator out. A request whose IP is unknown (no socket, no trusted proxy header) shares one bucket.
+ * Spec §4, plan decision 54 and ruling 13 of decision 67: 5 failed sign-ins a minute per client IP (TRUST_PROXY-aware,
+ * see `clientIpFrom`), with a global fallback of 20 a minute across all sources, so a guesser spreading attempts over
+ * many addresses is slowed too. In memory: one process, one operator. A correct credential always succeeds, whatever
+ * either bucket says, so spending the global bucket slows guessing but never locks the operator out. A request whose
+ * IP is unknown (no socket, no trusted proxy header) shares one per-IP bucket.
  * Memory is bounded by age and by size (review SEC-R2-1): past `maxSources` addresses the least recently failing one is
  * dropped, in constant time, so a spray of spoofed addresses cannot grow the map or slow each failure. (With
  * TRUST_PROXY=true a client that reaches the app directly can choose its address, which defeats any per-IP limit: that
@@ -43,9 +44,11 @@ export function credentialsMatch(
  */
 export class FailedAuthLimiter {
   private readonly byIp = new Map<string, number[]>();
+  /** Every recent failure from any source, oldest first (the global fallback). */
+  private all: number[] = [];
   constructor(
     private readonly clock: Clock,
-    private readonly limits = { perIp: 5, windowMs: 60_000, maxSources: 10_000 },
+    private readonly limits = { perIp: 5, global: 20, windowMs: 60_000, maxSources: 10_000 },
   ) {}
 
   private now(): number {
@@ -59,17 +62,25 @@ export class FailedAuthLimiter {
     return list;
   }
 
-  /** Seconds until this source may try again, or null when it is not limited. */
+  /** Seconds until the oldest of the last `limit` failures in `list` leaves the window, or null under the limit. */
+  private wait(list: readonly number[], limit: number, now: number): number | null {
+    if (list.length < limit) return null;
+    const pivot = list[list.length - limit] ?? now;
+    return Math.max(1, Math.ceil((pivot + this.limits.windowMs - now) / 1000));
+  }
+
+  /** Seconds until this source may try again, or null when neither its bucket nor the global one is spent. */
   retryAfterSeconds(ip: string): number | null {
     const now = this.now();
-    const list = this.recent(ip, now);
-    if (list.length < this.limits.perIp) return null;
-    const pivot = list[list.length - this.limits.perIp] ?? now;
-    return Math.max(1, Math.ceil((pivot + this.limits.windowMs - now) / 1000));
+    this.all = this.all.filter((t) => now - t < this.limits.windowMs);
+    const perIp = this.wait(this.recent(ip, now), this.limits.perIp, now);
+    const global = this.wait(this.all, this.limits.global, now);
+    return perIp === null ? global : global === null ? perIp : Math.max(perIp, global);
   }
 
   recordFailure(ip: string): void {
     const now = this.now();
+    this.all = [...this.all.filter((t) => now - t < this.limits.windowMs), now];
     const list = [...this.recent(ip, now), now];
     // why: delete then set, so the Map's insertion order is least recently failing first, and eviction takes the head.
     this.byIp.delete(ip);

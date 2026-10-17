@@ -32,15 +32,14 @@ import {
 import { assessRun, formatSummary, ledgerLine, retryAttemptLines, sessionOfCalls } from './recordReport.js';
 import {
   bookingOptions,
-  calendarParams,
   cheapestCalendarCell,
   cheapestOption,
   dataRowCount,
-  flightsParams,
   INVALID_SEARCHAPI_KEY,
   INVALID_TRAVELPAYOUTS_TOKEN,
   recordingLimits,
-  saUrl,
+  saCalendarUrl,
+  saFlightsUrl,
   TP_PAGE_LIMIT,
   tpUrl,
 } from './recordRequests.js';
@@ -201,7 +200,8 @@ class PlanRun {
   private readonly params = new ParamLog(paramRules());
   private readonly track: ReturnType<typeof tracking>;
   private readonly kit: HttpKit;
-  private readonly gl: string;
+  /** POINT_OF_SALE as configured; the adapter's builders lower-case it into `gl` (spec §5.2). */
+  private readonly pointOfSale: string;
   private cell: CellDates | null = null;
   private departureToken: string | null = null;
   private bookingToken: string | null = null;
@@ -222,7 +222,7 @@ class PlanRun {
     private readonly providers: RecordingProviders,
   ) {
     this.track = tracking(recorder);
-    this.gl = ports.config.pointOfSale.toLowerCase();
+    this.pointOfSale = ports.config.pointOfSale;
     this.kit = createHttpKit({
       budget: ports.budget,
       cache: ports.cache,
@@ -359,7 +359,7 @@ class PlanRun {
           break;
         }
         case 'sa-calendar': {
-          const url = saUrl(calendarParams(s.origin, s.destination, s.rect, this.gl));
+          const url = saCalendarUrl(s.origin, s.destination, s.rect, this.pointOfSale);
           const r = await this.exec(
             call.id,
             'searchapi',
@@ -381,7 +381,7 @@ class PlanRun {
             this.skip(call, 'skipped: calendar SA-02 gave no usable cell; the run must be repeated');
             break;
           }
-          const url = saUrl(calendarParams(s.origin, s.destination, s.rect, this.gl));
+          const url = saCalendarUrl(s.origin, s.destination, s.rect, this.pointOfSale);
           await this.exec(
             call.id,
             'searchapi',
@@ -395,7 +395,7 @@ class PlanRun {
         case 'sa-step3': {
           const token =
             s.kind === 'sa-step1'
-              ? {}
+              ? undefined
               : s.kind === 'sa-step2'
                 ? this.departureToken === null
                   ? null
@@ -410,7 +410,7 @@ class PlanRun {
             );
             break;
           }
-          const url = saUrl(flightsParams(s.origin, s.destination, this.cell, this.gl, token));
+          const url = saFlightsUrl(s.origin, s.destination, this.cell, this.pointOfSale, token);
           const r = await this.exec(
             call.id,
             'searchapi',
@@ -435,7 +435,7 @@ class PlanRun {
           break;
         }
         case 'sa-auth': {
-          const url = saUrl(flightsParams(s.origin, s.destination, s.cell, this.gl, {}));
+          const url = saFlightsUrl(s.origin, s.destination, s.cell, this.pointOfSale);
           await this.exec(
             call.id,
             'searchapi',

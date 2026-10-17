@@ -9,6 +9,7 @@ import {
   cellSchema,
   constraintNameSchema,
   coverageSummarySchema,
+  executionStatusSchema,
   executionSummarySchema,
   layoverSchema,
   microGbpSchema,
@@ -154,7 +155,8 @@ export const calendarResponseSchema = z.object({
  * its departure date and destination. `searched` counts per series: `total` is the cells of this nights value in the
  * series' scope (verification: the selected cells; discovery: every cell) and `searched` those whose outcome is
  * `priced`, `empty` or `no_data` (verification: any verification provider's outcome; discovery: that provider's), so
- * "not searched", "searched k of N" and "searched, no price" stay distinct per series.
+ * "not searched" and partial coverage stay distinct per series. A discovery series also carries its six buckets, so the
+ * view words a gap by bucket ("12 no cached data"), never with the "searched" umbrella View D alone shows (ruling 4).
  */
 const searchedCount = z.object({ searched: count, total: count });
 export const durationAnalysisResponseSchema = z.object({
@@ -167,7 +169,8 @@ export const durationAnalysisResponseSchema = z.object({
       minCalendar: z.array(z.object({ providerId: providerIdSchema, price: calendarFigure, n: count })),
       searched: z.object({
         verification: searchedCount,
-        discovery: z.array(searchedCount.extend({ providerId: providerIdSchema })),
+        /** `buckets` (N1, ruling 4): the six buckets of the provider's cells at this nights value, which View C names. */
+        discovery: z.array(searchedCount.extend({ providerId: providerIdSchema, buckets: bucketsSchema })),
       }),
     }),
   ),
@@ -184,6 +187,8 @@ export const coverageResponseSchema = z.object({
       total: count,
       requests: z.object({
         calls: count,
+        /** Distinct tiles requested: what discovery's `planCalls` counts and its overrun is judged on (cost-008). */
+        tiles: count,
         cacheHits: count,
         costMicroGbp: microGbpSchema,
         planCalls: count.nullable(),
@@ -206,6 +211,28 @@ export const coverageResponseSchema = z.object({
     }),
   ),
   scheduleBlockedSince: isoDateTimeSchema.nullable(),
+  /**
+   * Ruling 15 (UI-004): the definition's on-demand itinerary searches, newest first, below the parent run, each with
+   * its own buckets per stage × provider and its own ledger calls, so View D never presents the parent's ledger as the
+   * definition's whole spend.
+   */
+  onDemand: z.array(
+    z.object({
+      executionId: z.string(),
+      status: executionStatusSchema,
+      startedAt: isoDateTimeSchema.nullable(),
+      cell: cellSchema,
+      perStage: z.array(
+        z.object({
+          stage: stageSchema,
+          providerId: providerIdSchema,
+          buckets: bucketsSchema,
+          total: count,
+          requests: z.object({ calls: count, cacheHits: count, costMicroGbp: microGbpSchema }),
+        }),
+      ),
+    }),
+  ),
 });
 export const calendarGapResponseSchema = z.object({
   cheapestVerified: verifiedFigure.nullable(),
@@ -248,7 +275,8 @@ export const cellDetailResponseSchema = z.object({
    * child's hard stop and the calls of budget headroom left for it. Null when the definition has no verification
    * provider.
    */
-  verify: z.object({ maxCalls: count, headroomCalls: count }).nullable(),
+  /** needCalls (N2): the calls one search of this cell takes, so a 0-call definition can name the cap that fixes it. */
+  verify: z.object({ maxCalls: count, headroomCalls: count, needCalls: count }).nullable(),
 });
 export const historyPointSchema = z.object({
   at: isoDateTimeSchema,
@@ -263,10 +291,15 @@ export const historyPointResponseSchema = historyPointSchema.extend({
   stale: z.boolean(),
   truncated: z.boolean(),
 });
-/** No cabin, so no full provenance; plotted by `date`. */
+/**
+ * A point of a vendor's price-history series for one searched trip; no full provenance (spec §11), plotted by `date`.
+ * `currency` is the literal 'GBP': only vendor-stated GBP points are stored (the repository refuses any other, prov-004),
+ * so a point is never FX-converted and never carries "≈".
+ */
 export const routeSeriesPointSchema = z.object({
   date: isoDateSchema,
   pricePence: moneyPenceSchema,
+  currency: z.literal('GBP'),
   fetchedAt: isoDateTimeSchema,
   providerId: providerIdSchema,
   sourceKind: sourceKindSchema,
@@ -304,9 +337,14 @@ export const routeHistoryResponseSchema = z.object({
       points: z.array(historyPointResponseSchema.extend({ cell: cellSchema, executionId: z.string() })),
     }),
   ),
+  /**
+   * Ruling 6 (spec §7, §10 rev 28): one series per searched trip, provider and cabin. `trip` is null for points stored
+   * before migration 0003, whose trip was never recorded ("trip unknown"; their cabin is 'unknown').
+   */
   routeSeries: z.array(
     z.object({
       providerId: providerIdSchema,
+      trip: z.object({ departureDate: isoDateSchema, returnDate: isoDateSchema }).nullable(),
       cabin: z.union([cabinSchema, z.literal('unknown')]),
       /** `stale` by fetch age (decision 54); the stored point type is unchanged */
       points: z.array(routeSeriesPointSchema.extend({ stale: z.boolean() })),

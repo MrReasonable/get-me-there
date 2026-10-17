@@ -32,10 +32,13 @@ describe('shell (spec §11 layout)', () => {
     expect(within(nav).getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('a skip link comes first and targets the main region; the nav scrolls instead of wrapping (UI-15)', async () => {
+  it('a skip link comes first and targets the main region; the nav wraps into rows, never a hidden sideways scroll (UI-011)', async () => {
     const { user } = renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
     const nav = await screen.findByRole('navigation', { name: 'Views' });
-    expect(nav).toHaveClass('overflow-x-auto');
+    // why: UI-011: a sideways-scrolling nav cut "Coverage" to "Co" and hid three views at 375 px with no affordance;
+    // eight 44 px links fit two rows there (the phone e2e measures it).
+    expect(nav).not.toHaveClass('overflow-x-auto');
+    expect(nav.querySelector('ul')).toHaveClass('flex-wrap');
     await user.tab();
     const skip = screen.getByRole('link', { name: 'Skip to the main content' });
     expect(skip).toHaveFocus();
@@ -46,7 +49,6 @@ describe('shell (spec §11 layout)', () => {
   it('alerts renders the Alerts view for the selected definition', async () => {
     renderWithProviders(<App />, { search: '?view=alerts&def=def-0001' });
     expect(await screen.findByRole('heading', { name: COPY.alertsView.heading })).toBeInTheDocument();
-    expect(screen.queryByText(COPY.placeholder)).toBeNull();
   });
 
   it('definition selector lists definitions and writes def= to the URL', async () => {

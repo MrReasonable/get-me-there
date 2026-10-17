@@ -117,7 +117,11 @@ describe('failureOf: how a failed request is reported (cost-wp4b-r2-003, cost M-
   });
 });
 
-describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Recorder)', () => {
+// why: ruling 11: each test records the worked example (a migrated database, 7,917 airports, about 26 calls through
+// the real http-kit and recorder), about 2.5 s unloaded; 30 s keeps a loaded CI runner a slow pass, never a flake.
+describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Recorder)', {
+  timeout: 30_000,
+}, () => {
   it('issues the planned calls, follows the token chain and records every response', async () => {
     const run = await runRecording();
     const { summary, seen, plan, root } = run;
@@ -530,10 +534,10 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(ports.db.raw.prepare('SELECT COUNT(*) AS n FROM search_executions').get()).toEqual({ n: 0 });
   });
 
-  // why: it builds two real SQLite-backed ports and runs the recording tool twice against a real ledger; under full-suite
-  // load it once took 5,014 ms, past vitest's 5 s default, so it gets an explicit 15 s budget (coordinator ruling).
+  // why: it builds two real SQLite-backed ports and runs the recording tool twice against a real ledger (about 4.8 s
+  // unloaded, once 5,014 ms under full-suite load), so ruling 11 gives it 60 s, twice the describe's per-recording budget.
   it('priorToolCredits counts tool runs inside the SearchApi window only: lifetime on the trial, the billing month on 40usd (r2-ts-004)', {
-    timeout: 15_000,
+    timeout: 60_000,
   }, async () => {
     const clock = fixedClock(AT);
     const ports = seededPorts({ SEARCHAPI_PLAN: '40usd' }, clock);

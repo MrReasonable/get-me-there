@@ -18,7 +18,7 @@ import {
 import { majorToMinor } from '@gmt/providers/recording';
 import type { Ports } from '../wiring.js';
 import { cheapestOption } from './recordRequests.js';
-import type { Chain, Discovery, SmokeProviderReport, Vendor } from './smoke.js';
+import type { Chain, Discovery, SmokeProviderReport, Vendor } from './smokeStages.js';
 
 /** One line of the checklist. */
 export interface SmokeCheck {
@@ -251,10 +251,12 @@ export function checklist(i: ChecklistInput): SmokeCheck[] {
     const jaw = (tile.cellIssues ?? []).filter((x) => x.detail.includes('[open-jaw]'));
     const rows = jaw.reduce((n, x) => n + openJawRows(x.detail), 0);
     const dropped = noteCount(tile.notes, 'offers-dropped');
+    // why: pie-002: a priced row whose link token cannot be read was never checked for an open jaw; count it here.
+    const unreadable = noteCount(tile.notes, 'itinerary-unreadable');
     add(
       'open-jaw drop',
       rows > dropped ? 'fail' : 'look',
-      `${rows} open-jaw row(s) dropped in ${jaw.length} cell(s)${jaw.length === 0 ? '' : ` (${jaw.map((x) => `${x.cell.departureDate}–${x.cell.returnDate}`).join(', ')})`}; ${dropped} row(s) dropped in all${rows > dropped ? '; the issues count more rows than the tile dropped' : ''}`,
+      `${rows} open-jaw row(s) dropped in ${jaw.length} cell(s)${jaw.length === 0 ? '' : ` (${jaw.map((x) => `${x.cell.departureDate}–${x.cell.returnDate}`).join(', ')})`}; ${dropped} row(s) dropped in all${rows > dropped ? '; the issues count more rows than the tile dropped' : ''}; ${unreadable} priced row(s) whose link names no readable itinerary`,
     );
   }
 

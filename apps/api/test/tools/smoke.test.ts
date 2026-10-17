@@ -77,7 +77,9 @@ const lineOf = (r: SmokeResult, start: string): string => r.lines.find((l) => l.
 const billed = (ports: Ports, r: SmokeResult): number =>
   ports.budget.usage({ kind: 'execution-calls', executionId: r.executionId ?? '' }).calls;
 
-describe('runSmoke (spec §9 item 7)', () => {
+// why: ruling 11: each case seeds 7,917 airports into a fresh database and runs the smoke through the real http-kit
+// (up to about 1.5 s unloaded); 30 s keeps a loaded runner a slow pass.
+describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
   it('exits 0 with provenance: one tile per provider, one chain, the confirmed price as headline, every check passed, dated fixtures outside the recorded tree', async () => {
     const ports = smokePorts();
     const { r, root, urls } = await smoke(ports);
@@ -107,15 +109,20 @@ describe('runSmoke (spec §9 item 7)', () => {
     );
     // why: decision 66: the headline is the cheapest price a seller listing confirmed (the agent's £573 at step 3)
     expect(r.summary).toBe(
-      "cheapest confirmed price £573 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Google Flights via SearchApi, sold by Synthetic Travel Agent · fetched just now · vendor's cache age unknown",
+      "cheapest confirmed price £573 · LHR→JFK 2027-03-02–2027-03-16 (14n) · out 19h 00m nonstop, back 10h 00m nonstop · Google Flights via SearchApi, sold by Synthetic Travel Agent · fetched just now · vendor's cache age unknown",
     );
     expect(r.lines).toContain(r.summary);
     // why: Travelpayouts' £412 row is its cheapest; the £377 row flew back to another airport and was dropped (decision 39)
     expect(lineOf(r, 'travelpayouts discovery: priced')).toContain(
       'cheapest £412 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Aviasales cache · fetched just now · observed 10d ago',
     );
+    // why: N4 (pie-007): SearchApi's date grid states no cache age; the app's 24 h bound reads as assumed
+    expect(lineOf(r, 'searchapi discovery: priced')).toContain(
+      'fetched just now · provider age assumed ≤24h (undocumented) before that',
+    );
+    // why: pie-002: the line also says how many priced rows had no readable itinerary, so the guard's gaps are visible.
     expect(r.lines).toContain(
-      '  [look] open-jaw drop: 1 open-jaw row(s) dropped in 1 cell(s) (2027-03-03–2027-03-15); 1 row(s) dropped in all',
+      '  [look] open-jaw drop: 1 open-jaw row(s) dropped in 1 cell(s) (2027-03-03–2027-03-15); 1 row(s) dropped in all; 0 priced row(s) whose link names no readable itinerary',
     );
     expect(r.lines.some((l) => l.includes('£603 at step 1, £603 at step 2'))).toBe(true);
     expect(
@@ -267,7 +274,7 @@ describe('runSmoke (spec §9 item 7)', () => {
       'travelpayouts 1 tile, 1 answer(s) matched in the ledger by endpoint and status, 1 retried attempt(s), 0 cache hit(s)',
     );
     expect(r.exitCode).toBe(EXIT.ok);
-  }, 20_000);
+  }, 60_000); // why: ruling 11: a real-time http-kit retry plus a seeded database; 60 s survives a loaded runner
 
   it('1: step 2 showing another price than step 1 fails the check', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step2Price: 610 });
@@ -276,10 +283,19 @@ describe('runSmoke (spec §9 item 7)', () => {
     expect(r.lines.some((l) => l.includes('£603 at step 1, £610 at step 2'))).toBe(true);
   });
 
+  it('an itinerary price says how long each way takes and its stops; a calendar price says nothing it does not know (pft-005)', async () => {
+    const { r } = await smoke(smokePorts(), cli());
+    // why: the smoke applies no definition constraint, but it says what it found, so a 41-hour fare never hides.
+    expect(r.summary).toMatch(
+      / · out \d+h \d\dm (nonstop|\d stops?), back \d+h \d\dm (nonstop|\d stops?) · /,
+    );
+    expect(lineOf(r, 'travelpayouts discovery: priced')).not.toMatch(/ · out \d/);
+  });
+
   it('an unconfirmed step-2 price is never "sold by": it names the airline and carries the decision-44 label', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step3Dearer: true });
     expect(lineOf(r, 'searchapi itinerary: priced')).toContain(
-      "cheapest £603 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Google Flights via SearchApi, airline stated by the vendor: Synthetic Air One · fetched just now · vendor's cache age unknown · price not confirmed by the final step",
+      "cheapest £603 · LHR→JFK 2027-03-02–2027-03-16 (14n) · out 19h 00m nonstop, back 10h 00m nonstop · Google Flights via SearchApi, airline stated by the vendor: Synthetic Air One · fetched just now · vendor's cache age unknown · price not confirmed by the final step",
     );
     expect(r.summary.startsWith('cheapest confirmed price £650 ·')).toBe(true);
     expect(r.exitCode).toBe(EXIT.ok);
@@ -379,7 +395,8 @@ describe('runSmoke (spec §9 item 7)', () => {
  * on top of one real run's ledger. Every case asserts `fail`; each was shown to pass vacuously under a mutation that
  * turns its branch into `pass`.
  */
-describe('checklist FAIL branches (negative controls)', () => {
+// why: ruling 11: each case runs the smoke over a seeded database (about 1 s unloaded); 30 s survives a loaded runner.
+describe('checklist FAIL branches (negative controls)', { timeout: 30_000 }, () => {
   async function base(): Promise<{ ports: Ports; input: ChecklistInput; tp: SmokeProviderReport }> {
     const ports = smokePorts();
     const { r } = await smoke(ports);

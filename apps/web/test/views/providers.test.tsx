@@ -21,10 +21,9 @@ describe('Providers view (spec §10, §11)', () => {
     renderWithProviders(<ProvidersView />);
     const searchapi = await screen.findByRole('region', { name: 'SearchApi' });
     expect(within(searchapi).getByText('plan: SearchApi $40 a month')).toBeInTheDocument();
+    // why: ruling 17 (pie-007): an assumed bound reads as an assumption, never as the vendor's own.
     expect(
-      within(searchapi).getByText(
-        `Discovery: Google date grid via SearchApi · prices up to ${formatDuration(24)} old when fetched`,
-      ),
+      within(searchapi).getByText('Discovery: Google date grid via SearchApi · assumed ≤24h (undocumented)'),
     ).toBeInTheDocument();
     expect(
       within(searchapi).getByText(
@@ -45,6 +44,32 @@ describe('Providers view (spec §10, §11)', () => {
     expect(formatDuration(48)).toBe('2d'); // canary for the format
   });
 
+  it("heads each card with the provider's name, the one the status bar and filters use; the source labels stay on the capability lines (UI-003)", async () => {
+    const base = providersResponse();
+    server.use(
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json({
+          ...base,
+          providers: base.providers.map((p) =>
+            p.providerId === 'travelpayouts' ? { ...p, displayName: 'Aviasales cache' } : p,
+          ),
+        }),
+      ),
+    );
+    renderWithProviders(<ProvidersView />);
+    const tp = await screen.findByRole('region', { name: 'Travelpayouts' });
+    expect(within(tp).getByRole('heading', { level: 3 })).toHaveTextContent(/^Travelpayouts /);
+    expect(within(tp).getByText(/^Discovery: Aviasales cache/)).toBeInTheDocument();
+  });
+
+  it('names the call cap that governs a £0-per-call plan as a plain line, never an alert (ruling 5)', async () => {
+    renderWithProviders(<ProvidersView />);
+    const searchapi = await screen.findByRole('region', { name: 'SearchApi' });
+    const note = within(searchapi).getByText(/the monthly call cap \(10000 calls\) is the hard stop/);
+    expect(note.closest('[role="alert"]')).toBeNull();
+    expect(within(searchapi).queryByRole('alert')).toBeNull();
+  });
+
   it("shows each provider's notices (the zero-cap message) and marks unconfigured providers", async () => {
     server.use(
       http.get(`${API}/providers`, () =>
@@ -61,21 +86,21 @@ describe('Providers view (spec §10, §11)', () => {
     expect(within(searchapi).getByText('not configured')).toBeInTheDocument();
   });
 
-  it('only a provider-lifetime scope reads as lifetime; a row without bounds states no window (review prov-020)', async () => {
+  it('a trial plan shows its lifetime window only and never prints "no cap" (review prov-020, ruling 2)', async () => {
     server.use(
       http.get(`${API}/providers`, () =>
         HttpResponse.json(
           withSearchApi({
             plan: 'trial',
             excludedFromSchedule: true,
-            usage: [usage('provider-lifetime:searchapi', 9, 100), usage('provider-month:searchapi', 9, null)],
+            usage: [usage('provider-lifetime:searchapi', 9, 100)],
           }),
         ),
       ),
     );
     renderWithProviders(<ProvidersView />);
     expect(await screen.findByText("9 of 100 calls over the plan's lifetime")).toBeInTheDocument();
-    expect(screen.getByText('this month: 9 of no cap calls')).toBeInTheDocument();
+    expect(screen.queryByText(/no cap/)).toBeNull();
     expect(screen.getByText('plan: SearchApi trial credits (lifetime allowance)')).toBeInTheDocument();
     expect(screen.getByText('excluded from scheduled runs')).toBeInTheDocument();
   });

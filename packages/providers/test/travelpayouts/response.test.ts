@@ -26,6 +26,9 @@ const input = {
   currency: GBP,
 };
 const LINK = 'https://www.aviasales.com/search/synthetic?t=1';
+/** The harness's default row link for an LHR → JFK row: a readable closed itinerary (pie-002). */
+const ROW_LINK =
+  'https://www.aviasales.com/search/X?t=ZZ18146070001814617500000475LHRJFK18158511001815894900000430JFKLHR_1d1bd24f_58507';
 const thrown = (f: () => unknown) => {
   try {
     f();
@@ -69,7 +72,7 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
         returnDate: '2027-03-23',
         amountMinor: 41200,
         currency: 'GBP',
-        vendorLink: LINK,
+        vendorLink: ROW_LINK,
       },
       {
         origin: 'LHR',
@@ -78,7 +81,7 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
         returnDate: '2027-03-23',
         amountMinor: 39800,
         currency: 'GBP',
-        vendorLink: LINK,
+        vendorLink: ROW_LINK,
       },
       {
         origin: 'LHR',
@@ -98,6 +101,8 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
       'dropped-other-origin:1',
       'dropped-outside-band:1',
       'dropped-outside-tile:1',
+      // why: pie-002: the refused off-host link carries no readable itinerary either, so its open-jaw check is counted.
+      'itinerary-unreadable:1',
       'link-rejected:1',
       'offers-dropped:4',
     ]);
@@ -445,13 +450,37 @@ describe('closed round trips only (decision 35): an open-jaw row, on either end,
     expect(r.cellIssues[0]?.detail).toContain('[open-jaw]');
   });
 
-  it('prices a row whose link has no readable itinerary: the return cannot be checked, and nothing is invented about it', () => {
+  it('prices a row whose link has no readable itinerary on its airports, and counts it (pie-002): the return cannot be checked', () => {
     const r = attributeRows(
-      [row({ origin: 'LHR', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 })],
+      [
+        row({
+          origin: 'LHR',
+          dest: 'JFK',
+          dep: '2027-03-12',
+          ret: '2027-03-23',
+          price: 412,
+          link: '/search/synthetic?t=1',
+        }),
+      ],
       input,
     );
     expect(r.prices).toHaveLength(1);
     expect(r.cellIssues).toEqual([]);
+    // why: the open-jaw guard could not run, so the tile says so rather than pricing the row silently.
+    expect(r.notes.list()).toContain('itinerary-unreadable:1');
+  });
+
+  it('a row without any link is not counted as unreadable: there was nothing to read', () => {
+    const { link: _none, ...noLink } = row({
+      origin: 'LHR',
+      dest: 'JFK',
+      dep: '2027-03-12',
+      ret: '2027-03-23',
+      price: 412,
+    });
+    const r = attributeRows([noLink], input);
+    expect(r.prices).toHaveLength(1);
+    expect(r.notes.list().some((n) => n.startsWith('itinerary-unreadable'))).toBe(false);
   });
 });
 

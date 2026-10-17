@@ -80,16 +80,30 @@ describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
     expect(await as(x, WRONG, '198.51.100.1')).toBe(401);
   });
 
-  it('there is no global bucket: failures spread over many IPs never refuse another IP (review SEC-4)', async () => {
+  it('the global fallback: 20 failures a minute over many IPs refuse the next wrong attempt from any IP; a correct credential still succeeds (spec §4, ruling 13)', async () => {
     const x = await harness({ app: byTestIp });
-    for (let i = 0; i < 40; i++) await as(x, WRONG, `198.51.100.${i}`);
-    expect(await as(x, WRONG, '192.0.2.1')).toBe(401);
+    for (let i = 0; i < 20; i++) expect(await as(x, WRONG, `198.51.100.${i}`)).toBe(401);
+    expect(await as(x, WRONG, '192.0.2.1')).toBe(429);
+    // why: decision 54 still holds: the limit slows guessing and never locks out the operator, who knows the password.
     expect(await as(x, RIGHT, '192.0.2.1')).toBe(200);
+    x.clock.advance(61_000);
+    expect(await as(x, WRONG, '192.0.2.1')).toBe(401);
+  });
+
+  it('19 failures over many IPs are under the global fallback', async () => {
+    const x = await harness({ app: byTestIp });
+    for (let i = 0; i < 19; i++) await as(x, WRONG, `198.51.100.${i}`);
+    expect(await as(x, WRONG, '192.0.2.1')).toBe(401);
   });
 
   it('holds at most maxSources addresses, dropping the least recently failing one (review SEC-R2-1)', () => {
     const clock = fixedClock(T0);
-    const limiter = new FailedAuthLimiter(clock, { perIp: 2, windowMs: 60_000, maxSources: 3 });
+    const limiter = new FailedAuthLimiter(clock, {
+      perIp: 2,
+      global: 1_000,
+      windowMs: 60_000,
+      maxSources: 3,
+    });
     for (const ip of ['a', 'b', 'c']) limiter.recordFailure(ip);
     limiter.recordFailure('a'); // a is now the most recent
     expect(limiter.retryAfterSeconds('a')).not.toBeNull();

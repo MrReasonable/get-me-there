@@ -11,10 +11,10 @@ import {
 import type { ReuseCriteria, ReusedCopy } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import { markRemaining, type RunState, resumableCells } from '../run.js';
+import { HOUR_MS } from '../units.js';
 
 /** Spec §8.2: "reuse iff age < 0.9 × refresh, so a weekly cron refreshes weekly" (tested at 151 h, 152 h and a DST interval). */
 export const REUSE_TOLERANCE = 0.9;
-const HOUR_MS = 3_600_000;
 
 /** The definition's discoveryRefreshHours for a provider; core's DEFAULT_DISCOVERY_REFRESH_HOURS (168) otherwise (decision 21). */
 export function refreshHoursOf(

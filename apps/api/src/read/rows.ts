@@ -24,6 +24,7 @@ import {
   type SearchDefinition,
   unverifiedNames,
   verdictClass,
+  withAssumedBound,
   worstCaseAgeHours,
 } from '@gmt/core';
 import type { CalendarPriceRow, ObservationRow } from '@gmt/db';
@@ -95,7 +96,15 @@ export function priceCell(
   truncated: boolean,
 ): PriceCell {
   const s = staleness(provenance, thresholdFor(basis, provenance.providerId, rc), rc.now);
-  return { pricePence, provenance, stale: s.stale, ageHours: s.ageHours, truncated };
+  // why: N4 (pie-007): a calendar bound the app assumed (its provider's capability says so) is labelled "assumed".
+  const p =
+    basis === 'calendar'
+      ? withAssumedBound(
+          provenance,
+          rc.providers.find((x) => x.id === provenance.providerId)?.discovery?.info,
+        )
+      : provenance;
+  return { pricePence, provenance: p, stale: s.stale, ageHours: s.ageHours, truncated };
 }
 
 /** The price part of a row, for the views that show a row's price as a PriceCell. */
@@ -171,7 +180,7 @@ export function calendarRow(
     fareConditions: null,
     selfTransfer: null,
     booking: { kind: 'none' },
-    searchLink: safeSearchLink(r.providerId, r.cell, rc.def),
+    searchLink: safeSearchLink(r.providerId, r.cell, rc.def, r.vendorLink),
     otherOffers: [],
     notSeenInLatest: null,
     superseded,

@@ -56,6 +56,7 @@
         "return_date",
         "separate_tickets",
         "sort_by",
+        "stops",
         "travel_class"
       ],
       "values": {
@@ -73,9 +74,10 @@
         "return_date": "any",
         "separate_tickets": ["1"],
         "sort_by": ["price"],
+        "stops": ["nonstop", "one_stop_or_fewer", "two_stops_or_fewer"],
         "travel_class": ["business", "economy", "first_class", "premium_economy"]
       }
     }
   },
-  "contentSha256": "33024e6a8c86f1ff0da11c594486fd23d0267360cd6468730dbab7c03c1f7ea7"
+  "contentSha256": "37126f5d39f462de475ded4f66d227d3e10816887a57da2eccf9aedffd1d6cb0"
 }

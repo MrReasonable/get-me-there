@@ -1,18 +1,21 @@
 // Every predicate of the recorded-tree check passes on a known-good tree recorded from the stand-ins and fails on a
 // broken copy (r2-ts-002), before it ever meets the live recording; the stand-in tripwire catches a test tree
 // signed as a real one (prov-wp04b-006).
-import { copyFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { RecordedFixture } from '@gmt/providers';
 import { loadRecorded, withContentHash } from '@gmt/providers/testing';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RECORDED_BY } from '../../src/tools/record.js';
 import { runRecording, TEST_RECORDED_BY } from '../helpers/recording.js';
-import { filesUnder } from '../helpers/tmp.js';
+import { filesUnder, tempRecordedRoot } from '../helpers/tmp.js';
 import { STANDIN_MARKER } from '../helpers/vendors.js';
 import { checkWorkedExampleTree, holdsStandInMarker } from '../helpers/workedExampleTree.js';
 
 const OK = { recordedBy: TEST_RECORDED_BY, standInsAllowed: true };
+/** One full recording of the worked example: about 2.5 s unloaded, so 60 s survives a heavily loaded machine. */
+const RECORDING_TIMEOUT_MS = 60_000;
 const q = (f: RecordedFixture, k: string): string | null => new URL(f.request.url).searchParams.get(k);
 
 /** Rewrites one recording through `mutate`, re-hashed and renamed so only the predicate under test can object. */
@@ -42,14 +45,36 @@ function rewrite(
   renameSync(path, next);
 }
 
-describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
+/**
+ * Ruling 11 (decision 67, F4): recording the worked example (a migrated database, 7,917 airports and the whole plan
+ * through the real http-kit and recorder) takes about 2.5 s unloaded, so the file records it once into a pristine tree
+ * and each predicate test checks or breaks its own copy, which takes milliseconds. The pristine tree lives outside the
+ * per-test temporary directories, which are removed after every test.
+ */
+let pristine = '';
+beforeAll(async () => {
+  const { root } = await runRecording();
+  pristine = mkdtempSync(join(tmpdir(), 'gmt-worked-example-'));
+  cpSync(root, pristine, { recursive: true });
+}, RECORDING_TIMEOUT_MS);
+afterAll(() => rmSync(pristine, { recursive: true, force: true }));
+
+/** A copy of the pristine recorded tree in a fresh recorded root, for one test to check or break. */
+function freshTree(): string {
+  const { root } = tempRecordedRoot();
+  cpSync(pristine, root, { recursive: true });
+  return root;
+}
+
+// why: ruling 11: each test copies and hashes a recorded tree; 20 s covers a slow, loaded CI runner many times over.
+describe('checkWorkedExampleTree (the recorded-tree manifest)', { timeout: 20_000 }, () => {
   it('accepts a known-good tree recorded from the stand-ins', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     expect(checkWorkedExampleTree(root, OK)).toEqual([]);
   });
 
   it('rejects the stand-ins under the real signature: the signature check and the stand-in tripwire both fire (prov-wp04b-006)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     const problems = checkWorkedExampleTree(root, { recordedBy: RECORDED_BY, standInsAllowed: false });
     expect(problems).toContain(`recordedBy ${TEST_RECORDED_BY} on a searchapi file`);
     expect(problems).toContain(
@@ -58,7 +83,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a second recording session', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => f.providerId === 'travelpayouts' && f.status === 200,
@@ -70,7 +95,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it("rejects a step-2 placeholder missing from step 1's body", async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     const step1 = (f: RecordedFixture): boolean =>
       q(f, 'engine') === 'google_flights' &&
       f.status === 200 &&
@@ -85,7 +110,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a step-1 cell outside the 10–21-night band', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     const step1 = (f: RecordedFixture): boolean =>
       q(f, 'engine') === 'google_flights' &&
       f.status === 200 &&
@@ -108,7 +133,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a search_metadata URL on a host other than www.searchapi.io (the host allowlist applies there)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'booking_token') !== null && f.status === 200,
@@ -125,7 +150,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('accepts vendor body URLs on any https host: airline sites and gstatic images (ruling after the live run)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'booking_token') !== null && f.status === 200,
@@ -148,7 +173,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a plain-http body URL that carries a query', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'booking_token') !== null && f.status === 200,
@@ -162,7 +187,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a credential-shaped query parameter on an airline URL', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'booking_token') !== null && f.status === 200,
@@ -234,13 +259,13 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
       'search_metadata URL with a query under request_url',
     ],
   ] as const)('rejects %s (r3-ts-003)', async (_name, mutate, problem) => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(root, (f) => q(f, 'booking_token') !== null && f.status === 200, mutate);
     expect(checkWorkedExampleTree(root, OK)).toContain(problem);
   });
 
   it('accepts a www.google.com booking parameter that carries a recorder placeholder (r3-ts-003)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     const step3 = loadRecorded(root, 'searchapi', '/api/v1/search').find(
       (f) => q(f, 'booking_token') !== null && f.status === 200,
     );
@@ -249,7 +274,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a request with a stops parameter (r3-ts-003)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'engine') === 'google_flights_calendar' && f.status === 200,
@@ -266,7 +291,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a calendar request without separate_tickets=1 (plan decision 29: both engines)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'engine') === 'google_flights_calendar' && f.status === 200,
@@ -283,7 +308,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a tree without the reverse tile JFK→LON (plan decision 31)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     rewrite(
       root,
       (f) => q(f, 'origin') === 'JFK' && f.status === 200,
@@ -300,7 +325,7 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   });
 
   it('rejects a second allowlist file for a provider (r3-ts-003)', async () => {
-    const { root } = await runRecording();
+    const root = freshTree();
     copyFileSync(
       join(root, 'searchapi', 'params-2026-10-20.json'),
       join(root, 'searchapi', 'params-2026-10-21.json'),

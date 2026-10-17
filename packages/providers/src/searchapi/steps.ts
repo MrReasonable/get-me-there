@@ -39,9 +39,9 @@ export function parseBooking(body: unknown, gl: string) {
 }
 
 /**
- * `price_insights.price_history` as Google's route-level price-insight series, indicative (spec §2 bonus, §7; the
- * engine stores it in route_price_history, GBP points only per plan decision 25). That label is the spec's; whether
- * the series is per route or per searched dates and cabin is unverified (§13). A point that is malformed, has an impossible date or a price the shared `majorToMinor` refuses is dropped and counted
+ * `price_insights.price_history` as Google's price history for the searched trip, indicative (spec §2 bonus, §7 rev 28;
+ * the vendor's docs describe `price_insights` as part of one search's answer for its dates, so the engine stores it in
+ * route_price_history keyed by the trip's dates and cabin, GBP points only per plan decision 25, ruling 6). A point that is malformed, has an impossible date or a price the shared `majorToMinor` refuses is dropped and counted
  * `route-history-dropped`; it never fails the step. A response with no series at all yields an empty history and the
  * informational count `route-history-absent` (plan decision 40: best-effort).
  */

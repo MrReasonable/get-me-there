@@ -10,7 +10,7 @@ import {
 } from '@gmt/core';
 import type { ExecutionSummary, ItineraryHistoryResponse, RouteHistoryResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDateLong } from '../../format.js';
+import { formatIsoDateLong, formatTripShort } from '../../format.js';
 import { SERIES_COLOURS } from '../../lib/palette.js';
 import { sourceLabelOf } from '../../lib/sources.js';
 import { DAY_MS, dateMs, instantMs } from '../../lib/time.js';
@@ -62,10 +62,15 @@ export interface RouteLine {
   key: string;
   providerId: ProviderId;
   cabin: Cabin | 'unknown';
+  /** The searched trip in words ("5–15 Nov"), or null for a migrated series that never recorded one (ruling 6). */
+  trip: string | null;
   name: string;
   colour: number;
   points: RoutePlotPoint[];
 }
+
+const tripOf = (t: RouteHistoryResponse['routeSeries'][number]['trip']): string | null =>
+  t === null ? null : formatTripShort(t.departureDate, t.returnDate);
 
 /** Each parent run's place in the definition's run order, oldest 0 (executions arrive newest first). */
 export type RunOrder = ReadonlyMap<string, number>;
@@ -176,10 +181,11 @@ export function linesFromRoute(
   const route: RouteLine[] = resp.routeSeries
     .filter((s) => s.points.length > 0)
     .map((s) => ({
-      key: `${pair ?? ''}route:${s.providerId}:${s.cabin}`,
+      key: `${pair ?? ''}route:${s.providerId}:${s.cabin}:${s.trip?.departureDate ?? ''}:${s.trip?.returnDate ?? ''}`,
       providerId: s.providerId,
       cabin: s.cabin,
-      name: prefixed(pair, H.routeSeries(COPY.provider[s.providerId], cabinName(s.cabin))),
+      trip: tripOf(s.trip),
+      name: prefixed(pair, H.routeSeries(H.historyVendor[s.providerId], tripOf(s.trip), cabinName(s.cabin))),
       colour: 0,
       points: withBreaks(
         s.points.map(
@@ -292,7 +298,9 @@ export function itineraryHeading(resp: Pick<ItineraryHistoryResponse, 'cell' | '
 /** What the cross-execution header shows (plan decision 38): how many runs the lines span, first and last fetch. */
 export function historySpan(
   lines: readonly PlotLine[],
-): { runs: number; firstAt: IsoDateTime; lastAt: IsoDateTime } | null {
+  /** UI-010: executions that are on-demand children, counted as searches, never as runs. */
+  childIds: ReadonlySet<string>,
+): { runs: number; onDemand: number; firstAt: IsoDateTime; lastAt: IsoDateTime } | null {
   const priced = lines.flatMap((l) => l.points.flatMap((p) => (p.kind === 'price' ? [p] : [])));
   const first = priced.reduce<(typeof priced)[number] | null>(
     (a, p) => (a === null || p.t < a.t ? p : a),
@@ -303,7 +311,9 @@ export function historySpan(
     null,
   );
   if (first === null || last === null) return null;
-  return { runs: new Set(priced.map((p) => p.executionId)).size, firstAt: first.at, lastAt: last.at };
+  const ids = new Set(priced.map((p) => p.executionId));
+  const onDemand = [...ids].filter((id) => childIds.has(id)).length;
+  return { runs: ids.size - onDemand, onDemand, firstAt: first.at, lastAt: last.at };
 }
 
 /** The header's stale flag: true when every series' newest point is stale. */

@@ -37,7 +37,11 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-describe('scheduler (spec §8.2: croner with timezone; re-registered on create, PUT, disable, enable and delete)', () => {
+// why: ruling 11: cases drive croner through hours of fake time (up to about 2.3 s unloaded); the slowest set their
+// own HOURS_OF_FAKE_TIME, and the rest share this 30 s so a loaded runner is a slow pass.
+describe('scheduler (spec §8.2: croner with timezone; re-registered on create, PUT, disable, enable and delete)', {
+  timeout: 30_000,
+}, () => {
   it('registers with the definition tz and fires at the next local firing', HOURS_OF_FAKE_TIME, async () => {
     const s = createScheduler(hooks, capturingLogger(lines));
     s.register(def());

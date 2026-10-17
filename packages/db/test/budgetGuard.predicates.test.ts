@@ -267,7 +267,7 @@ describe('cap predicates (spec §5.3)', () => {
     );
   });
 
-  it('lifetime window: every row ever counts against the effective cap; the month scope reports cap null', () => {
+  it('lifetime window: every row ever counts against the effective cap; the month scope is marked unused', () => {
     const db = freshDb();
     const insert = db.raw.prepare(
       `INSERT INTO provider_requests (provider_id, endpoint_path, started_at, finished_at, outcome, billable, cost_micro_gbp, http_attempt, http_status, duration_ms) VALUES ('searchapi', '/api/v1/search', @at, @at, 'ok', 1, 0, 1, 200, 1)`,
@@ -279,6 +279,7 @@ describe('cap predicates (spec §5.3)', () => {
       calls: 90,
       costMicroGbp: 0,
       cap: 91,
+      windowUsed: true,
       windowStart: null,
       windowEnd: null,
     });
@@ -287,6 +288,7 @@ describe('cap predicates (spec §5.3)', () => {
     expect(guard.usage({ kind: 'provider-month', providerId: 'searchapi' })).toMatchObject({
       calls: 31,
       cap: null,
+      windowUsed: false,
       windowStart: '2026-10-01T00:00:00.000Z',
     });
     expect(

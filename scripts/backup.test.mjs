@@ -69,7 +69,8 @@ function backups(dir) {
   return existsSync(dir) ? readdirSync(dir).filter((f) => NAME.test(f)) : [];
 }
 
-describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', () => {
+// why: ruling 11: each case spawns node (up to about 1.3 s unloaded); 60 s survives a loaded runner.
+describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', { timeout: 60_000 }, () => {
   it('exits 0 and prints exactly one JSON line naming a copy that holds the data', () => {
     const dir = tempDir();
     const r = backup(['--db', sampleDb(dir), '--dir', join(dir, 'b')]);
@@ -141,7 +142,8 @@ describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', 
   });
 });
 
-describe('scripts/check-backup.mjs (spec §13 Restore)', () => {
+// why: ruling 11: each case spawns node (up to about 1.6 s unloaded); 60 s survives a loaded runner.
+describe('scripts/check-backup.mjs (spec §13 Restore)', { timeout: 60_000 }, () => {
   it('exits 0 for a good backup', () => {
     const dir = tempDir();
     const made = JSON.parse(backup(['--db', sampleDb(dir)]).stdout);

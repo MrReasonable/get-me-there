@@ -90,3 +90,21 @@ test('at 375px the calendar shows one month of compact days, nothing spilling ou
   await expect(face).toContainText('£');
   await expect(face.getByTestId('price-cell')).toHaveAttribute('title', new RegExp(COPY.provider.fixture));
 });
+
+test('at 375px the nav shows every view in at most two rows, and Results and Alerts never scroll the page sideways (UI-005, UI-009, UI-011) @phone', async ({
+  page,
+}) => {
+  for (const view of ['results', 'alerts']) {
+    await page.goto(`/?view=${view}`);
+    const nav = page.getByRole('navigation', { name: COPY.navLabel });
+    await expect(nav).toBeVisible();
+    for (const link of await nav.getByRole('link').all()) await expect(link).toBeInViewport({ ratio: 1 });
+    const box = await nav.boundingBox();
+    // why: two rows of 44 px links and their gap; a third row would push the content down for nothing.
+    expect(box?.height ?? 0).toBeLessThanOrEqual(2 * 44 + 8);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  }
+});

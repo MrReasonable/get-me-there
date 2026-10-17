@@ -159,45 +159,70 @@ describe('NotificationsRepo (spec §8.1 "deduplicated per execution and kind")',
   });
 });
 
-describe('RoutePriceHistoryRepo (spec §7 route_price_history)', () => {
-  it("upserts by (origin, destination, cabin, provider, date), allows cabin 'unknown', and returns one cabin's series in date order", () => {
+describe('RoutePriceHistoryRepo (spec §7 route_price_history, rev 28: keyed by trip)', () => {
+  const NOV = { departureDate: asIsoDate('2026-11-05'), returnDate: asIsoDate('2026-11-15') };
+  const DEC = { departureDate: asIsoDate('2026-12-01'), returnDate: asIsoDate('2026-12-11') };
+  const row = (trip: typeof NOV, date: string, pence: number, fetchedAt = T0, currency = 'GBP') => ({
+    origin: LHR,
+    destination: JFK,
+    trip,
+    cabin: 'economy' as const,
+    providerId: 'searchapi' as const,
+    date: asIsoDate(date),
+    lowestPricePence: pence,
+    currency,
+    fetchedAt,
+  });
+
+  it('upserts by trip, cabin, provider and point date, so two trips never overwrite each other (ruling 6, dm-001)', () => {
     const { db } = setup();
     const repo = new RoutePriceHistoryRepo(db, { allowSynthetic: false });
-    const row = (date: string, pence: number, fetchedAt = T0, cabin: 'unknown' | 'economy' = 'unknown') => ({
-      origin: LHR,
-      destination: JFK,
-      cabin,
-      providerId: 'searchapi' as const,
-      date: asIsoDate(date),
-      lowestPricePence: pence,
-      fetchedAt,
-    });
     repo.upsert([
-      row('2026-09-02', 52_000),
-      row('2026-09-01', 51_000),
-      row('2026-09-01', 49_000, T0, 'economy'),
+      row(NOV, '2026-09-02', 52_000),
+      row(NOV, '2026-09-01', 51_000),
+      row(DEC, '2026-09-01', 61_000),
     ]);
-    repo.upsert([row('2026-09-02', 50_500, at('2026-10-15T05:00:00.000Z'))]);
-    expect(repo.series(LHR, JFK, 'searchapi', 'unknown')).toEqual([
+    repo.upsert([row(NOV, '2026-09-02', 50_500, at('2026-10-15T05:00:00.000Z'))]);
+    const point = (date: string, pricePence: number, fetchedAt: string) => ({
+      date,
+      pricePence,
+      fetchedAt,
+      currency: 'GBP',
+      providerId: 'searchapi',
+      sourceKind: 'scraped-search',
+    });
+    expect(repo.series(LHR, JFK, 'searchapi', 'economy')).toEqual([
       {
-        date: '2026-09-01',
-        pricePence: 51_000,
-        fetchedAt: T0,
-        providerId: 'searchapi',
-        sourceKind: 'scraped-search',
+        trip: NOV,
+        points: [point('2026-09-01', 51_000, T0), point('2026-09-02', 50_500, '2026-10-15T05:00:00.000Z')],
       },
-      {
-        date: '2026-09-02',
-        pricePence: 50_500,
-        fetchedAt: '2026-10-15T05:00:00.000Z',
-        providerId: 'searchapi',
-        sourceKind: 'scraped-search',
-      },
+      { trip: DEC, points: [point('2026-09-01', 61_000, T0)] },
     ]);
-    expect(repo.series(LHR, JFK, 'searchapi', 'economy').map((p) => p.pricePence)).toEqual([49_000]);
-    expect(() => repo.upsert([row('2026-09-03', 1.5)])).toThrow(RowRejected);
-    expect(() => repo.upsert([{ ...row('2026-09-03', 1), providerId: 'fixture' }])).toThrow(
+    expect(repo.series(LHR, JFK, 'searchapi', 'premium_economy')).toEqual([]);
+  });
+
+  it('refuses a point the vendor did not state in GBP, a fractional price and a synthetic row outside the gate (prov-004)', () => {
+    const { db } = setup();
+    const repo = new RoutePriceHistoryRepo(db, { allowSynthetic: false });
+    expect(() => repo.upsert([row(NOV, '2026-09-03', 41_000, T0, 'USD')])).toThrow(
+      expect.objectContaining({ rule: 'route-history-gbp' }),
+    );
+    expect(() => repo.upsert([row(NOV, '2026-09-03', 1.5)])).toThrow(RowRejected);
+    expect(() => repo.upsert([{ ...row(NOV, '2026-09-03', 1), providerId: 'fixture' }])).toThrow(
       expect.objectContaining({ rule: 'synthetic-gate' }),
     );
+  });
+
+  it("returns a migrated row with no known trip as its own series, trip null, cabin as stored ('unknown')", () => {
+    const { db } = setup();
+    db.raw
+      .prepare(
+        `INSERT INTO route_price_history (origin, destination, departure_date, return_date, cabin, provider_id, date, lowest_price_pence, fetched_at) VALUES ('LHR', 'JFK', NULL, NULL, 'unknown', 'searchapi', '2026-09-01', 48000, ?)`,
+      )
+      .run(T0);
+    const repo = new RoutePriceHistoryRepo(db, { allowSynthetic: false });
+    expect(repo.series(LHR, JFK, 'searchapi', 'unknown')).toEqual([
+      { trip: null, points: [expect.objectContaining({ date: '2026-09-01', pricePence: 48_000 })] },
+    ]);
   });
 });

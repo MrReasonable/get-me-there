@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import * as recording from '../src/recording/index.js';
 
 describe('@gmt/providers/recording (plan decision 32: what the record tool shares instead of copying)', () => {
-  it('exports exactly the shared money conversion, the page size and the adapter URL builder', () => {
+  it("exports exactly the shared money conversion, the page size, the adapter URL builder and SearchApi's parameter builders (ruling 18)", () => {
     expect(Object.keys(recording).sort()).toEqual([
       'MAX_PAGES',
       'PAGE_LIMIT',
       'buildRequestUrl',
       'majorToMinor',
+      'searchApiCalendarParams',
+      'searchApiFlightsParams',
+      'searchApiUrl',
     ]);
     expect(recording.majorToMinor(412.55, 'GBP')).toBe(41255);
     expect(recording.PAGE_LIMIT).toBe(1000);

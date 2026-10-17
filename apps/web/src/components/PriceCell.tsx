@@ -1,16 +1,8 @@
-import { type ConstraintName, effectiveAge, formatAgeFull, sourceLabel, type Verdicts } from '@gmt/core';
+import { effectiveAge, formatAgeFull, formatAgeShort, sourceLabel } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
 import { assertProvenance, isCalendarPrice, Provenance } from './Provenance.js';
-
-/**
- * True when the final step did not confirm the price (decisions 37, 44): core judges `priceConfirmed`
- * only as `unverified`, so either the verdict or the unverified list says so.
- */
-export function priceUnconfirmed(r: { unverified: readonly ConstraintName[]; verdicts?: Verdicts }): boolean {
-  return r.unverified.includes('priceConfirmed') || r.verdicts?.priceConfirmed === 'unverified';
-}
 
 export interface PriceCellProps {
   pricePence: number;
@@ -33,16 +25,19 @@ export interface PriceCellProps {
   /** Beside the wide Results table's columns: the Provider and Destination columns carry those, so the line omits them. */
   besideColumns?: boolean;
   /**
-   * Decision 46's compact variant (WP10's calendar day cells): the amount with "≈", a short provider badge,
-   * the destination code and the stale, truncated and unconfirmed marks; source words, the age line and the
-   * destination note move to the title. WP10 adds props here, never a second price component.
+   * The compact variant (WP10's calendar day cells): the amount with "≈", a short provider badge, the destination code,
+   * the stale, truncated and unconfirmed marks and, visible without hover (spec §11, ruling 3, overruling decision 46),
+   * a short age line ("5d old") with "not checked" on a calendar price; the source words, the full age and the
+   * destination note are also in the title. WP10 adds props here, never a second price component.
    */
   compact?: boolean;
   /** Headers: the full age form, visible (spec §11). */
   fullAge?: boolean;
   /**
-   * WP10's phone day-cell face (plan decision 52): the amount with "≈" and each mark as one glyph; the provider,
-   * destination, source, age, note and the marks' words are in the title and in spoken text, so nothing is lost.
+   * WP10's phone day-cell face (plan decision 52, ruling 3): the amount with "≈", each mark as one glyph, the
+   * provider's short mark, the short age ("5d old", "age unknown") and "not checked" on a calendar price, all visible
+   * because touch has no hover; the full provider, destination, source, age, note and the marks' words are in the
+   * title and in spoken text, so nothing is lost.
    */
   face?: boolean;
 }
@@ -77,7 +72,6 @@ export function PriceCell(props: PriceCellProps) {
     const marks = [
       ...(props.unconfirmed === true ? [{ glyph: G.unconfirmed, words: COPY.priceNotConfirmed }] : []),
       ...(props.stale ? [{ glyph: G.stale, words: COPY.stale }] : []),
-      ...(age.kind === 'unknown' ? [{ glyph: G.ageUnknown, words: COPY.vendorAgeUnknown }] : []),
       ...(props.truncated === true ? [{ glyph: G.truncated, words: COPY.truncatedNote }] : []),
       ...(props.superseded === true ? [{ glyph: G.superseded, words: COPY.superseded }] : []),
       ...(notSeen !== null ? [{ glyph: G.notSeen, words: COPY.notSeenInLatest(COPY.agoOf(notSeen)) }] : []),
@@ -107,6 +101,15 @@ export function PriceCell(props: PriceCellProps) {
         <span aria-hidden="true" className="block font-medium">
           {COPY.providerMark[p.providerId]}
         </span>
+        {/* why: ruling 3: the age and the unchecked mark on the face; 10px words of at most 7 characters fit 45 px */}
+        <span aria-hidden="true" data-testid="face-age" className="block text-[10px] font-normal">
+          {formatAgeShort(age)}
+        </span>
+        {calendar ? (
+          <span aria-hidden="true" data-testid="face-unchecked" className="block text-[10px] font-normal">
+            {COPY.notChecked}
+          </span>
+        ) : null}
         <span className="sr-only">{spoken}</span>
       </span>
     );
@@ -151,7 +154,17 @@ export function PriceCell(props: PriceCellProps) {
           </span>
           {props.destination !== undefined ? <span>{props.destination}</span> : null}
         </span>
-      ) : (
+      ) : null}
+      {/* why: ruling 3: an unknown age is already the visible badge above; any other age is a short line on the face */}
+      {compact && (age.kind !== 'unknown' || calendar) ? (
+        <span data-testid="face-age" className="text-[11px]">
+          {[
+            ...(age.kind !== 'unknown' ? [formatAgeShort(age)] : []),
+            ...(calendar ? [COPY.notChecked] : []),
+          ].join(' · ')}
+        </span>
+      ) : null}
+      {compact ? null : (
         <Provenance
           provenance={p}
           calendar={props.calendar}

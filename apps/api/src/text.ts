@@ -41,6 +41,13 @@ export const API_TEXT = {
   coverageCheckUnavailable:
     'the coverage check reads the free Travelpayouts cache; set TRAVELPAYOUTS_TOKEN to enable it',
   zeroCapVerification: 'verification will not run: spend cap is 0',
+  zeroCapBootWarning: 'billed provider enabled under a zero spend cap: verification will not run',
+  // why: cost-006: on a subscription calls cost £0 at the margin, so a cap below the fees stops nothing; say so at boot.
+  spendCapBelowFees: (capPence: number, feesPence: number) =>
+    `MONTHLY_SPEND_CAP_PENCE ${capPence} is below the ${feesPence}p of subscription fees it counts: it cannot stop a call, because calls cost £0 at the margin; each provider's call cap is the hard stop`,
+  // why: ruling 5: on a plan whose calls cost £0 the spend cap cannot stop a call, so the card names the cap that does.
+  callCapGoverns: (window: 'month' | 'lifetime', cap: number) =>
+    `calls cost £0 each on this plan, so the spend cap does not stop them; the ${window === 'lifetime' ? 'lifetime' : 'monthly'} call cap (${cap} calls) is the hard stop`,
   // why: formatPence (core) is the only money formatter in user-facing strings (plan decision 15).
   ceilingNote: (capPence: number, feesPence: number) =>
     `monthly spend cap ${formatPence(capPence)}, of which ${formatPence(feesPence)} is subscription fees counted once`,
@@ -53,6 +60,13 @@ export const API_TEXT = {
     'calendar basis: no verification provider is configured, so constraints are not checked',
   basisNoObservations:
     'calendar basis: no itinerary-searched observations yet, so constraints are not checked',
+  // why: N2 (ruling 9): a 0-call definition starts no child; say why and which setting fixes it, in the form's words.
+  zeroRunCapDefault:
+    "new definitions on this plan allow 0 billed calls, so Verify stays unavailable until you raise a definition's call cap in Definitions → Run budget",
+  verifyZeroRunCap: (n: number) =>
+    `this definition allows 0 billed calls, so an itinerary search for one cell cannot start; raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run)`,
+  basisNoObservationsInSpace:
+    'calendar basis: no itinerary-searched observations inside the current space, so constraints are not checked',
   basisItinerarySearch:
     'itinerary-search basis: constraints checked against the current definition at read time',
   basisRequestedCalendar: 'calendar basis as requested: constraints are not checked',

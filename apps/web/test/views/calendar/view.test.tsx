@@ -110,12 +110,25 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     ).toBeInTheDocument();
   });
 
+  it('names the next move when more than half the cells have no cached data (ruling 16, pft-006)', async () => {
+    serve([day('2027-03-14', { discovery: [disc('travelpayouts', { priced: 1, no_data: 11 })] })]);
+    const { findByText } = renderWithProviders(<CalendarView definition={definition()} />);
+    expect(await findByText(COPY.thinCoverage)).toBeInTheDocument();
+  });
+
+  it('says nothing about thin coverage when half or fewer have no cached data', async () => {
+    serve([mixedDay]);
+    const { findByRole, queryByText } = renderWithProviders(<CalendarView definition={definition()} />);
+    await findByRole('table', { name: 'Mar 2027' });
+    expect(queryByText(COPY.thinCoverage)).toBeNull();
+  });
+
   it('the header names the run and carries the reused count', async () => {
     serve([mixedDay]);
     const { findByText, getByText } = renderWithProviders(<CalendarView definition={definition()} />);
     expect(await findByText('(3 reused from earlier runs)')).toBeInTheDocument();
     // why: WP9's span header names the runs by start time and says no single run status applies.
-    expect(getByText(COPY.spanExecutions(1))).toBeInTheDocument();
+    expect(getByText(COPY.spanExecutions(1, 0))).toBeInTheDocument();
     expect(getByText(/14 Oct 2026 13:00 Europe\/London/)).toBeInTheDocument();
   });
 
@@ -149,7 +162,9 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     expect(asked).toContain('JFK');
     expect(within(at('2027-03-14')).getByTestId('day-stay')).toHaveTextContent('14n · back 28 Mar');
     // why: the api counted JFK's cells, so the cue and the glyphs are JFK's own, never all destinations'.
-    expect(within(at('2027-03-14')).getByTestId('coverage-cue')).toHaveTextContent('24/24 searched');
+    expect(within(at('2027-03-14')).getByTestId('coverage-cue')).toHaveTextContent(
+      '18 priced, 6 no cached data',
+    );
     expect(at('2027-03-15')).toHaveTextContent('∅ 4 no fares');
     expect(at('2027-03-15')).toHaveTextContent('○ 20 not searched');
     expect(document.body).not.toHaveTextContent('all destinations');

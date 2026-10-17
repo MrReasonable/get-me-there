@@ -6,6 +6,7 @@ import { ViewHeader } from '../../components/ViewHeader.js';
 import { COPY } from '../../copy.js';
 import { formatIsoMonth } from '../../format.js';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
+import { isThinCoverage } from '../../lib/thinCoverage.js';
 import { useNow } from '../../now.js';
 import { CALENDAR_PARAMS, parseColourBasis, parseDestination } from '../../state/calendarState.js';
 import { updateSearchParams, useSearchParams } from '../../state/urlState.js';
@@ -66,6 +67,13 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
   if (all.isError) return <p role="alert">{COPY.loadFailed(all.error.message)}</p>;
 
   const C = COPY.calendarView;
+  // why: ruling 16: over every discovery count of the days shown (each provider's cells counted once per day).
+  const thin = days
+    .flatMap((d) => d.slice.discovery)
+    .reduce((a, e) => ({ noData: a.noData + e.buckets.no_data, total: a.total + e.total }), {
+      noData: 0,
+      total: 0,
+    });
   const wanted = months.find((m) => m === params.get(CALENDAR_PARAMS.month)) ?? months[0];
   // why: plan decision 38 — at phone width one month at a time as a compact grid, never every day stacked.
   const drawn: IsoMonth[] = narrow ? (wanted === undefined ? [] : [wanted]) : months;
@@ -92,6 +100,7 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
         </p>
       ) : null}
       <ReusedNote count={totalReused(days.map((d) => d.slice))} />
+      {isThinCoverage(thin.noData, thin.total) ? <p className="text-sm">{COPY.thinCoverage}</p> : null}
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col text-sm">
           {C.destinationFilter}

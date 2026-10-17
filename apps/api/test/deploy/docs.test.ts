@@ -2,7 +2,7 @@
 // and no other route, the plan's single exit-code table as the code defines it, and no banned word.
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
+import { AUTH_MISSING, apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
 import { SHUTDOWN_DEADLINE_MS } from '../../src/bootstrap/app.js';
@@ -10,7 +10,7 @@ import { EXIT } from '../../src/tools/types.js';
 import { between, REPO, read } from './files.js';
 
 /** Operator-facing docs, held to the spec §11 word list and to the worked example. */
-const OPERATOR_DOCS = ['api-limits.md', 'scheduling.md', 'setup.md'];
+const OPERATOR_DOCS = ['api-limits.md', 'release-notes.md', 'scheduling.md', 'setup.md'];
 /** Research notes that quote vendor terminology verbatim; not operator-facing text. */
 const RESEARCH_NOTES = ['providers.md'];
 /** The worked example's airports and their metro codes: the only places the docs may name (spec §1). */
@@ -105,6 +105,35 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
       expect(flat).toContain(command);
     expect(flat).toContain('docker compose cp app:/data/backups/. /var/backups/get-me-there/');
     expect(flat).toContain('install -d -m 0700');
+  });
+
+  it('every documented `docker compose up --wait` bounds the wait at 120 s and says what to look at then (devops-final-003, ruling 14)', () => {
+    const waits = [...setup.matchAll(/docker compose up [^\n`]*--wait\b[^\n`]*/g)].map((m) => m[0]);
+    expect(waits.length).toBeGreaterThanOrEqual(4);
+    for (const w of waits) expect(w).toContain('--wait --wait-timeout 120');
+    expect(flat).toContain('If it has not reported healthy after 2 minutes, run docker compose logs app');
+  });
+
+  it("section 1 names the two lines the refusal asks for, in the refusal's own words (devops-final-001, ruling 14)", () => {
+    const section1 = setup.slice(setup.indexOf('## 1.'), setup.indexOf('## 2.'));
+    expect(section1).toContain(AUTH_MISSING);
+  });
+
+  it('explains that trial definitions allow 0 billed calls and how to verify a cell anyway (N3, ruling 9)', () => {
+    expect(flat).toContain(
+      "On the trial plan new definitions allow 0 billed calls per run, so Verify in the calendar is unavailable until you raise the definition's call cap in Definitions → Run budget (Max billed calls per run); 6 covers one cell.",
+    );
+    const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
+    expect(limits).not.toContain('that call cap is the only stop');
+    expect(limits).toContain(
+      "that call cap and each definition's call cap (Max billed calls per run) are the stops",
+    );
+  });
+
+  it('tells an operator moving to 40usd to remove SEARCHAPI_TRIAL_USED, which otherwise exits 78 (N5, cost-007)', () => {
+    expect(flat).toContain(
+      'If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0): on `40usd` the app refuses to start with it (exit 78).',
+    );
   });
 
   it('turns auth off only through the Tailscale-only override file', () => {
@@ -212,15 +241,23 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     expect(all).toEqual([...OPERATOR_DOCS, ...RESEARCH_NOTES].sort());
   });
 
-  it.each(OPERATOR_DOCS)('%s contains no banned word', (file) => {
-    const text = read(`docs/${file}`);
+  it('the root README points a fresh clone at setup section 1 and the other operator docs (devops-final-006)', () => {
+    const readme = read('README.md');
+    expect(readme).toContain('docs/setup.md');
+    expect(readme).toContain('section 1');
+    for (const doc of ['docs/api-limits.md', 'docs/scheduling.md', 'docs/providers.md'])
+      expect(readme).toContain(doc);
+  });
+
+  it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'README.md'])('%s contains no banned word', (path) => {
+    const text = read(path);
     const hits = findBannedWords(text, BANNED_WORD_ALLOWLIST).map(
       (h) => `${h.word} @${h.index}: …${text.slice(Math.max(0, h.index - 30), h.index + 30)}…`,
     );
     expect(hits).toEqual([]);
   });
 
-  it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'docs/examples/london-new-york.json'])(
+  it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'README.md', 'docs/examples/london-new-york.json'])(
     '%s names no airport or metro code but the worked example’s',
     (path) => {
       const dataset = loadAirportsDataset(AIRPORTS_DATA_DIR);

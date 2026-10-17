@@ -166,5 +166,7 @@ export const capabilityInfoSchema = z.object({
   sourceKind: z.enum(['authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic']),
   provenanceNote: z.string(),
   maxAgeHours: z.union([z.number().int().min(0), z.literal('unknown')]),
+  /** Ruling 17 (pie-007): `maxAgeHours` is the app's assumption, not a vendor-stated bound. */
+  maxAgeAssumed: z.boolean().optional(),
 });
 export { cabinSchema, providerIdSchema };

@@ -24,6 +24,12 @@ Replace `CHANGE-ME` with that random value (the app needs at least 12 characters
 placeholder itself is refused). If a value contains `$`, wrap it in single quotes, because
 compose interpolates `$` in `.env`.
 
+These are the two lines the app asks for when they are missing. If `docker compose logs app`
+shows exit 78 with "add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)",
+add exactly these two lines and run `docker compose up -d` again. Do not set
+`ALLOW_UNAUTHENTICATED` in `.env`: compose does not forward it (section 3 is the only way to run
+without auth).
+
 Basic auth sends the password with every request. Over plain HTTP that is only acceptable on
 loopback. To reach the app from another device, put TLS in front of it (section 3).
 
@@ -44,9 +50,14 @@ APP_BASIC_AUTH_PASS=CHANGE-ME
 That is the whole `.env` for £0. Then:
 
 ```bash
-docker compose up -d --build --wait   # the first boot can take up to 4 minutes
+docker compose up -d --build --wait --wait-timeout 120
 docker compose ps                     # "healthy"
 ```
+
+If it has not reported healthy after 2 minutes, run docker compose logs app: a configuration
+refusal (exit 78) names what to fix and restarts until you do. If the log shows the app still
+starting (a lock wait or the first airport seeding), `docker compose ps` turns `healthy` within
+the 4-minute start period.
 
 Open <http://127.0.0.1:3000> and sign in. Then set up the daily backup of section 6 before
 you rely on the app.
@@ -65,7 +76,11 @@ SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1�
 ```
 
 then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
-`trial` allowance and scheduled runs leave SearchApi out.
+`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new definitions
+allow 0 billed calls per run, so Verify in the calendar is unavailable until you raise the
+definition's call cap in Definitions → Run budget (Max billed calls per run); 6 covers one
+cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
+on `40usd` the app refuses to start with it (exit 78).
 
 **Secrets are kept only in `.env`.** The repository's `.gitignore` keeps `.env` and every
 `.env.*` file except `.env.example` out of git, `.dockerignore` keeps them out of the image,
@@ -319,7 +334,7 @@ rsync -a /var/backups/get-me-there/ backup-host:get-me-there/
      done && mv restore.db get-me-there.db'
    ```
 
-4. Start and check: `docker compose up -d --wait`, then `curl -fsS http://127.0.0.1:3000/api/health`.
+4. Start and check: `docker compose up -d --wait --wait-timeout 120`, then `curl -fsS http://127.0.0.1:3000/api/health`.
    Delete the `*.pre-restore` files once you are satisfied.
 5. Restoring resets month-to-date spend: ledger rows written after the backup are gone. Lower
    the caps and reconcile with the vendor dashboard before the next run, as described in
@@ -329,7 +344,7 @@ rsync -a /var/backups/get-me-there/ backup-host:get-me-there/
 host folder over `/data` goes through Docker Desktop's file-sharing layer, where SQLite's WAL
 locking is not reliable and the database can be corrupted. On a Linux host a bind mount works
 if the directory is owned by uid 1000; the app stops at boot with exit 73 and a message naming
-the directory if it cannot write there.
+the directory if it cannot write there, or if its file system cannot hold SQLite's WAL journal.
 
 ## 7. Expected database growth
 
@@ -365,6 +380,13 @@ pnpm record:fixtures --budget 12 --route LHR,LGW:JFK,EWR --month 2027-03
 ```
 
 Recording spends SearchApi credits up to `--budget` (choose a month inside the next year).
+
+Because the recordings never enter git, the test suites that replay them (the SearchApi and
+Travelpayouts replays, the parameter allowlists against the recording, the engine's layer B and
+the worked-example manifest) skip in CI and say so by title. They run in full only on a machine
+that holds the recordings, so that local `pnpm -r --workspace-concurrency=1 test` is the gate
+for any change to a provider adapter or the engine: run it before merging such a change
+(plan decision 67, ruling 12).
 
 ## 9. One app per database, one user for every process
 
@@ -406,7 +428,7 @@ Every command-line entry point (the app itself, `pnpm record:fixtures`, `pnpm sm
 | 64 | bad arguments (usage), or a recording of another route than the worked example without `--out DIR` outside the repository |
 | 65 | a recording or smoke test refused for spend: with earlier tool runs in this database it would exceed the budget you gave (raise it only when you mean to spend more), or a provider's budget window has less room than the run needs |
 | 70 | refused because `NODE_ENV=test`, or because fixture data is enabled |
-| 73 | the data directory or `<data dir>/backups` is not writable, the database lock cannot be read, or the pre-migration backup cannot be attempted |
+| 73 | the data directory or `<data dir>/backups` is not writable, its file system cannot hold SQLite's WAL journal, the database lock cannot be read, or the pre-migration backup cannot be attempted |
 | 74 | a backup failed (boot, `scripts/backup.mjs`) or is unusable (`scripts/check-backup.mjs`); at boot, migrations were not applied |
 | 75 | the database lock is held by another running app or tool |
 | 78 | bad configuration; the message names every variable to fix (for the smoke test, also a `DATABASE_PATH` that would put its fixtures inside the repository's recorded fixture tree) |
@@ -432,13 +454,13 @@ migrations and the first airport seeding.
 - **Logs.** The app writes one JSON object a line; compose keeps 5 files of 10 MB. To follow
   one run: `docker compose logs --no-log-prefix app | jq -R 'fromjson? | select(.executionId == "<id>")'`.
 - **Upgrade.** Back up first (section 6), then from your checkout: `git pull`,
-  `docker compose up -d --build --wait`. When the new version brings schema migrations, the app
+  `docker compose up -d --build --wait --wait-timeout 120`. When the new version brings schema migrations, the app
   backs the database up again before applying them and logs `backup before N migration(s):
   <file>`. That file is the one a rollback needs and it sits on the volume, where newer backups
   prune it: once the log shows that line, run the cron command of section 6 once by hand (or
   `docker compose cp` that file out) so a copy exists off the volume.
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
-  named (section 6, Restore), and run `docker compose up -d --build --wait`. An older version
+  named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 120`. An older version
   cannot use a database a newer one has migrated, so the restore is required.
 - **Base image updates.** The `Dockerfile` pins `node:22-slim` by digest, so security fixes to
   Node and Debian arrive only when the pin moves. Once a month, run
@@ -476,6 +498,11 @@ itinerary search for its cheapest day pair (at most 4 credits). It prints the ch
 seller confirmed (or, without one, the cheapest calendar price, labelled as such, with its
 age), then a checklist. Run it after setup, after changing a key, and whenever prices look
 wrong.
+
+The smoke test applies none of a definition's constraints (stops, journey time, baggage): it
+shows the cheapest offer whatever its route, and says for each itinerary price how long each
+way takes and how many stops it makes (`out 19h 05m 2 stops, back 9h 30m nonstop`), so a long
+connection is visible before you compare it with Google Flights.
 
 Each database keeps its own count of the SearchApi credits tool runs have used (smoke tests and
 fixture recordings): the container's volume one, a development checkout's `data/dev.db`

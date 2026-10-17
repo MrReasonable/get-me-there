@@ -21,6 +21,8 @@ export interface DurationCell {
   price: DurationPrice | null;
   n: number;
   searched: SearchedCount;
+  /** A calendar series' six buckets at this nights value (N1); the verified series has none. */
+  buckets?: Night['searched']['discovery'][number]['buckets'];
 }
 export interface DurationRow {
   nights: number;
@@ -83,7 +85,12 @@ export function buildDurationData(
       const m = r?.minCalendar.find((x) => x.providerId === p);
       const d = r?.searched.discovery.find((x) => x.providerId === p);
       const searched = d === undefined ? NONE : { searched: d.searched, total: d.total };
-      cells[calendarKey(p)] = { price: m?.price ?? null, n: m?.n ?? 0, searched };
+      cells[calendarKey(p)] = {
+        price: m?.price ?? null,
+        n: m?.n ?? 0,
+        searched,
+        ...(d === undefined ? {} : { buckets: d.buckets }),
+      };
     }
     rows.push({ nights, cells, anySearched: Object.values(cells).some((c) => c.searched.searched > 0) });
   }
@@ -159,6 +166,9 @@ export function gapLabel(cell: DurationCell | undefined, kind: DurationSeries['k
     if (searched === 0) return D.notItinerarySearched;
     return searched < total ? D.partlyItinerarySearchedNoPrice(searched, total) : D.itinerarySearchedNoPrice;
   }
-  if (searched === 0) return D.notSearched;
-  return searched < total ? D.partlySearchedNoPrice(searched, total) : D.searchedNoPrice;
+  // why: N1 (ruling 4): a calendar gap names its buckets ("12 no cached data"), as the Calendar does; cache misses are
+  // never presented as a search that found nothing.
+  const b = cell?.buckets;
+  if (b === undefined || b.not_run === total) return D.notSearched;
+  return COPY.calendarView.bucketBreakdown(b);
 }

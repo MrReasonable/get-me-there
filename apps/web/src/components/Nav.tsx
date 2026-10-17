@@ -8,16 +8,17 @@ import { VIEWS, type ViewId } from '../state/view.js';
  */
 export function Nav({ current }: { current: ViewId }) {
   return (
-    // why: eight links scroll sideways on a phone instead of wrapping into three 44px rows (UI-15).
-    <nav aria-label={COPY.navLabel} className="max-w-full overflow-x-auto">
-      <ul className="flex gap-1 whitespace-nowrap">
+    // why: UI-011: a sideways scroll hid three views at 375 px with no affordance; with the phone padding the eight
+    // links wrap into two 44 px rows (UI-15's worry was three), every view in sight.
+    <nav aria-label={COPY.navLabel} className="max-w-full">
+      <ul className="flex flex-wrap gap-1 whitespace-nowrap">
         {VIEWS.map((v) => (
           <li key={v}>
             <a
               href={hrefWith({ view: v })}
               onClick={navigateTo({ view: v })}
               aria-current={v === current ? 'page' : undefined}
-              className={`inline-flex min-h-11 items-center rounded px-3 text-sm ${v === current ? 'bg-slate-900 text-white' : 'text-slate-800 underline'}`}
+              className={`inline-flex min-h-11 items-center rounded px-2 text-sm sm:px-3 ${v === current ? 'bg-slate-900 text-white' : 'text-slate-800 underline'}`}
             >
               {COPY.nav[v]}
             </a>

@@ -14,7 +14,7 @@ import {
 } from '@gmt/core';
 import type { HttpKit, HttpKitResponse } from '../http/types.js';
 import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.js';
-import { parseError } from '../shared/errors.js';
+import { isExpansionFailure, parseError } from '../shared/errors.js';
 import { majorToMinor } from '../shared/money.js';
 import { NoteCounter } from '../shared/notes.js';
 import { bookingOffers, statedAirline, step3NamesAirline, toRawSegments } from './offers.js';
@@ -58,17 +58,6 @@ export function estimateItinerary(q: ItineraryQuery, costPerCallMicroGbp: number
       `${WORST_SECONDS_PER_CALL} s per call, the slowest calendar call measured on 2026-10-14`,
     ],
   };
-}
-
-/**
- * Spec §5.4 (rev 12) and plan decision 17: only `upstream`, `network` and `parse` are a failed expansion; `auth`,
- * `quota`, `rate-limit` and `limiter-timeout` from any step propagate unchanged.
- */
-function isExpansionFailure(err: unknown): err is ProviderError {
-  return (
-    err instanceof ProviderError &&
-    (err.kind === 'upstream' || err.kind === 'network' || err.kind === 'parse')
-  );
 }
 
 /**

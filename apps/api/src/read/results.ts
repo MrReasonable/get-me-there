@@ -207,14 +207,30 @@ export function confirmedIn(loaded: Loaded): (r: ResultRow) => boolean {
   return (r) => r.observationId === null || !loaded.unconfirmed.has(r.observationId);
 }
 
-/** Spec §6.9 default basis and its reason. */
+/** Decision 67: whether verification is available, from the live definition (the one source every view reads). */
+export function verificationConfigured(def: SearchDefinition): boolean {
+  return def.providers.verification.length > 0;
+}
+
+/**
+ * Spec §6.9 default basis and its reason (decision 67). One source answers "is verification available": the live
+ * definition's `providers.verification`, the same source as `verificationProviderConfigured`, never the latest parent
+ * run's frozen snapshot (a parent that ran before verification was added must not hide an on-demand child's price).
+ * The verified basis is the default when that source names a provider and any observation, children included, lies
+ * inside the current space; otherwise the reason names the condition that failed.
+ */
 export function chooseBasis(loaded: Loaded, requested: Basis | undefined): { basis: Basis; reason: string } {
-  const hasVerification = (loaded.latestParent?.snapshot ?? loaded.def).providers.verification.length > 0;
   if (requested === 'calendar') return { basis: 'calendar', reason: API_TEXT.basisRequestedCalendar };
   if (requested === 'verified') return { basis: 'verified', reason: API_TEXT.basisItinerarySearch };
-  if (!hasVerification) return { basis: 'calendar', reason: API_TEXT.basisNoVerificationProvider };
-  if (loaded.verified.length === 0 && loaded.excluded.verified === 0)
-    return { basis: 'calendar', reason: API_TEXT.basisNoObservations };
+  if (!verificationConfigured(loaded.def))
+    return { basis: 'calendar', reason: API_TEXT.basisNoVerificationProvider };
+  if (loaded.verified.length === 0)
+    return {
+      basis: 'calendar',
+      // why: observations that only fall outside the current space are counted, so the reason says where they went.
+      reason:
+        loaded.excluded.verified > 0 ? API_TEXT.basisNoObservationsInSpace : API_TEXT.basisNoObservations,
+    };
   return { basis: 'verified', reason: API_TEXT.basisItinerarySearch };
 }
 
@@ -243,10 +259,10 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
     // why: with ?executionId= the header describes the run shown, alone (review prov-003, decision 42's principle).
     coverage:
       shown === undefined || q.executionId === undefined
-        ? coverageSummaryFor(loaded.latestParent, loaded.all, ports)
-        : coverageSummaryFor(shown, [], ports),
+        ? coverageSummaryFor(loaded.latestParent, loaded.all, ports, loaded.space)
+        : coverageSummaryFor(shown, [], ports, loaded.space),
     excludedByCurrentSpace: excluded,
-    verificationProviderConfigured: def.providers.verification.length > 0,
+    verificationProviderConfigured: verificationConfigured(def),
     // why: decision 45 (review prov I2): the headline is the first ranked row: the best class available and, within it,
     // a confirmed price before an unconfirmed one (`compareRows`); an unconfirmed headline keeps its verdict badge.
     cheapest: ranked[0] ?? null,

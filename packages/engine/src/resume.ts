@@ -24,6 +24,7 @@ import {
 } from './stages/reuse.js';
 import { confirmationNeeded, nothingToSearch, refused } from './start.js';
 import type { StartResult } from './types.js';
+import { HOUR_MS } from './units.js';
 
 /**
  * Spec §8.1 "Resume": allowed on interrupted | paused_* | cancelled, and on completed when retryable errors remain
@@ -212,7 +213,7 @@ export function olderThanRefresh(
     ids.length === 0
       ? DEFAULT_DISCOVERY_REFRESH_HOURS
       : Math.min(...ids.map((id) => refreshHoursOf(exec.snapshot, id)));
-  return Date.parse(now) - Date.parse(exec.startedAt ?? exec.createdAt) > REUSE_TOLERANCE * hours * 3_600_000;
+  return Date.parse(now) - Date.parse(exec.startedAt ?? exec.createdAt) > REUSE_TOLERANCE * hours * HOUR_MS;
 }
 
 /**

@@ -52,3 +52,15 @@ export function parseVendor<S extends z.ZodType>(
   if (!r.success) throw parseError(cause, zodReason(r.error), where);
   return r.data;
 }
+
+/**
+ * Spec §5.4 (rev 12) and plan decision 17: only `upstream`, `network` and `parse` are a failed expansion of a chain
+ * step; `auth`, `quota`, `rate-limit` and `limiter-timeout` from any step propagate unchanged. The one copy the
+ * SearchApi chain and the fixture provider share (ca-005), so the engine's parity tests exercise the same rule.
+ */
+export function isExpansionFailure(err: unknown): err is ProviderError {
+  return (
+    err instanceof ProviderError &&
+    (err.kind === 'upstream' || err.kind === 'network' || err.kind === 'parse')
+  );
+}

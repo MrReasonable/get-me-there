@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { COPY } from '../../src/copy.js';
 import { CoverageView } from '../../src/views/Coverage/CoverageView.js';
 import { API, coverageResponse, definition, execution } from '../fixtures.js';
 import { server } from '../msw/server.js';
@@ -22,6 +23,57 @@ function withStage(patch: Partial<ReturnType<typeof coverageResponse>['perStage'
 const render = () => renderWithProviders(<CoverageView definition={definition()} />);
 
 describe('View D (spec §11, §6.6)', () => {
+  it('lists each on-demand itinerary search below the parent run, with its own buckets and ledger calls (UI-004, ruling 15)', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/coverage`, () =>
+        HttpResponse.json(
+          coverageResponse({
+            onDemand: [
+              {
+                executionId: 'child-1',
+                status: 'completed',
+                startedAt: '2026-10-14T13:41:00.000Z',
+                cell: {
+                  origin: 'LHR',
+                  destination: 'JFK',
+                  departureDate: '2027-03-05',
+                  returnDate: '2027-03-15',
+                  nights: 10,
+                },
+                perStage: [
+                  {
+                    stage: 'verification',
+                    providerId: 'searchapi',
+                    buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 },
+                    total: 1,
+                    requests: { calls: 3, cacheHits: 0, costMicroGbp: 0 },
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    render();
+    const table = await screen.findByRole('table', { name: COPY.coverageOnDemandHeading });
+    const [row] = within(table).getAllByRole('row').slice(1);
+    expect(row).toHaveTextContent('LHR → JFK');
+    expect(row).toHaveTextContent('itinerary search');
+    expect(row).toHaveTextContent('SearchApi');
+    expect(row).toHaveTextContent('completed');
+    expect(row).toHaveTextContent('3 calls');
+    // why: its own buckets: one priced cell of one
+    expect([...(row?.querySelectorAll('td') ?? [])].map((c) => c.textContent)).toEqual(
+      expect.arrayContaining(['1', '0']),
+    );
+  });
+
+  it('says when no on-demand search has run', async () => {
+    render();
+    expect(await screen.findByText(COPY.coverageOnDemandNone)).toBeInTheDocument();
+  });
+
   it('counts per stage × provider in the six buckets, with cells, "searched", "with a price" and estimate vs ledger', async () => {
     render();
     const table = await screen.findByRole('table', { name: 'Coverage' });
@@ -56,7 +108,8 @@ describe('View D (spec §11, §6.6)', () => {
         '126',
         '110',
         '60 of 126',
-        '14 of 14 planned calls · 0 cache hits · ledger cost £0, from configured rates',
+        // why: cost-008: discovery is planned and judged in tiles (decision 43), so its line says tiles, calls beside.
+        '14 of 14 planned tiles (14 calls) · 0 cache hits · ledger cost £0, from configured rates',
       ],
       [
         'itinerary search',
@@ -192,7 +245,7 @@ describe('View D (spec §11, §6.6)', () => {
     );
     render();
     expect(
-      await screen.findByText('Overrun: ledger calls exceed the plan by more than 10%.'),
+      await screen.findByText('Overrun: tiles requested exceed the plan by more than 10%.'),
     ).toBeInTheDocument();
     expect(screen.getByText('Parity break: tile requests differ from the plan.')).toBeInTheDocument();
     expect(screen.getByText('(4 reused from earlier runs)')).toBeInTheDocument();

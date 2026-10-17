@@ -1,6 +1,12 @@
 // Spec §6.5, §6.9, §8.1 `/results`: basis, dedup, ranking, cap, staleness (decision 44), notSeenInLatest, children,
 // excluded rows (review focus 4), truncation (decisions 36, 47).
-import { apiContract, type Constraints, TRUNCATED_NOTE } from '@gmt/core';
+import {
+  apiContract,
+  type Constraints,
+  SEARCH_LINK_LABEL,
+  SEARCH_LINK_ROW_LABEL,
+  TRUNCATED_NOTE,
+} from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { API_TEXT } from '../../src/text.js';
 import { expectContract } from '../helpers/contract.js';
@@ -144,6 +150,23 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(r.rows.find((row) => row.itineraryHash === 'hP')?.notSeenInLatest).toBeNull();
     expect(r.coverage.onDemand).toBe(1);
     expect(r.executions.map((e) => e.id)).toEqual([s.id('E2'), s.id('E1')]); // newest first
+  });
+
+  it('"+C on demand" counts only children that searched their cell, inside the current space (ssr-002)', async () => {
+    const { x, def, s } = await world();
+    const searched = (name: string, c: typeof C1, hours: number) => {
+      s.execution(name, { def, status: 'completed', startedAt: at(hours), finishedAt: at(hours), child: c });
+      s.cells(name, [c], { discovery: [], selected: [{ cell: c, reason: 'always_include' }] });
+    };
+    searched('Eok', C1, -0.5);
+    s.verified('Eok', C1, [{ hash: 'hOk', pricePence: 61_000, fetchedAt: at(-0.5) }]);
+    // why: a completed child whose cell never reached a searched outcome (here not_run) searched nothing.
+    searched('Enone', C2, -0.4);
+    const OUT = cell('LHR', 'JFK', '2026-11-02', '2026-11-30'); // 28 nights: outside the example's 10–21
+    searched('Eout', OUT, -0.3);
+    s.verified('Eout', OUT, [{ hash: 'hOut', pricePence: 30_000, fetchedAt: at(-0.3) }]);
+    const r = await results(x, def.id);
+    expect(r.coverage.onDemand).toBe(1);
   });
 
   it('every execution summary carries the run snapshot expandTop (decision 42)', async () => {
@@ -331,6 +354,57 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     expect([row?.stale, row?.ageHours, row?.truncated]).toEqual([false, 3 + 24, false]);
   });
 
+  it('a Travelpayouts row links to its own validated vendor link first, the generic search link as the labelled fallback (ruling 17, pie-010)', async () => {
+    const x = await createHarness();
+    h = x;
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const s = seeder(x.ports);
+    s.execution('E3', { def, status: 'completed', startedAt: at(-4), finishedAt: at(-3) });
+    s.cells('E3', [C1, C2], { discovery: ['travelpayouts'] });
+    const price = (c: typeof C1, pence: number, vendorLink: string | null) => ({
+      providerId: 'travelpayouts' as const,
+      sourceKind: 'authorised-cached' as const,
+      cabin: 'economy' as const,
+      cell: c,
+      pricePence: pence,
+      priceNativeMinor: pence,
+      currencyNative: 'GBP',
+      fx: { converted: false as const },
+      pointOfSale: 'GB',
+      fetchedAt: at(-3),
+      providerObservedAt: null,
+      maxAgeHours: 48,
+      vendorLink,
+      reusedFromExecutionId: null,
+    });
+    const outcome = (c: typeof C1, pence: number) => ({
+      ...c,
+      status: 'priced' as const,
+      reason: null,
+      lastError: null,
+      fetchedAt: at(-3),
+      minPence: pence,
+      cabin: 'economy' as const,
+      pointOfSale: 'GB',
+      sourceKind: 'authorised-cached' as const,
+    });
+    const own = 'https://www.aviasales.com/search/LHR0211JFK12111?t=abc123';
+    x.ports.repos.cells.writeTile(s.id('E3'), 'travelpayouts', {
+      tileIndex: 0,
+      cells: [C1, C2],
+      discards: 0,
+      prices: [price(C1, 47_900, own), price(C2, 48_000, 'https://evil.example/x')],
+      outcomes: [outcome(C1, 47_900), outcome(C2, 48_000)],
+    });
+    const rows = (await results(x, def.id, '?basis=calendar')).rows;
+    const first = rows.find((r) => r.pricePence === 47_900);
+    expect(first?.searchLink).toEqual({ url: own, host: 'www.aviasales.com', label: SEARCH_LINK_ROW_LABEL });
+    // why: a stored link that fails re-validation is dropped for the generic search link, with its own label.
+    const second = rows.find((r) => r.pricePence === 48_000);
+    expect(second?.searchLink?.host).toBe('search.aviasales.com');
+    expect(second?.searchLink?.label).toBe(SEARCH_LINK_LABEL);
+  });
+
   it('marks a price from a truncated tile with truncated, from the outcome last_error (decisions 36, 47)', async () => {
     const x = await createHarness();
     h = x;
@@ -362,6 +436,38 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     s.tile('E3', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-1), maxAgeHours: 24 });
     x.clock.advance(150 * HOUR);
     expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(true); // 151 + 24 > 168 + 0 declared
+  });
+
+  it('decides from the live definition: a parent run without verification plus an on-demand child gives the verified basis (decision 67, F1)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    // why: the parent ran before verification was added, so its frozen snapshot names no verification provider.
+    const parentDef = { ...def, providers: { ...def.providers, verification: [] } };
+    s.execution('E1', { def: parentDef, status: 'completed', startedAt: at(-4), finishedAt: at(-3) });
+    s.cells('E1', [C1, C2]);
+    s.tile('E1', C2, { status: 'priced', pricePence: 47_900, fetchedAt: at(-3) });
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1), child: C1 });
+    s.cells('E2', [C1], { discovery: [], selected: [{ cell: C1, reason: 'always_include' }] });
+    s.verified('E2', C1, [{ hash: 'hD', pricePence: 47_100, fetchedAt: at(-1) }]);
+    const r = await results(x, def.id);
+    expect([r.basis, r.basisReason, r.verificationProviderConfigured]).toEqual([
+      'verified',
+      API_TEXT.basisItinerarySearch,
+      true,
+    ]);
+    expect(r.cheapest?.pricePence).toBe(47_100);
+  });
+
+  it('a definition with verification but no observation in the current space defaults to calendar and says so (decision 67)', async () => {
+    const { x, def } = await world();
+    expect(
+      (await x.request(`/api/definitions/${def.id}`, { method: 'PUT', json: { minNights: 11 } })).status,
+    ).toBe(200);
+    const r = await results(x, def.id);
+    expect(r.basis).toBe('calendar');
+    expect(r.basisReason.startsWith(API_TEXT.basisNoObservationsInSpace)).toBe(true);
   });
 
   it('is the default when a verification provider exists but nothing was itinerary-searched', async () => {

@@ -83,7 +83,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
     fetchLines = lines.fetch;
     routeLines = lines.route;
   }
-  const span = historySpan(fetchLines);
+  const span = historySpan(fetchLines, new Set(executions.filter((e) => e.isChild).map((e) => e.id)));
   const notes = definition.destinationNotes;
 
   return (
@@ -93,6 +93,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
         <p className="text-sm">
           {H.spanLine(
             span.runs,
+            span.onDemand,
             formatInstantDateLondon(instantMs(span.firstAt)),
             formatInstantDateLondon(instantMs(span.lastAt)),
           )}
@@ -111,21 +112,26 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
           </a>
         </div>
       ) : (
-        <label className="flex flex-col text-sm">
-          {H.routePicker}
-          <select
-            value={overlay ? ALL : chosen === undefined ? '' : pairKey(chosen)}
-            onChange={(e) => updateSearchParams({ [HISTORY_PARAMS.pair]: e.target.value }, 'replace')}
-            className="rounded border px-2 py-1"
-          >
-            {pairs.map((p) => (
-              <option key={pairKey(p)} value={pairKey(p)}>
-                {H.pairOption(p.origin, p.destination)}
+        <div>
+          <label className="flex flex-col text-sm">
+            {H.routePicker}
+            <select
+              value={overlay ? ALL : chosen === undefined ? '' : pairKey(chosen)}
+              onChange={(e) => updateSearchParams({ [HISTORY_PARAMS.pair]: e.target.value }, 'replace')}
+              className="rounded border px-2 py-1"
+            >
+              {pairs.map((p) => (
+                <option key={pairKey(p)} value={pairKey(p)}>
+                  {H.pairOption(p.origin, p.destination)}
+                </option>
+              ))}
+              <option value={ALL}>
+                {H.allPairs(Math.min(pairs.length, MAX_OVERLAY_PAIRS), pairs.length)}
               </option>
-            ))}
-            <option value={ALL}>{H.allPairs(Math.min(pairs.length, MAX_OVERLAY_PAIRS), pairs.length)}</option>
-          </select>
-        </label>
+            </select>
+          </label>
+          <p className="mt-1 text-sm text-slate-700">{H.offersPerItinerary}</p>
+        </div>
       )}
       {pending ? (
         <p role="status">{COPY.loading}</p>

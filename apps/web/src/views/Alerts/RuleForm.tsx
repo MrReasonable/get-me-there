@@ -139,7 +139,7 @@ export function RuleForm(props: {
           ))}
         </div>
       ) : null}
-      <button type="submit" disabled={props.busy}>
+      <button type="submit" className="min-h-11 rounded border border-slate-500 px-3" disabled={props.busy}>
         {C.addRule}
       </button>
     </form>

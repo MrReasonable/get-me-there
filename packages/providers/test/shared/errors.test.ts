@@ -1,7 +1,7 @@
-import { ProviderError } from '@gmt/core';
+import { ProviderError, type ProviderErrorKind } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { parseError, parseVendor } from '../../src/shared/errors.js';
+import { isExpansionFailure, parseError, parseVendor } from '../../src/shared/errors.js';
 import { asProviderError } from '../support/guards.js';
 
 const where = { providerId: 'travelpayouts', endpointPath: '/aviasales/v3/prices_for_dates' } as const;
@@ -58,5 +58,25 @@ describe('parseVendor (zod over untrusted vendor JSON, no casts)', () => {
     expect(e.message).toContain('data:');
     expect(e.message).toContain('[malformed-envelope]');
     expect(e.message).not.toContain('secret-looking-value');
+  });
+});
+
+describe('isExpansionFailure: the one spec §5.4 rule both chains use (ca-005)', () => {
+  const err = (kind: ProviderErrorKind) =>
+    new ProviderError({ kind, retryable: false, providerId: 'searchapi', message: 'x' });
+  it.each([
+    ['upstream', true],
+    ['network', true],
+    ['parse', true],
+    ['auth', false],
+    ['quota', false],
+    ['rate-limit', false],
+    ['limiter-timeout', false],
+  ] as const)('%s is a failed expansion: %s', (kind, expected) => {
+    expect(isExpansionFailure(err(kind))).toBe(expected);
+  });
+  it('anything that is not a ProviderError is not one', () => {
+    expect(isExpansionFailure(new Error('boom'))).toBe(false);
+    expect(isExpansionFailure(null)).toBe(false);
   });
 });

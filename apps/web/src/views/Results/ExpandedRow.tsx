@@ -1,9 +1,9 @@
-import { effectiveAge, formatFetchedAgo } from '@gmt/core';
+import { effectiveAge, formatFetchedAgo, priceUnconfirmed } from '@gmt/core';
 import type { ResultRow } from '../../api/types.js';
 import { BookingAction, SearchLink } from '../../components/BookingAction.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
+import { PriceCell } from '../../components/PriceCell.js';
 import { provenanceConsistent } from '../../components/Provenance.js';
 import { VerdictList } from '../../components/VerdictList.js';
 import { VerifyCellButton } from '../../components/VerifyCellButton.js';

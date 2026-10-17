@@ -215,6 +215,23 @@ function searchedOf(s: Searched, total: number): { searched: number; total: numb
   return { searched: s[0], total: s[1] };
 }
 
+/** A discovery count whose answered cells all came back "no cached data" (the Aviasales-cache case, N1). */
+function discoveryOf(s: Searched, total: number) {
+  const c = searchedOf(s, total);
+  return {
+    ...c,
+    buckets: {
+      priced: 0,
+      empty: 0,
+      no_data: c.searched,
+      error: 0,
+      skipped: 0,
+      not_run: total - c.searched,
+      reused: 0,
+    },
+  };
+}
+
 /** One nights value; verified/calendar are [pence, n] or null; `searched` says how much each series searched. */
 export function night(
   nights: number,
@@ -250,7 +267,7 @@ export function night(
           ],
     searched: {
       verification: searchedOf(searched.verification, 4),
-      discovery: [{ providerId: 'travelpayouts', ...searchedOf(searched.travelpayouts, 48) }],
+      discovery: [{ providerId: 'travelpayouts', ...discoveryOf(searched.travelpayouts, 48) }],
     },
   };
 }
@@ -295,7 +312,7 @@ export function cellDetail(c: Cell, over: Partial<CellDetailResponse> = {}): Cel
     outcomes: [],
     calendarPrices: [],
     observations: [],
-    verify: { maxCalls: 6, headroomCalls: 1840 },
+    verify: { maxCalls: 6, headroomCalls: 1840, needCalls: 6 },
     ...over,
   });
 }
@@ -338,10 +355,12 @@ export function routeHistory(
     routeSeries: [
       {
         providerId: 'searchapi',
-        cabin: 'unknown',
+        trip: { departureDate: '2027-03-10', returnDate: '2027-03-20' },
+        cabin: 'economy',
         points: ['2027-03-10', '2027-03-11', '2027-03-12'].map((d, i) => ({
           date: d,
           pricePence: 38000 + i * 500,
+          currency: 'GBP',
           fetchedAt: hoursBefore(2),
           providerId: 'searchapi',
           sourceKind: 'scraped-search',

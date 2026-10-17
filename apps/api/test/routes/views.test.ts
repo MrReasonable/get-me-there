@@ -270,7 +270,23 @@ describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () =>
     ).length;
     expect(ten?.searched).toEqual({
       verification: { searched: 3, total: 4 },
-      discovery: [{ providerId: 'fixture', searched: 3, total: tenTotal }],
+      // why: N1: the per-provider buckets, so View C names cache misses as such (C4's tile failed; the rest not run).
+      discovery: [
+        {
+          providerId: 'fixture',
+          searched: 3,
+          total: tenTotal,
+          buckets: {
+            priced: 1,
+            empty: 1,
+            no_data: 1,
+            error: 1,
+            skipped: 0,
+            not_run: tenTotal - 4,
+            reused: 0,
+          },
+        },
+      ],
     });
     expect(d.byNights[1]).toMatchObject({
       nights: 11,
@@ -278,9 +294,49 @@ describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () =>
       minCalendar: [],
       searched: {
         verification: { searched: 0, total: 0 },
-        discovery: [{ providerId: 'fixture', searched: 0, total: tenTotal }],
+        discovery: [
+          {
+            providerId: 'fixture',
+            searched: 0,
+            total: tenTotal,
+            buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: tenTotal, reused: 0 },
+          },
+        ],
       },
     });
+  });
+});
+
+describe('an assumed calendar bound reaches every price as such (N4, pie-007)', () => {
+  it('a calendar price from a provider whose bound is assumed carries maxAgeAssumed; a stated bound does not', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [C1]);
+    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
+    const calendar = async () =>
+      (
+        await get(
+          x,
+          `/api/definitions/${def.id}/calendar`,
+          '/api/definitions/:id/calendar',
+          apiContract.calendarResponseSchema,
+        )
+      ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
+    expect(await calendar()).not.toHaveProperty('maxAgeAssumed');
+    // why: SearchApi's date grid states no cache age; the app assumes 24 h and its capability says so (pie-007)
+    x.ports.providers.splice(
+      0,
+      x.ports.providers.length,
+      ...x.ports.providers.map((p) =>
+        p.discovery === undefined
+          ? p
+          : { ...p, discovery: { ...p.discovery, info: { ...p.discovery.info, maxAgeAssumed: true } } },
+      ),
+    );
+    expect(await calendar()).toMatchObject({ maxAgeHours: 24, maxAgeAssumed: true });
   });
 });
 
@@ -398,7 +454,7 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
     expect(cov.perStage.find((p) => p.stage === 'discovery')).toMatchObject({
       providerId: 'fixture',
       total: 4,
-      requests: { calls: 0, cacheHits: 0, costMicroGbp: 0, planCalls: null },
+      requests: { calls: 0, tiles: 0, cacheHits: 0, costMicroGbp: 0, planCalls: null },
       overrun: false,
       parityBreak: false,
     });
@@ -414,6 +470,50 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
       }),
     ]);
     expect(cov.scheduleBlockedSince).toBeNull();
+    expect(cov.onDemand).toEqual([]);
+  });
+
+  it('lists the on-demand children below the parent run, each with its own buckets and ledger (UI-004, ruling 15)', async () => {
+    const { x, def, s } = await world();
+    s.execution('Ec', { def, status: 'completed', startedAt: at(-0.5), finishedAt: at(-0.4), child: C1 });
+    s.cells('Ec', [C1], { discovery: [], selected: [{ cell: C1, reason: 'always_include' }] });
+    s.verified('Ec', C1, [{ hash: 'hC', pricePence: 47_100, fetchedAt: at(-0.4) }]);
+    const cov = await get(
+      x,
+      `/api/definitions/${def.id}/coverage`,
+      '/api/definitions/:id/coverage',
+      apiContract.coverageResponseSchema,
+    );
+    expect(cov.executionId).toBe(s.id('E1')); // the parent's table is unchanged
+    expect(cov.onDemand).toEqual([
+      {
+        executionId: s.id('Ec'),
+        status: 'completed',
+        startedAt: at(-0.5),
+        cell: { ...C1, nights: 10 },
+        perStage: [
+          {
+            stage: 'verification',
+            providerId: 'fixture',
+            buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 },
+            total: 1,
+            requests: { calls: 0, cacheHits: 0, costMicroGbp: 0 },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('an error on a cell that has since departed is not offered for retry: a resume would refuse it (ssr-004)', async () => {
+    const { x, def } = await world();
+    x.clock.advance(25 * 24 * 3_600_000); // 2026-11-08: C4 (out 2026-11-05) has departed
+    const cov = await get(
+      x,
+      `/api/definitions/${def.id}/coverage`,
+      '/api/definitions/:id/coverage',
+      apiContract.coverageResponseSchema,
+    );
+    expect(cov.errors.map((e) => [e.cell.departureDate, e.retryable])).toEqual([['2026-11-05', false]]);
   });
 
   it('an error outcome with no recorded reason says so with null, never an empty string (review prov M3)', async () => {
@@ -497,7 +597,7 @@ describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:re
     const { x, def, s } = await world();
     const preview = vi
       .spyOn(x.engine, 'childCapPreview')
-      .mockReturnValue({ ok: true, maxCalls: 6, headroomCalls: 994 });
+      .mockReturnValue({ ok: true, maxCalls: 6, headroomCalls: 994, needCalls: 6 });
     const d = await get(
       x,
       `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
@@ -514,7 +614,7 @@ describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:re
     expect(d.observations.map((o) => [o.itineraryHash, o.pricePence, o.verdictClass])).toEqual([
       ['hV', 60_000, 'verified'],
     ]);
-    expect(d.verify).toEqual({ maxCalls: 6, headroomCalls: 994 });
+    expect(d.verify).toEqual({ maxCalls: 6, headroomCalls: 994, needCalls: 6 });
     expect(preview).toHaveBeenCalledWith(def.id, C1);
   });
   it('drops a hostile stored booking from the observations it lists (decision 54, review SEC-R2-3)', async () => {

@@ -1,16 +1,17 @@
 /** Spec §10 system routes: health, airports, providers, budget, scheduler jobs. */
 import { statSync } from 'node:fs';
-import {
-  apiContract,
-  type Config,
-  DEFAULT_DISCOVERY_REFRESH_HOURS,
-  microGbpToPence,
-  type ProviderId,
-} from '@gmt/core';
+import { apiContract, DEFAULT_DISCOVERY_REFRESH_HOURS, microGbpToPence, type ProviderId } from '@gmt/core';
 import type { z } from 'zod';
 import { defaultDefinitionInput } from '../defaults.js';
 import { hostAllowed } from '../middleware/hardening.js';
-import { budgetScopes, providerBudget, providerScopes, usageOf } from '../read/usage.js';
+import {
+  budgetScopes,
+  planOf,
+  providerBudget,
+  providerScopes,
+  usageOf,
+  zeroCapBlocks,
+} from '../read/usage.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { NO_INPUT, plain, route } from './define.js';
@@ -63,9 +64,18 @@ export function healthDetail(ctx: RouteContext): HealthDetail {
   };
 }
 
-function planOf(config: Config, id: ProviderId): ProvidersResponse['providers'][number]['plan'] {
-  if (id === 'searchapi') return config.providers.searchapi?.plan ?? 'trial';
-  return id === 'fixture' ? 'synthetic' : 'free';
+/** Ruling 5: a billed provider whose calls cost £0 is stopped by its call cap alone; the card names that cap. */
+function capNoteOf(ctx: RouteContext, id: ProviderId): string | null {
+  const b = providerBudget(ctx.ports.config, id);
+  if (!b.billable || b.costPerCallMicroGbp > 0) return null;
+  const [scope] = providerScopes(ctx.ports.config, id);
+  const cap = scope === undefined ? null : usageOf(ctx.ports, scope).cap;
+  if (cap === null) return null;
+  const governs = API_TEXT.callCapGoverns(b.window, cap);
+  // why: N2 (ruling 9): with a 0-call default, the card's "N calls are the hard stop" must not read as calls available.
+  return ctx.ports.config.spend.executionMaxCalls === 0
+    ? `${governs}; ${API_TEXT.zeroRunCapDefault}`
+    : governs;
 }
 
 /**
@@ -82,11 +92,11 @@ export function providersResponse(ctx: RouteContext): ProvidersResponse {
       enabled: true,
       capabilities: { discovery: p.discovery?.info ?? null, verification: p.verification?.info ?? null },
       plan: planOf(config, p.id),
-      usage: providerScopes(p.id).map((s) => usageOf(ctx.ports, s)),
+      usage: providerScopes(config, p.id).map((s) => usageOf(ctx.ports, s)),
       excludedFromSchedule: providerBudget(config, p.id).excludedFromSchedule,
-      // why: spec §10/§12: a billed provider enabled under a zero cap cannot verify; say so where the operator looks.
-      notices:
-        p.id === 'searchapi' && config.spend.monthlyCapMicroGbp === 0 ? [API_TEXT.zeroCapVerification] : [],
+      // why: spec §10/§12, ruling 5: only a call that costs money is stopped by a zero spend cap; say so where the operator looks.
+      notices: zeroCapBlocks(config, p.id) ? [API_TEXT.zeroCapVerification] : [],
+      capNote: capNoteOf(ctx, p.id),
     })),
     synthetic: ctx.ports.providers.some((p) => p.id === 'fixture'),
     presets: {

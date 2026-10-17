@@ -125,6 +125,18 @@ function withData(r: JsonBodyType = rules, e: readonly { ruleId: string }[] = ev
   );
 }
 
+describe('Alerts at 375 px (spec §11 Accessibility; UI-009)', () => {
+  it('the eight-column events table scrolls sideways in its own labelled region, and every button is a 44 px target', async () => {
+    withData();
+    renderWithProviders(<AlertsView definitionId="def-1" />);
+    const table = await screen.findByRole('table', { name: C.eventsTable });
+    const region = table.closest('section');
+    expect(region).toHaveClass('overflow-x-auto');
+    expect(region?.getAttribute('aria-label')).toMatch(/scrolls sideways on a narrow screen/);
+    for (const b of screen.getAllByRole('button')) expect(b).toHaveClass('min-h-11');
+  });
+});
+
 describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
   it("shows this definition's events: status in words, the trip, the fare through PriceCell, the reason as a quote", async () => {
     withData();

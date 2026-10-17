@@ -2,8 +2,9 @@ import { COPY } from '../../copy.js';
 import type { Coverage } from './marker.js';
 
 /**
- * The day's visible, non-colour coverage cue (plan decision 38): "S/M searched" at 11 px beside a solid swatch when the
- * whole day was searched and a striped one when part was not, so thin coverage is visible without reading counts.
+ * A priced day's visible, non-colour coverage cue (plan decision 38, ruling 4 of decision 67): the buckets that apply,
+ * "3 priced, 9 no cached data", at 11 px, with a striped swatch when part of the day was not searched. The "searched"
+ * umbrella appears only in View D beside its breakdown (spec §3, §6.6), so a day of cached misses never reads covered.
  */
 export function CoverageCue({ coverage }: { coverage: Coverage }) {
   const C = COPY.calendarView;
@@ -22,8 +23,8 @@ export function CoverageCue({ coverage }: { coverage: Coverage }) {
       data-coverage={full ? 'full' : 'partial'}
       className="flex items-center gap-1 text-[11px]"
     >
-      <span aria-hidden="true" className={`cov-swatch ${full ? 'cov-full' : 'cov-partial'}`} />
-      {C.searchedFraction(coverage.searched, coverage.total)}
+      {full ? null : <span aria-hidden="true" className="cov-swatch cov-partial" />}
+      {C.bucketBreakdown(coverage.buckets)}
     </span>
   );
 }

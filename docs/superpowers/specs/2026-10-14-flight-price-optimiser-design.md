@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 27.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 28.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -103,7 +103,7 @@ Google has no public API.
 | Provider | Nature | Cost | Role | `sourceKind` | `maxAgeHours` |
 |---|---|---|---|---|---|
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
-| SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (declared, conservative assumption: a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
+| SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (the app's own conservative assumption, flagged as assumed and shown as "assumed ≤24h (undocumented)": a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
@@ -174,8 +174,9 @@ calls and ~175 free Travelpayouts calls settled every open fact:
    fare (recorded 2026-10-15); metro queries are not used.
 2. SearchApi calendar: 200-combination limit enforced as HTTP 400; per
    airport only; every probed route fully priced, thin ones included; 9–29 s
-   latency; ~23 rectangles per pair for the default band (8 outbound days ×
-   the 19-day return span a 12-night band needs; 152 combinations).
+   latency; 21 rectangles per pair for the worked example's 10–21-night band
+   and 182-day window (9 outbound days × the 20-day return span the band
+   needs; 180 combinations).
 3. SearchApi chain: step-1 price equals the step-2 price for the cheapest
    pairing (£603); step 3 showed an OTA at £573, so **the parity assertion
    fails** and `bookingLinks` is forced on (§5.4). Two of nine step-1
@@ -267,7 +268,8 @@ verification as a free history source (§7 `route_price_history`).
   price is stale only when its known age exceeds the threshold). Two label formats are defined once in `core`: the full form
   "fetched 2h ago · provider age unknown (≤7d before that)" for tooltips,
   headers and email, and the compact row form "2h ago · ≤7d" for table
-  cells and calendar days.
+  cells; where even that does not fit (a calendar day, the phone face) the
+  short face form "5d old", "≤2d old" or "age unknown", also from `core`.
 
 ---
 
@@ -286,7 +288,7 @@ one SQLite file, one container. Optional Mailpit for local email.
 | `web` | `core` (types, `api-contract`, pure filter/rank/verdict/label functions) | SPA. |
 
 **Tech**: TypeScript strict, Node 22, pnpm, `better-sqlite3` + Drizzle,
-Hono + `@hono/node-server` + `@hono/zod-validator`, `zod`, `@noble/hashes`,
+Hono + `@hono/node-server`, `zod`, `@noble/hashes`,
 `@date-fns/tz`, `bottleneck`, `p-retry`, `pino`, `croner`, `nodemailer`,
 Vite + React 19 + TanStack Query + TanStack Table + Tailwind + Recharts,
 Vitest + `msw` + Testing Library + Stryker, Playwright, Biome.
@@ -294,8 +296,8 @@ Vitest + `msw` + Testing Library + Stryker, Playwright, Biome.
 **Integration notes to verify at plan time** (each brief links its source):
 `@hono/node-server` `serveStatic` SPA fallback; `better-sqlite3` prebuilt
 fetch made **fail-closed** (no source-build fallback; version pinned by
-lockfile; integrity recorded in the WP12 brief); pnpm
-`onlyBuiltDependencies=["better-sqlite3"]`; Drizzle migrations in the
+lockfile; integrity recorded in the WP12 brief); pnpm 12
+`allowBuilds` for `better-sqlite3` and `esbuild`; Drizzle migrations in the
 image; `croner` `timezone` and one-shot jobs; `msw` on global `fetch`;
 `bottleneck` chained reservoirs + `maxConcurrent`; `p-retry`
 `onFailedAttempt` with `Retry-After`; `@date-fns/tz` `TZDate` DST rules;
@@ -422,7 +424,15 @@ export class AbortedError extends Error {}
   the 10–21-night band: 180 combinations), asserted ≤200 before reserve;
   ~21 tiles per pair for a 182-day window (the worked example: 4 pairs ≈ 84).
 - **Cell keys from the response**; entries outside `coveredCells` or with
-  nights ≠ the requested length are dropped and counted in `notes`.
+  nights ≠ the requested length are dropped and counted in `notes`. A
+  Travelpayouts row whose link token names a round trip other than the
+  cell's (an open jaw) is dropped and reported per cell; a row whose link
+  token cannot be read is priced on the row's own airports and counted
+  `itinerary-unreadable:n`, so the gap in that check is visible.
+- **Stops.** SearchApi `google_flights` sends the documented `stops` value
+  when the query has `maxStops` (0 `nonstop`, 1 `one_stop_or_fewer`, 2
+  `two_stops_or_fewer`; nothing above 2), so billed calls go to itineraries
+  the rule allows; verdicts still check stops from the segments.
 - **Empty is per capability.** `authorised-cached`: a schema-valid success
   envelope with zero entries → every covered cell `no_data`; a malformed
   envelope or `success:false` → `parse`. `scraped-aggregate`: an empty grid
@@ -446,9 +456,11 @@ export class AbortedError extends Error {}
 - **Errors.** 401/403 → `auth`; 402 → `quota`; 400 → `parse`
   (non-retryable) with the vendor's message in `last_error`; 404 → `upstream`
   non-retryable; 429 → `rate-limit`, or `quota` when the adapter's
-  classifier recognises the recorded quota body (the ledger cannot tell the
-  two apart for a billed vendor: a refused reservation never reaches the
-  vendor); a 429 without `Retry-After` waits the provider's configured
+  classifier recognises a quota body (the ledger cannot tell the two apart
+  for a billed vendor: a refused reservation never reaches the vendor);
+  SearchApi's classifier treats any 402, and a 403 or 429 whose body names
+  credits or quota, as `quota`, never retried, the HTTP code in the message;
+  a 429 without `Retry-After` waits the provider's configured
   fallback (Travelpayouts 60 s) or, with none, is non-retryable with a
   retry time at the hourly window;
   other 5xx → `upstream`; malformed → `parse`; socket → `network`; per-request timeout (`REQUEST_TIMEOUT_SECONDS`, separate from
@@ -541,7 +553,8 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
 
 Vendor parameter names from the allowlist (`travel_class` values `economy |
 premium_economy | business | first_class`). Step 1 (outbound options,
-cheapest-first) → step 2 per `expandTop` outbound (round-trip price for that
+cheapest-first among the options the vendor returns; `show_cheapest_flights`
+is not sent, a named follow-up) → step 2 per `expandTop` outbound (round-trip price for that
 pairing) → optional step 3 (`booking_token` → options; `booking_request` is a
 POST, stored as `{ kind: 'post', url, postData }`, rendered as a browser form,
 never fetched server-side; phone-only → `none`).
@@ -850,10 +863,13 @@ exist**; the header says why and offers a one-click switch. Per-cell
 verify actions and the calendar-gap banner are hidden when the definition
 has no verification provider.
 
-Every row on either basis carries a labelled **search link** (Aviasales
-deep link from Travelpayouts; a Google Flights search URL for SearchApi
-cells, which may not prefill every field) whenever `booking` is `none`,
-labelled "search link, not a fare link"; synthetic rows carry none.
+Every row on either basis carries a labelled **search link** whenever
+`booking` is `none`: a calendar row's own stored vendor link, re-validated
+against the provider's allowlist, comes first, labelled "the vendor's link
+for this cached row, not a fare link"; otherwise a generic search (an
+Aviasales search for Travelpayouts, a Google Flights search URL for
+SearchApi cells, which may not prefill every field), labelled "search link,
+not a fare link". Synthetic rows carry none.
 
 ---
 
@@ -878,7 +894,9 @@ are `toISOString()` text; booleans are integers 0/1.
   destination_notes_json {dest: text} NULL, onward_cost_json {dest: pence} NULL, schedule_cron NULL, schedule_tz NOT
   NULL, confirmed_cost_pence NULL (set **only** from an explicit
   confirmation the operator submits after seeing the estimate; never
-  recomputed automatically), enabled, deleted_at NULL, created_at,
+  recomputed automatically), confirmed_calls NULL (set together with
+  confirmed_cost_pence from the same explicit confirmation; the pre-start
+  comparison covers both), enabled, deleted_at NULL, created_at,
   updated_at). Soft-deleted.
 - `search_executions` (id, definition_id, is_child NOT NULL default 0,
   child_origin, child_destination, child_departure_date, child_return_date
@@ -978,12 +996,19 @@ are `toISOString()` text; booleans are integers 0/1.
   (rule_id, identity_key, fired_at).
 - `operator_notifications` (id, kind, execution_id NULL, definition_id,
   sent_at, status).
-- `route_price_history` (origin, destination, cabin (a cabin or
-  'unknown'), provider_id, date, lowest_price_pence, fetched_at) PK (origin, destination, cabin,
-  provider_id, date): the 60-day `price_insights.price_history` series
-  SearchApi returns with every step-1 response, upserted on each
-  verification. Shown on the History view as its own labelled series
-  ("Google's route-level lowest price, cabin unknown").
+- `route_price_history` (origin, destination, departure_date NULL,
+  return_date NULL, cabin (a cabin or 'unknown'), provider_id, date,
+  lowest_price_pence, fetched_at) UNIQUE (origin, destination,
+  departure_date, return_date, cabin, provider_id, date): the
+  `price_insights.price_history` series SearchApi returns with a step-1
+  response, which belongs to the **searched trip**, not the route, so each
+  point is keyed by the cell's departure and return dates and the request
+  cabin, and upserted on each verification. Only vendor-stated GBP points
+  are stored (the repository refuses any other currency). Rows written
+  before the trip was recorded keep NULL trip dates (both or neither, by
+  CHECK) and cabin 'unknown', and read "trip unknown". Shown on the History
+  view as its own labelled series per trip ("Google's price history for
+  5–15 Nov").
 - `app_lock` (id = 1, holder ∈ app | tool, heartbeat_at, acquired_at).
   Heartbeat every 30 s; stale after 3 missed beats; liveness judged by
   heartbeat age, never by pid. Graceful SIGTERM releases the lock after the
@@ -1011,7 +1036,9 @@ roll-up; the boot `running → interrupted` update with its
 its own transaction.
 
 **SQLite settings.** `journal_mode=WAL`, `busy_timeout=5000`,
-`foreign_keys=ON`. The app process is the only writer. The smoke and
+`foreign_keys=ON`. Opening a file database reads the journal mode back and
+refuses anything but WAL (a file system that cannot hold WAL makes SQLite
+keep its old mode silently); the app bootstrap exits 73. The app process is the only writer. The smoke and
 recording scripts run through the **tool bootstrap**, a second entrypoint in
 `apps/api` (WP4b) that reuses the same config parse and port wiring, opens
 the same DB, skips the boot sweep, auto-resume and cron, uses the production
@@ -1096,9 +1123,11 @@ completed
   "ledger cost, from configured rates". **Parity** = distinct tile requests
   (first-attempt ledger rows + cache hits) for one uninterrupted pass =
   `plan` length; a parity break raises an operator notification and a View
-  D flag. View D otherwise flags **overruns** only: actual calls > the
+  D flag. View D otherwise flags **overruns** only: usage above the
   **pre-factor plan** by more than 10% (the stored estimate already carries
-  the 1.2 factor, so it is not the comparison baseline).
+  the 1.2 factor, so it is not the comparison baseline), judged on distinct
+  tiles for discovery (its plan counts tiles, and a paged tile is one tile)
+  and on calls for itinerary search; View D words each line by its unit.
 - **Resume**: on `interrupted | paused_* | cancelled`, and on `completed`
   when `error` outcomes with headroom remain (retry-errors), continue per
   §7. Resume is a **compare-and-set**: `UPDATE … SET status = 'running'
@@ -1106,9 +1135,12 @@ completed
   changed, cancelling the one-shot job in the same step; the tick, the
   one-shot job, boot auto-resume and `/resume` all go through it, so
   losers no-op (or 409 for `/resume`). `/resume` also returns 409 if
-  another execution is active. Before planning, `not_run` and `skipped`
-  outcomes in either stage for cells with `departureDate ≤ todayLondon`
-  become `skipped:departed` (priced/empty/no_data rows are untouched).
+  another execution is active. Before planning, `not_run`, `error` and
+  `skipped` outcomes in either stage for cells with `departureDate ≤
+  todayLondon` become `skipped:departed`, their attempts and `last_error`
+  kept as evidence (an error on a flight that has left is not retryable;
+  priced/empty/no_data rows are untouched). View D offers Retry only for an
+  error on a cell that has not departed.
   Resume uses `estimateRemaining` (resumable tiles + remaining selected
   cells × estimate × factor) for its per-scope cap check, on both the
   tick and `/resume`. **Any** paused run older than `discoveryRefreshHours`
@@ -1144,15 +1176,22 @@ completed
   validates the cell ∈ `generateCells(current resolved space)` and airports
   exist; creates a child execution (`is_child = 1`, cell columns set) that
   skips discovery, `alwaysInclude = [cell]`, `maxCells = 1`, its own call
-  cap (the cell's estimated calls × the retry factor, bounded by the parent's
-  remaining headroom and never below `CHILD_MAX_CALLS`, default 6; the other
-  budget fields are inherited from the definition; a child never pauses: a
+  cap (the cell's estimated calls × the retry factor, raised to
+  `CHILD_MAX_CALLS`, default 6, and never above the headroom: the active
+  parent's remaining calls, else the definition's `maxCalls`, less what the
+  definition's other active children may still spend; a definition whose run
+  cap is 0 billed calls therefore starts no child, the request refused with
+  code `cap`; the other budget fields are inherited from the definition; the
+  cell panel's verify confirms the hard stop it shows; a child never pauses: a
   cap breach ends it `cancelled` with the cell left unverified), shares the
   provider/global caps; at most one active child per cell; the action is hidden when the
   definition has no verification provider. Child observations are
   **included** in results, calendar-gap, View B counts and duration
   analysis (filtered to the current resolved space), counted separately as
-  "+C on demand" beside "itinerary-searched K of N selected"; children are
+  "+C on demand" beside "itinerary-searched K of N selected", where C counts
+  completed children whose cell is inside the current resolved space and
+  whose verification roll-up for it is priced, empty or no_data (the
+  predicate K uses); children are
   excluded only from "latest execution", reuse sources and the parent
   index.
 
@@ -1169,7 +1208,9 @@ run the pre-start checks and start. A `paused_error` with no `resume_after`
 (every provider disabled) blocks the schedule until a manual resume or the
 supersede above. Missed firings are skipped; a boot that finds the last
 scheduled firing was missed records `skipped_missed` and notifies the
-operator, which is the laptop-asleep case for a personal install. Cron is
+operator, which is the laptop-asleep case for a personal install. A firing
+of a definition no configured provider can run on a schedule was refused
+at the tick, not missed, so boot records nothing for it. Cron is
 a bounded string in `core/api-contract`; the single `parseCron` wrapper in
 `engine` (over `croner`) is the **sole** semantic validator, imported by
 `api` (sub-hourly rejected, tz validated); `core` has no cron parser.
@@ -1218,7 +1259,14 @@ Thresholds in each package's `vitest.config.ts`, enforced in CI from WP0:
 85% lines and 70% branches; `web` 70% lines, 60% branches. Mutation
 testing (Stryker) on `core` `hashing`, `constraints`, `selection`,
 `rollUp`, `syntheticAllowed`, `toGbp`, `vendorUrl` and `alertDedup` with a
-break threshold of 80%. First-failing-test per WP in §16.
+break threshold of 80%, run in Stryker's sandbox (never in place) with
+explicit timeouts and concurrency 2; the gate fails when timed-out mutants
+exceed 5% of those tested (a timeout counts as detected, so load must never
+pass it), and CI runs it in a workflow of its own, on demand and weekly,
+never on every push. Recorded vendor responses never enter git, so the
+suites that replay them skip in CI by title; their local run, on a machine
+that holds the recordings, is the gate for any change to a provider adapter
+or the engine. First-failing-test per WP in §16.
 
 1. **`core`**: §6.1 incl. relative windows, clamping, zero-cell windows,
    `startOffsetDays = 0` rejection, DST/TZ matrix; §6.2 every constraint,
@@ -1307,7 +1355,9 @@ break threshold of 80%. First-failing-test per WP in §16.
 7. **Live scripts** (excluded from `pnpm test`, run via the tool bootstrap):
    `pnpm smoke:live` issues exactly one tile per configured provider (a
    query sized so `plan` yields one tile), asserts via the ledger, prints
-   the cheapest price with provenance, writes dated fixtures, exits non-zero
+   the cheapest price with provenance and, for an itinerary price, its time
+   each way and stops (it applies no definition constraint), writes dated
+   fixtures, exits non-zero
    on zero providers configured or any configured-provider error, distinct
    exit code for `empty`. `pnpm record:fixtures --budget N` records the step
    1→2→3 chain for one cell and the 429/quota bodies when the vendor can be
@@ -1327,22 +1377,22 @@ shape carries `provenance` and `stale`.
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ enabled scheduled definitions, or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
 | `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }` |
-| `GET /providers` | capabilities, plan, usage vs caps with window bounds; "verification will not run: spend cap is 0" when a billed provider is enabled under a zero cap |
+| `GET /providers` | capabilities, plan, usage vs caps with window bounds for the one window each plan uses (the month on a monthly plan, the lifetime on the trial; the unused window is not sent, so a null cap means no cap); "verification will not run: spend cap is 0" when a provider whose calls cost money is enabled under a zero spend cap; on a billed plan whose calls cost £0, a `capNote` naming the call cap that is the hard stop |
 | `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan**; response includes `budgetFit`; `PUT` re-registers the schedule; a zero-cell window returns 422 |
 | `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions |
 | `POST /definitions/coverage-check` | body: origins, destinations, window, nights; runs Travelpayouts month tiles (free, ledgered, subject to the free-call caps) and returns cached rows per pair per month; never calls a billed provider |
 | `POST /definitions/:id/executions` | pre-start checks; `confirmCostPence?`; 409 on active execution or cap breach naming the cap |
-| `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for all scopes, estimate vs ledger (updates during run) |
+| `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for every scope (each provider in the one window its plan uses), estimate vs ledger (updates during run) |
 | `POST /executions/:id/cancel`, `/resume` | `/resume` 409 if another is active or the compare-and-set loses; manual resume re-enables disabled providers and, on a `completed` execution, retries `error` outcomes with headroom |
 | `POST /cells/verify` | validated cell → child execution; 409 if a child is active for that cell |
 | `GET /definitions/:id/results?basis=&executionId=&limit=` | `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage }`; default basis per §6.9; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`. **No sort or filter parameters**: sorting and filtering are client-side (§6.5) |
-| `GET /definitions/:id/calendar?basis=` | per day: discovery counts per provider in the six buckets `{ priced, empty, no_data, error, skipped, not_run, reused }`, verification `{ selected, itinerarySearched, onDemand }`, `cheapestVerified` (class verified only, incl. children), `cheapestPartiallyVerified` with count, `cheapestCalendar`, `byDestination`; all in the definition's cabin |
+| `GET /definitions/:id/calendar?destination=` | per day: discovery counts per provider in the six buckets `{ priced, empty, no_data, error, skipped, not_run, reused }`, verification `{ selected, itinerarySearched, onDemand }`, `cheapestVerified` (class verified only, incl. children), `cheapestPartiallyVerified` with count, `cheapestCalendar`; all in the definition's cabin. With `destination`, every count and minimum is that destination's alone (plan decisions 53, 58: there is no basis parameter and no per-destination breakdown) |
 | `GET /definitions/:id/duration-analysis` | per nights: `minVerified` (class verified, with n, incl. children), `minCalendar` per provider with n |
-| `GET /definitions/:id/coverage` | summary, per-provider request counts, overrun and parity flags, "selected but not reached", errors with retry |
+| `GET /definitions/:id/coverage` | summary, per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
 | `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock` |
-| `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded |
+| `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
 
@@ -1358,22 +1408,39 @@ Flights via SearchApi" (itinerary search), "Google date grid via SearchApi"
 appears only beside class-`verified` values; the `verified` basis is
 labelled "itinerary-search basis"; stage counts say "itinerary-searched".
 
-Layout: nav owned by WP9 for all views; definition selector; **status bar**
-on every view: stage, progress, spend used / cap for execution and month,
-paused state with reason and Resume, "schedule blocked since <date>",
-Cancel. Every view header: execution(s) shown, status, age, stale label,
+Layout: nav owned by WP9 for all views, its links wrapping into rows on a
+phone so every view stays in sight; definition selector; **status bar**
+on every view: stage, progress as the six-bucket breakdown per stage ×
+provider (never an "attempted" or "searched" umbrella), spend used / cap
+for the execution and the month, and each provider's call usage against
+its binding window, worded as the Providers view words it ("this month:
+Travelpayouts 2 of 50000 calls", "SearchApi 7 of 24 calls over the plan's
+lifetime"), paused state with reason and Resume, "schedule blocked since
+<date>", Cancel. On a phone the numbers fold for a finished run and stay
+open while a run is active or paused. Every view header: execution(s) shown, status, age, stale label,
 banner when not completed. The Results header is two lines: **"cheapest
 found £X · <destination> <dates> · <basis> · <verdict class> · <provider> ·
 <age>"** and **"discovery: P priced · E no fares · X no cached data · R
 error · S skipped · U not searched of M (R′ reused) · itinerary-searched K
-of N selected (E outbounds each) +C on demand"**, linking to Coverage.
-Empty state for no providers. Red synthetic banner (§5.5).
+of N selected (E outbounds each) +C on demand"**, linking to Coverage
+("outbound" agrees with E; a run that selected nothing beside on-demand
+searches reads "itinerary-searched C cells on demand; none selected by the
+run"). When more than half the counted cells are "no cached data", Results
+and Calendar add one line naming the next move: add SearchApi discovery,
+widen the airports, or run the coverage check. Empty state for no
+providers. Red synthetic banner (§5.5).
 
 **Provenance on every price, visible without hover**: provider badge,
 source in words, effective age in the `core` compact row format ("2h ago ·
 ≤7d", or "age unknown") with the full form on hover and in headers, "≈" when
 FX-converted, dashed outline + "constraints not checked" for calendar
-prices, destination airport, and the operator's per-destination note from
+prices, destination airport. Where a cell is too small for the row form
+(the desktop calendar day, the phone day face, the 375px Results row) the
+face still shows the provider's short mark, the destination, a short age
+line from `core` ("5d old", "≤2d old", "age unknown", or the "vendor's
+cache age unknown" badge) and, on a calendar price, "not checked"; the
+title attribute may carry the long form, never the only form, and these
+faces keep their tested contrast and their fit at 375px. Each row also carries the operator's per-destination note from
 the definition (free text such as "onward leg not included") on every row
 for that destination. Optional operator-entered onward cost per destination
 renders as an "adjusted" column, labelled operator-entered, sortable, never
@@ -1419,20 +1486,31 @@ merged into price.
   scale, and the legend says which basis each day uses. Marker: "P priced ·
   E no fares · X no cached data · R error · S skipped · U not searched of M"
   for discovery, and "itinerary-searched 1 of 10 selected +C on demand"
-  separately. Distinct glyphs for `empty`, `no_data`, `error`,
-  `not_run`; numeric legend. Per-destination filter. Side panel with cells,
-  outcomes, verify.
+  separately. The day face names the buckets that apply ("12 no cached
+  data", "3 priced, 9 no cached data"), with a striped mark when part of the
+  day was not searched; it never shows a "searched" fraction or a "fully
+  searched" mark, which would make a day of cache misses read as covered.
+  Distinct glyphs for `empty`, `no_data`, `error`, `not_run`, each with its
+  count on the phone face too; numeric legend, the dashed-outline key
+  always open. Per-destination filter. Side panel with cells, outcomes,
+  verify.
 - **View C Duration**: bars per nights with axis titles (nights, £); series
   "min among verified (class verified, n=…)" and calendar per provider; `n`
   in label and tooltip; explicit empty and loading states; gaps for
   unsearched nights; no interpolation.
 - **View D Coverage**: counts per stage × provider with the six-bucket
-  breakdown and "searched" as the umbrella beside it; selected but not
-  reached with reason; overrun and parity flags; error list with retry.
+  breakdown and "searched" as the umbrella beside it (the one view that
+  shows it); selected but not reached with reason; overrun and parity
+  flags; error list with retry; below the latest parent run, the on-demand
+  itinerary searches, each with its own buckets and ledger calls.
 - **History**: one series per provider and kind; x = `fetchedAt` for
-  provider series and the point's own `date` for the route-level series
-  from `route_price_history` (sixty points share one fetch time); gaps;
-  reused rows excluded; axis titles; empty state.
+  provider series and the point's own `date` for the vendor's price-history
+  series from `route_price_history`, one per searched trip and named by it
+  ("Google's price history for 5–15 Nov", or "trip unknown"; points share
+  one fetch time and are vendor-stated GBP, never marked "≈"); gaps;
+  reused rows excluded; axis titles; empty state. The route view says
+  itinerary offers are shown per itinerary, from a Results row; "run"
+  counts parent runs, with on-demand searches counted apart.
 - **Definitions / Alerts / Providers**: forms with estimate, `budgetFit`,
   standing confirmation, onward-cost entries, plan presets shown.
 - **Accessibility**: 375px layout as above; keyboard-operable table and
@@ -1451,6 +1529,9 @@ variables override. The full preset table (every field per plan) lives in
 `docs/api-limits.md` and the zod schema.
 
 ```
+# For the container, write only the lines you set. NODE_ENV, IN_CONTAINER, DATABASE_PATH, PORT and BIND_ADDRESS are
+# fixed by the image and docker-compose.yml; ALLOW_UNAUTHENTICATED and ALLOW_FIXTURE_PROVIDER are not forwarded by
+# compose (docs/setup.md sections 2 and 3). The development-only lines are marked below.
 # --- core ---
 NODE_ENV=production                      # production | development | test (test refused by the app bootstrap)
 DATABASE_PATH=/data/get-me-there.db      # realpath-resolved at boot; .fixture.db required with ALLOW_FIXTURE_PROVIDER
@@ -1497,8 +1578,9 @@ SEARCHAPI_PLAN=trial                     # trial (100 lifetime, 20/h, 2/min, con
                                          # 100usd is above the approved ceiling and needs every value set explicitly
 SEARCHAPI_BILLING_DAY=1                  # 1–28
 SEARCHAPI_CACHE_TTL_HOURS=1              # local cache window; the vendor does not bill a cached repeat (spike fact 4) but its window is undocumented
-SEARCHAPI_TRIAL_USED=0                   # seed for the lifetime window when the trial was partly spent elsewhere
+SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime window when the trial was partly spent elsewhere; above 0 on 40usd fails boot
 # overrides: SEARCHAPI_MONTHLY_CALL_CAP, _RATE_PER_MINUTE, _RATE_PER_HOUR, _CONCURRENCY, _COST_PER_CALL_MICRO_GBP, _PLAN_FIXED_PENCE
+# the hourly rate is clamped to 20% of the call cap, the vendor's own hourly rule
 # --- email (all or nothing) ---
 SMTP_HOST=
 SMTP_PORT=
@@ -1517,15 +1599,22 @@ ALLOW_FIXTURE_PROVIDER=
 On subscription plans the **call cap is the hard stop**, the marginal cost
 per call is 0, and the global cap and `/budget` count
 `SEARCHAPI_PLAN_FIXED_PENCE` once, so `MONTHLY_SPEND_CAP_PENCE` means total
-monthly spend and the £35 ceiling is visible. Boot warns when a billed
-provider is enabled under a zero cap.
+monthly spend and the £35 ceiling is visible. A zero spend cap stops only a
+call that costs money: boot warns, and `/providers` says verification will
+not run, when a provider whose calls cost money is enabled under a zero
+cap; on a plan whose calls cost £0 the call cap is the only stop, and the
+Providers view names it. Boot also warns, naming
+`MONTHLY_SPEND_CAP_PENCE`, when that cap is below the subscription fees it
+counts, and logs one line naming each configured provider's plan, window
+and schedule exclusion. With neither auth variable set on a non-loopback
+bind, the refusal names the two `.env` lines to add.
 
 ---
 
 ## 13. Deployment and operations
 `Dockerfile`: multi-stage; `node:22-slim` pinned by digest;
 `NODE_ENV=production` and `IN_CONTAINER=1`; `pnpm install --frozen-lockfile`
-with `onlyBuiltDependencies=["better-sqlite3"]` and the prebuilt fetch made
+with pnpm 12 `allowBuilds` (better-sqlite3, esbuild) and the prebuilt fetch made
 **fail-closed** (no source-build fallback; version pinned by the lockfile;
 integrity recorded in the WP12 brief); migrations, the vendored airports
 dataset and `scripts/` copied into the runtime image; `USER node`;
@@ -1626,6 +1715,39 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 28: final whole-branch review (2026-10-17)
+
+Folded in from the final whole-branch review (plan decision 67).
+§3, §11: provenance stays visible without hover on every face too small
+for the row form (desktop calendar day, phone face, the 375px Results row):
+provider mark, short age line ("5d old"), "not checked" on calendar prices;
+the title may carry the long form, never the only form (this overrules plan
+decision 46). §3, §6.6, §11: the "searched" umbrella appears only in View
+D; day faces and the status bar show buckets. §7, §10, §11:
+`route_price_history` is keyed by the searched trip (dates and cabin, NULL
+trip on migrated rows, GBP only; migration 0003) and History names the
+trip. §7: `search_definitions.confirmed_calls`; the WAL journal mode is
+read back and enforced. §10: the calendar route takes `?destination=` and
+returns no per-destination breakdown (plan decisions 53, 58); provider
+usage carries only the window each plan uses, and `/providers` gains
+`capNote`; View D carries the on-demand children. §8.1: departed `error`
+outcomes become `skipped:departed` too; a child's call cap never exceeds
+the headroom (no child for a 0-call run cap); "+C on demand" counts by K's
+predicate inside the current space; discovery overruns are judged on
+tiles. §8.2: a firing refused for no runnable provider is not "missed".
+§5.2: SearchApi quota exhaustion (402, or 403/429 naming credits or quota);
+`stops` sent from `maxStops`; unreadable Travelpayouts itinerary tokens
+counted. §5.4: "cheapest-first" among the options the vendor returns. §2:
+the calendar's 24-hour bound is marked an assumption; the tiling figure is
+9 × 20 (180 combinations, 21 rectangles a pair). §4, §13: pnpm 12
+`allowBuilds`; no `@hono/zod-validator`. §6.9: a row's own vendor link
+first. §9: the mutation gate's sandbox and timeout rule, and the local
+recorded-suite gate. §11: the status bar's binding window; thin-coverage
+line; nav wraps on a phone. §12: the `.env` block says what the container
+fixes; the zero-cap warning needs a per-call cost; spend cap below fees
+warns; `SEARCHAPI_TRIAL_USED` refused on a monthly plan; the hourly rate
+clamped to the vendor's 20% rule.
 
 ### Revision 27: web wording and defaults (2026-10-17)
 

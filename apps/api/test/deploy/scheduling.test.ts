@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { renderCadenceTable } from './cadence.js';
 import { between, read } from './files.js';
 
-describe('docs/scheduling.md cadence table (spec §8.2; decisions 25, 34)', () => {
+// why: ruling 11: each case estimates the example definition over every pair and month (about 2 s unloaded); 30 s
+// keeps a loaded runner a slow pass.
+describe('docs/scheduling.md cadence table (spec §8.2; decisions 25, 34)', { timeout: 30_000 }, () => {
   it('matches the table the engine computes for the example on the day the doc names', () => {
     const doc = read('docs/scheduling.md');
     expect(doc.replace(/\s+/g, ' ')).toContain('computed for a definition saved on 14 October 2026');

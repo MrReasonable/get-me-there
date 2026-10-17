@@ -15,7 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --coverage && pnpm run test:tz",
     "test:tz": "TZ=Europe/London vitest run && TZ=UTC vitest run && TZ=America/Los_Angeles vitest run && TZ=Asia/Tokyo vitest run",
-    "mutate": "stryker run"
+    "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
   },
   "dependencies": {
     "@date-fns/tz": "1.5.0",

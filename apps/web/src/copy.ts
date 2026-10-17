@@ -21,6 +21,15 @@ import {
 import type { z } from 'zod';
 
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
+/** The six buckets a progress line names (spec §3); `reused` sits inside its bucket and is not a seventh. */
+type ProgressBuckets = {
+  priced: number;
+  empty: number;
+  no_data: number;
+  error: number;
+  skipped: number;
+  not_run: number;
+};
 type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
 /** Every outcome reason core can write (review arch2-005): a new or renamed one fails `satisfies` in the panel's map. */
 type OutcomeReasonKey =
@@ -41,6 +50,13 @@ export type BucketName = Exclude<keyof Buckets, 'reused'>;
  * zero-cap message, provenance notes, search-link labels, airport names) are WP8's and core's and
  * are tested there. The worked example's words live in src/example.ts and arrive as arguments.
  */
+/** The Results header's itinerary-search clause (spec §3, §11); see COPY.itineraryLine. */
+function itineraryLine(c: { searched: number; selected: number; onDemand: number }): string {
+  return c.selected === 0 && c.onDemand > 0
+    ? ` · itinerary-searched ${c.onDemand} ${c.onDemand === 1 ? 'cell' : 'cells'} on demand; none selected by the run`
+    : ` · itinerary-searched ${c.searched} of ${c.selected} selected +${c.onDemand} on demand`;
+}
+
 export const COPY = {
   appTitle: 'get-me-there',
   skipToContent: 'Skip to the main content',
@@ -55,7 +71,6 @@ export const COPY = {
     alerts: 'Alerts',
     providers: 'Providers',
   },
-  placeholder: 'This view is not available yet.',
   definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No search definitions yet. Create one under Definitions.',
   definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',
@@ -85,7 +100,6 @@ export const COPY = {
   priceMarkGlyph: {
     unconfirmed: '≠',
     stale: '◷',
-    ageUnknown: '?',
     truncated: '…',
     notSeen: '◌',
     superseded: '↺',
@@ -191,11 +205,17 @@ export const COPY = {
     reused: number;
   }) =>
     `discovery: ${c.priced} priced · ${c.empty} no fares · ${c.noData} no cached data · ${c.error} error · ${c.skipped} skipped · ${c.notRun} not searched of ${c.total} (${c.reused} reused)`,
-  itineraryLine: (c: { searched: number; selected: number; onDemand: number }) =>
-    ` · itinerary-searched ${c.searched} of ${c.selected} selected +${c.onDemand} on demand`,
+  // why: pft-008, po-008: a run that selected nothing beside on-demand searches says so in words, without a policy
+  // clause for a stage it never had; "outbound" agrees with its number.
+  itineraryLine,
   itineraryLineExpand: (c: { searched: number; selected: number; expandTop: number; onDemand: number }) =>
-    ` · itinerary-searched ${c.searched} of ${c.selected} selected (${c.expandTop} outbounds each) +${c.onDemand} on demand`,
+    c.selected === 0
+      ? itineraryLine(c)
+      : ` · itinerary-searched ${c.searched} of ${c.selected} selected (${c.expandTop} ${c.expandTop === 1 ? 'outbound' : 'outbounds'} each) +${c.onDemand} on demand`,
   noItinerarySearch: ' · itinerary search not configured',
+  // why: ruling 16 (pft-006): when most cells came back "no cached data", say what would answer them; copy only.
+  thinCoverage:
+    'Most cells came back "no cached data", which is not evidence that no flights exist. Next: add SearchApi discovery to this definition, widen its airports, or run the Coverage check on the definition form.',
   truncated: (shown: number, total: number) => `within the cheapest ${shown} of ${total}`,
   excludedByCurrentSpace: (n: number) =>
     `${n} rows outside the current window and nights range are not shown`,
@@ -208,7 +228,9 @@ export const COPY = {
     `itinerary search for one cell, started ${started} (${status}, ${age})`,
   executionNotStarted: (status: string) => `run not started yet (${status})`,
   childExecutionNotStarted: (status: string) => `itinerary search for one cell, not started yet (${status})`,
-  spanExecutions: (n: number) => `across ${n} ${n === 1 ? 'run' : 'runs'}; no single run status applies`,
+  // why: UI-010: "run" means a parent run everywhere; on-demand searches are counted apart.
+  spanExecutions: (runs: number, onDemand: number) =>
+    `across ${runs} ${runs === 1 ? 'run' : 'runs'}${onDemand === 0 ? '' : ` and ${onDemand} on-demand ${onDemand === 1 ? 'search' : 'searches'}`}; no single run status applies`,
   notCompletedBanner: (status: string) => `The latest run is ${status}; these results may be partial.`,
   noExecution: 'No run yet for this definition.',
   statusName: {
@@ -228,28 +250,11 @@ export const COPY = {
 
   // status bar (spec §11)
   statusBarLabel: 'Run status',
-  progress: (p: {
-    stage: string;
-    provider: string;
-    verb: string;
-    done: number;
-    total: number;
-    error: number;
-    skipped: number;
-    notRun: number;
-  }) =>
-    `${p.stage} · ${p.provider}: ${p.verb} ${p.done} of ${p.total} cells (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
-  progressSelected: (p: {
-    provider: string;
-    done: number;
-    selected: number;
-    error: number;
-    skipped: number;
-    notRun: number;
-  }) =>
-    `itinerary search · ${p.provider}: attempted ${p.done} of ${p.selected} selected (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
-  // why: the bar counts attempts (answered or failed); "searched" is View D's definition and excludes errors (ruling 1).
-  progressVerb: { discovery: 'attempted', verification: 'attempted' } satisfies Record<Stage, string>,
+  // why: ruling 4 (decision 67): the bar names every bucket; an umbrella ("searched", "attempted") is View D's alone.
+  progress: (p: { stage: string; provider: string; buckets: ProgressBuckets; total: number }) =>
+    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched of ${p.total} cells`,
+  progressSelected: (p: { provider: string; buckets: ProgressBuckets; selected: number }) =>
+    `itinerary search · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error of ${p.selected} selected · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched`,
   progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
   spendRunCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} billed calls`,
   spendRunFreeCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} free calls`,
@@ -257,6 +262,8 @@ export const COPY = {
   spendMonth: (used: string, cap: string) => `this month: ${used} of ${cap}`,
   spendProviderMonth: (provider: string, calls: number, cap: string) =>
     `this month: ${provider} ${calls} of ${cap} calls`,
+  spendProviderLifetime: (provider: string, calls: number, cap: string) =>
+    `${provider} ${calls} of ${cap} calls over the plan's lifetime`,
   nearCap: 'near cap',
   noCap: 'no cap',
   paused: (reason: string) => `Paused: ${reason}`,
@@ -374,10 +381,23 @@ export const COPY = {
   reasonBudget: 'skipped: budget',
   noneSelectedNotReached: 'Every selected cell was reached.',
   overrunFlag: 'Overrun: ledger calls exceed the plan by more than 10%.',
+  // why: cost-008: discovery is planned in tiles and a paged tile is one tile (decision 43), so its flag says tiles.
+  overrunFlagTiles: 'Overrun: tiles requested exceed the plan by more than 10%.',
   parityFlag: 'Parity break: tile requests differ from the plan.',
   requestsHeading: 'Requests (estimate vs ledger)',
+  // why: ruling 15 (UI-004): the children below the parent run, so View D never shows the parent's ledger as all spend.
+  coverageOnDemandHeading: 'On-demand itinerary searches (one cell each)',
+  coverageOnDemandNone: 'No on-demand itinerary search has run for this definition.',
+  coverageOnDemandScroll: 'On-demand itinerary searches (scrolls sideways on a narrow screen)',
+  coverageOnDemandCell: 'Cell',
+  coverageOnDemandRun: 'Run',
+  coverageOnDemandRunText: (status: string, started: string) => `${status}, started ${started}`,
+  coverageOnDemandCalls: (calls: number, hits: number, cost: string) =>
+    `${calls} ${calls === 1 ? 'call' : 'calls'} · ${hits} cache ${hits === 1 ? 'hit' : 'hits'} · ${cost}`,
   requestRow: (calls: number, planned: string, hits: number, cost: string) =>
     `${calls} of ${planned} planned calls · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
+  requestRowTiles: (tiles: number, planned: string, calls: number, hits: number, cost: string) =>
+    `${tiles} of ${planned} planned tiles (${calls} ${calls === 1 ? 'call' : 'calls'}) · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
   errorsHeading: 'Errors',
   // why: the contract's error reason is nullable; an unrecorded reason is said, never shown as an empty string.
   noReasonRecorded: 'no reason recorded',
@@ -403,6 +423,7 @@ export const COPY = {
   capabilityVerification: 'Itinerary search',
   maxAge: (age: string) => `prices up to ${age} old when fetched`,
   maxAgeUnknown: "vendor's cache age unknown",
+  maxAgeAssumed: (age: string) => `assumed ≤${age} (undocumented)`,
   maxAgeAtFetch: 'provider states no age beyond the fetch time',
   usageWindow: (calls: number, cap: string, start: string, end: string) =>
     `${calls} of ${cap} calls · window ${start} to ${end}`,
@@ -549,11 +570,31 @@ export const COPY = {
     cachedFrom: 'cached from',
     glyphCount: (n: number, words: string) => `${n} ${words}`,
     // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
-    phoneMark: { partial: '◐', full: '●' },
+    phoneMark: { partial: '◐' },
     phonePartial: 'part of the day not searched',
     phoneNights: (n: number) => `${n}n`,
-    phoneFull: 'every cell of the day searched',
-    searchedFraction: (searched: number, total: number) => `${searched}/${total} searched`,
+    // why: ruling 4: the buckets that apply, in the spec §3 order, zero buckets left out; never the "searched" umbrella.
+    bucketBreakdown: (b: {
+      priced: number;
+      empty: number;
+      no_data: number;
+      error: number;
+      skipped: number;
+      not_run: number;
+    }) =>
+      (
+        [
+          [b.priced, 'priced'],
+          [b.empty, 'no fares'],
+          [b.no_data, 'no cached data'],
+          [b.error, 'error'],
+          [b.skipped, 'skipped'],
+          [b.not_run, 'not searched'],
+        ] as const
+      )
+        .filter(([n]) => n > 0)
+        .map(([n, words]) => `${n} ${words}`)
+        .join(', '),
     destinationFilter: 'Destination',
     allDestinations: 'All destinations',
     colourBy: 'Colour by',
@@ -587,10 +628,8 @@ export const COPY = {
       dashed: 'dashed outline: a calendar price; constraints not checked',
       stale:
         'stale: older than one refresh cycle by fetch age plus any known vendor age; shown and labelled, never hidden. A price whose vendor age is unknown says "vendor\'s cache age unknown" instead',
-      coverageFull:
-        'S/M searched with a solid square: every cell of the day searched (priced, no fares or no cached data) by its best-covered source',
       coveragePartial:
-        'S/M searched with a striped square: part of the day not searched; per-source counts are in the panel',
+        'counts under the price (e.g. "3 priced, 9 no cached data") name the buckets of its best-covered source; a striped square: part of the day not searched; per-source counts are in the panel',
       cachedFrom:
         'cached from £X: a cheaper calendar price exists for this day, with its destination and stay; constraints not checked',
       unconfirmed:
@@ -599,7 +638,7 @@ export const COPY = {
       stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
       bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
       phone:
-        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, ? vendor cache age unknown, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ● every cell of the day searched, ◐ part of the day not searched. Open a day for the rest.',
+        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ◐ part of the day not searched; under the amount its provider, its age ("5d old", "age unknown") and "not checked" on a calendar price. A day without a price shows each glyph with its count. Open a day for the rest.',
       phoneProviders:
         'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), syn Fixture (synthetic fixture data).',
       glyphs: 'Days without a price show, with how many cells of the best-covered source:',
@@ -667,8 +706,12 @@ export const COPY = {
       verifyCost: (maxCalls: number, headroom: number) =>
         `hard stop ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${headroom} ${headroom === 1 ? 'call' : 'calls'} of budget headroom left`,
       verifyNoHeadroom: 'No budget headroom left for this search.',
+      // why: N2 (ruling 9): a 0-call definition is not out of headroom; it allows no billed call, and one setting fixes it.
+      verifyZeroRunCap: (n: number) =>
+        `This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run).`,
       verifyCostLoading: 'Loading what this search may spend…',
       verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
+      verifyConfirmRefused: (message: string) => `Needs confirmation: ${message}`,
       verifyConflict: 'An itinerary search for this cell is already running.',
     },
   },
@@ -676,7 +719,7 @@ export const COPY = {
     title: 'Duration',
     chartTitle: 'Cheapest found by stay length',
     chartNote:
-      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A star on the axis (13*) = no source searched that stay length. A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
+      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A tick marked with a star (*) = no source has answered for that stay length yet (its cells are not searched). A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
     xAxis: 'nights',
     yAxis: 'price (GBP)',
     tickNotSearched: (nights: number) => `${nights}*`,
@@ -690,8 +733,6 @@ export const COPY = {
     seriesLine: (series: string, value: string) => `${series}: ${value}`,
     cellDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
     notSearched: 'not searched',
-    searchedNoPrice: 'searched, no price',
-    partlySearchedNoPrice: (k: number, total: number) => `searched ${k} of ${total} cells, no price`,
     notItinerarySearched: 'not itinerary-searched',
     itinerarySearchedNoPrice: 'itinerary-searched, no class-verified price',
     partlyItinerarySearchedNoPrice: (k: number, total: number) =>
@@ -713,11 +754,20 @@ export const COPY = {
       `${lines} series share ${colours} colours: tell them apart by the legend name and line style`,
     xAxisFetched: 'fetched (Europe/London)',
     yAxis: 'price (GBP)',
-    routeChartTitle: 'Route-level series (indicative): price by travel date',
+    // why: ruling 6: SearchApi's price_insights series is the vendor's history for the one searched trip, not the route.
+    routeChartTitle: 'Vendor price history for a searched trip (indicative): price by date',
     routeChartNote:
-      'Reported by the vendor, not searched cell by cell; the vendor does not state its route scope or which date pairs it covers. Indicative: not an offer, no seller, constraints not checked.',
-    xAxisTravelDate: 'travel date',
-    routeSeries: (provider: string, cabin: string) => `${provider} route-level series, indicative · ${cabin}`,
+      "Each line is the vendor's own price history for one searched trip (the dates in its name), reported with an itinerary search; this app did not search those dates day by day. Indicative: not an offer, no seller, constraints not checked.",
+    xAxisTravelDate: 'date of the vendor price',
+    routeSeries: (vendor: string, trip: string | null, cabin: string) =>
+      trip === null
+        ? `${vendor}'s price history, trip unknown · ${cabin}, indicative`
+        : `${vendor}'s price history for ${trip} · ${cabin}, indicative`,
+    historyVendor: {
+      searchapi: 'Google',
+      travelpayouts: 'Aviasales',
+      fixture: 'Synthetic fixture',
+    } satisfies Record<ProviderId, string>,
     calendarSeries: (source: string, cabin: string) =>
       `${source} · ${cabin} · cheapest calendar price across this pair's cells, per run (constraints not checked)`,
     offerSeries: (source: string, seller: string, cabin: string) =>
@@ -729,6 +779,9 @@ export const COPY = {
       `cheapest searched cell ${origin}→${destination} ${dep}–${ret}`,
     cellChanged: 'a different cell from the previous point',
     routePicker: 'Route',
+    // why: UI-010: the route view plots calendar series only, so it says where an itinerary offer's history is.
+    offersPerItinerary:
+      "Itinerary offers are shown per itinerary: open a row's price history in Results to see one.",
     pairOption: (origin: string, destination: string) => `${origin}→${destination}`,
     allPairs: (shown: number, total: number) =>
       shown === total ? 'All pairs' : `All pairs (first ${shown} of ${total})`,
@@ -736,19 +789,20 @@ export const COPY = {
       `${route} · ${departs} to ${back} · ${carriers}`,
     itineraryHash: (hash: string) => `itinerary ${hash}`,
     backToRoute: 'Show route history',
-    spanLine: (points: number, from: string, to: string) =>
-      `${points} ${points === 1 ? 'run' : 'runs'} shown, ${from} to ${to}`,
+    spanLine: (runs: number, onDemand: number, from: string, to: string) =>
+      `${runs} ${runs === 1 ? 'run' : 'runs'}${onDemand === 0 ? '' : ` and ${onDemand} on-demand ${onDemand === 1 ? 'search' : 'searches'}`} shown, ${from} to ${to}`,
     tableCaption: (series: string) => `${series}: every point, with provenance`,
     chartScroll: (title: string) => `${title}, chart (scrolls sideways on a narrow screen)`,
     tableScroll: (series: string) => `${series}: table of points (scrolls)`,
     whenColumn: 'Fetched (Europe/London)',
-    travelDateColumn: 'Travel date',
+    travelDateColumn: 'Date',
     priceColumn: 'Price',
     detailColumn: 'Detail',
     cabinNotStated: 'cabin not stated',
-    routeProvenance: (source: string, cabin: string, age: string) =>
-      `${source} · indicative route-level series · ${cabin} · ${age}`,
-    routeFxUnknown: 'currency conversion not recorded for the route-level series',
+    routeProvenance: (source: string, trip: string | null, cabin: string, age: string) =>
+      `${source} · indicative price history for ${trip ?? 'an unknown trip'} · ${cabin} · ${age}`,
+    // why: prov-004: the repository stores vendor-stated GBP points only, so nothing on this table was converted.
+    routeGbp: 'vendor-stated GBP, unconverted',
     rowLink: 'price history',
     empty: 'No price history yet for this selection. Each run adds a point.',
   },
@@ -782,6 +836,7 @@ export const COPY = {
     noRules: 'No alert rules for this definition yet.',
     eventsHeading: 'Alert events',
     eventsTable: 'Alert events',
+    eventsScroll: 'Alert events (scrolls sideways on a narrow screen)',
     noEvents: 'No alerts have fired for this definition yet.',
     colFired: 'Fired',
     colRule: 'Rule',

@@ -13,10 +13,11 @@ import { exampleDefinitionInput } from './helpers/factories.js';
 function upTo0001(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  rmSync(join(dir, '0002_alert_event_lifecycle.sql'));
+  const later = ['0002_alert_event_lifecycle', '0003_route_history_by_trip'];
+  for (const tag of later) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
-  journal.entries = journal.entries.filter((e) => e.tag !== '0002_alert_event_lifecycle');
+  journal.entries = journal.entries.filter((e) => !later.includes(e.tag));
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
 }
@@ -40,7 +41,10 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
       ['suppressed', 'same price band'],
     ])
       insert.run(T0, status, reason);
-    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual(['0002_alert_event_lifecycle']);
+    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([
+      '0002_alert_event_lifecycle',
+      '0003_route_history_by_trip',
+    ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const events = new AlertsRepo(db, fixedClock(T0)).events({ ruleId: 'r1', limit: 10 });
     expect(events.map((e) => [e.id, e.status, e.reason, e.payload]).sort()).toEqual([

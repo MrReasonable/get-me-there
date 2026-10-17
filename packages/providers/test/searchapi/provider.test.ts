@@ -24,7 +24,12 @@ describe('searchApiProvider (spec §5.1, §2)', () => {
   it('declares discovery scraped-aggregate ≤24 h and verification scraped-search of unknown age (plan decision 24)', () => {
     const { discovery, verification } = capabilities(p);
     expect(discovery.info).toEqual(SEARCHAPI_DISCOVERY_INFO);
-    expect(discovery.info).toMatchObject({ sourceKind: 'scraped-aggregate', maxAgeHours: 24 });
+    // why: ruling 17 (pie-007): the 24 h is the app's assumption, not a vendor bound, and the info says so.
+    expect(discovery.info).toMatchObject({
+      sourceKind: 'scraped-aggregate',
+      maxAgeHours: 24,
+      maxAgeAssumed: true,
+    });
     expect(verification.info).toMatchObject({ sourceKind: 'scraped-search', maxAgeHours: 'unknown' });
   });
 

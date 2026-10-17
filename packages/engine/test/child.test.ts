@@ -61,16 +61,18 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     }
   });
 
-  it('is bounded by the parent’s headroom above the floor: a 4-call cell with 2 calls left gets the floor of 6 and runs; a 9-call cell with 7 left is refused', async () => {
+  it('never exceeds the headroom (ruling 9): a 4-call cell with 5 calls left gets 5, not the floor of 6, and runs; with 2 left it is refused; a 9-call cell with 7 left is refused', async () => {
     const h = createHarness();
     await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const o = h.orch();
     const small = verifying(h);
+    const tight = verifying(h);
     const big = verifying(h, {
       verification: { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 3, bookingLinks: true },
     });
     for (const [def, spent] of [
-      [small, 998],
+      [small, 995],
+      [tight, 998],
       [big, 993],
     ] as const) {
       const parent = await o.start(def.id, { trigger: 'manual' });
@@ -82,13 +84,37 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
         executionId: parent.executionId,
       });
     }
-    const floor = await o.verifyCell(small.id, cell);
-    if (!floor.ok) throw new Error(floor.message);
-    expect(h.repos.executions.get(floor.executionId)?.snapshot.budget.maxCalls).toBe(6);
-    expect((await h.waitForSettled(floor.executionId)).status).toBe('completed');
+    const bounded = await o.verifyCell(small.id, cell);
+    if (!bounded.ok) throw new Error(bounded.message);
+    expect(h.repos.executions.get(bounded.executionId)?.snapshot.budget.maxCalls).toBe(5);
+    expect((await h.waitForSettled(bounded.executionId)).status).toBe('completed');
+    expect(await o.verifyCell(tight.id, cell)).toMatchObject({
+      ok: false,
+      code: 'cap',
+      details: { headroom: 2, need: 4 },
+    });
     const refused = await o.verifyCell(big.id, cell);
     expect(refused).toMatchObject({ ok: false, code: 'cap', details: { headroom: 7, need: 9 } });
     expect(refused.ok ? '' : refused.message).toContain('has room for 7 of the 9 calls this cell needs');
+  });
+
+  it('a definition whose run cap is 0 billed calls creates no child: the verify is refused, never a child that cannot spend its cap (ruling 9, cost-005)', async () => {
+    const h = createHarness();
+    const def = verifying(h, { budget: { ...baseDefinition().budget, maxCalls: 0 } });
+    const before = h.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true }).length;
+    const r = await h.orch().verifyCell(def.id, cell);
+    expect(r).toMatchObject({ ok: false, code: 'cap', details: { headroom: 0 } });
+    expect(h.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true })).toHaveLength(
+      before,
+    );
+    const ctx = buildContext(h.deps, h.options);
+    // why: N2: the preview also says how many calls one search of this cell needs, so the operator can be told the fix.
+    expect(childCapPreview(ctx, def.id, cell)).toMatchObject({
+      ok: true,
+      maxCalls: 0,
+      headroomCalls: 0,
+      needCalls: 6,
+    });
   });
 
   it("counts what the definition's other active children may still spend against the headroom (cost-r2-001)", async () => {
@@ -144,11 +170,21 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     const def = verifying(h, {
       verification: { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 3, bookingLinks: true },
     });
-    expect(childCapPreview(ctx, def.id, cell)).toEqual({ ok: true, maxCalls: 9, headroomCalls: 1000 });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({
+      ok: true,
+      maxCalls: 9,
+      headroomCalls: 1000,
+      needCalls: 9,
+    });
     const parent = await o.start(def.id, { trigger: 'manual' });
     if (!parent.ok) throw new Error(parent.message);
     h.spendLedger({ providerId: 'fixture', rows: 991, costMicroGbpEach: 0, executionId: parent.executionId });
-    expect(childCapPreview(ctx, def.id, cell)).toEqual({ ok: true, maxCalls: 9, headroomCalls: 9 });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({
+      ok: true,
+      maxCalls: 9,
+      headroomCalls: 9,
+      needCalls: 9,
+    });
     const r = await o.verifyCell(def.id, cell);
     if (!r.ok) throw new Error(r.message);
     expect(h.repos.executions.get(r.executionId)?.snapshot.budget.maxCalls).toBe(9);

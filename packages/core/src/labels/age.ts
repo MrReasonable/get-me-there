@@ -4,7 +4,8 @@ import type { Provenance } from '../types/provenance.js';
 /** Spec §3 "Effective age" and the two label formats, defined once here for web, api and email. */
 export type EffectiveAge =
   | { kind: 'observed'; fetchedHours: number; observedHours: number }
-  | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number }
+  /** `assumed` (N4): the bound is the app's assumption, not the vendor's; every label then says so. */
+  | { kind: 'bounded'; fetchedHours: number; maxAgeHours: number; assumed?: true }
   | { kind: 'unknown'; fetchedHours: number };
 
 /**
@@ -17,7 +18,7 @@ export function hoursSince(from: IsoDateTime, now: IsoDateTime): number {
 }
 
 export function effectiveAge(
-  p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>,
+  p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours' | 'maxAgeAssumed'>,
   now: IsoDateTime,
 ): EffectiveAge {
   const fetchedHours = hoursSince(p.fetchedAt, now);
@@ -28,7 +29,13 @@ export function effectiveAge(
     return { kind: 'observed', fetchedHours, observedHours };
   }
   if (p.maxAgeHours === 'unknown') return { kind: 'unknown', fetchedHours };
-  return { kind: 'bounded', fetchedHours, maxAgeHours: p.maxAgeHours };
+  // why: the flag appears only when set, so a stated bound keeps its plain shape everywhere it is compared.
+  return {
+    kind: 'bounded',
+    fetchedHours,
+    maxAgeHours: p.maxAgeHours,
+    ...(p.maxAgeAssumed === true ? { assumed: true } : {}),
+  };
 }
 
 /**
@@ -91,8 +98,9 @@ export function formatAgeFull(a: EffectiveAge): string {
       return `${fetched} · observed ${formatAgo(a.observedHours)}`;
     case 'bounded':
       // why: maxAgeHours 0 is an interactive search at request time; there is no bound to show.
-      return a.maxAgeHours === 0
-        ? fetched
+      if (a.maxAgeHours === 0) return fetched;
+      return a.assumed === true
+        ? `${fetched} · provider age assumed ≤${formatDuration(a.maxAgeHours)} (undocumented) before that`
         : `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
     case 'unknown':
       return `${fetched} · vendor's cache age unknown`;
@@ -106,9 +114,32 @@ export function formatAgeCompact(a: EffectiveAge): string {
     case 'observed':
       return `${fetched} · obs ${formatDuration(a.observedHours)}`;
     case 'bounded':
-      return a.maxAgeHours === 0 ? fetched : `${fetched} · ≤${formatDuration(a.maxAgeHours)}`;
+      if (a.maxAgeHours === 0) return fetched;
+      return `${fetched} · ${a.assumed === true ? 'assumed ' : ''}≤${formatDuration(a.maxAgeHours)}`;
     case 'unknown':
       return `${fetched} · age unknown`;
+  }
+}
+
+/**
+ * The face form (ruling 3, decision 67): the one short line a calendar day and the phone face show without hover,
+ * "5d old", "≤2d old" (fetch age plus the provider's bound, so never younger than the worst case) or "age unknown".
+ * Each word stays within 7 characters so it fits a 45 px phone day column.
+ */
+export function formatAgeShort(a: EffectiveAge): string {
+  const old = (hours: number) => (hours < 1 ? 'just now' : `${formatDuration(hours)} old`);
+  switch (a.kind) {
+    case 'observed':
+      return old(a.observedHours);
+    case 'bounded':
+      // why: maxAgeHours 0 is an interactive search at request time, so the fetch age is the whole age.
+      if (a.maxAgeHours === 0) return old(a.fetchedHours);
+      // why: N4: an assumed bound never reads as the vendor's; "assumed ≤26h" keeps each word within 7 characters.
+      return a.assumed === true
+        ? `assumed ≤${formatDuration(worstCaseAgeHours(a))}`
+        : `≤${old(worstCaseAgeHours(a))}`;
+    case 'unknown':
+      return 'age unknown';
   }
 }
 
@@ -120,4 +151,17 @@ export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
   if (a.kind === 'unknown') return 1;
   if (b.kind === 'unknown') return -1;
   return worstCaseAgeHours(a) - worstCaseAgeHours(b);
+}
+
+/**
+ * N4 (pie-007): marks a price's bound as the app's assumption when its provider's capability says the bound is assumed
+ * (SearchApi's undocumented date-grid cache). Provenance is stored without the flag, so readers apply this from the
+ * provider list; a bound of 0 or 'unknown' asserts nothing to qualify and is returned as is.
+ */
+export function withAssumedBound<P extends Pick<Provenance, 'maxAgeHours' | 'maxAgeAssumed'>>(
+  p: P,
+  info: { maxAgeAssumed?: boolean | undefined } | undefined,
+): P {
+  if (info?.maxAgeAssumed !== true || p.maxAgeHours === 'unknown' || p.maxAgeHours === 0) return p;
+  return { ...p, maxAgeAssumed: true };
 }

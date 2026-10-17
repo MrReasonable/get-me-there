@@ -102,10 +102,8 @@ describe('GET /api/providers (spec §10)', () => {
     );
     const fixture = body.providers.find((p) => p.providerId === 'fixture');
     expect(fixture?.plan).toBe('synthetic');
-    expect(fixture?.usage.map((u) => u.scope)).toEqual([
-      'provider-month:fixture',
-      'provider-lifetime:fixture',
-    ]);
+    // why: only the window the plan uses is reported, so a null cap can only mean "no cap" (ruling 2, decision 67).
+    expect(fixture?.usage.map((u) => u.scope)).toEqual(['provider-month:fixture']);
     expect(fixture?.notices).toEqual([]);
     expect(body.synthetic).toBe(true);
     expect(body.presets).toMatchObject({
@@ -114,10 +112,34 @@ describe('GET /api/providers (spec §10)', () => {
       schedulerTimezone: 'Europe/London',
     });
   });
-  it('says verification will not run when a billed provider is enabled under a zero cap', async () => {
+  it('a trial plan reports the lifetime window alone, with its cap (ruling 2, F2)', async () => {
+    const x = await harness({
+      SEARCHAPI_KEY: SENTINEL_SA,
+      SEARCHAPI_PLAN: 'trial',
+      SEARCHAPI_TRIAL_USED: '76',
+    });
+    const body = await expectContract(
+      await x.request('/api/providers'),
+      'GET',
+      '/api/providers',
+      apiContract.providersResponseSchema,
+    );
+    expect(
+      body.providers.find((p) => p.providerId === 'searchapi')?.usage.map((u) => [u.scope, u.cap]),
+    ).toEqual([['provider-lifetime:searchapi', 24]]);
+    const budget = await expectContract(
+      await x.request('/api/budget'),
+      'GET',
+      '/api/budget',
+      apiContract.budgetResponseSchema,
+    );
+    expect(budget.scopes.map((s) => s.scope)).not.toContain('provider-month:searchapi');
+  });
+  it('says verification will not run only when calls cost money and the spend cap is 0 (ruling 5)', async () => {
     const x = await harness({
       SEARCHAPI_KEY: SENTINEL_SA,
       SEARCHAPI_PLAN: '40usd',
+      SEARCHAPI_COST_PER_CALL_MICRO_GBP: '5000',
       MONTHLY_SPEND_CAP_PENCE: '0',
     });
     const body = await expectContract(
@@ -126,8 +148,57 @@ describe('GET /api/providers (spec §10)', () => {
       '/api/providers',
       apiContract.providersResponseSchema,
     );
-    expect(body.providers.find((p) => p.providerId === 'searchapi')?.notices).toContain(
-      API_TEXT.zeroCapVerification,
+    const sa = body.providers.find((p) => p.providerId === 'searchapi');
+    expect(sa?.notices).toEqual([API_TEXT.zeroCapVerification]);
+    expect(sa?.capNote).toBeNull();
+  });
+  it.each([
+    [
+      'the trial',
+      { SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '76' },
+      API_TEXT.callCapGoverns('lifetime', 24),
+    ],
+    [
+      'the $40 plan under a zero cap',
+      { SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: '0' },
+      API_TEXT.callCapGoverns('month', 10_000),
+    ],
+  ])(
+    'on %s calls cost £0, so no zero-cap notice: the card names the call cap that governs (ruling 5)',
+    async (_l, env, note) => {
+      const x = await harness({ SEARCHAPI_KEY: SENTINEL_SA, ...env });
+      const body = await expectContract(
+        await x.request('/api/providers'),
+        'GET',
+        '/api/providers',
+        apiContract.providersResponseSchema,
+      );
+      const sa = body.providers.find((p) => p.providerId === 'searchapi');
+      expect(sa?.notices).toEqual([]);
+      expect(sa?.capNote).toBe(note);
+    },
+  );
+});
+
+describe('the Providers card says when new definitions allow 0 billed calls (N2, ruling 9)', () => {
+  it('on the trial preset (EXECUTION_MAX_CALLS 0) the capNote adds why Verify is unavailable and what to raise', async () => {
+    const x = await harness({
+      SEARCHAPI_KEY: SENTINEL_SA,
+      SEARCHAPI_PLAN: 'trial',
+      SEARCHAPI_TRIAL_USED: '76',
+      EXECUTION_MAX_CALLS: '',
+    });
+    const body = await expectContract(
+      await x.request('/api/providers'),
+      'GET',
+      '/api/providers',
+      apiContract.providersResponseSchema,
+    );
+    expect(body.providers.find((p) => p.providerId === 'searchapi')?.capNote).toBe(
+      `${API_TEXT.callCapGoverns('lifetime', 24)}; ${API_TEXT.zeroRunCapDefault}`,
+    );
+    expect(API_TEXT.zeroRunCapDefault).toBe(
+      "new definitions on this plan allow 0 billed calls, so Verify stays unavailable until you raise a definition's call cap in Definitions → Run budget",
     );
   });
 });

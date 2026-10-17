@@ -52,7 +52,6 @@ export const FIXTURE_PATHS = [
   '/itinerary/booking',
   '/health',
 ] as const;
-export type FixturePath = (typeof FIXTURE_PATHS)[number];
 
 /** First matching rule with `times` left answers the request. `params` match query values exactly. */
 const fixtureRuleSchema = z.object({

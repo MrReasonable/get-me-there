@@ -106,7 +106,10 @@ describe('metroRuleCheck (plan decision 34): every request on both vendors names
   });
 });
 
-describe('smoke recordings stay out of git wherever the database lives (plan decision 61)', () => {
+// why: ruling 11: each case spawns git check-ignore; 30 s survives a loaded runner.
+describe('smoke recordings stay out of git wherever the database lives (plan decision 61)', {
+  timeout: 30_000,
+}, () => {
   it.each([
     'data/smoke/fixtures/recorded/searchapi/_api_v1_search/2027-02-10-0123456789ab.json',
     'smoke/fixtures/recorded/travelpayouts/_aviasales_v3_prices_for_dates/2027-02-10-0123456789ab.json',

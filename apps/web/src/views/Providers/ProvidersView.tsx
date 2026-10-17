@@ -11,21 +11,24 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 
-function maxAgeText(h: CapabilityInfo['maxAgeHours']): string {
+function maxAgeText(info: CapabilityInfo): string {
+  const h = info.maxAgeHours;
   if (h === 'unknown') return COPY.maxAgeUnknown;
-  return h === 0 ? COPY.maxAgeAtFetch : COPY.maxAge(formatDuration(h));
+  if (h === 0) return COPY.maxAgeAtFetch;
+  // why: ruling 17 (pie-007): an assumed bound is worded as an assumption, never as the vendor's.
+  return info.maxAgeAssumed === true ? COPY.maxAgeAssumed(formatDuration(h)) : COPY.maxAge(formatDuration(h));
 }
 
 function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   return (
     <div>
-      <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info.maxAgeHours))}</p>
+      <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info))}</p>
       <p className="text-slate-700">{info.provenanceNote}</p>
     </div>
   );
 }
 
-/** Only a `provider-lifetime:` scope is a lifetime allowance; any other row without bounds states no window (review prov-020). */
+/** Only a `provider-lifetime:` scope is a lifetime allowance; any other row without bounds states no window (review prov-020). The API sends only the window the plan uses, so a null cap here means no cap is configured (ruling 2). */
 function usageText(u: UsageRow, providerId: ProviderId): string {
   const cap = u.cap === null ? COPY.noCap : String(u.cap);
   if (u.scope === budgetScopeLabel({ kind: 'provider-lifetime', providerId }))
@@ -59,13 +62,15 @@ export function ProvidersView() {
     <div className="space-y-3 text-sm">
       <h2 className="text-xl font-semibold">{COPY.providersHeading}</h2>
       {q.data.providers.map((p) => (
+        // why: UI-003: the card is headed by the provider's name, the word the status bar, filters and marks use; the
+        // source labels (the API's displayName among them) stay on the capability lines.
         <section
           key={p.providerId}
-          aria-label={p.displayName}
+          aria-label={COPY.provider[p.providerId]}
           className="rounded border border-slate-300 p-2"
         >
           <h3 className="font-semibold">
-            {p.displayName}{' '}
+            {COPY.provider[p.providerId]}{' '}
             <span className="font-normal">{p.enabled ? COPY.providerEnabled : COPY.providerDisabled}</span>
           </h3>
           {p.notices.map((n) => (
@@ -74,6 +79,8 @@ export function ProvidersView() {
             </p>
           ))}
           <p>{COPY.plan(COPY.planName[p.plan])}</p>
+          {/* why: ruling 5: which call cap stops a £0-per-call plan; information, not a warning, so no alert role */}
+          {p.capNote !== null ? <p data-cost="">{p.capNote}</p> : null}
           {p.excludedFromSchedule ? <p>{COPY.excludedFromSchedule}</p> : null}
           {p.capabilities.discovery !== null ? (
             <Capability title={COPY.capabilityDiscovery} info={p.capabilities.discovery} />

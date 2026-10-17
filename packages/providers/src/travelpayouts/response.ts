@@ -305,6 +305,9 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
     // why: an airport query is the closed round trip origin → destination → origin (decision 35); a row whose outbound
     // or return starts or ends at another airport is not the cell's trip, so it is dropped and reported rather than priced.
     const trip = itineraryOf(row.link);
+    // why: pie-002: a link whose token cannot be read leaves the open-jaw guard unrun; the row is still priced on the
+    // row's own airports (origin_airport, destination_airport), and the tile counts it so the smoke and the logs say so.
+    if (trip === null && typeof row.link === 'string' && row.link !== '') notes.add('itinerary-unreadable');
     if (trip !== null && !isClosed(trip, input.origin, input.destination)) {
       notes.add('offers-dropped');
       droppedFor(key, cell).openJaw += 1;

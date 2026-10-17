@@ -15,7 +15,7 @@
     "boundaries": "node scripts/check-boundaries.mjs",
     "casts": "node scripts/check-casts.mjs",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "pnpm -r --workspace-concurrency=1 test",
     "mutate": "pnpm --filter @gmt/core mutate",
     "dev": "pnpm --parallel --filter @gmt/api --filter @gmt/web dev",
     "smoke:live": "pnpm -C apps/api run tool smoke",

@@ -16,7 +16,7 @@ import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { SEARCHED } from './coverage.js';
+import { onDemandSearched, SEARCHED } from './coverage.js';
 import { executionSummary } from './executions.js';
 import { pickCalendar, pickVerified } from './pick.js';
 import { confirmedIn, loadRows } from './results.js';
@@ -64,8 +64,9 @@ export function assembleCalendar(
       : ports.repos.cells.rollUps(parent.id);
   const selected =
     parent === null ? [] : ports.repos.cells.selected(parent.id).filter(({ cell }) => mine(cell));
-  const children = loaded.all.filter(
-    (e) => e.isChild && e.status === 'completed' && e.cell !== null && mine(e.cell),
+  // why: ssr-002: the header's "+C on demand" predicate, so a day never counts a child that searched nothing.
+  const children = onDemandSearched(loaded.all, ports, loaded.space).filter(
+    (e) => e.cell !== null && mine(e.cell),
   );
   // why: plan decision 58: the minima are picked (seen, then fresh, then cheaper) over every confirmed offer, before the
   // per-itinerary dedup, whose primary offer is chosen on price before age and would hide a fresh offer from another

@@ -47,7 +47,7 @@ describe('SEARCHAPI_PARAMS (spec §5.2 dated allowlist, plan decision 24)', () =
     expect(withContentHash(rest).contentSha256).toBe(contentSha256);
   });
 
-  it('sends adults=1, travel_class and separate_tickets=1 on both engines, sort_by=price on google_flights, never stops (decision 29)', () => {
+  it('sends adults=1, travel_class and separate_tickets=1 on both engines, sort_by=price and the documented stops values on google_flights only (decision 29, ruling 8)', () => {
     const cal = SEARCHAPI_PARAMS.endpoints['/api/v1/search?engine=google_flights_calendar'];
     const fl = SEARCHAPI_PARAMS.endpoints['/api/v1/search?engine=google_flights'];
     expect(cal?.values).toMatchObject({
@@ -57,7 +57,7 @@ describe('SEARCHAPI_PARAMS (spec §5.2 dated allowlist, plan decision 24)', () =
     });
     expect(fl?.values).toMatchObject({ adults: ['1'], sort_by: ['price'], separate_tickets: ['1'] });
     expect(cal?.names).not.toContain('stops');
-    expect(fl?.names).not.toContain('stops');
+    expect(fl?.values.stops).toEqual(['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer']);
     expect(cal?.names).not.toContain('sort_by');
   });
 });
@@ -120,8 +120,20 @@ describe('request builders (spec §5.2 point of sale, §5.4 travel_class)', () =
     expect(allowed({ ...s1, booking_token: 'tok' })).not.toThrow();
   });
 
-  it('ignores ItineraryQuery.maxStops: no stops parameter is ever sent (recorded gap, §13)', () => {
-    expect(flightsParams({ ...cellQ, maxStops: 0 }, 'GB')).toEqual(flightsParams(cellQ, 'GB'));
+  it.each([
+    [0, 'nonstop'],
+    [1, 'one_stop_or_fewer'],
+    [2, 'two_stops_or_fewer'],
+  ] as const)('maxStops %i sends the documented stops=%s (ruling 8), on every step', (maxStops, value) => {
+    const p = flightsParams({ ...cellQ, maxStops }, 'GB');
+    expect(p).toEqual({ ...flightsParams(cellQ, 'GB'), stops: value });
+    expect(flightsParams({ ...cellQ, maxStops }, 'GB', { departure_token: 't' }).stops).toBe(value);
+    expect(allowed(p)).not.toThrow();
+  });
+
+  it('sends no stops without maxStops, or above the two the vendor documents (no filter is narrower than the rule)', () => {
+    expect(flightsParams(cellQ, 'GB')).not.toHaveProperty('stops');
+    expect(flightsParams({ ...cellQ, maxStops: 3 }, 'GB')).not.toHaveProperty('stops');
   });
 
   it('holds each engine to its own names', () => {
@@ -130,10 +142,11 @@ describe('request builders (spec §5.2 point of sale, §5.4 travel_class)', () =
     expect(allowed({ ...calendarParams(calQ, rect, 'GB'), sort_by: 'price' })).toThrow();
   });
 
-  it('refuses an unknown name, a disallowed value and a stops filter', () => {
+  it('refuses an unknown name, a disallowed value and a stops filter on the calendar or an undocumented stops value', () => {
     expect(allowed({ ...calendarParams(calQ, rect, 'GB'), api_key: 'x' })).toThrow();
     expect(allowed({ ...calendarParams(calQ, rect, 'GB'), currency: 'USD' })).toThrow();
-    expect(allowed({ ...flightsParams(cellQ, 'GB'), stops: 'nonstop' })).toThrow();
+    expect(allowed({ ...calendarParams(calQ, rect, 'GB'), stops: 'nonstop' })).toThrow();
+    expect(allowed({ ...flightsParams(cellQ, 'GB'), stops: 'any' })).toThrow();
     expect(allowed({ ...flightsParams(cellQ, 'GB'), separate_tickets: '0' })).toThrow();
     expect(allowed({ ...calendarParams(calQ, rect, 'US') })).toThrow();
   });

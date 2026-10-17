@@ -23,15 +23,15 @@ export function DayBody(props: {
       <GlyphList glyphs={display.glyphs} />
       {display.reason === 'no-run' ? <span className="block">{C.noRunCoversDay}</span> : null}
       {display.reason === 'no-provider' ? <span className="block">{C.noDiscoveryProvider}</span> : null}
-      {/* why: ui-r2-003 — a grey day says how much of it was looked at, as a priced day does */}
-      {display.reason === 'counts' ? <CoverageCue coverage={coverageOf(slice)} /> : null}
+      {/* why: ui-r2-003, ruling 4: a grey day's glyph counts are its buckets, so it needs no second cue */}
     </span>
   );
 }
 
 /**
  * The phone face (plan decision 52, review ui-r2-001): at 375 px a column is about 45 px, so a day shows its number and
- * band, the amount through PriceCell's `face` (marks as single glyphs, words in its title and spoken text) or the
+ * band, the amount through PriceCell's `face` (marks as single glyphs, the provider mark, the short age and "not
+ * checked" visible, words in its title and spoken text) or the
  * glyphs of a priceless day, and one-glyph marks for "price not confirmed" and partial coverage. Stay, provider,
  * "cached from" and the counts are in the panel, one tap away.
  */
@@ -44,8 +44,6 @@ export function PhoneDayBody(props: {
   const C = COPY.calendarView;
   const coverage = coverageOf(slice);
   const partial = coverage.kind === 'fraction' && coverage.searched < coverage.total;
-  const full =
-    display.kind === 'price' && coverage.kind === 'fraction' && coverage.searched === coverage.total;
   const unconfirmed = showsUnconfirmed(slice);
   const marks = (
     <>
@@ -59,13 +57,6 @@ export function PhoneDayBody(props: {
         <span data-coverage="partial">
           <span aria-hidden="true">{C.phoneMark.partial}</span>
           <span className="sr-only">{C.phonePartial}</span>
-        </span>
-      ) : null}
-      {/* why: decision 38 — every priced day carries a visible non-colour coverage cue; fully searched has its own mark */}
-      {full ? (
-        <span data-coverage="full">
-          <span aria-hidden="true">{C.phoneMark.full}</span>
-          <span className="sr-only">{C.phoneFull}</span>
         </span>
       ) : null}
     </>
@@ -101,10 +92,12 @@ export function PhoneDayBody(props: {
     <span className="block min-w-0 text-[11px]">
       {display.glyphs.map((g) => (
         <span key={g.status} data-glyph={g.status}>
+          {/* why: UI-007: the legend promises counts, so the count is visible beside the glyph, not only spoken */}
           <span aria-hidden="true" className="font-bold">
             {C.glyphSymbol[g.status]}
           </span>
-          <span className="sr-only">{glyphWords(g)}</span>
+          {g.count === null ? null : <span data-glyph-count="">{g.count}</span>}
+          <span className="sr-only">{g.count === null ? glyphWords(g) : ` ${COPY.bucket[g.status]}`}</span>
         </span>
       ))}
       {display.reason === 'no-provider' ? <span className="sr-only">{C.noDiscoveryProvider}</span> : null}
@@ -114,8 +107,9 @@ export function PhoneDayBody(props: {
 }
 
 /**
- * The day's price in WP9's PriceCell compact form (decisions 36, 38, 46): the amount with "≈", a short provider badge,
- * the destination code and the stale, truncated and unconfirmed marks, with source, age and note in its title; then
+ * The day's price in WP9's PriceCell compact form (decisions 36, 38, ruling 3 of decision 67): the amount with "≈", a
+ * short provider badge, the destination code, the stale, truncated and unconfirmed marks and the short age line with
+ * "not checked" on a calendar price, visible without hover; source words, the full age and the note in its title; then
  * the stay, any cheaper cached fare with its own destination and stay (decision 52) and the coverage cue. Everything
  * else is in the side panel. A price without provenance is withheld (spec §9 item 6).
  */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as barrel from '../../src/index.js';
 import { effectiveAge, formatAgeCompact } from '../../src/labels/age.js';
 import { dedupByItinerary } from '../../src/results/dedup.js';
 import { priceUnconfirmed, rankRows, sortRows } from '../../src/results/rank.js';
@@ -323,5 +324,18 @@ describe('sortRows (spec §6.5 sort keys)', () => {
     expect(sortRows([c2, c1], 'totalTime', 'desc')).toEqual([c2, c1]);
     expect(sortRows([c1, x], 'totalTime', 'asc')).toEqual([x, c1]);
     expect(sortRows([x, c1], 'totalTime', 'desc')).toEqual([x, c1]);
+  });
+});
+
+describe('priceUnconfirmed: the one definition web and core share (ca-003)', () => {
+  it('reads the verdict when there is one, else the unverified list (a calendar-panel offer carries no verdicts)', () => {
+    expect(priceUnconfirmed({ verdicts: { priceConfirmed: 'unverified' }, unverified: [] })).toBe(true);
+    expect(priceUnconfirmed({ verdicts: { priceConfirmed: 'pass' }, unverified: [] })).toBe(false);
+    expect(priceUnconfirmed({ unverified: ['priceConfirmed'] })).toBe(true);
+    expect(priceUnconfirmed({ unverified: ['checkedBagRequired'] })).toBe(false);
+    expect(priceUnconfirmed({ verdicts: {} })).toBe(false);
+  });
+  it('is on the barrel', () => {
+    expect(barrel.priceUnconfirmed).toBe(priceUnconfirmed);
   });
 });

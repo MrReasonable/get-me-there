@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
 // the better-sqlite3 prebuilt is fail-closed, version pinned by the lockfile, integrity recorded in the WP12 brief).
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 
-describe('scripts/assert-sqlite-prebuilt.mjs', () => {
+// why: ruling 11: each case spawns node; 60 s survives a loaded runner.
+describe('scripts/assert-sqlite-prebuilt.mjs', { timeout: 60_000 }, () => {
   it('pnpm-lock.yaml pins better-sqlite3 13.0.3 to the integrity recorded in the WP12 brief', () => {
     const lock = readFileSync(join(REPO, 'pnpm-lock.yaml'), 'utf8').split('\n');
     const at = lock.findIndex((l) => l.trim() === 'better-sqlite3@13.0.3:');

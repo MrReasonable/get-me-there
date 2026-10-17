@@ -261,7 +261,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(marks.slice(0, 2)).toEqual(['price not confirmed by the final step', 'stale']);
   });
 
-  it('decision 46 compact: amount with "≈", short provider badge, destination and marks; source, age and note in the title', () => {
+  it('compact (ruling 3): amount with "≈", provider badge, destination, marks and a visible age line; the long form in the title', () => {
     renderWithProviders(
       <PriceCell
         pricePence={39950}
@@ -285,6 +285,8 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(within(cell).queryByText('Aviasales cache')).toBeNull();
     expect(within(cell).queryByText('onward leg not included')).toBeNull();
     expect(screen.queryByTestId('provenance')).toBeNull();
+    // why: provenance without hover (spec §11, ruling 3): the age and "not checked" are on the face, not only the title.
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent('≤2d old · not checked');
     const { full } = ages(calendarProvenance);
     expect(cell.getAttribute('title')).toBe(
       `Travelpayouts · Aviasales cache · ${full} · constraints not checked · onward leg not included`,
@@ -298,10 +300,57 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     );
     const cell = screen.getByTestId('price-cell');
     expect(within(cell).getByText('SA')).toBeInTheDocument();
+    // why: the unknown age is the visible badge; the face adds no second "age unknown" and no "not checked".
+    expect(within(cell).getByText("vendor's cache age unknown")).toBeInTheDocument();
+    expect(within(cell).queryByTestId('face-age')).toBeNull();
     expect(cell.getAttribute('title')).toBe(
       `SearchApi · Google Flights via SearchApi · ${ages(searchProvenance).full}`,
     );
     expect(cell.className).not.toContain('border-dashed');
+  });
+
+  it('a vendor-dated calendar price shows its observed age on the compact face (F3: "5d old")', () => {
+    renderWithProviders(
+      <PriceCell
+        pricePence={47900}
+        provenance={{ ...calendarProvenance, providerObservedAt: '2026-10-09T15:00:00.000Z' }}
+        calendar
+        stale={false}
+        destination="JFK"
+        compact
+      />,
+    );
+    expect(within(screen.getByTestId('price-cell')).getByTestId('face-age')).toHaveTextContent(
+      '5d old · not checked',
+    );
+  });
+
+  it('a calendar price of unknown vendor age shows the unknown-age badge and "not checked", never a second age (ruling 3)', () => {
+    renderWithProviders(
+      <PriceCell
+        pricePence={30000}
+        provenance={{ ...calendarProvenance, maxAgeHours: 'unknown', fx: { converted: false } }}
+        calendar
+        stale={false}
+        compact
+      />,
+    );
+    const cell = screen.getByTestId('price-cell');
+    expect(within(cell).getByText("vendor's cache age unknown")).toBeInTheDocument();
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^not checked$/);
+  });
+
+  it('an itinerary price of known age shows its short age alone, with no "not checked" (ruling 3)', () => {
+    renderWithProviders(
+      <PriceCell
+        pricePence={41200}
+        provenance={{ ...searchProvenance, maxAgeHours: 48 }}
+        calendar={false}
+        stale={false}
+        compact
+      />,
+    );
+    expect(within(screen.getByTestId('price-cell')).getByTestId('face-age')).toHaveTextContent(/^≤2d old$/);
   });
 
   it('the tests clock is the fixed NOW', () => {

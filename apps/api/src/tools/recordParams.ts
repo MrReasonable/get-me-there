@@ -18,9 +18,15 @@ type ValueKind = 'iata' | 'iso-date' | 'iso-month' | 'positive-int' | 'opaque-to
 /**
  * `fixed`: the allowlist lists the values actually sent. `oneOf`: the allowlist lists the vendor's whole
  * documented set (spec §5.4 `travel_class`), so WP5 may send any cabin while this run sends one.
+ * `documented`: like `oneOf`, and listed even when this run sends none, for a vendor-documented parameter the adapter
+ * sends only for some definitions (ruling 8 `stops`: the worked example sets no maxStops).
  * `kind`: a variable value, written as 'any'.
  */
-type ParamRule = { fixed: readonly string[] } | { oneOf: readonly string[] } | { kind: ValueKind };
+type ParamRule =
+  | { fixed: readonly string[] }
+  | { oneOf: readonly string[] }
+  | { documented: readonly string[] }
+  | { kind: ValueKind };
 interface EndpointRules {
   provider: 'travelpayouts' | 'searchapi';
   key: string;
@@ -95,8 +101,10 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
         outbound_date: date,
         return_date: date,
         ...shared,
-        // why: plan decision 24 — sorted by price; no `stops` on either engine (separate_tickets is shared, decision 29)
+        // why: plan decision 24 — sorted by price (separate_tickets is shared, decision 29)
         sort_by: { fixed: ['price'] },
+        // why: ruling 8: sent when a definition sets maxStops; the vendor's documented set (docs read 2026-10-17)
+        stops: { documented: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'] },
         departure_token: { kind: 'opaque-token' },
         booking_token: { kind: 'opaque-token' },
       },
@@ -115,7 +123,14 @@ export class ParamLog {
     for (const [name, value] of params) {
       const rule = table[name];
       if (rule === undefined) throw new Error(`parameter ${name} is not in the ${key} allowlist`);
-      const allowed = 'fixed' in rule ? rule.fixed : 'oneOf' in rule ? rule.oneOf : null;
+      const allowed =
+        'fixed' in rule
+          ? rule.fixed
+          : 'oneOf' in rule
+            ? rule.oneOf
+            : 'documented' in rule
+              ? rule.documented
+              : null;
       if (allowed !== null && !allowed.includes(value))
         throw new Error(`${key}: a value of ${name} is not allowed`);
       if ('kind' in rule && rule.kind !== 'opaque-token' && !KIND_PATTERN[rule.kind].test(value))
@@ -150,7 +165,9 @@ export class ParamLog {
       const r = this.rules[k];
       const seen = this.observed.get(k);
       if (r.provider !== provider || seen === undefined) continue;
-      const names = [...seen.keys()].sort();
+      // why: a documented parameter is listed whether or not this run sent it (ruling 8).
+      const documented = Object.entries(r.params).flatMap(([n, rule]) => ('documented' in rule ? [n] : []));
+      const names = [...new Set([...seen.keys(), ...documented])].sort();
       const values: Record<string, string[] | 'any'> = {};
       for (const name of names) {
         const rule = r.params[name];
@@ -159,7 +176,9 @@ export class ParamLog {
             ? 'any'
             : 'oneOf' in rule
               ? [...rule.oneOf].sort()
-              : [...(seen.get(name) ?? [])].sort();
+              : 'documented' in rule
+                ? [...rule.documented].sort()
+                : [...(seen.get(name) ?? [])].sort();
       }
       endpoints[r.key] = { names, values };
     }

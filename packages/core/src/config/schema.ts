@@ -198,6 +198,13 @@ function providerLimits(
 }
 
 /** Spec §12. Returns every bad field at once rather than the first. */
+/**
+ * The refusal an operator who skipped docs/setup.md section 1 reads in `docker compose logs` (devops-final-001): the
+ * exact two lines to add to .env. bootApp's assertAuthInvariants says the same.
+ */
+export const AUTH_MISSING =
+  'add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)';
+
 export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const r = new Reader(env);
   const nodeEnv = r.oneOf('NODE_ENV', ['production', 'development', 'test']) ?? 'production';
@@ -231,11 +238,21 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   }
   const allowUnauthenticated = r.bool('ALLOW_UNAUTHENTICATED') ?? false;
   if (auth === null && authUser === undefined && !LOOPBACK.test(bindAddress) && !allowUnauthenticated) {
+    // why: devops-final-001 (ruling 14): the fix is the two auth lines, so they lead. In the container BIND_ADDRESS is
+    // fixed by docker-compose.yml and ALLOW_UNAUTHENTICATED is not forwarded, so neither is named as the thing to edit.
+    const container = r.raw('IN_CONTAINER') !== undefined;
+    r.fail('APP_BASIC_AUTH_USER', AUTH_MISSING);
+    if (!container)
+      r.fail(
+        'BIND_ADDRESS',
+        `binding ${bindAddress} without auth needs ALLOW_UNAUTHENTICATED=true (Tailscale-only hosts)`,
+      );
     r.fail(
-      'BIND_ADDRESS',
-      `binding ${bindAddress} without auth needs ALLOW_UNAUTHENTICATED=true (Tailscale-only hosts)`,
+      'ALLOW_UNAUTHENTICATED',
+      container
+        ? 'not an option here: docker-compose.yml does not forward it, so add the two auth lines instead'
+        : 'set to true only on a host that is not reachable from the internet',
     );
-    r.fail('ALLOW_UNAUTHENTICATED', 'set to true only on a host that is not reachable from the internet');
   }
 
   const pointOfSale = r.str('POINT_OF_SALE') ?? 'GB';
@@ -270,6 +287,13 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
             planFixedMicroGbp: r.pence('SEARCHAPI_PLAN_FIXED_PENCE') ?? preset.planFixedMicroGbp,
           },
         };
+  // why: cost-007: the trial count is zeroed on a monthly window (db budgetConfig), so a value left in .env after a
+  // switch to the subscription would be silently ignored; spec §12: a variable that cannot apply fails boot, named.
+  if (searchapi !== null && searchapi.limits.window === 'month' && searchapi.trialUsed > 0)
+    r.fail(
+      'SEARCHAPI_TRIAL_USED',
+      `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
+    );
   const billedPreset = searchapi === null ? null : preset;
   // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
   const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };

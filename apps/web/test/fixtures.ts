@@ -403,6 +403,7 @@ export function providersResponse(
         plan: 'free',
         excludedFromSchedule: false,
         notices: [],
+        capNote: null,
         capabilities: {
           discovery: {
             sourceKind: 'authorised-cached',
@@ -420,11 +421,14 @@ export function providersResponse(
         plan: '40usd',
         excludedFromSchedule: false,
         notices: [],
+        capNote:
+          'calls cost £0 each on this plan, so the spend cap does not stop them; the monthly call cap (10000 calls) is the hard stop',
         capabilities: {
           discovery: {
             sourceKind: 'scraped-aggregate',
             provenanceNote: 'Google date grid via SearchApi',
             maxAgeHours: 24,
+            maxAgeAssumed: true,
           },
           verification: {
             sourceKind: 'scraped-search',
@@ -504,7 +508,7 @@ export function coverageResponse(
         providerId: 'travelpayouts',
         buckets: discoveryBuckets,
         total: 126,
-        requests: { calls: 14, cacheHits: 0, costMicroGbp: 0, planCalls: 14 },
+        requests: { calls: 14, tiles: 14, cacheHits: 0, costMicroGbp: 0, planCalls: 14 },
         overrun: false,
         parityBreak: false,
       },
@@ -513,7 +517,7 @@ export function coverageResponse(
         providerId: 'searchapi',
         buckets: verificationBuckets,
         total: 126,
-        requests: { calls: 50, cacheHits: 0, costMicroGbp: 0, planCalls: 50 },
+        requests: { calls: 50, tiles: 0, cacheHits: 0, costMicroGbp: 0, planCalls: 50 },
         overrun: false,
         parityBreak: false,
       },
@@ -533,6 +537,7 @@ export function coverageResponse(
       },
     ],
     scheduleBlockedSince: null,
+    onDemand: [],
     ...over,
   });
 }

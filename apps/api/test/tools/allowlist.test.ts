@@ -2,13 +2,14 @@
 // ParamsAllowlist, hashed like a recorded fixture and loaded through WP4's own loader (arch-010).
 import { mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIsoDate } from '@gmt/core';
+import { asIata, asIsoDate } from '@gmt/core';
 import {
   assertRequestAllowed,
   loadParamsAllowlist,
   type ParamsAllowlist,
   RecorderRefusedError,
 } from '@gmt/providers';
+import { searchApiCalendarParams, searchApiFlightsParams } from '@gmt/providers/recording';
 import { loadRecorded } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 import { ParamLog, paramRules, writeAllowlist } from '../../src/tools/recordParams.js';
@@ -35,7 +36,8 @@ const SA_COMMON = [
   'adults',
 ];
 
-describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
+// why: ruling 11: the first test records the worked example (about 2.5 s unloaded); 30 s survives a loaded runner.
+describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', { timeout: 30_000 }, () => {
   it('the recording writes allowlists WP4 loads, with the exact names and values of brief §5.4, and every recorded request passes them', async () => {
     const { root } = await runRecording();
     const tp = load(root, 'travelpayouts');
@@ -87,12 +89,21 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
         },
       },
       '/api/v1/search?engine=google_flights': {
-        names: [...SA_COMMON, 'booking_token', 'departure_token', 'separate_tickets', 'sort_by'].sort(),
+        names: [
+          ...SA_COMMON,
+          'booking_token',
+          'departure_token',
+          'separate_tickets',
+          'sort_by',
+          'stops',
+        ].sort(),
         values: {
           ...fixedSa,
           engine: ['google_flights'],
           separate_tickets: ['1'],
           sort_by: ['price'],
+          // why: ruling 8: the documented set is listed though the worked example sets no maxStops and sends none.
+          stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'],
           arrival_id: 'any',
           departure_id: 'any',
           outbound_date: 'any',
@@ -104,8 +115,9 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
     });
     for (const doc of [tp, sa]) {
       for (const ep of Object.values(doc.endpoints))
-        for (const banned of ['api_key', 'token', 'market', 'trip_class', 'return_at', 'stops'])
+        for (const banned of ['api_key', 'token', 'market', 'trip_class', 'return_at'])
           expect(ep.names).not.toContain(banned);
+      expect(sa.endpoints['/api/v1/search?engine=google_flights_calendar']?.names).not.toContain('stops');
     }
     for (const f of loadRecorded(root, 'travelpayouts', '/aviasales/v3/prices_for_dates'))
       assertRequestAllowed(tp, f.endpointPath, new URL(f.request.url));
@@ -165,5 +177,51 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
     const { root } = tempRecordedRoot();
     symlinkSync(tempDir(), join(root, 'searchapi'));
     expect(() => writeAllowlist(root, doc)).toThrow(/resolves outside/);
+  });
+});
+
+// why: ruling 11: records the worked example once (about 2.5 s unloaded); 30 s survives a loaded runner.
+describe("record:fixtures sends the adapter's own SearchApi parameter sets (ruling 18, ca-012)", {
+  timeout: 30_000,
+}, () => {
+  it('every SearchApi request equals what @gmt/providers builds for the same rectangle or cell', async () => {
+    const { seen } = await runRecording();
+    expect(seen.sa.length).toBeGreaterThan(0);
+    for (const p of seen.sa) {
+      const sent = Object.fromEntries(p);
+      const base = { origin: asIata(sent.departure_id ?? ''), destination: asIata(sent.arrival_id ?? '') };
+      const built =
+        sent.engine === 'google_flights_calendar'
+          ? searchApiCalendarParams(
+              { ...base, cabin: 'economy' },
+              {
+                kind: 'rectangle',
+                departFrom: asIsoDate(sent.outbound_date_start ?? ''),
+                departTo: asIsoDate(sent.outbound_date_end ?? ''),
+                returnFrom: asIsoDate(sent.return_date_start ?? ''),
+                returnTo: asIsoDate(sent.return_date_end ?? ''),
+              },
+              'GB',
+            )
+          : searchApiFlightsParams(
+              {
+                ...base,
+                departureDate: asIsoDate(sent.outbound_date ?? ''),
+                returnDate: asIsoDate(sent.return_date ?? ''),
+                cabin: 'economy',
+                adults: 1,
+                currency: 'GBP',
+                expandTop: 1,
+                bookingLinks: true,
+              },
+              'GB',
+              sent.departure_token !== undefined
+                ? { departure_token: sent.departure_token }
+                : sent.booking_token !== undefined
+                  ? { booking_token: sent.booking_token }
+                  : undefined,
+            );
+      expect(sent).toEqual(built);
+    }
   });
 });

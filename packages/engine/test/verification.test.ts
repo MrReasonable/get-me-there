@@ -401,8 +401,8 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
   });
 });
 
-describe('route price history (spec §7 rev 10)', () => {
-  it('upserts only the points the vendor gave in GBP, cabin unknown; other currencies are dropped and counted (prov-wp07-007)', async () => {
+describe('route price history (spec §7 rev 28, ruling 6)', () => {
+  it("upserts the vendor's GBP points keyed by the searched trip and the request cabin; other currencies are dropped and counted (prov-wp07-007)", async () => {
     const routeHistory = [
       { date: asIsoDate('2026-10-12'), lowestPriceMinor: 41_200, currency: 'GBP' },
       { date: asIsoDate('2026-10-13'), lowestPriceMinor: 40_900, currency: 'GBP' },
@@ -411,31 +411,20 @@ describe('route price history (spec §7 rev 10)', () => {
     const h = createHarness({ transformFixture: (p) => mapResult(p, (r) => ({ ...r, routeHistory })) });
     await h.runToCompletion(h.orch(), def(h).id);
     const rows = h.db.raw
-      .prepare<
-        [],
-        { origin: string; destination: string; cabin: string; p: string; date: string; pence: number }
-      >(
-        'SELECT origin, destination, cabin, provider_id AS p, date, lowest_price_pence AS pence FROM route_price_history ORDER BY date',
+      .prepare<[], { dep: string; ret: string; cabin: string; p: string; date: string; pence: number }>(
+        'SELECT departure_date AS dep, return_date AS ret, cabin, provider_id AS p, date, lowest_price_pence AS pence FROM route_price_history ORDER BY dep, ret, date',
       )
       .all();
-    expect(rows).toEqual([
-      {
-        origin: 'LHR',
-        destination: 'JFK',
-        cabin: 'unknown',
-        p: 'fixture',
-        date: '2026-10-12',
-        pence: 41_200,
-      },
-      {
-        origin: 'LHR',
-        destination: 'JFK',
-        cabin: 'unknown',
-        p: 'fixture',
-        date: '2026-10-13',
-        pence: 40_900,
-      },
-    ]);
+    // why: every verified cell stores its own trip's series, so two cells' points never overwrite each other (dm-001).
+    const trips = new Set(rows.map((r) => `${r.dep}|${r.ret}`));
+    expect(trips.size).toBeGreaterThan(1);
+    expect(rows.length).toBe(trips.size * 2);
+    for (const r of rows) {
+      expect([r.cabin, r.p]).toEqual(['economy', 'fixture']);
+      expect(r.dep < r.ret).toBe(true);
+    }
+    expect(rows.filter((r) => r.date === '2026-10-12').every((r) => r.pence === 41_200)).toBe(true);
+    expect(rows.some((r) => r.date === '2026-10-11')).toBe(false);
     expect(
       h.logs.some(
         (l) => l.msg === 'verification: route history points not in GBP dropped' && l.fields.dropped === 1,

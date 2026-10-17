@@ -216,7 +216,11 @@ export function row(s: RowSpec): Record<string, unknown> {
     transfers: 0,
     return_transfers: 0,
     duration: 900,
-    link: s.link ?? '/search/synthetic?t=1',
+    // why: pie-002: by default a readable closed itinerary token for the row's own airports (the vendor's shape), so a
+    // test that is not about the open-jaw guard never trips its "itinerary-unreadable" count.
+    link:
+      s.link ??
+      `/search/X?t=ZZ18146070001814617500000475${s.origin}${s.dest}18158511001815894900000430${s.dest}${s.origin}_1d1bd24f_58507`,
   };
 }
 

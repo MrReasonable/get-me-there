@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { defaultFixtureRoot, loadFixtureTree } from '../../src/fixture/tree.js';
-import { createRecorder, loadRecordedJson, withContentHash } from '../../src/http/recorder.js';
+import { loadRecordedJson } from '../../src/http/recordedFiles.js';
+import { createRecorder, withContentHash } from '../../src/http/recorder.js';
 import { verifyFixturesTree, verifyRecordedFile, verifyRecordedTree } from '../../src/testing/verify.js';
 import { ALL_SECRETS, req, SEARCH, SENTINELS } from '../fakes.js';
 
@@ -14,7 +15,8 @@ const FIXTURES = fileURLToPath(new URL('../../fixtures', import.meta.url));
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
 const scanFixtures = (root: string): string[] => verifyFixturesTree(root, ALL_SECRETS);
 
-describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)', () => {
+// why: ruling 11: lists the committed tree through git and scans every fixture file; 30 s survives a loaded runner.
+describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)', { timeout: 30_000 }, () => {
   it('reports each planted fault in a temporary tree (positive control, test-008)', async () => {
     const root = join(mkdtempSync(join(tmpdir(), 'gmt-scan-')), 'fixtures');
     cpSync(defaultFixtureRoot(), join(root, 'synthetic', 'fixture'), { recursive: true });

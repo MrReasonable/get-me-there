@@ -3,6 +3,11 @@ import type { Cabin, ProviderId } from '../types/provenance.js';
 
 /** The one label every search link carries (spec §6.9). */
 export const SEARCH_LINK_LABEL = 'search link, not a fare link';
+/**
+ * Ruling 17 (pie-010): the label of a calendar row's own vendor link (the cached itinerary the vendor's row names),
+ * preferred over the generic search, which may search the whole city; still not a fare.
+ */
+export const SEARCH_LINK_ROW_LABEL = "the vendor's link for this cached row, not a fare link";
 
 // why: Aviasales `trip_class` is 0 economy, 1 business, 2 first (Travelpayouts search-form
 // documentation); it has no premium economy, and Travelpayouts is economy-only anyway (spec §2).

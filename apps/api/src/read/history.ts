@@ -7,6 +7,7 @@ import {
   isStale,
   type ProviderId,
   type SearchDefinition,
+  withAssumedBound,
 } from '@gmt/core';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -72,10 +73,11 @@ function refreshFor(
 /**
  * Route history: the calendar series per provider in the requested cabin, one point per execution fetch carrying its
  * cell and execution (reused rows excluded by the repository), each stale by the calendar rule and truncated when its
- * discovery outcome was (decisions 36, 38); plus the route-level lowest-price series per provider, for the requested
- * cabin and `'unknown'` (SearchApi's vendor gives none), plotted by `date` (spec §7 `route_price_history`, decision 40).
- * Plan decision 54: each route-level point carries `stale` by fetch age against the provider's calendar threshold (the
- * series is GBP-only by contract, decision 25, and WP10 labels it indicative).
+ * discovery outcome was (decisions 36, 38); plus the vendor's price-history series per provider and searched trip
+ * (ruling 6, spec §7 rev 28 `route_price_history`, decision 40), for the requested cabin and then `'unknown'` (rows
+ * migrated without a trip), plotted by `date`. Plan decision 54: each point carries `stale` by fetch age against the
+ * provider's calendar threshold (the series is vendor-stated GBP only, decision 25 and prov-004; WP10 labels it
+ * indicative).
  */
 export function routeHistory(
   origin: Iata,
@@ -96,11 +98,14 @@ export function routeHistory(
         s.providerId,
         refreshFor(defs, origin, destination, s.providerId),
       );
+      // why: N4 (pie-007): an assumed bound is labelled "assumed" here as on every other view.
+      const info = ports.providers.find((x) => x.id === s.providerId)?.discovery?.info;
       return {
         providerId: s.providerId,
         cabin,
         points: s.points.map((p) => ({
           ...p,
+          provenance: withAssumedBound(p.provenance, info),
           stale: staleness(p.provenance, threshold, now).stale,
           truncated: truncated({
             executionId: p.executionId,
@@ -119,16 +124,21 @@ export function routeHistory(
           p.id,
           refreshFor(defs, origin, destination, p.id),
         );
-        return [cabin, 'unknown' as const].map((cab) => ({
-          providerId: p.id,
-          cabin: cab,
-          points: ports.repos.routeHistory.series(origin, destination, p.id, cab).map((pt) => ({
-            ...pt,
-            // why: decision 54: stale by fetch age. The vendor gives the series no age, so core's rule (decision 55)
-            // reads it as an unknown vendor age, which counts the fetch age alone. The web labels the series indicative.
-            stale: isStale({ fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, now, threshold),
+        // why: ruling 6: one series per searched trip in the requested cabin, then the migrated rows that never
+        // recorded a trip (cabin 'unknown'), which the web labels "trip unknown".
+        return [cabin, 'unknown' as const].flatMap((cab) =>
+          ports.repos.routeHistory.series(origin, destination, p.id, cab).map((s) => ({
+            providerId: p.id,
+            trip: s.trip,
+            cabin: cab,
+            points: s.points.map((pt) => ({
+              ...pt,
+              // why: decision 54: stale by fetch age. The vendor gives the series no age, so core's rule (decision 55)
+              // reads it as an unknown vendor age, which counts the fetch age alone. The web labels the series indicative.
+              stale: isStale({ fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, now, threshold),
+            })),
           })),
-        }));
+        );
       })
       .filter((s) => s.points.length > 0),
   };

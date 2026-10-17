@@ -11,7 +11,7 @@ export {
 export { backupDatabase, checkBackup } from './backup.js';
 export { type BudgetConfig, budgetConfigFromConfig, effectiveCallCap } from './budgetConfig.js';
 export { SqliteBudgetGuard } from './budgetGuard.js';
-export { type Db, openDatabase } from './client.js';
+export { type Db, openDatabase, WalUnavailableError } from './client.js';
 export { RowCorrupt } from './internal/read.js';
 export { RowRejected } from './internal/validate.js';
 export { runMaintenance } from './maintenance.js';
@@ -28,7 +28,11 @@ export { FxRepo } from './repositories/fx.js';
 export { ItinerariesRepo } from './repositories/itineraries.js';
 export { LedgerRepo } from './repositories/ledger.js';
 export { NotificationsRepo } from './repositories/notifications.js';
-export { RoutePriceHistoryRepo } from './repositories/routePriceHistory.js';
+export {
+  type RouteHistorySeries,
+  type RouteHistoryTrip,
+  RoutePriceHistoryRepo,
+} from './repositories/routePriceHistory.js';
 export { SqliteResponseCache } from './responseCache.js';
 export {
   AIRPORTS_MIN_ROWS,

@@ -19,8 +19,6 @@ import type { CellDates, Rect } from './recordRequests.js';
 
 export type { CellDates, Rect } from './recordRequests.js';
 
-/** Calendar + step 1 + step 2 + step 3: the credits the four required SearchApi fixtures cost. */
-export const SA_REQUIRED_CREDITS = 4;
 /** The smallest accepted --budget: the required four plus the over-limit probe (SA-03), which is billed if the vendor answers it with an empty 200. */
 export const RECORD_MIN_BUDGET = 5;
 /** Months of Travelpayouts metro tiles: the worked example's 182-day window spans 7 (spec §5.2). */

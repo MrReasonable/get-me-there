@@ -10,6 +10,7 @@ import { coverageSummaryFor } from './coverage.js';
 import { executionResponse, overrunOf, planCallsOf } from './executions.js';
 import { EXECUTIONS_LIMIT } from './results.js';
 import { withNights } from './rows.js';
+import { currentSpace } from './space.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
 /**
@@ -24,7 +25,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
   });
   const parent = all.find((e) => !e.isChild) ?? null;
   if (parent === null) throw new ApiError(404, 'no_execution', API_TEXT.noExecution);
-  const summary = coverageSummaryFor(parent, all, ports);
+  const summary = coverageSummaryFor(parent, all, ports, currentSpace(def, ports.clock.todayLondon()));
   const counts = ports.repos.ledger.countsFor(parent.id);
   const parityBreak = ports.repos.notifications.wasSent('parity_break', parent.id, def.id);
   const perStage = executionResponse(ports, parent).progress.map((p) => {
@@ -34,6 +35,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
       ...p,
       requests: {
         calls: line?.calls ?? 0,
+        tiles: line?.tiles ?? 0,
         cacheHits: line?.cacheHits ?? 0,
         costMicroGbp: line?.costMicroGbp ?? 0,
         planCalls,
@@ -43,6 +45,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
     };
   });
   const outcomes = ports.repos.cells.outcomes(parent.id);
+  const today = ports.clock.todayLondon();
   const notReached = selectedNotReached(
     ports.repos.cells.selected(parent.id).map((s) => s.cell),
     outcomes.filter((o) => o.stage === 'verification'),
@@ -62,9 +65,38 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         lastError: o.lastError,
         attempts: o.attempts,
         // why: what a manual resume would pick up again: WP3's retriedOnResume, the predicate the resume query is built
-        // from (review arch-005), so View D's "retry" and the resume never disagree.
-        retryable: retriedOnResume(o, true),
+        // from (review arch-005), and, as resumableCells does, only a cell that has not departed (ssr-004), so View D's
+        // "retry" and the resume never disagree and no dead Retry button shows.
+        retryable: retriedOnResume(o, true) && o.departureDate > today,
       })),
     scheduleBlockedSince: engine.scheduler.blockedSince(),
+    // why: ruling 15 (UI-004): every on-demand child, newest first, with its own buckets and ledger calls.
+    onDemand: all
+      .flatMap((e) => (e.isChild && e.cell !== null ? [{ e, cell: e.cell }] : []))
+      .map(({ e, cell }) => {
+        const ledger = ports.repos.ledger.countsFor(e.id);
+        return {
+          executionId: e.id,
+          status: e.status,
+          startedAt: e.startedAt,
+          cell: withNights(cell),
+          // why: a child searches one cell at the itinerary stage; a stage line with no cells says nothing.
+          perStage: executionResponse(ports, e)
+            .progress.filter((p) => p.total > 0)
+            .map((p) => {
+              const line = ledger.perProvider.find(
+                (c) => c.providerId === p.providerId && c.stage === p.stage,
+              );
+              return {
+                ...p,
+                requests: {
+                  calls: line?.calls ?? 0,
+                  cacheHits: line?.cacheHits ?? 0,
+                  costMicroGbp: line?.costMicroGbp ?? 0,
+                },
+              };
+            }),
+        };
+      }),
   };
 }

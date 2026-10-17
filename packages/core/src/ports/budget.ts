@@ -15,11 +15,17 @@ export function budgetScopeLabel(s: BudgetScope): string {
   return 'providerId' in s ? `${s.kind}:${s.providerId}` : s.kind;
 }
 
-/** `cap` is null for a window the plan does not use and for a scope with no cap configured. */
+/**
+ * Ruling 2 (decision 67): "window not used by this plan" and "no cap" are different facts. `windowUsed` is false only
+ * for a provider window the provider's plan does not use (the month window of a lifetime trial, the lifetime window of
+ * a monthly plan); its `cap` is then null and means nothing. With `windowUsed` true, a null `cap` means no cap is
+ * configured for the scope. Execution and global scopes are always used.
+ */
 export interface Usage {
   calls: number;
   costMicroGbp: number;
   cap: number | null;
+  windowUsed: boolean;
   windowStart: IsoDateTime | null;
   windowEnd: IsoDateTime | null;
 }

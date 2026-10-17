@@ -8,9 +8,10 @@ import { z } from 'zod';
 import { bootApp, type RunningApp } from '../../src/bootstrap/app.js';
 import { type AssetPaths, assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
+import { API_TEXT } from '../../src/text.js';
 import { loadConfigFromEnv } from '../../src/wiring.js';
 import { errorOf } from '../helpers/contract.js';
-import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
+import { cleanEnv, SENTINEL_AUTH, SENTINEL_SA, silentLog } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
 import { basic, captureLines } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
@@ -173,6 +174,55 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
     await running.close();
     expect(lines.join('')).toContain('ALLOW_UNAUTHENTICATED');
   });
+
+  it.each([
+    ['a £0-per-call plan under a zero cap: no warning', { SEARCHAPI_PLAN: 'trial' }, false],
+    [
+      'a billed per-call plan under a zero cap: the spec §12 warning',
+      { SEARCHAPI_PLAN: '40usd', SEARCHAPI_COST_PER_CALL_MICRO_GBP: '5000', MONTHLY_SPEND_CAP_PENCE: '0' },
+      true,
+    ],
+  ] as const)(
+    'boot logs the providers configured; %s (devops-final-002, ruling 5)',
+    async (_l, env, warns) => {
+      const lines: string[] = [];
+      const running = await bootApp({
+        config: loadConfigFromEnv(envFor({ SEARCHAPI_KEY: SENTINEL_SA, ...env })),
+        log: createLogger({ logLevel: 'info' }, { destination: captureLines(lines) }),
+        listen: false,
+        assets: assetPaths(),
+      });
+      await running.close();
+      const records = lines.map((l) => z.looseObject({ msg: z.string() }).parse(JSON.parse(l)));
+      const configured = records.find((r) => r.msg === 'providers configured');
+      expect(JSON.stringify(configured)).toContain('"searchapi"');
+      expect(JSON.stringify(configured)).toContain('"monthlySpendCapPence"');
+      expect(records.some((r) => r.msg === API_TEXT.zeroCapBootWarning)).toBe(warns);
+      expect(lines.join('')).not.toContain(SENTINEL_SA);
+    },
+  );
+
+  it.each([
+    ['3000p, below the £32 fee', '3000', true],
+    ['3500p, the default', '3500', false],
+  ] as const)(
+    'a spend cap of %s on the 40usd plan: boot warns naming MONTHLY_SPEND_CAP_PENCE only when below the fees (cost-006)',
+    async (_l, cap, warns) => {
+      const lines: string[] = [];
+      const running = await bootApp({
+        config: loadConfigFromEnv(
+          envFor({ SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: cap }),
+        ),
+        log: createLogger({ logLevel: 'info' }, { destination: captureLines(lines) }),
+        listen: false,
+        assets: assetPaths(),
+      });
+      await running.close();
+      const warning = lines.find((l) => l.includes(API_TEXT.spendCapBelowFees(Number(cap), 3200)));
+      expect(warning !== undefined).toBe(warns);
+      if (warns) expect(warning).toContain('MONTHLY_SPEND_CAP_PENCE');
+    },
+  );
 
   it('a password shorter than 12 characters fails boot naming the variable', () => {
     expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: 'elevenchars' }))).toThrow(

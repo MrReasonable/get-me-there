@@ -7,7 +7,15 @@
 export function formatPence(pence: number): string {
   if (!Number.isSafeInteger(pence) || pence < 0)
     throw new RangeError(`pence must be a non-negative integer: ${pence}`);
-  const pounds = String(Math.floor(pence / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const pounds = groupThousands(Math.floor(pence / 100));
   const rest = pence % 100;
   return rest === 0 ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
+}
+
+/**
+ * en-GB digit grouping of a non-negative integer, a comma every three digits (13104 → "13,104"), without Intl so no
+ * host ICU can change it: the one grouping money and counts share (ca-010).
+ */
+export function groupThousands(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }

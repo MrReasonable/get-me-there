@@ -1,3 +1,4 @@
+import { within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { PriceCell } from '../../src/components/PriceCell.js';
 import { COPY } from '../../src/copy.js';
@@ -26,7 +27,9 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).toHaveAttribute('data-face');
     expect(cell).not.toHaveClass('border-dashed');
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
-    expect(hidden).toEqual(['≈', '≠◷?…↺◌', COPY.providerMark.searchapi]);
+    // why: the unknown age is now words on the face (ruling 3), so it has no glyph of its own.
+    expect(hidden).toEqual(['≈', '≠◷…↺◌', COPY.providerMark.searchapi, 'age unknown']);
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent('age unknown');
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [
@@ -49,12 +52,56 @@ describe('PriceCell face (phone day cell)', () => {
     );
     const cell = getByTestId('price-cell');
     expect(cell).toHaveClass('border-dashed');
-    // why: no marks, so the only aria-hidden part is the provider's short mark (visible provenance without hover)
+    // why: no marks, so the aria-hidden parts are the visible provenance without hover: mark, age, "not checked"
     expect([...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent)).toEqual([
       COPY.providerMark.travelpayouts,
+      '≤2d old',
+      'not checked',
     ]);
     expect(cell.getAttribute('title')).not.toContain('onward');
     expect(cell.getAttribute('title')).toContain('constraints not checked');
+    // why: provenance without hover (spec §11, ruling 3): touch has no title, so the age and "not checked" are visible.
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent('≤2d old');
+    expect(within(cell).getByTestId('face-unchecked')).toHaveTextContent('not checked');
+  });
+
+  it.each([
+    ['observed', { ...provCalendar, providerObservedAt: '2026-10-01T15:00:00.000Z' }],
+    ['bounded', provCalendar],
+    ['unknown', { ...provSearch, maxAgeHours: 'unknown' as const }],
+    [
+      'assumed',
+      { ...provCalendar, providerId: 'searchapi' as const, maxAgeHours: 24, maxAgeAssumed: true as const },
+    ],
+  ])(
+    'a %s age fits the 375 px day column: every visible word is at most 7 characters (about 45 px)',
+    (_k, prov) => {
+      const { getByTestId } = renderWithProviders(
+        <PriceCell face pricePence={123400} provenance={prov} calendar stale={false} />,
+      );
+      const cell = getByTestId('price-cell');
+      for (const id of ['face-age', 'face-unchecked']) {
+        const words = (within(cell).getByTestId(id).textContent ?? '').split(/\s+/).filter(Boolean);
+        for (const w of words) expect(w.length, w).toBeLessThanOrEqual(7);
+      }
+      expect(within(cell).getByTestId('face-age').className).toContain('text-[10px]');
+    },
+  );
+
+  it('an assumed SearchApi calendar bound reads "assumed ≤…", never a plain "≤", on the face and in the title (N4)', () => {
+    const prov = {
+      ...provCalendar,
+      providerId: 'searchapi' as const,
+      maxAgeHours: 24,
+      maxAgeAssumed: true as const,
+    };
+    const { getByTestId } = renderWithProviders(
+      <PriceCell face pricePence={30000} provenance={prov} calendar stale={false} />,
+    );
+    const cell = getByTestId('price-cell');
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent('assumed ≤26h');
+    expect(cell.getAttribute('title')).toContain('provider age assumed ≤24h (undocumented)');
+    expect(cell.getAttribute('title')).not.toContain('provider age unknown (≤');
   });
 
   it('the full form badges a superseded calendar price after "stale" (decision 54)', () => {

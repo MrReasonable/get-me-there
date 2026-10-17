@@ -41,6 +41,12 @@ export interface Provenance {
   fetchedAt: IsoDateTime;
   providerObservedAt?: IsoDateTime;
   maxAgeHours: number | 'unknown';
+  /**
+   * N4 (pie-007): `maxAgeHours` is the app's own assumption about an undocumented vendor cache (SearchApi's date
+   * grid), not a bound the vendor states; the labels then say "assumed". Set at read time from the provider's
+   * capability; absent means the bound is stated.
+   */
+  maxAgeAssumed?: true;
   fx: FxInfo;
   pointOfSale: PointOfSale;
   cabin: Cabin;
@@ -54,6 +60,7 @@ export const provenanceSchema: z.ZodType<Provenance> = z.strictObject({
   fetchedAt: isoDateTimeSchema,
   providerObservedAt: isoDateTimeSchema.exactOptional(),
   maxAgeHours: z.union([z.number().int().min(0), z.literal('unknown')]),
+  maxAgeAssumed: z.literal(true).exactOptional(),
   fx: fxInfoSchema,
   pointOfSale: pointOfSaleSchema,
   cabin: cabinSchema,

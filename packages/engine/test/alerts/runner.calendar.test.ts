@@ -1,4 +1,4 @@
-import { cellKeyString } from '@gmt/core';
+import { cellKeyString, type FlightProvider } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { runAlerts } from '../../src/alerts/runner.js';
 import {
@@ -71,6 +71,36 @@ describe('calendar basis (spec §6.8)', () => {
       reason: { kind: 'new', gapHours: 169 },
       previous: { pricePence: 50000 },
     });
+  });
+
+  it('a calendar price whose bound its provider assumes reads "assumed" in the email and payload (N4, pie-007)', async () => {
+    const { f, def, ex } = scenario();
+    // why: SearchApi's date grid states no cache age; its capability marks the app's 24 h bound as assumed
+    const assumed: FlightProvider = {
+      id: 'searchapi',
+      displayName: 'SearchApi (assumed-bound stand-in)',
+      suppliedFields: ['price'],
+      cabins: ['economy'],
+      discovery: {
+        info: {
+          sourceKind: 'scraped-aggregate',
+          provenanceNote: 'stand-in',
+          maxAgeHours: 168,
+          maxAgeAssumed: true,
+        },
+        plan: () => [],
+        fetchTile: () => Promise.reject(new Error('no HTTP in this test')),
+      },
+      healthcheck: async () => ({ ok: true, detail: 'not probed' }),
+    };
+    f.deps.providers.push(assumed);
+    const rule = seedRule(f, def, { type: 'absolute', thresholdPence: 45000, basis: 'calendar' });
+    await runAlerts(f.deps, ex);
+    const body = f.notifier.digests()[0]?.body ?? '';
+    expect(body).toContain('provider age assumed ≤7d (undocumented) before that');
+    expect(body).not.toContain('provider age unknown (≤7d');
+    const events = f.repos.alerts.events({ ruleId: rule.id, limit: 100 });
+    expect(events.every((e) => payloadOf(e).provenance.maxAgeAssumed === true)).toBe(true);
   });
 
   it('absolute rules still apply to an absent-then-present cell', async () => {

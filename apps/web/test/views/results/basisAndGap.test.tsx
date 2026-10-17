@@ -3,6 +3,7 @@ import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { qk } from '../../../src/api/queries.js';
+import { COPY } from '../../../src/copy.js';
 import { ResultsView } from '../../../src/views/Results/ResultsView.js';
 import {
   API,
@@ -225,5 +226,30 @@ describe('calendar-gap banner (spec §11, §6.9)', () => {
     expect(
       client.getQueryCache().find({ queryKey: qk.calendarGap(calendarOnly.id) })?.state.dataUpdateCount ?? 0,
     ).toBe(0);
+  });
+});
+
+describe('thin coverage names the next move (ruling 16, pft-006)', () => {
+  const withCoverage = (noData: number, priced: number) =>
+    resultsResponse({
+      coverage: {
+        buckets: { priced, empty: 0, no_data: noData, error: 0, skipped: 0, not_run: 0, reused: 0 },
+        total: priced + noData,
+        selected: 0,
+        itinerarySearched: 0,
+        onDemand: 0,
+        reused: 0,
+      },
+    });
+  it('more than half the cells with no cached data shows one line with the three moves', async () => {
+    server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(withCoverage(99, 9))));
+    renderWithProviders(<ResultsView definition={definition()} />);
+    expect(await screen.findByText(COPY.thinCoverage)).toBeInTheDocument();
+  });
+  it('half or fewer does not', async () => {
+    server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(withCoverage(54, 54))));
+    renderWithProviders(<ResultsView definition={definition()} />);
+    await screen.findByText(/discovery: 54 priced/);
+    expect(screen.queryByText(COPY.thinCoverage)).toBeNull();
   });
 });

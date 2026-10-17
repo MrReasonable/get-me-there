@@ -50,7 +50,13 @@ describe('six-bucket day counts (spec §11 View B, §3)', () => {
         disc('searchapi', { priced: 12, empty: 3, error: 33 }),
       ],
     });
-    expect(coverageOf(s)).toEqual({ kind: 'fraction', searched: 15, total: 48, providerId: 'searchapi' });
+    expect(coverageOf(s)).toMatchObject({
+      kind: 'fraction',
+      searched: 15,
+      total: 48,
+      providerId: 'searchapi',
+    });
+    expect(coverageOf(s)).toMatchObject({ buckets: { priced: 12, empty: 3, error: 33 } }); // the face's breakdown (ruling 4)
     expect(coverageOf(slice({ discovery: [] }))).toEqual({ kind: 'none' });
   });
 
@@ -125,7 +131,7 @@ describe('six-bucket day counts (spec §11 View B, §3)', () => {
     expect(jfk.destination).toBe('JFK');
     expect(jfk.cheapestCalendar?.cell).toEqual(jfkCell);
     expect(jfk.unconfirmedCells).toBe(1);
-    expect(coverageOf(jfk)).toEqual({
+    expect(coverageOf(jfk)).toMatchObject({
       kind: 'fraction',
       searched: 4,
       total: 24,

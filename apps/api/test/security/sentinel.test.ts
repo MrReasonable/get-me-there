@@ -32,7 +32,11 @@ function scan(cwd: string, env: Record<string, string> = SENTINEL_ENV) {
   return spawnSync(process.execPath, [SCAN], { cwd, env, encoding: 'utf8', timeout: 30_000 });
 }
 
-describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
+// why: ruling 11: the cases spawn the secret scan under node (and two record a tree first); the recording cases set
+// SPAWNING_TEST_TIMEOUT_MS, the rest share it here so a loaded runner is a slow pass.
+describe('no key reaches any recorded file (spec §5.3 sentinel test)', {
+  timeout: SPAWNING_TEST_TIMEOUT_MS,
+}, () => {
   it(
     'a tree recorded with sentinel keys, raw bodies included, is clean; planting a sentinel makes the scan fail without printing it',
     async () => {

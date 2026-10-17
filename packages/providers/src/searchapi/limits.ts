@@ -3,20 +3,28 @@
  * travelpayouts/limits.ts; registered by apps/api httpLimitsFor (Task 5.10).
  */
 import { type Config, ProviderError, type ProviderLimits } from '@gmt/core';
+import { vendorMessage } from '../http/classify.js';
 import type { ProviderHttpLimits, ResponseFacts } from '../http/types.js';
 import { isRecord } from '../util.js';
 import { SEARCHAPI_HOST } from './params.js';
 
+/** SearchApi's hourly ceiling as a share of the plan's credits (pricing page, read 2026-10-17). */
+export const SEARCHAPI_HOURLY_SHARE = 0.2;
 /** The 401 body the spike recorded (spec §2 fact 5). */
 const INVALID_KEY = 'Invalid API key.';
+/** Ruling 17 (pie-005): a 403 or 429 whose body names credits or quota is the plan running out, not a rate limit. */
+const QUOTA_WORDS = /credit|quota/i;
 
 /**
  * http-kit's `classifyError` hook for SearchApi (spec §5.2, plan decision 15). It recognises SearchApi bodies
  * only and returns `undefined` for everything else, so http-kit's default table applies (401/403 auth, 402
  * quota, 400 parse with the vendor message, 404 upstream, 429 rate-limit, 5xx upstream); http-kit then applies
  * Retry-After, the hourly fallback for a header-less 429, limiter-timeout and scrubbing. Recognised today: the
- * recorded 401 body, so its vendor text reaches `last_error`. No quota body has been recorded (spec §2 fact 5),
- * so a 429 is never `quota`. `reason` stays unset: the outcome reason is the kind (spec §3).
+ * recorded 401 body, so its vendor text reaches `last_error`; and, by ruling 17 of decision 67 (pie-005), quota
+ * exhaustion: any 402, or a 403 or 429 whose body names credits or quota, is `quota`, so http-kit stops at once and
+ * never retries (the hourly resume against a dead plan never happens) and the HTTP code is in the message. No quota
+ * body has been recorded (spec §2 fact 5), so the rule is the vendor-neutral wording. `reason` stays unset: the outcome
+ * reason is the kind (spec §3).
  */
 export function classifySearchApiError(f: ResponseFacts): ProviderError | undefined {
   const error = isRecord(f.body) ? f.body.error : undefined;
@@ -29,6 +37,18 @@ export function classifySearchApiError(f: ResponseFacts): ProviderError | undefi
       message: `searchapi ${f.endpointPath}: HTTP 401 (${INVALID_KEY})`,
     });
   }
+  const vendor = vendorMessage(f.body);
+  if (
+    f.status === 402 ||
+    ((f.status === 403 || f.status === 429) && vendor !== undefined && QUOTA_WORDS.test(vendor))
+  )
+    return new ProviderError({
+      kind: 'quota',
+      retryable: false,
+      httpStatus: f.status,
+      providerId: 'searchapi',
+      message: `searchapi ${f.endpointPath}: HTTP ${f.status} (quota exhausted${vendor === undefined ? '' : `: ${vendor}`})`,
+    });
   return undefined;
 }
 
@@ -45,7 +65,10 @@ export function searchApiHttpLimits(
   return {
     hosts: [SEARCHAPI_HOST],
     ratePerMinute: limits.ratePerMinute,
-    ratePerHour: limits.ratePerHour,
+    // why: pie-006: the vendor's one published rule is "up to 20% of your plan's credits each hour" (pricing page, read
+    // 2026-10-17); an override above it would draw 429s the adapter cannot tell from quota, so it is clamped, as
+    // Travelpayouts' per-minute rate is.
+    ratePerHour: Math.min(limits.ratePerHour, Math.floor(SEARCHAPI_HOURLY_SHARE * limits.monthlyCallCap)),
     concurrency: limits.concurrency,
     billable: 'http-200',
     costPerCallMicroGbp: limits.costPerCallMicroGbp,

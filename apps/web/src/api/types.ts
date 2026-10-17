@@ -6,11 +6,9 @@ export type { BudgetFit, CoverageCheckResponse, DefinitionResponse, ResultRow } 
 
 /** Response types: the z.output of each contract schema (plan "API contract"). */
 export type ProvidersResponse = z.output<typeof apiContract.providersResponseSchema>;
-export type ProviderEntry = ProvidersResponse['providers'][number];
 export type Estimate = z.output<typeof apiContract.estimateSchema>;
 export type EstimateResponse = z.output<typeof apiContract.estimateResponseSchema>;
 export type ExecutionResponse = z.output<typeof apiContract.executionResponseSchema>;
-export type StartExecutionResponse = z.output<typeof apiContract.startExecutionResponseSchema>;
 export type ResultsResponse = z.output<typeof apiContract.resultsResponseSchema>;
 export type ExecutionSummary = z.output<typeof apiContract.executionSummarySchema>;
 export type CoverageResponse = z.output<typeof apiContract.coverageResponseSchema>;
