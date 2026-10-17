@@ -854,6 +854,7 @@ export const COPY = {
     classUnchecked: 'constraints not checked',
     noPrevious: 'none',
     noReason: 'no reason recorded',
-    notRecorded: 'not recorded',
+    payloadInvalid: 'invalid record: it does not match the alert format',
+    reasonWithheld: 'reason withheld: its record is invalid',
   },
 } as const;

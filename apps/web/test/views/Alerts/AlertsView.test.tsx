@@ -179,14 +179,16 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     expect(prices.map((p) => p.textContent?.match(/£\d+/)?.[0])).toEqual(['£412', '£468']);
   });
 
-  it('a payload of another shape shows "not recorded" and no price', async () => {
+  it('a payload of another shape shows an invalid-record error, no price, and withholds the reason that quotes one', async () => {
     const [sent] = events;
     if (sent === undefined) throw new Error('events');
     const oldShape = { ...sent, payload: { label: 'old shape' } };
     withData(rules, [oldShape]);
     renderWithProviders(<AlertsView definitionId="def-1" />);
     const table = await screen.findByRole('table', { name: C.eventsTable });
-    expect(within(table).getAllByText(C.notRecorded)).toHaveLength(4);
+    expect(within(table).getAllByText(C.payloadInvalid)).toHaveLength(4);
+    expect(within(table).getByText(C.reasonWithheld)).toBeInTheDocument();
+    expect(within(table).queryByText(sent.reason)).toBeNull();
     expect(within(table).queryByTestId('price-cell')).toBeNull();
   });
 
