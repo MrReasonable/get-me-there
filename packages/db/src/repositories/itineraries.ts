@@ -4,7 +4,6 @@ import type {
   CellOutcome,
   Clock,
   FxInfo,
-  HistoryPoint,
   IsoDateTime,
   NormalisedItinerary,
   Observation,
@@ -45,7 +44,7 @@ import {
   assertProviderKind,
   RowRejected,
 } from '../internal/validate.js';
-import type { ObservationRow, RepoOptions } from '../types.js';
+import type { ObservationRow, OfferHistoryPoint, RepoOptions } from '../types.js';
 
 interface ObservationDbRow {
   id: number;
@@ -443,13 +442,16 @@ export class ItinerariesRepo {
     return r === undefined ? null : toObservation(r);
   }
 
-  /** Every observation of every offer of one itinerary, one series per offer, oldest first (History view). */
+  /**
+   * Every observation of every offer of one itinerary, one series per offer, oldest first (History view). Each point
+   * carries the observation's supplied fields, so a reader can tell a price the final step confirmed (plan decision 42).
+   */
   offerHistory(
     hash: string,
-  ): Array<{ providerId: ProviderId; seller: string; cabin: Cabin; points: HistoryPoint[] }> {
+  ): Array<{ providerId: ProviderId; seller: string; cabin: Cabin; points: OfferHistoryPoint[] }> {
     const out = new Map<
       number,
-      { providerId: ProviderId; seller: string; cabin: Cabin; points: HistoryPoint[] }
+      { providerId: ProviderId; seller: string; cabin: Cabin; points: OfferHistoryPoint[] }
     >();
     for (const r of this.db.raw
       .prepare<[string], ObservationDbRow>(
@@ -463,7 +465,13 @@ export class ItinerariesRepo {
         cabin: o.provenance.cabin,
         points: [],
       };
-      series.points.push({ at: o.provenance.fetchedAt, pricePence: o.pricePence, provenance: o.provenance });
+      series.points.push({
+        at: o.provenance.fetchedAt,
+        pricePence: o.pricePence,
+        provenance: o.provenance,
+        suppliedFields: o.suppliedFields,
+        executionId: o.executionId,
+      });
       out.set(r.offer_id, series);
     }
     return [...out.values()];

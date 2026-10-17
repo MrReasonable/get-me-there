@@ -1,8 +1,9 @@
+import { hoursSince } from '../labels/age.js';
 import { formatPence } from '../text/money.js';
 import type { AlertCandidate, AlertRule, Firing, PriorFiring } from '../types/alerts.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { Cabin, ProviderId } from '../types/provenance.js';
-import { dedupKey, hoursSince, identityKey, isSuppressed, priceOf, type Suppression, span } from './dedup.js';
+import { dedupKey, identityKey, isSuppressed, priceOf, type Suppression, span } from './dedup.js';
 
 /**
  * Spec §7: `discoveryRefreshHours` defaults to 168 per provider when the definition omits it. The one

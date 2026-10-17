@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { countCells } from '../../src/space/generate.js';
-import { resolveWindow } from '../../src/space/window.js';
+import { resolveSpace, resolveWindow } from '../../src/space/window.js';
 import type { WindowSpec } from '../../src/types/definition.js';
 import { asIsoDate } from '../../src/types/ids.js';
 import { iatas } from '../helpers/space.js';
@@ -85,5 +85,40 @@ describe('resolveWindow (spec §6.1)', () => {
     [{ kind: 'relative', startOffsetDays: 7, lengthDays: 2.5 }],
   ] satisfies Array<[WindowSpec]>)('throws RangeError on %j (validation rejects these first)', (w) => {
     expect(() => resolveWindow(w, d('2026-10-14'))).toThrow(RangeError);
+  });
+});
+
+describe('resolveSpace (spec §6.1: the one resolution rule the api, engine and validation share)', () => {
+  const def = {
+    origins: iatas('LHR', 'LGW'),
+    destinations: iatas('JFK'),
+    minNights: 10,
+    maxNights: 21,
+  };
+  it('resolves the window against today and carries the airports and nights', () => {
+    const r = resolveSpace(
+      { ...def, window: { kind: 'relative', startOffsetDays: 7, lengthDays: 10 } },
+      asIsoDate('2026-10-14'),
+    );
+    expect(r).toEqual({
+      space: {
+        origins: ['LHR', 'LGW'],
+        destinations: ['JFK'],
+        departureFrom: '2026-10-21',
+        departureTo: '2026-10-30',
+        minNights: 10,
+        maxNights: 21,
+      },
+      clamped: false,
+    });
+  });
+  it('reports a clamped absolute window, and copies the airport lists', () => {
+    const input = {
+      ...def,
+      window: { kind: 'absolute' as const, from: asIsoDate('2026-10-01'), to: asIsoDate('2026-11-01') },
+    };
+    const r = resolveSpace(input, asIsoDate('2026-10-14'));
+    expect([r.space.departureFrom, r.clamped]).toEqual(['2026-10-15', true]);
+    expect(r.space.origins).not.toBe(input.origins);
   });
 });

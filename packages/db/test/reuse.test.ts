@@ -220,6 +220,8 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
         .all(c),
     ).toEqual([{ f: T0, r: a }]);
     expect(prices.fetchedBy(c)).toEqual([]); // a reused copy is not "fetched by" c
+    // …but c holds it: its own view of its prices includes the copy, with the source's fetch time (decision 58)
+    expect(prices.heldBy(c).map((r) => [r.fetchedAt, r.reusedFromExecutionId])).toEqual([[T0, a]]);
     new ExecutionsRepo(db, clock).setStatus(c, 'completed');
     clock.advance(60_000);
     const d = newExecution(db, clock, { definition }).execution.id;

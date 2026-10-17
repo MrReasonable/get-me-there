@@ -7,6 +7,14 @@ export type BudgetScope =
   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
   | { kind: 'global-month' };
 
+/**
+ * The wire label of a scope (`execution-calls`, `provider-month:searchapi`, `global-month`): the one formatter the
+ * budget-fit scopes, the usage rows and the schedule refusal share (plan decision 54; WP7's budgetFit formats the same).
+ */
+export function budgetScopeLabel(s: BudgetScope): string {
+  return 'providerId' in s ? `${s.kind}:${s.providerId}` : s.kind;
+}
+
 /** `cap` is null for a window the plan does not use and for a scope with no cap configured. */
 export interface Usage {
   calls: number;

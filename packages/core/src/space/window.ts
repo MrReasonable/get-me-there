@@ -1,5 +1,5 @@
 import { addDays, daysBetween } from '../dates/epochDay.js';
-import type { WindowSpec } from '../types/definition.js';
+import type { ResolvedSpace, SearchDefinition, WindowSpec } from '../types/definition.js';
 import type { IsoDate } from '../types/ids.js';
 
 /**
@@ -31,4 +31,27 @@ export function resolveWindow(
   }
   const clamped = daysBetween(w.from, tomorrow) > 0; // from is before tomorrow
   return { departureFrom: clamped ? tomorrow : w.from, departureTo: w.to, clamped };
+}
+
+/**
+ * Spec §6.1: a definition's resolved space today, the one construction the api's current space, the engine's snapshot
+ * and `validateSearchSpace` share (review arch Minor), so they cannot drift. `clamped` is `resolveWindow`'s. The
+ * airport lists are copied, so the space never aliases the definition.
+ */
+export function resolveSpace(
+  def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights'>,
+  todayLondon: IsoDate,
+): { space: ResolvedSpace; clamped: boolean } {
+  const w = resolveWindow(def.window, todayLondon);
+  return {
+    space: {
+      origins: [...def.origins],
+      destinations: [...def.destinations],
+      departureFrom: w.departureFrom,
+      departureTo: w.departureTo,
+      minNights: def.minNights,
+      maxNights: def.maxNights,
+    },
+    clamped: w.clamped,
+  };
 }

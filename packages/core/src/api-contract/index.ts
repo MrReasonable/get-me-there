@@ -5,11 +5,13 @@ import {
   alertEventsQuerySchema,
   alertRuleInputSchema,
   alertRuleSchema,
+  alertRulesQuerySchema,
   alertRuleUpdateRequestSchema,
 } from './alerts.js';
 import {
   coverageCheckRequestSchema,
   coverageCheckResponseSchema,
+  definitionCreateOptionalSchema,
   definitionCreateRequestSchema,
   definitionResponseSchema,
   definitionUpdateRequestSchema,
@@ -23,6 +25,7 @@ import {
 } from './executions.js';
 import {
   calendarGapResponseSchema,
+  calendarQuerySchema,
   calendarResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
@@ -79,9 +82,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/airports', airportsResponseSchema, { query: airportsQuerySchema }),
   route('GET', '/providers', providersResponseSchema),
   route('GET', '/definitions', definitionResponseSchema.array()),
-  route('POST', '/definitions', definitionResponseSchema, {
-    request: definitionCreateRequestSchema.optional(),
-  }),
+  route('POST', '/definitions', definitionResponseSchema, { request: definitionCreateOptionalSchema }),
   route('POST', '/definitions/estimate', estimateResponseSchema, { request: definitionCreateRequestSchema }),
   route('POST', '/definitions/coverage-check', coverageCheckResponseSchema, {
     request: coverageCheckRequestSchema,
@@ -98,7 +99,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('POST', '/executions/:id/resume', executionResponseSchema),
   route('POST', '/cells/verify', startExecutionResponseSchema, { request: verifyCellRequestSchema }),
   route('GET', '/definitions/:id/results', resultsResponseSchema, { query: resultsQuerySchema }),
-  route('GET', '/definitions/:id/calendar', calendarResponseSchema),
+  route('GET', '/definitions/:id/calendar', calendarResponseSchema, { query: calendarQuerySchema }),
   route('GET', '/definitions/:id/duration-analysis', durationAnalysisResponseSchema),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
   route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),
@@ -113,9 +114,7 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/routes/:origin/:destination/history', routeHistoryResponseSchema, {
     query: routeHistoryQuerySchema,
   }),
-  route('GET', '/alerts', alertRuleSchema.array(), {
-    query: alertEventsQuerySchema.pick({ definitionId: true }),
-  }),
+  route('GET', '/alerts', alertRuleSchema.array(), { query: alertRulesQuerySchema }),
   route('POST', '/alerts', alertRuleSchema, { request: alertRuleInputSchema }),
   route('PUT', '/alerts/:id', alertRuleSchema, { request: alertRuleUpdateRequestSchema }),
   route('DELETE', '/alerts/:id', alertRuleSchema),

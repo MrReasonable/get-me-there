@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { effectiveAge, formatAgeCompact } from '../../src/labels/age.js';
 import { dedupByItinerary } from '../../src/results/dedup.js';
-import { rankRows, sortRows } from '../../src/results/rank.js';
+import { priceUnconfirmed, rankRows, sortRows } from '../../src/results/rank.js';
 import type { SortKey } from '../../src/results/types.js';
 import { calendarRow, NOW, row } from '../helpers/rows.js';
 
@@ -135,9 +135,62 @@ describe('dedupByItinerary (spec §6.5; ruling 3)', () => {
         ?.otherOffers[0]?.seller,
     ).toBe('');
   });
+  it('within a class a confirmed offer heads its itinerary over a cheaper unconfirmed one; class still comes first (decision 45, review prov I2)', () => {
+    const unconfirmed = { priceConfirmed: 'unverified' as const, cabin: 'pass' as const };
+    const same = dedupByItinerary(
+      [
+        row({ seller: 'U', pricePence: 38_000, verdictClass: 'partially-verified', verdicts: unconfirmed }),
+        row({
+          seller: 'C',
+          pricePence: 40_000,
+          verdictClass: 'partially-verified',
+          unverified: ['checkedBagRequired'],
+        }),
+      ],
+      NOW,
+    );
+    expect(same[0]).toMatchObject({ seller: 'C', pricePence: 40_000 });
+    expect(same[0]?.otherOffers.map((o) => o.seller)).toEqual(['U']);
+    const failedConfirmed = dedupByItinerary(
+      [
+        row({ seller: 'U', pricePence: 38_000, verdictClass: 'partially-verified', verdicts: unconfirmed }),
+        row({ seller: 'F', pricePence: 40_000, verdictClass: 'failed' }),
+      ],
+      NOW,
+    );
+    // why: class first: a confirmed failed offer never outranks an unconfirmed partially-verified one.
+    expect(failedConfirmed[0]).toMatchObject({ seller: 'U' });
+    const allUnconfirmed = dedupByItinerary(
+      [
+        row({ seller: 'U2', pricePence: 39_000, verdictClass: 'partially-verified', verdicts: unconfirmed }),
+        row({ seller: 'U1', pricePence: 38_000, verdictClass: 'partially-verified', verdicts: unconfirmed }),
+      ],
+      NOW,
+    );
+    expect(allUnconfirmed[0]).toMatchObject({ seller: 'U1' });
+  });
 });
 
 describe('rankRows (spec §6.5, §8.1; ruling 3)', () => {
+  it('within a class, an offer whose price was not confirmed ranks after every confirmed one (decision 45)', () => {
+    const ranked = rankRows(
+      [
+        row({
+          itineraryHash: 'u',
+          seller: 'U',
+          pricePence: 38_000,
+          verdictClass: 'partially-verified',
+          verdicts: { priceConfirmed: 'unverified' },
+        }),
+        row({ itineraryHash: 'c', seller: 'C', pricePence: 40_000, verdictClass: 'partially-verified' }),
+        row({ itineraryHash: 'f', seller: 'F', pricePence: 30_000, verdictClass: 'failed' }),
+      ],
+      NOW,
+    );
+    expect(sellers(ranked)).toEqual(['C', 'U', 'F']);
+    expect(ranked.map(priceUnconfirmed)).toEqual([false, true, false]);
+  });
+
   it('orders verified, partially-verified, failed, then by price', () => {
     const ranked = rankRows(
       [

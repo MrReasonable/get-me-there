@@ -1,9 +1,10 @@
+import { hoursSince } from '../labels/age.js';
 import type { AlertDigest, DigestItem } from '../ports/notifier.js';
 import { resultRowKey } from '../results/rowKey.js';
 import { searchLinkFor } from '../results/searchLink.js';
 import type { AlertRule, Firing } from '../types/alerts.js';
 import type { Cell } from '../types/definition.js';
-import { hoursSince, priceOf } from './dedup.js';
+import { priceOf } from './dedup.js';
 
 /** Spec §6.8: a digest lists the cheapest 10 firings (and 10 new cells) and counts the rest. */
 const DIGEST_TOP = 10;

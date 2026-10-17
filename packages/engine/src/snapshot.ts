@@ -7,8 +7,7 @@ import {
   generateCells,
   type IsoDate,
   type ProviderId,
-  type ResolvedSpace,
-  resolveWindow,
+  resolveSpace,
   type SearchDefinition,
   type Stage,
 } from '@gmt/core';
@@ -56,17 +55,9 @@ export function buildSnapshot(
   today: IsoDate = ctx.clock.todayLondon(),
 ): BuiltSnapshot {
   const notes: string[] = [];
-  const w = resolveWindow(def.window, today);
-  if (w.clamped) notes.push('window clamped to start tomorrow');
-  const resolved: ResolvedSpace = {
-    origins: def.origins,
-    destinations: def.destinations,
-    departureFrom: w.departureFrom,
-    departureTo: w.departureTo,
-    minNights: def.minNights,
-    maxNights: def.maxNights,
-  };
-  const cells = w.departureFrom > w.departureTo ? [] : generateCells(resolved);
+  const { space: resolved, clamped } = resolveSpace(def, today);
+  if (clamped) notes.push('window clamped to start tomorrow');
+  const cells = resolved.departureFrom > resolved.departureTo ? [] : generateCells(resolved);
   const inSpace = new Set(cells.map(cellKeyString));
   const kept = def.verification.alwaysInclude.filter((c) => inSpace.has(cellKeyString(c)));
   const dropped = def.verification.alwaysInclude.length - kept.length;
@@ -102,7 +93,7 @@ export function buildSnapshot(
     },
     resolved,
     resolvedAt: ctx.clock.now(),
-    windowClamped: w.clamped,
+    windowClamped: clamped,
     droppedAlwaysInclude: def.verification.alwaysInclude.filter((c) => !inSpace.has(cellKeyString(c))),
   };
   return { snapshot, cells, notes, excluded };

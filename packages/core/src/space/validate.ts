@@ -7,7 +7,7 @@ import {
 } from '../types/definition.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import { countCells } from './generate.js';
-import { resolveWindow } from './window.js';
+import { resolveSpace } from './window.js';
 
 /**
  * Airports-table lookups `validateSearchSpace` needs. `AirportsRepo` (WP3) satisfies it; tests
@@ -41,7 +41,7 @@ const IATA_RE = /^[A-Z]{3}$/;
  *
  * why: the engine must not call this at execution start. There a relative window may have slid
  * past an `alwaysInclude` cell, which spec §6.1 says is "dropped with a note, not an error", and a
- * zero-cell window is recorded as `skipped_window`; the engine uses `resolveWindow`, `countCells`
+ * zero-cell window is recorded as `skipped_window`; the engine uses `resolveSpace`, `countCells`
  * and `selectCandidates`' omission of out-of-space members instead.
  *
  * why: nothing is upper-cased or otherwise repaired here. `iataSchema` upper-cases operator input
@@ -116,15 +116,7 @@ export function validateSearchSpace(
   }
   if (errors.length > 0) return { ok: false, errors };
 
-  const win = resolveWindow(w, todayLondon);
-  const resolved: ResolvedSpace = {
-    origins: [...def.origins],
-    destinations: [...def.destinations],
-    departureFrom: win.departureFrom,
-    departureTo: win.departureTo,
-    minNights: def.minNights,
-    maxNights: def.maxNights,
-  };
+  const { space: resolved, clamped } = resolveSpace(def, todayLondon);
   const cells = countCells(resolved);
   if (cells === 0) {
     return {
@@ -132,13 +124,13 @@ export function validateSearchSpace(
       errors: [
         {
           field: 'window',
-          message: `the window resolves to no departure days: it ends before ${win.departureFrom}`,
+          message: `the window resolves to no departure days: it ends before ${resolved.departureFrom}`,
         },
       ],
     };
   }
   if (cells > maxCells) {
-    const days = daysBetween(win.departureFrom, win.departureTo) + 1;
+    const days = daysBetween(resolved.departureFrom, resolved.departureTo) + 1;
     const nights = def.maxNights - def.minNights + 1;
     const factors = [
       plural(def.origins.length, 'origin'),
@@ -167,10 +159,10 @@ export function validateSearchSpace(
   });
   if (errors.length > 0) return { ok: false, errors };
 
-  const notes = win.clamped
-    ? [`window start moved to ${win.departureFrom} (tomorrow); searches start tomorrow at the earliest`]
+  const notes = clamped
+    ? [`window start moved to ${resolved.departureFrom} (tomorrow); searches start tomorrow at the earliest`]
     : [];
-  return { ok: true, resolved, clamped: win.clamped, notes };
+  return { ok: true, resolved, clamped, notes };
 }
 
 /** A non-negative integer (spec §6.1 nights, spec §6.7 policy counts). */

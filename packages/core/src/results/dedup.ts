@@ -14,7 +14,8 @@ function isClassed(r: ResultRow): r is ClassedRow {
 type Entry = { kind: 'row'; row: ResultRow } | { kind: 'group'; rows: [ClassedRow, ...ClassedRow[]] };
 
 /**
- * Spec §6.5 dedup: one row per itinerary hash. The primary offer is the first by `compareRows`
+ * Spec §6.5 dedup: one row per itinerary hash. The primary offer is the first by `compareRows` (class first; within a
+ * class a confirmed price before an unconfirmed one, decision 45)
  * (class, seen-in-latest, price, age, seller), so a verified offer heads its itinerary even when a
  * partially-verified or failed one is cheaper, and a seen offer beats a cheaper one the latest
  * search no longer returned. Every other offer goes to `otherOffers`, cheapest first, each with its
@@ -42,6 +43,8 @@ export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow
   }
   return out.map((entry) => {
     if (entry.kind === 'row') return entry.row;
+    // why: decision 45 (review prov I2): `compareRows` orders by class first and, within a class, a confirmed price
+    // before an unconfirmed one, so the primary is the best class and the confirmed offer within it.
     const primary = entry.rows.reduce((best, r) => (compareRows(r, best, now) < 0 ? r : best));
     const otherOffers = entry.rows
       .filter((r) => r !== primary)

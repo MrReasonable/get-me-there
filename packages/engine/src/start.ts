@@ -81,6 +81,16 @@ export async function recordSkipped(
 }
 
 /**
+ * What `confirmationNeeded` reads: the soft-confirm threshold, the budget guard's caps and each provider's cap scope.
+ * Narrow so the api can call the same rule over its own ports (plan decision 58).
+ */
+export interface ConfirmationContext {
+  readonly config: Pick<EngineContext['config'], 'spend'>;
+  readonly budget: Pick<EngineContext['budget'], 'usage'>;
+  limitsOf(id: ProviderId): Pick<ReturnType<EngineContext['limitsOf']>, 'capKind'>;
+}
+
+/**
  * Spec §8.1 SOFT_CONFIRM: the runnable (not blocked) part of the estimate needs confirming when its cost is above the
  * pence threshold, or when a provider's runnable calls exceed SOFT_CONFIRM_CALL_SHARE of its call cap — the monthly
  * cap, or the lifetime cap of a lifetime plan such as the SearchApi trial (ruling 6, cost-r2-004) — so a plan whose
@@ -90,7 +100,7 @@ export async function recordSkipped(
  * `totalCalls` and `estimatePence` are what a client confirms.
  */
 export function confirmationNeeded(
-  ctx: EngineContext,
+  ctx: ConfirmationContext,
   estimate: Estimate,
   blocked: ReadonlySet<LineKey>,
   confirmed: Confirmation,

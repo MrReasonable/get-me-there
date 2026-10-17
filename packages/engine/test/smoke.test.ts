@@ -17,4 +17,11 @@ describe('@gmt/engine package', () => {
     // why: WP8 imports the engine's value rather than keeping a copy that could drift
     expect(pkg.SOFT_CONFIRM_CALL_SHARE).toBe(0.2);
   });
+  it('exports the confirmation rule and the cap-scope mapping the api calls (decision 58)', () => {
+    // why: WP8 fills needsConfirmation with the engine's own rule instead of a copy that could drift
+    expect(pkg.capKindOf('month')).toBe('provider-month');
+    expect(pkg.capKindOf('lifetime')).toBe('provider-lifetime');
+    expect(pkg.lineKey('verification', 'searchapi')).toBe('verification:searchapi');
+    expectTypeOf(pkg.confirmationNeeded).toBeFunction();
+  });
 });

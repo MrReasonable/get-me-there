@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import * as barrel from '../../src/index.js';
 import {
   compareAges,
   effectiveAge,
   formatAgeCompact,
   formatAgeFull,
   formatDuration,
+  hoursSince,
+  isStale,
   worstCaseAgeHours,
 } from '../../src/labels/age.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
@@ -77,7 +80,7 @@ describe('formatting', () => {
     expect(formatAgeFull(o)).toBe('fetched 2h ago · observed 3h ago');
     expect(formatAgeCompact(o)).toBe('2h ago · obs 3h');
     const u = { kind: 'unknown', fetchedHours: 2 } as const;
-    expect(formatAgeFull(u)).toBe('fetched 2h ago · provider age unknown');
+    expect(formatAgeFull(u)).toBe("fetched 2h ago · vendor's cache age unknown");
     expect(formatAgeCompact(u)).toBe('2h ago · age unknown');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 })).toBe('just now · ≤24h');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 1, maxAgeHours: 24 })).toBe('1h ago · ≤24h');
@@ -98,7 +101,7 @@ describe('ordering (spec §8.1: unknown loses to any known age)', () => {
   it('worstCaseAgeHours', () => {
     expect(worstCaseAgeHours({ kind: 'observed', fetchedHours: 2, observedHours: 3 })).toBe(3);
     expect(worstCaseAgeHours({ kind: 'bounded', fetchedHours: 2, maxAgeHours: 48 })).toBe(50);
-    expect(worstCaseAgeHours({ kind: 'unknown', fetchedHours: 2 })).toBe('unknown');
+    expect(worstCaseAgeHours({ kind: 'unknown', fetchedHours: 2 })).toBe(2); // spec rev 23: the fetch age alone
   });
   it('compareAges', () => {
     const known = { kind: 'bounded', fetchedHours: 100, maxAgeHours: 48 } as const;
@@ -106,7 +109,65 @@ describe('ordering (spec §8.1: unknown loses to any known age)', () => {
     expect(compareAges(known, unknown)).toBeLessThan(0);
     expect(compareAges(unknown, known)).toBeGreaterThan(0);
     expect(compareAges(unknown, unknown)).toBe(0);
+    // why: an unknown vendor age loses even with a smaller fetch age than the known one
+    expect(
+      compareAges(
+        { kind: 'unknown', fetchedHours: 0 },
+        { kind: 'bounded', fetchedHours: 5, maxAgeHours: 48 },
+      ),
+    ).toBeGreaterThan(0);
     expect(compareAges({ kind: 'observed', fetchedHours: 1, observedHours: 1 }, known)).toBeLessThan(0);
     expect(compareAges(known, known)).toBe(0);
+  });
+});
+
+describe('isStale (spec §3, plan decisions 44, 54, 55: the one staleness rule)', () => {
+  const at = (hoursAgo: number) =>
+    asIsoDateTime(new Date(Date.parse(now) - hoursAgo * 3_600_000).toISOString());
+  it('a known bound adds to the fetch age; stale only strictly past the threshold', () => {
+    expect(isStale({ fetchedAt: at(150), maxAgeHours: 42 }, now, 192)).toBe(false); // 192, not past
+    expect(isStale({ fetchedAt: at(151), maxAgeHours: 42 }, now, 192)).toBe(true);
+  });
+  it('an observed age wins over the bound, and is never younger than the fetch age (decision 58)', () => {
+    expect(isStale({ fetchedAt: at(1), providerObservedAt: at(200), maxAgeHours: 0 }, now, 192)).toBe(true);
+    expect(isStale({ fetchedAt: at(150), providerObservedAt: at(180), maxAgeHours: 168 }, now, 192)).toBe(
+      false,
+    );
+    // an observed time after the fetch is a vendor error: the 300 h fetch age stands
+    expect(isStale({ fetchedAt: at(300), providerObservedAt: at(10), maxAgeHours: 168 }, now, 192)).toBe(
+      true,
+    );
+    expect(
+      effectiveAge({ fetchedAt: at(300), providerObservedAt: at(10), maxAgeHours: 0 }, now),
+    ).toMatchObject({
+      observedHours: 300,
+    });
+    expect(
+      effectiveAge({ fetchedAt: at(50), providerObservedAt: at(50), maxAgeHours: 0 }, now),
+    ).toMatchObject({
+      fetchedHours: 50,
+      observedHours: 50,
+    });
+  });
+  it('an unknown vendor age counts the fetch age alone: never stale on that account', () => {
+    expect(isStale({ fetchedAt: at(191), maxAgeHours: 'unknown' }, now, 192)).toBe(false);
+    expect(isStale({ fetchedAt: at(193), maxAgeHours: 'unknown' }, now, 192)).toBe(true);
+  });
+});
+
+describe('hoursSince (plan decision 59: the one whole-hour age helper the api and the alerts share)', () => {
+  const now = asIsoDateTime('2026-10-14T15:00:00.000Z');
+  it('counts whole hours, rounding down', () => {
+    expect(hoursSince(asIsoDateTime('2026-10-14T13:00:00.000Z'), now)).toBe(2);
+    expect(hoursSince(asIsoDateTime('2026-10-14T13:00:00.001Z'), now)).toBe(1);
+    expect(hoursSince(now, now)).toBe(0);
+  });
+
+  it('is never negative: an instant after now reads as 0', () => {
+    expect(hoursSince(asIsoDateTime('2026-10-14T18:00:00.000Z'), now)).toBe(0);
+  });
+
+  it('is exported from the core barrel', () => {
+    expect(barrel.hoursSince).toBe(hoursSince);
   });
 });

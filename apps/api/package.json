@@ -14,8 +14,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --coverage",
-    "dev": "tsx watch src/bootstrap/app.ts",
-    "tool": "node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts"
+    "dev": "node --conditions=@gmt/source --import tsx --watch src/bootstrap/start.ts",
+    "tool": "node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts",
+    "start": "node dist/bootstrap/start.js"
   },
   "dependencies": {
     "@gmt/core": "workspace:*",
@@ -23,7 +24,6 @@
     "@gmt/engine": "workspace:*",
     "@gmt/providers": "workspace:*",
     "@hono/node-server": "2.1.5",
-    "@hono/zod-validator": "0.9.1",
     "hono": "4.13.13",
     "pino": "10.4.0",
     "zod": "4.6.7"

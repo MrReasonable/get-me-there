@@ -11,6 +11,9 @@ export interface Db {
   transaction<T>(fn: SyncFn<T>): T;
   /** Same, with BEGIN IMMEDIATE: the write lock is taken before `fn` runs (BudgetGuard.reserve, AppLock). */
   immediateTransaction<T>(fn: SyncFn<T>): T;
+  /** `wal_checkpoint(TRUNCATE)` on a file db (spec §7 shutdown); nothing for ':memory:'. The pragma's one home. */
+  checkpoint(): void;
+  /** Checkpoints, then closes. */
   close(): void;
 }
 
@@ -28,13 +31,17 @@ export function openDatabase(path: string): Db {
       if (result instanceof Promise) throw new TypeError('transaction callbacks must be synchronous');
       return result;
     });
+  const checkpoint = () => {
+    if (path !== ':memory:') raw.pragma('wal_checkpoint(TRUNCATE)');
+  };
   return {
     raw,
     drizzle: orm,
     transaction: (fn) => guarded(fn)(),
     immediateTransaction: (fn) => guarded(fn).immediate(),
+    checkpoint,
     close: () => {
-      if (path !== ':memory:') raw.pragma('wal_checkpoint(TRUNCATE)');
+      checkpoint();
       raw.close();
     },
   };

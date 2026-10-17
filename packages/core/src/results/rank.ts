@@ -23,8 +23,17 @@ function identity(r: ResultRow): string {
 }
 
 /**
+ * True when the final step did not confirm the row's price (no `price` supplied field, so `evaluateConstraints` set
+ * `priceConfirmed: 'unverified'`; decisions 27, 37, 45). Such an offer ranks after every confirmed offer of its class.
+ */
+export function priceUnconfirmed(r: Pick<ResultRow, 'verdicts'>): boolean {
+  return r.verdicts.priceConfirmed === 'unverified';
+}
+
+/**
  * The one row order core uses (spec §6.5, §8.1), shared by `rankRows` and `dedupByItinerary`:
- * verdict class (verified, partially-verified, failed, then calendar `unchecked`); rows seen in
+ * verdict class (verified, partially-verified, failed, then calendar `unchecked`); within a class, confirmed prices
+ * before unconfirmed ones (decision 45: an unconfirmed fare never outranks a confirmed one of its class); rows seen in
  * the latest search before `notSeenInLatest` ones; price; effective age through `compareAges`
  * (fresher first, unknown age loses to any known age, a future timestamp clamps to "just now":
  * plan review focus 2); seller; identity. Stale rows are not demoted: spec §8.1 returns and
@@ -33,6 +42,7 @@ function identity(r: ResultRow): string {
 export function compareRows(a: ResultRow, b: ResultRow, now: IsoDateTime): number {
   return (
     CLASS_RANK[a.verdictClass] - CLASS_RANK[b.verdictClass] ||
+    Number(priceUnconfirmed(a)) - Number(priceUnconfirmed(b)) ||
     Number(a.notSeenInLatest !== null) - Number(b.notSeenInLatest !== null) ||
     a.pricePence - b.pricePence ||
     compareAges(effectiveAge(a.provenance, now), effectiveAge(b.provenance, now)) ||
