@@ -117,6 +117,20 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     expect(r.stderr).toContain('apps/api/src/planted.ts names the city New York');
   });
 
+  it('both codes of a hyphenated route such as LHR-JFK fail (CodeRabbit batch 3)', () => {
+    const r = run(
+      tree({
+        'apps/api/src/route.ts': "export const key = 'LHR-JFK';\n",
+        'apps/web/src/range.tsx': "export const p = <p>{'LGW-EWR-x'}</p>;\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/api/src/route.ts names the airport code LHR');
+    expect(r.stderr).toContain('apps/api/src/route.ts names the airport code JFK');
+    expect(r.stderr).toContain('apps/web/src/range.tsx names the airport code LGW');
+    expect(r.stderr).toContain('apps/web/src/range.tsx names the airport code EWR');
+  });
+
   it.each([
     ['packages/db/test/x.test.ts', ['// biome', '-ignore lint/x: y'].join('')],
     ['packages/engine/src/y.ts', ['// @ts', '-expect-error why'].join('')],

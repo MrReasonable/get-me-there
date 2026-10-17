@@ -191,7 +191,9 @@ function literalTexts(file, src) {
 function placeOffenders(file, src) {
   const out = [];
   for (const text of literalTexts(file, src)) {
-    for (const m of text.matchAll(/(?<![\w-])[A-Z]{3}(?![\w-])/g)) {
+    // why: a hyphen is a boundary, so both codes of a route key such as 'LHR-JFK' are read (CodeRabbit batch 3);
+    // words that then match are listed in NOT_AIRPORT_WORDS
+    for (const m of text.matchAll(/(?<!\w)[A-Z]{3}(?!\w)/g)) {
       if (codes.has(m[0]) && !NOT_AIRPORTS.has(m[0])) out.push(`${file} names the airport code ${m[0]}`);
     }
     for (const m of text.matchAll(cityPattern)) out.push(`${file} names the city ${m[1]}`);
