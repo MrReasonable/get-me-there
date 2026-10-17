@@ -1,6 +1,7 @@
 // Spec §9 item 5 sweeps: strict mounting, auth flags, every GET against core/api-contract with provenance on every
 // price, banned words in every API string, sentinel secrets never in a body or a log line.
 import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, TRUNCATED_NOTE } from '@gmt/core';
+import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp } from '../../src/app.js';
@@ -177,7 +178,7 @@ function apiTexts(): string[] {
     API_TEXT.ceilingNote(3500, 3200),
     API_TEXT.notCancellable('completed'),
     API_TEXT.cellNotInSpace,
-    API_TEXT.unknownAirport('AAA'),
+    API_TEXT.unknownAirport('ZZZ'),
     API_TEXT.noVerificationProvider,
     API_TEXT.basisNoVerificationProvider,
     API_TEXT.basisNoObservations,
@@ -248,6 +249,13 @@ describe('banned words in API strings (spec §11, §8.3)', () => {
     const texts = apiTexts();
     expect(texts).toHaveLength(Object.keys(API_TEXT).length);
     for (const text of texts) expect(findBannedWords(text, BANNED_WORD_ALLOWLIST), text).toEqual([]);
+    // why: CodeRabbit batch 3 — tests name only the worked example's airports; a sample code for "not in the airports
+    // table" must be one the dataset does not hold (AAA is Anaa, a real airport), so it names no other place
+    const dataset = loadAirportsDataset(AIRPORTS_DATA_DIR);
+    const places = new Set([...dataset.airports.map((a) => a.iata), ...Object.keys(dataset.metros)]);
+    const example = new Set(['LHR', 'LGW', 'JFK', 'EWR', 'LON', 'NYC']);
+    const named = texts.flatMap((t) => [...t.matchAll(/\b[A-Z]{3}\b/g)].map((m) => m[0]));
+    expect(named.filter((c) => places.has(c) && !example.has(c) && c !== 'GBP' && c !== 'API')).toEqual([]);
   });
 
   it('no reason, notice, message, label or summary in any response contains a banned word', async () => {
