@@ -556,6 +556,8 @@ export const COPY = {
     // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
     phoneMark: { partial: '◐', full: '●' },
     phonePartial: 'part of the day not searched',
+    phoneNights: (n: number) => `${n}n`,
+    phoneFull: 'every cell of the day searched',
     searchedFraction: (searched: number, total: number) => `${searched}/${total} searched`,
     destinationFilter: 'Destination',
     allDestinations: 'All destinations',

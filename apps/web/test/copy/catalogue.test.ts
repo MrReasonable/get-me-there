@@ -140,6 +140,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'calendarView.glyphCount': [47, 'not searched'],
   'calendarView.unconfirmedCellsFor': [1, 'JFK'],
   'calendarView.stay': [14, '28 Mar'],
+  'calendarView.phoneNights': [12],
   'calendarView.searchedFraction': [12, 48],
   'calendarView.staleLine': [3, 40, '8d'],
   'calendarView.unconfirmedCells': [2],

@@ -1,6 +1,7 @@
 import { asIata, asIsoDate, asIsoMonth, type Buckets, monthOf } from '@gmt/core';
 import { within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import { CalendarGrid, FOCUS_RING } from '../../../src/views/Calendar/CalendarGrid.js';
 import { CalendarLegend } from '../../../src/views/Calendar/CalendarLegend.js';
 import { buildCalendarModel } from '../../../src/views/Calendar/model.js';
@@ -447,7 +448,11 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     // why: stay, cached-from, the badge and the counts are left to the panel at this width.
     expect(within(priced).queryByTestId('day-stay')).toBeNull();
     expect(within(priced).queryByTestId('coverage-cue')).toBeNull();
-    expect(within(priced).queryByText('TP')).toBeNull();
+    // why: provenance without hover (spec §11): the face carries the provider's short mark, the night count and a coverage mark.
+    expect(face).toHaveTextContent(COPY.providerShort.travelpayouts);
+    expect(within(priced).getByTestId('day-nights')).toHaveTextContent('12n');
+    expect(within(priced).getByTestId('day-nights')).toHaveTextContent('◐');
+    expect(within(dayCell('2027-03-10')).getByTestId('day-nights')).toHaveTextContent('●');
     const grey = dayCell('2027-03-21');
     expect([...grey.querySelectorAll('[data-glyph]')].map((g) => g.textContent)).toEqual([
       '∅2 no fares',

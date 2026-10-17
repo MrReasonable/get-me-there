@@ -229,6 +229,8 @@ function PhoneDayBody(props: { display: DayDisplay; slice: DaySlice; notes: Part
   const C = COPY.calendarView;
   const coverage = coverageOf(slice);
   const partial = coverage.kind === 'fraction' && coverage.searched < coverage.total;
+  const full =
+    display.kind === 'price' && coverage.kind === 'fraction' && coverage.searched === coverage.total;
   const unconfirmed = slice.unconfirmedCells > 0 && slice.cheapestVerified === null;
   const marks = (
     <>
@@ -242,6 +244,13 @@ function PhoneDayBody(props: { display: DayDisplay; slice: DaySlice; notes: Part
         <span data-coverage="partial">
           <span aria-hidden="true">{C.phoneMark.partial}</span>
           <span className="sr-only">{C.phonePartial}</span>
+        </span>
+      ) : null}
+      {/* why: decision 38 — every priced day carries a visible non-colour coverage cue; fully searched has its own mark */}
+      {full ? (
+        <span data-coverage="full">
+          <span aria-hidden="true">{C.phoneMark.full}</span>
+          <span className="sr-only">{C.phoneFull}</span>
         </span>
       ) : null}
     </>
@@ -266,7 +275,10 @@ function PhoneDayBody(props: { display: DayDisplay; slice: DaySlice; notes: Part
             destinationNote={notes[p.cell.destination] ?? null}
           />
         </PriceBoundary>
-        <span className="block">{marks}</span>
+        {/* why: the stay's night count is on the face (decision 38); the dates are in the panel */}
+        <span data-testid="day-nights" className="block">
+          {C.phoneNights(p.cell.nights)} {marks}
+        </span>
       </span>
     );
   }

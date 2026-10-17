@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PriceCell } from '../../src/components/PriceCell.js';
+import { COPY } from '../../src/copy.js';
 import { fxConverted, provCalendar, provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';
 
@@ -25,7 +26,7 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).toHaveAttribute('data-face');
     expect(cell).not.toHaveClass('border-dashed');
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
-    expect(hidden).toEqual(['≈', '≠◷?…↺◌']);
+    expect(hidden).toEqual(['≈', '≠◷?…↺◌', COPY.providerShort.searchapi]);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [
@@ -48,7 +49,10 @@ describe('PriceCell face (phone day cell)', () => {
     );
     const cell = getByTestId('price-cell');
     expect(cell).toHaveClass('border-dashed');
-    expect(cell.querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
+    // why: no marks, so the only aria-hidden part is the provider's short mark (visible provenance without hover)
+    expect([...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent)).toEqual([
+      COPY.providerShort.travelpayouts,
+    ]);
     expect(cell.getAttribute('title')).not.toContain('onward');
     expect(cell.getAttribute('title')).toContain('constraints not checked');
   });
