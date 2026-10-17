@@ -1,4 +1,5 @@
 // The logic of scripts/ensure-build.mjs, with its file-system, process and clock operations injectable for tests.
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -197,10 +198,14 @@ export function acquire(lock, ops = realOps) {
   }
 }
 
-/** Releases the lock and exits when the process is interrupted. Returns a function that removes the handlers. */
-export function releaseOnSignal(lock, owned, proc = process, ops = realOps) {
+/**
+ * Releases the lock and exits when the process is interrupted. `beforeExit` runs first with the signal (underLock
+ * stops its build there). Returns a function that removes the handlers.
+ */
+export function releaseOnSignal(lock, owned, proc = process, ops = realOps, beforeExit = () => undefined) {
   const handlers = SIGNALS.map((sig) => {
     const onSignal = () => {
+      beforeExit(sig);
       release(lock, owned, ops);
       proc.exit(128 + osConstants.signals[sig]);
     };
@@ -210,6 +215,47 @@ export function releaseOnSignal(lock, owned, proc = process, ops = realOps) {
   return () => {
     for (const [sig, onSignal] of handlers) proc.off(sig, onSignal);
   };
+}
+
+/**
+ * Runs `body` holding the lock. `body` gets `run(cmd, args, opts)`, which spawns a child in its own process group and
+ * resolves when it exits 0. why: PR #3 review — a build under execFileSync blocks the event loop, so the signal
+ * handlers could not run and a SIGTERM or SIGHUP neither stopped the build nor released the lock; a spawned child
+ * leaves the loop free, and a signal stops the child's whole group (pnpm and its tsc runs), releases the lock and exits.
+ */
+export async function underLock(lock, body, { proc = process, ops = realOps } = {}) {
+  const owned = acquire(lock, ops);
+  const children = new Set();
+  const stopAll = (sig) => {
+    for (const c of children) {
+      try {
+        process.kill(-c.pid, sig);
+      } catch {
+        c.kill(sig);
+      }
+    }
+  };
+  const stopWatching = releaseOnSignal(lock, owned, proc, ops, stopAll);
+  const run = (cmd, args, opts = {}) =>
+    new Promise((resolve, reject) => {
+      const c = spawn(cmd, args, { ...opts, detached: true });
+      children.add(c);
+      c.once('error', (err) => {
+        children.delete(c);
+        reject(err);
+      });
+      c.once('exit', (code, signal) => {
+        children.delete(c);
+        if (code === 0) resolve();
+        else reject(new Error(`ensure-build: ${cmd} ${args.join(' ')} exited ${signal ?? code}`));
+      });
+    });
+  try {
+    return await body(run);
+  } finally {
+    release(lock, owned, ops);
+    stopWatching();
+  }
 }
 
 /** Newest mtime among the build inputs: each package's src, tsconfigs and package.json, and the root's config. */

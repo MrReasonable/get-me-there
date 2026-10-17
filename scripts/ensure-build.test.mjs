@@ -296,6 +296,56 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
     }
   });
 
+  // why: PR #3 review — the build ran under execFileSync, which blocks the event loop, so the signal handlers could
+  // not run: a SIGTERM or SIGHUP sent to ensure-build alone neither stopped the build nor released the lock. The
+  // build is now a spawned child: a signal stops it (its whole process group) and releases the lock at once.
+  it.each(['SIGTERM', 'SIGHUP', 'SIGINT'])(
+    'a %s sent to ensure-build alone, mid-build, stops the build and releases the lock',
+    async (sig) => {
+      const lock = lockIn();
+      const lib = JSON.stringify(join(import.meta.dirname, 'ensure-build-lib.mjs'));
+      const child = spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          [
+            `import { underLock } from ${lib};`,
+            // the "build": a long-running child that prints its pid, standing in for pnpm and tsc
+            `await underLock(${JSON.stringify(lock)}, (run) => run(process.execPath, ['-e', 'console.log(process.pid); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'] }));`,
+          ].join('\n'),
+        ],
+        { stdio: ['ignore', 'pipe', 'inherit'] },
+      );
+      const buildPid = Number(await held(child));
+      expect(existsSync(lock)).toBe(true);
+      const exited = new Promise((ok) => child.once('exit', (code, signal) => ok({ code, signal })));
+      const started = Date.now();
+      child.kill(sig);
+      expect(await exited).toMatchObject({ code: 128 + { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 }[sig] });
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(existsSync(lock)).toBe(false);
+      // the build itself was stopped too, never left running unlocked
+      await new Promise((ok) => setTimeout(ok, 200));
+      expect(realOps.alive(buildPid)).toBe(false);
+    },
+  );
+
+  it('a build that fails releases the lock and rejects naming the command', async () => {
+    const { underLock } = await import('./ensure-build-lib.mjs');
+    const lock = lockIn();
+    await expect(
+      underLock(lock, (run) => run(process.execPath, ['-e', 'process.exit(3)'], { stdio: 'ignore' })),
+    ).rejects.toThrow(/exited 3/);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('ensure-build.mjs builds through underLock, never a blocking execFileSync', () => {
+    const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
+    expect(text).toContain('await underLock(LOCK,');
+    expect(text).not.toContain('execFileSync');
+  });
+
   it('a build killed outright (SIGKILL) leaves a lock the next run takes at once', async () => {
     const lock = lockIn();
     const child = spawn(
