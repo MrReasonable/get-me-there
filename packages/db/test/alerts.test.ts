@@ -90,7 +90,7 @@ describe('AlertsRepo (spec §6.8, §7 alert_rules / alert_events)', () => {
     ).toBe('SQLITE_CONSTRAINT_CHECK');
   });
 
-  it('priorFirings: sent events for the identities within the window, with the price that fired; payload and reason URLs stripped', () => {
+  it('priorFirings: notified events for the identities within the window, with the price that fired; payload and reason URLs stripped', () => {
     const { db, clock, definition, executionId, rule, alerts } = setup();
     const r = alerts.create({ ...rule, basis: 'calendar', requireAllVerified: null });
     const [priceId] = new CalendarPricesRepo(db, clock, { allowSynthetic: false }).insert(executionId, [
@@ -108,13 +108,13 @@ describe('AlertsRepo (spec §6.8, §7 alert_rules / alert_events)', () => {
     alerts.insertEvent({
       ...base,
       firedAt: at('2026-10-01T05:00:00.000Z'),
-      status: 'sent',
+      status: 'notified',
       payload: { link: 'https://www.aviasales.com/search?marker=SECRET' },
     });
     alerts.insertEvent({
       ...base,
       firedAt: at('2026-10-10T05:00:00.000Z'),
-      status: 'failed',
+      status: 'queued',
       reason: 'SMTP 550 https://user:pw@mail.example/x',
       payload: {},
     });
@@ -122,7 +122,7 @@ describe('AlertsRepo (spec §6.8, §7 alert_rules / alert_events)', () => {
       ...base,
       identityKey: 'other',
       firedAt: at('2026-10-11T05:00:00.000Z'),
-      status: 'sent',
+      status: 'notified',
       payload: {},
     });
     expect(alerts.priorFirings(r.id, [base.identityKey], at('2026-09-30T00:00:00.000Z'))).toEqual([
@@ -136,7 +136,7 @@ describe('AlertsRepo (spec §6.8, §7 alert_rules / alert_events)', () => {
     expect(alerts.priorFirings(r.id, [base.identityKey], at('2026-10-02T00:00:00.000Z'))).toEqual([]);
     expect(alerts.priorFirings(r.id, [], at('2026-09-30T00:00:00.000Z'))).toEqual([]);
     const events = alerts.events({ definitionId: definition.id, limit: 10 });
-    expect(events.map((e) => e.status)).toEqual(['sent', 'failed', 'sent']);
+    expect(events.map((e) => e.status)).toEqual(['notified', 'queued', 'notified']);
     expect(JSON.stringify(events.at(-1)?.payload)).not.toContain('SECRET');
     expect(events[1]?.reason).not.toMatch(/pw@/);
     expect(alerts.events({ ruleId: r.id, limit: 1 })).toHaveLength(1);

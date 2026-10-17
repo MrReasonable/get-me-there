@@ -43,10 +43,18 @@ export interface EngineDeps {
   clock: Clock;
   log: Logger;
 }
+/**
+ * How the pass that runs the alerts step ended (decision 59): `completed`, or stopped by a budget cap (`budget`, the
+ * paused_budget stop of decision 25). The alert runner says "a budget cap left … undone" only for the latter.
+ */
+export interface AlertsPass {
+  stop: 'completed' | 'budget';
+}
 /** The alerts step of spec §8.1 ("alerts: evaluateAlertRules → persist events → notify digests"); WP11 provides runAlerts. */
 export type AlertsStepHook = (
   deps: EngineDeps,
   executionId: string,
+  pass: AlertsPass,
 ) => Promise<{ digests: number; events: number }>;
 /**
  * Engine options. Every cost and limit comes from `config` (ruling 3); `providerConcurrency` overrides the pool size per

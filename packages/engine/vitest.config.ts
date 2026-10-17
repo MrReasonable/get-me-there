@@ -13,7 +13,14 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/index.ts', 'src/**/index.ts'],
-      thresholds: { lines: 85, branches: 70, functions: 85, statements: 85 },
+      thresholds: {
+        lines: 85,
+        branches: 70,
+        functions: 85,
+        statements: 85,
+        // why: the alert runner decides what the operator is told about a fare (WP11 review TS-12), so it keeps a higher floor
+        'src/alerts/**': { lines: 95, branches: 80, functions: 95, statements: 95 },
+      },
     },
   },
 });

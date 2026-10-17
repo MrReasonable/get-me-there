@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isoDateTimeSchema } from '../types/ids.js';
-import { moneyPenceSchema, resultBasisSchema } from './common.js';
+import { provenanceSchema } from '../types/provenance.js';
+import { constraintNameSchema, moneyPenceSchema, resultBasisSchema, verdictClassSchema } from './common.js';
 
 const ruleFields = {
   definitionId: z.string(),
@@ -53,7 +54,7 @@ export const alertEventSchema = z.object({
   calendarPriceId: z.number().int().nullable(),
   dedupKey: z.string(),
   firedAt: isoDateTimeSchema,
-  status: z.enum(['sent', 'failed', 'suppressed']),
+  status: z.enum(['queued', 'notified', 'suppressed']),
   reason: z.string().nullable(),
   payload: z.unknown(),
 });
@@ -64,3 +65,38 @@ export const alertEventsQuerySchema = z.object({
 });
 /** `GET /alerts?definitionId=`: one object, so handlers can name it. */
 export const alertRulesQuerySchema = alertEventsQuerySchema.pick({ definitionId: true });
+
+/**
+ * Decision 56: the payload the alert runner (WP11, engine) stores on every alert event and the Alerts view (WP11, web)
+ * reads; one schema, no local copies. The fare and the previous price each carry their provenance, so the view prints
+ * both through PriceCell (decision 52). Marks are stored as facts the view can re-judge later: the stale threshold
+ * that applied (core's isStale recomputes against now) and the instant of the newer search that did not see the fare.
+ */
+export const alertEventPayloadSchema = z.object({
+  /** The digest the event went out in; null for a suppressed event. */
+  digestId: z.string().nullable(),
+  executionId: z.string(),
+  pricePence: moneyPenceSchema,
+  provenance: provenanceSchema,
+  /** The price a drop was measured against, or the out-of-window price of a "new" cell; null when none. */
+  previous: z.object({ pricePence: moneyPenceSchema, provenance: provenanceSchema }).nullable(),
+  /** Listed in the digest's "new" section (spec §6.8 absent-then-present); never a drop firing. */
+  isNew: z.boolean(),
+  /** The cell in words, e.g. "LHR→JFK 14 Mar–28 Mar (14n)". */
+  route: z.string(),
+  /** The results row's vocabulary (verdictClassSchema plus 'unchecked'); `failed` never fires (decision 59). */
+  verdictClass: z.union([verdictClassSchema.exclude(['failed']), z.literal('unchecked')]),
+  unverified: z.array(constraintNameSchema),
+  /** Reason parts: what fired, and the whole hours between the previous fetch and this one when a previous price exists. */
+  reason: z.object({
+    kind: z.enum(['threshold', 'drop', 'new']),
+    gapHours: z.number().int().min(0).nullable(),
+  }),
+  /** The basis threshold this price is judged against (decisions 54, 55). */
+  staleThresholdHours: z.number().int().min(1),
+  /** From a discovery tile the page cap cut short: "cheapest of the rows read" (decision 30). */
+  truncated: z.boolean(),
+  /** A newer itinerary search of the cell did not see this fare; `at` is that search's fetch instant when known. */
+  notSeenInLatest: z.object({ at: isoDateTimeSchema.nullable() }).nullable(),
+});
+export type AlertEventPayload = z.output<typeof alertEventPayloadSchema>;

@@ -110,8 +110,8 @@ export const TERMINAL_STATUSES = [
 export const ALERT_RULE_TYPES = exhaustive<AlertRuleType>()(['absolute', 'dropPct', 'dropAbs'] as const);
 export const RESULT_BASES = exhaustive<ResultBasis>()(['verified', 'calendar'] as const);
 export const ALERT_EVENT_STATUSES = exhaustive<AlertEvent['status']>()([
-  'sent',
-  'failed',
+  'queued',
+  'notified',
   'suppressed',
 ] as const);
 export const OPERATOR_MESSAGE_KINDS = exhaustive<OperatorMessageKind>()([

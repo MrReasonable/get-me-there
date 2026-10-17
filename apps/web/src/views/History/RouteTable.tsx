@@ -1,4 +1,4 @@
-import { effectiveAge, formatAgeFull, type IsoDateTime } from '@gmt/core';
+import { effectiveAge, formatAgeFull, type IsoDateTime, sourceLabel } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatIsoDateLong, formatPence } from '../../format.js';
 import type { RouteLine } from './lines.js';
@@ -41,7 +41,7 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
               </td>
               <td>
                 {H.routeProvenance(
-                  COPY.source[p.route.sourceKind],
+                  sourceLabel(p.route),
                   cabin,
                   formatAgeFull(effectiveAge({ fetchedAt: p.route.fetchedAt, maxAgeHours: 'unknown' }, now)),
                 )}

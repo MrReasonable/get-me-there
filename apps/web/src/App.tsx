@@ -8,12 +8,12 @@ import { SyntheticBanner } from './components/SyntheticBanner.js';
 import { COPY } from './copy.js';
 import { useSearchParams } from './state/urlState.js';
 import { parseView } from './state/view.js';
+import { AlertsView } from './views/Alerts/index.js';
 import { CalendarView } from './views/Calendar/CalendarView.js';
 import { CoverageView } from './views/Coverage/CoverageView.js';
 import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
 import { DurationView } from './views/Duration/DurationView.js';
 import { HistoryView } from './views/History/HistoryView.js';
-import { Placeholder } from './views/Placeholder.js';
 import { ProvidersView } from './views/Providers/ProvidersView.js';
 import { ResultsView } from './views/Results/ResultsView.js';
 
@@ -37,7 +37,8 @@ export function App() {
     view === 'coverage' ||
     view === 'calendar' ||
     view === 'duration' ||
-    view === 'history';
+    view === 'history' ||
+    view === 'alerts';
   return (
     <div className="min-h-screen bg-white text-slate-900">
       {providers.data?.synthetic === true ? <SyntheticBanner /> : null}
@@ -77,7 +78,7 @@ export function App() {
           ) : null}
           {view === 'duration' && selected !== null ? <DurationView definition={selected} /> : null}
           {view === 'history' && selected !== null ? <HistoryView definition={selected} /> : null}
-          {view === 'alerts' ? <Placeholder /> : null}
+          {view === 'alerts' && selected !== null ? <AlertsView definitionId={selected.id} /> : null}
           {view === 'definitions' ? <DefinitionsView /> : null}
           {view === 'providers' ? <ProvidersView /> : null}
         </AppBoundary>

@@ -5,6 +5,7 @@ import {
   type Provenance as ProvenanceT,
   provenanceSchema,
   type SourceKind,
+  sourceLabel,
 } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { useNow } from '../now.js';
@@ -81,7 +82,7 @@ export function Provenance({
           {COPY.provider[p.providerId]}
         </span>
       ) : null}
-      <span>{COPY.source[p.sourceKind]}</span>
+      <span>{sourceLabel(p)}</span>
       {fullAge ? (
         <span>{formatAgeFull(age)}</span>
       ) : (

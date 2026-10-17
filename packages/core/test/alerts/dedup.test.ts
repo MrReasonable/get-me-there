@@ -55,6 +55,13 @@ describe('isSuppressed (spec §6.8 cooldown, default 336 h; ruling 8 repeat step
     expect(isSuppressed(at(41_500), last, 336, NOW).suppressed).toBe(true);
   });
 
+  it('the 5% step rounds up to a whole penny: a fractional 5% is not rounded down (review ts-2)', () => {
+    // last fired £412.10: 5% is 2060.5p, so the step is 2061p and the floor is 39149p
+    const last = [prior({ pricePence: 41_210 })];
+    expect(isSuppressed(at(39_149), last, 336, NOW)).toEqual({ suppressed: false, reason: null });
+    expect(isSuppressed(at(39_150), last, 336, NOW).suppressed).toBe(true);
+  });
+
   it('the step is measured from the most recent firing of the identity', () => {
     const older = prior({ pricePence: 50_000, dedupKey: 'r1|h1|500', firedAt: hoursAgo(100) });
     const newer = prior({ pricePence: 41_200, firedAt: hoursAgo(10) });

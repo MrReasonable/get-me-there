@@ -1,9 +1,12 @@
-import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, findBannedWords, SOURCE_LABELS } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[]> = {
+  'alertsView.notSaved': ['database is locked'],
+  'alertsView.cooldownText': [336],
+  'alertsView.classPartial': ['checked bag'],
   confirmedWas: ['154', '£1'],
   metroExpanded: ['LON', 'LHR, LGW'],
   progressSelected: [{ provider: 'SearchApi', done: 8, selected: 10, error: 1, skipped: 116, notRun: 2 }],
@@ -244,6 +247,11 @@ describe('COPY catalogue (spec §11 banned words)', () => {
 
   it('"verified" as a whole word appears only in class labels and beside class-verified values', () => {
     const allowed = new Set([
+      // WP11: each names the class or sits beside a class-verified value (spec §6.8, §11)
+      'alertsView.basisVerified',
+      'alertsView.requireAll',
+      'alertsView.classVerified',
+      'alertsView.classPartial',
       'classLabel.verified',
       'classLabel.partially-verified',
       'calendarGapLead',
@@ -309,7 +317,7 @@ describe('glyph set (review ui I2)', () => {
       expect(line).toContain(`${COPY.providerMark[id]} `);
       expect(line).toContain(COPY.provider[id]);
     }
-    expect(line).toContain(COPY.source.synthetic);
+    expect(line).toContain(SOURCE_LABELS.synthetic);
     expect(new Set(Object.values(COPY.providerMark)).size).toBe(3);
   });
   it('the phone legend line names every mark glyph', () => {

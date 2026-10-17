@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AlertEvent,
+  type AlertEventStatus,
   type AlertRule,
   type AlertRuleInput,
   type Clock,
@@ -146,8 +147,9 @@ export class AlertsRepo {
   }
 
   /**
-   * Spec §6.8 suppression input for `isSuppressed`: every **sent** event for the identities since `since`, with the
-   * price that fired (from its observation or calendar price). A failed send does not suppress.
+   * Spec §6.8 suppression input for `isSuppressed`: every **notified** event for the identities since `since`, with the
+   * price that fired (from its observation or calendar price). A queued event (its send pending or failed) does
+   * not suppress, and neither does a "new" listing (`payload.isNew`), which was never a firing (decision 56).
    */
   priorFirings(ruleId: string, identityKeys: string[], since: IsoDateTime): PriorFiring[] {
     assertIsoDateTime('since', since);
@@ -161,12 +163,74 @@ export class AlertsRepo {
          FROM alert_events ev
          LEFT JOIN price_observations o ON o.id = ev.observation_id
          LEFT JOIN calendar_prices p ON p.id = ev.calendar_price_id
-         WHERE ev.rule_id = @ruleId AND ev.status = 'sent' AND ev.fired_at >= @since
+         WHERE ev.rule_id = @ruleId AND ev.status = 'notified' AND ev.fired_at >= @since
+           AND coalesce(json_extract(ev.payload_json, '$.isNew'), 0) <> 1
            AND ev.identity_key IN (SELECT value FROM json_each(@keys)) AND COALESCE(o.price_pence, p.price_pence) IS NOT NULL
          ORDER BY ev.fired_at DESC, ev.id DESC`,
       )
       .all({ ruleId, since, keys: JSON.stringify(identityKeys) })
       .map((r) => ({ ...r, firedAt: readTime('alert_events.fired_at', r.firedAt) }));
+  }
+
+  /**
+   * Decision 56: every event of the rule whose price row was written by the execution (its observation's or calendar
+   * price's execution_id), oldest first. The alert runner reads it to find what an earlier pass of the same execution
+   * recorded (never repeated) and what it left queued (sent with the next digest).
+   */
+  eventsForExecution(ruleId: string, executionId: string): AlertEvent[] {
+    return this.db.raw
+      .prepare<Record<string, unknown>, EventDbRow>(
+        `SELECT ev.* FROM alert_events ev
+         LEFT JOIN price_observations o ON o.id = ev.observation_id
+         LEFT JOIN calendar_prices p ON p.id = ev.calendar_price_id
+         WHERE ev.rule_id = @ruleId AND coalesce(o.execution_id, p.execution_id) = @executionId
+         ORDER BY ev.id`,
+      )
+      .all({ ruleId, executionId })
+      .map(toEvent);
+  }
+
+  /**
+   * Decisions 56, 59: moves events on after a send — `notified` when every notifier accepted the digest, `queued` (with
+   * the failure in `reason`) when one did not, `suppressed` when a later pass's cooldown judged a queued firing or no
+   * email is configured. A field left out of the patch keeps its stored value; a successful retry passes its own reason,
+   * fire time and digest id, so the row describes the send that delivered it. One transaction; URLs in `reason`
+   * stripped as on insert. Throws when an id does not exist.
+   */
+  updateEvents(
+    ids: readonly number[],
+    patch: {
+      status: AlertEventStatus;
+      reason?: string | null;
+      firedAt?: IsoDateTime;
+      digestId?: string;
+      /** The whole payload, replacing the stored one: a retry records the marks of the send that delivered it. */
+      payload?: unknown;
+    },
+  ): void {
+    if (patch.firedAt !== undefined) assertIsoDateTime('fired_at', patch.firedAt);
+    const update = this.db.raw.prepare(
+      `UPDATE alert_events SET status = @status,
+         reason = CASE WHEN @keepReason = 1 THEN reason ELSE @reason END,
+         fired_at = coalesce(@firedAt, fired_at),
+         payload_json = CASE WHEN @payload IS NULL AND @digestId IS NULL THEN payload_json
+           ELSE json_set(coalesce(@payload, payload_json), '$.digestId', coalesce(@digestId, json_extract(coalesce(@payload, payload_json), '$.digestId'))) END
+       WHERE id = @id`,
+    );
+    this.db.transaction(() => {
+      for (const id of ids) {
+        const changed = update.run({
+          id,
+          status: patch.status,
+          keepReason: patch.reason === undefined ? 1 : 0,
+          reason: patch.reason === undefined || patch.reason === null ? null : stripUrlsInText(patch.reason),
+          firedAt: patch.firedAt ?? null,
+          digestId: patch.digestId ?? null,
+          payload: patch.payload === undefined ? null : stripUrlsInText(JSON.stringify(patch.payload)),
+        }).changes;
+        if (changed !== 1) throw new RowRejected('missing', `alert event ${id} does not exist`);
+      }
+    });
   }
 
   /** Spec §5.3: URLs in `payload_json` and `reason` are stored without query string or userinfo. */

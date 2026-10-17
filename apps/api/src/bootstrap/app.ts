@@ -9,7 +9,7 @@
  */
 import { type Clock, type Config, type Logger, type Secret, systemClock } from '@gmt/core';
 import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports } from '@gmt/db';
-import { createEngine, type Engine, LogNotifier } from '@gmt/engine';
+import type { Engine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp } from '../app.js';
@@ -19,6 +19,7 @@ import { safeMessage } from '../safeMessage.js';
 import { inProcessTools } from '../tools/inProcess.js';
 import { EXIT } from '../tools/types.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
+import { engineFor } from './engine.js';
 import { BootError } from './errors.js';
 import { waitForLockFree } from './lock.js';
 import { type AssetPaths, assetPaths } from './paths.js';
@@ -138,8 +139,8 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       .flatMap((d) => [...d.origins, ...d.destinations]);
     const sanity = sanityCheckAirports(ports.db, referenced);
     if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`, EXIT.failed);
-    // why: WP11 adds `{ alerts: runAlerts }` to these options; until then the engine's default noAlerts step runs.
-    const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
+    // why: spec §8.1, §8.3 — WP11's alert runner as the alerts step, the notifiers config asks for (engine.ts).
+    const engine = engineFor(ports, log);
     await engine.boot();
     const app = createApp(ports, engine, { webRoot: deps.assets.webRoot, tools: deps.tools?.(ports) ?? {} });
     const bound = deps.listen ? await listen(app, config) : null;

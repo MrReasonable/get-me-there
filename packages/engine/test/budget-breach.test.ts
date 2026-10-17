@@ -250,13 +250,13 @@ describe('BudgetExceeded global-month (spec §8.1 with decision 25)', () => {
 });
 
 describe('the alerts step and "alerts running on calendar basis only" (spec §6.8, §8.1, decision 25)', () => {
-  it('runs once after a completed pass with (deps, executionId); a failing hook is logged, not fatal', async () => {
+  it('runs once after a completed pass with (deps, executionId, pass); a failing hook is logged, not fatal', async () => {
     const h = createHarness();
     const alerts = vi.fn(async () => ({ digests: 1, events: 2 }));
     const orch = h.orch({ ...h.options, alerts });
     const done = await h.runToCompletion(orch, h.createDefinition().id);
     expect(done.status).toBe('completed');
-    expect(alerts).toHaveBeenCalledExactlyOnceWith(h.deps, done.id);
+    expect(alerts).toHaveBeenCalledExactlyOnceWith(h.deps, done.id, { stop: 'completed' });
     alerts.mockRejectedValueOnce(new Error('digest render failed'));
     const second = await h.runToCompletion(orch, h.createDefinition().id);
     expect(second.status).toBe('completed');
@@ -302,7 +302,7 @@ describe('the alerts step and "alerts running on calendar basis only" (spec §6.
     rule(h, def.id);
     const e = await h.runToCompletion(h.orch({ ...h.options, alerts }), def.id);
     expect(e.status).toBe('paused_budget');
-    expect(alerts).toHaveBeenCalledExactlyOnceWith(h.deps, e.id);
+    expect(alerts).toHaveBeenCalledExactlyOnceWith(h.deps, e.id, { stop: 'budget' });
     const v = h.outcomes(e.id, { stage: 'verification' }).filter((o) => o.reason !== 'not_selected');
     expect(v).toHaveLength(2);
     expect(v.every((o) => o.status === 'skipped' && o.reason === 'budget')).toBe(true);

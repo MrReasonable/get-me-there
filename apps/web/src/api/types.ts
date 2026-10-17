@@ -37,3 +37,6 @@ export type DurationResponse = z.output<typeof apiContract.durationAnalysisRespo
 export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseSchema>;
 export type ItineraryHistoryResponse = z.output<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.output<typeof apiContract.routeHistoryResponseSchema>;
+
+/** An alert rule as the form sends it: the schema's input shape (cooldownHours may be left to its default of 336). */
+export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;

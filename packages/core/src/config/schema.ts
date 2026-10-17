@@ -50,6 +50,11 @@ export interface Config {
     /** only outside production; the fixture provider itself is gated by syntheticAllowed */
     fixture: { costMicroGbp: number } | null;
   };
+  /**
+   * ALERT_EMAIL_MAX_PER_HOUR (decision 56): outgoing emails per hour, beyond which messages are logged and dropped.
+   * Counted in process memory (a restart starts a fresh hour) and shared by digests and operator messages.
+   */
+  alertEmailMaxPerHour: number;
   smtp: {
     host: string;
     port: number;
@@ -72,6 +77,22 @@ export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: C
 
 type Env = Record<string, string | undefined>;
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
+
+/**
+ * Spec §8.3: SMTP_TLS=none is allowed only for a loopback host, or the `mailpit` host under NODE_ENV=development. The
+ * one copy of the rule: the config schema enforces it and the engine's EmailNotifier re-checks it (WP11).
+ */
+export function smtpPlaintextAllowed(host: string, nodeEnv: Config['nodeEnv']): boolean {
+  return LOOPBACK.test(host) || (host === 'mailpit' && nodeEnv === 'development');
+}
+
+/**
+ * One mailbox: an address only, so a list, a display name or a control character can never reach an email header
+ * (spec §8.3). The config schema checks ALERT_EMAIL_TO/FROM with it and the engine's EmailNotifier re-checks (WP11).
+ */
+export function isMailbox(s: string): boolean {
+  return z.email().safeParse(s).success;
+}
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
 const smtpTuple = z.tuple([z.string(), z.string(), z.string(), z.string(), z.string(), z.string()]);
 
@@ -141,6 +162,23 @@ export function isValidTimeZone(tz: string): boolean {
   }
 }
 
+/**
+ * APP_BASE_URL (spec §12): https, and nothing an email link must not carry or would break — no userinfo (credentials
+ * in every email), no query and no fragment (the app appends its own). A path prefix is allowed (a reverse proxy).
+ */
+function appBaseUrlOk(raw: string): boolean {
+  if (!z.url({ protocol: /^https$/ }).safeParse(raw).success) return false;
+  const u = new URL(raw);
+  return (
+    u.username === '' &&
+    u.password === '' &&
+    u.search === '' &&
+    u.hash === '' &&
+    !raw.includes('#') &&
+    !raw.includes('?')
+  );
+}
+
 /** `maxCacheTtlHours` bounds the response cache for a provider whose data has a stated freshness window (Travelpayouts: 48). */
 function providerLimits(
   r: Reader,
@@ -174,8 +212,8 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
         .filter((h) => h.length > 0)
     : [`localhost:${port}`, `127.0.0.1:${port}`, ...(nodeEnv === 'development' ? ['localhost:5173'] : [])];
   const appBaseUrl = r.str('APP_BASE_URL') ?? null;
-  if (appBaseUrl !== null && !z.url({ protocol: /^https$/ }).safeParse(appBaseUrl).success) {
-    r.fail('APP_BASE_URL', 'APP_BASE_URL must be an https URL');
+  if (appBaseUrl !== null && !appBaseUrlOk(appBaseUrl)) {
+    r.fail('APP_BASE_URL', 'APP_BASE_URL must be an https URL with no user, password, query or fragment');
   }
 
   // auth: both or neither; password ≥ 12 (spec §4)
@@ -257,8 +295,17 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     const [host, , user, pass, to, from] = smtpTuple.parse(smtpValues);
     const smtpPort = r.int('SMTP_PORT', 1, 65535);
     const tls = r.oneOf('SMTP_TLS', ['implicit', 'starttls', 'none']) ?? 'implicit';
-    const plaintextAllowed = LOOPBACK.test(host) || (host === 'mailpit' && nodeEnv === 'development');
-    if (tls === 'none' && !plaintextAllowed) {
+    if (!isMailbox(to))
+      r.fail(
+        'ALERT_EMAIL_TO',
+        'ALERT_EMAIL_TO must be one email address (no display name, list or control character)',
+      );
+    if (!isMailbox(from))
+      r.fail(
+        'ALERT_EMAIL_FROM',
+        'ALERT_EMAIL_FROM must be one email address (no display name, list or control character)',
+      );
+    if (tls === 'none' && !smtpPlaintextAllowed(host, nodeEnv)) {
       r.fail(
         'SMTP_TLS',
         'SMTP_TLS=none is allowed only for a loopback host or the mailpit host under NODE_ENV=development',
@@ -280,6 +327,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
 
   const logLevel = r.oneOf('LOG_LEVEL', LOG_LEVELS) ?? 'info';
   const staleAfterHours = r.int('STALE_AFTER_HOURS', 1) ?? 192;
+  const alertEmailMaxPerHour = r.int('ALERT_EMAIL_MAX_PER_HOUR', 1) ?? 20;
   const calendarStaleAfterHours = r.int('CALENDAR_STALE_AFTER_HOURS', 1) ?? null;
   const stuckAfterHours = r.int('STUCK_AFTER_HOURS', 1) ?? 12;
   const maxCellsPerDefinition = r.int('MAX_CELLS_PER_DEFINITION', 1) ?? 50_000;
@@ -322,6 +370,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       fxMaxRateAgeDays,
       spend,
       providers: { travelpayouts, searchapi, fixture },
+      alertEmailMaxPerHour,
       smtp,
       inContainer,
       allowFixtureProvider,

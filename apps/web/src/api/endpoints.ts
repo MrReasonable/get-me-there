@@ -1,6 +1,7 @@
 import { type Cabin, type CellKey, apiContract as c, type Iata } from '@gmt/core';
 import { call } from './client.js';
 import type {
+  AlertRuleBody,
   Basis,
   CoverageCheckBody,
   DefinitionBody,
@@ -76,5 +77,14 @@ export const api = {
     call(c.routeHistoryResponseSchema, 'GET', '/api/routes/:origin/:destination/history', {
       params: { origin, destination },
       query: { cabin },
+    }),
+  alertRules: (definitionId: string) =>
+    call(c.alertRuleSchema.array(), 'GET', '/api/alerts', { query: { definitionId } }),
+  createAlertRule: (body: AlertRuleBody) => call(c.alertRuleSchema, 'POST', '/api/alerts', { body }),
+  // why: DELETE soft-deletes the rule (AlertsRepo.softDelete); its events stay listed.
+  deleteAlertRule: (id: string) => call(c.alertRuleSchema, 'DELETE', '/api/alerts/:id', { params: { id } }),
+  alertEvents: (definitionId: string, limit: number) =>
+    call(c.alertEventSchema.array(), 'GET', '/api/alerts/events', {
+      query: { definitionId, limit: String(limit) },
     }),
 };

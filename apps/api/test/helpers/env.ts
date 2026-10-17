@@ -64,6 +64,7 @@ export const ALL_VARS = [
   'SMTP_PASS',
   'ALERT_EMAIL_TO',
   'ALERT_EMAIL_FROM',
+  'ALERT_EMAIL_MAX_PER_HOUR',
   'IN_CONTAINER',
   'ALLOW_FIXTURE_PROVIDER',
 ] as const;
