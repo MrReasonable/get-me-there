@@ -53,6 +53,20 @@ describe('POST /api/tools/record (spec §10, §7 app_lock)', () => {
     expect((await errorOf(smoke)).code).toBe('not_found');
   });
 
+  it('refuses with 409 inside a container, before the runner runs: recordings are local-only (plan decision 62)', async () => {
+    const record = vi.fn(async (_args: unknown, _signal: AbortSignal) => ok);
+    const x = await harness({ env: { IN_CONTAINER: '1' }, app: { tools: { record } } });
+    expect(x.ports.config.inContainer).toBe(true);
+    const res = await x.request('/api/tools/record', { method: 'POST', json: body });
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toMatchObject({
+      code: 'recording_in_container',
+      message:
+        'fixture recording runs from a development checkout, not inside the container (recordings are local-only)',
+    });
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it('runs the registered runner with the validated arguments', async () => {
     const record = vi.fn(async (_args: unknown, _signal: AbortSignal) => ok);
     const x = await harness({ app: { tools: { record } } });

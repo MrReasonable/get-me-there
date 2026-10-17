@@ -60,6 +60,8 @@ export const API_TEXT = {
     `${inside} of ${total} rows are inside the current window and nights range`,
   toolUnavailable: (name: string) => `the ${name} tool is not available in this build`,
   toolBusy: (name: string) => `the ${name} tool is already running`,
+  recordingInContainer:
+    'fixture recording runs from a development checkout, not inside the container (recordings are local-only)',
   toolFailed: (name: string) => `the ${name} tool failed; see the server log`,
   toolSynthetic: 'the record tool refuses while the synthetic gate is open (spec §5.5)',
   toolSummary: (name: string, exitCode: number, files: number) =>

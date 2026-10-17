@@ -182,6 +182,7 @@ function apiTexts(): string[] {
     API_TEXT.insideSpace(0, 3),
     API_TEXT.toolUnavailable('record'),
     API_TEXT.toolBusy('record'),
+    API_TEXT.recordingInContainer,
     API_TEXT.toolFailed('record'),
     API_TEXT.toolSynthetic,
     API_TEXT.toolSummary('record', 0, 3),
