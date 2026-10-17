@@ -56,7 +56,8 @@ export type { SmokeCheck } from './smokeChecks.js';
 export const NOT_CONFIRMED = 'price not confirmed by the final step';
 
 // why: provider identifiers in a fixed order, never airports; the free provider first, so a broken setup is learned
-// before any credit is spent (plan decision 23 orders the record tool's probes the same way).
+// before any credit is spent: a setup failure there skips SearchApi entirely (plan decision 23 orders the record
+// tool's probes the same way; cost review M1).
 export const VENDORS = ['travelpayouts', 'searchapi'] as const;
 export type Vendor = (typeof VENDORS)[number];
 // why: a cache hit is not a call; the smoke must show that the vendor answers today (spec §9 item 7).
@@ -218,6 +219,11 @@ export interface Discovery {
   report: SmokeProviderReport;
   plans: TilePlan[];
   tile: Tile | null;
+  /**
+   * The failure was the setup's, not the vendor's day: an auth or quota refusal that will not pass on a retry, or a
+   * provider that could not plan the one tile. After the free provider fails this way no credit is spent (cost M1).
+   */
+  setupFailure?: true;
 }
 export interface Chain {
   report: SmokeProviderReport;
@@ -237,6 +243,13 @@ function blankReport(providerId: Vendor, stage: SmokeProviderReport['stage']) {
   });
 }
 
+/** An auth or quota refusal that a retry will not lift: the operator's key or plan, not the vendor's day. */
+function setupFailure(e: unknown): { setupFailure?: true } {
+  return e instanceof ProviderError && !e.retryable && (e.kind === 'auth' || e.kind === 'quota')
+    ? { setupFailure: true }
+    : {};
+}
+
 /** One provider's one tile. A plan of any other length is reported and nothing is fetched. */
 async function discover(
   ports: Ports,
@@ -248,7 +261,12 @@ async function discover(
   const report = blankReport(id, 'discovery');
   const cap = provider?.discovery;
   if (provider === undefined || cap === undefined)
-    return { report: report('error', 'configured but has no discovery capability'), plans: [], tile: null };
+    return {
+      report: report('error', 'configured but has no discovery capability'),
+      plans: [],
+      tile: null,
+      setupFailure: true,
+    };
   const plans = cap.plan(q);
   const [first] = plans;
   if (plans.length !== 1 || first === undefined)
@@ -256,6 +274,7 @@ async function discover(
       report: report('error', `planned ${plans.length} tiles; the smoke query must plan exactly 1`),
       plans,
       tile: null,
+      setupFailure: true,
     };
   let result: DiscoveryTileResult;
   try {
@@ -263,13 +282,14 @@ async function discover(
   } catch (e) {
     const why = describeFailure(e, ports);
     if (why === null) throw e;
-    return { report: report('error', why), plans, tile: null };
+    return { report: report('error', why), plans, tile: null, ...setupFailure(e) };
   }
   if (result.kind === 'tile-error')
     return {
       report: report('error', describeFailure(result.error, ports) ?? 'tile error'),
       plans,
       tile: null,
+      ...setupFailure(result.error),
     };
   // why: a partial tile is reported on its line, never hidden behind "priced" (prov-wp13-r1-003)
   const issues = result.cellIssues ?? [];
@@ -508,7 +528,13 @@ export async function runSmoke(
   const found = new Map<Vendor, Discovery>();
   let itinerary: Chain | null = null;
   try {
-    for (const id of configured)
+    const blocked = 'Travelpayouts failed first (auth, quota or configuration); no credit spent';
+    for (const id of configured) {
+      // why: cost review M1: a setup failure on the free provider stops the run before SearchApi spends a credit
+      if (id === 'searchapi' && found.get('travelpayouts')?.setupFailure === true) {
+        found.set(id, { report: blankReport(id, 'discovery')('skipped', blocked), plans: [], tile: null });
+        continue;
+      }
       found.set(
         id,
         await discover(
@@ -519,12 +545,14 @@ export async function runSmoke(
           ctx,
         ),
       );
+    }
     const saCell = found.get('searchapi')?.report.cheapest?.cell;
     const skipped = (detail: string): Chain => ({
       report: blankReport('searchapi', 'itinerary')('skipped', detail),
       result: null,
     });
     if (!configured.includes('searchapi')) itinerary = null;
+    else if (found.get('travelpayouts')?.setupFailure === true) itinerary = skipped(blocked);
     else if (opts.signal.aborted) itinerary = skipped('aborted before the chain');
     else if (saCell === undefined)
       // why: no priced calendar cell, so the chain has nothing to search; no credit is spent on it (cost I-1)

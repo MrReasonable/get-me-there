@@ -223,6 +223,31 @@ describe('runSmoke (spec §9 item 7)', () => {
     );
   });
 
+  it.each([
+    ['a Travelpayouts 401 (auth)', 401],
+    ['a Travelpayouts 402 quota refusal', 402],
+  ])(
+    '1: %s stops the run before any SearchApi credit: the free provider goes first so a broken setup costs nothing (cost review M1)',
+    async (_label, status) => {
+      const ports = smokePorts();
+      const { r, urls } = await smoke(ports, cli(), {
+        failOn: (u) =>
+          u.hostname === 'api.travelpayouts.com' ? { status, body: { error: 'refused' } } : undefined,
+      });
+      expect(r.exitCode).toBe(EXIT.failed);
+      expect(urls.filter((u) => u.hostname === 'www.searchapi.io')).toEqual([]);
+      expect(billed(ports, r)).toBe(0);
+      expect(r.reports.map((p) => [p.providerId, p.stage, p.status])).toEqual([
+        ['travelpayouts', 'discovery', 'error'],
+        ['searchapi', 'discovery', 'skipped'],
+        ['searchapi', 'itinerary', 'skipped'],
+      ]);
+      expect(r.reports[1]?.detail).toBe(
+        'Travelpayouts failed first (auth, quota or configuration); no credit spent',
+      );
+    },
+  );
+
   it('1: step 2 showing another price than step 1 fails the check', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step2Price: 610 });
     expect(r.exitCode).toBe(EXIT.failed);
