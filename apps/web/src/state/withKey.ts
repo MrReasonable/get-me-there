@@ -13,7 +13,11 @@ export function withKey<T extends object, K extends OptionalKeys<T>>(
   key: K,
   value: T[K] | undefined,
 ): T;
-export function withKey<T extends object, K extends keyof T>(obj: T, key: K, value: T[K]): T;
+export function withKey<T extends object, K extends keyof T>(
+  obj: T,
+  key: K,
+  value: Exclude<T[K], undefined>,
+): T;
 export function withKey<T extends object, K extends keyof T>(obj: T, key: K, value: T[K] | undefined): T {
   const next = { ...obj };
   if (value === undefined) delete next[key];

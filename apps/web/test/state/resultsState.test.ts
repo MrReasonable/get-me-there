@@ -105,6 +105,8 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     // `undefined` is accepted only for the keys OptionalKeys names, so withKey({ id: 'x' }, 'id', undefined) does not compile.
     expectTypeOf<OptionalKeys<{ id: string; note?: string }>>().toEqualTypeOf<'note'>();
     expectTypeOf<OptionalKeys<{ id: string }>>().toEqualTypeOf<never>();
+    // a required key typed `string | undefined` is not optional either, so it cannot be removed through undefined
+    expectTypeOf<OptionalKeys<{ id: string | undefined; note?: string }>>().toEqualTypeOf<'note'>();
     expect(activeFilterCount(full.filters)).toBe(10);
   });
 

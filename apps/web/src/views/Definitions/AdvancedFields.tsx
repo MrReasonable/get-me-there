@@ -33,7 +33,7 @@ export function AdvancedFields({
   const setC = <K extends OptionalKeys<DraftConstraints>>(k: K, value: DraftConstraints[K] | undefined) =>
     setDraft({ ...draft, constraints: withKey(c, k, value) });
   // why: a required policy field always has a value; only the optional ones can be cleared.
-  const setV = <K extends keyof DraftPolicy>(k: K, value: DraftPolicy[K]) =>
+  const setV = <K extends keyof DraftPolicy>(k: K, value: Exclude<DraftPolicy[K], undefined>) =>
     setDraft({ ...draft, verification: withKey(v, k, value) });
   const setVOptional = <K extends OptionalKeys<DraftPolicy>>(k: K, value: DraftPolicy[K] | undefined) =>
     setDraft({ ...draft, verification: withKey(v, k, value) });
