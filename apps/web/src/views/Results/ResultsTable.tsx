@@ -1,4 +1,11 @@
-import { effectiveAge, formatFetchedAgo, priceUnconfirmed, resultRowKey, type SortKey } from '@gmt/core';
+import {
+  effectiveAge,
+  formatAgeShort,
+  formatFetchedAgo,
+  priceUnconfirmed,
+  resultRowKey,
+  type SortKey,
+} from '@gmt/core';
 import {
   createColumnHelper,
   type ExpandedState,
@@ -119,9 +126,20 @@ function SortHeader({ id }: { id: ColumnId }) {
   );
 }
 
+/**
+ * Spec §11's fetched-ago column (pft-007): the effective age leads ("5d old", "≤2d old", "age unknown"), because it is
+ * the age that explains a vendor's different price today; the fetch age, often the same on every row, is the small
+ * second line. Both are core's labels.
+ */
 function FetchedAgo({ row }: { row: ResultRow }) {
   const now = useNow();
-  return <span>{formatFetchedAgo(effectiveAge(row.provenance, now))}</span>;
+  const age = effectiveAge(row.provenance, now);
+  return (
+    <span className="flex flex-col">
+      <span>{formatAgeShort(age)}</span>
+      <span className="text-xs text-slate-700">{formatFetchedAgo(age)}</span>
+    </span>
+  );
 }
 
 /**

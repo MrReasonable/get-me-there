@@ -5,6 +5,7 @@ import {
   effectiveAge,
   filterRows,
   formatAgeFull,
+  formatAgeShort,
   formatFetchedAgo,
   type ResultFilters,
   resultRowKey,
@@ -582,14 +583,21 @@ describe('empty, loading and error states (reviews UI-5, tsr-011, tsr-002)', () 
     expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
-  it('every Fetched cell is core formatFetchedAgo of its row (review tsr2-007)', async () => {
+  it('every Fetched cell leads with the effective age, the fetch age below it, both core labels (tsr2-007, pft-007)', async () => {
     countResults(resultsResponse({ rows: five }));
     view();
     await table();
     const fetchedColumn = headers().indexOf('Fetched');
-    const cells = dataRows().map((r) => r.querySelectorAll('td')[fetchedColumn]?.textContent);
-    expect(cells).toEqual(filterRows(five, {}).map((r) => formatFetchedAgo(effectiveAge(r.provenance, NOW))));
-    expect(cells[0]).toBe('fetched 5h ago');
+    const cells = dataRows().map((r) => r.querySelectorAll('td')[fetchedColumn]);
+    // why: pft-007: the observed age (why Aviasales today differs) is the larger text; the fetch age, often the same on
+    // every row, is the small second line.
+    expect(cells.map((c) => c?.firstElementChild?.firstElementChild?.textContent)).toEqual(
+      filterRows(five, {}).map((r) => formatAgeShort(effectiveAge(r.provenance, NOW))),
+    );
+    expect(cells.map((c) => c?.querySelector('.text-xs')?.textContent)).toEqual(
+      filterRows(five, {}).map((r) => formatFetchedAgo(effectiveAge(r.provenance, NOW))),
+    );
+    expect(cells[0]?.querySelector('.text-xs')?.textContent).toBe('fetched 5h ago');
   });
 
   it('a page of itinerary rows of unknown vendor age is labelled, not called stale (decision 44)', async () => {
