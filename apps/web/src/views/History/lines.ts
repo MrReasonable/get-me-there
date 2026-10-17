@@ -220,20 +220,20 @@ export function linesFromItinerary(resp: ItineraryHistoryResponse, order: RunOrd
     const out: PlotLine[] = [];
     if (confirmed.length > 0) {
       out.push({
-        key: `offer:${s.providerId}:${s.seller}`,
+        key: `offer:${s.providerId}:${s.seller}:${s.cabin}`,
         kind: 'offer',
         providerId: s.providerId,
-        name: H.offerSeries(sourceOf(confirmed), s.seller),
+        name: H.offerSeries(sourceOf(confirmed), s.seller, cabinName(s.cabin)),
         colour: 0,
         points: withBreaks(confirmed.map(toPlot), joined, fetchGap),
       });
     }
     if (unconfirmed.length > 0) {
       out.push({
-        key: `offer-unconfirmed:${s.providerId}:${s.seller}`,
+        key: `offer-unconfirmed:${s.providerId}:${s.seller}:${s.cabin}`,
         kind: 'offer-unconfirmed',
         providerId: s.providerId,
-        name: H.offerUnconfirmedSeries(sourceOf(unconfirmed), s.seller),
+        name: H.offerUnconfirmedSeries(sourceOf(unconfirmed), s.seller, cabinName(s.cabin)),
         colour: 0,
         points: withBreaks(unconfirmed.map(toPlot), joined, fetchGap),
       });

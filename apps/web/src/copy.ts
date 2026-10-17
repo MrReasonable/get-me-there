@@ -719,9 +719,10 @@ export const COPY = {
     routeSeries: (provider: string, cabin: string) => `${provider} route-level series, indicative · ${cabin}`,
     calendarSeries: (source: string, cabin: string) =>
       `${source} · ${cabin} · cheapest calendar price across this pair's cells, per run (constraints not checked)`,
-    offerSeries: (source: string, seller: string) => `${source} · itinerary offer · ${seller}`,
-    offerUnconfirmedSeries: (source: string, seller: string) =>
-      `${source} · itinerary offer · ${seller} · price not confirmed by the final step`,
+    offerSeries: (source: string, seller: string, cabin: string) =>
+      `${source} · itinerary offer · ${seller} · ${cabin}`,
+    offerUnconfirmedSeries: (source: string, seller: string, cabin: string) =>
+      `${source} · itinerary offer · ${seller} · ${cabin} · price not confirmed by the final step`,
     pairPrefix: (pair: string, name: string) => `${pair} · ${name}`,
     cheapestCell: (origin: string, destination: string, dep: string, ret: string) =>
       `cheapest searched cell ${origin}→${destination} ${dep}–${ret}`,

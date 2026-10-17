@@ -120,13 +120,29 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
     expect(route.map((l) => l.name)).toEqual(['SearchApi route-level series, indicative · cabin not stated']);
     expect(linesFromRoute(threeRuns, order, 'LHR-JFK').fetch[0]?.name).toMatch(/^LHR-JFK · Aviasales cache/);
   });
+  it('one seller in two cabins is two series: own key, own name with the cabin, own colour (review prov I2)', () => {
+    const base = itineraryHistory();
+    const first = base.series[0];
+    if (first === undefined) throw new Error('fixture has a series');
+    const lines = linesFromItinerary(
+      itineraryHistory({ series: [first, { ...first, cabin: 'business' }] }),
+      runOrder(runsAt(5, 6, 173, 174)),
+    );
+    const keys = lines.map((l) => l.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toHaveLength(4);
+    expect(lines.map((l) => l.name)).toContain(
+      'Google Flights via SearchApi · itinerary offer · Example Travel · business',
+    );
+    expect(new Set(lines.map((l) => l.colour)).size).toBe(4);
+  });
   it('an itinerary splits confirmed and unconfirmed prices into a solid and a dotted series, joined by run order', () => {
     const lines = linesFromItinerary(itineraryHistory(), runOrder(runsAt(5, 6, 173, 174)));
     expect(lines.map((l) => [l.kind, l.name])).toEqual([
-      ['offer', 'Google Flights via SearchApi · itinerary offer · Example Travel'],
+      ['offer', 'Google Flights via SearchApi · itinerary offer · Example Travel · economy'],
       [
         'offer-unconfirmed',
-        'Google Flights via SearchApi · itinerary offer · Example Travel · price not confirmed by the final step',
+        'Google Flights via SearchApi · itinerary offer · Example Travel · economy · price not confirmed by the final step',
       ],
     ]);
     // why: 173 → 5 skips the runs 174 and 6 between them, so the confirmed line breaks; 174 → 6 skips 173 and breaks too.
@@ -410,7 +426,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     // why: prov-r2-010 — the badge sits inside each unconfirmed price, first, as everywhere else.
     for (const cell of within(unconfirmed).getAllByTestId('price-cell'))
       expect(cell).toHaveTextContent('price not confirmed by the final step');
-    const confirmed = await findByRole('table', { name: /Example Travel: every point/ });
+    const confirmed = await findByRole('table', { name: /Example Travel · economy: every point/ });
     expect(within(confirmed).getAllByTestId('price-cell')[0]).not.toHaveTextContent('price not confirmed');
     expect(getByText('LHR→JFK · Sun 14 Mar 2027 to Sun 28 Mar 2027 · BA')).toBeInTheDocument();
     expect(unconfirmed).toHaveTextContent('JFK');
