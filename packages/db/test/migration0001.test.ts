@@ -5,17 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { applyMigrations, pendingMigrations } from '../src/migrate.js';
 import { MIGRATIONS_DIR } from '../src/paths.js';
 import { DefinitionsRepo } from '../src/repositories/definitions.js';
-import { freshDb, openTracked, T0, tmpDbPath, tmpDir } from './helpers/db.js';
+import { freshDb, openTracked, sqliteCode, T0, tmpDbPath, tmpDir } from './helpers/db.js';
 import { exampleDefinitionInput } from './helpers/factories.js';
-
-const sqliteCode = (f: () => unknown): string | null => {
-  try {
-    f();
-    return null;
-  } catch (err) {
-    return err instanceof Error && 'code' in err && typeof err.code === 'string' ? err.code : null;
-  }
-};
 
 /** A copy of the migrations folder that stops at 0000, as an install made before this migration has it. */
 function onlyInitial(): string {
