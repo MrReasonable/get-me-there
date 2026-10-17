@@ -13,4 +13,8 @@ describe('@gmt/engine package', () => {
     // why: a compile-time check (tests are type-checked); WP8 imports this type rather than restating the shape
     expectTypeOf<pkg.StartOptions>().toEqualTypeOf<Parameters<pkg.Engine['start']>[1]>();
   });
+  it('exports SOFT_CONFIRM_CALL_SHARE, the call share above which a run needs confirming (decision 53)', () => {
+    // why: WP8 imports the engine's value rather than keeping a copy that could drift
+    expect(pkg.SOFT_CONFIRM_CALL_SHARE).toBe(0.2);
+  });
 });
