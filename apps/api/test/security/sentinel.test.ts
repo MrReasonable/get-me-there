@@ -73,10 +73,13 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
     expect(r.status).toBe(0);
   });
 
-  it('raw bodies are ignored by git and redacted files are not', () => {
+  // why: plan decision 61 — recorded vendor responses (raw or redacted) are not ours to republish, so git
+  // ignores them all; only our own parameter allowlists stay trackable.
+  it('raw and redacted recordings are ignored by git; parameter allowlists are not', () => {
     const base = 'packages/providers/fixtures/recorded/searchapi/_api_v1_search/2026-10-20-0123456789ab';
     const ignored = (p: string) => spawnSync('git', ['check-ignore', '-q', p], { cwd: REPO }).status;
     expect(ignored(`${base}.raw.json`)).toBe(0);
-    expect(ignored(`${base}.json`)).toBe(1);
+    expect(ignored(`${base}.json`)).toBe(0);
+    expect(ignored('packages/providers/fixtures/recorded/searchapi/params-2026-10-20.json')).toBe(1);
   });
 });
