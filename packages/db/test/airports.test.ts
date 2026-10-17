@@ -114,7 +114,7 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
 
   it('the vendored metro list holds only current multi-airport cities: no one-airport metro, no member the data does not seed (dm-M3)', () => {
     const { metros, airports } = loadAirportsDataset(AIRPORTS_DATA_DIR);
-    const seeded = new Set(airports.map((a) => a.iata));
+    const seeded = new Set<string>(airports.map((a) => a.iata));
     for (const [code, members] of Object.entries(metros)) {
       expect(members.length, `${code} has at least two members`).toBeGreaterThanOrEqual(2);
       // a closed or former airport is not in the airports file, so a stale member would show up here
