@@ -1,5 +1,5 @@
 import { addDays, type CellKey, type Iata, type IsoDate, type IsoMonth, monthOf } from '@gmt/core';
-import { type KeyboardEvent, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
@@ -36,6 +36,8 @@ export interface CalendarGridProps {
   /** Phone width: each day shows its compact face, the rest is in the panel (plan decision 52, review ui-r2-001). */
   compact: boolean;
   onOpen(date: IsoDate, cell: CellKey | null): void;
+  /** Phone width draws one month: a key that leaves it asks the parent to show the target's month (review ui M7). */
+  onMonth?(month: IsoMonth): void;
 }
 
 /** Monday-first weeks of one month, null for padding. */
@@ -75,11 +77,20 @@ export function targetOf(date: IsoDate, key: string): IsoDate | null {
  * View B heatmap: a captioned table of day buttons per month (plan decision 51), roving tabindex; arrows move by a day or a week, Home and End to the ends of
  * the week, PageUp and PageDown by a month; Enter or Space opens the side panel (spec §11 View B, Accessibility).
  */
-export function CalendarGrid({ days, model, months, destinationNotes, compact, onOpen }: CalendarGridProps) {
+export function CalendarGrid({
+  days,
+  model,
+  months,
+  destinationNotes,
+  compact,
+  onOpen,
+  onMonth,
+}: CalendarGridProps) {
   const byDate = new Map(days.map((d) => [d.date, d]));
   const shown = new Set(months);
   const [focusDate, setFocusDate] = useState<IsoDate | null>(null);
   const refs = useRef(new Map<IsoDate, HTMLButtonElement>());
+  const pending = useRef<IsoDate | null>(null);
   // why: the tab stop is the focused day if it is still drawn, else the first drawn day.
   const firstShown = days.find((d) => shown.has(monthOf(d.date)))?.date ?? null;
   const tabStop =
@@ -98,8 +109,20 @@ export function CalendarGrid({ days, model, months, destinationNotes, compact, o
     if (byDate.has(next) && shown.has(monthOf(next))) {
       setFocusDate(next);
       refs.current.get(next)?.focus();
+    } else if (byDate.has(next) && onMonth !== undefined) {
+      // why: at phone width the target lies in another month: show that month, then focus the day once it is drawn
+      pending.current = next;
+      setFocusDate(next);
+      onMonth(monthOf(next));
     }
   };
+  useEffect(() => {
+    const date = pending.current;
+    if (date !== null && refs.current.has(date)) {
+      pending.current = null;
+      refs.current.get(date)?.focus();
+    }
+  });
 
   return (
     <div className="flex flex-col gap-6">

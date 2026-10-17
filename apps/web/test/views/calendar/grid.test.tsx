@@ -396,6 +396,27 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(dayCell('2027-03-30').className).toContain(FOCUS_RING);
   });
 
+  it('at phone width a key that leaves the drawn month asks for the target month (review ui M7)', async () => {
+    const days = [vDay('2027-03-30', 40000), vDay('2027-04-01', 40000), vDay('2027-04-30', 40000)];
+    const model = buildCalendarModel(days, 'verified', NOW);
+    const onMonth = vi.fn();
+    const { user } = renderWithProviders(
+      <CalendarGrid
+        days={days}
+        model={model}
+        months={[asIsoMonth('2027-03')]}
+        destinationNotes={{}}
+        compact
+        onOpen={vi.fn()}
+        onMonth={onMonth}
+      />,
+    );
+    dayCell('2027-03-30').focus();
+    await user.keyboard('{PageDown}');
+    expect(onMonth).toHaveBeenLastCalledWith('2027-04');
+    expect(dayCell('2027-03-30')).toBeInTheDocument();
+  });
+
   it('clicking a glyph day opens the panel with no preselected cell', async () => {
     const { onOpen, user } = renderGrid([gDay('2027-03-08', { not_run: 48 })]);
     await user.click(dayCell('2027-03-08'));

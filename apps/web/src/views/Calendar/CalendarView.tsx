@@ -173,6 +173,7 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
             destinationNotes={definition.destinationNotes}
             compact={narrow}
             onOpen={(date, cell) => setOpen({ date, cell })}
+            {...(narrow ? { onMonth: (m: IsoMonth) => setParam(CALENDAR_PARAMS.month, m) } : {})}
           />
         </>
       )}
