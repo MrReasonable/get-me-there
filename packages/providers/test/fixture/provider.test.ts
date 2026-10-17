@@ -285,7 +285,9 @@ describe('fixture discovery through the real http-kit and msw', () => {
     expect(first.kind).toBe('tile');
     // why: LGW-EWR is served in pages of 40, so this tile takes more than one call; guard the premise.
     expect(budget.count('fetch')).toBeGreaterThan(1);
+    const fetched = budget.count('fetch');
     await drive(discovery.fetchTile(plan, paged, ctx({ executionId: 'exec-2' })));
+    expect(budget.count('fetch')).toBe(fetched); // the repeat is served wholly from the cache
     expect(budget.count('cache-hit')).toBe(1);
   });
 
