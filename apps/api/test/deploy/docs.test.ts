@@ -2,7 +2,7 @@
 // and no other route, the plan's single exit-code table as the code defines it, and no banned word.
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
 import { EXIT } from '../../src/tools/types.js';
@@ -76,6 +76,21 @@ describe('recorded vendor responses are local-only (decision 61)', () => {
   });
 });
 
+// why: the paths in these checks (/data) do not exist on the test host, and the checks are about other rules
+const identity = (p: string): string => p;
+
+/** The environment compose gives the container, reduced to what these checks need. */
+function containerEnv(extra: Record<string, string>): Record<string, string> {
+  return {
+    NODE_ENV: 'production',
+    IN_CONTAINER: '1',
+    DATABASE_PATH: '/data/get-me-there.db',
+    APP_BASIC_AUTH_USER: 'operator',
+    APP_BASIC_AUTH_PASS: 'a-long-random-password-0123',
+    ...extra,
+  };
+}
+
 describe('docs/setup.md operations rules (plan decision 63; round-1 review)', () => {
   const setup = read('docs/setup.md');
   const flat = setup.replace(/\s+/g, ' ');
@@ -117,8 +132,37 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
 
   it('uses a placeholder password the config refuses, and a private .env', () => {
     expect(setup).toContain('APP_BASIC_AUTH_PASS=CHANGE-ME');
-    expect('CHANGE-ME'.length).toBeLessThan(12);
+    // why: review code-architect M1 — the claim is about the config, so the config parses it (not a literal length)
+    const refused = parseConfig(containerEnv({ APP_BASIC_AUTH_PASS: 'CHANGE-ME' }), { realpath: identity });
+    expect(refused.ok ? [] : refused.errors.map((e) => e.field)).toContain('APP_BASIC_AUTH_PASS');
+    expect(parseConfig(containerEnv({}), { realpath: identity }).ok).toBe(true);
     expect(setup).toContain('chmod 600 .env');
+  });
+
+  it('states the real SMTP_TLS=none rule: loopback only, which inside the container is the container itself', () => {
+    // why: review code-architect I1 — the config accepts `none` for a loopback host under any NODE_ENV and does not
+    // look at IN_CONTAINER, so the docs must not say the container refuses it.
+    const mail = {
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: '1025',
+      SMTP_TLS: 'none',
+      SMTP_USER: 'dev',
+      SMTP_PASS: 'dev',
+    };
+    const to = { ALERT_EMAIL_TO: 'operator@example.com', ALERT_EMAIL_FROM: 'get-me-there@example.com' };
+    expect(parseConfig(containerEnv({ ...mail, ...to }), { realpath: identity }).ok).toBe(true);
+    expect(flat).not.toContain('is refused in the container');
+    expect(flat).not.toContain('the container refuses');
+    expect(flat).not.toContain('would exit 78');
+    expect(flat).toContain('`SMTP_TLS=none` is accepted only for a loopback host');
+    expect(flat).toContain('inside the container, loopback is the container itself');
+    expect(flat).toContain('mail fails when it is sent');
+  });
+
+  it('gets the pre-migration backup off the volume and tells the cron user how to reach docker', () => {
+    // why: review devops M3 and M5
+    expect(flat).toContain('run the cron command of section 6 once by hand');
+    expect(flat).toContain('The cron user must be in the `docker` group');
   });
 
   it('leaves the smoke test to WP13 (decision 63)', () => {

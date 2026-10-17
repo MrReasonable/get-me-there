@@ -174,8 +174,10 @@ ALERT_EMAIL_TO=operator@example.com
 ALERT_EMAIL_FROM=get-me-there@example.com
 ```
 
-`ALERT_EMAIL_TO` and `ALERT_EMAIL_FROM` take one address each. `SMTP_TLS=none` is refused in
-the container; it exists for the local mail catcher of section 12. `ALERT_EMAIL_MAX_PER_HOUR`
+`ALERT_EMAIL_TO` and `ALERT_EMAIL_FROM` take one address each. `SMTP_TLS=none` is accepted only for a loopback host,
+and inside the container, loopback is the container itself, so a mail catcher on the host is
+unreachable and mail fails when it is sent; use `implicit` or `starttls` here (`none` is for the
+local mail catcher of section 12). `ALERT_EMAIL_MAX_PER_HOUR`
 (default 20) caps outgoing email: beyond it a message is logged and dropped, and the alerts it
 carried stay queued with the reason shown in the Alerts view.
 
@@ -270,7 +272,9 @@ sudo install -d -m 0700 -o operator /var/backups/get-me-there
 ```
 
 Then add a cron job, for example `/etc/cron.d/get-me-there` (adjust the user, the path of
-your checkout and the address):
+your checkout and the address). The cron user must be in the `docker` group (which is root on
+this host, section 1), or put the same line in root's crontab; the `docker compose exec` still
+runs as `node` inside:
 
 ```cron
 MAILTO=operator@example.com
@@ -421,7 +425,9 @@ migrations and the first airport seeding.
 - **Upgrade.** Back up first (section 6), then from your checkout: `git pull`,
   `docker compose up -d --build --wait`. When the new version brings schema migrations, the app
   backs the database up again before applying them and logs `backup before N migration(s):
-  <file>`.
+  <file>`. That file is the one a rollback needs and it sits on the volume, where newer backups
+  prune it: once the log shows that line, run the cron command of section 6 once by hand (or
+  `docker compose cp` that file out) so a copy exists off the volume.
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
   named (section 6, Restore), and run `docker compose up -d --build --wait`. An older version
   cannot use a database a newer one has migrated, so the restore is required.
@@ -442,8 +448,8 @@ docker compose --profile dev up -d mailpit   # optional: catch alert email local
 
 `pnpm dev` runs the api and the web app with hot reload against `data/dev.db` (`data/` is in
 `.gitignore`); it reads no `.env`, so it takes its settings from the shell. To send its mail to
-Mailpit, export these in that shell, never in `.env` (the container refuses `SMTP_TLS=none`
-and would exit 78):
+Mailpit, export these in that shell, never in `.env`: the container would accept
+them (loopback host), but there loopback is the container itself, so mail fails when it is sent:
 
 ```bash
 export SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_TLS=none SMTP_USER=dev SMTP_PASS=dev
