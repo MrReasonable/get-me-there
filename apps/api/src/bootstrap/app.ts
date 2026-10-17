@@ -7,15 +7,17 @@
  * wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order). A boot that fails after taking the lock releases
  * it and stops the heartbeat before the database closes.
  */
-import { type Clock, type Config, type Logger, type Secret, systemClock } from '@gmt/core';
+import { type Clock, type Config, type Logger, microGbpToPence, type Secret, systemClock } from '@gmt/core';
 import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp } from '../app.js';
 import { createLogger } from '../logger.js';
+import { planOf, providerBudget, zeroCapBlocks } from '../read/usage.js';
 import type { AppEnv, HttpToolRunners } from '../routes/types.js';
 import { safeMessage } from '../safeMessage.js';
+import { API_TEXT } from '../text.js';
 import { inProcessTools } from '../tools/inProcess.js';
 import { EXIT } from '../tools/types.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
@@ -84,6 +86,32 @@ export function assertAuthInvariants(config: Config, log: Logger): void {
       'serving without auth on a non-loopback bind (ALLOW_UNAUTHENTICATED)',
     );
   }
+}
+
+/**
+ * Devops-final-002, spec §12: one info line naming each configured provider's plan, window and schedule exclusion and
+ * the monthly spend cap, so `docker compose logs` says what the app will spend; and, by ruling 5, the warning only when
+ * a provider's calls cost money under a zero spend cap. No secret is logged: ids, plan names and numbers only.
+ */
+export function logProvidersConfigured(ports: Pick<Ports, 'config' | 'providers'>, log: Logger): void {
+  const { config } = ports;
+  log.info(
+    {
+      providers: ports.providers.map((p) => {
+        const b = providerBudget(config, p.id);
+        return {
+          id: p.id,
+          plan: planOf(config, p.id),
+          window: b.window,
+          excludedFromSchedule: b.excludedFromSchedule,
+        };
+      }),
+      monthlySpendCapPence: microGbpToPence(config.spend.monthlyCapMicroGbp),
+    },
+    'providers configured',
+  );
+  const blocked = ports.providers.filter((p) => zeroCapBlocks(config, p.id)).map((p) => p.id);
+  if (blocked.length > 0) log.warn({ providers: blocked }, API_TEXT.zeroCapBootWarning);
 }
 
 function listen(app: Hono<AppEnv>, config: Config): Promise<{ server: ServerType; port: number }> {
@@ -157,6 +185,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     // why: spec §8.1, §8.3 — WP11's alert runner as the alerts step, the notifiers config asks for (engine.ts).
     const engine = engineFor(ports, log);
     await engine.boot();
+    logProvidersConfigured(ports, log);
     const app = createApp(ports, engine, { webRoot: deps.assets.webRoot, tools: deps.tools?.(ports) ?? {} });
     const bound = deps.listen ? await listen(app, config) : null;
     const beat = heartbeat;

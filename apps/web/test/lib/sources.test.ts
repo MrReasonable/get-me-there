@@ -14,6 +14,7 @@ describe('source labels (spec §11 vocabulary; synthetic tagged end to end, spec
         plan: 'synthetic',
         excludedFromSchedule: false,
         notices: [],
+        capNote: null,
         capabilities: {
           discovery: { sourceKind: 'synthetic', provenanceNote: 'synthetic', maxAgeHours: 0 },
           verification: null,

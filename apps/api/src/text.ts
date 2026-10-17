@@ -41,6 +41,10 @@ export const API_TEXT = {
   coverageCheckUnavailable:
     'the coverage check reads the free Travelpayouts cache; set TRAVELPAYOUTS_TOKEN to enable it',
   zeroCapVerification: 'verification will not run: spend cap is 0',
+  zeroCapBootWarning: 'billed provider enabled under a zero spend cap: verification will not run',
+  // why: ruling 5: on a plan whose calls cost £0 the spend cap cannot stop a call, so the card names the cap that does.
+  callCapGoverns: (window: 'month' | 'lifetime', cap: number) =>
+    `calls cost £0 each on this plan, so the spend cap does not stop them; the ${window === 'lifetime' ? 'lifetime' : 'monthly'} call cap (${cap} calls) is the hard stop`,
   // why: formatPence (core) is the only money formatter in user-facing strings (plan decision 15).
   ceilingNote: (capPence: number, feesPence: number) =>
     `monthly spend cap ${formatPence(capPence)}, of which ${formatPence(feesPence)} is subscription fees counted once`,

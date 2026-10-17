@@ -39,6 +39,23 @@ export function providerScopes(config: Config, providerId: ProviderId): BudgetSc
   return [{ kind, providerId }];
 }
 
+/**
+ * Ruling 5 (decision 67): a zero spend cap stops a provider only when its calls cost money. The guard passes zero-cost
+ * calls under any spend cap (spec §5.3), so on the trial and the $40 plan verification does run, bounded by the call cap.
+ */
+export function zeroCapBlocks(config: Config, id: ProviderId): boolean {
+  const b = providerBudget(config, id);
+  return b.billable && b.costPerCallMicroGbp > 0 && config.spend.monthlyCapMicroGbp === 0;
+}
+
+export type PlanName = 'trial' | '40usd' | 'free' | 'synthetic';
+
+/** The plan a provider runs under, in the providers contract's words (spec §10, §12). */
+export function planOf(config: Config, id: ProviderId): PlanName {
+  if (id === 'searchapi') return config.providers.searchapi?.plan ?? 'trial';
+  return id === 'fixture' ? 'synthetic' : 'free';
+}
+
 /** Every scope of the spec §8.1 pre-start check: execution scopes (when given), each provider, global. */
 export function budgetScopes(ports: Ports, executionId: string | null): BudgetScope[] {
   const execution: BudgetScope[] =

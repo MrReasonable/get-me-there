@@ -403,6 +403,7 @@ export function providersResponse(
         plan: 'free',
         excludedFromSchedule: false,
         notices: [],
+        capNote: null,
         capabilities: {
           discovery: {
             sourceKind: 'authorised-cached',
@@ -420,6 +421,8 @@ export function providersResponse(
         plan: '40usd',
         excludedFromSchedule: false,
         notices: [],
+        capNote:
+          'calls cost £0 each on this plan, so the spend cap does not stop them; the monthly call cap (10000 calls) is the hard stop',
         capabilities: {
           discovery: {
             sourceKind: 'scraped-aggregate',

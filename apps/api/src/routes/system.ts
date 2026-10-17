@@ -10,7 +10,14 @@ import {
 import type { z } from 'zod';
 import { defaultDefinitionInput } from '../defaults.js';
 import { hostAllowed } from '../middleware/hardening.js';
-import { budgetScopes, providerBudget, providerScopes, usageOf } from '../read/usage.js';
+import {
+  budgetScopes,
+  planOf,
+  providerBudget,
+  providerScopes,
+  usageOf,
+  zeroCapBlocks,
+} from '../read/usage.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { NO_INPUT, plain, route } from './define.js';
@@ -63,9 +70,13 @@ export function healthDetail(ctx: RouteContext): HealthDetail {
   };
 }
 
-function planOf(config: Config, id: ProviderId): ProvidersResponse['providers'][number]['plan'] {
-  if (id === 'searchapi') return config.providers.searchapi?.plan ?? 'trial';
-  return id === 'fixture' ? 'synthetic' : 'free';
+/** Ruling 5: a billed provider whose calls cost £0 is stopped by its call cap alone; the card names that cap. */
+function capNoteOf(ctx: RouteContext, id: ProviderId): string | null {
+  const b = providerBudget(ctx.ports.config, id);
+  if (!b.billable || b.costPerCallMicroGbp > 0) return null;
+  const [scope] = providerScopes(ctx.ports.config, id);
+  const cap = scope === undefined ? null : usageOf(ctx.ports, scope).cap;
+  return cap === null ? null : API_TEXT.callCapGoverns(b.window, cap);
 }
 
 /**
@@ -84,9 +95,9 @@ export function providersResponse(ctx: RouteContext): ProvidersResponse {
       plan: planOf(config, p.id),
       usage: providerScopes(config, p.id).map((s) => usageOf(ctx.ports, s)),
       excludedFromSchedule: providerBudget(config, p.id).excludedFromSchedule,
-      // why: spec §10/§12: a billed provider enabled under a zero cap cannot verify; say so where the operator looks.
-      notices:
-        p.id === 'searchapi' && config.spend.monthlyCapMicroGbp === 0 ? [API_TEXT.zeroCapVerification] : [],
+      // why: spec §10/§12, ruling 5: only a call that costs money is stopped by a zero spend cap; say so where the operator looks.
+      notices: zeroCapBlocks(config, p.id) ? [API_TEXT.zeroCapVerification] : [],
+      capNote: capNoteOf(ctx, p.id),
     })),
     synthetic: ctx.ports.providers.some((p) => p.id === 'fixture'),
     presets: {

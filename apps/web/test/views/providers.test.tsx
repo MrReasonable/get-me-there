@@ -45,6 +45,14 @@ describe('Providers view (spec §10, §11)', () => {
     expect(formatDuration(48)).toBe('2d'); // canary for the format
   });
 
+  it('names the call cap that governs a £0-per-call plan as a plain line, never an alert (ruling 5)', async () => {
+    renderWithProviders(<ProvidersView />);
+    const searchapi = await screen.findByRole('region', { name: 'SearchApi' });
+    const note = within(searchapi).getByText(/the monthly call cap \(10000 calls\) is the hard stop/);
+    expect(note.closest('[role="alert"]')).toBeNull();
+    expect(within(searchapi).queryByRole('alert')).toBeNull();
+  });
+
   it("shows each provider's notices (the zero-cap message) and marks unconfigured providers", async () => {
     server.use(
       http.get(`${API}/providers`, () =>

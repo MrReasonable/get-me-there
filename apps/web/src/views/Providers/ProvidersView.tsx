@@ -74,6 +74,8 @@ export function ProvidersView() {
             </p>
           ))}
           <p>{COPY.plan(COPY.planName[p.plan])}</p>
+          {/* why: ruling 5: which call cap stops a £0-per-call plan; information, not a warning, so no alert role */}
+          {p.capNote !== null ? <p data-cost="">{p.capNote}</p> : null}
           {p.excludedFromSchedule ? <p>{COPY.excludedFromSchedule}</p> : null}
           {p.capabilities.discovery !== null ? (
             <Capability title={COPY.capabilityDiscovery} info={p.capabilities.discovery} />

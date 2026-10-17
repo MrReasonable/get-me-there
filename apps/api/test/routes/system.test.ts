@@ -135,10 +135,11 @@ describe('GET /api/providers (spec §10)', () => {
     );
     expect(budget.scopes.map((s) => s.scope)).not.toContain('provider-month:searchapi');
   });
-  it('says verification will not run when a billed provider is enabled under a zero cap', async () => {
+  it('says verification will not run only when calls cost money and the spend cap is 0 (ruling 5)', async () => {
     const x = await harness({
       SEARCHAPI_KEY: SENTINEL_SA,
       SEARCHAPI_PLAN: '40usd',
+      SEARCHAPI_COST_PER_CALL_MICRO_GBP: '5000',
       MONTHLY_SPEND_CAP_PENCE: '0',
     });
     const body = await expectContract(
@@ -147,10 +148,36 @@ describe('GET /api/providers (spec §10)', () => {
       '/api/providers',
       apiContract.providersResponseSchema,
     );
-    expect(body.providers.find((p) => p.providerId === 'searchapi')?.notices).toContain(
-      API_TEXT.zeroCapVerification,
-    );
+    const sa = body.providers.find((p) => p.providerId === 'searchapi');
+    expect(sa?.notices).toEqual([API_TEXT.zeroCapVerification]);
+    expect(sa?.capNote).toBeNull();
   });
+  it.each([
+    [
+      'the trial',
+      { SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '76' },
+      API_TEXT.callCapGoverns('lifetime', 24),
+    ],
+    [
+      'the $40 plan under a zero cap',
+      { SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: '0' },
+      API_TEXT.callCapGoverns('month', 10_000),
+    ],
+  ])(
+    'on %s calls cost £0, so no zero-cap notice: the card names the call cap that governs (ruling 5)',
+    async (_l, env, note) => {
+      const x = await harness({ SEARCHAPI_KEY: SENTINEL_SA, ...env });
+      const body = await expectContract(
+        await x.request('/api/providers'),
+        'GET',
+        '/api/providers',
+        apiContract.providersResponseSchema,
+      );
+      const sa = body.providers.find((p) => p.providerId === 'searchapi');
+      expect(sa?.notices).toEqual([]);
+      expect(sa?.capNote).toBe(note);
+    },
+  );
 });
 
 describe('GET /api/budget and GET /api/scheduler/jobs (spec §7 budget windows, §8.2)', () => {
