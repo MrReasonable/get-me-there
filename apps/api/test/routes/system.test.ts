@@ -102,10 +102,8 @@ describe('GET /api/providers (spec §10)', () => {
     );
     const fixture = body.providers.find((p) => p.providerId === 'fixture');
     expect(fixture?.plan).toBe('synthetic');
-    expect(fixture?.usage.map((u) => u.scope)).toEqual([
-      'provider-month:fixture',
-      'provider-lifetime:fixture',
-    ]);
+    // why: only the window the plan uses is reported, so a null cap can only mean "no cap" (ruling 2, decision 67).
+    expect(fixture?.usage.map((u) => u.scope)).toEqual(['provider-month:fixture']);
     expect(fixture?.notices).toEqual([]);
     expect(body.synthetic).toBe(true);
     expect(body.presets).toMatchObject({
@@ -113,6 +111,29 @@ describe('GET /api/providers (spec §10)', () => {
       discoveryRefreshHours: 168,
       schedulerTimezone: 'Europe/London',
     });
+  });
+  it('a trial plan reports the lifetime window alone, with its cap (ruling 2, F2)', async () => {
+    const x = await harness({
+      SEARCHAPI_KEY: SENTINEL_SA,
+      SEARCHAPI_PLAN: 'trial',
+      SEARCHAPI_TRIAL_USED: '76',
+    });
+    const body = await expectContract(
+      await x.request('/api/providers'),
+      'GET',
+      '/api/providers',
+      apiContract.providersResponseSchema,
+    );
+    expect(
+      body.providers.find((p) => p.providerId === 'searchapi')?.usage.map((u) => [u.scope, u.cap]),
+    ).toEqual([['provider-lifetime:searchapi', 24]]);
+    const budget = await expectContract(
+      await x.request('/api/budget'),
+      'GET',
+      '/api/budget',
+      apiContract.budgetResponseSchema,
+    );
+    expect(budget.scopes.map((s) => s.scope)).not.toContain('provider-month:searchapi');
   });
   it('says verification will not run when a billed provider is enabled under a zero cap', async () => {
     const x = await harness({

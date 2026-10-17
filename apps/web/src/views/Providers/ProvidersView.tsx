@@ -25,7 +25,7 @@ function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   );
 }
 
-/** Only a `provider-lifetime:` scope is a lifetime allowance; any other row without bounds states no window (review prov-020). */
+/** Only a `provider-lifetime:` scope is a lifetime allowance; any other row without bounds states no window (review prov-020). The API sends only the window the plan uses, so a null cap here means no cap is configured (ruling 2). */
 function usageText(u: UsageRow, providerId: ProviderId): string {
   const cap = u.cap === null ? COPY.noCap : String(u.cap);
   if (u.scope === budgetScopeLabel({ kind: 'provider-lifetime', providerId }))

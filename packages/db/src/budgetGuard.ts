@@ -169,6 +169,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
         calls: g.calls,
         costMicroGbp: g.cost,
         cap: this.config.spend.monthlyCapMicroGbp,
+        windowUsed: true,
         windowStart: g.windowStart,
         windowEnd: g.windowEnd,
       };
@@ -178,11 +179,13 @@ export class SqliteBudgetGuard implements BudgetGuard {
       const budget = this.budgetFor(scope.providerId);
       const asked = scope.kind === 'provider-lifetime' ? 'lifetime' : 'month';
       const u = this.providerUsage(scope.providerId, budget, now, asked);
-      // why: plan Budget port "cap is null for a window the plan does not use".
+      // why: Budget port (ruling 2): an unused window is marked, so its null cap is never read as "no cap".
+      const windowUsed = asked === budget.window;
       return {
         calls: u.calls,
         costMicroGbp: u.cost,
-        cap: asked === budget.window ? effectiveCallCap(budget) : null,
+        cap: windowUsed ? effectiveCallCap(budget) : null,
+        windowUsed,
         windowStart: u.windowStart,
         windowEnd: u.windowEnd,
       };
@@ -247,7 +250,14 @@ export class SqliteBudgetGuard implements BudgetGuard {
         : kind === 'execution-free-calls'
           ? caps.maxFreeCalls
           : caps.maxCostMicroGbp;
-    return { calls: u.calls, costMicroGbp: u.cost, cap, windowStart: null, windowEnd: null };
+    return {
+      calls: u.calls,
+      costMicroGbp: u.cost,
+      cap,
+      windowUsed: true,
+      windowStart: null,
+      windowEnd: null,
+    };
   }
 
   private executionRows(executionId: string, providers: ProviderId[], billed: boolean): CallsAndCost {

@@ -259,6 +259,33 @@ describe('status bar (spec §11)', () => {
     expect(near(used, cap)).toBe(expected);
   });
 
+  it("a trial plan shows SearchApi's lifetime window, worded as Providers words it, and marks it near cap (ruling 2, F2)", async () => {
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            budget: [
+              usage('provider-lifetime:searchapi', 20, 24),
+              usage(
+                'provider-month:travelpayouts',
+                2,
+                50000,
+                0,
+                '2026-10-01T00:00:00.000Z',
+                '2026-11-01T00:00:00.000Z',
+              ),
+            ],
+          }),
+        ),
+      ),
+    );
+    renderWithProviders(bar());
+    const line = await screen.findByText("SearchApi 20 of 24 calls over the plan's lifetime");
+    expect(line).toHaveTextContent('near cap');
+    expect(screen.getByText('this month: Travelpayouts 2 of 50000 calls')).not.toHaveTextContent('near cap');
+    expect(screen.queryByText(/no cap/)).toBeNull();
+  });
+
   it('a null cap reads "no cap" and is never marked near', async () => {
     server.use(
       http.get(`${API}/executions/:id`, () =>

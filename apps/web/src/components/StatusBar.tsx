@@ -71,14 +71,27 @@ function Spend({ text, used, cap }: { text: string; used: number; cap: number | 
   );
 }
 
-/** `provider-month:<id>` rows: the call cap is the hard stop on a subscription plan (spec §1, §5.3). */
-function ProviderMonths({ e }: { e: ExecutionResponse }) {
+/**
+ * Each provider's binding window (ruling 2, decision 67): the API sends only the window the plan uses, the month on a
+ * monthly plan and the lifetime on the trial, so the bar renders whichever arrives, worded as the Providers view words
+ * it, and the near-cap mark reads that window's cap. The call cap is the hard stop (spec §1, §5.3).
+ */
+function ProviderWindows({ e }: { e: ExecutionResponse }) {
   return apiContract.providerIdSchema.options.map((providerId) => {
-    const u = usageOf(e, budgetScopeLabel({ kind: 'provider-month', providerId }));
-    return u === null ? null : (
+    const provider = COPY.provider[providerId];
+    const month = usageOf(e, budgetScopeLabel({ kind: 'provider-month', providerId }));
+    const lifetime = usageOf(e, budgetScopeLabel({ kind: 'provider-lifetime', providerId }));
+    const u = lifetime ?? month;
+    if (u === null) return null;
+    const cap = capText(u.cap, String);
+    return (
       <Spend
         key={providerId}
-        text={COPY.spendProviderMonth(COPY.provider[providerId], u.calls, capText(u.cap, String))}
+        text={
+          lifetime !== null
+            ? COPY.spendProviderLifetime(provider, u.calls, cap)
+            : COPY.spendProviderMonth(provider, u.calls, cap)
+        }
         used={u.calls}
         cap={u.cap}
       />
@@ -293,7 +306,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
                 cap={month.cap}
               />
             ) : null}
-            <ProviderMonths e={e} />
+            <ProviderWindows e={e} />
           </div>
         </details>
       ) : null}

@@ -44,10 +44,10 @@ describe('POST /api/definitions/:id/executions and GET /api/executions/:id (spec
         'execution-free-calls',
         'execution-cost',
         'provider-month:fixture',
-        'provider-lifetime:fixture',
         'global-month',
       ]),
     );
+    expect(e.budget.map((b) => b.scope)).not.toContain('provider-lifetime:fixture'); // the unused window (ruling 2)
     expect(e.ledger.perProvider.every((p) => p.providerId === 'fixture')).toBe(true);
     expect([e.parityBreak, e.overrun, e.disabledProviders]).toEqual([false, false, []]);
   });

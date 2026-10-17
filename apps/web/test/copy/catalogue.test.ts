@@ -75,6 +75,7 @@ const SAMPLES: Record<string, unknown[]> = {
   spendRunCost: ['£0', '£0'],
   spendMonth: ['£32', '£35'],
   spendProviderMonth: ['SearchApi', 615, '10000'],
+  spendProviderLifetime: ['SearchApi', 7, '24'],
   paused: ['budget'],
   resumesAt: ['1 Nov 2026 00:00 Europe/London'],
   scheduleBlocked: ['14 Oct 2026'],

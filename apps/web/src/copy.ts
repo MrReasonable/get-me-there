@@ -257,6 +257,8 @@ export const COPY = {
   spendMonth: (used: string, cap: string) => `this month: ${used} of ${cap}`,
   spendProviderMonth: (provider: string, calls: number, cap: string) =>
     `this month: ${provider} ${calls} of ${cap} calls`,
+  spendProviderLifetime: (provider: string, calls: number, cap: string) =>
+    `${provider} ${calls} of ${cap} calls over the plan's lifetime`,
   nearCap: 'near cap',
   noCap: 'no cap',
   paused: (reason: string) => `Paused: ${reason}`,

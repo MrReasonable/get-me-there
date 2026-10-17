@@ -82,7 +82,7 @@ export function providersResponse(ctx: RouteContext): ProvidersResponse {
       enabled: true,
       capabilities: { discovery: p.discovery?.info ?? null, verification: p.verification?.info ?? null },
       plan: planOf(config, p.id),
-      usage: providerScopes(p.id).map((s) => usageOf(ctx.ports, s)),
+      usage: providerScopes(config, p.id).map((s) => usageOf(ctx.ports, s)),
       excludedFromSchedule: providerBudget(config, p.id).excludedFromSchedule,
       // why: spec §10/§12: a billed provider enabled under a zero cap cannot verify; say so where the operator looks.
       notices:

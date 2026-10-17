@@ -47,6 +47,7 @@ describe('budget windows (spec §7 "Budget windows")', () => {
       calls: 2,
       costMicroGbp: 0,
       cap: 10,
+      windowUsed: true,
       windowStart: '2026-09-15T00:00:00.000Z',
       windowEnd: '2026-10-15T00:00:00.000Z',
     });
@@ -54,6 +55,25 @@ describe('budget windows (spec §7 "Budget windows")', () => {
       calls: 2,
       windowStart: '2026-09-15T00:00:00.000Z',
     });
+  });
+});
+
+describe('an unused window is marked, never reported as "no cap" (ruling 2, decision 67)', () => {
+  it.each([
+    ['month', 'provider-month', 'provider-lifetime'],
+    ['lifetime', 'provider-lifetime', 'provider-month'],
+  ] as const)('a %s plan: %s is used and capped, %s is unused', (window, used, unused) => {
+    const guard = new SqliteBudgetGuard(
+      freshDb(),
+      budgetConfig({ searchapi: limits({ window, monthlyCallCap: 24 }) }),
+      fixedClock(T0),
+    );
+    expect(guard.usage({ kind: used, providerId: 'searchapi' })).toMatchObject({ cap: 24, windowUsed: true });
+    expect(guard.usage({ kind: unused, providerId: 'searchapi' })).toMatchObject({
+      cap: null,
+      windowUsed: false,
+    });
+    expect(guard.usage({ kind: 'global-month' }).windowUsed).toBe(true);
   });
 });
 

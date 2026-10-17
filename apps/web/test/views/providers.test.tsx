@@ -61,21 +61,21 @@ describe('Providers view (spec §10, §11)', () => {
     expect(within(searchapi).getByText('not configured')).toBeInTheDocument();
   });
 
-  it('only a provider-lifetime scope reads as lifetime; a row without bounds states no window (review prov-020)', async () => {
+  it('a trial plan shows its lifetime window only and never prints "no cap" (review prov-020, ruling 2)', async () => {
     server.use(
       http.get(`${API}/providers`, () =>
         HttpResponse.json(
           withSearchApi({
             plan: 'trial',
             excludedFromSchedule: true,
-            usage: [usage('provider-lifetime:searchapi', 9, 100), usage('provider-month:searchapi', 9, null)],
+            usage: [usage('provider-lifetime:searchapi', 9, 100)],
           }),
         ),
       ),
     );
     renderWithProviders(<ProvidersView />);
     expect(await screen.findByText("9 of 100 calls over the plan's lifetime")).toBeInTheDocument();
-    expect(screen.getByText('this month: 9 of no cap calls')).toBeInTheDocument();
+    expect(screen.queryByText(/no cap/)).toBeNull();
     expect(screen.getByText('plan: SearchApi trial credits (lifetime allowance)')).toBeInTheDocument();
     expect(screen.getByText('excluded from scheduled runs')).toBeInTheDocument();
   });

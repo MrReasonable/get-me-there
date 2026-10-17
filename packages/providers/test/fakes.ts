@@ -123,7 +123,7 @@ export class FakeBudget implements BudgetGuard {
     } else if (scope.kind === 'execution-free-calls') {
       rows = this.rows.filter((r) => r.executionId === scope.executionId && !this.billed.has(r.providerId));
     }
-    return { calls: rows.length, costMicroGbp: 0, cap, ...window };
+    return { calls: rows.length, costMicroGbp: 0, cap, windowUsed: true, ...window };
   }
 
   recentCalls(providerId: ProviderId, since: IsoDateTime): number {
