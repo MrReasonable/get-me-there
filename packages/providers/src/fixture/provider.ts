@@ -97,9 +97,10 @@ function enumerate(q: DiscoveryQuery): CellKey[] {
  * `rectangle` spanning its covered cells. With `q.cells` set, re-plans over that subset. Tiles partition the cells.
  */
 export function planFixtureTiles(q: DiscoveryQuery): TilePlan[] {
-  const cells = q.cells
-    ? q.cells.filter((c) => c.origin === q.origin && c.destination === q.destination)
-    : enumerate(q);
+  // why: a cell of another pair would fall in no tile and vanish unreported; same refusal as the Travelpayouts tiler.
+  if (q.cells?.some((c) => c.origin !== q.origin || c.destination !== q.destination))
+    throw new Error('planFixtureTiles: every cell must belong to the query pair');
+  const cells = q.cells ?? enumerate(q);
   const start = toEpochDay(q.departureFrom);
   const blocks = new Map<number, CellKey[]>();
   for (const c of cells) {
@@ -156,6 +157,7 @@ export function fixtureProvider(opts: {
     ctx: ProviderContext,
     tileIndex: number | null,
     cache: HttpKitRequest['cache'],
+    ledgerCacheHit = true,
   ): Promise<HttpKitResponse> => {
     const url = new URL(endpointPath, FIXTURE_ORIGIN);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -171,6 +173,8 @@ export function fixtureProvider(opts: {
       cache,
       signal: ctx.signal,
       recordFixtures: false,
+      // why: a later page of a paginated tile leaves no cache-hit row, so parity counts one row per tile (spec §8.1).
+      ledgerCacheHit,
     });
   };
   // why: cached only when the server marks the body cacheable, so layer-A scenarios are never masked by default.
@@ -218,6 +222,7 @@ export function fixtureProvider(opts: {
           ctx,
           plan.index,
           calendarCache,
+          page === 1,
         );
         // why: a multi-call result carries the oldest call's fetchedAt (spec §2).
         fetchedAt = older(fetchedAt, res.fetchedAt);
