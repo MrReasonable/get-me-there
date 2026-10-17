@@ -26,7 +26,7 @@ export interface CadenceCase {
   definition: DefinitionInput;
 }
 
-/** The table's rows: the £0 configuration, the example on $40 weekly and daily, its maxCells headroom, the trial. */
+/** The table's rows: the £0 configuration, the example on SearchApi `40usd` weekly and daily, its maxCells headroom, the trial. */
 export function cadenceCases(): CadenceCase[] {
   const example = exampleInput();
   const free: DefinitionInput = {
@@ -39,14 +39,14 @@ export function cadenceCases(): CadenceCase[] {
   };
   return [
     { label: '£0: Travelpayouts only, weekly', plan: 'none', definition: free },
-    { label: '$40: both providers, weekly (the example)', plan: '40usd', definition: example },
+    { label: 'SearchApi `40usd`: both providers, weekly (the example)', plan: '40usd', definition: example },
     {
-      label: '$40: both providers, daily (`0 5 * * *`)',
+      label: 'SearchApi `40usd`: both providers, daily (`0 5 * * *`)',
       plan: '40usd',
       definition: { ...example, scheduleCron: '0 5 * * *' },
     },
     {
-      label: '$40: both providers, weekly, `maxCells` 200',
+      label: 'SearchApi `40usd`: both providers, weekly, `maxCells` 200',
       plan: '40usd',
       definition: { ...example, verification: { ...example.verification, maxCells: 200 } },
     },

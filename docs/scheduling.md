@@ -44,9 +44,9 @@ regenerates the table and fails if this page and the code disagree.
 | Configuration | Calls a run: planned → with the 1.2 retry factor | Runs a month | Calls a month (budgetFit) of the cap | Fits every cap |
 |---|---|---|---|---|
 | £0: Travelpayouts only, weekly | Travelpayouts calendar 28 → 34 | 4.33 | Travelpayouts 148 of 50,000 | yes |
-| $40: both providers, weekly (the example) | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 50 → 60 | 4.33 | Travelpayouts 148 of 50,000; SearchApi 698 of 10,000 | yes |
-| $40: both providers, daily (`0 5 * * *`) | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 50 → 60 | 30.42 | Travelpayouts 170 of 50,000; SearchApi 2,330 of 10,000 | yes |
-| $40: both providers, weekly, `maxCells` 200 | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 1,000 → 1,200 | 4.33 | Travelpayouts 148 of 50,000; SearchApi 5,638 of 10,000 | yes |
+| SearchApi `40usd`: both providers, weekly (the example) | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 50 → 60 | 4.33 | Travelpayouts 148 of 50,000; SearchApi 698 of 10,000 | yes |
+| SearchApi `40usd`: both providers, daily (`0 5 * * *`) | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 50 → 60 | 30.42 | Travelpayouts 170 of 50,000; SearchApi 2,330 of 10,000 | yes |
+| SearchApi `40usd`: both providers, weekly, `maxCells` 200 | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 1,000 → 1,200 | 4.33 | Travelpayouts 148 of 50,000; SearchApi 5,638 of 10,000 | yes |
 | SearchApi `trial`: both providers, weekly | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101 (refused: over the provider-lifetime cap); SearchApi itinerary search 50 → 60 (refused: over the provider-lifetime cap) | 4.33 | Travelpayouts 148 of 50,000; SearchApi 0 (scheduled runs leave it out) | yes |
 <!-- cadence-table:end -->
 

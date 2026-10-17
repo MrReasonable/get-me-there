@@ -16,7 +16,15 @@ describe('docs/scheduling.md cadence table (spec §8.2; decisions 25, 34)', { ti
   it('Travelpayouts plans one free call per airport pair and month (2 × 2 pairs × 7 months), and runs a month stay unrounded', () => {
     const table = renderCadenceTable();
     expect(table).toContain('| £0: Travelpayouts only, weekly | Travelpayouts calendar 28 → 34 | 4.33 |');
-    expect(table).toContain('| $40: both providers, daily (`0 5 * * *`) |');
+    expect(table).toContain('| SearchApi `40usd`: both providers, daily (`0 5 * * *`) |');
     expect(table).toContain('| 30.42 |');
+  }, 60_000);
+
+  it('names each SearchApi plan by its preset id, as docs/api-limits.md does, never by a price (CodeRabbit batch 3)', () => {
+    const table = renderCadenceTable();
+    expect(table).not.toContain('$40');
+    const labels = [...table.matchAll(/^\| ([^|]+) \|/gm)].map((m) => m[1]?.trim() ?? '').slice(2);
+    expect(labels.filter((l) => l.startsWith('SearchApi `40usd`:'))).toHaveLength(3);
+    expect(read('docs/api-limits.md')).toContain('SearchApi `40usd`');
   }, 60_000);
 });
