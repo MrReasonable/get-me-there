@@ -6,7 +6,7 @@ describe('calendar URL state (review arch M3)', () => {
   it('keeps the destination only when it is one of the definition’s, else all', () => {
     const dests = [asIata('JFK'), asIata('EWR')];
     expect(parseDestination('EWR', dests)).toBe('EWR');
-    expect(parseDestination('LAX', dests)).toBe('all');
+    expect(parseDestination('BBB', dests)).toBe('all');
     expect(parseDestination(null, dests)).toBe('all');
   });
   it('reads a colour basis only when it is one of the two', () => {
