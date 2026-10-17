@@ -411,7 +411,9 @@ for any change to a provider adapter or the engine: run it before merging such a
   projects publish `127.0.0.1:3000`, so stop your app first (`docker compose stop` in your own checkout),
   then in the other checkout run `docker compose -p gmt-trial up -d --build --wait --wait-timeout 120`.
   Afterwards remove it with `docker compose -p gmt-trial down -v`, which removes only the `gmt-trial`
-  volume, and start your app again with `docker compose up -d --wait --wait-timeout 120`.
+  volume, and start your app again from your own checkout with
+  `docker compose up -d --build --wait --wait-timeout 120`. Keep `--build`: both checkouts tag their image
+  `get-me-there:local`, so without it your app would start on the trial checkout's code.
 - **One user.** Run every command against the database as the app's user, which
   `docker compose exec app …` and `docker compose run app …` do by default (`node`). Never add
   `--user root` or `-u 0`: a check that only reads the database can still leave SQLite's `-wal`
