@@ -214,6 +214,55 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(again.rows.map((r) => [r.itineraryHash, r.notSeenInLatest])).toEqual([['hV', { ageHours: 0 }]]);
   });
 
+  it('an unconfirmed fare ranks after a confirmed one of its class and is never the headline while one exists (review prov I2)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ constraints: { maxStops: 1, checkedBagRequired: true } }),
+    );
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1, C2, C3], {
+      selected: [C1, C2, C3].map((c) => ({ cell: c, reason: 'top_n' as const })),
+    });
+    s.verified('E1', C1, [
+      { hash: 'hU', pricePence: 38_000, fetchedAt: at(-1), baggage: null, confirmed: false },
+    ]);
+    s.verified('E1', C2, [{ hash: 'hP', pricePence: 40_000, fetchedAt: at(-1), baggage: null }]);
+    // One itinerary with an unconfirmed cheaper offer and a confirmed dearer one: the confirmed offer is the row.
+    s.verified('E1', C3, [
+      { hash: 'hD', seller: 'OTA', pricePence: 37_000, fetchedAt: at(-1), baggage: null, confirmed: false },
+      { hash: 'hD', seller: 'BA', pricePence: 41_000, fetchedAt: at(-1), baggage: null },
+    ]);
+    const r = await results(x, def.id);
+    expect(r.rows.map((row) => [row.itineraryHash, row.seller, row.pricePence])).toEqual([
+      ['hP', 'BA', 40_000],
+      ['hD', 'BA', 41_000],
+      ['hU', 'BA', 38_000],
+    ]);
+    expect(r.rows[1]?.otherOffers.map((o) => [o.seller, o.pricePence])).toEqual([['OTA', 37_000]]);
+    expect(r.cheapest?.itineraryHash).toBe('hP');
+  });
+
+  it('the headline is an unconfirmed fare only when no confirmed offer exists, and keeps its mark (review prov I2)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput({ constraints: { maxStops: 0 } }));
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1, C2], { selected: [C1, C2].map((c) => ({ cell: c, reason: 'top_n' as const })) });
+    s.verified('E1', C1, [{ hash: 'hU', pricePence: 38_000, fetchedAt: at(-1), confirmed: false }]);
+    expect((await results(x, def.id)).cheapest?.verdicts.priceConfirmed).toBe('unverified');
+    // A confirmed offer of a lower class still heads the headline (the ruling: never unconfirmed while one exists).
+    s.verified('E1', C2, [{ hash: 'hF', pricePence: 50_000, fetchedAt: at(-1), stopsOut: 1 }]);
+    const r = await results(x, def.id);
+    expect(r.rows.map((row) => [row.itineraryHash, row.verdictClass])).toEqual([
+      ['hU', 'partially-verified'],
+      ['hF', 'failed'],
+    ]);
+    expect(r.cheapest?.itineraryHash).toBe('hF');
+  });
+
   it.each([
     ['a javascript: URL', { kind: 'get', url: 'javascript:alert(1)', host: 'x' }],
     ['plain http', { kind: 'get', url: 'http://www.google.com/travel/flights', host: 'www.google.com' }],
