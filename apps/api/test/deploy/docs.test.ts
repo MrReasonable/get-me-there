@@ -187,6 +187,8 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(flat).toContain('`SMTP_TLS=none` is accepted only for a loopback host');
     expect(flat).toContain('inside the container, loopback is the container itself');
     expect(flat).toContain('mail fails when it is sent');
+    // why: CodeRabbit batch 3 — the spec §12 ceiling counts delivered mail; the doc says a failure does not use it up
+    expect(flat).toContain('a failed send does not use up the hour');
   });
 
   it('gets the pre-migration backup off the volume and tells the cron user how to reach docker', () => {

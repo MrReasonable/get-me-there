@@ -118,7 +118,10 @@ export class EmailNotifier implements Notifier {
   readonly #log: Logger;
   readonly #clock: Clock;
   readonly #maxPerHour: number;
-  /** Instants of the sends attempted in the last hour (in process; a restart starts a fresh hour). */
+  /**
+   * Instants of the sends in the last hour that succeeded or are in flight (in process; a restart starts a fresh hour).
+   * A send takes its slot before it starts, so concurrent sends stop at the ceiling, and gives it back when it fails.
+   */
   #recent: IsoDateTime[] = [];
 
   constructor(opts: EmailNotifierOptions) {
@@ -158,6 +161,11 @@ export class EmailNotifier implements Notifier {
       this.#log.info({ messageId: info.messageId }, 'email sent');
       return { ok: true };
     } catch (err) {
+      // why: spec §12 — the ceiling counts delivered mail. A failed send returns its slot, so a run of SMTP failures
+      // never turns later sends into "ceiling reached" and hides the real cause; retries stay bounded by the alert
+      // passes, which follow executions (CodeRabbit batch 3).
+      const slot = this.#recent.indexOf(now);
+      if (slot !== -1) this.#recent.splice(slot, 1);
       this.#log.warn(failureCodes(err), 'email not sent');
       return { ok: false, detail: this.#detail(err) };
     }

@@ -194,7 +194,8 @@ and inside the container, loopback is the container itself, so a mail catcher on
 unreachable and mail fails when it is sent; use `implicit` or `starttls` here (`none` is for the
 local mail catcher of section 12). `ALERT_EMAIL_MAX_PER_HOUR`
 (default 20) caps outgoing email: beyond it a message is logged and dropped, and the alerts it
-carried stay queued with the reason shown in the Alerts view.
+carried stay queued with the reason shown in the Alerts view. Only emails sent (or being sent) count: a failed send
+does not use up the hour, so an SMTP outage shows its own error, never "ceiling reached".
 
 Set `APP_BASE_URL` to the `https://` address you type (for example
 `APP_BASE_URL=https://flights.example.com` or your `https://…ts.net` name) so alert emails

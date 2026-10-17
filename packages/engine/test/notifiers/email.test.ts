@@ -263,6 +263,48 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
     expect(t.messages).toHaveLength(3);
   });
 
+  it('a failed send gives its slot back, so SMTP failures never exhaust the ceiling; concurrent sends still stop at it (spec §12, CodeRabbit batch 3)', async () => {
+    const log = captureLogger();
+    const sent: MailMessage[] = [];
+    let fail = true;
+    let release: () => void = () => undefined;
+    let hold = false;
+    const factory: TransportFactory = () => ({
+      sendMail: async (m: MailMessage) => {
+        if (fail) throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+        if (hold) await new Promise<void>((ok) => (release = ok));
+        sent.push(m);
+        return { messageId: `<${sent.length}@example.com>` };
+      },
+    });
+    const n = new EmailNotifier({
+      smtp: smtp(),
+      nodeEnv: 'production',
+      log,
+      clock: fixedClock(NOW),
+      maxPerHour: 1,
+      createTransport: factory,
+    });
+    // three failures in one hour: each is a real attempt with its own cause, never "ceiling reached"
+    for (let i = 0; i < 3; i++) {
+      const r = await n.send(digestMessage());
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('ECONNREFUSED');
+    }
+    fail = false;
+    hold = true;
+    // the first success holds the one slot while it is in flight, so a concurrent second send is dropped
+    const first = n.send(digestMessage());
+    expect(await n.send(digestMessage())).toEqual({
+      ok: false,
+      detail: 'outgoing email ceiling reached (1 per hour); message dropped',
+    });
+    release();
+    expect((await first).ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect((await n.send(digestMessage())).ok).toBe(false);
+  });
+
   it('a transport failure returns ok:false; the password reaches neither the detail nor the log, and the log holds codes only (review sec-008)', async () => {
     const log = captureLogger();
     const failing: TransportFactory = () => ({
