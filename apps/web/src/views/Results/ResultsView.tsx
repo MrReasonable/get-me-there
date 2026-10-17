@@ -19,6 +19,8 @@ import {
 } from '../../state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { oneOf } from '../../state/withKey.js';
+import { BasisSwitch } from './BasisSwitch.js';
+import { CalendarGapBanner } from './CalendarGapBanner.js';
 import { Filters } from './Filters.js';
 import { ResultsHeader } from './ResultsHeader.js';
 import { ResultsTable, SORT_LABEL } from './ResultsTable.js';
@@ -124,6 +126,8 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
         stale={data.rows.length > 0 && data.rows.every((r) => r.stale)}
       />
       <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} />
+      <BasisSwitch basis={data.basis} reason={data.basisReason} />
+      {verificationConfigured ? <CalendarGapBanner definitionId={definition.id} /> : null}
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} narrow={narrow} />
       <div className="flex flex-wrap items-end gap-3 text-sm">
         {narrow ? (
