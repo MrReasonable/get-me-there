@@ -34,7 +34,9 @@ function ends(d: readonly Segment[]): { first: Segment; last: Segment } | null {
  * observation's stored `supplied_fields_json`, so an edited constraint re-judges old rows.
  * Only constraints the definition sets are judged (a `false` boolean or an empty airline list is
  * "not set"); `cabin` is always judged against `requestedCabin` (the offer's cabin, never
- * evidence itself). Absent input is `unverified`, never `pass`.
+ * evidence itself). Absent input is `unverified`, never `pass`. Whatever the definition sets, an
+ * offer whose `price` is not a supplied field (no seller listing confirmed it, decision 27) carries
+ * `priceConfirmed: 'unverified'`, so it can never class as verified (decision 37).
  */
 export function evaluateConstraints(
   it: NormalisedItinerary,
@@ -56,6 +58,7 @@ export function evaluateConstraints(
     cabins === null || cabins.length !== all.length
       ? 'unverified'
       : verdict(cabins.every((k) => CABIN_RANK[k] >= CABIN_RANK[requestedCabin]));
+  if (!has('price')) v.priceConfirmed = 'unverified';
 
   if (c.maxStops !== undefined) {
     const max = c.maxStops;

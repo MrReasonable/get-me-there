@@ -513,7 +513,7 @@ Verified on 2026-10-14 against the sources named; what the table marks as exerci
 - `src/notify.ts` — `notifyOperator`. `src/notifiers/operatorTemplates.ts` — `renderOperatorMessage`, `OPERATOR_KINDS`, `cleanLine`, `cleanText`. `src/notifiers/log.ts` — `LogNotifier`, `containsSynthetic`.
 - `src/fx/limits.ts` — `fxHttpLimits` (decision 32).
 - `src/scheduler/parseCron.ts` — `parseCron`, `isValidTimeZone`, `previousFiring`, `firingsBetween`, `runsPerMonth`. `src/scheduler/scheduler.ts` — `createScheduler`. `src/boot.ts` — `bootEngine`. `src/coverageCheck.ts` — `countCachedCells`, `coverageCheckWith`, `coverageCheckFor`. `src/fx/refresh.ts` — `refreshFx`, `parseFrankfurter`, `FRANKFURTER_LATEST_URL`. `src/maintenance.ts` — `runMaintenanceJob`, `runSystemJob`, `FX_REFRESH_CRON`, `MAINTENANCE_CRON`.
-- `test/support/setup.ts` (network guards, harness cleanup), `test/support/harness.ts` (the layer-A harness, the worked example and `refusedWith`), `test/support/wrappers.ts` (fixture decorators, id `fixture`), `test/support/fx.ts` (frankfurter on stubbed fetch); 25 `test/*.test.ts` files, one or two per task as named there (with WP0's `smoke.test.ts`, 26 run).
+- `test/support/setup.ts` (network guards, harness cleanup), `test/support/harness.ts` (the layer-A harness, the worked example and `refusedWith`), `test/support/wrappers.ts` (fixture decorators, id `fixture`), `test/support/fx.ts` (frankfurter on stubbed fetch); 24 `test/*.test.ts` files, one or two per task as named there (with WP0's `smoke.test.ts`, 25 run; the cast check's test is `scripts/check-casts.test.mjs`, decision 49).
 
 **Create** (outside the engine)
 
@@ -13037,7 +13037,7 @@ export function childSnapshot(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/engine exec vitest run child verification budget-breach`
-Expected: PASS, 54 tests (9 + 20 + 15, and the 11 of `error-table-verification.test.ts`, which the `verification` filter also matches).
+Expected: PASS, 55 tests (9 + 20 + 15, and the 11 of `error-table-verification.test.ts`, which the `verification` filter also matches).
 
 - [ ] **Step 5: Commit**
 
@@ -15538,7 +15538,7 @@ MrReasonable <4990954+MrReasonable@users.noreply.github.com>"
 ### Task 7.20: §14 log fields, the banned-word sweep over every string the engine emits, and the repository cast check
 
 **Files:**
-- Create: `packages/engine/test/logs-and-words.test.ts`, `packages/engine/test/check-casts.test.ts`, `scripts/check-casts.mjs`
+- Create: `packages/engine/test/logs-and-words.test.ts`, `scripts/check-casts.test.mjs` (decision 49: tests of root scripts live beside them, run by the root Vitest project `scripts`), `scripts/check-casts.mjs`
 - Modify: root `package.json` (`"casts"`), `.github/workflows/ci.yml` (`pnpm casts` after `pnpm boundaries`)
 
 **Interfaces:**
@@ -15551,7 +15551,7 @@ The sweep collects what the engine emitted at runtime — notification subjects 
 
 - [ ] **Step 1: Write the test**
 
-`packages/engine/test/check-casts.test.ts` (new file):
+`scripts/check-casts.test.mjs` (new file; as implemented it is this test in plain JS, with REPO = `new URL('../', import.meta.url)`, decision 49):
 
 ```ts
 import { spawnSync } from 'node:child_process';
@@ -15927,7 +15927,7 @@ Expected: PASS, 8 tests; `pnpm casts` prints `check-casts: N files, 0 casts` and
 - [ ] **Step 4: Run the whole package with coverage**
 
 Run: `pnpm --filter @gmt/engine test`
-Expected: every test file passes (26 files: the 25 this brief creates and WP0's smoke test; 265 tests); the coverage summary meets lines ≥ 85, branches ≥ 70, functions ≥ 85, statements ≥ 85 for `src/**` (barrels excluded). If a threshold fails, add a test for the uncovered branch named in the report; never lower the threshold.
+Expected: every test file passes (25 files: the 24 this brief creates under `packages/engine/test/` and WP0's smoke test; 279 tests after fix round 1; the cast check's own test runs in the root `scripts` project, decision 49); the coverage summary meets lines ≥ 85, branches ≥ 70, functions ≥ 85, statements ≥ 85 for `src/**` (barrels excluded). If a threshold fails, add a test for the uncovered branch named in the report; never lower the threshold.
 
 - [ ] **Step 5: Commit**
 
@@ -15952,9 +15952,9 @@ Run from the repository root on the WP7 branch:
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/engine test` | every file under `packages/engine/test/` passes (26 files: the 25 this brief creates and WP0's smoke test; 265 tests); coverage for `packages/engine/src/**` (barrels excluded) at lines ≥ 85 %, branches ≥ 70 %, functions ≥ 85 %, statements ≥ 85 %, enforced by `packages/engine/vitest.config.ts`; Vitest exits 0. Every engine test is layer A (layer B is WP13's), so this is also the layer-A suite |
+| `pnpm --filter @gmt/engine test` | every file under `packages/engine/test/` passes (25 files: the 24 this brief creates and WP0's smoke test; 279 tests after fix round 1); coverage for `packages/engine/src/**` (barrels excluded) at lines ≥ 85 %, branches ≥ 70 %, functions ≥ 85 %, statements ≥ 85 %, enforced by `packages/engine/vitest.config.ts`; Vitest exits 0. Every engine test is layer A (layer B is WP13's), so this is also the layer-A suite |
 | `for i in 1 2 3; do pnpm --filter @gmt/engine exec vitest run --coverage.enabled=false \|\| exit 1; done` | three consecutive green runs (the hold/release, fake-timer and concurrency tests are deterministic) |
-| `TZ=America/Los_Angeles pnpm --filter @gmt/engine exec vitest run --coverage.enabled=false` and the same with `TZ=Asia/Tokyo` | 265 passed each: no engine test depends on the machine's zone (London dates come from instants through core, test-strategy-reviewer-033) |
+| `TZ=America/Los_Angeles pnpm --filter @gmt/engine exec vitest run --coverage.enabled=false` and the same with `TZ=Asia/Tokyo` | 279 passed each: no engine test depends on the machine's zone (London dates come from instants through core, test-strategy-reviewer-033) |
 | `pnpm lint` | `biome check .` reports no errors |
 | `pnpm -r typecheck` | exit 0 for every package (src and test, each package's `tsconfig.test.json`) |
 | `pnpm boundaries` | exit 0 (engine imports only `@gmt/core`, `@gmt/db`, `@gmt/providers`; no msw outside providers' testing subpath) |

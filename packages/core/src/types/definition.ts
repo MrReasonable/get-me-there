@@ -109,6 +109,8 @@ export interface SearchDefinition {
   scheduleCron: string | null;
   scheduleTz: string;
   confirmedCostPence: number | null;
+  /** Decision 37: the calls of the confirmed estimate, beside its pence; set only from an explicit confirmation. */
+  confirmedCalls: number | null;
   enabled: boolean;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -117,7 +119,7 @@ export interface SearchDefinition {
 
 export type DefinitionInput = Omit<
   SearchDefinition,
-  'id' | 'confirmedCostPence' | 'createdAt' | 'updatedAt' | 'deletedAt'
+  'id' | 'confirmedCostPence' | 'confirmedCalls' | 'createdAt' | 'updatedAt' | 'deletedAt'
 >;
 
 /** The definition as frozen at execution start, with the resolved window. Spec §8.1. */

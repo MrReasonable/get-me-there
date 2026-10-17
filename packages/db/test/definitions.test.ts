@@ -18,6 +18,7 @@ describe('DefinitionsRepo (spec §7 search_definitions)', () => {
       ...input,
       id: created.id,
       confirmedCostPence: null,
+      confirmedCalls: null,
       createdAt: T0,
       updatedAt: T0,
       deletedAt: null,
@@ -74,15 +75,20 @@ describe('DefinitionsRepo (spec §7 search_definitions)', () => {
     expect(repo.get(keep.id)?.deletedAt).toBeNull();
   });
 
-  it('setConfirmedCost stores integer pence only, and update never touches it', () => {
+  it('setConfirmed stores integer pence and calls together, and update never touches them (decision 37)', () => {
     const repo = new DefinitionsRepo(freshDb(), fixedClock(T0));
     const d = repo.create(exampleDefinitionInput());
-    repo.setConfirmedCost(d.id, 412);
+    repo.setConfirmed(d.id, { pence: 412, calls: 30 });
     repo.update(d.id, { name: 'renamed' });
-    expect(repo.get(d.id)?.confirmedCostPence).toBe(412);
-    repo.setConfirmedCost(d.id, null);
-    expect(repo.get(d.id)?.confirmedCostPence).toBeNull();
-    expect(() => repo.setConfirmedCost(d.id, 4.5)).toThrow(RowRejected);
+    expect(repo.get(d.id)).toMatchObject({ confirmedCostPence: 412, confirmedCalls: 30 });
+    repo.setConfirmed(d.id, null);
+    expect(repo.get(d.id)).toMatchObject({ confirmedCostPence: null, confirmedCalls: null });
+    expect(() => repo.setConfirmed(d.id, { pence: 4.5, calls: 1 })).toThrow(RowRejected);
+    expect(() => repo.setConfirmed(d.id, { pence: 1, calls: 1.5 })).toThrow(RowRejected);
+    expect(() => repo.setConfirmed('missing', { pence: 1, calls: 1 })).toThrow(/missing/);
+    expect(repo.get(d.id)).toMatchObject({ confirmedCostPence: null, confirmedCalls: null });
+    const created = repo.create({ ...exampleDefinitionInput(), confirmedCostPence: 5, confirmedCalls: 7 });
+    expect(repo.get(created.id)).toMatchObject({ confirmedCostPence: 5, confirmedCalls: 7 });
   });
 
   it('rejects non-integer nights, budgets and onward costs', () => {

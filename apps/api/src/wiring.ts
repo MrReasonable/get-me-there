@@ -30,6 +30,7 @@ import {
   SqliteBudgetGuard,
   SqliteResponseCache,
 } from '@gmt/db';
+import { fxHttpLimits } from '@gmt/engine';
 import {
   createHttpKit,
   type FixtureRecorder,
@@ -161,17 +162,8 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
     ...(config.providers.travelpayouts === null
       ? {}
       : { travelpayouts: travelpayoutsHttpLimits(config.providers.travelpayouts.limits, config) }),
-    // why: plan decision 2 — frankfurter lives at api.frankfurter.dev; the .app host redirects and http-kit refuses redirects.
-    // Owner: WP7's fx/refresh.ts holds the fx client; this entry moves beside it as `fxHttpLimits` (arch M-7).
-    fx: {
-      hosts: ['api.frankfurter.dev'],
-      ratePerMinute: 10,
-      ratePerHour: 100,
-      concurrency: 1,
-      billable: 'never',
-      costPerCallMicroGbp: 0,
-      ...timing,
-    },
+    // why: decision 32 — the FX client's http policy lives beside it in the engine (fx/limits.ts), one copy
+    fx: fxHttpLimits(timing),
   };
 }
 

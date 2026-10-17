@@ -9,6 +9,7 @@ import {
   type DefinitionSnapshot,
   type Estimate,
   type ExecutionStatus,
+  microGbpToPence,
 } from '@gmt/core';
 import type { Ports } from '../wiring.js';
 import {
@@ -126,7 +127,7 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
         // why: every planned first attempt, the unbilled 401 probe included, so parity with the ledger's rows holds (cost M-1)
         planCalls: t.saCalls,
         costMicroGbp: saCost,
-        costPence: Math.ceil(saCost / 10_000),
+        costPence: microGbpToPence(saCost),
         seconds: 0,
         blocked: null,
       },
@@ -134,7 +135,7 @@ function planEstimate(plan: readonly PlannedCall[], saCostMicroGbp: number): Est
     totalCalls: t.worstCaseFreeCalls + t.worstCaseCredits,
     totalPlanCalls: t.freeCalls + t.saCalls,
     totalCostMicroGbp: saCost,
-    totalCostPence: Math.ceil(saCost / 10_000),
+    totalCostPence: microGbpToPence(saCost),
     seconds: 0,
     assumptions: [
       'record:fixtures plan: SearchApi calls at worst-case credits; Travelpayouts calls at the page cap',

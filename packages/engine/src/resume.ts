@@ -1,0 +1,252 @@
+import {
+  DEFAULT_DISCOVERY_REFRESH_HOURS,
+  type Execution,
+  type ExecutionStatus,
+  type IsoDateTime,
+  type ProviderId,
+  RESUMABLE_STATUSES,
+} from '@gmt/core';
+import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
+import type { EngineContext } from './context.js';
+import { addPass, estimateRemainingFor, withBlocked } from './estimate.js';
+import { execute } from './execute.js';
+import { lineKey } from './lines.js';
+import type { Orchestrator } from './orchestrator.js';
+import type { RunRegistry } from './registry.js';
+import { disabledBefore, markRemaining, newRun, resumableCells } from './run.js';
+import { sellsCabin } from './snapshot.js';
+import {
+  REUSE_TOLERANCE,
+  refreshHoursOf,
+  reusableFor,
+  reuseCriteriaFor,
+  skipBlockedDiscovery,
+} from './stages/reuse.js';
+import { confirmationNeeded, nothingToSearch, refused } from './start.js';
+import type { StartResult } from './types.js';
+
+/**
+ * Spec §8.1 "Resume": allowed on interrupted | paused_* | cancelled, and on completed when retryable errors remain
+ * (retry-errors). It is a compare-and-set — the tick, the one-shot job, boot auto-resume and /resume all go through it,
+ * so losers get code `active` (409). /resume is also refused while another execution of the definition is active, and
+ * an execution whose definition was soft-deleted is never resumed (plan decision 5).
+ *
+ * Order: the per-scope cap check uses estimateRemaining, which leaves out the cells whose departure date has arrived
+ * (po-016); a manual resume of a paused_budget parent checks against the definition's current `budget` (and nothing
+ * else), which needs the stored confirmation, pence and calls, when it raises the spend (cost-r1-005, decision 37); a
+ * resume whose remaining discovery is all blocked, before any selection and with no price yet, is refused like a
+ * start (ssr2-03). Nothing is written to the execution until the claim succeeds (ssr-09, arch-r2-006): marking the
+ * departed cells skipped:departed, the refreshed budget, the blocked lines' cells (reuse first, then skipped:budget;
+ * cost-r1-001, ruling 2) and
+ * the pass's runnable plan added to the stored estimate (cost-r1-009, cost-r1-014) all go into the same transaction as
+ * the compare-and-set. An automatic resume of a paused_error with nothing resumable leaves it as it is, unclaimed
+ * (ruling 10); a manual resume re-admits the providers disabled in the previous pass.
+ */
+export async function resumeExecution(
+  ctx: EngineContext,
+  reg: RunRegistry,
+  executionId: string,
+  opts: { manual: boolean },
+): Promise<StartResult> {
+  const exec = ctx.repos.executions.get(executionId);
+  if (exec === null) return refused('not_found', `execution ${executionId} not found`, { executionId });
+  const def = ctx.repos.definitions.get(exec.definitionId);
+  if (def === null || def.deletedAt !== null)
+    return refused('not_found', 'the definition of this execution was deleted', {
+      executionId,
+      definitionId: exec.definitionId,
+    });
+  if (reg.get(executionId) !== undefined || !RESUMABLE_STATUSES.includes(exec.status))
+    return refused('active', `execution is ${exec.status} and cannot be resumed`, { status: exec.status });
+  const other =
+    exec.isChild && exec.cell !== null
+      ? ctx.repos.executions.activeChild(exec.definitionId, exec.cell)
+      : ctx.repos.executions.activeParent(exec.definitionId);
+  if (other !== null && other.id !== exec.id)
+    return refused('active', 'another execution of this definition is active', {
+      activeExecutionId: other.id,
+    });
+
+  // why: ssr-07 — a row left by a version that created it before seeding has no cells; resuming it would end
+  // completed with nothing searched, so it is cancelled instead
+  if (!exec.isChild && ctx.repos.cells.rollUps(executionId).size === 0) {
+    ctx.repos.executions.setStatus(executionId, 'cancelled', {
+      finishedAt: ctx.clock.now(),
+      resumeAfter: null,
+      errorText: NEVER_STARTED,
+    });
+    return refused('not_found', `this execution ${NEVER_STARTED}; start a new run`, { executionId });
+  }
+  const refresh = opts.manual && exec.status === 'paused_budget' && !exec.isChild;
+  const current = refresh ? { ...exec, snapshot: { ...exec.snapshot, budget: def.budget } } : exec;
+  const remaining = estimateRemainingFor(ctx, current, opts.manual);
+  const needed = remaining.perProvider.filter((p) => p.calls > 0);
+  // why: ssr M2 — cells another run has priced since need no call but are still work: the pass copies them
+  const copyable = needed.length === 0 && hasReusableWork(ctx, current, opts.manual);
+  if (needed.length === 0 && !copyable && current.status === 'completed')
+    return refused('active', 'nothing left to retry on this execution', { executionId });
+  if (needed.length === 0 && !copyable && !opts.manual && current.status === 'paused_error')
+    return refused(
+      'active',
+      'nothing can resume automatically; a manual resume retries the providers that were disabled',
+      { executionId },
+    );
+  const check = checkBudget(
+    ctx,
+    spendOf(remaining),
+    current.snapshot.budget,
+    current.id,
+    current.definitionId,
+  );
+  const pass = withBlocked(remaining, check.blockedBy);
+  const starved =
+    !ctx.repos.cells.hasVerificationOutcomes(executionId) &&
+    !ctx.repos.cells.outcomes(executionId, { stage: 'discovery' }).some((o) => o.status === 'priced') &&
+    nothingToSearch(current.snapshot, { perProvider: needed }, check.blocked, (id) =>
+      sellsCabin(ctx, id, current.snapshot.cabin),
+    );
+  const isBlocked = (p: (typeof needed)[number]) => check.blocked.has(lineKey(p.stage, p.providerId));
+  if ((needed.length > 0 && needed.every(isBlocked)) || starved)
+    return refused('cap', `budget cap: ${breachMessage(check.breaches)}`, { breaches: check.breaches });
+  // why: field by field, so key order never matters and a lowered or unchanged cap is not a raise (code-architect
+  // review 10); any cap that rose needs the stored confirmation
+  const was = exec.snapshot.budget;
+  const raised =
+    refresh &&
+    (def.budget.maxCalls > was.maxCalls ||
+      def.budget.maxFreeCalls > was.maxFreeCalls ||
+      def.budget.maxCostMicroGbp > was.maxCostMicroGbp);
+  if (raised) {
+    const confirm = confirmationNeeded(ctx, pass, check.blocked, {
+      pence: def.confirmedCostPence,
+      calls: def.confirmedCalls,
+    });
+    if (confirm !== null)
+      return refused(
+        'confirm',
+        `${confirm.reason} under the raised budget and the definition's confirmation does not cover it`,
+        {
+          estimateMicroGbp: confirm.estimateMicroGbp,
+          estimatePence: confirm.estimatePence,
+          calls: confirm.calls,
+          totalCalls: confirm.totalCalls,
+        },
+      );
+  }
+  let departed = 0;
+  const claimed = ctx.db.immediateTransaction(() => {
+    if (!ctx.repos.executions.claimResume(executionId)) return false;
+    departed = ctx.repos.cells.markDeparted(executionId, ctx.clock.todayLondon());
+    ctx.repos.executions.patch(executionId, {
+      estimate: addPass(current.estimate, pass),
+      ...(refresh ? { snapshot: current.snapshot } : {}),
+    });
+    // why: ruling 2 — a blocked discovery line copies its reusable cells before the rest become skipped:budget
+    for (const id of current.snapshot.providers.discovery)
+      if (check.blocked.has(lineKey('discovery', id)))
+        skipBlockedDiscovery(
+          ctx,
+          {
+            executionId,
+            definitionId: current.definitionId,
+            snapshot: current.snapshot,
+            manual: opts.manual,
+          },
+          id,
+        );
+    if (ctx.repos.cells.hasVerificationOutcomes(executionId))
+      for (const id of current.snapshot.providers.verification)
+        if (check.blocked.has(lineKey('verification', id)))
+          markRemaining(ctx, { executionId }, 'verification', id, 'budget');
+    return true;
+  });
+  if (!claimed) return refused('active', 'another resume claimed this execution first', { executionId });
+  ctx.hooks.cancelResume(executionId); // why: spec §8.1 "cancelling the one-shot job in the same step"
+  const run = newRun(
+    ctx,
+    { ...current, status: 'running' },
+    { manual: opts.manual, fresh: false, blocked: check.blocked },
+  );
+  run.log.info(
+    { manual: opts.manual, autoResumeCount: current.autoResumeCount, departed, blocked: [...check.blocked] },
+    'execution: resumed',
+  );
+  reg.launch(run, () => execute(ctx, run));
+  return { ok: true, executionId };
+}
+
+/**
+ * Whether a resumed pass would copy any discovery cell from a newer run (ssr M2): the cells it would fetch, less the
+ * providers an automatic resume keeps disabled, that have a reusable copy.
+ */
+function hasReusableWork(ctx: EngineContext, exec: Execution, manual: boolean): boolean {
+  if (exec.isChild) return false;
+  const disabled = manual ? new Set<ProviderId>() : disabledBefore(ctx, exec.id);
+  return exec.snapshot.providers.discovery.some((id) => {
+    const info = ctx.providers.get(id)?.discovery?.info;
+    if (info === undefined || disabled.has(id) || !sellsCabin(ctx, id, exec.snapshot.cabin)) return false;
+    const cells = resumableCells(ctx, exec.id, 'discovery', id, manual);
+    const criteria = reuseCriteriaFor(ctx, exec.snapshot, id, info);
+    return reusableFor(ctx, exec.definitionId, exec.snapshot, id, criteria, cells).length > 0;
+  });
+}
+
+/** error_text of an execution cancelled because it was never seeded (ssr-07). */
+export const NEVER_STARTED = 'never finished starting and was cancelled';
+
+// why: ssr M3 — an interrupted run that no automatic resume picked up (AUTO_RESUME off, or above the crash-loop cap)
+// is as dead as a paused one, so it goes stale the same way and never blocks the schedule for good
+const STALEABLE: readonly ExecutionStatus[] = ['paused_budget', 'paused_error', 'interrupted'];
+
+/**
+ * Ruling 10: older than 0.9 × the shortest discoveryRefreshHours of the snapshot's discovery providers (168 h by
+ * default), so the weekly tick supersedes a run that paused seconds after the previous firing, DST-shortened weeks
+ * included. Age is elapsed time from started_at.
+ */
+export function olderThanRefresh(
+  exec: Pick<Execution, 'startedAt' | 'createdAt' | 'snapshot'>,
+  now: IsoDateTime,
+): boolean {
+  const ids = exec.snapshot.providers.discovery;
+  const hours =
+    ids.length === 0
+      ? DEFAULT_DISCOVERY_REFRESH_HOURS
+      : Math.min(...ids.map((id) => refreshHoursOf(exec.snapshot, id)));
+  return Date.parse(now) - Date.parse(exec.startedAt ?? exec.createdAt) > REUSE_TOLERANCE * hours * 3_600_000;
+}
+
+/**
+ * Spec §8.1/§8.2: "any paused run older than discoveryRefreshHours whose resume_after is not in the future is cancelled
+ * and a fresh run started" (olderThanRefresh, ruling 10); an interrupted run counts as paused here (ssr M3).
+ */
+export function isStalePaused(
+  exec: Pick<Execution, 'status' | 'resumeAfter' | 'startedAt' | 'createdAt' | 'snapshot'>,
+  now: IsoDateTime,
+): boolean {
+  if (!STALEABLE.includes(exec.status)) return false;
+  if (exec.resumeAfter !== null && exec.resumeAfter > now) return false;
+  return olderThanRefresh(exec, now);
+}
+
+/** error_text of a run cancelled because it went stale (spec §8.2 supersede; ssr2-06, ssr2-09). */
+export const SUPERSEDED =
+  'superseded: older than its discovery refresh allows; the next run starts with fresh prices';
+
+/**
+ * Cancels a stale run (its one-shot job with it) and records why. It never starts a run: the tick starts the fresh one
+ * at a scheduled firing, and for a definition without a schedule the next run is the operator's (ssr2-06). False when
+ * the run was no longer active.
+ */
+export async function supersede(
+  ctx: EngineContext,
+  orch: Pick<Orchestrator, 'cancel'>,
+  exec: Pick<Execution, 'id' | 'definitionId' | 'startedAt'>,
+): Promise<boolean> {
+  if (!(await orch.cancel(exec.id))) return false;
+  ctx.repos.executions.patch(exec.id, { errorText: SUPERSEDED });
+  ctx.log.info(
+    { executionId: exec.id, definitionId: exec.definitionId, startedAt: exec.startedAt },
+    'execution: superseded a stale run',
+  );
+  return true;
+}

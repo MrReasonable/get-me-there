@@ -1,4 +1,6 @@
 import { NormalisationError } from '../errors.js';
+import type { IsoDate } from '../types/ids.js';
+import type { FxInfo } from '../types/provenance.js';
 
 /**
  * The currencies frankfurter (ECB reference rates) publishes, read from
@@ -73,4 +75,30 @@ export function toGbp(amountMinor: number, currency: string, rateNano: number): 
   const pence = (2n * numerator + denominator) / (2n * denominator);
   if (pence > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError(`converted amount too large: ${pence}`);
   return Number(pence);
+}
+
+/** A rate already checked against `FX_MAX_RATE_AGE_DAYS` by the caller, or null (spec §5.6). */
+export type RateLookup = (currency: string) => { rateNano: number; rateDate: IsoDate; source: string } | null;
+
+/**
+ * Spec §5.6 money, the one step shared by offers (normaliseOffer) and calendar prices (the engine): GBP passes through
+ * unconverted; any other currency must be ECB-covered and have a rate from `rateFor`, converted by toGbp with rate,
+ * date and source recorded together. Currency codes are compared upper-cased. Throws NormalisationError
+ * (`currency-unsupported`, `fx-unavailable`) or, from toGbp, RangeError for an amount that is not a non-negative
+ * integer — never a guessed price.
+ */
+export function priceInGbp(
+  amount: { amountMinor: number; currency: string },
+  rateFor: RateLookup,
+): { pricePence: number; fx: FxInfo } {
+  const currency = amount.currency.toUpperCase();
+  if (currency === 'GBP')
+    return { pricePence: toGbp(amount.amountMinor, 'GBP', 1), fx: { converted: false } };
+  if (!ECB_CURRENCIES.includes(currency)) throw new NormalisationError('currency-unsupported', currency);
+  const rate = rateFor(currency);
+  if (rate === null) throw new NormalisationError('fx-unavailable', currency);
+  return {
+    pricePence: toGbp(amount.amountMinor, currency, rate.rateNano),
+    fx: { converted: true, rateNano: rate.rateNano, rateDate: rate.rateDate, source: rate.source },
+  };
 }

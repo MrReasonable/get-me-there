@@ -1,3 +1,24 @@
-// Barrel for @gmt/engine. Every public export of the package is re-exported from here;
-// consumers never deep-import. Extended by later work packages.
-export {};
+// Barrel for @gmt/engine (plan contract "Engine"). EmailNotifier and runAlerts are added by WP11.
+export { noAlerts } from './alertsStep.js';
+export { createEngine } from './engine.js';
+export { confirmationOf } from './estimate.js';
+export { fxHttpLimits } from './fx/limits.js';
+export { LogNotifier } from './notifiers/log.js';
+export { renderOperatorMessage } from './notifiers/operatorTemplates.js';
+export { parseCron } from './scheduler/parseCron.js';
+export { SOFT_CONFIRM_CALL_SHARE } from './start.js';
+export type {
+  AlertsStepHook,
+  BudgetFit,
+  ChildCapPreview,
+  CoverageCheckRequest,
+  CoverageCheckResponse,
+  Engine,
+  EngineDeps,
+  EngineOptions,
+  Estimate,
+  SchedulerJob,
+  StartOptions,
+  StartResult,
+  VerifyCellOptions,
+} from './types.js';

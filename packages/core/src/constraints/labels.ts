@@ -22,9 +22,10 @@ export const CONSTRAINT_LABELS: Record<ConstraintName, string> = {
   checkedBagRequired: 'checked bag',
   minCheckedBags: 'min checked bags',
   maxPricePence: 'max price',
+  priceConfirmed: 'price not confirmed by the final step',
 };
 
-/** Every ConstraintName in a fixed order (cabin, then the spec §6.2 table order). */
+/** Every ConstraintName in a fixed order (cabin, then the spec §6.2 table order, then priceConfirmed). */
 export const CONSTRAINT_NAMES = [
   'cabin',
   'maxStops',
@@ -42,4 +43,5 @@ export const CONSTRAINT_NAMES = [
   'checkedBagRequired',
   'minCheckedBags',
   'maxPricePence',
+  'priceConfirmed',
 ] as const satisfies readonly ConstraintName[];

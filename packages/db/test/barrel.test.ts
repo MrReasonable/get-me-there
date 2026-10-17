@@ -130,7 +130,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
     expect(repos.routeHistory).toBeInstanceOf(db.RoutePriceHistoryRepo);
   });
 
-  it('the one migration creates exactly the spec §7 tables', () => {
+  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37)', () => {
     const d = freshDb();
     const tables = d.raw
       .prepare<[], { name: string }>(
@@ -139,7 +139,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       .all()
       .map((r) => r.name);
     expect(tables).toEqual([...SPEC_TABLES].sort());
-    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 1 });
+    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 2 });
   });
 
   it('foreign keys are declared and enforced', () => {

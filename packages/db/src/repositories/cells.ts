@@ -16,7 +16,9 @@ import {
 } from '@gmt/core';
 import type { Db } from '../client.js';
 import {
+  MANUAL_RETRYABLE,
   NO_DATA_REASONS,
+  NON_RETRYABLE,
   OUTCOME_STATUSES,
   PROVIDER_IDS,
   SELECTION_REASONS,
@@ -108,17 +110,6 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
     throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
 }
 
-/** Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. */
-const NON_RETRYABLE = [
-  'auth',
-  'quota',
-  'parse',
-  'no-return-legs',
-  'fx-unavailable',
-  'currency-unsupported',
-  'unknown-airport-tz',
-] as const;
-const MANUAL_RETRYABLE = ['auth', 'quota', 'parse'] as const;
 const sqlList = (xs: readonly string[]) => xs.map((r) => `'${r}'`).join(', ');
 
 /**
@@ -477,12 +468,16 @@ export class CellsRepo {
       .map(toCellKey);
   }
 
-  /** Spec §8.1: not_run and skipped outcomes of cells departing on or before `today` become skipped:departed; priced/empty/no_data untouched. */
+  /**
+   * Spec §8.1 "before planning": not_run, error and skipped outcomes of cells departing on or before `today` become
+   * skipped:departed, so a resume never re-fetches a flight that has left, whatever its outcome (ruling 1, ssr I1; the
+   * error's attempts and last_error stay as evidence). priced, empty and no_data are untouched.
+   */
   markDeparted(executionId: string, today: IsoDate): number {
     return this.db.transaction(() => {
       const changes = this.db.raw
         .prepare(
-          `UPDATE cell_outcomes SET status = 'skipped', reason = 'departed' WHERE execution_id = @executionId AND departure_date <= @today AND (status = 'not_run' OR (status = 'skipped' AND reason <> 'departed'))`,
+          `UPDATE cell_outcomes SET status = 'skipped', reason = 'departed' WHERE execution_id = @executionId AND departure_date <= @today AND (status IN ('not_run', 'error') OR (status = 'skipped' AND reason <> 'departed'))`,
         )
         .run({ executionId, today }).changes;
       if (changes > 0) {

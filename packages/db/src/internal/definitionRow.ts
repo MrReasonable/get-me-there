@@ -50,6 +50,7 @@ export interface DefinitionDbRow {
   schedule_cron: string | null;
   schedule_tz: string;
   confirmed_cost_pence: number | null;
+  confirmed_calls: number | null;
   enabled: number;
   deleted_at: string | null;
   created_at: string;
@@ -83,6 +84,7 @@ export function readDefinition(r: DefinitionDbRow): SearchDefinition {
     ...input,
     id: r.id,
     confirmedCostPence: r.confirmed_cost_pence,
+    confirmedCalls: r.confirmed_calls,
     createdAt: readTime(`${c}.created_at`, r.created_at),
     updatedAt: readTime(`${c}.updated_at`, r.updated_at),
     deletedAt: readNullableTime(`${c}.deleted_at`, r.deleted_at),
@@ -98,6 +100,7 @@ export function readSnapshot(column: string, text: string): DefinitionSnapshot {
   const {
     id,
     confirmedCostPence: confirmed,
+    confirmedCalls,
     createdAt,
     updatedAt,
     deletedAt,
@@ -114,6 +117,9 @@ export function readSnapshot(column: string, text: string): DefinitionSnapshot {
     ...input,
     id: readString(column, id),
     confirmedCostPence: confirmed === null || confirmed === undefined ? null : readInt(column, confirmed),
+    // why: snapshots frozen before migration 0001 have no confirmedCalls (decision 37)
+    confirmedCalls:
+      confirmedCalls === null || confirmedCalls === undefined ? null : readInt(column, confirmedCalls),
     createdAt: readTime(column, readString(column, createdAt)),
     updatedAt: readTime(column, readString(column, updatedAt)),
     deletedAt:

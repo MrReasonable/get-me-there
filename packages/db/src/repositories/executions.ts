@@ -141,33 +141,50 @@ export class ExecutionsRepo {
     private readonly clock: Clock,
   ) {}
 
+  /**
+   * Inserts an execution. A second active parent of the definition, or a second active child of the same cell, is
+   * refused with `RowRejected` rule `active` (spec §7 partial unique indexes).
+   */
   create(input: ExecutionCreateInput): Execution {
     if (input.isChild !== (input.cell !== null))
       throw new RowRejected('child-cell', 'a child execution carries a cell and a parent does not');
     const id = randomUUID();
     const now = this.clock.now();
     const c = input.cell;
-    this.db.raw
-      .prepare(
-        `INSERT INTO search_executions (id, definition_id, is_child, child_origin, child_destination, child_departure_date, child_return_date, definition_snapshot_json, trigger, status, estimate_json, created_at, started_at, finished_at)
-         VALUES (@id, @definitionId, @isChild, @o, @d, @dep, @ret, @snapshot, @trigger, @status, @estimate, @now, @startedAt, @finishedAt)`,
-      )
-      .run({
-        id,
-        definitionId: input.definitionId,
-        isChild: input.isChild ? 1 : 0,
-        o: c?.origin ?? null,
-        d: c?.destination ?? null,
-        dep: c?.departureDate ?? null,
-        ret: c?.returnDate ?? null,
-        snapshot: JSON.stringify(input.snapshot),
-        trigger: input.trigger,
-        status: input.status,
-        estimate: input.estimate === null ? null : JSON.stringify(input.estimate),
-        now,
-        startedAt: input.status === 'running' ? now : null,
-        finishedAt: SKIPPED.includes(input.status) ? now : null,
-      });
+    try {
+      this.db.raw
+        .prepare(
+          `INSERT INTO search_executions (id, definition_id, is_child, child_origin, child_destination, child_departure_date, child_return_date, definition_snapshot_json, trigger, status, estimate_json, created_at, started_at, finished_at)
+           VALUES (@id, @definitionId, @isChild, @o, @d, @dep, @ret, @snapshot, @trigger, @status, @estimate, @now, @startedAt, @finishedAt)`,
+        )
+        .run({
+          id,
+          definitionId: input.definitionId,
+          isChild: input.isChild ? 1 : 0,
+          o: c?.origin ?? null,
+          d: c?.destination ?? null,
+          dep: c?.departureDate ?? null,
+          ret: c?.returnDate ?? null,
+          snapshot: JSON.stringify(input.snapshot),
+          trigger: input.trigger,
+          status: input.status,
+          estimate: input.estimate === null ? null : JSON.stringify(input.estimate),
+          now,
+          startedAt: input.status === 'running' ? now : null,
+          finishedAt: SKIPPED.includes(input.status) ? now : null,
+        });
+    } catch (err) {
+      // why: the partial unique indexes (spec §7 one active parent per definition, one active child per cell) are the
+      // driver's to report; callers see the condition, never a SQLite code (code-architect review 3)
+      if (err instanceof Database.SqliteError && err.code === 'SQLITE_CONSTRAINT_UNIQUE')
+        throw new RowRejected(
+          'active',
+          input.isChild
+            ? 'this cell is already being verified'
+            : 'another execution of this definition is active',
+        );
+      throw err;
+    }
     return this.mustGet(id);
   }
 

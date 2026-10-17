@@ -95,6 +95,8 @@ const definitionFields = {
   enabled: z.boolean(),
   /** the explicit confirmation from the create click; stored only when it covers the current estimate */
   confirmedCostPence: moneyPenceSchema.optional(),
+  /** decision 37: the calls of that same confirmation; a confirmation covers a run only with both */
+  confirmedCalls: positiveInt.optional(),
 };
 const refineDefinition = (
   d: {
@@ -126,7 +128,9 @@ const refineDefinition = (
   }
 };
 /** The unrefined field shape: used to read stored rows back, where the save-time policy refinements must not run. */
-export const definitionShapeSchema = z.object(definitionFields).omit({ confirmedCostPence: true });
+export const definitionShapeSchema = z
+  .object(definitionFields)
+  .omit({ confirmedCostPence: true, confirmedCalls: true });
 export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
 export const definitionUpdateRequestSchema = z.object(definitionFields).partial();
 
@@ -170,6 +174,7 @@ export const estimateResponseSchema = z.object({ estimate: estimateSchema, budge
 export const definitionResponseSchema = z.object({
   ...definitionFields,
   confirmedCostPence: moneyPenceSchema.nullable(),
+  confirmedCalls: positiveInt.nullable(),
   id: z.string(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -177,7 +182,12 @@ export const definitionResponseSchema = z.object({
   budgetFit: budgetFitSchema,
   estimate: estimateSchema.nullable(),
   needsConfirmation: z
-    .object({ estimateMicroGbp: microGbpSchema, confirmedCostPence: moneyPenceSchema.nullable() })
+    .object({
+      estimateMicroGbp: microGbpSchema,
+      totalCalls: positiveInt,
+      confirmedCostPence: moneyPenceSchema.nullable(),
+      confirmedCalls: positiveInt.nullable(),
+    })
     .nullable(),
   notices: z.array(z.string()),
 });
@@ -193,9 +203,14 @@ export const coverageCheckResponseSchema = z.object({
     z.object({
       origin: iataSchema,
       destination: iataSchema,
-      months: z.array(z.object({ month: isoMonthSchema, cachedRows: positiveInt, cellsInBand: positiveInt })),
+      // cachedRows: distinct in-band cells with a cached price; null when the month was not fully checked: a tile covering
+      // it failed, or left cells unread (decisions 25, 37)
+      months: z.array(
+        z.object({ month: isoMonthSchema, cachedRows: positiveInt.nullable(), cellsInBand: positiveInt }),
+      ),
     }),
   ),
+  // calls: the tiles the check requested (decision 37); a cached tile costs no upstream call and a tile may page
   calls: positiveInt,
   notes: z.array(z.string()),
 });
