@@ -191,6 +191,15 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(flat).toContain('smoke/fixtures/recorded');
     expect(flat).toContain('The app writes no fixtures for a smoke test it runs');
     expect(flat).toContain('`2` and `3`');
+    // why: provenance review, fix round 1: the docs say which line to read and what each check proves
+    expect(flat).toContain(
+      'the line that starts `SearchApi credits already ledgered to tool runs in this budget window: N`',
+    );
+    expect(flat).not.toContain('first report line');
+    expect(flat).toContain(
+      "each price shown carries the source kind, age limit and point of sale its provider's adapter declares, and was fetched during this run",
+    );
+    expect(flat).not.toContain("This checks the providers' answers");
     expect(flat).not.toContain('--confirm-rerun');
   });
 });

@@ -178,6 +178,8 @@ describe('runSmoke (spec §9 item 7)', () => {
     const again = await smoke(ports, cli(4));
     expect(again.r.exitCode).toBe(EXIT.spendRefused);
     expect(again.r.summary).toContain('raise --budget only if you mean to spend more');
+    // why: the figure to read is the third line of the report, not the first (provenance review)
+    expect(again.r.summary).toContain("read the 'SearchApi credits already ledgered' line above");
     // why: the route returns these lines in its body, so spec §11's banned words apply to them too
     for (const l of again.r.lines) expect(findBannedWords(l, BANNED_WORD_ALLOWLIST), l).toEqual([]);
     expect((await smoke(ports, cli(8))).r.exitCode).toBe(EXIT.ok);

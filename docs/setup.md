@@ -492,7 +492,7 @@ curl -u operator -H 'Content-Type: application/json' -H 'X-Requested-With: get-m
   -X POST http://127.0.0.1:3000/api/tools/smoke -d '{"origin":"LHR","destination":"JFK","budget":8,"dryRun":true}'
 ```
 
-Its first report line reads `SearchApi credits already ledgered to tool runs in this budget
+Read the line that starts `SearchApi credits already ledgered to tool runs in this budget
 window: N`. Choose `budget` as N plus 4, then send the same request without `"dryRun":true`.
 When this run's 4 credits would go beyond `budget`, or the window has no room left, the smoke
 test refuses with code 65 before sending anything. The answer's `exitCode` uses the table in
@@ -517,9 +517,9 @@ Each checklist line reads `ok`, `FAIL`, `skip` or `look`:
 - `ledger`: every answer the run received has its own row in the database's request log, with
   the same endpoint and status (retried attempts are counted separately), and the credits stayed
   inside this run's limit.
-- `provenance`: each price shown carries the source, fetch time, point of sale and age limit
-  its provider declares. This checks the providers' answers; the stored records are checked by
-  the app's own tests.
+- `provenance`: each price shown carries the source kind, age limit and point of sale its
+  provider's adapter declares, and was fetched during this run. The stored records are checked
+  by the app's own tests.
 - `airport pairs (metro rule)`: both providers were asked for the airports you named, never a
   city code.
 - `9-day rectangle`, `step 1 = step 2`, `sellers`: SearchApi accepted the date grid the app

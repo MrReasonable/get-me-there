@@ -489,7 +489,7 @@ export async function runSmoke(
   if (position.rerunNeedsConfirm && !cli.confirmRerun)
     return refuse(
       EXIT.spendRefused,
-      `refusing: credits already ledgered to earlier tool runs plus this run's worst case exceed --budget ${cli.args.budget}; read the first line above and raise --budget only if you mean to spend more (plan decision 20)`,
+      `refusing: credits already ledgered to earlier tool runs plus this run's worst case exceed --budget ${cli.args.budget}; read the 'SearchApi credits already ledgered' line above and raise --budget only if you mean to spend more (plan decision 20)`,
     );
 
   // why: the recorder's paths are collected exactly by the tools' one wrapper (toolExecution.ts `tracking`)
