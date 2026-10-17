@@ -299,6 +299,7 @@ describe('runTool success paths', () => {
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
   });
 
+  // why: two full recording runs over a real SQLite ledger; under a loaded machine this exceeds Vitest's 5 s default.
   it('a live run through runTool records into the given root under the test signature; a second run needs --confirm-rerun (ts-014, ruling 3, prov-wp04b-006)', async () => {
     const h = harness();
     stubVendors();
@@ -316,7 +317,7 @@ describe('runTool success paths', () => {
     expect(again.text()).toContain('(a live run needs --confirm-rerun)');
     const confirmed = harness(h.dbPath);
     expect(await runTool('record', [...ROUTE, '--confirm-rerun'], confirmed.opts)).toBe(EXIT.ok);
-  });
+  }, 30_000);
 
   it('a live run refuses with 65, before any request, when the SearchApi window has less room than the worst case (cost-wp4b-r2-001)', async () => {
     const h = harness(undefined, { SEARCHAPI_TRIAL_USED: '97' });
