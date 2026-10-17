@@ -18,6 +18,17 @@ const WORKED_EXAMPLE = ['LHR', 'LGW', 'JFK', 'EWR', 'LON', 'NYC'];
 /** Capitalised words in the docs that happen to be IATA codes too; extend only with a word, never a place. */
 const NOT_PLACES = ['API', 'DIR', 'GBP', 'GET', 'PWD', 'TLS', 'VPS', 'WAL'];
 
+/**
+ * Cells in one markdown table row. Every unescaped pipe is a column break, inside inline code too (as markdown tables
+ * read it); only an escaped \\| is text.
+ */
+function tableCells(line: string): number {
+  return line
+    .replace(/\\\|/g, '')
+    .replace(/^\||\|$/g, '')
+    .split('|').length;
+}
+
 const example: unknown = JSON.parse(read('docs/examples/london-new-york.json'));
 
 describe('the example definition (spec §1, §11)', () => {
@@ -286,17 +297,21 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     },
   );
 
+  // why: PR #3 review — the counter replaced inline code before counting, so an unescaped pipe inside `a|b` (which
+  // markdown reads as a column break) was hidden and a malformed row passed; only an escaped \| is not a break
+  it('the cell counter counts an unescaped pipe inside inline code as a column, and an escaped one as text', () => {
+    expect(tableCells('| a | b |')).toBe(2);
+    expect(tableCells('| a | `x|y` |')).toBe(3);
+    expect(tableCells('| a | `x\\|y` |')).toBe(2);
+    expect(tableCells('| a | x \\| y |')).toBe(2);
+  });
+
   // why: CodeRabbit batch 3 — a providers.md row had one cell fewer than its header, so its verdict sat under
   // "Authorised source?"; every table row in every doc has its header's cell count
   it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
     '%s: every table row has as many cells as its header',
     (path) => {
-      const cells = (line: string): number =>
-        line
-          .replace(/`[^`]*`/g, 'code')
-          .replace(/\\\|/g, '')
-          .replace(/^\||\|$/g, '')
-          .split('|').length;
+      const cells = tableCells;
       const bad: string[] = [];
       let header: number | null = null;
       for (const [i, line] of read(path).split('\n').entries()) {
