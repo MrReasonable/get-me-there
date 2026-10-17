@@ -112,6 +112,24 @@ export function formatAgeCompact(a: EffectiveAge): string {
   }
 }
 
+/**
+ * The face form (ruling 3, decision 67): the one short line a calendar day and the phone face show without hover,
+ * "5d old", "≤2d old" (fetch age plus the provider's bound, so never younger than the worst case) or "age unknown".
+ * Each word stays within 7 characters so it fits a 45 px phone day column.
+ */
+export function formatAgeShort(a: EffectiveAge): string {
+  const old = (hours: number) => (hours < 1 ? 'just now' : `${formatDuration(hours)} old`);
+  switch (a.kind) {
+    case 'observed':
+      return old(a.observedHours);
+    case 'bounded':
+      // why: maxAgeHours 0 is an interactive search at request time, so the fetch age is the whole age.
+      return a.maxAgeHours === 0 ? old(a.fetchedHours) : `≤${old(worstCaseAgeHours(a))}`;
+    case 'unknown':
+      return 'age unknown';
+  }
+}
+
 /** Sort comparator: fresher first; an unknown age loses to any known age; two unknowns tie. Spec §8.1. */
 export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
   // why: the ordering rule is about what is known, not about the number: an unknown vendor age loses to any known one

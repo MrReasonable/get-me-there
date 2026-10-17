@@ -31,7 +31,8 @@ export function DayBody(props: {
 
 /**
  * The phone face (plan decision 52, review ui-r2-001): at 375 px a column is about 45 px, so a day shows its number and
- * band, the amount through PriceCell's `face` (marks as single glyphs, words in its title and spoken text) or the
+ * band, the amount through PriceCell's `face` (marks as single glyphs, the provider mark, the short age and "not
+ * checked" visible, words in its title and spoken text) or the
  * glyphs of a priceless day, and one-glyph marks for "price not confirmed" and partial coverage. Stay, provider,
  * "cached from" and the counts are in the panel, one tap away.
  */
@@ -114,8 +115,9 @@ export function PhoneDayBody(props: {
 }
 
 /**
- * The day's price in WP9's PriceCell compact form (decisions 36, 38, 46): the amount with "≈", a short provider badge,
- * the destination code and the stale, truncated and unconfirmed marks, with source, age and note in its title; then
+ * The day's price in WP9's PriceCell compact form (decisions 36, 38, ruling 3 of decision 67): the amount with "≈", a
+ * short provider badge, the destination code, the stale, truncated and unconfirmed marks and the short age line with
+ * "not checked" on a calendar price, visible without hover; source words, the full age and the note in its title; then
  * the stay, any cheaper cached fare with its own destination and stay (decision 52) and the coverage cue. Everything
  * else is in the side panel. A price without provenance is withheld (spec §9 item 6).
  */

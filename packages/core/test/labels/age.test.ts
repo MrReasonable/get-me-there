@@ -5,6 +5,7 @@ import {
   effectiveAge,
   formatAgeCompact,
   formatAgeFull,
+  formatAgeShort,
   formatDuration,
   hoursSince,
   isStale,
@@ -94,6 +95,24 @@ describe('formatting', () => {
   it('a zero bound (interactive search at request time) shows no bound clause (spec §8.3)', () => {
     expect(formatAgeFull({ kind: 'bounded', fetchedHours: 5, maxAgeHours: 0 })).toBe('fetched 5h ago');
     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 5, maxAgeHours: 0 })).toBe('5h ago');
+  });
+});
+
+describe('formatAgeShort: the face form of the calendar day and the phone (ruling 3, decision 67)', () => {
+  it.each([
+    [{ kind: 'observed', fetchedHours: 0, observedHours: 120 }, '5d old'],
+    [{ kind: 'observed', fetchedHours: 0, observedHours: 0 }, 'just now'],
+    [{ kind: 'observed', fetchedHours: 3, observedHours: 3 }, '3h old'],
+    [{ kind: 'bounded', fetchedHours: 2, maxAgeHours: 48 }, '≤2d old'],
+    [{ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 }, '≤24h old'],
+    [{ kind: 'bounded', fetchedHours: 5, maxAgeHours: 0 }, '5h old'],
+    [{ kind: 'bounded', fetchedHours: 0, maxAgeHours: 0 }, 'just now'],
+    [{ kind: 'unknown', fetchedHours: 2 }, 'age unknown'],
+  ] as const)('%o reads %s', (a, text) => {
+    expect(formatAgeShort(a)).toBe(text);
+  });
+  it('is on the barrel', () => {
+    expect(barrel.formatAgeShort).toBe(formatAgeShort);
   });
 });
 

@@ -152,7 +152,8 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     // why: ui-r2-006 — the long explanations fold away; the scale and the glyphs stay open.
     const more = within(legend).getByText('What the marks mean').closest('details');
     expect(more).not.toHaveAttribute('open');
-    expect(more).toHaveTextContent('dashed outline');
+    // why: UI-F3: the dashed outline's key stays open beside the glyphs, never folded away.
+    expect(more).not.toHaveTextContent('dashed outline');
     expect(more).not.toHaveTextContent('○ not searched');
   });
 
@@ -161,7 +162,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
       JFK: 'onward leg not included',
     });
     const v = within(dayCell('2027-03-08'));
-    // why: WP9's compact PriceCell (decision 46): amount, short badge, destination, marks; the rest in its title.
+    // why: WP9's compact PriceCell (ruling 3): amount, short badge, destination, marks, age line; the long form in its title.
     const price = priceCellIn(dayCell('2027-03-08'));
     expect(price).not.toHaveClass('border-dashed');
     expect(price).toHaveTextContent('SA');
