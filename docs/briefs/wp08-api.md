@@ -3,70 +3,72 @@ wp: 8
 title: "api: app bootstrap, routes, auth, hardening, static, health, record tool route"
 owner: sonnet
 depends_on: [4b, 7, 9, 10]
-spec_sections: ["§3 Effective age", "§4 Auth and request hardening", "§5.5", "§6.5", "§6.8 (storage)", "§6.9", "§7 app_lock, Migrations", "§8.1", "§8.2", "§9 item 5", "§10", "§12", "§13", "§14"]
+spec_sections: ["§3 Effective age", "§4 Auth and request hardening", "§5.2 Vendor links", "§5.5", "§6.5", "§6.8 (storage)", "§6.9", "§7 app_lock, Migrations", "§8.1", "§8.2", "§9 item 5", "§10", "§12", "§13", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, security-reviewer, provenance-auditor, product-owner, devops-reviewer]
 status: draft
 ---
 
 # WP8 — `@gmt/api`: app bootstrap, routes, auth, hardening, static, health, record tool route
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 24) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`: "Global Constraints", every "Cross-package contracts" block and "Decisions taken at reconciliation" 1–52) before Task 8.0. Refreshed on 2026-10-17 against main at `697ad9d` (spec revision 24, plan decisions 1–52) and the reviewed WP7, WP9 and WP10 briefs; every code block below was assembled on a scratch worktree of main and run green (§13 says what stood in for the parts not on main yet).
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 24) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`: "Global Constraints", every "Cross-package contracts" block and "Decisions taken at reconciliation" 1–55) before Task 8.0. Refreshed on 2026-10-17 after review round 1, against main at `d765d38` (WP7 merged; spec revision 24; plan decisions 1–55) and the reviewed WP9 and WP10 briefs; every code block below was assembled on a scratch worktree of main and run green (§13: WP9's Task 9.0 and WP10's Task 10.1, not on main yet, were applied verbatim from their briefs first).
 
 ## 1. Goal
 
-Turn the engine, repositories and ports into the one HTTP surface of spec §10 under `/api`, behind the auth and hardening of spec §4, started by an app bootstrap that honours the §5.5 synthetic gates, the §7 `app_lock` waits and the pre-migration backup, and that shuts down gracefully (§7, §13).
+Turn the engine, repositories and ports into the one HTTP surface of spec §10 under `/api`, behind the auth and hardening of spec §4, started by an app bootstrap that honours the §5.5 synthetic gates, judges `app_lock` before it touches the database (§7, decision 53), backs up before migrating, and shuts down gracefully (§7, §13).
 
 ## 2. Scope
 
 **In**
 
-- `apps/api/src/app.ts`: `createApp(ports, engine, options?)`, a Hono app that mounts every `ROUTES` entry of `@gmt/core` `apiContract` (paths already carry `/api`) with `@hono/zod-validator` on bodies and queries, the error envelope `{ error: { code, message, details? } }` (a 422 and a validation 400 carry `details.fields`), security headers, Host/Origin/Content-Type/X-Requested-With checks, basic auth with the failed-auth rate limit, static serving of the built web app with an SPA fallback outside `/api`. Handlers narrow every input with its contract schema (`parseWith`); no `as` anywhere (`pnpm casts`, decision 48).
-- Every route of spec §10 except `POST /api/tools/smoke`: health (union schema), airports autocomplete, providers, definitions CRUD with the plan-preset draft and the confirmation rule in pence and calls (decisions 37, 42, 43), both estimate routes, the coverage check, executions, single-cell verify, results (§6.5/§6.9), calendar, duration analysis, coverage, calendar gap, cell detail (with `verify` from `Engine.childCapPreview`, decisions 42, 48), history (with `stale`, `truncated` and `priceConfirmed` on points, decisions 36, 38, 42), alert rule storage and events, scheduler jobs, budget, and `POST /api/tools/record` over WP4b's `runRecord`.
-- Staleness by fetch age (decision 44, spec rev 23): a price is stale when its fetch age plus its known `maxAgeHours` exceeds the threshold; an unknown vendor age is aged by the fetch age alone and never marked stale on that account. `truncated` on every calendar price from its discovery outcome's `last_error` through core's `isTruncated` (decisions 36, 47). Verified-basis minima skip prices the final step did not confirm (decisions 45, 48).
-- `apps/api/src/bootstrap/app.ts`: `bootApp(deps)` and `main(env)` in the plan's order: refuse `NODE_ENV=test` → data directory writable → backup preflight through WP4b's `bootstrap/preflight.ts` (decision 32) → `buildPorts` (migrations) → seed + airport sanity check → `AppLock('app')` with waits and the 30 s heartbeat → `createEngine` → `engine.boot()` → serve; SIGTERM: stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close → exit 0. Exit codes from WP4b's single `EXIT` table (`apps/api/src/tools/types.ts`).
-- Two contract additions no other brief makes (Task 8.0): `expandTop` on `executionSummarySchema` (decision 42) and draft-tolerant stored/response definition shapes; plus `suppliedFields` on `ItinerariesRepo.offerHistory` points, from which `priceConfirmed` is derived (decision 42).
+- `apps/api/src/app.ts`: `createApp(ports, engine, options?)`, a Hono app that mounts every `ROUTES` entry of `@gmt/core` `apiContract` (paths already carry `/api`). Each handler is built with `route({ request, query }, run)` over its ROUTES entry's own schema objects, which parses the body and the query exactly once (decision 54) and hands `run` their typed output; `createApp` refuses a handler whose schemas are not its entry's. Around them: the error envelope `{ error: { code, message, details? } }` (a 422 and a validation 400 carry `details.fields`), a 64 KiB body limit (413), `Cache-Control: no-store` on every API response, security headers, Host/Origin/Content-Type/X-Requested-With checks, basic auth with the per-IP failed-auth limit, static serving of the built web app with an SPA fallback outside `/api`. No `as` anywhere (`pnpm casts`, decision 48).
+- Every route of spec §10 except `POST /api/tools/smoke`: health (union schema), airports autocomplete, providers, definitions CRUD with the plan-preset draft and the confirmation rule (decisions 37, 42, 43, 53, 54), both estimate routes, the coverage check, executions, single-cell verify (passing its confirmation, decision 54), results (§6.5/§6.9), calendar (with `?destination=`, decision 53), duration analysis, coverage, calendar gap, cell detail (with `verify` from `Engine.childCapPreview`, decisions 42, 48), history (the itinerary's `cell` and `carriers`; `stale`, `truncated`, `priceConfirmed` and `executionId` on its points; `stale` on route-level points, decisions 36, 38, 42, 52, 54, 55), alert rule storage and events, scheduler jobs, budget, and `POST /api/tools/record` over WP4b's `runRecord`.
+- Provenance on every figure (decisions 44, 53, 54, 55): staleness is core's one `isStale(provenance, now, thresholdHours)`, the effective age (observed age; else fetch age plus a known `maxAgeHours`; else, the vendor's age unknown, the fetch age alone) against the threshold, called for every `stale` the api computes; every verified-basis figure (rows, calendar day minima, duration minima, calendar-gap yardstick) carries "not seen in latest search" and prefers a seen, then a fresh, price; a calendar-basis price a newer parent execution found empty or no_data is `superseded` (result rows, the calendar day's minimum, the duration's calendar minima, the cell detail) and ranks after current prices; `truncated` on every calendar price (decisions 36, 47); verified-basis minima skip prices the final step did not confirm (decisions 45, 48); every booking and search link is re-validated against `LINK_ALLOWLIST` on the way out.
+- One request at a time per definition for estimate, coverage check, run, resume and verify (429 `already_running`, decision 54).
+- `apps/api/src/bootstrap/app.ts`: `bootApp(deps)` and `main(env)` in decision 53's order: refuse `NODE_ENV=test` (70) → re-assert the auth invariants on the injected config (78) → data directory writable (73) → read `app_lock` read-only and wait while it is fresh (75 when it stays fresh; 73 when unreadable) → backup preflight through WP4b's `bootstrap/preflight.ts` (decision 32) → `buildPorts` (migrations) → seed + airport sanity check → `AppLock('app')` and the 30 s heartbeat → `createEngine` → `engine.boot()` → serve; a failed boot after the lock releases it and stops the heartbeat. SIGTERM: stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close → exit 0. Exit codes from WP4b's single `EXIT` table (`apps/api/src/tools/types.ts`).
+- Task 8.0's core and db additions (§12): core's effective age for an unknown vendor age, `isStale` and the "vendor's cache age unknown" label (decision 55), `vendorLinkSchema` on every contract link field, `storedBookingSchema`, `superseded` on result rows, `budgetScopeLabel`, the verify confirmation fields, draft-tolerant stored definitions, `definitionCreateOptionalSchema` and `alertRulesQuerySchema`, the exported `CONSTRAINT_NAMES`; db's `retriedOnResume` and `OfferHistoryPoint` (supplied fields and execution).
 - Every §9 item 5 test as real code, plus the review-focus line 4 test.
 
 **Out**
 
-- `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger` (with the §14 redact paths and secret scrubbing), `safeMessage`, the tool bootstrap with `recordingTarget`, the preflight helpers, `runRecord`/`recordFixtures` and the `EXIT` table: WP4b (on main, consumed here).
+- `buildPorts`, `loadConfigFromEnv`, `collectSecrets`, `createLogger` (with the §14 redact paths and secret scrubbing), `safeMessage`, the tool bootstrap with `recordingTarget`, the preflight helpers, `runRecord`/`recordFixtures` and the `EXIT` table: WP4b (on main, consumed here). WP8 moves the tool bootstrap's airport seeding into a shared `bootstrap/seed.ts` both bootstraps call.
 - `POST /api/tools/smoke`, `runSmoke` and the "tool bootstrap starts no execution" test: WP13. WP8 leaves the smoke route unmounted (key listed in `OWNED_ELSEWHERE`); WP13 adds its handler and removes the key.
 - The alert runner (`runAlerts`, passed to `createEngine` as `opts.alerts`), `EmailNotifier`, templates: WP11, which modifies `bootApp` to pass `{ alerts: runAlerts }`. WP8 stores and reads alert rules and events only.
 - `backupDatabase` (WP3) and its CLI wrapper `scripts/backup.mjs` (WP12). Dockerfile, compose, `HEALTHCHECK` (fetches `GET /api/health`), docs: WP12.
-- The SPA and its client: WP9/WP10. The contract fields WP9 Task 9.0 (`truncated`) and WP10 Task 10.1 (duration `searched` per series and minimum cells, `historyPointResponseSchema`, `priceConfirmed`, `verify`, the calendar day's `verification.unconfirmedCells`, decision 51) add, and the fields WP7 Tasks 7.13 and 7.18 add (`confirmedCalls`, `confirmCalls`, `needsConfirmation.totalCalls`, nullable `cachedRows`); WP8 fills them.
-- Engine semantics (pre-start checks, the confirmation comparison at start, resume compare-and-set, child sizing, scheduler, budget fit): WP7. WP8 maps `StartResult` to HTTP and mirrors the confirmation trigger only to fill `needsConfirmation`.
+- The SPA and its client: WP9/WP10. The contract fields WP9 Task 9.0 adds (`truncated` on price cells and rows, `expandTop` on the execution summary, core's `formatAgo`/`formatFetchedAgo`) and WP10 Task 10.1 adds (`calendarQuerySchema` on the calendar route; `notSeenInLatest` on the day's verified minima, the duration's `minVerified` and the calendar gap's yardstick; `superseded` on the day's calendar minimum, the duration's calendar minima and the cell detail's calendar prices; `verification.unconfirmedCells`; per-series `searched` counts and the minima's cells; `historyPointResponseSchema`, the itinerary's `cell` and `carriers` and each point's `priceConfirmed` and `executionId`; `stale` on route-level points; the cell detail's `verify`); WP8 fills every one. WP10 labels the route-level series indicative; the contract's route points are GBP-only by shape (decision 25).
+- Engine semantics (pre-start checks, the confirmation comparison at start and verify, `confirmationOf`, resume compare-and-set, child sizing, scheduler, budget fit): WP7, on main. WP8 maps `StartResult` and `ChildCapPreview` to HTTP and mirrors the confirmation trigger only to fill `needsConfirmation`, with WP7's `SOFT_CONFIRM_CALL_SHARE`.
 - The place-name check in `scripts/check-boundaries.mjs` and its `NOT_AIRPORT_WORDS` list: WP9 Task 9.12 (decisions 36, 46). WP8's strings need no new entry: the only three-letter capitals its new code adds are `GET` (handler keys), already listed.
 
 ## 3. Spec sections
 
 | Section | What it requires of WP8 |
 |---|---|
-| §3 Effective age (rev 23) | Every price carries its effective age as a number: the observed age, or the fetch age plus a known `maxAgeHours`, or (unknown vendor age) the fetch age alone, which the web labels "vendor's cache age unknown" from the provenance; an unknown age is never stale on that account (decision 44). |
-| §4 "Auth and request hardening" | Basic auth (both vars or neither, password ≥ 12, constant-time compare), failed-auth limit 5/min per source IP (from `X-Forwarded-For` only with `TRUST_PROXY=true`) with a global 20/min; everything authenticated except the minimal `GET /api/health`, which is also Host-exempt; the `ALLOWED_HOSTS` rejection names the header value and the variable; mutating routes need `Content-Type: application/json` and `X-Requested-With: get-me-there`; `Origin`, when present, must match; CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`. |
-| §5.5 | Bootstraps refuse `NODE_ENV=test`; injected-config boot matrix; one test spawning the real bootstrap with a real production environment (`/providers` omits `fixture`, the fixture constructor throws, a synthetic write throws). |
+| §3 Effective age (rev 24) | Every price carries its effective age as a number: the observed age, or the fetch age plus a known `maxAgeHours`, or (unknown vendor age) the fetch age alone, which the web labels "vendor's cache age unknown" from the provenance. Core's `worstCaseAgeHours` returns that number (Task 8.0, decision 53); `compareAges` ranks an unknown age after any known one; core's full label for it reads "vendor's cache age unknown". Stale means the effective age exceeds the threshold, decided by core's one `isStale` (decisions 54, 55). |
+| §4 "Auth and request hardening" | Basic auth (both vars or neither, password ≥ 12, constant-time compare), re-asserted by `bootApp` on an injected config; failed-auth limit 5/min per client IP (from `X-Forwarded-For` only with `TRUST_PROXY=true`), and a correct credential always succeeds (decision 54); everything authenticated except the minimal `GET /api/health`, which is also Host-exempt, and whose detail an unauthenticated deployment shows only to an allowed Host; the `ALLOWED_HOSTS` rejection names the header value and the variable, never the allowed values (decision 54); mutating routes need `Content-Type: application/json` and `X-Requested-With: get-me-there`; `Origin`, when present, must match; bodies over 64 KiB are 413; API responses are `no-store` and carry no CORS headers; CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`. |
+| §5.2 Vendor links | `vendorLink` and `booking.url` are https on a host within the provider's `LINK_ALLOWLIST` entry, checked again on the way out; anything else becomes `{ kind: 'none' }` (decision 54). |
+| §5.5 | Bootstraps refuse `NODE_ENV=test`; injected-config boot matrix (production with and without the phrase, development in and out of a container, the wrong phrase, a plain `.db` path; the fixture constructor throws outside the gate; a definition naming `fixture` under production is 422 `unknown_provider`); one test spawning the real bootstrap with a real production environment. |
 | §6.5 | `/results` dedups per itinerary hash, ranks by class then price, returns at most 1000 rows with `truncated` and `total`, no sort/filter parameters. |
 | §6.8 | Alert rules stored with the `requireAllVerified` refinement enforced on create and on a merged partial update; events listed by rule and definition; soft delete keeps events. |
 | §6.9 | Basis `verified` or `calendar`; calendar rows are class `unchecked` with a "not applied" list; default basis calendar when the snapshot has no verification provider or no observation exists, with a reason; calendar gap empty with no verification provider; a search link on every non-synthetic row. |
-| §7 `app_lock`, Migrations | App holder: heartbeat every 30 s; a fresh `tool` lock → wait up to 60 s then refuse; a fresh `app` lock → wait up to 90 s logging its age, refuse if still heartbeated, take over a stale lock at once; SIGTERM releases the lock after the checkpoint. Backup before migrations when migrations are pending; a failed backup refuses boot. Seed and the airport sanity check fail boot. |
-| §8.1 | Staleness per price (as §3 above); `notSeenInLatest`; overruns against the pre-factor plan (discovery on tiles, decision 43); `/resume` manual, 409 on a lost compare-and-set or an active sibling; single-cell verify validates membership in the current resolved space and the airports; children in results, calendar, calendar gap and duration analysis. |
-| §8.2 | Definition create/PUT/disable/enable/delete (re)register its cron job in the same request; cron validated by the engine's `parseCron` (sub-hourly rejected); the default definition uses the plan-aware preset; a schedule whose provider-month scope does not fit is refused (decision 25). |
+| §7 `app_lock`, Migrations | The app reads the lock read-only before any backup or migration (decision 53): a fresh `tool` lock → wait up to 60 s then refuse (75); a fresh `app` lock → wait up to 90 s logging its age, proceed once it goes stale, refuse a second live app (75). Heartbeat every 30 s; SIGTERM releases the lock after the checkpoint. Backup before migrations when migrations are pending; a failed backup refuses boot. Seed and the airport sanity check fail boot. |
+| §8.1 | Staleness per price (as §3 above); "not seen in latest search" on every verified-basis figure; overruns against the pre-factor plan (discovery on tiles, decision 43); `/resume` manual, 409 on a lost compare-and-set or an active sibling (and WP3's `RowRejected('active')` from a lost race); single-cell verify validates membership in the current resolved space and the airports and passes the confirmation; children in results, calendar, calendar gap and duration analysis. |
+| §8.2 | Definition create/PUT/disable/enable/delete (re)register its cron job in the same request; cron validated by the engine's `parseCron` (sub-hourly rejected); the default definition uses the plan-aware preset; a schedule whose provider-month scope does not fit is refused (decision 25), matched by core's `budgetScopeLabel`. |
 | §9 item 5 | Every test listed there (Task 8.15 sweeps). |
-| §10 | The route table under `/api`, incl. `GET /airports` and `POST /definitions/estimate`; the error envelope with `details.fields` on 422; `provenance` and `stale` on every price-bearing shape. |
+| §10 | The route table under `/api`, incl. `GET /airports`, `POST /definitions/estimate` and the calendar's `destination` query; the error envelope with `details.fields` on 422; `provenance` and `stale` on every price-bearing shape. |
 | §12 | `process.env` read once, in `src/bootstrap/start.ts`, and parsed through the `core` schema by WP4b's `loadConfigFromEnv`. |
 | §13, §14 | `/api/health` for the `HEALTHCHECK`; graceful shutdown; pino with redaction and secret scrubbing (WP4b's `createLogger`); error messages through WP4b's `safeMessage`. |
 
-The brief follows the spec at revision 24 and plan decisions 1–52 (50 and 52 change nothing here: resume, stride and web rules). Where a brief and the plan name a field differently (WP10's `verification.unconfirmed` against decision 51's `unconfirmedCells`), the brief follows the plan and §13 records it.
+The brief follows the spec at revision 24 and plan decisions 1–55. Decisions 53 and 54 are the rulings on this brief's first review round; decision 55 (from the WP11 refresh) gives core one `isStale` that WP8 adds and WP8 and WP11 both call, and the unknown-age label text; §13 lists only what the plan has not recorded.
 
 ## 4. Interfaces consumed
 
-As the code on main declares them (WP0–WP6, WP4b), plus the additions the reviewed WP7, WP9 and WP10 briefs make before WP8 runs (marked). Only the members WP8 calls are listed; the plan's "Cross-package contracts" are authoritative for the rest.
+As the code on main declares them (WP0–WP7, WP4b), plus the WP9 Task 9.0 and WP10 Task 10.1 contract fields (marked). Only the members WP8 calls are listed; the plan's "Cross-package contracts" are authoritative for the rest.
 
 ```ts
-// @gmt/core — types and helpers (WP0–WP2)
+// @gmt/core — types and helpers (WP0–WP2, WP7)
 export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
 export interface CellKey { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate }
 export function cellKeyString(c: CellKey): string;
-export interface SearchDefinition { id; name; origins: Iata[]; destinations: Iata[]; window: WindowSpec; minNights; maxNights; cabin; constraints; verification: VerificationPolicy; budget: ExecutionBudget; providers: ProvidersConfig; destinationNotes: Partial<Record<Iata, string>>; onwardCostPence: Partial<Record<Iata, number>>; scheduleCron: string | null; scheduleTz: string; confirmedCostPence: number | null; confirmedCalls: number | null /* WP7 Task 7.13 */; enabled: boolean; createdAt; updatedAt; deletedAt: IsoDateTime | null }
+export interface SearchDefinition { id; name; origins: Iata[]; destinations: Iata[]; window: WindowSpec; minNights; maxNights; cabin; constraints; verification: VerificationPolicy; budget: ExecutionBudget; providers: ProvidersConfig; destinationNotes: Partial<Record<Iata, string>>; onwardCostPence: Partial<Record<Iata, number>>; scheduleCron: string | null; scheduleTz: string; confirmedCostPence: number | null; confirmedCalls: number | null; enabled: boolean; createdAt; updatedAt; deletedAt: IsoDateTime | null }
 export type DefinitionInput = Omit<SearchDefinition, 'id' | 'confirmedCostPence' | 'confirmedCalls' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
 export type DefinitionSnapshot = SearchDefinition & { resolved: ResolvedSpace; resolvedAt: IsoDateTime; windowClamped: boolean; droppedAlwaysInclude: CellKey[] };
 export interface Execution { id; definitionId; isChild; cell: CellKey | null; snapshot: DefinitionSnapshot; status: ExecutionStatus; stage: Stage | null; estimate: Estimate | null; resumeAfter; startedAt; finishedAt; errorText; createdAt; trigger: 'manual' | 'schedule' | 'tool' }
@@ -76,24 +78,24 @@ export type BudgetFit = z.infer<typeof budgetFitSchema>;   // { fits; runsPerMon
 export type BudgetScope = { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string } | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId } | { kind: 'global-month' };
 export interface Usage { calls; costMicroGbp; cap: number | null; windowStart: IsoDateTime | null; windowEnd: IsoDateTime | null }
 export interface ProviderLimits { monthlyCallCap; window: 'month' | 'lifetime'; …; planFixedMicroGbp: number; excludedFromSchedule: boolean }
-export const PENCE_TO_MICRO = 10_000;
-export function microGbpToPence(micro: number): number;               // rounds up (decisions 47, 49; WP7 Task 7.1)
-export const TRUNCATED_NOTE = 'cheapest of the rows read';            // WP7 Task 7.5
-export function isTruncated(lastError: string | null): boolean;       // WP7 Task 7.5 (decision 47)
+export function microGbpToPence(micro: number): number;               // rounds up (decisions 47, 49)
+export const TRUNCATED_NOTE = 'cheapest of the rows read'; export function isTruncated(lastError: string | null): boolean;   // decision 47
+export const PRICE_UNCONFIRMED = 'price-unconfirmed';                 // the verified cell's reason when no offer is confirmed (test seeder)
 export const DEFAULT_DISCOVERY_REFRESH_HOURS = 168;                   // decision 21
-export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // EffectiveAge always carries fetchedHours
-export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown';
+export function effectiveAge(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime): EffectiveAge;   // always carries fetchedHours
 export function resolveWindow(w: WindowSpec, todayLondon: IsoDate): { departureFrom; departureTo; clamped };
 export function generateCells(space: ResolvedSpace): Cell[]; export function countCells(space: ResolvedSpace): number;
 export function addDays(d: IsoDate, n: number): IsoDate; export function daysBetween(a: IsoDate, b: IsoDate): number;
 export function validateSearchSpace(def: Pick<SearchDefinition, 'origins' | 'destinations' | 'window' | 'minNights' | 'maxNights' | 'verification'>, todayLondon: IsoDate, lookup: AirportLookup, maxCells: number): ValidationResult;
 export interface AirportLookup { exists(iata: Iata): boolean; metroOf(iata: Iata): string | null; airportsOfMetro(code: string): Iata[] }
 export function selectedNotReached(selected: CellKey[], outcomes: CellOutcome[]): Array<{ cell: CellKey; reason: 'not_run' | 'skipped:budget' }>;
+export function sixBuckets(outcomes: CellOutcome[]): Buckets;
 export function evaluateConstraints(it, obs, c: Constraints, requestedCabin: Cabin, supplied: readonly SuppliedField[]): Verdicts;
 export function verdictClass(v: Verdicts): VerdictClass;   // throws without a cabin verdict: never called on calendar rows
 export function unverifiedNames(v: Verdicts): ConstraintName[];
 export function dedupByItinerary(rows: ResultRow[], now: IsoDateTime): ResultRow[]; export function rankRows(rows: ResultRow[], now: IsoDateTime): ResultRow[];
 export function searchLinkFor(providerId: ProviderId, cell: CellKey, cabin: Cabin): { url; host; label } | null;   // null for 'fixture'
+export const LINK_ALLOWLIST: Record<ProviderId, string[]>; export function validateVendorUrl(url: string, allowed: readonly string[]): Booking;   // spec §5.2
 export function formatPence(pence: number): string;
 export function stripUrlsInText(text: string): string; export function syntheticAllowed(c: SyntheticGateInput): boolean;
 export function findBannedWords(text: string, allowlist?: readonly string[]): Array<{ word; index }>; export const BANNED_WORD_ALLOWLIST: readonly string[];
@@ -101,38 +103,40 @@ export const iataSchema: z.ZodType<Iata, string>; export const isoDateSchema: z.
 export function isoDateTimeOfEpochMs(ms: number): IsoDateTime; export function londonDateOf(instant: IsoDateTime): IsoDate;
 export function fixedClock(at: IsoDateTime): Clock & { advance(ms: number): void; set(at: IsoDateTime): void };
 export const FIXTURE_OPT_IN_PHRASE = 'i-understand-this-is-fake';
-export interface Config { nodeEnv; databasePath; port; bindAddress; allowedHosts: string[]; auth: { user: string; pass: Secret } | null; trustProxy; logLevel; pointOfSale; staleAfterHours: number; calendarStaleAfterHours: number | null; maxCellsPerDefinition; schedulerTimezone; spend: { monthlyCapMicroGbp; softConfirmMicroGbp; executionMaxCalls; executionMaxFreeCalls; executionMaxCostMicroGbp; childMaxCalls; … }; providers: { travelpayouts: { token; limits } | null; searchapi: { key; plan: PlanId; trialUsed; limits } | null; fixture: { costMicroGbp } | null }; … }
+export interface Config { nodeEnv; databasePath; port; bindAddress; allowedHosts: string[]; auth: { user: string; pass: Secret } | null; allowUnauthenticated: boolean; trustProxy; logLevel; pointOfSale; staleAfterHours: number; calendarStaleAfterHours: number | null; maxCellsPerDefinition; schedulerTimezone; spend: { monthlyCapMicroGbp; softConfirmMicroGbp; executionMaxCalls; executionMaxFreeCalls; executionMaxCostMicroGbp; childMaxCalls; … }; providers: { travelpayouts: { token; limits } | null; searchapi: { key; plan: PlanId; trialUsed; limits } | null; fixture: { costMicroGbp } | null }; … }
 export interface FlightProvider { id; displayName; discovery?: { info: CapabilityInfo; … }; verification?: { info: CapabilityInfo; … }; … }
 export * as apiContract from './api-contract/index.js';
-// apiContract (WP0; with WP7 Tasks 7.13/7.18, WP9 Task 9.0, WP10 Task 10.1 and this brief's Task 8.0):
+// apiContract (WP0, WP7; WP9 Task 9.0, WP10 Task 10.1 marked; Task 8.0's additions in §5):
 //   ROUTES: readonly RouteDef[] (RouteDef { method; path /* /api/… */; request?; query?; response; auth: 'public' | 'required' })
-//   errorEnvelopeSchema, cellKeySchema, priceCellSchema { pricePence, provenance, stale, ageHours, truncated /* 9.0 */ },
-//   executionSummarySchema { id, status, isChild, startedAt, finishedAt, ageHours, expandTop /* 8.0 */ }, usageSchema, coverageSummarySchema,
-//   definitionCreateRequestSchema / definitionUpdateRequestSchema (+ confirmedCostPence?, confirmedCalls? /* 7.13 */), definitionShapeSchema,
-//   definitionResponseSchema (+ confirmedCalls; needsConfirmation { estimateMicroGbp, totalCalls, confirmedCostPence, confirmedCalls } /* 7.13 */),
-//   estimateResponseSchema, coverageCheckRequestSchema, coverageCheckResponseSchema (cachedRows: number | null /* 7.18 */),
-//   executionResponseSchema, startExecutionRequestSchema { confirmCostPence?, confirmCalls? /* 7.13 */ }, startExecutionResponseSchema, verifyCellRequestSchema,
-//   resultRowSchema (+ truncated /* 9.0 */), resultsQuerySchema, resultsResponseSchema, calendarResponseSchema (day verification + unconfirmedCells /* 10.1, decision 51 */),
-//   durationAnalysisResponseSchema (minima carry `cell`; searched { verification; discovery: Array<{ providerId; searched }> } /* 10.1 */),
-//   coverageResponseSchema, calendarGapResponseSchema, cellDetailResponseSchema (+ verify: { maxCalls; headroomCalls } | null /* 10.1, decision 42 */),
-//   historyPointSchema, historyPointResponseSchema { …HistoryPoint, stale, truncated } /* 10.1 */, itineraryHistoryResponseSchema (points + priceConfirmed /* 10.1 */),
-//   routeHistoryQuerySchema, routeHistoryResponseSchema, airportsQuerySchema, airportsResponseSchema, providersResponseSchema,
+//   errorEnvelopeSchema, cellKeySchema, priceCellSchema { pricePence, provenance, stale, ageHours, truncated /* 9.0 */ }, executionSummarySchema (+ expandTop /* 9.0 */), usageSchema, coverageSummarySchema,
+//   definitionCreateRequestSchema / definitionUpdateRequestSchema (+ confirmedCostPence?, confirmedCalls?), definitionShapeSchema,
+//   definitionResponseSchema (+ confirmedCalls; needsConfirmation { estimateMicroGbp, totalCalls, confirmedCostPence, confirmedCalls }),
+//   estimateResponseSchema, coverageCheckRequestSchema, coverageCheckResponseSchema (cachedRows: number | null),
+//   executionResponseSchema, startExecutionRequestSchema { confirmCostPence?, confirmCalls? }, startExecutionResponseSchema, verifyCellRequestSchema,
+//   resultRowSchema (+ truncated /* 9.0 */), resultsQuerySchema, resultsResponseSchema,
+//   calendarQuerySchema { destination? } /* 10.1 */, calendarResponseSchema (day: verification.unconfirmedCells; cheapestVerified / cheapestPartiallyVerified + notSeenInLatest; cheapestCalendar + superseded /* 10.1 */),
+//   durationAnalysisResponseSchema (minima carry `cell`; minVerified + notSeenInLatest; minCalendar[].price + superseded; searched { verification: { searched, total }; discovery: Array<{ providerId; searched; total }> } /* 10.1 */),
+//   coverageResponseSchema, calendarGapResponseSchema (cheapestVerified + notSeenInLatest /* 10.1 */), cellDetailResponseSchema (calendarPrices[] + superseded; verify: { maxCalls; headroomCalls } | null /* 10.1 */),
+//   historyPointSchema, historyPointResponseSchema { …HistoryPoint, stale, truncated } /* 10.1 */, itineraryHistoryResponseSchema (cell, carriers; points + priceConfirmed, executionId /* 10.1 */),
+//   routeHistoryQuerySchema, routeHistoryResponseSchema (routeSeries points + stale /* 10.1 */), routeSeriesPointSchema, airportsQuerySchema, airportsResponseSchema, providersResponseSchema,
 //   budgetResponseSchema, schedulerJobsResponseSchema, healthPublicSchema, healthDetailSchema, alertRuleSchema, alertRuleInputSchema,
 //   alertRuleUpdateRequestSchema, alertEventSchema, alertEventsQuerySchema, toolRecordRequestSchema, toolRunResponseSchema
 
-// @gmt/db (WP0, WP3; WP7 Task 7.13)
+// @gmt/db (WP0, WP3, WP7)
 export interface Db { raw: BetterSqlite3.Database; transaction; immediateTransaction; close(): void }
 export const MIGRATIONS_DIR: string; export const AIRPORTS_DATA_DIR: string;
 export const HEARTBEAT_INTERVAL_MS = 30_000;
+export function readOnlyLockState(dbPath: string, clock: Clock): { state: 'absent' } | { state: 'fresh' | 'stale'; holder: 'app' | 'tool'; heartbeatAt: IsoDateTime };   // opens the file read-only (absent for :memory: or no file); throws when it is not a database
 export class AppLock { constructor(db: Db, holder: 'app' | 'tool', clock: Clock, log: Logger, opts?); static inspect(db: Db): { holder; heartbeatAt; acquiredAt } | null; acquire(opts: { waitMs: number }): 'acquired' | 'refused'; heartbeat(): void; release(): void }
+export class RowRejected extends Error { readonly rule: string }   // rule 'active': an execution of the definition is already active (WP7)
 export function loadAirportsDataset(dir: string): AirportsDataset; export function seedAirports(db: Db, dataset: AirportsDataset): { inserted; datasetVersion };
 export function sanityCheckAirports(db: Db, referenced: Iata[]): { ok: true } | { ok: false; reason: string };
 export class AirportsRepo { exists(iata); search(q, limit): Airport[]; metroOf(iata); airportsOfMetro(code): Iata[]; count(): number; datasetVersion(): string | null }
-export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number; confirmedCalls?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?): SearchDefinition[]; softDelete(id): void; setConfirmed(id, confirmed: { pence: number; calls: number } | null): void /* WP7 Task 7.13, replaces setConfirmedCost */ }
-export class ExecutionsRepo { get(id): Execution | null; listForDefinition(definitionId, opts: { limit; includeChildren }): Execution[] /* newest first */ }
-export class CellsRepo { outcomes(executionId, filter?: { stage?; providerId?; cells? }): CellOutcome[]; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; bucketsPerDay(executionId): Map<IsoDate, Array<{ stage; providerId; buckets; total }>>; selected(executionId): Array<{ cell; reason }> }
-export class CalendarPricesRepo { latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; history(origin, destination, cabin, opts?): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> }
-export class ItinerariesRepo { observationsForDefinition(definitionId, opts: { executionIds; space; cabin; includeChildren }): ObservationRow[]; latestVerificationOutcomeForCell(definitionId, cell, cabin): CellOutcome | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: OfferHistoryPoint[] /* Task 8.0 */ }> }
+export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number; confirmedCalls?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?): SearchDefinition[]; softDelete(id): void; setConfirmed(id, confirmed: { pence: number; calls: number } | null): void }
+export class ExecutionsRepo { get(id): Execution | null; listForDefinition(definitionId, opts: { limit; includeChildren }): Execution[] /* newest first: created_at, then rowid */ }
+export class CellsRepo { outcomes(executionId, filter?: { stage?; providerId?; cells? }): CellOutcome[]; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; selected(executionId): Array<{ cell; reason }> }
+export class CalendarPricesRepo { latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[]; history(origin, destination, cabin, opts?): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> }
+export class ItinerariesRepo { get(hash): (NormalisedItinerary & { firstSeenAt }) | null; observationsForDefinition(definitionId, opts: { executionIds; space; cabin; includeChildren }): ObservationRow[]; latestVerificationOutcomeForCell(definitionId, cell, cabin): CellOutcome | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: OfferHistoryPoint[] /* Task 8.0 */ }> }
 export class LedgerRepo { countsFor(executionId): { calls; costMicroGbp; tiles; cacheHits; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> } }
 export class AlertsRepo { rules(definitionId?): AlertRule[]; get(id); create(input); update(id, patch); softDelete(id); events(filter: { ruleId?; definitionId?; limit }): AlertEvent[] }
 export class NotificationsRepo { wasSent(kind: OperatorMessageKind, executionId: string | null, definitionId: string): boolean }
@@ -140,28 +144,33 @@ export class RoutePriceHistoryRepo { series(origin, destination, providerId, cab
 
 // @gmt/providers (WP4): fixtureProvider(opts): FlightProvider (throws unless syntheticAllowed); buildPorts wires the fixture host through http-kit's gated inProcessHosts.
 
-// @gmt/engine (WP7 brief §5; the brief WP8 is assembled against)
+// @gmt/engine (WP7, on main)
 export interface StartOptions { trigger: 'manual' | 'schedule'; confirmCostPence?: number; confirmCalls?: number }
+export interface VerifyCellOptions { confirmCostPence?: number; confirmCalls?: number }
 export type StartResult = { ok: true; executionId: string } | { ok: false; code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled'; message: string; details: unknown };
-export interface Engine { boot(): Promise<void>; shutdown(): Promise<void>; start(definitionId, opts: StartOptions): Promise<StartResult>; resume(executionId, opts: { manual: boolean }): Promise<StartResult>; cancel(executionId): Promise<boolean>; verifyCell(definitionId, cell: CellKey): Promise<StartResult>; childCapPreview(definitionId, cell: CellKey): { maxCalls: number; headroomCalls: number }; estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate; budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit; coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>; scheduler: { register(def): void; unregister(definitionId): void; jobs(): SchedulerJob[]; tick(definitionId): Promise<void>; blockedSince(): IsoDateTime | null }; status(): { running: string[]; degraded: boolean; nextRun; lastExecutionAt } }
-export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   // boot() makes no network call; EngineOptions carries no cost
+export type ChildCapPreview = { ok: true; maxCalls: number; headroomCalls: number } | { ok: false; code: 'not_found' | 'window'; message: string };
+export interface Engine { boot(): Promise<void>; shutdown(): Promise<void>; start(definitionId, opts: StartOptions): Promise<StartResult>; resume(executionId, opts: { manual: boolean }): Promise<StartResult>; cancel(executionId): Promise<boolean>; verifyCell(definitionId, cell: CellKey, opts?: VerifyCellOptions): Promise<StartResult>; childCapPreview(definitionId, cell: CellKey): ChildCapPreview; estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate; budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit; coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>; scheduler: { register(def): void; unregister(definitionId): void; jobs(): SchedulerJob[]; tick(definitionId): Promise<void>; blockedSince(): IsoDateTime | null }; status(): { running: string[]; degraded: boolean; nextRun; lastExecutionAt } }
+export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   // boot() makes no network call
+export function confirmationOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number };   // worst case over every line, blocked ones included
+export const SOFT_CONFIRM_CALL_SHARE = 0.2;                                                            // decisions 25, 53
 export function parseCron(expr: string, tz: string): { ok: true; next(from: Date): Date | null } | { ok: false; reason: string };
 export class LogNotifier implements Notifier { constructor(log: Logger) }
-// What WP8 relies on (WP7 §5): estimate() is the worst case without reuse with `blocked` filled and totals over what would run; a
-// start compares the stored or sent confirmation in pence AND calls; childCapPreview sizes exactly as verifyCell will.
+// What WP8 relies on: estimate() is the worst case without reuse with `blocked` filled and totals over the lines that would run;
+// a start or verify compares the stored or sent confirmation in pence AND calls with confirmationOf(estimate);
+// childCapPreview sizes exactly as verifyCell will and refuses where verifyCell would.
 
 // apps/api on main (WP4b)
 export interface Ports { config; db: Db; repos: Repos; budget: BudgetGuard; cache; http; providers: FlightProvider[]; clock; log: Logger; secrets: Secret[]; recorder; fixtureRoot: string | null }
-export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?; migrationsDir: string; fixtureRoot?: string }): Ports;   // fixtureRoot defaults to defaultFixtureRoot() under the gate
+export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; recorder?; migrationsDir: string; fixtureRoot?: string }): Ports;
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv): Config;   // throws InvalidConfigError naming every bad field
 export class InvalidConfigError extends Error {}; export function collectSecrets(config: Config): Secret[];
 export function createLogger(config: Pick<Config, 'logLevel'>, opts?: { destination?: NodeJS.WritableStream; fd?: 1 | 2; secrets?: readonly Secret[] }): Logger;
-export function safeMessage(e: unknown, secrets: readonly Secret[]): string;   // src/safeMessage.ts
+export function safeMessage(e: unknown, secrets: readonly Secret[]): string;   // src/safeMessage.ts: URL queries and userinfo stripped, secrets replaced
 export const EXIT = { ok: 0, failed: 1, usage: 64, spendRefused: 65, refusedTestEnv: 70, preflightImpossible: 73, backupFailed: 74, lockRefused: 75, badConfig: 78 } as const;   // src/tools/types.ts
 // src/bootstrap/preflight.ts (decision 32): dataDirRefusal(databasePath): string | null; pendingOnExistingDb(databasePath, migrationsDir): string[];
 //   backupsDirFor(databasePath): string; BACKUPS_KEPT = 5;
 //   backupBeforeMigrations(databasePath, migrationsDir, clock, secrets): { ok: true; line: string | null } | { ok: false; code: 73 | 74; message: string }
-// src/bootstrap/tool.ts: interface RecordingTarget { root; recordedBy }; recordingTarget(cli: RecordCli, given?: RecordingTarget, roots?): RecordingTarget | { refusal: string }
+// src/bootstrap/tool.ts: runTool(name, argv, opts?): Promise<number>; interface RecordingTarget { root; recordedBy }; recordingTarget(cli: RecordCli, given?: RecordingTarget, roots?): RecordingTarget | { refusal: string }
 // src/tools/record.ts: recordPrecheck(c: Config): string | null; runRecord(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number /* exit code */>
 // src/tools/recordPlan.ts: interface RecordCli { args: RecordArgs; dryRun: boolean; confirmRerun: boolean; out: string | null }
 // test/helpers (WP4b): env.ts cleanEnv, SENTINEL_AUTH/SA/TP, silentLog; tmp.ts tempDir, onCleanup; test/support/setup.ts installs WP4's network guards
@@ -172,48 +181,66 @@ The fixture provider is reached through http-kit's gated `inProcessHosts` seam (
 ## 5. Interfaces produced
 
 ```ts
-// apps/api/src/routes/types.ts
+// apps/api/src/routes/types.ts, define.ts
 export const API_PREFIX = '/api';
-export type AppEnv = { Variables: { authenticated: boolean; optionalBody?: { present: boolean; value: unknown } } };
-export interface RouteInput { body: unknown; query: unknown; params: Record<string, string> }
-export interface RouteContext { ports: Ports; engine: Engine; tools: ToolRunners; toolInFlight: { name: string | null } }
-export type RouteHandler = (c: Context<AppEnv>, input: RouteInput, ctx: RouteContext) => Response | Promise<Response>;
+export type AppEnv = { Variables: { authenticated: boolean } };
+export interface RawInput { body: unknown; query: Record<string, string> | undefined; params: Record<string, string> }
+export interface RouteContext { ports: Ports; engine: Engine; tools: HttpToolRunners; toolInFlight: { name: string | null }; busy: Set<string> }
+export interface RouteHandler { readonly request: z.ZodType; readonly query: z.ZodType; handle(c: Context<AppEnv>, raw: RawInput, ctx: RouteContext): Response | Promise<Response> }
 export type HandlerTable = Readonly<Record<string, RouteHandler>>;   // keyed `${method} ${path}` of a ROUTES entry
+export const NO_INPUT: z.ZodUndefined;   // the schema of an input a route does not take
+export function route<B extends z.ZodType, Q extends z.ZodType>(schemas: { request: B; query: Q }, run: (c, input: { body: z.output<B>; query: z.output<Q>; params }, ctx) => Response | Promise<Response>): RouteHandler;
+export function plain(run: (c, input: { body: undefined; query: undefined; params }, ctx) => Response | Promise<Response>): RouteHandler;
 export type ToolRunResponse = z.infer<typeof apiContract.toolRunResponseSchema>;
-export interface ToolRunners { record?: (args: ToolRecordRequest, signal: AbortSignal) => Promise<ToolRunResponse> }
+export interface HttpToolRunners { record?: (args: ToolRecordRequest, signal: AbortSignal) => Promise<ToolRunResponse> }   // named apart from WP4b's CLI ToolRunners
 /** ROUTES entries whose handler another package owns; left unmounted here. WP13 removes 'POST /api/tools/smoke' when it adds its handler. */
 export const OWNED_ELSEWHERE: ReadonlySet<string>;
 
-// apps/api/src/app.ts
-export interface AppOptions { webRoot?: string | null; tools?: ToolRunners; clientIp?: (c: Context<AppEnv>) => string | null; routes?: readonly apiContract.RouteDef[] }
+// apps/api/src/app.ts, routes/shared.ts, errors.ts
+export const MAX_BODY_BYTES = 64 * 1024;
+export interface AppOptions { webRoot?: string | null; tools?: HttpToolRunners; clientIp?: (c: Context<AppEnv>) => string | null; routes?: readonly apiContract.RouteDef[] }
 export function createApp(ports: Ports, engine: Engine, options?: AppOptions): Hono<AppEnv>;   // strict mounting (Task 8.15)
-
-// apps/api/src/errors.ts, routes/shared.ts
+export function oneAtATime<T>(ctx: RouteContext, key: string, fn: () => T | Promise<T>): Promise<T>;   // 429 already_running (decision 54)
 export class ApiError extends Error { constructor(status: ContentfulStatusCode, code: string, message: string, details?: Details) }
 export function envelope(code: string, message: string, details?: Details): { error: { code; message; details? } };
-export function parseWith<S extends z.ZodType>(schema: S, value: unknown, target?: string): z.output<S>;
 
-// apps/api/src/bootstrap/app.ts, lock.ts, paths.ts
+// apps/api/src/bootstrap/app.ts, lock.ts, seed.ts, paths.ts
 export class BootError extends Error { readonly exitCode: number }
-export interface BootDeps { config: Config; log: Logger; clock?: Clock; listen: boolean; assets: AssetPaths; tools?: (ports: Ports) => ToolRunners; sleep?: (ms: number) => Promise<void>; timers?: Timers }
+export interface BootDeps { config: Config; log: Logger; clock?: Clock; listen: boolean; assets: AssetPaths; tools?: (ports: Ports) => HttpToolRunners; sleep?: (ms: number) => Promise<void> }
 export interface RunningApp { app: Hono<AppEnv>; ports: Ports; engine: Engine; port: number | null; close(): Promise<void> }
+export function assertAuthInvariants(config: Config, log: Logger): void;
 export function bootApp(deps: BootDeps): Promise<RunningApp>;
 export function main(env: NodeJS.ProcessEnv): Promise<void>;
-export function acquireAppLockWithWaits(d: LockWaitDeps): Promise<void>; export const TOOL_LOCK_WAIT_MS = 60_000; export const APP_LOCK_WAIT_MS = 90_000;
-export class LockRefusedError extends Error { readonly exitCode: 75 }
+export function waitForLockFree(d: { databasePath; clock; sleep; log; secrets }): Promise<void>; export const TOOL_LOCK_WAIT_MS = 60_000; export const APP_LOCK_WAIT_MS = 90_000;
+export class LockRefusedError extends Error { readonly exitCode: 75 }; export class LockUnreadableError extends Error { readonly exitCode: 73 }
+export function seedIfNeeded(ports: Ports, dataDir: string, report: (line: string) => void): void;   // both bootstraps
 export interface AssetPaths { migrationsDir: string; airportsDataDir: string; webRoot: string | null }; export function assetPaths(): AssetPaths;
 
 // apps/api/src/read/*: the read model the routes share and WP11 may reuse
-export function staleness(p: Provenance, thresholdHours: number, now: IsoDateTime): { ageHours: number; stale: boolean };   // decision 44, spec rev 23
-export function loadRows(def: SearchDefinition, ports: Ports, executionId?: string): Loaded;
+export function staleness(p: Provenance, thresholdHours: number, now: IsoDateTime): { ageHours: number; stale: boolean };   // effective age; stale from core's isStale (decisions 44, 54, 55)
+export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: readonly string[]): Loaded;
+export function pickVerified(rows: readonly ResultRow[]): ResultRow | null;   // seen in the newest search, then fresh, then cheaper (decision 54)
+export function safeBooking(b: Booking, providerId: ProviderId): Booking;     // LINK_ALLOWLIST re-validation (decision 54)
 export function executionSummary(e: Execution, now: IsoDateTime): ExecutionSummary;
 export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput;   // src/defaults.ts; DEFAULT_CRON = '0 5 * * 1'
 
 // apps/api/src/tools/inProcess.ts
-export function inProcessTools(ports: Ports, opts?: { recording?: RecordingTarget }): ToolRunners;
+export function inProcessTools(ports: Ports, opts?: { recording?: RecordingTarget; runRecord?: typeof runRecord }): HttpToolRunners;
 
-// @gmt/core (Task 8.0): executionSummarySchema.expandTop; definitionShapeSchema / definitionResponseSchema accept empty airport lists (drafts)
-// @gmt/db (Task 8.0): export interface OfferHistoryPoint extends HistoryPoint { suppliedFields: SuppliedField[] }; offerHistory points are OfferHistoryPoint
+// @gmt/core (Task 8.0)
+export function worstCaseAgeHours(a: EffectiveAge): number;   // unknown vendor age → the fetch age (spec rev 24 §3, decision 53)
+export function isStale(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime, thresholdHours: number): boolean;   // the one staleness rule (decision 55; WP11 calls it too)
+export function formatAgeFull(a: EffectiveAge): string;   // unknown vendor age: "fetched 2h ago · vendor's cache age unknown" (decision 55)
+export function compareAges(a: EffectiveAge, b: EffectiveAge): number;   // an unknown age loses to any known one
+export function budgetScopeLabel(s: BudgetScope): string;   // 'provider-month:searchapi', 'global-month', …
+export { CONSTRAINT_NAMES };   // now in the barrel
+// apiContract: vendorLinkSchema (https on a LINK_ALLOWLIST host; bookingSchema and searchLinkSchema use it), storedBookingSchema (any URL; db reads),
+//   resultRowSchema.superseded (decision 54, as on WP10's calendar figures),
+//   verifyCellRequestSchema { confirmCostPence?, confirmCalls? }, draft-tolerant definitionShapeSchema / definitionResponseSchema,
+//   definitionCreateOptionalSchema, alertRulesQuerySchema
+// @gmt/db (Task 8.0)
+export function retriedOnResume(o: Pick<CellOutcome, 'status' | 'reason' | 'attempts'>, manual: boolean): boolean;   // RESUMABLE_SQL's rule, from the same lists
+export interface OfferHistoryPoint extends HistoryPoint { suppliedFields: SuppliedField[]; executionId: string }   // offerHistory points
 ```
 
 ## 6. Library notes
@@ -222,15 +249,15 @@ All versions from the plan's Task 0.1 list (already in `apps/api/package.json`).
 
 | Library | Version | Calls used | Source verified |
 |---|---|---|---|
-| `hono` | 4.13.13 | `new Hono<AppEnv>()`, `app.on(method, path, mw, handler)`, `app.use(path, mw)`, `app.onError`, `app.notFound`, `app.request(url, init)` for tests, `c.json(body, status)`, `c.header()`, `c.req.header()`, `c.req.path`, `c.req.method`, `c.req.param()`, `c.req.query()`, `c.req.text()`, `c.req.json()` (cached after the validator read it), `c.req.raw.signal`; `HTTPException` from `hono/http-exception` (the validator's malformed-JSON throw); `secureHeaders` from `hono/secure-headers` with `contentSecurityPolicy: { defaultSrc: ["'self'"], frameAncestors: ["'none'"] }`, `referrerPolicy: 'no-referrer'`, `xContentTypeOptions: 'nosniff'`, `xFrameOptions: 'DENY'`; `every` from `hono/combine` | context7 `/websites/hono_dev` (secure-headers options table; `app.request`; HTTPException) |
+| `hono` | 4.13.13 | `new Hono<AppEnv>()`, `app.on(method, path, handler)`, `app.use(path, mw)`, `app.onError`, `app.notFound`, `app.request(url, init)` for tests, `c.json(body, status)`, `c.header()`, `c.req.header()`, `c.req.path`, `c.req.method`, `c.req.param()`, `c.req.query()`, `c.req.text()`, `c.req.raw.signal`; `bodyLimit({ maxSize, onError })` from `hono/body-limit` (checks `Content-Length`, then counts a streamed body); `secureHeaders` from `hono/secure-headers` with `contentSecurityPolicy: { defaultSrc: ["'self'"], frameAncestors: ["'none'"] }`, `referrerPolicy: 'no-referrer'`, `xContentTypeOptions: 'nosniff'`, `xFrameOptions: 'DENY'` | context7 `/websites/hono_dev` (secure-headers options table; body-limit; `app.request`) |
 | `@hono/node-server` | 2.1.5 | `serve({ fetch, port, hostname }, (info) => …)` returns the `node:http` server; `serveStatic({ root })` and `serveStatic({ path })` from `@hono/node-server/serve-static` (rejects `..`, `//` and backslashes; calls `next()` when not found); `getConnInfo(c)` from `@hono/node-server/conninfo` (`info.remote.address`; throws under `app.request()`, which has no socket) | context7 `/honojs/node-server` |
-| `@hono/zod-validator` | 0.9.1 | `zValidator('json' \| 'query', schema, hook)`; the hook receives `{ success: false, error }` with zod 4's `$ZodError` (typed here by its `issues` only) and returns the 400 envelope | context7 `/honojs/middleware` (README hook; peer `zod ^3.25.0 \|\| ^4.0.0`) |
-| `zod` | 4.6.7 | `safeParse`, `z.output`, `.pick`, `.extend`, `z.looseObject` (tests parse bodies rather than cast them) | the api-contract's own usage |
+| `zod` | 4.6.7 | `safeParse`, `z.output`, `z.undefined()`, `z.url().refine(…)`, `.pick`, `.extend`, `.optional()`, `z.looseObject` and `z.record` (tests parse bodies rather than cast them) | the api-contract's own usage |
 | `pino` | 10.4.0 (through WP4b's `createLogger`) | not configured here; tests pass a `Writable` as `opts.destination` to capture lines | context7 `/pinojs/pino` |
 | `tsx` | 4.23.15 (dev) | `node --conditions=@gmt/source --import tsx src/bootstrap/start.ts` for the spawn test and `pnpm dev` (`--watch`) | tsx docs: `--import tsx` is the Node ≥ 20.6 loader form |
-| `typescript` | 5.9.3 | `ts.createSourceFile` in the assembly's approximation of WP9's place-name check (not shipped) | — |
-| `vitest` | 5.0.4 | `describe/it/it.each/it.skipIf`, `vi.spyOn`, `vi.fn`, `vi.waitFor`, `afterEach`, `afterAll`; per-task runs use `pnpm --filter @gmt/api exec vitest run <files>` (decision 8) | — |
-| Node | 22 | `node:crypto` `createHash`, `timingSafeEqual`; `node:child_process` `spawn`, `spawnSync`; `node:net` `createServer().listen(0)` (no host: WP4's guards refuse even a lookup of `127.0.0.1`); `node:stream` `Writable`; `fs.readdirSync(dir, { recursive: true, withFileTypes: true })` with `parentPath` | Node docs |
+| `vitest` | 5.0.4 | `describe/it/it.each`, `describe(name, { timeout }, fn)` (the boot files, which seed the full airports table per boot), `vi.spyOn`, `vi.fn`, `vi.waitFor`, `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })` and `vi.advanceTimersByTime` (the heartbeat), `afterEach`; coverage `thresholds` with glob keys (`'src/read/**'`); per-task runs use `pnpm --filter @gmt/api exec vitest run <files>` (decision 8) | — |
+| Node | 22 | `node:crypto` `createHash`, `timingSafeEqual`; `node:child_process` `spawn`, `spawnSync`; `node:net` `createServer().listen(0)` (no host: WP4's guards refuse even a lookup of `127.0.0.1`); `node:stream` `Writable`; `fs.readdirSync(dir, { recursive: true, withFileTypes: true })` with `parentPath`; `path.relative` | Node docs |
+
+`@hono/zod-validator` leaves `apps/api` (Task 8.1 removes it): each handler parses its own body and query once with the ROUTES schemas (decision 54), so a validator middleware would parse a second time.
 
 ## 7. Files
 
@@ -238,16 +265,16 @@ All versions from the plan's Task 0.1 list (already in `apps/api/package.json`).
 
 ```
 src/text.ts                    API_TEXT: every fixed user-facing string the api emits
-src/errors.ts                  ApiError, envelope, fieldsDetail, issuesToFields, scrubDetails, onError, notFound
+src/errors.ts                  ApiError, envelope, fieldsDetail, issuesToFields, scrubDetails, onError (RowRejected('active') → 409), notFound
 src/defaults.ts                DEFAULT_CRON, defaultDefinitionInput (spec §8.2 preset, §11 form defaults)
 src/static.ts                  mountStatic(app, webRoot): serveStatic + SPA fallback outside /api
-src/app.ts                     createApp, mounting from ROUTES
+src/app.ts                     createApp, MAX_BODY_BYTES, mounting from ROUTES
 src/middleware/headers.ts      securityHeaders()
-src/middleware/hardening.ts    hostAllowlist, originCheck, mutatingRequestCheck
-src/middleware/auth.ts         credentialsMatch, FailedAuthLimiter, clientIpFrom, basicAuthGate
-src/middleware/validate.ts     validatorsFor(route), readInput, acceptsUndefined
-src/routes/types.ts            API_PREFIX, AppEnv, RouteInput, RouteContext, RouteHandler, HandlerTable, ToolRunners, OWNED_ELSEWHERE
-src/routes/shared.ts           parseWith, param, getLiveDefinition
+src/middleware/hardening.ts    hostAllowed, hostAllowlist, originCheck, noStore, mutatingRequestCheck
+src/middleware/auth.ts         credentialsMatch, FailedAuthLimiter, UNKNOWN_IP, clientIpFrom, basicAuthGate
+src/routes/types.ts            API_PREFIX, AppEnv, RawInput, RouteContext, RouteHandler, HandlerTable, HttpToolRunners, OWNED_ELSEWHERE
+src/routes/define.ts           NO_INPUT, route, plain: one validation per request
+src/routes/shared.ts           param, getLiveDefinition, oneAtATime
 src/routes/index.ts            HANDLERS (merge of every table below)
 src/routes/system.ts           /api/health, /api/airports, /api/providers, /api/budget, /api/scheduler/jobs
 src/routes/definitions.ts      /api/definitions CRUD, both estimate routes, /api/definitions/coverage-check
@@ -257,10 +284,10 @@ src/routes/history.ts          /api/itineraries/:hash/history, /api/routes/:orig
 src/routes/alerts.ts           /api/alerts CRUD, /api/alerts/events
 src/routes/tools.ts            /api/tools/record
 src/read/space.ts              isDraft, currentSpace, cellInSpace, airportLookup
-src/read/usage.ts              providerLimits, scopeLabel, providerScopes, windowScope, budgetScopes, usageOf
-src/read/definitions.ts        definitionResponse, deletedResponse, needsConfirmation, confirmationRequired, covers, mergeDefinition, inputOf
+src/read/usage.ts              providerLimits, providerScopes, windowScope, budgetScopes, usageOf
+src/read/definitions.ts        definitionResponse, deletedResponse, needsConfirmation, confirmationRequired, storedCovers, sentCovers, mergeDefinition, inputOf
 src/read/executions.ts         executionResponse, executionSummary, overrunOf, planCallsOf, hoursSince
-src/read/rows.ts               staleness, thresholds, priceCell, verifiedRow, calendarRow, latestPerOffer, notSeenResolver, cheapest
+src/read/rows.ts               staleness, thresholds, priceCell, safeBooking, verifiedRow, calendarRow, latestPerOffer, notSeenResolver, cheapest, pickVerified
 src/read/coverage.ts           coverageSummaryFor, zeroBuckets, SEARCHED
 src/read/results.ts            loadRows, truncationOf, confirmedIn, chooseBasis, assembleResults
 src/read/calendar.ts           assembleCalendar, assembleCalendarGap
@@ -269,68 +296,75 @@ src/read/coverageView.ts       assembleCoverage, retryable
 src/read/cell.ts               assembleCellDetail
 src/read/history.ts            itineraryHistory, routeHistory
 src/bootstrap/paths.ts         assetPaths()
-src/bootstrap/lock.ts          acquireAppLockWithWaits, LockRefusedError
-src/bootstrap/app.ts           bootApp, main, BootError, Timers
+src/bootstrap/lock.ts          waitForLockFree, LockRefusedError, LockUnreadableError
+src/bootstrap/seed.ts          seedIfNeeded (both bootstraps)
+src/bootstrap/app.ts           bootApp, assertAuthInvariants, main, BootError
 src/bootstrap/start.ts         the process entry (the app's one process.env read)
-src/tools/inProcess.ts         inProcessTools(ports): the record runner over runRecord
+src/tools/inProcess.ts         inProcessTools(ports, opts?): the record runner over runRecord
 test/helpers/harness.ts        in-memory ports + engine + app; request helper; captureLines; harnessEnv
 test/helpers/contract.ts       expectContract, expectEnvelopeOrContract, errorOf
 test/helpers/examples.ts       exampleDefinitionInput (the worked example, sized for tests), SMALL_WINDOW
-test/helpers/seed.ts           seeder over WP3's atomic writes (generated ids, named in tests)
+test/helpers/seed.ts           seeder over WP3's atomic writes and the real budget guard (generated ids, named in tests)
 test/defaults.test.ts, test/bootstrap/app.{spawn,matrix,lock,backup,shutdown}.test.ts, test/routes/*.test.ts
-packages/core/test/api-contract/wp08.test.ts
+packages/core/test/api-contract/wp08.test.ts, packages/db/test/cells.retriedOnResume.test.ts
 ```
 
 **Modify**
 
-- `apps/api/package.json`: scripts `dev` (the entry is `start.ts`) and `start` (Task 8.1). No dependency change: `hono`, `@hono/node-server`, `@hono/zod-validator` and `zod` are already listed.
-- `apps/api/vitest.config.ts`: `testTimeout: 60_000` (Task 8.1).
-- `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/definitions.ts` (Task 8.0).
-- `packages/db/src/types.ts`, `packages/db/src/index.ts`, `packages/db/src/repositories/itineraries.ts`, `packages/db/test/itineraries.test.ts` (Task 8.0).
-- `src/wiring.ts`, `src/logger.ts`, `src/safeMessage.ts`, `src/bootstrap/preflight.ts`, `src/bootstrap/tool.ts` and `src/tools/*` other than `inProcess.ts` are WP4b's and are not changed here.
+- `apps/api/package.json`: remove `@hono/zod-validator`; scripts `dev` (the entry is `start.ts`) and `start` (Task 8.1).
+- `apps/api/src/bootstrap/tool.ts`: call the shared `seedIfNeeded`; its heartbeat error is logged under `err` (Task 8.1).
+- `apps/api/vitest.config.ts`: per-folder thresholds for `src/read/**` and `src/routes/**` (Task 8.15). The default test timeout stays; the boot files name their own (`BOOT_TIMEOUT_MS`).
+- `packages/core/src/labels/age.ts`, `ports/budget.ts`, `index.ts`, `api-contract/{common,results,definitions,executions,alerts,index}.ts` and their tests (Task 8.0).
+- `packages/db/src/types.ts`, `index.ts`, `internal/read.ts`, `repositories/itineraries.ts`, `repositories/cells.ts` and their tests (Task 8.0).
+- `src/wiring.ts`, `src/logger.ts`, `src/safeMessage.ts`, `src/bootstrap/preflight.ts` and `src/tools/*` other than `inProcess.ts` are WP4b's and are not changed here.
 
 ## 8. Tasks
 
-Every "Run" step assumes the workspace dependencies of `@gmt/api` resolve from source (the `@gmt/source` condition and the Vitest aliases). Per-task runs use `pnpm --filter @gmt/api exec vitest run <files>` (no coverage threshold on a partial run, decision 8); the full `pnpm --filter @gmt/api test` enforces thresholds. Tasks 8.2–8.8 pin behaviour Task 8.1 already builds (the bootstrap and the middleware cannot boot without each other); each is seen failing first by the stated temporary mutation, which the step then reverts.
+Every "Run" step assumes the workspace dependencies of `@gmt/api` resolve from source (the `@gmt/source` condition and the Vitest aliases). Per-task runs use `pnpm --filter @gmt/api exec vitest run <files>` (no coverage threshold on a partial run, decision 8); the full `pnpm --filter @gmt/api test` enforces thresholds. Tasks 8.2–8.8 pin behaviour Task 8.1 already builds (the bootstrap and the middleware cannot boot without each other); each is seen failing first by its temporary mutations, one per rule, which the step then reverts. The feature tasks 8.9–8.15 fail first because their routes do not exist yet, and then list the mutations that prove each rule's test bites. Every mutation and its failing test names were run on the assembled tree.
 
-### Task 8.0: The contract fields only WP8 adds
+### Task 8.0: Core and db: effective age and `isStale`, link re-validation, the row's superseded mark, scope labels, the resume predicate
 
 **Files:**
-- Create: `packages/core/test/api-contract/wp08.test.ts`
-- Modify: `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/definitions.ts`, `packages/db/src/types.ts`, `packages/db/src/index.ts`, `packages/db/src/repositories/itineraries.ts`, `packages/db/test/itineraries.test.ts`
+- Create: `packages/core/test/api-contract/wp08.test.ts`, `packages/db/test/cells.retriedOnResume.test.ts`
+- Modify: `packages/core/src/labels/age.ts`, `packages/core/src/ports/budget.ts`, `packages/core/src/index.ts`, `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/results.ts`, `packages/core/src/api-contract/definitions.ts`, `packages/core/src/api-contract/executions.ts`, `packages/core/src/api-contract/alerts.ts`, `packages/core/src/api-contract/index.ts`, `packages/core/test/labels/age.test.ts`, `packages/core/test/api-contract/contract.test.ts`, `packages/core/test/helpers/rows.ts`, `packages/core/test/wp2-barrel.test.ts`, `packages/db/src/types.ts`, `packages/db/src/index.ts`, `packages/db/src/internal/read.ts`, `packages/db/src/repositories/itineraries.ts`, `packages/db/src/repositories/cells.ts`, `packages/db/test/barrel.test.ts`, `packages/db/test/itineraries.test.ts`
 
 **Interfaces:**
-- Consumes: `executionSummarySchema`, `definitionShapeSchema`, `definitionResponseSchema` (WP0, after WP7 Task 7.13), `ItinerariesRepo.offerHistory` (WP3).
-- Produces: `executionSummarySchema.expandTop` (decision 42: the Results header's "(E outbounds each)" describes the run shown, not today's definition); draft-tolerant `definitionShapeSchema` and `definitionResponseSchema` (spec §10: `POST /definitions` with no body creates the plan default, which names no airport, spec §1 — WP3 reads every stored row through the shape schema, so without this a draft can be inserted but never read back); `OfferHistoryPoint` (`suppliedFields` on each `offerHistory` point, from which Task 8.13 derives `priceConfirmed`).
+- Consumes: `effectiveAge`, `EffectiveAge`, `formatAgeFull`, `LINK_ALLOWLIST`, `validateVendorUrl`, `BudgetScope`, `CONSTRAINT_NAMES` (core); the api-contract schemas (WP0, WP7); `ItinerariesRepo.offerHistory`, `RESUMABLE_SQL`'s `NON_RETRYABLE`/`MANUAL_RETRYABLE` lists (WP3, WP7).
+- Produces (each a ruling of decision 53 or 54, or a field no other brief adds):
+  - `worstCaseAgeHours(a): number` — the unknown-vendor-age case is the fetch age (spec §3 rev 24, decision 53; no local conversion in the api); `compareAges` ranks an unknown age after every known one and two unknowns equal.
+  - `isStale(provenance, now, thresholdHours)` — the one staleness rule, effective age against the threshold, so an unknown vendor age is never stale on that account (decision 55); the api's rows and history points call it, and WP11's alerts will. `formatAgeFull` of an unknown vendor age reads "fetched 2h ago · vendor's cache age unknown" (spec §3 rev 23); the compact form stays "2h ago · age unknown".
+  - `vendorLinkSchema` (https, no userinfo or port, a host equal to or under a `LINK_ALLOWLIST` entry); `bookingSchema` and the result row's `searchLink` use it, so a hostile stored link can never pass the response contract (decision 54, spec §5.2). `storedBookingSchema` keeps any URL for the db's read, so one bad stored link never fails a page: the api drops it instead (Task 8.11).
+  - `resultRowSchema.superseded`: a calendar-basis row whose cell a newer parent execution found empty or no_data (decision 54), the same boolean WP10's Task 10.1 puts on the views' calendar figures; WP10 notes that the rows of `/results` had no field yet.
+  - `definitionCreateOptionalSchema` and `alertRulesQuerySchema` as named objects on their routes, so a handler can bind the very schema its ROUTES entry declares (decision 54: one validation).
+  - `verifyCellRequestSchema.confirmCostPence?` and `confirmCalls?` (WP7's `VerifyCellOptions`).
+  - `budgetScopeLabel(scope)`: the wire label every scope list and the schedule refusal share (review arch-011).
+  - `CONSTRAINT_NAMES` in the core barrel (calendar rows' "not applied" list, review arch-010).
+  - Draft-tolerant `definitionShapeSchema` and `definitionResponseSchema` (decision 53).
+  - db: `retriedOnResume(outcome, manual)`, the resume query's rule as a predicate from the same two lists (View D's "retry", review arch-005); `OfferHistoryPoint` with the observation's `suppliedFields` (decision 53) and its `executionId` (WP10's history points, decision 52), asserted exactly in `itineraries.test.ts`; the db reads bookings with `storedBookingSchema`.
 
-- [ ] **Step 1: Write the failing test**
+WP9's Task 9.0 already adds `expandTop` and `truncated`, and WP10's Task 10.1 the calendar query, the views' marks and the history fields; this task adds none of them.
+
+- [ ] **Step 1: Write the failing tests**
 
 `packages/core/test/api-contract/wp08.test.ts` (new file):
 
 ```ts
 import { describe, expect, it } from 'vitest';
 import {
+  alertRulesQuerySchema,
+  bookingSchema,
+  definitionCreateOptionalSchema,
   definitionCreateRequestSchema,
   definitionShapeSchema,
-  executionSummarySchema,
+  resultRowSchema,
+  storedBookingSchema,
+  vendorLinkSchema,
+  verifyCellRequestSchema,
 } from '../../src/api-contract/index.js';
+import { budgetScopeLabel } from '../../src/ports/budget.js';
 
-// WP8's contract additions (plan decision 42; spec §10 `POST /definitions` with no body).
+// WP8's contract additions (plan decision 53: drafts; spec §10 `POST /definitions` with no body).
 describe('WP8 contract additions', () => {
-  it('an execution summary carries the run snapshot expandTop', () => {
-    const summary = {
-      id: 'e1',
-      status: 'completed',
-      isChild: false,
-      startedAt: '2026-10-14T09:00:00.000Z',
-      finishedAt: '2026-10-14T10:00:00.000Z',
-      ageHours: 1,
-    };
-    expect(executionSummarySchema.safeParse(summary).success).toBe(false);
-    expect(executionSummarySchema.safeParse({ ...summary, expandTop: 2 }).success).toBe(true);
-    expect(executionSummarySchema.safeParse({ ...summary, expandTop: 0 }).success).toBe(false);
-  });
-
   it('a stored definition may be a draft without airports; a create body may not', () => {
     const origins = definitionShapeSchema.shape.origins;
     expect(origins.safeParse([]).success).toBe(true);
@@ -339,80 +373,558 @@ describe('WP8 contract additions', () => {
     expect(create.error?.issues.some((i) => i.path[0] === 'origins' && i.code === 'too_small')).toBe(true);
   });
 });
+
+// WP8 round-2 additions (plan decisions 53, 54).
+describe('WP8 contract additions, round 2', () => {
+  it.each([
+    ['https://www.aviasales.com/search/LHR0211JFK1', true],
+    ['https://google.com/travel/flights', true],
+    ['http://www.aviasales.com/x', false],
+    ['javascript:alert(1)', false],
+    ['https://evil.example/aviasales.com', false],
+    ['https://user@aviasales.com/', false],
+    ['https://aviasales.com.evil.example/', false],
+    ['https://aviasales.com:8443/', false],
+  ])('vendorLinkSchema: %s → %s', (url, ok) => {
+    expect(vendorLinkSchema.safeParse(url).success).toBe(ok);
+    expect(bookingSchema.safeParse({ kind: 'get', url, host: 'h' }).success).toBe(ok);
+    expect(bookingSchema.safeParse({ kind: 'post', url, postData: '', host: 'h' }).success).toBe(ok);
+  });
+
+  it('storedBookingSchema reads any stored URL, so the api can drop it rather than fail the page', () => {
+    expect(
+      storedBookingSchema.safeParse({ kind: 'get', url: 'javascript:alert(1)', host: 'x' }).success,
+    ).toBe(true);
+    expect(
+      storedBookingSchema.safeParse({ kind: 'post', url: 'https://a.b/', postData: '', host: 'x' }).success,
+    ).toBe(true);
+    expect(storedBookingSchema.safeParse({ kind: 'none' }).success).toBe(true);
+    expect(storedBookingSchema.safeParse({ kind: 'get', url: 'not a url', host: 'x' }).success).toBe(false);
+  });
+
+  it('budgetScopeLabel names provider scopes with their provider and the global scopes alone', () => {
+    expect(budgetScopeLabel({ kind: 'provider-month', providerId: 'searchapi' })).toBe(
+      'provider-month:searchapi',
+    );
+    expect(budgetScopeLabel({ kind: 'global-month' })).toBe('global-month');
+  });
+
+  it('a result row carries the superseded mark beside the not-seen mark (decision 54)', () => {
+    const mark = resultRowSchema.shape.notSeenInLatest;
+    expect(mark.safeParse(null).success).toBe(true);
+    expect(mark.safeParse({ ageHours: 'unknown' }).success).toBe(true);
+    expect(resultRowSchema.shape.superseded.safeParse(true).success).toBe(true);
+    expect(resultRowSchema.shape.superseded.safeParse(null).success).toBe(false);
+  });
+
+  it('alert rules take an optional definitionId; a create body is optional', () => {
+    expect(alertRulesQuerySchema.parse({ definitionId: 'd1' })).toEqual({ definitionId: 'd1' });
+    expect(definitionCreateOptionalSchema.safeParse(undefined).success).toBe(true);
+    expect(definitionCreateOptionalSchema.safeParse({ origins: [] }).success).toBe(false);
+  });
+
+  it('a verify request may carry a confirmation', () => {
+    const base = {
+      definitionId: 'd1',
+      cell: { origin: 'LHR', destination: 'JFK', departureDate: '2026-11-02', returnDate: '2026-11-12' },
+    };
+    expect(verifyCellRequestSchema.parse({ ...base, confirmCostPence: 7, confirmCalls: 6 })).toMatchObject({
+      confirmCostPence: 7,
+      confirmCalls: 6,
+    });
+    expect(verifyCellRequestSchema.safeParse({ ...base, confirmCalls: -1 }).success).toBe(false);
+  });
+});
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+`packages/db/test/cells.retriedOnResume.test.ts` (new file):
 
-Run: `pnpm --filter @gmt/core exec vitest run test/api-contract/wp08.test.ts`
-Expected: FAIL, 2 of 2: the summary without `expandTop` still parses (`expected true to be false`), and the stored shape refuses an empty `origins` (`expected false to be true`).
+```ts
+// retriedOnResume is RESUMABLE_SQL as a predicate (plan decision 54): over every status × reason × attempts × manual
+// combination, the predicate and the resume query pick the same cells.
+import { cellKeyString, fixedClock } from '@gmt/core';
+import { describe, expect, it } from 'vitest';
+import { CellsRepo, retriedOnResume } from '../src/repositories/cells.js';
+import { freshDb, T0 } from './helpers/db.js';
+import { cell, newExecution, withNights } from './helpers/factories.js';
+import { rawOutcome } from './helpers/outcomes.js';
+
+const CASES: Array<{ status: string; reason: string | null; attempts: number }> = [
+  { status: 'not_run', reason: null, attempts: 0 },
+  { status: 'priced', reason: null, attempts: 1 },
+  { status: 'empty', reason: null, attempts: 1 },
+  { status: 'skipped', reason: 'budget', attempts: 0 },
+  { status: 'skipped', reason: 'provider_disabled', attempts: 0 },
+  { status: 'skipped', reason: 'not_selected', attempts: 0 },
+  { status: 'error', reason: 'upstream', attempts: 1 },
+  { status: 'error', reason: 'upstream', attempts: 3 },
+  { status: 'error', reason: 'auth', attempts: 1 },
+  { status: 'error', reason: 'quota', attempts: 5 },
+  { status: 'error', reason: 'parse', attempts: 1 },
+  { status: 'error', reason: 'no-return-legs', attempts: 1 },
+  { status: 'error', reason: 'no-priced-options', attempts: 1 },
+  { status: 'error', reason: 'fx-unavailable', attempts: 1 },
+];
+
+describe('retriedOnResume (spec §7 Resume; plan decision 54)', () => {
+  it.each([false, true])('agrees with the resume query (manual %s)', (manual) => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const { execution } = newExecution(db, clock);
+    const repo = new CellsRepo(db, clock, { allowSynthetic: false });
+    const cells = CASES.map((_, i) =>
+      cell(undefined, undefined, `2027-05-${String(i + 1).padStart(2, '0')}`, '2027-06-20'),
+    );
+    repo.seed(execution.id, cells.map(withNights), ['searchapi']);
+    CASES.forEach((c, i) => {
+      const at = cells[i];
+      if (at !== undefined) rawOutcome(db, execution.id, at, 'discovery', 'searchapi', c);
+    });
+    const byQuery = new Set(
+      repo.resumable(execution.id, 'discovery', 'searchapi', manual).map(cellKeyString),
+    );
+    const byPredicate = repo
+      .outcomes(execution.id)
+      .filter((o) => retriedOnResume(o, manual))
+      .map(cellKeyString);
+    expect(new Set(byPredicate)).toEqual(byQuery);
+    expect(byQuery.size).toBe(manual ? 7 : 3); // why: not_run, budget, a young upstream error; manual adds disabled, auth, quota, parse
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `pnpm --filter @gmt/core exec vitest run test/api-contract/wp08.test.ts && pnpm --filter @gmt/db exec vitest run test/cells.retriedOnResume.test.ts`
+Expected: FAIL: the core suite's `vendorLinkSchema`, `storedBookingSchema`, `budgetScopeLabel` and the named query schemas are not exported (`Cannot read properties of undefined`, `… is not a function`); the db suite cannot call `retriedOnResume`.
 
 - [ ] **Step 3: Implement**
 
-`packages/core/src/api-contract/common.ts` — find:
+Core sources:
 
-```ts
-  finishedAt: isoDateTimeSchema.nullable(),
-  ageHours: ageHoursSchema,
-});
+Apply this patch from the repository root (`git apply`):
+
+```diff
+diff --git a/packages/core/src/api-contract/alerts.ts b/packages/core/src/api-contract/alerts.ts
+index 49484ad..09adf66 100644
+--- a/packages/core/src/api-contract/alerts.ts
++++ b/packages/core/src/api-contract/alerts.ts
+@@ -62,3 +62,5 @@ export const alertEventsQuerySchema = z.object({
+   definitionId: z.string().optional(),
+   limit: z.coerce.number().int().min(1).max(1000).optional(),
+ });
++/** `GET /alerts?definitionId=`: one object, so handlers can name it. */
++export const alertRulesQuerySchema = alertEventsQuerySchema.pick({ definitionId: true });
+diff --git a/packages/core/src/api-contract/common.ts b/packages/core/src/api-contract/common.ts
+index 1ae92fc..607e680 100644
+--- a/packages/core/src/api-contract/common.ts
++++ b/packages/core/src/api-contract/common.ts
+@@ -1,4 +1,5 @@
+ import { z } from 'zod';
++import { LINK_ALLOWLIST, validateVendorUrl } from '../normalise/vendorUrl.js';
+ import type { Buckets } from '../types/execution.js';
+ import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
+ import { cabinSchema, provenanceSchema, providerIdSchema } from '../types/provenance.js';
+@@ -52,11 +53,32 @@ export const cronSchema = z
+   .min(9)
+   .max(100)
+   .regex(/^[\d*/,\-\s]+$/, 'cron: digits, * / , - and spaces only; validated by the scheduler');
+-export const bookingSchema = z.discriminatedUnion('kind', [
++/** Every host a vendor or search link may name (spec §5.2), across providers. */
++const LINK_HOSTS: readonly string[] = Object.values(LINK_ALLOWLIST).flat();
++/**
++ * Spec §5.2 vendor links, re-validated on the wire (plan decision 54): https, no userinfo, no port, a host equal to or
++ * under a `LINK_ALLOWLIST` entry. A stored value that fails never reaches a client as a link.
++ */
++export const vendorLinkSchema = z
++  .url()
++  .refine(
++    (u) => validateVendorUrl(u, LINK_HOSTS).kind !== 'none',
++    'link must be https on an allowlisted host',
++  );
++/**
++ * The booking as an adapter stored it (spec §6.3): any URL. The db reads with this, so one bad stored link never fails a
++ * whole page; the api re-validates it and the wire schema below refuses it (plan decision 54).
++ */
++export const storedBookingSchema = z.discriminatedUnion('kind', [
+   z.object({ kind: z.literal('get'), url: z.url(), host: z.string() }),
+   z.object({ kind: z.literal('post'), url: z.url(), postData: z.string(), host: z.string() }),
+   z.object({ kind: z.literal('none') }),
+ ]);
++export const bookingSchema = z.discriminatedUnion('kind', [
++  z.object({ kind: z.literal('get'), url: vendorLinkSchema, host: z.string() }),
++  z.object({ kind: z.literal('post'), url: vendorLinkSchema, postData: z.string(), host: z.string() }),
++  z.object({ kind: z.literal('none') }),
++]);
+ export const executionStatusSchema = z.enum([
+   'pending',
+   'running',
+diff --git a/packages/core/src/api-contract/definitions.ts b/packages/core/src/api-contract/definitions.ts
+index 47f3043..e4f438a 100644
+--- a/packages/core/src/api-contract/definitions.ts
++++ b/packages/core/src/api-contract/definitions.ts
+@@ -127,11 +127,23 @@ const refineDefinition = (
+     });
+   }
+ };
++/**
++ * A stored definition may be a draft without airports (spec §10: `POST /definitions` with no body creates the plan
++ * default, which names none, spec §1), so the stored and response shapes accept empty airport lists; a create or
++ * update body still needs at least one of each.
++ */
++const storedFields = {
++  ...definitionFields,
++  origins: z.array(iataSchema),
++  destinations: z.array(iataSchema),
++};
+ /** The unrefined field shape: used to read stored rows back, where the save-time policy refinements must not run. */
+ export const definitionShapeSchema = z
+-  .object(definitionFields)
++  .object(storedFields)
+   .omit({ confirmedCostPence: true, confirmedCalls: true });
+ export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
++/** `POST /definitions` takes no body (the plan default, a draft) or a create body; one object, so handlers can name it. */
++export const definitionCreateOptionalSchema = definitionCreateRequestSchema.optional();
+ export const definitionUpdateRequestSchema = z.object(definitionFields).partial();
+ 
+ export const budgetFitSchema = z.object({
+@@ -172,7 +184,7 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
+ /** Both estimate routes return the estimate with its budget fit, so the form shows both before the create click. */
+ export const estimateResponseSchema = z.object({ estimate: estimateSchema, budgetFit: budgetFitSchema });
+ export const definitionResponseSchema = z.object({
+-  ...definitionFields,
++  ...storedFields,
+   confirmedCostPence: moneyPenceSchema.nullable(),
+   confirmedCalls: positiveInt.nullable(),
+   id: z.string(),
+diff --git a/packages/core/src/api-contract/executions.ts b/packages/core/src/api-contract/executions.ts
+index 2aa5feb..7f98ac0 100644
+--- a/packages/core/src/api-contract/executions.ts
++++ b/packages/core/src/api-contract/executions.ts
+@@ -56,4 +56,10 @@ export const startExecutionRequestSchema = z.object({
+   confirmCalls: z.number().int().min(0).optional(),
+ });
+ export const startExecutionResponseSchema = z.object({ executionId: z.string() });
+-export const verifyCellRequestSchema = z.object({ definitionId: z.string(), cell: cellKeySchema });
++/** WP7: a single-cell verification above SOFT_CONFIRM needs the confirmation a start would, pence and calls together. */
++export const verifyCellRequestSchema = z.object({
++  definitionId: z.string(),
++  cell: cellKeySchema,
++  confirmCostPence: moneyPenceSchema.optional(),
++  confirmCalls: z.number().int().min(0).optional(),
++});
+diff --git a/packages/core/src/api-contract/index.ts b/packages/core/src/api-contract/index.ts
+index 9762540..7d52d58 100644
+--- a/packages/core/src/api-contract/index.ts
++++ b/packages/core/src/api-contract/index.ts
+@@ -5,11 +5,13 @@ import {
+   alertEventsQuerySchema,
+   alertRuleInputSchema,
+   alertRuleSchema,
++  alertRulesQuerySchema,
+   alertRuleUpdateRequestSchema,
+ } from './alerts.js';
+ import {
+   coverageCheckRequestSchema,
+   coverageCheckResponseSchema,
++  definitionCreateOptionalSchema,
+   definitionCreateRequestSchema,
+   definitionResponseSchema,
+   definitionUpdateRequestSchema,
+@@ -80,9 +82,7 @@ export const ROUTES: readonly RouteDef[] = [
+   route('GET', '/airports', airportsResponseSchema, { query: airportsQuerySchema }),
+   route('GET', '/providers', providersResponseSchema),
+   route('GET', '/definitions', definitionResponseSchema.array()),
+-  route('POST', '/definitions', definitionResponseSchema, {
+-    request: definitionCreateRequestSchema.optional(),
+-  }),
++  route('POST', '/definitions', definitionResponseSchema, { request: definitionCreateOptionalSchema }),
+   route('POST', '/definitions/estimate', estimateResponseSchema, { request: definitionCreateRequestSchema }),
+   route('POST', '/definitions/coverage-check', coverageCheckResponseSchema, {
+     request: coverageCheckRequestSchema,
+@@ -114,9 +114,7 @@ export const ROUTES: readonly RouteDef[] = [
+   route('GET', '/routes/:origin/:destination/history', routeHistoryResponseSchema, {
+     query: routeHistoryQuerySchema,
+   }),
+-  route('GET', '/alerts', alertRuleSchema.array(), {
+-    query: alertEventsQuerySchema.pick({ definitionId: true }),
+-  }),
++  route('GET', '/alerts', alertRuleSchema.array(), { query: alertRulesQuerySchema }),
+   route('POST', '/alerts', alertRuleSchema, { request: alertRuleInputSchema }),
+   route('PUT', '/alerts/:id', alertRuleSchema, { request: alertRuleUpdateRequestSchema }),
+   route('DELETE', '/alerts/:id', alertRuleSchema),
+diff --git a/packages/core/src/api-contract/results.ts b/packages/core/src/api-contract/results.ts
+index ec9b529..7016f46 100644
+--- a/packages/core/src/api-contract/results.ts
++++ b/packages/core/src/api-contract/results.ts
+@@ -18,12 +18,14 @@ import {
+   resultBasisSchema,
+   segmentSchema,
+   stageSchema,
++  vendorLinkSchema,
+   verdictClassSchema,
+   verdictsSchema,
+ } from './common.js';
+ 
+ const count = z.number().int().min(0);
+-const searchLinkSchema = z.object({ url: z.url(), host: z.string(), label: z.string() }).nullable();
++/** A vendor search link (spec §5.2): re-validated on the wire like a booking link (plan decision 54). */
++const searchLinkSchema = z.object({ url: vendorLinkSchema, host: z.string(), label: z.string() }).nullable();
+ /** Spec §6.5 / §6.9: one row per itinerary (or calendar cell), provenance on every price. */
+ export const resultRowSchema = z.object({
+   itineraryHash: z.string().nullable(),
+@@ -80,6 +82,11 @@ export const resultRowSchema = z.object({
+     }),
+   ),
+   notSeenInLatest: z.object({ ageHours: ageHoursSchema }).nullable(),
++  /**
++   * Plan decision 54, as on the views' calendar figures: a calendar-basis row whose cell a newer parent execution found
++   * empty or no_data, ranked after every current price. Always false on the verified basis.
++   */
++  superseded: z.boolean(),
+   adjustedPence: moneyPenceSchema.nullable(),
+   destinationNote: z.string().nullable(),
+   executionId: z.string(),
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index bb0ba74..407acf1 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -22,7 +22,7 @@ export * from './config/schema.js';
+ export * from './config/secret.js';
+ export * from './config/synthetic.js';
+ export { evaluateConstraints } from './constraints/evaluate.js';
+-export { CONSTRAINT_LABELS } from './constraints/labels.js';
++export { CONSTRAINT_LABELS, CONSTRAINT_NAMES } from './constraints/labels.js';
+ export { unverifiedNames, verdictClass } from './constraints/verdictClass.js';
+ export * from './coverage/buckets.js';
+ export * from './coverage/rollUp.js';
+diff --git a/packages/core/src/labels/age.ts b/packages/core/src/labels/age.ts
+index 8476637..81fed55 100644
+--- a/packages/core/src/labels/age.ts
++++ b/packages/core/src/labels/age.ts
+@@ -25,18 +25,35 @@ export function effectiveAge(
+   return { kind: 'bounded', fetchedHours, maxAgeHours: p.maxAgeHours };
+ }
+ 
+-/** The age a careful reader should assume: observed age, or fetched age plus the provider's bound. */
+-export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown' {
++/**
++ * The effective age of spec §3 (revision 23, plan decisions 44, 53): the observed age when the vendor dates the price,
++ * else the fetch age plus the provider's bound, else (the vendor's age unknown) the fetch age alone. The labels say
++ * "vendor's cache age unknown" for the last case; this number never pretends to know more.
++ */
++export function worstCaseAgeHours(a: EffectiveAge): number {
+   switch (a.kind) {
+     case 'observed':
+       return a.observedHours;
+     case 'bounded':
+       return a.fetchedHours + a.maxAgeHours;
+     case 'unknown':
+-      return 'unknown';
++      return a.fetchedHours;
+   }
+ }
+ 
++/**
++ * The one staleness rule (spec §3, plan decisions 44, 54, 55): stale when the effective age exceeds the threshold. An
++ * unknown vendor age counts the fetch age alone, so it is never stale on that account; every package that marks a price
++ * stale (the api's rows and history points, WP11's alerts) calls this.
++ */
++export function isStale(
++  p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>,
++  now: IsoDateTime,
++  thresholdHours: number,
++): boolean {
++  return worstCaseAgeHours(effectiveAge(p, now)) > thresholdHours;
++}
++
+ /** "just now" under an hour; hours to 47h; days to 13d; weeks after. */
+ export function formatDuration(hours: number): string {
+   if (hours < 1) return 'just now';
+@@ -56,7 +73,10 @@ export function formatFetchedAgo(a: EffectiveAge): string {
+   return `fetched ${formatAgo(a.fetchedHours)}`;
+ }
+ 
+-/** Tooltip, header and email form, e.g. "fetched 2h ago · provider age unknown (≤7d before that)". */
++/**
++ * Tooltip, header and email form, e.g. "fetched 2h ago · provider age unknown (≤7d before that)", or, when the vendor
++ * gives no age at all, "fetched 2h ago · vendor's cache age unknown" (spec §3 rev 23, decision 55).
++ */
+ export function formatAgeFull(a: EffectiveAge): string {
+   const fetched = formatFetchedAgo(a);
+   switch (a.kind) {
+@@ -68,7 +88,7 @@ export function formatAgeFull(a: EffectiveAge): string {
+         ? fetched
+         : `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
+     case 'unknown':
+-      return `${fetched} · provider age unknown`;
++      return `${fetched} · vendor's cache age unknown`;
+   }
+ }
+ 
+@@ -87,10 +107,10 @@ export function formatAgeCompact(a: EffectiveAge): string {
+ 
+ /** Sort comparator: fresher first; an unknown age loses to any known age; two unknowns tie. Spec §8.1. */
+ export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
+-  const wa = worstCaseAgeHours(a);
+-  const wb = worstCaseAgeHours(b);
+-  if (wa === 'unknown' && wb === 'unknown') return 0;
+-  if (wa === 'unknown') return 1;
+-  if (wb === 'unknown') return -1;
+-  return wa - wb;
++  // why: the ordering rule is about what is known, not about the number: an unknown vendor age loses to any known one
++  // even when its fetch age is smaller (spec §8.1).
++  if (a.kind === 'unknown' && b.kind === 'unknown') return 0;
++  if (a.kind === 'unknown') return 1;
++  if (b.kind === 'unknown') return -1;
++  return worstCaseAgeHours(a) - worstCaseAgeHours(b);
+ }
+diff --git a/packages/core/src/ports/budget.ts b/packages/core/src/ports/budget.ts
+index fb4d25f..81587eb 100644
+--- a/packages/core/src/ports/budget.ts
++++ b/packages/core/src/ports/budget.ts
+@@ -7,6 +7,14 @@ export type BudgetScope =
+   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
+   | { kind: 'global-month' };
+ 
++/**
++ * The wire label of a scope (`execution-calls`, `provider-month:searchapi`, `global-month`): the one formatter the
++ * budget-fit scopes, the usage rows and the schedule refusal share (plan decision 54; WP7's budgetFit formats the same).
++ */
++export function budgetScopeLabel(s: BudgetScope): string {
++  return 'providerId' in s ? `${s.kind}:${s.providerId}` : s.kind;
++}
++
+ /** `cap` is null for a window the plan does not use and for a scope with no cap configured. */
+ export interface Usage {
+   calls: number;
 ```
 
-`packages/core/src/api-contract/common.ts` — replace with:
+Core tests the change touches (the effective-age cases, `isStale` and the unknown-age label; the result-row fixtures gain `superseded`; `CONSTRAINT_NAMES` leaves the barrel's private list):
 
-```ts
-  finishedAt: isoDateTimeSchema.nullable(),
-  ageHours: ageHoursSchema,
-  /** Plan decision 42: the run's own outbounds expanded per cell (its snapshot's `verification.expandTop`). */
-  expandTop: z.number().int().min(1),
-});
+Apply this patch from the repository root (`git apply`):
+
+```diff
+diff --git a/packages/core/test/api-contract/contract.test.ts b/packages/core/test/api-contract/contract.test.ts
+index e5ee5da..e4918b1 100644
+--- a/packages/core/test/api-contract/contract.test.ts
++++ b/packages/core/test/api-contract/contract.test.ts
+@@ -111,6 +111,7 @@ describe('api-contract (spec §10)', () => {
+       },
+       otherOffers: [],
+       notSeenInLatest: null,
++      superseded: false,
+       adjustedPence: null,
+       destinationNote: null,
+       executionId: 'e1',
+diff --git a/packages/core/test/helpers/rows.ts b/packages/core/test/helpers/rows.ts
+index f9a2970..ccf5452 100644
+--- a/packages/core/test/helpers/rows.ts
++++ b/packages/core/test/helpers/rows.ts
+@@ -68,6 +68,7 @@ export function row(over: Over = {}): ResultRow {
+     },
+     otherOffers: [],
+     notSeenInLatest: null,
++    superseded: false,
+     adjustedPence: null,
+     destinationNote: null,
+     executionId: 'ex-2',
+diff --git a/packages/core/test/labels/age.test.ts b/packages/core/test/labels/age.test.ts
+index fb38218..2f78bf1 100644
+--- a/packages/core/test/labels/age.test.ts
++++ b/packages/core/test/labels/age.test.ts
+@@ -5,6 +5,7 @@ import {
+   formatAgeCompact,
+   formatAgeFull,
+   formatDuration,
++  isStale,
+   worstCaseAgeHours,
+ } from '../../src/labels/age.js';
+ import { asIsoDateTime } from '../../src/types/ids.js';
+@@ -77,7 +78,7 @@ describe('formatting', () => {
+     expect(formatAgeFull(o)).toBe('fetched 2h ago · observed 3h ago');
+     expect(formatAgeCompact(o)).toBe('2h ago · obs 3h');
+     const u = { kind: 'unknown', fetchedHours: 2 } as const;
+-    expect(formatAgeFull(u)).toBe('fetched 2h ago · provider age unknown');
++    expect(formatAgeFull(u)).toBe("fetched 2h ago · vendor's cache age unknown");
+     expect(formatAgeCompact(u)).toBe('2h ago · age unknown');
+     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 })).toBe('just now · ≤24h');
+     expect(formatAgeCompact({ kind: 'bounded', fetchedHours: 1, maxAgeHours: 24 })).toBe('1h ago · ≤24h');
+@@ -98,7 +99,7 @@ describe('ordering (spec §8.1: unknown loses to any known age)', () => {
+   it('worstCaseAgeHours', () => {
+     expect(worstCaseAgeHours({ kind: 'observed', fetchedHours: 2, observedHours: 3 })).toBe(3);
+     expect(worstCaseAgeHours({ kind: 'bounded', fetchedHours: 2, maxAgeHours: 48 })).toBe(50);
+-    expect(worstCaseAgeHours({ kind: 'unknown', fetchedHours: 2 })).toBe('unknown');
++    expect(worstCaseAgeHours({ kind: 'unknown', fetchedHours: 2 })).toBe(2); // spec rev 23: the fetch age alone
+   });
+   it('compareAges', () => {
+     const known = { kind: 'bounded', fetchedHours: 100, maxAgeHours: 48 } as const;
+@@ -106,7 +107,33 @@ describe('ordering (spec §8.1: unknown loses to any known age)', () => {
+     expect(compareAges(known, unknown)).toBeLessThan(0);
+     expect(compareAges(unknown, known)).toBeGreaterThan(0);
+     expect(compareAges(unknown, unknown)).toBe(0);
++    // why: an unknown vendor age loses even with a smaller fetch age than the known one
++    expect(
++      compareAges(
++        { kind: 'unknown', fetchedHours: 0 },
++        { kind: 'bounded', fetchedHours: 5, maxAgeHours: 48 },
++      ),
++    ).toBeGreaterThan(0);
+     expect(compareAges({ kind: 'observed', fetchedHours: 1, observedHours: 1 }, known)).toBeLessThan(0);
+     expect(compareAges(known, known)).toBe(0);
+   });
+ });
++
++describe('isStale (spec §3, plan decisions 44, 54, 55: the one staleness rule)', () => {
++  const at = (hoursAgo: number) =>
++    asIsoDateTime(new Date(Date.parse(now) - hoursAgo * 3_600_000).toISOString());
++  it('a known bound adds to the fetch age; stale only strictly past the threshold', () => {
++    expect(isStale({ fetchedAt: at(150), maxAgeHours: 42 }, now, 192)).toBe(false); // 192, not past
++    expect(isStale({ fetchedAt: at(151), maxAgeHours: 42 }, now, 192)).toBe(true);
++  });
++  it('an observed age wins over the fetch age and the bound', () => {
++    expect(isStale({ fetchedAt: at(1), providerObservedAt: at(200), maxAgeHours: 0 }, now, 192)).toBe(true);
++    expect(isStale({ fetchedAt: at(300), providerObservedAt: at(10), maxAgeHours: 168 }, now, 192)).toBe(
++      false,
++    );
++  });
++  it('an unknown vendor age counts the fetch age alone: never stale on that account', () => {
++    expect(isStale({ fetchedAt: at(191), maxAgeHours: 'unknown' }, now, 192)).toBe(false);
++    expect(isStale({ fetchedAt: at(193), maxAgeHours: 'unknown' }, now, 192)).toBe(true);
++  });
++});
+diff --git a/packages/core/test/wp2-barrel.test.ts b/packages/core/test/wp2-barrel.test.ts
+index 190ea34..568e72d 100644
+--- a/packages/core/test/wp2-barrel.test.ts
++++ b/packages/core/test/wp2-barrel.test.ts
+@@ -49,7 +49,6 @@ const PRIVATE = [
+   'need',
+   'compareRows',
+   'compareText',
+-  'CONSTRAINT_NAMES',
+   // module exports that no other package reads, so they stay out of the barrel
+   'MIN_REPEAT_DROP_PENCE',
+   'MIN_REPEAT_DROP_PERCENT',
 ```
 
-`packages/core/src/api-contract/definitions.ts` — find:
-
-```ts
-/** The unrefined field shape: used to read stored rows back, where the save-time policy refinements must not run. */
-export const definitionShapeSchema = z
-  .object(definitionFields)
-```
-
-`packages/core/src/api-contract/definitions.ts` — replace with:
-
-```ts
-/**
- * A stored definition may be a draft without airports (spec §10: `POST /definitions` with no body creates the plan
- * default, which names none, spec §1), so the stored and response shapes accept empty airport lists; a create or
- * update body still needs at least one of each.
- */
-const storedFields = {
-  ...definitionFields,
-  origins: z.array(iataSchema),
-  destinations: z.array(iataSchema),
-};
-/** The unrefined field shape: used to read stored rows back, where the save-time policy refinements must not run. */
-export const definitionShapeSchema = z
-  .object(storedFields)
-```
-
-`packages/core/src/api-contract/definitions.ts` — find:
-
-```ts
-export const definitionResponseSchema = z.object({
-  ...definitionFields,
-```
-
-`packages/core/src/api-contract/definitions.ts` — replace with:
-
-```ts
-export const definitionResponseSchema = z.object({
-  ...storedFields,
-```
+Db sources and the tests they touch:
 
 Apply this patch from the repository root (`git apply`):
 
 ```diff
 diff --git a/packages/db/src/index.ts b/packages/db/src/index.ts
-index 4607f8a..c405f2c 100644
+index 4607f8a..114b791 100644
 --- a/packages/db/src/index.ts
 +++ b/packages/db/src/index.ts
+@@ -21,7 +21,7 @@ export { createRepos, type Repos } from './repos.js';
+ export { AirportsRepo } from './repositories/airports.js';
+ export { AlertsRepo } from './repositories/alerts.js';
+ export { CalendarPricesRepo } from './repositories/calendarPrices.js';
+-export { CellsRepo } from './repositories/cells.js';
++export { CellsRepo, retriedOnResume } from './repositories/cells.js';
+ export { DefinitionsRepo } from './repositories/definitions.js';
+ export { ExecutionsRepo } from './repositories/executions.js';
+ export { FxRepo } from './repositories/fx.js';
 @@ -44,6 +44,7 @@ export type {
    ExecutionCreateInput,
    ExecutionPatch,
@@ -421,8 +933,56 @@ index 4607f8a..c405f2c 100644
    RepoOptions,
    ReuseCriteria,
    ReusedCopy,
+diff --git a/packages/db/src/internal/read.ts b/packages/db/src/internal/read.ts
+index ab440be..3f6c3c1 100644
+--- a/packages/db/src/internal/read.ts
++++ b/packages/db/src/internal/read.ts
+@@ -112,7 +112,7 @@ export const readBaggage = (column: string, v: unknown): BaggageSnapshot =>
+ export const readFareConditions = (column: string, v: unknown): FareConditions =>
+   parseWith(column, apiContract.resultRowSchema.shape.fareConditions.unwrap(), v);
+ export const readBooking = (column: string, text: string): Booking =>
+-  parseWith(column, apiContract.bookingSchema, readJson(column, text));
++  parseWith(column, apiContract.storedBookingSchema, readJson(column, text));
+ export const readEstimate = (column: string, text: string): Estimate =>
+   parseWith(column, apiContract.estimateSchema, readJson(column, text));
+ 
+diff --git a/packages/db/src/repositories/cells.ts b/packages/db/src/repositories/cells.ts
+index 427aae7..aa41597 100644
+--- a/packages/db/src/repositories/cells.ts
++++ b/packages/db/src/repositories/cells.ts
+@@ -110,6 +110,30 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
+     throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
+ }
+ 
++const listed = (xs: readonly string[], reason: string | null): boolean =>
++  reason !== null && xs.includes(reason);
++
++/**
++ * The resume rule of RESUMABLE_SQL as a predicate over one outcome, from the same two lists, so a reader that shows
++ * "retry" (View D, WP8) and the resume that does the retry cannot disagree (plan decision 54; test cells.resume).
++ */
++export function retriedOnResume(
++  o: Pick<CellOutcome, 'status' | 'reason' | 'attempts'>,
++  manual: boolean,
++): boolean {
++  switch (o.status) {
++    case 'not_run':
++      return true;
++    case 'skipped':
++      return o.reason === 'budget' || (manual && o.reason === 'provider_disabled');
++    case 'error':
++      return (
++        (o.attempts < 3 && !listed(NON_RETRYABLE, o.reason)) || (manual && listed(MANUAL_RETRYABLE, o.reason))
++      );
++    default:
++      return false;
++  }
++}
+ const sqlList = (xs: readonly string[]) => xs.map((r) => `'${r}'`).join(', ');
+ 
+ /**
 diff --git a/packages/db/src/repositories/itineraries.ts b/packages/db/src/repositories/itineraries.ts
-index 4d61f2a..9919649 100644
+index 4d61f2a..3b6d888 100644
 --- a/packages/db/src/repositories/itineraries.ts
 +++ b/packages/db/src/repositories/itineraries.ts
 @@ -4,7 +4,6 @@ import type {
@@ -462,7 +1022,7 @@ index 4d61f2a..9919649 100644
      >();
      for (const r of this.db.raw
        .prepare<[string], ObservationDbRow>(
-@@ -463,7 +465,12 @@ export class ItinerariesRepo {
+@@ -463,7 +465,13 @@ export class ItinerariesRepo {
          cabin: o.provenance.cabin,
          points: [],
        };
@@ -472,12 +1032,13 @@ index 4d61f2a..9919649 100644
 +        pricePence: o.pricePence,
 +        provenance: o.provenance,
 +        suppliedFields: o.suppliedFields,
++        executionId: o.executionId,
 +      });
        out.set(r.offer_id, series);
      }
      return [...out.values()];
 diff --git a/packages/db/src/types.ts b/packages/db/src/types.ts
-index 256583b..23e92d0 100644
+index 256583b..72bae90 100644
 --- a/packages/db/src/types.ts
 +++ b/packages/db/src/types.ts
 @@ -8,6 +8,7 @@ import type {
@@ -488,25 +1049,48 @@ index 256583b..23e92d0 100644
    Iata,
    IsoDateTime,
    NormalisedItinerary,
-@@ -147,3 +148,7 @@ export interface ObservationRow extends Observation {
+@@ -147,3 +148,11 @@ export interface ObservationRow extends Observation {
    cell: Cell;
    seller: string;
  }
-+/** One `offerHistory` point: the stored history point plus the observation's supplied fields (plan decision 42). */
++/**
++ * One `offerHistory` point: the stored history point plus the observation's supplied fields (plan decision 42) and the
++ * execution that wrote it (decision 52: History joins only consecutive runs).
++ */
 +export interface OfferHistoryPoint extends HistoryPoint {
 +  suppliedFields: SuppliedField[];
++  executionId: string;
 +}
+diff --git a/packages/db/test/barrel.test.ts b/packages/db/test/barrel.test.ts
+index 47b01a2..5db639e 100644
+--- a/packages/db/test/barrel.test.ts
++++ b/packages/db/test/barrel.test.ts
+@@ -101,6 +101,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
+         'openDatabase',
+         'pendingMigrations',
+         'readOnlyLockState',
++        'retriedOnResume',
+         'runMaintenance',
+         'sanityCheckAirports',
+         'seedAirports',
 diff --git a/packages/db/test/itineraries.test.ts b/packages/db/test/itineraries.test.ts
-index 273ea2c..cd371ae 100644
+index 273ea2c..cb0bd29 100644
 --- a/packages/db/test/itineraries.test.ts
 +++ b/packages/db/test/itineraries.test.ts
-@@ -701,7 +701,9 @@ describe('ItinerariesRepo reads', () => {
+@@ -701,7 +701,16 @@ describe('ItinerariesRepo reads', () => {
          providerId: 'searchapi',
          seller: 'British Airways',
          cabin: 'economy',
 -        points: [{ at: T0, pricePence: 41_200, provenance: SEARCHAPI_PROVENANCE }],
 +        points: [
-+          { at: T0, pricePence: 41_200, provenance: SEARCHAPI_PROVENANCE, suppliedFields: expect.any(Array) },
++          {
++            at: T0,
++            pricePence: 41_200,
++            provenance: SEARCHAPI_PROVENANCE,
++            // why: the observation's own supplied fields, which the api reads as priceConfirmed (plan decision 42)
++            suppliedFields: ['segments', 'segmentTimes', 'segmentCabins', 'price', 'seller', 'baggage'],
++            executionId,
++          },
 +        ],
        },
      ]);
@@ -515,37 +1099,39 @@ index 273ea2c..cd371ae 100644
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core exec vitest run test/api-contract && pnpm --filter @gmt/db exec vitest run test/itineraries.test.ts && pnpm -r typecheck`
-Expected: PASS (the new file's 2 tests; the itineraries suite unchanged in count); typecheck clean. Run `pnpm --filter @gmt/core test` too: core stays at 100% on every metric.
+Run: `pnpm --filter @gmt/core test && pnpm --filter @gmt/db test && pnpm -r typecheck`
+Expected: PASS: core 767 tests with 100% on every metric (14 of them `wp08.test.ts`), db 276 tests (7 of them `cells.retriedOnResume.test.ts`); typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: expandTop on the execution summary, draft-tolerant stored definitions, supplied fields on offer history"
+git add -A apps/api packages && git commit -m "wp08: core effective age and isStale, the unknown-age label, link re-validation, the row superseded mark, scope labels; db retriedOnResume and offer-history supplied fields and execution"
 ```
 
 ### Task 8.1: The app bootstrap, the server core, and production boot lacks `fixture` (first failing test)
 
 **Files:**
-- Create: `apps/api/src/text.ts`, `src/errors.ts`, `src/defaults.ts`, `src/routes/types.ts`, `src/routes/shared.ts`, `src/read/usage.ts`, `src/routes/system.ts`, `src/routes/index.ts`, `src/middleware/validate.ts`, `src/middleware/auth.ts`, `src/middleware/headers.ts`, `src/middleware/hardening.ts`, `src/static.ts`, `src/app.ts`, `src/bootstrap/paths.ts`, `src/bootstrap/lock.ts`, `src/bootstrap/app.ts`, `src/bootstrap/start.ts`
-- Modify: `apps/api/package.json`, `apps/api/vitest.config.ts`
+- Create: `apps/api/src/text.ts`, `src/errors.ts`, `src/defaults.ts`, `src/routes/types.ts`, `src/routes/define.ts`, `src/routes/shared.ts`, `src/read/usage.ts`, `src/routes/system.ts`, `src/routes/index.ts`, `src/middleware/auth.ts`, `src/middleware/headers.ts`, `src/middleware/hardening.ts`, `src/static.ts`, `src/app.ts`, `src/bootstrap/paths.ts`, `src/bootstrap/lock.ts`, `src/bootstrap/seed.ts`, `src/bootstrap/app.ts`, `src/bootstrap/start.ts`
+- Modify: `apps/api/package.json`, `apps/api/src/bootstrap/tool.ts`
 - Test: `apps/api/test/bootstrap/app.spawn.test.ts`, `apps/api/test/defaults.test.ts`
 
 **Interfaces:**
-- Consumes: `loadConfigFromEnv`, `InvalidConfigError`, `collectSecrets`, `buildPorts`, `createLogger`, `safeMessage`, `EXIT`, `dataDirRefusal`, `backupBeforeMigrations` (WP4b); `fixtureProvider` (WP4); `AppLock`, `HEARTBEAT_INTERVAL_MS`, `seedAirports`, `loadAirportsDataset`, `sanityCheckAirports`, `MIGRATIONS_DIR`, `AIRPORTS_DATA_DIR`, `CalendarPriceInsert` (WP3); `createEngine`, `LogNotifier` (WP7); `apiContract.ROUTES`, `microGbpToPence`, `DEFAULT_DISCOVERY_REFRESH_HOURS`, `FIXTURE_OPT_IN_PHRASE`, `formatPence` (core).
-- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `ApiError`, `envelope`, `fieldsDetail`, `issuesToFields`, `parseWith`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `windowScope`, `budgetScopes`, the middleware of spec §4, `bootApp`, `BootError`, `Timers`, `main`, `acquireAppLockWithWaits`, `LockRefusedError`, `assetPaths`; routes `GET /api/health` (both shapes), `GET /api/airports`, `GET /api/providers`, `GET /api/budget`, `GET /api/scheduler/jobs`.
+- Consumes: `loadConfigFromEnv`, `InvalidConfigError`, `collectSecrets`, `buildPorts`, `createLogger`, `safeMessage`, `EXIT`, `dataDirRefusal`, `backupBeforeMigrations` (WP4b); `fixtureProvider` (WP4); `readOnlyLockState`, `AppLock`, `HEARTBEAT_INTERVAL_MS`, `seedAirports`, `loadAirportsDataset`, `sanityCheckAirports`, `RowRejected`, `MIGRATIONS_DIR`, `AIRPORTS_DATA_DIR`, `CalendarPriceInsert` (WP3); `createEngine`, `LogNotifier` (WP7); `budgetScopeLabel`, `microGbpToPence`, `DEFAULT_DISCOVERY_REFRESH_HOURS`, the system schemas (core).
+- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `MAX_BODY_BYTES`, `route`, `plain`, `NO_INPUT`, `oneAtATime`, `ApiError`, `envelope`, `fieldsDetail`, `issuesToFields`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `windowScope`, `budgetScopes`, the middleware of spec §4, `bootApp`, `assertAuthInvariants`, `BootError`, `main`, `waitForLockFree`, `LockRefusedError`, `LockUnreadableError`, `seedIfNeeded`, `assetPaths`; routes `GET /api/health` (both shapes), `GET /api/airports`, `GET /api/providers`, `GET /api/budget`, `GET /api/scheduler/jobs`.
 
-The bootstrap cannot boot without its ports, its middleware and at least one route, so this task builds them together; Tasks 8.2–8.8 then pin each behaviour with its own tests.
+The bootstrap cannot boot without its ports, its middleware and at least one route, so this task builds them together; Tasks 8.2–8.8 then pin each behaviour with its own tests and mutations.
 
 **Plan preset** (spec §8.2, §11), used by `GET /api/providers` `presets` and by `POST /api/definitions` with no body (Task 8.9): Travelpayouts discovery when configured; SearchApi in both stages only on the `40usd` plan (the `trial` credits are for the spike and smoke, spec §2 fact 7); the fixture provider in both stages when the gate admits it; `maxCells 10, topN 10, expandTop 2, bookingLinks true`; budget from `EXECUTION_MAX_*`; each discovery provider's refresh core's `DEFAULT_DISCOVERY_REFRESH_HOURS` (168, decision 21); no airports; `enabled: false`; schedule `0 5 * * 1` in `SCHEDULER_TIMEZONE`.
 
-**Boot order** (plan "Wiring and bootstraps", spec §7; decision 32 reuses WP4b's preflight): refuse `NODE_ENV=test` (70) → `dataDirRefusal` (73) → `backupBeforeMigrations` when migrations are pending on an existing file (73 when the backups path is unusable, 74 when the backup fails) → `buildPorts` (migrations) → seed when the airports table is empty or the dataset changed → `sanityCheckAirports` over the airports of enabled definitions (1) → `acquireAppLockWithWaits` (75) → heartbeat every `HEARTBEAT_INTERVAL_MS`, its failure logged rather than thrown (a throw inside a timer would kill the process with executions running) → `createEngine({ ...ports, notifiers: [new LogNotifier(log)] })` (WP7's `EngineOptions` carries no cost; WP11 adds `{ alerts: runAlerts }`) → `engine.boot()` → `createApp` → serve. `close()`: stop accepting → `engine.shutdown()` → clear the heartbeat → `wal_checkpoint(TRUNCATE)` → `lock.release()` → `db.close()`. Every exit code is WP4b's `EXIT` table, the one table every CLI shares.
+**Boot order** (decision 53; spec §7; decision 32 reuses WP4b's preflight): refuse `NODE_ENV=test` (70) → `assertAuthInvariants` on the injected config, the same rules `loadConfigFromEnv` enforces, so no caller of `bootApp` can serve without auth on a public bind, with an empty `ALLOWED_HOSTS` or a short password (78; `ALLOW_UNAUTHENTICATED=true` is accepted with a warning) → `dataDirRefusal` (73) → `waitForLockFree`: `app_lock` read read-only with WP3's `readOnlyLockState`, as the record tool does, polling every second while it is fresh — up to 60 s for a tool, 90 s for another app, logging the holder and the lock's age every 10 s — then 75; an unreadable file is 73 → `backupBeforeMigrations` when migrations are pending on an existing file (73 when the backups path is unusable, 74 when the backup fails) → `buildPorts` (migrations) → `seedIfNeeded` (shared with the tool bootstrap) → `sanityCheckAirports` over the airports of enabled definitions (1) → `lock.acquire({ waitMs: 0 })`, which also catches a process that took the lock since the read-only check (75) → heartbeat every `HEARTBEAT_INTERVAL_MS` with a plain `setInterval(...).unref()`, its failure logged rather than thrown (a throw inside a timer would kill the process with executions running) → `createEngine({ ...ports, notifiers: [new LogNotifier(log)] })` (WP11 adds `{ alerts: runAlerts }`) → `engine.boot()` → `createApp` → serve. Anything that throws after the lock is taken clears the heartbeat, releases the lock and closes the database before rethrowing (review arch-008). `close()`: stop accepting → `engine.shutdown()` → clear the heartbeat → `wal_checkpoint(TRUNCATE)` → `lock.release()` → `db.close()`. Every exit code is WP4b's `EXIT` table.
 
-**Input typing.** `@hono/zod-validator` validates each body and query with its ROUTES schema (the 400 envelope with `details.fields` on failure). The table-driven mount loses Hono's static input types, so `readInput` hands the handler `unknown` values and the handler narrows them with `parseWith(schema, value)`: the same schema the validator accepted, an idempotent re-parse, and no cast (`pnpm casts`, decision 48).
+**One validation per request** (decision 54). Each handler is `route({ request, query }, run)` over its ROUTES entry's own schema objects (`NO_INPUT`, `z.undefined()`, for an input the route does not take; `plain(run)` for neither). `createApp` reads the raw body as text (an empty body is `undefined`; text that is not JSON is the 400 `validation` envelope with `API_TEXT.malformedJson`), the query record and the path parameters, and the handler parses the body and the query once, answering a refusal with the 400 envelope and `details.fields`. Binding the schemas to the handler keeps the parsed types without a cast (`pnpm casts`, decision 48), and `createApp` refuses a handler whose schemas are not its entry's own objects.
+
+**Hardening** (spec §4, decision 54): headers on everything → Host (exempting the public `GET /api/health`; the rejection names the header value and `ALLOWED_HOSTS`, and the allowed values go to the log only) → `Origin` → auth → on `/api/*`: `bodyLimit` at `MAX_BODY_BYTES` = 64 KiB (413 `body_too_large`), `Cache-Control: no-store`, then JSON and `X-Requested-With` on mutating calls. No CORS middleware: the SPA is same-origin. The failed-auth limiter is per client IP only, 5 failures a minute; a request whose IP is unknown (no socket under `app.request()`, no trusted proxy) shares one `UNKNOWN_IP` bucket; a valid credential is accepted before the limiter is consulted, so the limit slows guessing and never locks out the operator. With auth off, health detail is shown only to an allowed Host (a DNS-rebound page cannot read it, review SEC-2).
 
 - [ ] **Step 1: Write the failing tests**
 
-The spawn test runs the real entry with an environment built from scratch (no inherited `NODE_ENV=test`), and probes the server from a second, unguarded `node` process, because this test process's `fetch` is answered by WP4's network guards and they refuse even a DNS lookup of `127.0.0.1`.
+The spawn test runs the real entry with an environment built from scratch (no inherited `NODE_ENV=test`), and probes the server from a second, unguarded `node` process, because this test process's `fetch` is answered by WP4's network guards and they refuse even a DNS lookup of `127.0.0.1`. Its timeouts are named constants: it starts a real production process.
 
 `apps/api/test/bootstrap/app.spawn.test.ts` (new file):
 
@@ -568,6 +1154,11 @@ import { tempDir } from '../helpers/tmp.js';
 // why: the spawned process must see a real production environment, not vitest's NODE_ENV=test, so the env is built
 // from scratch (cleanEnv blanks every variable spec §12 names) rather than copied from this process.
 const apiRoot = fileURLToPath(new URL('../..', import.meta.url));
+/** How long the probe process may take, how long the child may take to listen, and the two tests' budgets. */
+const PROBE_TIMEOUT_MS = 20_000;
+const LISTEN_TIMEOUT_MS = 45_000;
+const BOOT_TEST_TIMEOUT_MS = 90_000;
+const REFUSAL_TEST_TIMEOUT_MS = 60_000;
 const ENTRY = ['--conditions=@gmt/source', '--import', 'tsx', 'src/bootstrap/start.ts'];
 
 /** A free port. why: listen without a host, because the network guards refuse even a lookup of 127.0.0.1. */
@@ -615,7 +1206,7 @@ function probe(url: string, authorization: string): { status: number; body: unkn
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     env: { PATH: process.env.PATH ?? '' },
     encoding: 'utf8',
-    timeout: 20_000,
+    timeout: PROBE_TIMEOUT_MS,
   });
   const out = z.object({ status: z.number(), body: z.unknown() }).parse(JSON.parse(r.stdout));
   return out;
@@ -652,72 +1243,84 @@ function syntheticCalendarRow(): CalendarPriceInsert {
 }
 
 describe('production boot lacks fixture (spec §5.5, §9 item 5)', () => {
-  it('the real bootstrap under NODE_ENV=production never offers or accepts synthetic data', async () => {
-    const dir = tempDir('gmt-spawn-');
-    const port = await freePort();
-    // why: the strongest negative case: the opt-in phrase is set, the path ends in .fixture.db and we are not in a
-    // container, so NODE_ENV=production is the only thing standing between us and synthetic data.
-    const env = cleanEnv({
-      PATH: process.env.PATH ?? '',
-      NODE_ENV: 'production',
-      DATABASE_PATH: join(dir, 'prod.fixture.db'),
-      PORT: String(port),
-      BIND_ADDRESS: '127.0.0.1',
-      ALLOWED_HOSTS: `127.0.0.1:${port}`,
-      APP_BASIC_AUTH_USER: 'operator',
-      APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
-      ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
-      LOG_LEVEL: 'info',
-    });
-    const child = spawn(process.execPath, ENTRY, { cwd: apiRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    try {
-      await waitForLine(child, /"msg":"listening"/, 45_000);
-      const auth = Buffer.from(`operator:${SENTINEL_AUTH}`).toString('base64');
-      const res = probe(`http://127.0.0.1:${port}/api/providers`, `Basic ${auth}`);
-      expect(res.status).toBe(200);
-      const body = apiContract.providersResponseSchema.parse(res.body);
-      expect(body.providers.map((p) => p.providerId)).not.toContain('fixture');
-      expect(body.synthetic).toBe(false);
-    } finally {
-      child.kill('SIGTERM');
-    }
-    expect(await waitForExit(child)).toBe(0);
+  it(
+    'the real bootstrap under NODE_ENV=production never offers or accepts synthetic data',
+    async () => {
+      const dir = tempDir('gmt-spawn-');
+      const port = await freePort();
+      // why: the strongest negative case: the opt-in phrase is set, the path ends in .fixture.db and we are not in a
+      // container, so NODE_ENV=production is the only thing standing between us and synthetic data.
+      const env = cleanEnv({
+        PATH: process.env.PATH ?? '',
+        NODE_ENV: 'production',
+        DATABASE_PATH: join(dir, 'prod.fixture.db'),
+        PORT: String(port),
+        BIND_ADDRESS: '127.0.0.1',
+        ALLOWED_HOSTS: `127.0.0.1:${port}`,
+        APP_BASIC_AUTH_USER: 'operator',
+        APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
+        ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
+        LOG_LEVEL: 'info',
+      });
+      const child = spawn(process.execPath, ENTRY, { cwd: apiRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
+      try {
+        await waitForLine(child, /"msg":"listening"/, LISTEN_TIMEOUT_MS);
+        const auth = Buffer.from(`operator:${SENTINEL_AUTH}`).toString('base64');
+        const res = probe(`http://127.0.0.1:${port}/api/providers`, `Basic ${auth}`);
+        expect(res.status).toBe(200);
+        const body = apiContract.providersResponseSchema.parse(res.body);
+        expect(body.providers.map((p) => p.providerId)).not.toContain('fixture');
+        expect(body.synthetic).toBe(false);
+      } finally {
+        child.kill('SIGTERM');
+      }
+      expect(await waitForExit(child)).toBe(0);
 
-    // Same environment and file, in this process: the gates hold outside the server too.
-    const config = loadConfigFromEnv(env);
-    const log = createLogger({ logLevel: 'error' });
-    const ports = buildPorts(config, { log, migrationsDir: MIGRATIONS_DIR });
-    try {
-      expect(ports.providers.map((p) => p.id)).not.toContain('fixture');
-      expect(() =>
-        fixtureProvider({ http: ports.http, log, clock: systemClock, config, costMicroGbp: 0 }),
-      ).toThrow();
-      // why: match the message so a foreign-key failure cannot satisfy the assertion by accident.
-      expect(() => ports.repos.calendarPrices.insert('spawn-test', [syntheticCalendarRow()])).toThrow(
-        /synthetic/i,
-      );
-    } finally {
-      ports.db.close();
-    }
-  }, 90_000);
+      // Same environment and file, in this process: the gates hold outside the server too.
+      const config = loadConfigFromEnv(env);
+      const log = createLogger({ logLevel: 'error' });
+      const ports = buildPorts(config, { log, migrationsDir: MIGRATIONS_DIR });
+      try {
+        expect(ports.providers.map((p) => p.id)).not.toContain('fixture');
+        expect(() =>
+          fixtureProvider({ http: ports.http, log, clock: systemClock, config, costMicroGbp: 0 }),
+        ).toThrow();
+        // why: match the message so a foreign-key failure cannot satisfy the assertion by accident.
+        expect(() => ports.repos.calendarPrices.insert('spawn-test', [syntheticCalendarRow()])).toThrow(
+          /synthetic/i,
+        );
+      } finally {
+        ports.db.close();
+      }
+    },
+    BOOT_TEST_TIMEOUT_MS,
+  );
 
-  it('refuses NODE_ENV=test with exit code 70 and bad config with 78 (plan exit-code table)', async () => {
-    const dir = tempDir('gmt-spawn-');
-    const base = {
-      PATH: process.env.PATH ?? '',
-      BIND_ADDRESS: '127.0.0.1',
-      APP_BASIC_AUTH_USER: 'operator',
-      APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
-    };
-    const run = (env: Record<string, string>) =>
-      waitForExit(
-        spawn(process.execPath, ENTRY, { cwd: apiRoot, env: cleanEnv({ ...base, ...env }), stdio: 'ignore' }),
-      );
-    expect(await run({ NODE_ENV: 'test', DATABASE_PATH: join(dir, 'x.test.db') })).toBe(70);
-    expect(await run({ NODE_ENV: 'production', DATABASE_PATH: join(dir, 'x.db'), PORT: 'not-a-port' })).toBe(
-      78,
-    );
-  }, 60_000);
+  it(
+    'refuses NODE_ENV=test with exit code 70 and bad config with 78 (plan exit-code table)',
+    async () => {
+      const dir = tempDir('gmt-spawn-');
+      const base = {
+        PATH: process.env.PATH ?? '',
+        BIND_ADDRESS: '127.0.0.1',
+        APP_BASIC_AUTH_USER: 'operator',
+        APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
+      };
+      const run = (env: Record<string, string>) =>
+        waitForExit(
+          spawn(process.execPath, ENTRY, {
+            cwd: apiRoot,
+            env: cleanEnv({ ...base, ...env }),
+            stdio: 'ignore',
+          }),
+        );
+      expect(await run({ NODE_ENV: 'test', DATABASE_PATH: join(dir, 'x.test.db') })).toBe(70);
+      expect(
+        await run({ NODE_ENV: 'production', DATABASE_PATH: join(dir, 'x.db'), PORT: 'not-a-port' }),
+      ).toBe(78);
+    },
+    REFUSAL_TEST_TIMEOUT_MS,
+  );
 });
 ```
 
@@ -807,6 +1410,11 @@ Expected: FAIL: `Cannot find module '../src/defaults.js'`; the spawn test's chil
 
 - [ ] **Step 3: Implement**
 
+Remove the validator middleware the routes no longer use (it updates `package.json` and `pnpm-lock.yaml`), then add the scripts:
+
+Run: `pnpm --filter @gmt/api remove @hono/zod-validator`
+Expected: `@hono/zod-validator` leaves `apps/api/package.json` and the lockfile; nothing else changes.
+
 `apps/api/package.json` — find:
 
 ```json
@@ -822,19 +1430,70 @@ Expected: FAIL: `Cannot find module '../src/defaults.js'`; the spawn test's chil
     "start": "node dist/bootstrap/start.js"
 ```
 
-`apps/api/vitest.config.ts` — find:
+The tool bootstrap calls the shared seeding (and logs its heartbeat failure under `err`, as every other error log does):
 
-```ts
-    setupFiles: ['test/support/setup.ts'],
-```
+Apply this patch from the repository root (`git apply`):
 
-`apps/api/vitest.config.ts` — replace with:
-
-```ts
-    setupFiles: ['test/support/setup.ts'],
-    // why: the boot tests seed the full airports table per boot and the spawn test starts a real production process
-    // (spec §5.5); on a loaded machine the default 5 s, and even 20 s, timed out in the assembly runs.
-    testTimeout: 60_000,
+```diff
+diff --git a/apps/api/src/bootstrap/tool.ts b/apps/api/src/bootstrap/tool.ts
+index 9624092..3a6367c 100644
+--- a/apps/api/src/bootstrap/tool.ts
++++ b/apps/api/src/bootstrap/tool.ts
+@@ -12,10 +12,8 @@ import {
+   AIRPORTS_DATA_DIR,
+   AppLock,
+   HEARTBEAT_INTERVAL_MS,
+-  loadAirportsDataset,
+   MIGRATIONS_DIR,
+   readOnlyLockState,
+-  seedAirports,
+ } from '@gmt/db';
+ import { defaultRecordedRoot } from '@gmt/providers';
+ import { createLogger } from '../logger.js';
+@@ -26,6 +24,7 @@ import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
+ import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
+ import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
+ import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
++import { seedIfNeeded } from './seed.js';
+ 
+ export { EXIT, type ToolName } from '../tools/types.js';
+ 
+@@ -274,7 +273,10 @@ async function runToolSteps(
+       } catch (e) {
+         // why: a throw inside a timer would kill the process with the execution left running (arch-014, cost-wp4b-007)
+         lockLost = true;
+-        log.error({ error: safeMessage(e, secrets) }, 'app_lock heartbeat failed; aborting the tool');
++        log.error(
++          { err: { message: safeMessage(e, secrets) } },
++          'app_lock heartbeat failed; aborting the tool',
++        );
+         err(`app_lock lost (${safeMessage(e, secrets)}); aborting`);
+         ac.abort();
+       }
+@@ -286,7 +288,7 @@ async function runToolSteps(
+     process.on('SIGINT', onSignal);
+     process.on('SIGTERM', onSignal);
+     try {
+-      seedIfNeeded(ports, out);
++      seedIfNeeded(ports, AIRPORTS_DATA_DIR, out);
+       const code = await prepared.run(ports, {
+         signal: ac.signal,
+         out,
+@@ -310,14 +312,6 @@ async function runToolSteps(
+   }
+ }
+ 
+-/** Spec §7: seed after migration when `airports` is empty or the dataset version changed; local files, no network. */
+-function seedIfNeeded(ports: Ports, out: (line: string) => void): void {
+-  const dataset = loadAirportsDataset(AIRPORTS_DATA_DIR);
+-  if (ports.repos.airports.count() > 0 && ports.repos.airports.datasetVersion() === dataset.version) return;
+-  const r = seedAirports(ports.db, dataset);
+-  out(`airports seeded: ${r.inserted} rows, dataset ${r.datasetVersion}`);
+-}
+-
+ /**
+  * True when this module is the process entry. why: argv[1] may be a symlink (pnpm's bin links), so it is resolved; if
+  * resolution fails the unresolved path is compared instead of silently skipping the run (arch-r2-006).
 ```
 
 `apps/api/src/text.ts` (new file):
@@ -854,18 +1513,23 @@ export const API_TEXT = {
   notFound: 'no such route',
   unauthenticated: 'authentication required',
   rateLimited: (seconds: number) => `too many failed sign-in attempts; retry in ${seconds}s`,
-  hostRejected: (host: string, allowed: readonly string[]) =>
-    `Host "${host}" is not in ALLOWED_HOSTS (${allowed.join(', ')})`,
-  originRejected: (origin: string, allowed: readonly string[]) =>
-    `Origin "${origin}" does not match ALLOWED_HOSTS (${allowed.join(', ')})`,
+  // why: plan decision 54: a rejection names the variable, never its values (they would tell a stranger the host names).
+  hostRejected: (host: string) => `Host "${host}" is not in ALLOWED_HOSTS`,
+  originRejected: (origin: string) => `Origin "${origin}" does not name a host in ALLOWED_HOSTS`,
+  bodyTooLarge: 'request body is larger than the api accepts',
   contentType: 'requests that change data need Content-Type: application/json',
   requestedWith: 'requests that change data need X-Requested-With: get-me-there',
   validation: (target: string) => `invalid request ${target}`,
   malformedJson: 'request body is not valid JSON',
-  definitionNotFound: (id: string) => `no search definition ${id}`,
-  executionNotFound: (id: string) => `no execution ${id}`,
+  // why: not-found messages never echo the id a caller sent (spec §5.3: a pasted secret must not come back out).
+  definitionNotFound: 'no such search definition',
+  executionNotFound: 'no such execution',
   noExecution: 'this definition has not been run yet',
-  alertNotFound: (id: string) => `no alert rule ${id}`,
+  alertNotFound: 'no such alert rule',
+  itineraryNotFound: 'no such itinerary',
+  alreadyRunning: 'a request for this definition is already running; retry when it finishes',
+  unknownProvider: (id: string) => `provider ${id} is not configured`,
+  unknownDestination: 'that destination is not one of this definition',
   draftNotice: 'Set at least one origin and one destination before running or scheduling this search.',
   draftCannotEnable: 'a definition without origins and destinations cannot be enabled',
   draftNoEstimate: 'set origins and destinations before asking for an estimate',
@@ -909,8 +1573,8 @@ export const API_TEXT = {
 ```ts
 /** The spec §10 error envelope and the app's error handlers. */
 import { type Logger, type Secret, stripUrlsInText } from '@gmt/core';
+import { RowRejected } from '@gmt/db';
 import type { Context } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { safeMessage } from './safeMessage.js';
 import { API_TEXT } from './text.js';
@@ -974,14 +1638,15 @@ export function envelope(
 }
 
 /**
- * `app.onError`: ApiError → its envelope; Hono's HTTPException (a malformed JSON body from the validator) → 400
- * `validation`; anything else → 500 without internals, logged URL-free and secret-free (spec §5.3, §14).
+ * `app.onError`: ApiError → its envelope; WP3's `RowRejected('active')` (a start or verify that lost the race for the
+ * one-active-execution index) → 409 `active`; anything else → 500 without internals, logged URL-free and secret-free
+ * (spec §5.3, §14).
  */
 export function onError(log: Logger, secrets: readonly Secret[]) {
   return (err: Error, c: Context) => {
     if (err instanceof ApiError) return c.json(envelope(err.code, err.message, err.details), err.status);
-    if (err instanceof HTTPException && err.status < 500)
-      return c.json(envelope('validation', API_TEXT.malformedJson), 400);
+    if (err instanceof RowRejected && err.rule === 'active')
+      return c.json(envelope('active', err.message), 409);
     log.error({ err: { name: err.name, message: safeMessage(err, secrets) } }, 'unhandled error');
     return c.json(envelope('internal', API_TEXT.internal), 500);
   };
@@ -1071,44 +1736,119 @@ export const API_PREFIX = '/api';
 export interface AppVariables {
   /** True when the request carried valid basic-auth credentials, or auth is disabled by config. */
   authenticated: boolean;
-  /** Set by the optional-JSON validator: whether a body was sent and its parsed value. */
-  optionalBody?: { present: boolean; value: unknown };
 }
 export type AppEnv = { Variables: AppVariables };
 
 export type ToolRunResponse = z.infer<typeof apiContract.toolRunResponseSchema>;
 export type ToolRecordRequest = z.infer<typeof apiContract.toolRecordRequestSchema>;
-/** In-process tool entry points; an absent runner answers 503 tool_unavailable. */
-export interface ToolRunners {
+/**
+ * The tools the HTTP surface runs in-process; an absent runner answers 503 tool_unavailable. why: named apart from
+ * WP4b's `ToolRunners` in `bootstrap/tool.ts` (the CLI's runners, a different shape) so the two never shadow.
+ */
+export interface HttpToolRunners {
   record?: (args: ToolRecordRequest, signal: AbortSignal) => Promise<ToolRunResponse>;
 }
 
 /** ROUTES entries another package mounts (plan decision 4). WP13 adds the smoke handler and removes its key. */
 export const OWNED_ELSEWHERE: ReadonlySet<string> = new Set(['POST /api/tools/smoke']);
 
-/**
- * What a handler receives. Values are what the validators accepted, typed `unknown` because the table-driven mount
- * loses Hono's static input type; each handler narrows with its own contract schema through `parseWith` (no casts).
- */
-export interface RouteInput {
+/** The raw inputs of one request: the JSON body (undefined when empty), the query record, the path parameters. */
+export interface RawInput {
   body: unknown;
-  query: unknown;
+  query: Record<string, string> | undefined;
   params: Record<string, string>;
 }
 export interface RouteContext {
   ports: Ports;
   engine: Engine;
-  tools: ToolRunners;
+  tools: HttpToolRunners;
   /** One tool at a time (spec §10 `/tools/*`). */
   toolInFlight: { name: string | null };
+  /** Plan decision 54: the definitions with an estimate, coverage check, run, resume or verify in flight. */
+  busy: Set<string>;
 }
-export type RouteHandler = (
-  c: Context<AppEnv>,
-  input: RouteInput,
-  ctx: RouteContext,
-) => Response | Promise<Response>;
+/**
+ * One route's handler with the schemas it validates against: the ROUTES entry's own `request` and `query` objects
+ * (createApp checks identity), parsed exactly once before `handle` runs (plan decision 54).
+ */
+export interface RouteHandler {
+  readonly request: z.ZodType;
+  readonly query: z.ZodType;
+  handle(c: Context<AppEnv>, raw: RawInput, ctx: RouteContext): Response | Promise<Response>;
+}
 /** Handlers keyed exactly as `${method} ${path}` of a ROUTES entry. */
 export type HandlerTable = Readonly<Record<string, RouteHandler>>;
+```
+
+`apps/api/src/routes/define.ts` (new file):
+
+```ts
+/** One validation per request (plan decision 54): each handler declares the ROUTES schemas and receives their output. */
+import type { Context } from 'hono';
+import { z } from 'zod';
+import { envelope, fieldsDetail, issuesToFields } from '../errors.js';
+import { API_TEXT } from '../text.js';
+import type { AppEnv, RouteContext, RouteHandler } from './types.js';
+
+/** The schema of an input a route does not take: only `undefined` passes. Shared, so createApp can compare identity. */
+export const NO_INPUT = z.undefined();
+
+/** The validated inputs a handler receives, typed from its schemas. */
+export interface Input<B extends z.ZodType, Q extends z.ZodType> {
+  body: z.output<B>;
+  query: z.output<Q>;
+  params: Record<string, string>;
+}
+
+/**
+ * Defines a handler over the ROUTES entry's `request` and `query` (pass `NO_INPUT` for one the route does not take).
+ * The body and the query are parsed here, once; a refusal is the 400 `validation` envelope with `details.fields`.
+ * why: the table-driven mount loses Hono's static input types; binding the schema objects to the handler keeps the
+ * types without a cast, and createApp refuses a handler whose schemas are not the ROUTES entry's own.
+ */
+export function route<B extends z.ZodType, Q extends z.ZodType>(
+  schemas: { request: B; query: Q },
+  run: (c: Context<AppEnv>, input: Input<B, Q>, ctx: RouteContext) => Response | Promise<Response>,
+): RouteHandler {
+  return {
+    request: schemas.request,
+    query: schemas.query,
+    handle: (c, raw, ctx) => {
+      const body = schemas.request.safeParse(raw.body);
+      if (!body.success)
+        return c.json(
+          envelope(
+            'validation',
+            API_TEXT.validation('body'),
+            fieldsDetail(issuesToFields(body.error.issues)),
+          ),
+          400,
+        );
+      const query = schemas.query.safeParse(raw.query);
+      if (!query.success)
+        return c.json(
+          envelope(
+            'validation',
+            API_TEXT.validation('query'),
+            fieldsDetail(issuesToFields(query.error.issues)),
+          ),
+          400,
+        );
+      return run(c, { body: body.data, query: query.data, params: raw.params }, ctx);
+    },
+  };
+}
+
+/** A route without a body or a query. */
+export function plain(
+  run: (
+    c: Context<AppEnv>,
+    input: Input<typeof NO_INPUT, typeof NO_INPUT>,
+    ctx: RouteContext,
+  ) => Response | Promise<Response>,
+): RouteHandler {
+  return route({ request: NO_INPUT, query: NO_INPUT }, run);
+}
 ```
 
 `apps/api/src/routes/shared.ts` (new file):
@@ -1116,41 +1856,38 @@ export type HandlerTable = Readonly<Record<string, RouteHandler>>;
 ```ts
 /** Helpers every handler table uses. */
 import type { SearchDefinition } from '@gmt/core';
-import type { z } from 'zod';
-import { ApiError, fieldsDetail, issuesToFields } from '../errors.js';
+import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
-import type { RouteContext, RouteInput } from './types.js';
-
-/**
- * Narrows a validated input with its contract schema. why: the validators already accepted the value with this same
- * schema, so this parse cannot fail on a mounted route; it is how a handler gets the static type without a cast (plan
- * Global Constraints: no `as`). Re-parsing is idempotent for every contract schema (trim/upper-case, coerce, default).
- */
-export function parseWith<S extends z.ZodType>(schema: S, value: unknown, target = 'body'): z.output<S> {
-  const r = schema.safeParse(value);
-  if (!r.success)
-    throw new ApiError(
-      400,
-      'validation',
-      API_TEXT.validation(target),
-      fieldsDetail(issuesToFields(r.error.issues)),
-    );
-  return r.data;
-}
+import type { RouteContext } from './types.js';
 
 /** A path parameter the router guarantees; a missing one is a 400, never a crash. */
-export function param(input: RouteInput, name: string): string {
+export function param(input: { params: Record<string, string> }, name: string): string {
   const v = input.params[name];
   if (v === undefined || v === '') throw new ApiError(400, 'validation', API_TEXT.validation('path'));
   return v;
 }
 
-/** A definition that exists and is not soft-deleted, else 404 `definition_not_found`. */
+/** A definition that exists and is not soft-deleted, else 404 `definition_not_found` (the id is not echoed). */
 export function getLiveDefinition(ctx: RouteContext, id: string): SearchDefinition {
   const def = ctx.ports.repos.definitions.get(id);
   if (def === null || def.deletedAt !== null)
-    throw new ApiError(404, 'definition_not_found', API_TEXT.definitionNotFound(id));
+    throw new ApiError(404, 'definition_not_found', API_TEXT.definitionNotFound);
   return def;
+}
+
+/**
+ * Plan decision 54: an estimate, coverage check, run, resume or verify of one definition runs one at a time; a second
+ * request while one is in flight is 429 `already_running`. `key` is the definition id, or a fixed key for the requests
+ * that have none (an unsaved estimate, the coverage check).
+ */
+export async function oneAtATime<T>(ctx: RouteContext, key: string, fn: () => T | Promise<T>): Promise<T> {
+  if (ctx.busy.has(key)) throw new ApiError(429, 'already_running', API_TEXT.alreadyRunning);
+  ctx.busy.add(key);
+  try {
+    return await fn();
+  } finally {
+    ctx.busy.delete(key);
+  }
 }
 ```
 
@@ -1161,6 +1898,7 @@ export function getLiveDefinition(ctx: RouteContext, id: string): SearchDefiniti
 import {
   type apiContract,
   type BudgetScope,
+  budgetScopeLabel,
   type Config,
   microGbpToPence,
   type ProviderId,
@@ -1178,11 +1916,6 @@ export function providerLimits(config: Config, id: ProviderId): ProviderLimits |
   return null;
 }
 
-/** Stable wire label for a scope, e.g. `provider-month:searchapi`, `execution-calls`, `global-month`. */
-export function scopeLabel(s: BudgetScope): string {
-  return 'providerId' in s ? `${s.kind}:${s.providerId}` : s.kind;
-}
-
 /** Both provider windows; the guard reports `cap: null` for the one the plan does not use (plan, Budget port). */
 export function providerScopes(providerId: ProviderId): BudgetScope[] {
   return [
@@ -1191,7 +1924,10 @@ export function providerScopes(providerId: ProviderId): BudgetScope[] {
   ];
 }
 
-/** The provider window its plan counts against: lifetime for the trial, month otherwise (spec §5.3). */
+/**
+ * The provider window its plan counts against: lifetime for the trial, month otherwise (spec §5.3). why: the engine's own
+ * mapping (`limitsOf(id).capKind`) is internal; this reads the same config field.
+ */
 export function windowScope(config: Config, providerId: ProviderId): BudgetScope {
   const kind =
     providerLimits(config, providerId)?.window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
@@ -1215,7 +1951,7 @@ export function budgetScopes(ports: Ports, executionId: string | null): BudgetSc
 export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
   const u = ports.budget.usage(scope);
   return {
-    scope: scopeLabel(scope),
+    scope: budgetScopeLabel(scope),
     calls: u.calls,
     costMicroGbp: u.costMicroGbp,
     costPence: microGbpToPence(u.costMicroGbp),
@@ -1240,10 +1976,11 @@ import {
 } from '@gmt/core';
 import type { z } from 'zod';
 import { defaultDefinitionInput } from '../defaults.js';
+import { hostAllowed } from '../middleware/hardening.js';
 import { budgetScopes, providerLimits, providerScopes, usageOf } from '../read/usage.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { parseWith } from './shared.js';
+import { NO_INPUT, plain, route } from './define.js';
 import type { HandlerTable, RouteContext } from './types.js';
 
 type HealthDetail = z.infer<typeof apiContract.healthDetailSchema>;
@@ -1351,25 +2088,34 @@ export function budgetResponse(ctx: RouteContext): BudgetResponse {
 }
 
 export const systemHandlers: HandlerTable = {
-  // why: one public route with two shapes: the HEALTHCHECK gets the minimal one, an authenticated caller the detail.
-  'GET /api/health': (c, _input, ctx) =>
-    c.json(c.get('authenticated') ? healthDetail(ctx) : healthPublic(ctx)),
-  'GET /api/airports': (c, input, ctx) => {
-    const { q } = parseWith(apiContract.airportsQuerySchema, input.query, 'query');
-    return c.json(
-      ctx.ports.repos.airports.search(q, 20).map((a) => ({
-        iata: a.iata,
-        name: a.name,
-        city: a.city,
-        country: a.country,
-        tz: a.tz,
-        metro: a.metro,
-      })),
-    );
-  },
-  'GET /api/providers': (c, _input, ctx) => c.json(providersResponse(ctx)),
-  'GET /api/budget': (c, _input, ctx) => c.json(budgetResponse(ctx)),
-  'GET /api/scheduler/jobs': (c, _input, ctx) => c.json({ jobs: ctx.engine.scheduler.jobs() }),
+  /**
+   * One public route with two shapes: the HEALTHCHECK gets the minimal one; the detail goes only to a caller with
+   * valid credentials or, with auth off, a request whose Host is allowed (review SEC-2: the route is Host-exempt, so
+   * a rebinding page must not read the detail through it).
+   */
+  'GET /api/health': plain((c, _input, ctx) => {
+    const { config } = ctx.ports;
+    const detail =
+      c.get('authenticated') && (config.auth !== null || hostAllowed(config, c.req.header('host')));
+    return c.json(detail ? healthDetail(ctx) : healthPublic(ctx));
+  }),
+  'GET /api/airports': route(
+    { request: NO_INPUT, query: apiContract.airportsQuerySchema },
+    (c, { query }, ctx) =>
+      c.json(
+        ctx.ports.repos.airports.search(query.q, 20).map((a) => ({
+          iata: a.iata,
+          name: a.name,
+          city: a.city,
+          country: a.country,
+          tz: a.tz,
+          metro: a.metro,
+        })),
+      ),
+  ),
+  'GET /api/providers': plain((c, _input, ctx) => c.json(providersResponse(ctx))),
+  'GET /api/budget': plain((c, _input, ctx) => c.json(budgetResponse(ctx))),
+  'GET /api/scheduler/jobs': plain((c, _input, ctx) => c.json({ jobs: ctx.engine.scheduler.jobs() })),
 };
 ```
 
@@ -1383,94 +2129,6 @@ import type { HandlerTable } from './types.js';
 export const HANDLERS: HandlerTable = {
   ...systemHandlers,
 };
-```
-
-`apps/api/src/middleware/validate.ts` (new file):
-
-```ts
-/** Spec §10: every ROUTES entry's path, query and body validated by its contract schema before the handler runs. */
-import type { apiContract } from '@gmt/core';
-import { zValidator } from '@hono/zod-validator';
-import type { Context, MiddlewareHandler } from 'hono';
-import type { z } from 'zod';
-import { envelope, fieldsDetail, issuesToFields } from '../errors.js';
-import type { AppEnv, RouteInput } from '../routes/types.js';
-import { API_TEXT } from '../text.js';
-
-type RouteDef = apiContract.RouteDef;
-type Target = 'json' | 'query';
-const TARGET_LABEL: Record<Target, string> = { json: 'body', query: 'query' };
-
-/** The 400 envelope with `details.fields` for a value its schema refused. */
-function refusal(
-  c: Context<AppEnv>,
-  target: string,
-  error: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }> },
-) {
-  return c.json(
-    envelope('validation', API_TEXT.validation(target), fieldsDetail(issuesToFields(error.issues))),
-    400,
-  );
-}
-
-function validator(target: Target, schema: z.ZodType): MiddlewareHandler<AppEnv> {
-  return zValidator(target, schema, (result, c) => {
-    if (!result.success) return refusal(c, TARGET_LABEL[target], result.error);
-    return undefined;
-  });
-}
-
-/** True for request schemas that accept a missing body (only `POST /api/definitions`, spec §10). */
-export function acceptsUndefined(schema: z.ZodType): boolean {
-  return schema.safeParse(undefined).success;
-}
-
-/** Body validator for schemas that accept "no body": zValidator('json') would reject an empty body as malformed. */
-function optionalJson(schema: z.ZodType): MiddlewareHandler<AppEnv> {
-  return async (c, next) => {
-    const text = await c.req.text();
-    if (text.trim() === '') {
-      c.set('optionalBody', { present: false, value: undefined });
-      return next();
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return c.json(envelope('validation', API_TEXT.malformedJson), 400);
-    }
-    const r = schema.safeParse(parsed);
-    if (!r.success) return refusal(c, 'body', r.error);
-    c.set('optionalBody', { present: true, value: r.data });
-    return next();
-  };
-}
-
-const passThrough: MiddlewareHandler<AppEnv> = async (_c, next) => {
-  await next();
-};
-
-/** The validators a ROUTES entry needs: query, then body. Always at least one middleware. */
-export function validatorsFor(route: RouteDef): MiddlewareHandler<AppEnv>[] {
-  const mws: MiddlewareHandler<AppEnv>[] = [passThrough];
-  if (route.query !== undefined) mws.push(validator('query', route.query));
-  if (route.request !== undefined)
-    mws.push(
-      acceptsUndefined(route.request) ? optionalJson(route.request) : validator('json', route.request),
-    );
-  return mws;
-}
-
-/**
- * The inputs a handler reads: the path parameters, the raw query and the body its validator accepted (Hono caches the
- * parsed JSON, so this is no second read). Each handler narrows them with `parseWith` and its contract schema.
- */
-export async function readInput(c: Context<AppEnv>, route: RouteDef): Promise<RouteInput> {
-  let body: unknown;
-  if (route.request !== undefined)
-    body = acceptsUndefined(route.request) ? c.get('optionalBody')?.value : await c.req.json();
-  return { body, query: route.query === undefined ? undefined : c.req.query(), params: c.req.param() };
-}
 ```
 
 `apps/api/src/middleware/auth.ts` (new file):
@@ -1507,55 +2165,49 @@ export function credentialsMatch(
   return userOk && passOk ? 'valid' : 'invalid';
 }
 
-/** Spec §4: 5 failures per minute per source IP, 20 per minute overall. In memory: one process, one operator. */
+/**
+ * Spec §4 and plan decision 54: 5 failed sign-ins a minute per client IP (TRUST_PROXY-aware, see `clientIpFrom`). In
+ * memory: one process, one operator. why: no global bucket, because anyone who can reach the port could then keep the
+ * operator out by spending it; and a correct credential always succeeds, so the limit slows guessing without ever
+ * locking the operator out. A request whose IP is unknown (no socket, no trusted proxy header) shares one bucket.
+ */
 export class FailedAuthLimiter {
   private readonly byIp = new Map<string, number[]>();
-  private global: number[] = [];
   constructor(
     private readonly clock: Clock,
-    private readonly limits = { perIp: 5, global: 20, windowMs: 60_000 },
+    private readonly limits = { perIp: 5, windowMs: 60_000 },
   ) {}
 
   private now(): number {
     return Date.parse(this.clock.now());
   }
 
-  private recent(list: number[], now: number): number[] {
-    return list.filter((t) => now - t < this.limits.windowMs);
-  }
-
-  /** When does the oldest failure that keeps `list` at its limit expire? null when under the limit. */
-  private blockedUntil(list: number[], limit: number): number | null {
-    if (list.length < limit) return null;
-    const pivot = list[list.length - limit];
-    return pivot === undefined ? null : pivot + this.limits.windowMs;
+  private recent(ip: string, now: number): number[] {
+    const list = (this.byIp.get(ip) ?? []).filter((t) => now - t < this.limits.windowMs);
+    if (list.length === 0) this.byIp.delete(ip);
+    else this.byIp.set(ip, list);
+    return list;
   }
 
   /** Seconds until this source may try again, or null when it is not limited. */
-  retryAfterSeconds(ip: string | null): number | null {
+  retryAfterSeconds(ip: string): number | null {
     const now = this.now();
-    this.global = this.recent(this.global, now);
-    const untils = [this.blockedUntil(this.global, this.limits.global)];
-    if (ip !== null) {
-      const mine = this.recent(this.byIp.get(ip) ?? [], now);
-      if (mine.length === 0) this.byIp.delete(ip);
-      else this.byIp.set(ip, mine);
-      untils.push(this.blockedUntil(mine, this.limits.perIp));
-    }
-    const until = Math.max(...untils.map((u) => u ?? 0));
-    return until > now ? Math.ceil((until - now) / 1000) : null;
+    const list = this.recent(ip, now);
+    if (list.length < this.limits.perIp) return null;
+    const pivot = list[list.length - this.limits.perIp] ?? now;
+    return Math.max(1, Math.ceil((pivot + this.limits.windowMs - now) / 1000));
   }
 
-  recordFailure(ip: string | null): void {
+  recordFailure(ip: string): void {
     const now = this.now();
-    this.global.push(now);
-    if (ip !== null) this.byIp.set(ip, [...(this.byIp.get(ip) ?? []), now]);
+    this.byIp.set(ip, [...this.recent(ip, now), now]);
     // why: bound memory under a spray of source addresses.
-    if (this.byIp.size > 10_000) {
-      for (const [k, v] of this.byIp) if (this.recent(v, now).length === 0) this.byIp.delete(k);
-    }
+    if (this.byIp.size > 10_000) for (const k of [...this.byIp.keys()]) this.recent(k, now);
   }
 }
+
+/** The bucket of a request whose client IP is not known. */
+export const UNKNOWN_IP = 'unknown';
 
 /** Spec §4: `X-Forwarded-For` only when `TRUST_PROXY=true` (its last entry, appended by the proxy), else the socket. */
 export function clientIpFrom(config: Config): (c: Context<AppEnv>) => string | null {
@@ -1585,30 +2237,31 @@ export interface AuthGateOptions {
 }
 
 /**
- * Spec §4: everything except the public `GET /api/health` needs auth, static files included.
- * Credentials are evaluated only when the source is not rate-limited; a wrong password counts
- * on every route (so the public health route cannot probe passwords); a request without credentials is never counted.
+ * Spec §4: everything except the public `GET /api/health` needs auth, static files included. A valid credential is
+ * accepted whatever the limiter says (decision 54); a wrong one from a source over its limit is 429 with Retry-After,
+ * otherwise it counts and is 401 — on every route, the public health route included, so it cannot probe passwords. A
+ * request without credentials is never counted.
  */
 export function basicAuthGate(o: AuthGateOptions): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const auth = o.config.auth;
     if (auth === null) {
-      // why: config refuses this on a non-loopback bind unless ALLOW_UNAUTHENTICATED=true (spec §4).
+      // why: config refuses this on a non-loopback bind unless ALLOW_UNAUTHENTICATED=true (spec §4); bootApp re-asserts it.
       c.set('authenticated', true);
       return next();
     }
     const isPublic = o.publicKeys.has(`${c.req.method} ${c.req.path}`);
     const header = c.req.header('authorization');
     if (header !== undefined) {
-      const ip = o.clientIp(c);
+      if (credentialsMatch(header, auth) === 'valid') {
+        c.set('authenticated', true);
+        return next();
+      }
+      const ip = o.clientIp(c) ?? UNKNOWN_IP;
       const retry = o.limiter.retryAfterSeconds(ip);
       if (retry !== null) {
         c.header('Retry-After', String(retry));
         return c.json(envelope('auth_rate_limited', API_TEXT.rateLimited(retry)), 429);
-      }
-      if (credentialsMatch(header, auth) === 'valid') {
-        c.set('authenticated', true);
-        return next();
       }
       o.limiter.recordFailure(ip);
     }
@@ -1643,8 +2296,8 @@ export function securityHeaders() {
 `apps/api/src/middleware/hardening.ts` (new file):
 
 ```ts
-/** Spec §4 request hardening: Host allowlist, Origin check, JSON and X-Requested-With on mutating calls. */
-import type { Config } from '@gmt/core';
+/** Spec §4 request hardening: Host allowlist, Origin check, JSON and X-Requested-With on mutating calls; no caching. */
+import type { Config, Logger } from '@gmt/core';
 import type { Context, MiddlewareHandler } from 'hono';
 import { envelope } from '../errors.js';
 import type { AppEnv } from '../routes/types.js';
@@ -1653,28 +2306,28 @@ import { API_TEXT } from '../text.js';
 type Exempt = (c: Context<AppEnv>) => boolean;
 const MUTATING = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
-/** Spec §4 `ALLOWED_HOSTS`: rejection names the header value and the variable. The public GET /api/health is exempt. */
-export function hostAllowlist(config: Config, exempt: Exempt): MiddlewareHandler<AppEnv> {
-  const allowed = new Set(config.allowedHosts.map((h) => h.toLowerCase()));
+/** True when `host` is one of ALLOWED_HOSTS (case-insensitive). */
+export function hostAllowed(config: Config, host: string | undefined): boolean {
+  return host !== undefined && config.allowedHosts.some((h) => h.toLowerCase() === host.toLowerCase());
+}
+
+/**
+ * Spec §4 `ALLOWED_HOSTS`: the rejection names the received Host and the variable, never the allowed values (plan
+ * decision 54); the values go to the log for the operator. The public GET /api/health is exempt.
+ */
+export function hostAllowlist(config: Config, exempt: Exempt, log: Logger): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     if (exempt(c)) return next();
-    const host = c.req.header('host') ?? '';
-    if (!allowed.has(host.toLowerCase())) {
-      return c.json(
-        envelope(
-          'host_not_allowed',
-          API_TEXT.hostRejected(host === '' ? '(none)' : host, config.allowedHosts),
-        ),
-        403,
-      );
-    }
-    return next();
+    const host = c.req.header('host');
+    if (hostAllowed(config, host)) return next();
+    log.warn({ host: host ?? null, allowedHosts: config.allowedHosts }, 'Host not in ALLOWED_HOSTS');
+    const shown = host === undefined || host === '' ? '(none)' : host;
+    return c.json(envelope('host_not_allowed', API_TEXT.hostRejected(shown)), 403);
   };
 }
 
 /** Spec §4: `Origin`, when present, must name an allowed host. */
 export function originCheck(config: Config, exempt: Exempt): MiddlewareHandler<AppEnv> {
-  const allowed = new Set(config.allowedHosts.map((h) => h.toLowerCase()));
   return async (c, next) => {
     const origin = c.req.header('origin');
     if (origin === undefined || exempt(c)) return next();
@@ -1684,12 +2337,16 @@ export function originCheck(config: Config, exempt: Exempt): MiddlewareHandler<A
     } catch {
       host = origin; // why: "null" and garbage are compared as-is, so they never match
     }
-    if (!allowed.has(host.toLowerCase()))
-      return c.json(
-        envelope('origin_not_allowed', API_TEXT.originRejected(origin, config.allowedHosts)),
-        403,
-      );
-    return next();
+    if (hostAllowed(config, host)) return next();
+    return c.json(envelope('origin_not_allowed', API_TEXT.originRejected(origin)), 403);
+  };
+}
+
+/** Authenticated API responses are private: never cached by a browser or a proxy (review SEC-8). */
+export function noStore(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    await next();
+    c.header('Cache-Control', 'no-store');
   };
 }
 
@@ -1737,29 +2394,34 @@ export function mountStatic(app: Hono<AppEnv>, webRoot: string): void {
 import { apiContract } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import { type Context, Hono } from 'hono';
-import { every } from 'hono/combine';
-import { notFound, onError } from './errors.js';
+import { bodyLimit } from 'hono/body-limit';
+import { envelope, notFound, onError } from './errors.js';
 import { basicAuthGate, clientIpFrom, FailedAuthLimiter } from './middleware/auth.js';
-import { hostAllowlist, mutatingRequestCheck, originCheck } from './middleware/hardening.js';
+import { hostAllowlist, mutatingRequestCheck, noStore, originCheck } from './middleware/hardening.js';
 import { securityHeaders } from './middleware/headers.js';
-import { readInput, validatorsFor } from './middleware/validate.js';
+import { NO_INPUT } from './routes/define.js';
 import { HANDLERS } from './routes/index.js';
 import {
   API_PREFIX,
   type AppEnv,
+  type HttpToolRunners,
   OWNED_ELSEWHERE,
+  type RawInput,
   type RouteContext,
-  type ToolRunners,
 } from './routes/types.js';
 import { mountStatic } from './static.js';
+import { API_TEXT } from './text.js';
 import type { Ports } from './wiring.js';
 
 export { API_PREFIX };
 
+/** The largest request body the api reads (review SEC-1): a definition is a few kilobytes; nothing needs more. */
+export const MAX_BODY_BYTES = 64 * 1024;
+
 export interface AppOptions {
   /** Directory of the built SPA (`apps/web/dist`); null serves no static files. */
   webRoot?: string | null;
-  tools?: ToolRunners;
+  tools?: HttpToolRunners;
   /** Source IP for the failed-auth limit; tests inject it, production derives it from the socket or the proxy. */
   clientIp?: (c: Context<AppEnv>) => string | null;
   /** The route table to mount; defaults to `apiContract.ROUTES`. Tests pass a modified table. */
@@ -1770,22 +2432,42 @@ export function publicRouteKeys(routes: readonly apiContract.RouteDef[]): Set<st
   return new Set(routes.filter((r) => r.auth === 'public').map((r) => `${r.method} ${r.path}`));
 }
 
+/** The JSON body of a route that takes one: undefined when empty, a 400 envelope when it is not JSON. */
+async function readBody(c: Context<AppEnv>): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  const text = await c.req.text();
+  if (text.trim() === '') return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /**
  * The single HTTP surface (spec §10): one Hono app mounting every ROUTES entry from `@gmt/core` api-contract (paths
- * carry `/api`) with zod validation, the error envelope, the spec §4 hardening and the auth gate.
+ * carry `/api`), each body and query validated once by its handler against the entry's own schemas (decision 54), the
+ * error envelope, the spec §4 hardening and the auth gate. A handler whose schemas are not its ROUTES entry's refuses
+ * to build.
  */
 export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}): Hono<AppEnv> {
   const routes = options.routes ?? apiContract.ROUTES;
-  const ctx: RouteContext = { ports, engine, tools: options.tools ?? {}, toolInFlight: { name: null } };
+  const ctx: RouteContext = {
+    ports,
+    engine,
+    tools: options.tools ?? {},
+    toolInFlight: { name: null },
+    busy: new Set(),
+  };
   const app = new Hono<AppEnv>();
   app.onError(onError(ports.log, ports.secrets));
   app.notFound(notFound);
   const publicKeys = publicRouteKeys(routes);
   const isPublic = (c: Context<AppEnv>) => publicKeys.has(`${c.req.method} ${c.req.path}`);
   // why: ROUTES paths carry /api, so the public key is 'GET /api/health'.
-  // Order (spec §4): headers on everything → Host → Origin → auth → JSON + X-Requested-With on mutating API calls.
+  // Order (spec §4): headers on everything → Host → Origin → auth → body size, JSON + X-Requested-With and no-store
+  // on API calls.
   app.use('*', securityHeaders());
-  app.use('*', hostAllowlist(ports.config, isPublic));
+  app.use('*', hostAllowlist(ports.config, isPublic, ports.log));
   app.use('*', originCheck(ports.config, isPublic));
   app.use(
     '*',
@@ -1796,15 +2478,37 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
       clientIp: options.clientIp ?? clientIpFrom(ports.config),
     }),
   );
+  app.use(
+    `${API_PREFIX}/*`,
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) => c.json(envelope('body_too_large', API_TEXT.bodyTooLarge), 413),
+    }),
+  );
+  app.use(`${API_PREFIX}/*`, noStore());
   app.use(`${API_PREFIX}/*`, mutatingRequestCheck());
   for (const route of routes) {
     const key = `${route.method} ${route.path}`;
     const handler = HANDLERS[key];
     // why: Task 8.15 makes mounting strict once every handler exists; until then an unmapped entry answers 404.
     if (handler === undefined || OWNED_ELSEWHERE.has(key)) continue;
-    app.on(route.method, route.path, every(...validatorsFor(route)), async (c) =>
-      handler(c, await readInput(c, route), ctx),
-    );
+    // why: the handler validates with the schemas it was typed against; they must be the entry's own objects.
+    if (handler.request !== (route.request ?? NO_INPUT) || handler.query !== (route.query ?? NO_INPUT))
+      throw new Error(`handler for ${key} validates with schemas other than its ROUTES entry's`);
+    app.on(route.method, route.path, async (c) => {
+      let body: unknown;
+      if (route.request !== undefined) {
+        const read = await readBody(c);
+        if (!read.ok) return c.json(envelope('validation', API_TEXT.malformedJson), 400);
+        body = read.value;
+      }
+      const raw: RawInput = {
+        body,
+        query: route.query === undefined ? undefined : c.req.query(),
+        params: c.req.param(),
+      };
+      return handler.handle(c, raw, ctx);
+    });
   }
   if (options.webRoot) mountStatic(app, options.webRoot);
   return app;
@@ -1846,14 +2550,18 @@ export function assetPaths(): AssetPaths {
 `apps/api/src/bootstrap/lock.ts` (new file):
 
 ```ts
-/** Spec §7 `app_lock` acquisition policy for the app holder. */
-import type { Clock, IsoDateTime, Logger } from '@gmt/core';
-import type { AppLock } from '@gmt/db';
+/** Spec §7 `app_lock` for the app holder, judged read-only before anything touches the database (plan decision 53). */
+import type { Clock, Logger, Secret } from '@gmt/core';
+import { readOnlyLockState } from '@gmt/db';
+import { safeMessage } from '../safeMessage.js';
 import { EXIT } from '../tools/types.js';
 
 /** Spec §7: a fresh tool lock makes the app wait up to 60 s, then refuse. */
 export const TOOL_LOCK_WAIT_MS = 60_000;
-/** Spec §7: a fresh app lock makes the app wait up to 90 s (three missed 30 s beats), then refuse if still heartbeated. */
+/**
+ * Spec §7: a fresh app lock is waited on up to 90 s (three missed 30 s beats): a crashed app's lock goes stale inside
+ * that time; one still being heartbeated after it belongs to a second live app, which is refused (decision 53).
+ */
 export const APP_LOCK_WAIT_MS = 90_000;
 export const LOCK_POLL_MS = 1_000;
 const LOG_EVERY_MS = 10_000;
@@ -1867,52 +2575,84 @@ export class LockRefusedError extends Error {
   }
 }
 
+/** The lock could not be read at all (not a database, unreadable file); exit code 73, as the tool bootstrap has it. */
+export class LockUnreadableError extends Error {
+  readonly exitCode = EXIT.preflightImpossible;
+  constructor(message: string) {
+    super(message);
+    this.name = 'LockUnreadableError';
+  }
+}
+
 export interface LockWaitDeps {
-  lock: AppLock;
-  inspect: () => { holder: 'app' | 'tool'; heartbeatAt: IsoDateTime } | null;
+  databasePath: string;
   clock: Clock;
   sleep: (ms: number) => Promise<void>;
   log: Logger;
+  secrets: readonly Secret[];
 }
 
-const ms = (iso: IsoDateTime): number => Date.parse(iso);
 const seconds = (v: number): number => Math.round(v / 1000);
 
 /**
- * The app holder's acquisition policy (spec §7): poll every second. A fresh `tool` lock: refuse once 60 s have passed.
- * A fresh `app` lock: wait, logging its age every 10 s; WP3's `acquire` takes it over at once whenever it has gone stale
- * (three missed 30 s beats); if it is still being heartbeated after 90 s, refuse (two live apps). Liveness is judged by
- * heartbeat age inside `acquire`, never by pid.
+ * Plan decision 53: before any backup or migration, the app reads `app_lock` read-only (WP3's `readOnlyLockState`, as
+ * the record tool does) and waits while it is fresh — up to 60 s for a tool, 90 s for another app — polling every
+ * second and logging the holder and the lock's age every 10 s; it returns once the lock is absent or stale, and refuses
+ * with 75 when the wait runs out. A second app started against a live one therefore never backs up or migrates. The
+ * lock itself is taken after the migrations, when the table is sure to exist (`AppLock.acquire`, which also catches a
+ * process that took it in between). why: not `AppLock.acquire`'s own wait (review arch-006): acquire writes the lock
+ * row, so it needs the migrated table, and the point of decision 53 is that nothing writes before the lock is judged.
  */
-export async function acquireAppLockWithWaits(d: LockWaitDeps): Promise<void> {
-  const started = ms(d.clock.now());
+export async function waitForLockFree(d: LockWaitDeps): Promise<void> {
+  const started = Date.parse(d.clock.now());
   let lastLogAt = Number.NEGATIVE_INFINITY;
   for (;;) {
-    if (d.lock.acquire({ waitMs: 0 }) === 'acquired') return;
-    const now = ms(d.clock.now());
+    let state: ReturnType<typeof readOnlyLockState>;
+    try {
+      state = readOnlyLockState(d.databasePath, d.clock);
+    } catch (e) {
+      throw new LockUnreadableError(
+        `cannot read app_lock in ${d.databasePath}: ${safeMessage(e, d.secrets)}; refusing (spec §7)`,
+      );
+    }
+    if (state.state !== 'fresh') return;
+    const now = Date.parse(d.clock.now());
     const waited = now - started;
-    const held = d.inspect();
-    if (held !== null) {
-      const lockAgeMs = now - ms(held.heartbeatAt);
-      if (held.holder === 'tool' && waited >= TOOL_LOCK_WAIT_MS) {
-        throw new LockRefusedError(
-          `app_lock is held by a tool process (heartbeat ${seconds(lockAgeMs)}s ago); waited ${seconds(waited)}s; refusing to start. Start the app when the tool has finished.`,
-        );
-      }
-      if (held.holder === 'app' && waited > APP_LOCK_WAIT_MS) {
-        // why: an ungracefully stopped app stops heartbeating and goes stale within 90 s; a lock that
-        // is still fresh after that belongs to a second live app, and two writers would corrupt the ledger.
-        throw new LockRefusedError(
-          `app_lock is held by another app process that is still heartbeating (${seconds(lockAgeMs)}s ago); refusing to start a second app`,
-        );
-      }
-      if (waited - lastLogAt >= LOG_EVERY_MS) {
-        d.log.warn({ holder: held.holder, lockAgeMs, waitedMs: waited }, 'waiting for app_lock');
-        lastLogAt = waited;
-      }
+    const lockAgeMs = now - Date.parse(state.heartbeatAt);
+    const limit = state.holder === 'tool' ? TOOL_LOCK_WAIT_MS : APP_LOCK_WAIT_MS;
+    // why: strictly past the limit: WP3 calls a lock fresh up to and including 90 s, so a crashed app's lock taken as
+    // the wait began turns stale on the next poll after 90 s, not on the poll at 90 s.
+    if (waited > limit)
+      throw new LockRefusedError(
+        state.holder === 'tool'
+          ? `app_lock is held by a tool process (heartbeat ${seconds(lockAgeMs)}s ago); waited ${seconds(waited)}s; start the app when the tool has finished`
+          : `app_lock is held by another app process that is still heartbeating (${seconds(lockAgeMs)}s ago); refusing to start a second app`,
+      );
+    if (waited - lastLogAt >= LOG_EVERY_MS) {
+      d.log.warn({ holder: state.holder, lockAgeMs, waitedMs: waited }, 'waiting for app_lock');
+      lastLogAt = waited;
     }
     await d.sleep(LOCK_POLL_MS);
   }
+}
+```
+
+`apps/api/src/bootstrap/seed.ts` (new file):
+
+```ts
+/** Spec §7 airport seeding, shared by the app and the tool bootstraps (review arch-007). */
+import { loadAirportsDataset, seedAirports } from '@gmt/db';
+import type { Ports } from '../wiring.js';
+
+/**
+ * Seeds after migration when the `airports` table is empty or the vendored dataset's version changed; local files, no
+ * network (spec §7). `report` receives one line when it seeds.
+ */
+export function seedIfNeeded(ports: Ports, dataDir: string, report: (line: string) => void): void {
+  const dataset = loadAirportsDataset(dataDir);
+  if (ports.repos.airports.count() > 0 && ports.repos.airports.datasetVersion() === dataset.version) return;
+  const r = seedAirports(ports.db, dataset);
+  report(`airports seeded: ${r.inserted} rows, dataset ${r.datasetVersion}`);
 }
 ```
 
@@ -1921,31 +2661,28 @@ export async function acquireAppLockWithWaits(d: LockWaitDeps): Promise<void> {
 ```ts
 /**
  * The app bootstrap (spec §4, §5.5, §7, §12, §13): the process that serves the API and the SPA and runs the engine.
- * Order (plan "Wiring and bootstraps"): refuse NODE_ENV=test → data directory writable → backup preflight when
- * migrations are pending (WP4b's preflight.ts, decision 32) → buildPorts (migrations) → seed + airport sanity check →
- * app_lock('app') with waits and a 30 s heartbeat → createEngine → engine.boot() → serve. Shutdown: stop accepting →
- * engine.shutdown() → wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order).
+ * Order (plan "Wiring and bootstraps", decision 53): refuse NODE_ENV=test → re-assert the auth invariants → data
+ * directory writable → `app_lock` read-only, waiting while it is fresh → backup preflight when migrations are pending
+ * (WP4b's preflight.ts, decision 32) → buildPorts (migrations) → seed + airport sanity check → `AppLock('app')` and the
+ * 30 s heartbeat → createEngine → engine.boot() → serve. Shutdown: stop accepting → engine.shutdown() →
+ * wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order). A boot that fails after taking the lock releases
+ * it and stops the heartbeat before the database closes.
  */
 import { type Clock, type Config, type Logger, type Secret, systemClock } from '@gmt/core';
-import {
-  AppLock,
-  HEARTBEAT_INTERVAL_MS,
-  loadAirportsDataset,
-  sanityCheckAirports,
-  seedAirports,
-} from '@gmt/db';
+import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports } from '@gmt/db';
 import { createEngine, type Engine, LogNotifier } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp } from '../app.js';
 import { createLogger } from '../logger.js';
-import type { AppEnv, ToolRunners } from '../routes/types.js';
+import type { AppEnv, HttpToolRunners } from '../routes/types.js';
 import { safeMessage } from '../safeMessage.js';
 import { EXIT } from '../tools/types.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
-import { acquireAppLockWithWaits } from './lock.js';
+import { LockRefusedError, waitForLockFree } from './lock.js';
 import { type AssetPaths, assetPaths } from './paths.js';
 import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
+import { seedIfNeeded } from './seed.js';
 
 /** A boot refusal: logged with its message; start.ts exits with `exitCode` (the plan's single exit-code table). */
 export class BootError extends Error {
@@ -1957,30 +2694,6 @@ export class BootError extends Error {
   }
 }
 
-/** Timers the bootstrap uses for the heartbeat; tests inject their own to observe it. */
-export interface Timers {
-  setInterval(fn: () => void, ms: number): unknown;
-  clearInterval(handle: unknown): void;
-}
-
-/** Node's timers, the heartbeat unref'd so it never keeps the process alive. */
-function nodeTimers(): Timers {
-  const handles = new Map<unknown, NodeJS.Timeout>();
-  return {
-    setInterval: (fn, ms) => {
-      const t = setInterval(fn, ms);
-      t.unref();
-      const key = {};
-      handles.set(key, t);
-      return key;
-    },
-    clearInterval: (key) => {
-      clearInterval(handles.get(key));
-      handles.delete(key);
-    },
-  };
-}
-
 export interface BootDeps {
   config: Config;
   log: Logger;
@@ -1989,11 +2702,9 @@ export interface BootDeps {
   listen: boolean;
   assets: AssetPaths;
   /** Builds the in-process tool runners once ports exist (`main` passes `inProcessTools`). */
-  tools?: (ports: Ports) => ToolRunners;
+  tools?: (ports: Ports) => HttpToolRunners;
   /** Injected by tests to advance a fixed clock instead of waiting for app_lock. */
   sleep?: (ms: number) => Promise<void>;
-  /** Injected by tests to observe the heartbeat; defaults to unref'd Node timers. */
-  timers?: Timers;
 }
 
 export interface RunningApp {
@@ -2002,6 +2713,30 @@ export interface RunningApp {
   engine: Engine;
   port: number | null;
   close(): Promise<void>;
+}
+
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
+
+/**
+ * Spec §4, review SEC-3: the invariants `loadConfigFromEnv` enforces, re-asserted on the injected config, so no caller
+ * of `bootApp` can serve without auth on a public bind or with no allowed host. 78, as a config error.
+ */
+export function assertAuthInvariants(config: Config, log: Logger): void {
+  if (config.allowedHosts.length === 0)
+    throw new BootError('ALLOWED_HOSTS is empty; refusing to serve', EXIT.badConfig);
+  if (config.auth !== null && config.auth.pass.reveal().length < 12)
+    throw new BootError('APP_BASIC_AUTH_PASS must be at least 12 characters', EXIT.badConfig);
+  if (config.auth === null && !LOOPBACK.test(config.bindAddress)) {
+    if (!config.allowUnauthenticated)
+      throw new BootError(
+        `binding ${config.bindAddress} without auth needs ALLOW_UNAUTHENTICATED=true (spec §4)`,
+        EXIT.badConfig,
+      );
+    log.warn(
+      { bindAddress: config.bindAddress },
+      'serving without auth on a non-loopback bind (ALLOW_UNAUTHENTICATED)',
+    );
+  }
 }
 
 function listen(app: Hono<AppEnv>, config: Config): Promise<{ server: ServerType; port: number }> {
@@ -2017,35 +2752,38 @@ function closeServer(server: ServerType | null): Promise<void> {
   return new Promise((resolve) => (server === null ? resolve() : server.close(() => resolve())));
 }
 
-/** Spec §7: seed after migration when `airports` is empty or the dataset version changed; local files, no network. */
-function seedIfNeeded(ports: Ports, dir: string, log: Logger): void {
-  const dataset = loadAirportsDataset(dir);
-  if (ports.repos.airports.count() > 0 && ports.repos.airports.datasetVersion() === dataset.version) return;
-  const r = seedAirports(ports.db, dataset);
-  log.info({ inserted: r.inserted, datasetVersion: r.datasetVersion }, 'airports seeded');
-}
+const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Everything the app process does at start, with config injected (spec §5.5 boot matrix), in the plan's order.
- * Every refusal is a BootError (or LockRefusedError) carrying the plan's exit code: 70 NODE_ENV=test, 73 an unwritable
- * data or backups directory, 74 a failed backup, 75 app_lock refused, 1 anything else (a failed sanity check).
+ * Everything the app process does at start, with config injected (spec §5.5 boot matrix), in the order above. Every
+ * refusal carries the plan's exit code: 70 NODE_ENV=test, 78 a broken auth invariant, 73 an unwritable data or
+ * backups directory or an unreadable lock, 75 app_lock held by a live process, 74 a failed backup, 1 anything else.
  */
 export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   const { config, log } = deps;
   const clock = deps.clock ?? systemClock;
-  const timers = deps.timers ?? nodeTimers();
   const secrets: readonly Secret[] = collectSecrets(config);
   // why: spec §5.5: both bootstraps refuse NODE_ENV=test, so a test config can never serve traffic.
   if (config.nodeEnv === 'test')
     throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5)', EXIT.refusedTestEnv);
+  assertAuthInvariants(config, log);
   const dataDir = dataDirRefusal(config.databasePath);
   if (dataDir !== null) throw new BootError(dataDir, EXIT.preflightImpossible);
+  await waitForLockFree({
+    databasePath: config.databasePath,
+    clock,
+    sleep: deps.sleep ?? realSleep,
+    log,
+    secrets,
+  });
   const backup = backupBeforeMigrations(config.databasePath, deps.assets.migrationsDir, clock, secrets);
   if (!backup.ok) throw new BootError(backup.message, backup.code);
   if (backup.line !== null) log.info({}, backup.line);
   const ports = buildPorts(config, { log, clock, migrationsDir: deps.assets.migrationsDir });
+  const lock = new AppLock(ports.db, 'app', clock, log);
+  let heartbeat: NodeJS.Timeout | null = null;
   try {
-    seedIfNeeded(ports, deps.assets.airportsDataDir, log);
+    seedIfNeeded(ports, deps.assets.airportsDataDir, (line) => log.info({}, line));
     // Spec §7: at least 5,000 airports with tz, and every airport an enabled definition references exists.
     const referenced = ports.repos.definitions
       .list()
@@ -2053,15 +2791,10 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       .flatMap((d) => [...d.origins, ...d.destinations]);
     const sanity = sanityCheckAirports(ports.db, referenced);
     if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`, EXIT.failed);
-    const lock = new AppLock(ports.db, 'app', clock, log);
-    await acquireAppLockWithWaits({
-      lock,
-      inspect: () => AppLock.inspect(ports.db),
-      clock,
-      sleep: deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
-      log,
-    });
-    const heartbeat = timers.setInterval(() => {
+    // why: the read-only wait found the lock free; a process that took it since is caught here, without a second wait.
+    if (lock.acquire({ waitMs: 0 }) === 'refused')
+      throw new LockRefusedError('app_lock was taken by another process during boot; refusing to start');
+    heartbeat = setInterval(() => {
       try {
         lock.heartbeat();
       } catch (e) {
@@ -2069,11 +2802,13 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         log.error({ err: { message: safeMessage(e, secrets) } }, 'app_lock heartbeat failed');
       }
     }, HEARTBEAT_INTERVAL_MS);
+    heartbeat.unref();
     // why: WP11 adds `{ alerts: runAlerts }` to these options; until then the engine's default noAlerts step runs.
     const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
     await engine.boot();
     const app = createApp(ports, engine, { webRoot: deps.assets.webRoot, tools: deps.tools?.(ports) ?? {} });
     const bound = deps.listen ? await listen(app, config) : null;
+    const beat = heartbeat;
     let closed = false;
     return {
       app,
@@ -2085,7 +2820,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         closed = true;
         await closeServer(bound?.server ?? null); // stop accepting
         await engine.shutdown();
-        timers.clearInterval(heartbeat);
+        clearInterval(beat);
         // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
         ports.db.raw.pragma('wal_checkpoint(TRUNCATE)');
         lock.release();
@@ -2094,6 +2829,10 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       },
     };
   } catch (err) {
+    // why: review arch-008: a boot that failed after the lock was taken must not leave it fresh for 90 s or a heartbeat
+    // firing against a closed database.
+    if (heartbeat !== null) clearInterval(heartbeat);
+    lock.release();
     ports.db.close();
     throw err;
   }
@@ -2145,39 +2884,43 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
 import { safeMessage } from '../safeMessage.js';
 import { EXIT } from '../tools/types.js';
 import { BootError, main } from './app.js';
-import { LockRefusedError } from './lock.js';
+import { LockRefusedError, LockUnreadableError } from './lock.js';
 
 main(process.env).catch((err: unknown) => {
   // why: boot errors are already URL- and secret-free; a stray error is stripped of URLs here before it is printed.
   process.stderr.write(`${safeMessage(err, [])}\n`);
-  // why: BootError and LockRefusedError carry the plan's exit code (70, 73, 74, 75, 78); anything else is 1.
-  process.exit(err instanceof BootError || err instanceof LockRefusedError ? err.exitCode : EXIT.failed);
+  // why: BootError and the lock errors carry the plan's exit code (70, 73, 74, 75, 78); anything else is 1.
+  process.exit(
+    err instanceof BootError || err instanceof LockRefusedError || err instanceof LockUnreadableError
+      ? err.exitCode
+      : EXIT.failed,
+  );
 });
 ```
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.spawn.test.ts test/defaults.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 6 tests: the child logs `"msg":"listening"`, the probe's `GET /api/providers` is 200 without `fixture` and with `synthetic: false`, the child exits 0 on SIGTERM, the fixture constructor and the synthetic insert both throw, the refusals exit 70 and 78; typecheck clean.
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.spawn.test.ts test/defaults.test.ts test/bootstrap/tool.test.ts && pnpm --filter @gmt/api typecheck`
+Expected: PASS: 6 tests in the two new files (the child logs `"msg":"listening"`, the probe's `GET /api/providers` is 200 without `fixture` and with `synthetic: false`, the child exits 0 on SIGTERM, the fixture constructor and the synthetic insert both throw, the refusals exit 70 and 78), and WP4b's 47 tool-bootstrap tests still pass over the shared seeding; typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: the app bootstrap, the server core and the production-boot-lacks-fixture spawn test"
+git add -A apps/api packages && git commit -m "wp08: the app bootstrap with decision 53's lock-first order, the server core and the production-boot-lacks-fixture spawn test"
 ```
 
-### Task 8.2: The route-test harness; the injected-config boot matrix, `NODE_ENV=test` refusal, data directory, password length, airport sanity check
+### Task 8.2: The route-test helpers; the injected-config boot matrix, `NODE_ENV=test` refusal, auth invariants, data directory, password length, airport sanity check
 
 **Files:**
 - Test: `apps/api/test/bootstrap/app.matrix.test.ts`
-- Create: `apps/api/test/helpers/harness.ts`
+- Create: `apps/api/test/helpers/harness.ts`, `apps/api/test/helpers/contract.ts`, `apps/api/test/helpers/examples.ts`
 
 **Interfaces:**
-- Consumes: `bootApp`, `createApp` (Task 8.1); `buildPorts` under `NODE_ENV=test` and `:memory:`, `loadConfigFromEnv`, `cleanEnv`, `SENTINEL_AUTH` (WP4b); `createEngine`, `LogNotifier` (WP7); the vendored airports files under `AIRPORTS_DATA_DIR` (WP3). Produces (test-only): `createHarness`, `Harness`, `harnessEnv`, `captureLines`, `basic`, `T0`, `HOST`, `AUTH_USER` — the route-test engine: real ports over an in-memory database, the engine, the fixture provider reached in-process through http-kit's gated `inProcessHosts` seam, the app driven with `app.request()`; it imports no other package's test files and needs no `msw`.
+- Consumes: `bootApp`, `createApp` (Task 8.1); `buildPorts` under `NODE_ENV=test` and `:memory:`, `loadConfigFromEnv`, `cleanEnv`, `SENTINEL_AUTH` (WP4b); `createEngine`, `LogNotifier` (WP7); `fixtureProvider` (WP4); the vendored airports files under `AIRPORTS_DATA_DIR` (WP3). Produces (test-only): `createHarness`, `Harness`, `harnessEnv`, `captureLines`, `basic`, `T0`, `HOST`, `AUTH_USER` — real ports over an in-memory database seeded with the London and New York metro members only (review TS-4: each route test builds a harness in milliseconds instead of loading the full airports table; boot tests seed the full table and name their own `BOOT_TIMEOUT_MS`), the engine, the fixture provider reached in-process through http-kit's gated `inProcessHosts` seam, the app driven with `app.request()`, and an `afterEach` that closes every harness a test opened, idempotently, so no file leaks a database on a failure path (review TS-8); `expectContract(res, method, path, schema)` (parses the body against its ROUTES entry and returns it typed, so no test casts a body), `expectEnvelopeOrContract`, `errorOf`; `exampleDefinitionInput`, `SMALL_WINDOW`, `LHR`, `LGW`, `JFK`, `EWR`.
 
-Rules (spec §5.5, §4, §7): the gate decides whether `fixture` is offered, through `GET /api/providers` and the ports alike; `NODE_ENV=test` is refused before the database is touched (70); an unwritable data directory is 73; a password under 12 characters is a config error naming `APP_BASIC_AUTH_PASS`; a failed airport sanity check fails boot (1).
+Rules (spec §5.5, §4, §7; review TS-5): the gate decides whether `fixture` is offered, through `GET /api/providers` and the ports alike, for production with and without the phrase, development in and out of a container, the wrong phrase, and a plain `.db` path; outside the gate the fixture constructor throws; `NODE_ENV=test` is refused before the database is touched (70); `bootApp` re-asserts the auth invariants on an injected config (78) and accepts `ALLOW_UNAUTHENTICATED=true` with a warning; config refuses no auth on a public bind and a half-set credential pair; an unwritable data directory is 73; a password under 12 characters is a config error naming `APP_BASIC_AUTH_PASS`; a failed airport sanity check fails boot (1). Task 8.9 adds the matrix row that needs the definitions route.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the test**
 
 `apps/api/test/helpers/harness.ts` (new file):
 
@@ -2187,9 +2930,16 @@ Rules (spec §5.5, §4, §7): the gate decides whether `fixture` is offered, thr
 // (buildPorts wires it), so no request leaves the process and no msw is imported here.
 import { Writable } from 'node:stream';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
-import { AIRPORTS_DATA_DIR, loadAirportsDataset, MIGRATIONS_DIR, seedAirports } from '@gmt/db';
+import {
+  AIRPORTS_DATA_DIR,
+  type AirportsDataset,
+  loadAirportsDataset,
+  MIGRATIONS_DIR,
+  seedAirports,
+} from '@gmt/db';
 import { createEngine, type Engine, LogNotifier } from '@gmt/engine';
 import type { Hono } from 'hono';
+import { afterEach } from 'vitest';
 import { type AppOptions, createApp } from '../../src/app.js';
 import { createLogger } from '../../src/logger.js';
 import type { AppEnv } from '../../src/routes/types.js';
@@ -2216,7 +2966,7 @@ export function basic(user: string, pass: string): string {
 }
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'OPTIONS';
   json?: unknown;
   body?: string;
   headers?: Record<string, string>;
@@ -2253,8 +3003,26 @@ export function harnessEnv(env: Record<string, string> = {}): Record<string, str
   });
 }
 
-/** Parsed once per test file: every harness seeds the same vendored dataset (spec §7), so only the insert repeats. */
-let dataset: ReturnType<typeof loadAirportsDataset> | undefined;
+/**
+ * The airports a route test needs: every airport of the worked example's metros (London, New York), parsed once per
+ * test file. why: route tests never run the 5,000-row sanity check (the boot tests seed the full table), and seeding
+ * the full table into every in-memory harness made the suite slow enough to time out on a loaded machine (review
+ * TS-4); with the metros' members present, metro-code validation and the airports route behave as with the full table.
+ */
+let dataset: AirportsDataset | undefined;
+function routeTestAirports(): AirportsDataset {
+  if (dataset !== undefined) return dataset;
+  const full = loadAirportsDataset(AIRPORTS_DATA_DIR);
+  const keep = new Set([...(full.metros.LON ?? []), ...(full.metros.NYC ?? [])]);
+  dataset = { ...full, airports: full.airports.filter((a) => keep.has(a.iata)) };
+  return dataset;
+}
+
+/** Every harness still open; closed after each test whatever the test did (review TS-8). */
+const open: Harness[] = [];
+afterEach(async () => {
+  for (const h of open.splice(0)) await h.close();
+});
 
 export async function createHarness(
   opts: { env?: Record<string, string>; app?: AppOptions } = {},
@@ -2264,12 +3032,12 @@ export async function createHarness(
   const log = createLogger(config, { destination: captureLines(logLines), secrets: collectSecrets(config) });
   const clock = fixedClock(T0);
   const ports = buildPorts(config, { log, clock, migrationsDir: MIGRATIONS_DIR });
-  dataset ??= loadAirportsDataset(AIRPORTS_DATA_DIR);
-  seedAirports(ports.db, dataset);
+  seedAirports(ports.db, routeTestAirports());
   const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
   await engine.boot();
   const app = createApp(ports, engine, { webRoot: null, ...opts.app });
-  return {
+  let closed = false;
+  const harness: Harness = {
     ports,
     engine,
     app,
@@ -2292,567 +3060,16 @@ export async function createHarness(
       });
     },
     close: async () => {
+      if (closed) return;
+      closed = true;
       await engine.shutdown();
       ports.db.close();
     },
   };
+  open.push(harness);
+  return harness;
 }
 ```
-
-`apps/api/test/bootstrap/app.matrix.test.ts` (new file):
-
-```ts
-// Spec §5.5 injected-config boot matrix; spec §4 password length; spec §7 the airport sanity check fails boot.
-import { chmodSync, copyFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { apiContract, FIXTURE_OPT_IN_PHRASE } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
-import { bootApp, type RunningApp } from '../../src/bootstrap/app.js';
-import { type AssetPaths, assetPaths } from '../../src/bootstrap/paths.js';
-import { createLogger } from '../../src/logger.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
-import { cleanEnv, SENTINEL_AUTH } from '../helpers/env.js';
-import { basic } from '../helpers/harness.js';
-import { tempDir } from '../helpers/tmp.js';
-
-function envFor(overrides: Record<string, string>): Record<string, string> {
-  return cleanEnv({
-    NODE_ENV: 'production',
-    DATABASE_PATH: join(tempDir('gmt-matrix-'), 'm.fixture.db'),
-    BIND_ADDRESS: '127.0.0.1',
-    PORT: '3000',
-    APP_BASIC_AUTH_USER: 'operator',
-    APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
-    ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
-    LOG_LEVEL: 'error',
-    ...overrides,
-  });
-}
-
-function bootWith(env: Record<string, string>, assets: AssetPaths = assetPaths()): Promise<RunningApp> {
-  return bootApp({
-    config: loadConfigFromEnv(env),
-    log: createLogger({ logLevel: 'error' }),
-    listen: false,
-    assets,
-  });
-}
-
-describe('injected-config boot matrix (spec §5.5)', () => {
-  it.each([
-    // label, env overrides, fixture offered?
-    ['production with the phrase and .fixture.db', {}, false],
-    ['development, phrase, .fixture.db, not in a container', { NODE_ENV: 'development' }, true],
-    ['development in a container', { NODE_ENV: 'development', IN_CONTAINER: '1' }, false],
-    ['development with the wrong phrase', { NODE_ENV: 'development', ALLOW_FIXTURE_PROVIDER: 'yes' }, false],
-    ['development without the phrase', { NODE_ENV: 'development', ALLOW_FIXTURE_PROVIDER: '' }, false],
-  ] as const)('%s → fixture offered: %s', async (_label, overrides, expected) => {
-    const running = await bootWith(envFor(overrides));
-    try {
-      expect(running.ports.providers.some((p) => p.id === 'fixture')).toBe(expected);
-      const res = await running.app.request('http://localhost:3000/api/providers', {
-        headers: { host: 'localhost:3000', authorization: basic('operator', SENTINEL_AUTH) },
-      });
-      expect(res.status).toBe(200);
-      const body = apiContract.providersResponseSchema.parse(await res.json());
-      expect(body.providers.some((p) => p.providerId === 'fixture')).toBe(expected);
-      expect(body.synthetic).toBe(expected);
-    } finally {
-      await running.close();
-    }
-  });
-
-  it('development with the phrase but a plain .db path offers no fixture', async () => {
-    const env = envFor({ NODE_ENV: 'development' });
-    const running = await bootWith({
-      ...env,
-      DATABASE_PATH: String(env.DATABASE_PATH).replace('.fixture.db', '.db'),
-    });
-    try {
-      expect(running.ports.providers.some((p) => p.id === 'fixture')).toBe(false);
-    } finally {
-      await running.close();
-    }
-  });
-
-  it('refuses NODE_ENV=test before touching the database (exit 70)', async () => {
-    const env = envFor({ NODE_ENV: 'test' });
-    const path = String(env.DATABASE_PATH).replace('.fixture.db', '.test.db');
-    await expect(bootWith({ ...env, DATABASE_PATH: path })).rejects.toMatchObject({
-      exitCode: 70,
-      message: expect.stringMatching(/NODE_ENV=test/),
-    });
-  });
-
-  it.skipIf(process.getuid?.() === 0)(
-    'an unwritable data directory fails boot with exit code 73',
-    async () => {
-      const env = envFor({});
-      const dir = dirname(String(env.DATABASE_PATH));
-      chmodSync(dir, 0o500);
-      await expect(bootWith(env)).rejects.toMatchObject({ exitCode: 73 });
-    },
-  );
-
-  it('a password shorter than 12 characters fails boot naming the variable', () => {
-    expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: 'elevenchars' }))).toThrow(
-      /APP_BASIC_AUTH_PASS/,
-    );
-  });
-
-  it('a failed airport sanity check fails boot (exit 1)', async () => {
-    // why: the vendored files cut to ten airports, far below the 5,000 the check requires (spec §7).
-    const source = assetPaths().airportsDataDir;
-    const file = readdirSync(source).find((f) => /^airports\..+\.json$/.test(f)) ?? '';
-    const real = z
-      .looseObject({ airports: z.array(z.unknown()) })
-      .parse(JSON.parse(readFileSync(join(source, file), 'utf8')));
-    const dataDir = tempDir('gmt-airports-');
-    writeFileSync(
-      join(dataDir, 'airports.tiny.json'),
-      JSON.stringify({ ...real, airports: real.airports.slice(0, 10) }),
-    );
-    copyFileSync(join(source, 'metros.json'), join(dataDir, 'metros.json'));
-    await expect(bootWith(envFor({}), { ...assetPaths(), airportsDataDir: dataDir })).rejects.toMatchObject({
-      exitCode: 1,
-      message: expect.stringMatching(/airport sanity check failed/),
-    });
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Mutation: in `apps/api/src/bootstrap/app.ts` delete the two lines `if (config.nodeEnv === 'test')` … `throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5)', EXIT.refusedTestEnv);`.
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.matrix.test.ts`
-Expected: FAIL, 1 of 10: "refuses NODE_ENV=test before touching the database (exit 70)" — `promise resolved "{ app: …" instead of rejecting`.
-
-Revert the mutation.
-
-- [ ] **Step 3: Implement**
-
-Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.matrix.test.ts`
-Expected: PASS, 10 tests (five matrix rows, the plain `.db` path, the refusal, 73, the password, the sanity check).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A apps/api packages && git commit -m "wp08: boot matrix, NODE_ENV=test refusal, data directory, password length and airport sanity tests"
-```
-
-### Task 8.3: `app_lock` waits for the app holder
-
-**Files:**
-- Test: `apps/api/test/bootstrap/app.lock.test.ts`
-
-**Interfaces:**
-- Consumes: `acquireAppLockWithWaits`, `TOOL_LOCK_WAIT_MS`, `APP_LOCK_WAIT_MS` (Task 8.1); `AppLock`, `AppLock.inspect` (WP3); `fixedClock` (core).
-
-Rule (spec §7; plan "Wiring and bootstraps"): poll every second. A fresh `tool` lock: refuse once 60 s have passed (75). A fresh `app` lock: wait, logging its age every 10 s; WP3's `acquire` takes it over at once whenever it has gone stale (three missed 30 s beats); if it is still being heartbeated after 90 s, refuse (two live apps). The test sleeps by advancing a fixed clock.
-
-- [ ] **Step 1: Write the failing test**
-
-`apps/api/test/bootstrap/app.lock.test.ts` (new file):
-
-```ts
-// Spec §7 app_lock: the app holder's waits, the stale takeover and the two-live-apps refusal.
-import { fixedClock } from '@gmt/core';
-import { AppLock, MIGRATIONS_DIR } from '@gmt/db';
-import { describe, expect, it } from 'vitest';
-import { APP_LOCK_WAIT_MS, acquireAppLockWithWaits, TOOL_LOCK_WAIT_MS } from '../../src/bootstrap/lock.js';
-import { createLogger } from '../../src/logger.js';
-import { buildPorts, loadConfigFromEnv } from '../../src/wiring.js';
-import { captureLines, harnessEnv, T0 } from '../helpers/harness.js';
-import { onCleanup } from '../helpers/tmp.js';
-
-function setup(onSleep: (totalMs: number) => void = () => {}) {
-  const config = loadConfigFromEnv(harnessEnv());
-  const clock = fixedClock(T0);
-  const lines: string[] = [];
-  const log = createLogger({ logLevel: 'debug' }, { destination: captureLines(lines) });
-  const ports = buildPorts(config, { log, clock, migrationsDir: MIGRATIONS_DIR });
-  onCleanup(() => ports.db.close());
-  let slept = 0;
-  const sleep = async (ms: number) => {
-    slept += ms;
-    clock.advance(ms);
-    onSleep(slept);
-  };
-  const acquire = () =>
-    acquireAppLockWithWaits({
-      lock: new AppLock(ports.db, 'app', clock, log),
-      inspect: () => AppLock.inspect(ports.db),
-      clock,
-      sleep,
-      log,
-    });
-  return { ports, clock, log, lines, acquire, slept: () => slept };
-}
-
-describe('app_lock waits for the app holder (spec §7)', () => {
-  it('acquires a free lock without waiting', async () => {
-    const s = setup();
-    await s.acquire();
-    expect(s.slept()).toBe(0);
-    expect(AppLock.inspect(s.ports.db)?.holder).toBe('app');
-  });
-
-  it('waits 60 s on a fresh tool lock, then refuses with exit code 75', async () => {
-    const s = setup();
-    expect(new AppLock(s.ports.db, 'tool', s.clock, s.log).acquire({ waitMs: 0 })).toBe('acquired');
-    await expect(s.acquire()).rejects.toMatchObject({ exitCode: 75, message: expect.stringMatching(/tool/) });
-    expect(s.slept()).toBeGreaterThanOrEqual(TOOL_LOCK_WAIT_MS);
-    expect(s.slept()).toBeLessThan(TOOL_LOCK_WAIT_MS + 2_000);
-    expect(AppLock.inspect(s.ports.db)?.holder).toBe('tool');
-  });
-
-  it('acquires as soon as a tool releases within the wait', async () => {
-    let tool: AppLock | undefined;
-    const s = setup((total) => {
-      if (total >= 10_000) tool?.release();
-    });
-    tool = new AppLock(s.ports.db, 'tool', s.clock, s.log);
-    tool.acquire({ waitMs: 0 });
-    await s.acquire();
-    expect(s.slept()).toBeGreaterThanOrEqual(10_000);
-    expect(s.slept()).toBeLessThan(12_000);
-    expect(AppLock.inspect(s.ports.db)?.holder).toBe('app');
-  });
-
-  it("takes over its own previous process's app lock once it goes stale, logging the lock age", async () => {
-    const s = setup();
-    new AppLock(s.ports.db, 'app', s.clock, s.log).acquire({ waitMs: 0 }); // the previous process, now dead
-    const before = AppLock.inspect(s.ports.db);
-    await s.acquire();
-    expect(s.slept()).toBeGreaterThanOrEqual(APP_LOCK_WAIT_MS);
-    expect(s.slept()).toBeLessThanOrEqual(APP_LOCK_WAIT_MS + 2_000);
-    const after = AppLock.inspect(s.ports.db);
-    expect(after?.holder).toBe('app');
-    expect(after?.acquiredAt).not.toBe(before?.acquiredAt);
-    expect(s.lines.some((l) => l.includes('"lockAgeMs"'))).toBe(true);
-  });
-
-  it('refuses after 90 s when another app process is still heartbeating', async () => {
-    let other: AppLock | undefined;
-    const s = setup(() => other?.heartbeat());
-    other = new AppLock(s.ports.db, 'app', s.clock, s.log);
-    other.acquire({ waitMs: 0 });
-    await expect(s.acquire()).rejects.toThrow(/still heartbeating/);
-    expect(s.slept()).toBeGreaterThan(APP_LOCK_WAIT_MS);
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Mutation: in `apps/api/src/bootstrap/lock.ts` change `waited >= TOOL_LOCK_WAIT_MS` to `waited >= APP_LOCK_WAIT_MS`.
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.lock.test.ts`
-Expected: FAIL, 1 of 5: "waits 60 s on a fresh tool lock, then refuses with exit code 75" — `expected 90000 to be less than 62000`.
-
-Revert the mutation.
-
-- [ ] **Step 3: Implement**
-
-Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.lock.test.ts`
-Expected: PASS, 5 tests.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A apps/api packages && git commit -m "wp08: app_lock wait tests: 60 s on a tool lock, stale takeover, two live apps refused"
-```
-
-### Task 8.4: Backup preflight when migrations are pending
-
-**Files:**
-- Test: `apps/api/test/bootstrap/app.backup.test.ts`
-
-**Interfaces:**
-- Consumes: `bootApp` (Task 8.1); `backupsDirFor`, `pendingOnExistingDb` (WP4b `bootstrap/preflight.ts`, decision 32); WP3's `backupDatabase` behind it.
-
-Rule (spec §7 Migrations, §13): the app bootstrap calls WP4b's `backupBeforeMigrations` before `buildPorts` applies anything; a new database file has nothing to back up; a backup lands in `<db dir>/backups` and holds the pre-migration schema; a failed backup refuses boot with 74 and leaves the schema unmigrated; a backups path that is not a directory refuses with 73. A probe migration (a copy of the committed migrations plus one newer journal entry) makes migrations pending without touching the committed tree.
-
-- [ ] **Step 1: Write the failing test**
-
-`apps/api/test/bootstrap/app.backup.test.ts` (new file):
-
-```ts
-// Spec §7 Migrations, §13 Backup: the app bootstrap reuses WP4b's preflight (plan decision 32).
-import { chmodSync, cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { openDatabase } from '@gmt/db';
-import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
-import { bootApp } from '../../src/bootstrap/app.js';
-import { assetPaths } from '../../src/bootstrap/paths.js';
-import { backupsDirFor, pendingOnExistingDb } from '../../src/bootstrap/preflight.js';
-import { createLogger } from '../../src/logger.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
-import { cleanEnv, SENTINEL_AUTH } from '../helpers/env.js';
-import { tempDir } from '../helpers/tmp.js';
-
-function config(dbPath: string) {
-  return loadConfigFromEnv(
-    cleanEnv({
-      NODE_ENV: 'production',
-      DATABASE_PATH: dbPath,
-      BIND_ADDRESS: '127.0.0.1',
-      APP_BASIC_AUTH_USER: 'operator',
-      APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
-      LOG_LEVEL: 'error',
-    }),
-  );
-}
-
-const journalSchema = z.looseObject({ entries: z.array(z.looseObject({ when: z.number() })) });
-
-/** A copy of the bundled migrations plus one journal entry newer than anything applied. */
-function migrationsWithProbe(): string {
-  const dir = join(tempDir('gmt-mig-'), 'drizzle');
-  cpSync(assetPaths().migrationsDir, dir, { recursive: true });
-  const journalPath = join(dir, 'meta', '_journal.json');
-  const journal = journalSchema.parse(JSON.parse(readFileSync(journalPath, 'utf8')));
-  const last = journal.entries[journal.entries.length - 1] ?? { when: 0 };
-  // why: drizzle orders by `when`; the probe must be newer than every committed migration, whatever their dates.
-  const when = Math.max(...journal.entries.map((e) => e.when)) + 1_000;
-  journal.entries.push({ ...last, idx: journal.entries.length, when, tag: '9999_wp8_probe' });
-  writeFileSync(journalPath, JSON.stringify(journal));
-  writeFileSync(join(dir, '9999_wp8_probe.sql'), 'CREATE TABLE wp8_probe (id integer);');
-  return dir;
-}
-
-function hasProbe(dbPath: string): boolean {
-  const db = openDatabase(dbPath);
-  try {
-    return (
-      db.raw.prepare("select name from sqlite_master where type = 'table' and name = 'wp8_probe'").get() !==
-      undefined
-    );
-  } finally {
-    db.close();
-  }
-}
-
-async function bootOnce(dbPath: string, migrationsDir = assetPaths().migrationsDir): Promise<void> {
-  const running = await bootApp({
-    config: config(dbPath),
-    log: createLogger({ logLevel: 'error' }),
-    listen: false,
-    assets: { ...assetPaths(), migrationsDir },
-  });
-  await running.close();
-}
-
-describe('backup preflight (spec §7 Migrations, §13 Backup)', () => {
-  it('a database file that does not exist yet is migrated without a backup; an up-to-date one is not backed up', async () => {
-    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
-    await bootOnce(dbPath);
-    await bootOnce(dbPath);
-    expect(pendingOnExistingDb(dbPath, assetPaths().migrationsDir)).toEqual([]);
-    expect(readdirSync(join(dbPath, '..'))).not.toContain('backups');
-  });
-
-  it('backs up into <db dir>/backups before applying pending migrations; the backup has the old schema', async () => {
-    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
-    await bootOnce(dbPath);
-    const probeDir = migrationsWithProbe();
-    expect(pendingOnExistingDb(dbPath, probeDir)).toEqual(['9999_wp8_probe']);
-    await bootOnce(dbPath, probeDir);
-    expect(hasProbe(dbPath)).toBe(true);
-    const backups = readdirSync(backupsDirFor(dbPath));
-    expect(backups).toHaveLength(1);
-    expect(hasProbe(join(backupsDirFor(dbPath), backups[0] ?? ''))).toBe(false);
-  });
-
-  it('a failed backup refuses boot with exit code 74 and leaves the schema unmigrated', async () => {
-    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
-    await bootOnce(dbPath);
-    mkdirSync(backupsDirFor(dbPath));
-    chmodSync(backupsDirFor(dbPath), 0o777); // why: WP3's backupDatabase refuses a world-writable backups directory
-    await expect(bootOnce(dbPath, migrationsWithProbe())).rejects.toMatchObject({
-      exitCode: 74,
-      message: expect.stringMatching(/backup failed, refusing to migrate/),
-    });
-    expect(hasProbe(dbPath)).toBe(false);
-  });
-
-  it('a backups path that is not a directory refuses boot with exit code 73', async () => {
-    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
-    await bootOnce(dbPath);
-    writeFileSync(backupsDirFor(dbPath), 'not a directory');
-    await expect(bootOnce(dbPath, migrationsWithProbe())).rejects.toMatchObject({ exitCode: 73 });
-    expect(hasProbe(dbPath)).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Mutation: in `apps/api/src/bootstrap/app.ts` replace `if (!backup.ok) throw new BootError(backup.message, backup.code);` with `void backup;`.
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.backup.test.ts`
-Expected: FAIL, 2 of 4: the 74 and 73 cases — `promise resolved "undefined" instead of rejecting`.
-
-Revert the mutation.
-
-- [ ] **Step 3: Implement**
-
-Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.backup.test.ts`
-Expected: PASS, 4 tests.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A apps/api packages && git commit -m "wp08: backup preflight tests over WP4b's preflight (decision 32)"
-```
-
-### Task 8.5: Graceful shutdown order and the heartbeat
-
-**Files:**
-- Test: `apps/api/test/bootstrap/app.shutdown.test.ts`
-
-**Interfaces:**
-- Consumes: `bootApp`, `Timers` (Task 8.1); `HEARTBEAT_INTERVAL_MS`, `AppLock` (WP3).
-
-Rule (spec §7, §13): the heartbeat runs every 30 s; shutdown is stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close, and is idempotent. pino redaction is WP4b's and tested there.
-
-- [ ] **Step 1: Write the failing test**
-
-`apps/api/test/bootstrap/app.shutdown.test.ts` (new file):
-
-```ts
-// Spec §7, §13: the heartbeat and the graceful shutdown order.
-import { existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { AppLock, HEARTBEAT_INTERVAL_MS, openDatabase } from '@gmt/db';
-import { describe, expect, it, vi } from 'vitest';
-import { bootApp, type Timers } from '../../src/bootstrap/app.js';
-import { assetPaths } from '../../src/bootstrap/paths.js';
-import { createLogger } from '../../src/logger.js';
-import { loadConfigFromEnv } from '../../src/wiring.js';
-import { cleanEnv } from '../helpers/env.js';
-import { tempDir } from '../helpers/tmp.js';
-
-function first(order: number[]): number {
-  const v = order[0];
-  if (v === undefined) throw new Error('not called');
-  return v;
-}
-
-describe('graceful shutdown (spec §7, §13)', () => {
-  it('heartbeats every 30 s and shuts down: engine → checkpoint → release lock → close', async () => {
-    const dbPath = join(tempDir('gmt-sd-'), 's.db');
-    const config = loadConfigFromEnv(
-      cleanEnv({
-        NODE_ENV: 'development',
-        DATABASE_PATH: dbPath,
-        BIND_ADDRESS: '127.0.0.1',
-        LOG_LEVEL: 'error',
-      }),
-    );
-    let tick: (() => void) | undefined;
-    let intervalMs = 0;
-    const handle = { id: 'heartbeat' };
-    const cleared: unknown[] = [];
-    const timers: Timers = {
-      setInterval: (fn, ms) => {
-        tick = fn;
-        intervalMs = ms;
-        return handle;
-      },
-      clearInterval: (h) => void cleared.push(h),
-    };
-    const running = await bootApp({
-      config,
-      log: createLogger({ logLevel: 'error' }),
-      listen: false,
-      assets: assetPaths(),
-      timers,
-    });
-    expect(intervalMs).toBe(HEARTBEAT_INTERVAL_MS);
-    const heartbeat = vi.spyOn(AppLock.prototype, 'heartbeat');
-    tick?.();
-    expect(heartbeat).toHaveBeenCalledTimes(1);
-
-    const shutdown = vi.spyOn(running.engine, 'shutdown');
-    const pragma = vi.spyOn(running.ports.db.raw, 'pragma');
-    const release = vi.spyOn(AppLock.prototype, 'release');
-    const close = vi.spyOn(running.ports.db, 'close');
-    await running.close();
-    const checkpointIndex = pragma.mock.calls.findIndex(([src]) => String(src).startsWith('wal_checkpoint'));
-    const checkpointOrder = pragma.mock.invocationCallOrder[checkpointIndex] ?? Number.NaN;
-    expect(first(shutdown.mock.invocationCallOrder)).toBeLessThan(checkpointOrder);
-    expect(checkpointOrder).toBeLessThan(first(release.mock.invocationCallOrder));
-    expect(first(release.mock.invocationCallOrder)).toBeLessThan(first(close.mock.invocationCallOrder));
-    expect(cleared).toContain(handle);
-
-    const db = openDatabase(dbPath);
-    try {
-      expect(AppLock.inspect(db)).toBeNull();
-    } finally {
-      db.close();
-    }
-    const wal = `${dbPath}-wal`;
-    expect(!existsSync(wal) || statSync(wal).size === 0).toBe(true);
-    await running.close(); // idempotent
-    expect(shutdown).toHaveBeenCalledTimes(1);
-    vi.restoreAllMocks();
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Mutation: in `apps/api/src/bootstrap/app.ts` move `lock.release();` above `ports.db.raw.pragma('wal_checkpoint(TRUNCATE)');`.
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.shutdown.test.ts`
-Expected: FAIL, 1 of 1: `expected 4 to be less than 3` (the checkpoint ran after the release).
-
-Revert the mutation.
-
-- [ ] **Step 3: Implement**
-
-Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.shutdown.test.ts`
-Expected: PASS, 1 test.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A apps/api packages && git commit -m "wp08: shutdown order (checkpoint before lock release) and heartbeat test"
-```
-
-### Task 8.6: Contract helpers; security headers; Host, Origin, Content-Type, X-Requested-With
-
-**Files:**
-- Create: `apps/api/test/helpers/contract.ts`, `apps/api/test/helpers/examples.ts`
-- Test: `apps/api/test/routes/hardening.test.ts`
-
-**Interfaces:**
-- Consumes: the harness (Task 8.2), `apiContract.ROUTES`, `errorEnvelopeSchema` (core).
-- Produces (test-only): `expectContract(res, method, path, schema)` (parses the body against its ROUTES entry and returns it typed, so no test casts a body), `expectEnvelopeOrContract`, `errorOf`; `exampleDefinitionInput`, `SMALL_WINDOW`, `LHR`, `LGW`, `JFK`, `EWR`.
-
-Rules (spec §4): headers on every response including 401 and 404; Host checked before auth, the public `GET /api/health` exempt; `Origin`, when present, must name an allowed host; mutating API calls need JSON (415 otherwise) and `X-Requested-With: get-me-there` (403).
-
-- [ ] **Step 1: Write the helpers and the failing test**
 
 `apps/api/test/helpers/contract.ts` (new file):
 
@@ -2955,21 +3172,773 @@ export function exampleDefinitionInput(overrides: Partial<DefinitionInput> = {})
 }
 ```
 
+`apps/api/test/bootstrap/app.matrix.test.ts` (new file):
+
+```ts
+// Spec §5.5 injected-config boot matrix; spec §4 password length and auth invariants; spec §7 the airport sanity check.
+import { chmodSync, copyFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { apiContract, FIXTURE_OPT_IN_PHRASE, systemClock } from '@gmt/core';
+import { fixtureProvider } from '@gmt/providers';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { bootApp, type RunningApp } from '../../src/bootstrap/app.js';
+import { type AssetPaths, assetPaths } from '../../src/bootstrap/paths.js';
+import { createLogger } from '../../src/logger.js';
+import { loadConfigFromEnv } from '../../src/wiring.js';
+import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
+import { basic, captureLines } from '../helpers/harness.js';
+import { tempDir } from '../helpers/tmp.js';
+
+function envFor(overrides: Record<string, string>): Record<string, string> {
+  return cleanEnv({
+    NODE_ENV: 'production',
+    DATABASE_PATH: join(tempDir('gmt-matrix-'), 'm.fixture.db'),
+    BIND_ADDRESS: '127.0.0.1',
+    PORT: '3000',
+    APP_BASIC_AUTH_USER: 'operator',
+    APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
+    ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
+    LOG_LEVEL: 'error',
+    ...overrides,
+  });
+}
+
+function bootWith(env: Record<string, string>, assets: AssetPaths = assetPaths()): Promise<RunningApp> {
+  return bootApp({
+    config: loadConfigFromEnv(env),
+    log: createLogger({ logLevel: 'error' }),
+    listen: false,
+    assets,
+  });
+}
+
+/** Each boot seeds the full airports table; this file's tests may take longer than the default 5 s. */
+const BOOT_TIMEOUT_MS = 30_000;
+
+describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS }, () => {
+  it.each([
+    // label, env overrides, fixture offered?
+    ['production with the phrase and .fixture.db: no fixture', {}, false],
+    ['production without the phrase: no fixture', { ALLOW_FIXTURE_PROVIDER: '' }, false],
+    [
+      'development, phrase, .fixture.db, not in a container: fixture offered',
+      { NODE_ENV: 'development' },
+      true,
+    ],
+    ['development in a container: no fixture', { NODE_ENV: 'development', IN_CONTAINER: '1' }, false],
+    [
+      'development with the wrong phrase: no fixture',
+      { NODE_ENV: 'development', ALLOW_FIXTURE_PROVIDER: 'yes' },
+      false,
+    ],
+    [
+      'development without the phrase: no fixture',
+      { NODE_ENV: 'development', ALLOW_FIXTURE_PROVIDER: '' },
+      false,
+    ],
+  ] as const)('%s', async (_label, overrides, expected) => {
+    const running = await bootWith(envFor(overrides));
+    try {
+      expect(running.ports.providers.some((p) => p.id === 'fixture')).toBe(expected);
+      const res = await running.app.request('http://localhost:3000/api/providers', {
+        headers: { host: 'localhost:3000', authorization: basic('operator', SENTINEL_AUTH) },
+      });
+      expect(res.status).toBe(200);
+      const body = apiContract.providersResponseSchema.parse(await res.json());
+      expect(body.providers.some((p) => p.providerId === 'fixture')).toBe(expected);
+      expect(body.synthetic).toBe(expected);
+      if (!expected) {
+        // why: spec §5.5: outside the gate the fixture provider cannot even be built
+        expect(() =>
+          fixtureProvider({
+            http: running.ports.http,
+            log: silentLog,
+            clock: systemClock,
+            config: running.ports.config,
+            costMicroGbp: 0,
+          }),
+        ).toThrow();
+      }
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('development with the phrase but a plain .db path offers no fixture', async () => {
+    const env = envFor({ NODE_ENV: 'development' });
+    const running = await bootWith({
+      ...env,
+      DATABASE_PATH: String(env.DATABASE_PATH).replace('.fixture.db', '.db'),
+    });
+    try {
+      expect(running.ports.providers.some((p) => p.id === 'fixture')).toBe(false);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('refuses NODE_ENV=test before touching the database (exit 70)', async () => {
+    const env = envFor({ NODE_ENV: 'test' });
+    const path = String(env.DATABASE_PATH).replace('.fixture.db', '.test.db');
+    await expect(bootWith({ ...env, DATABASE_PATH: path })).rejects.toMatchObject({
+      exitCode: 70,
+      message: expect.stringMatching(/NODE_ENV=test/),
+    });
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'an unwritable data directory fails boot with exit code 73',
+    async () => {
+      const env = envFor({});
+      const dir = dirname(String(env.DATABASE_PATH));
+      chmodSync(dir, 0o500);
+      await expect(bootWith(env)).rejects.toMatchObject({ exitCode: 73 });
+    },
+  );
+
+  it('auth invariants (spec §4, review SEC-3): config refuses no auth on a public bind and a half-set pair', () => {
+    expect(() =>
+      loadConfigFromEnv(
+        envFor({ BIND_ADDRESS: '0.0.0.0', APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' }),
+      ),
+    ).toThrow(/ALLOW_UNAUTHENTICATED/);
+    expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: '' }))).toThrow(/APP_BASIC_AUTH_PASS/);
+  });
+
+  it('bootApp re-asserts them on an injected config (78), and accepts the explicit flag with a warning', async () => {
+    const env = envFor({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' });
+    const loopback = loadConfigFromEnv(env);
+    const forged = { ...loopback, bindAddress: '0.0.0.0' };
+    const boot = (config: typeof loopback, lines: string[] = []) =>
+      bootApp({
+        config,
+        log: createLogger({ logLevel: 'warn' }, { destination: captureLines(lines) }),
+        listen: false,
+        assets: assetPaths(),
+      });
+    await expect(boot(forged)).rejects.toMatchObject({ exitCode: 78 });
+    await expect(boot({ ...loopback, allowedHosts: [] })).rejects.toMatchObject({ exitCode: 78 });
+    const lines: string[] = [];
+    const running = await boot({ ...forged, allowUnauthenticated: true }, lines);
+    await running.close();
+    expect(lines.join('')).toContain('ALLOW_UNAUTHENTICATED');
+  });
+
+  it('a password shorter than 12 characters fails boot naming the variable', () => {
+    expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: 'elevenchars' }))).toThrow(
+      /APP_BASIC_AUTH_PASS/,
+    );
+  });
+
+  it('a failed airport sanity check fails boot (exit 1)', async () => {
+    // why: the vendored files cut to ten airports, far below the 5,000 the check requires (spec §7).
+    const source = assetPaths().airportsDataDir;
+    const file = readdirSync(source).find((f) => /^airports\..+\.json$/.test(f)) ?? '';
+    const real = z
+      .looseObject({ airports: z.array(z.unknown()) })
+      .parse(JSON.parse(readFileSync(join(source, file), 'utf8')));
+    const dataDir = tempDir('gmt-airports-');
+    writeFileSync(
+      join(dataDir, 'airports.tiny.json'),
+      JSON.stringify({ ...real, airports: real.airports.slice(0, 10) }),
+    );
+    copyFileSync(join(source, 'metros.json'), join(dataDir, 'metros.json'));
+    await expect(bootWith(envFor({}), { ...assetPaths(), airportsDataDir: dataDir })).rejects.toMatchObject({
+      exitCode: 1,
+      message: expect.stringMatching(/airport sanity check failed/),
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify each rule's test fails without it**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.matrix.test.ts` once per mutation below, each applied alone and then reverted.
+
+- **8.2a**: in `apps/api/src/bootstrap/app.ts` replace
+
+```ts
+  if (config.nodeEnv === 'test')
+    throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5)', EXIT.refusedTestEnv);
+```
+
+  with nothing.
+  Fails: “refuses NODE_ENV=test before touching the database (exit 70)”.
+
+- **8.2b**: in `apps/api/src/bootstrap/app.ts` delete the line `assertAuthInvariants(config, log);`. Fails: “bootApp re-asserts them on an injected config (78), and accepts the explicit flag with a warning”.
+
+- [ ] **Step 3: Implement**
+
+Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.matrix.test.ts`
+Expected: PASS, 13 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: route-test helpers; boot matrix, NODE_ENV=test refusal, auth invariants, data directory, password length and airport sanity tests"
+```
+
+### Task 8.3: `app_lock` judged read-only before anything touches the database
+
+**Files:**
+- Test: `apps/api/test/bootstrap/app.lock.test.ts`
+
+**Interfaces:**
+- Consumes: `waitForLockFree`, `TOOL_LOCK_WAIT_MS`, `APP_LOCK_WAIT_MS` (Task 8.1); `readOnlyLockState`, `AppLock`, `applyMigrations`, `openDatabase` (WP3); `fixedClock` (core).
+
+Rule (spec §7, decision 53): poll every second, read-only. No lock, or no database file yet: proceed at once. A fresh `tool` lock: refuse once 60 s have passed (75), or proceed as soon as the tool releases. A fresh `app` lock: wait, logging its age every 10 s; proceed once it goes stale (a crashed app's three missed 30 s beats); if it is still being heartbeated after 90 s, refuse (two live apps, 75). A file that is not a database: 73. The tests run against a real migrated file and sleep by advancing a fixed clock, heartbeating or releasing the other holder from the sleep.
+
+- [ ] **Step 1: Write the test**
+
+`apps/api/test/bootstrap/app.lock.test.ts` (new file):
+
+```ts
+// Spec §7 app_lock and plan decision 53: the app reads the lock read-only before any backup or migration, waits while
+// it is fresh (60 s for a tool, 90 s for another app), takes over a stale one, and refuses a live second app with 75.
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fixedClock } from '@gmt/core';
+import { AppLock, applyMigrations, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
+import { describe, expect, it } from 'vitest';
+import { APP_LOCK_WAIT_MS, TOOL_LOCK_WAIT_MS, waitForLockFree } from '../../src/bootstrap/lock.js';
+import { createLogger } from '../../src/logger.js';
+import { silentLog } from '../helpers/env.js';
+import { captureLines, T0 } from '../helpers/harness.js';
+import { onCleanup, tempDir } from '../helpers/tmp.js';
+
+/** A migrated database file, a fixed clock, and a sleep that advances it and runs `onSleep` (a heartbeat, a release). */
+function setup(onSleep: (totalMs: number) => void = () => {}) {
+  const databasePath = join(tempDir('gmt-lock-'), 'app.db');
+  const db = openDatabase(databasePath);
+  applyMigrations(db, MIGRATIONS_DIR);
+  onCleanup(() => db.close());
+  const clock = fixedClock(T0);
+  const lines: string[] = [];
+  const log = createLogger({ logLevel: 'debug' }, { destination: captureLines(lines) });
+  let slept = 0;
+  const sleep = async (ms: number) => {
+    slept += ms;
+    clock.advance(ms);
+    onSleep(slept);
+  };
+  const wait = () => waitForLockFree({ databasePath, clock, sleep, log, secrets: [] });
+  const hold = (holder: 'app' | 'tool') => {
+    const lock = new AppLock(db, holder, clock, silentLog);
+    expect(lock.acquire({ waitMs: 0 })).toBe('acquired');
+    return lock;
+  };
+  return { db, clock, lines, wait, hold, slept: () => slept };
+}
+
+describe('the read-only app_lock wait (spec §7, plan decision 53)', () => {
+  it('returns at once when no lock is held, and for a file that does not exist yet', async () => {
+    const s = setup();
+    await s.wait();
+    expect(s.slept()).toBe(0);
+    await waitForLockFree({
+      databasePath: join(tempDir(), 'none.db'),
+      clock: s.clock,
+      sleep: async () => undefined,
+      log: silentLog,
+      secrets: [],
+    });
+  });
+
+  it('waits 60 s on a fresh tool lock, then refuses with exit code 75', async () => {
+    let tool: AppLock | undefined;
+    const s = setup(() => tool?.heartbeat());
+    tool = s.hold('tool');
+    await expect(s.wait()).rejects.toMatchObject({ exitCode: 75, message: expect.stringMatching(/tool/) });
+    expect(s.slept()).toBeGreaterThanOrEqual(TOOL_LOCK_WAIT_MS);
+    expect(s.slept()).toBeLessThan(TOOL_LOCK_WAIT_MS + 2_000);
+  });
+
+  it('proceeds as soon as a tool releases within the wait', async () => {
+    let tool: AppLock | undefined;
+    const s = setup((total) => (total >= 10_000 ? tool?.release() : tool?.heartbeat()));
+    tool = s.hold('tool');
+    await s.wait();
+    expect(s.slept()).toBeGreaterThanOrEqual(10_000);
+    expect(s.slept()).toBeLessThan(12_000);
+  });
+
+  it("proceeds once a crashed app's lock goes stale (no heartbeats), logging the lock's age", async () => {
+    const s = setup();
+    s.hold('app'); // the previous process, now dead
+    await s.wait();
+    expect(s.slept()).toBeGreaterThan(0);
+    expect(s.slept()).toBeLessThanOrEqual(APP_LOCK_WAIT_MS + 1_000);
+    expect(s.lines.some((l) => l.includes('"lockAgeMs"'))).toBe(true);
+  });
+
+  it('refuses a second app with 75 after 90 s while the first is still heartbeating', async () => {
+    let other: AppLock | undefined;
+    const s = setup(() => other?.heartbeat());
+    other = s.hold('app');
+    await expect(s.wait()).rejects.toMatchObject({
+      exitCode: 75,
+      message: expect.stringMatching(/still heartbeating/),
+    });
+    expect(s.slept()).toBeGreaterThanOrEqual(APP_LOCK_WAIT_MS);
+  });
+
+  it('a file that is not a database is 73, as in the tool bootstrap', async () => {
+    const s = setup();
+    const notDb = join(tempDir(), 'garbage.db');
+    writeFileSync(notDb, 'not a database');
+    await expect(
+      waitForLockFree({
+        databasePath: notDb,
+        clock: s.clock,
+        sleep: async () => undefined,
+        log: silentLog,
+        secrets: [],
+      }),
+    ).rejects.toMatchObject({ exitCode: 73 });
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify each rule's test fails without it**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.lock.test.ts` once per mutation below, each applied alone and then reverted.
+
+- **8.3a**: in `apps/api/src/bootstrap/lock.ts` replace `const limit = state.holder === 'tool' ? TOOL_LOCK_WAIT_MS : APP_LOCK_WAIT_MS;` with `const limit = APP_LOCK_WAIT_MS;`. Fails: “waits 60 s on a fresh tool lock, then refuses with exit code 75”.
+
+- **8.3b**: in `apps/api/src/bootstrap/lock.ts` replace
+
+```ts
+    if (state.state !== 'fresh') return;
+```
+
+  with
+
+```ts
+    if (state.state === 'absent') return;
+```
+
+  Fails: “proceeds once a crashed app's lock goes stale (no heartbeats), logging the lock's age”.
+
+- [ ] **Step 3: Implement**
+
+Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.lock.test.ts`
+Expected: PASS, 6 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: read-only app_lock wait tests: 60 s on a tool lock, release, stale takeover, two live apps refused, unreadable file"
+```
+
+### Task 8.4: Backup preflight when migrations are pending, after the lock check
+
+**Files:**
+- Test: `apps/api/test/bootstrap/app.backup.test.ts`
+
+**Interfaces:**
+- Consumes: `bootApp` (Task 8.1); `backupsDirFor`, `pendingOnExistingDb` (WP4b `bootstrap/preflight.ts`, decision 32); WP3's `backupDatabase` behind it; `AppLock` (WP3).
+
+Rule (spec §7 Migrations, §13; decision 53; review TS-2): the app bootstrap calls WP4b's `backupBeforeMigrations` before `buildPorts` applies anything, and only after the read-only lock check; a new database file has nothing to back up; a backup lands in `<db dir>/backups` and holds the pre-migration schema; a failed backup refuses boot with 74 and leaves the schema unmigrated; a backups path that is not a directory refuses with 73; a second app started against a live, heartbeating app lock with a migration pending refuses with 75 and leaves no backups directory and no migrated table. A probe migration (a copy of the committed migrations plus one newer journal entry) makes migrations pending without touching the committed tree.
+
+- [ ] **Step 1: Write the test**
+
+`apps/api/test/bootstrap/app.backup.test.ts` (new file):
+
+```ts
+// Spec §7 Migrations, §13 Backup: the app bootstrap reuses WP4b's preflight (plan decision 32).
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fixedClock } from '@gmt/core';
+import { AppLock, openDatabase } from '@gmt/db';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { bootApp } from '../../src/bootstrap/app.js';
+import { assetPaths } from '../../src/bootstrap/paths.js';
+import { backupsDirFor, pendingOnExistingDb } from '../../src/bootstrap/preflight.js';
+import { createLogger } from '../../src/logger.js';
+import { loadConfigFromEnv } from '../../src/wiring.js';
+import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
+import { T0 } from '../helpers/harness.js';
+import { tempDir } from '../helpers/tmp.js';
+
+function config(dbPath: string) {
+  return loadConfigFromEnv(
+    cleanEnv({
+      NODE_ENV: 'production',
+      DATABASE_PATH: dbPath,
+      BIND_ADDRESS: '127.0.0.1',
+      APP_BASIC_AUTH_USER: 'operator',
+      APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
+      LOG_LEVEL: 'error',
+    }),
+  );
+}
+
+const journalSchema = z.looseObject({ entries: z.array(z.looseObject({ when: z.number() })) });
+
+/** A copy of the bundled migrations plus one journal entry newer than anything applied. */
+function migrationsWithProbe(): string {
+  const dir = join(tempDir('gmt-mig-'), 'drizzle');
+  cpSync(assetPaths().migrationsDir, dir, { recursive: true });
+  const journalPath = join(dir, 'meta', '_journal.json');
+  const journal = journalSchema.parse(JSON.parse(readFileSync(journalPath, 'utf8')));
+  const last = journal.entries[journal.entries.length - 1] ?? { when: 0 };
+  // why: drizzle orders by `when`; the probe must be newer than every committed migration, whatever their dates.
+  const when = Math.max(...journal.entries.map((e) => e.when)) + 1_000;
+  journal.entries.push({ ...last, idx: journal.entries.length, when, tag: '9999_wp8_probe' });
+  writeFileSync(journalPath, JSON.stringify(journal));
+  writeFileSync(join(dir, '9999_wp8_probe.sql'), 'CREATE TABLE wp8_probe (id integer);');
+  return dir;
+}
+
+function hasProbe(dbPath: string): boolean {
+  const db = openDatabase(dbPath);
+  try {
+    return (
+      db.raw.prepare("select name from sqlite_master where type = 'table' and name = 'wp8_probe'").get() !==
+      undefined
+    );
+  } finally {
+    db.close();
+  }
+}
+
+async function bootOnce(dbPath: string, migrationsDir = assetPaths().migrationsDir): Promise<void> {
+  const running = await bootApp({
+    config: config(dbPath),
+    log: createLogger({ logLevel: 'error' }),
+    listen: false,
+    assets: { ...assetPaths(), migrationsDir },
+  });
+  await running.close();
+}
+
+/** Each boot seeds the full airports table; this file's tests may take longer than the default 5 s. */
+const BOOT_TIMEOUT_MS = 30_000;
+
+describe('backup preflight (spec §7 Migrations, §13 Backup)', { timeout: BOOT_TIMEOUT_MS }, () => {
+  it('a database file that does not exist yet is migrated without a backup; an up-to-date one is not backed up', async () => {
+    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
+    await bootOnce(dbPath);
+    await bootOnce(dbPath);
+    expect(pendingOnExistingDb(dbPath, assetPaths().migrationsDir)).toEqual([]);
+    expect(readdirSync(join(dbPath, '..'))).not.toContain('backups');
+  });
+
+  it('backs up into <db dir>/backups before applying pending migrations; the backup has the old schema', async () => {
+    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
+    await bootOnce(dbPath);
+    const probeDir = migrationsWithProbe();
+    expect(pendingOnExistingDb(dbPath, probeDir)).toEqual(['9999_wp8_probe']);
+    await bootOnce(dbPath, probeDir);
+    expect(hasProbe(dbPath)).toBe(true);
+    const backups = readdirSync(backupsDirFor(dbPath));
+    expect(backups).toHaveLength(1);
+    expect(hasProbe(join(backupsDirFor(dbPath), backups[0] ?? ''))).toBe(false);
+  });
+
+  it('a failed backup refuses boot with exit code 74 and leaves the schema unmigrated', async () => {
+    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
+    await bootOnce(dbPath);
+    mkdirSync(backupsDirFor(dbPath));
+    chmodSync(backupsDirFor(dbPath), 0o777); // why: WP3's backupDatabase refuses a world-writable backups directory
+    await expect(bootOnce(dbPath, migrationsWithProbe())).rejects.toMatchObject({
+      exitCode: 74,
+      message: expect.stringMatching(/backup failed, refusing to migrate/),
+    });
+    expect(hasProbe(dbPath)).toBe(false);
+  });
+
+  it('a backups path that is not a directory refuses boot with exit code 73', async () => {
+    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
+    await bootOnce(dbPath);
+    writeFileSync(backupsDirFor(dbPath), 'not a directory');
+    await expect(bootOnce(dbPath, migrationsWithProbe())).rejects.toMatchObject({ exitCode: 73 });
+    expect(hasProbe(dbPath)).toBe(false);
+  });
+
+  it('a second app against a live app lock refuses with 75 and runs no backup or migration (plan decision 53)', async () => {
+    const dbPath = join(tempDir('gmt-bk-'), 'b.db');
+    await bootOnce(dbPath);
+    const clock = fixedClock(T0);
+    const live = openDatabase(dbPath);
+    const first = new AppLock(live, 'app', clock, silentLog);
+    expect(first.acquire({ waitMs: 0 })).toBe('acquired');
+    try {
+      const probeDir = migrationsWithProbe();
+      expect(pendingOnExistingDb(dbPath, probeDir)).toEqual(['9999_wp8_probe']);
+      await expect(
+        bootApp({
+          config: config(dbPath),
+          log: createLogger({ logLevel: 'error' }),
+          clock,
+          listen: false,
+          assets: { ...assetPaths(), migrationsDir: probeDir },
+          // why: the first app keeps heartbeating while the second waits on the shared clock
+          sleep: async (ms) => {
+            clock.advance(ms);
+            first.heartbeat();
+          },
+        }),
+      ).rejects.toMatchObject({ exitCode: 75 });
+      expect(existsSync(backupsDirFor(dbPath))).toBe(false);
+      expect(hasProbe(dbPath)).toBe(false);
+    } finally {
+      first.release();
+      live.close();
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify each rule's test fails without it**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.backup.test.ts` once per mutation below, each applied alone and then reverted.
+
+- **8.4a**: in `apps/api/src/bootstrap/app.ts` replace `if (!backup.ok) throw new BootError(backup.message, backup.code);` with `void backup;`. Fails: “a failed backup refuses boot with exit code 74 and leaves the schema unmigrated”; “a backups path that is not a directory refuses boot with exit code 73”.
+
+- **8.4b**: in `apps/api/src/bootstrap/app.ts` replace
+
+```ts
+  await waitForLockFree({
+    databasePath: config.databasePath,
+    clock,
+    sleep: deps.sleep ?? realSleep,
+    log,
+    secrets,
+  });
+```
+
+  with nothing.
+  Fails: “a second app against a live app lock refuses with 75 and runs no backup or migration (plan decision 53)”.
+
+- [ ] **Step 3: Implement**
+
+Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.backup.test.ts`
+Expected: PASS, 5 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: backup preflight tests over WP4b's preflight (decision 32), and no backup or migration for a refused second app (decision 53)"
+```
+
+### Task 8.5: Graceful shutdown order, the heartbeat, and a failed boot that leaves no lock
+
+**Files:**
+- Test: `apps/api/test/bootstrap/app.shutdown.test.ts`
+
+**Interfaces:**
+- Consumes: `bootApp` (Task 8.1); `HEARTBEAT_INTERVAL_MS`, `AppLock` (WP3); Vitest's fake interval timers.
+
+Rule (spec §7, §13; review arch-008, arch-015): the heartbeat runs every 30 s (driven with `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })`; only intervals are faked, because croner and the engine use timeouts); shutdown is stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close, clears the heartbeat, and is idempotent; a boot that fails after taking the lock (here `listen`, which this process's network guards refuse) leaves no lock row and no heartbeat. pino redaction is WP4b's and tested there.
+
+- [ ] **Step 1: Write the test**
+
+`apps/api/test/bootstrap/app.shutdown.test.ts` (new file):
+
+```ts
+// Spec §7, §13: the heartbeat, the graceful shutdown order, and a failed boot that leaves no lock behind.
+import { existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { AppLock, HEARTBEAT_INTERVAL_MS, openDatabase } from '@gmt/db';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { bootApp } from '../../src/bootstrap/app.js';
+import { assetPaths } from '../../src/bootstrap/paths.js';
+import { createLogger } from '../../src/logger.js';
+import { loadConfigFromEnv } from '../../src/wiring.js';
+import { cleanEnv } from '../helpers/env.js';
+import { tempDir } from '../helpers/tmp.js';
+
+/** Boot tests seed the full airports table; this file's tests may take longer than the default 5 s. */
+const BOOT_TIMEOUT_MS = 30_000;
+
+function first(order: number[]): number {
+  const v = order[0];
+  if (v === undefined) throw new Error('not called');
+  return v;
+}
+
+function devConfig(dbPath: string) {
+  return loadConfigFromEnv(
+    cleanEnv({
+      NODE_ENV: 'development',
+      DATABASE_PATH: dbPath,
+      BIND_ADDRESS: '127.0.0.1',
+      LOG_LEVEL: 'error',
+    }),
+  );
+}
+
+/** Spies on the interval timers; `heartbeat()` is the handle of the one interval at HEARTBEAT_INTERVAL_MS. */
+function intervalSpies() {
+  const set = vi.spyOn(globalThis, 'setInterval');
+  const clear = vi.spyOn(globalThis, 'clearInterval');
+  return {
+    clear,
+    heartbeat: () => {
+      const i = set.mock.calls.findIndex((call) => call[1] === HEARTBEAT_INTERVAL_MS);
+      const r = set.mock.results[i];
+      if (r === undefined || r.type !== 'return') throw new Error('no heartbeat interval was set');
+      return r.value;
+    },
+  };
+}
+
+function lockRow(dbPath: string) {
+  const db = openDatabase(dbPath);
+  try {
+    return AppLock.inspect(db);
+  } finally {
+    db.close();
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () => {
+  it('heartbeats every 30 s and shuts down: engine → checkpoint → release lock → close', async () => {
+    const dbPath = join(tempDir('gmt-sd-'), 's.db');
+    // why: only the interval timers are faked: the heartbeat is the app's one interval, croner and the engine use timeouts.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const timers = intervalSpies();
+    const running = await bootApp({
+      config: devConfig(dbPath),
+      log: createLogger({ logLevel: 'error' }),
+      listen: false,
+      assets: assetPaths(),
+    });
+    const heartbeat = vi.spyOn(AppLock.prototype, 'heartbeat');
+    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS - 1);
+    expect(heartbeat).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(heartbeat).toHaveBeenCalledTimes(1);
+
+    const shutdown = vi.spyOn(running.engine, 'shutdown');
+    const pragma = vi.spyOn(running.ports.db.raw, 'pragma');
+    const release = vi.spyOn(AppLock.prototype, 'release');
+    const close = vi.spyOn(running.ports.db, 'close');
+    await running.close();
+    const checkpointIndex = pragma.mock.calls.findIndex(([src]) => String(src).startsWith('wal_checkpoint'));
+    const checkpointOrder = pragma.mock.invocationCallOrder[checkpointIndex] ?? Number.NaN;
+    expect(first(shutdown.mock.invocationCallOrder)).toBeLessThan(checkpointOrder);
+    expect(checkpointOrder).toBeLessThan(first(release.mock.invocationCallOrder));
+    expect(first(release.mock.invocationCallOrder)).toBeLessThan(first(close.mock.invocationCallOrder));
+    expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat()); // the heartbeat is cleared
+
+    expect(lockRow(dbPath)).toBeNull();
+    const wal = `${dbPath}-wal`;
+    expect(!existsSync(wal) || statSync(wal).size === 0).toBe(true);
+    await running.close(); // idempotent
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('a boot that fails after taking the lock releases it and stops the heartbeat (review arch-008)', async () => {
+    const dbPath = join(tempDir('gmt-sd-'), 's.db');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const timers = intervalSpies();
+    // why: listen is the last step, after the lock and the heartbeat; this process's network guards refuse its address
+    // lookup, so it fails here deterministically.
+    await expect(
+      bootApp({
+        config: devConfig(dbPath),
+        log: createLogger({ logLevel: 'error' }),
+        listen: true,
+        assets: assetPaths(),
+      }),
+    ).rejects.toThrow();
+    expect(lockRow(dbPath)).toBeNull();
+    expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat());
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify each rule's test fails without it**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.shutdown.test.ts` once per mutation below, each applied alone and then reverted.
+
+- **8.5a**: in `apps/api/src/bootstrap/app.ts` replace
+
+```ts
+        ports.db.raw.pragma('wal_checkpoint(TRUNCATE)');
+        lock.release();
+```
+
+  with
+
+```ts
+        lock.release();
+        ports.db.raw.pragma('wal_checkpoint(TRUNCATE)');
+```
+
+  Fails: “heartbeats every 30 s and shuts down: engine → checkpoint → release lock → close”.
+
+- **8.5b**: in `apps/api/src/bootstrap/app.ts` replace
+
+```ts
+    if (heartbeat !== null) clearInterval(heartbeat);
+    lock.release();
+```
+
+  with nothing.
+  Fails: “a boot that fails after taking the lock releases it and stops the heartbeat (review arch-008)”.
+
+- [ ] **Step 3: Implement**
+
+Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.shutdown.test.ts`
+Expected: PASS, 2 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: shutdown order (checkpoint before lock release), heartbeat, and lock release on a failed boot"
+```
+
+### Task 8.6: Security headers; Host, Origin, Content-Type, X-Requested-With; body size, no-store, no CORS
+
+**Files:**
+- Test: `apps/api/test/routes/hardening.test.ts`
+
+**Interfaces:**
+- Consumes: the harness and contract helpers (Task 8.2), `MAX_BODY_BYTES` (Task 8.1), `apiContract.ROUTES`, `errorEnvelopeSchema` (core).
+
+Rules (spec §4; decision 54; reviews SEC-1, SEC-6, SEC-8): headers on every response including 401 and 404; Host checked before auth, the public `GET /api/health` exempt, and the rejection names the value and the variable but no allowed host (those go to the log); `Origin`, when present, must name an allowed host; mutating API calls need JSON (415 otherwise) and `X-Requested-With: get-me-there` (403); a body over 64 KiB is 413 `body_too_large` before any parse; every API response is `Cache-Control: no-store`; none carries an `Access-Control-*` header and a preflight is never approved.
+
+- [ ] **Step 1: Write the test**
+
 `apps/api/test/routes/hardening.test.ts` (new file):
 
 ```ts
 // Spec §4 security headers and request hardening.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MAX_BODY_BYTES } from '../../src/app.js';
 import { API_TEXT } from '../../src/text.js';
 import { errorOf } from '../helpers/contract.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 
 let h: Harness;
-beforeAll(async () => {
+beforeEach(async () => {
   h = await createHarness();
-});
-afterAll(async () => {
-  await h.close();
 });
 
 describe('security headers (spec §4)', () => {
@@ -2989,13 +3958,16 @@ describe('security headers (spec §4)', () => {
 });
 
 describe('Host allowlist (spec §4)', () => {
-  it('rejects an unknown Host naming the value and ALLOWED_HOSTS, before auth', async () => {
+  it('rejects an unknown Host naming the value and the variable, never the allowed hosts, before auth', async () => {
     const res = await h.request('/api/providers', { auth: false, headers: { host: 'evil.example:3000' } });
     expect(res.status).toBe(403);
     const e = await errorOf(res);
     expect(e.code).toBe('host_not_allowed');
-    expect(e.message).toBe(API_TEXT.hostRejected('evil.example:3000', h.ports.config.allowedHosts));
+    expect(e.message).toBe(API_TEXT.hostRejected('evil.example:3000'));
     expect(e.message).toContain('ALLOWED_HOSTS');
+    // why: decision 54: the allowed values would tell a stranger the host names; they go to the log only
+    for (const allowed of h.ports.config.allowedHosts) expect(JSON.stringify(e)).not.toContain(allowed);
+    expect(h.logLines.join('')).toContain(h.ports.config.allowedHosts[0] ?? 'no allowed host');
   });
   it('names a missing Host as (none)', async () => {
     const res = await h.request('/api/providers', { headers: { host: '' } });
@@ -3066,43 +4038,103 @@ describe('mutating requests (spec §4)', () => {
     expect((await h.request('/api/providers')).status).toBe(200);
   });
 });
+
+describe('body size, caching and cross-origin (reviews SEC-1, SEC-8)', () => {
+  it('a body over MAX_BODY_BYTES is 413 before it is parsed', async () => {
+    const spy = vi.spyOn(h.engine, 'estimate');
+    const res = await h.request('/api/definitions/estimate', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'x'.repeat(MAX_BODY_BYTES) }),
+    });
+    expect(res.status).toBe(413);
+    expect((await errorOf(res)).code).toBe('body_too_large');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('every API response is no-store; none carries an Access-Control header, and a preflight is not approved', async () => {
+    for (const path of ['/api/providers', '/api/health', '/api/nothing-here']) {
+      const res = await h.request(path, { headers: { origin: 'http://localhost:3000' } });
+      expect(res.headers.get('cache-control'), path).toBe('no-store');
+      expect(
+        [...res.headers.keys()].filter((k) => k.startsWith('access-control-')),
+        path,
+      ).toEqual([]);
+    }
+    const preflight = await h.request('/api/definitions', {
+      method: 'OPTIONS',
+      csrf: false,
+      headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST' },
+    });
+    expect(preflight.headers.get('access-control-allow-origin')).toBeNull();
+    expect(preflight.status).not.toBe(204);
+  });
+});
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run to verify each rule's test fails without it**
 
-Mutation: in `apps/api/src/app.ts` delete the line `` app.use(`${API_PREFIX}/*`, mutatingRequestCheck()); ``.
+Run: `pnpm --filter @gmt/api exec vitest run test/routes/hardening.test.ts` once per mutation below, each applied alone and then reverted.
 
-Run: `pnpm --filter @gmt/api exec vitest run test/routes/hardening.test.ts`
-Expected: FAIL, 4 of 18: the three 415 cases and the 403 case get 404.
+- **8.6a**: in `apps/api/src/app.ts` replace
 
-Revert the mutation.
+```ts
+  app.use(`${API_PREFIX}/*`, mutatingRequestCheck());
+```
+
+  with nothing.
+  Fails: “POST without Content-Type: application/json → 415”; “PUT without Content-Type: application/json → 415”; “DELETE without Content-Type: application/json → 415”; “without X-Requested-With: get-me-there → 403”.
+
+- **8.6b**: in `apps/api/src/middleware/hardening.ts` replace
+
+```ts
+API_TEXT.hostRejected(shown)
+```
+
+  with
+
+```ts
+`${API_TEXT.hostRejected(shown)} (${config.allowedHosts.join(', ')})`
+```
+
+  Fails: “rejects an unknown Host naming the value and the variable, never the allowed hosts, before auth”.
+
+- **8.6c**: in `apps/api/src/app.ts` replace `      maxSize: MAX_BODY_BYTES,` with `      maxSize: MAX_BODY_BYTES * 4,`. Fails: “a body over MAX_BODY_BYTES is 413 before it is parsed”.
+
+- **8.6d**: in `apps/api/src/app.ts` replace
+
+```ts
+  app.use(`${API_PREFIX}/*`, noStore());
+```
+
+  with nothing.
+  Fails: “every API response is no-store; none carries an Access-Control header, and a preflight is not approved”.
 
 - [ ] **Step 3: Implement**
 
-Nothing beyond Task 8.1 and the test helpers above.
+Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/hardening.test.ts`
-Expected: PASS, 18 tests.
+Expected: PASS, 20 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: route-test harness; security header and request hardening tests"
+git add -A apps/api packages && git commit -m "wp08: security header, request hardening, body limit, no-store and no-CORS tests"
 ```
 
-### Task 8.7: Failed-auth rate limit, the auth gate over static files, the SPA fallback
+### Task 8.7: Failed-auth rate limit per client IP, the auth gate over static files, the SPA fallback
 
 **Files:**
 - Test: `apps/api/test/routes/auth.test.ts`
 
 **Interfaces:**
-- Consumes: `basicAuthGate`, `FailedAuthLimiter`, `clientIpFrom`, `mountStatic` (Task 8.1); the harness (Task 8.6).
+- Consumes: `basicAuthGate`, `FailedAuthLimiter`, `clientIpFrom`, `UNKNOWN_IP`, `mountStatic` (Task 8.1); the harness (Task 8.2).
 
-Rules (spec §4): a request that presents credentials is refused with 429 (`auth_rate_limited`, `Retry-After`) while its source IP has 5 failures in the last minute, or the whole app has 20; a wrong password counts on every route, the public `/health` included (so it cannot probe passwords), but a request without credentials is never counted. The source IP is the last `X-Forwarded-For` entry only when `TRUST_PROXY=true`, else the socket address; when neither is known only the global limit applies. Static files need auth; SPA paths fall back to `index.html`; `/api/*` never does.
+Rules (spec §4, decision 54, review SEC-4): a wrong credential is refused with 429 (`auth_rate_limited`, `Retry-After`) while its client IP has 5 failures in the last minute; a correct credential is always accepted, from any IP; there is no global bucket, so failures spread over many addresses never refuse another; a wrong password counts on every route, the public `/health` included (so it cannot probe passwords), but a request without credentials is never counted. The client IP is the last `X-Forwarded-For` entry only when `TRUST_PROXY=true`, else the socket address; with neither, every request shares the `UNKNOWN_IP` bucket. Static files need auth; SPA paths fall back to `index.html`; `/api/*` never does.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the test**
 
 `apps/api/test/routes/auth.test.ts` (new file):
 
@@ -3157,98 +4189,64 @@ describe('basic auth gate (spec §4)', () => {
   });
 });
 
-describe('failed-auth rate limit (spec §4)', () => {
-  it('5 failures from one IP block that IP (even with the right password) for a minute, not others', async () => {
+describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
+  const as = (x: Harness, authorization: string, ip: string, path = '/api/providers') =>
+    x.request(path, { headers: { authorization, 'x-test-ip': ip } }).then((r) => r.status);
+
+  it('5 failures from one IP limit that IP for a minute, not others; a correct credential always succeeds', async () => {
     const x = await harness({ app: byTestIp });
-    for (let i = 0; i < 5; i++)
-      expect(
-        (await x.request('/api/providers', { headers: { authorization: WRONG, 'x-test-ip': '203.0.113.7' } }))
-          .status,
-      ).toBe(401);
+    for (let i = 0; i < 5; i++) expect(await as(x, WRONG, '203.0.113.7')).toBe(401);
     const blocked = await x.request('/api/providers', {
-      headers: { authorization: RIGHT, 'x-test-ip': '203.0.113.7' },
+      headers: { authorization: WRONG, 'x-test-ip': '203.0.113.7' },
     });
     expect(blocked.status).toBe(429);
     expect((await errorOf(blocked)).code).toBe('auth_rate_limited');
     expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
-    expect(
-      (await x.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '203.0.113.8' } }))
-        .status,
-    ).toBe(200);
+    // why: decision 54: the limit slows guessing; it never locks out the operator, who knows the password
+    expect(await as(x, RIGHT, '203.0.113.7')).toBe(200);
+    expect(await as(x, WRONG, '203.0.113.8')).toBe(401);
     x.clock.advance(61_000);
-    expect(
-      (await x.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '203.0.113.7' } }))
-        .status,
-    ).toBe(200);
+    expect(await as(x, WRONG, '203.0.113.7')).toBe(401);
   });
 
   it('wrong credentials on the public /api/health still count; no credentials never do', async () => {
     const x = await harness({ app: byTestIp });
-    for (let i = 0; i < 5; i++)
-      expect(
-        (await x.request('/api/health', { headers: { authorization: WRONG, 'x-test-ip': '203.0.113.9' } }))
-          .status,
-      ).toBe(200);
-    expect(
-      (await x.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '203.0.113.9' } }))
-        .status,
-    ).toBe(429);
+    for (let i = 0; i < 5; i++) expect(await as(x, WRONG, '203.0.113.9', '/api/health')).toBe(200);
+    expect(await as(x, WRONG, '203.0.113.9')).toBe(429);
     for (let i = 0; i < 30; i++)
       await x.request('/api/health', { auth: false, headers: { 'x-test-ip': '198.51.100.1' } });
-    expect(
-      (await x.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '198.51.100.1' } }))
-        .status,
-    ).toBe(200);
+    expect(await as(x, WRONG, '198.51.100.1')).toBe(401);
   });
 
-  it('20 failures across many IPs trip the global limit', async () => {
+  it('there is no global bucket: failures spread over many IPs never refuse another IP (review SEC-4)', async () => {
     const x = await harness({ app: byTestIp });
-    for (let i = 0; i < 20; i++)
-      await x.request('/api/providers', {
-        headers: { authorization: WRONG, 'x-test-ip': `198.51.100.${i}` },
-      });
-    expect(
-      (await x.request('/api/providers', { headers: { authorization: RIGHT, 'x-test-ip': '192.0.2.1' } }))
-        .status,
-    ).toBe(429);
+    for (let i = 0; i < 40; i++) await as(x, WRONG, `198.51.100.${i}`);
+    expect(await as(x, WRONG, '192.0.2.1')).toBe(401);
+    expect(await as(x, RIGHT, '192.0.2.1')).toBe(200);
   });
 
   it('TRUST_PROXY=true keys on the last X-Forwarded-For entry', async () => {
     const x = await harness({ env: { TRUST_PROXY: 'true' } });
-    for (let i = 0; i < 5; i++)
-      await x.request('/api/providers', {
-        headers: { authorization: WRONG, 'x-forwarded-for': '198.51.100.7' },
-      });
-    expect(
-      (
-        await x.request('/api/providers', {
-          headers: { authorization: RIGHT, 'x-forwarded-for': '198.51.100.7' },
-        })
-      ).status,
-    ).toBe(429);
-    expect(
-      (
-        await x.request('/api/providers', {
-          headers: { authorization: RIGHT, 'x-forwarded-for': '198.51.100.7, 198.51.100.8' },
-        })
-      ).status,
-    ).toBe(200);
+    const xff = (authorization: string, chain: string) =>
+      x
+        .request('/api/providers', { headers: { authorization, 'x-forwarded-for': chain } })
+        .then((r) => r.status);
+    for (let i = 0; i < 5; i++) await xff(WRONG, '198.51.100.7');
+    expect(await xff(WRONG, '198.51.100.7')).toBe(429);
+    expect(await xff(WRONG, '198.51.100.7, 198.51.100.8')).toBe(401);
   });
 
-  it('TRUST_PROXY=false ignores X-Forwarded-For', async () => {
+  it('TRUST_PROXY=false ignores X-Forwarded-For: every unknown-IP request shares one bucket', async () => {
     const x = await harness();
     for (let i = 0; i < 5; i++)
       await x.request('/api/providers', {
-        headers: { authorization: WRONG, 'x-forwarded-for': '198.51.100.7' },
+        headers: { authorization: WRONG, 'x-forwarded-for': `198.51.100.${i}` },
       });
-    // why: no socket under app.request(), so the IP is unknown and only the global limit (20) applies.
-    expect(
-      (
-        await x.request('/api/providers', {
-          headers: { authorization: RIGHT, 'x-forwarded-for': '198.51.100.7' },
-        })
-      ).status,
-    ).toBe(200);
+    // why: no socket under app.request() and no trusted proxy, so the five spoofed addresses were one source
+    const res = await x.request('/api/providers', {
+      headers: { authorization: WRONG, 'x-forwarded-for': '203.0.113.1' },
+    });
+    expect(res.status).toBe(429);
   });
 });
 
@@ -3284,14 +4282,45 @@ describe('static files and SPA fallback (spec §4, §13)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run to verify each rule's test fails without it**
 
-Mutation: in `apps/api/src/middleware/auth.ts` delete `o.limiter.recordFailure(ip);`.
+Run: `pnpm --filter @gmt/api exec vitest run test/routes/auth.test.ts` once per mutation below, each applied alone and then reverted.
 
-Run: `pnpm --filter @gmt/api exec vitest run test/routes/auth.test.ts`
-Expected: FAIL, 4 of 10: the rate-limit tests get 200 where they expect 429.
+- **8.7a**: in `apps/api/src/middleware/auth.ts` delete the line `o.limiter.recordFailure(ip);`. Fails: “5 failures from one IP limit that IP for a minute, not others; a correct credential always succeeds”; “wrong credentials on the public /api/health still count; no credentials never do”; “TRUST_PROXY=true keys on the last X-Forwarded-For entry”; “TRUST_PROXY=false ignores X-Forwarded-For: every unknown-IP request shares one bucket”.
 
-Revert the mutation.
+- **8.7b**: in `apps/api/src/middleware/auth.ts` replace
+
+```ts
+    if (header !== undefined) {
+      if (credentialsMatch(header, auth) === 'valid') {
+        c.set('authenticated', true);
+        return next();
+      }
+      const ip = o.clientIp(c) ?? UNKNOWN_IP;
+      const retry = o.limiter.retryAfterSeconds(ip);
+      if (retry !== null) {
+        c.header('Retry-After', String(retry));
+        return c.json(envelope('auth_rate_limited', API_TEXT.rateLimited(retry)), 429);
+      }
+```
+
+  with
+
+```ts
+    if (header !== undefined) {
+      const ip = o.clientIp(c) ?? UNKNOWN_IP;
+      const retry = o.limiter.retryAfterSeconds(ip);
+      if (retry !== null) {
+        c.header('Retry-After', String(retry));
+        return c.json(envelope('auth_rate_limited', API_TEXT.rateLimited(retry)), 429);
+      }
+      if (credentialsMatch(header, auth) === 'valid') {
+        c.set('authenticated', true);
+        return next();
+      }
+```
+
+  Fails: “5 failures from one IP limit that IP for a minute, not others; a correct credential always succeeds”.
 
 - [ ] **Step 3: Implement**
 
@@ -3305,7 +4334,7 @@ Expected: PASS, 10 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: failed-auth rate limit, auth over static files and SPA fallback tests"
+git add -A apps/api packages && git commit -m "wp08: per-IP failed-auth limit where a correct credential always wins; auth over static files and SPA fallback tests"
 ```
 
 ### Task 8.8: Health detail, airports autocomplete, providers, budget, scheduler jobs
@@ -3314,11 +4343,11 @@ git add -A apps/api packages && git commit -m "wp08: failed-auth rate limit, aut
 - Test: `apps/api/test/routes/system.test.ts`
 
 **Interfaces:**
-- Consumes: `systemHandlers` (Task 8.1); `engine.status()`, `engine.scheduler.jobs()`, `engine.scheduler.blockedSince()` (WP7); `AirportsRepo.search` (WP3); the system schemas of the api-contract.
+- Consumes: `systemHandlers`, `hostAllowed` (Task 8.1); `engine.status()`, `engine.scheduler.jobs()`, `engine.scheduler.blockedSince()` (WP7); `AirportsRepo.search` (WP3); the system schemas of the api-contract.
 
-Rules (spec §10, §13): one public health route with two shapes (`healthResponseSchema` is the union): the `HEALTHCHECK` gets `{ ok, degraded }`; an authenticated caller gets the detail, which never includes the database path (`sizeBytes` is 0 for `:memory:`), and `healthy: null` per provider because health never calls a provider. Airports: up to 20 rows in the repository's prefix-on-IATA-then-city/name order. Providers: capabilities, plan, both usage windows, the zero-cap notice, the presets with core's refresh default. Budget: every provider window and the global one, the cap, the subscription fees counted once in it (spec §5.3) and a one-line ceiling note, money through `microGbpToPence` (decision 49).
+Rules (spec §10, §13; review SEC-2): one public health route with two shapes (`healthResponseSchema` is the union): the `HEALTHCHECK` gets `{ ok, degraded }`; an authenticated caller gets the detail — with auth off, only when the Host is allowed — which never includes the database path (`sizeBytes` is 0 for `:memory:`), and `healthy: null` per provider because health never calls a provider. Airports: up to 20 rows in the repository's prefix-on-IATA-then-city/name order. Providers: capabilities, plan, both usage windows, the zero-cap notice, the presets with core's refresh default. Budget: every provider window and the global one labelled by `budgetScopeLabel`, the cap, the subscription fees counted once in it (spec §5.3) and a one-line ceiling note, money through `microGbpToPence` (decision 49).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the test**
 
 `apps/api/test/routes/system.test.ts` (new file):
 
@@ -3364,6 +4393,17 @@ describe('GET /api/health (spec §10, §13)', () => {
     expect(detail.providers.map((p) => p.providerId)).toContain('fixture');
     expect(detail.scheduler).toMatchObject({ jobCount: 0, blockedSince: null });
   });
+  it('with auth off, a foreign Host gets the minimal shape, an allowed Host the detail (review SEC-2)', async () => {
+    const x = await harness({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' });
+    const foreign = await x.request('/api/health', { auth: false, headers: { host: 'rebound.example' } });
+    expect(await expectContract(foreign, 'GET', '/api/health', apiContract.healthPublicSchema)).toEqual({
+      ok: true,
+      degraded: false,
+    });
+    const local = await x.request('/api/health', { auth: false });
+    await expectContract(local, 'GET', '/api/health', apiContract.healthDetailSchema);
+  });
+
   it('reports degraded from the engine without detail', async () => {
     const x = await harness();
     vi.spyOn(x.engine, 'status').mockReturnValue({
@@ -3480,14 +4520,11 @@ describe('GET /api/budget and GET /api/scheduler/jobs (spec §7 budget windows, 
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run to verify each rule's test fails without it**
 
-Mutation: in `apps/api/src/routes/system.ts` change the health handler to `c.json(healthPublic(ctx))`.
+Run: `pnpm --filter @gmt/api exec vitest run test/routes/system.test.ts` once per mutation below, each applied alone and then reverted.
 
-Run: `pnpm --filter @gmt/api exec vitest run test/routes/system.test.ts`
-Expected: FAIL, 1 of 8: `GET /api/health does not match the test schema` (the authenticated body has no `db`).
-
-Revert the mutation.
+- **8.8a**: in `apps/api/src/routes/system.ts` replace `c.get('authenticated') && (config.auth !== null || hostAllowed(config, c.req.header('host')))` with `c.get('authenticated')`. Fails: “with auth off, a foreign Host gets the minimal shape, an allowed Host the detail (review SEC-2)”.
 
 - [ ] **Step 3: Implement**
 
@@ -3496,32 +4533,32 @@ Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep i
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/system.test.ts`
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: health detail, airports, providers presets, budget and scheduler jobs tests"
+git add -A apps/api packages && git commit -m "wp08: health detail (Host-checked without auth), airports, providers presets, budget and scheduler jobs tests"
 ```
 
 ### Task 8.9: Definitions CRUD, the plan-preset draft, cron validation, schedule sync and fit, both estimate routes, the coverage check, the confirmation rule
 
 **Files:**
 - Create: `apps/api/src/read/space.ts`, `src/read/definitions.ts`, `src/routes/definitions.ts`
-- Modify: `apps/api/src/routes/index.ts`
+- Modify: `apps/api/src/routes/index.ts`, `apps/api/test/bootstrap/app.matrix.test.ts`
 - Test: `apps/api/test/routes/definitions.test.ts`
 
 **Interfaces:**
-- Consumes: `DefinitionsRepo.create/update/get/list/softDelete/setConfirmed` (WP3, WP7 Task 7.13); `engine.estimate`, `engine.budgetFit`, `engine.coverageCheck`, `engine.scheduler.register/unregister`, `parseCron` (WP7); `resolveWindow`, `countCells`, `daysBetween`, `validateSearchSpace` (WP1); `PENCE_TO_MICRO`; `definitionCreateRequestSchema`, `definitionUpdateRequestSchema`, `definitionResponseSchema`, `estimateResponseSchema`, `coverageCheckRequestSchema`, `coverageCheckResponseSchema` (core).
-- Produces: `isDraft`, `currentSpace`, `cellInSpace`, `airportLookup`, `definitionResponse`, `deletedResponse`, `needsConfirmation`, `confirmationRequired`, `covers`, `SOFT_CONFIRM_CALL_SHARE`, `mergeDefinition`, `inputOf`, `ZERO_BUDGET_FIT`, `syncSchedule`, `validateForSave`; routes `GET/POST /api/definitions`, `GET/PUT/DELETE /api/definitions/:id`, `POST /api/definitions/estimate`, `POST /api/definitions/:id/estimate`, `POST /api/definitions/coverage-check`.
+- Consumes: `DefinitionsRepo.create/update/get/list/softDelete/setConfirmed` (WP3, WP7); `engine.estimate`, `engine.budgetFit`, `engine.coverageCheck`, `engine.scheduler.register/unregister`, `parseCron`, `confirmationOf`, `SOFT_CONFIRM_CALL_SHARE` (WP7); `resolveWindow`, `countCells`, `daysBetween`, `validateSearchSpace` (WP1); `PENCE_TO_MICRO`, `budgetScopeLabel`; `definitionCreateOptionalSchema`, `definitionCreateRequestSchema`, `definitionUpdateRequestSchema`, `definitionResponseSchema`, `estimateResponseSchema`, `coverageCheckRequestSchema`, `coverageCheckResponseSchema` (core).
+- Produces: `isDraft`, `currentSpace`, `cellInSpace`, `airportLookup`, `definitionResponse`, `deletedResponse`, `needsConfirmation`, `confirmationRequired`, `storedCovers`, `sentCovers`, `mergeDefinition`, `inputOf`, `ZERO_BUDGET_FIT`, `syncSchedule`, `validateForSave`; routes `GET/POST /api/definitions`, `GET/PUT/DELETE /api/definitions/:id`, `POST /api/definitions/estimate`, `POST /api/definitions/:id/estimate`, `POST /api/definitions/coverage-check`.
 
 **`POST /api/definitions` with no body** (spec §10, §8.2, §11): `201` with the response for a newly persisted **draft** built by `defaultDefinitionInput`: no airports, `enabled: false`, `confirmedCostPence` and `confirmedCalls` null, `estimate: null`, `budgetFit: { fits: true, runsPerMonth: 0, perScope: [] }`, `needsConfirmation: null`, `notices: [API_TEXT.draftNotice]`; no cron job is registered (Task 8.0 lets the stored shape hold it). A draft can be renamed or edited but not enabled (`422 draft_cannot_enable`), estimated (`422 draft_definition`) or run.
 
-**Confirmation** (spec §7, decisions 25, 37, 42, 43): create and PUT bodies may carry `confirmedCostPence` and `confirmedCalls`, the operator's explicit confirmation. The route stores both with `DefinitionsRepo.setConfirmed(id, { pence, calls })` only when both are sent and both cover the current estimate (`pence × 10 000 ≥ totalCostMicroGbp` and `calls ≥ totalCalls`; the estimate is the engine's worst case without reuse, which a start compares against); otherwise nothing is stored. Nothing else writes them. `needsConfirmation` is `{ estimateMicroGbp, totalCalls, confirmedCostPence, confirmedCalls }` when a run needs a confirmation — the estimate above `SOFT_CONFIRM`, or one provider's runnable calls above 20% of its window cap (`SOFT_CONFIRM_CALL_SHARE`, the engine's share; §13) — and the stored one does not cover both; else `null`.
+**Confirmation** (spec §7, decisions 25, 37, 42, 43, 53, 54). A run needs one when its runnable cost (lines no cap blocks, as WP7's pre-start check sums them) is above `SOFT_CONFIRM`, or one provider's runnable calls are above WP7's `SOFT_CONFIRM_CALL_SHARE` of that provider's window cap. `needsConfirmation` is then `{ estimateMicroGbp, totalCalls, confirmedCostPence, confirmedCalls }` with the **worst-case** figures of WP7's `confirmationOf(estimate)` — every line, blocked ones included — unless the stored confirmation covers the runnable lines in pence and in calls; else null. Create and PUT bodies may carry `confirmedCostPence` and `confirmedCalls`, the operator's explicit confirmation: when both are sent and both are at least the worst-case figures, the route stores `confirmationOf(estimate)` itself with `DefinitionsRepo.setConfirmed` (so a provider back from a cap next month is still covered, and a larger figure the operator typed is not what is stored); otherwise nothing is stored. Nothing else writes them.
 
-**Schedule** (spec §8.2, decision 25): cron is validated by the engine's `parseCron`, the sole validator (422 `invalid_cron` with `details.fields`); a save that turns a schedule on or changes it is refused with 422 `schedule_over_budget` while any `provider-month:` scope of the engine's `budgetFit` does not fit; create, PUT, disable, enable and delete (re)register the job in the same request.
+**Validation** (spec §8.2, §5.5): cron by the engine's `parseCron`, the sole validator (422 `invalid_cron` with `details.fields`); every named provider must be configured (422 `unknown_provider`: a production config never offers `fixture`); a window resolving to zero cells is 422 `zero_cells`; the rest of `validateSearchSpace` is 422 `invalid_definition` with its fields; a save that turns a schedule on or changes it is refused with 422 `schedule_over_budget` while any provider-month scope of the engine's `budgetFit` does not fit, matched by `budgetScopeLabel` (review arch-011). Create, PUT, disable, enable and delete (re)register the job in the same request. PUT merges the update into the stored definition field by field (`mergeDefinition`: an absent field keeps its value, `null` is a value) and validates the merged definition, so a partial update cannot bypass a refinement. A malformed JSON body is the 400 `validation` envelope.
 
-**PUT** merges the update into the stored definition field by field (`mergeDefinition`: an absent field keeps its value, `null` is a value) and validates the merged definition, so a partial update cannot bypass a refinement. A malformed JSON body is a 400 `validation` envelope (Hono's `HTTPException` mapped by `onError`). A window resolving to zero cells is 422 `zero_cells`; the rest of `validateSearchSpace` is 422 `invalid_definition` with its fields.
+**One at a time** (decision 54, review SEC-5): both estimates and the coverage check run inside `oneAtATime`, keyed by the definition's id, or `estimate:unsaved` and `coverage-check` for requests that name no saved definition; a second while one is in flight is 429 `already_running`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3531,11 +4568,12 @@ git add -A apps/api packages && git commit -m "wp08: health detail, airports, pr
 // Spec §8.2, §10 definitions CRUD, the plan-preset draft, cron validation, schedule sync, both estimate routes, the
 // coverage check; the confirmation rule (spec §7, plan decisions 25, 37, 42, 43).
 import { apiContract, asIata, asIsoDate, asIsoMonth, type Estimate } from '@gmt/core';
+import { confirmationOf, SOFT_CONFIRM_CALL_SHARE } from '@gmt/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { API_TEXT } from '../../src/text.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { SENTINEL_TP } from '../helpers/env.js';
-import { exampleDefinitionInput } from '../helpers/examples.js';
+import { exampleDefinitionInput, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 
 let h: Harness | undefined;
@@ -3549,9 +4587,21 @@ async function harness(env: Record<string, string> = {}): Promise<Harness> {
 }
 
 const DEF = apiContract.definitionResponseSchema;
-const estimateOf = (totalCostMicroGbp: number, totalCalls = 10): Estimate => ({
+type Line = Estimate['perProvider'][number];
+const line = (costMicroGbp: number, calls: number, blocked: string | null = null): Line => ({
+  providerId: 'fixture',
+  stage: blocked === null ? 'discovery' : 'verification',
+  calls,
+  planCalls: calls,
+  costMicroGbp,
+  costPence: Math.ceil(costMicroGbp / 10_000),
+  seconds: 1,
+  blocked,
+});
+/** An estimate of one runnable line (and, when given, more lines; WP7 sums the shown totals over runnable ones). */
+const estimateOf = (totalCostMicroGbp: number, totalCalls = 10, extra: Line[] = []): Estimate => ({
   cells: 10,
-  perProvider: [],
+  perProvider: [line(totalCostMicroGbp, totalCalls), ...extra],
   totalCalls,
   totalPlanCalls: 9,
   totalCostMicroGbp,
@@ -3747,24 +4797,51 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
     const x = await harness();
     const cap = x.ports.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).cap ?? 0;
     expect(cap).toBeGreaterThan(0);
-    const heavy: Estimate = {
-      ...estimateOf(0, cap),
-      perProvider: [
-        {
-          providerId: 'fixture',
-          stage: 'discovery',
-          calls: cap,
-          planCalls: cap,
-          costMicroGbp: 0,
-          costPence: 0,
-          seconds: 1,
-          blocked: null,
-        },
-      ],
-    };
-    vi.spyOn(x.engine, 'estimate').mockReturnValue(heavy);
+    vi.spyOn(x.engine, 'estimate').mockReturnValue(
+      estimateOf(0, Math.floor(SOFT_CONFIRM_CALL_SHARE * cap) + 1),
+    );
     const d = await create(x, exampleDefinitionInput());
-    expect(d.needsConfirmation).toMatchObject({ estimateMicroGbp: 0, totalCalls: cap });
+    expect(d.needsConfirmation).toMatchObject({ estimateMicroGbp: 0 });
+    vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, Math.floor(SOFT_CONFIRM_CALL_SHARE * cap)));
+    expect((await create(x, exampleDefinitionInput())).needsConfirmation).toBeNull();
+  });
+
+  it('shows and stores the worst case over every line, blocked ones included (WP7 confirmationOf, decision 54)', async () => {
+    const x = await harness();
+    // a runnable 300p / 30-call line and a 200p / 10-call line a cap blocks today
+    vi.spyOn(x.engine, 'estimate').mockReturnValue({
+      ...estimateOf(3_000_000, 30, [line(2_000_000, 10, 'provider-month')]),
+    });
+    const created = await create(x, exampleDefinitionInput());
+    expect(created.needsConfirmation).toMatchObject({ estimateMicroGbp: 5_000_000, totalCalls: 40 });
+    const put = (json: unknown) =>
+      x
+        .request(`/api/definitions/${created.id}`, { method: 'PUT', json })
+        .then((r) => expectContract(r, 'PUT', '/api/definitions/:id', DEF));
+    expect((await put({ confirmedCostPence: 300, confirmedCalls: 30 })).confirmedCostPence).toBeNull();
+    // why: what is stored is the worst case itself, not the operator's larger figure (WP7's confirmationOf)
+    expect(await put({ confirmedCostPence: 900, confirmedCalls: 90 })).toMatchObject({
+      confirmedCostPence: 500,
+      confirmedCalls: 40,
+      needsConfirmation: null,
+    });
+  });
+
+  it('with the real engine: an over-threshold run needs a confirmation, and a confirmation of its figures clears it', async () => {
+    // why: review TS-1: the rule runs against a real estimate, not a mocked one (the fixture billed at 10p a call)
+    const x = await harness({ FIXTURE_COST_MICRO_GBP: '100000' });
+    const created = await create(
+      x,
+      exampleDefinitionInput({ window: SMALL_WINDOW, minNights: 10, maxNights: 10 }),
+    );
+    const worst = confirmationOf(x.engine.estimate(created, x.clock.todayLondon()));
+    expect(worst.pence).toBeGreaterThan(100);
+    expect(created.needsConfirmation).toMatchObject({ totalCalls: worst.calls, confirmedCostPence: null });
+    const put = await x.request(`/api/definitions/${created.id}`, {
+      method: 'PUT',
+      json: { confirmedCostPence: worst.pence, confirmedCalls: worst.calls },
+    });
+    expect((await expectContract(put, 'PUT', '/api/definitions/:id', DEF)).needsConfirmation).toBeNull();
   });
 
   it('404 for an unknown definition', async () => {
@@ -3851,6 +4928,24 @@ describe('estimates and the coverage check', () => {
     expect(body.pairs[0]?.months[0]?.cachedRows).toBeNull();
     expect(spy).toHaveBeenCalledTimes(1);
   });
+
+  it('one coverage check at a time (decision 54): a second while one runs is 429 already_running', async () => {
+    const x = await harness({ TRAVELPAYOUTS_TOKEN: SENTINEL_TP });
+    let release: (() => void) | undefined;
+    vi.spyOn(x.engine, 'coverageCheck')
+      .mockResolvedValue({ pairs: [], calls: 0, notes: [] })
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (release = () => resolve({ pairs: [], calls: 0, notes: [] }))),
+      );
+    const first = x.request('/api/definitions/coverage-check', { json: coverageBody });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const second = await x.request('/api/definitions/coverage-check', { json: coverageBody });
+    expect(second.status).toBe(429);
+    expect((await errorOf(second)).code).toBe('already_running');
+    release?.();
+    expect((await first).status).toBe(200);
+    expect((await x.request('/api/definitions/coverage-check', { json: coverageBody })).status).toBe(200);
+  });
 });
 ```
 
@@ -3931,6 +5026,7 @@ import {
   type ProviderId,
   type SearchDefinition,
 } from '@gmt/core';
+import { confirmationOf, SOFT_CONFIRM_CALL_SHARE } from '@gmt/engine';
 import type { z } from 'zod';
 import type { RouteContext } from '../routes/types.js';
 import { API_TEXT } from '../text.js';
@@ -3943,44 +5039,63 @@ export type DefinitionResponse = z.infer<typeof apiContract.definitionResponseSc
 /** The budgetFit of a draft: nothing to search, nothing to fit. */
 export const ZERO_BUDGET_FIT: BudgetFit = { fits: true, runsPerMonth: 0, perScope: [] };
 
-/**
- * Decision 25: a run whose calls for one provider exceed this share of that provider's window cap asks for a
- * confirmation even when it costs nothing. why: the same share as WP7's pre-start check, so the form asks exactly when
- * a start would be refused with `confirm` (§13 asks WP7 to export its constant so one copy remains).
- */
-export const SOFT_CONFIRM_CALL_SHARE = 0.2;
-
-/** One explicit operator confirmation, as stored (`confirmed_cost_pence`, `confirmed_calls`). */
+/** A confirmation as stored (`confirmed_cost_pence`, `confirmed_calls`), or as sent with a create, PUT or start. */
 export interface Confirmation {
   pence: number | null;
   calls: number | null;
 }
 
-/** Decisions 37, 43: a confirmation covers an estimate only when both its pence and its calls suffice. */
-export function covers(c: Confirmation, estimate: Estimate): boolean {
-  return (
-    c.pence !== null &&
-    c.calls !== null &&
-    c.pence * PENCE_TO_MICRO >= estimate.totalCostMicroGbp &&
-    c.calls >= estimate.totalCalls
-  );
+/** The lines a start would run (a line a budget cap blocks is left out), summed as WP7's pre-start check sums them. */
+function runnable(e: Estimate): {
+  costMicroGbp: number;
+  calls: number;
+  perProvider: Map<ProviderId, number>;
+} {
+  const lines = e.perProvider.filter((p) => p.blocked === null);
+  const perProvider = new Map<ProviderId, number>();
+  for (const p of lines) perProvider.set(p.providerId, (perProvider.get(p.providerId) ?? 0) + p.calls);
+  return {
+    costMicroGbp: lines.reduce((a, p) => a + p.costMicroGbp, 0),
+    calls: lines.reduce((a, p) => a + p.calls, 0),
+    perProvider,
+  };
 }
 
-/** Spec §8.1, decision 25: the estimate is above SOFT_CONFIRM, or one provider's runnable calls are a heavy share of its cap. */
+/**
+ * Spec §8.1, decision 25: a run needs a confirmation when its runnable cost is above SOFT_CONFIRM, or one provider's
+ * runnable calls are more than WP7's `SOFT_CONFIRM_CALL_SHARE` of that provider's window cap (decision 53: the engine's
+ * constant, so the form asks exactly when a start would be refused with `confirm`).
+ */
 export function confirmationRequired(estimate: Estimate, ports: Ports): boolean {
-  if (estimate.totalCostMicroGbp > ports.config.spend.softConfirmMicroGbp) return true;
-  const calls = new Map<ProviderId, number>();
-  for (const p of estimate.perProvider)
-    if (p.blocked === null) calls.set(p.providerId, (calls.get(p.providerId) ?? 0) + p.calls);
-  return [...calls].some(([id, n]) => {
+  const r = runnable(estimate);
+  if (r.costMicroGbp > ports.config.spend.softConfirmMicroGbp) return true;
+  return [...r.perProvider].some(([id, n]) => {
     const cap = ports.budget.usage(windowScope(ports.config, id)).cap;
     return cap !== null && n > SOFT_CONFIRM_CALL_SHARE * cap;
   });
 }
 
+/** Decisions 37, 43: a stored confirmation covers a run only when its pence and its calls both cover the runnable lines. */
+export function storedCovers(c: Confirmation, estimate: Estimate): boolean {
+  const r = runnable(estimate);
+  return (
+    c.pence !== null && c.calls !== null && c.pence * PENCE_TO_MICRO >= r.costMicroGbp && c.calls >= r.calls
+  );
+}
+
 /**
- * `needsConfirmation` (decision 42 shape): the estimate's cost and calls with the stored confirmation, when a run needs
- * one and the stored confirmation does not cover both; else null. Never writes the confirmation (spec §7).
+ * Decision 54 with WP7's `confirmationOf`: an operator's sent confirmation covers the definition when it names at
+ * least the worst-case figures (every line, blocked ones included) — the figures `needsConfirmation` shows and the
+ * store records, so a provider back from a cap next month is still covered.
+ */
+export function sentCovers(c: Confirmation, estimate: Estimate): boolean {
+  const worst = confirmationOf(estimate);
+  return c.pence !== null && c.calls !== null && c.pence >= worst.pence && c.calls >= worst.calls;
+}
+
+/**
+ * `needsConfirmation` (decision 42 shape): the worst-case figures to confirm, with the stored confirmation, when a run
+ * needs one and the stored confirmation does not cover it; else null. Never writes the confirmation (spec §7).
  */
 export function needsConfirmation(
   def: Pick<SearchDefinition, 'confirmedCostPence' | 'confirmedCalls'>,
@@ -3988,10 +5103,11 @@ export function needsConfirmation(
   ports: Ports,
 ): DefinitionResponse['needsConfirmation'] {
   if (!confirmationRequired(estimate, ports)) return null;
-  if (covers({ pence: def.confirmedCostPence, calls: def.confirmedCalls }, estimate)) return null;
+  if (storedCovers({ pence: def.confirmedCostPence, calls: def.confirmedCalls }, estimate)) return null;
+  const worst = confirmationOf(estimate);
   return {
-    estimateMicroGbp: estimate.totalCostMicroGbp,
-    totalCalls: estimate.totalCalls,
+    estimateMicroGbp: estimate.perProvider.reduce((a, p) => a + p.costMicroGbp, 0),
+    totalCalls: worst.calls,
     confirmedCostPence: def.confirmedCostPence,
     confirmedCalls: def.confirmedCalls,
   };
@@ -4096,25 +5212,31 @@ export function inputOf(def: SearchDefinition): DefinitionInput {
 /** Spec §10 definitions CRUD, both estimate routes and the coverage check; spec §8.2 schedule sync. */
 import {
   apiContract,
+  budgetScopeLabel,
   countCells,
   type DefinitionInput,
   type SearchDefinition,
   validateSearchSpace,
 } from '@gmt/core';
-import { parseCron } from '@gmt/engine';
+import { confirmationOf, parseCron } from '@gmt/engine';
 import { defaultDefinitionInput } from '../defaults.js';
 import { ApiError, fieldsDetail, issuesToFields } from '../errors.js';
 import {
-  covers,
   definitionResponse,
   deletedResponse,
   inputOf,
   mergeDefinition,
+  sentCovers,
 } from '../read/definitions.js';
 import { airportLookup, currentSpace, isDraft } from '../read/space.js';
 import { API_TEXT } from '../text.js';
-import { getLiveDefinition, param, parseWith } from './shared.js';
+import { NO_INPUT, plain, route } from './define.js';
+import { getLiveDefinition, oneAtATime, param } from './shared.js';
 import type { HandlerTable, RouteContext } from './types.js';
+
+/** The fixed in-flight key of the requests that name no saved definition (decision 54). */
+const UNSAVED_ESTIMATE = 'estimate:unsaved';
+const COVERAGE_CHECK = 'coverage-check';
 
 /** The explicit confirmation a create or update body may carry (decisions 37, 42). */
 interface SentConfirmation {
@@ -4123,9 +5245,10 @@ interface SentConfirmation {
 }
 
 /**
- * Spec §7, decisions 37 and 43: the stored confirmation is set only from an explicit operator value carrying both pence
- * and calls, and only when both cover the current estimate (the worst case without reuse that a start compares
- * against); otherwise nothing is stored and the response carries needsConfirmation.
+ * Spec §7, decisions 37, 43 and 54: the stored confirmation is set only from an explicit operator value carrying both
+ * pence and calls that cover the worst-case figures, and what is stored is WP7's `confirmationOf(estimate)` (every
+ * line, blocked ones included), never the shown totals; otherwise nothing is stored and the response carries
+ * needsConfirmation.
  */
 function applyConfirmation(
   def: SearchDefinition,
@@ -4135,9 +5258,10 @@ function applyConfirmation(
   const { confirmedCostPence: pence, confirmedCalls: calls } = sent;
   if (pence === undefined || calls === undefined || isDraft(def)) return def;
   const estimate = ctx.engine.estimate(def, ctx.ports.clock.todayLondon());
-  if (!covers({ pence, calls }, estimate)) return def;
-  ctx.ports.repos.definitions.setConfirmed(def.id, { pence, calls });
-  return { ...def, confirmedCostPence: pence, confirmedCalls: calls };
+  if (!sentCovers({ pence, calls }, estimate)) return def;
+  const worst = confirmationOf(estimate);
+  ctx.ports.repos.definitions.setConfirmed(def.id, worst);
+  return { ...def, confirmedCostPence: worst.pence, confirmedCalls: worst.calls };
 }
 
 /** Spec §10 estimate routes: `{ estimate, budgetFit }` so the form shows both before the create click. */
@@ -4167,9 +5291,10 @@ function scheduleChanges(next: DefinitionInput, before: SearchDefinition | null)
 
 /**
  * Save-time validation of the whole (merged) definition: cron through the scheduler's `parseCron` (spec §8.2, the sole
- * validator), drafts may not be enabled, then the contract shape, zero-cell windows (422, spec §6.1),
- * `validateSearchSpace` (airports, metro codes, nights, caps, alwaysInclude) and, when the save turns a schedule on or
- * changes it, the monthly fit of every provider-month scope (decision 25). Returns the parsed definition.
+ * validator), drafts may not be enabled, every named provider must be configured (a production config never offers
+ * `fixture`, spec §5.5), then the contract shape, zero-cell windows (422, spec §6.1), `validateSearchSpace` (airports,
+ * metro codes, nights, caps, alwaysInclude) and, when the save turns a schedule on or changes it, the monthly fit of
+ * every provider-month scope (decision 25), matched by core's scope label (decision 54).
  */
 export function validateForSave(
   def: DefinitionInput,
@@ -4184,6 +5309,17 @@ export function validateForSave(
         'invalid_cron',
         API_TEXT.invalidCron(cron.reason),
         fieldsDetail([{ field: 'scheduleCron', message: cron.reason }]),
+      );
+  }
+  const configured = new Set(ctx.ports.providers.map((p) => p.id));
+  for (const stage of ['discovery', 'verification'] as const) {
+    const unknown = def.providers[stage].find((id) => !configured.has(id));
+    if (unknown !== undefined)
+      throw new ApiError(
+        422,
+        'unknown_provider',
+        API_TEXT.unknownProvider(unknown),
+        fieldsDetail([{ field: `providers.${stage}`, message: API_TEXT.unknownProvider(unknown) }]),
       );
   }
   if (isDraft(def)) {
@@ -4221,9 +5357,12 @@ export function validateForSave(
   if (!v.ok)
     throw new ApiError(422, 'invalid_definition', API_TEXT.invalidDefinition, fieldsDetail(v.errors));
   if (scheduleChanges(def, before)) {
+    const monthScopes = new Set(
+      ctx.ports.providers.map((p) => budgetScopeLabel({ kind: 'provider-month', providerId: p.id })),
+    );
     const over = ctx.engine
       .budgetFit(def)
-      .perScope.filter((s) => s.scope.startsWith('provider-month:') && !s.fits)
+      .perScope.filter((s) => monthScopes.has(s.scope) && !s.fits)
       .map((s) => s.scope);
     if (over.length > 0)
       throw new ApiError(
@@ -4237,81 +5376,84 @@ export function validateForSave(
 }
 
 export const definitionHandlers: HandlerTable = {
-  'GET /api/definitions': (c, _input, ctx) =>
+  'GET /api/definitions': plain((c, _input, ctx) =>
     c.json(ctx.ports.repos.definitions.list().map((d) => definitionResponse(d, ctx))),
+  ),
 
-  'POST /api/definitions': (c, input, ctx) => {
-    // why: spec §10: no body creates the plan-aware default, a draft without airports.
-    if (c.get('optionalBody')?.present !== true) {
-      const draft = ctx.ports.repos.definitions.create(
-        validateForSave(defaultDefinitionInput(ctx.ports.config, ctx.ports.providers), ctx, null),
+  'POST /api/definitions': route(
+    { request: apiContract.definitionCreateOptionalSchema, query: NO_INPUT },
+    (c, { body }, ctx) => {
+      // why: spec §10: no body creates the plan-aware default, a draft without airports.
+      if (body === undefined) {
+        const draft = ctx.ports.repos.definitions.create(
+          validateForSave(defaultDefinitionInput(ctx.ports.config, ctx.ports.providers), ctx, null),
+        );
+        return c.json(definitionResponse(draft, ctx), 201);
+      }
+      const { confirmedCostPence, confirmedCalls, ...def } = body;
+      const created = applyConfirmation(
+        ctx.ports.repos.definitions.create(validateForSave(def, ctx, null)),
+        { confirmedCostPence, confirmedCalls },
+        ctx,
       );
-      return c.json(definitionResponse(draft, ctx), 201);
-    }
-    const { confirmedCostPence, confirmedCalls, ...def } = parseWith(
-      apiContract.definitionCreateRequestSchema,
-      input.body,
-    );
-    const created = applyConfirmation(
-      ctx.ports.repos.definitions.create(validateForSave(def, ctx, null)),
-      { confirmedCostPence, confirmedCalls },
-      ctx,
-    );
-    syncSchedule(created, ctx);
-    return c.json(definitionResponse(created, ctx), 201);
-  },
+      syncSchedule(created, ctx);
+      return c.json(definitionResponse(created, ctx), 201);
+    },
+  ),
 
-  'POST /api/definitions/estimate': (c, input, ctx) => {
-    const {
-      confirmedCostPence: _p,
-      confirmedCalls: _c,
-      ...def
-    } = parseWith(apiContract.definitionCreateRequestSchema, input.body);
-    // why: the unsaved body is estimated, not scheduled, so its enabled flag and schedule fit do not matter here.
-    validateForSave({ ...def, enabled: false }, ctx, null);
-    return c.json(estimateResponse(def, ctx));
-  },
+  'POST /api/definitions/estimate': route(
+    { request: apiContract.definitionCreateRequestSchema, query: NO_INPUT },
+    (c, { body }, ctx) =>
+      oneAtATime(ctx, UNSAVED_ESTIMATE, () => {
+        const { confirmedCostPence: _p, confirmedCalls: _c, ...def } = body;
+        // why: the unsaved body is estimated, not scheduled, so its enabled flag and schedule fit do not matter here.
+        validateForSave({ ...def, enabled: false }, ctx, null);
+        return c.json(estimateResponse(def, ctx));
+      }),
+  ),
 
-  'GET /api/definitions/:id': (c, input, ctx) =>
+  'GET /api/definitions/:id': plain((c, input, ctx) =>
     c.json(definitionResponse(getLiveDefinition(ctx, param(input, 'id')), ctx)),
+  ),
 
-  'PUT /api/definitions/:id': (c, input, ctx) => {
-    const existing = getLiveDefinition(ctx, param(input, 'id'));
-    const { confirmedCostPence, confirmedCalls, ...patch } = parseWith(
-      apiContract.definitionUpdateRequestSchema,
-      input.body,
-    );
-    const merged = validateForSave(mergeDefinition(inputOf(existing), patch), ctx, existing);
-    const updated = applyConfirmation(
-      ctx.ports.repos.definitions.update(existing.id, merged),
-      { confirmedCostPence, confirmedCalls },
-      ctx,
-    );
-    syncSchedule(updated, ctx);
-    return c.json(definitionResponse(updated, ctx));
-  },
+  'PUT /api/definitions/:id': route(
+    { request: apiContract.definitionUpdateRequestSchema, query: NO_INPUT },
+    (c, input, ctx) => {
+      const existing = getLiveDefinition(ctx, param(input, 'id'));
+      const { confirmedCostPence, confirmedCalls, ...patch } = input.body;
+      const merged = validateForSave(mergeDefinition(inputOf(existing), patch), ctx, existing);
+      const updated = applyConfirmation(
+        ctx.ports.repos.definitions.update(existing.id, merged),
+        { confirmedCostPence, confirmedCalls },
+        ctx,
+      );
+      syncSchedule(updated, ctx);
+      return c.json(definitionResponse(updated, ctx));
+    },
+  ),
 
-  'DELETE /api/definitions/:id': (c, input, ctx) => {
+  'DELETE /api/definitions/:id': plain((c, input, ctx) => {
     const existing = getLiveDefinition(ctx, param(input, 'id'));
     ctx.ports.repos.definitions.softDelete(existing.id);
     ctx.engine.scheduler.unregister(existing.id);
     return c.json(deletedResponse(existing, ctx));
-  },
+  }),
 
-  'POST /api/definitions/:id/estimate': (c, input, ctx) => {
+  'POST /api/definitions/:id/estimate': plain((c, input, ctx) => {
     const def = getLiveDefinition(ctx, param(input, 'id'));
     if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
-    return c.json(estimateResponse(def, ctx));
-  },
+    return oneAtATime(ctx, def.id, () => c.json(estimateResponse(def, ctx)));
+  }),
 
-  'POST /api/definitions/coverage-check': async (c, input, ctx) => {
-    // why: spec §10: the check runs free Travelpayouts month tiles and never calls a billed provider.
-    if (!ctx.ports.providers.some((p) => p.id === 'travelpayouts'))
-      throw new ApiError(409, 'coverage_check_unavailable', API_TEXT.coverageCheckUnavailable);
-    return c.json(
-      await ctx.engine.coverageCheck(parseWith(apiContract.coverageCheckRequestSchema, input.body)),
-    );
-  },
+  'POST /api/definitions/coverage-check': route(
+    { request: apiContract.coverageCheckRequestSchema, query: NO_INPUT },
+    (c, { body }, ctx) => {
+      // why: spec §10: the check runs free Travelpayouts month tiles and never calls a billed provider.
+      if (!ctx.ports.providers.some((p) => p.id === 'travelpayouts'))
+        throw new ApiError(409, 'coverage_check_unavailable', API_TEXT.coverageCheckUnavailable);
+      return oneAtATime(ctx, COVERAGE_CHECK, async () => c.json(await ctx.engine.coverageCheck(body)));
+    },
+  ),
 };
 ```
 
@@ -4329,18 +5471,114 @@ export const HANDLERS: HandlerTable = {
 };
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+The boot matrix gains its production row for a definition naming `fixture` (spec §5.5; it needs this task's route):
 
-Run: `pnpm --filter @gmt/api exec vitest run test/routes/definitions.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 16 tests; typecheck clean.
+`apps/api/test/bootstrap/app.matrix.test.ts` — find:
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A apps/api packages && git commit -m "wp08: definitions CRUD, plan-preset draft, confirmation in pence and calls, cron and schedule-fit validation, estimates, coverage check"
+```ts
+import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
 ```
 
-### Task 8.10: Executions: start, read, cancel, resume; single-cell verify with membership validation
+`apps/api/test/bootstrap/app.matrix.test.ts` — replace with:
+
+```ts
+import { errorOf } from '../helpers/contract.js';
+import { cleanEnv, SENTINEL_AUTH, silentLog } from '../helpers/env.js';
+import { exampleDefinitionInput } from '../helpers/examples.js';
+```
+
+`apps/api/test/bootstrap/app.matrix.test.ts` — find:
+
+```ts
+  it('development with the phrase but a plain .db path offers no fixture', async () => {
+```
+
+`apps/api/test/bootstrap/app.matrix.test.ts` — replace with:
+
+```ts
+  it('production refuses a definition naming the fixture provider with 422 unknown_provider', async () => {
+    const running = await bootWith(envFor({}));
+    try {
+      const refused = await running.app.request('http://localhost:3000/api/definitions', {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3000',
+          authorization: basic('operator', SENTINEL_AUTH),
+          'content-type': 'application/json',
+          'x-requested-with': 'get-me-there',
+        },
+        body: JSON.stringify(exampleDefinitionInput()),
+      });
+      expect(refused.status).toBe(422);
+      expect((await errorOf(refused)).code).toBe('unknown_provider');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('development with the phrase but a plain .db path offers no fixture', async () => {
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `pnpm --filter @gmt/api exec vitest run test/routes/definitions.test.ts test/bootstrap/app.matrix.test.ts && pnpm --filter @gmt/api typecheck`
+Expected: PASS, 19 + 14 tests (the definitions suite, including the real-engine confirmation test, and the boot matrix with its new row); typecheck clean.
+
+- [ ] **Step 5: See the tests bite**
+
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.9a**: in `apps/api/src/routes/definitions.ts` replace
+
+```ts
+  ctx.ports.repos.definitions.setConfirmed(def.id, worst);
+  return { ...def, confirmedCostPence: worst.pence, confirmedCalls: worst.calls };
+```
+
+  with
+
+```ts
+  ctx.ports.repos.definitions.setConfirmed(def.id, { pence, calls });
+  return { ...def, confirmedCostPence: pence, confirmedCalls: calls };
+```
+
+  Fails: “shows and stores the worst case over every line, blocked ones included (WP7 confirmationOf, decision 54)”.
+
+- **8.9b**: in `apps/api/src/routes/definitions.ts` replace
+
+```ts
+return oneAtATime(ctx, COVERAGE_CHECK, async
+```
+
+  with
+
+```ts
+return oneAtATime(ctx, `${COVERAGE_CHECK}:${Math.random()}`, async
+```
+
+  Fails: “one coverage check at a time (decision 54): a second while one runs is 429 already_running”.
+
+- **8.9c**: in `apps/api/src/routes/definitions.ts` replace
+
+```ts
+    if (unknown !== undefined)
+```
+
+  with
+
+```ts
+    if (unknown !== undefined && false)
+```
+
+  Fails: “production refuses a definition naming the fixture provider with 422 unknown_provider”.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: definitions CRUD, plan-preset draft, worst-case confirmation, cron, provider and schedule-fit validation, estimates, coverage check, one at a time"
+```
+
+### Task 8.10: Executions: start, read, cancel, resume; single-cell verify with membership validation; one at a time
 
 **Files:**
 - Create: `apps/api/test/helpers/seed.ts`, `apps/api/src/read/executions.ts`, `src/routes/executions.ts`
@@ -4348,12 +5586,14 @@ git add -A apps/api packages && git commit -m "wp08: definitions CRUD, plan-pres
 - Test: `apps/api/test/routes/executions.test.ts`
 
 **Interfaces:**
-- Consumes: `engine.start` (`StartOptions` with `confirmCostPence` and `confirmCalls`), `engine.resume/cancel/verifyCell`, `StartResult` (WP7); `ExecutionsRepo.get`, `CellsRepo.buckets/outcomes`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent` (WP3); `microGbpToPence`; `executionResponseSchema`, `startExecutionRequestSchema`, `startExecutionResponseSchema`, `verifyCellRequestSchema` (core).
-- Produces: `executionResponse`, `executionSummary` (with the snapshot's `expandTop`, Task 8.0), `overrunOf`, `planCallsOf`, `OVERRUN_TOLERANCE`, `hoursSince`, `startError`; routes `POST /api/definitions/:id/executions`, `GET /api/executions/:id`, `POST /api/executions/:id/cancel`, `POST /api/executions/:id/resume`, `POST /api/cells/verify`; test-only `seeder(ports)` (`execution`, `cells`, `tile`, `tileError`, `reuse`, `verified`, `routeLowest`, `id`), `cell`, `at`.
+- Consumes: `engine.start` (`StartOptions` with `confirmCostPence` and `confirmCalls`), `engine.resume/cancel`, `engine.verifyCell(definitionId, cell, opts)` with `VerifyCellOptions`, `StartResult` (WP7); `ExecutionsRepo.get`, `CellsRepo.buckets/outcomes`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent`, `RowRejected` (WP3); the real `BudgetGuard` (`reserve(...).finalise(...)`) for test ledger rows; `microGbpToPence`, `PRICE_UNCONFIRMED`; `executionResponseSchema`, `startExecutionRequestSchema`, `startExecutionResponseSchema`, `verifyCellRequestSchema` (core).
+- Produces: `executionResponse`, `executionSummary` (with the snapshot's `expandTop`), `overrunOf`, `planCallsOf`, `OVERRUN_TOLERANCE`, `hoursSince`, `startError`; routes `POST /api/definitions/:id/executions`, `GET /api/executions/:id`, `POST /api/executions/:id/cancel`, `POST /api/executions/:id/resume`, `POST /api/cells/verify`; test-only `seeder(ports)` (`execution`, `cells`, `tile`, `tileError`, `reuse`, `verified`, `ledger`, `routeLowest`, `id`), `cell`, `at`.
 
-HTTP mapping of `StartResult` (spec §8.1, §10): `ok` → `202 { executionId }` for start and verify, `200` with the execution for resume and cancel; `not_found` → 404; `active`, `cap`, `confirm`, `disabled` → 409 with the engine's code, message and details (URL-stripped); `window` → 422. A start passes `confirmCostPence` and `confirmCalls` through only when sent (decisions 37, 43). `/resume` always passes `{ manual: true }`. `/api/cells/verify` checks, in order: the definition exists (404), it has a verification provider (422 `no_verification_provider`), the cell is in the current resolved space (422 `cell_not_in_space`), both airports exist (422 `unknown_airport`); the engine enforces one active child per cell (409 `active`). Execution reads add `overrun` (spec §8.1: more than 10% above the stored estimate's pre-factor `planCalls`, discovery judged on distinct tiles and verification on calls, decision 43), `parityBreak` (the operator notification was sent) and `disabledProviders`.
+HTTP mapping of `StartResult` (spec §8.1, §10): `ok` → `202 { executionId }` for start and verify, `200` with the execution for resume and cancel; `not_found` → 404; `active`, `cap`, `confirm`, `disabled` → 409 with the engine's code, message and details (URL-stripped); `window` → 422. WP3's `RowRejected('active')` from a start or verify that lost the race to create the execution is 409 `active` too (`onError`). A start and a verify pass `confirmCostPence` and `confirmCalls` through only when sent (decisions 37, 43, 54). `/resume` always passes `{ manual: true }`. Start, resume and verify run inside `oneAtATime` keyed by the definition (429 `already_running`, decision 54); another definition is never held up. `/api/cells/verify` checks, in order: the definition exists (404), it has a verification provider (422 `no_verification_provider`), the cell is in the current resolved space (422 `cell_not_in_space`), both airports exist (422 `unknown_airport`); the engine enforces one active child per cell (409 `active`). Execution reads add `overrun` (spec §8.1: more than 10% above the stored estimate's pre-factor `planCalls`, discovery judged on distinct tiles and verification on calls, decision 43), `parityBreak` (the operator notification was sent) and `disabledProviders`.
 
-`test/helpers/seed.ts` writes test data through WP3's atomic units (`writeTile`, `writeTileError`, `writeVerifiedCell`, `copyReused`), so route tests control every value while every repository invariant holds (synthetic gate, priced ⇔ price, roll-ups, unique keys); executions get generated ids, named in tests.
+The refusals are tested twice (review TS-1): once mapped from a mocked `StartResult`, and once through the real engine — a definition with a one-call cap is 409 `cap`, and a run above `SOFT_CONFIRM` (the fixture billed at 10p a call) is 409 `confirm` with its figures, in both cases with no ledger row and no started execution; resent with the refusal's `estimatePence` and `totalCalls`, the run starts. The overrun test reads real ledger rows written through the budget guard (review TS-6).
+
+`test/helpers/seed.ts` writes test data through WP3's atomic units (`writeTile`, `writeTileError`, `writeVerifiedCell`, `copyReused`) and the real budget guard, so route tests control every value while every repository invariant holds (synthetic gate, priced ⇔ price, roll-ups, unique keys, WP7's rule that a verified cell's price is its cheapest confirmed offer and a cell with none carries the `price-unconfirmed` reason); executions get generated ids, named in tests.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4367,6 +5607,7 @@ import {
   asIata,
   asIsoDate,
   type BaggageSnapshot,
+  type Booking,
   type Cabin,
   type CellKey,
   type DefinitionSnapshot,
@@ -4376,6 +5617,7 @@ import {
   isoDateTimeOfEpochMs,
   londonDateOf,
   type NormalisedItinerary,
+  PRICE_UNCONFIRMED,
   type ProviderId,
   resolveWindow,
   type SearchDefinition,
@@ -4427,6 +5669,8 @@ export interface SeedOffer {
   /** false: the final step did not confirm the price (no `price` supplied field, decisions 27, 37). */
   confirmed?: boolean;
   maxAgeHours?: number | 'unknown';
+  /** The stored booking, as an adapter wrote it; the api re-validates it on the way out (decision 54). */
+  booking?: Booking;
 }
 
 /** A synthetic itinerary for the cell: `stopsOut` clearly synthetic connection points (AAA, BBB), one inbound leg. */
@@ -4635,7 +5879,7 @@ export function seeder(ports: Ports) {
                 segmentCabins: [...itinerary.outbound, ...itinerary.inbound].map(() => CABIN),
                 baggage,
                 fareConditions: null,
-                booking: { kind: 'none' },
+                booking: o.booking ?? { kind: 'none' },
                 bookingExpiresAt: null,
                 suppliedFields,
                 partialExpansion: false,
@@ -4654,21 +5898,43 @@ export function seeder(ports: Ports) {
         };
       });
       const fetchedAt = [...offers.map((o) => o.fetchedAt)].sort()[0] ?? T0;
+      // why: WP7's write rule (decision 45): the cell's price is the cheapest confirmed one, and a cell with no
+      // confirmed offer carries the `price-unconfirmed` reason.
+      const confirmed = offers.filter((o) => o.confirmed !== false);
       repos.cells.writeVerifiedCell(id(name), PROVIDER, {
         cell: c,
         itineraries,
         outcome: {
           ...c,
           status: 'priced',
-          reason: null,
+          reason: confirmed.length === 0 ? PRICE_UNCONFIRMED : null,
           lastError: null,
           fetchedAt,
-          minPence: Math.min(...offers.map((o) => o.pricePence)),
+          minPence: Math.min(...(confirmed.length > 0 ? confirmed : offers).map((o) => o.pricePence)),
           cabin: CABIN,
           pointOfSale: POS,
           sourceKind: 'synthetic',
         },
       });
+    },
+
+    /**
+     * Ledger rows as http-kit leaves them (review TS-6): for each tile index, `attempts` upstream calls through the real
+     * budget guard, the first one per tile counting as the tile.
+     */
+    ledger(name: string, tiles: Array<{ tileIndex: number; attempts: number }>): void {
+      for (const t of tiles)
+        for (let attempt = 1; attempt <= t.attempts; attempt++)
+          ports.budget
+            .reserve({
+              providerId: PROVIDER,
+              executionId: id(name),
+              tileIndex: t.tileIndex,
+              costMicroGbp: ports.config.providers.fixture?.costMicroGbp ?? 0,
+              httpAttempt: attempt,
+              endpointPath: '/calendar',
+            })
+            .finalise({ outcome: 'ok', httpStatus: 200, durationMs: 1 });
     },
 
     /** One point of the route-level lowest-price series (spec §7 route_price_history). */
@@ -4702,7 +5968,9 @@ export type Seeder = ReturnType<typeof seeder>;
 ```ts
 // Spec §8.1, §10 executions: start, read, cancel, resume; single-cell verify with membership validation.
 import { apiContract, asIata, asIsoDate, cellKeyString, generateCells } from '@gmt/core';
+import { RowRejected } from '@gmt/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { cellInSpace } from '../../src/read/space.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput, SMALL_WINDOW } from '../helpers/examples.js';
@@ -4714,8 +5982,8 @@ afterEach(async () => {
   await h?.close();
   h = undefined;
 });
-async function harness(): Promise<Harness> {
-  h = await createHarness();
+async function harness(env: Record<string, string> = {}): Promise<Harness> {
+  h = await createHarness({ env });
   return h;
 }
 
@@ -4799,12 +6067,12 @@ describe('POST /api/definitions/:id/executions and GET /api/executions/:id (spec
     expect((await errorOf(res)).code).toBe('execution_not_found');
   });
 
-  it('flags a discovery overrun on distinct tiles, never on calls (decision 43)', async () => {
+  it('flags a discovery overrun on distinct tiles from real ledger rows, never on calls (decision 43, review TS-6)', async () => {
     const x = await harness();
     const def = x.ports.repos.definitions.create(small());
     const s = seeder(x.ports);
-    const id = s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    const plan = (planCalls: number) =>
+    const planned = (name: string) => {
+      const id = s.execution(name, { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
       x.ports.repos.executions.patch(id, {
         estimate: {
           cells: 4,
@@ -4812,16 +6080,16 @@ describe('POST /api/definitions/:id/executions and GET /api/executions/:id (spec
             {
               providerId: 'fixture',
               stage: 'discovery',
-              calls: planCalls,
-              planCalls,
+              calls: 10,
+              planCalls: 10,
               costMicroGbp: 0,
               costPence: 0,
               seconds: 1,
               blocked: null,
             },
           ],
-          totalCalls: planCalls,
-          totalPlanCalls: planCalls,
+          totalCalls: 10,
+          totalPlanCalls: 10,
           totalCostMicroGbp: 0,
           totalCostPence: 0,
           seconds: 1,
@@ -4830,28 +6098,19 @@ describe('POST /api/definitions/:id/executions and GET /api/executions/:id (spec
           retryFactor: 1.2,
         },
       });
-    const ledger = vi.spyOn(x.ports.repos.ledger, 'countsFor');
-    const counts = (tiles: number, calls: number) => ({
-      calls,
-      costMicroGbp: 0,
-      tiles,
-      cacheHits: 0,
-      perProvider: [
-        {
-          providerId: 'fixture' as const,
-          stage: 'discovery' as const,
-          calls,
-          costMicroGbp: 0,
-          tiles,
-          cacheHits: 0,
-        },
-      ],
-    });
-    plan(10);
-    ledger.mockReturnValue(counts(10, 30)); // why: a paged tile spends a call a page; 10 tiles as planned is no overrun
-    expect((await execution(x, id)).overrun).toBe(false);
-    ledger.mockReturnValue(counts(12, 12));
-    expect((await execution(x, id)).overrun).toBe(true);
+      return id;
+    };
+    const tiles = (n: number, attempts: number) =>
+      Array.from({ length: n }, (_, i) => ({ tileIndex: i, attempts }));
+    const paged = planned('E-paged');
+    // why: ten tiles as planned, each paging three times: thirty calls, but no overrun
+    s.ledger('E-paged', tiles(10, 3));
+    const paging = await execution(x, paged);
+    expect([paging.ledger.calls, paging.ledger.tiles, paging.overrun]).toEqual([30, 10, false]);
+    const extra = planned('E-extra');
+    s.ledger('E-extra', tiles(12, 1));
+    const over = await execution(x, extra);
+    expect([over.ledger.tiles, over.overrun]).toEqual([12, true]);
   });
 });
 
@@ -4965,6 +6224,93 @@ describe('POST /api/cells/verify (spec §8.1 Single-cell verification)', () => {
     expect([checked, members.size]).toEqual([80, 6]);
   });
 });
+
+describe('refusals with the real engine, the active race, and one request at a time (review TS-1, decision 54)', () => {
+  const ledgerRows = (x: Harness) =>
+    x.ports.db.raw.prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM provider_requests').get()?.n ?? -1;
+  const startedRuns = (x: Harness, defId: string) =>
+    x.ports.repos.executions
+      .listForDefinition(defId, { limit: 10, includeChildren: true })
+      .filter((e) => e.status === 'running' || e.status === 'completed').length;
+
+  it('a run over its call cap is 409 cap before any provider call', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create({
+      ...small(),
+      budget: { maxCalls: 1, maxFreeCalls: 1, maxCostMicroGbp: 10_000_000 },
+    });
+    const res = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(res.status).toBe(409);
+    expect((await errorOf(res)).code).toBe('cap');
+    expect([ledgerRows(x), startedRuns(x, def.id)]).toEqual([0, 0]);
+  });
+
+  it('an unconfirmed run above SOFT_CONFIRM is 409 confirm with its figures; resent with them, it starts', async () => {
+    const x = await harness({ FIXTURE_COST_MICRO_GBP: '100000' });
+    const def = x.ports.repos.definitions.create(small());
+    const refused = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(refused.status).toBe(409);
+    const e = await errorOf(refused);
+    expect(e.code).toBe('confirm');
+    expect([ledgerRows(x), startedRuns(x, def.id)]).toEqual([0, 0]);
+    const figures = z.object({ estimatePence: z.number(), totalCalls: z.number() }).parse(e.details);
+    const ok = await x.request(`/api/definitions/${def.id}/executions`, {
+      json: { confirmCostPence: figures.estimatePence, confirmCalls: figures.totalCalls },
+    });
+    expect(ok.status).toBe(202);
+  });
+
+  it("WP3's RowRejected('active') from a lost race is 409 active", async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(small());
+    vi.spyOn(x.engine, 'start').mockRejectedValue(
+      new RowRejected('active', 'another execution of this definition is active'),
+    );
+    const res = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(res.status).toBe(409);
+    expect((await errorOf(res)).code).toBe('active');
+  });
+
+  it('a verify passes its confirmation on to the engine', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const verify = vi.spyOn(x.engine, 'verifyCell').mockResolvedValue({ ok: true, executionId: 'c1' });
+    const c = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+    await x.request('/api/cells/verify', {
+      json: { definitionId: def.id, cell: c, confirmCostPence: 7, confirmCalls: 6 },
+    });
+    expect(verify).toHaveBeenCalledWith(def.id, c, { confirmCostPence: 7, confirmCalls: 6 });
+  });
+
+  it('a second run or verify of a definition while one is in flight is 429 already_running', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    let release: (() => void) | undefined;
+    vi.spyOn(x.engine, 'start')
+      .mockResolvedValue({ ok: true, executionId: 'e2' })
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (release = () => resolve({ ok: true, executionId: 'e1' }))),
+      );
+    const first = x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const second = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(second.status).toBe(429);
+    expect((await errorOf(second)).code).toBe('already_running');
+    const verify = await x.request('/api/cells/verify', {
+      json: { definitionId: def.id, cell: cell('LHR', 'JFK', '2026-11-02', '2026-11-12') },
+    });
+    expect(verify.status).toBe(429);
+    const other = x.ports.repos.definitions.create(exampleDefinitionInput({ name: 'another' }));
+    vi.spyOn(x.engine, 'verifyCell').mockResolvedValue({ ok: true, executionId: 'c1' });
+    const elsewhere = await x.request('/api/cells/verify', {
+      json: { definitionId: other.id, cell: cell('LHR', 'JFK', '2026-11-02', '2026-11-12') },
+    });
+    expect(elsewhere.status).toBe(202); // why: one at a time per definition, not per app
+    release?.();
+    expect((await first).status).toBe(202);
+    expect((await x.request(`/api/definitions/${def.id}/executions`, { json: {} })).status).toBe(202);
+  });
+});
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -5006,7 +6352,10 @@ const STATUSES_WITH_REASON = new Set([
 ]);
 
 const HOUR = 3_600_000;
-/** Whole hours from `from` to `now`, never negative. */
+/**
+ * Whole hours from `from` to `now`, never negative. why: core's `hoursBetween` is module-private to `labels/age.ts`;
+ * this is the one api copy, and every whole-hour age the api reports outside a provenance comes from it (review arch-014).
+ */
 export function hoursSince(from: IsoDateTime, now: IsoDateTime): number {
   return Math.max(0, Math.floor((Date.parse(now) - Date.parse(from)) / HOUR));
 }
@@ -5132,7 +6481,8 @@ import { ApiError, type Details, scrubDetails } from '../errors.js';
 import { executionResponse } from '../read/executions.js';
 import { cellInSpace, currentSpace } from '../read/space.js';
 import { API_TEXT } from '../text.js';
-import { getLiveDefinition, param, parseWith } from './shared.js';
+import { NO_INPUT, plain, route } from './define.js';
+import { getLiveDefinition, oneAtATime, param } from './shared.js';
 import type { AppEnv, HandlerTable, RouteContext } from './types.js';
 
 type Refusal = Extract<StartResult, { ok: false }>;
@@ -5155,7 +6505,7 @@ export function startError(r: Refusal): ApiError {
 
 function getExecution(ctx: RouteContext, id: string): Execution {
   const e = ctx.ports.repos.executions.get(id);
-  if (e === null) throw new ApiError(404, 'execution_not_found', API_TEXT.executionNotFound(id));
+  if (e === null) throw new ApiError(404, 'execution_not_found', API_TEXT.executionNotFound);
   return e;
 }
 
@@ -5165,52 +6515,63 @@ function accepted(c: Context<AppEnv>, r: StartResult) {
   return c.json({ executionId: r.executionId }, 202);
 }
 
+/** The confirmation fields a start or verify body carries, passed on only when sent (decisions 37, 43). */
+function confirmation(b: { confirmCostPence?: number | undefined; confirmCalls?: number | undefined }) {
+  return {
+    ...(b.confirmCostPence === undefined ? {} : { confirmCostPence: b.confirmCostPence }),
+    ...(b.confirmCalls === undefined ? {} : { confirmCalls: b.confirmCalls }),
+  };
+}
+
 export const executionHandlers: HandlerTable = {
-  'POST /api/definitions/:id/executions': async (c, input, ctx) => {
-    const def = getLiveDefinition(ctx, param(input, 'id'));
-    const body = parseWith(apiContract.startExecutionRequestSchema, input.body);
-    // why: decisions 37, 43: a manual start passes the pence and the calls the operator saw; the engine compares both.
-    return accepted(
-      c,
-      await ctx.engine.start(def.id, {
-        trigger: 'manual',
-        ...(body.confirmCostPence === undefined ? {} : { confirmCostPence: body.confirmCostPence }),
-        ...(body.confirmCalls === undefined ? {} : { confirmCalls: body.confirmCalls }),
-      }),
-    );
-  },
+  'POST /api/definitions/:id/executions': route(
+    { request: apiContract.startExecutionRequestSchema, query: NO_INPUT },
+    (c, input, ctx) => {
+      const def = getLiveDefinition(ctx, param(input, 'id'));
+      return oneAtATime(ctx, def.id, async () =>
+        accepted(c, await ctx.engine.start(def.id, { trigger: 'manual', ...confirmation(input.body) })),
+      );
+    },
+  ),
 
-  'GET /api/executions/:id': (c, input, ctx) =>
+  'GET /api/executions/:id': plain((c, input, ctx) =>
     c.json(executionResponse(ctx.ports, getExecution(ctx, param(input, 'id')))),
+  ),
 
-  'POST /api/executions/:id/cancel': async (c, input, ctx) => {
+  'POST /api/executions/:id/cancel': plain(async (c, input, ctx) => {
     const e = getExecution(ctx, param(input, 'id'));
     if (!(await ctx.engine.cancel(e.id)))
       throw new ApiError(409, 'not_cancellable', API_TEXT.notCancellable(e.status));
     return c.json(executionResponse(ctx.ports, getExecution(ctx, e.id)));
-  },
+  }),
 
-  'POST /api/executions/:id/resume': async (c, input, ctx) => {
+  'POST /api/executions/:id/resume': plain((c, input, ctx) => {
     const e = getExecution(ctx, param(input, 'id'));
-    // why: the API's resume is the operator's manual resume (spec §8.1): it re-enables disabled providers.
-    const r = await ctx.engine.resume(e.id, { manual: true });
-    if (!r.ok) throw startError(r);
-    return c.json(executionResponse(ctx.ports, getExecution(ctx, r.executionId)));
-  },
+    return oneAtATime(ctx, e.definitionId, async () => {
+      // why: the API's resume is the operator's manual resume (spec §8.1): it re-enables disabled providers.
+      const r = await ctx.engine.resume(e.id, { manual: true });
+      if (!r.ok) throw startError(r);
+      return c.json(executionResponse(ctx.ports, getExecution(ctx, r.executionId)));
+    });
+  }),
 
-  'POST /api/cells/verify': async (c, input, ctx) => {
-    const body = parseWith(apiContract.verifyCellRequestSchema, input.body);
-    const def = getLiveDefinition(ctx, body.definitionId);
-    if (def.providers.verification.length === 0)
-      throw new ApiError(422, 'no_verification_provider', API_TEXT.noVerificationProvider);
-    if (!cellInSpace(currentSpace(def, ctx.ports.clock.todayLondon()), body.cell))
-      throw new ApiError(422, 'cell_not_in_space', API_TEXT.cellNotInSpace, { cell: body.cell });
-    for (const code of [body.cell.origin, body.cell.destination]) {
-      if (!ctx.ports.repos.airports.exists(code))
-        throw new ApiError(422, 'unknown_airport', API_TEXT.unknownAirport(code));
-    }
-    return accepted(c, await ctx.engine.verifyCell(def.id, body.cell));
-  },
+  'POST /api/cells/verify': route(
+    { request: apiContract.verifyCellRequestSchema, query: NO_INPUT },
+    (c, { body }, ctx) => {
+      const def = getLiveDefinition(ctx, body.definitionId);
+      if (def.providers.verification.length === 0)
+        throw new ApiError(422, 'no_verification_provider', API_TEXT.noVerificationProvider);
+      if (!cellInSpace(currentSpace(def, ctx.ports.clock.todayLondon()), body.cell))
+        throw new ApiError(422, 'cell_not_in_space', API_TEXT.cellNotInSpace, { cell: body.cell });
+      for (const code of [body.cell.origin, body.cell.destination]) {
+        if (!ctx.ports.repos.airports.exists(code))
+          throw new ApiError(422, 'unknown_airport', API_TEXT.unknownAirport(code));
+      }
+      return oneAtATime(ctx, def.id, async () =>
+        accepted(c, await ctx.engine.verifyCell(def.id, body.cell, confirmation(body))),
+      );
+    },
+  ),
 };
 ```
 
@@ -5233,15 +6594,47 @@ export const HANDLERS: HandlerTable = {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/executions.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 18 tests; typecheck clean.
+Expected: PASS, 23 tests; typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: See the tests bite**
 
-```bash
-git add -A apps/api packages && git commit -m "wp08: executions start/read/cancel/resume with confirmation calls, overrun on tiles, single-cell verify with membership"
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.10a**: in `apps/api/src/routes/executions.ts` replace
+
+```ts
+      return oneAtATime(ctx, def.id, async () =>
+        accepted(c, await ctx.engine.start(
 ```
 
-### Task 8.11: Results (spec §6.5, §6.9, §8.1): basis, dedup, ranking, cap, staleness, truncation, `notSeenInLatest`, children, excluded rows
+  with
+
+```ts
+      return oneAtATime(ctx, `${def.id}:${Math.random()}`, async () =>
+        accepted(c, await ctx.engine.start(
+```
+
+  Fails: “a second run or verify of a definition while one is in flight is 429 already_running”.
+
+- **8.10b**: in `apps/api/src/errors.ts` replace
+
+```ts
+    if (err instanceof RowRejected && err.rule === 'active')
+      return c.json(envelope('active', err.message), 409);
+```
+
+  with nothing.
+  Fails: “WP3's RowRejected('active') from a lost race is 409 active”.
+
+- **8.10c**: in `apps/api/src/routes/executions.ts` replace `accepted(c, await ctx.engine.verifyCell(def.id, body.cell, confirmation(body))),` with `accepted(c, await ctx.engine.verifyCell(def.id, body.cell)),`. Fails: “a verify passes its confirmation on to the engine”.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: executions with confirmation calls, real-engine refusals, overrun on real ledger tiles, verify with confirmation, one at a time"
+```
+
+### Task 8.11: Results (spec §6.5, §6.9, §8.1): basis, dedup, ranking, cap, staleness, truncation, the not-seen and superseded marks, links, children, excluded rows
 
 **Files:**
 - Create: `apps/api/src/read/rows.ts`, `src/read/coverage.ts`, `src/read/results.ts`, `src/routes/results.ts`
@@ -5249,22 +6642,23 @@ git add -A apps/api packages && git commit -m "wp08: executions start/read/cance
 - Test: `apps/api/test/routes/results.test.ts`
 
 **Interfaces:**
-- Consumes: `ItinerariesRepo.observationsForDefinition`, `ItinerariesRepo.latestVerificationOutcomeForCell`, `CalendarPricesRepo.latestPerCell(definitionId, cabin, null)`, `ExecutionsRepo.listForDefinition`, `CellsRepo.rollUps/outcomes/selected` (WP3); `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `dedupByItinerary`, `rankRows`, `searchLinkFor`, `effectiveAge`, `worstCaseAgeHours`, `isTruncated`, `TRUNCATED_NOTE`, `DEFAULT_DISCOVERY_REFRESH_HOURS` (core).
-- Produces: `staleness`, `calendarThreshold`, `calendarStaleAfterHours`, `thresholdFor`, `priceCell`, `priceOf`, `verifiedRow`, `calendarRow`, `configuredConstraints`, `latestPerOffer`, `notSeenResolver`, `cheapest`, `withNights`, `coverageSummaryFor`, `SEARCHED`, `loadRows`, `truncationOf`, `confirmedIn`, `discoveryProviders`, `chooseBasis`, `assembleResults`, `RESULTS_CAP`; route `GET /api/definitions/:id/results`.
+- Consumes: `ItinerariesRepo.observationsForDefinition`, `ItinerariesRepo.latestVerificationOutcomeForCell`, `CalendarPricesRepo.latestPerCell(definitionId, cabin, null)`, `CalendarPricesRepo.fetchedBy`, `ExecutionsRepo.listForDefinition`, `CellsRepo.rollUps/outcomes/selected` (WP3); `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `dedupByItinerary`, `rankRows`, `searchLinkFor`, `LINK_ALLOWLIST`, `validateVendorUrl`, `effectiveAge`, `worstCaseAgeHours`, `isStale`, `CONSTRAINT_NAMES`, `isTruncated`, `TRUNCATED_NOTE`, `DEFAULT_DISCOVERY_REFRESH_HOURS` (core).
+- Produces: `staleness`, `calendarThreshold`, `calendarStaleAfterHours`, `thresholdFor`, `priceCell`, `priceOf`, `safeBooking`, `verifiedRow`, `calendarRow`, `configuredConstraints`, `latestPerOffer`, `notSeenResolver`, `cheapest`, `pickVerified`, `withNights`, `coverageSummaryFor`, `SEARCHED`, `loadRows`, `truncationOf`, `confirmedIn`, `chooseBasis`, `assembleResults`, `RESULTS_CAP`; route `GET /api/definitions/:id/results`.
 
 Assembly rules, each pinned by a test below:
 
-1. Rows come from **every** execution of the definition, children included (spec §8.1), or from one execution when `executionId` is given (404 for a foreign one); observations and calendar prices are read in the definition's current cabin.
+1. Rows come from **every** execution of the definition, children included (spec §8.1), or from one execution when `executionId` is given (404 for one of another definition). Scoped to a run, the calendar rows are the latest that run fetched per provider and cell (`fetchedBy`), not the global latest filtered, so an older run picked from the list still shows its own price after a newer run priced the cell again (review prov-003); the scoped coverage and executions list are that run's. Observations and calendar prices are read in the definition's current cabin.
 2. Each offer contributes its latest observation (max `fetchedAt`, tie on id); verdicts are evaluated now against the **current** constraints and requested cabin with the observation's stored supplied fields (spec §6.2).
 3. Rows outside the current resolved space are dropped and counted in `excludedByCurrentSpace` (the repositories are read with `space: null` so the count is possible); when that count is non-zero, `basisReason` ends with "· I of N rows are inside the current window and nights range" (review focus 4). An all-excluded verified basis stays verified, so the reason says why the table is empty.
 4. Default basis (spec §6.9): `calendar` when the latest parent's snapshot (or, with none, the definition) has no verification provider, or no observation exists; otherwise `verified`. `basisReason` says which; `verificationProviderConfigured` reports the current definition.
 5. Verified basis: `dedupByItinerary(rows, now)` then `rankRows(rows, now)`; **all classes are returned**, `failed` last; `cheapest` is the first ranked row (the Results headline).
-6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked` (assigned directly: `verdictClass` throws without a cabin verdict), `notApplied` = every configured constraint, `booking: none`, a search link (`null` for synthetic rows).
-7. **Staleness** (spec §3 and §8.1 at revision 23, decision 44): `ageHours` is the effective age — the observed age, else the fetch age plus a known `maxAgeHours`, else the fetch age alone; a price is stale only when its fetch age plus its **known** `maxAgeHours` exceeds the threshold (`STALE_AFTER_HOURS` for the verified basis; for the calendar basis `CALENDAR_STALE_AFTER_HOURS`, else the discovery refresh plus the provider's declared age). An unknown vendor age is never stale on that account; the web labels it "vendor's cache age unknown" from `provenance.maxAgeHours`, and its stale banner counts only rows stale by a known age. Stale rows are returned, never hidden.
+6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked` (assigned directly: `verdictClass` throws without a cabin verdict), `notApplied` = every configured constraint from core's `CONSTRAINT_NAMES`, `booking: none`. A price whose cell a **newer parent execution** (later in the newest-first list, so two runs in one second still order) found `empty` or `no_data` for the same provider is `superseded: true` and ranks after every current price (decision 54, review prov-013).
+7. **Staleness** (spec §3, §8.1; decisions 44, 53, 54, 55): `ageHours` is the effective age from core's `worstCaseAgeHours` — the observed age, else the fetch age plus a known `maxAgeHours`, else the fetch age alone — and `stale` is core's `isStale` against the threshold (`STALE_AFTER_HOURS` for the verified basis; for the calendar basis `CALENDAR_STALE_AFTER_HOURS`, else the discovery refresh plus the provider's declared age). The web labels an unknown age "vendor's cache age unknown" from `provenance.maxAgeHours`.
 8. **Truncation** (decisions 36, 47): a calendar price is `truncated` when its discovery outcome's `last_error` starts with `TRUNCATED_NOTE`, read with core's `isTruncated`; itinerary rows are never truncated.
 9. Cheapest per cell is computed here from recomputed verdicts, never read from `search_cells.best_observation_id`.
-10. `notSeenInLatest`: the cell's newest `priced | empty` verification outcome is from another execution in which this offer has no observation → `{ ageHours }` of that newer search.
-11. At most `limit` rows (default and maximum 1000); `total` counts every row before the cut; `truncated = total > limit`.
+10. `notSeenInLatest`: the cell's newest `priced | empty` verification outcome is from another execution in which this offer has no observation → `{ ageHours }` of that newer search, or `'unknown'` when that outcome has no `fetchedAt` (review prov-011).
+11. **Links** (spec §5.2, decision 54, review SEC-9): a stored `booking` is re-validated with `validateVendorUrl` against its own provider's `LINK_ALLOWLIST` entry and becomes `{ kind: 'none' }` when it fails (a `javascript:` URL, or another provider's host); a search link is kept only when it re-validates; the contract's `vendorLinkSchema` refuses anything else on the way out.
+12. At most `limit` rows (default and maximum 1000); `total` counts every row before the cut; `truncated = total > limit`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5438,6 +6832,60 @@ describe('GET /definitions/:id/results, verified basis', () => {
     const { x, def, s } = await world();
     expect((await results(x, def.id, `?executionId=${s.id('E1')}`)).total).toBe(3);
     expect((await x.request(`/api/definitions/${def.id}/results?executionId=nope`)).status).toBe(404);
+    const other = x.ports.repos.definitions.create(exampleDefinitionInput({ name: 'other' }));
+    s.execution('EO', { def: other, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    expect((await x.request(`/api/definitions/${def.id}/results?executionId=${s.id('EO')}`)).status).toBe(
+      404,
+    );
+  });
+
+  it('an older run picked with executionId still shows its own price after a newer run priced the cell again (review prov-003)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', [C1]);
+    s.tile('Eold', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-29) });
+    s.execution('Enew', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('Enew', [C1]);
+    s.tile('Enew', C1, { status: 'priced', pricePence: 47_000, fetchedAt: at(-1) });
+    const scoped = await results(x, def.id, `?basis=calendar&executionId=${s.id('Eold')}`);
+    expect(scoped.rows.map((r) => [r.pricePence, r.executionId])).toEqual([[45_000, s.id('Eold')]]);
+    expect(scoped.executions.map((e) => e.id)).toEqual([s.id('Eold')]);
+    const latest = await results(x, def.id, '?basis=calendar');
+    expect(latest.rows.map((r) => r.pricePence)).toEqual([47_000]);
+  });
+
+  it('a stored booking link that fails the allowlist on the way out is dropped (decision 54, review SEC-5)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1, C2], { selected: [C1, C2].map((c) => ({ cell: c, reason: 'top_n' as const })) });
+    s.verified('E1', C1, [
+      {
+        hash: 'hJ',
+        pricePence: 50_000,
+        fetchedAt: at(-1),
+        booking: { kind: 'get', url: 'javascript:alert(1)', host: 'x' },
+      },
+    ]);
+    s.verified('E1', C2, [
+      {
+        hash: 'hG',
+        pricePence: 51_000,
+        fetchedAt: at(-1),
+        // why: an allowlisted host of another provider is still not this provider's link
+        booking: { kind: 'get', url: 'https://www.google.com/travel/flights', host: 'www.google.com' },
+      },
+    ]);
+    const r = await results(x, def.id);
+    expect(r.rows.map((row) => [row.itineraryHash, row.booking.kind])).toEqual([
+      ['hJ', 'none'],
+      ['hG', 'none'],
+    ]);
   });
 });
 
@@ -5518,6 +6966,26 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     expect((await results(x, def.id)).basisReason).toBe(API_TEXT.basisNoObservations);
   });
 
+  it('a calendar price a later search found empty is marked superseded and ranked after current prices (decision 54)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', [C1, C2]);
+    s.tile('Eold', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-29) });
+    s.tile('Eold', C2, { status: 'priced', pricePence: 50_000, fetchedAt: at(-29), tileIndex: 1 });
+    s.execution('Enew', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('Enew', [C1, C2]);
+    s.tile('Enew', C1, { status: 'empty', fetchedAt: at(-2) });
+    s.tile('Enew', C2, { status: 'priced', pricePence: 52_000, fetchedAt: at(-2), tileIndex: 1 });
+    const r = await results(x, def.id, '?basis=calendar');
+    expect(r.rows.map((row) => [row.pricePence, row.superseded])).toEqual([
+      [52_000, false],
+      [30_000, true],
+    ]);
+  });
+
   it('can be requested explicitly, and ignores reused copies', async () => {
     const { x, def, s } = await world();
     s.tile('E1', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-3) });
@@ -5568,8 +7036,10 @@ Expected: FAIL: every results request answers 404 `not_found`.
 /** Result rows of both bases, prices with provenance, staleness and truncation (spec §6.2, §6.9, §8.1). */
 import {
   type apiContract,
+  type Booking,
   type CellKey,
   type CellOutcome,
+  CONSTRAINT_NAMES,
   type Config,
   type ConstraintName,
   type Constraints,
@@ -5580,11 +7050,14 @@ import {
   evaluateConstraints,
   type FlightProvider,
   type IsoDateTime,
+  isStale,
+  LINK_ALLOWLIST,
   type Provenance,
   type ProviderId,
   type SearchDefinition,
   searchLinkFor,
   unverifiedNames,
+  validateVendorUrl,
   verdictClass,
   worstCaseAgeHours,
 } from '@gmt/core';
@@ -5633,24 +7106,19 @@ export function thresholdFor(basis: Basis, providerId: ProviderId, rc: RowContex
 }
 
 /**
- * Spec §3 and §8.1 at revision 23 (plan decision 44). `ageHours` is the effective age: the observed age when the vendor
- * dates the price, else the fetch age plus the vendor's declared `maxAgeHours`, else (`'unknown'`) the fetch age alone;
- * the web labels the last case "vendor's cache age unknown" from `provenance.maxAgeHours`. A price is stale only when
- * its known age (fetch age plus a known `maxAgeHours`) exceeds the threshold, so an unknown vendor age never marks it
- * stale on that account.
+ * Spec §3 and §8.1 at revision 24 (plan decisions 44, 53, 54). `ageHours` is the effective age from core: the observed
+ * age when the vendor dates the price, else the fetch age plus a known `maxAgeHours`, else the fetch age alone (the web
+ * labels that case "vendor's cache age unknown" from `provenance.maxAgeHours`). A price is stale when its effective age
+ * exceeds the threshold, so an unknown vendor age is never stale on that account alone: core's `isStale`, the one copy
+ * of the rule (decision 55).
  */
 export function staleness(
   p: Provenance,
   thresholdHours: number,
   now: IsoDateTime,
 ): { ageHours: number; stale: boolean } {
-  const age = effectiveAge(p, now);
-  const known = p.maxAgeHours === 'unknown' ? 0 : p.maxAgeHours;
-  const worst = worstCaseAgeHours(age);
-  return {
-    ageHours: worst === 'unknown' ? age.fetchedHours : worst,
-    stale: age.fetchedHours + known > thresholdHours,
-  };
+  const ageHours = worstCaseAgeHours(effectiveAge(p, now));
+  return { ageHours, stale: isStale(p, now, thresholdHours) };
 }
 
 /** A price on the wire: amount, provenance, staleness, age, truncation (decisions 36, 44). */
@@ -5686,33 +7154,38 @@ export function withNights(c: CellKey): ResultRow['cell'] {
   };
 }
 
-/** Every constraint an operator can set (spec §6.2), in the order the web lists them. */
-const CONSTRAINT_NAMES: readonly ConstraintName[] = [
-  'maxStops',
-  'maxJourneyMinutes',
-  'minLayoverMinutes',
-  'maxLayoverMinutes',
-  'noOvernightLayover',
-  'departureWindowLocal',
-  'arrivalWindowLocal',
-  'noSelfTransfer',
-  'noAirportChange',
-  'includeAirlines',
-  'excludeAirlines',
-  'cabinBagRequired',
-  'checkedBagRequired',
-  'minCheckedBags',
-  'maxPricePence',
-];
-
-/** Constraints the operator set; on calendar rows these are "not applied" (spec §6.9). */
+/**
+ * Constraints the operator set; on calendar rows these are "not applied" (spec §6.9). Core's `CONSTRAINT_NAMES` is the
+ * one list (review arch-010); `cabin` and `priceConfirmed` are never keys of `Constraints`, so they never appear.
+ */
 export function configuredConstraints(c: Constraints): ConstraintName[] {
-  const set: ConstraintName[] = [];
-  for (const [k, v] of Object.entries(c)) {
-    const name = CONSTRAINT_NAMES.find((n) => n === k);
-    if (name !== undefined && v !== undefined) set.push(name);
-  }
-  return set;
+  const set = new Set(Object.entries(c).flatMap(([k, v]) => (v === undefined ? [] : [k])));
+  return CONSTRAINT_NAMES.filter((n) => set.has(n));
+}
+
+/**
+ * Spec §5.2 and plan decision 54: a stored booking is re-validated against its provider's `LINK_ALLOWLIST` before it
+ * is sent (https, no userinfo, no port, an allowlisted host); anything else becomes `{ kind: 'none' }`. A post booking
+ * keeps its form data with the re-validated URL.
+ */
+export function safeBooking(b: Booking, providerId: ProviderId): Booking {
+  if (b.kind === 'none') return b;
+  const checked = validateVendorUrl(b.url, LINK_ALLOWLIST[providerId]);
+  if (checked.kind !== 'get') return { kind: 'none' };
+  return b.kind === 'post'
+    ? { kind: 'post', url: checked.url, postData: b.postData, host: checked.host }
+    : checked;
+}
+
+/** The same rule for a search link (decision 54): kept only when it re-validates for its provider. */
+function safeSearchLink(
+  providerId: ProviderId,
+  cell: CellKey,
+  def: SearchDefinition,
+): ResultRow['searchLink'] {
+  const link = searchLinkFor(providerId, cell, def.cabin);
+  if (link === null) return null;
+  return validateVendorUrl(link.url, LINK_ALLOWLIST[providerId]).kind === 'get' ? link : null;
 }
 
 function adjusted(
@@ -5724,8 +7197,16 @@ function adjusted(
   return onward === undefined ? null : pricePence + onward; // why: a separate column, never merged into price (spec §11)
 }
 
-/** Spec §6.9 calendar-basis row; `truncated` from the cell's discovery outcome (decisions 36, 47). */
-export function calendarRow(r: CalendarPriceRow, rc: RowContext, truncated: boolean): ResultRow {
+/**
+ * Spec §6.9 calendar-basis row; `truncated` from the cell's discovery outcome (decisions 36, 47); `superseded` when a
+ * newer parent execution found the cell empty or no_data for the same provider (decision 54).
+ */
+export function calendarRow(
+  r: CalendarPriceRow,
+  rc: RowContext,
+  truncated: boolean,
+  superseded: boolean,
+): ResultRow {
   const p = priceCell(r.pricePence, r.provenance, 'calendar', rc, truncated);
   return {
     itineraryHash: null,
@@ -5750,9 +7231,10 @@ export function calendarRow(r: CalendarPriceRow, rc: RowContext, truncated: bool
     fareConditions: null,
     selfTransfer: null,
     booking: { kind: 'none' },
-    searchLink: searchLinkFor(r.providerId, r.cell, rc.def.cabin),
+    searchLink: safeSearchLink(r.providerId, r.cell, rc.def),
     otherOffers: [],
     notSeenInLatest: null,
+    superseded,
     adjustedPence: adjusted(rc.def, r.cell.destination, r.pricePence),
     destinationNote: rc.def.destinationNotes[r.cell.destination] ?? null,
     executionId: r.executionId,
@@ -5765,7 +7247,7 @@ export function calendarRow(r: CalendarPriceRow, rc: RowContext, truncated: bool
 export function verifiedRow(
   o: ObservationRow,
   rc: RowContext,
-  notSeenInLatest: { ageHours: number } | null,
+  notSeenInLatest: { ageHours: number | 'unknown' } | null,
 ): ResultRow {
   const it = o.itinerary;
   const verdicts = evaluateConstraints(it, o, rc.def.constraints, rc.def.cabin, o.suppliedFields);
@@ -5796,10 +7278,11 @@ export function verifiedRow(
     baggage: o.baggage,
     fareConditions: o.fareConditions,
     selfTransfer: o.selfTransfer,
-    booking: o.booking,
-    searchLink: searchLinkFor(o.offer.providerId, o.cell, rc.def.cabin),
+    booking: safeBooking(o.booking, o.offer.providerId),
+    searchLink: safeSearchLink(o.offer.providerId, o.cell, rc.def),
     otherOffers: [],
     notSeenInLatest,
+    superseded: false,
     adjustedPence: adjusted(rc.def, it.destination, o.pricePence),
     destinationNote: rc.def.destinationNotes[it.destination] ?? null,
     executionId: o.executionId,
@@ -5808,10 +7291,30 @@ export function verifiedRow(
   };
 }
 
-/** The cheapest row, or null. */
+/** The cheapest row, or null (calendar-basis minima). */
 export function cheapest(rows: readonly ResultRow[]): ResultRow | null {
   let best: ResultRow | null = null;
   for (const r of rows) if (best === null || r.pricePence < best.pricePence) best = r;
+  return best;
+}
+
+/**
+ * The verified-basis figure of a set of rows (plan decision 54, spec §8.1, §11 View B): a row the newest search of its
+ * cell returned beats one it did not, a fresh row beats a stale one, then the cheaper wins. The caller carries the
+ * winner's `notSeenInLatest`, so a not-seen figure is shown only when nothing seen exists, and says so.
+ */
+export function pickVerified(rows: readonly ResultRow[]): ResultRow | null {
+  const rank = (r: ResultRow) => [r.notSeenInLatest === null ? 0 : 1, r.stale ? 1 : 0, r.pricePence];
+  let best: ResultRow | null = null;
+  for (const r of rows) {
+    if (best === null) {
+      best = r;
+      continue;
+    }
+    const [a, b] = [rank(r), rank(best)];
+    const i = a.findIndex((x, k) => x !== b[k]);
+    if (i >= 0 && (a[i] ?? 0) < (b[i] ?? 0)) best = r;
+  }
   return best;
 }
 
@@ -5842,7 +7345,7 @@ export function notSeenResolver(
 ) {
   const seen = new Set(rows.map((r) => `${r.executionId}|${r.offer.id}`));
   const cache = new Map<string, CellOutcome | null>();
-  return (r: ObservationRow): { ageHours: number } | null => {
+  return (r: ObservationRow): { ageHours: number | 'unknown' } | null => {
     const key = cellKeyString(r.cell);
     let latest = cache.get(key);
     if (latest === undefined) {
@@ -5851,7 +7354,8 @@ export function notSeenResolver(
     }
     if (latest === null || (latest.status !== 'priced' && latest.status !== 'empty')) return null;
     if (latest.executionId === r.executionId || seen.has(`${latest.executionId}|${r.offer.id}`)) return null;
-    return { ageHours: hoursSince(latest.fetchedAt ?? now, now) };
+    // why: a priced or empty outcome always has fetchedAt; if one ever lacks it the age is not known, never "now".
+    return { ageHours: latest.fetchedAt === null ? 'unknown' : hoursSince(latest.fetchedAt, now) };
   };
 }
 ```
@@ -5923,7 +7427,6 @@ import {
   dedupByItinerary,
   type Execution,
   isTruncated,
-  type ProviderId,
   type ResolvedSpace,
   rankRows,
   type SearchDefinition,
@@ -5998,23 +7501,70 @@ export function truncationOf(
   };
 }
 
-/** Everything the read routes share: rows of both bases for the definition's current space and cabin. */
-export function loadRows(def: SearchDefinition, ports: Ports, executionId?: string): Loaded {
+/** The latest calendar price per (provider, cell) among `rows` (max fetchedAt, tie on id), reused copies dropped. */
+function latestPerProviderCell(rows: readonly CalendarPriceRow[]): CalendarPriceRow[] {
+  const best = new Map<string, CalendarPriceRow>();
+  for (const r of rows) {
+    if (r.reusedFromExecutionId !== null) continue;
+    const key = `${r.providerId}|${cellKeyString(r.cell)}`;
+    const cur = best.get(key);
+    if (cur === undefined || r.fetchedAt > cur.fetchedAt || (r.fetchedAt === cur.fetchedAt && r.id > cur.id))
+      best.set(key, r);
+  }
+  return [...best.values()];
+}
+
+/**
+ * Plan decision 54: a calendar price is "superseded by a later search" when a newer parent execution than the one that
+ * fetched it found its cell empty or no_data for the same provider (`superseded` on rows and on the views' calendar
+ * figures, the shape WP10's Task 10.1 gives the views).
+ */
+export function supersessionOf(
+  ports: Ports,
+  latestParent: Execution | null,
+  all: readonly Execution[],
+): (r: Pick<CalendarPriceRow, 'executionId' | 'providerId' | 'cell'>) => boolean {
+  if (latestParent === null) return () => false;
+  // why: `all` is newest first (created_at, then rowid), so a later position is an earlier search, even when two
+  // executions share a created_at second.
+  const position = new Map(all.map((e, i) => [e.id, i]));
+  const latestAt = position.get(latestParent.id) ?? 0;
+  const latest = new Map(
+    ports.repos.cells
+      .outcomes(latestParent.id, { stage: 'discovery' })
+      .map((o) => [`${o.providerId}|${cellKeyString(o)}`, o]),
+  );
+  return (r) => {
+    const fetchedBy = position.get(r.executionId);
+    if (fetchedBy === undefined || fetchedBy <= latestAt) return false;
+    const o = latest.get(`${r.providerId}|${cellKeyString(r.cell)}`);
+    return o !== undefined && (o.status === 'empty' || o.status === 'no_data');
+  };
+}
+
+/**
+ * Everything the read routes share: rows of both bases for the definition's current space and cabin. `executionIds`
+ * scopes the rows to those executions (a run picked with `?executionId=`, or the duration analysis's set): calendar
+ * rows are then the latest each of them fetched, read per execution rather than filtered out of the global latest, so
+ * a cell a newer run priced again still shows the scoped run's price (review prov-003). "Not seen in latest search"
+ * and "superseded by a later search" always compare with the newest search of the cell.
+ */
+export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: readonly string[]): Loaded {
   const now = ports.clock.now();
   const space = currentSpace(def, ports.clock.todayLondon());
   const all = ports.repos.executions.listForDefinition(def.id, {
     limit: EXECUTIONS_LIMIT,
     includeChildren: true,
   });
-  const scoped = executionId === undefined ? all : all.filter((e) => e.id === executionId);
-  if (executionId !== undefined && scoped.length === 0)
-    throw new ApiError(404, 'execution_not_found', API_TEXT.executionNotFound(executionId));
-  const ids = new Set(scoped.map((e) => e.id));
+  const wanted = executionIds === undefined ? null : new Set(executionIds);
+  const scoped = wanted === null ? all : all.filter((e) => wanted.has(e.id));
+  const ids = scoped.map((e) => e.id);
   const rc: RowContext = { def, now, config: ports.config, providers: ports.providers };
+  const latestParent = all.find((e) => !e.isChild) ?? null;
 
   // why: space null reads every cell, so rows outside the current space can be counted (review focus 4).
   const raw = ports.repos.itineraries.observationsForDefinition(def.id, {
-    executionIds: [...ids],
+    executionIds: ids,
     space: null,
     cabin: def.cabin,
     includeChildren: true,
@@ -6030,11 +7580,17 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionId?: stri
   const hashes = (xs: readonly { itinerary: { hash: string } }[]) =>
     new Set(xs.map((o) => o.itinerary.hash)).size;
 
-  const calendarAll = ports.repos.calendarPrices
-    .latestPerCell(def.id, def.cabin, null)
-    .filter((r) => ids.has(r.executionId) && r.reusedFromExecutionId === null);
+  const calendarAll =
+    wanted === null
+      ? ports.repos.calendarPrices
+          .latestPerCell(def.id, def.cabin, null)
+          .filter((r) => r.reusedFromExecutionId === null)
+      : latestPerProviderCell(
+          ids.flatMap((id) => ports.repos.calendarPrices.fetchedBy(id)).filter((r) => r.cabin === def.cabin),
+        );
   const calendarIn = calendarAll.filter((r) => cellInSpace(space, r.cell));
   const truncated = truncationOf(ports);
+  const superseded = supersessionOf(ports, latestParent, all);
 
   return {
     def,
@@ -6042,10 +7598,10 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionId?: stri
     rc,
     all,
     scoped,
-    latestParent: all.find((e) => !e.isChild) ?? null,
+    latestParent,
     verified: inSpace.map((o) => verifiedRow(o, rc, notSeen(o))),
     unconfirmed: new Set(inSpace.filter((o) => !o.suppliedFields.includes('price')).map((o) => o.id)),
-    calendar: calendarIn.map((r) => calendarRow(r, rc, truncated(r))),
+    calendar: calendarIn.map((r) => calendarRow(r, rc, truncated(r), superseded(r))),
     excluded: {
       verified: hashes(latest) - hashes(inSpace),
       calendar: calendarAll.length - calendarIn.length,
@@ -6056,13 +7612,6 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionId?: stri
 /** A verified-basis row whose price the final step confirmed (decisions 45, 48). */
 export function confirmedIn(loaded: Loaded): (r: ResultRow) => boolean {
   return (r) => r.observationId === null || !loaded.unconfirmed.has(r.observationId);
-}
-
-/** The discovery providers of the rows' definition, for per-provider series. */
-export function discoveryProviders(loaded: Loaded): ProviderId[] {
-  return [
-    ...new Set([...loaded.def.providers.discovery, ...loaded.calendar.map((r) => r.provenance.providerId)]),
-  ];
 }
 
 /** Spec §6.9 default basis and its reason. */
@@ -6078,12 +7627,16 @@ export function chooseBasis(loaded: Loaded, requested: Basis | undefined): { bas
 
 /** Spec §10 `GET /api/definitions/:id/results`. No sort or filter parameters: the client sorts and filters (spec §6.5). */
 export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: Ports): ResultsResponse {
-  const loaded = loadRows(def, ports, q.executionId);
+  const loaded = loadRows(def, ports, q.executionId === undefined ? undefined : [q.executionId]);
+  const shown = loaded.scoped[0];
+  if (q.executionId !== undefined && shown === undefined)
+    throw new ApiError(404, 'execution_not_found', API_TEXT.executionNotFound);
   const { basis, reason } = chooseBasis(loaded, q.basis);
-  const ranked = rankRows(
-    basis === 'verified' ? dedupByItinerary(loaded.verified, loaded.rc.now) : loaded.calendar,
-    loaded.rc.now,
-  );
+  const ranked =
+    basis === 'verified'
+      ? rankRows(dedupByItinerary(loaded.verified, loaded.rc.now), loaded.rc.now)
+      : // why: decision 54: a superseded calendar price ranks after every current one (a stable partition).
+        rankRows(loaded.calendar, loaded.rc.now).sort((a, b) => Number(a.superseded) - Number(b.superseded));
   const excluded = basis === 'verified' ? loaded.excluded.verified : loaded.excluded.calendar;
   const total = ranked.length;
   const limit = Math.min(q.limit ?? RESULTS_CAP, RESULTS_CAP);
@@ -6094,7 +7647,11 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
     basis,
     basisReason: excluded > 0 ? `${reason} · ${API_TEXT.insideSpace(total, total + excluded)}` : reason,
     executions: loaded.scoped.map((e) => executionSummary(e, loaded.rc.now)),
-    coverage: coverageSummaryFor(loaded.latestParent, loaded.all, ports),
+    // why: with ?executionId= the header describes the run shown, alone (review prov-003, decision 42's principle).
+    coverage:
+      shown === undefined || q.executionId === undefined
+        ? coverageSummaryFor(loaded.latestParent, loaded.all, ports)
+        : coverageSummaryFor(shown, [], ports),
     excludedByCurrentSpace: excluded,
     verificationProviderConfigured: def.providers.verification.length > 0,
     cheapest: ranked[0] ?? null,
@@ -6108,18 +7665,16 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
 /** Spec §10 read routes over a definition's executions: results (Task 8.12 adds the four views and the cell detail). */
 import { apiContract } from '@gmt/core';
 import { assembleResults } from '../read/results.js';
-import { getLiveDefinition, param, parseWith } from './shared.js';
+import { NO_INPUT, route } from './define.js';
+import { getLiveDefinition, param } from './shared.js';
 import type { HandlerTable } from './types.js';
 
 export const resultHandlers: HandlerTable = {
-  'GET /api/definitions/:id/results': (c, input, ctx) =>
-    c.json(
-      assembleResults(
-        getLiveDefinition(ctx, param(input, 'id')),
-        parseWith(apiContract.resultsQuerySchema, input.query, 'query'),
-        ctx.ports,
-      ),
-    ),
+  'GET /api/definitions/:id/results': route(
+    { request: NO_INPUT, query: apiContract.resultsQuerySchema },
+    (c, input, ctx) =>
+      c.json(assembleResults(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports)),
+  ),
 };
 ```
 
@@ -6144,15 +7699,41 @@ export const HANDLERS: HandlerTable = {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/results.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 15 tests (with the execution summary's `expandTop`, decision 42); typecheck clean.
+Expected: PASS, 18 tests (with the execution summary's `expandTop`, decision 42); typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: See the tests bite**
 
-```bash
-git add -A apps/api packages && git commit -m "wp08: results: basis, dedup, class-then-price ranking, cap, staleness by fetch age, truncation, notSeenInLatest, excluded rows"
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.11a**: in `apps/api/src/read/rows.ts` replace `  return { ageHours, stale: isStale(p, now, thresholdHours) };` with `  return { ageHours, stale: effectiveAge(p, now).fetchedHours > thresholdHours };`. Fails: “an unknown vendor age is aged by fetchedAt alone and is not stale for that reason (decision 44, spec rev 23)”; “a calendar price is stale only past the refresh plus the provider age (spec §8.1)”.
+
+- **8.11b**: in `apps/api/src/read/rows.ts` replace `    booking: safeBooking(o.booking, o.offer.providerId),` with `    booking: o.booking,`. Fails: “a stored booking link that fails the allowlist on the way out is dropped (decision 54, review SEC-5)”.
+
+- **8.11c**: in `apps/api/src/read/results.ts` replace `    return o !== undefined && (o.status === 'empty' || o.status === 'no_data');` with `    return false;`. Fails: “a calendar price a later search found empty is marked superseded and ranked after current prices (decision 54)”.
+
+- **8.11d**: in `apps/api/src/read/results.ts` replace
+
+```ts
+    wanted === null
+      ? ports.repos
 ```
 
-### Task 8.12: Calendar, duration analysis, coverage, calendar gap, cell detail
+  with
+
+```ts
+    wanted === null || wanted !== null
+      ? ports.repos
+```
+
+  Fails: “an older run picked with executionId still shows its own price after a newer run priced the cell again (review prov-003)”.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp08: results: basis, dedup, ranking, cap, effective-age staleness, truncation, not-seen and superseded marks, link re-validation, scoped runs"
+```
+
+### Task 8.12: Calendar (with `destination`), duration analysis, coverage, calendar gap, cell detail
 
 **Files:**
 - Create: `apps/api/src/read/calendar.ts`, `src/read/duration.ts`, `src/read/coverageView.ts`, `src/read/cell.ts`
@@ -6160,16 +7741,18 @@ git add -A apps/api packages && git commit -m "wp08: results: basis, dedup, clas
 - Test: `apps/api/test/routes/views.test.ts`
 
 **Interfaces:**
-- Consumes: `loadRows`, `confirmedIn`, `discoveryProviders`, `priceOf`, `withNights`, `cheapest`, `calendarStaleAfterHours` (Task 8.11); `overrunOf`, `planCallsOf`, `executionResponse` (Task 8.10); `CellsRepo.bucketsPerDay/outcomes/rollUps/selected`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent` (WP3); `engine.scheduler.blockedSince()`, `engine.childCapPreview` (WP7); `selectedNotReached`, `addDays`, `daysBetween`, `dedupByItinerary` (core).
-- Produces: `assembleCalendar`, `assembleCalendarGap`, `assembleDuration`, `assembleCoverage`, `retryable`, `assembleCellDetail`; routes `GET /api/definitions/:id/calendar`, `/duration-analysis`, `/coverage`, `/calendar-gap`, `/cells/:origin/:destination/:departureDate/:returnDate`.
+- Consumes: `loadRows`, `confirmedIn`, `priceOf`, `withNights`, `cheapest`, `pickVerified`, `calendarStaleAfterHours` (Task 8.11); `overrunOf`, `planCallsOf`, `executionResponse` (Task 8.10); `CellsRepo.outcomes/rollUps/selected`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent`, `retriedOnResume` (WP3, Task 8.0); `engine.scheduler.blockedSince()`, `engine.childCapPreview` (WP7); `selectedNotReached`, `sixBuckets`, `addDays`, `daysBetween`, `dedupByItinerary`, `cellKeyString` (core).
+- Produces: `assembleCalendar`, `assembleCalendarGap`, `assembleDuration`, `assembleCoverage`, `retryable`, `assembleCellDetail`; routes `GET /api/definitions/:id/calendar` (`?destination=`), `/duration-analysis`, `/coverage`, `/calendar-gap`, `/cells/:origin/:destination/:departureDate/:returnDate`.
 
-Rules: every view reads the same rows as `/results` and dedups itinerary-searched rows per itinerary before counting. Calendar days cover every departure date of the current window; six-bucket counts, selection and coverage come from the **latest parent** execution, completed children counted per day as "on demand". `cheapestVerified` uses class `verified` only; `cheapestPartiallyVerified` carries its `count`; `verification.unconfirmedCells` counts the day's selected cells whose itinerary search priced but confirmed no price (decision 51), over every destination; neither minimum, nor duration's `minVerified`, nor the calendar gap's minimum, ever uses a price the final step did not confirm (decisions 45, 48: a verified-basis view never shows an unconfirmed fare as the itinerary-search price). A priced verification roll-up with a null price counts as itinerary-searched and contributes no price. The calendar response reports `staleAfterHours` and per discovery provider `calendarStaleAfterHours`.
+**Calendar** (View B; decisions 51, 53, 54). Days cover every departure date of the current window. With `destination` (one of the definition's, else 422 `unknown_destination`), every figure of the day — the six-bucket counts, the selection, `unconfirmedCells`, both verified minima, the calendar minimum and `byDestination` — counts that destination's cells only, so a filtered day never borrows another airport's price or count. Six-bucket counts come from the latest parent's discovery outcomes through core's `sixBuckets`; selection and coverage from the latest parent, completed children counted per day as "on demand". Verified-basis figures count confirmed prices only, filtered **before** the per-itinerary dedup, so a confirmed £400 offer is never lost behind an unconfirmed £380 one for the same itinerary (review prov-009); `cheapestVerified` uses class `verified`, `cheapestPartiallyVerified` carries its `count`, and each is picked by `pickVerified`: a price the newest search returned before one it did not, then a fresh one before a stale one, then the cheaper (decision 54, spec §11 View B), with its `notSeenInLatest` mark (decision 54, WP10's field). `cheapestCalendar` prefers a current price to a superseded one and carries `superseded`; `byDestination` keeps its plain figures (WP10 no longer reads it). `verification.unconfirmedCells` counts the latest parent's selected cells whose verification roll-up is priced with no confirmed price (decisions 48, 51), so an older run's confirmed price does not hide the latest run's unconfirmed one (review prov-008). The response reports `staleAfterHours` and per discovery provider `calendarStaleAfterHours`.
 
-Duration (plan decision 38, WP10 §13): each minimum carries its `cell`; `n` counts the cells of that nights value with a class-verified confirmed price (verified) or that the provider priced (calendar); `searched` is per series — `verification` is true when any verification outcome of that nights value, in the latest parent or a completed child, is priced, empty or no_data, and each discovery provider of the definition by the same rule over its own outcomes in the latest parent.
+**Duration** (View C; decisions 38, 54; review prov-012; WP10's shapes): one execution set — the latest parent plus completed children — feeds both the minima and the `searched` counts, so a nights value is never counted searched by one run and priced by another. Each minimum carries its `cell` and `n` (cells of that nights value with a class-verified confirmed price, or that the provider priced); `minVerified` is picked by `pickVerified` and carries its `notSeenInLatest` mark; each `minCalendar[].price` prefers a current price and carries `superseded` (with one execution set it reads the latest parent's own fetches, so it is false unless a later run of the set says otherwise). `searched` counts per series: `verification` over the selected cells of that nights value (the latest parent's selection and the completed children's cells), each discovery provider over every cell of that nights value in the current space; `searched` is those whose outcome in the set is priced, empty or no_data. Cell keys are core's `cellKeyString`.
 
-Coverage (View D) is the latest parent's; before the first run it is 404 `no_execution` (the contract names one execution). `perStage` rows carry their ledger counts, the pre-factor `planCalls`, `overrun` (decision 43: discovery on tiles) and `parityBreak`; `errors[].retryable` is what a manual resume would pick up (WP3's resume query): `auth`, `quota`, `parse` always; other reasons while `attempts < 3`, except the deterministic `no-return-legs`, `no-priced-options`, `fx-unavailable`, `currency-unsupported`, `unknown-airport-tz`.
+**Coverage** (View D) is the latest parent's; before the first run it is 404 `no_execution`. `perStage` rows carry their ledger counts, the pre-factor `planCalls`, `overrun` (decision 43: discovery on tiles) and `parityBreak`; `errors[].retryable` is WP3's `retriedOnResume(outcome, true)`, the very rule the manual resume runs.
 
-Cell detail: outcomes per execution × stage × provider passed as stored (a priced verification outcome with a null `minPence` is the web's "price not confirmed", decision 48), calendar prices with `truncated`, observations as rows, and `verify` from `Engine.childCapPreview(definitionId, cell)` — the same sizing the child gets (decisions 42, 45, 48) — or null without a verification provider or for a cell outside the current space.
+**Calendar gap** (spec §6.9): current calendar prices below the verified-basis yardstick — the class-verified confirmed price picked by `pickVerified`, with its mark; a superseded calendar price is not listed. Empty without a verification provider.
+
+**Cell detail**: outcomes per execution × stage × provider as stored (a priced verification outcome with a null `minPence` is the web's "price not confirmed", decision 48), calendar prices with `truncated` and `superseded`, observations as rows, and `verify` from `Engine.childCapPreview(definitionId, cell)` when its result is `ok` — the same sizing and the same refusals as `verifyCell` (decisions 42, 45, 48) — or null without a verification provider or when the preview refuses (`not_found`, `window`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6177,7 +7760,7 @@ Cell detail: outcomes per execution × stage × provider passed as stored (a pri
 
 ```ts
 // Spec §10 calendar, duration analysis, coverage, calendar gap and cell detail (Views B, C, D and the side panel).
-import { apiContract, daysBetween } from '@gmt/core';
+import { apiContract, asIata, daysBetween, generateCells } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { currentSpace } from '../../src/read/space.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
@@ -6318,6 +7901,105 @@ describe('GET /api/definitions/:id/calendar (spec §10, View B)', () => {
   });
 });
 
+describe('calendar selection rules (plan decisions 53, 54; review prov-009)', () => {
+  const calendar = (x: Harness, defId: string, query = '') =>
+    get(
+      x,
+      `/api/definitions/${defId}/calendar${query}`,
+      '/api/definitions/:id/calendar',
+      apiContract.calendarResponseSchema,
+    );
+  async function bare(destinations = ['JFK']) {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ destinations: destinations.map(asIata) }),
+    );
+    return { x, s, def };
+  }
+
+  it('with destination=, buckets, selection, minima and byDestination count that destination only; 422 for another', async () => {
+    const { x, s, def } = await bare(['JFK', 'EWR']);
+    const J = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+    const E = cell('LHR', 'EWR', '2026-11-02', '2026-11-12');
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [J, E], { selected: [J, E].map((c) => ({ cell: c, reason: 'top_n' as const })) });
+    s.tile('E1', J, { status: 'priced', pricePence: 45_000, fetchedAt: at(-1) });
+    s.tile('E1', E, { status: 'priced', pricePence: 35_000, fetchedAt: at(-1), tileIndex: 1 });
+    s.verified('E1', J, [{ hash: 'hJ', pricePence: 60_000, fetchedAt: at(-1) }]);
+    s.verified('E1', E, [{ hash: 'hE', pricePence: 50_000, fetchedAt: at(-1) }]);
+    const both = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
+    expect([
+      both?.cheapestVerified?.pricePence,
+      both?.verification.selected,
+      both?.discovery[0]?.total,
+    ]).toEqual([50_000, 2, 2]);
+    const jfk = (await calendar(x, def.id, '?destination=JFK')).days.find((d) => d.date === '2026-11-02');
+    expect([jfk?.cheapestVerified?.pricePence, jfk?.cheapestCalendar?.pricePence]).toEqual([60_000, 45_000]);
+    expect([jfk?.verification.selected, jfk?.discovery[0]?.total]).toEqual([1, 1]);
+    expect(jfk?.byDestination.map((b) => b.destination)).toEqual(['JFK']);
+    const bos = await x.request(`/api/definitions/${def.id}/calendar?destination=BOS`);
+    expect(bos.status).toBe(422);
+    expect((await errorOf(bos)).code).toBe('unknown_destination');
+  });
+
+  it('prefers a price the newest search returned over a cheaper one it did not, and marks the latter', async () => {
+    const { x, s, def } = await bare();
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E1', C1, [{ hash: 'hOld', pricePence: 55_000, fetchedAt: at(-29) }]);
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E2', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E2', C1, [{ hash: 'hNew', pricePence: 65_000, fetchedAt: at(-1) }]);
+    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
+    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hNew', notSeenInLatest: null });
+    const gap = await get(
+      x,
+      `/api/definitions/${def.id}/calendar-gap`,
+      '/api/definitions/:id/calendar-gap',
+      apiContract.calendarGapResponseSchema,
+    );
+    expect(gap.cheapestVerified).toMatchObject({ itineraryHash: 'hNew', notSeenInLatest: null });
+  });
+
+  it('prefers a fresh price over a cheaper stale one on the same day', async () => {
+    const { x, s, def } = await bare();
+    const C1b = cell('LHR', 'JFK', '2026-11-02', '2026-11-13');
+    s.execution('E1', { def, status: 'completed', startedAt: at(-300), finishedAt: at(-1) });
+    s.cells('E1', [C1, C1b], { selected: [C1, C1b].map((c) => ({ cell: c, reason: 'top_n' as const })) });
+    s.verified('E1', C1, [{ hash: 'hStale', pricePence: 50_000, fetchedAt: at(-250) }]); // 250 h > 192
+    s.verified('E1', C1b, [{ hash: 'hFresh', pricePence: 58_000, fetchedAt: at(-1) }]);
+    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
+    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hFresh', stale: false });
+  });
+
+  it('a confirmed £400 offer is the cheapest even when the same itinerary has an unconfirmed £380 offer', async () => {
+    const { x, s, def } = await bare();
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E1', C1, [
+      { hash: 'hD', pricePence: 40_000, fetchedAt: at(-1), seller: 'Confirmed Air' },
+      { hash: 'hD', pricePence: 38_000, fetchedAt: at(-1), seller: 'Unconfirmed Travel', confirmed: false },
+    ]);
+    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
+    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hD', pricePence: 40_000 });
+    expect(day?.verification.unconfirmedCells).toBe(0);
+  });
+
+  it("unconfirmedCells follows the latest run: an older run's confirmed price does not hide it", async () => {
+    const { x, s, def } = await bare();
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E1', C1, [{ hash: 'hC', pricePence: 60_000, fetchedAt: at(-29) }]);
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E2', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E2', C1, [{ hash: 'hU', pricePence: 55_000, fetchedAt: at(-1), confirmed: false }]);
+    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
+    expect(day?.verification.unconfirmedCells).toBe(1);
+  });
+});
+
 describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () => {
   it('per nights: minimum with its cell and n, calendar per provider, searched per series, gaps as null / empty', async () => {
     const { x, def } = await world();
@@ -6337,16 +8019,94 @@ describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () =>
         price: expect.objectContaining({ pricePence: 45_000 }),
       }),
     ]);
+    // why: WP10's per-series counts: three of the four selected 10-night cells were itinerary-searched (C4 was not
+    // reached); the fixture answered C1, C2 and C3 of every 10-night cell of the window (C4's tile failed)
+    const tenTotal = generateCells(currentSpace(def, x.clock.todayLondon())).filter(
+      (c) => c.nights === 10,
+    ).length;
     expect(ten?.searched).toEqual({
-      verification: true,
-      discovery: [{ providerId: 'fixture', searched: true }],
+      verification: { searched: 3, total: 4 },
+      discovery: [{ providerId: 'fixture', searched: 3, total: tenTotal }],
     });
     expect(d.byNights[1]).toMatchObject({
       nights: 11,
       minVerified: null,
       minCalendar: [],
-      searched: { verification: false, discovery: [{ providerId: 'fixture', searched: false }] },
+      searched: {
+        verification: { searched: 0, total: 0 },
+        discovery: [{ providerId: 'fixture', searched: 0, total: tenTotal }],
+      },
     });
+  });
+});
+
+describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 shapes)', () => {
+  it('a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const C1b = cell('LHR', 'JFK', '2026-11-02', '2026-11-13'); // same day, 11 nights
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', [C1, C1b]);
+    s.tile('Eold', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-29) });
+    s.tile('Eold', C1b, { status: 'priced', pricePence: 50_000, fetchedAt: at(-29), tileIndex: 1 });
+    s.execution('Enew', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('Enew', [C1, C1b]);
+    s.tile('Enew', C1, { status: 'empty', fetchedAt: at(-2) });
+    s.tile('Enew', C1b, { status: 'priced', pricePence: 52_000, fetchedAt: at(-2), tileIndex: 1 });
+    const day = (
+      await get(
+        x,
+        `/api/definitions/${def.id}/calendar`,
+        '/api/definitions/:id/calendar',
+        apiContract.calendarResponseSchema,
+      )
+    ).days.find((d) => d.date === '2026-11-02');
+    expect(day?.cheapestCalendar).toMatchObject({ pricePence: 52_000, superseded: false });
+    const d = await get(
+      x,
+      `/api/definitions/${def.id}/duration-analysis`,
+      '/api/definitions/:id/duration-analysis',
+      apiContract.durationAnalysisResponseSchema,
+    );
+    // why: the duration reads the latest parent's own fetches, so the 10-night minimum is gone, not superseded
+    expect(d.byNights.find((n) => n.nights === 10)?.minCalendar).toEqual([]);
+    const detail = await get(
+      x,
+      `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
+      '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
+      apiContract.cellDetailResponseSchema,
+    );
+    expect(detail.calendarPrices.map((p) => [p.pricePence, p.superseded])).toEqual([[30_000, true]]);
+  });
+});
+
+describe('duration analysis over one set of executions (review prov-006)', () => {
+  it("an older run's price is neither a minimum nor marks a nights value searched once a newer run skipped it", async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.tile('E1', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-29) });
+    s.verified('E1', C1, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-29) }]);
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E2', [C2], { selected: [{ cell: C2, reason: 'top_n' }] });
+    s.verified('E2', C2, [{ hash: 'hW', pricePence: 61_000, fetchedAt: at(-1) }]);
+    const d = await get(
+      x,
+      `/api/definitions/${def.id}/duration-analysis`,
+      '/api/definitions/:id/duration-analysis',
+      apiContract.durationAnalysisResponseSchema,
+    );
+    const ten = d.byNights.find((n) => n.nights === 10);
+    expect(ten?.minVerified).toMatchObject({ pricePence: 61_000, n: 1, cell: { ...C2, nights: 10 } });
+    expect(ten?.minVerified?.cell.departureDate).toBe('2026-11-03');
+    expect(ten?.searched.verification).toEqual({ searched: 1, total: 1 });
+    expect(ten?.minCalendar).toEqual([]);
+    expect(ten?.searched.discovery.map((s) => s.searched)).toEqual([0]);
   });
 });
 
@@ -6443,7 +8203,7 @@ describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:re
     const { x, def, s } = await world();
     const preview = vi
       .spyOn(x.engine, 'childCapPreview')
-      .mockReturnValue({ maxCalls: 6, headroomCalls: 994 });
+      .mockReturnValue({ ok: true, maxCalls: 6, headroomCalls: 994 });
     const d = await get(
       x,
       `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
@@ -6505,66 +8265,95 @@ Expected: FAIL: every view route answers 404 `not_found`.
 import {
   addDays,
   type apiContract,
-  type Buckets,
+  type CellOutcome,
   cellKeyString,
   dedupByItinerary,
-  type IsoDate,
+  type Iata,
   type ProviderId,
   type RollUp,
   type SearchDefinition,
-  type Stage,
+  sixBuckets,
 } from '@gmt/core';
 import type { z } from 'zod';
+import { ApiError } from '../errors.js';
+import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { SEARCHED } from './coverage.js';
 import { executionSummary } from './executions.js';
-import { confirmedIn, discoveryProviders, loadRows } from './results.js';
-import { calendarStaleAfterHours, cheapest, priceOf, type ResultRow } from './rows.js';
-
-type DayBuckets = Array<{ stage: Stage; providerId: ProviderId; buckets: Buckets; total: number }>;
+import { confirmedIn, loadRows } from './results.js';
+import { calendarStaleAfterHours, cheapest, pickVerified, priceOf, type ResultRow } from './rows.js';
 
 export type CalendarResponse = z.infer<typeof apiContract.calendarResponseSchema>;
 export type CalendarGapResponse = z.infer<typeof apiContract.calendarGapResponseSchema>;
 
+/** A verified-basis figure with its "not seen in latest search" mark (decision 54). */
+function verifiedFigure(r: ResultRow) {
+  return { ...priceOf(r), notSeenInLatest: r.notSeenInLatest };
+}
+
+/** The calendar-basis figure: a current price before one a later search superseded (decision 54), then the cheapest. */
+function pickCalendar(rows: readonly ResultRow[]): ResultRow | null {
+  return cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);
+}
+
+/** True when the cell's verification roll-up is priced with no confirmed price (decisions 45, 48, 51). */
+function unconfirmed(r: RollUp | undefined): boolean {
+  return r?.status === 'priced' && r.minPence === null;
+}
+
 /**
- * Spec §10 `GET /calendar`: one entry per departure date of the current window. Six-bucket counts, selection and
- * coverage come from the latest parent execution (children are excluded from "latest execution", spec §8.1); completed
- * children count per day as "on demand". `cheapestVerified` is class verified only; `cheapestPartiallyVerified` skips
- * prices the final step did not confirm (decisions 45, 48); `unconfirmedCells` counts the day's selected cells whose
- * itinerary search priced but confirmed no price (decision 51), over every destination: the day-level count cannot
- * follow the web's destination filter (§13).
+ * Spec §10 `GET /calendar`: one entry per departure date of the current window, for every destination or, with
+ * `destination` (plan decision 53), for that destination's cells only — buckets, selection, minima and
+ * `unconfirmedCells` alike, so a filtered day never counts another airport. Six-bucket counts and selection come from
+ * the latest parent execution's outcomes (spec §8.1); completed children count per day as "on demand". The verified
+ * figures (class verified; partially verified with its count) count only confirmed prices, filtered before the
+ * per-itinerary dedup so a confirmed offer is never lost behind an unconfirmed one (review prov-009), and prefer a row
+ * the newest search returned, then a fresh one (decision 54, spec §11 View B). `unconfirmedCells` is the latest
+ * parent's selected cells whose verification roll-up is priced with no confirmed price.
  */
-export function assembleCalendar(def: SearchDefinition, ports: Ports): CalendarResponse {
+export function assembleCalendar(
+  def: SearchDefinition,
+  destination: Iata | undefined,
+  ports: Ports,
+): CalendarResponse {
+  if (destination !== undefined && !def.destinations.includes(destination))
+    throw new ApiError(422, 'unknown_destination', API_TEXT.unknownDestination);
   const loaded = loadRows(def, ports);
   const parent = loaded.latestParent;
-  const perDay =
-    parent === null ? new Map<IsoDate, DayBuckets>() : ports.repos.cells.bucketsPerDay(parent.id);
+  const mine = (c: { destination: Iata }) => destination === undefined || c.destination === destination;
+  const outcomes: CellOutcome[] =
+    parent === null ? [] : ports.repos.cells.outcomes(parent.id, { stage: 'discovery' }).filter(mine);
   const rollUps =
     parent === null
       ? new Map<string, { discovery: RollUp; verification: RollUp }>()
       : ports.repos.cells.rollUps(parent.id);
-  const selected = parent === null ? [] : ports.repos.cells.selected(parent.id);
-  const children = loaded.all.filter((e) => e.isChild && e.status === 'completed');
-  const confirmed = confirmedIn(loaded);
-  const verified = dedupByItinerary(loaded.verified, loaded.rc.now).filter(confirmed);
-  // why: decisions 45, 48, 51: a cell whose itinerary search priced but whose final step confirmed no price has no
-  // itinerary-search price; the day counts such cells so the web can say "price not confirmed" without outcome reasons.
-  const confirmedCells = new Set(loaded.verified.filter(confirmed).map((r) => cellKeyString(r.cell)));
+  const selected =
+    parent === null ? [] : ports.repos.cells.selected(parent.id).filter(({ cell }) => mine(cell));
+  const children = loaded.all.filter(
+    (e) => e.isChild && e.status === 'completed' && e.cell !== null && mine(e.cell),
+  );
+  const verified = dedupByItinerary(
+    loaded.verified.filter(confirmedIn(loaded)).filter((r) => mine(r.cell)),
+    loaded.rc.now,
+  );
+  const calendar = loaded.calendar.filter((r) => mine(r.cell));
+  const providers = def.providers.discovery;
   const days: CalendarResponse['days'] = [];
   for (let d = loaded.space.departureFrom; d <= loaded.space.departureTo; d = addDays(d, 1)) {
     const onDay = (r: ResultRow) => r.cell.departureDate === d;
     const v = verified.filter(onDay);
-    const cal = loaded.calendar.filter(onDay);
+    const cal = calendar.filter(onDay);
     const partial = v.filter((r) => r.verdictClass === 'partially-verified');
-    const best = cheapest(v.filter((r) => r.verdictClass === 'verified'));
-    const bestPartial = cheapest(partial);
-    const bestCal = cheapest(cal);
+    const best = pickVerified(v.filter((r) => r.verdictClass === 'verified'));
+    const bestPartial = pickVerified(partial);
+    const bestCal = pickCalendar(cal);
     const sel = selected.filter(({ cell }) => cell.departureDate === d);
     days.push({
       date: d,
-      discovery: (perDay.get(d) ?? [])
-        .filter((p) => p.stage === 'discovery')
-        .map(({ providerId, buckets, total }) => ({ providerId, buckets, total })),
+      discovery: providers.flatMap((providerId: ProviderId) => {
+        const list = outcomes.filter((o) => o.departureDate === d && o.providerId === providerId);
+        return list.length === 0 ? [] : [{ providerId, buckets: sixBuckets(list), total: list.length }];
+      }),
       verification: {
         selected: sel.length,
         itinerarySearched: sel.filter(({ cell }) => {
@@ -6572,40 +8361,42 @@ export function assembleCalendar(def: SearchDefinition, ports: Ports): CalendarR
           return s !== null && SEARCHED.has(s);
         }).length,
         onDemand: children.filter((e) => e.cell?.departureDate === d).length,
-        unconfirmedCells: sel.filter(({ cell }) => {
-          const key = cellKeyString(cell);
-          return rollUps.get(key)?.verification.status === 'priced' && !confirmedCells.has(key);
-        }).length,
+        unconfirmedCells: sel.filter(({ cell }) =>
+          unconfirmed(rollUps.get(cellKeyString(cell))?.verification),
+        ).length,
       },
       cheapestVerified:
         best === null || best.itineraryHash === null
           ? null
-          : { ...priceOf(best), cell: best.cell, itineraryHash: best.itineraryHash },
+          : { ...verifiedFigure(best), cell: best.cell, itineraryHash: best.itineraryHash },
       cheapestPartiallyVerified:
         bestPartial === null || bestPartial.itineraryHash === null
           ? null
           : {
-              ...priceOf(bestPartial),
+              ...verifiedFigure(bestPartial),
               cell: bestPartial.cell,
               itineraryHash: bestPartial.itineraryHash,
               count: partial.length,
             },
-      cheapestCalendar: bestCal === null ? null : { ...priceOf(bestCal), cell: bestCal.cell },
-      byDestination: def.destinations.map((destination) => {
-        const dv = cheapest(
-          v.filter((r) => r.verdictClass === 'verified' && r.cell.destination === destination),
-        );
-        const dc = cheapest(cal.filter((r) => r.cell.destination === destination));
-        return {
-          destination,
-          cheapestVerified: dv === null ? null : priceOf(dv),
-          cheapestCalendar: dc === null ? null : priceOf(dc),
-        };
-      }),
+      cheapestCalendar:
+        bestCal === null ? null : { ...priceOf(bestCal), cell: bestCal.cell, superseded: bestCal.superseded },
+      byDestination: def.destinations
+        .filter((x) => mine({ destination: x }))
+        .map((dest) => {
+          const dv = pickVerified(
+            v.filter((r) => r.verdictClass === 'verified' && r.cell.destination === dest),
+          );
+          const dc = pickCalendar(cal.filter((r) => r.cell.destination === dest));
+          return {
+            destination: dest,
+            cheapestVerified: dv === null ? null : priceOf(dv),
+            cheapestCalendar: dc === null ? null : priceOf(dc),
+          };
+        }),
     });
   }
   const calendarStale: Partial<Record<ProviderId, number>> = {};
-  for (const id of discoveryProviders(loaded)) calendarStale[id] = calendarStaleAfterHours(loaded.rc, id);
+  for (const id of providers) calendarStale[id] = calendarStaleAfterHours(loaded.rc, id);
   return {
     days,
     executions: loaded.scoped.map((e) => executionSummary(e, loaded.rc.now)),
@@ -6615,22 +8406,24 @@ export function assembleCalendar(def: SearchDefinition, ports: Ports): CalendarR
 }
 
 /**
- * Spec §10 `GET /calendar-gap`: calendar prices below the cheapest class-verified, confirmed price; empty without a
- * verification provider. why: search_cells.best_observation_id is the cheapest observation written, not the cheapest
- * class-verified one, so the minimum is computed at read time (plan round-2 pin).
+ * Spec §10 `GET /calendar-gap`: current calendar prices below the verified-basis yardstick, which is the class-verified
+ * confirmed price picked as every verified figure is (decision 54: seen before not seen, fresh before stale, then
+ * cheaper) and carries its mark; empty without a verification provider. A superseded calendar price is not listed: a
+ * later search of that cell found no fares. why: search_cells.best_observation_id is the cheapest observation written,
+ * not the cheapest class-verified one, so the yardstick is computed at read time (plan round-2 pin).
  */
 export function assembleCalendarGap(def: SearchDefinition, ports: Ports): CalendarGapResponse {
   if (def.providers.verification.length === 0) return { cheapestVerified: null, cells: [] };
   const loaded = loadRows(def, ports);
-  const best = cheapest(
-    loaded.verified.filter((r) => r.verdictClass === 'verified').filter(confirmedIn(loaded)),
+  const best = pickVerified(
+    loaded.verified.filter(confirmedIn(loaded)).filter((r) => r.verdictClass === 'verified'),
   );
   if (best === null || best.itineraryHash === null) return { cheapestVerified: null, cells: [] };
   const below = loaded.calendar
-    .filter((r) => r.pricePence < best.pricePence)
+    .filter((r) => !r.superseded && r.pricePence < best.pricePence)
     .sort((a, b) => a.pricePence - b.pricePence);
   return {
-    cheapestVerified: { ...priceOf(best), cell: best.cell, itineraryHash: best.itineraryHash },
+    cheapestVerified: { ...verifiedFigure(best), cell: best.cell, itineraryHash: best.itineraryHash },
     cells: below.map((r) => ({ cell: r.cell, calendar: priceOf(r), verifyAvailable: true })),
   };
 }
@@ -6642,72 +8435,106 @@ export function assembleCalendarGap(def: SearchDefinition, ports: Ports): Calend
 /** Spec §10 `/duration-analysis` (View C). */
 import {
   type apiContract,
-  type CellOutcome,
+  type CellKey,
+  cellKeyString,
   daysBetween,
   dedupByItinerary,
-  type ProviderId,
+  generateCells,
   type SearchDefinition,
 } from '@gmt/core';
 import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import { SEARCHED } from './coverage.js';
 import { executionSummary } from './executions.js';
-import { confirmedIn, discoveryProviders, loadRows } from './results.js';
-import { cheapest, priceOf, type ResultRow } from './rows.js';
+import { confirmedIn, EXECUTIONS_LIMIT, loadRows } from './results.js';
+import { cheapest, pickVerified, priceOf, type ResultRow } from './rows.js';
 import { cellInSpace } from './space.js';
 
 export type DurationResponse = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
 
-const cellsOf = (rows: readonly ResultRow[]): number =>
-  new Set(
-    rows.map((r) => `${r.cell.departureDate}|${r.cell.returnDate}|${r.cell.origin}|${r.cell.destination}`),
-  ).size;
+const cellsOf = (rows: readonly ResultRow[]): number => new Set(rows.map((r) => cellKeyString(r.cell))).size;
 
 /**
- * Spec §10 `GET /duration-analysis`: per nights value, no interpolation (absent → null / []). Each minimum carries its
- * cell; `n` counts the cells of that nights value with a class-verified confirmed price (verified) or that the provider
- * priced (calendar). `searched` is per series (plan decision 38, WP10 §13): verification is true when any verification
- * outcome of that nights value, in the latest parent or a completed child, is priced, empty or no_data; each discovery
- * provider of the definition by the same rule over its own outcomes in the latest parent.
+ * Spec §10 `GET /duration-analysis`: per nights value, no interpolation (absent → null / []). Plan decision 54: the
+ * minima and the `searched` counts read the same executions — the latest parent and the completed children — and the
+ * same provider list, the definition's discovery providers, so a price never sits beside "not searched". Each minimum
+ * carries its cell; `n` counts the cells of that nights value with a class-verified confirmed price (verified, picked
+ * as every verified figure is, with its "not seen in latest search" mark) or that the provider priced (calendar, a
+ * current price before a superseded one, with its `superseded` mark). `searched` counts per series, as WP10's Task 10.1
+ * declares it: verification over the selected cells of the nights value (the latest parent's selection and the
+ * completed children's cells), discovery over every cell of the nights value in the current space; `searched` is those
+ * whose outcome in the set is priced, empty or no_data.
  */
 export function assembleDuration(def: SearchDefinition, ports: Ports): DurationResponse {
-  const loaded = loadRows(def, ports);
-  const verified = dedupByItinerary(loaded.verified, loaded.rc.now)
-    .filter((r) => r.verdictClass === 'verified')
-    .filter(confirmedIn(loaded));
-  const providers = discoveryProviders(loaded);
-  const parent = loaded.latestParent;
-  const sources = [
-    ...(parent === null ? [] : [parent]),
-    ...loaded.all.filter((e) => e.isChild && e.status === 'completed'),
-  ];
-  const outcomes: CellOutcome[] = sources
-    .flatMap((e) => ports.repos.cells.outcomes(e.id))
-    .filter((o) => SEARCHED.has(o.status) && cellInSpace(loaded.space, o));
-  const searched = (nights: number, keep: (o: CellOutcome) => boolean) =>
-    outcomes.some((o) => keep(o) && daysBetween(o.departureDate, o.returnDate) === nights);
+  const all = ports.repos.executions.listForDefinition(def.id, {
+    limit: EXECUTIONS_LIMIT,
+    includeChildren: true,
+  });
+  const parent = all.find((e) => !e.isChild);
+  const children = all.filter((e) => e.isChild && e.status === 'completed');
+  const set = [...(parent === undefined ? [] : [parent]), ...children];
+  const loaded = loadRows(
+    def,
+    ports,
+    set.map((e) => e.id),
+  );
+  const verified = dedupByItinerary(loaded.verified.filter(confirmedIn(loaded)), loaded.rc.now).filter(
+    (r) => r.verdictClass === 'verified',
+  );
+  const inSpace = (c: CellKey) => cellInSpace(loaded.space, c);
+  const answered = new Set(
+    set
+      .flatMap((e) => ports.repos.cells.outcomes(e.id))
+      .filter((o) => SEARCHED.has(o.status) && inSpace(o))
+      .map((o) => `${o.stage}|${o.stage === 'discovery' ? o.providerId : ''}|${cellKeyString(o)}`),
+  );
+  const selected = [
+    ...(parent === undefined ? [] : ports.repos.cells.selected(parent.id).map(({ cell }) => cell)),
+    ...children.flatMap((e) => (e.cell === null ? [] : [e.cell])),
+  ].filter(inSpace);
+  const selectedKeys = [...new Map(selected.map((c) => [cellKeyString(c), c])).values()];
+  const space = generateCells(loaded.space);
+  const nightsOf = (c: CellKey) => daysBetween(c.departureDate, c.returnDate);
+  const count = (cells: readonly CellKey[], stage: string, providerId: string) => ({
+    searched: cells.filter((c) => answered.has(`${stage}|${providerId}|${cellKeyString(c)}`)).length,
+    total: cells.length,
+  });
   const byNights: DurationResponse['byNights'] = [];
   for (let n = def.minNights; n <= def.maxNights; n++) {
     const v = verified.filter((r) => r.cell.nights === n);
-    const best = cheapest(v);
+    const best = pickVerified(v);
+    const ofNights = space.filter((c) => c.nights === n);
     byNights.push({
       nights: n,
-      minVerified: best === null ? null : { ...priceOf(best), cell: best.cell, n: cellsOf(v) },
-      minCalendar: providers.flatMap((providerId: ProviderId) => {
+      minVerified:
+        best === null
+          ? null
+          : { ...priceOf(best), cell: best.cell, n: cellsOf(v), notSeenInLatest: best.notSeenInLatest },
+      minCalendar: def.providers.discovery.flatMap((providerId) => {
         const rows = loaded.calendar.filter(
           (r) => r.cell.nights === n && r.provenance.providerId === providerId,
         );
-        const b = cheapest(rows);
-        return b === null ? [] : [{ providerId, price: { ...priceOf(b), cell: b.cell }, n: cellsOf(rows) }];
+        // why: decision 54: a superseded price is the minimum only when no current one exists.
+        const b = cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);
+        return b === null
+          ? []
+          : [
+              {
+                providerId,
+                price: { ...priceOf(b), cell: b.cell, superseded: b.superseded },
+                n: cellsOf(rows),
+              },
+            ];
       }),
       searched: {
-        verification: searched(n, (o) => o.stage === 'verification'),
+        verification: count(
+          selectedKeys.filter((c) => nightsOf(c) === n),
+          'verification',
+          '',
+        ),
         discovery: def.providers.discovery.map((providerId) => ({
           providerId,
-          searched: searched(
-            n,
-            (o) => o.stage === 'discovery' && o.providerId === providerId && o.executionId === parent?.id,
-          ),
+          ...count(ofNights, 'discovery', providerId),
         })),
       },
     });
@@ -6721,6 +8548,7 @@ export function assembleDuration(def: SearchDefinition, ports: Ports): DurationR
 ```ts
 /** Spec §10 `/coverage` (View D). Separate from `coverage.ts` so `results.ts` → `coverage.ts` stays acyclic. */
 import { type apiContract, type CellOutcome, type SearchDefinition, selectedNotReached } from '@gmt/core';
+import { retriedOnResume } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -6731,22 +8559,12 @@ import { executionResponse, overrunOf, planCallsOf } from './executions.js';
 import { withNights } from './rows.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
-/** Reasons a manual resume re-admits (spec §7 Resume; WP3's resume query). */
-const MANUAL_RETRY = new Set(['auth', 'quota', 'parse']);
-/** Deterministic failures no resume retries (spec §7 Resume; decision 37 adds `no-priced-options`). */
-const NEVER_RETRY = new Set([
-  'no-return-legs',
-  'no-priced-options',
-  'fx-unavailable',
-  'currency-unsupported',
-  'unknown-airport-tz',
-]);
-
-/** What a manual resume would pick up again (spec §7 Resume, WP3's resume query with `manual`). */
-export function retryable(o: Pick<CellOutcome, 'reason' | 'attempts'>): boolean {
-  const reason = o.reason ?? '';
-  if (MANUAL_RETRY.has(reason)) return true;
-  return o.attempts < 3 && !NEVER_RETRY.has(reason);
+/**
+ * What a manual resume would pick up again: WP3's `retriedOnResume`, the predicate the resume query is built from
+ * (review arch-005), so View D's "retry" and the resume never disagree.
+ */
+export function retryable(o: Pick<CellOutcome, 'status' | 'reason' | 'attempts'>): boolean {
+  return retriedOnResume(o, true);
 }
 
 /**
@@ -6812,14 +8630,13 @@ import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import { loadRows } from './results.js';
 import { type ResultRow, withNights } from './rows.js';
-import { cellInSpace } from './space.js';
 
 export type CellDetailResponse = z.infer<typeof apiContract.cellDetailResponseSchema>;
 
 /**
  * Spec §10 cell route: outcomes per execution × stage × provider, prices with provenance, the observations as rows.
  * `verify` is what a per-cell verify would spend now, from `Engine.childCapPreview` (the same sizing the child gets,
- * decisions 42, 45, 48); null without a verification provider or for a cell outside the current space. A priced
+ * decisions 42, 45, 48); null without a verification provider or when the preview refuses the cell (`not_found`, `window`). A priced
  * verification outcome with a null `minPence` is passed through as stored: its price was not confirmed (decision 48).
  */
 export function assembleCellDetail(
@@ -6831,7 +8648,8 @@ export function assembleCellDetail(
   const key = cellKeyString(target);
   const loaded = loadRows(def, ports);
   const onCell = (r: ResultRow) => cellKeyString(r.cell) === key;
-  const canVerify = def.providers.verification.length > 0 && cellInSpace(loaded.space, target);
+  // why: WP7's preview refuses a cell it would not verify (`not_found`, `window`); the button then has nothing to show.
+  const preview = def.providers.verification.length > 0 ? engine.childCapPreview(def.id, target) : null;
   return {
     cell: withNights(target),
     outcomes: loaded.all.flatMap((e) => ports.repos.cells.outcomes(e.id, { cells: [target] })),
@@ -6847,11 +8665,13 @@ export function assembleCellDetail(
               truncated: r.truncated,
               executionId: r.executionId,
               calendarPriceId: r.calendarPriceId,
+              superseded: r.superseded,
             },
           ],
     ),
     observations: loaded.verified.filter(onCell),
-    verify: canVerify ? engine.childCapPreview(def.id, target) : null,
+    verify:
+      preview?.ok === true ? { maxCalls: preview.maxCalls, headroomCalls: preview.headroomCalls } : null,
   };
 }
 ```
@@ -6868,11 +8688,12 @@ import { assembleCoverage } from '../read/coverageView.js';
 import { assembleDuration } from '../read/duration.js';
 import { assembleResults } from '../read/results.js';
 import { API_TEXT } from '../text.js';
-import { getLiveDefinition, param, parseWith } from './shared.js';
-import type { HandlerTable, RouteInput } from './types.js';
+import { NO_INPUT, plain, route } from './define.js';
+import { getLiveDefinition, param } from './shared.js';
+import type { HandlerTable } from './types.js';
 
 /** Path parameters of the cell route; the route declares no params schema, so they are validated here. */
-function cellFromPath(input: RouteInput): CellKey {
+function cellFromPath(input: { params: Record<string, string> }): CellKey {
   const o = iataSchema.safeParse(param(input, 'origin'));
   const d = iataSchema.safeParse(param(input, 'destination'));
   const dep = isoDateSchema.safeParse(param(input, 'departureDate'));
@@ -6883,24 +8704,29 @@ function cellFromPath(input: RouteInput): CellKey {
 }
 
 export const resultHandlers: HandlerTable = {
-  'GET /api/definitions/:id/results': (c, input, ctx) =>
-    c.json(
-      assembleResults(
-        getLiveDefinition(ctx, param(input, 'id')),
-        parseWith(apiContract.resultsQuerySchema, input.query, 'query'),
-        ctx.ports,
+  'GET /api/definitions/:id/results': route(
+    { request: NO_INPUT, query: apiContract.resultsQuerySchema },
+    (c, input, ctx) =>
+      c.json(assembleResults(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports)),
+  ),
+  // why: plan decision 53: both bases come back per day; `destination` narrows the day to one destination's cells.
+  'GET /api/definitions/:id/calendar': route(
+    { request: NO_INPUT, query: apiContract.calendarQuerySchema },
+    (c, input, ctx) =>
+      c.json(
+        assembleCalendar(getLiveDefinition(ctx, param(input, 'id')), input.query.destination, ctx.ports),
       ),
-    ),
-  // why: the calendar route takes no query (plan API contract): both bases come back per day and the client colours by one (spec §11).
-  'GET /api/definitions/:id/calendar': (c, input, ctx) =>
-    c.json(assembleCalendar(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
-  'GET /api/definitions/:id/duration-analysis': (c, input, ctx) =>
+  ),
+  'GET /api/definitions/:id/duration-analysis': plain((c, input, ctx) =>
     c.json(assembleDuration(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
-  'GET /api/definitions/:id/coverage': (c, input, ctx) =>
+  ),
+  'GET /api/definitions/:id/coverage': plain((c, input, ctx) =>
     c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),
-  'GET /api/definitions/:id/calendar-gap': (c, input, ctx) =>
+  ),
+  'GET /api/definitions/:id/calendar-gap': plain((c, input, ctx) =>
     c.json(assembleCalendarGap(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
-  'GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate': (c, input, ctx) =>
+  ),
+  'GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate': plain((c, input, ctx) =>
     c.json(
       assembleCellDetail(
         getLiveDefinition(ctx, param(input, 'id')),
@@ -6909,18 +8735,49 @@ export const resultHandlers: HandlerTable = {
         ctx.engine,
       ),
     ),
+  ),
 };
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/views.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 11 tests; `test/routes/results.test.ts` still passes; typecheck clean.
+Expected: PASS, 18 tests; typecheck clean (run `test/routes/results.test.ts` too: still 18).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: See the tests bite**
+
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.12a**: in `apps/api/src/read/rows.ts` replace `  const rank = (r: ResultRow) => [r.notSeenInLatest === null ? 0 : 1, r.stale ? 1 : 0, r.pricePence];` with `  const rank = (r: ResultRow) => [r.pricePence];`. Fails: “prefers a price the newest search returned over a cheaper one it did not, and marks the latter”; “prefers a fresh price over a cheaper stale one on the same day”.
+
+- **8.12b**: in `apps/api/src/read/calendar.ts` replace `    loaded.verified.filter(confirmedIn(loaded)).filter((r) => mine(r.cell)),` with `    loaded.verified.filter((r) => mine(r.cell)),`. Fails: “an offer whose price the final step did not confirm is never a cheapest itinerary-search price (decisions 45, 48)”.
+
+- **8.12c**: in `apps/api/src/read/calendar.ts` replace `    parent === null ? [] : ports.repos.cells.selected(parent.id).filter(({ cell }) => mine(cell));` with `    parent === null ? [] : ports.repos.cells.selected(parent.id);`. Fails: “with destination=, buckets, selection, minima and byDestination count that destination only; 422 for another”.
+
+- **8.12e**: in `apps/api/src/read/calendar.ts` replace `  return cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);` with `  return cheapest(rows);`. Fails: “a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one”.
+
+- **8.12d**: in `apps/api/src/read/duration.ts` replace
+
+```ts
+  const loaded = loadRows(
+    def,
+    ports,
+    set.map((e) => e.id),
+  );
+```
+
+  with
+
+```ts
+  const loaded = loadRows(def, ports);
+```
+
+  Fails: “a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one”; “an older run's price is neither a minimum nor marks a nights value searched once a newer run skipped it”.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: calendar, duration analysis with per-series searched, coverage, calendar gap and cell detail with verify"
+git add -A apps/api packages && git commit -m "wp08: calendar with destination filter and seen-then-fresh minima, duration over one execution set, coverage, calendar gap and cell detail"
 ```
 
 ### Task 8.13: History routes and alert rule storage
@@ -6931,10 +8788,10 @@ git add -A apps/api packages && git commit -m "wp08: calendar, duration analysis
 - Test: `apps/api/test/routes/history.test.ts`, `apps/api/test/routes/alerts.test.ts`
 
 **Interfaces:**
-- Consumes: `ItinerariesRepo.offerHistory` (with Task 8.0's `suppliedFields`), `CalendarPricesRepo.history`, `RoutePriceHistoryRepo.series`, `DefinitionsRepo.list`, `AlertsRepo` (WP3); `staleness`, `calendarThreshold`, `truncationOf` (Task 8.11); `itineraryHistoryResponseSchema`, `routeHistoryResponseSchema`, `routeHistoryQuerySchema`, `alertRuleInputSchema`, `alertRuleUpdateRequestSchema`, `alertEventsQuerySchema`, `iataSchema` (core).
+- Consumes: `ItinerariesRepo.get`, `ItinerariesRepo.offerHistory` (with Task 8.0's `suppliedFields` and `executionId`), `CalendarPricesRepo.history`, `RoutePriceHistoryRepo.series`, `DefinitionsRepo.list`, `AlertsRepo` (WP3); `staleness`, `calendarThreshold`, `truncationOf` (Task 8.11); `isStale` (core, Task 8.0); `itineraryHistoryResponseSchema`, `routeHistoryResponseSchema`, `routeHistoryQuerySchema`, `alertRuleInputSchema`, `alertRuleUpdateRequestSchema`, `alertRulesQuerySchema`, `alertEventsQuerySchema`, `iataSchema` (core).
 - Produces: `itineraryHistory`, `routeHistory`; routes `GET /api/itineraries/:hash/history`, `GET /api/routes/:origin/:destination/history`, `GET/POST /api/alerts`, `PUT/DELETE /api/alerts/:id`, `GET /api/alerts/events`.
 
-Rules (spec §7, §10, §11; decisions 36, 38, 42, 44): itinerary history is one series per (provider, seller, cabin); each point carries `stale` (verified-basis rule), `truncated: false` and `priceConfirmed` (`price` among the observation's supplied fields). Route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy), one point per execution fetch carrying its `cell` and `executionId` (reused rows excluded by the repository), each with `stale` by the calendar rule (the refresh of a live definition flying the pair, else core's default) and `truncated` from its discovery outcome; plus the route-level lowest-price series per provider for the requested cabin and `'unknown'`, plotted by `date` (empty when the vendor supplies none, decision 40). Alert routes store and read rules and events only; evaluation and delivery are WP11. `DELETE /api/alerts/:id` soft-deletes (events kept). `GET /api/alerts` filters by `?definitionId=` (the ROUTES query schema); `GET /api/alerts/events` by `ruleId` and `definitionId`. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
+Rules (spec §7, §10, §11; decisions 36, 38, 42, 44, 52, 54, 55): itinerary history is the itinerary's own `cell` and `carriers` from its stored row (404 `itinerary_not_found` for an unknown hash) and one series per (provider, seller, cabin); each point carries the `executionId` of the run that observed it, `stale` (verified-basis rule, core's `isStale`), `truncated: false` and `priceConfirmed` (`price` among the observation's supplied fields). Route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy), one point per execution fetch carrying its `cell` and `executionId` (reused rows excluded by the repository), each with `stale` by the calendar rule (the refresh of a live definition flying the pair, else core's default) and `truncated` from its discovery outcome; plus the route-level lowest-price series per provider for the requested cabin and `'unknown'`, plotted by `date` (empty when the vendor supplies none, decision 40), each point `stale` by its fetch age against the provider's calendar threshold: core's `isStale` with an unknown vendor age, since the vendor dates the series no further (review prov-004, decisions 54, 55). WP10 labels that series indicative; it is GBP-only by contract (decision 25). Alert routes store and read rules and events only; evaluation and delivery are WP11. `DELETE /api/alerts/:id` soft-deletes (events kept). `GET /api/alerts` filters by `?definitionId=` (`alertRulesQuerySchema`); `GET /api/alerts/events` by `ruleId` and `definitionId`. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6944,7 +8801,7 @@ Rules (spec §7, §10, §11; decisions 36, 38, 42, 44): itinerary history is one
 // Spec §10, §7 history routes: provenance, staleness, truncation and confirmation on every point (decisions 36, 38, 42, 44).
 import { apiContract, TRUNCATED_NOTE } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { expectContract } from '../helpers/contract.js';
+import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 import { at, cell, seeder } from '../helpers/seed.js';
@@ -6992,7 +8849,7 @@ async function world() {
 
 describe('history routes (spec §10, §7)', () => {
   it('itinerary history: one series per provider, seller and cabin, points in time order with provenance, stale and confirmation', async () => {
-    const { x } = await world();
+    const { x, s } = await world();
     const body = await expectContract(
       await x.request('/api/itineraries/hV/history'),
       'GET',
@@ -7009,6 +8866,13 @@ describe('history routes (spec §10, §7)', () => {
       ],
     );
     expect(body.series[0]?.points.every((p) => p.provenance.providerId === 'fixture')).toBe(true);
+    // decision 52 (WP10 Task 10.1): the itinerary names its own trip, and each point the run that observed it
+    expect(body.cell).toEqual({ ...C1, nights: 10 });
+    expect(body.carriers).toEqual(['BA']);
+    expect(body.series[0]?.points.map((p) => p.executionId)).toEqual([s.id('E1'), s.id('E2')]);
+    const unknown = await x.request('/api/itineraries/nope/history');
+    expect(unknown.status).toBe(404);
+    expect((await errorOf(unknown)).code).toBe('itinerary_not_found');
   });
 
   it('route history: one calendar point per execution fetch, reused rows excluded, stale and truncated, and the route-level series by cabin and date', async () => {
@@ -7033,6 +8897,19 @@ describe('history routes (spec §10, §7)', () => {
         .find((r) => r.providerId === 'fixture' && r.cabin === 'unknown')
         ?.points.map((p) => [p.date, p.pricePence]),
     ).toEqual([['2026-10-13', 44_000]]);
+    // decisions 54, 55: a route-level point is stale by its fetch age (the vendor gives the series no age)
+    const route = body.routeSeries.find((r) => r.providerId === 'fixture');
+    expect(route?.points.map((p) => p.stale)).toEqual([false]);
+    x.clock.advance(200 * 3_600_000);
+    const later = await expectContract(
+      await x.request('/api/routes/LHR/JFK/history'),
+      'GET',
+      '/api/routes/:origin/:destination/history',
+      ROUTE,
+    );
+    expect(later.routeSeries.find((r) => r.providerId === 'fixture')?.points.map((p) => p.stale)).toEqual([
+      true,
+    ]);
   });
 
   it('reads the requested cabin and rejects a bad airport code', async () => {
@@ -7185,26 +9062,35 @@ import {
   type Cabin,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   type Iata,
+  isStale,
   type ProviderId,
   type SearchDefinition,
 } from '@gmt/core';
 import type { z } from 'zod';
+import { ApiError } from '../errors.js';
+import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { truncationOf } from './results.js';
-import { calendarThreshold, staleness } from './rows.js';
+import { calendarThreshold, staleness, withNights } from './rows.js';
 
 export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
 
 /**
- * One series per (provider, seller, cabin), oldest first (spec §11 History). Each point is stale by the verified-basis
- * rule (STALE_AFTER_HOURS, decision 44), never truncated (an itinerary search has no pages), and says whether the final
- * step confirmed its price (`price` among the observation's supplied fields, decisions 27, 37, 42).
+ * One series per (provider, seller, cabin), oldest first (spec §11 History), under the itinerary's own `cell` and
+ * `carriers` from its stored row (decision 52, WP10 Task 10.1); 404 for an unknown hash. Each point names the execution
+ * whose observation it is, is stale by the verified-basis rule (STALE_AFTER_HOURS, decisions 44, 55), never truncated
+ * (an itinerary search has no pages), and says whether the final step confirmed its price (`price` among the
+ * observation's supplied fields, decisions 27, 37, 42).
  */
 export function itineraryHistory(hash: string, ports: Ports): ItineraryHistoryResponse {
   const now = ports.clock.now();
+  const it = ports.repos.itineraries.get(hash);
+  if (it === null) throw new ApiError(404, 'itinerary_not_found', API_TEXT.itineraryNotFound);
   return {
     itineraryHash: hash,
+    cell: withNights(it),
+    carriers: it.marketingCarriers,
     series: ports.repos.itineraries.offerHistory(hash).map((s) => ({
       providerId: s.providerId,
       seller: s.seller,
@@ -7239,6 +9125,8 @@ function refreshFor(
  * cell and execution (reused rows excluded by the repository), each stale by the calendar rule and truncated when its
  * discovery outcome was (decisions 36, 38); plus the route-level lowest-price series per provider, for the requested
  * cabin and `'unknown'` (SearchApi's vendor gives none), plotted by `date` (spec §7 `route_price_history`, decision 40).
+ * Plan decision 54: each route-level point carries `stale` by fetch age against the provider's calendar threshold (the
+ * series is GBP-only by contract, decision 25, and WP10 labels it indicative).
  */
 export function routeHistory(
   origin: Iata,
@@ -7270,13 +9158,24 @@ export function routeHistory(
       };
     }),
     routeSeries: ports.providers
-      .flatMap((p) =>
-        [cabin, 'unknown' as const].map((cab) => ({
+      .flatMap((p) => {
+        const threshold = calendarThreshold(
+          ports.config,
+          ports.providers,
+          p.id,
+          refreshFor(defs, origin, destination, p.id),
+        );
+        return [cabin, 'unknown' as const].map((cab) => ({
           providerId: p.id,
           cabin: cab,
-          points: ports.repos.routeHistory.series(origin, destination, p.id, cab),
-        })),
-      )
+          points: ports.repos.routeHistory.series(origin, destination, p.id, cab).map((pt) => ({
+            ...pt,
+            // why: decision 54: stale by fetch age. The vendor gives the series no age, so core's rule (decision 55)
+            // reads it as an unknown vendor age, which counts the fetch age alone. The web labels the series indicative.
+            stale: isStale({ fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, now, threshold),
+          })),
+        }));
+      })
       .filter((s) => s.points.length > 0),
   };
 }
@@ -7290,20 +9189,24 @@ import { apiContract, iataSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
 import { itineraryHistory, routeHistory } from '../read/history.js';
 import { API_TEXT } from '../text.js';
-import { param, parseWith } from './shared.js';
+import { NO_INPUT, plain, route } from './define.js';
+import { param } from './shared.js';
 import type { HandlerTable } from './types.js';
 
 export const historyHandlers: HandlerTable = {
-  'GET /api/itineraries/:hash/history': (c, input, ctx) =>
+  'GET /api/itineraries/:hash/history': plain((c, input, ctx) =>
     c.json(itineraryHistory(param(input, 'hash'), ctx.ports)),
+  ),
 
-  'GET /api/routes/:origin/:destination/history': (c, input, ctx) => {
-    const o = iataSchema.safeParse(param(input, 'origin'));
-    const d = iataSchema.safeParse(param(input, 'destination'));
-    if (!o.success || !d.success) throw new ApiError(400, 'validation', API_TEXT.validation('path'));
-    const q = parseWith(apiContract.routeHistoryQuerySchema, input.query, 'query');
-    return c.json(routeHistory(o.data, d.data, q.cabin ?? 'economy', ctx.ports));
-  },
+  'GET /api/routes/:origin/:destination/history': route(
+    { request: NO_INPUT, query: apiContract.routeHistoryQuerySchema },
+    (c, input, ctx) => {
+      const o = iataSchema.safeParse(param(input, 'origin'));
+      const d = iataSchema.safeParse(param(input, 'destination'));
+      if (!o.success || !d.success) throw new ApiError(400, 'validation', API_TEXT.validation('path'));
+      return c.json(routeHistory(o.data, d.data, input.query.cabin ?? 'economy', ctx.ports));
+    },
+  ),
 };
 ```
 
@@ -7314,7 +9217,8 @@ export const historyHandlers: HandlerTable = {
 import { type AlertRule, apiContract } from '@gmt/core';
 import { ApiError, fieldsDetail, issuesToFields } from '../errors.js';
 import { API_TEXT } from '../text.js';
-import { param, parseWith } from './shared.js';
+import { NO_INPUT, plain, route } from './define.js';
+import { param } from './shared.js';
 import type { HandlerTable, RouteContext } from './types.js';
 
 function requireDefinition(ctx: RouteContext, id: string): void {
@@ -7323,66 +9227,67 @@ function requireDefinition(ctx: RouteContext, id: string): void {
     throw new ApiError(
       422,
       'definition_not_found',
-      API_TEXT.definitionNotFound(id),
-      fieldsDetail([{ field: 'definitionId', message: API_TEXT.definitionNotFound(id) }]),
+      API_TEXT.definitionNotFound,
+      fieldsDetail([{ field: 'definitionId', message: API_TEXT.definitionNotFound }]),
     );
 }
 
 function getRule(ctx: RouteContext, id: string): AlertRule {
   const rule = ctx.ports.repos.alerts.get(id);
-  if (rule === null) throw new ApiError(404, 'alert_not_found', API_TEXT.alertNotFound(id));
+  if (rule === null) throw new ApiError(404, 'alert_not_found', API_TEXT.alertNotFound);
   return rule;
 }
 
 export const alertHandlers: HandlerTable = {
-  'GET /api/alerts': (c, input, ctx) => {
-    const q = parseWith(
-      apiContract.alertEventsQuerySchema.pick({ definitionId: true }),
-      input.query,
-      'query',
-    );
-    return c.json(ctx.ports.repos.alerts.rules(q.definitionId));
-  },
+  'GET /api/alerts': route(
+    { request: NO_INPUT, query: apiContract.alertRulesQuerySchema },
+    (c, { query }, ctx) => c.json(ctx.ports.repos.alerts.rules(query.definitionId)),
+  ),
 
-  'POST /api/alerts': (c, input, ctx) => {
-    const body = parseWith(apiContract.alertRuleInputSchema, input.body);
-    requireDefinition(ctx, body.definitionId);
-    return c.json(ctx.ports.repos.alerts.create(body), 201);
-  },
+  'POST /api/alerts': route(
+    { request: apiContract.alertRuleInputSchema, query: NO_INPUT },
+    (c, { body }, ctx) => {
+      requireDefinition(ctx, body.definitionId);
+      return c.json(ctx.ports.repos.alerts.create(body), 201);
+    },
+  ),
 
-  'PUT /api/alerts/:id': (c, input, ctx) => {
-    const { id, ...current } = getRule(ctx, param(input, 'id'));
-    const patch = parseWith(apiContract.alertRuleUpdateRequestSchema, input.body);
-    // why: validate the merged rule, so a partial update cannot slip past the requireAllVerified refinement (spec §6.8).
-    const merged = apiContract.alertRuleInputSchema.safeParse({ ...current, ...patch });
-    if (!merged.success)
-      throw new ApiError(
-        422,
-        'invalid_alert_rule',
-        API_TEXT.validation('body'),
-        fieldsDetail(issuesToFields(merged.error.issues)),
-      );
-    if (merged.data.definitionId !== current.definitionId) requireDefinition(ctx, merged.data.definitionId);
-    return c.json(ctx.ports.repos.alerts.update(id, merged.data));
-  },
+  'PUT /api/alerts/:id': route(
+    { request: apiContract.alertRuleUpdateRequestSchema, query: NO_INPUT },
+    (c, input, ctx) => {
+      const { id, ...current } = getRule(ctx, param(input, 'id'));
+      // why: validate the merged rule, so a partial update cannot slip past the requireAllVerified refinement (spec §6.8).
+      const merged = apiContract.alertRuleInputSchema.safeParse({ ...current, ...input.body });
+      if (!merged.success)
+        throw new ApiError(
+          422,
+          'invalid_alert_rule',
+          API_TEXT.validation('body'),
+          fieldsDetail(issuesToFields(merged.error.issues)),
+        );
+      if (merged.data.definitionId !== current.definitionId) requireDefinition(ctx, merged.data.definitionId);
+      return c.json(ctx.ports.repos.alerts.update(id, merged.data));
+    },
+  ),
 
-  'DELETE /api/alerts/:id': (c, input, ctx) => {
+  'DELETE /api/alerts/:id': plain((c, input, ctx) => {
     const existing = getRule(ctx, param(input, 'id'));
     // why: alert rules soft-delete so their events stay readable (plan decision 15).
     ctx.ports.repos.alerts.softDelete(existing.id);
     return c.json(existing);
-  },
+  }),
 
-  'GET /api/alerts/events': (c, input, ctx) => {
-    const q = parseWith(apiContract.alertEventsQuerySchema, input.query, 'query');
-    return c.json(
-      ctx.ports.repos.alerts.events({
-        ...(q.ruleId === undefined ? {} : { ruleId: q.ruleId }),
-        ...(q.definitionId === undefined ? {} : { definitionId: q.definitionId }),
-        limit: q.limit ?? 100,
-      }),
-    );
-  },
+  'GET /api/alerts/events': route(
+    { request: NO_INPUT, query: apiContract.alertEventsQuerySchema },
+    (c, { query }, ctx) =>
+      c.json(
+        ctx.ports.repos.alerts.events({
+          ...(query.ruleId === undefined ? {} : { ruleId: query.ruleId }),
+          ...(query.definitionId === undefined ? {} : { definitionId: query.definitionId }),
+          limit: query.limit ?? 100,
+        }),
+      ),
+  ),
 };
 ```
 
@@ -7413,10 +9318,16 @@ export const HANDLERS: HandlerTable = {
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/history.test.ts test/routes/alerts.test.ts && pnpm --filter @gmt/api typecheck`
 Expected: PASS, 3 + 4 tests; typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: See the tests bite**
+
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.13a**: in `apps/api/src/read/history.ts` replace `            stale: isStale({ fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, now, threshold),` with `            stale: false,`. Fails: “route history: one calendar point per execution fetch, reused rows excluded, stale and truncated, and the route-level series by cabin and date”.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: history routes with stale, truncated and priceConfirmed points; alert rule storage"
+git add -A apps/api packages && git commit -m "wp08: history routes: itinerary cell and carriers, points with execution, stale, truncated and priceConfirmed, stale route points; alert rule storage"
 ```
 
 ### Task 8.14: `POST /api/tools/record` inside the app process
@@ -7427,10 +9338,10 @@ git add -A apps/api packages && git commit -m "wp08: history routes with stale, 
 - Test: `apps/api/test/routes/tools.test.ts`
 
 **Interfaces:**
-- Consumes: `runRecord`, `recordPrecheck` (WP4b `src/tools/record.ts`), `RecordCli` (`src/tools/recordPlan.ts`), `recordingTarget`, `RecordingTarget` (`src/bootstrap/tool.ts`), `EXIT`, `safeMessage`; `syntheticAllowed`; `toolRecordRequestSchema`, `toolRunResponseSchema` (core).
-- Produces: `inProcessTools(ports, opts?)`; route `POST /api/tools/record`.
+- Consumes: `runRecord`, `recordPrecheck` (WP4b `src/tools/record.ts`), `RecordCli` (`src/tools/recordPlan.ts`), `recordingTarget`, `RecordingTarget`, `runTool` (`src/bootstrap/tool.ts`), `EXIT`, `safeMessage`; `syntheticAllowed`; `toolRecordRequestSchema`, `toolRunResponseSchema` (core).
+- Produces: `inProcessTools(ports, opts?)` returning `HttpToolRunners` (named apart from WP4b's CLI `ToolRunners`, review arch-009); route `POST /api/tools/record`.
 
-Rules (spec §7, §10, §13): the route needs auth like every other; it runs the record tool in this process (the app holds `app_lock`, so the tool bootstrap would refuse) through WP4b's own `runRecord` over the app's ports, so the plan, the budget position and every spend refusal are the CLI's; one tool at a time (`409 tool_busy`); an unregistered runner answers `503 tool_unavailable`; a runner that throws answers `500 tool_failed` and logs the message through `safeMessage`. The runner refuses, before any call and with the CLI's exit codes, an open synthetic gate (70: recordings and the ledger never share a database with synthetic data), a route that may not enter the committed tree (64; HTTP has no `--out`) and a configuration that cannot record (78); over HTTP there is no `--confirm-rerun`, so a rerun that needs it ends 65. The request's own abort signal stops the run. `fixturesWritten` lists every file the run added under the recorded root. `POST /api/tools/smoke` is WP13's and stays unmounted.
+Rules (spec §7, §10, §13; reviews SEC-7, arch-009): the route needs auth like every other; it runs the record tool in this process (the app holds `app_lock`, so the tool bootstrap would refuse) through WP4b's own `runRecord` over the app's ports, so the plan, the budget position and every spend refusal are the CLI's; one tool at a time (`409 tool_busy`); an unregistered runner answers `503 tool_unavailable`; a runner that throws answers `500 tool_failed` and logs the message through `safeMessage`. The runner refuses, before any call and with the CLI's exit codes and in `runTool`'s order, an open synthetic gate (70), a route that may not enter the committed tree (64; HTTP has no `--out`) and a configuration that cannot record (78); a test runs both over the same refusing configurations and compares the codes. Over HTTP there is no `--confirm-rerun`, so a rerun that needs it ends 65. Every output line passes through `safeMessage` (URL queries and secrets stripped) before it leaves the process, and `fixturesWritten` lists the files the run added, relative to the recorded root, so no absolute path of the host is returned. The request's own abort signal stops the run. `POST /api/tools/smoke` is WP13's and stays unmounted.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7438,15 +9349,18 @@ Rules (spec §7, §10, §13): the route needs auth like every other; it runs the
 
 ```ts
 // Spec §10, §7 `POST /api/tools/record` inside the app process.
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract } from '@gmt/core';
+import { apiContract, FIXTURE_OPT_IN_PHRASE } from '@gmt/core';
 import { MIGRATIONS_DIR } from '@gmt/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runTool } from '../../src/bootstrap/tool.js';
 import type { ToolRunResponse } from '../../src/routes/types.js';
 import { inProcessTools } from '../../src/tools/inProcess.js';
+import type { runRecord } from '../../src/tools/record.js';
 import { buildPorts, loadConfigFromEnv } from '../../src/wiring.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
-import { cleanEnv, silentLog } from '../helpers/env.js';
+import { cleanEnv, SENTINEL_SA, SENTINEL_TP, silentLog } from '../helpers/env.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
 import { onCleanup, tempDir } from '../helpers/tmp.js';
 
@@ -7566,6 +9480,75 @@ describe('the in-process runner outside the synthetic gate (plan exit-code table
     });
   });
 });
+
+describe('the in-process runner: refusal order, scrubbed lines and relative paths (reviews SEC-7, arch-010)', () => {
+  const argv = (b: {
+    budget: number;
+    origins: readonly string[];
+    destinations: readonly string[];
+    month: string;
+  }) => [
+    '--budget',
+    String(b.budget),
+    '--route',
+    `${b.origins.join(',')}:${b.destinations.join(',')}`,
+    '--month',
+    b.month,
+  ];
+  const vendors = { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd' };
+
+  function portsFor(env: Record<string, string>, file = 'app.db') {
+    const fullEnv = cleanEnv({
+      NODE_ENV: 'development',
+      DATABASE_PATH: join(tempDir('gmt-tools-'), file),
+      BIND_ADDRESS: '127.0.0.1',
+      LOG_LEVEL: 'error',
+      ...env,
+    });
+    const ports = buildPorts(loadConfigFromEnv(fullEnv), { log: silentLog, migrationsDir: MIGRATIONS_DIR });
+    onCleanup(() => ports.db.close());
+    return { ports, env: fullEnv };
+  }
+
+  it.each([
+    ['an open synthetic gate', { ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE }, 'app.fixture.db', body, 70],
+    ['another route', {}, 'app.db', { ...body, origins: ['LGW'], destinations: ['EWR'] }, 64],
+    ['no vendor keys', {}, 'app.db', body, 78],
+  ] as const)('%s: the same exit code as runTool', async (_label, extra, file, args, code) => {
+    const { ports, env } = portsFor(extra, file);
+    const lines: string[] = [];
+    const cli = await runTool('record', argv(args), {
+      env,
+      err: (l) => lines.push(l),
+      out: (l) => lines.push(l),
+    });
+    const http = await inProcessTools(ports).record?.(
+      apiContract.toolRecordRequestSchema.parse(args),
+      new AbortController().signal,
+    );
+    expect([cli, http?.exitCode]).toEqual([code, code]);
+  });
+
+  it('every line has URL queries and secrets scrubbed, and fixturesWritten is relative to the recorded root', async () => {
+    const { ports } = portsFor(vendors);
+    const root = join(tempDir('gmt-rec-'), 'fixtures', 'recorded');
+    const fake: typeof runRecord = async (_ports, _cli, o) => {
+      o.out(`GET https://api.example.test/v1?token=${SENTINEL_TP} 200`);
+      o.err(`key ${SENTINEL_SA} rejected`);
+      mkdirSync(join(o.recordedRoot, 'travelpayouts'), { recursive: true });
+      writeFileSync(join(o.recordedRoot, 'travelpayouts', 'x.json'), '{}');
+      return 0;
+    };
+    const r = await inProcessTools(ports, {
+      recording: { root, recordedBy: 'test' },
+      runRecord: fake,
+    }).record?.(apiContract.toolRecordRequestSchema.parse(body), new AbortController().signal);
+    expect(r?.exitCode).toBe(0);
+    expect(r?.fixturesWritten).toEqual([join('travelpayouts', 'x.json')]);
+    const text = JSON.stringify(r);
+    for (const leak of [SENTINEL_TP, SENTINEL_SA, 'token=', root]) expect(text).not.toContain(leak);
+  });
+});
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -7583,31 +9566,34 @@ import { apiContract } from '@gmt/core';
 import { ApiError } from '../errors.js';
 import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
-import { parseWith } from './shared.js';
+import { NO_INPUT, route } from './define.js';
 import type { HandlerTable } from './types.js';
 
 export const toolHandlers: HandlerTable = {
   /** One tool at a time; an unregistered runner is 503; a runner that throws is 500 with a scrubbed log line. */
-  'POST /api/tools/record': async (c, input, ctx) => {
-    const record = ctx.tools.record;
-    if (record === undefined) throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable('record'));
-    if (ctx.toolInFlight.name !== null)
-      throw new ApiError(409, 'tool_busy', API_TEXT.toolBusy(ctx.toolInFlight.name));
-    const args = parseWith(apiContract.toolRecordRequestSchema, input.body);
-    ctx.toolInFlight.name = 'record';
-    // why: the request's own signal ends the run when the client disconnects, as SIGINT ends the CLI run.
-    try {
-      return c.json(await record(args, c.req.raw.signal));
-    } catch (err) {
-      ctx.ports.log.error(
-        { tool: 'record', err: { message: safeMessage(err, ctx.ports.secrets) } },
-        'tool failed',
-      );
-      throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed('record'));
-    } finally {
-      ctx.toolInFlight.name = null;
-    }
-  },
+  'POST /api/tools/record': route(
+    { request: apiContract.toolRecordRequestSchema, query: NO_INPUT },
+    async (c, { body }, ctx) => {
+      const record = ctx.tools.record;
+      if (record === undefined)
+        throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable('record'));
+      if (ctx.toolInFlight.name !== null)
+        throw new ApiError(409, 'tool_busy', API_TEXT.toolBusy(ctx.toolInFlight.name));
+      ctx.toolInFlight.name = 'record';
+      // why: the request's own signal ends the run when the client disconnects, as SIGINT ends the CLI run.
+      try {
+        return c.json(await record(body, c.req.raw.signal));
+      } catch (err) {
+        ctx.ports.log.error(
+          { tool: 'record', err: { message: safeMessage(err, ctx.ports.secrets) } },
+          'tool failed',
+        );
+        throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed('record'));
+      } finally {
+        ctx.toolInFlight.name = null;
+      }
+    },
+  ),
 };
 ```
 
@@ -7620,10 +9606,11 @@ export const toolHandlers: HandlerTable = {
  * smoke.
  */
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { syntheticAllowed } from '@gmt/core';
 import { type RecordingTarget, recordingTarget } from '../bootstrap/tool.js';
-import type { ToolRecordRequest, ToolRunners, ToolRunResponse } from '../routes/types.js';
+import type { HttpToolRunners, ToolRecordRequest, ToolRunResponse } from '../routes/types.js';
+import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { recordPrecheck, runRecord } from './record.js';
@@ -7647,14 +9634,21 @@ function refused(exitCode: number, line: string): ToolRunResponse {
   };
 }
 
+/** Test seams; production passes none. `runRecord` stands in for WP4b's runner (review SEC-7's sentinel test). */
+export interface InProcessOptions {
+  recording?: RecordingTarget;
+  runRecord?: typeof runRecord;
+}
+
 /**
- * The record runner over `runRecord` with the CLI's refusals in the same order and with the same exit codes (plan
- * exit-code table): an open synthetic gate (70), a route that may not enter the committed tree (64), a configuration
- * that cannot record (78); then the run itself, which refuses for spend with 65 (no `--confirm-rerun` over HTTP).
- * `fixturesWritten` is every file the run added under the recorded root. `recording` is the test seam the tool
- * bootstrap also has.
+ * The record runner over `runRecord`. why: the refusals mirror `runTool`'s order and exit codes (plan exit-code
+ * table), which a test pins by running both over the same refusing config: an open synthetic gate (70), a route that
+ * may not enter the committed tree (64), a configuration that cannot record (78); the run itself refuses for spend
+ * with 65 (no `--confirm-rerun` over HTTP). Every line is URL- and secret-scrubbed with `safeMessage` before it leaves
+ * the process (review SEC-7), and `fixturesWritten` lists the files the run added, relative to the recorded root.
  */
-export function inProcessTools(ports: Ports, opts: { recording?: RecordingTarget } = {}): ToolRunners {
+export function inProcessTools(ports: Ports, opts: InProcessOptions = {}): HttpToolRunners {
+  const run = opts.runRecord ?? runRecord;
   return {
     record: async (args: ToolRecordRequest, signal: AbortSignal) => {
       if (syntheticAllowed(ports.config)) return refused(EXIT.refusedTestEnv, API_TEXT.toolSynthetic);
@@ -7664,15 +9658,18 @@ export function inProcessTools(ports: Ports, opts: { recording?: RecordingTarget
       const precheck = recordPrecheck(ports.config);
       if (precheck !== null) return refused(EXIT.badConfig, precheck);
       const lines: string[] = [];
+      const keep = (l: string) => lines.push(safeMessage(l, ports.secrets));
       const before = new Set(filesUnder(target.root));
-      const exitCode = await runRecord(ports, cli, {
+      const exitCode = await run(ports, cli, {
         signal,
-        out: (l) => lines.push(l),
-        err: (l) => lines.push(l),
+        out: keep,
+        err: keep,
         recordedRoot: target.root,
         recordedBy: target.recordedBy,
       });
-      const fixturesWritten = filesUnder(target.root).filter((f) => !before.has(f));
+      const fixturesWritten = filesUnder(target.root)
+        .filter((f) => !before.has(f))
+        .map((f) => relative(target.root, f));
       return {
         exitCode,
         summary: API_TEXT.toolSummary('record', exitCode, fixturesWritten.length),
@@ -7743,23 +9740,31 @@ import { EXIT } from '../tools/types.js';
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/tools.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 7 tests; typecheck clean.
+Expected: PASS, 11 tests; typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: See the tests bite**
+
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.14a**: in `apps/api/src/tools/inProcess.ts` replace `const keep = (l: string) => lines.push(safeMessage(l, ports.secrets));` with `const keep = (l: string) => lines.push(l);`. Fails: “every line has URL queries and secrets scrubbed, and fixturesWritten is relative to the recorded root”.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: POST /api/tools/record in-process over WP4b's runRecord"
+git add -A apps/api packages && git commit -m "wp08: POST /api/tools/record in-process over WP4b's runRecord, refusals in runTool's order, scrubbed lines, relative paths"
 ```
 
-### Task 8.15: Contract sweep: strict mounting, auth flags, every response against `core/api-contract`, provenance, banned words, sentinels
+### Task 8.15: Contract sweep: strict mounting, auth flags, every response against `core/api-contract`, provenance by shape, banned words, sentinels; folder coverage thresholds
 
 **Files:**
-- Modify: `apps/api/src/app.ts`
+- Modify: `apps/api/src/app.ts`, `apps/api/vitest.config.ts`
 - Test: `apps/api/test/routes/contract-sweep.test.ts`
 
 **Interfaces:**
-- Consumes: `apiContract.ROUTES`, `findBannedWords`, `BANNED_WORD_ALLOWLIST` (core); every handler table.
+- Consumes: `apiContract.ROUTES`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`, `TRUNCATED_NOTE` (core); every handler table.
 - Produces: `createApp` throws when a ROUTES entry has no handler (unless listed in `OWNED_ELSEWHERE`) or a handler has no ROUTES entry.
+
+Rules (spec §9 item 5; reviews prov-005, SEC-10, TS-7): the provenance sweep is shape-based — every object holding `pricePence`, `minPence` or `lowestPricePence` must carry `provenance` or a `providerId` + `sourceKind` pair and `stale` (itself or an enclosing object; row-level outcomes excepted), and a `fixture` price must be `synthetic` and the reverse — over a seeded world with a truncated tile, an unconfirmed offer, an unknown-age observation and a route-level point, so a price field added later is checked without editing the sweep. The banned-word sweep covers every `API_TEXT` entry and every user-facing string of every response. The sentinel sweep sends provider keys and the password in a path, a query, a malformed body and a verify body as well as on the happy routes, and finds none in any body or log line. `vitest.config.ts` adds per-folder thresholds for `src/read/**` and `src/routes/**` (90% lines, functions, statements; 80% branches), so a file there cannot hide behind the package average.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7768,7 +9773,7 @@ git add -A apps/api packages && git commit -m "wp08: POST /api/tools/record in-p
 ```ts
 // Spec §9 item 5 sweeps: strict mounting, auth flags, every GET against core/api-contract with provenance on every
 // price, banned words in every API string, sentinel secrets never in a body or a log line.
-import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, TRUNCATED_NOTE } from '@gmt/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp } from '../../src/app.js';
@@ -7791,16 +9796,40 @@ async function harness(env: Record<string, string> = {}): Promise<Harness> {
 }
 
 const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+const C2 = cell('LHR', 'JFK', '2026-11-03', '2026-11-13');
 const mounted = apiContract.ROUTES.filter((r) => !OWNED_ELSEWHERE.has(`${r.method} ${r.path}`));
 
-/** A small world touching every read route: one parent execution, a calendar price, an observation, an alert rule. */
+/**
+ * A small world touching every read route and every provenance shape (review TS-4): a parent execution, a calendar
+ * price, a truncated tile, a confirmed observation, an unconfirmed one, an unknown-age one, a route-level point and an
+ * alert rule.
+ */
 function seedWorld(x: Harness): { def: string; exec: string; alert: string } {
   const s = seeder(x.ports);
   const def = x.ports.repos.definitions.create(exampleDefinitionInput({ constraints: { maxStops: 1 } }));
   s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
   s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+  s.cells('E1', [C2]);
   s.tile('E1', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-1) });
-  s.verified('E1', C1, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-1) }]);
+  s.tile('E1', C2, {
+    status: 'priced',
+    pricePence: 41_000,
+    fetchedAt: at(-1),
+    lastError: TRUNCATED_NOTE,
+    tileIndex: 1,
+  });
+  s.verified('E1', C1, [
+    { hash: 'hV', pricePence: 60_000, fetchedAt: at(-1) },
+    { hash: 'hU', pricePence: 58_000, fetchedAt: at(-1), confirmed: false },
+    { hash: 'hA', pricePence: 61_000, fetchedAt: at(-1), maxAgeHours: 'unknown' },
+  ]);
+  s.routeLowest({
+    origin: 'LHR',
+    destination: 'JFK',
+    date: '2026-11-02',
+    pricePence: 40_000,
+    fetchedAt: at(-1),
+  });
   const alert = x.ports.repos.alerts.create({
     definitionId: def.id,
     type: 'absolute',
@@ -7828,13 +9857,33 @@ function fill(path: string, ids: { def: string; exec: string; alert: string }): 
 }
 const missing = { def: 'zz-missing', exec: 'zz-missing', alert: 'zz-missing' };
 
-/** Paths of every object that has a `pricePence` but no `provenance` (spec §10: provenance on every price). */
-function pricesWithoutProvenance(v: unknown, path = '$'): string[] {
-  if (Array.isArray(v)) return v.flatMap((x, i) => pricesWithoutProvenance(x, `${path}[${i}]`));
+const PRICE_KEYS = ['pricePence', 'minPence', 'lowestPricePence'] as const;
+
+/**
+ * Paths of every object holding a price (`pricePence`, `minPence`, `lowestPricePence`) that does not say where it came
+ * from and how old it is (spec §10, review TS-4): it must carry `provenance` or a `providerId` + `sourceKind` pair, and a
+ * `stale` flag unless its provenance is the cell-level roll-up's; a fixture price must be synthetic and the reverse.
+ * Shape-based, so a price field a later change adds is checked without editing this list.
+ */
+function unlabelledPrices(
+  v: unknown,
+  path = '$',
+  inherited: { stale: boolean } = { stale: false },
+): string[] {
+  if (Array.isArray(v)) return v.flatMap((x, i) => unlabelledPrices(x, `${path}[${i}]`, inherited));
   if (v === null || typeof v !== 'object') return [];
-  // why: route-series points carry providerId + sourceKind by contract (the vendor gives no cabin).
-  const here = 'pricePence' in v && !('provenance' in v) && !('sourceKind' in v) ? [path] : [];
-  return [...here, ...Object.entries(v).flatMap(([k, x]) => pricesWithoutProvenance(x, `${path}.${k}`))];
+  const o = z.record(z.string(), z.unknown()).parse(v);
+  const scope = { stale: inherited.stale || 'stale' in o };
+  const problems: string[] = [];
+  if (PRICE_KEYS.some((k) => typeof o[k] === 'number')) {
+    const prov = z.object({ providerId: z.string(), sourceKind: z.string() }).safeParse(o.provenance ?? o);
+    if (!prov.success) problems.push(`${path}: price without provenance`);
+    else if ((prov.data.providerId === 'fixture') !== (prov.data.sourceKind === 'synthetic'))
+      problems.push(`${path}: fixture and synthetic must go together`);
+    if (!scope.stale && !('verdictClass' in o) && !('status' in o))
+      problems.push(`${path}: price without stale`);
+  }
+  return [...problems, ...Object.entries(o).flatMap(([k, x]) => unlabelledPrices(x, `${path}.${k}`, scope))];
 }
 
 /** Every user-facing string in a response: reasons, notices, messages, labels, notes, summaries, assumptions. */
@@ -7857,16 +9906,21 @@ function apiTexts(): string[] {
     API_TEXT.notFound,
     API_TEXT.unauthenticated,
     API_TEXT.rateLimited(42),
-    API_TEXT.hostRejected('evil.example:3000', ['localhost:3000']),
-    API_TEXT.originRejected('https://evil.example', ['localhost:3000']),
+    API_TEXT.hostRejected('evil.example:3000'),
+    API_TEXT.originRejected('https://evil.example'),
+    API_TEXT.bodyTooLarge,
     API_TEXT.contentType,
     API_TEXT.requestedWith,
     API_TEXT.validation('body'),
     API_TEXT.malformedJson,
-    API_TEXT.definitionNotFound('d1'),
-    API_TEXT.executionNotFound('e1'),
+    API_TEXT.definitionNotFound,
+    API_TEXT.executionNotFound,
     API_TEXT.noExecution,
-    API_TEXT.alertNotFound('a1'),
+    API_TEXT.alertNotFound,
+    API_TEXT.alreadyRunning,
+    API_TEXT.unknownProvider('fixture'),
+    API_TEXT.unknownDestination,
+    API_TEXT.itineraryNotFound,
     API_TEXT.draftNotice,
     API_TEXT.draftCannotEnable,
     API_TEXT.draftNoEstimate,
@@ -7938,7 +9992,7 @@ describe('every GET route against the contract, with provenance on every price (
       const res = await x.request(fill(route.path, ids));
       expect(res.status, route.path).toBe(200);
       const body = await expectEnvelopeOrContract(res, 'GET', route.path);
-      expect(pricesWithoutProvenance(body), route.path).toEqual([]);
+      expect(unlabelledPrices(body), route.path).toEqual([]);
     }
   });
 });
@@ -7980,6 +10034,25 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
       ).text(),
     );
     bodies.push(await (await x.request('/api/definitions', { json: { name: SENTINEL_SA } })).text());
+    // why: review SEC-6: a secret the client sends back in a path, a query or a malformed body is never echoed
+    bodies.push(await (await x.request(`/api/definitions/${SENTINEL_SA}`)).text());
+    bodies.push(await (await x.request(`/api/executions/${SENTINEL_TP}`)).text());
+    bodies.push(
+      await (await x.request(`/api/definitions/${ids.def}/calendar?destination=${SENTINEL_SA}`)).text(),
+    );
+    bodies.push(await (await x.request(`/api/airports?q=${SENTINEL_TP}&limit=${SENTINEL_SA}`)).text());
+    bodies.push(
+      await (
+        await x.request('/api/definitions', { method: 'POST', body: `{"name":"${SENTINEL_TP}"` })
+      ).text(),
+    );
+    bodies.push(
+      await (
+        await x.request('/api/cells/verify', {
+          json: { definitionId: SENTINEL_SA, cell: { origin: SENTINEL_TP } },
+        })
+      ).text(),
+    );
     const everything = [...bodies, ...x.logLines].join('\n');
     for (const secret of [SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP]) expect(everything).not.toContain(secret);
   });
@@ -7989,7 +10062,7 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/contract-sweep.test.ts`
-Expected: FAIL, 1 of 6: "refuses a ROUTES entry without a handler and a handler without a ROUTES entry" (`createApp` skips silently); the other sweeps pass when Tasks 8.8–8.14 are complete, and any failure there names the offending route.
+Expected: FAIL, 1 of 6: "refuses a ROUTES entry without a handler and a handler without a ROUTES entry" (`createApp` skips silently); the other sweeps pass when Tasks 8.8–8.14 are complete, and any failure there names the offending route and path.
 
 - [ ] **Step 3: Implement**
 
@@ -8001,10 +10074,6 @@ Expected: FAIL, 1 of 6: "refuses a ROUTES entry without a handler and a handler 
     const handler = HANDLERS[key];
     // why: Task 8.15 makes mounting strict once every handler exists; until then an unmapped entry answers 404.
     if (handler === undefined || OWNED_ELSEWHERE.has(key)) continue;
-    app.on(route.method, route.path, every(...validatorsFor(route)), async (c) =>
-      handler(c, await readInput(c, route), ctx),
-    );
-  }
 ```
 
 `apps/api/src/app.ts` — replace with:
@@ -8021,36 +10090,58 @@ Expected: FAIL, 1 of 6: "refuses a ROUTES entry without a handler and a handler 
     const handler = HANDLERS[key];
     // why: spec §10 is the route table; an entry without a handler is a contract the api does not honour.
     if (handler === undefined) throw new Error(`no handler for ${key}`);
-    app.on(route.method, route.path, every(...validatorsFor(route)), async (c) =>
-      handler(c, await readInput(c, route), ctx),
-    );
-  }
 ```
 
 `apps/api/src/app.ts` — find:
 
 ```ts
- * carry `/api`) with zod validation, the error envelope, the spec §4 hardening and the auth gate.
- */
+ error envelope, the spec §4 hardening and the auth gate. A handler whose schemas are not its ROUTES entry's refuses
+ * to build.
 ```
 
 `apps/api/src/app.ts` — replace with:
 
 ```ts
- * carry `/api`) with zod validation, the error envelope, the spec §4 hardening and the auth gate. Strict: a ROUTES entry
- * without a handler (unless another package owns it) or a handler without a ROUTES entry refuses to build.
- */
+ error envelope, the spec §4 hardening and the auth gate. Strict: a ROUTES entry without a handler (unless another
+ * package owns it), a handler without a ROUTES entry, or a handler whose schemas are not its entry's refuses to build.
+```
+
+`apps/api/vitest.config.ts` — find:
+
+```ts
+      thresholds: { lines: 85, branches: 70, functions: 85, statements: 85 },
+```
+
+`apps/api/vitest.config.ts` — replace with:
+
+```ts
+      thresholds: {
+        lines: 85,
+        branches: 70,
+        functions: 85,
+        statements: 85,
+        // why: the read model and the routes carry the provenance and coverage rules (spec §6.9, §8.1, §10); a file
+        // there cannot hide behind the package average (review TS-7).
+        'src/read/**': { lines: 90, branches: 80, functions: 90, statements: 90 },
+        'src/routes/**': { lines: 90, branches: 80, functions: 90, statements: 90 },
+      },
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api test`
-Expected: PASS, every test file (35 files, 337 tests in the assembly: 142 new here, 195 WP4b's); coverage at or above 85% lines, functions and statements and 70% branches (the assembly measured 93.3 / 92.8 / 94.7 / 86.0).
+Expected: PASS, every test file (35 files, 369 tests in the assembly: 174 new here, 195 WP4b's) under the default test timeout; coverage at or above 85% lines, functions and statements and 70% branches for `src`, and the folder thresholds (the assembly measured 94.4 / 86.2 / 94.9 / 95.8 statements / branches / functions / lines overall, `src/read` 96.2 / 81.4 / 96.2 / 97.8, `src/routes` 96.3 / 93.0 / 100 / 96.8).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: See the tests bite**
+
+Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
+
+- **8.15a**: in `apps/api/src/read/history.ts` delete the line `stale: isStale({ fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, now, threshold),`. Fails: “validates each response and finds no price without provenance”.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: strict ROUTES mounting and the contract, provenance, banned-word and sentinel sweeps"
+git add -A apps/api packages && git commit -m "wp08: strict ROUTES mounting; contract, shape-based provenance, banned-word and error-path sentinel sweeps; folder coverage thresholds"
 ```
 
 ## 9. Pinned review-focus tests
@@ -8067,29 +10158,31 @@ Run from the repository root:
 
 | Command | Expected |
 |---|---|
-| `pnpm --filter @gmt/api test` | every test passes, including `bootstrap/app.spawn` (a real production bootstrap); coverage ≥ 85% lines, functions, statements and ≥ 70% branches for `apps/api/src` |
-| `pnpm --filter @gmt/core test` and `pnpm --filter @gmt/db test` | pass; core at 100% on every metric with Task 8.0's test |
+| `pnpm --filter @gmt/api test` | every test passes under the default test timeout, including `bootstrap/app.spawn` (a real production bootstrap); coverage ≥ 85% lines, functions, statements and ≥ 70% branches for `apps/api/src`, and ≥ 90% lines, functions, statements and ≥ 80% branches for each of `src/read/**` and `src/routes/**` |
+| `pnpm --filter @gmt/core test` and `pnpm --filter @gmt/db test` | pass; core at 100% on every metric with Task 8.0's tests |
+| `pnpm --filter @gmt/engine test` and `pnpm --filter @gmt/providers test` | pass unchanged (they read the contract and the db Task 8.0 touches) |
 | `pnpm -r typecheck` | exit 0 |
 | `pnpm lint` | exit 0, no diagnostics |
 | `pnpm boundaries` | exit 0: `@gmt/api` reads `process.env` only under `src/bootstrap/`; no msw import; no suppression comment; once WP9 Task 9.12 is on main, no place name in an `apps/api/src` string outside `tools/workedExample.ts` (WP8's new code adds only `GET`, already in `NOT_AIRPORT_WORDS`) |
-| `pnpm casts` | exit 0, `0 casts` (decision 48; the assembly scanned 315 files) |
+| `pnpm casts` | exit 0, `0 casts` (decision 48; the assembly scanned 471 files) |
+| Every mutation of Tasks 8.2–8.15 | each fails the named tests and is reverted (the assembly ran all 33) |
 | Manual: `NODE_ENV=development DATABASE_PATH=./data/dev.db BIND_ADDRESS=127.0.0.1 pnpm --filter @gmt/api dev`, then `curl -s -H 'Host: localhost:3000' localhost:3000/api/health` | the log shows `"msg":"listening"`; curl prints `{"ok":true,"degraded":false}`; Ctrl-C logs `shutdown complete` and exits 0 |
 
 ## 11. Open questions
 
-None requires the operator's judgment. The design questions this refresh met are settled by plan decisions 21–49; the items below are coordination for the plan owner and other briefs, collected in §13.
+None requires the operator's judgment. Review round 1's `[needs judgment]` items are ruled by plan decisions 53 and 54, and decision 55 adds core's `isStale`; the items below are coordination for the plan owner and other briefs, collected in §13.
 
 ## 12. Changes outside `apps/api`
 
-- `packages/core/src/api-contract/common.ts`, `definitions.ts` and the new `packages/core/test/api-contract/wp08.test.ts` (Task 8.0): `executionSummarySchema.expandTop`; draft-tolerant `definitionShapeSchema` and `definitionResponseSchema`.
-- `packages/db/src/types.ts`, `src/index.ts`, `src/repositories/itineraries.ts`, `test/itineraries.test.ts` (Task 8.0): `OfferHistoryPoint` with the observation's `suppliedFields`.
+- `packages/core` (Task 8.0): `labels/age.ts` (`worstCaseAgeHours` returns a number, `compareAges` ranks by what is known, `isStale`, the "vendor's cache age unknown" label), `ports/budget.ts` (`budgetScopeLabel`), `index.ts` (`CONSTRAINT_NAMES`), `api-contract/common.ts` (`vendorLinkSchema`, `storedBookingSchema`, `bookingSchema` on the refined links), `api-contract/results.ts` (the row's `superseded`, the refined search link), `api-contract/definitions.ts` (draft-tolerant stored shapes, `definitionCreateOptionalSchema`), `api-contract/executions.ts` (the verify confirmation), `api-contract/alerts.ts` (`alertRulesQuerySchema`), `api-contract/index.ts` (the routes that use them); tests `labels/age.test.ts`, `api-contract/contract.test.ts`, `helpers/rows.ts`, `wp2-barrel.test.ts` and the new `api-contract/wp08.test.ts`.
+- `packages/db` (Task 8.0): `repositories/cells.ts` (`retriedOnResume`), `internal/read.ts` (bookings read with `storedBookingSchema`), `repositories/itineraries.ts` and `types.ts` (`OfferHistoryPoint` with supplied fields and execution), `index.ts`; tests `barrel.test.ts`, `itineraries.test.ts` (exact `suppliedFields`) and the new `cells.retriedOnResume.test.ts`.
+- `pnpm-lock.yaml` (Task 8.1): `@hono/zod-validator` removed.
 
 ## 13. For the plan (not yet recorded there)
 
-1. **Assembly stand-ins.** WP7, WP9 Task 9.0 and WP10 Task 10.1 are not on main. The assembly (2026-10-17, scratch worktrees of main at `f5ecd4e` and `697ad9d`; the brief was replayed task by task into a fresh tree, `pnpm -r typecheck` after every task) applied WP7 Task 7.13's patches verbatim (migration 0001 with a hand-added journal entry, `setConfirmed`, `confirmedCalls`, the contract's `confirmCalls` and `needsConfirmation.totalCalls`) with the db test it changes, WP7's `microGbpToPence`, `TRUNCATED_NOTE`/`isTruncated`, nullable `cachedRows` and `scripts/check-casts.mjs`, WP9's `truncated` on price cells and rows, and WP10's contract fields (with decision 42's `verify` and decision 51's `unconfirmedCells`), and stubbed `@gmt/engine` with WP7 §5's types: `start` and `verifyCell` write executions and seeded cells through the repositories and finish at once, `childCapPreview` returns `CHILD_MAX_CALLS` and the definition's `maxCalls`, `estimate` a fixed small plan, `budgetFit` always fits, `parseCron` refuses a non-numeric minute field. Route tests that depend on engine behaviour mock it with `vi.spyOn`; the two that run the engine (start, verify) assert only what any engine must write. WP4b's tool test counted two migrations, as WP7 Task 7.13 changes it. Results: `pnpm -r typecheck`, `pnpm lint`, `pnpm boundaries` and `pnpm casts` clean; `pnpm --filter @gmt/api test` 337/337 with thresholds met (93.3% lines, 86.0% branches). On a machine also running WP7's suite (load 15–20) the full run timed out in WP4b's and WP8's slowest tests alike at the old 20 s timeout, hence 60 s and the harness's parsed-once airports dataset. The core and db failures the stand-ins cause (WP9's and WP7's own fixture updates) are those packages' diffs.
-2. **`unconfirmedCells`.** Decision 51 names the calendar day's field `verification.unconfirmedCells` and asks for it "under the active destination filter"; the reviewed WP10 brief (Task 10.1) still declares `verification.unconfirmed`. WP8 fills decision 51's name with the count over every destination of the day, because the calendar route takes no query and `byDestination` carries prices only; a per-destination count needs `byDestination[].unconfirmedCells` in the contract (the same gap as WP10 §13 item 2). WP10's Task 10.1 should rename its field.
-3. **Drafts in the contract.** Spec §10's no-body `POST /definitions` creates a definition with no airports (spec §1), but the stored-row and response schemas required at least one origin and destination, so WP3 could insert a draft and never read it back. Task 8.0 relaxes only `definitionShapeSchema` and `definitionResponseSchema`; the plan's API-contract text should say so, and WP9 should expect empty airport lists on a draft.
-4. **Contract additions with no owner until now.** `expandTop` on `executionSummarySchema` (decision 42) is added by WP8's Task 8.0; `OfferHistoryPoint` (`suppliedFields` on `offerHistory`) is the db change behind `priceConfirmed` on itinerary history points. The plan's Database contract should list `offerHistory(hash): Array<{ …; points: OfferHistoryPoint[] }>`.
-5. **One copy of the soft-confirm call share.** WP8 mirrors WP7's `SOFT_CONFIRM_CALL_SHARE = 0.2` to fill `needsConfirmation` (decision 25). WP7's barrel does not export it (nor `StartOptions`, which WP8 needs only structurally); exporting both from `@gmt/engine` lets WP8 import the constant instead of declaring it.
-6. **Spec text at the next revision.** §10's `GET /definitions/:id/calendar?basis=` (the contract takes no query; both bases come back per day); §10's coverage row gains "404 before the first run"; §7's app bootstrap order says nothing of a fresh `app_lock` held while migrations are pending: the app runs the backup preflight and migrations before it takes the lock (the plan's order), so a second app started against a running one would migrate before it refuses; WP4b's tool avoids this with `readOnlyLockState` first, and the app could do the same before `backupBeforeMigrations` (a WP8 change if the plan rules it).
-7. **Core age helper.** Spec rev 23 makes the effective age of an unknown-age price the fetch age; core's `worstCaseAgeHours` still returns `'unknown'` for it, so WP8's `staleness` maps that case to `fetchedHours` itself, and `ageHours` on the wire is never `'unknown'` from WP8. The contract's `ageHoursSchema` still admits `'unknown'`; WP9/WP10 read the "vendor's cache age unknown" label from `provenance.maxAgeHours`.
+1. **Assembly stand-ins.** WP9 Task 9.0 and WP10 Task 10.1 are not on main. The assembly (2026-10-17, a scratch worktree of main at `d765d38`, WP7 merged, no engine stub) first applied both tasks' file operations verbatim, parsed out of their briefs on main, and committed them as the base every Task 8.0 patch applies to; with those two tasks on main first, the patches apply as written. This round moved four contract additions from WP8's Task 8.0 to their owners: `expandTop` (WP9), and the calendar query, the views' not-seen and superseded marks and the route-point `stale` (WP10). WP8 fills WP10's shapes as declared there, including the per-series `searched` counts and the itinerary history's `cell`, `carriers` and point `executionId`; it drops the route-series `label` and `fx` fields round 1 proposed, since WP10 labels the series in the web and its points are GBP-only by shape.
+2. **One copy of the confirmation sums.** WP8 uses WP7's `SOFT_CONFIRM_CALL_SHARE` and `confirmationOf` (decision 53), but still sums the runnable lines itself to fill `needsConfirmation` and to judge a stored confirmation, as WP7's `start.ts` does internally. Exporting WP7's `confirmationNeeded` and its coverage check from `@gmt/engine` would let WP8 drop `runnable`, `confirmationRequired` and `storedCovers` (review arch-003).
+3. **Scope labels.** WP8 matches the schedule refusal and labels usage rows with core's `budgetScopeLabel`; WP7's `budgetFit` formats its `perScope[].scope` with its own template, which today produces the same strings. WP7 should call `budgetScopeLabel` so the two cannot drift.
+4. **Reuse targets and View D.** WP7's re-review N3 gave `internal/reuseCopy.ts` its own `refetchable` rule built from the same two reason lists; it is `retriedOnResume(outcome, true)` written out. Using the predicate there leaves one copy of the rule in db.
+5. **Superseded rows in WP9's views.** WP8 adds `superseded` to `/results` rows (Task 8.0); WP9's Results table should render it as WP10 renders the calendar figures' mark. The calendar gap lists no superseded price at all, so its `cells[].calendar` needs no field.
+6. **Spec text at the next revision.** §10's `GET /definitions/:id/calendar?basis=` (the contract takes `destination`, not `basis`; both bases come back per day); §10's coverage row gains "404 before the first run"; §7's app bootstrap order gains decision 53's read-only lock check before the backup.
