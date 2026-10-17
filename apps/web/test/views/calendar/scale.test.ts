@@ -125,12 +125,17 @@ describe('calendar model: one basis at a time, other-basis days hatched and excl
 
 describe('band colours (review ui-r2-005)', () => {
   const bands: Band[] = [0, 1, 2, 3, 4];
+  /** The Tailwind class that spells a text colour: the two named ones, else an arbitrary value. */
+  const textClass = (text: string) =>
+    text === '#ffffff' ? 'text-white' : text === '#000000' ? 'text-black' : `text-[${text}]`;
+  const hasClass = (classes: string, one: string) => classes.split(/\s+/).includes(one);
   it('every band carries its text at WCAG AA 4.5:1 or better, and its class spells the same colours', () => {
     for (const b of bands) {
       const { fill, text } = BAND_COLOURS[b];
       expect(contrast(fill, text)).toBeGreaterThanOrEqual(4.5);
       expect(BAND_CLASSES[b]).toContain(`bg-[${fill}]`);
-      expect(BAND_CLASSES[b]).toContain(text === '#ffffff' ? 'text-white' : 'text-black');
+      // why: the exact class for the exact colour, so a changed colour with a stale class cannot hide behind a white/black proxy
+      expect(hasClass(BAND_CLASSES[b], textClass(text))).toBe(true);
     }
   });
   it('neighbouring bands differ in lightness by a ratio of 1.3 or more, darkest to lightest', () => {
@@ -143,6 +148,9 @@ describe('band colours (review ui-r2-005)', () => {
   it('the lightest band is bordered and the flat shade is a band colour, so neither reads as priceless', () => {
     expect(BAND_CLASSES[4]).toContain('border');
     expect(FLAT_CLASS).toContain(`bg-[${BAND_COLOURS[3].fill}]`);
+    // the flat shade's own text must read on its fill at 4.5:1, and its class must spell the band-3 text colour
+    expect(hasClass(FLAT_CLASS, textClass(BAND_COLOURS[3].text))).toBe(true);
+    expect(contrast(BAND_COLOURS[3].fill, BAND_COLOURS[3].text)).toBeGreaterThanOrEqual(4.5);
   });
 });
 
