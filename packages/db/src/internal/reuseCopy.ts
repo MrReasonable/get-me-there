@@ -3,7 +3,6 @@ import type { Db } from '../client.js';
 import { ExecutionsRepo } from '../repositories/executions.js';
 import type { CalendarPriceRow, ReuseCriteria, ReusedCopy } from '../types.js';
 import { readSnapshot } from './definitionRow.js';
-import { MANUAL_RETRYABLE, NON_RETRYABLE } from './enums.js';
 import { keyParams, type OutcomeDbRow, toOutcome } from './outcomeRow.js';
 import { SELECT_OUTCOME_SQL, storeOutcome } from './outcomeWrite.js';
 import {
@@ -12,6 +11,7 @@ import {
   toCalendarPriceRow,
   validateCalendarPrice,
 } from './priceRow.js';
+import { retriedOnResume } from './resumeRule.js';
 import { storeRollUps } from './rollUps.js';
 import { assertIsoDateTime, assertProviderAllowed, assertProviderKind, RowRejected } from './validate.js';
 
@@ -146,19 +146,11 @@ function assertSourceStored(
 }
 
 /**
- * A target a reused copy may replace (ssr M2): an outcome some resume fetches again, as RESUMABLE_SQL selects it —
- * `not_run`, `skipped` for budget or a disabled provider, an `error` an automatic resume retries (retryable reason,
- * fewer than 3 attempts) or one a manual resume re-admits (MANUAL_RETRYABLE); never a fetched result, another skip
- * (departed, not_selected) or an error no resume fetches (re-review N3).
+ * A target a reused copy may replace (ssr M2): exactly an outcome a manual resume fetches again, so the rule is
+ * `retriedOnResume` itself, not a copy of it (plan decision 57; test reuse.agreesWithResume). Never a fetched result,
+ * another skip (departed, not_selected) or an error no resume fetches (re-review N3).
  */
-function refetchable(target: OutcomeDbRow): boolean {
-  const r = target.reason;
-  if (target.status === 'not_run') return true;
-  if (target.status === 'skipped') return r === 'budget' || r === 'provider_disabled';
-  if (target.status !== 'error') return false;
-  const automatic = target.attempts < 3 && (r === null || !NON_RETRYABLE.some((x) => x === r));
-  return automatic || MANUAL_RETRYABLE.some((x) => x === r);
-}
+const refetchable = (target: OutcomeDbRow): boolean => retriedOnResume(toOutcome(target), true);
 
 /**
  * Spec §7 atomic unit "each reused cell's outcome + copied prices + roll-up" (one transaction for the batch).
