@@ -90,7 +90,8 @@ describe('GitHub workflows (least privilege)', () => {
 // why: CodeRabbit batch 3 — the image-history check matched only NAME=value, so a credential baked in another shape
 // (an `ENV NAME value` layer, a JSON "token": value) passed; and the compose step's throwaway credentials are said to
 // be CI-only and never a real value. The check's own grep patterns are run over sample history lines here.
-describe('the docker job keeps credentials out of the image history', () => {
+// why: ruling 11: each case spawns grep; 60 s survives a loaded runner.
+describe('the docker job keeps credentials out of the image history', { timeout: 60_000 }, () => {
   const ci = text('ci.yml');
   const line = ci.split('\n').find((l) => l.includes('docker history --no-trunc get-me-there:local')) ?? '';
   const patterns = [...line.matchAll(/-e '([^']+)'/g)].map((m) => m[1]);
@@ -98,6 +99,7 @@ describe('the docker job keeps credentials out of the image history', () => {
     spawnSync('grep', ['-Ei', ...patterns.flatMap((p) => ['-e', p])], {
       input: `${sample}\n`,
       encoding: 'utf8',
+      timeout: 30_000,
     }).status === 0;
 
   it('greps with explicit -e patterns', () => {
