@@ -1,7 +1,9 @@
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { acquire, breakStale, realOps, release } from './ensure-build-lib.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -30,26 +32,30 @@ describe('scripts/ensure-build.mjs', () => {
 });
 
 describe('scripts/ensure-build-lib.mjs (re-review N1, N2)', () => {
-  it('N1: retries the acquire when the holder releases the lock between the failed mkdir and the stat', async () => {
+  it('N1: retries the acquire when the holder releases the lock between the failed create and the read', async () => {
     const { acquire } = await import('./ensure-build-lib.mjs');
     const calls = [];
     let held = true;
     const enoent = Object.assign(new Error('gone'), { code: 'ENOENT' });
-    await acquire('/lock', {
-      mkdir: () => {
-        calls.push('mkdir');
+    acquire('/lock', {
+      create: () => {
+        calls.push('create');
         if (held) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
       },
-      // the holder releases exactly here: after mkdir failed, before our stat looks
-      stat: () => {
+      // the holder releases exactly here: after create failed, before our read looks
+      read: () => {
         held = false;
         throw enoent;
       },
-      rm: () => undefined,
+      alive: () => true,
+      claim: () => true,
+      remove: () => undefined,
       sleep: () => undefined,
       now: () => 0,
+      token: () => 't',
+      pid: 1,
     });
-    expect(calls).toEqual(['mkdir', 'mkdir']);
+    expect(calls).toEqual(['create', 'create']);
   });
 
   it('N2: a newer root tsconfig, package.json or lockfile makes the stamp stale', async () => {
@@ -81,5 +87,174 @@ describe('scripts/ensure-build-lib.mjs (re-review N1, N2)', () => {
       expect(needsBuild(repo, stamp), f).toBe(true);
       utimesSync(join(repo, f), old, old);
     }
+  });
+});
+
+/** @type {string[]} */
+const scratch = [];
+afterEach(() => {
+  for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+function lockIn() {
+  const d = mkdtempSync(join(tmpdir(), 'gmt-lock-'));
+  scratch.push(d);
+  return join(d, 'build.lock');
+}
+/** The pid of a process that has already exited. */
+const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+const noSleep = {
+  ...realOps,
+  sleep: () => {
+    throw new Error('slept on a lock that should be taken at once');
+  },
+};
+/** Resolves once the child prints that it holds the lock; rejects if it exits first. */
+const held = (child) =>
+  new Promise((ok, fail) => {
+    child.stdout.once('data', ok);
+    child.once('exit', (code) => fail(new Error(`the lock holder exited early (${code})`)));
+  });
+const record = (/** @type {string} */ lock) => JSON.parse(readFileSync(lock, 'utf8'));
+
+// why: CodeRabbit batch 3 — the lock was a bare directory: an interrupted build left it to block every later run
+// for 15 minutes, two waiters could both clear the same stale lock and build at once, and the holder's cleanup could
+// delete a successor's lock. It now records its owner's pid and a token; a stale lock is taken over through a
+// per-token claim, so only one waiter can take it, and a holder releases only its own token.
+describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)', {
+  timeout: 60_000,
+}, () => {
+  it('records the owner pid and a token, and the owner releases it', () => {
+    const lock = lockIn();
+    const owned = acquire(lock);
+    expect(record(lock)).toEqual({ pid: process.pid, token: owned.token });
+    expect(owned.token).toMatch(/^[\w-]{16,}$/);
+    expect(release(lock, owned)).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('a holder never releases a lock it no longer owns', () => {
+    const lock = lockIn();
+    const owned = acquire(lock);
+    // another process took the lock over (the first holder looked stale)
+    rmSync(lock);
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'successor-token-0001' }));
+    expect(release(lock, owned)).toBe(false);
+    expect(record(lock).token).toBe('successor-token-0001');
+  });
+
+  it('a lock whose owner process has exited is taken over at once, without waiting', () => {
+    const lock = lockIn();
+    writeFileSync(lock, JSON.stringify({ pid: deadPid(), token: 'dead-owner-token-01' }));
+    const owned = acquire(lock, noSleep);
+    expect(record(lock)).toEqual({ pid: process.pid, token: owned.token });
+  });
+
+  it('a live, fresh owner is waited for, then the waiter gives up naming the owner', () => {
+    const lock = lockIn();
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'live-owner-token-01' }));
+    let t = Date.now();
+    let slept = 0;
+    const ops = {
+      ...realOps,
+      now: () => t,
+      sleep: () => {
+        slept++;
+        t += 60_000;
+      },
+    };
+    expect(() => acquire(lock, ops)).toThrow(
+      `ensure-build: gave up waiting for ${lock}, held by pid ${process.pid}`,
+    );
+    expect(slept).toBeGreaterThan(0);
+    expect(record(lock).token).toBe('live-owner-token-01');
+  });
+
+  it('two waiters that saw the same stale record: only the first takes it, the second leaves the new lock alone', () => {
+    const lock = lockIn();
+    writeFileSync(lock, JSON.stringify({ pid: deadPid(), token: 'stale-owner-token-1' }));
+    const seenByB = realOps.read(lock);
+    const a = acquire(lock, noSleep);
+    // B acts on what it read before A's takeover; the claim is per inspected owner, so it removes nothing
+    expect(breakStale(lock, seenByB)).toBe(false);
+    expect(record(lock).token).toBe(a.token);
+  });
+
+  it('a waiter whose claim on the stale record is held by another waiter does not remove the lock', () => {
+    const lock = lockIn();
+    writeFileSync(lock, JSON.stringify({ pid: deadPid(), token: 'stale-owner-token-2' }));
+    const seen = realOps.read(lock);
+    writeFileSync(`${lock}.break-${seen.key}`, '1');
+    expect(breakStale(lock, seen)).toBe(false);
+    expect(record(lock).token).toBe('stale-owner-token-2');
+  });
+
+  it('a lock without owner metadata (an older directory lock) is stale only by age', () => {
+    const lock = lockIn();
+    mkdirSync(lock);
+    let t = Date.now();
+    const sleeps = [];
+    const ops = {
+      ...realOps,
+      now: () => t,
+      sleep: (ms) => {
+        sleeps.push(ms);
+        t += 16 * 60_000;
+      },
+    };
+    const owned = acquire(lock, ops);
+    expect(sleeps.length).toBe(1); // fresh at first, so waited; past 15 minutes, taken over
+    expect(record(lock).token).toBe(owned.token);
+  });
+
+  it('a build interrupted by SIGINT, SIGTERM or SIGHUP releases the lock before it exits', async () => {
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+      const lock = lockIn();
+      const child = spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          [
+            `import { acquire, releaseOnSignal } from ${JSON.stringify(join(import.meta.dirname, 'ensure-build-lib.mjs'))};`,
+            `const owned = acquire(${JSON.stringify(lock)});`,
+            `releaseOnSignal(${JSON.stringify(lock)}, owned);`,
+            "console.log('held');",
+            'setInterval(() => {}, 1000);',
+          ].join('\n'),
+        ],
+        { stdio: ['ignore', 'pipe', 'inherit'] },
+      );
+      await held(child);
+      expect(existsSync(lock), sig).toBe(true);
+      const exited = new Promise((ok) => child.once('exit', (code, signal) => ok({ code, signal })));
+      child.kill(sig);
+      expect(await exited, sig).toMatchObject({ code: 128 + { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 }[sig] });
+      expect(existsSync(lock), sig).toBe(false);
+    }
+  });
+
+  it('a build killed outright (SIGKILL) leaves a lock the next run takes at once', async () => {
+    const lock = lockIn();
+    const child = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        [
+          `import { acquire } from ${JSON.stringify(join(import.meta.dirname, 'ensure-build-lib.mjs'))};`,
+          `acquire(${JSON.stringify(lock)});`,
+          "console.log('held');",
+          'setInterval(() => {}, 1000);',
+        ].join('\n'),
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+    await held(child);
+    const exited = new Promise((ok) => child.once('exit', ok));
+    child.kill('SIGKILL');
+    await exited;
+    expect(existsSync(lock)).toBe(true);
+    const owned = acquire(lock, noSleep);
+    expect(record(lock).token).toBe(owned.token);
   });
 });
