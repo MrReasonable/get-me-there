@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeFilterCount,
   DEFAULT_CLASSES,
+  nightsFilterPatch,
   parseBasis,
   parseResultsState,
   parseSelectedRow,
@@ -121,5 +122,13 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect([prevented, window.location.search]).toEqual([0, '?view=results']);
     go(click({}));
     expect([prevented, window.location.search]).toEqual([1, '?view=providers']);
+  });
+});
+
+describe('nightsFilterPatch (review arch M2)', () => {
+  it('is the one encoding the Results filter parses back, so Duration links cannot drift from it', () => {
+    const patch = nightsFilterPatch(14, 14);
+    expect(patch).toEqual({ 'f.nights': '14-14' });
+    expect(parseResultsState(new URLSearchParams(patch)).filters.nights).toEqual({ min: 14, max: 14 });
   });
 });

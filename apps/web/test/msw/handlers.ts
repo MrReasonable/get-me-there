@@ -11,6 +11,7 @@ import {
   providersResponse,
   resultsResponse,
 } from '../fixtures.js';
+import { wp10Handlers } from './wp10Handlers.js';
 
 /** A valid response body for each mutation the views send. */
 const MUTATIONS: ReadonlyArray<{ method: 'POST' | 'PUT'; path: string; body: JsonBodyType }> = [
@@ -40,6 +41,7 @@ const url = (path: string) => `${API}${path.slice('/api'.length)}`;
 
 /** Default API: one definition, both providers, a completed run with two itinerary rows. */
 export const handlers = [
+  ...wp10Handlers,
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
   http.get(url('/api/definitions'), () => HttpResponse.json([definition()])),
   http.get(url('/api/definitions/:id/results'), () => HttpResponse.json(resultsResponse())),

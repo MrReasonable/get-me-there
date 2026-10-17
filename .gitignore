@@ -29,3 +29,6 @@ apps/*/coverage/
 # (params-*.json, our own derived data) and .gitkeep stay tracked. Plan decision 61.
 packages/providers/fixtures/recorded/**/*.json
 !packages/providers/fixtures/recorded/**/params-*.json
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/e2e/.tmp/

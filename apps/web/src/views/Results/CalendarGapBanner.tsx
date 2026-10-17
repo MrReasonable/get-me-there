@@ -75,9 +75,7 @@ export function CalendarGapBanner({
                   destinationNote={destinationNotes[c.cell.destination] ?? null}
                 />
               </PriceBoundary>
-              {c.verifyAvailable ? (
-                <VerifyCellButton definitionId={definitionId} cell={key} nights={nights} />
-              ) : null}
+              {c.verifyAvailable ? <VerifyCellButton definitionId={definitionId} cell={key} /> : null}
             </li>
           );
         })}

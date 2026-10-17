@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
-import { formatInstantUtc, formatIsoDate, formatMicroGbp } from '../format.js';
+import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
 import { parseBasis } from '../state/resultsState.js';
 import { useSearchParams } from '../state/urlState.js';
@@ -158,7 +158,7 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
               {e.status === 'paused_budget' || e.status === 'paused_error' ? (
                 <span className="font-medium">
                   {COPY.paused(e.reason ?? COPY.statusName[e.status])}
-                  {e.resumeAfter !== null ? ` · ${COPY.resumesAt(formatInstantUtc(e.resumeAfter))}` : null}
+                  {e.resumeAfter !== null ? ` · ${COPY.resumesAt(formatRunInstant(e.resumeAfter))}` : null}
                 </span>
               ) : null}
             </>

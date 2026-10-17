@@ -2,6 +2,7 @@ import { CONSTRAINT_LABELS } from '@gmt/core';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { AIRPORT_DEBOUNCE_MS } from '../../../src/views/Definitions/AirportListInput.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
@@ -484,5 +485,18 @@ describe('per-destination fields and the example (spec §11)', () => {
     expect(chipCodes('Destinations')).toEqual(['JFK', 'EWR']);
     expect(fieldValue('Min nights')).toBe('10');
     expect(fieldValue('Max nights')).toBe('21');
+  });
+
+  it('"import example" leaves the per-execution budget from the plan preset (the api\'s new-definition source), never zeroed or the file\'s', async () => {
+    const base = providersResponse();
+    const providers = {
+      ...base,
+      presets: { ...base.presets, budget: { maxCalls: 321, maxFreeCalls: 654, maxCostMicroGbp: 0 } },
+    };
+    const { user } = renderWithProviders(<DefinitionForm existing={null} providers={providers} />);
+    await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
+    await user.click(screen.getByText(COPY.advanced));
+    expect(fieldValue(COPY.maxCalls)).toBe('321');
+    expect(fieldValue(COPY.maxFreeCalls)).toBe('654');
   });
 });

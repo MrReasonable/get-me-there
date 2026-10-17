@@ -15,35 +15,9 @@ import {
   resultsResponse,
   verifiedRow,
 } from '../fixtures.js';
+import { poundsOutsidePrices, renderedCopy } from '../guards.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
-
-/** Every visible string plus the attributes a screen reader or tooltip shows. */
-function renderedCopy(): string {
-  const attrs = [...document.body.querySelectorAll('[title], [aria-label], [placeholder], [alt]')].flatMap(
-    (el) => ['title', 'aria-label', 'placeholder', 'alt'].map((a) => el.getAttribute(a) ?? ''),
-  );
-  return [document.body.textContent ?? '', ...attrs].join('\n');
-}
-
-/**
- * Every "£" in the DOM sits inside a PriceCell (a fare, with provenance), a [data-cost] element (a cost
- * or a cap) or a form label ("Max price (£)"), on every view (reviews tsr-003, prov-r2-007).
- */
-function poundsOutsidePrices(): string[] {
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  const outside: string[] = [];
-  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
-    const host = n.parentElement;
-    if (
-      n.textContent?.includes('£') &&
-      host?.closest('[data-testid="price-cell"], [data-cost], label') === null
-    ) {
-      outside.push(n.textContent);
-    }
-  }
-  return outside;
-}
 
 describe('rendered views contain no banned word, and no "£" outside a price or a cost (spec §11, §9 item 6)', () => {
   for (const view of VIEWS) {

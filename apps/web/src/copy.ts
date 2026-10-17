@@ -4,9 +4,15 @@ import {
   type Cabin,
   CONSTRAINT_LABELS,
   type ConstraintName,
+  type ErrorReason,
   type ExecutionStatus,
   formatAgo,
+  type MIXED_ERROR_REASON,
+  type NoDataReason,
+  type PARTIAL_EXPANSION,
+  type PRICE_UNCONFIRMED,
   type ProviderId,
+  type SkipReason,
   type SourceKind,
   type Stage,
   TRUNCATED_NOTE,
@@ -17,6 +23,14 @@ import type { z } from 'zod';
 
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
 type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
+/** Every outcome reason core can write (review arch2-005): a new or renamed one fails `satisfies` in the panel's map. */
+type OutcomeReasonKey =
+  | SkipReason
+  | NoDataReason
+  | ErrorReason
+  | typeof MIXED_ERROR_REASON
+  | typeof PARTIAL_EXPANSION
+  | typeof PRICE_UNCONFIRMED;
 /** The six coverage buckets; `reused` is a count beside them, not a bucket (spec §3). */
 export type BucketName = Exclude<keyof Buckets, 'reused'>;
 
@@ -43,8 +57,6 @@ export const COPY = {
     providers: 'Providers',
   },
   placeholder: 'This view is not available yet.',
-  calendarPlaceholderHint:
-    'Until it is, the Results filters slice the window by month: set "Departs on or after" and "Departs on or before".',
   definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No search definitions yet. Create one under Definitions.',
   definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',
@@ -76,6 +88,15 @@ export const COPY = {
     synthetic: 'synthetic fixture data',
   } satisfies Record<SourceKind, string>,
   fxApprox: '≈',
+  /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
+  priceMarkGlyph: {
+    unconfirmed: '≠',
+    stale: '◷',
+    ageUnknown: '?',
+    truncated: '…',
+    notSeen: '◌',
+    superseded: '↺',
+  },
   fxSpoken: (detail: string) => `approximately (${detail})`,
   fxTitle: (rateDate: string, source: string) => `converted to GBP at the ${rateDate} rate (${source})`,
   constraintsNotChecked: 'constraints not checked',
@@ -94,6 +115,8 @@ export const COPY = {
     ProviderId,
     string
   >,
+  /** The three-letter-or-less provider mark of the phone day face, where `providerShort`'s "synthetic" is 50 px wide. */
+  providerMark: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'syn' } satisfies Record<ProviderId, string>,
   ageUnknown: 'age unknown',
   agoOf: (hours: number | 'unknown') => (hours === 'unknown' ? 'age unknown' : formatAgo(hours)),
   adjustedQualifier: 'incl. operator-entered onward cost',
@@ -506,4 +529,234 @@ export const COPY = {
   confirmNew: (calls: number, cap: number, amount: string) =>
     `Confirm about ${calls} calls (hard stop ${cap}), ${amount} per run`,
   none: 'none',
+  // --- WP10 (spec §11 View B, View C, History; plan decisions 38, 44, 46, 48) ---
+  calendarView: {
+    title: 'Calendar',
+    discoveryMarker: (
+      b: { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number },
+      total: number,
+    ) =>
+      `${b.priced} priced · ${b.empty} no fares · ${b.no_data} no cached data · ${b.error} error · ${b.skipped} skipped · ${b.not_run} not searched of ${total}`,
+    countsInconsistent: 'counts inconsistent',
+    verificationMarker: (searched: number, selected: number, onDemand: number) =>
+      `itinerary-searched ${searched} of ${selected} selected +${onDemand} on demand`,
+    verificationNotConfigured: 'itinerary search: no verification provider configured',
+    noDiscoveryProvider: 'no discovery provider configured',
+    noRunCoversDay: 'not searched yet: no run covers this day',
+    providerNotSearched: (source: string) => `${source}: not searched yet for this day`,
+    markerSource: (source: string, marker: string) => `${source}: ${marker}`,
+    partlyVerified: (count: number) =>
+      `${count} partially verified ${count === 1 ? 'itinerary' : 'itineraries'} found for this day (never the day price)`,
+    glyphSymbol: { empty: '∅', no_data: '◇', error: '✕', skipped: '–', not_run: '○' },
+    calendarPrice: 'calendar price',
+    bandAria: (band: number) => `price band ${band + 1} of 5${band === 0 ? ', cheapest' : ''}`,
+    flatAria: 'one shade: the scale is flat',
+    hatchedAria: 'not on the colour scale',
+    stay: (nights: number, back: string) => `${nights}n · back ${back}`,
+    cachedFrom: 'cached from',
+    glyphCount: (n: number, words: string) => `${n} ${words}`,
+    // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
+    phoneMark: { partial: '◐', full: '●' },
+    phonePartial: 'part of the day not searched',
+    phoneNights: (n: number) => `${n}n`,
+    phoneFull: 'every cell of the day searched',
+    searchedFraction: (searched: number, total: number) => `${searched}/${total} searched`,
+    destinationFilter: 'Destination',
+    allDestinations: 'All destinations',
+    colourBy: 'Colour by',
+    empty: 'No days to show yet. The calendar fills in as cells are searched.',
+    staleLine: (stale: number, shown: number, verifiedAfter: string) =>
+      `${stale} of ${shown} shown prices are stale by fetch age plus any known vendor age (itinerary prices after ${verifiedAfter}, calendar prices after their provider's refresh interval)`,
+    unconfirmedShort: 'price not confirmed',
+    unconfirmedCells: (n: number) =>
+      `price not confirmed: ${n} itinerary-searched ${n === 1 ? 'cell' : 'cells'} priced nothing the final step confirmed`,
+    unconfirmedCellsFor: (n: number, destination: string) =>
+      `price not confirmed: ${n} itinerary-searched ${destination} ${n === 1 ? 'cell' : 'cells'} priced nothing the final step confirmed`,
+    monthNav: 'Month',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
+    legend: {
+      title: 'Legend',
+      scaleQuintile: (basis: string, days: number) =>
+        `Colour: ${basis} prices on ${days} days, in five price bands (quintiles of the days shown)`,
+      scaleFlatFew: (basis: string, days: number, min: number) =>
+        `Colour: one shade for ${basis} prices on ${days} ${days === 1 ? 'day' : 'days'}; fewer than ${min} days are too few for price bands`,
+      scaleFlatNarrow: (basis: string, days: number, min: string, max: string) =>
+        `Colour: one shade for ${basis} prices on ${days} days; they span ${min}–${max}, less than 10%, too narrow for price bands`,
+      scaleEmpty: (basis: string) => `Colour: no ${basis} prices to colour yet`,
+      band: (band: number, min: string, max: string, days: number) =>
+        `band ${band + 1}: ${min}–${max} (${days} ${days === 1 ? 'day' : 'days'})`,
+      flatSwatch: (days: number) => `one shade: ${days} ${days === 1 ? 'day' : 'days'}`,
+      hatched: (shown: 'verified' | 'calendar', days: number) =>
+        `hatched: ${days} ${days === 1 ? 'day shows' : 'days show'} a ${shown === 'verified' ? 'class-verified' : 'calendar'} price instead and ${days === 1 ? 'is' : 'are'} not on this scale`,
+      priceless: 'grey with a label: no price for this day',
+      more: 'What the marks mean',
+      dashed: 'dashed outline: a calendar price; constraints not checked',
+      stale:
+        'stale: older than one refresh cycle by fetch age plus any known vendor age; shown and labelled, never hidden. A price whose vendor age is unknown says "vendor\'s cache age unknown" instead',
+      coverageFull:
+        'S/M searched with a solid square: every cell of the day searched (priced, no fares or no cached data) by its best-covered source',
+      coveragePartial:
+        'S/M searched with a striped square: part of the day not searched; per-source counts are in the panel',
+      cachedFrom:
+        'cached from £X: a cheaper calendar price exists for this day, with its destination and stay; constraints not checked',
+      unconfirmed:
+        'price not confirmed: an itinerary search priced this day, but the final step confirmed none of its prices',
+      truncated: 'cheapest of the rows read: the provider returned more rows than were read for that month',
+      stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
+      bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
+      phone:
+        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, ? vendor cache age unknown, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ● every cell of the day searched, ◐ part of the day not searched. Open a day for the rest.',
+      phoneProviders:
+        'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), syn Fixture (synthetic fixture data).',
+      glyphs: 'Days without a price show, with how many cells of the best-covered source:',
+      skippedWhy: ' (a budget stop, a disabled provider or a passed date; reasons in the panel)',
+    },
+    panel: {
+      title: (date: string) => `Departing ${date}`,
+      close: 'Close',
+      dayHeading: 'This day',
+      dayVerified: 'cheapest class-verified price',
+      dayPartlyVerified: 'cheapest partially verified itinerary',
+      dayCalendar: 'cheapest calendar price',
+      dayCell: (nights: number, back: string) => `${nights} nights · back ${back}`,
+      cellPicker: 'Cell',
+      cellOption: (origin: string, destination: string, nights: number, back: string) =>
+        `${origin}→${destination} · ${nights} nights · back ${back}`,
+      outcomes: 'Outcomes per run, stage and provider (newest run first)',
+      columns: {
+        run: 'Run',
+        stage: 'Stage',
+        provider: 'Provider',
+        status: 'Outcome',
+        reason: 'Reason',
+        attempts: 'Attempts',
+        fetched: 'Fetched (Europe/London)',
+        detail: 'Detail',
+        reused: 'Reused from',
+      },
+      run: (label: string) => `run ${label}`,
+      latestRun: 'latest run',
+      reasons: {
+        not_selected: 'not selected for itinerary search',
+        budget: 'stopped: a budget cap was reached',
+        provider_disabled: 'provider disabled',
+        departed: 'departure date has passed',
+        'cabin-not-offered': "the provider does not offer this definition's cabin",
+        auth: 'the provider refused the credentials',
+        'rate-limit': 'the provider rate-limited the request',
+        quota: "the provider's quota is used up",
+        upstream: 'the provider failed',
+        parse: "the provider's answer could not be read",
+        network: 'network failure',
+        'limiter-timeout': 'waited too long for a request slot',
+        'fx-unavailable': 'no exchange rate available',
+        'currency-unsupported': 'currency not supported',
+        'unknown-airport-tz': 'airport time zone unknown',
+        'no-return-legs': 'no return legs offered',
+        'unmappable-carrier': 'carrier code not recognised',
+        'bad-local-time': 'a flight time could not be read',
+        'cell-mismatch': 'the answer was for different dates or airports',
+        'no-priced-options': 'the provider answered with no priced options',
+        mixed: 'several different errors',
+        'partial-expansion': 'some outbound flights could not be expanded',
+        'price-unconfirmed': 'price not confirmed by the final step',
+      } satisfies Record<OutcomeReasonKey, string>,
+      offersDropped: (n: number) => `${n} ${n === 1 ? 'offer' : 'offers'} could not be read and were dropped`,
+      reasonRaw: (reason: string) => `other: ${reason}`,
+      dash: '—',
+      reusedFrom: (run: string) => `reused from ${run}`,
+      prices: 'Prices for this cell',
+      noPrices: 'No prices stored for this cell.',
+      calendarPriceRun: (run: string) => `calendar price · ${run}`,
+      observation: (seller: string, cls: string) => `itinerary offer · ${seller} · ${cls}`,
+      showInResults: 'show in results',
+      verifyCost: (maxCalls: number, headroom: number) =>
+        `hard stop ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${headroom} ${headroom === 1 ? 'call' : 'calls'} of budget headroom left`,
+      verifyNoHeadroom: 'No budget headroom left for this search.',
+      verifyCostLoading: 'Loading what this search may spend…',
+      verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
+      verifyConflict: 'An itinerary search for this cell is already running.',
+    },
+  },
+  durationView: {
+    title: 'Duration',
+    chartTitle: 'Cheapest found by stay length',
+    chartNote:
+      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A star on the axis (13*) = no source searched that stay length. A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
+    xAxis: 'nights',
+    yAxis: 'price (GBP)',
+    tickNotSearched: (nights: number) => `${nights}*`,
+    verifiedSeries: (n: number) => `min among verified (class verified, n=${n})`,
+    verifiedShort: 'min among verified',
+    calendarSeries: (source: string, n: number) => `calendar, ${source} (constraints not checked, n=${n})`,
+    calendarShort: (source: string) => `calendar, ${source}`,
+    nightsLabel: (n: number) => `${n} nights`,
+    nightsLink: (n: number) => `${n} nights: show in results`,
+    tooltipDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
+    seriesLine: (series: string, value: string) => `${series}: ${value}`,
+    cellDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
+    notSearched: 'not searched',
+    searchedNoPrice: 'searched, no price',
+    partlySearchedNoPrice: (k: number, total: number) => `searched ${k} of ${total} cells, no price`,
+    notItinerarySearched: 'not itinerary-searched',
+    itinerarySearchedNoPrice: 'itinerary-searched, no class-verified price',
+    partlyItinerarySearchedNoPrice: (k: number, total: number) =>
+      `itinerary-searched ${k} of ${total} selected cells, no class-verified price`,
+    tableCaption: 'Cheapest found per stay length, with provenance',
+    chartScroll: 'Cheapest found by stay length, chart (scrolls sideways on a narrow screen)',
+    tableScroll: 'Cheapest found per stay length, table (scrolls sideways on a narrow screen)',
+    staleLine: (stale: number, shown: number) =>
+      `${stale} of ${shown} shown prices are stale (older than one refresh cycle by fetch age plus any known vendor age)`,
+    empty:
+      "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
+  },
+  historyView: {
+    title: 'History',
+    fetchChartTitle: 'Price by fetch date',
+    connectorNote:
+      'Each point is one run. A line joins two points only when they come from consecutive runs of this definition; a run that did not fetch the series breaks the line. No price was fetched between two points.',
+    coloursRepeat: (lines: number, colours: number) =>
+      `${lines} series share ${colours} colours: tell them apart by the legend name and line style`,
+    xAxisFetched: 'fetched (Europe/London)',
+    yAxis: 'price (GBP)',
+    routeChartTitle: 'Route-level series (indicative): price by travel date',
+    routeChartNote:
+      'Reported by the vendor, not searched cell by cell; the vendor does not state its route scope or which date pairs it covers. Indicative: not an offer, no seller, constraints not checked.',
+    xAxisTravelDate: 'travel date',
+    routeSeries: (provider: string, cabin: string) => `${provider} route-level series, indicative · ${cabin}`,
+    calendarSeries: (source: string, cabin: string) =>
+      `${source} · ${cabin} · cheapest calendar price across this pair's cells, per run (constraints not checked)`,
+    offerSeries: (source: string, seller: string, cabin: string) =>
+      `${source} · itinerary offer · ${seller} · ${cabin}`,
+    offerUnconfirmedSeries: (source: string, seller: string, cabin: string) =>
+      `${source} · itinerary offer · ${seller} · ${cabin} · price not confirmed by the final step`,
+    pairPrefix: (pair: string, name: string) => `${pair} · ${name}`,
+    cheapestCell: (origin: string, destination: string, dep: string, ret: string) =>
+      `cheapest searched cell ${origin}→${destination} ${dep}–${ret}`,
+    cellChanged: 'a different cell from the previous point',
+    routePicker: 'Route',
+    pairOption: (origin: string, destination: string) => `${origin}→${destination}`,
+    allPairs: (shown: number, total: number) =>
+      shown === total ? 'All pairs' : `All pairs (first ${shown} of ${total})`,
+    itineraryHeading: (route: string, departs: string, back: string, carriers: string) =>
+      `${route} · ${departs} to ${back} · ${carriers}`,
+    itineraryHash: (hash: string) => `itinerary ${hash}`,
+    backToRoute: 'Show route history',
+    spanLine: (points: number, from: string, to: string) =>
+      `${points} ${points === 1 ? 'run' : 'runs'} shown, ${from} to ${to}`,
+    tableCaption: (series: string) => `${series}: every point, with provenance`,
+    chartScroll: (title: string) => `${title}, chart (scrolls sideways on a narrow screen)`,
+    tableScroll: (series: string) => `${series}: table of points (scrolls)`,
+    whenColumn: 'Fetched (Europe/London)',
+    travelDateColumn: 'Travel date',
+    priceColumn: 'Price',
+    detailColumn: 'Detail',
+    cabinNotStated: 'cabin not stated',
+    routeProvenance: (source: string, cabin: string, age: string) =>
+      `${source} · indicative route-level series · ${cabin} · ${age}`,
+    routeFxUnknown: 'currency conversion not recorded for the route-level series',
+    rowLink: 'price history',
+    empty: 'No price history yet for this selection. Each run adds a point.',
+  },
 } as const;

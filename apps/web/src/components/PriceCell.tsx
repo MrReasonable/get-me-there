@@ -40,9 +40,16 @@ export interface PriceCellProps {
   compact?: boolean;
   /** Headers: the full age form, visible (spec §11). */
   fullAge?: boolean;
+  /**
+   * WP10's phone day-cell face (plan decision 52): the amount with "≈" and each mark as one glyph; the provider,
+   * destination, source, age, note and the marks' words are in the title and in spoken text, so nothing is lost.
+   */
+  face?: boolean;
 }
 
-const badge = 'ml-1 rounded px-1 text-xs font-normal';
+// why: a badge sits on its own pale fill, so it names its text colour; inside a dark calendar band it would otherwise
+// inherit the band's white text (white on slate-200 is about 1.2:1; review ui C1).
+const badge = 'ml-1 rounded px-1 text-xs font-normal text-slate-900';
 
 /**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
@@ -65,6 +72,45 @@ export function PriceCell(props: PriceCellProps) {
     formatAgeFull(age),
     ...(calendar ? [COPY.constraintsNotChecked] : []),
   ];
+  if (props.face === true) {
+    const G = COPY.priceMarkGlyph;
+    const marks = [
+      ...(props.unconfirmed === true ? [{ glyph: G.unconfirmed, words: COPY.priceNotConfirmed }] : []),
+      ...(props.stale ? [{ glyph: G.stale, words: COPY.stale }] : []),
+      ...(age.kind === 'unknown' ? [{ glyph: G.ageUnknown, words: COPY.vendorAgeUnknown }] : []),
+      ...(props.truncated === true ? [{ glyph: G.truncated, words: COPY.truncatedNote }] : []),
+      ...(props.superseded === true ? [{ glyph: G.superseded, words: COPY.superseded }] : []),
+      ...(notSeen !== null ? [{ glyph: G.notSeen, words: COPY.notSeenInLatest(COPY.agoOf(notSeen)) }] : []),
+    ];
+    const spoken = [
+      ...marks.map((m) => m.words),
+      ...detail,
+      ...(props.destination !== undefined ? [props.destination] : []),
+      ...(props.destinationNote ? [props.destinationNote] : []),
+    ].join(' · ');
+    return (
+      <span
+        data-testid="price-cell"
+        data-face
+        title={spoken}
+        className={`block min-w-0 text-[11px] font-semibold tabular-nums ${calendar ? 'rounded border border-dashed border-current' : ''}`}
+      >
+        {fxTitle !== null ? (
+          <>
+            <span aria-hidden="true">{COPY.fxApprox}</span>
+            <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
+          </>
+        ) : null}
+        {formatPence(props.pricePence)}
+        {marks.length > 0 ? <span aria-hidden="true">{marks.map((m) => m.glyph).join('')}</span> : null}
+        {/* why: provenance visible without hover (spec §11): the provider's short mark, since touch has no title */}
+        <span aria-hidden="true" className="block font-medium">
+          {COPY.providerMark[p.providerId]}
+        </span>
+        <span className="sr-only">{spoken}</span>
+      </span>
+    );
+  }
   return (
     <span
       data-testid="price-cell"
@@ -73,7 +119,7 @@ export function PriceCell(props: PriceCellProps) {
           ? [...detail, ...(props.destinationNote ? [props.destinationNote] : [])].join(' · ')
           : undefined
       }
-      className={`flex flex-col gap-0.5 ${compact && calendar ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
+      className={`flex flex-col gap-0.5 ${compact && calendar ? 'rounded border border-dashed border-current px-1' : ''}`}
     >
       <span className="font-semibold tabular-nums">
         {fxTitle !== null ? (
@@ -100,7 +146,9 @@ export function PriceCell(props: PriceCellProps) {
       </span>
       {compact ? (
         <span className="inline-flex gap-1 text-xs">
-          <span className="rounded bg-slate-200 px-1 font-medium">{COPY.providerShort[p.providerId]}</span>
+          <span className="rounded bg-slate-200 px-1 font-medium text-slate-900">
+            {COPY.providerShort[p.providerId]}
+          </span>
           {props.destination !== undefined ? <span>{props.destination}</span> : null}
         </span>
       ) : (

@@ -108,7 +108,9 @@ describe('status bar (spec §11)', () => {
     );
     const { user } = renderWithProviders(bar());
     expect(
-      await screen.findByText('Paused: searchapi provider-month cap reached · resumes 1 Nov 2026 00:00 UTC'),
+      await screen.findByText(
+        'Paused: searchapi provider-month cap reached · resumes 1 Nov 2026 00:00 Europe/London',
+      ),
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     await expect.poll(() => resumed).toBe(1);
@@ -339,7 +341,7 @@ describe('view header (spec §11)', () => {
     );
     expect(
       screen.getByText(
-        'showing run started 14 Oct 2026 12:00 UTC (running, just now), run started 7 Oct 2026 12:00 UTC (completed, age unknown)',
+        'showing run started 14 Oct 2026 13:00 Europe/London (running, just now), run started 7 Oct 2026 13:00 Europe/London (completed, age unknown)',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(

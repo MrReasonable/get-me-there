@@ -1,6 +1,6 @@
 import type { ExecutionSummary } from '../api/types.js';
 import { COPY } from '../copy.js';
-import { formatInstantUtc } from '../format.js';
+import { formatRunInstant } from '../format.js';
 
 export interface ViewHeaderProps {
   title: string;
@@ -23,7 +23,7 @@ function itemText(e: HeaderRun): string {
   if (e.startedAt === null)
     return e.isChild ? COPY.childExecutionNotStarted(status) : COPY.executionNotStarted(status);
   const make = e.isChild ? COPY.childExecutionItem : COPY.executionItem;
-  return make(formatInstantUtc(e.startedAt), status, COPY.agoOf(e.ageHours));
+  return make(formatRunInstant(e.startedAt), status, COPY.agoOf(e.ageHours));
 }
 
 /**

@@ -37,6 +37,11 @@ const MONEY_FILES = new Set([
   'src/views/Coverage/CoverageView.tsx',
   'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
+  // WP10 (plan decision 52): the heatmap legend's band ranges, scale values in [data-scale], never fares; the
+  // indicative route-level series, which spec §11 exempts from full provenance ([data-indicative] rows). The charts
+  // print fares only through PriceCell and their axes without "£" (format.ts formatAxisPounds), so they are not here.
+  'src/views/Calendar/CalendarLegend.tsx',
+  'src/views/History/RouteTable.tsx',
 ]);
 
 function parse(file: string, text: string): ts.SourceFile {
@@ -97,6 +102,10 @@ const NON_COPY_PROPS = new Set([
   'htmlFor',
   'inputMode',
   'value',
+  // WP10: Recharts' identifier props (a data field, an axis scale, a legend position), never copy
+  'dataKey',
+  'scale',
+  'verticalAlign',
 ]);
 
 /** True when the literal is an attribute value on a component (`<Heading text="…">`), not on an HTML element. */
@@ -116,7 +125,12 @@ export function copyOffenders(file: string, text: string): string[] {
       const slot = jsxSlot(n);
       if (slot === 'child') out.push(`${file}: literal child "${lit}"`);
       else if (slot !== null && COPY_ATTRS.has(slot.attr)) out.push(`${file}: ${slot.attr}="${lit}"`);
-      else if (slot !== null && onComponent(n) && !NON_COPY_PROPS.has(slot.attr))
+      else if (
+        slot !== null &&
+        onComponent(n) &&
+        !NON_COPY_PROPS.has(slot.attr) &&
+        !slot.attr.startsWith('data-')
+      )
         out.push(`${file}: prop ${slot.attr}="${lit}"`);
     }
     ts.forEachChild(n, visit);
