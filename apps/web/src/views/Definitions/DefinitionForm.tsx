@@ -34,6 +34,12 @@ const input = 'min-h-11 rounded border border-slate-400 px-1';
 /** Fields that live inside the collapsed advanced fold. */
 const ADVANCED_FIELDS = /^(constraints|verification|budget|providers|schedule|enabled)/;
 const button = 'min-h-11 rounded border border-slate-700 px-3';
+type EstimateBody = ReturnType<typeof draftToRequest>;
+/** A draft as it was when Show estimate was clicked: its comparison key and the request body built from it. */
+interface DraftSnapshot {
+  key: string;
+  body: EstimateBody;
+}
 
 /**
  * Spec §11 Definitions form. New definition: "Show estimate" calls POST /api/definitions/estimate
@@ -62,6 +68,8 @@ export function DefinitionForm({
   const [saved, setSaved] = useState<DefinitionResponse | null>(existing);
   const [estimate, setEstimate] = useState<EstimateResponse | null>(null);
   const [estimatedFor, setEstimatedFor] = useState<string | null>(null);
+  // why: the body that was estimated; Create sends this one, so a later edit can never reach the server under an old confirmation.
+  const [estimatedBody, setEstimatedBody] = useState<EstimateBody | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   // why: a half-filled time window is a local field error; saving or estimating would send a window the operator changed.
   const [incomplete, setIncomplete] = useState<readonly string[]>([]);
@@ -113,22 +121,24 @@ export function DefinitionForm({
   };
 
   const estimateDraft = useMutation({
-    mutationFn: () => api.estimateDraft(draftToRequest(draft)),
-    onSuccess: (e) => {
+    // why: the snapshot is the mutation variable, so onSuccess records the draft that was sent, not the one at response time.
+    mutationFn: (snap: DraftSnapshot) => api.estimateDraft(snap.body),
+    onSuccess: (e, snap) => {
       setEstimate(e);
-      setEstimatedFor(current);
+      setEstimatedFor(snap.key);
+      setEstimatedBody(snap.body);
       setFieldErrors([]);
       setNotice(null);
     },
     onError,
   });
   const create = useMutation({
-    mutationFn: (e: EstimateResponse) =>
+    mutationFn: (v: { e: EstimateResponse; body: EstimateBody }) =>
       api.createDefinition({
-        ...draftToRequest(draft),
-        confirmedCostPence: microGbpToPence(e.estimate.totalCostMicroGbp),
+        ...v.body,
+        confirmedCostPence: microGbpToPence(v.e.estimate.totalCostMicroGbp),
         // why: decisions 42, 43: the calls the operator saw are confirmed with the pence; one without the other covers no run.
-        confirmedCalls: e.estimate.totalCalls,
+        confirmedCalls: v.e.estimate.totalCalls,
       }),
     onSuccess: (d) => {
       accept(d, COPY.created);
@@ -254,7 +264,7 @@ export function DefinitionForm({
           disabled={blocked || estimateDraft.isPending}
           aria-busy={estimateDraft.isPending ? true : undefined}
           aria-describedby={blocked ? 'd-blocked' : undefined}
-          onClick={() => estimateDraft.mutate()}
+          onClick={() => estimateDraft.mutate({ key: current, body: draftToRequest(draft) })}
         >
           {estimateDraft.isPending ? COPY.working : COPY.showEstimate}
         </button>
@@ -285,7 +295,9 @@ export function DefinitionForm({
           blocked={blocked}
           pending={create.isPending}
           hardStop={draft.budget.maxCalls}
-          onCreate={() => create.mutate(estimate)}
+          onCreate={() => {
+            if (estimatedBody !== null) create.mutate({ e: estimate, body: estimatedBody });
+          }}
         />
       ) : null}
       {saved !== null ? (

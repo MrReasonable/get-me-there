@@ -215,9 +215,7 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
 
   it('a delete that failed is announced and the rule stays listed', async () => {
     withData();
-    server.use(
-      http.delete(`${API}/alerts/:id`, () => HttpResponse.json({ error: 'nope' }, { status: 500 })),
-    );
+    server.use(http.delete(`${API}/alerts/:id`, () => HttpResponse.json({ error: 'nope' }, { status: 500 })));
     const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
     const [first] = await screen.findAllByRole('button', { name: C.deleteRule });
     if (first === undefined) throw new Error('delete button');
