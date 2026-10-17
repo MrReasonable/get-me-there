@@ -8,21 +8,24 @@ import { SEARCHAPI_WHERE } from './params.js';
 const echoSchema = z.object({ currency: z.string().optional(), gl: z.string().optional() });
 
 /**
- * `google_flights_calendar` (docs 2026-10-14): `has_no_flights` is per entry and such entries omit `price`. Dates
- * stay strings here and are checked per entry with core's `isoDateSchema`, so one bad entry is dropped and counted
- * rather than failing the tile; prices stay numbers and go through `majorToMinor`.
+ * One `google_flights_calendar` entry (docs 2026-10-14): `has_no_flights` is per entry and such entries omit `price`.
+ * Dates stay strings here and are checked per entry with core's `isoDateSchema`; prices stay numbers and go through
+ * `majorToMinor`.
+ */
+export const calendarEntrySchema = z.object({
+  departure: z.string(),
+  return: z.string().optional(),
+  price: z.number().optional(),
+  is_lowest_price: z.boolean().optional(),
+  has_no_flights: z.boolean().optional(),
+});
+/**
+ * The calendar envelope, strict; its entries are read one by one with `calendarEntrySchema`, so one wrongly shaped
+ * entry is dropped and counted rather than failing the tile (CodeRabbit batch 3).
  */
 export const calendarResponseSchema = z.object({
   search_parameters: echoSchema.optional(),
-  calendar: z.array(
-    z.object({
-      departure: z.string(),
-      return: z.string().optional(),
-      price: z.number().optional(),
-      is_lowest_price: z.boolean().optional(),
-      has_no_flights: z.boolean().optional(),
-    }),
-  ),
+  calendar: z.array(z.unknown()),
 });
 
 const airportSchema = z.object({ id: z.string(), date: z.string(), time: z.string() });
@@ -44,11 +47,14 @@ export const optionSchema = z.object({
 });
 /** One `price_insights.price_history` point; checked per point so a bad one is dropped, never fatal. */
 export const historyPointSchema = z.object({ price: z.number(), iso_date: z.string() });
-/** Steps 1 and 2. `other_flights` is not on the docs page; it is read when present. */
+/**
+ * Steps 1 and 2. `other_flights` is not on the docs page; it is read when present. The envelope is strict; each option
+ * is read on its own with `optionSchema`, so one wrongly shaped option is dropped and counted (CodeRabbit batch 3).
+ */
 export const flightsResponseSchema = z.object({
   search_parameters: echoSchema.optional(),
-  best_flights: z.array(optionSchema).optional(),
-  other_flights: z.array(optionSchema).optional(),
+  best_flights: z.array(z.unknown()).optional(),
+  other_flights: z.array(z.unknown()).optional(),
   price_insights: z.object({ price_history: z.array(z.unknown()).nullish() }).nullish(),
 });
 export const bookingOptionSchema = z.object({

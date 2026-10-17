@@ -4,7 +4,13 @@ import { parseError, parseVendor } from '../shared/errors.js';
 import { majorToMinor } from '../shared/money.js';
 import type { NoteCounter } from '../shared/notes.js';
 import { SEARCHAPI_WHERE } from './params.js';
-import { bookingResponseSchema, flightsResponseSchema, historyPointSchema, readEcho } from './shapes.js';
+import {
+  bookingResponseSchema,
+  flightsResponseSchema,
+  historyPointSchema,
+  optionSchema,
+  readEcho,
+} from './shapes.js';
 
 type RouteHistory = NonNullable<ItinerarySearchResult['routeHistory']>;
 
@@ -12,7 +18,7 @@ type RouteHistory = NonNullable<ItinerarySearchResult['routeHistory']>;
  * Steps 1 and 2 (`step` names which in the message). A body with neither `best_flights` nor `other_flights` is a parse error, never "no options": an
  * unread key must not become positive evidence of no fares (spec §3 `empty`).
  */
-export function parseFlights(body: unknown, gl: string, step: string) {
+export function parseFlights(body: unknown, gl: string, step: 'step 1' | 'step 2', notes: NoteCounter) {
   const data = parseVendor(flightsResponseSchema, body, 'malformed-flights', SEARCHAPI_WHERE);
   const echo = readEcho(data.search_parameters, gl);
   if (data.best_flights === undefined && data.other_flights === undefined)
@@ -21,9 +27,24 @@ export function parseFlights(body: unknown, gl: string, step: string) {
       `${step}: neither best_flights nor other_flights is present`,
       SEARCHAPI_WHERE,
     );
+  const raw = [...(data.best_flights ?? []), ...(data.other_flights ?? [])];
+  // why: one wrongly shaped option is dropped and counted, never the whole step; options that were all malformed are
+  // a vendor fault (parse), never "no options", which would read as no fares (CodeRabbit batch 3)
+  const options = raw.flatMap((o) => {
+    const r = optionSchema.safeParse(o);
+    if (r.success) return [r.data];
+    notes.add(`dropped-malformed-option-${step.replace(' ', '')}`);
+    return [];
+  });
+  if (raw.length > 0 && options.length === 0)
+    throw parseError(
+      'malformed-flights',
+      `${step}: every one of the ${raw.length} options is malformed`,
+      SEARCHAPI_WHERE,
+    );
   return {
     ...echo,
-    options: [...(data.best_flights ?? []), ...(data.other_flights ?? [])],
+    options,
     // why: null when the vendor sent no series at all (plan decision 40: best-effort), told apart from an empty one.
     priceHistory: data.price_insights?.price_history ?? null,
   };

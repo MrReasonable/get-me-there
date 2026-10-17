@@ -22,7 +22,13 @@ import { assertRequestAllowed, type ParamsAllowlist } from '../params/allowlist.
 import { parseError, parseVendor } from '../shared/errors.js';
 import { NoteCounter } from '../shared/notes.js';
 import { authHeaders, calendarParams, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_WHERE, toUrl } from './params.js';
-import { calendarResponseSchema, currencySupported, minorOrDrop, readEcho } from './shapes.js';
+import {
+  calendarEntrySchema,
+  calendarResponseSchema,
+  currencySupported,
+  minorOrDrop,
+  readEcho,
+} from './shapes.js';
 
 /** Spec §2 fact 2: the calendar engine refuses more than 200 outbound × return combinations (HTTP 400). */
 export const MAX_COMBINATIONS = 200;
@@ -204,7 +210,21 @@ export function parseCalendarBody(
   const dropped = new Map<string, number>();
   const notes = new NoteCounter();
   const prices: RawCalendarPrice[] = [];
-  for (const e of data.calendar) {
+  // why: one wrongly shaped entry is dropped and counted, never the whole tile; a grid of nothing but malformed
+  // entries is a vendor fault (parse), never an absent or empty tile (CodeRabbit batch 3)
+  const entries = data.calendar.flatMap((raw) => {
+    const r = calendarEntrySchema.safeParse(raw);
+    if (r.success) return [r.data];
+    notes.add('dropped-malformed-entry');
+    return [];
+  });
+  if (entries.length === 0)
+    throw parseError(
+      'malformed-calendar',
+      `every one of the ${data.calendar.length} calendar entries is malformed`,
+      SEARCHAPI_WHERE,
+    );
+  for (const e of entries) {
     if (e.return === undefined) {
       notes.add('dropped-no-return');
       continue;

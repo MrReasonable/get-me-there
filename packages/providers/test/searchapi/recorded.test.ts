@@ -22,8 +22,10 @@ import { authHeaders, SEARCHAPI_ENDPOINT_PATH, SEARCHAPI_PARAMS } from '../../sr
 import { SEARCHAPI_SUPPLIED_FIELDS } from '../../src/searchapi/provider.js';
 import {
   bookingResponseSchema,
+  calendarEntrySchema,
   calendarResponseSchema,
   flightsResponseSchema,
+  optionSchema,
 } from '../../src/searchapi/shapes.js';
 import { majorToMinor } from '../../src/shared/money.js';
 import { replayHandlers } from '../../src/testing/index.js';
@@ -76,8 +78,12 @@ const tokensIn = (body: unknown, name: string): string[] => {
 const flights = (r: SearchApiRecording) => {
   const p = flightsResponseSchema.safeParse(r.body);
   if (!p.success) throw new Error('recorded google_flights body does not parse');
-  return [...(p.data.best_flights ?? []), ...(p.data.other_flights ?? [])];
+  // why: the envelope reads options as unknown (the adapter parses them one by one); recorded ones must all parse
+  return [...(p.data.best_flights ?? []), ...(p.data.other_flights ?? [])].map((o) => optionSchema.parse(o));
 };
+/** A recorded calendar body's entries, each read with the adapter's entry schema (recorded ones must all parse). */
+const calendarEntries = (body: unknown) =>
+  calendarResponseSchema.parse(body).calendar.map((e) => calendarEntrySchema.parse(e));
 const bookings = (r: SearchApiRecording) => bookingResponseSchema.parse(r.body).booking_options ?? [];
 const minor = (major: number) => {
   const m = majorToMinor(major, 'GBP');
@@ -103,7 +109,7 @@ describe.skipIf(!present)(
       // why: decision 29: SA-02 is recorded as production plans it (9 × 20 for the worked band), so replay exercises
       // the tile shape the adapter really sends; the block is the window-free largest b for the recorded band.
       expect(days).toBe(outboundBlockDays({ departureFrom: from, departureTo: addDays(from, 181), ...band }));
-      const answered = new Set(calendarResponseSchema.parse(rec.body).calendar.map((e) => e.departure));
+      const answered = new Set(calendarEntries(rec.body).map((e) => e.departure));
       expect(answered.size).toBe(days);
     });
 
@@ -192,7 +198,7 @@ describe.skipIf(!present)(
         ctx(),
       );
       if (res.kind !== 'tile') throw new Error(`expected a tile, got ${res.error.message}`);
-      const entries = calendarResponseSchema.parse(rec.body).calendar;
+      const entries = calendarEntries(rec.body);
       const inBand = entries.filter(
         (e) =>
           e.return !== undefined &&

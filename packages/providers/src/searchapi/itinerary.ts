@@ -140,7 +140,7 @@ export async function searchItinerary(
   const base = flightsParams(q, d.pointOfSale);
 
   const s1 = await send(d, base, ctx);
-  const r1 = parseFlights(s1.body, gl, 'step 1');
+  const r1 = parseFlights(s1.body, gl, 'step 1', notes);
   const fetched: IsoDateTime[] = [s1.fetchedAt];
   const routeHistory = toRouteHistory(r1.priceHistory, r1.currency, notes);
   if (r1.options.length === 0) {
@@ -209,7 +209,7 @@ export async function searchItinerary(
     try {
       const s2 = await send(d, { ...base, departure_token: out.token }, ctx);
       fetched.push(s2.fetchedAt);
-      r2 = parseFlights(s2.body, gl, 'step 2');
+      r2 = parseFlights(s2.body, gl, 'step 2', notes);
     } catch (err) {
       if (isExpansionFailure(err)) {
         failed += 1;
