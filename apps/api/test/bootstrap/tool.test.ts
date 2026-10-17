@@ -271,7 +271,7 @@ describe('runTool success paths', () => {
     );
     expect(text).toContain(`recording into: ${h.root}`);
     expect(text).toContain(
-      'SearchApi window: 0 of 100 used (compare with the dashboard); room 100, this run ≤5',
+      'SearchApi window (trial; SEARCHAPI_TRIAL_USED 0): 0 of 100 used (compare with the dashboard); room 100, this run ≤5',
     );
     expect(text).toContain('Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): 2000');
     expect(text).toContain(
@@ -314,7 +314,7 @@ describe('runTool success paths', () => {
     const again = harness(h.dbPath);
     expect(await runTool('record', ROUTE, again.opts)).toBe(EXIT.spendRefused);
     expect(again.errors()).toContain('credits already ledgered to earlier tool runs');
-    expect(again.text()).toContain('(a live run needs --confirm-rerun)');
+    expect(again.text()).toContain('(a run that calls the vendors needs --confirm-rerun)');
     const confirmed = harness(h.dbPath);
     expect(await runTool('record', [...ROUTE, '--confirm-rerun'], confirmed.opts)).toBe(EXIT.ok);
   }, 30_000);
@@ -324,7 +324,7 @@ describe('runTool success paths', () => {
     const seen = stubVendors();
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain(
-      'a live run would be refused: the SearchApi window has room for 3 credit(s) but this run may use 5',
+      'a run that calls the vendors would be refused: the SearchApi window has room for 3 credit(s) but this run may use 5',
     );
     expect(await runTool('record', [...ROUTE, '--confirm-rerun'], h.opts)).toBe(EXIT.spendRefused);
     expect(h.errors()).toContain('the SearchApi window has room for 3 credit(s)');

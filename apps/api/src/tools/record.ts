@@ -16,7 +16,6 @@ import {
 import { majorToMinor } from '@gmt/providers/recording';
 import { safeMessage } from '../safeMessage.js';
 import type { Ports } from '../wiring.js';
-import { budgetPosition, openRecordingExecution } from './recordExecution.js';
 import { type EndpointKey, ParamLog, paramRules, writeAllowlist } from './recordParams.js';
 import {
   type CellDates,
@@ -45,6 +44,7 @@ import {
   TP_PAGE_LIMIT,
   tpUrl,
 } from './recordRequests.js';
+import { budgetPosition, openRecordingExecution } from './toolExecution.js';
 import {
   EXIT,
   type RecordedCall,
@@ -177,7 +177,7 @@ export async function recordFixtures(
     recordedBy: ctx.recordedBy,
   });
   const providers: RecordingProviders = { tp, sa };
-  const executionId = openRecordingExecution(ports, args, plan, sa);
+  const executionId = openRecordingExecution(ports, args, plan);
   let run: PlanRun | null = null;
   try {
     run = new PlanRun(ports, plan, executionId, recorder, ctx, providers);

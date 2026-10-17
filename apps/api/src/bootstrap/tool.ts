@@ -5,7 +5,7 @@
  * its whole run. The one process.env read is here.
  */
 import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Clock, type Config, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
 import {
@@ -18,6 +18,7 @@ import {
 import { defaultRecordedRoot } from '@gmt/providers';
 import { createLogger } from '../logger.js';
 import { safeMessage } from '../safeMessage.js';
+import { isInside } from '../tools/paths.js';
 import { RECORDED_BY, recordPrecheck, runRecord } from '../tools/record.js';
 import { parseRecordArgs, type RecordCli } from '../tools/recordPlan.js';
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
@@ -71,14 +72,6 @@ export function repositoryRoots(from: string = defaultRecordedRoot()): string[] 
   return roots;
 }
 
-/** The true-case real path of `p`, or of its nearest existing ancestor with the rest appended (a directory not made yet). */
-function realOrAncestor(p: string): string {
-  const abs = resolve(p);
-  if (existsSync(abs)) return realpathSync.native(abs);
-  const up = dirname(abs);
-  return up === abs ? abs : join(realOrAncestor(up), abs.slice(up.length + 1));
-}
-
 /**
  * Where a record run writes, and under which signature (sec2-002, ruling 2026-10-15): the committed tree only for the
  * worked example's route; any other route needs `--out DIR` outside the repository, which writes DIR/fixtures/recorded.
@@ -90,8 +83,8 @@ export function recordingTarget(
 ): RecordingTarget | { refusal: string } {
   if (given !== undefined) return given;
   if (cli.out !== null) {
-    const out = realOrAncestor(cli.out);
-    if ((roots ?? repositoryRoots()).some((repo) => out === repo || out.startsWith(`${repo}${sep}`)))
+    const out = cli.out;
+    if ((roots ?? repositoryRoots()).some((repo) => isInside(out, repo)))
       return {
         refusal: `--out ${cli.out} is inside the repository; recordings of other routes stay outside it`,
       };
