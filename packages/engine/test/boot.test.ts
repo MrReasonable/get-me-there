@@ -327,6 +327,23 @@ describe('boot (spec §8.1 "Boot order")', () => {
     expect(executions(h, def.id).filter((x) => x.status === 'skipped_missed')).toHaveLength(1);
   });
 
+  it('does not call a firing missed when no configured provider can run the definition: the tick ran and refused (ssr-005)', async () => {
+    const h = createHarness(fake);
+    // why: the one named provider is not configured here, so every tick is refused 'disabled' and writes no execution
+    const def = h.createDefinition({
+      scheduleCron: '0 5 * * 1',
+      providers: {
+        discovery: ['travelpayouts'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168 },
+      },
+    });
+    h.clock.set(asIsoDateTime('2026-10-20T09:00:00.000Z'));
+    await engine(h).boot();
+    expect(executions(h, def.id).filter((x) => x.status === 'skipped_missed')).toHaveLength(0);
+    expect(h.notifications.some((n) => n.body.includes('because the app was not running'))).toBe(false);
+  });
+
   it('does not record skipped_missed for a firing before the schedule took effect (ssr2-11)', async () => {
     const h = createHarness(fake);
     const def = h.createDefinition(); // created Wednesday 14 Oct, no schedule

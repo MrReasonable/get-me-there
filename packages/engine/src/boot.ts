@@ -18,8 +18,9 @@ export const FX_AFTER_BOOT_MS = 60_000;
 /**
  * Spec §8.2: "a boot that finds the last scheduled firing was missed records skipped_missed and notifies", once per
  * firing. A firing is not missed when the definition was last changed at or after it (the schedule may not have
- * existed then, ssr2-11), when a scheduled execution was created at or after it, or when an execution of the definition
- * was active at that instant: the tick ran and was blocked, which records nothing by design (ssr-16).
+ * existed then, ssr2-11), when a scheduled execution was created at or after it, when an execution of the definition
+ * was active at that instant (the tick ran and was blocked, which records nothing by design, ssr-16), or when no
+ * configured provider can run the definition on a schedule (the tick ran and refused, ssr-005).
  */
 async function detectMissed(ctx: EngineContext, def: SearchDefinition, bootAt: IsoDateTime): Promise<void> {
   if (def.scheduleCron === null) return;
@@ -35,6 +36,16 @@ async function detectMissed(ctx: EngineContext, def: SearchDefinition, bootAt: I
     .some((e) => (e.startedAt ?? e.createdAt) <= prevAt && (e.finishedAt === null || e.finishedAt >= prevAt));
   if (activeThen) return;
   const built = buildSnapshot(ctx, def, 'schedule');
+  // why: ssr-005: a definition no configured provider can run on a schedule is refused 'disabled' at every tick, which
+  // writes no execution (start.ts; po-003 keeps it out of skipped_budget). That firing ran and refused, so "did not
+  // happen because the app was not running" would be false; the refusal's own notice already told the operator.
+  if (built.snapshot.providers.discovery.length + built.snapshot.providers.verification.length === 0) {
+    ctx.log.info(
+      { definitionId: def.id, firing: prevAt },
+      'boot: last firing refused for no runnable provider, not missed',
+    );
+    return;
+  }
   await recordSkipped(
     ctx,
     def,
