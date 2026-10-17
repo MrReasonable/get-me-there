@@ -21,44 +21,59 @@ const SENTINEL_ENV = {
   APP_BASIC_AUTH_PASS: SENTINEL_AUTH,
 };
 
+/**
+ * Timeout for the cases that spawn the scanner in a loop. why: each scan is a node process (about 0.3 s alone); the
+ * encoded-forms case runs one per form (more than 8), which took it past vitest's 5 s default under the full api run's
+ * parallel workers (fix round 1). Sized to the spawns, like WP4b's 30 s tool test.
+ */
+const SPAWNING_TEST_TIMEOUT_MS = 60_000;
+
 function scan(cwd: string, env: Record<string, string> = SENTINEL_ENV) {
   return spawnSync(process.execPath, [SCAN], { cwd, env, encoding: 'utf8', timeout: 30_000 });
 }
 
 describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
-  it('a tree recorded with sentinel keys, raw bodies included, is clean; planting a sentinel makes the scan fail without printing it', async () => {
-    const run = await runRecording();
-    const clean = scan(run.repo);
-    expect(clean.stdout).toContain('secret scan: checked 4 configured secret value(s)');
-    expect(clean.stdout).toContain('secret scan: clean');
-    expect(clean.status).toBe(0);
-    const plantDir = join(run.root, 'planted');
-    mkdirSync(plantDir, { recursive: true });
-    writeFileSync(join(plantDir, 'p.json'), JSON.stringify({ leaked: SENTINEL_SA }));
-    const dirty = scan(run.repo);
-    expect(dirty.status).toBe(1);
-    expect(dirty.stderr).toContain('secret value found');
-    expect(dirty.stderr).not.toContain(SENTINEL_SA);
-  });
+  it(
+    'a tree recorded with sentinel keys, raw bodies included, is clean; planting a sentinel makes the scan fail without printing it',
+    async () => {
+      const run = await runRecording();
+      const clean = scan(run.repo);
+      expect(clean.stdout).toContain('secret scan: checked 4 configured secret value(s)');
+      expect(clean.stdout).toContain('secret scan: clean');
+      expect(clean.status).toBe(0);
+      const plantDir = join(run.root, 'planted');
+      mkdirSync(plantDir, { recursive: true });
+      writeFileSync(join(plantDir, 'p.json'), JSON.stringify({ leaked: SENTINEL_SA }));
+      const dirty = scan(run.repo);
+      expect(dirty.status).toBe(1);
+      expect(dirty.stderr).toContain('secret value found');
+      expect(dirty.stderr).not.toContain(SENTINEL_SA);
+    },
+    SPAWNING_TEST_TIMEOUT_MS,
+  );
 
-  it("every encoded form WP4's scrubber knows (secretForms) also fails the scan: one shared list (sec minor 2, N-1)", async () => {
-    const run = await runRecording();
-    const forms = [
-      ...new Set([SENTINEL_SA, SENTINEL_TP, SENTINEL_SMTP, SENTINEL_AUTH].flatMap((v) => secretForms(v))),
-    ];
-    // why: the padded and unpadded base64 forms differ for these values, so the list is not just the raw value
-    expect(forms.length).toBeGreaterThan(8);
-    for (const [i, form] of forms.entries()) {
-      const dir = join(run.root, `encoded-${i}`);
-      mkdirSync(dir, { recursive: true });
-      // why: written raw, not JSON-encoded, so the planted text is exactly the form
-      writeFileSync(join(dir, 'p.txt'), `leaked: ${form}\n`);
-      const r = scan(run.repo);
-      expect(r.status, form).toBe(1);
-      expect(r.stderr).not.toContain(form);
-      rmSync(dir, { recursive: true });
-    }
-  });
+  it(
+    "every encoded form WP4's scrubber knows (secretForms) also fails the scan: one shared list (sec minor 2, N-1)",
+    async () => {
+      const run = await runRecording();
+      const forms = [
+        ...new Set([SENTINEL_SA, SENTINEL_TP, SENTINEL_SMTP, SENTINEL_AUTH].flatMap((v) => secretForms(v))),
+      ];
+      // why: the padded and unpadded base64 forms differ for these values, so the list is not just the raw value
+      expect(forms.length).toBeGreaterThan(8);
+      for (const [i, form] of forms.entries()) {
+        const dir = join(run.root, `encoded-${i}`);
+        mkdirSync(dir, { recursive: true });
+        // why: written raw, not JSON-encoded, so the planted text is exactly the form
+        writeFileSync(join(dir, 'p.txt'), `leaked: ${form}\n`);
+        const r = scan(run.repo);
+        expect(r.status, form).toBe(1);
+        expect(r.stderr).not.toContain(form);
+        rmSync(dir, { recursive: true });
+      }
+    },
+    SPAWNING_TEST_TIMEOUT_MS,
+  );
 
   it('with no secret loaded it still passes, but says that only the shape rules ran (sec minor 2)', () => {
     const r = scan(REPO, { PATH: process.env.PATH ?? '' });
