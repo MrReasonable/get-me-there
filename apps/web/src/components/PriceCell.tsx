@@ -1,11 +1,4 @@
-import {
-  effectiveAge,
-  formatAgeFull,
-  formatAgeShort,
-  formatAgo,
-  formatFetchedAgo,
-  sourceLabel,
-} from '@gmt/core';
+import { effectiveAge, formatAgeFull, formatAgeShort, formatFetchedAgo, sourceLabel } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
@@ -111,9 +104,7 @@ export function PriceCell(props: PriceCellProps) {
         {/* why: ruling 3: the age and the unchecked mark on the face; 10px words of at most 7 characters fit 45 px */}
         <span aria-hidden="true" data-testid="face-age" className="block text-[10px] font-normal">
           {/* why: an unknown vendor age says nothing of when the price was fetched, so the fetch age leads (hard rule: fetched time without hover) */}
-          {age.kind === 'unknown'
-            ? `${formatAgo(age.fetchedHours)} · ${formatAgeShort(age)}`
-            : formatAgeShort(age)}
+          {age.kind === 'unknown' ? `${formatFetchedAgo(age)} · ${formatAgeShort(age)}` : formatAgeShort(age)}
         </span>
         {calendar ? (
           <span aria-hidden="true" data-testid="face-unchecked" className="block text-[10px] font-normal">

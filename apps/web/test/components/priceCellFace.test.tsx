@@ -33,9 +33,9 @@ describe('PriceCell face (phone day cell)', () => {
       '≈',
       '≠◷…↺◌',
       COPY.providerMark.searchapi,
-      expect.stringMatching(/^.+ ago · age unknown$/),
+      expect.stringMatching(/^fetched .+ ago · age unknown$/),
     ]);
-    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/ago · age unknown$/);
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^fetched .+ ago · age unknown$/);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [
