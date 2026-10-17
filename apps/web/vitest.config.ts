@@ -35,7 +35,7 @@ export default defineConfig({
         functions: 70,
         statements: 70,
         'src/components/{Provenance,PriceCell,PriceBoundary,BookingAction}.tsx': FULL,
-        'src/state/{urlState,resultsState}.ts': FULL,
+        'src/state/{urlState,resultsState,calendarState}.ts': FULL,
         'src/lib/**': VIEW_MODEL,
         'src/views/{Calendar,Duration,History}/*.ts': VIEW_MODEL,
       },

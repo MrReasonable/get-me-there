@@ -17,7 +17,9 @@ import {
   linesForPairs,
   linesFromItinerary,
   newestAllStale,
+  type Pair,
   type PlotLine,
+  pairKey,
   type RouteLine,
   runOrder,
 } from './lines.js';
@@ -27,9 +29,6 @@ const H = COPY.historyView;
 /** The overlay of every pair draws at most this many pairs, one palette colour each (review ui-r2-009). */
 export const MAX_OVERLAY_PAIRS = 6;
 const ALL = 'all';
-
-type Pair = { origin: Iata; destination: Iata };
-const pairKey = (p: Pair) => `${p.origin}-${p.destination}`;
 
 /**
  * History (spec §11 History, §10 history routes; plan decisions 38, 52): route history by pair (or every pair

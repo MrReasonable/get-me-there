@@ -3,7 +3,8 @@ import { fromEpochDay, type IsoDate, isoDateTimeSchema, toEpochDay } from '@gmt/
 // Instants as epoch milliseconds, which carry no zone (review focus 3; test/lib/noDateParsing.test.ts forbids Date
 // objects outside src/now.tsx). Inputs are toISOString instants or epoch-day integers; a date-only string is refused.
 
-const DAY_MS = 86_400_000;
+/** Milliseconds in a day: the one definition the views share. */
+export const DAY_MS = 86_400_000;
 
 /** Epoch milliseconds of an instant; throws RangeError on anything but the toISOString form (spec §6.3). */
 export function instantMs(t: string): number {

@@ -1,10 +1,9 @@
 import { COPY } from '../../copy.js';
 import { formatPence } from '../../format.js';
+import { GLYPH_ORDER } from './display.js';
 import type { CalendarModel } from './model.js';
 import { BAND_CLASSES, FLAT_CLASS, MIN_BANDED_DAYS, PRICELESS_CLASS } from './scale.js';
-import type { DayBasis, GlyphStatus } from './types.js';
-
-const GLYPHS: readonly GlyphStatus[] = ['empty', 'no_data', 'error', 'skipped', 'not_run'];
+import type { DayBasis } from './types.js';
 
 /**
  * Numeric legend (spec §11 View B): the basis on the scale and how it is banded (or why it is flat), each band's pence
@@ -65,7 +64,7 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
       </ul>
       <p>{L.glyphs}</p>
       <ul className="flex flex-wrap gap-x-4">
-        {GLYPHS.map((g) => (
+        {GLYPH_ORDER.map((g) => (
           <li key={g}>
             <span aria-hidden="true">{C.glyphSymbol[g]}</span> {COPY.bucket[g]}
             {g === 'skipped' ? <span>{L.skippedWhy}</span> : null}

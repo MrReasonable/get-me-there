@@ -13,7 +13,7 @@ import { COPY } from '../../copy.js';
 import { formatIsoDateLong } from '../../format.js';
 import { SERIES_COLOURS } from '../../lib/palette.js';
 import { sourceLabelOf } from '../../lib/sources.js';
-import { dateMs, instantMs } from '../../lib/time.js';
+import { DAY_MS, dateMs, instantMs } from '../../lib/time.js';
 
 type CalendarFetchPoint = RouteHistoryResponse['calendarSeries'][number]['points'][number];
 type OfferPoint = ItineraryHistoryResponse['series'][number]['points'][number];
@@ -66,8 +66,6 @@ export interface RouteLine {
   colour: number;
   points: RoutePlotPoint[];
 }
-
-const DAY_MS = 86_400_000;
 
 /** Each parent run's place in the definition's run order, oldest 0 (executions arrive newest first). */
 export type RunOrder = ReadonlyMap<string, number>;
@@ -249,8 +247,8 @@ export function assignColours<L extends { key: string; colour: number }>(lines: 
   return lines.map((l) => ({ ...l, colour: keys.indexOf(l.key) }));
 }
 
-type Pair = { origin: Iata; destination: Iata };
-const pairKey = (p: Pair) => `${p.origin}-${p.destination}`;
+export type Pair = { origin: Iata; destination: Iata };
+export const pairKey = (p: Pair) => `${p.origin}-${p.destination}`;
 
 /**
  * Every line of the pairs shown. In the overlay every line of a pair takes the pair's colour (its place in the

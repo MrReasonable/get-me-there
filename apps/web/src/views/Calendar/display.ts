@@ -35,7 +35,8 @@ export type DayDisplay =
     }
   | { kind: 'glyphs'; glyphs: Glyph[]; reason: GlyphReason };
 
-const GLYPH_ORDER: readonly GlyphStatus[] = ['empty', 'no_data', 'error', 'skipped', 'not_run'];
+/** The order priceless-day glyphs are drawn and the legend lists them. */
+export const GLYPH_ORDER: readonly GlyphStatus[] = ['empty', 'no_data', 'error', 'skipped', 'not_run'];
 
 function priceless(slice: DaySlice): DayDisplay {
   if (slice.discoveryProviders.length === 0) return { kind: 'glyphs', glyphs: [], reason: 'no-provider' };

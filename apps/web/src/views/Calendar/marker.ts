@@ -72,6 +72,14 @@ export function coverageOf(slice: DaySlice): Coverage {
   };
 }
 
+/**
+ * Decision 48: a day says "price not confirmed" when its itinerary search priced cells but confirmed none, and only
+ * while it shows no class-verified price. One predicate for the desktop and the phone body.
+ */
+export function showsUnconfirmed(slice: DaySlice): boolean {
+  return slice.unconfirmedCells > 0 && slice.cheapestVerified === null;
+}
+
 /** The configured discovery providers that have no counts for the day: not searched yet by them (prov-r2-009). */
 export function providersNotSearched(slice: DaySlice): ProviderId[] {
   return slice.discoveryProviders.filter((p) => !slice.discovery.some((d) => d.providerId === p));

@@ -7,6 +7,7 @@ import { COPY } from '../../copy.js';
 import { formatIsoMonth } from '../../format.js';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
 import { useNow } from '../../now.js';
+import { CALENDAR_PARAMS, parseColourBasis, parseDestination } from '../../state/calendarState.js';
 import { updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { CalendarGrid } from './CalendarGrid.js';
 import { CalendarLegend } from './CalendarLegend.js';
@@ -16,19 +17,6 @@ import { defaultColourBasis } from './display.js';
 import { type SliceOptions, sliceOf, totalReused } from './marker.js';
 import { buildCalendarModel } from './model.js';
 import type { DayBasis, GridDay } from './types.js';
-
-/** URL keys of the view's state (ui-r1-016: filters survive navigation and links, like WP9's Results state). */
-export const CALENDAR_PARAMS = { destination: 'cal.dest', basis: 'cal.basis', month: 'cal.month' } as const;
-
-/** The destination filter from the URL: one of the definition's destinations, else all. */
-export function parseDestination(raw: string | null, destinations: readonly Iata[]): Iata | 'all' {
-  return destinations.find((d) => d === raw) ?? 'all';
-}
-
-/** The operator's chosen colour basis from the URL, or null for the default. */
-export function parseBasis(raw: string | null): DayBasis | null {
-  return raw === 'verified' || raw === 'calendar' ? raw : null;
-}
 
 function gridDays(days: readonly CalendarDay[], o: SliceOptions, destination: Iata | null): GridDay[] {
   return days.map((d) => ({ date: d.date, slice: sliceOf(d, o, destination) }));
@@ -62,7 +50,7 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
     () => gridDays(raw ?? [], { verificationConfigured: hasVerification, discoveryProviders }, filter),
     [raw, filter, hasVerification, discoveryProviders],
   );
-  const chosen = parseBasis(params.get(CALENDAR_PARAMS.basis));
+  const chosen = parseColourBasis(params.get(CALENDAR_PARAMS.basis));
   // why: plan decision 38 — the default is judged over all destinations, so a filter change never flips the colouring.
   const colourBasis: DayBasis =
     chosen === 'calendar' || (chosen === 'verified' && hasVerification)
