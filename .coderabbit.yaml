@@ -16,6 +16,9 @@ reviews:
     - "!**/dist/**"
     - "!**/coverage/**"
     - "!packages/db/drizzle/meta/**"
+    # why: the work briefs are historical records of what each package was asked to build at dispatch, never updated after
+    # merge (docs/briefs/README.md); review the shipped code, spec and plan instead
+    - "!docs/briefs/**"
   path_instructions:
     - path: "**/*"
       instructions: |

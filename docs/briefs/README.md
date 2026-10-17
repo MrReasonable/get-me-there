@@ -1,5 +1,9 @@
 # Work briefs
 
+> **Historical records.** Each brief records what its work package was asked to build when it was dispatched. The
+> code, the spec and the plan are current; a brief is not updated after its package merges, so where they differ, the
+> code, spec and plan win.
+
 One brief per work package (WP) of `docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`. A brief is the only document an implementer needs besides the spec and the plan: it carries that package's bite-sized tasks in the `superpowers:writing-plans` format, with real test code and real implementation code in every step.
 
 Briefs are reviewed with `/review-spec docs/briefs/<file> --roster core` before dispatch. Critical and High findings are fixed in the brief first.
