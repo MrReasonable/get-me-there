@@ -44,6 +44,9 @@ const safeInt = (v: string): number | undefined => {
 const int = (v: string | null): number | undefined => (v === null ? undefined : safeInt(v));
 const CARRIER = /^[A-Z0-9]{2}$/;
 
+/** The URL parameter that carries the results basis; the status bar, Results and History all read it through this. */
+export const BASIS_PARAM = 'basis';
+
 export function parseBasis(v: string | null): Basis | null {
   return v === 'verified' || v === 'calendar' ? v : null;
 }

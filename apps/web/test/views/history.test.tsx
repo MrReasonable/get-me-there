@@ -405,6 +405,23 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(chart.querySelectorAll('circle[data-stale="false"]').length).toBeGreaterThan(0);
   });
 
+  it('a failed runs query is shown, not read as a definition with no runs (route and itinerary history)', async () => {
+    server.use(
+      http.get(routeRoute, () => HttpResponse.json(threeRuns)),
+      http.get(itineraryRoute, () => HttpResponse.json(itineraryHistory())),
+      http.get(resultsRoute, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'runs down' } }, { status: 500 }),
+      ),
+    );
+    const route = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(await route.findByRole('alert')).toHaveTextContent('Could not load: runs down');
+    route.unmount();
+    const itinerary = renderWithProviders(<HistoryView definition={definition()} />, {
+      search: '?hash=h1',
+    });
+    expect(await itinerary.findByRole('alert')).toHaveTextContent('Could not load: runs down');
+  });
+
   it('a gap point draws no dot: only priced points get one, so no phantom fetch sits at the top of the plot', async () => {
     const at = asIsoDateTime('2026-10-12T15:00:00.000Z');
     const priced = (t: number, executionId: string): PlotPoint => ({

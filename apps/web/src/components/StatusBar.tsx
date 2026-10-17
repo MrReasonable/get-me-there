@@ -6,7 +6,7 @@ import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/typ
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
-import { parseBasis } from '../state/resultsState.js';
+import { BASIS_PARAM, parseBasis } from '../state/resultsState.js';
 import { useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
 
@@ -104,7 +104,7 @@ export interface StatusBarProps {
 /** Spec §11 status bar, on every view: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
 export function StatusBar({ definition, showRunNow }: StatusBarProps) {
   const params = useSearchParams();
-  const results = useResults(definition?.id ?? null, parseBasis(params.get('basis')));
+  const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];
   // why: lists are newest first; the bar follows the newest parent run, and a one-cell child is a separate line.
   const latestId = executions.find((x) => !x.isChild)?.id ?? null;

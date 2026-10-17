@@ -10,6 +10,7 @@ import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
 import { oneOf } from '../../state/oneOf.js';
 import {
   activeFilterCount,
+  BASIS_PARAM,
   CLASSES,
   parseBasis,
   parseResultsState,
@@ -75,7 +76,7 @@ function anySynthetic(data: ResultsResponse, gap: CalendarGapResponse | undefine
 /** View A (spec §11): one fetch per basis; every sort and filter is core's pure function over that page. */
 export function ResultsView({ definition }: { definition: DefinitionResponse }) {
   const params = useSearchParams();
-  const basis = parseBasis(params.get('basis'));
+  const basis = parseBasis(params.get(BASIS_PARAM));
   const ui = useMemo(() => parseResultsState(params), [params]);
   const results = useResults(definition.id, basis);
   const providers = useProviders();
