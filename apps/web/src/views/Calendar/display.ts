@@ -1,5 +1,5 @@
 import { compareAges, effectiveAge, type IsoDateTime } from '@gmt/core';
-import { bestCovered } from './marker.js';
+import { bestCovered, countsConsistent } from './marker.js';
 import type { DayBasis, DayPrice, DaySlice, GlyphStatus, GridDay } from './types.js';
 
 /** Why a priceless day shows what it shows. */
@@ -9,7 +9,9 @@ export type GlyphReason =
   /** discovery is configured but no run has outcome rows for this day yet: not searched */
   | 'no-run'
   /** the definition has no discovery provider */
-  | 'no-provider';
+  | 'no-provider'
+  /** a source's total disagrees with the sum of its buckets: no outcome is trusted, so none is drawn */
+  | 'inconsistent';
 
 /** One glyph of a priceless day and its cell count (null when no run has counted the day: review ui-r2-003). */
 export interface Glyph {
@@ -44,6 +46,9 @@ function priceless(slice: DaySlice): DayDisplay {
   const best = bestCovered(slice.discovery);
   if (best === null)
     return { kind: 'glyphs', glyphs: [{ status: 'not_run', count: null }], reason: 'no-run' };
+  // why: the same test as the coverage cue: a total that is not the buckets' sum could turn "no fares: 1" into a day
+  // with no counted cell, so no outcome glyph is drawn for it and the day says its counts are inconsistent.
+  if (!slice.discovery.every(countsConsistent)) return { kind: 'glyphs', glyphs: [], reason: 'inconsistent' };
   // why: ui-r2-003 — counts from one source (the cue's best-covered one), so "1 no fares, 47 not searched" never
   // reads like "47 no fares, 1 not searched", and two providers' states are never mixed; the panel lists every source.
   const glyphs = GLYPH_ORDER.filter((s) => best.buckets[s] > 0).map((status) => ({

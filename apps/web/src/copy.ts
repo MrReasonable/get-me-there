@@ -577,7 +577,7 @@ export const COPY = {
     cachedFrom: 'cached from',
     glyphCount: (n: number, words: string) => `${n} ${words}`,
     // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
-    phoneMark: { partial: '◐' },
+    phoneMark: { partial: '◐', inconsistent: '?' },
     phonePartial: 'part of the day not searched',
     phoneNights: (n: number) => `${n}n`,
     // why: ruling 4: the buckets that apply, in the spec §3 order, zero buckets left out; never the "searched" umbrella.
@@ -645,7 +645,7 @@ export const COPY = {
       stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
       bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
       phone:
-        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ◐ part of the day not searched; under the amount its provider, its age ("5d old", "age unknown") and "not checked" on a calendar price. A day without a price shows each glyph with its count. Open a day for the rest.',
+        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ◐ part of the day not searched, ? the counts of a day disagree with its total; under the amount its provider, its age ("5d old", or "5h ago · age unknown" when the vendor gives none) and "not checked" on a calendar price. A day without a price shows each glyph with its count. Open a day for the rest.',
       phoneProviders:
         'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), syn Fixture (synthetic fixture data).',
       glyphs: 'Days without a price show, with how many cells of the best-covered source:',
