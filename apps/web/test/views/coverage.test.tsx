@@ -102,7 +102,7 @@ describe('View D (spec §11, §6.6)', () => {
     );
     render();
     expect(
-      await screen.findByText('showing run started 14 Oct 2026 14:00 UTC (running, 1h ago)'),
+      await screen.findByText('showing run started 14 Oct 2026 15:00 Europe/London (running, 1h ago)'),
     ).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(
       'The latest run is running; these results may be partial.',

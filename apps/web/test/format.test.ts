@@ -1,13 +1,13 @@
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
-  formatInstantUtc,
   formatIsoDate,
   formatIsoDateLong,
   formatIsoDateShort,
   formatLocalDateTime,
   formatMicroGbp,
   formatMinutes,
+  formatRunInstant,
   formatSeconds,
   formatWeekday,
   parsePoundsToPence,
@@ -31,8 +31,9 @@ describe('the one date-formatting module (decision 38; WP10 imports it)', () => 
     expect(formatWeekday(asIsoDate('2027-03-15'))).toBe('Mon');
   });
 
-  it('a run instant is labelled UTC and never shifted; segment times are airport wall time', () => {
-    expect(formatInstantUtc('2026-10-14T12:00:00.000Z')).toBe('14 Oct 2026 12:00 UTC');
+  it('a run instant is shown in Europe/London and labelled; segment times are airport wall time', () => {
+    expect(formatRunInstant('2026-10-14T12:00:00.000Z')).toBe('14 Oct 2026 13:00 Europe/London');
+    expect(formatRunInstant('2026-12-14T12:00:00.000Z')).toBe('14 Dec 2026 12:00 Europe/London');
     expect(formatLocalDateTime('2027-03-14T10:25')).toBe('14 Mar 10:25');
     expect(formatLocalDateTime('2027-03-14')).toBe('2027-03-14');
   });
