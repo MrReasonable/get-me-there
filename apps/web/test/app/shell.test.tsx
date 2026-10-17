@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../src/App.js';
@@ -92,6 +92,33 @@ describe('shell (spec §11 layout)', () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it.each(['results', 'coverage', 'calendar', 'duration', 'history', 'alerts'])(
+    'the %s view waits for /providers: while it is pending no price renders, so synthetic data never looks real',
+    async (view) => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      server.use(
+        http.get(`${API}/providers`, async () => {
+          await gate;
+          return HttpResponse.json(providersResponse({ synthetic: true }));
+        }),
+      );
+      const { client } = renderWithProviders(<App />, { search: `?view=${view}&def=def-0001` });
+      await screen.findByLabelText('Search definition');
+      // why: wait until only /providers is still in flight, so a view that did render would have its data by now
+      await waitFor(() => expect(client.isFetching()).toBe(1));
+      const main = screen.getByRole('main');
+      expect(within(main).queryByTestId('price-cell')).toBeNull();
+      expect(within(main).queryByRole('table')).toBeNull();
+      expect(within(main).getAllByText(COPY.loading).length).toBeGreaterThan(0);
+      release();
+      expect(await screen.findByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
+      await waitFor(() => expect(within(screen.getByRole('main')).queryByText(COPY.loading)).toBeNull());
+    },
+  );
 
   it('empty state when no provider is configured', async () => {
     server.use(

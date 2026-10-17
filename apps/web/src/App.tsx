@@ -1,7 +1,7 @@
 import { useDefinitions, useProviders } from './api/queries.js';
 import { AppBoundary } from './components/AppBoundary.js';
 import { DefinitionSelector } from './components/DefinitionSelector.js';
-import { LoadError } from './components/LoadState.js';
+import { LoadError, Loading } from './components/LoadState.js';
 import { Nav } from './components/Nav.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SyntheticBanner } from './components/SyntheticBanner.js';
@@ -32,6 +32,9 @@ export function App() {
   const selectedId = requested ?? list[0]?.id ?? null;
   const selected = list.find((d) => d.id === selectedId) ?? null;
   const noProviders = providers.data !== undefined && !providers.data.providers.some((p) => p.enabled);
+  // why: until /providers answers (or fails, which the page then says), the page cannot tell whether its prices are
+  // synthetic, so no price view renders: a fixture price must never look real for the moment before the banner.
+  const providerStatusKnown = providers.data !== undefined || providers.error !== null;
   const needsDefinition =
     view === 'results' ||
     view === 'coverage' ||
@@ -70,15 +73,26 @@ export function App() {
           {needsDefinition && definitions.data !== undefined && selected === null ? (
             <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
           ) : null}
-          {view === 'results' && selected !== null ? <ResultsView definition={selected} /> : null}
-          {view === 'coverage' && selected !== null ? <CoverageView definition={selected} /> : null}
-          {view === 'calendar' && selected !== null ? (
+          {needsDefinition && selected !== null && !providerStatusKnown ? <Loading /> : null}
+          {view === 'results' && selected !== null && providerStatusKnown ? (
+            <ResultsView definition={selected} />
+          ) : null}
+          {view === 'coverage' && selected !== null && providerStatusKnown ? (
+            <CoverageView definition={selected} />
+          ) : null}
+          {view === 'calendar' && selected !== null && providerStatusKnown ? (
             // why: a new definition starts with no panel open and its own filter defaults.
             <CalendarView key={selected.id} definition={selected} />
           ) : null}
-          {view === 'duration' && selected !== null ? <DurationView definition={selected} /> : null}
-          {view === 'history' && selected !== null ? <HistoryView definition={selected} /> : null}
-          {view === 'alerts' && selected !== null ? <AlertsView definitionId={selected.id} /> : null}
+          {view === 'duration' && selected !== null && providerStatusKnown ? (
+            <DurationView definition={selected} />
+          ) : null}
+          {view === 'history' && selected !== null && providerStatusKnown ? (
+            <HistoryView definition={selected} />
+          ) : null}
+          {view === 'alerts' && selected !== null && providerStatusKnown ? (
+            <AlertsView definitionId={selected.id} />
+          ) : null}
           {view === 'definitions' ? <DefinitionsView /> : null}
           {view === 'providers' ? <ProvidersView /> : null}
         </AppBoundary>
