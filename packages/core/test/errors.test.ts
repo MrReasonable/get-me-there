@@ -82,7 +82,9 @@ describe('BudgetExceeded', () => {
 
 describe('stripUrlsInText scheme case', () => {
   it('strips the query of an upper- or mixed-case scheme', () => {
-    expect(stripUrlsInText('GET HTTPS://api.example.com/x?api_key=SECRET')).toBe('GET https://api.example.com/x');
+    expect(stripUrlsInText('GET HTTPS://api.example.com/x?api_key=SECRET')).toBe(
+      'GET https://api.example.com/x',
+    );
     expect(stripUrlsInText('HTTPS://u:p@api.example.com/x?api_key=SECRET')).toBe('https://api.example.com/x');
     expect(stripUrlsInText('Http://localhost:8080/x?api_key=SECRET')).toBe('http://localhost:8080/x');
   });

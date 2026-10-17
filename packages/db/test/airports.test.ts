@@ -124,7 +124,10 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
 
   it('airports with no passenger service, as recorded in metros.ATTRIBUTION, are in no metro (dm-M3 re-review)', () => {
     const { metros } = loadAirportsDataset(AIRPORTS_DATA_DIR);
-    const attribution = readFileSync(join(AIRPORTS_DATA_DIR, 'metros.ATTRIBUTION'), 'utf8').replace(/\s+/g, ' ');
+    const attribution = readFileSync(join(AIRPORTS_DATA_DIR, 'metros.ATTRIBUTION'), 'utf8').replace(
+      /\s+/g,
+      ' ',
+    );
     // why: the closed list lives in build-airports.mjs and is copied into the attribution as "(XXX Name, reason; ...)".
     const listed = /airports with no passenger service \(([^)]*)\)/.exec(attribution)?.[1];
     const closed = (listed ?? '').split(';').map((entry) => entry.trim().slice(0, 3));

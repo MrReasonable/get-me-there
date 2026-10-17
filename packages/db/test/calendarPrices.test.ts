@@ -7,7 +7,17 @@ import { CellsRepo } from '../src/repositories/cells.js';
 import { DefinitionsRepo } from '../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
 import { at, count, freshDb, sqliteCode, T0 } from './helpers/db.js';
-import { calendarPrice, cell, EWR, exampleDefinitionInput, JFK, LGW, LHR, newExecution, withNights } from './helpers/factories.js';
+import {
+  calendarPrice,
+  cell,
+  EWR,
+  exampleDefinitionInput,
+  JFK,
+  LGW,
+  LHR,
+  newExecution,
+  withNights,
+} from './helpers/factories.js';
 
 function setup(allowSynthetic = false, onlyLhrJfk = false) {
   const db = freshDb();
