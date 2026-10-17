@@ -74,6 +74,8 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
   // why: the default basis needs the all-destination calendar too, so a filtered view waits for both.
   if (q.isPending || all.isPending) return <p role="status">{COPY.loading}</p>;
   if (q.isError) return <p role="alert">{COPY.loadFailed(q.error.message)}</p>;
+  // why: the default basis is judged on the all-destination calendar (decision 38); without it say so, never judge on no days.
+  if (all.isError) return <p role="alert">{COPY.loadFailed(all.error.message)}</p>;
 
   const C = COPY.calendarView;
   const wanted = months.find((m) => m === params.get(CALENDAR_PARAMS.month)) ?? months[0];

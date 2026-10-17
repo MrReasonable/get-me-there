@@ -88,6 +88,20 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     expect(await findByRole('alert')).toHaveTextContent('Could not load: boom');
   });
 
+  it('a failed all-destination query is shown, not silently judged on no days (review ui I5, prov M5)', async () => {
+    server.use(
+      http.get(route, ({ request }) =>
+        new URL(request.url).searchParams.get('destination') === null
+          ? HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })
+          : HttpResponse.json(calendarResponse([mixedDay])),
+      ),
+    );
+    const { findByRole } = renderWithProviders(<CalendarView definition={definition()} />, {
+      search: '?cal.dest=JFK',
+    });
+    expect(await findByRole('alert')).toHaveTextContent('Could not load: boom');
+  });
+
   it('shows the empty state when there are no days', async () => {
     serve([]);
     const { findByText } = renderWithProviders(<CalendarView definition={definition()} />);
