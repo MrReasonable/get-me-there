@@ -135,7 +135,7 @@ describe('dedupByItinerary (spec §6.5; ruling 3)', () => {
         ?.otherOffers[0]?.seller,
     ).toBe('');
   });
-  it('an unconfirmed offer never heads its itinerary while a confirmed one exists (decision 45, review prov I2)', () => {
+  it('within a class a confirmed offer heads its itinerary over a cheaper unconfirmed one; class still comes first (decision 45, review prov I2)', () => {
     const unconfirmed = { priceConfirmed: 'unverified' as const, cabin: 'pass' as const };
     const same = dedupByItinerary(
       [
@@ -158,7 +158,8 @@ describe('dedupByItinerary (spec §6.5; ruling 3)', () => {
       ],
       NOW,
     );
-    expect(failedConfirmed[0]).toMatchObject({ seller: 'F' });
+    // why: class first: a confirmed failed offer never outranks an unconfirmed partially-verified one.
+    expect(failedConfirmed[0]).toMatchObject({ seller: 'U' });
     const allUnconfirmed = dedupByItinerary(
       [
         row({ seller: 'U2', pricePence: 39_000, verdictClass: 'partially-verified', verdicts: unconfirmed }),

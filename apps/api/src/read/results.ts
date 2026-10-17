@@ -247,8 +247,8 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
         : coverageSummaryFor(shown, [], ports),
     excludedByCurrentSpace: excluded,
     verificationProviderConfigured: def.providers.verification.length > 0,
-    // why: decision 45 (review prov I2): the headline is never an unconfirmed fare while a confirmed row exists; when
-    // none does, the unconfirmed row is shown with its `priceConfirmed: 'unverified'` verdict, which the web badges.
-    cheapest: (basis === 'verified' ? ranked.find(confirmedIn(loaded)) : undefined) ?? ranked[0] ?? null,
+    // why: decision 45 (review prov I2): the headline is the first ranked row: the best class available and, within it,
+    // a confirmed price before an unconfirmed one (`compareRows`); an unconfirmed headline keeps its verdict badge.
+    cheapest: ranked[0] ?? null,
   };
 }

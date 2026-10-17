@@ -244,7 +244,7 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(r.cheapest?.itineraryHash).toBe('hP');
   });
 
-  it('the headline is an unconfirmed fare only when no confirmed offer exists, and keeps its mark (review prov I2)', async () => {
+  it('the headline is the best class available, confirmed first only within a class, and keeps its mark (review prov I2)', async () => {
     const x = await createHarness();
     h = x;
     const s = seeder(x.ports);
@@ -253,14 +253,14 @@ describe('GET /definitions/:id/results, verified basis', () => {
     s.cells('E1', [C1, C2], { selected: [C1, C2].map((c) => ({ cell: c, reason: 'top_n' as const })) });
     s.verified('E1', C1, [{ hash: 'hU', pricePence: 38_000, fetchedAt: at(-1), confirmed: false }]);
     expect((await results(x, def.id)).cheapest?.verdicts.priceConfirmed).toBe('unverified');
-    // A confirmed offer of a lower class still heads the headline (the ruling: never unconfirmed while one exists).
-    s.verified('E1', C2, [{ hash: 'hF', pricePence: 50_000, fetchedAt: at(-1), stopsOut: 1 }]);
+    // A confirmed failed offer never outranks an unconfirmed partially-verified one: class comes first.
+    s.verified('E1', C2, [{ hash: 'hF', pricePence: 30_000, fetchedAt: at(-1), stopsOut: 1 }]);
     const r = await results(x, def.id);
     expect(r.rows.map((row) => [row.itineraryHash, row.verdictClass])).toEqual([
       ['hU', 'partially-verified'],
       ['hF', 'failed'],
     ]);
-    expect(r.cheapest?.itineraryHash).toBe('hF');
+    expect(r.cheapest?.itineraryHash).toBe('hU');
   });
 
   it.each([
