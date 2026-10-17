@@ -20,13 +20,18 @@ const NOT_PLACES = ['API', 'DIR', 'GBP', 'GET', 'PWD', 'TLS', 'VPS', 'WAL'];
 
 /**
  * Cells in one markdown table row. Every unescaped pipe is a column break, inside inline code too (as markdown tables
- * read it); only an escaped \\| is text.
+ * read it); a pipe is escaped, and so text, only when an odd number of backslashes precedes it (in `\\|` the first
+ * backslash escapes the second, so the pipe still breaks the column).
  */
 function tableCells(line: string): number {
-  return line
-    .replace(/\\\|/g, '')
-    .replace(/^\||\|$/g, '')
-    .split('|').length;
+  const body = line.replace(/^\|/, '').replace(/(?<!\\)((?:\\\\)*)\|$/, '$1');
+  let breaks = 0;
+  let slashes = 0;
+  for (const ch of body) {
+    if (ch === '|' && slashes % 2 === 0) breaks += 1;
+    slashes = ch === '\\' ? slashes + 1 : 0;
+  }
+  return breaks + 1;
 }
 
 const example: unknown = JSON.parse(read('docs/examples/london-new-york.json'));
@@ -304,6 +309,10 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     expect(tableCells('| a | `x|y` |')).toBe(3);
     expect(tableCells('| a | `x\\|y` |')).toBe(2);
     expect(tableCells('| a | x \\| y |')).toBe(2);
+    // why: PR #3 re-review — a pipe is escaped only after an odd number of backslashes; in `\\|` the first backslash
+    // escapes the second, so the pipe still breaks the column
+    expect(tableCells('| a | x \\\\| y |')).toBe(3);
+    expect(tableCells('| a | x \\\\\\| y |')).toBe(2);
   });
 
   // why: CodeRabbit batch 3 — a providers.md row had one cell fewer than its header, so its verdict sat under
