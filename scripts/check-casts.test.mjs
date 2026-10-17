@@ -31,7 +31,8 @@ function check(files, cwd = REPO) {
   return spawnSync(process.execPath, [SCRIPT, ...paths], { cwd, encoding: 'utf8', timeout: 60_000 });
 }
 
-describe('scripts/check-casts.mjs', () => {
+// why: ruling 11: each case spawns node (whose own spawn timeout is 60 s); the test allows the same.
+describe('scripts/check-casts.mjs', { timeout: 60_000 }, () => {
   it('fails on `as string`, `<number>x`, `as readonly string[]` and `as unknown as Foo`, naming each line', () => {
     const r = check({
       'a.ts': [

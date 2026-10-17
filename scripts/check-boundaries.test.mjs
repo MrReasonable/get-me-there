@@ -45,7 +45,10 @@ afterEach(() => {
   scratch = null;
 });
 
-describe('scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46)', () => {
+// why: ruling 11: each case spawns node over a scratch tree; 60 s survives a loaded runner.
+describe('scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46)', {
+  timeout: 60_000,
+}, () => {
   it('a clean tree passes, with codes and cities in comments, identifiers and the two allowlisted files', () => {
     const r = run(
       tree({

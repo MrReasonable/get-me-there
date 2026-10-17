@@ -104,7 +104,9 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     const before = h.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true }).length;
     const r = await h.orch().verifyCell(def.id, cell);
     expect(r).toMatchObject({ ok: false, code: 'cap', details: { headroom: 0 } });
-    expect(h.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true })).toHaveLength(before);
+    expect(h.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true })).toHaveLength(
+      before,
+    );
     const ctx = buildContext(h.deps, h.options);
     expect(childCapPreview(ctx, def.id, cell)).toMatchObject({ ok: true, maxCalls: 0, headroomCalls: 0 });
   });

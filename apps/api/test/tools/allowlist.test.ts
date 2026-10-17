@@ -36,7 +36,8 @@ const SA_COMMON = [
   'adults',
 ];
 
-describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
+// why: ruling 11: the first test records the worked example (about 2.5 s unloaded); 30 s survives a loaded runner.
+describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', { timeout: 30_000 }, () => {
   it('the recording writes allowlists WP4 loads, with the exact names and values of brief §5.4, and every recorded request passes them', async () => {
     const { root } = await runRecording();
     const tp = load(root, 'travelpayouts');
@@ -179,7 +180,10 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
   });
 });
 
-describe("record:fixtures sends the adapter's own SearchApi parameter sets (ruling 18, ca-012)", () => {
+// why: ruling 11: records the worked example once (about 2.5 s unloaded); 30 s survives a loaded runner.
+describe("record:fixtures sends the adapter's own SearchApi parameter sets (ruling 18, ca-012)", {
+  timeout: 30_000,
+}, () => {
   it('every SearchApi request equals what @gmt/providers builds for the same rectangle or cell', async () => {
     const { seen } = await runRecording();
     expect(seen.sa.length).toBeGreaterThan(0);

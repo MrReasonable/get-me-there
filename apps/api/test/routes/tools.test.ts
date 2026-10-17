@@ -33,7 +33,8 @@ const ok: ToolRunResponse = {
 };
 const body = { budget: 5, origins: ['LHR', 'LGW'], destinations: ['JFK', 'EWR'], month: '2027-03' };
 
-describe('POST /api/tools/record (spec §10, §7 app_lock)', () => {
+// why: ruling 11: cases run the record tool in process over a seeded database; 30 s survives a loaded runner.
+describe('POST /api/tools/record (spec §10, §7 app_lock)', { timeout: 30_000 }, () => {
   it('requires auth', async () => {
     const x = await harness({ app: { tools: { record: async () => ok } } });
     expect((await x.request('/api/tools/record', { method: 'POST', json: body, auth: false })).status).toBe(
@@ -113,7 +114,10 @@ describe('POST /api/tools/record (spec §10, §7 app_lock)', () => {
   });
 });
 
-describe('the in-process runner outside the synthetic gate (plan exit-code table)', () => {
+// why: ruling 11: cases run a tool in process over a seeded database; 30 s survives a loaded runner.
+describe('the in-process runner outside the synthetic gate (plan exit-code table)', {
+  timeout: 30_000,
+}, () => {
   it('refuses another route with 64 and a configuration without both vendors with 78, before any call', async () => {
     const dbPath = join(tempDir('gmt-tools-'), 'app.db');
     const config = loadConfigFromEnv(
@@ -140,7 +144,10 @@ describe('the in-process runner outside the synthetic gate (plan exit-code table
   });
 });
 
-describe('the in-process runner: refusal order, scrubbed lines and relative paths (reviews SEC-7, arch-010)', () => {
+// why: ruling 11: cases run a tool in process over a seeded database; 30 s survives a loaded runner.
+describe('the in-process runner: refusal order, scrubbed lines and relative paths (reviews SEC-7, arch-010)', {
+  timeout: 30_000,
+}, () => {
   const argv = (b: {
     budget: number;
     origins: readonly string[];

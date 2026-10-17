@@ -27,7 +27,8 @@ const TOOL = apiContract.toolRunResponseSchema;
 const body = { origin: 'LHR', destination: 'JFK', budget: 4 };
 const ok: ToolRunResponse = { exitCode: 0, summary: 'cheapest found £1', lines: ['x'], fixturesWritten: [] };
 
-describe('POST /api/tools/smoke (spec §10, §13)', () => {
+// why: ruling 11: cases run the smoke in process over a seeded database; 30 s survives a loaded runner.
+describe('POST /api/tools/smoke (spec §10, §13)', { timeout: 30_000 }, () => {
   it('requires auth; 503 when the runner is not registered', async () => {
     const x = await harness();
     expect((await x.request('/api/tools/smoke', { method: 'POST', json: body, auth: false })).status).toBe(
@@ -90,7 +91,8 @@ describe('POST /api/tools/smoke (spec §10, §13)', () => {
   });
 });
 
-describe('the in-process smoke runner', () => {
+// why: ruling 11: cases run the smoke in process over a seeded database; 30 s survives a loaded runner.
+describe('the in-process smoke runner', { timeout: 30_000 }, () => {
   it('refuses with the CLI code 70 while the synthetic gate is open', async () => {
     const x = await harness();
     const r = await inProcessTools(x.ports).smoke?.(

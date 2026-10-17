@@ -77,7 +77,9 @@ const lineOf = (r: SmokeResult, start: string): string => r.lines.find((l) => l.
 const billed = (ports: Ports, r: SmokeResult): number =>
   ports.budget.usage({ kind: 'execution-calls', executionId: r.executionId ?? '' }).calls;
 
-describe('runSmoke (spec §9 item 7)', () => {
+// why: ruling 11: each case seeds 7,917 airports into a fresh database and runs the smoke through the real http-kit
+// (up to about 1.5 s unloaded); 30 s keeps a loaded runner a slow pass.
+describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
   it('exits 0 with provenance: one tile per provider, one chain, the confirmed price as headline, every check passed, dated fixtures outside the recorded tree', async () => {
     const ports = smokePorts();
     const { r, root, urls } = await smoke(ports);
@@ -267,7 +269,7 @@ describe('runSmoke (spec §9 item 7)', () => {
       'travelpayouts 1 tile, 1 answer(s) matched in the ledger by endpoint and status, 1 retried attempt(s), 0 cache hit(s)',
     );
     expect(r.exitCode).toBe(EXIT.ok);
-  }, 20_000);
+  }, 60_000); // why: ruling 11: a real-time http-kit retry plus a seeded database; 60 s survives a loaded runner
 
   it('1: step 2 showing another price than step 1 fails the check', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step2Price: 610 });
@@ -379,7 +381,8 @@ describe('runSmoke (spec §9 item 7)', () => {
  * on top of one real run's ledger. Every case asserts `fail`; each was shown to pass vacuously under a mutation that
  * turns its branch into `pass`.
  */
-describe('checklist FAIL branches (negative controls)', () => {
+// why: ruling 11: each case runs the smoke over a seeded database (about 1 s unloaded); 30 s survives a loaded runner.
+describe('checklist FAIL branches (negative controls)', { timeout: 30_000 }, () => {
   async function base(): Promise<{ ports: Ports; input: ChecklistInput; tp: SmokeProviderReport }> {
     const ports = smokePorts();
     const { r } = await smoke(ports);

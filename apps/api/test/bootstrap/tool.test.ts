@@ -104,7 +104,9 @@ function count(dbPath: string, sql: string): unknown {
   }
 }
 
-describe('runTool refusals (spec §5.5, §7, plan decision 20)', () => {
+// why: ruling 11: each case opens and migrates a database file and may seed airports (under 1 s unloaded); 30 s
+// keeps a loaded runner a slow pass.
+describe('runTool refusals (spec §5.5, §7, plan decision 20)', { timeout: 30_000 }, () => {
   it('refuses NODE_ENV=test (read through loadConfigFromEnv) before opening anything', async () => {
     const h = harness(undefined, { NODE_ENV: 'test' });
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.refusedTestEnv);
@@ -240,7 +242,9 @@ describe('runTool refusals (spec §5.5, §7, plan decision 20)', () => {
   });
 });
 
-describe('runTool success paths', () => {
+// why: ruling 11: each case runs record or smoke end to end through runTool (up to about 5.5 s unloaded for two
+// recordings in a row); 60 s keeps a loaded runner a slow pass.
+describe('runTool success paths', { timeout: 60_000 }, () => {
   it('backs up before migrating: the copy has the pre-migration schema, the database is migrated after (ts-013)', async () => {
     const h = harness();
     openDatabase(h.dbPath).close();
@@ -402,7 +406,8 @@ describe('runTool success paths', () => {
   });
 });
 
-describe('where a record run may write (sec2-002 ruling)', () => {
+// why: ruling 11: cases run the record tool through runTool (about 2.5 s unloaded); 30 s survives a loaded runner.
+describe('where a record run may write (sec2-002 ruling)', { timeout: 30_000 }, () => {
   function bare(extra: Record<string, string> = {}) {
     const h = harness(undefined, extra);
     const { recording: _ignored, ...opts } = h.opts;
@@ -464,7 +469,8 @@ describe('where a record run may write (sec2-002 ruling)', () => {
   });
 });
 
-describe('runTool releases the lock on every exit path (ts-003)', () => {
+// why: ruling 11: cases run a tool to each exit path through runTool (up to about 2.5 s unloaded); 30 s survives load.
+describe('runTool releases the lock on every exit path (ts-003)', { timeout: 30_000 }, () => {
   function lockRow(dbPath: string): unknown {
     return count(dbPath, 'SELECT COUNT(*) AS n FROM app_lock');
   }
@@ -587,7 +593,8 @@ describe('runTool releases the lock on every exit path (ts-003)', () => {
   });
 });
 
-describe('runRecord through runTool: failed and partial runs (r2-ts-004)', () => {
+// why: ruling 11: each case records the worked example through runTool (about 2.5 s unloaded); 30 s survives load.
+describe('runRecord through runTool: failed and partial runs (r2-ts-004)', { timeout: 30_000 }, () => {
   it('a run with required calls not as planned exits 1 and reports them without attributing skipped calls to the vendor', async () => {
     const h = harness();
     stubVendors({ calendar: 'no-priced-cell' });
