@@ -5,15 +5,18 @@
 import {
   type AlertDigest,
   type AlertRule,
+  CONSTRAINT_LABELS,
   type DigestItem,
   effectiveAge,
   formatAgeFull,
   formatDuration,
   formatPence,
+  hoursSince,
   type IsoDateTime,
   LINK_ALLOWLIST,
   type Provenance,
   type ResultBasis,
+  type Segment,
   sourceLabel,
   validateVendorUrl,
 } from '@gmt/core';
@@ -84,6 +87,9 @@ function ageLine(p: Provenance, now: IsoDateTime): string {
 
 function verdictSegment(item: DigestItem): string {
   if (item.verdictClass === 'unchecked') return 'constraints not checked';
+  // why: decisions 37, 44 — an unconfirmed price says so wherever it renders; the runner never alerts on one.
+  if (item.unverified.includes('priceConfirmed')) return CONSTRAINT_LABELS.priceConfirmed;
+  if (item.verdictClass === 'verified') return 'class verified';
   const n = item.unverified.length;
   return `${n} constraint${n === 1 ? '' : 's'} unverified`;
 }
@@ -140,14 +146,62 @@ function previousLine(item: DigestItem): string | null {
   return `   Previous: ${formatPence(item.previousPricePence)}${gap}`;
 }
 
-/** Lines specific to the item's basis; Task 11.2 adds the itinerary-search branch. */
-function basisLines(_item: DigestItem): string[] {
-  return ['   calendar price, no itinerary; constraints not checked'];
+function segmentLine(s: Segment): string {
+  const hhmm = (local: string) => local.slice(11, 16);
+  return `${providerText(s.marketingCarrier)} ${s.flightNumber} ${s.from} ${hhmm(s.departLocal)} → ${s.to} ${hhmm(s.arriveLocal)} (${day(s.departLocal)})`;
 }
 
-/** Task 11.2 adds the itinerary-search links. */
-function linkLine(item: DigestItem, _input: DigestRenderInput): string {
-  return searchLine(item);
+function expiryText(expiresAt: IsoDateTime | null, now: IsoDateTime): string {
+  if (expiresAt === null) return 'expiry not stated';
+  if (Date.parse(expiresAt) > Date.parse(now)) {
+    const h = hoursSince(now, expiresAt);
+    return h < 1 ? 'expires within the hour' : `expires in ${formatDuration(h)}`;
+  }
+  const h = hoursSince(expiresAt, now);
+  return h < 1 ? 'expired just now' : `expired ${formatDuration(h)} ago`;
+}
+
+/**
+ * A booking link re-validated at render (spec §5.2, decision 54): core's validateVendorUrl against the provider's
+ * LINK_ALLOWLIST, and the host the adapter stored. A POST booking links to the app's results row instead (spec §8.3).
+ */
+function verifiedLinkLine(item: DigestItem, input: DigestRenderInput): string {
+  const b = item.booking;
+  if (b.kind === 'post') {
+    const row = appRowLink(input.appBaseUrl, input.digest.definitionId, 'verified', item.rowKey);
+    return `Link: this fare is booked through a form, which email cannot submit; open the results row in get-me-there: ${row}`;
+  }
+  if (b.kind === 'none') return searchLine(item);
+  const checked = validateVendorUrl(b.url, LINK_ALLOWLIST[item.provenance.providerId]);
+  // why: spec §5.3 (rev 10) — a validated booking link keeps its query in email; it carries no credentials.
+  return checked.kind === 'get' && checked.host === b.host
+    ? `Link: ${checked.url} (host ${checked.host}, ${expiryText(item.bookingExpiresAt, input.now)})`
+    : 'Link: none (the stored link failed validation)';
+}
+
+/** Lines specific to the item's basis: seller, segments and verdicts for itinerary-search items; a marker for calendar prices. */
+function basisLines(item: DigestItem): string[] {
+  if (item.verdictClass === 'unchecked') return ['   calendar price, no itinerary; constraints not checked'];
+  return [
+    `   Seller: ${providerText(item.seller ?? 'not stated')}`,
+    item.outbound === null
+      ? '   Segments: not available'
+      : `   Outbound: ${item.outbound.map(segmentLine).join('; ')}`,
+    ...(item.inbound === null ? [] : [`   Inbound: ${item.inbound.map(segmentLine).join('; ')}`]),
+    item.verdictClass === 'verified'
+      ? '   Verdicts: class verified; every constraint passed'
+      : `   Verdicts: class ${item.verdictClass}; unverified: ${item.unverified.map((k) => CONSTRAINT_LABELS[k]).join(', ')}`,
+  ];
+}
+
+/** Calendar items always carry `booking: none` (core's buildDigest), so their link is the labelled search link. */
+function linkLine(item: DigestItem, input: DigestRenderInput): string {
+  return item.verdictClass === 'unchecked' ? searchLine(item) : verifiedLinkLine(item, input);
+}
+
+/** The marks a reader needs beside the price (decisions 37, 44), in a fixed order; Task 11.7 adds the runner's. */
+function notesOf(item: DigestItem, _input: DigestRenderInput): string[] {
+  return item.unverified.includes('priceConfirmed') ? [CONSTRAINT_LABELS.priceConfirmed] : [];
 }
 
 function itemLines(n: number, item: DigestItem, input: DigestRenderInput): string[] {
@@ -159,6 +213,8 @@ function itemLines(n: number, item: DigestItem, input: DigestRenderInput): strin
   const prev = previousLine(item);
   if (prev !== null) lines.push(prev);
   lines.push(`   Provenance: ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}`);
+  const notes = notesOf(item, input);
+  if (notes.length > 0) lines.push(`   Notes: ${notes.join('; ')}`);
   lines.push(`   ${linkLine(item, input)}`);
   return lines;
 }
@@ -196,7 +252,8 @@ function newItemLine(item: DigestItem, input: DigestRenderInput): string {
     item.previousPricePence === null
       ? ''
       : ` · previous ${formatPence(item.previousPricePence)}${item.fetchGapHours === null ? '' : `, ${gapText(item.fetchGapHours)}`}`;
-  return `- ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}${prev}`;
+  const notes = notesOf(item, input);
+  return `- ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}${prev}${notes.length > 0 ? ` · ${notes.join('; ')}` : ''}`;
 }
 
 /** Spec §8.3 body; LF line endings only. */
