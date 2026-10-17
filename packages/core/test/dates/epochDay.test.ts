@@ -52,8 +52,8 @@ describe('toEpochDay / fromEpochDay (spec §6.1: epoch-day integers, never Date-
   it.each(['2027-02-29', '2026-13-01', '0000-06-01', '2026-1-1', 'garbage'])(
     'toEpochDay rejects %j',
     (bad: string) => {
-      // @ts-expect-error a plain string is not an IsoDate; the runtime guard is what is under test
-      expect(() => toEpochDay(bad)).toThrow(RangeError);
+      // why: a plain string is not an IsoDate; Reflect.apply passes it untyped, since the runtime guard is under test.
+      expect(() => Reflect.apply(toEpochDay, undefined, [bad])).toThrow(RangeError);
     },
   );
 
@@ -98,8 +98,8 @@ describe('monthOf / monthsSpanned', () => {
   it('monthOf takes YYYY-MM and validates', () => {
     expect(monthOf(d('2028-02-29'))).toBe('2028-02');
     const bad: string = '2027-02-29';
-    // @ts-expect-error a plain string is not an IsoDate; the runtime guard is what is under test
-    expect(() => monthOf(bad)).toThrow(RangeError);
+    // why: a plain string is not an IsoDate; Reflect.apply passes it untyped, since the runtime guard is under test.
+    expect(() => Reflect.apply(monthOf, undefined, [bad])).toThrow(RangeError);
   });
   it('spans the default window: 2026-10-21 .. 2027-04-20 is seven months', () => {
     expect(monthsSpanned(d('2026-10-21'), d('2027-04-20'))).toEqual([

@@ -425,6 +425,8 @@ export const COPY = {
   constraintsHeading: 'Constraints',
   inPounds: (label: string) => `${label} (£)`,
   minutesAsHours: (text: string) => `= ${text}`,
+  // why: one end of a time window alone is an unfinished constraint; say so rather than dropping it silently.
+  bothEndsNeeded: 'both ends needed',
   timeFrom: 'from',
   timeTo: 'to',
   airlinesHelp: 'comma-separated carrier codes',

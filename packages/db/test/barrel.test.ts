@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import * as db from '../src/index.js';
@@ -107,9 +108,10 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'seedAirports',
       ].sort(),
     );
-    // @ts-expect-error ProviderBudget is the guard's internal entry type, not part of the contract
-    const leaked = (x?: db.ProviderBudget) => x;
-    expect(leaked()).toBeUndefined();
+    // why: ProviderBudget is the guard's internal entry type, not part of the contract; the barrel never names it.
+    expect(readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')).not.toMatch(
+      /\bProviderBudget\b/,
+    );
   });
 
   it('createRepos builds every repository', () => {

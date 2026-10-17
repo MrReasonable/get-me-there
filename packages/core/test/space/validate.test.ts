@@ -77,8 +77,8 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
 
     it('upper-cases nothing itself: a lowercase code that bypassed the schema is a format error', () => {
       const origins: string[] = ['lhr', 'LGW'];
-      // @ts-expect-error a plain string[] is not Iata[]; this is a row written around the schema
-      expect(fields({ ...base, origins })).toEqual([
+      // why: a plain string[] is not Iata[]; this is a row written around the schema, passed untyped by Reflect.apply.
+      expect(Reflect.apply(fields, undefined, [{ ...base, origins }])).toEqual([
         { field: 'origins.0', message: 'lhr is not a three-letter upper-case IATA code' },
       ]);
     });

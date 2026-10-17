@@ -277,8 +277,9 @@ describe('client-side sort and filter (spec §6.5)', () => {
     await table();
     const rows = dataRows();
     expect(rows).toHaveLength(2);
-    expect(within(rows[0] as HTMLElement).queryByText('superseded by a later search')).toBeNull();
-    expect(within(rows[1] as HTMLElement).getByText('superseded by a later search')).toBeInTheDocument();
+    const [first, second] = rows;
+    expect(first && within(first).queryByText('superseded by a later search')).toBeNull();
+    expect(second && within(second).getByText('superseded by a later search')).toBeInTheDocument();
   });
 
   it('marks exactly the rows core bandCheapest marks', async () => {
