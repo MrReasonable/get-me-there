@@ -18,8 +18,10 @@ jobs:
       - run: pnpm boundaries
       - run: pnpm casts
       - run: pnpm -r typecheck
-      - run: pnpm test:coverage
-      - run: pnpm --filter @gmt/web test
+      # why: the root vitest config ignores each package's coverage thresholds (coverage is a root-only option), so every
+      # package runs its own `test` script (its config, its thresholds, then its TZ runs); the root scripts project follows.
+      - run: pnpm -r --workspace-concurrency=1 test
+      - run: pnpm exec vitest run --project scripts
       - run: pnpm secret-scan
       - name: secret scan catches a planted fixture
         run: |
