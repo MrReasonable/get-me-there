@@ -248,6 +248,21 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     expect(within(second).getByTestId('price-cell')).not.toHaveTextContent('price not confirmed');
   });
 
+  it('an offer the latest search no longer returned, and a superseded row, carry decision 54 marks in the panel', async () => {
+    const unseen = verifiedRow({ cell: c, seller: 'Example Air', notSeenInLatest: { ageHours: 30 } });
+    const old = calendarRow({ cell: c, superseded: true });
+    server.use(
+      http.get(cellRoute, () =>
+        HttpResponse.json({ ...detail, calendarPrices: [], observations: [unseen, old] }),
+      ),
+    );
+    const { findAllByTestId } = renderPanel(definition(), slice({}));
+    const [first, second] = await findAllByTestId('panel-observation');
+    if (first === undefined || second === undefined) throw new Error('two observations');
+    expect(within(first).getByTestId('price-cell')).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(within(second).getByTestId('price-cell')).toHaveTextContent('superseded by a later search');
+  });
+
   it('a superseded calendar price says so and is listed after the current one (decision 54)', async () => {
     const [first] = detail.calendarPrices;
     if (first === undefined) throw new Error('fixture has a calendar price');

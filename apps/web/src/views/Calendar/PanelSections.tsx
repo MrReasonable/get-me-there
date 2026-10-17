@@ -188,6 +188,7 @@ export function CellDetailBody(props: {
                   stale={o.stale}
                   truncated={o.truncated}
                   unconfirmed={priceUnconfirmed(o)}
+                  {...figureMarks(o)}
                   destination={o.cell.destination}
                   destinationNote={note}
                 />
