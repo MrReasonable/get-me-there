@@ -5,12 +5,12 @@ owner: sonnet
 depends_on: [4b, 7, 9, 10]
 spec_sections: ["§3 Effective age", "§4 Auth and request hardening", "§5.2 Vendor links", "§5.5", "§6.5", "§6.8 (storage)", "§6.9", "§7 app_lock, Migrations", "§8.1", "§8.2", "§9 item 5", "§10", "§12", "§13", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, security-reviewer, provenance-auditor, product-owner, devops-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP8 — `@gmt/api`: app bootstrap, routes, auth, hardening, static, health, record tool route
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 24) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`: "Global Constraints", every "Cross-package contracts" block and "Decisions taken at reconciliation" 1–55) before Task 8.0. Refreshed on 2026-10-17 after review round 1, against main at `d765d38` (WP7 merged; spec revision 24; plan decisions 1–55) and the reviewed WP9 and WP10 briefs; every code block below was assembled on a scratch worktree of main and run green (§13: WP9's Task 9.0 and WP10's Task 10.1, not on main yet, were applied verbatim from their briefs first).
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 25) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`: "Global Constraints", every "Cross-package contracts" block and "Decisions taken at reconciliation" 1–58) before Task 8.0a. Refreshed on 2026-10-17 after review round 2, against main at `f8f66c0` (WP7 merged; spec revision 25; plan decisions 1–58) and the reviewed WP9 and WP10 briefs. Tasks 8.0a and 8.0b apply WP9's Task 9.0 and WP10's Task 10.1 first (decision 57); every code block below was assembled on a scratch worktree of main in that order and run green.
 
 ## 1. Goal
 
@@ -22,10 +22,10 @@ Turn the engine, repositories and ports into the one HTTP surface of spec §10 u
 
 - `apps/api/src/app.ts`: `createApp(ports, engine, options?)`, a Hono app that mounts every `ROUTES` entry of `@gmt/core` `apiContract` (paths already carry `/api`). Each handler is built with `route({ request, query }, run)` over its ROUTES entry's own schema objects, which parses the body and the query exactly once (decision 54) and hands `run` their typed output; `createApp` refuses a handler whose schemas are not its entry's. Around them: the error envelope `{ error: { code, message, details? } }` (a 422 and a validation 400 carry `details.fields`), a 64 KiB body limit (413), `Cache-Control: no-store` on every API response, security headers, Host/Origin/Content-Type/X-Requested-With checks, basic auth with the per-IP failed-auth limit, static serving of the built web app with an SPA fallback outside `/api`. No `as` anywhere (`pnpm casts`, decision 48).
 - Every route of spec §10 except `POST /api/tools/smoke`: health (union schema), airports autocomplete, providers, definitions CRUD with the plan-preset draft and the confirmation rule (decisions 37, 42, 43, 53, 54), both estimate routes, the coverage check, executions, single-cell verify (passing its confirmation, decision 54), results (§6.5/§6.9), calendar (with `?destination=`, decision 53), duration analysis, coverage, calendar gap, cell detail (with `verify` from `Engine.childCapPreview`, decisions 42, 48), history (the itinerary's `cell` and `carriers`; `stale`, `truncated`, `priceConfirmed` and `executionId` on its points; `stale` on route-level points, decisions 36, 38, 42, 52, 54, 55), alert rule storage and events, scheduler jobs, budget, and `POST /api/tools/record` over WP4b's `runRecord`.
-- Provenance on every figure (decisions 44, 53, 54, 55): staleness is core's one `isStale(provenance, now, thresholdHours)`, the effective age (observed age; else fetch age plus a known `maxAgeHours`; else, the vendor's age unknown, the fetch age alone) against the threshold, called for every `stale` the api computes; every verified-basis figure (rows, calendar day minima, duration minima, calendar-gap yardstick) carries "not seen in latest search" and prefers a seen, then a fresh, price; a calendar-basis price a newer parent execution found empty or no_data is `superseded` (result rows, the calendar day's minimum, the duration's calendar minima, the cell detail) and ranks after current prices; `truncated` on every calendar price (decisions 36, 47); verified-basis minima skip prices the final step did not confirm (decisions 45, 48); every booking and search link is re-validated against `LINK_ALLOWLIST` on the way out.
-- One request at a time per definition for estimate, coverage check, run, resume and verify (429 `already_running`, decision 54).
-- `apps/api/src/bootstrap/app.ts`: `bootApp(deps)` and `main(env)` in decision 53's order: refuse `NODE_ENV=test` (70) → re-assert the auth invariants on the injected config (78) → data directory writable (73) → read `app_lock` read-only and wait while it is fresh (75 when it stays fresh; 73 when unreadable) → backup preflight through WP4b's `bootstrap/preflight.ts` (decision 32) → `buildPorts` (migrations) → seed + airport sanity check → `AppLock('app')` and the 30 s heartbeat → `createEngine` → `engine.boot()` → serve; a failed boot after the lock releases it and stops the heartbeat. SIGTERM: stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close → exit 0. Exit codes from WP4b's single `EXIT` table (`apps/api/src/tools/types.ts`).
-- Task 8.0's core and db additions (§12): core's effective age for an unknown vendor age, `isStale` and the "vendor's cache age unknown" label (decision 55), `vendorLinkSchema` on every contract link field, `storedBookingSchema`, `superseded` on result rows, `budgetScopeLabel`, the verify confirmation fields, draft-tolerant stored definitions, `definitionCreateOptionalSchema` and `alertRulesQuerySchema`, the exported `CONSTRAINT_NAMES`; db's `retriedOnResume` and `OfferHistoryPoint` (supplied fields and execution).
+- Provenance on every figure (decisions 44, 53, 54, 55, 58): staleness is core's one `isStale(provenance, now, thresholdHours)`, the effective age (the observed age, never younger than the fetch age; else fetch age plus a known `maxAgeHours`; else, the vendor's age unknown, the fetch age alone) against the threshold, called for every `stale` the api computes; every verified-basis figure (rows, calendar day minima, duration minima, the calendar gap's reference verified price) carries "not seen in latest search" and is picked latest seen, then fresh, then cheapest, over every confirmed offer before the per-itinerary dedup; a calendar-basis price is `superseded` when the latest execution that searched its cell is newer and found it empty or no_data (result rows, the calendar day's minimum, the duration's calendar minima, the cell detail) and ranks after current prices; `truncated` on every calendar price (decisions 36, 47); verified-basis minima skip prices the final step did not confirm (decisions 45, 48); every booking and search link is re-validated against `LINK_ALLOWLIST` on the way out.
+- One in-flight guard (decisions 54, 58): a second run, resume or verify of a definition, or a second coverage check, while one is awaiting is 429 `already_running`; a second tool run is 409 `tool_busy`. The estimates are synchronous and need none.
+- `apps/api/src/bootstrap/app.ts`: `bootApp(deps)` and `main(env)` in decision 53's order: refuse `NODE_ENV=test` (70) → re-assert the auth invariants on the injected config (78) → data directory writable (73) → read `app_lock` read-only and wait while it is fresh (75 when it stays fresh; 73 when unreadable) → backup preflight through WP4b's `bootstrap/preflight.ts` (decision 32) → `buildPorts` (migrations) → `AppLock('app')` and the 30 s heartbeat → seed + airport sanity check under the lock, as the tool bootstrap seeds (decision 58) → `createEngine` → `engine.boot()` → serve; a failed boot after the lock releases it and stops the heartbeat. SIGTERM: stop accepting → `engine.shutdown()` → `wal_checkpoint(TRUNCATE)` → lock release → close → exit 0. Every refusal is one `BootError` carrying an exit code from WP4b's single `EXIT` table (`apps/api/src/tools/types.ts`).
+- Task 8.0's core and db additions (§12): core's effective age (an unknown vendor age counts the fetch age; an observed age is never younger than the fetch age), `isStale` and the "vendor's cache age unknown" label (decisions 55, 58), `byDestination` dropped from the calendar day (decision 58), `vendorLinkSchema` on every contract link field, `storedBookingSchema`, `superseded` on result rows, `budgetScopeLabel`, the verify confirmation fields, draft-tolerant stored definitions, `definitionCreateOptionalSchema` and `alertRulesQuerySchema`, the exported `CONSTRAINT_NAMES`; db's `retriedOnResume`, `OfferHistoryPoint` (supplied fields and execution) and `CalendarPricesRepo.heldBy`; the engine's exports of its own `confirmationNeeded`, `capKindOf` and `lineKey` (decision 58).
 - Every §9 item 5 test as real code, plus the review-focus line 4 test.
 
 **Out**
@@ -35,29 +35,29 @@ Turn the engine, repositories and ports into the one HTTP surface of spec §10 u
 - The alert runner (`runAlerts`, passed to `createEngine` as `opts.alerts`), `EmailNotifier`, templates: WP11, which modifies `bootApp` to pass `{ alerts: runAlerts }`. WP8 stores and reads alert rules and events only.
 - `backupDatabase` (WP3) and its CLI wrapper `scripts/backup.mjs` (WP12). Dockerfile, compose, `HEALTHCHECK` (fetches `GET /api/health`), docs: WP12.
 - The SPA and its client: WP9/WP10. The contract fields WP9 Task 9.0 adds (`truncated` on price cells and rows, `expandTop` on the execution summary, core's `formatAgo`/`formatFetchedAgo`) and WP10 Task 10.1 adds (`calendarQuerySchema` on the calendar route; `notSeenInLatest` on the day's verified minima, the duration's `minVerified` and the calendar gap's yardstick; `superseded` on the day's calendar minimum, the duration's calendar minima and the cell detail's calendar prices; `verification.unconfirmedCells`; per-series `searched` counts and the minima's cells; `historyPointResponseSchema`, the itinerary's `cell` and `carriers` and each point's `priceConfirmed` and `executionId`; `stale` on route-level points; the cell detail's `verify`); WP8 fills every one. WP10 labels the route-level series indicative; the contract's route points are GBP-only by shape (decision 25).
-- Engine semantics (pre-start checks, the confirmation comparison at start and verify, `confirmationOf`, resume compare-and-set, child sizing, scheduler, budget fit): WP7, on main. WP8 maps `StartResult` and `ChildCapPreview` to HTTP and mirrors the confirmation trigger only to fill `needsConfirmation`, with WP7's `SOFT_CONFIRM_CALL_SHARE`.
+- Engine semantics (pre-start checks, the confirmation comparison at start and verify, `confirmationOf`, resume compare-and-set, child sizing, scheduler, budget fit): WP7, on main. WP8 maps `StartResult` and `ChildCapPreview` to HTTP and fills `needsConfirmation` by calling WP7's own `confirmationNeeded` and `capKindOf`, which Task 8.0 exports (decision 58); WP8 keeps no copy of the rule.
 - The place-name check in `scripts/check-boundaries.mjs` and its `NOT_AIRPORT_WORDS` list: WP9 Task 9.12 (decisions 36, 46). WP8's strings need no new entry: the only three-letter capitals its new code adds are `GET` (handler keys), already listed.
 
 ## 3. Spec sections
 
 | Section | What it requires of WP8 |
 |---|---|
-| §3 Effective age (rev 24) | Every price carries its effective age as a number: the observed age, or the fetch age plus a known `maxAgeHours`, or (unknown vendor age) the fetch age alone, which the web labels "vendor's cache age unknown" from the provenance. Core's `worstCaseAgeHours` returns that number (Task 8.0, decision 53); `compareAges` ranks an unknown age after any known one; core's full label for it reads "vendor's cache age unknown". Stale means the effective age exceeds the threshold, decided by core's one `isStale` (decisions 54, 55). |
-| §4 "Auth and request hardening" | Basic auth (both vars or neither, password ≥ 12, constant-time compare), re-asserted by `bootApp` on an injected config; failed-auth limit 5/min per client IP (from `X-Forwarded-For` only with `TRUST_PROXY=true`), and a correct credential always succeeds (decision 54); everything authenticated except the minimal `GET /api/health`, which is also Host-exempt, and whose detail an unauthenticated deployment shows only to an allowed Host; the `ALLOWED_HOSTS` rejection names the header value and the variable, never the allowed values (decision 54); mutating routes need `Content-Type: application/json` and `X-Requested-With: get-me-there`; `Origin`, when present, must match; bodies over 64 KiB are 413; API responses are `no-store` and carry no CORS headers; CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`. |
+| §3 Effective age (rev 25) | Every price carries its effective age as a number: the observed age, or the fetch age plus a known `maxAgeHours`, or (unknown vendor age) the fetch age alone, which the web labels "vendor's cache age unknown" from the provenance. Core's `worstCaseAgeHours` returns that number (Task 8.0, decision 53); `compareAges` ranks an unknown age after any known one; core's full label for it reads "vendor's cache age unknown". Stale means the effective age exceeds the threshold, decided by core's one `isStale` (decisions 54, 55). |
+| §4 "Auth and request hardening" | Basic auth (both vars or neither, password ≥ 12, constant-time compare), re-asserted by `bootApp` on an injected config; failed-auth limit 5/min per client IP (from `X-Forwarded-For` only with `TRUST_PROXY=true`, which is safe only when the app is reachable through the proxy alone), held in memory bounded by age and size, and a correct credential always succeeds (decision 54); everything authenticated except the minimal `GET /api/health`, which is also Host-exempt, and whose detail an unauthenticated deployment shows only to an allowed Host; the `ALLOWED_HOSTS` rejection names the header value and the variable, never the allowed values (decision 54); mutating routes need `Content-Type: application/json` and `X-Requested-With: get-me-there`; `Origin`, when present, must match; bodies over 64 KiB are 413; every API response is `no-store`, the 401, 403, 413 and 429 refusals included (decision 58), and none carries a CORS header; CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`. |
 | §5.2 Vendor links | `vendorLink` and `booking.url` are https on a host within the provider's `LINK_ALLOWLIST` entry, checked again on the way out; anything else becomes `{ kind: 'none' }` (decision 54). |
 | §5.5 | Bootstraps refuse `NODE_ENV=test`; injected-config boot matrix (production with and without the phrase, development in and out of a container, the wrong phrase, a plain `.db` path; the fixture constructor throws outside the gate; a definition naming `fixture` under production is 422 `unknown_provider`); one test spawning the real bootstrap with a real production environment. |
 | §6.5 | `/results` dedups per itinerary hash, ranks by class then price, returns at most 1000 rows with `truncated` and `total`, no sort/filter parameters. |
 | §6.8 | Alert rules stored with the `requireAllVerified` refinement enforced on create and on a merged partial update; events listed by rule and definition; soft delete keeps events. |
 | §6.9 | Basis `verified` or `calendar`; calendar rows are class `unchecked` with a "not applied" list; default basis calendar when the snapshot has no verification provider or no observation exists, with a reason; calendar gap empty with no verification provider; a search link on every non-synthetic row. |
-| §7 `app_lock`, Migrations | The app reads the lock read-only before any backup or migration (decision 53): a fresh `tool` lock → wait up to 60 s then refuse (75); a fresh `app` lock → wait up to 90 s logging its age, proceed once it goes stale, refuse a second live app (75). Heartbeat every 30 s; SIGTERM releases the lock after the checkpoint. Backup before migrations when migrations are pending; a failed backup refuses boot. Seed and the airport sanity check fail boot. |
-| §8.1 | Staleness per price (as §3 above); "not seen in latest search" on every verified-basis figure; overruns against the pre-factor plan (discovery on tiles, decision 43); `/resume` manual, 409 on a lost compare-and-set or an active sibling (and WP3's `RowRejected('active')` from a lost race); single-cell verify validates membership in the current resolved space and the airports and passes the confirmation; children in results, calendar, calendar gap and duration analysis. |
+| §7 `app_lock`, Migrations | The app reads the lock read-only before any backup or migration (decision 53): a fresh `tool` lock → wait up to 60 s then refuse (75); a fresh `app` lock → wait up to 90 s logging its age, proceed once it goes stale, refuse a second live app (75). The lock is taken right after the migrations, and airports are seeded under it (decision 58). Heartbeat every 30 s; SIGTERM releases the lock after the checkpoint. Backup before migrations when migrations are pending; a failed backup refuses boot. Seed and the airport sanity check fail boot. |
+| §8.1 | Staleness per price (as §3 above); "not seen in latest search" on every verified-basis figure; overruns against the pre-factor plan (discovery on tiles, decision 43); `/resume` manual, 409 on a lost compare-and-set or an active sibling (and WP3's `RowRejected('active')` from a lost race); single-cell verify validates membership in the current resolved space and the airports and passes the confirmation; children in results, calendar, calendar gap and duration analysis; a run's own view includes the prices it reused (decision 58). |
 | §8.2 | Definition create/PUT/disable/enable/delete (re)register its cron job in the same request; cron validated by the engine's `parseCron` (sub-hourly rejected); the default definition uses the plan-aware preset; a schedule whose provider-month scope does not fit is refused (decision 25), matched by core's `budgetScopeLabel`. |
 | §9 item 5 | Every test listed there (Task 8.15 sweeps). |
 | §10 | The route table under `/api`, incl. `GET /airports`, `POST /definitions/estimate` and the calendar's `destination` query; the error envelope with `details.fields` on 422; `provenance` and `stale` on every price-bearing shape. |
 | §12 | `process.env` read once, in `src/bootstrap/start.ts`, and parsed through the `core` schema by WP4b's `loadConfigFromEnv`. |
 | §13, §14 | `/api/health` for the `HEALTHCHECK`; graceful shutdown; pino with redaction and secret scrubbing (WP4b's `createLogger`); error messages through WP4b's `safeMessage`. |
 
-The brief follows the spec at revision 24 and plan decisions 1–55. Decisions 53 and 54 are the rulings on this brief's first review round; decision 55 (from the WP11 refresh) gives core one `isStale` that WP8 adds and WP8 and WP11 both call, and the unknown-age label text; §13 lists only what the plan has not recorded.
+The brief follows the spec at revision 25 and plan decisions 1–58 (revision 25 changes alert delivery, which is WP11's; WP8's alert routes only read events). Decisions 53 and 54 rule on this brief's first review round, 57 on its task order and 58 on its second round; decision 55 (from the WP11 refresh) gives core one `isStale` that WP8 adds and WP8 and WP11 both call, and the unknown-age label text; §13 lists only what the plan has not recorded.
 
 ## 4. Interfaces consumed
 
@@ -135,7 +135,7 @@ export class AirportsRepo { exists(iata); search(q, limit): Airport[]; metroOf(i
 export class DefinitionsRepo { create(input: DefinitionInput & { confirmedCostPence?: number; confirmedCalls?: number }): SearchDefinition; update(id, patch: Partial<DefinitionInput>): SearchDefinition; get(id): SearchDefinition | null; list(opts?): SearchDefinition[]; softDelete(id): void; setConfirmed(id, confirmed: { pence: number; calls: number } | null): void }
 export class ExecutionsRepo { get(id): Execution | null; listForDefinition(definitionId, opts: { limit; includeChildren }): Execution[] /* newest first: created_at, then rowid */ }
 export class CellsRepo { outcomes(executionId, filter?: { stage?; providerId?; cells? }): CellOutcome[]; rollUps(executionId): Map<string, { discovery: RollUp; verification: RollUp }>; buckets(executionId, stage, providerId): Buckets; selected(executionId): Array<{ cell; reason }> }
-export class CalendarPricesRepo { latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[]; history(origin, destination, cabin, opts?): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> }
+export class CalendarPricesRepo { latestPerCell(definitionId, cabin, space: ResolvedSpace | null): CalendarPriceRow[]; fetchedBy(executionId): CalendarPriceRow[]; heldBy(executionId): CalendarPriceRow[] /* Task 8.0: fetched and reused rows */; history(origin, destination, cabin, opts?): Array<{ providerId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> }
 export class ItinerariesRepo { get(hash): (NormalisedItinerary & { firstSeenAt }) | null; observationsForDefinition(definitionId, opts: { executionIds; space; cabin; includeChildren }): ObservationRow[]; latestVerificationOutcomeForCell(definitionId, cell, cabin): CellOutcome | null; offerHistory(hash): Array<{ providerId; seller; cabin; points: OfferHistoryPoint[] /* Task 8.0 */ }> }
 export class LedgerRepo { countsFor(executionId): { calls; costMicroGbp; tiles; cacheHits; perProvider: Array<{ providerId; stage: Stage | null; calls; costMicroGbp; tiles; cacheHits }> } }
 export class AlertsRepo { rules(definitionId?): AlertRule[]; get(id); create(input); update(id, patch); softDelete(id); events(filter: { ruleId?; definitionId?; limit }): AlertEvent[] }
@@ -153,6 +153,10 @@ export interface Engine { boot(): Promise<void>; shutdown(): Promise<void>; star
 export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;   // boot() makes no network call
 export function confirmationOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number };   // worst case over every line, blocked ones included
 export const SOFT_CONFIRM_CALL_SHARE = 0.2;                                                            // decisions 25, 53
+// Task 8.0 exports (decision 58): the engine's own confirmation rule and cap-scope mapping, narrowed to what they read
+export interface ConfirmationContext { config: Pick<Config, 'spend'>; budget: Pick<BudgetGuard, 'usage'>; limitsOf(id: ProviderId): { capKind: 'provider-month' | 'provider-lifetime' } }
+export function confirmationNeeded(ctx: ConfirmationContext, estimate: Estimate, blocked: ReadonlySet<LineKey>, confirmed: Confirmation): { estimateMicroGbp; estimatePence; calls; totalCalls; reason } | null;
+export function capKindOf(window: 'month' | 'lifetime'): 'provider-month' | 'provider-lifetime'; export type LineKey; export function lineKey(stage: Stage, providerId: ProviderId): LineKey;
 export function parseCron(expr: string, tz: string): { ok: true; next(from: Date): Date | null } | { ok: false; reason: string };
 export class LogNotifier implements Notifier { constructor(log: Logger) }
 // What WP8 relies on: estimate() is the worst case without reuse with `blocked` filled and totals over the lines that would run;
@@ -185,7 +189,7 @@ The fixture provider is reached through http-kit's gated `inProcessHosts` seam (
 export const API_PREFIX = '/api';
 export type AppEnv = { Variables: { authenticated: boolean } };
 export interface RawInput { body: unknown; query: Record<string, string> | undefined; params: Record<string, string> }
-export interface RouteContext { ports: Ports; engine: Engine; tools: HttpToolRunners; toolInFlight: { name: string | null }; busy: Set<string> }
+export interface RouteContext { ports: Ports; engine: Engine; tools: HttpToolRunners; busy: Set<string> }
 export interface RouteHandler { readonly request: z.ZodType; readonly query: z.ZodType; handle(c: Context<AppEnv>, raw: RawInput, ctx: RouteContext): Response | Promise<Response> }
 export type HandlerTable = Readonly<Record<string, RouteHandler>>;   // keyed `${method} ${path}` of a ROUTES entry
 export const NO_INPUT: z.ZodUndefined;   // the schema of an input a route does not take
@@ -200,27 +204,27 @@ export const OWNED_ELSEWHERE: ReadonlySet<string>;
 export const MAX_BODY_BYTES = 64 * 1024;
 export interface AppOptions { webRoot?: string | null; tools?: HttpToolRunners; clientIp?: (c: Context<AppEnv>) => string | null; routes?: readonly apiContract.RouteDef[] }
 export function createApp(ports: Ports, engine: Engine, options?: AppOptions): Hono<AppEnv>;   // strict mounting (Task 8.15)
-export function oneAtATime<T>(ctx: RouteContext, key: string, fn: () => T | Promise<T>): Promise<T>;   // 429 already_running (decision 54)
+export function oneAtATime<T>(ctx: RouteContext, key: string, fn: () => T | Promise<T>, busy?: () => ApiError): Promise<T>;   // the one in-flight guard; 429 already_running by default (decisions 54, 58)
 export class ApiError extends Error { constructor(status: ContentfulStatusCode, code: string, message: string, details?: Details) }
 export function envelope(code: string, message: string, details?: Details): { error: { code; message; details? } };
 
 // apps/api/src/bootstrap/app.ts, lock.ts, seed.ts, paths.ts
-export class BootError extends Error { readonly exitCode: number }
 export interface BootDeps { config: Config; log: Logger; clock?: Clock; listen: boolean; assets: AssetPaths; tools?: (ports: Ports) => HttpToolRunners; sleep?: (ms: number) => Promise<void> }
 export interface RunningApp { app: Hono<AppEnv>; ports: Ports; engine: Engine; port: number | null; close(): Promise<void> }
 export function assertAuthInvariants(config: Config, log: Logger): void;
 export function bootApp(deps: BootDeps): Promise<RunningApp>;
 export function main(env: NodeJS.ProcessEnv): Promise<void>;
 export function waitForLockFree(d: { databasePath; clock; sleep; log; secrets }): Promise<void>; export const TOOL_LOCK_WAIT_MS = 60_000; export const APP_LOCK_WAIT_MS = 90_000;
-export class LockRefusedError extends Error { readonly exitCode: 75 }; export class LockUnreadableError extends Error { readonly exitCode: 73 }
+// bootstrap/errors.ts: export class BootError extends Error { constructor(message: string, exitCode: number); readonly exitCode: number }   // the one refusal (decision 58)
 export function seedIfNeeded(ports: Ports, dataDir: string, report: (line: string) => void): void;   // both bootstraps
 export interface AssetPaths { migrationsDir: string; airportsDataDir: string; webRoot: string | null }; export function assetPaths(): AssetPaths;
 
 // apps/api/src/read/*: the read model the routes share and WP11 may reuse
 export function staleness(p: Provenance, thresholdHours: number, now: IsoDateTime): { ageHours: number; stale: boolean };   // effective age; stale from core's isStale (decisions 44, 54, 55)
 export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: readonly string[]): Loaded;
-export function pickVerified(rows: readonly ResultRow[]): ResultRow | null;   // seen in the newest search, then fresh, then cheaper (decision 54)
-export function safeBooking(b: Booking, providerId: ProviderId): Booking;     // LINK_ALLOWLIST re-validation (decision 54)
+export function pickVerified(rows: readonly ResultRow[]): ResultRow | null;   // read/pick.ts: seen in the newest search, then fresh, then cheaper (decisions 54, 58)
+export function pickCalendar(rows: readonly ResultRow[]): ResultRow | null;   // read/pick.ts: a current price before a superseded one, then cheaper
+export function safeBooking(b: Booking, providerId: ProviderId): Booking;     // read/links.ts: LINK_ALLOWLIST re-validation (decision 54)
 export function executionSummary(e: Execution, now: IsoDateTime): ExecutionSummary;
 export function defaultDefinitionInput(config: Config, providers: readonly FlightProvider[]): DefinitionInput;   // src/defaults.ts; DEFAULT_CRON = '0 5 * * 1'
 
@@ -228,7 +232,8 @@ export function defaultDefinitionInput(config: Config, providers: readonly Fligh
 export function inProcessTools(ports: Ports, opts?: { recording?: RecordingTarget; runRecord?: typeof runRecord }): HttpToolRunners;
 
 // @gmt/core (Task 8.0)
-export function worstCaseAgeHours(a: EffectiveAge): number;   // unknown vendor age → the fetch age (spec rev 24 §3, decision 53)
+export function effectiveAge(p, now: IsoDateTime): EffectiveAge;   // observedHours = max(observed age, fetch age) (decision 58)
+export function worstCaseAgeHours(a: EffectiveAge): number;   // unknown vendor age → the fetch age (spec §3, decision 53)
 export function isStale(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime, thresholdHours: number): boolean;   // the one staleness rule (decision 55; WP11 calls it too)
 export function formatAgeFull(a: EffectiveAge): string;   // unknown vendor age: "fetched 2h ago · vendor's cache age unknown" (decision 55)
 export function compareAges(a: EffectiveAge, b: EffectiveAge): number;   // an unknown age loses to any known one
@@ -237,10 +242,12 @@ export { CONSTRAINT_NAMES };   // now in the barrel
 // apiContract: vendorLinkSchema (https on a LINK_ALLOWLIST host; bookingSchema and searchLinkSchema use it), storedBookingSchema (any URL; db reads),
 //   resultRowSchema.superseded (decision 54, as on WP10's calendar figures),
 //   verifyCellRequestSchema { confirmCostPence?, confirmCalls? }, draft-tolerant definitionShapeSchema / definitionResponseSchema,
-//   definitionCreateOptionalSchema, alertRulesQuerySchema
+//   definitionCreateOptionalSchema, alertRulesQuerySchema; calendarDaySchema without byDestination (decision 58)
 // @gmt/db (Task 8.0)
 export function retriedOnResume(o: Pick<CellOutcome, 'status' | 'reason' | 'attempts'>, manual: boolean): boolean;   // RESUMABLE_SQL's rule, from the same lists
 export interface OfferHistoryPoint extends HistoryPoint { suppliedFields: SuppliedField[]; executionId: string }   // offerHistory points
+CalendarPricesRepo.heldBy(executionId): CalendarPriceRow[];   // the rows a run fetched and the copies it reused (decision 58)
+// @gmt/engine (Task 8.0): confirmationNeeded, ConfirmationContext, Confirmation, capKindOf, lineKey, LineKey exported (§4)
 ```
 
 ## 6. Library notes
@@ -274,7 +281,7 @@ src/middleware/hardening.ts    hostAllowed, hostAllowlist, originCheck, noStore,
 src/middleware/auth.ts         credentialsMatch, FailedAuthLimiter, UNKNOWN_IP, clientIpFrom, basicAuthGate
 src/routes/types.ts            API_PREFIX, AppEnv, RawInput, RouteContext, RouteHandler, HandlerTable, HttpToolRunners, OWNED_ELSEWHERE
 src/routes/define.ts           NO_INPUT, route, plain: one validation per request
-src/routes/shared.ts           param, getLiveDefinition, oneAtATime
+src/routes/shared.ts           param, getLiveDefinition, oneAtATime (the one in-flight guard)
 src/routes/index.ts            HANDLERS (merge of every table below)
 src/routes/system.ts           /api/health, /api/airports, /api/providers, /api/budget, /api/scheduler/jobs
 src/routes/definitions.ts      /api/definitions CRUD, both estimate routes, /api/definitions/coverage-check
@@ -284,10 +291,12 @@ src/routes/history.ts          /api/itineraries/:hash/history, /api/routes/:orig
 src/routes/alerts.ts           /api/alerts CRUD, /api/alerts/events
 src/routes/tools.ts            /api/tools/record
 src/read/space.ts              isDraft, currentSpace, cellInSpace, airportLookup
-src/read/usage.ts              providerLimits, providerScopes, windowScope, budgetScopes, usageOf
-src/read/definitions.ts        definitionResponse, deletedResponse, needsConfirmation, confirmationRequired, storedCovers, sentCovers, mergeDefinition, inputOf
+src/read/usage.ts              providerLimits, providerScopes, budgetScopes, usageOf
+src/read/definitions.ts        definitionResponse, deletedResponse, needsConfirmation (over WP7's confirmationNeeded), sentCovers, mergeDefinition, inputOf
 src/read/executions.ts         executionResponse, executionSummary, overrunOf, planCallsOf, hoursSince
-src/read/rows.ts               staleness, thresholds, priceCell, safeBooking, verifiedRow, calendarRow, latestPerOffer, notSeenResolver, cheapest, pickVerified
+src/read/rows.ts               staleness, thresholds, priceCell, verifiedRow, calendarRow, latestPerOffer, notSeenResolver
+src/read/links.ts              safeBooking, safeSearchLink (spec §5.2 re-validation)
+src/read/pick.ts               cheapest, pickVerified, pickCalendar (picking one figure out of rows)
 src/read/coverage.ts           coverageSummaryFor, zeroBuckets, SEARCHED
 src/read/results.ts            loadRows, truncationOf, confirmedIn, chooseBasis, assembleResults
 src/read/calendar.ts           assembleCalendar, assembleCalendarGap
@@ -296,9 +305,10 @@ src/read/coverageView.ts       assembleCoverage, retryable
 src/read/cell.ts               assembleCellDetail
 src/read/history.ts            itineraryHistory, routeHistory
 src/bootstrap/paths.ts         assetPaths()
-src/bootstrap/lock.ts          waitForLockFree, LockRefusedError, LockUnreadableError
+src/bootstrap/errors.ts        BootError (the one boot refusal, decision 58)
+src/bootstrap/lock.ts          waitForLockFree
 src/bootstrap/seed.ts          seedIfNeeded (both bootstraps)
-src/bootstrap/app.ts           bootApp, assertAuthInvariants, main, BootError
+src/bootstrap/app.ts           bootApp, assertAuthInvariants, main
 src/bootstrap/start.ts         the process entry (the app's one process.env read)
 src/tools/inProcess.ts         inProcessTools(ports, opts?): the record runner over runRecord
 test/helpers/harness.ts        in-memory ports + engine + app; request helper; captureLines; harnessEnv
@@ -315,23 +325,62 @@ packages/core/test/api-contract/wp08.test.ts, packages/db/test/cells.retriedOnRe
 - `apps/api/src/bootstrap/tool.ts`: call the shared `seedIfNeeded`; its heartbeat error is logged under `err` (Task 8.1).
 - `apps/api/vitest.config.ts`: per-folder thresholds for `src/read/**` and `src/routes/**` (Task 8.15). The default test timeout stays; the boot files name their own (`BOOT_TIMEOUT_MS`).
 - `packages/core/src/labels/age.ts`, `ports/budget.ts`, `index.ts`, `api-contract/{common,results,definitions,executions,alerts,index}.ts` and their tests (Task 8.0).
-- `packages/db/src/types.ts`, `index.ts`, `internal/read.ts`, `repositories/itineraries.ts`, `repositories/cells.ts` and their tests (Task 8.0).
+- `packages/db/src/types.ts`, `index.ts`, `internal/read.ts`, `repositories/itineraries.ts`, `repositories/cells.ts`, `repositories/calendarPrices.ts` and their tests (Task 8.0).
+- `packages/engine/src/context.ts`, `start.ts`, `index.ts` and `test/smoke.test.ts` (Task 8.0: the exports of decision 58, no behaviour change).
+- WP9's Task 9.0 and WP10's Task 10.1 files, exactly as those tasks write them (Tasks 8.0a, 8.0b; decision 57).
 - `src/wiring.ts`, `src/logger.ts`, `src/safeMessage.ts`, `src/bootstrap/preflight.ts` and `src/tools/*` other than `inProcess.ts` are WP4b's and are not changed here.
 
 ## 8. Tasks
 
-Every "Run" step assumes the workspace dependencies of `@gmt/api` resolve from source (the `@gmt/source` condition and the Vitest aliases). Per-task runs use `pnpm --filter @gmt/api exec vitest run <files>` (no coverage threshold on a partial run, decision 8); the full `pnpm --filter @gmt/api test` enforces thresholds. Tasks 8.2–8.8 pin behaviour Task 8.1 already builds (the bootstrap and the middleware cannot boot without each other); each is seen failing first by its temporary mutations, one per rule, which the step then reverts. The feature tasks 8.9–8.15 fail first because their routes do not exist yet, and then list the mutations that prove each rule's test bites. Every mutation and its failing test names were run on the assembled tree.
+Every "Run" step assumes the workspace dependencies of `@gmt/api` resolve from source (the `@gmt/source` condition and the Vitest aliases). Per-task runs use `pnpm --filter @gmt/api exec vitest run <files>` (no coverage threshold on a partial run, decision 8); the full `pnpm --filter @gmt/api test` enforces thresholds. Tasks 8.0a and 8.0b apply WP9's and WP10's contract tasks as their briefs write them (decision 57); Task 8.0's patches apply on top of them. Tasks 8.2–8.8 pin behaviour Task 8.1 already builds (the bootstrap and the middleware cannot boot without each other); each is seen failing first by its temporary mutations, one per rule, which the step then reverts. The feature tasks 8.9–8.15 fail first because their routes do not exist yet, and then list the mutations that prove each rule's test bites. Every mutation and its failing test names were run on the assembled tree.
 
-### Task 8.0: Core and db: effective age and `isStale`, link re-validation, the row's superseded mark, scope labels, the resume predicate
+### Task 8.0a: Apply WP9's Task 9.0 (contract fields WP8 fills)
+
+Plan decision 57: WP8 needs contract fields WP9 and WP10 introduce, while their web tasks need WP8's api, so WP8's implementer applies WP9's Task 9.0 and then WP10's Task 10.1 exactly as their briefs write them, as WP8's first two tasks; WP9's and WP10's implementers then skip them (already on main). Do not copy or adapt them: every Task 8.0 patch below applies on top of their result.
+
+- [ ] **Step 1: Apply WP9's Task 9.0 as written**
+
+Work through `docs/briefs/wp09-web-shell-definitions-results.md` §8 **Task 9.0** ("Core additions: `truncated` on every price, the run's `expandTop`, the departure-date filter, the age phrases", line 285 on main at `f8f66c0`), Steps 1–4, unchanged: the new `packages/core/test/results/webAdditions.test.ts`, the `common.ts` and `results.ts` edits, the replaced `results/types.ts`, `results/filter.ts` and `labels/age.ts`, and the `helpers/rows.ts` and `contract.test.ts` fixture edits.
+
+- [ ] **Step 2: Run that task's checks**
+
+Run: `pnpm --filter @gmt/core exec vitest run test/results test/api-contract test/labels && pnpm --filter @gmt/core test && pnpm --filter @gmt/core typecheck`
+Expected: PASS, as WP9's Task 9.0 Step 4 states; core at 100% on every metric.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp09 task 9.0 (applied by WP8, plan decision 57): truncated on every price, expandTop, the departure filter, the age phrases"
+```
+
+### Task 8.0b: Apply WP10's Task 10.1 (contract fields WP8 fills)
+
+- [ ] **Step 1: Apply WP10's Task 10.1 as written**
+
+Work through `docs/briefs/wp10-web-calendar-duration-history.md` §8 **Task 10.1** ("Contract additions in core (first failing test)", line 289 on main at `f8f66c0`), Steps 1–4, unchanged: the new `packages/core/test/api-contract/wp10.test.ts` and the `api-contract/results.ts` and `api-contract/index.ts` edits. Its last edit targets WP9's `apps/web/test/fixtures.ts`, which does not exist until WP9's web tasks create it: skip that one edit here (§13 item 2).
+
+- [ ] **Step 2: Run that task's checks**
+
+Run: `pnpm --filter @gmt/core exec vitest run test/api-contract && pnpm -r typecheck`
+Expected: PASS, as WP10's Task 10.1 Step 4 states; typecheck clean.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add -A apps/api packages && git commit -m "wp10 task 10.1 (applied by WP8, plan decision 57): the calendar query, the views' marks, unconfirmedCells, searched counts, history fields, verify"
+```
+
+### Task 8.0: Core, db and engine: effective age and `isStale`, link re-validation, the row's superseded mark, scope labels, the resume predicate, a run's held prices, the engine's confirmation rule
 
 **Files:**
 - Create: `packages/core/test/api-contract/wp08.test.ts`, `packages/db/test/cells.retriedOnResume.test.ts`
-- Modify: `packages/core/src/labels/age.ts`, `packages/core/src/ports/budget.ts`, `packages/core/src/index.ts`, `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/results.ts`, `packages/core/src/api-contract/definitions.ts`, `packages/core/src/api-contract/executions.ts`, `packages/core/src/api-contract/alerts.ts`, `packages/core/src/api-contract/index.ts`, `packages/core/test/labels/age.test.ts`, `packages/core/test/api-contract/contract.test.ts`, `packages/core/test/helpers/rows.ts`, `packages/core/test/wp2-barrel.test.ts`, `packages/db/src/types.ts`, `packages/db/src/index.ts`, `packages/db/src/internal/read.ts`, `packages/db/src/repositories/itineraries.ts`, `packages/db/src/repositories/cells.ts`, `packages/db/test/barrel.test.ts`, `packages/db/test/itineraries.test.ts`
+- Modify: `packages/core/src/labels/age.ts`, `packages/core/src/ports/budget.ts`, `packages/core/src/index.ts`, `packages/core/src/api-contract/common.ts`, `packages/core/src/api-contract/results.ts`, `packages/core/src/api-contract/definitions.ts`, `packages/core/src/api-contract/executions.ts`, `packages/core/src/api-contract/alerts.ts`, `packages/core/src/api-contract/index.ts`, `packages/core/test/labels/age.test.ts`, `packages/core/test/api-contract/contract.test.ts`, `packages/core/test/helpers/rows.ts`, `packages/core/test/wp2-barrel.test.ts`, `packages/db/src/types.ts`, `packages/db/src/index.ts`, `packages/db/src/internal/read.ts`, `packages/db/src/repositories/itineraries.ts`, `packages/db/src/repositories/cells.ts`, `packages/db/src/repositories/calendarPrices.ts`, `packages/db/test/barrel.test.ts`, `packages/db/test/itineraries.test.ts`, `packages/db/test/reuse.test.ts`, `packages/engine/src/context.ts`, `packages/engine/src/start.ts`, `packages/engine/src/index.ts`, `packages/engine/test/smoke.test.ts`
 
 **Interfaces:**
-- Consumes: `effectiveAge`, `EffectiveAge`, `formatAgeFull`, `LINK_ALLOWLIST`, `validateVendorUrl`, `BudgetScope`, `CONSTRAINT_NAMES` (core); the api-contract schemas (WP0, WP7); `ItinerariesRepo.offerHistory`, `RESUMABLE_SQL`'s `NON_RETRYABLE`/`MANUAL_RETRYABLE` lists (WP3, WP7).
-- Produces (each a ruling of decision 53 or 54, or a field no other brief adds):
-  - `worstCaseAgeHours(a): number` — the unknown-vendor-age case is the fetch age (spec §3 rev 24, decision 53; no local conversion in the api); `compareAges` ranks an unknown age after every known one and two unknowns equal.
+- Consumes: `effectiveAge`, `EffectiveAge`, `formatAgeFull`, `LINK_ALLOWLIST`, `validateVendorUrl`, `BudgetScope`, `CONSTRAINT_NAMES` (core); the api-contract schemas (WP0, WP7); `ItinerariesRepo.offerHistory`, `CalendarPricesRepo`, `RESUMABLE_SQL`'s `NON_RETRYABLE`/`MANUAL_RETRYABLE` lists (WP3, WP7); WP7's `confirmationNeeded`, `EngineContext.limitsOf(id).capKind`, `lineKey` (internal until now).
+- Produces (each a ruling of decisions 53–58, or a field no other brief adds):
+  - `effectiveAge` clamps an observed age to at least the fetch age (decision 58): a vendor cannot have observed a price after we fetched it, so a later observed time never makes held data look younger; the test pins a 300 h fetch with a 10 h observed time as stale.
+  - `worstCaseAgeHours(a): number` — the unknown-vendor-age case is the fetch age (spec §3, decision 53; no local conversion in the api); `compareAges` ranks an unknown age after every known one and two unknowns equal.
   - `isStale(provenance, now, thresholdHours)` — the one staleness rule, effective age against the threshold, so an unknown vendor age is never stale on that account (decision 55); the api's rows and history points call it, and WP11's alerts will. `formatAgeFull` of an unknown vendor age reads "fetched 2h ago · vendor's cache age unknown" (spec §3 rev 23); the compact form stays "2h ago · age unknown".
   - `vendorLinkSchema` (https, no userinfo or port, a host equal to or under a `LINK_ALLOWLIST` entry); `bookingSchema` and the result row's `searchLink` use it, so a hostile stored link can never pass the response contract (decision 54, spec §5.2). `storedBookingSchema` keeps any URL for the db's read, so one bad stored link never fails a page: the api drops it instead (Task 8.11).
   - `resultRowSchema.superseded`: a calendar-basis row whose cell a newer parent execution found empty or no_data (decision 54), the same boolean WP10's Task 10.1 puts on the views' calendar figures; WP10 notes that the rows of `/results` had no field yet.
@@ -342,7 +391,11 @@ Every "Run" step assumes the workspace dependencies of `@gmt/api` resolve from s
   - Draft-tolerant `definitionShapeSchema` and `definitionResponseSchema` (decision 53).
   - db: `retriedOnResume(outcome, manual)`, the resume query's rule as a predicate from the same two lists (View D's "retry", review arch-005); `OfferHistoryPoint` with the observation's `suppliedFields` (decision 53) and its `executionId` (WP10's history points, decision 52), asserted exactly in `itineraries.test.ts`; the db reads bookings with `storedBookingSchema`.
 
-WP9's Task 9.0 already adds `expandTop` and `truncated`, and WP10's Task 10.1 the calendar query, the views' marks and the history fields; this task adds none of them.
+  - `calendarDaySchema` loses `byDestination` (decision 58): no client reads it, `?destination=` scopes the whole day instead, and its figures could not carry the decision 54 marks. WP10's own test fixtures still pass (zod drops the unknown key).
+  - db: `CalendarPricesRepo.heldBy(executionId)`, the rows a run fetched and the copies it reused (decision 58), so a run's own view of its prices agrees with its coverage, which counts a reused cell as priced.
+  - engine (decision 58; no behaviour change): `confirmationNeeded` takes a narrow `ConfirmationContext` (the soft-confirm threshold, the guard's `usage`, each provider's `capKind`) that `EngineContext` satisfies, and is exported with `Confirmation`, `lineKey` and `LineKey`; `capKindOf(window)` is the one window-to-scope mapping, used by `buildContext` and exported. The api calls them and keeps no copy (Task 8.9).
+
+Tasks 8.0a and 8.0b already added `expandTop`, `truncated`, the calendar query, the views' marks and the history fields; this task adds none of them. After WP8 merges, WP7's confirmation check and `budgetFit` take core's `budgetScopeLabel` and db's reuse-copy rule calls `retriedOnResume` (decision 57's follow-ups).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -654,7 +707,7 @@ index 9762540..7d52d58 100644
    route('PUT', '/alerts/:id', alertRuleSchema, { request: alertRuleUpdateRequestSchema }),
    route('DELETE', '/alerts/:id', alertRuleSchema),
 diff --git a/packages/core/src/api-contract/results.ts b/packages/core/src/api-contract/results.ts
-index ec9b529..7016f46 100644
+index ec9b529..5b064e4 100644
 --- a/packages/core/src/api-contract/results.ts
 +++ b/packages/core/src/api-contract/results.ts
 @@ -18,12 +18,14 @@ import {
@@ -685,6 +738,21 @@ index ec9b529..7016f46 100644
    adjustedPence: moneyPenceSchema.nullable(),
    destinationNote: z.string().nullable(),
    executionId: z.string(),
+@@ -129,13 +136,7 @@ export const calendarDaySchema = z.object({
+   cheapestVerified: verifiedFigure.nullable(),
+   cheapestPartiallyVerified: verifiedFigure.extend({ count }).nullable(),
+   cheapestCalendar: calendarFigure.nullable(),
+-  byDestination: z.array(
+-    z.object({
+-      destination: iataSchema,
+-      cheapestVerified: priceCellSchema.nullable(),
+-      cheapestCalendar: priceCellSchema.nullable(),
+-    }),
+-  ),
++  // why: plan decision 58: no per-destination figures; `?destination=` (decision 53) scopes the whole day instead.
+ });
+ /**
+  * Plan decision 53: the calendar route's optional destination. With it, every day's buckets, selection counts, minimums
 diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
 index bb0ba74..407acf1 100644
 --- a/packages/core/src/index.ts
@@ -699,17 +767,28 @@ index bb0ba74..407acf1 100644
  export * from './coverage/buckets.js';
  export * from './coverage/rollUp.js';
 diff --git a/packages/core/src/labels/age.ts b/packages/core/src/labels/age.ts
-index 8476637..81fed55 100644
+index 8476637..2ccb971 100644
 --- a/packages/core/src/labels/age.ts
 +++ b/packages/core/src/labels/age.ts
-@@ -25,18 +25,35 @@ export function effectiveAge(
+@@ -19,24 +19,45 @@ export function effectiveAge(
+ ): EffectiveAge {
+   const fetchedHours = hoursBetween(p.fetchedAt, now);
+   if (p.providerObservedAt !== undefined) {
+-    return { kind: 'observed', fetchedHours, observedHours: hoursBetween(p.providerObservedAt, now) };
++    // why: plan decision 58: a vendor cannot have observed a price after we fetched it, so an observed time later than
++    // the fetch (a vendor clock or data error) never makes the price look younger than the fetch.
++    const observedHours = Math.max(hoursBetween(p.providerObservedAt, now), fetchedHours);
++    return { kind: 'observed', fetchedHours, observedHours };
+   }
+   if (p.maxAgeHours === 'unknown') return { kind: 'unknown', fetchedHours };
    return { kind: 'bounded', fetchedHours, maxAgeHours: p.maxAgeHours };
  }
  
 -/** The age a careful reader should assume: observed age, or fetched age plus the provider's bound. */
 -export function worstCaseAgeHours(a: EffectiveAge): number | 'unknown' {
 +/**
-+ * The effective age of spec §3 (revision 23, plan decisions 44, 53): the observed age when the vendor dates the price,
++ * The effective age of spec §3 (revision 23, plan decisions 44, 53, 58): the observed age (never younger than the fetch
++ * age, `effectiveAge` clamps it) when the vendor dates the price,
 + * else the fetch age plus the provider's bound, else (the vendor's age unknown) the fetch age alone. The labels say
 + * "vendor's cache age unknown" for the last case; this number never pretends to know more.
 + */
@@ -741,7 +820,7 @@ index 8476637..81fed55 100644
  /** "just now" under an hour; hours to 47h; days to 13d; weeks after. */
  export function formatDuration(hours: number): string {
    if (hours < 1) return 'just now';
-@@ -56,7 +73,10 @@ export function formatFetchedAgo(a: EffectiveAge): string {
+@@ -56,7 +77,10 @@ export function formatFetchedAgo(a: EffectiveAge): string {
    return `fetched ${formatAgo(a.fetchedHours)}`;
  }
  
@@ -753,7 +832,7 @@ index 8476637..81fed55 100644
  export function formatAgeFull(a: EffectiveAge): string {
    const fetched = formatFetchedAgo(a);
    switch (a.kind) {
-@@ -68,7 +88,7 @@ export function formatAgeFull(a: EffectiveAge): string {
+@@ -68,7 +92,7 @@ export function formatAgeFull(a: EffectiveAge): string {
          ? fetched
          : `${fetched} · provider age unknown (≤${formatDuration(a.maxAgeHours)} before that)`;
      case 'unknown':
@@ -762,7 +841,7 @@ index 8476637..81fed55 100644
    }
  }
  
-@@ -87,10 +107,10 @@ export function formatAgeCompact(a: EffectiveAge): string {
+@@ -87,10 +111,10 @@ export function formatAgeCompact(a: EffectiveAge): string {
  
  /** Sort comparator: fresher first; an unknown age loses to any known age; two unknowns tie. Spec §8.1. */
  export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
@@ -830,7 +909,7 @@ index f9a2970..ccf5452 100644
      destinationNote: null,
      executionId: 'ex-2',
 diff --git a/packages/core/test/labels/age.test.ts b/packages/core/test/labels/age.test.ts
-index fb38218..2f78bf1 100644
+index fb38218..e9aa0bd 100644
 --- a/packages/core/test/labels/age.test.ts
 +++ b/packages/core/test/labels/age.test.ts
 @@ -5,6 +5,7 @@ import {
@@ -859,7 +938,7 @@ index fb38218..2f78bf1 100644
    });
    it('compareAges', () => {
      const known = { kind: 'bounded', fetchedHours: 100, maxAgeHours: 48 } as const;
-@@ -106,7 +107,33 @@ describe('ordering (spec §8.1: unknown loses to any known age)', () => {
+@@ -106,7 +107,48 @@ describe('ordering (spec §8.1: unknown loses to any known age)', () => {
      expect(compareAges(known, unknown)).toBeLessThan(0);
      expect(compareAges(unknown, known)).toBeGreaterThan(0);
      expect(compareAges(unknown, unknown)).toBe(0);
@@ -882,11 +961,26 @@ index fb38218..2f78bf1 100644
 +    expect(isStale({ fetchedAt: at(150), maxAgeHours: 42 }, now, 192)).toBe(false); // 192, not past
 +    expect(isStale({ fetchedAt: at(151), maxAgeHours: 42 }, now, 192)).toBe(true);
 +  });
-+  it('an observed age wins over the fetch age and the bound', () => {
++  it('an observed age wins over the bound, and is never younger than the fetch age (decision 58)', () => {
 +    expect(isStale({ fetchedAt: at(1), providerObservedAt: at(200), maxAgeHours: 0 }, now, 192)).toBe(true);
-+    expect(isStale({ fetchedAt: at(300), providerObservedAt: at(10), maxAgeHours: 168 }, now, 192)).toBe(
++    expect(isStale({ fetchedAt: at(150), providerObservedAt: at(180), maxAgeHours: 168 }, now, 192)).toBe(
 +      false,
 +    );
++    // an observed time after the fetch is a vendor error: the 300 h fetch age stands
++    expect(isStale({ fetchedAt: at(300), providerObservedAt: at(10), maxAgeHours: 168 }, now, 192)).toBe(
++      true,
++    );
++    expect(
++      effectiveAge({ fetchedAt: at(300), providerObservedAt: at(10), maxAgeHours: 0 }, now),
++    ).toMatchObject({
++      observedHours: 300,
++    });
++    expect(
++      effectiveAge({ fetchedAt: at(50), providerObservedAt: at(50), maxAgeHours: 0 }, now),
++    ).toMatchObject({
++      fetchedHours: 50,
++      observedHours: 50,
++    });
 +  });
 +  it('an unknown vendor age counts the fetch age alone: never stale on that account', () => {
 +    expect(isStale({ fetchedAt: at(191), maxAgeHours: 'unknown' }, now, 192)).toBe(false);
@@ -946,6 +1040,31 @@ index ab440be..3f6c3c1 100644
  export const readEstimate = (column: string, text: string): Estimate =>
    parseWith(column, apiContract.estimateSchema, readJson(column, text));
  
+diff --git a/packages/db/src/repositories/calendarPrices.ts b/packages/db/src/repositories/calendarPrices.ts
+index e827d54..8a11cfd 100644
+--- a/packages/db/src/repositories/calendarPrices.ts
++++ b/packages/db/src/repositories/calendarPrices.ts
+@@ -189,6 +189,20 @@ export class CalendarPricesRepo {
+     };
+   }
+ 
++  /**
++   * Every price row this execution holds: the ones it fetched and the reused copies it made (each keeping its source's
++   * fetch time and `reusedFromExecutionId`). A run's own view (plan decision 58): its coverage counts a reused cell as
++   * priced, so its prices must include that cell's price.
++   */
++  heldBy(executionId: string): CalendarPriceRow[] {
++    return this.db.raw
++      .prepare<[string], CalendarPriceDbRow>(
++        'SELECT * FROM calendar_prices WHERE execution_id = ? ORDER BY id',
++      )
++      .all(executionId)
++      .map(toCalendarPriceRow);
++  }
++
+   /** Prices this execution fetched itself (reused copies excluded): the calendar-basis alert candidates (spec §6.8). */
+   fetchedBy(executionId: string): CalendarPriceRow[] {
+     return this.db.raw
 diff --git a/packages/db/src/repositories/cells.ts b/packages/db/src/repositories/cells.ts
 index 427aae7..aa41597 100644
 --- a/packages/db/src/repositories/cells.ts
@@ -1095,39 +1214,162 @@ index 273ea2c..cb0bd29 100644
        },
      ]);
      expect(repo.latestVerificationOutcomeForCell(definition.id, cell(), 'economy')).toMatchObject({
+diff --git a/packages/db/test/reuse.test.ts b/packages/db/test/reuse.test.ts
+index 4676e72..baa83b2 100644
+--- a/packages/db/test/reuse.test.ts
++++ b/packages/db/test/reuse.test.ts
+@@ -220,6 +220,8 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
+         .all(c),
+     ).toEqual([{ f: T0, r: a }]);
+     expect(prices.fetchedBy(c)).toEqual([]); // a reused copy is not "fetched by" c
++    // …but c holds it: its own view of its prices includes the copy, with the source's fetch time (decision 58)
++    expect(prices.heldBy(c).map((r) => [r.fetchedAt, r.reusedFromExecutionId])).toEqual([[T0, a]]);
+     new ExecutionsRepo(db, clock).setStatus(c, 'completed');
+     clock.advance(60_000);
+     const d = newExecution(db, clock, { definition }).execution.id;
+```
+
+Engine exports and their smoke test:
+
+Apply this patch from the repository root (`git apply`):
+
+```diff
+diff --git a/packages/engine/src/context.ts b/packages/engine/src/context.ts
+index 400cd30..925e39c 100644
+--- a/packages/engine/src/context.ts
++++ b/packages/engine/src/context.ts
+@@ -40,6 +40,14 @@ export interface ProviderRunLimits {
+   billed: boolean;
+ }
+ 
++/**
++ * The cap scope a provider's calls count against, from its plan window (spec §5.3): the one mapping the engine and the
++ * api share (plan decision 58).
++ */
++export function capKindOf(window: 'month' | 'lifetime'): 'provider-month' | 'provider-lifetime' {
++  return window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
++}
++
+ /** What every engine module receives. Built once per engine by buildContext. */
+ export interface EngineContext {
+   readonly deps: EngineDeps;
+@@ -83,7 +91,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
+       ratePerMinute: b.ratePerMinute,
+       ratePerHour: b.ratePerHour,
+       window: b.window,
+-      capKind: b.window === 'lifetime' ? 'provider-lifetime' : 'provider-month',
++      capKind: capKindOf(b.window),
+       planFixedMicroGbp: b.planFixedMicroGbp,
+       excludedFromSchedule: b.excludedFromSchedule,
+       billed: b.billable,
+diff --git a/packages/engine/src/index.ts b/packages/engine/src/index.ts
+index 0479780..6234672 100644
+--- a/packages/engine/src/index.ts
++++ b/packages/engine/src/index.ts
+@@ -1,12 +1,19 @@
+ // Barrel for @gmt/engine (plan contract "Engine"). EmailNotifier and runAlerts are added by WP11.
+ export { noAlerts } from './alertsStep.js';
++export { capKindOf } from './context.js';
+ export { createEngine } from './engine.js';
+ export { confirmationOf } from './estimate.js';
+ export { fxHttpLimits } from './fx/limits.js';
++export { type LineKey, lineKey } from './lines.js';
+ export { LogNotifier } from './notifiers/log.js';
+ export { renderOperatorMessage } from './notifiers/operatorTemplates.js';
+ export { parseCron } from './scheduler/parseCron.js';
+-export { SOFT_CONFIRM_CALL_SHARE } from './start.js';
++export {
++  type Confirmation,
++  type ConfirmationContext,
++  confirmationNeeded,
++  SOFT_CONFIRM_CALL_SHARE,
++} from './start.js';
+ export type {
+   AlertsStepHook,
+   BudgetFit,
+diff --git a/packages/engine/src/start.ts b/packages/engine/src/start.ts
+index ce5eb03..3f8cd5c 100644
+--- a/packages/engine/src/start.ts
++++ b/packages/engine/src/start.ts
+@@ -80,6 +80,16 @@ export async function recordSkipped(
+   return exec.id;
+ }
+ 
++/**
++ * What `confirmationNeeded` reads: the soft-confirm threshold, the budget guard's caps and each provider's cap scope.
++ * Narrow so the api can call the same rule over its own ports (plan decision 58).
++ */
++export interface ConfirmationContext {
++  readonly config: Pick<EngineContext['config'], 'spend'>;
++  readonly budget: Pick<EngineContext['budget'], 'usage'>;
++  limitsOf(id: ProviderId): Pick<ReturnType<EngineContext['limitsOf']>, 'capKind'>;
++}
++
+ /**
+  * Spec §8.1 SOFT_CONFIRM: the runnable (not blocked) part of the estimate needs confirming when its cost is above the
+  * pence threshold, or when a provider's runnable calls exceed SOFT_CONFIRM_CALL_SHARE of its call cap — the monthly
+@@ -89,8 +99,9 @@ export async function recordSkipped(
+  * alone never covers a run of any size. Null when no confirmation is needed, else the refusal details, whose
+  * `totalCalls` and `estimatePence` are what a client confirms.
+  */
++
+ export function confirmationNeeded(
+-  ctx: EngineContext,
++  ctx: ConfirmationContext,
+   estimate: Estimate,
+   blocked: ReadonlySet<LineKey>,
+   confirmed: Confirmation,
+diff --git a/packages/engine/test/smoke.test.ts b/packages/engine/test/smoke.test.ts
+index 8d04300..e0f8c2c 100644
+--- a/packages/engine/test/smoke.test.ts
++++ b/packages/engine/test/smoke.test.ts
+@@ -17,4 +17,11 @@ describe('@gmt/engine package', () => {
+     // why: WP8 imports the engine's value rather than keeping a copy that could drift
+     expect(pkg.SOFT_CONFIRM_CALL_SHARE).toBe(0.2);
+   });
++  it('exports the confirmation rule and the cap-scope mapping the api calls (decision 58)', () => {
++    // why: WP8 fills needsConfirmation with the engine's own rule instead of a copy that could drift
++    expect(pkg.capKindOf('month')).toBe('provider-month');
++    expect(pkg.capKindOf('lifetime')).toBe('provider-lifetime');
++    expect(pkg.lineKey('verification', 'searchapi')).toBe('verification:searchapi');
++    expectTypeOf(pkg.confirmationNeeded).toBeFunction();
++  });
+ });
 ```
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @gmt/core test && pnpm --filter @gmt/db test && pnpm -r typecheck`
-Expected: PASS: core 767 tests with 100% on every metric (14 of them `wp08.test.ts`), db 276 tests (7 of them `cells.retriedOnResume.test.ts`); typecheck clean.
+Run: `pnpm --filter @gmt/core test && pnpm --filter @gmt/db test && pnpm --filter @gmt/engine test && pnpm -r typecheck`
+Expected: PASS: core 767 tests with 100% on every metric (14 of them `wp08.test.ts`), db 276 tests (7 of them `cells.retriedOnResume.test.ts`), engine 282 tests; typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: core effective age and isStale, the unknown-age label, link re-validation, the row superseded mark, scope labels; db retriedOnResume and offer-history supplied fields and execution"
+git add -A apps/api packages && git commit -m "wp08: core effective age and isStale, the unknown-age label, link re-validation, the row superseded mark, no byDestination, scope labels; db retriedOnResume, offer-history fields, heldBy; engine exports its confirmation rule"
 ```
 
 ### Task 8.1: The app bootstrap, the server core, and production boot lacks `fixture` (first failing test)
 
 **Files:**
-- Create: `apps/api/src/text.ts`, `src/errors.ts`, `src/defaults.ts`, `src/routes/types.ts`, `src/routes/define.ts`, `src/routes/shared.ts`, `src/read/usage.ts`, `src/routes/system.ts`, `src/routes/index.ts`, `src/middleware/auth.ts`, `src/middleware/headers.ts`, `src/middleware/hardening.ts`, `src/static.ts`, `src/app.ts`, `src/bootstrap/paths.ts`, `src/bootstrap/lock.ts`, `src/bootstrap/seed.ts`, `src/bootstrap/app.ts`, `src/bootstrap/start.ts`
+- Create: `apps/api/src/text.ts`, `src/errors.ts`, `src/defaults.ts`, `src/routes/types.ts`, `src/routes/define.ts`, `src/routes/shared.ts`, `src/read/usage.ts`, `src/routes/system.ts`, `src/routes/index.ts`, `src/middleware/auth.ts`, `src/middleware/headers.ts`, `src/middleware/hardening.ts`, `src/static.ts`, `src/app.ts`, `src/bootstrap/errors.ts`, `src/bootstrap/paths.ts`, `src/bootstrap/lock.ts`, `src/bootstrap/seed.ts`, `src/bootstrap/app.ts`, `src/bootstrap/start.ts`
 - Modify: `apps/api/package.json`, `apps/api/src/bootstrap/tool.ts`
 - Test: `apps/api/test/bootstrap/app.spawn.test.ts`, `apps/api/test/defaults.test.ts`
 
 **Interfaces:**
 - Consumes: `loadConfigFromEnv`, `InvalidConfigError`, `collectSecrets`, `buildPorts`, `createLogger`, `safeMessage`, `EXIT`, `dataDirRefusal`, `backupBeforeMigrations` (WP4b); `fixtureProvider` (WP4); `readOnlyLockState`, `AppLock`, `HEARTBEAT_INTERVAL_MS`, `seedAirports`, `loadAirportsDataset`, `sanityCheckAirports`, `RowRejected`, `MIGRATIONS_DIR`, `AIRPORTS_DATA_DIR`, `CalendarPriceInsert` (WP3); `createEngine`, `LogNotifier` (WP7); `budgetScopeLabel`, `microGbpToPence`, `DEFAULT_DISCOVERY_REFRESH_HOURS`, the system schemas (core).
-- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `MAX_BODY_BYTES`, `route`, `plain`, `NO_INPUT`, `oneAtATime`, `ApiError`, `envelope`, `fieldsDetail`, `issuesToFields`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `windowScope`, `budgetScopes`, the middleware of spec §4, `bootApp`, `assertAuthInvariants`, `BootError`, `main`, `waitForLockFree`, `LockRefusedError`, `LockUnreadableError`, `seedIfNeeded`, `assetPaths`; routes `GET /api/health` (both shapes), `GET /api/airports`, `GET /api/providers`, `GET /api/budget`, `GET /api/scheduler/jobs`.
+- Produces: `createApp` (non-strict mounting; Task 8.15 makes it strict), `MAX_BODY_BYTES`, `route`, `plain`, `NO_INPUT`, `oneAtATime`, `ApiError`, `envelope`, `fieldsDetail`, `issuesToFields`, `API_TEXT`, `defaultDefinitionInput`, `usageOf`, `providerScopes`, `budgetScopes`, the middleware of spec §4, `bootApp`, `assertAuthInvariants`, `BootError` (the one refusal class, `bootstrap/errors.ts`), `main`, `waitForLockFree`, `seedIfNeeded`, `assetPaths`; routes `GET /api/health` (both shapes), `GET /api/airports`, `GET /api/providers`, `GET /api/budget`, `GET /api/scheduler/jobs`.
 
 The bootstrap cannot boot without its ports, its middleware and at least one route, so this task builds them together; Tasks 8.2–8.8 then pin each behaviour with its own tests and mutations.
 
 **Plan preset** (spec §8.2, §11), used by `GET /api/providers` `presets` and by `POST /api/definitions` with no body (Task 8.9): Travelpayouts discovery when configured; SearchApi in both stages only on the `40usd` plan (the `trial` credits are for the spike and smoke, spec §2 fact 7); the fixture provider in both stages when the gate admits it; `maxCells 10, topN 10, expandTop 2, bookingLinks true`; budget from `EXECUTION_MAX_*`; each discovery provider's refresh core's `DEFAULT_DISCOVERY_REFRESH_HOURS` (168, decision 21); no airports; `enabled: false`; schedule `0 5 * * 1` in `SCHEDULER_TIMEZONE`.
 
-**Boot order** (decision 53; spec §7; decision 32 reuses WP4b's preflight): refuse `NODE_ENV=test` (70) → `assertAuthInvariants` on the injected config, the same rules `loadConfigFromEnv` enforces, so no caller of `bootApp` can serve without auth on a public bind, with an empty `ALLOWED_HOSTS` or a short password (78; `ALLOW_UNAUTHENTICATED=true` is accepted with a warning) → `dataDirRefusal` (73) → `waitForLockFree`: `app_lock` read read-only with WP3's `readOnlyLockState`, as the record tool does, polling every second while it is fresh — up to 60 s for a tool, 90 s for another app, logging the holder and the lock's age every 10 s — then 75; an unreadable file is 73 → `backupBeforeMigrations` when migrations are pending on an existing file (73 when the backups path is unusable, 74 when the backup fails) → `buildPorts` (migrations) → `seedIfNeeded` (shared with the tool bootstrap) → `sanityCheckAirports` over the airports of enabled definitions (1) → `lock.acquire({ waitMs: 0 })`, which also catches a process that took the lock since the read-only check (75) → heartbeat every `HEARTBEAT_INTERVAL_MS` with a plain `setInterval(...).unref()`, its failure logged rather than thrown (a throw inside a timer would kill the process with executions running) → `createEngine({ ...ports, notifiers: [new LogNotifier(log)] })` (WP11 adds `{ alerts: runAlerts }`) → `engine.boot()` → `createApp` → serve. Anything that throws after the lock is taken clears the heartbeat, releases the lock and closes the database before rethrowing (review arch-008). `close()`: stop accepting → `engine.shutdown()` → clear the heartbeat → `wal_checkpoint(TRUNCATE)` → `lock.release()` → `db.close()`. Every exit code is WP4b's `EXIT` table.
+**Boot order** (decisions 53, 58; spec §7; decision 32 reuses WP4b's preflight): refuse `NODE_ENV=test` (70) → `assertAuthInvariants` on the injected config, the same rules `loadConfigFromEnv` enforces, so no caller of `bootApp` can serve without auth on a public bind, with an empty `ALLOWED_HOSTS` or a short password (78; `ALLOW_UNAUTHENTICATED=true` is accepted with a warning) → `dataDirRefusal` (73) → `waitForLockFree`: `app_lock` read read-only with WP3's `readOnlyLockState`, as the record tool does, polling every second while it is fresh — up to 60 s for a tool, 90 s for another app, logging the holder and the lock's age every 10 s — then 75; an unreadable file is 73 (both a `BootError`, the one refusal class every step throws, so `start.ts` reads one `exitCode`) → `backupBeforeMigrations` when migrations are pending on an existing file (73 when the backups path is unusable, 74 when the backup fails) → `buildPorts` (migrations) → `lock.acquire({ waitMs: 0 })` right away, as the tool bootstrap takes it, which also catches a process that took the lock since the read-only check (75) → heartbeat every `HEARTBEAT_INTERVAL_MS` with a plain `setInterval(...).unref()`, its failure logged rather than thrown (a throw inside a timer would kill the process with executions running) → `seedIfNeeded` (shared with the tool bootstrap) and `sanityCheckAirports` over the airports of enabled definitions (1), both under the lock, so an app and a tool starting together never both seed (decision 58) → `createEngine({ ...ports, notifiers: [new LogNotifier(log)] })` (WP11 adds `{ alerts: runAlerts }`) → `engine.boot()` → `createApp` → serve. Anything that throws after `buildPorts` clears the heartbeat, releases the lock (WP3's `release` deletes only the row this `AppLock` acquired, so a refused acquire leaves the holder's lock alone) and closes the database before rethrowing (review arch-008). `close()`: stop accepting → `engine.shutdown()` → clear the heartbeat → `wal_checkpoint(TRUNCATE)` → `lock.release()` → `db.close()`. Every exit code is WP4b's `EXIT` table.
+
+**One in-flight guard** (decisions 54, 58): `oneAtATime(ctx, key, fn, busy?)` over `RouteContext.busy`; a second request under a key that is awaiting is refused with `busy()` (429 `already_running` by default). Keys: the definition id for run, resume and verify; `coverage-check`; `tool` for the record tool with its contract's 409 `tool_busy`. The estimates are synchronous, so nothing can run beside them and they take no guard.
 
 **One validation per request** (decision 54). Each handler is `route({ request, query }, run)` over its ROUTES entry's own schema objects (`NO_INPUT`, `z.undefined()`, for an input the route does not take; `plain(run)` for neither). `createApp` reads the raw body as text (an empty body is `undefined`; text that is not JSON is the 400 `validation` envelope with `API_TEXT.malformedJson`), the query record and the path parameters, and the handler parses the body and the query once, answering a refusal with the 400 envelope and `details.fields`. Binding the schemas to the handler keeps the parsed types without a cast (`pnpm casts`, decision 48), and `createApp` refuses a handler whose schemas are not its entry's own objects.
 
-**Hardening** (spec §4, decision 54): headers on everything → Host (exempting the public `GET /api/health`; the rejection names the header value and `ALLOWED_HOSTS`, and the allowed values go to the log only) → `Origin` → auth → on `/api/*`: `bodyLimit` at `MAX_BODY_BYTES` = 64 KiB (413 `body_too_large`), `Cache-Control: no-store`, then JSON and `X-Requested-With` on mutating calls. No CORS middleware: the SPA is same-origin. The failed-auth limiter is per client IP only, 5 failures a minute; a request whose IP is unknown (no socket under `app.request()`, no trusted proxy) shares one `UNKNOWN_IP` bucket; a valid credential is accepted before the limiter is consulted, so the limit slows guessing and never locks out the operator. With auth off, health detail is shown only to an allowed Host (a DNS-rebound page cannot read it, review SEC-2).
+**Hardening** (spec §4, decisions 54, 58): `Cache-Control: no-store` first on `/api/*`, set after the rest of the chain returns, so every API response carries it, the 401, 403, 413 and 429 refusals included → headers on everything → Host (exempting the public `GET /api/health`; the rejection names the header value and `ALLOWED_HOSTS`, and the allowed values go to the log only) → `Origin` → auth → on `/api/*`: `bodyLimit` at `MAX_BODY_BYTES` = 64 KiB (413 `body_too_large`), then JSON and `X-Requested-With` on mutating calls. No CORS middleware: the SPA is same-origin. The failed-auth limiter is per client IP only, 5 failures a minute; a request whose IP is unknown (no socket under `app.request()`, no trusted proxy) shares one `UNKNOWN_IP` bucket; a valid credential is accepted before the limiter is consulted, so the limit slows guessing and never locks out the operator. The limiter's memory is bounded by age and by size: past 10 000 source addresses the least recently failing one is dropped in constant time (review SEC-R2-1). `TRUST_PROXY=true` is safe only when the app is reachable through the proxy alone: a client that reaches it directly can choose its `X-Forwarded-For`, which defeats any per-IP limit (WP12's operator docs carry the same sentence). With auth off, health detail is shown only to an allowed Host (a DNS-rebound page cannot read it, review SEC-2).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1762,9 +2004,7 @@ export interface RouteContext {
   ports: Ports;
   engine: Engine;
   tools: HttpToolRunners;
-  /** One tool at a time (spec §10 `/tools/*`). */
-  toolInFlight: { name: string | null };
-  /** Plan decision 54: the definitions with an estimate, coverage check, run, resume or verify in flight. */
+  /** Plan decisions 54, 58: the keys with a request in flight (`oneAtATime`): definitions, the coverage check, the tool. */
   busy: Set<string>;
 }
 /**
@@ -1875,13 +2115,22 @@ export function getLiveDefinition(ctx: RouteContext, id: string): SearchDefiniti
   return def;
 }
 
+/** The refusal of a request whose key is already in flight (decision 54): 429 `already_running`. */
+const alreadyRunning = () => new ApiError(429, 'already_running', API_TEXT.alreadyRunning);
+
 /**
- * Plan decision 54: an estimate, coverage check, run, resume or verify of one definition runs one at a time; a second
- * request while one is in flight is 429 `already_running`. `key` is the definition id, or a fixed key for the requests
- * that have none (an unsaved estimate, the coverage check).
+ * The one in-flight guard (plan decisions 54, 58): a second request under the same key while one is awaiting is refused
+ * with `busy()` — 429 `already_running` by default. Keys: the definition id for a run, resume or verify; `coverage-check`
+ * for the coverage check; `tool` for the record tool (409 `tool_busy`, its contract code). The estimates are
+ * synchronous, so they need no guard: nothing else runs while they do.
  */
-export async function oneAtATime<T>(ctx: RouteContext, key: string, fn: () => T | Promise<T>): Promise<T> {
-  if (ctx.busy.has(key)) throw new ApiError(429, 'already_running', API_TEXT.alreadyRunning);
+export async function oneAtATime<T>(
+  ctx: RouteContext,
+  key: string,
+  fn: () => T | Promise<T>,
+  busy: () => ApiError = alreadyRunning,
+): Promise<T> {
+  if (ctx.busy.has(key)) throw busy();
   ctx.busy.add(key);
   try {
     return await fn();
@@ -1922,16 +2171,6 @@ export function providerScopes(providerId: ProviderId): BudgetScope[] {
     { kind: 'provider-month', providerId },
     { kind: 'provider-lifetime', providerId },
   ];
-}
-
-/**
- * The provider window its plan counts against: lifetime for the trial, month otherwise (spec §5.3). why: the engine's own
- * mapping (`limitsOf(id).capKind`) is internal; this reads the same config field.
- */
-export function windowScope(config: Config, providerId: ProviderId): BudgetScope {
-  const kind =
-    providerLimits(config, providerId)?.window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
-  return { kind, providerId };
 }
 
 /** Every scope of the spec §8.1 pre-start check: execution scopes (when given), each provider, global. */
@@ -2170,12 +2409,16 @@ export function credentialsMatch(
  * memory: one process, one operator. why: no global bucket, because anyone who can reach the port could then keep the
  * operator out by spending it; and a correct credential always succeeds, so the limit slows guessing without ever
  * locking the operator out. A request whose IP is unknown (no socket, no trusted proxy header) shares one bucket.
+ * Memory is bounded by age and by size (review SEC-R2-1): past `maxSources` addresses the least recently failing one is
+ * dropped, in constant time, so a spray of spoofed addresses cannot grow the map or slow each failure. (With
+ * TRUST_PROXY=true a client that reaches the app directly can choose its address, which defeats any per-IP limit: that
+ * setting is safe only when the app is reachable through the proxy alone.)
  */
 export class FailedAuthLimiter {
   private readonly byIp = new Map<string, number[]>();
   constructor(
     private readonly clock: Clock,
-    private readonly limits = { perIp: 5, windowMs: 60_000 },
+    private readonly limits = { perIp: 5, windowMs: 60_000, maxSources: 10_000 },
   ) {}
 
   private now(): number {
@@ -2200,9 +2443,20 @@ export class FailedAuthLimiter {
 
   recordFailure(ip: string): void {
     const now = this.now();
-    this.byIp.set(ip, [...this.recent(ip, now), now]);
-    // why: bound memory under a spray of source addresses.
-    if (this.byIp.size > 10_000) for (const k of [...this.byIp.keys()]) this.recent(k, now);
+    const list = [...this.recent(ip, now), now];
+    // why: delete then set, so the Map's insertion order is least recently failing first, and eviction takes the head.
+    this.byIp.delete(ip);
+    this.byIp.set(ip, list);
+    while (this.byIp.size > this.limits.maxSources) {
+      const oldest = this.byIp.keys().next().value;
+      if (oldest === undefined) break;
+      this.byIp.delete(oldest);
+    }
+  }
+
+  /** How many source addresses the limiter is holding (tests). */
+  get sources(): number {
+    return this.byIp.size;
   }
 }
 
@@ -2455,7 +2709,6 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
     ports,
     engine,
     tools: options.tools ?? {},
-    toolInFlight: { name: null },
     busy: new Set(),
   };
   const app = new Hono<AppEnv>();
@@ -2464,8 +2717,9 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
   const publicKeys = publicRouteKeys(routes);
   const isPublic = (c: Context<AppEnv>) => publicKeys.has(`${c.req.method} ${c.req.path}`);
   // why: ROUTES paths carry /api, so the public key is 'GET /api/health'.
-  // Order (spec §4): headers on everything → Host → Origin → auth → body size, JSON + X-Requested-With and no-store
-  // on API calls.
+  // Order (spec §4, decision 58): no-store first on API calls, so every API response carries it — the 401, 403, 413 and
+  // 429 refusals included → headers on everything → Host → Origin → auth → body size, JSON + X-Requested-With.
+  app.use(`${API_PREFIX}/*`, noStore());
   app.use('*', securityHeaders());
   app.use('*', hostAllowlist(ports.config, isPublic, ports.log));
   app.use('*', originCheck(ports.config, isPublic));
@@ -2485,7 +2739,6 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
       onError: (c) => c.json(envelope('body_too_large', API_TEXT.bodyTooLarge), 413),
     }),
   );
-  app.use(`${API_PREFIX}/*`, noStore());
   app.use(`${API_PREFIX}/*`, mutatingRequestCheck());
   for (const route of routes) {
     const key = `${route.method} ${route.path}`;
@@ -2512,6 +2765,21 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
   }
   if (options.webRoot) mountStatic(app, options.webRoot);
   return app;
+}
+```
+
+`apps/api/src/bootstrap/errors.ts` (new file):
+
+```ts
+/** The one boot-refusal error (plan decision 58): the app bootstrap and the lock wait throw it; start.ts exits with its code. */
+export class BootError extends Error {
+  /** The plan's single exit-code table (`EXIT`): 70, 73, 74, 75, 78; 1 for anything else. */
+  readonly exitCode: number;
+  constructor(message: string, exitCode: number) {
+    super(message);
+    this.name = 'BootError';
+    this.exitCode = exitCode;
+  }
 }
 ```
 
@@ -2555,6 +2823,7 @@ import type { Clock, Logger, Secret } from '@gmt/core';
 import { readOnlyLockState } from '@gmt/db';
 import { safeMessage } from '../safeMessage.js';
 import { EXIT } from '../tools/types.js';
+import { BootError } from './errors.js';
 
 /** Spec §7: a fresh tool lock makes the app wait up to 60 s, then refuse. */
 export const TOOL_LOCK_WAIT_MS = 60_000;
@@ -2565,24 +2834,6 @@ export const TOOL_LOCK_WAIT_MS = 60_000;
 export const APP_LOCK_WAIT_MS = 90_000;
 export const LOCK_POLL_MS = 1_000;
 const LOG_EVERY_MS = 10_000;
-
-/** A lock refusal; exit code 75 in the plan's table. */
-export class LockRefusedError extends Error {
-  readonly exitCode = EXIT.lockRefused;
-  constructor(message: string) {
-    super(message);
-    this.name = 'LockRefusedError';
-  }
-}
-
-/** The lock could not be read at all (not a database, unreadable file); exit code 73, as the tool bootstrap has it. */
-export class LockUnreadableError extends Error {
-  readonly exitCode = EXIT.preflightImpossible;
-  constructor(message: string) {
-    super(message);
-    this.name = 'LockUnreadableError';
-  }
-}
 
 export interface LockWaitDeps {
   databasePath: string;
@@ -2611,8 +2862,9 @@ export async function waitForLockFree(d: LockWaitDeps): Promise<void> {
     try {
       state = readOnlyLockState(d.databasePath, d.clock);
     } catch (e) {
-      throw new LockUnreadableError(
+      throw new BootError(
         `cannot read app_lock in ${d.databasePath}: ${safeMessage(e, d.secrets)}; refusing (spec §7)`,
+        EXIT.preflightImpossible,
       );
     }
     if (state.state !== 'fresh') return;
@@ -2623,10 +2875,11 @@ export async function waitForLockFree(d: LockWaitDeps): Promise<void> {
     // why: strictly past the limit: WP3 calls a lock fresh up to and including 90 s, so a crashed app's lock taken as
     // the wait began turns stale on the next poll after 90 s, not on the poll at 90 s.
     if (waited > limit)
-      throw new LockRefusedError(
+      throw new BootError(
         state.holder === 'tool'
           ? `app_lock is held by a tool process (heartbeat ${seconds(lockAgeMs)}s ago); waited ${seconds(waited)}s; start the app when the tool has finished`
           : `app_lock is held by another app process that is still heartbeating (${seconds(lockAgeMs)}s ago); refusing to start a second app`,
+        EXIT.lockRefused,
       );
     if (waited - lastLogAt >= LOG_EVERY_MS) {
       d.log.warn({ holder: state.holder, lockAgeMs, waitedMs: waited }, 'waiting for app_lock');
@@ -2661,10 +2914,10 @@ export function seedIfNeeded(ports: Ports, dataDir: string, report: (line: strin
 ```ts
 /**
  * The app bootstrap (spec §4, §5.5, §7, §12, §13): the process that serves the API and the SPA and runs the engine.
- * Order (plan "Wiring and bootstraps", decision 53): refuse NODE_ENV=test → re-assert the auth invariants → data
+ * Order (plan "Wiring and bootstraps", decisions 53, 58): refuse NODE_ENV=test → re-assert the auth invariants → data
  * directory writable → `app_lock` read-only, waiting while it is fresh → backup preflight when migrations are pending
- * (WP4b's preflight.ts, decision 32) → buildPorts (migrations) → seed + airport sanity check → `AppLock('app')` and the
- * 30 s heartbeat → createEngine → engine.boot() → serve. Shutdown: stop accepting → engine.shutdown() →
+ * (WP4b's preflight.ts, decision 32) → buildPorts (migrations) → `AppLock('app')` and the 30 s heartbeat → seed +
+ * airport sanity check under the lock (as the tool bootstrap seeds) → createEngine → engine.boot() → serve. Shutdown: stop accepting → engine.shutdown() →
  * wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order). A boot that fails after taking the lock releases
  * it and stops the heartbeat before the database closes.
  */
@@ -2679,20 +2932,11 @@ import type { AppEnv, HttpToolRunners } from '../routes/types.js';
 import { safeMessage } from '../safeMessage.js';
 import { EXIT } from '../tools/types.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
-import { LockRefusedError, waitForLockFree } from './lock.js';
+import { BootError } from './errors.js';
+import { waitForLockFree } from './lock.js';
 import { type AssetPaths, assetPaths } from './paths.js';
 import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
 import { seedIfNeeded } from './seed.js';
-
-/** A boot refusal: logged with its message; start.ts exits with `exitCode` (the plan's single exit-code table). */
-export class BootError extends Error {
-  readonly exitCode: number;
-  constructor(message: string, exitCode: number) {
-    super(message);
-    this.name = 'BootError';
-    this.exitCode = exitCode;
-  }
-}
 
 export interface BootDeps {
   config: Config;
@@ -2783,17 +3027,13 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   const lock = new AppLock(ports.db, 'app', clock, log);
   let heartbeat: NodeJS.Timeout | null = null;
   try {
-    seedIfNeeded(ports, deps.assets.airportsDataDir, (line) => log.info({}, line));
-    // Spec §7: at least 5,000 airports with tz, and every airport an enabled definition references exists.
-    const referenced = ports.repos.definitions
-      .list()
-      .filter((d) => d.enabled)
-      .flatMap((d) => [...d.origins, ...d.destinations]);
-    const sanity = sanityCheckAirports(ports.db, referenced);
-    if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`, EXIT.failed);
-    // why: the read-only wait found the lock free; a process that took it since is caught here, without a second wait.
+    // why: plan decision 58: the lock is taken right after the migrations, as the tool bootstrap takes it, so airports are
+    // seeded under it. The read-only wait found it free; a process that took it since is caught here, without a wait.
     if (lock.acquire({ waitMs: 0 }) === 'refused')
-      throw new LockRefusedError('app_lock was taken by another process during boot; refusing to start');
+      throw new BootError(
+        'app_lock was taken by another process during boot; refusing to start',
+        EXIT.lockRefused,
+      );
     heartbeat = setInterval(() => {
       try {
         lock.heartbeat();
@@ -2803,6 +3043,14 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
       }
     }, HEARTBEAT_INTERVAL_MS);
     heartbeat.unref();
+    seedIfNeeded(ports, deps.assets.airportsDataDir, (line) => log.info({}, line));
+    // Spec §7: at least 5,000 airports with tz, and every airport an enabled definition references exists.
+    const referenced = ports.repos.definitions
+      .list()
+      .filter((d) => d.enabled)
+      .flatMap((d) => [...d.origins, ...d.destinations]);
+    const sanity = sanityCheckAirports(ports.db, referenced);
+    if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`, EXIT.failed);
     // why: WP11 adds `{ alerts: runAlerts }` to these options; until then the engine's default noAlerts step runs.
     const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
     await engine.boot();
@@ -2832,6 +3080,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     // why: review arch-008: a boot that failed after the lock was taken must not leave it fresh for 90 s or a heartbeat
     // firing against a closed database.
     if (heartbeat !== null) clearInterval(heartbeat);
+    // why: WP3's release deletes only the row this AppLock acquired, so a refused acquire leaves the holder's lock alone.
     lock.release();
     ports.db.close();
     throw err;
@@ -2883,18 +3132,14 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
 /** The app process entry (`pnpm --filter @gmt/api start`, `dev`, and the WP12 image CMD). The one process.env read. */
 import { safeMessage } from '../safeMessage.js';
 import { EXIT } from '../tools/types.js';
-import { BootError, main } from './app.js';
-import { LockRefusedError, LockUnreadableError } from './lock.js';
+import { main } from './app.js';
+import { BootError } from './errors.js';
 
 main(process.env).catch((err: unknown) => {
   // why: boot errors are already URL- and secret-free; a stray error is stripped of URLs here before it is printed.
   process.stderr.write(`${safeMessage(err, [])}\n`);
-  // why: BootError and the lock errors carry the plan's exit code (70, 73, 74, 75, 78); anything else is 1.
-  process.exit(
-    err instanceof BootError || err instanceof LockRefusedError || err instanceof LockUnreadableError
-      ? err.exitCode
-      : EXIT.failed,
-  );
+  // why: a BootError carries the plan's exit code (70, 73, 74, 75, 78); anything else is 1.
+  process.exit(err instanceof BootError ? err.exitCode : EXIT.failed);
 });
 ```
 
@@ -2918,7 +3163,7 @@ git add -A apps/api packages && git commit -m "wp08: the app bootstrap with deci
 **Interfaces:**
 - Consumes: `bootApp`, `createApp` (Task 8.1); `buildPorts` under `NODE_ENV=test` and `:memory:`, `loadConfigFromEnv`, `cleanEnv`, `SENTINEL_AUTH` (WP4b); `createEngine`, `LogNotifier` (WP7); `fixtureProvider` (WP4); the vendored airports files under `AIRPORTS_DATA_DIR` (WP3). Produces (test-only): `createHarness`, `Harness`, `harnessEnv`, `captureLines`, `basic`, `T0`, `HOST`, `AUTH_USER` — real ports over an in-memory database seeded with the London and New York metro members only (review TS-4: each route test builds a harness in milliseconds instead of loading the full airports table; boot tests seed the full table and name their own `BOOT_TIMEOUT_MS`), the engine, the fixture provider reached in-process through http-kit's gated `inProcessHosts` seam, the app driven with `app.request()`, and an `afterEach` that closes every harness a test opened, idempotently, so no file leaks a database on a failure path (review TS-8); `expectContract(res, method, path, schema)` (parses the body against its ROUTES entry and returns it typed, so no test casts a body), `expectEnvelopeOrContract`, `errorOf`; `exampleDefinitionInput`, `SMALL_WINDOW`, `LHR`, `LGW`, `JFK`, `EWR`.
 
-Rules (spec §5.5, §4, §7; review TS-5): the gate decides whether `fixture` is offered, through `GET /api/providers` and the ports alike, for production with and without the phrase, development in and out of a container, the wrong phrase, and a plain `.db` path; outside the gate the fixture constructor throws; `NODE_ENV=test` is refused before the database is touched (70); `bootApp` re-asserts the auth invariants on an injected config (78) and accepts `ALLOW_UNAUTHENTICATED=true` with a warning; config refuses no auth on a public bind and a half-set credential pair; an unwritable data directory is 73; a password under 12 characters is a config error naming `APP_BASIC_AUTH_PASS`; a failed airport sanity check fails boot (1). Task 8.9 adds the matrix row that needs the definitions route.
+Rules (spec §5.5, §4, §7; review TS-5): the gate decides whether `fixture` is offered, through `GET /api/providers` and the ports alike, for production with and without the phrase, development in and out of a container, the wrong phrase, and a plain `.db` path; outside the gate the fixture constructor throws; `NODE_ENV=test` is refused before the database is touched (70); `bootApp` re-asserts the auth invariants on an injected config — a public bind without auth, an empty `ALLOWED_HOSTS`, a password under 12 characters (review SEC-R2-2) — with 78, and accepts `ALLOW_UNAUTHENTICATED=true` with a warning; config refuses no auth on a public bind and a half-set credential pair; an unwritable data directory is 73; a password under 12 characters is a config error naming `APP_BASIC_AUTH_PASS`; a failed airport sanity check fails boot (1). Task 8.9 adds the matrix row that needs the definitions route.
 
 - [ ] **Step 1: Write the test**
 
@@ -3178,7 +3423,7 @@ export function exampleDefinitionInput(overrides: Partial<DefinitionInput> = {})
 // Spec §5.5 injected-config boot matrix; spec §4 password length and auth invariants; spec §7 the airport sanity check.
 import { chmodSync, copyFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { apiContract, FIXTURE_OPT_IN_PHRASE, systemClock } from '@gmt/core';
+import { apiContract, FIXTURE_OPT_IN_PHRASE, Secret, systemClock } from '@gmt/core';
 import { fixtureProvider } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -3306,7 +3551,7 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
     expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: '' }))).toThrow(/APP_BASIC_AUTH_PASS/);
   });
 
-  it('bootApp re-asserts them on an injected config (78), and accepts the explicit flag with a warning', async () => {
+  it('bootApp re-asserts them on an injected config (78): public bind, no host, short password; the explicit flag warns', async () => {
     const env = envFor({ APP_BASIC_AUTH_USER: '', APP_BASIC_AUTH_PASS: '' });
     const loopback = loadConfigFromEnv(env);
     const forged = { ...loopback, bindAddress: '0.0.0.0' };
@@ -3319,6 +3564,10 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
       });
     await expect(boot(forged)).rejects.toMatchObject({ exitCode: 78 });
     await expect(boot({ ...loopback, allowedHosts: [] })).rejects.toMatchObject({ exitCode: 78 });
+    // why: review SEC-R2-2: the short-password branch on an injected config, which loadConfigFromEnv never builds
+    await expect(
+      boot({ ...loopback, auth: { user: 'operator', pass: new Secret('elevenchars') } }),
+    ).rejects.toMatchObject({ exitCode: 78, message: expect.stringMatching(/APP_BASIC_AUTH_PASS/) });
     const lines: string[] = [];
     const running = await boot({ ...forged, allowUnauthenticated: true }, lines);
     await running.close();
@@ -3366,7 +3615,7 @@ Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.matrix.test.ts` 
   with nothing.
   Fails: “refuses NODE_ENV=test before touching the database (exit 70)”.
 
-- **8.2b**: in `apps/api/src/bootstrap/app.ts` delete the line `assertAuthInvariants(config, log);`. Fails: “bootApp re-asserts them on an injected config (78), and accepts the explicit flag with a warning”.
+- **8.2b**: in `apps/api/src/bootstrap/app.ts` delete the line `assertAuthInvariants(config, log);`. Fails: “bootApp re-asserts them on an injected config (78): public bind, no host, short password; the explicit flag warns”.
 
 - [ ] **Step 3: Implement**
 
@@ -3889,10 +4138,12 @@ Run: `pnpm --filter @gmt/api exec vitest run test/bootstrap/app.shutdown.test.ts
 
   Fails: “heartbeats every 30 s and shuts down: engine → checkpoint → release lock → close”.
 
-- **8.5b**: in `apps/api/src/bootstrap/app.ts` replace
+- **8.5b**: in `apps/api/src/bootstrap/app.ts` delete the line `if (heartbeat !== null) clearInterval(heartbeat);`. Fails: “a boot that fails after taking the lock releases it and stops the heartbeat (review arch-008)”.
+
+- **8.5c**: in `apps/api/src/bootstrap/app.ts` replace
 
 ```ts
-    if (heartbeat !== null) clearInterval(heartbeat);
+    // why: WP3's release deletes only the row this AppLock acquired, so a refused acquire leaves the holder's lock alone.
     lock.release();
 ```
 
@@ -3922,7 +4173,7 @@ git add -A apps/api packages && git commit -m "wp08: shutdown order (checkpoint 
 **Interfaces:**
 - Consumes: the harness and contract helpers (Task 8.2), `MAX_BODY_BYTES` (Task 8.1), `apiContract.ROUTES`, `errorEnvelopeSchema` (core).
 
-Rules (spec §4; decision 54; reviews SEC-1, SEC-6, SEC-8): headers on every response including 401 and 404; Host checked before auth, the public `GET /api/health` exempt, and the rejection names the value and the variable but no allowed host (those go to the log); `Origin`, when present, must name an allowed host; mutating API calls need JSON (415 otherwise) and `X-Requested-With: get-me-there` (403); a body over 64 KiB is 413 `body_too_large` before any parse; every API response is `Cache-Control: no-store`; none carries an `Access-Control-*` header and a preflight is never approved.
+Rules (spec §4; decisions 54, 58; reviews SEC-1, SEC-6, SEC-8): headers on every response including 401 and 404; `Cache-Control: no-store` on every API response, the 401, the Host and Origin 403s and the 413 included (the 429 is pinned in Task 8.7); Host checked before auth, the public `GET /api/health` exempt, and the rejection names the value and the variable but no allowed host (those go to the log); `Origin`, when present, must name an allowed host; mutating API calls need JSON (415 otherwise) and `X-Requested-With: get-me-there` (403); a body over 64 KiB is 413 `body_too_large` before any parse; every API response is `Cache-Control: no-store`; none carries an `Access-Control-*` header and a preflight is never approved.
 
 - [ ] **Step 1: Write the test**
 
@@ -4060,6 +4311,15 @@ describe('body size, caching and cross-origin (reviews SEC-1, SEC-8)', () => {
         path,
       ).toEqual([]);
     }
+    // decision 58: the refusals too, which return before any route runs (the 429 is pinned in auth.test.ts)
+    const refusals = await Promise.all([
+      h.request('/api/providers', { auth: false }),
+      h.request('/api/providers', { headers: { host: 'evil.example:3000' } }),
+      h.request('/api/providers', { headers: { origin: 'https://evil.example' } }),
+      h.request('/api/definitions/estimate', { method: 'POST', body: 'x'.repeat(MAX_BODY_BYTES + 1) }),
+    ]);
+    expect(refusals.map((r) => r.status)).toEqual([401, 403, 403, 413]);
+    for (const r of refusals) expect(r.headers.get('cache-control'), String(r.status)).toBe('no-store');
     const preflight = await h.request('/api/definitions', {
       method: 'OPTIONS',
       csrf: false,
@@ -4098,7 +4358,7 @@ API_TEXT.hostRejected(shown)
 
   Fails: “rejects an unknown Host naming the value and the variable, never the allowed hosts, before auth”.
 
-- **8.6c**: in `apps/api/src/app.ts` replace `      maxSize: MAX_BODY_BYTES,` with `      maxSize: MAX_BODY_BYTES * 4,`. Fails: “a body over MAX_BODY_BYTES is 413 before it is parsed”.
+- **8.6c**: in `apps/api/src/app.ts` replace `      maxSize: MAX_BODY_BYTES,` with `      maxSize: MAX_BODY_BYTES * 4,`. Fails: “a body over MAX_BODY_BYTES is 413 before it is parsed”; “every API response is no-store; none carries an Access-Control header, and a preflight is not approved”.
 
 - **8.6d**: in `apps/api/src/app.ts` replace
 
@@ -4132,7 +4392,7 @@ git add -A apps/api packages && git commit -m "wp08: security header, request ha
 **Interfaces:**
 - Consumes: `basicAuthGate`, `FailedAuthLimiter`, `clientIpFrom`, `UNKNOWN_IP`, `mountStatic` (Task 8.1); the harness (Task 8.2).
 
-Rules (spec §4, decision 54, review SEC-4): a wrong credential is refused with 429 (`auth_rate_limited`, `Retry-After`) while its client IP has 5 failures in the last minute; a correct credential is always accepted, from any IP; there is no global bucket, so failures spread over many addresses never refuse another; a wrong password counts on every route, the public `/health` included (so it cannot probe passwords), but a request without credentials is never counted. The client IP is the last `X-Forwarded-For` entry only when `TRUST_PROXY=true`, else the socket address; with neither, every request shares the `UNKNOWN_IP` bucket. Static files need auth; SPA paths fall back to `index.html`; `/api/*` never does.
+Rules (spec §4, decisions 54, 58; reviews SEC-4, SEC-R2-1): the limiter holds at most `maxSources` addresses, dropping the least recently failing one, so a spray of addresses neither grows it nor slows each failure; a wrong credential is refused with 429 (`auth_rate_limited`, `Retry-After`) while its client IP has 5 failures in the last minute; a correct credential is always accepted, from any IP; there is no global bucket, so failures spread over many addresses never refuse another; a wrong password counts on every route, the public `/health` included (so it cannot probe passwords), but a request without credentials is never counted. The client IP is the last `X-Forwarded-For` entry only when `TRUST_PROXY=true`, else the socket address; with neither, every request shares the `UNKNOWN_IP` bucket. Static files need auth; SPA paths fall back to `index.html`; `/api/*` never does.
 
 - [ ] **Step 1: Write the test**
 
@@ -4142,13 +4402,15 @@ Rules (spec §4, decision 54, review SEC-4): a wrong credential is refused with 
 // Spec §4 basic auth, the failed-auth rate limit, auth over static files, the SPA fallback.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fixedClock } from '@gmt/core';
 import type { Context } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { FailedAuthLimiter } from '../../src/middleware/auth.js';
 import type { AppEnv } from '../../src/routes/types.js';
 import { errorOf } from '../helpers/contract.js';
 import { SENTINEL_AUTH } from '../helpers/env.js';
-import { AUTH_USER, basic, createHarness, type Harness } from '../helpers/harness.js';
+import { AUTH_USER, basic, createHarness, type Harness, T0 } from '../helpers/harness.js';
 import { tempDir } from '../helpers/tmp.js';
 
 const WRONG = basic(AUTH_USER, 'wrong-password-000');
@@ -4202,6 +4464,7 @@ describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
     expect(blocked.status).toBe(429);
     expect((await errorOf(blocked)).code).toBe('auth_rate_limited');
     expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(blocked.headers.get('cache-control')).toBe('no-store'); // decision 58: refusals are no-store too
     // why: decision 54: the limit slows guessing; it never locks out the operator, who knows the password
     expect(await as(x, RIGHT, '203.0.113.7')).toBe(200);
     expect(await as(x, WRONG, '203.0.113.8')).toBe(401);
@@ -4223,6 +4486,19 @@ describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
     for (let i = 0; i < 40; i++) await as(x, WRONG, `198.51.100.${i}`);
     expect(await as(x, WRONG, '192.0.2.1')).toBe(401);
     expect(await as(x, RIGHT, '192.0.2.1')).toBe(200);
+  });
+
+  it('holds at most maxSources addresses, dropping the least recently failing one (review SEC-R2-1)', () => {
+    const clock = fixedClock(T0);
+    const limiter = new FailedAuthLimiter(clock, { perIp: 2, windowMs: 60_000, maxSources: 3 });
+    for (const ip of ['a', 'b', 'c']) limiter.recordFailure(ip);
+    limiter.recordFailure('a'); // a is now the most recent
+    expect(limiter.retryAfterSeconds('a')).not.toBeNull();
+    limiter.recordFailure('d'); // evicts b, the least recently failing
+    expect(limiter.sources).toBe(3);
+    for (let i = 0; i < 100; i++) limiter.recordFailure(`spray-${i}`);
+    expect(limiter.sources).toBe(3);
+    expect(limiter.retryAfterSeconds('a')).toBeNull(); // evicted by the spray: forgotten, never grown
   });
 
   it('TRUST_PROXY=true keys on the last X-Forwarded-For entry', async () => {
@@ -4322,6 +4598,8 @@ Run: `pnpm --filter @gmt/api exec vitest run test/routes/auth.test.ts` once per 
 
   Fails: “5 failures from one IP limit that IP for a minute, not others; a correct credential always succeeds”.
 
+- **8.7c**: in `apps/api/src/middleware/auth.ts` replace `    while (this.byIp.size > this.limits.maxSources) {` with `    while (this.byIp.size > this.limits.maxSources * 1000) {`. Fails: “holds at most maxSources addresses, dropping the least recently failing one (review SEC-R2-1)”.
+
 - [ ] **Step 3: Implement**
 
 Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep it.
@@ -4329,7 +4607,7 @@ Nothing beyond Task 8.1: the behaviour exists; this task's tests are what keep i
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/auth.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4549,16 +4827,16 @@ git add -A apps/api packages && git commit -m "wp08: health detail (Host-checked
 - Test: `apps/api/test/routes/definitions.test.ts`
 
 **Interfaces:**
-- Consumes: `DefinitionsRepo.create/update/get/list/softDelete/setConfirmed` (WP3, WP7); `engine.estimate`, `engine.budgetFit`, `engine.coverageCheck`, `engine.scheduler.register/unregister`, `parseCron`, `confirmationOf`, `SOFT_CONFIRM_CALL_SHARE` (WP7); `resolveWindow`, `countCells`, `daysBetween`, `validateSearchSpace` (WP1); `PENCE_TO_MICRO`, `budgetScopeLabel`; `definitionCreateOptionalSchema`, `definitionCreateRequestSchema`, `definitionUpdateRequestSchema`, `definitionResponseSchema`, `estimateResponseSchema`, `coverageCheckRequestSchema`, `coverageCheckResponseSchema` (core).
-- Produces: `isDraft`, `currentSpace`, `cellInSpace`, `airportLookup`, `definitionResponse`, `deletedResponse`, `needsConfirmation`, `confirmationRequired`, `storedCovers`, `sentCovers`, `mergeDefinition`, `inputOf`, `ZERO_BUDGET_FIT`, `syncSchedule`, `validateForSave`; routes `GET/POST /api/definitions`, `GET/PUT/DELETE /api/definitions/:id`, `POST /api/definitions/estimate`, `POST /api/definitions/:id/estimate`, `POST /api/definitions/coverage-check`.
+- Consumes: `DefinitionsRepo.create/update/get/list/softDelete/setConfirmed` (WP3, WP7); `engine.estimate`, `engine.budgetFit`, `engine.coverageCheck`, `engine.scheduler.register/unregister`, `parseCron`, `confirmationOf`, and Task 8.0's exports `confirmationNeeded`, `capKindOf`, `lineKey` (WP7); `resolveWindow`, `countCells`, `daysBetween`, `validateSearchSpace` (WP1); `PENCE_TO_MICRO`, `budgetScopeLabel`; `definitionCreateOptionalSchema`, `definitionCreateRequestSchema`, `definitionUpdateRequestSchema`, `definitionResponseSchema`, `estimateResponseSchema`, `coverageCheckRequestSchema`, `coverageCheckResponseSchema` (core).
+- Produces: `isDraft`, `currentSpace`, `cellInSpace`, `airportLookup`, `definitionResponse`, `deletedResponse`, `needsConfirmation`, `sentCovers`, `mergeDefinition`, `inputOf`, `ZERO_BUDGET_FIT`, `syncSchedule`, `validateForSave`; routes `GET/POST /api/definitions`, `GET/PUT/DELETE /api/definitions/:id`, `POST /api/definitions/estimate`, `POST /api/definitions/:id/estimate`, `POST /api/definitions/coverage-check`.
 
 **`POST /api/definitions` with no body** (spec §10, §8.2, §11): `201` with the response for a newly persisted **draft** built by `defaultDefinitionInput`: no airports, `enabled: false`, `confirmedCostPence` and `confirmedCalls` null, `estimate: null`, `budgetFit: { fits: true, runsPerMonth: 0, perScope: [] }`, `needsConfirmation: null`, `notices: [API_TEXT.draftNotice]`; no cron job is registered (Task 8.0 lets the stored shape hold it). A draft can be renamed or edited but not enabled (`422 draft_cannot_enable`), estimated (`422 draft_definition`) or run.
 
-**Confirmation** (spec §7, decisions 25, 37, 42, 43, 53, 54). A run needs one when its runnable cost (lines no cap blocks, as WP7's pre-start check sums them) is above `SOFT_CONFIRM`, or one provider's runnable calls are above WP7's `SOFT_CONFIRM_CALL_SHARE` of that provider's window cap. `needsConfirmation` is then `{ estimateMicroGbp, totalCalls, confirmedCostPence, confirmedCalls }` with the **worst-case** figures of WP7's `confirmationOf(estimate)` — every line, blocked ones included — unless the stored confirmation covers the runnable lines in pence and in calls; else null. Create and PUT bodies may carry `confirmedCostPence` and `confirmedCalls`, the operator's explicit confirmation: when both are sent and both are at least the worst-case figures, the route stores `confirmationOf(estimate)` itself with `DefinitionsRepo.setConfirmed` (so a provider back from a cap next month is still covered, and a larger figure the operator typed is not what is stored); otherwise nothing is stored. Nothing else writes them.
+**Confirmation** (spec §7, decisions 25, 37, 42, 43, 53, 54, 58). Whether a run needs one is WP7's own `confirmationNeeded(ctx, estimate, blocked, stored)`, the function a start calls: the api passes a `ConfirmationContext` over its ports (the config, the guard, each provider's `capKindOf` its plan window; the fixture provider counts monthly), the estimate's blocked lines as `lineKey`s and the stored confirmation, and keeps no copy of the rule (review arch-wp08-003). When it needs one, `needsConfirmation` is `{ estimateMicroGbp, totalCalls, confirmedCostPence, confirmedCalls }` with the **worst-case** figures of WP7's `confirmationOf(estimate)` — every line, blocked ones included; else null. Create and PUT bodies may carry `confirmedCostPence` and `confirmedCalls`, the operator's explicit confirmation: when both are sent and both are at least the worst-case figures, the route stores `confirmationOf(estimate)` itself with `DefinitionsRepo.setConfirmed` (so a provider back from a cap next month is still covered, and a larger figure the operator typed is not what is stored); otherwise nothing is stored. Nothing else writes them.
 
 **Validation** (spec §8.2, §5.5): cron by the engine's `parseCron`, the sole validator (422 `invalid_cron` with `details.fields`); every named provider must be configured (422 `unknown_provider`: a production config never offers `fixture`); a window resolving to zero cells is 422 `zero_cells`; the rest of `validateSearchSpace` is 422 `invalid_definition` with its fields; a save that turns a schedule on or changes it is refused with 422 `schedule_over_budget` while any provider-month scope of the engine's `budgetFit` does not fit, matched by `budgetScopeLabel` (review arch-011). Create, PUT, disable, enable and delete (re)register the job in the same request. PUT merges the update into the stored definition field by field (`mergeDefinition`: an absent field keeps its value, `null` is a value) and validates the merged definition, so a partial update cannot bypass a refinement. A malformed JSON body is the 400 `validation` envelope.
 
-**One at a time** (decision 54, review SEC-5): both estimates and the coverage check run inside `oneAtATime`, keyed by the definition's id, or `estimate:unsaved` and `coverage-check` for requests that name no saved definition; a second while one is in flight is 429 `already_running`.
+**One at a time** (decisions 54, 58; review SEC-5): the coverage check runs inside `oneAtATime` under the key `coverage-check`; a second while one is awaiting is 429 `already_running`. The estimates are synchronous (`engine.estimate` and `budgetFit` return at once), so no request can run beside them and they take no guard.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5017,69 +5295,54 @@ export function airportLookup(repo: AirportsRepo): AirportLookup {
 
 ```ts
 /** The definition response and the confirmation rule (spec §7, §8.1, §10; plan decisions 25, 37, 42, 43). */
-import {
-  type apiContract,
-  type BudgetFit,
-  type DefinitionInput,
-  type Estimate,
-  PENCE_TO_MICRO,
-  type ProviderId,
-  type SearchDefinition,
+import type {
+  apiContract,
+  BudgetFit,
+  DefinitionInput,
+  Estimate,
+  ProviderId,
+  SearchDefinition,
 } from '@gmt/core';
-import { confirmationOf, SOFT_CONFIRM_CALL_SHARE } from '@gmt/engine';
+import {
+  type Confirmation,
+  type ConfirmationContext,
+  capKindOf,
+  confirmationNeeded,
+  confirmationOf,
+  type LineKey,
+  lineKey,
+} from '@gmt/engine';
 import type { z } from 'zod';
 import type { RouteContext } from '../routes/types.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { isDraft } from './space.js';
-import { windowScope } from './usage.js';
+import { providerLimits } from './usage.js';
 
 export type DefinitionResponse = z.infer<typeof apiContract.definitionResponseSchema>;
 
 /** The budgetFit of a draft: nothing to search, nothing to fit. */
 export const ZERO_BUDGET_FIT: BudgetFit = { fits: true, runsPerMonth: 0, perScope: [] };
 
-/** A confirmation as stored (`confirmed_cost_pence`, `confirmed_calls`), or as sent with a create, PUT or start. */
-export interface Confirmation {
-  pence: number | null;
-  calls: number | null;
-}
-
-/** The lines a start would run (a line a budget cap blocks is left out), summed as WP7's pre-start check sums them. */
-function runnable(e: Estimate): {
-  costMicroGbp: number;
-  calls: number;
-  perProvider: Map<ProviderId, number>;
-} {
-  const lines = e.perProvider.filter((p) => p.blocked === null);
-  const perProvider = new Map<ProviderId, number>();
-  for (const p of lines) perProvider.set(p.providerId, (perProvider.get(p.providerId) ?? 0) + p.calls);
+/**
+ * WP7's own confirmation rule over the api's ports (plan decision 58): the soft-confirm threshold, the guard's caps and
+ * each provider's cap scope through the engine's `capKindOf`, so the form asks exactly when a start would be refused
+ * with `confirm`. The fixture provider has no configured limits and counts monthly, as the guard counts it.
+ */
+function confirmationContext(ports: Ports): ConfirmationContext {
   return {
-    costMicroGbp: lines.reduce((a, p) => a + p.costMicroGbp, 0),
-    calls: lines.reduce((a, p) => a + p.calls, 0),
-    perProvider,
+    config: ports.config,
+    budget: ports.budget,
+    limitsOf: (id: ProviderId) => ({
+      capKind: capKindOf(providerLimits(ports.config, id)?.window ?? 'month'),
+    }),
   };
 }
 
-/**
- * Spec §8.1, decision 25: a run needs a confirmation when its runnable cost is above SOFT_CONFIRM, or one provider's
- * runnable calls are more than WP7's `SOFT_CONFIRM_CALL_SHARE` of that provider's window cap (decision 53: the engine's
- * constant, so the form asks exactly when a start would be refused with `confirm`).
- */
-export function confirmationRequired(estimate: Estimate, ports: Ports): boolean {
-  const r = runnable(estimate);
-  if (r.costMicroGbp > ports.config.spend.softConfirmMicroGbp) return true;
-  return [...r.perProvider].some(([id, n]) => {
-    const cap = ports.budget.usage(windowScope(ports.config, id)).cap;
-    return cap !== null && n > SOFT_CONFIRM_CALL_SHARE * cap;
-  });
-}
-
-/** Decisions 37, 43: a stored confirmation covers a run only when its pence and its calls both cover the runnable lines. */
-export function storedCovers(c: Confirmation, estimate: Estimate): boolean {
-  const r = runnable(estimate);
-  return (
-    c.pence !== null && c.calls !== null && c.pence * PENCE_TO_MICRO >= r.costMicroGbp && c.calls >= r.calls
+/** The estimate lines a cap blocks today, as the engine's line keys (`Estimate.perProvider[].blocked`). */
+function blockedLines(estimate: Estimate): Set<LineKey> {
+  return new Set(
+    estimate.perProvider.filter((p) => p.blocked !== null).map((p) => lineKey(p.stage, p.providerId)),
   );
 }
 
@@ -5102,8 +5365,9 @@ export function needsConfirmation(
   estimate: Estimate,
   ports: Ports,
 ): DefinitionResponse['needsConfirmation'] {
-  if (!confirmationRequired(estimate, ports)) return null;
-  if (storedCovers({ pence: def.confirmedCostPence, calls: def.confirmedCalls }, estimate)) return null;
+  const stored: Confirmation = { pence: def.confirmedCostPence, calls: def.confirmedCalls };
+  if (confirmationNeeded(confirmationContext(ports), estimate, blockedLines(estimate), stored) === null)
+    return null;
   const worst = confirmationOf(estimate);
   return {
     estimateMicroGbp: estimate.perProvider.reduce((a, p) => a + p.costMicroGbp, 0),
@@ -5234,8 +5498,7 @@ import { NO_INPUT, plain, route } from './define.js';
 import { getLiveDefinition, oneAtATime, param } from './shared.js';
 import type { HandlerTable, RouteContext } from './types.js';
 
-/** The fixed in-flight key of the requests that name no saved definition (decision 54). */
-const UNSAVED_ESTIMATE = 'estimate:unsaved';
+/** The in-flight key of the coverage check, which names no saved definition (decision 54). */
 const COVERAGE_CHECK = 'coverage-check';
 
 /** The explicit confirmation a create or update body may carry (decisions 37, 42). */
@@ -5403,13 +5666,12 @@ export const definitionHandlers: HandlerTable = {
 
   'POST /api/definitions/estimate': route(
     { request: apiContract.definitionCreateRequestSchema, query: NO_INPUT },
-    (c, { body }, ctx) =>
-      oneAtATime(ctx, UNSAVED_ESTIMATE, () => {
-        const { confirmedCostPence: _p, confirmedCalls: _c, ...def } = body;
-        // why: the unsaved body is estimated, not scheduled, so its enabled flag and schedule fit do not matter here.
-        validateForSave({ ...def, enabled: false }, ctx, null);
-        return c.json(estimateResponse(def, ctx));
-      }),
+    (c, { body }, ctx) => {
+      const { confirmedCostPence: _p, confirmedCalls: _c, ...def } = body;
+      // why: the unsaved body is estimated, not scheduled, so its enabled flag and schedule fit do not matter here.
+      validateForSave({ ...def, enabled: false }, ctx, null);
+      return c.json(estimateResponse(def, ctx));
+    },
   ),
 
   'GET /api/definitions/:id': plain((c, input, ctx) =>
@@ -5442,7 +5704,7 @@ export const definitionHandlers: HandlerTable = {
   'POST /api/definitions/:id/estimate': plain((c, input, ctx) => {
     const def = getLiveDefinition(ctx, param(input, 'id'));
     if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
-    return oneAtATime(ctx, def.id, () => c.json(estimateResponse(def, ctx)));
+    return c.json(estimateResponse(def, ctx));
   }),
 
   'POST /api/definitions/coverage-check': route(
@@ -6637,27 +6899,27 @@ git add -A apps/api packages && git commit -m "wp08: executions with confirmatio
 ### Task 8.11: Results (spec §6.5, §6.9, §8.1): basis, dedup, ranking, cap, staleness, truncation, the not-seen and superseded marks, links, children, excluded rows
 
 **Files:**
-- Create: `apps/api/src/read/rows.ts`, `src/read/coverage.ts`, `src/read/results.ts`, `src/routes/results.ts`
+- Create: `apps/api/src/read/rows.ts`, `src/read/links.ts`, `src/read/pick.ts`, `src/read/coverage.ts`, `src/read/results.ts`, `src/routes/results.ts`
 - Modify: `apps/api/src/routes/index.ts`
 - Test: `apps/api/test/routes/results.test.ts`
 
 **Interfaces:**
-- Consumes: `ItinerariesRepo.observationsForDefinition`, `ItinerariesRepo.latestVerificationOutcomeForCell`, `CalendarPricesRepo.latestPerCell(definitionId, cabin, null)`, `CalendarPricesRepo.fetchedBy`, `ExecutionsRepo.listForDefinition`, `CellsRepo.rollUps/outcomes/selected` (WP3); `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `dedupByItinerary`, `rankRows`, `searchLinkFor`, `LINK_ALLOWLIST`, `validateVendorUrl`, `effectiveAge`, `worstCaseAgeHours`, `isStale`, `CONSTRAINT_NAMES`, `isTruncated`, `TRUNCATED_NOTE`, `DEFAULT_DISCOVERY_REFRESH_HOURS` (core).
-- Produces: `staleness`, `calendarThreshold`, `calendarStaleAfterHours`, `thresholdFor`, `priceCell`, `priceOf`, `safeBooking`, `verifiedRow`, `calendarRow`, `configuredConstraints`, `latestPerOffer`, `notSeenResolver`, `cheapest`, `pickVerified`, `withNights`, `coverageSummaryFor`, `SEARCHED`, `loadRows`, `truncationOf`, `confirmedIn`, `chooseBasis`, `assembleResults`, `RESULTS_CAP`; route `GET /api/definitions/:id/results`.
+- Consumes: `ItinerariesRepo.observationsForDefinition`, `ItinerariesRepo.latestVerificationOutcomeForCell`, `CalendarPricesRepo.latestPerCell(definitionId, cabin, null)`, `CalendarPricesRepo.heldBy` (Task 8.0), `ExecutionsRepo.listForDefinition`, `CellsRepo.rollUps/outcomes/selected` (WP3); `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `dedupByItinerary`, `rankRows`, `searchLinkFor`, `LINK_ALLOWLIST`, `validateVendorUrl`, `effectiveAge`, `worstCaseAgeHours`, `isStale`, `CONSTRAINT_NAMES`, `isTruncated`, `TRUNCATED_NOTE`, `DEFAULT_DISCOVERY_REFRESH_HOURS` (core).
+- Produces: `rows.ts` (`staleness`, `calendarThreshold`, `calendarStaleAfterHours`, `thresholdFor`, `priceCell`, `priceOf`, `verifiedRow`, `calendarRow`, `configuredConstraints`, `latestPerOffer`, `notSeenResolver`, `withNights`), `links.ts` (`safeBooking`, `safeSearchLink`), `pick.ts` (`cheapest`, `pickVerified`, `pickCalendar`; review arch-wp08-r2-008 split them out of `rows.ts`), `coverageSummaryFor`, `SEARCHED`, `loadRows`, `truncationOf`, `confirmedIn`, `chooseBasis`, `assembleResults`, `RESULTS_CAP`; route `GET /api/definitions/:id/results`.
 
 Assembly rules, each pinned by a test below:
 
-1. Rows come from **every** execution of the definition, children included (spec §8.1), or from one execution when `executionId` is given (404 for one of another definition). Scoped to a run, the calendar rows are the latest that run fetched per provider and cell (`fetchedBy`), not the global latest filtered, so an older run picked from the list still shows its own price after a newer run priced the cell again (review prov-003); the scoped coverage and executions list are that run's. Observations and calendar prices are read in the definition's current cabin.
+1. Rows come from **every** execution of the definition, children included (spec §8.1), or from one execution when `executionId` is given (404 for one of another definition). Scoped to a run, the calendar rows are the latest that run holds per provider and cell — fetched or reused within its refresh window (`heldBy`, decision 58: its coverage counts a reused cell as priced, so its prices must include it, with the source's fetch time and the source outcome's truncation) — not the global latest filtered, so an older run picked from the list still shows its own price after a newer run priced the cell again (review prov-003); the scoped coverage and executions list are that run's. Observations and calendar prices are read in the definition's current cabin.
 2. Each offer contributes its latest observation (max `fetchedAt`, tie on id); verdicts are evaluated now against the **current** constraints and requested cabin with the observation's stored supplied fields (spec §6.2).
 3. Rows outside the current resolved space are dropped and counted in `excludedByCurrentSpace` (the repositories are read with `space: null` so the count is possible); when that count is non-zero, `basisReason` ends with "· I of N rows are inside the current window and nights range" (review focus 4). An all-excluded verified basis stays verified, so the reason says why the table is empty.
 4. Default basis (spec §6.9): `calendar` when the latest parent's snapshot (or, with none, the definition) has no verification provider, or no observation exists; otherwise `verified`. `basisReason` says which; `verificationProviderConfigured` reports the current definition.
 5. Verified basis: `dedupByItinerary(rows, now)` then `rankRows(rows, now)`; **all classes are returned**, `failed` last; `cheapest` is the first ranked row (the Results headline).
-6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked` (assigned directly: `verdictClass` throws without a cabin verdict), `notApplied` = every configured constraint from core's `CONSTRAINT_NAMES`, `booking: none`. A price whose cell a **newer parent execution** (later in the newest-first list, so two runs in one second still order) found `empty` or `no_data` for the same provider is `superseded: true` and ranks after every current price (decision 54, review prov-013).
-7. **Staleness** (spec §3, §8.1; decisions 44, 53, 54, 55): `ageHours` is the effective age from core's `worstCaseAgeHours` — the observed age, else the fetch age plus a known `maxAgeHours`, else the fetch age alone — and `stale` is core's `isStale` against the threshold (`STALE_AFTER_HOURS` for the verified basis; for the calendar basis `CALENDAR_STALE_AFTER_HOURS`, else the discovery refresh plus the provider's declared age). The web labels an unknown age "vendor's cache age unknown" from `provenance.maxAgeHours`.
+6. Calendar basis: the latest price per (provider, cell), reused copies ignored, class `unchecked` (assigned directly: `verdictClass` throws without a cabin verdict), `notApplied` = every configured constraint from core's `CONSTRAINT_NAMES`, `booking: none`. A price is `superseded: true` when the **latest parent execution that searched its cell** for that provider (outcome `priced`, `empty` or `no_data`; later in the newest-first list wins, so two runs in one second still order) is newer than the price's execution and found the cell `empty` or `no_data`; a newer run that skipped, failed on or reused the cell does not clear the mark (decisions 54, 58; reviews prov-013, prov-wp08-r2-002). Superseded prices rank after every current price.
+7. **Staleness** (spec §3, §8.1; decisions 44, 53, 54, 55, 58): `ageHours` is the effective age from core's `worstCaseAgeHours` — the observed age (never younger than the fetch age), else the fetch age plus a known `maxAgeHours`, else the fetch age alone — and `stale` is core's `isStale` against the threshold (`STALE_AFTER_HOURS` for the verified basis; for the calendar basis `CALENDAR_STALE_AFTER_HOURS`, else the discovery refresh plus the provider's declared age). The web labels an unknown age "vendor's cache age unknown" from `provenance.maxAgeHours`.
 8. **Truncation** (decisions 36, 47): a calendar price is `truncated` when its discovery outcome's `last_error` starts with `TRUNCATED_NOTE`, read with core's `isTruncated`; itinerary rows are never truncated.
 9. Cheapest per cell is computed here from recomputed verdicts, never read from `search_cells.best_observation_id`.
 10. `notSeenInLatest`: the cell's newest `priced | empty` verification outcome is from another execution in which this offer has no observation → `{ ageHours }` of that newer search, or `'unknown'` when that outcome has no `fetchedAt` (review prov-011).
-11. **Links** (spec §5.2, decision 54, review SEC-9): a stored `booking` is re-validated with `validateVendorUrl` against its own provider's `LINK_ALLOWLIST` entry and becomes `{ kind: 'none' }` when it fails (a `javascript:` URL, or another provider's host); a search link is kept only when it re-validates; the contract's `vendorLinkSchema` refuses anything else on the way out.
+11. **Links** (spec §5.2, decision 54, review SEC-9): a stored `booking` is re-validated with `validateVendorUrl` against its own provider's `LINK_ALLOWLIST` entry and becomes `{ kind: 'none' }` when it fails (a `javascript:` URL, plain http, userinfo, a port, a suffix look-alike, another provider's host, or a post booking off the allowlist; the test runs each, review SEC-R2-3); a search link is kept only when it re-validates; the contract's `vendorLinkSchema` refuses anything else on the way out.
 12. At most `limit` rows (default and maximum 1000); `total` counts every row before the cut; `truncated = total > limit`.
 
 - [ ] **Step 1: Write the failing test**
@@ -6857,36 +7119,39 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(latest.rows.map((r) => r.pricePence)).toEqual([47_000]);
   });
 
-  it('a stored booking link that fails the allowlist on the way out is dropped (decision 54, review SEC-5)', async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E1', [C1, C2], { selected: [C1, C2].map((c) => ({ cell: c, reason: 'top_n' as const })) });
-    s.verified('E1', C1, [
-      {
-        hash: 'hJ',
-        pricePence: 50_000,
-        fetchedAt: at(-1),
-        booking: { kind: 'get', url: 'javascript:alert(1)', host: 'x' },
-      },
-    ]);
-    s.verified('E1', C2, [
-      {
-        hash: 'hG',
-        pricePence: 51_000,
-        fetchedAt: at(-1),
-        // why: an allowlisted host of another provider is still not this provider's link
-        booking: { kind: 'get', url: 'https://www.google.com/travel/flights', host: 'www.google.com' },
-      },
-    ]);
-    const r = await results(x, def.id);
-    expect(r.rows.map((row) => [row.itineraryHash, row.booking.kind])).toEqual([
-      ['hJ', 'none'],
-      ['hG', 'none'],
-    ]);
-  });
+  it.each([
+    ['a javascript: URL', { kind: 'get', url: 'javascript:alert(1)', host: 'x' }],
+    ['plain http', { kind: 'get', url: 'http://www.google.com/travel/flights', host: 'www.google.com' }],
+    ['userinfo', { kind: 'get', url: 'https://user:pw@www.google.com/travel', host: 'www.google.com' }],
+    [
+      'a suffix look-alike',
+      { kind: 'get', url: 'https://www.google.com.evil.example/', host: 'www.google.com.evil.example' },
+    ],
+    ['a port', { kind: 'get', url: 'https://www.google.com:8443/travel', host: 'www.google.com' }],
+    [
+      "another provider's host",
+      { kind: 'get', url: 'https://www.google.com/travel/flights', host: 'www.google.com' },
+    ],
+    [
+      'a post off the allowlist',
+      { kind: 'post', url: 'https://evil.example/book', postData: 'a=1', host: 'evil.example' },
+    ],
+  ] as const)(
+    'a stored booking with %s is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)',
+    async (_label, booking) => {
+      const x = await createHarness();
+      h = x;
+      const s = seeder(x.ports);
+      const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+      s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+      s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+      s.verified('E1', C1, [{ hash: 'hJ', pricePence: 50_000, fetchedAt: at(-1), booking }]);
+      const r = await results(x, def.id);
+      expect(r.rows.map((row) => [row.itineraryHash, row.booking, row.searchLink])).toEqual([
+        ['hJ', { kind: 'none' }, null],
+      ]);
+    },
+  );
 });
 
 describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
@@ -6986,6 +7251,47 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     ]);
   });
 
+  it('superseded compares with the latest run that searched the cell: a newer run that skipped it does not clear the mark (decision 58)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-50), finishedAt: at(-49) });
+    s.cells('E1', [C1]);
+    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-49) });
+    s.execution('E2', { def, status: 'completed', startedAt: at(-20), finishedAt: at(-19) });
+    s.cells('E2', [C1, C2]);
+    s.tile('E2', C1, { status: 'empty', fetchedAt: at(-19) });
+    s.tile('E2', C2, { status: 'priced', pricePence: 31_000, fetchedAt: at(-19), tileIndex: 1 });
+    s.execution('E3', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E3', [C1, C2]); // not_run: E3 searched neither cell
+    const r = await results(x, def.id, '?basis=calendar');
+    // C1: E2's "no fares" still marks E1's price; C2: E2's price is the latest search's own, never superseded
+    expect(r.rows.map((row) => [row.pricePence, row.superseded])).toEqual([
+      [31_000, false],
+      [30_000, true],
+    ]);
+  });
+
+  it('a run picked with executionId shows the prices it reused, as its coverage counts them (decision 58)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', [C1]);
+    s.tile('Eold', C1, { status: 'priced', pricePence: 41_000, fetchedAt: at(-29) });
+    s.execution('Enew', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('Enew', [C1, C2]);
+    s.reuse('Enew', 'Eold', [C1], at(-100));
+    s.tile('Enew', C2, { status: 'priced', pricePence: 52_000, fetchedAt: at(-1), tileIndex: 1 });
+    const r = await results(x, def.id, `?basis=calendar&executionId=${s.id('Enew')}`);
+    expect(r.rows.map((row) => [row.pricePence, row.provenance.fetchedAt]).sort()).toEqual([
+      [41_000, at(-29)],
+      [52_000, at(-1)],
+    ]);
+  });
+
   it('can be requested explicitly, and ignores reused copies', async () => {
     const { x, def, s } = await world();
     s.tile('E1', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-3) });
@@ -7033,10 +7339,12 @@ Expected: FAIL: every results request answers 404 `not_found`.
 `apps/api/src/read/rows.ts` (new file):
 
 ```ts
-/** Result rows of both bases, prices with provenance, staleness and truncation (spec §6.2, §6.9, §8.1). */
+/**
+ * Result rows of both bases, prices with provenance, staleness and truncation (spec §6.2, §6.9, §8.1). Link
+ * re-validation is `links.ts`; picking a figure out of rows is `pick.ts` (review arch-wp08-r2-008).
+ */
 import {
   type apiContract,
-  type Booking,
   type CellKey,
   type CellOutcome,
   CONSTRAINT_NAMES,
@@ -7051,19 +7359,17 @@ import {
   type FlightProvider,
   type IsoDateTime,
   isStale,
-  LINK_ALLOWLIST,
   type Provenance,
   type ProviderId,
   type SearchDefinition,
-  searchLinkFor,
   unverifiedNames,
-  validateVendorUrl,
   verdictClass,
   worstCaseAgeHours,
 } from '@gmt/core';
 import type { CalendarPriceRow, ObservationRow } from '@gmt/db';
 import type { z } from 'zod';
 import { hoursSince } from './executions.js';
+import { safeBooking, safeSearchLink } from './links.js';
 
 export type ResultRow = z.infer<typeof apiContract.resultRowSchema>;
 export type PriceCell = z.infer<typeof apiContract.priceCellSchema>;
@@ -7161,31 +7467,6 @@ export function withNights(c: CellKey): ResultRow['cell'] {
 export function configuredConstraints(c: Constraints): ConstraintName[] {
   const set = new Set(Object.entries(c).flatMap(([k, v]) => (v === undefined ? [] : [k])));
   return CONSTRAINT_NAMES.filter((n) => set.has(n));
-}
-
-/**
- * Spec §5.2 and plan decision 54: a stored booking is re-validated against its provider's `LINK_ALLOWLIST` before it
- * is sent (https, no userinfo, no port, an allowlisted host); anything else becomes `{ kind: 'none' }`. A post booking
- * keeps its form data with the re-validated URL.
- */
-export function safeBooking(b: Booking, providerId: ProviderId): Booking {
-  if (b.kind === 'none') return b;
-  const checked = validateVendorUrl(b.url, LINK_ALLOWLIST[providerId]);
-  if (checked.kind !== 'get') return { kind: 'none' };
-  return b.kind === 'post'
-    ? { kind: 'post', url: checked.url, postData: b.postData, host: checked.host }
-    : checked;
-}
-
-/** The same rule for a search link (decision 54): kept only when it re-validates for its provider. */
-function safeSearchLink(
-  providerId: ProviderId,
-  cell: CellKey,
-  def: SearchDefinition,
-): ResultRow['searchLink'] {
-  const link = searchLinkFor(providerId, cell, def.cabin);
-  if (link === null) return null;
-  return validateVendorUrl(link.url, LINK_ALLOWLIST[providerId]).kind === 'get' ? link : null;
 }
 
 function adjusted(
@@ -7291,33 +7572,6 @@ export function verifiedRow(
   };
 }
 
-/** The cheapest row, or null (calendar-basis minima). */
-export function cheapest(rows: readonly ResultRow[]): ResultRow | null {
-  let best: ResultRow | null = null;
-  for (const r of rows) if (best === null || r.pricePence < best.pricePence) best = r;
-  return best;
-}
-
-/**
- * The verified-basis figure of a set of rows (plan decision 54, spec §8.1, §11 View B): a row the newest search of its
- * cell returned beats one it did not, a fresh row beats a stale one, then the cheaper wins. The caller carries the
- * winner's `notSeenInLatest`, so a not-seen figure is shown only when nothing seen exists, and says so.
- */
-export function pickVerified(rows: readonly ResultRow[]): ResultRow | null {
-  const rank = (r: ResultRow) => [r.notSeenInLatest === null ? 0 : 1, r.stale ? 1 : 0, r.pricePence];
-  let best: ResultRow | null = null;
-  for (const r of rows) {
-    if (best === null) {
-      best = r;
-      continue;
-    }
-    const [a, b] = [rank(r), rank(best)];
-    const i = a.findIndex((x, k) => x !== b[k]);
-    if (i >= 0 && (a[i] ?? 0) < (b[i] ?? 0)) best = r;
-  }
-  return best;
-}
-
 /** An offer's current price is its latest observation (spec §7 `latest` = max fetchedAt, tie id). */
 export function latestPerOffer(rows: readonly ObservationRow[]): ObservationRow[] {
   const best = new Map<number, ObservationRow>();
@@ -7357,6 +7611,86 @@ export function notSeenResolver(
     // why: a priced or empty outcome always has fetchedAt; if one ever lacks it the age is not known, never "now".
     return { ageHours: latest.fetchedAt === null ? 'unknown' : hoursSince(latest.fetchedAt, now) };
   };
+}
+```
+
+`apps/api/src/read/links.ts` (new file):
+
+```ts
+/** Vendor links re-validated on the way out (spec §5.2, plan decision 54). */
+import {
+  type Booking,
+  type CellKey,
+  LINK_ALLOWLIST,
+  type ProviderId,
+  type SearchDefinition,
+  searchLinkFor,
+  validateVendorUrl,
+} from '@gmt/core';
+import type { ResultRow } from './rows.js';
+
+/**
+ * Spec §5.2 and plan decision 54: a stored booking is re-validated against its provider's `LINK_ALLOWLIST` before it
+ * is sent (https, no userinfo, no port, an allowlisted host); anything else becomes `{ kind: 'none' }`. A post booking
+ * keeps its form data with the re-validated URL.
+ */
+export function safeBooking(b: Booking, providerId: ProviderId): Booking {
+  if (b.kind === 'none') return b;
+  const checked = validateVendorUrl(b.url, LINK_ALLOWLIST[providerId]);
+  if (checked.kind !== 'get') return { kind: 'none' };
+  return b.kind === 'post'
+    ? { kind: 'post', url: checked.url, postData: b.postData, host: checked.host }
+    : checked;
+}
+
+/** The same rule for a search link (decision 54): kept only when it re-validates for its provider. */
+export function safeSearchLink(
+  providerId: ProviderId,
+  cell: CellKey,
+  def: SearchDefinition,
+): ResultRow['searchLink'] {
+  const link = searchLinkFor(providerId, cell, def.cabin);
+  if (link === null) return null;
+  return validateVendorUrl(link.url, LINK_ALLOWLIST[providerId]).kind === 'get' ? link : null;
+}
+```
+
+`apps/api/src/read/pick.ts` (new file):
+
+```ts
+/** Picking one figure out of rows (spec §8.1, §11 View B; plan decisions 54, 58). */
+import type { ResultRow } from './rows.js';
+
+/** The cheapest row, or null (calendar-basis minima). */
+export function cheapest(rows: readonly ResultRow[]): ResultRow | null {
+  let best: ResultRow | null = null;
+  for (const r of rows) if (best === null || r.pricePence < best.pricePence) best = r;
+  return best;
+}
+
+/**
+ * The verified-basis figure of a set of rows (plan decision 54, spec §8.1, §11 View B): a row the newest search of its
+ * cell returned beats one it did not, a fresh row beats a stale one, then the cheaper wins. The caller carries the
+ * winner's `notSeenInLatest`, so a not-seen figure is shown only when nothing seen exists, and says so.
+ */
+export function pickVerified(rows: readonly ResultRow[]): ResultRow | null {
+  const rank = (r: ResultRow) => [r.notSeenInLatest === null ? 0 : 1, r.stale ? 1 : 0, r.pricePence];
+  let best: ResultRow | null = null;
+  for (const r of rows) {
+    if (best === null) {
+      best = r;
+      continue;
+    }
+    const [a, b] = [rank(r), rank(best)];
+    const i = a.findIndex((x, k) => x !== b[k]);
+    if (i >= 0 && (a[i] ?? 0) < (b[i] ?? 0)) best = r;
+  }
+  return best;
+}
+
+/** The calendar-basis figure: a current price before one a later search superseded (decision 54), then the cheapest. */
+export function pickCalendar(rows: readonly ResultRow[]): ResultRow | null {
+  return cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);
 }
 ```
 
@@ -7436,7 +7770,7 @@ import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { coverageSummaryFor } from './coverage.js';
+import { coverageSummaryFor, SEARCHED } from './coverage.js';
 import { executionSummary } from './executions.js';
 import {
   type Basis,
@@ -7485,27 +7819,28 @@ export interface Loaded {
  */
 export function truncationOf(
   ports: Ports,
-): (r: Pick<CalendarPriceRow, 'executionId' | 'providerId' | 'cell'>) => boolean {
+): (r: Pick<CalendarPriceRow, 'executionId' | 'reusedFromExecutionId' | 'providerId' | 'cell'>) => boolean {
   const byExecution = new Map<string, Map<string, CellOutcome>>();
   return (r) => {
-    let outcomes = byExecution.get(r.executionId);
+    // why: a reused copy's truncation is its source's: the copying run read no pages (decision 58).
+    const source = r.reusedFromExecutionId ?? r.executionId;
+    let outcomes = byExecution.get(source);
     if (outcomes === undefined) {
       outcomes = new Map(
         ports.repos.cells
-          .outcomes(r.executionId, { stage: 'discovery' })
+          .outcomes(source, { stage: 'discovery' })
           .map((o) => [`${o.providerId}|${cellKeyString(o)}`, o]),
       );
-      byExecution.set(r.executionId, outcomes);
+      byExecution.set(source, outcomes);
     }
     return isTruncated(outcomes.get(`${r.providerId}|${cellKeyString(r.cell)}`)?.lastError ?? null);
   };
 }
 
-/** The latest calendar price per (provider, cell) among `rows` (max fetchedAt, tie on id), reused copies dropped. */
+/** The latest calendar price per (provider, cell) among `rows` (max fetchedAt, tie on id), reused copies included. */
 function latestPerProviderCell(rows: readonly CalendarPriceRow[]): CalendarPriceRow[] {
   const best = new Map<string, CalendarPriceRow>();
   for (const r of rows) {
-    if (r.reusedFromExecutionId !== null) continue;
     const key = `${r.providerId}|${cellKeyString(r.cell)}`;
     const cur = best.get(key);
     if (cur === undefined || r.fetchedAt > cur.fetchedAt || (r.fetchedAt === cur.fetchedAt && r.id > cur.id))
@@ -7515,39 +7850,41 @@ function latestPerProviderCell(rows: readonly CalendarPriceRow[]): CalendarPrice
 }
 
 /**
- * Plan decision 54: a calendar price is "superseded by a later search" when a newer parent execution than the one that
- * fetched it found its cell empty or no_data for the same provider (`superseded` on rows and on the views' calendar
- * figures, the shape WP10's Task 10.1 gives the views).
+ * Plans decisions 54 and 58: a calendar price is "superseded by a later search" when the latest parent execution that
+ * searched its cell for that provider (outcome priced, empty or no_data) is newer than the price's execution and found
+ * the cell empty or no_data. A newer run that skipped the cell, failed on it or reused it does not count as a search,
+ * so an older "no fares" still marks the price. `superseded` is the field on rows and on the views' calendar figures.
  */
-export function supersessionOf(
+function supersessionOf(
   ports: Ports,
-  latestParent: Execution | null,
   all: readonly Execution[],
 ): (r: Pick<CalendarPriceRow, 'executionId' | 'providerId' | 'cell'>) => boolean {
-  if (latestParent === null) return () => false;
   // why: `all` is newest first (created_at, then rowid), so a later position is an earlier search, even when two
   // executions share a created_at second.
   const position = new Map(all.map((e, i) => [e.id, i]));
-  const latestAt = position.get(latestParent.id) ?? 0;
-  const latest = new Map(
-    ports.repos.cells
-      .outcomes(latestParent.id, { stage: 'discovery' })
-      .map((o) => [`${o.providerId}|${cellKeyString(o)}`, o]),
-  );
+  const lastSearch = new Map<string, { at: number; found: boolean }>();
+  all.forEach((e, at) => {
+    if (e.isChild) return;
+    for (const o of ports.repos.cells.outcomes(e.id, { stage: 'discovery' })) {
+      const key = `${o.providerId}|${cellKeyString(o)}`;
+      if (!SEARCHED.has(o.status) || lastSearch.has(key)) continue;
+      lastSearch.set(key, { at, found: o.status === 'priced' });
+    }
+  });
   return (r) => {
     const fetchedBy = position.get(r.executionId);
-    if (fetchedBy === undefined || fetchedBy <= latestAt) return false;
-    const o = latest.get(`${r.providerId}|${cellKeyString(r.cell)}`);
-    return o !== undefined && (o.status === 'empty' || o.status === 'no_data');
+    const last = lastSearch.get(`${r.providerId}|${cellKeyString(r.cell)}`);
+    return fetchedBy !== undefined && last !== undefined && last.at < fetchedBy && !last.found;
   };
 }
 
 /**
  * Everything the read routes share: rows of both bases for the definition's current space and cabin. `executionIds`
  * scopes the rows to those executions (a run picked with `?executionId=`, or the duration analysis's set): calendar
- * rows are then the latest each of them fetched, read per execution rather than filtered out of the global latest, so
- * a cell a newer run priced again still shows the scoped run's price (review prov-003). "Not seen in latest search"
- * and "superseded by a later search" always compare with the newest search of the cell.
+ * rows are then the latest each of them holds — fetched, or reused within its refresh window (decision 58, so a run's
+ * prices agree with its coverage, which counts a reused cell as priced) — read per execution rather than filtered out
+ * of the global latest, so a cell a newer run priced again still shows the scoped run's price (review prov-003). "Not
+ * seen in latest search" and "superseded by a later search" always compare with the newest search of the cell.
  */
 export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: readonly string[]): Loaded {
   const now = ports.clock.now();
@@ -7586,11 +7923,11 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: rea
           .latestPerCell(def.id, def.cabin, null)
           .filter((r) => r.reusedFromExecutionId === null)
       : latestPerProviderCell(
-          ids.flatMap((id) => ports.repos.calendarPrices.fetchedBy(id)).filter((r) => r.cabin === def.cabin),
+          ids.flatMap((id) => ports.repos.calendarPrices.heldBy(id)).filter((r) => r.cabin === def.cabin),
         );
   const calendarIn = calendarAll.filter((r) => cellInSpace(space, r.cell));
   const truncated = truncationOf(ports);
-  const superseded = supersessionOf(ports, latestParent, all);
+  const superseded = supersessionOf(ports, all);
 
   return {
     def,
@@ -7699,7 +8036,7 @@ export const HANDLERS: HandlerTable = {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/results.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 18 tests (with the execution summary's `expandTop`, decision 42); typecheck clean.
+Expected: PASS, 26 tests (with the execution summary's `expandTop`, decision 42); typecheck clean.
 
 - [ ] **Step 5: See the tests bite**
 
@@ -7707,9 +8044,11 @@ Apply each temporary mutation alone, run the task's test file, see the named tes
 
 - **8.11a**: in `apps/api/src/read/rows.ts` replace `  return { ageHours, stale: isStale(p, now, thresholdHours) };` with `  return { ageHours, stale: effectiveAge(p, now).fetchedHours > thresholdHours };`. Fails: “an unknown vendor age is aged by fetchedAt alone and is not stale for that reason (decision 44, spec rev 23)”; “a calendar price is stale only past the refresh plus the provider age (spec §8.1)”.
 
-- **8.11b**: in `apps/api/src/read/rows.ts` replace `    booking: safeBooking(o.booking, o.offer.providerId),` with `    booking: o.booking,`. Fails: “a stored booking link that fails the allowlist on the way out is dropped (decision 54, review SEC-5)”.
+- **8.11b**: in `apps/api/src/read/rows.ts` replace `    booking: safeBooking(o.booking, o.offer.providerId),` with `    booking: o.booking,`. Fails: “a stored booking with a javascript: URL is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”; “a stored booking with plain http is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”; “a stored booking with userinfo is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”; “a stored booking with a suffix look-alike is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”; “a stored booking with a port is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”; “a stored booking with another provider's host is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”; “a stored booking with a post off the allowlist is dropped on the way out (decision 54, reviews SEC-9, SEC-R2-3)”.
 
-- **8.11c**: in `apps/api/src/read/results.ts` replace `    return o !== undefined && (o.status === 'empty' || o.status === 'no_data');` with `    return false;`. Fails: “a calendar price a later search found empty is marked superseded and ranked after current prices (decision 54)”.
+- **8.11c**: in `apps/api/src/read/results.ts` replace `last.at < fetchedBy && !last.found;` with `false;`. Fails: “a calendar price a later search found empty is marked superseded and ranked after current prices (decision 54)”; “superseded compares with the latest run that searched the cell: a newer run that skipped it does not clear the mark (decision 58)”.
+
+- **8.11e**: in `apps/api/src/read/results.ts` replace `      if (!SEARCHED.has(o.status) || lastSearch.has(key)) continue;` with `      if (lastSearch.has(key)) continue;`. Fails: “superseded compares with the latest run that searched the cell: a newer run that skipped it does not clear the mark (decision 58)”.
 
 - **8.11d**: in `apps/api/src/read/results.ts` replace
 
@@ -7727,10 +8066,12 @@ Apply each temporary mutation alone, run the task's test file, see the named tes
 
   Fails: “an older run picked with executionId still shows its own price after a newer run priced the cell again (review prov-003)”.
 
+- **8.11f**: in `apps/api/src/read/results.ts` replace `ports.repos.calendarPrices.heldBy(id)` with `ports.repos.calendarPrices.fetchedBy(id)`. Fails: “a run picked with executionId shows the prices it reused, as its coverage counts them (decision 58)”.
+
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: results: basis, dedup, ranking, cap, effective-age staleness, truncation, not-seen and superseded marks, link re-validation, scoped runs"
+git add -A apps/api packages && git commit -m "wp08: results: basis, dedup, ranking, cap, effective-age staleness, truncation, not-seen and superseded marks, link re-validation, scoped runs with reused copies"
 ```
 
 ### Task 8.12: Calendar (with `destination`), duration analysis, coverage, calendar gap, cell detail
@@ -7741,16 +8082,16 @@ git add -A apps/api packages && git commit -m "wp08: results: basis, dedup, rank
 - Test: `apps/api/test/routes/views.test.ts`
 
 **Interfaces:**
-- Consumes: `loadRows`, `confirmedIn`, `priceOf`, `withNights`, `cheapest`, `pickVerified`, `calendarStaleAfterHours` (Task 8.11); `overrunOf`, `planCallsOf`, `executionResponse` (Task 8.10); `CellsRepo.outcomes/rollUps/selected`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent`, `retriedOnResume` (WP3, Task 8.0); `engine.scheduler.blockedSince()`, `engine.childCapPreview` (WP7); `selectedNotReached`, `sixBuckets`, `addDays`, `daysBetween`, `dedupByItinerary`, `cellKeyString` (core).
+- Consumes: `loadRows`, `confirmedIn`, `priceOf`, `withNights`, `pickVerified`, `pickCalendar`, `calendarStaleAfterHours` (Task 8.11); `overrunOf`, `planCallsOf`, `executionResponse` (Task 8.10); `CellsRepo.outcomes/rollUps/selected`, `LedgerRepo.countsFor`, `NotificationsRepo.wasSent`, `retriedOnResume` (WP3, Task 8.0); `engine.scheduler.blockedSince()`, `engine.childCapPreview` (WP7); `selectedNotReached`, `sixBuckets`, `addDays`, `daysBetween`, `dedupByItinerary`, `cellKeyString` (core).
 - Produces: `assembleCalendar`, `assembleCalendarGap`, `assembleDuration`, `assembleCoverage`, `retryable`, `assembleCellDetail`; routes `GET /api/definitions/:id/calendar` (`?destination=`), `/duration-analysis`, `/coverage`, `/calendar-gap`, `/cells/:origin/:destination/:departureDate/:returnDate`.
 
-**Calendar** (View B; decisions 51, 53, 54). Days cover every departure date of the current window. With `destination` (one of the definition's, else 422 `unknown_destination`), every figure of the day — the six-bucket counts, the selection, `unconfirmedCells`, both verified minima, the calendar minimum and `byDestination` — counts that destination's cells only, so a filtered day never borrows another airport's price or count. Six-bucket counts come from the latest parent's discovery outcomes through core's `sixBuckets`; selection and coverage from the latest parent, completed children counted per day as "on demand". Verified-basis figures count confirmed prices only, filtered **before** the per-itinerary dedup, so a confirmed £400 offer is never lost behind an unconfirmed £380 one for the same itinerary (review prov-009); `cheapestVerified` uses class `verified`, `cheapestPartiallyVerified` carries its `count`, and each is picked by `pickVerified`: a price the newest search returned before one it did not, then a fresh one before a stale one, then the cheaper (decision 54, spec §11 View B), with its `notSeenInLatest` mark (decision 54, WP10's field). `cheapestCalendar` prefers a current price to a superseded one and carries `superseded`; `byDestination` keeps its plain figures (WP10 no longer reads it). `verification.unconfirmedCells` counts the latest parent's selected cells whose verification roll-up is priced with no confirmed price (decisions 48, 51), so an older run's confirmed price does not hide the latest run's unconfirmed one (review prov-008). The response reports `staleAfterHours` and per discovery provider `calendarStaleAfterHours`.
+**Calendar** (View B; decisions 51, 53, 54, 58). Days cover every departure date of the current window. With `destination` (one of the definition's, else 422 `unknown_destination`), every figure of the day — the six-bucket counts, the selection, `unconfirmedCells`, both verified minima and the calendar minimum — counts that destination's cells only (the day has no per-destination figures, decision 58), so a filtered day never borrows another airport's price or count. Six-bucket counts come from the latest parent's discovery outcomes through core's `sixBuckets`; selection and coverage from the latest parent, completed children counted per day as "on demand". Verified-basis figures count confirmed prices only and are picked by `pickVerified` over **every confirmed offer, before the per-itinerary dedup** (decision 58): the dedup chooses an itinerary's primary offer on price before age, so picking after it would hide a fresh £420 offer from one seller behind a stale £400 one from another, and a confirmed £400 offer behind an unconfirmed £380 one (review prov-009). `cheapestVerified` uses class `verified`, `cheapestPartiallyVerified` class `partially-verified` with its `count` (itineraries, from the dedup), each picked latest seen, then fresh, then cheapest (decision 54, spec §11 View B), with its `notSeenInLatest` mark (WP10's field). `cheapestCalendar` is `pickCalendar`'s: a current price before a superseded one, carrying `superseded`. `verification.unconfirmedCells` counts the latest parent's selected cells whose verification roll-up is priced with no confirmed price (decisions 48, 51), so an older run's confirmed price does not hide the latest run's unconfirmed one (review prov-008). The response reports `staleAfterHours` and per discovery provider `calendarStaleAfterHours`.
 
-**Duration** (View C; decisions 38, 54; review prov-012; WP10's shapes): one execution set — the latest parent plus completed children — feeds both the minima and the `searched` counts, so a nights value is never counted searched by one run and priced by another. Each minimum carries its `cell` and `n` (cells of that nights value with a class-verified confirmed price, or that the provider priced); `minVerified` is picked by `pickVerified` and carries its `notSeenInLatest` mark; each `minCalendar[].price` prefers a current price and carries `superseded` (with one execution set it reads the latest parent's own fetches, so it is false unless a later run of the set says otherwise). `searched` counts per series: `verification` over the selected cells of that nights value (the latest parent's selection and the completed children's cells), each discovery provider over every cell of that nights value in the current space; `searched` is those whose outcome in the set is priced, empty or no_data. Cell keys are core's `cellKeyString`.
+**Duration** (View C; decisions 38, 54, 58; review prov-012; WP10's shapes): one execution set — the latest parent plus completed children, with the prices each holds, reused copies included (decision 58) — feeds both the minima and the `searched` counts, so a nights value is never counted searched by one run and priced by another. Each minimum carries its `cell` and `n` (cells of that nights value with a class-verified confirmed price, or that the provider priced); `minVerified` is picked by `pickVerified` over every confirmed offer before any dedup and carries its `notSeenInLatest` mark; each `minCalendar[].price` is `pickCalendar`'s and carries `superseded`, so a cell the latest run reused is both counted searched and priced. `searched` counts per series: `verification` over the selected cells of that nights value (the latest parent's selection and the completed children's cells), each discovery provider over every cell of that nights value in the current space; `searched` is those whose outcome in the set is priced, empty or no_data. Cell keys are core's `cellKeyString`.
 
 **Coverage** (View D) is the latest parent's; before the first run it is 404 `no_execution`. `perStage` rows carry their ledger counts, the pre-factor `planCalls`, `overrun` (decision 43: discovery on tiles) and `parityBreak`; `errors[].retryable` is WP3's `retriedOnResume(outcome, true)`, the very rule the manual resume runs.
 
-**Calendar gap** (spec §6.9): current calendar prices below the verified-basis yardstick — the class-verified confirmed price picked by `pickVerified`, with its mark; a superseded calendar price is not listed. Empty without a verification provider.
+**Calendar gap** (spec §6.9; decision 58): current calendar prices below the **reference verified price (latest seen, then fresh, then cheapest)** — the class-verified confirmed price picked by `pickVerified`, with its mark; a superseded calendar price is not listed. Empty without a verification provider.
 
 **Cell detail**: outcomes per execution × stage × provider as stored (a priced verification outcome with a null `minPence` is the web's "price not confirmed", decision 48), calendar prices with `truncated` and `superseded`, observations as rows, and `verify` from `Engine.childCapPreview(definitionId, cell)` when its result is `ok` — the same sizing and the same refusals as `verifyCell` (decisions 42, 45, 48) — or null without a verification provider or when the preview refuses (`not_found`, `window`).
 
@@ -7815,7 +8156,7 @@ const get = <S extends Parameters<typeof expectContract>[3]>(
 ) => x.request(path).then((r) => expectContract(r, 'GET', route, schema));
 
 describe('GET /api/definitions/:id/calendar (spec §10, View B)', () => {
-  it('per day: six buckets per provider, selection, the three cheapest, byDestination, stale thresholds', async () => {
+  it('per day: six buckets per provider, selection, the three cheapest, stale thresholds', async () => {
     const { x, def } = await world();
     const cal = await get(
       x,
@@ -7848,13 +8189,7 @@ describe('GET /api/definitions/:id/calendar (spec §10, View B)', () => {
     });
     expect(day('2026-11-02')?.cheapestCalendar?.pricePence).toBe(45_000);
     expect(day('2026-11-02')?.cheapestPartiallyVerified).toBeNull();
-    expect(
-      day('2026-11-02')?.byDestination.map((b) => [
-        b.destination,
-        b.cheapestVerified?.pricePence,
-        b.cheapestCalendar?.pricePence,
-      ]),
-    ).toEqual([['JFK', 60_000, 45_000]]);
+    expect(Object.keys(day('2026-11-02') ?? {})).not.toContain('byDestination'); // decision 58
     expect(day('2026-11-03')?.discovery[0]?.buckets.no_data).toBe(1);
     expect(day('2026-11-03')?.cheapestPartiallyVerified).toMatchObject({
       pricePence: 40_000,
@@ -7919,7 +8254,7 @@ describe('calendar selection rules (plan decisions 53, 54; review prov-009)', ()
     return { x, s, def };
   }
 
-  it('with destination=, buckets, selection, minima and byDestination count that destination only; 422 for another', async () => {
+  it('with destination=, buckets, selection and minima count that destination only; 422 for another', async () => {
     const { x, s, def } = await bare(['JFK', 'EWR']);
     const J = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
     const E = cell('LHR', 'EWR', '2026-11-02', '2026-11-12');
@@ -7938,7 +8273,6 @@ describe('calendar selection rules (plan decisions 53, 54; review prov-009)', ()
     const jfk = (await calendar(x, def.id, '?destination=JFK')).days.find((d) => d.date === '2026-11-02');
     expect([jfk?.cheapestVerified?.pricePence, jfk?.cheapestCalendar?.pricePence]).toEqual([60_000, 45_000]);
     expect([jfk?.verification.selected, jfk?.discovery[0]?.total]).toEqual([1, 1]);
-    expect(jfk?.byDestination.map((b) => b.destination)).toEqual(['JFK']);
     const bos = await x.request(`/api/definitions/${def.id}/calendar?destination=BOS`);
     expect(bos.status).toBe(422);
     expect((await errorOf(bos)).code).toBe('unknown_destination');
@@ -7972,6 +8306,18 @@ describe('calendar selection rules (plan decisions 53, 54; review prov-009)', ()
     s.verified('E1', C1b, [{ hash: 'hFresh', pricePence: 58_000, fetchedAt: at(-1) }]);
     const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
     expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hFresh', stale: false });
+  });
+
+  it('a fresh offer from another seller is shown before a cheaper stale offer of the same itinerary (decision 58)', async () => {
+    const { x, s, def } = await bare();
+    s.execution('E1', { def, status: 'completed', startedAt: at(-300), finishedAt: at(-1) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E1', C1, [
+      { hash: 'hS', pricePence: 40_000, fetchedAt: at(-250), seller: 'Stale Air' }, // 250 h > 192
+      { hash: 'hS', pricePence: 42_000, fetchedAt: at(-1), seller: 'Fresh Travel' },
+    ]);
+    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
+    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hS', pricePence: 42_000, stale: false });
   });
 
   it('a confirmed £400 offer is the cheapest even when the same itinerary has an unconfirmed £380 offer', async () => {
@@ -8082,7 +8428,30 @@ describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 s
   });
 });
 
-describe('duration analysis over one set of executions (review prov-006)', () => {
+describe('duration analysis over one set of executions (review prov-012)', () => {
+  it('counts a cell the latest run reused as searched and takes its reused price as the minimum (decision 58)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', [C1]);
+    s.tile('Eold', C1, { status: 'priced', pricePence: 41_000, fetchedAt: at(-29) });
+    s.execution('Enew', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('Enew', [C1, C2]);
+    s.reuse('Enew', 'Eold', [C1], at(-100));
+    s.tile('Enew', C2, { status: 'priced', pricePence: 52_000, fetchedAt: at(-1), tileIndex: 1 });
+    const d = await get(
+      x,
+      `/api/definitions/${def.id}/duration-analysis`,
+      '/api/definitions/:id/duration-analysis',
+      apiContract.durationAnalysisResponseSchema,
+    );
+    const ten = d.byNights.find((n) => n.nights === 10);
+    expect(ten?.minCalendar.map((m) => [m.price.pricePence, m.n])).toEqual([[41_000, 2]]);
+    expect(ten?.searched.discovery[0]?.searched).toBe(2);
+  });
+
   it("an older run's price is neither a minimum nor marks a nights value searched once a newer run skipped it", async () => {
     const x = await createHarness();
     h = x;
@@ -8223,6 +8592,32 @@ describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:re
     expect(d.verify).toEqual({ maxCalls: 6, headroomCalls: 994 });
     expect(preview).toHaveBeenCalledWith(def.id, C1);
   });
+  it('drops a hostile stored booking from the observations it lists (decision 54, review SEC-R2-3)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    const url = 'https://user:pw@evil.example:8443/book';
+    s.verified('E1', C1, [
+      {
+        hash: 'hH',
+        pricePence: 50_000,
+        fetchedAt: at(-1),
+        booking: { kind: 'get', url, host: 'evil.example' },
+      },
+    ]);
+    const d = await get(
+      x,
+      `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
+      route,
+      apiContract.cellDetailResponseSchema,
+    );
+    expect(d.observations.map((o) => o.booking)).toEqual([{ kind: 'none' }]);
+    expect(JSON.stringify(d)).not.toContain('evil.example');
+  });
+
   it('verify is null without a verification provider', async () => {
     const x = await createHarness();
     h = x;
@@ -8280,8 +8675,9 @@ import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { SEARCHED } from './coverage.js';
 import { executionSummary } from './executions.js';
+import { pickCalendar, pickVerified } from './pick.js';
 import { confirmedIn, loadRows } from './results.js';
-import { calendarStaleAfterHours, cheapest, pickVerified, priceOf, type ResultRow } from './rows.js';
+import { calendarStaleAfterHours, priceOf, type ResultRow } from './rows.js';
 
 export type CalendarResponse = z.infer<typeof apiContract.calendarResponseSchema>;
 export type CalendarGapResponse = z.infer<typeof apiContract.calendarGapResponseSchema>;
@@ -8289,11 +8685,6 @@ export type CalendarGapResponse = z.infer<typeof apiContract.calendarGapResponse
 /** A verified-basis figure with its "not seen in latest search" mark (decision 54). */
 function verifiedFigure(r: ResultRow) {
   return { ...priceOf(r), notSeenInLatest: r.notSeenInLatest };
-}
-
-/** The calendar-basis figure: a current price before one a later search superseded (decision 54), then the cheapest. */
-function pickCalendar(rows: readonly ResultRow[]): ResultRow | null {
-  return cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);
 }
 
 /** True when the cell's verification roll-up is priced with no confirmed price (decisions 45, 48, 51). */
@@ -8306,10 +8697,11 @@ function unconfirmed(r: RollUp | undefined): boolean {
  * `destination` (plan decision 53), for that destination's cells only — buckets, selection, minima and
  * `unconfirmedCells` alike, so a filtered day never counts another airport. Six-bucket counts and selection come from
  * the latest parent execution's outcomes (spec §8.1); completed children count per day as "on demand". The verified
- * figures (class verified; partially verified with its count) count only confirmed prices, filtered before the
- * per-itinerary dedup so a confirmed offer is never lost behind an unconfirmed one (review prov-009), and prefer a row
- * the newest search returned, then a fresh one (decision 54, spec §11 View B). `unconfirmedCells` is the latest
- * parent's selected cells whose verification roll-up is priced with no confirmed price.
+ * figures (class verified; partially verified with its count) count only confirmed prices and are picked over every
+ * confirmed offer before the per-itinerary dedup, so neither an unconfirmed offer (review prov-009) nor a cheaper stale
+ * offer of the same itinerary (decision 58) hides the price shown; each prefers a row the newest search returned, then a
+ * fresh one, then the cheaper (decision 54, spec §11 View B), with its marks. `unconfirmedCells` is the latest parent's
+ * selected cells whose verification roll-up is priced with no confirmed price. No per-destination figures (decision 58).
  */
 export function assembleCalendar(
   def: SearchDefinition,
@@ -8332,20 +8724,21 @@ export function assembleCalendar(
   const children = loaded.all.filter(
     (e) => e.isChild && e.status === 'completed' && e.cell !== null && mine(e.cell),
   );
-  const verified = dedupByItinerary(
-    loaded.verified.filter(confirmedIn(loaded)).filter((r) => mine(r.cell)),
-    loaded.rc.now,
-  );
+  // why: plan decision 58: the minima are picked (seen, then fresh, then cheaper) over every confirmed offer, before the
+  // per-itinerary dedup, whose primary offer is chosen on price before age and would hide a fresh offer from another
+  // seller behind a cheaper stale one. The dedup only sizes the partially-verified `count`.
+  const confirmed = loaded.verified.filter(confirmedIn(loaded)).filter((r) => mine(r.cell));
+  const verified = dedupByItinerary(confirmed, loaded.rc.now);
   const calendar = loaded.calendar.filter((r) => mine(r.cell));
   const providers = def.providers.discovery;
   const days: CalendarResponse['days'] = [];
   for (let d = loaded.space.departureFrom; d <= loaded.space.departureTo; d = addDays(d, 1)) {
     const onDay = (r: ResultRow) => r.cell.departureDate === d;
-    const v = verified.filter(onDay);
+    const offers = confirmed.filter(onDay);
     const cal = calendar.filter(onDay);
-    const partial = v.filter((r) => r.verdictClass === 'partially-verified');
-    const best = pickVerified(v.filter((r) => r.verdictClass === 'verified'));
-    const bestPartial = pickVerified(partial);
+    const partial = verified.filter((r) => onDay(r) && r.verdictClass === 'partially-verified');
+    const best = pickVerified(offers.filter((r) => r.verdictClass === 'verified'));
+    const bestPartial = pickVerified(offers.filter((r) => r.verdictClass === 'partially-verified'));
     const bestCal = pickCalendar(cal);
     const sel = selected.filter(({ cell }) => cell.departureDate === d);
     days.push({
@@ -8380,19 +8773,6 @@ export function assembleCalendar(
             },
       cheapestCalendar:
         bestCal === null ? null : { ...priceOf(bestCal), cell: bestCal.cell, superseded: bestCal.superseded },
-      byDestination: def.destinations
-        .filter((x) => mine({ destination: x }))
-        .map((dest) => {
-          const dv = pickVerified(
-            v.filter((r) => r.verdictClass === 'verified' && r.cell.destination === dest),
-          );
-          const dc = pickCalendar(cal.filter((r) => r.cell.destination === dest));
-          return {
-            destination: dest,
-            cheapestVerified: dv === null ? null : priceOf(dv),
-            cheapestCalendar: dc === null ? null : priceOf(dc),
-          };
-        }),
     });
   }
   const calendarStale: Partial<Record<ProviderId, number>> = {};
@@ -8406,9 +8786,8 @@ export function assembleCalendar(
 }
 
 /**
- * Spec §10 `GET /calendar-gap`: current calendar prices below the verified-basis yardstick, which is the class-verified
- * confirmed price picked as every verified figure is (decision 54: seen before not seen, fresh before stale, then
- * cheaper) and carries its mark; empty without a verification provider. A superseded calendar price is not listed: a
+ * Spec §10 `GET /calendar-gap`: current calendar prices below the reference verified price (latest seen, then fresh,
+ * then cheapest; decisions 54, 58): the class-verified confirmed price picked as every verified figure is, with its mark; empty without a verification provider. A superseded calendar price is not listed: a
  * later search of that cell found no fares. why: search_cells.best_observation_id is the cheapest observation written,
  * not the cheapest class-verified one, so the yardstick is computed at read time (plan round-2 pin).
  */
@@ -8438,7 +8817,6 @@ import {
   type CellKey,
   cellKeyString,
   daysBetween,
-  dedupByItinerary,
   generateCells,
   type SearchDefinition,
 } from '@gmt/core';
@@ -8446,8 +8824,9 @@ import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import { SEARCHED } from './coverage.js';
 import { executionSummary } from './executions.js';
+import { pickCalendar, pickVerified } from './pick.js';
 import { confirmedIn, EXECUTIONS_LIMIT, loadRows } from './results.js';
-import { cheapest, pickVerified, priceOf, type ResultRow } from './rows.js';
+import { priceOf, type ResultRow } from './rows.js';
 import { cellInSpace } from './space.js';
 
 export type DurationResponse = z.infer<typeof apiContract.durationAnalysisResponseSchema>;
@@ -8478,9 +8857,8 @@ export function assembleDuration(def: SearchDefinition, ports: Ports): DurationR
     ports,
     set.map((e) => e.id),
   );
-  const verified = dedupByItinerary(loaded.verified.filter(confirmedIn(loaded)), loaded.rc.now).filter(
-    (r) => r.verdictClass === 'verified',
-  );
+  // why: plan decision 58: picked over every confirmed offer before any per-itinerary dedup (see assembleCalendar).
+  const verified = loaded.verified.filter(confirmedIn(loaded)).filter((r) => r.verdictClass === 'verified');
   const inSpace = (c: CellKey) => cellInSpace(loaded.space, c);
   const answered = new Set(
     set
@@ -8514,8 +8892,7 @@ export function assembleDuration(def: SearchDefinition, ports: Ports): DurationR
         const rows = loaded.calendar.filter(
           (r) => r.cell.nights === n && r.provenance.providerId === providerId,
         );
-        // why: decision 54: a superseded price is the minimum only when no current one exists.
-        const b = cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);
+        const b = pickCalendar(rows);
         return b === null
           ? []
           : [
@@ -8742,19 +9119,21 @@ export const resultHandlers: HandlerTable = {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api exec vitest run test/routes/views.test.ts && pnpm --filter @gmt/api typecheck`
-Expected: PASS, 18 tests; typecheck clean (run `test/routes/results.test.ts` too: still 18).
+Expected: PASS, 21 tests; typecheck clean (run `test/routes/results.test.ts` too: still 26).
 
 - [ ] **Step 5: See the tests bite**
 
 Apply each temporary mutation alone, run the task's test file, see the named tests fail, revert:
 
-- **8.12a**: in `apps/api/src/read/rows.ts` replace `  const rank = (r: ResultRow) => [r.notSeenInLatest === null ? 0 : 1, r.stale ? 1 : 0, r.pricePence];` with `  const rank = (r: ResultRow) => [r.pricePence];`. Fails: “prefers a price the newest search returned over a cheaper one it did not, and marks the latter”; “prefers a fresh price over a cheaper stale one on the same day”.
+- **8.12a**: in `apps/api/src/read/pick.ts` replace `  const rank = (r: ResultRow) => [r.notSeenInLatest === null ? 0 : 1, r.stale ? 1 : 0, r.pricePence];` with `  const rank = (r: ResultRow) => [r.pricePence];`. Fails: “prefers a price the newest search returned over a cheaper one it did not, and marks the latter”; “prefers a fresh price over a cheaper stale one on the same day”; “a fresh offer from another seller is shown before a cheaper stale offer of the same itinerary (decision 58)”.
 
-- **8.12b**: in `apps/api/src/read/calendar.ts` replace `    loaded.verified.filter(confirmedIn(loaded)).filter((r) => mine(r.cell)),` with `    loaded.verified.filter((r) => mine(r.cell)),`. Fails: “an offer whose price the final step did not confirm is never a cheapest itinerary-search price (decisions 45, 48)”.
+- **8.12f**: in `apps/api/src/read/calendar.ts` replace `    const offers = confirmed.filter(onDay);` with `    const offers = verified.filter(onDay);`. Fails: “a fresh offer from another seller is shown before a cheaper stale offer of the same itinerary (decision 58)”.
 
-- **8.12c**: in `apps/api/src/read/calendar.ts` replace `    parent === null ? [] : ports.repos.cells.selected(parent.id).filter(({ cell }) => mine(cell));` with `    parent === null ? [] : ports.repos.cells.selected(parent.id);`. Fails: “with destination=, buckets, selection, minima and byDestination count that destination only; 422 for another”.
+- **8.12b**: in `apps/api/src/read/calendar.ts` replace `  const confirmed = loaded.verified.filter(confirmedIn(loaded)).filter((r) => mine(r.cell));` with `  const confirmed = loaded.verified.filter((r) => mine(r.cell));`. Fails: “an offer whose price the final step did not confirm is never a cheapest itinerary-search price (decisions 45, 48)”.
 
-- **8.12e**: in `apps/api/src/read/calendar.ts` replace `  return cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);` with `  return cheapest(rows);`. Fails: “a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one”.
+- **8.12c**: in `apps/api/src/read/calendar.ts` replace `    parent === null ? [] : ports.repos.cells.selected(parent.id).filter(({ cell }) => mine(cell));` with `    parent === null ? [] : ports.repos.cells.selected(parent.id);`. Fails: “with destination=, buckets, selection and minima count that destination only; 422 for another”.
+
+- **8.12e**: in `apps/api/src/read/pick.ts` replace `  return cheapest(rows.filter((r) => !r.superseded)) ?? cheapest(rows);` with `  return cheapest(rows);`. Fails: “a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one”.
 
 - **8.12d**: in `apps/api/src/read/duration.ts` replace
 
@@ -8777,7 +9156,7 @@ Apply each temporary mutation alone, run the task's test file, see the named tes
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A apps/api packages && git commit -m "wp08: calendar with destination filter and seen-then-fresh minima, duration over one execution set, coverage, calendar gap and cell detail"
+git add -A apps/api packages && git commit -m "wp08: calendar with destination filter and minima picked before dedup, duration over one execution set with reused prices, coverage, calendar gap and cell detail"
 ```
 
 ### Task 8.13: History routes and alert rule storage
@@ -8791,7 +9170,7 @@ git add -A apps/api packages && git commit -m "wp08: calendar with destination f
 - Consumes: `ItinerariesRepo.get`, `ItinerariesRepo.offerHistory` (with Task 8.0's `suppliedFields` and `executionId`), `CalendarPricesRepo.history`, `RoutePriceHistoryRepo.series`, `DefinitionsRepo.list`, `AlertsRepo` (WP3); `staleness`, `calendarThreshold`, `truncationOf` (Task 8.11); `isStale` (core, Task 8.0); `itineraryHistoryResponseSchema`, `routeHistoryResponseSchema`, `routeHistoryQuerySchema`, `alertRuleInputSchema`, `alertRuleUpdateRequestSchema`, `alertRulesQuerySchema`, `alertEventsQuerySchema`, `iataSchema` (core).
 - Produces: `itineraryHistory`, `routeHistory`; routes `GET /api/itineraries/:hash/history`, `GET /api/routes/:origin/:destination/history`, `GET/POST /api/alerts`, `PUT/DELETE /api/alerts/:id`, `GET /api/alerts/events`.
 
-Rules (spec §7, §10, §11; decisions 36, 38, 42, 44, 52, 54, 55): itinerary history is the itinerary's own `cell` and `carriers` from its stored row (404 `itinerary_not_found` for an unknown hash) and one series per (provider, seller, cabin); each point carries the `executionId` of the run that observed it, `stale` (verified-basis rule, core's `isStale`), `truncated: false` and `priceConfirmed` (`price` among the observation's supplied fields). Route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy), one point per execution fetch carrying its `cell` and `executionId` (reused rows excluded by the repository), each with `stale` by the calendar rule (the refresh of a live definition flying the pair, else core's default) and `truncated` from its discovery outcome; plus the route-level lowest-price series per provider for the requested cabin and `'unknown'`, plotted by `date` (empty when the vendor supplies none, decision 40), each point `stale` by its fetch age against the provider's calendar threshold: core's `isStale` with an unknown vendor age, since the vendor dates the series no further (review prov-004, decisions 54, 55). WP10 labels that series indicative; it is GBP-only by contract (decision 25). Alert routes store and read rules and events only; evaluation and delivery are WP11. `DELETE /api/alerts/:id` soft-deletes (events kept). `GET /api/alerts` filters by `?definitionId=` (`alertRulesQuerySchema`); `GET /api/alerts/events` by `ruleId` and `definitionId`. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
+Rules (spec §7, §10, §11; decisions 36, 38, 42, 44, 52, 54, 55): itinerary history is the itinerary's own `cell` and `carriers` from its stored row (404 `itinerary_not_found` for an unknown hash) and one series per (provider, seller, cabin); each point carries the `executionId` of the run that observed it, `stale` (verified-basis rule, core's `isStale`), `truncated: false` and `priceConfirmed` (`price` among the observation's supplied fields). Route history is the calendar series per provider in the requested cabin (`?cabin=`, default economy), one point per execution fetch carrying its `cell` and `executionId` (reused rows excluded by the repository), each with `stale` by the calendar rule (the refresh of a live definition flying the pair, else core's default) and `truncated` from its discovery outcome; plus the route-level lowest-price series per provider for the requested cabin and `'unknown'`, plotted by `date` (empty when the vendor supplies none, decision 40), each point `stale` by its fetch age against the provider's calendar threshold: core's `isStale` with an unknown vendor age, since the vendor dates the series no further (review prov-004, decisions 54, 55). WP10 labels that series indicative; it is GBP-only by contract (decision 25). Alert routes store and read rules and events only; evaluation and delivery are WP11. `DELETE /api/alerts/:id` soft-deletes (events kept). `GET /api/alerts` filters by `?definitionId=` (`alertRulesQuerySchema`); `GET /api/alerts/events` by `ruleId` and `definitionId`. Events are read generically through WP3's repository and validated by the contract's `alertEventSchema`, so the route is unchanged by WP11's migration 0002 (statuses `queued | notified | suppressed`, spec rev 25); its test seeds a `suppressed` event (a status on both sides of 0002) with a payload in the shape of WP11's `alertEventPayloadSchema` (decision 56), and no WP8 code or test uses `'sent'`. A PUT is validated on the merged rule, so the `requireAllVerified` refinement (spec §6.8) cannot be bypassed by a partial update.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9022,9 +9401,33 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
       calendarPriceId: null,
       dedupKey: `${r.id}|hV|500`,
       firedAt: at(-1),
-      status: 'sent',
+      // why: 'suppressed' is a status before and after WP11's migration 0002 (sent → notified, failed → queued), and the
+      // payload has WP11's alertEventPayloadSchema shape, so this test holds on either side of WP11 (decision 56)
+      status: 'suppressed',
       reason: 'below £500',
-      payload: {},
+      payload: {
+        digestId: null,
+        executionId: 'ex-1',
+        pricePence: 41_200,
+        provenance: {
+          providerId: 'fixture',
+          sourceKind: 'synthetic',
+          fetchedAt: at(-1),
+          maxAgeHours: 'unknown',
+          fx: { converted: false },
+          pointOfSale: 'unknown',
+          cabin: 'economy',
+        },
+        previous: null,
+        isNew: false,
+        route: 'LHR→JFK 2 Nov–12 Nov (10n)',
+        verdictClass: 'verified',
+        unverified: [],
+        reason: { kind: 'threshold', gapHours: null },
+        staleThresholdHours: 192,
+        truncated: false,
+        notSeenInLatest: null,
+      },
     });
     const EVENTS = apiContract.alertEventSchema.array();
     const events = await expectContract(
@@ -9033,7 +9436,7 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
       '/api/alerts/events',
       EVENTS,
     );
-    expect(events.map((e) => e.status)).toEqual(['sent']);
+    expect(events.map((e) => [e.status, e.reason])).toEqual([['suppressed', 'below £500']]);
     expect((await x.request(`/api/alerts/${r.id}`, { method: 'DELETE' })).status).toBe(200);
     const after = (q: string) =>
       x
@@ -9153,7 +9556,12 @@ export function routeHistory(
         points: s.points.map((p) => ({
           ...p,
           stale: staleness(p.provenance, threshold, now).stale,
-          truncated: truncated({ executionId: p.executionId, providerId: s.providerId, cell: p.cell }),
+          truncated: truncated({
+            executionId: p.executionId,
+            reusedFromExecutionId: null,
+            providerId: s.providerId,
+            cell: p.cell,
+          }),
         })),
       };
     }),
@@ -9277,6 +9685,9 @@ export const alertHandlers: HandlerTable = {
     return c.json(existing);
   }),
 
+  // why: events are read generically through WP3's repository and validated by the contract's `alertEventSchema`, so
+  // the route works before and after WP11's migration 0002 (statuses `queued | notified | suppressed`) and needs no
+  // change when WP11 adds `alertEventPayloadSchema` (decision 56).
   'GET /api/alerts/events': route(
     { request: NO_INPUT, query: apiContract.alertEventsQuerySchema },
     (c, { query }, ctx) =>
@@ -9341,7 +9752,7 @@ git add -A apps/api packages && git commit -m "wp08: history routes: itinerary c
 - Consumes: `runRecord`, `recordPrecheck` (WP4b `src/tools/record.ts`), `RecordCli` (`src/tools/recordPlan.ts`), `recordingTarget`, `RecordingTarget`, `runTool` (`src/bootstrap/tool.ts`), `EXIT`, `safeMessage`; `syntheticAllowed`; `toolRecordRequestSchema`, `toolRunResponseSchema` (core).
 - Produces: `inProcessTools(ports, opts?)` returning `HttpToolRunners` (named apart from WP4b's CLI `ToolRunners`, review arch-009); route `POST /api/tools/record`.
 
-Rules (spec §7, §10, §13; reviews SEC-7, arch-009): the route needs auth like every other; it runs the record tool in this process (the app holds `app_lock`, so the tool bootstrap would refuse) through WP4b's own `runRecord` over the app's ports, so the plan, the budget position and every spend refusal are the CLI's; one tool at a time (`409 tool_busy`); an unregistered runner answers `503 tool_unavailable`; a runner that throws answers `500 tool_failed` and logs the message through `safeMessage`. The runner refuses, before any call and with the CLI's exit codes and in `runTool`'s order, an open synthetic gate (70), a route that may not enter the committed tree (64; HTTP has no `--out`) and a configuration that cannot record (78); a test runs both over the same refusing configurations and compares the codes. Over HTTP there is no `--confirm-rerun`, so a rerun that needs it ends 65. Every output line passes through `safeMessage` (URL queries and secrets stripped) before it leaves the process, and `fixturesWritten` lists the files the run added, relative to the recorded root, so no absolute path of the host is returned. The request's own abort signal stops the run. `POST /api/tools/smoke` is WP13's and stays unmounted.
+Rules (spec §7, §10, §13; reviews SEC-7, arch-009): the route needs auth like every other; it runs the record tool in this process (the app holds `app_lock`, so the tool bootstrap would refuse) through WP4b's own `runRecord` over the app's ports, so the plan, the budget position and every spend refusal are the CLI's; one tool at a time through the one in-flight guard, `oneAtATime` under the key `tool` with the contract's `409 tool_busy` (decision 58: no second guard); an unregistered runner answers `503 tool_unavailable`; a runner that throws answers `500 tool_failed` and logs the message through `safeMessage`. The runner refuses, before any call and with the CLI's exit codes and in `runTool`'s order, an open synthetic gate (70), a route that may not enter the committed tree (64; HTTP has no `--out`) and a configuration that cannot record (78); a test runs both over the same refusing configurations and compares the codes. Over HTTP there is no `--confirm-rerun`, so a rerun that needs it ends 65. Every output line passes through `safeMessage` (URL queries and secrets stripped) before it leaves the process, and `fixturesWritten` lists the files the run added, relative to the recorded root, so no absolute path of the host is returned. The request's own abort signal stops the run. `POST /api/tools/smoke` is WP13's and stays unmounted.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9567,7 +9978,10 @@ import { ApiError } from '../errors.js';
 import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
 import { NO_INPUT, route } from './define.js';
+import { oneAtATime } from './shared.js';
 import type { HandlerTable } from './types.js';
+
+const TOOL_KEY = 'tool';
 
 export const toolHandlers: HandlerTable = {
   /** One tool at a time; an unregistered runner is 503; a runner that throws is 500 with a scrubbed log line. */
@@ -9577,21 +9991,24 @@ export const toolHandlers: HandlerTable = {
       const record = ctx.tools.record;
       if (record === undefined)
         throw new ApiError(503, 'tool_unavailable', API_TEXT.toolUnavailable('record'));
-      if (ctx.toolInFlight.name !== null)
-        throw new ApiError(409, 'tool_busy', API_TEXT.toolBusy(ctx.toolInFlight.name));
-      ctx.toolInFlight.name = 'record';
-      // why: the request's own signal ends the run when the client disconnects, as SIGINT ends the CLI run.
-      try {
-        return c.json(await record(body, c.req.raw.signal));
-      } catch (err) {
-        ctx.ports.log.error(
-          { tool: 'record', err: { message: safeMessage(err, ctx.ports.secrets) } },
-          'tool failed',
-        );
-        throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed('record'));
-      } finally {
-        ctx.toolInFlight.name = null;
-      }
+      // why: one tool at a time, whichever it is (spec §10 `/tools/*`): one key, the contract's 409 tool_busy.
+      return oneAtATime(
+        ctx,
+        TOOL_KEY,
+        async () => {
+          // why: the request's own signal ends the run when the client disconnects, as SIGINT ends the CLI run.
+          try {
+            return c.json(await record(body, c.req.raw.signal));
+          } catch (err) {
+            ctx.ports.log.error(
+              { tool: 'record', err: { message: safeMessage(err, ctx.ports.secrets) } },
+              'tool failed',
+            );
+            throw new ApiError(500, 'tool_failed', API_TEXT.toolFailed('record'));
+          }
+        },
+        () => new ApiError(409, 'tool_busy', API_TEXT.toolBusy('record')),
+      );
     },
   ),
 };
@@ -9764,7 +10181,7 @@ git add -A apps/api packages && git commit -m "wp08: POST /api/tools/record in-p
 - Consumes: `apiContract.ROUTES`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`, `TRUNCATED_NOTE` (core); every handler table.
 - Produces: `createApp` throws when a ROUTES entry has no handler (unless listed in `OWNED_ELSEWHERE`) or a handler has no ROUTES entry.
 
-Rules (spec §9 item 5; reviews prov-005, SEC-10, TS-7): the provenance sweep is shape-based — every object holding `pricePence`, `minPence` or `lowestPricePence` must carry `provenance` or a `providerId` + `sourceKind` pair and `stale` (itself or an enclosing object; row-level outcomes excepted), and a `fixture` price must be `synthetic` and the reverse — over a seeded world with a truncated tile, an unconfirmed offer, an unknown-age observation and a route-level point, so a price field added later is checked without editing the sweep. The banned-word sweep covers every `API_TEXT` entry and every user-facing string of every response. The sentinel sweep sends provider keys and the password in a path, a query, a malformed body and a verify body as well as on the happy routes, and finds none in any body or log line. `vitest.config.ts` adds per-folder thresholds for `src/read/**` and `src/routes/**` (90% lines, functions, statements; 80% branches), so a file there cannot hide behind the package average.
+Rules (spec §9 item 5; reviews prov-005, SEC-10, TS-7): the provenance sweep is shape-based — every object holding `pricePence`, `minPence` or `lowestPricePence` must carry `provenance` or a `providerId` + `sourceKind` pair and `stale` (itself or an enclosing object; row-level outcomes excepted), and a `fixture` price must be `synthetic` and the reverse — over a seeded world with a truncated tile, an unconfirmed offer, an unknown-age observation, a route-level point and a hostile stored booking (a post to an off-allowlist host with userinfo and a port, which no response may carry: review SEC-R2-3), so a price field added later is checked without editing the sweep. The banned-word sweep covers every `API_TEXT` entry and every user-facing string of every response. The sentinel sweep sends provider keys and the password in a path, a query, a malformed body and a verify body as well as on the happy routes, and finds none — nor the base64 of either Basic credential (review SEC-R2-4) — in any body or log line. `vitest.config.ts` adds per-folder thresholds for `src/read/**` and `src/routes/**` (90% lines, functions, statements; 80% branches), so a file there cannot hide behind the package average.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9782,7 +10199,7 @@ import { API_TEXT } from '../../src/text.js';
 import { expectEnvelopeOrContract } from '../helpers/contract.js';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
-import { basic, createHarness, type Harness } from '../helpers/harness.js';
+import { AUTH_USER, basic, createHarness, type Harness } from '../helpers/harness.js';
 import { at, cell, seeder } from '../helpers/seed.js';
 
 let h: Harness | undefined;
@@ -9822,6 +10239,18 @@ function seedWorld(x: Harness): { def: string; exec: string; alert: string } {
     { hash: 'hV', pricePence: 60_000, fetchedAt: at(-1) },
     { hash: 'hU', pricePence: 58_000, fetchedAt: at(-1), confirmed: false },
     { hash: 'hA', pricePence: 61_000, fetchedAt: at(-1), maxAgeHours: 'unknown' },
+    // why: review SEC-R2-3: a hostile stored link, so a route that bypassed the re-validation fails the contract here
+    {
+      hash: 'hH',
+      pricePence: 62_000,
+      fetchedAt: at(-1),
+      booking: {
+        kind: 'post',
+        url: 'https://user:pw@evil.example:8443/book',
+        postData: 'a=1',
+        host: 'evil.example',
+      },
+    },
   ]);
   s.routeLowest({
     origin: 'LHR',
@@ -9993,6 +10422,7 @@ describe('every GET route against the contract, with provenance on every price (
       expect(res.status, route.path).toBe(200);
       const body = await expectEnvelopeOrContract(res, 'GET', route.path);
       expect(unlabelledPrices(body), route.path).toEqual([]);
+      expect(JSON.stringify(body), route.path).not.toContain('evil.example:8443'); // the hostile stored link
     }
   });
 });
@@ -10054,7 +10484,12 @@ describe('sentinel secrets never reach a body or a log line (spec §5.3)', () =>
       ).text(),
     );
     const everything = [...bodies, ...x.logLines].join('\n');
-    for (const secret of [SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP]) expect(everything).not.toContain(secret);
+    // why: review SEC-R2-4: a logged Basic header would hold the base64 of user:pass, which contains neither sentinel
+    const encoded = [basic(AUTH_USER, SENTINEL_AUTH), basic(SENTINEL_SA, SENTINEL_TP)].map((b) =>
+      b.slice('Basic '.length),
+    );
+    for (const secret of [SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP, ...encoded])
+      expect(everything).not.toContain(secret);
   });
 });
 ```
@@ -10130,7 +10565,7 @@ Expected: FAIL, 1 of 6: "refuses a ROUTES entry without a handler and a handler 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/api test`
-Expected: PASS, every test file (35 files, 369 tests in the assembly: 174 new here, 195 WP4b's) under the default test timeout; coverage at or above 85% lines, functions and statements and 70% branches for `src`, and the folder thresholds (the assembly measured 94.4 / 86.2 / 94.9 / 95.8 statements / branches / functions / lines overall, `src/read` 96.2 / 81.4 / 96.2 / 97.8, `src/routes` 96.3 / 93.0 / 100 / 96.8).
+Expected: PASS, every test file (35 files, 381 tests in the assembly: 186 new here, 195 WP4b's) under the default test timeout; coverage at or above 85% lines, functions and statements and 70% branches for `src`, and the folder thresholds (the assembly measured 94.6 / 86.4 / 95.1 / 95.9 statements / branches / functions / lines overall, `src/read` 96.5 / 81.3 / 96.6 / 97.7, `src/routes` 96.2 / 93.0 / 100 / 96.8).
 
 - [ ] **Step 5: See the tests bite**
 
@@ -10159,30 +10594,29 @@ Run from the repository root:
 | Command | Expected |
 |---|---|
 | `pnpm --filter @gmt/api test` | every test passes under the default test timeout, including `bootstrap/app.spawn` (a real production bootstrap); coverage ≥ 85% lines, functions, statements and ≥ 70% branches for `apps/api/src`, and ≥ 90% lines, functions, statements and ≥ 80% branches for each of `src/read/**` and `src/routes/**` |
-| `pnpm --filter @gmt/core test` and `pnpm --filter @gmt/db test` | pass; core at 100% on every metric with Task 8.0's tests |
-| `pnpm --filter @gmt/engine test` and `pnpm --filter @gmt/providers test` | pass unchanged (they read the contract and the db Task 8.0 touches) |
+| `pnpm --filter @gmt/core test`, `pnpm --filter @gmt/db test` and `pnpm --filter @gmt/engine test` | pass; core at 100% on every metric with Tasks 8.0a, 8.0b and 8.0's tests; the engine's barrel test pins Task 8.0's exports |
+| `pnpm --filter @gmt/providers test` | passes unchanged (it reads the contract Task 8.0 touches) |
 | `pnpm -r typecheck` | exit 0 |
 | `pnpm lint` | exit 0, no diagnostics |
 | `pnpm boundaries` | exit 0: `@gmt/api` reads `process.env` only under `src/bootstrap/`; no msw import; no suppression comment; once WP9 Task 9.12 is on main, no place name in an `apps/api/src` string outside `tools/workedExample.ts` (WP8's new code adds only `GET`, already in `NOT_AIRPORT_WORDS`) |
-| `pnpm casts` | exit 0, `0 casts` (decision 48; the assembly scanned 471 files) |
-| Every mutation of Tasks 8.2–8.15 | each fails the named tests and is reverted (the assembly ran all 33) |
+| `pnpm casts` | exit 0, `0 casts` (decision 48; the assembly scanned 474 files) |
+| Every mutation of Tasks 8.2–8.15 | each fails the named tests and is reverted (the assembly ran all 38) |
 | Manual: `NODE_ENV=development DATABASE_PATH=./data/dev.db BIND_ADDRESS=127.0.0.1 pnpm --filter @gmt/api dev`, then `curl -s -H 'Host: localhost:3000' localhost:3000/api/health` | the log shows `"msg":"listening"`; curl prints `{"ok":true,"degraded":false}`; Ctrl-C logs `shutdown complete` and exits 0 |
 
 ## 11. Open questions
 
-None requires the operator's judgment. Review round 1's `[needs judgment]` items are ruled by plan decisions 53 and 54, and decision 55 adds core's `isStale`; the items below are coordination for the plan owner and other briefs, collected in §13.
+None requires the operator's judgment. Review rounds 1 and 2 are ruled by plan decisions 53, 54, 57 and 58, and decision 55 adds core's `isStale`; §13 holds the two items the plan has not recorded.
 
 ## 12. Changes outside `apps/api`
 
-- `packages/core` (Task 8.0): `labels/age.ts` (`worstCaseAgeHours` returns a number, `compareAges` ranks by what is known, `isStale`, the "vendor's cache age unknown" label), `ports/budget.ts` (`budgetScopeLabel`), `index.ts` (`CONSTRAINT_NAMES`), `api-contract/common.ts` (`vendorLinkSchema`, `storedBookingSchema`, `bookingSchema` on the refined links), `api-contract/results.ts` (the row's `superseded`, the refined search link), `api-contract/definitions.ts` (draft-tolerant stored shapes, `definitionCreateOptionalSchema`), `api-contract/executions.ts` (the verify confirmation), `api-contract/alerts.ts` (`alertRulesQuerySchema`), `api-contract/index.ts` (the routes that use them); tests `labels/age.test.ts`, `api-contract/contract.test.ts`, `helpers/rows.ts`, `wp2-barrel.test.ts` and the new `api-contract/wp08.test.ts`.
-- `packages/db` (Task 8.0): `repositories/cells.ts` (`retriedOnResume`), `internal/read.ts` (bookings read with `storedBookingSchema`), `repositories/itineraries.ts` and `types.ts` (`OfferHistoryPoint` with supplied fields and execution), `index.ts`; tests `barrel.test.ts`, `itineraries.test.ts` (exact `suppliedFields`) and the new `cells.retriedOnResume.test.ts`.
+- WP9's Task 9.0 and WP10's Task 10.1, exactly as their briefs write them (Tasks 8.0a, 8.0b; decision 57), except Task 10.1's edit of WP9's not-yet-created `apps/web/test/fixtures.ts`.
+- `packages/core` (Task 8.0): `labels/age.ts` (`effectiveAge` never younger than the fetch age, `worstCaseAgeHours` returns a number, `compareAges` ranks by what is known, `isStale`, the "vendor's cache age unknown" label), `ports/budget.ts` (`budgetScopeLabel`), `index.ts` (`CONSTRAINT_NAMES`), `api-contract/common.ts` (`vendorLinkSchema`, `storedBookingSchema`, `bookingSchema` on the refined links), `api-contract/results.ts` (the row's `superseded`, the refined search link, no `byDestination`), `api-contract/definitions.ts` (draft-tolerant stored shapes, `definitionCreateOptionalSchema`), `api-contract/executions.ts` (the verify confirmation), `api-contract/alerts.ts` (`alertRulesQuerySchema`), `api-contract/index.ts` (the routes that use them); tests `labels/age.test.ts`, `api-contract/contract.test.ts`, `helpers/rows.ts`, `wp2-barrel.test.ts` and the new `api-contract/wp08.test.ts`.
+- `packages/db` (Task 8.0): `repositories/cells.ts` (`retriedOnResume`), `repositories/calendarPrices.ts` (`heldBy`), `internal/read.ts` (bookings read with `storedBookingSchema`), `repositories/itineraries.ts` and `types.ts` (`OfferHistoryPoint` with supplied fields and execution), `index.ts`; tests `barrel.test.ts`, `itineraries.test.ts` (exact `suppliedFields`), `reuse.test.ts` (`heldBy` holds the copy) and the new `cells.retriedOnResume.test.ts`.
+- `packages/engine` (Task 8.0): `context.ts` (`capKindOf`), `start.ts` (`ConfirmationContext`, the narrowed `confirmationNeeded` parameter), `index.ts` (the exports), `test/smoke.test.ts`.
 - `pnpm-lock.yaml` (Task 8.1): `@hono/zod-validator` removed.
 
 ## 13. For the plan (not yet recorded there)
 
-1. **Assembly stand-ins.** WP9 Task 9.0 and WP10 Task 10.1 are not on main. The assembly (2026-10-17, a scratch worktree of main at `d765d38`, WP7 merged, no engine stub) first applied both tasks' file operations verbatim, parsed out of their briefs on main, and committed them as the base every Task 8.0 patch applies to; with those two tasks on main first, the patches apply as written. This round moved four contract additions from WP8's Task 8.0 to their owners: `expandTop` (WP9), and the calendar query, the views' not-seen and superseded marks and the route-point `stale` (WP10). WP8 fills WP10's shapes as declared there, including the per-series `searched` counts and the itinerary history's `cell`, `carriers` and point `executionId`; it drops the route-series `label` and `fx` fields round 1 proposed, since WP10 labels the series in the web and its points are GBP-only by shape.
-2. **One copy of the confirmation sums.** WP8 uses WP7's `SOFT_CONFIRM_CALL_SHARE` and `confirmationOf` (decision 53), but still sums the runnable lines itself to fill `needsConfirmation` and to judge a stored confirmation, as WP7's `start.ts` does internally. Exporting WP7's `confirmationNeeded` and its coverage check from `@gmt/engine` would let WP8 drop `runnable`, `confirmationRequired` and `storedCovers` (review arch-003).
-3. **Scope labels.** WP8 matches the schedule refusal and labels usage rows with core's `budgetScopeLabel`; WP7's `budgetFit` formats its `perScope[].scope` with its own template, which today produces the same strings. WP7 should call `budgetScopeLabel` so the two cannot drift.
-4. **Reuse targets and View D.** WP7's re-review N3 gave `internal/reuseCopy.ts` its own `refetchable` rule built from the same two reason lists; it is `retriedOnResume(outcome, true)` written out. Using the predicate there leaves one copy of the rule in db.
-5. **Superseded rows in WP9's views.** WP8 adds `superseded` to `/results` rows (Task 8.0); WP9's Results table should render it as WP10 renders the calendar figures' mark. The calendar gap lists no superseded price at all, so its `cells[].calendar` needs no field.
-6. **Spec text at the next revision.** §10's `GET /definitions/:id/calendar?basis=` (the contract takes `destination`, not `basis`; both bases come back per day); §10's coverage row gains "404 before the first run"; §7's app bootstrap order gains decision 53's read-only lock check before the backup.
+1. **Spec and web wording at the next revision.** §10's `GET /definitions/:id/calendar?basis=` (the contract takes `destination`, not `basis`; both bases come back per day, and the day has no `byDestination`, decision 58); §10's coverage row gains "404 before the first run"; §7's app bootstrap order gains decision 53's read-only lock check before the backup and decision 58's lock-then-seed; §10's calendar-gap row says "below the reference verified price (latest seen, then fresh, then cheapest)" instead of "the cheapest class-verified observation", and WP10's banner the same words (decision 58).
+2. **WP10 Task 10.1's fixture edit.** Its last step adds `notSeenInLatest: null` to WP9's `apps/web/test/fixtures.ts`, which does not exist when WP8 applies the task (decision 57). WP9's implementer, who creates that file and skips Task 10.1, has to write the field in; WP9's or WP10's brief should say so.
+3. **Alert events after WP11.** WP8 runs before WP11, so it cannot import WP11's `alertEventPayloadSchema` or rely on migration 0002's statuses: `GET /api/alerts/events` passes events through the repository and `alertEventSchema` generically (status and payload as stored), and works before and after 0002. When WP11 lands it should make `alertEventSchema.payload` its `alertEventPayloadSchema`, so this route parses every payload with it (decision 56), and its own tests then pin the new statuses on this route.
