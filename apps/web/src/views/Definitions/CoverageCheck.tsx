@@ -56,32 +56,34 @@ export function CoverageCheck({ draft, available }: { draft: Draft; available: b
       ) : null}
       {check.data !== undefined ? (
         <div className={stale ? 'opacity-60' : ''}>
-          <table aria-label={COPY.coverageCheck} className="border-collapse">
-            <thead>
-              <tr>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageCheckMonth}
-                </th>
-                {months.map((m) => (
-                  <th key={m} scope="col" className="p-1 text-right">
-                    {m}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {check.data.pairs.map((p) => (
-                <tr key={`${p.origin}-${p.destination}`}>
-                  <th scope="row" className="p-1 text-left font-normal">
-                    {COPY.coverageCheckPair(p.origin, p.destination)}
+          <section aria-label={COPY.coverageCheckScroll} className="overflow-x-auto">
+            <table aria-label={COPY.coverageCheck} className="border-collapse">
+              <thead>
+                <tr>
+                  <th scope="col" className="p-1 text-left">
+                    {COPY.coverageCheckMonth}
                   </th>
                   {months.map((m) => (
-                    <MonthCell key={m} m={p.months.find((x) => x.month === m)} />
+                    <th key={m} scope="col" className="p-1 text-right">
+                      {m}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {check.data.pairs.map((p) => (
+                  <tr key={`${p.origin}-${p.destination}`}>
+                    <th scope="row" className="p-1 text-left font-normal">
+                      {COPY.coverageCheckPair(p.origin, p.destination)}
+                    </th>
+                    {months.map((m) => (
+                      <MonthCell key={m} m={p.months.find((x) => x.month === m)} />
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
           <p>{COPY.coverageCheckCalls(check.data.calls)}</p>
           {check.data.notes.map((n) => (
             <p key={n}>{n}</p>

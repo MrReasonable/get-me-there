@@ -38,13 +38,19 @@ export function App() {
           {COPY.providersUnknown(providers.error.message)}
         </p>
       ) : null}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-10 focus:bg-white focus:p-2 focus:underline"
+      >
+        {COPY.skipToContent}
+      </a>
       <header className="flex flex-wrap items-center gap-4 border-b border-slate-300 px-4 py-2">
         <h1 className="text-lg font-bold">{COPY.appTitle}</h1>
         <Nav current={view} />
         <DefinitionSelector definitions={list} selectedId={selectedId} />
       </header>
       <StatusBar definition={selected} showRunNow={view === 'results' || view === 'definitions'} />
-      <main className="px-4 py-3">
+      <main id="main" tabIndex={-1} className="px-4 py-3">
         <AppBoundary>
           {noProviders ? (
             <p className="mb-3 rounded border border-slate-400 p-3">{COPY.emptyNoProviders}</p>

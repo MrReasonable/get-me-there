@@ -304,64 +304,67 @@ export function ResultsTable({
   });
   return (
     <TableContext.Provider value={context}>
-      <table aria-label={COPY.resultsTableLabel} className="w-full border-collapse text-sm">
-        <thead>
-          {table.getHeaderGroups().map((group) => (
-            <tr key={group.id}>
-              {group.headers.map((h) => {
-                const key = SORT_KEY.get(h.column.id);
-                const ariaSort =
-                  key === undefined
-                    ? undefined
-                    : sort?.key === key
-                      ? sort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none';
-                return (
-                  <th
-                    key={h.id}
-                    scope="col"
-                    aria-sort={ariaSort}
-                    className="border-b border-slate-400 p-1 text-left"
-                  >
-                    <table.FlexRender header={h} />
-                  </th>
-                );
-              })}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <Fragment key={row.id}>
-              <tr
-                id={rowDomId(row.id)}
-                aria-current={row.id === selectedRow ? 'true' : undefined}
-                className={`border-b border-slate-200 align-top ${row.id === selectedRow ? 'bg-amber-50 outline outline-2 outline-amber-600' : ''}`}
-              >
-                {row.getAllCells().map((c) => (
-                  <td key={c.id} className="p-1">
-                    <table.FlexRender cell={c} />
-                  </td>
-                ))}
+      {/* why: a labelled scroll region, so a table wider than the screen scrolls inside itself, not the page (UI-3). */}
+      <section aria-label={COPY.resultsScroll} className="overflow-x-auto">
+        <table aria-label={COPY.resultsTableLabel} className="w-full border-collapse text-sm">
+          <thead>
+            {table.getHeaderGroups().map((group) => (
+              <tr key={group.id}>
+                {group.headers.map((h) => {
+                  const key = SORT_KEY.get(h.column.id);
+                  const ariaSort =
+                    key === undefined
+                      ? undefined
+                      : sort?.key === key
+                        ? sort.dir === 'asc'
+                          ? 'ascending'
+                          : 'descending'
+                        : 'none';
+                  return (
+                    <th
+                      key={h.id}
+                      scope="col"
+                      aria-sort={ariaSort}
+                      className="border-b border-slate-400 p-1 text-left"
+                    >
+                      <table.FlexRender header={h} />
+                    </th>
+                  );
+                })}
               </tr>
-              {row.getIsExpanded() ? (
-                <tr id={detailId(row.id)}>
-                  <td colSpan={ids.length} className="bg-slate-50">
-                    <ExpandedRow
-                      row={row.original}
-                      extras={narrow}
-                      verificationConfigured={verificationConfigured}
-                      definitionId={definitionId}
-                    />
-                  </td>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.map((row) => (
+              <Fragment key={row.id}>
+                <tr
+                  id={rowDomId(row.id)}
+                  aria-current={row.id === selectedRow ? 'true' : undefined}
+                  className={`border-b border-slate-200 align-top ${row.id === selectedRow ? 'bg-amber-50 outline outline-2 outline-amber-600' : ''}`}
+                >
+                  {row.getAllCells().map((c) => (
+                    <td key={c.id} className="p-1">
+                      <table.FlexRender cell={c} />
+                    </td>
+                  ))}
                 </tr>
-              ) : null}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+                {row.getIsExpanded() ? (
+                  <tr id={detailId(row.id)}>
+                    <td colSpan={ids.length} className="bg-slate-50">
+                      <ExpandedRow
+                        row={row.original}
+                        extras={narrow}
+                        verificationConfigured={verificationConfigured}
+                        definitionId={definitionId}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </TableContext.Provider>
   );
 }

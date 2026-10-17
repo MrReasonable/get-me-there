@@ -169,6 +169,20 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     );
   });
 
+  it('a half-filled time window disables Create and confirm as well, with the reason beside it (ruling 6)', async () => {
+    server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())));
+    const { user } = renderWithProviders(<DefinitionsView />);
+    await importAndEstimate(user);
+    const create = await screen.findByRole('button', { name: /^Create and confirm/ });
+    expect(create).toBeEnabled();
+    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.clear(screen.getByLabelText('arrival time window to'));
+    expect(create).toBeDisabled();
+    expect(create).toHaveAccessibleDescription(
+      'Cannot estimate or save: a time window needs both ends, or neither.',
+    );
+  });
+
   it('editing after an estimate replaces Create with "show the estimate again" until re-estimated', async () => {
     server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())));
     const { user } = renderWithProviders(<DefinitionsView />);

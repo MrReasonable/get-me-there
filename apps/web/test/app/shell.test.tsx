@@ -30,6 +30,17 @@ describe('shell (spec §11 layout)', () => {
     expect(within(nav).getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
   });
 
+  it('a skip link comes first and targets the main region; the nav scrolls instead of wrapping (UI-15)', async () => {
+    const { user } = renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
+    const nav = await screen.findByRole('navigation', { name: 'Views' });
+    expect(nav).toHaveClass('overflow-x-auto');
+    await user.tab();
+    const skip = screen.getByRole('link', { name: 'Skip to the main content' });
+    expect(skip).toHaveFocus();
+    expect(skip).toHaveAttribute('href', '#main');
+    expect(screen.getByRole('main')).toHaveAttribute('id', 'main');
+  });
+
   it.each(['duration', 'history', 'alerts'])(
     '%s is a placeholder that names no work package',
     async (view) => {

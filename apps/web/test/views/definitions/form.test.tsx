@@ -321,6 +321,83 @@ describe("the API's field errors (422 details.fields) land under the field they 
   });
 });
 
+describe('blocking, required fields, pending and focus (fix round 1)', () => {
+  it('a cleared nights box is "required", blocks estimating, and is never sent as 0 (UI-10)', async () => {
+    const bodies = estimateBodies();
+    const { user } = renderForm();
+    await user.clear(screen.getByLabelText('Min nights'));
+    expect(screen.getByRole('alert')).toHaveTextContent('required');
+    expect(screen.getByLabelText('Min nights')).toBeInvalid();
+    const estimate = screen.getByRole('button', { name: 'Show estimate' });
+    expect(estimate).toBeDisabled();
+    expect(estimate).toHaveAccessibleDescription(
+      'Cannot estimate or save: fill in the required number fields.',
+    );
+    await user.type(screen.getByLabelText('Min nights'), '8');
+    expect(screen.getByRole('button', { name: 'Show estimate' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toMatchObject({ minNights: 8 });
+  });
+
+  it('Show estimate is disabled and labelled while working, so a double tap sends one request (UI-2)', async () => {
+    let posts = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API}/definitions/estimate`, async () => {
+        posts += 1;
+        await gate;
+        return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+      }),
+    );
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    const working = await screen.findByRole('button', { name: 'Working…' });
+    expect(working).toBeDisabled();
+    await user.click(working);
+    release();
+    await screen.findByRole('region', { name: 'Estimate' });
+    expect(posts).toBe(1);
+  });
+
+  it('an API error on a field inside the advanced fold opens the fold and moves focus to the summary (UI-11)', async () => {
+    server.use(
+      http.post(`${API}/definitions/estimate`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'validation',
+              message: 'x',
+              details: { fields: [{ field: 'constraints.maxStops', message: 'too many' }] },
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    const summary = await screen.findByRole('alert');
+    expect(summary).toHaveTextContent('constraints.maxStops: too many');
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(screen.getByText('Advanced: constraints and policy').closest('details')).toHaveAttribute('open');
+  });
+
+  it('a pounds box with text that is not an amount says so instead of silently keeping the old value (UI-8)', async () => {
+    const { user } = renderForm();
+    await user.type(screen.getByLabelText('Destinations'), 'JFK{Enter}');
+    const box = screen.getByLabelText(/^Onward cost to JFK in £/);
+    await user.type(box, '12.5.0');
+    expect(box).toBeInvalid();
+    expect(screen.getByRole('alert')).toHaveTextContent('not an amount in pounds');
+    await user.clear(box);
+    expect(box).toBeValid();
+  });
+});
+
 describe('per-destination fields and the example (spec §11)', () => {
   it('note and onward cost per destination reach the estimate request, the cost in pence', async () => {
     const bodies = estimateBodies();

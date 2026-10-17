@@ -80,12 +80,17 @@ export function PoundsField({
   onChange: (p: number | undefined) => void;
 }) {
   const [text, setText] = useSynced(penceToPoundsInput(pence), poundsText);
+  // why: text that does not parse is shown as an error rather than silently leaving the old value in force (UI-8).
+  const invalid = text.trim() !== '' && parsePoundsToPence(text) === undefined;
+  const errorId = `${id}-errors`;
   return (
     <span className="flex flex-col">
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
         inputMode="decimal"
+        aria-invalid={invalid}
+        aria-describedby={invalid ? errorId : undefined}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -94,6 +99,7 @@ export function PoundsField({
         }}
         className={`w-28 ${input}`}
       />
+      <FieldErrors id={errorId} messages={invalid ? [COPY.invalidPounds] : []} />
     </span>
   );
 }
@@ -230,7 +236,7 @@ export function Check({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <span className="flex min-h-11 items-center gap-1">
+    <span className="flex items-center gap-1">
       <input
         id={id}
         type="checkbox"
@@ -238,7 +244,9 @@ export function Check({
         disabled={disabled === true}
         onChange={(e) => onChange(e.target.checked)}
       />
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id} className="flex min-h-11 items-center">
+        {label}
+      </label>
     </span>
   );
 }

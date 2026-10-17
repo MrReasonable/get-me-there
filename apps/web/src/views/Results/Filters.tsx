@@ -79,6 +79,10 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
         : { min: Math.min(range.min, range.max), max: Math.max(range.min, range.max) },
     );
   };
+  // why: typed text that does not parse is flagged, not silently ignored (UI-8).
+  const priceInvalid = maxPrice.trim() !== '' && parsePoundsToPence(maxPrice) === undefined;
+  const nightsMinInvalid = nightsMin.trim() !== '' && intOrUndefined(nightsMin) === undefined;
+  const nightsMaxInvalid = nightsMax.trim() !== '' && intOrUndefined(nightsMax) === undefined;
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     apply(typed(f));
@@ -89,7 +93,17 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
     const first = dates[0];
     const last = dates.at(-1);
     if (!parsed.success) {
-      apply(setFilter(f, 'departure', undefined));
+      // why: clearing one end leaves the range open-ended on that side (the data's own bound); only clearing
+      // the last explicit end removes the filter (UI-9).
+      const other = end === 'from' ? current?.to : current?.from;
+      const bound = end === 'from' ? first : last;
+      if (other === undefined || bound === undefined) {
+        apply(setFilter(f, 'departure', undefined));
+        return;
+      }
+      apply(
+        setFilter(f, 'departure', end === 'from' ? { from: bound, to: other } : { from: other, to: bound }),
+      );
       return;
     }
     const from = end === 'from' ? parsed.data : (current?.from ?? first);
@@ -184,33 +198,54 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
           <input
             id="filter-max-price"
             className={field}
+            aria-invalid={priceInvalid}
+            aria-describedby={priceInvalid ? 'filter-max-price-error' : undefined}
             inputMode="decimal"
             value={maxPrice}
             onChange={(e) => setMaxPrice(e.target.value)}
             onBlur={() => apply(typed(f))}
           />
+          {priceInvalid ? (
+            <span id="filter-max-price-error" role="alert" className="text-xs text-red-800">
+              {COPY.invalidPounds}
+            </span>
+          ) : null}
         </span>
         <span className="flex flex-col">
           <label htmlFor="filter-nights-min">{COPY.filterNightsMin}</label>
           <input
             id="filter-nights-min"
             className={field}
+            aria-invalid={nightsMinInvalid}
+            aria-describedby={nightsMinInvalid ? 'filter-nights-min-error' : undefined}
             inputMode="numeric"
             value={nightsMin}
             onChange={(e) => setNightsMin(e.target.value)}
             onBlur={() => apply(typed(f))}
           />
+          {nightsMinInvalid ? (
+            <span id="filter-nights-min-error" role="alert" className="text-xs text-red-800">
+              {COPY.invalidWholeNumber}
+            </span>
+          ) : null}
         </span>
         <span className="flex flex-col">
           <label htmlFor="filter-nights-max">{COPY.filterNightsMax}</label>
           <input
             id="filter-nights-max"
             className={field}
+            aria-invalid={nightsMaxInvalid}
+            aria-describedby={nightsMaxInvalid ? 'filter-nights-max-error' : undefined}
             inputMode="numeric"
             value={nightsMax}
             onChange={(e) => setNightsMax(e.target.value)}
             onBlur={() => apply(typed(f))}
           />
+          {nightsMaxInvalid ? (
+            <span id="filter-nights-max-error" role="alert" className="text-xs text-red-800">
+              {COPY.invalidWholeNumber}
+            </span>
+          ) : null}
         </span>
         <span className="flex flex-col">
           <label htmlFor="filter-depart-from">{COPY.filterDepartFrom}</label>

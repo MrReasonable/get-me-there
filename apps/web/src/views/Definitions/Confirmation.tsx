@@ -14,11 +14,16 @@ const button = 'min-h-11 rounded border border-slate-700 px-3';
 export function CreateConfirmation({
   estimate,
   fresh,
+  blocked,
+  pending,
   hardStop,
   onCreate,
 }: {
   estimate: EstimateResponse;
   fresh: boolean;
+  /** A field error is open: the create click is refused exactly like Show estimate and Save (ruling 6). */
+  blocked: boolean;
+  pending: boolean;
   /** The run budget's call cap, the runtime limit beside the estimate. */
   hardStop: number;
   onCreate: () => void;
@@ -31,14 +36,19 @@ export function CreateConfirmation({
         <button
           type="button"
           data-cost=""
-          className="min-h-11 rounded bg-slate-900 px-3 text-white"
+          className="min-h-11 rounded bg-slate-900 px-3 text-white disabled:opacity-60"
+          disabled={blocked || pending}
+          aria-busy={pending ? true : undefined}
+          aria-describedby={blocked ? 'd-blocked' : undefined}
           onClick={onCreate}
         >
-          {COPY.createConfirm(
-            estimate.estimate.totalCalls,
-            hardStop,
-            formatPence(microGbpToPence(estimate.estimate.totalCostMicroGbp)),
-          )}
+          {pending
+            ? COPY.working
+            : COPY.createConfirm(
+                estimate.estimate.totalCalls,
+                hardStop,
+                formatPence(microGbpToPence(estimate.estimate.totalCostMicroGbp)),
+              )}
         </button>
       ) : (
         <p role="status" className="font-medium">
@@ -55,9 +65,11 @@ export function CreateConfirmation({
  */
 export function Reconfirmation({
   definition,
+  pending,
   onConfirm,
 }: {
   definition: DefinitionResponse;
+  pending: boolean;
   onConfirm: (v: { pence: number; calls: number }) => void;
 }) {
   const n = definition.needsConfirmation;
@@ -79,8 +91,16 @@ export function Reconfirmation({
                 ),
         })}
       </p>
-      <button type="button" className={button} onClick={() => onConfirm({ pence, calls: n.totalCalls })}>
-        {COPY.confirmNew(n.totalCalls, definition.budget.maxCalls, formatPence(pence))}
+      <button
+        type="button"
+        className={button}
+        disabled={pending}
+        aria-busy={pending ? true : undefined}
+        onClick={() => onConfirm({ pence, calls: n.totalCalls })}
+      >
+        {pending
+          ? COPY.working
+          : COPY.confirmNew(n.totalCalls, definition.budget.maxCalls, formatPence(pence))}
       </button>
     </div>
   );

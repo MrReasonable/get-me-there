@@ -95,6 +95,28 @@ const five: ResultRow[] = [
   calendarRow({ pricePence: 30000 }),
 ];
 
+describe('phone layout at 375px (jsdom has no layout, so the structure is asserted)', () => {
+  it('the table sits in its own scroll region, every control is a 44px target, and tablets get the stacked layout', async () => {
+    setViewportWidth(375);
+    countResults(resultsResponse({ rows: five }));
+    view();
+    const t = await table();
+    expect(t.closest('section')).toHaveClass('overflow-x-auto');
+    for (const b of screen.getAllByRole('button', { name: /^Show details/ }))
+      expect(b).toHaveClass('min-h-11');
+    for (const b of screen.getAllByRole('button', { name: /^Sort by/ })) expect(b).toHaveClass('min-h-11');
+    expect(screen.queryByRole('columnheader', { name: /Carriers/ })).toBeNull();
+  });
+
+  it('a 768px tablet is still too narrow for twelve columns, so it gets the stacked layout too', async () => {
+    setViewportWidth(768);
+    countResults(resultsResponse({ rows: five }));
+    view();
+    await table();
+    expect(screen.queryByRole('columnheader', { name: /Carriers/ })).toBeNull();
+  });
+});
+
 describe('View A columns (spec §11)', () => {
   it('wide: every column in the spec order; adjusted appears only when configured, through PriceCell', async () => {
     countResults();
@@ -399,6 +421,30 @@ describe('client-side sort and filter (spec §6.5)', () => {
       ),
     );
     expect(rowNames()).toHaveLength(3);
+  });
+
+  it('clearing one departure date keeps the other end, open-ended on the cleared side (UI-9)', async () => {
+    countResults(resultsResponse({ rows: five }));
+    view();
+    await table();
+    fireEvent.change(screen.getByLabelText('Departs on or after'), { target: { value: '2027-03-14' } });
+    fireEvent.change(screen.getByLabelText('Departs on or before'), { target: { value: '2027-03-20' } });
+    fireEvent.change(screen.getByLabelText('Departs on or after'), { target: { value: '' } });
+    expect(url().get('f.depart')).toBe('2027-03-10..2027-03-20');
+    fireEvent.change(screen.getByLabelText('Departs on or before'), { target: { value: '' } });
+    expect(url().get('f.depart')).toBe('2027-03-10..2027-04-02');
+  });
+
+  it('a max price or nights box that does not parse is flagged instead of silently ignored (UI-8)', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const { user } = view();
+    await table();
+    await user.type(screen.getByLabelText('Max price (£)'), 'abc');
+    expect(screen.getByLabelText('Max price (£)')).toBeInvalid();
+    expect(screen.getByText('not an amount in pounds (for example 450 or 450.50)')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Min nights'), '1x');
+    expect(screen.getByLabelText('Min nights')).toBeInvalid();
+    expect(screen.getByText('not a whole number')).toBeInTheDocument();
   });
 
   it('carriers: codes apply on leaving the box; entries that are not codes are shown as ignored (review PFT-12)', async () => {

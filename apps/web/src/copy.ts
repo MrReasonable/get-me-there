@@ -29,6 +29,7 @@ export type BucketName = Exclude<keyof Buckets, 'reused'>;
  */
 export const COPY = {
   appTitle: 'get-me-there',
+  skipToContent: 'Skip to the main content',
   navLabel: 'Views',
   nav: {
     results: 'Results',
@@ -334,6 +335,8 @@ export const COPY = {
   coverageSearched: 'searched (priced + no fares + no cached data)',
   coverageWithPrice: 'with a price',
   withPriceValue: (priced: number, total: number) => `${priced} of ${total}`,
+  resultsScroll: 'Round trips found (scrolls sideways on a narrow screen)',
+  coverageCheckScroll: 'Coverage check months (scrolls sideways on a narrow screen)',
   coverageScroll: 'Coverage counts (scrolls sideways on a narrow screen)',
   coverageLegend: 'What the columns mean',
   bucketHelp: {
@@ -433,6 +436,11 @@ export const COPY = {
   inPounds: (label: string) => `${label} (£)`,
   minutesAsHours: (text: string) => `= ${text}`,
   // why: one end of a time window alone is an unfinished constraint; say so rather than dropping it silently.
+  required: 'required',
+  invalidPounds: 'not an amount in pounds (for example 450 or 450.50)',
+  invalidWholeNumber: 'not a whole number',
+  blockedByRequired: 'Cannot estimate or save: fill in the required number fields.',
+  creatingBlocked: 'Cannot create while a field above has an error.',
   bothEndsNeeded: 'both ends needed',
   blockedByTimeWindow: 'Cannot estimate or save: a time window needs both ends, or neither.',
   timeFrom: 'from',

@@ -1,13 +1,11 @@
-import { apiContract, londonDateOf, microGbpToPence, resolveWindow } from '@gmt/core';
+import { microGbpToPence } from '@gmt/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, type FieldError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import type { DefinitionResponse, EstimateResponse, ProvidersResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../example.js';
-import { formatIsoDate } from '../../format.js';
-import { useNow } from '../../now.js';
 import { updateSearchParams } from '../../state/urlState.js';
 import { withKey } from '../../state/withKey.js';
 import { AdvancedFields, type ProviderCapabilities } from './AdvancedFields.js';
@@ -25,29 +23,17 @@ import {
   EMPTY_ABSOLUTE,
 } from './draft.js';
 import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
-import { FieldErrors, NumberField, PoundsField } from './fields.js';
+import { FieldErrors, PoundsField } from './fields.js';
+import { SearchSpaceFields } from './SearchSpaceFields.js';
 
 /** Field errors whose path is `field` or starts with `field.` (422 `details.fields`). */
 const errorsFor = (errors: readonly FieldError[], field: string) =>
   errors.filter((e) => e.field === field || e.field.startsWith(`${field}.`)).map((e) => e.message);
 
 const input = 'min-h-11 rounded border border-slate-400 px-1';
+/** Fields that live inside the collapsed advanced fold. */
+const ADVANCED_FIELDS = /^(constraints|verification|budget|providers|schedule|enabled)/;
 const button = 'min-h-11 rounded border border-slate-700 px-3';
-
-/** "departures from 21 Oct 2026 to 20 Apr 2027, as resolved today" under the relative fields (review PFT-08). */
-function ResolvedWindow({ window: w }: { window: DraftWindow }) {
-  const now = useNow();
-  if (w.kind !== 'relative' || w.startOffsetDays < 1 || w.lengthDays < 1) return null;
-  const r = resolveWindow(
-    { kind: 'relative', startOffsetDays: w.startOffsetDays, lengthDays: w.lengthDays },
-    londonDateOf(now),
-  );
-  return (
-    <p className="w-full text-xs">
-      {COPY.resolvedWindow(formatIsoDate(r.departureFrom), formatIsoDate(r.departureTo))}
-    </p>
-  );
-}
 
 /**
  * Spec §11 Definitions form. New definition: "Show estimate" calls POST /api/definitions/estimate
@@ -86,7 +72,22 @@ export function DefinitionForm({
       ),
     [],
   );
-  const blocked = incomplete.length > 0;
+  // why: a required number box left blank is also a local field error (UI-10); neither is coerced to a value.
+  const [blank, setBlank] = useState<readonly string[]>([]);
+  const markBlank = useCallback(
+    (id: string, on: boolean) =>
+      setBlank((prev) => (on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id))),
+    [],
+  );
+  const blocked = incomplete.length > 0 || blank.length > 0;
+  // why: the API's field errors move focus to their summary, and open the fold when one names an advanced field (UI-11).
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  useEffect(() => {
+    if (fieldErrors.length === 0) return;
+    if (fieldErrors.some((e) => ADVANCED_FIELDS.test(e.field))) setAdvancedOpen(true);
+    summaryRef.current?.focus();
+  }, [fieldErrors]);
   const [notice, setNotice] = useState<string | null>(null);
   const capabilities: ProviderCapabilities[] = providers.providers
     .filter((p) => p.enabled)
@@ -148,17 +149,11 @@ export function DefinitionForm({
     onError,
   });
 
-  const w = draft.window;
-  const switchWindow = () => {
-    setOtherWindow(w);
-    setDraft({ ...draft, window: otherWindow });
-  };
   const fresh = estimate !== null && estimatedFor === current;
-  const nightsErrors = (field: 'minNights' | 'maxNights') => errorsFor(fieldErrors, field);
   return (
     <form onSubmit={(e) => e.preventDefault()} className="space-y-3 text-sm">
       {fieldErrors.length > 0 ? (
-        <div role="alert" className="rounded border border-red-700 p-2">
+        <div ref={summaryRef} tabIndex={-1} role="alert" className="rounded border border-red-700 p-2">
           <p className="font-semibold">{COPY.fieldErrorsHeading}</p>
           <ul>
             {fieldErrors.map((e) => (
@@ -177,7 +172,10 @@ export function DefinitionForm({
       <button
         type="button"
         className={button}
-        onClick={() => setDraft(applyExample(draft, EXAMPLE_DEFINITION))}
+        onClick={() => {
+          setDraft(applyExample(draft, EXAMPLE_DEFINITION));
+          setBlank([]);
+        }}
       >
         {COPY.importExample(EXAMPLE_LABEL)}
       </button>
@@ -230,104 +228,16 @@ export function DefinitionForm({
           />
         </span>
       ))}
-      <fieldset className="flex flex-wrap items-end gap-3">
-        <legend className="font-semibold">{COPY.windowHeading}</legend>
-        <span className="flex min-h-11 items-center gap-1">
-          <input
-            id="w-relative"
-            type="radio"
-            name="window"
-            checked={w.kind === 'relative'}
-            onChange={switchWindow}
-          />
-          <label htmlFor="w-relative">{COPY.windowRelative}</label>
-        </span>
-        <span className="flex min-h-11 items-center gap-1">
-          <input
-            id="w-absolute"
-            type="radio"
-            name="window"
-            checked={w.kind === 'absolute'}
-            onChange={switchWindow}
-          />
-          <label htmlFor="w-absolute">{COPY.windowAbsolute}</label>
-        </span>
-        {w.kind === 'relative' ? (
-          <>
-            <NumberField
-              id="w-offset"
-              label={COPY.startOffsetDays}
-              value={w.startOffsetDays}
-              errors={errorsFor(fieldErrors, 'window.startOffsetDays')}
-              onChange={(v) => setDraft({ ...draft, window: { ...w, startOffsetDays: v ?? 0 } })}
-            />
-            <NumberField
-              id="w-length"
-              label={COPY.lengthDays}
-              value={w.lengthDays}
-              errors={errorsFor(fieldErrors, 'window.lengthDays')}
-              onChange={(v) => setDraft({ ...draft, window: { ...w, lengthDays: v ?? 0 } })}
-            />
-            <ResolvedWindow window={w} />
-          </>
-        ) : (
-          <>
-            <span className="flex flex-col">
-              <label htmlFor="w-from">{COPY.windowFrom}</label>
-              <input
-                id="w-from"
-                type="date"
-                className={input}
-                value={w.from}
-                onChange={(e) => setDraft({ ...draft, window: { ...w, from: e.target.value } })}
-              />
-            </span>
-            <span className="flex flex-col">
-              <label htmlFor="w-to">{COPY.windowTo}</label>
-              <input
-                id="w-to"
-                type="date"
-                className={input}
-                value={w.to}
-                onChange={(e) => setDraft({ ...draft, window: { ...w, to: e.target.value } })}
-              />
-            </span>
-          </>
-        )}
-        <NumberField
-          id="n-min"
-          label={COPY.minNights}
-          value={draft.minNights}
-          errors={nightsErrors('minNights')}
-          onChange={(v) => setDraft({ ...draft, minNights: v ?? 0 })}
-        />
-        <NumberField
-          id="n-max"
-          label={COPY.maxNights}
-          value={draft.maxNights}
-          errors={nightsErrors('maxNights')}
-          onChange={(v) => setDraft({ ...draft, maxNights: v ?? 0 })}
-        />
-        <span className="flex flex-col">
-          <label htmlFor="d-cabin">{COPY.cabin}</label>
-          <select
-            id="d-cabin"
-            className={input}
-            value={draft.cabin}
-            onChange={(e) => {
-              const cabin = apiContract.cabinSchema.safeParse(e.target.value);
-              if (cabin.success) setDraft({ ...draft, cabin: cabin.data });
-            }}
-          >
-            {apiContract.cabinSchema.options.map((c) => (
-              <option key={c} value={c}>
-                {COPY.cabinName[c]}
-              </option>
-            ))}
-          </select>
-        </span>
-      </fieldset>
-      <details>
+      <SearchSpaceFields
+        draft={draft}
+        setDraft={setDraft}
+        otherWindow={otherWindow}
+        setOtherWindow={setOtherWindow}
+        errorsFor={(field) => errorsFor(fieldErrors, field)}
+        blank={blank}
+        markBlank={markBlank}
+      />
+      <details open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
         <summary className="min-h-11 cursor-pointer font-semibold">{COPY.advanced}</summary>
         <AdvancedFields
           draft={draft}
@@ -341,38 +251,49 @@ export function DefinitionForm({
         <button
           type="button"
           className={button}
-          disabled={blocked}
+          disabled={blocked || estimateDraft.isPending}
+          aria-busy={estimateDraft.isPending ? true : undefined}
           aria-describedby={blocked ? 'd-blocked' : undefined}
           onClick={() => estimateDraft.mutate()}
         >
-          {COPY.showEstimate}
+          {estimateDraft.isPending ? COPY.working : COPY.showEstimate}
         </button>
       ) : (
         <button
           type="button"
           className={button}
-          disabled={blocked}
+          disabled={blocked || save.isPending}
+          aria-busy={save.isPending ? true : undefined}
           aria-describedby={blocked ? 'd-blocked' : undefined}
           onClick={() => save.mutate(saved)}
         >
-          {COPY.save}
+          {save.isPending ? COPY.working : COPY.save}
         </button>
       )}
       {blocked ? (
         <p id="d-blocked" className="text-red-800">
-          {COPY.blockedByTimeWindow}
+          {[
+            ...(incomplete.length > 0 ? [COPY.blockedByTimeWindow] : []),
+            ...(blank.length > 0 ? [COPY.blockedByRequired] : []),
+          ].join(' ')}
         </p>
       ) : null}
       {saved === null && estimate !== null ? (
         <CreateConfirmation
           estimate={estimate}
           fresh={fresh}
+          blocked={blocked}
+          pending={create.isPending}
           hardStop={draft.budget.maxCalls}
           onCreate={() => create.mutate(estimate)}
         />
       ) : null}
       {saved !== null ? (
-        <Reconfirmation definition={saved} onConfirm={(v) => confirm.mutate({ id: saved.id, ...v })} />
+        <Reconfirmation
+          definition={saved}
+          pending={confirm.isPending}
+          onConfirm={(v) => confirm.mutate({ id: saved.id, ...v })}
+        />
       ) : null}
       {saved?.estimate ? <EstimatePanel estimate={saved.estimate} hardStop={saved.budget.maxCalls} /> : null}
       {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}

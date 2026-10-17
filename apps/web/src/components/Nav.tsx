@@ -8,8 +8,9 @@ import { VIEWS, type ViewId } from '../state/view.js';
  */
 export function Nav({ current }: { current: ViewId }) {
   return (
-    <nav aria-label={COPY.navLabel}>
-      <ul className="flex flex-wrap gap-1">
+    // why: eight links scroll sideways on a phone instead of wrapping into three 44px rows (UI-15).
+    <nav aria-label={COPY.navLabel} className="max-w-full overflow-x-auto">
+      <ul className="flex gap-1 whitespace-nowrap">
         {VIEWS.map((v) => (
           <li key={v}>
             <a
