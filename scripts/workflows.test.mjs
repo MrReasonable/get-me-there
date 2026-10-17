@@ -28,6 +28,24 @@ describe('GitHub workflows (least privilege)', () => {
       expect(s.split('\n- ')[0].split('\n      - ')[0]).toContain('persist-credentials: false');
   });
 
+  // why: Node 20 actions are deprecated on GitHub-hosted runners; each pin must be a full SHA whose comment names a
+  // release that runs on Node 24, and runners are pinned rather than floating on ubuntu-latest.
+  it.each(files)('%s pins actions by SHA at Node 24 releases and runners to ubuntu-24.04', (f) => {
+    const t = text(f);
+    const uses = [...t.matchAll(/uses: (\S+)@([0-9a-f]+) # (\S+)/g)];
+    expect(uses.length).toBeGreaterThan(0);
+    for (const [, action, sha] of uses) expect(sha, action).toMatch(/^[0-9a-f]{40}$/);
+    const minimum = { 'actions/checkout': 6, 'actions/setup-node': 6, 'pnpm/action-setup': 6 };
+    for (const [, action, , tag] of uses)
+      if (action in minimum)
+        expect(Number(tag.replace(/^v/, '').split('.')[0]), `${action} ${tag}`).toBeGreaterThanOrEqual(
+          minimum[action],
+        );
+    const runners = [...t.matchAll(/^\s*runs-on: (\S+)/gm)].map((m) => m[1]);
+    expect(runners.length).toBeGreaterThan(0);
+    for (const r of runners) expect(r).toBe('ubuntu-24.04');
+  });
+
   it('the docker job proves the container refuses the recording tool, and its image scan prunes only the pnpm store', () => {
     const t = text('ci.yml');
     expect(t).toContain('/api/tools/record');
