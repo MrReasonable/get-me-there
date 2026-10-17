@@ -11,6 +11,10 @@ describe('CI enforces every package’s own coverage thresholds', () => {
     expect(CI).toMatch(/run: pnpm -r --workspace-concurrency=1 test\s*$/m);
     expect(CI).not.toMatch(/pnpm test:coverage/);
   });
+  it('the root test:coverage script is the same gated per-package run, never a root coverage run (ts-006)', () => {
+    const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8'));
+    expect(pkg.scripts['test:coverage']).toBe('pnpm -r --workspace-concurrency=1 test');
+  });
   it('still runs the root scripts project', () => {
     expect(CI).toMatch(/run: pnpm exec vitest run --project scripts\s*$/m);
   });
