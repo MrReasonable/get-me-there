@@ -15,6 +15,7 @@ import {
 } from '../fixtures.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
+import { setViewportWidth } from '../viewport.js';
 
 const bar = (over: Parameters<typeof definition>[0] = {}, showRunNow = true) => (
   <StatusBar definition={definition(over)} showRunNow={showRunNow} />
@@ -29,9 +30,11 @@ describe('status bar (spec §11)', () => {
     expect(await screen.findByText('running')).toBeInTheDocument();
     const lines = screen.getAllByRole('progressbar');
     expect(lines.map((l) => l.textContent)).toEqual([
-      'discovery · Travelpayouts: searched 116 of 126 cells (6 error) · 0 skipped · 10 not searched',
-      'itinerary search · SearchApi: itinerary-searched 0 of 10 selected (0 error) · 116 skipped · 10 not searched',
+      'discovery · Travelpayouts: attempted 116 of 126 cells (6 error) · 0 skipped · 10 not searched',
+      'itinerary search · SearchApi: attempted 0 of 10 selected (0 error) · 116 skipped · 10 not searched',
     ]);
+    // why: screen readers announce a progressbar's value text, not its child text, so the unsearched count must be in it.
+    expect(lines.map((l) => l.getAttribute('aria-valuetext'))).toEqual(lines.map((l) => l.textContent));
     // why: the itinerary-search line counts against the selected cells (spec §3), from the results response.
     expect(lines.map((l) => [l.getAttribute('aria-valuenow'), l.getAttribute('aria-valuemax')])).toEqual([
       ['116', '126'],
@@ -111,6 +114,83 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => resumed).toBe(1);
   });
 
+  it('an interrupted run offers Resume as well as Cancel, and no Run now (spec §7; derived from core)', async () => {
+    let resumed = 0;
+    server.use(
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'interrupted' }))),
+      http.post(`${API}/executions/:id/resume`, () => {
+        resumed += 1;
+        return HttpResponse.json(execution());
+      }),
+    );
+    const { user } = renderWithProviders(bar());
+    await user.click(await screen.findByRole('button', { name: 'Resume' }));
+    await expect.poll(() => resumed).toBe(1);
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+  });
+
+  it('a running run offers no Resume', async () => {
+    server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
+    renderWithProviders(bar());
+    await screen.findByText('running');
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+  });
+
+  it('a failed results query shows the reason and a retry instead of loading forever (UI-6)', async () => {
+    let ok = false;
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        ok
+          ? HttpResponse.json(resultsResponse())
+          : HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 }),
+      ),
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())),
+    );
+    const { user } = renderWithProviders(bar());
+    expect(await screen.findByRole('alert')).toHaveTextContent('db is down');
+    expect(screen.queryByText('Loading…')).toBeNull();
+    ok = true;
+    await user.click(screen.getByRole('button', { name: /Try again|Retry/ }));
+    expect(await screen.findByText('running')).toBeInTheDocument();
+  });
+
+  it('Run now shows a working state and cannot be double-tapped (UI-2)', async () => {
+    let posts = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: [] })),
+      ),
+      http.post(`${API}/definitions/:id/executions`, async () => {
+        posts += 1;
+        await gate;
+        return HttpResponse.json({ executionId: 'exec-0002' });
+      }),
+    );
+    const { user } = renderWithProviders(bar());
+    await user.click(await screen.findByRole('button', { name: /Run now/ }));
+    const working = await screen.findByRole('button', { name: 'Working…' });
+    expect(working).toBeDisabled();
+    expect(working).toHaveAttribute('aria-busy', 'true');
+    await user.click(working);
+    release();
+    await expect.poll(() => posts).toBe(1);
+  });
+
+  it('at 375px the numbers fold into one disclosure; status and Cancel stay visible (UI-14)', async () => {
+    setViewportWidth(375);
+    server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
+    renderWithProviders(bar());
+    await screen.findByText('running');
+    const details = screen.getByText('Progress and spend').closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  });
+
   it('shows "schedule blocked since <date>" from coverage.scheduleBlockedSince', async () => {
     server.use(
       http.get(`${API}/definitions/:id/coverage`, () =>
@@ -134,7 +214,7 @@ describe('status bar (spec §11)', () => {
     );
     const { user } = renderWithProviders(bar({ confirmedCostPence: 0 }));
     expect(await screen.findByText('No run yet for this definition.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Run now (about 154 calls (hard stop 2000), £0)' }));
+    await user.click(screen.getByRole('button', { name: 'Run now: about 154 calls, hard stop 2000 · £0' }));
     // why: decision 43: the stored confirmation covers a run only with both its pence and its calls.
     await expect.poll(() => bodies).toEqual([{ confirmCostPence: 0, confirmCalls: 154 }]);
   });

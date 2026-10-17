@@ -226,8 +226,9 @@ export const COPY = {
     skipped: number;
     notRun: number;
   }) =>
-    `itinerary search · ${p.provider}: itinerary-searched ${p.done} of ${p.selected} selected (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
-  progressVerb: { discovery: 'searched', verification: 'itinerary-searched' } satisfies Record<Stage, string>,
+    `itinerary search · ${p.provider}: attempted ${p.done} of ${p.selected} selected (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
+  // why: the bar counts attempts (answered or failed); "searched" is View D's definition and excludes errors (ruling 1).
+  progressVerb: { discovery: 'attempted', verification: 'attempted' } satisfies Record<Stage, string>,
   progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
   spendRunCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} billed calls`,
   spendRunFreeCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} free calls`,
@@ -246,8 +247,10 @@ export const COPY = {
   confirmCancel: 'Confirm: cancel this run',
   keepRunning: 'Keep running',
   runNow: (calls: number, cap: number, cost: string) =>
-    `Run now (about ${calls} calls (hard stop ${cap}), ${cost})`,
+    `Run now: about ${calls} calls, hard stop ${cap} · ${cost}`,
   runNowUnestimated: 'Run now',
+  working: 'Working…',
+  runDetails: 'Progress and spend',
   runNowBlocked: 'The estimate is above what you confirmed; confirm it under Definitions before running.',
 
   // filters (spec §6.5)

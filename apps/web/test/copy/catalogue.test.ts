@@ -189,7 +189,8 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(COPY.itineraryLine({ searched: 2, selected: 10, onDemand: 1 })).toBe(
       ' · itinerary-searched 2 of 10 selected +1 on demand',
     );
-    expect(COPY.progressVerb.verification).toBe('itinerary-searched');
+    // why: the status bar counts attempts (errors included), so it never borrows View D's "searched" (ruling 1).
+    expect(COPY.progressVerb).toEqual({ discovery: 'attempted', verification: 'attempted' });
   });
 
   it('confirmations state the estimated calls with the hard stop, and pounds (decisions 36, 44)', () => {
@@ -197,7 +198,7 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'Create and confirm about 154 calls (hard stop 2000), £0 per run',
     );
     expect(COPY.confirmNew(154, 2000, '£2')).toBe('Confirm about 154 calls (hard stop 2000), £2 per run');
-    expect(COPY.runNow(154, 2000, '£0')).toBe('Run now (about 154 calls (hard stop 2000), £0)');
+    expect(COPY.runNow(154, 2000, '£0')).toBe('Run now: about 154 calls, hard stop 2000 · £0');
     const copy = [
       COPY.createConfirm(1, 2, '£0'),
       COPY.confirmNew(1, 2, '£0'),
