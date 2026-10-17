@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 25.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 26.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -76,9 +76,10 @@ fully priced calendars (126 of 126 cells on every probe), itinerary search on `m
 cells per run with real segments, per-seller prices, baggage and constraint
 verdicts, and a free 60-day route price history. On a subscription plan the
 marginal cost per call is zero and the plan's 10,000 calls a month is the
-hard stop; the worked example uses ~615 of them a month, so raising
-`maxCells` to ~200 per run (~1,090 per run) or running daily (~4,300 a
-month) both fit (§8.2).
+hard stop; the worked example's weekly schedule uses well under a tenth
+of them, and raising `maxCells` to ~200 per run or running daily both fit.
+The exact figures are generated from the engine's own estimate functions
+into `docs/scheduling.md` (§8.2).
 
 **Non-goals for this build**: ground transport, rail, accommodation,
 multimodal totals (§7 keeps two columns; the operator may enter an
@@ -1180,7 +1181,7 @@ under the §5.2 tilings measured by the spike:
 | Config | Per run | Per month (weekly) | Fits |
 |---|---|---|---|
 | £0 Travelpayouts, `month` tiles | `O × D × M` free calls (worked example 28) | ~60 | yes, cap 50,000; usefulness is whatever the coverage check reports for the pairs |
-| SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | ~615 of 10,000 | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,090/run) or daily runs (~4,300/month) |
+| SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | see `docs/scheduling.md` (generated) | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,090/run) or daily runs (~4,300/month) |
 | SearchApi trial | one discovery exceeds 100 | — | spike and smoke only; scheduled runs exclude SearchApi on `trial` |
 
 There is no built-in definition with airports in it. The Definitions form
@@ -1505,6 +1506,7 @@ SMTP_USER=
 SMTP_PASS=
 ALERT_EMAIL_TO=
 ALERT_EMAIL_FROM=
+ALERT_EMAIL_MAX_PER_HOUR=20                # outgoing email ceiling; messages beyond it are logged and dropped
 # --- set by the Dockerfile, never by the operator ---
 # IN_CONTAINER=1
 # --- never in production; development only, not passed by compose ---
@@ -1549,7 +1551,7 @@ always uses real SMTP.
 `scripts/backup.mjs` (`VACUUM INTO` + `PRAGMA integrity_check` on the
 output, refusing an existing target; a failure refuses migrations)
 runs pre-migration when migrations are pending and on demand via `docker
-compose exec`; the live smoke and recording are invoked from the host with
+compose exec`; the live smoke is invoked from the host with
 `curl -u … -X POST http://127.0.0.1:3000/api/tools/smoke` (the image has no
 curl); docs give a
 host cron example with retention, how to copy out of the named volume, and
@@ -1623,6 +1625,13 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 26: deployment details (2026-10-17)
+
+§1, §8.2: cost figures point to the generated `docs/scheduling.md` instead
+of hand-written numbers. §12: `ALERT_EMAIL_MAX_PER_HOUR`. §13: fixture
+recording runs from a development checkout, never inside the container
+(recordings are local-only, decision 61).
 
 ### Revision 25: alert delivery (2026-10-17)
 
