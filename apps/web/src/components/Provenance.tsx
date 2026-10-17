@@ -17,6 +17,11 @@ export class MissingProvenanceError extends Error {
   }
 }
 
+/** Spec §5.5: the `fixture` provider and the `synthetic` source kind only ever appear together. */
+export function provenanceConsistent(p: Pick<ProvenanceT, 'providerId' | 'sourceKind'>): boolean {
+  return (p.providerId === 'fixture') === (p.sourceKind === 'synthetic');
+}
+
 /**
  * Validates with core's schema, never by presence checks, so a partial object (no fetchedAt,
  * maxAgeHours missing) fails exactly like undefined. Spec §3: nothing is defaulted. Spec §5.5: a
@@ -26,7 +31,7 @@ export function assertProvenance(p: unknown): ProvenanceT {
   const r = provenanceSchema.safeParse(p);
   if (!r.success)
     throw new MissingProvenanceError(r.error.issues.map((i) => i.path.join('.') || '(root)').join(', '));
-  if ((r.data.providerId === 'fixture') !== (r.data.sourceKind === 'synthetic')) {
+  if (!provenanceConsistent(r.data)) {
     throw new MissingProvenanceError(`provider ${r.data.providerId} with source ${r.data.sourceKind}`);
   }
   return r.data;

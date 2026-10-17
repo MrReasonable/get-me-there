@@ -52,6 +52,20 @@ describe('verdicts: distinct text for pass / fail / unverified (spec §9 item 6)
     ]);
   });
 
+  it('a priceConfirmed verdict that is not unverified is not shown, so no tick sits beside "price not confirmed" (ruling 4)', () => {
+    render(verifiedRow({ verdicts: { cabin: 'pass', priceConfirmed: 'pass' }, unverified: [] }));
+    const items = within(screen.getByRole('list', { name: 'Constraint verdicts' })).getAllByRole('listitem');
+    expect(items.map((i) => i.textContent)).toEqual([`✓ ${L.cabin}: pass`]);
+    expect(screen.queryByText(/price not confirmed/)).toBeNull();
+  });
+
+  it('a row whose provenance pairs the fixture provider with a real source shows no segments, carriers or sellers (ruling 3)', () => {
+    render(verifiedRow({ itineraryHash: 'odd', provenance: { ...provSearch, providerId: 'fixture' } }));
+    expect(screen.getByRole('alert')).toHaveTextContent("details withheld: this row's provenance is invalid");
+    expect(screen.queryByRole('list', { name: 'Constraint verdicts' })).toBeNull();
+    expect(screen.queryByText(/ZZ/)).toBeNull();
+  });
+
   it('a constraint listed as unverified but missing from verdicts is shown unverified, never dropped (review tsr-014)', () => {
     render(verifiedRow({ verdicts: {}, unverified: ['checkedBagRequired'] }));
     const items = within(screen.getByRole('list', { name: 'Constraint verdicts' })).getAllByRole('listitem');
@@ -268,10 +282,10 @@ describe('calendar rows (spec §6.9)', () => {
     );
     const { user, unmount } = render(calendarRow());
     await user.click(
-      screen.getByRole('button', { name: 'Search this cell for itineraries (uses billed calls)' }),
+      screen.getByRole('button', { name: /^Search .* for itineraries \(uses billed calls\)$/ }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Itinerary search started for this cell; the status bar follows it.',
+      'Itinerary search started for LHR → EWR 2 Apr 2027–16 Apr 2027 (14n); the status bar follows it.',
     );
     expect(bodies).toEqual([
       {
@@ -281,6 +295,6 @@ describe('calendar rows (spec §6.9)', () => {
     ]);
     unmount();
     render(calendarRow(), false);
-    expect(screen.queryByRole('button', { name: /Search this cell/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /for itineraries \(uses billed calls\)/ })).toBeNull();
   });
 });

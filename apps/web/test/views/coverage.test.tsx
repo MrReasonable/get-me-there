@@ -172,7 +172,7 @@ describe('View D (spec §11, §6.6)', () => {
     );
     render();
     const list = await screen.findByRole('list', { name: 'Selected but not reached' });
-    expect(within(list).getByText('LHR → JFK 22 Mar 2027 to 1 Apr 2027: not run')).toBeInTheDocument();
+    expect(within(list).getByText('LHR → JFK 22 Mar 2027 to 1 Apr 2027: not searched')).toBeInTheDocument();
     expect(
       within(list).getByText('LHR → JFK 20 Mar 2027 to 1 Apr 2027: skipped: budget'),
     ).toBeInTheDocument();

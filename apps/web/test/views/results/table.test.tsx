@@ -511,9 +511,29 @@ describe('empty, loading and error states (reviews UI-5, tsr-011, tsr-002)', () 
     await table();
     const withheld = dataRows()[1];
     if (withheld === undefined) throw new Error('no second row');
-    expect(within(withheld).getByRole('alert')).toHaveTextContent('price withheld: provenance missing');
+    expect(within(withheld).getByRole('alert')).toHaveTextContent(
+      'price withheld: provenance missing or invalid',
+    );
     expect(within(withheld).queryByText(/£/)).toBeNull();
     expect(within(dataRows()[0] ?? document.body).getByText('£412')).toBeInTheDocument();
+  });
+
+  it('such a row is withheld whole (no carriers, stops, class, provider) and raises the red synthetic banner (ruling 3)', async () => {
+    expectConsoleErrors(/price withheld|price rendered without valid provenance/);
+    const odd = verifiedRow({
+      itineraryHash: 'odd',
+      carriers: ['ZZ'],
+      provenance: { ...provSearch, providerId: 'fixture' },
+    });
+    countResults(resultsResponse({ rows: [verifiedRow(), odd] }));
+    view();
+    await table();
+    const withheld = dataRows()[1];
+    if (withheld === undefined) throw new Error('no second row');
+    expect(within(withheld).queryByText('ZZ')).toBeNull();
+    expect(within(withheld).queryByText('Fixture')).toBeNull();
+    expect(within(withheld).getAllByText('withheld').length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByText(/Synthetic data: the fixture provider is enabled/)).toBeInTheDocument();
   });
 
   it('every Fetched cell is core formatFetchedAgo of its row (review tsr2-007)', async () => {

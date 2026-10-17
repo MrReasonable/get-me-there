@@ -23,6 +23,9 @@ export function VerdictList({
   const entries = apiContract.constraintNameSchema.options.flatMap(
     (name): Array<[ConstraintName, Verdict]> => {
       const v = verdicts[name] ?? (unverified.includes(name) ? 'unverified' : undefined);
+      // why: "price not confirmed by the final step" is itself the unverified statement; under any other verdict it
+      // would read as a pass beside a contradicting label, so it appears only as unverified (ruling 4).
+      if (name === 'priceConfirmed' && v !== 'unverified') return [];
       return v === undefined ? [] : [[name, v]];
     },
   );

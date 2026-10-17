@@ -1,20 +1,28 @@
-import { cellKeyString } from '@gmt/core';
-import { useCalendarGap, useExecutionActions } from '../../api/queries.js';
+import { cellKeyString, type Iata } from '@gmt/core';
+import { useCalendarGap } from '../../api/queries.js';
 import { LoadError } from '../../components/LoadState.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
+import { VerifyCellButton } from '../../components/VerifyCellButton.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 
 /**
- * Spec §11: "N cells have calendar prices below your cheapest verified (£X)" with per-cell verify.
+ * Spec §11 / decision 58: "N cells have calendar prices below your reference verified price (latest seen, then fresh,
+ * then cheapest)" with per-cell verify.
  * Rendered only when the results response says a verification provider is configured, so the
  * query never runs on the £0 configuration. Every price renders through PriceCell. A failed fetch
  * says so in the banner's place rather than looking like "no gap" (review prov-019).
  */
-export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
+export function CalendarGapBanner({
+  definitionId,
+  destinationNotes,
+}: {
+  definitionId: string;
+  /** The operator's per-destination notes (spec §11): every price for a destination carries its note. */
+  destinationNotes: Partial<Record<Iata, string>>;
+}) {
   const gap = useCalendarGap(definitionId, true);
-  const actions = useExecutionActions();
   if (gap.error) return <LoadError error={gap.error} retry={() => void gap.refetch()} />;
   const data = gap.data;
   if (data === undefined || data.cells.length === 0 || data.cheapestVerified === null) return null;
@@ -38,6 +46,7 @@ export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
             stale={cv.stale}
             truncated={cv.truncated}
             destination={cv.cell.destination}
+            destinationNote={destinationNotes[cv.cell.destination] ?? null}
             notSeenInLatestHours={cv.notSeenInLatest?.ageHours ?? null}
           />
         </PriceBoundary>
@@ -63,23 +72,16 @@ export function CalendarGapBanner({ definitionId }: { definitionId: string }) {
                   stale={c.calendar.stale}
                   truncated={c.calendar.truncated}
                   destination={c.cell.destination}
+                  destinationNote={destinationNotes[c.cell.destination] ?? null}
                 />
               </PriceBoundary>
               {c.verifyAvailable ? (
-                <button
-                  type="button"
-                  className="min-h-11 rounded border border-slate-500 px-3"
-                  onClick={() => actions.verify.mutate({ definitionId, cell: key })}
-                >
-                  {COPY.verifyCell}
-                </button>
+                <VerifyCellButton definitionId={definitionId} cell={key} nights={nights} />
               ) : null}
             </li>
           );
         })}
       </ul>
-      {actions.verify.isSuccess ? <p role="status">{COPY.verifyStarted}</p> : null}
-      {actions.verify.error ? <p role="alert">{COPY.actionFailed(actions.verify.error.message)}</p> : null}
     </section>
   );
 }

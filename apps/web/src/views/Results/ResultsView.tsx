@@ -68,8 +68,9 @@ function anySynthetic(data: ResultsResponse, gap: CalendarGapResponse | undefine
           ...gap.cells.map((c) => c.calendar.provenance),
           ...(gap.cheapestVerified === null ? [] : [gap.cheapestVerified.provenance]),
         ]),
-  ].map((p) => p.sourceKind);
-  return kinds.includes('synthetic');
+  ];
+  // why: a fixture-provider provenance raises the banner even when its source kind is not tagged synthetic (ruling 3).
+  return kinds.some((p) => p.sourceKind === 'synthetic' || p.providerId === 'fixture');
 }
 
 /** View A (spec §11): one fetch per basis; every sort and filter is core's pure function over that page. */
@@ -127,7 +128,9 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
       />
       <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} />
       <BasisSwitch basis={data.basis} reason={data.basisReason} />
-      {verificationConfigured ? <CalendarGapBanner definitionId={definition.id} /> : null}
+      {verificationConfigured ? (
+        <CalendarGapBanner definitionId={definition.id} destinationNotes={definition.destinationNotes} />
+      ) : null}
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} narrow={narrow} />
       <div className="flex flex-wrap items-end gap-3 text-sm">
         {narrow ? (

@@ -1,11 +1,12 @@
 import { effectiveAge, formatFetchedAgo } from '@gmt/core';
-import { useExecutionActions } from '../../api/queries.js';
 import type { ResultRow } from '../../api/types.js';
 import { BookingAction, SearchLink } from '../../components/BookingAction.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
+import { provenanceConsistent } from '../../components/Provenance.js';
 import { VerdictList } from '../../components/VerdictList.js';
+import { VerifyCellButton } from '../../components/VerifyCellButton.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatLocalDateTime, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
@@ -55,9 +56,15 @@ export interface ExpandedRowProps {
  */
 export function ExpandedRow({ row, extras, verificationConfigured, definitionId }: ExpandedRowProps) {
   const now = useNow();
-  const actions = useExecutionActions();
   const { nights: _nights, ...cellKey } = row.cell;
   const providerId = row.provenance.providerId;
+  if (!provenanceConsistent(row.provenance)) {
+    return (
+      <section aria-label={COPY.detailsFor(rowName(row))} className="p-2 text-sm">
+        <p role="alert">{COPY.rowWithheld}</p>
+      </section>
+    );
+  }
   return (
     <section aria-label={COPY.detailsFor(rowName(row))} className="grid gap-3 p-2 text-sm md:grid-cols-2">
       {extras ? (
@@ -189,17 +196,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
       ) : null}
       {row.basis === 'calendar' && verificationConfigured ? (
         <div>
-          <button
-            type="button"
-            className="min-h-11 rounded border border-slate-500 px-3"
-            onClick={() => actions.verify.mutate({ definitionId, cell: cellKey })}
-          >
-            {COPY.verifyCell}
-          </button>
-          {actions.verify.isSuccess ? <p role="status">{COPY.verifyStarted}</p> : null}
-          {actions.verify.error ? (
-            <p role="alert">{COPY.actionFailed(actions.verify.error.message)}</p>
-          ) : null}
+          <VerifyCellButton definitionId={definitionId} cell={cellKey} nights={row.cell.nights} />
         </div>
       ) : null}
     </section>

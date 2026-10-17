@@ -27,10 +27,12 @@ describe('Providers view (spec §10, §11)', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      within(searchapi).getByText('Itinerary search: Google Flights via SearchApi · provider age unknown'),
+      within(searchapi).getByText(
+        "Itinerary search: Google Flights via SearchApi · vendor's cache age unknown",
+      ),
     ).toBeInTheDocument();
     expect(
-      within(searchapi).getByText('615 of 10000 calls · window 1 Oct 2026 to 1 Nov 2026'),
+      within(searchapi).getByText('this month: 615 of 10000 calls · window 1 Oct 2026 to 1 Nov 2026'),
     ).toBeInTheDocument();
     const tp = screen.getByRole('region', { name: 'Travelpayouts' });
     expect(
@@ -73,7 +75,7 @@ describe('Providers view (spec §10, §11)', () => {
     );
     renderWithProviders(<ProvidersView />);
     expect(await screen.findByText("9 of 100 calls over the plan's lifetime")).toBeInTheDocument();
-    expect(screen.getByText('9 of no cap calls')).toBeInTheDocument();
+    expect(screen.getByText('this month: 9 of no cap calls')).toBeInTheDocument();
     expect(screen.getByText('plan: SearchApi trial credits (lifetime allowance)')).toBeInTheDocument();
     expect(screen.getByText('excluded from scheduled runs')).toBeInTheDocument();
   });

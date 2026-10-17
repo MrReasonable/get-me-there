@@ -10,6 +10,8 @@ const SAMPLES: Record<string, unknown[]> = {
   childExecutionNotStarted: ['pending'],
   executionNotStarted: ['pending'],
   loadFailed: ['network error'],
+  verifyCellFor: ['LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)'],
+  verifyStartedFor: ['LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)'],
   actionFailed: ['409 conflict'],
   providersUnknown: ['HTTP 500'],
   fxSpoken: ['converted to GBP at the 2026-10-13 rate (frankfurter)'],

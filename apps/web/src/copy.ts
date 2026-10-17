@@ -59,7 +59,10 @@ export const COPY = {
     'Synthetic data: the fixture provider is enabled. Every price on this page is made up for development and testing.',
 
   // provenance (spec §11)
-  priceWithheld: 'price withheld: provenance missing',
+  priceWithheld: 'price withheld: provenance missing or invalid',
+  // why: a fixture-provider row that is not tagged synthetic cannot be trusted for any of its fields (ruling 3).
+  rowWithheld: "details withheld: this row's provenance is invalid",
+  withheldCell: 'withheld',
   provider: { travelpayouts: 'Travelpayouts', searchapi: 'SearchApi', fixture: 'Fixture' } satisfies Record<
     ProviderId,
     string
@@ -305,12 +308,12 @@ export const COPY = {
   hostShown: (host: string) => `(${host})`,
   otherOffers: 'Other sellers for this itinerary',
   summary: 'Summary',
-  verifyCell: 'Search this cell for itineraries (uses billed calls)',
-  verifyStarted: 'Itinerary search started for this cell; the status bar follows it.',
+  verifyCellFor: (cell: string) => `Search ${cell} for itineraries (uses billed calls)`,
+  verifyStartedFor: (cell: string) => `Itinerary search started for ${cell}; the status bar follows it.`,
 
   // basis and calendar gap (spec §6.9, §11)
   calendarGapLead: (n: number) =>
-    `${n} ${n === 1 ? 'cell has a calendar price' : 'cells have calendar prices'} (constraints not checked) below your cheapest verified`,
+    `${n} ${n === 1 ? 'cell has a calendar price' : 'cells have calendar prices'} (constraints not checked) below your reference verified price (latest seen, then fresh, then cheapest)`,
   calendarGapList: 'Cells to search',
 
   // coverage view (spec §11 View D)
@@ -347,7 +350,7 @@ export const COPY = {
   coverageEmpty: 'No run yet, so nothing has been searched.',
   sumMismatch: (sum: number, total: number) => `buckets sum to ${sum}, not ${total}; report this`,
   selectedNotReached: 'Selected but not reached',
-  reasonNotRun: 'not run',
+  reasonNotRun: 'not searched',
   reasonBudget: 'skipped: budget',
   noneSelectedNotReached: 'Every selected cell was reached.',
   overrunFlag: 'Overrun: ledger calls exceed the plan by more than 10%.',
@@ -379,11 +382,12 @@ export const COPY = {
   capabilityDiscovery: 'Discovery',
   capabilityVerification: 'Itinerary search',
   maxAge: (age: string) => `prices up to ${age} old when fetched`,
-  maxAgeUnknown: 'provider age unknown',
+  maxAgeUnknown: "vendor's cache age unknown",
   maxAgeAtFetch: 'provider states no age beyond the fetch time',
   usageWindow: (calls: number, cap: string, start: string, end: string) =>
     `${calls} of ${cap} calls · window ${start} to ${end}`,
   usageLifetime: (calls: number, cap: string) => `${calls} of ${cap} calls over the plan's lifetime`,
+  usageMonth: 'this month: ',
   usageNoWindow: (calls: number, cap: string) => `${calls} of ${cap} calls`,
   excludedFromSchedule: 'excluded from scheduled runs',
 

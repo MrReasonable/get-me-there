@@ -1,4 +1,4 @@
-import { type CapabilityInfo, formatDuration } from '@gmt/core';
+import { budgetScopeLabel, type CapabilityInfo, formatDuration, type ProviderId } from '@gmt/core';
 import { useProviders } from '../../api/queries.js';
 import type { UsageRow } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
@@ -20,9 +20,17 @@ function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
 }
 
 /** Only a `provider-lifetime:` scope is a lifetime allowance; any other row without bounds states no window (review prov-020). */
-function usageText(u: UsageRow): string {
+function usageText(u: UsageRow, providerId: ProviderId): string {
   const cap = u.cap === null ? COPY.noCap : String(u.cap);
-  if (u.scope.startsWith('provider-lifetime:')) return COPY.usageLifetime(u.calls, cap);
+  if (u.scope === budgetScopeLabel({ kind: 'provider-lifetime', providerId }))
+    return COPY.usageLifetime(u.calls, cap);
+  // why: the scope is named (core's label decides), so "12 of 100 calls" never leaves the reader guessing which cap it is (UI-16).
+  const scope = u.scope === budgetScopeLabel({ kind: 'provider-month', providerId }) ? COPY.usageMonth : '';
+  const text = usageBody(u, cap);
+  return scope === '' ? text : `${scope}${text}`;
+}
+
+function usageBody(u: UsageRow, cap: string): string {
   if (u.windowStart === null || u.windowEnd === null) return COPY.usageNoWindow(u.calls, cap);
   return COPY.usageWindow(
     u.calls,
@@ -69,7 +77,7 @@ export function ProvidersView() {
           ) : null}
           <ul>
             {p.usage.map((u) => (
-              <li key={u.scope}>{usageText(u)}</li>
+              <li key={u.scope}>{usageText(u, p.providerId)}</li>
             ))}
           </ul>
         </section>

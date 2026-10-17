@@ -11,6 +11,7 @@ import type { ResultRow } from '../../api/types.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
+import { provenanceConsistent } from '../../components/Provenance.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
@@ -175,6 +176,19 @@ function AdjustedColumn({ row }: { row: ResultRow }) {
 
 function cellFor(id: ColumnId, r: ResultRow, narrow: boolean) {
   const calendar = r.basis === 'calendar';
+  // why: a row whose provenance is inconsistent (the fixture provider without the synthetic tag) is withheld whole:
+  // only its identity (destination, dates) and the price column's withheld notice show (ruling 3).
+  const withheld = !provenanceConsistent(r.provenance);
+  if (
+    withheld &&
+    id !== 'price' &&
+    id !== 'departure' &&
+    id !== 'return' &&
+    id !== 'nights' &&
+    id !== 'destination' &&
+    id !== 'expand'
+  )
+    return <span>{COPY.withheldCell}</span>;
   switch (id) {
     case 'price':
       return <PriceColumn row={r} narrow={narrow} />;
