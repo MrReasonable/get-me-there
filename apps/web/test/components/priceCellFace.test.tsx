@@ -25,7 +25,7 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).toHaveAttribute('data-face');
     expect(cell).not.toHaveClass('border-dashed');
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
-    expect(hidden).toEqual(['≈', '!◷?…↺◌']);
+    expect(hidden).toEqual(['≈', '≠◷?…↺◌']);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [

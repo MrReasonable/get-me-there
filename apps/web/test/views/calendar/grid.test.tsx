@@ -296,8 +296,8 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(new Set(glyphs.map((g) => g.querySelector('[aria-hidden="true"]')?.textContent)).size).toBe(5);
     expect(glyphs.map((g) => g.textContent)).toEqual([
       '∅ 1 no fares',
-      '? 1 no cached data',
-      '! 1 error',
+      '◇ 1 no cached data',
+      '✕ 1 error',
       '– 1 skipped',
       '○ 1 not searched',
     ]);

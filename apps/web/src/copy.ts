@@ -90,7 +90,7 @@ export const COPY = {
   fxApprox: '≈',
   /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
   priceMarkGlyph: {
-    unconfirmed: '!',
+    unconfirmed: '≠',
     stale: '◷',
     ageUnknown: '?',
     truncated: '…',
@@ -545,7 +545,7 @@ export const COPY = {
     markerSource: (source: string, marker: string) => `${source}: ${marker}`,
     partlyVerified: (count: number) =>
       `${count} partially verified ${count === 1 ? 'itinerary' : 'itineraries'} found for this day (never the day price)`,
-    glyphSymbol: { empty: '∅', no_data: '?', error: '!', skipped: '–', not_run: '○' },
+    glyphSymbol: { empty: '∅', no_data: '◇', error: '✕', skipped: '–', not_run: '○' },
     calendarPrice: 'calendar price',
     bandAria: (band: number) => `price band ${band + 1} of 5${band === 0 ? ', cheapest' : ''}`,
     flatAria: 'one shade: the scale is flat',
@@ -553,7 +553,8 @@ export const COPY = {
     stay: (nights: number, back: string) => `${nights}n · back ${back}`,
     cachedFrom: 'cached from',
     glyphCount: (n: number, words: string) => `${n} ${words}`,
-    phoneMark: { partial: '◐', unconfirmed: '!' },
+    // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
+    phoneMark: { partial: '◐', full: '●' },
     phonePartial: 'part of the day not searched',
     searchedFraction: (searched: number, total: number) => `${searched}/${total} searched`,
     destinationFilter: 'Destination',
@@ -601,7 +602,7 @@ export const COPY = {
       stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
       bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
       phone:
-        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ! price not confirmed, ◷ stale, ? vendor cache age unknown, … cheapest of the rows read, ◐ part of the day not searched. Open a day for the rest.',
+        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, ? vendor cache age unknown, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ● every cell of the day searched, ◐ part of the day not searched. Open a day for the rest.',
       glyphs: 'Days without a price show, with how many cells of the best-covered source:',
       skippedWhy: ' (a budget stop, a disabled provider or a passed date; reasons in the panel)',
     },

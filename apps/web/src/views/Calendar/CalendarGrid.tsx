@@ -234,7 +234,7 @@ function PhoneDayBody(props: { display: DayDisplay; slice: DaySlice; notes: Part
     <>
       {unconfirmed ? (
         <span data-testid="day-unconfirmed">
-          <span aria-hidden="true">{C.phoneMark.unconfirmed}</span>
+          <span aria-hidden="true">{COPY.priceMarkGlyph.unconfirmed}</span>
           <span className="sr-only">{C.unconfirmedShort}</span>
         </span>
       ) : null}

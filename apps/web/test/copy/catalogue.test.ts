@@ -290,3 +290,18 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(findBannedWords('Live fares', BANNED_WORD_ALLOWLIST)).toHaveLength(1);
   });
 });
+
+describe('glyph set (review ui I2)', () => {
+  it('every symbol in the legend means one thing: no glyph appears twice', () => {
+    const all = [
+      ...Object.values(COPY.calendarView.glyphSymbol),
+      ...Object.values(COPY.calendarView.phoneMark),
+      ...Object.values(COPY.priceMarkGlyph),
+    ];
+    expect(new Set(all).size).toBe(all.length);
+  });
+  it('the phone legend line names every mark glyph', () => {
+    for (const g of [...Object.values(COPY.priceMarkGlyph), ...Object.values(COPY.calendarView.phoneMark)])
+      expect(COPY.calendarView.legend.phone).toContain(g);
+  });
+});
