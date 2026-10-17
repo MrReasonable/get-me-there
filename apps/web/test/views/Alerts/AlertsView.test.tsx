@@ -148,6 +148,13 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     expect(screen.queryByText('not this definition')).toBeNull();
   });
 
+  it('the intro promises at most one email per rule each time a run stops, not one per run (review prov-3)', async () => {
+    withData();
+    renderWithProviders(<AlertsView definitionId="def-1" />);
+    expect(await screen.findByText(C.intro)).toHaveTextContent(/each time a run stops/);
+    expect(C.intro).not.toMatch(/per run/);
+  });
+
   it('a partially-verified firing names its unverified constraint and shows the previous price through PriceCell too (review PA-3, PA-4)', async () => {
     withData();
     renderWithProviders(<AlertsView definitionId="def-1" />);

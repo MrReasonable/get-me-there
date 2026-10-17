@@ -199,14 +199,22 @@ export class AlertsRepo {
    */
   updateEvents(
     ids: readonly number[],
-    patch: { status: AlertEventStatus; reason?: string | null; firedAt?: IsoDateTime; digestId?: string },
+    patch: {
+      status: AlertEventStatus;
+      reason?: string | null;
+      firedAt?: IsoDateTime;
+      digestId?: string;
+      /** The whole payload, replacing the stored one: a retry records the marks of the send that delivered it. */
+      payload?: unknown;
+    },
   ): void {
     if (patch.firedAt !== undefined) assertIsoDateTime('fired_at', patch.firedAt);
     const update = this.db.raw.prepare(
       `UPDATE alert_events SET status = @status,
          reason = CASE WHEN @keepReason = 1 THEN reason ELSE @reason END,
          fired_at = coalesce(@firedAt, fired_at),
-         payload_json = CASE WHEN @digestId IS NULL THEN payload_json ELSE json_set(payload_json, '$.digestId', @digestId) END
+         payload_json = CASE WHEN @payload IS NULL AND @digestId IS NULL THEN payload_json
+           ELSE json_set(coalesce(@payload, payload_json), '$.digestId', coalesce(@digestId, json_extract(coalesce(@payload, payload_json), '$.digestId'))) END
        WHERE id = @id`,
     );
     this.db.transaction(() => {
@@ -218,6 +226,7 @@ export class AlertsRepo {
           reason: patch.reason === undefined || patch.reason === null ? null : stripUrlsInText(patch.reason),
           firedAt: patch.firedAt ?? null,
           digestId: patch.digestId ?? null,
+          payload: patch.payload === undefined ? null : stripUrlsInText(JSON.stringify(patch.payload)),
         }).changes;
         if (changed !== 1) throw new RowRejected('missing', `alert event ${id} does not exist`);
       }

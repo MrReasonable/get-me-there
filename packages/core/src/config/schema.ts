@@ -50,7 +50,10 @@ export interface Config {
     /** only outside production; the fixture provider itself is gated by syntheticAllowed */
     fixture: { costMicroGbp: number } | null;
   };
-  /** ALERT_EMAIL_MAX_PER_HOUR (decision 56): outgoing emails per hour, beyond which messages are logged and dropped. */
+  /**
+   * ALERT_EMAIL_MAX_PER_HOUR (decision 56): outgoing emails per hour, beyond which messages are logged and dropped.
+   * Counted in process memory (a restart starts a fresh hour) and shared by digests and operator messages.
+   */
   alertEmailMaxPerHour: number;
   smtp: {
     host: string;

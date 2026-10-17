@@ -105,9 +105,9 @@ function verdictSegment(item: DigestItem): string {
 
 /** Spec §8.3 subject for the digest's first (cheapest) item. */
 export function renderSubject(item: DigestItem, now: IsoDateTime): string {
-  return stripControl(
-    `[get-me-there] ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, now)} · ${verdictSegment(item)}`,
-  );
+  // why: every part is core-formatted (dates, a validated IATA code, core's labels), none provider text, so there is
+  // nothing to clean here; EmailNotifier runs the one cleaner over the subject before it is sent (and tests it).
+  return `[get-me-there] ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, now)} · ${verdictSegment(item)}`;
 }
 
 /**
@@ -162,7 +162,8 @@ function previousLine(item: DigestItem, input: DigestRenderInput): string | null
 
 function segmentLine(s: Segment): string {
   const hhmm = (local: string) => local.slice(11, 16);
-  return `${providerText(s.marketingCarrier)} ${s.flightNumber} ${s.from} ${hhmm(s.departLocal)} → ${s.to} ${hhmm(s.arriveLocal)} (${day(s.departLocal)})`;
+  // why: sec-3 — every provider-derived field is cleaned and capped, not only the carrier
+  return `${providerText(s.marketingCarrier)} ${providerText(String(s.flightNumber))} ${providerText(s.from)} ${hhmm(s.departLocal)} → ${providerText(s.to)} ${hhmm(s.arriveLocal)} (${day(s.departLocal)})`;
 }
 
 function expiryText(expiresAt: IsoDateTime | null, now: IsoDateTime): string {

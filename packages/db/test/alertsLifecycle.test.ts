@@ -112,6 +112,20 @@ describe('AlertsRepo event lifecycle (decision 56)', () => {
     expect(() => alerts.updateEvents([a], { status: 'notified', firedAt: at('not a time') })).toThrow();
   });
 
+  it('a retry can rewrite the whole payload (the marks of the send that delivered it), URLs stripped, digestId winning (review prov-2)', () => {
+    const { alerts, rule, second, p2, event } = setup();
+    const a = alerts.insertEvent(
+      event({ calendarPriceId: p2, payload: { digestId: 'd1', truncated: false } }),
+    );
+    alerts.updateEvents([a], {
+      status: 'notified',
+      payload: { digestId: 'd0', truncated: true, link: 'https://h.example/p?key=1' },
+      digestId: 'd2',
+    });
+    const [e] = alerts.eventsForExecution(rule.id, second.execution.id);
+    expect(e?.payload).toEqual({ digestId: 'd2', truncated: true, link: 'https://h.example/p' });
+  });
+
   it('priorFirings counts notified firings only: never a queued event or a "new" listing', () => {
     const { alerts, rule, p1, p2, event } = setup();
     alerts.insertEvent(event({ calendarPriceId: p1, status: 'queued' }));

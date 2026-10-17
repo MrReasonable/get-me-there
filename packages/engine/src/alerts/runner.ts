@@ -20,7 +20,9 @@ import {
   isoDateTimeOfEpochMs,
   type Notifier,
   type ResultBasis,
+  stripUrlsInText,
 } from '@gmt/core';
+import { scrubSecrets } from '@gmt/providers';
 import { LogNotifier } from '../notifiers/log.js';
 import type { AlertsPass } from '../types.js';
 import type { AlertRunContext, AlertRunnerDeps } from './context.js';
@@ -156,9 +158,12 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
   const earlier = ctx.deps.repos.alerts.eventsForExecution(rule.id, ctx.executionId);
   const done = new Set<string>();
   const queued = new Map<string, number>();
+  const queuedReason = new Map<string, string>();
   for (const e of earlier) {
-    if (e.status === 'queued') queued.set(rowRefOf(e), e.id);
-    else done.add(rowRefOf(e));
+    if (e.status === 'queued') {
+      queued.set(rowRefOf(e), e.id);
+      queuedReason.set(rowRefOf(e), e.reason ?? '');
+    } else done.add(rowRefOf(e));
   }
   const candidates = pool.candidates.filter((c) => !done.has(rowRef(c)));
   if (candidates.length === 0) return NONE;
@@ -178,7 +183,18 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
   // why: plan pin — evaluateAlertRules returns suppressed firings too; the runner records them and the digest omits them.
   const suppressed = firings.filter((f) => f.suppressed !== null);
   const sendable = firings.filter((f) => f.suppressed === null);
+  // why: prov-1 — core settles each identity on its cheapest candidate, so a queued row whose trip a cheaper price of
+  // this pass replaced is never sent; it must stop promising a resend ("sent again when this run resumes").
+  const judged = new Set(firings.map((f) => rowRef(f.candidate)));
+  const superseded = [...queued].filter(([ref]) => !judged.has(ref));
   ctx.deps.db.transaction(() => {
+    for (const [ref, id] of superseded) {
+      const original = (queuedReason.get(ref) ?? '').split('; not delivered')[0] ?? '';
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'suppressed',
+        reason: `${original}; superseded by a cheaper price of the same trip in a later pass; not retried`,
+      });
+    }
     for (const f of suppressed) {
       const id = queued.get(rowRef(f.candidate));
       if (id === undefined)
@@ -191,9 +207,10 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
     }
   });
   // why: plan decision 10 — "new" listings alone are not a digest.
-  if (!sendable.some((f) => !f.isNew)) return { digests: 0, events: suppressed.length };
+  const moved = suppressed.length + superseded.length;
+  if (!sendable.some((f) => !f.isNew)) return { digests: 0, events: moved };
   const delivered = await deliver(ctx, rule, { firings, sendable, pool, marks, queued });
-  return { digests: delivered.digests, events: delivered.events + suppressed.length };
+  return { digests: delivered.digests, events: delivered.events + moved };
 }
 
 /** "itinerary-searched K of N cells, E outbounds each" for this execution; null without a verification provider. */
@@ -266,7 +283,7 @@ async function deliver(
     verificationNotRun: facts.verificationNotRun,
     unconfirmed: run.pool.unconfirmed,
   });
-  const outcome = await sendToAll(ctx.deps.notifiers, {
+  const outcome = await sendToAll(ctx, {
     kind: 'digest',
     digest,
     subject: renderSubject(first, ctx.now),
@@ -292,24 +309,42 @@ async function deliver(
         reason: f.reason,
         firedAt: ctx.now,
         digestId,
+        // why: prov-2 — the stored payload is the record of what was sent, so a retry records this send's marks
+        payload: eventRow(ctx, f, run.pool, run.marks, 'queued', digestId).payload,
       });
   });
   return { digests: 1, events: ids.length };
 }
 
+/**
+ * A notifier's failure text as it may be stored in an event reason and shown in the Alerts view (sec-1): the SMTP
+ * password scrubbed and URLs stripped, so the boundary does not rest on one notifier's behaviour. When scrubbing
+ * refuses, a fixed text is stored and a codes-only warning logged.
+ */
+function safeDetail(ctx: AlertRunContext, text: string): string {
+  const secrets = ctx.deps.config.smtp === null ? [] : [ctx.deps.config.smtp.pass];
+  try {
+    return stripUrlsInText(scrubSecrets(text, secrets));
+  } catch {
+    ctx.log.warn({ code: 'scrub_refused' }, 'alerts: notifier failure detail withheld');
+    return 'detail withheld';
+  }
+}
+
 /** Sends to every notifier; `sent` only when every notifier accepted the message. */
 async function sendToAll(
-  notifiers: readonly Notifier[],
+  ctx: AlertRunContext,
   msg: Parameters<Notifier['send']>[0],
 ): Promise<{ status: 'sent' } | { status: 'failed'; detail: string }> {
+  const notifiers = ctx.deps.notifiers;
   const failures: string[] = [];
   if (notifiers.length === 0) failures.push('no notifier configured');
   for (const n of notifiers) {
     try {
       const r = await n.send(msg);
-      if (!r.ok) failures.push(`${n.id}: ${r.detail ?? 'not delivered'}`);
+      if (!r.ok) failures.push(`${n.id}: ${safeDetail(ctx, r.detail ?? 'not delivered')}`);
     } catch (err) {
-      failures.push(`${n.id}: ${err instanceof Error ? err.message : String(err)}`);
+      failures.push(`${n.id}: ${safeDetail(ctx, err instanceof Error ? err.message : String(err))}`);
     }
   }
   return failures.length === 0 ? { status: 'sent' } : { status: 'failed', detail: failures.join('; ') };

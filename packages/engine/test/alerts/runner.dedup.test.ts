@@ -8,8 +8,11 @@ import {
   cells,
   type Fixture,
   fixture,
+  JFK,
+  LHR,
   payloadOf,
   RecordingNotifier,
+  searchedEmpty,
   seedCalendar,
   seedDefinition,
   seedExecution,
@@ -272,6 +275,98 @@ describe('a later pass of the same execution never repeats a firing or a listing
     expect(f.repos.alerts.events({ ruleId: rule.id, limit: 1 })[0]?.reason).toBe(
       '£412 is at or below the £450 threshold; not delivered: email: connection refused; not retried unless this run is resumed',
     );
+  });
+});
+
+describe('a queued event no later pass will send, and the payload of a delivered retry (review prov-1, prov-2)', () => {
+  it('a queued row whose trip a cheaper offer of the same pass replaced stops promising a resend', async () => {
+    const f = fixture({
+      notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
+    });
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { basis: 'verified', thresholdPence: 45000, requireAllVerified: false });
+    const ex = seedExecution(f, def);
+    const departureDate = asIsoDate('2026-11-02');
+    seedObservation(f, ex, { departureDate, pricePence: 42000, seller: 'British Airways' });
+    await runAlerts(f.deps, ex, { stop: 'budget' });
+    f.notifier.respondWith({ ok: true });
+    f.clock.advance(HOUR);
+    // the resumed pass found the same itinerary cheaper from another seller
+    seedObservation(f, ex, { departureDate, pricePence: 41000, seller: 'An agency' });
+    expect(await runAlerts(f.deps, ex)).toEqual({ digests: 1, events: 2 });
+    expect(
+      f.repos.alerts
+        .events({ ruleId: rule.id, limit: 10 })
+        .map((e) => [payloadOf(e).pricePence, e.status, e.reason]),
+    ).toEqual([
+      [41000, 'notified', '£410 is at or below the £450 threshold'],
+      [
+        42000,
+        'suppressed',
+        '£420 is at or below the £450 threshold; superseded by a cheaper price of the same trip in a later pass; not retried',
+      ],
+    ]);
+  });
+
+  it('a retried row records the marks of the send that delivered it, not those of the failed send', async () => {
+    const f = fixture({
+      notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
+    });
+    const def = seedDefinition(f);
+    const ex = seedExecution(f, def);
+    seedObservation(f, ex, { departureDate: asIsoDate('2026-11-02'), pricePence: 42000 });
+    const rule = seedRule(f, def, { basis: 'verified', thresholdPence: 45000, requireAllVerified: false });
+    await runAlerts(f.deps, ex, { stop: 'budget' });
+    const [queued] = f.repos.alerts.events({ ruleId: rule.id, limit: 10 });
+    expect(queued === undefined ? null : payloadOf(queued).notSeenInLatest).toBeNull();
+    // a single-cell search after the first pass found no fares for the cell
+    f.clock.advance(HOUR);
+    const searchedAt = f.clock.now();
+    const nov2 = {
+      origin: LHR,
+      destination: JFK,
+      departureDate: asIsoDate('2026-11-02'),
+      returnDate: asIsoDate('2026-11-16'),
+      nights: 14,
+    };
+    const child = seedExecution(f, def, nov2);
+    f.repos.cells.seed(child, [nov2], []);
+    f.repos.cells.seedVerification(child, [{ cell: nov2, reason: 'always_include' }], [nov2], ['searchapi']);
+    searchedEmpty(f, child, nov2);
+    f.notifier.respondWith({ ok: true });
+    f.clock.advance(HOUR);
+    expect(await runAlerts(f.deps, ex)).toEqual({ digests: 1, events: 1 });
+    const [notified] = f.repos.alerts.events({ ruleId: rule.id, limit: 10 });
+    expect(notified?.status).toBe('notified');
+    expect(notified === undefined ? null : payloadOf(notified).notSeenInLatest).toEqual({ at: searchedAt });
+  });
+});
+
+describe('a notifier failure detail reaches the event reason scrubbed (review sec-1)', () => {
+  it('a thrown message holding the SMTP password or a URL query is stored without them', async () => {
+    const pass = 'test-smtp-pass-0123456789abcdef';
+    const f = fixture({
+      env: {
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '465',
+        SMTP_USER: 'alerts',
+        SMTP_PASS: pass,
+        ALERT_EMAIL_TO: 'operator@example.com',
+        ALERT_EMAIL_FROM: 'get-me-there@example.com',
+      },
+    });
+    f.deps.notifiers.splice(0, f.deps.notifiers.length, {
+      id: 'broken',
+      send: async () =>
+        Promise.reject(new Error(`login failed with ${pass} at https://h.example/p?token=${pass}`)),
+    });
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
+    await runAt(f, def, 41200);
+    const reason = f.repos.alerts.events({ ruleId: rule.id, limit: 1 })[0]?.reason ?? '';
+    expect(reason).toContain('not delivered: broken: login failed');
+    expect(reason).not.toContain(pass);
+    expect(reason).not.toContain('token=');
   });
 });
 

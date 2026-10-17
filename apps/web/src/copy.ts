@@ -756,7 +756,7 @@ export const COPY = {
   alertsView: {
     heading: 'Alerts',
     intro:
-      'One email per rule per run: the ten cheapest matches and a count of the rest, each price with its source and age.',
+      'At most one email per rule each time a run stops (a run paused by a budget cap and later completed can send two): the ten cheapest matches and a count of the rest, each price with its source and age.',
     formLabel: 'New alert rule',
     ruleType: 'Rule type',
     typeAbsolute: 'Price at or below',
