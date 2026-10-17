@@ -470,8 +470,8 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
 
   it('a step-3 seller that is a connecting carrier or a near-miss spelling keeps the step-2 offer (synthetic)', async () => {
     const mixed = [
-      seg('JFK', 'BOS', '2026-11-14', '15:00', 'Y2 300', 'Synthetic Air Two'),
-      seg('BOS', 'LHR', '2026-11-14', '19:00', 'X1 107', 'Synthetic Air One'),
+      seg('JFK', 'EWR', '2026-11-14', '15:00', 'Y2 300', 'Synthetic Air Two'),
+      seg('EWR', 'LHR', '2026-11-14', '19:00', 'X1 107', 'Synthetic Air One'),
     ];
     chain(
       flightsBody([A]),

@@ -505,7 +505,7 @@ describe('estimate parity: every airport pair is its own request (plan decision 
         http.get(TP, () =>
           HttpResponse.json(
             envelope([
-              row({ origin: 'LTN', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
+              row({ origin: 'LGW', dest: 'JFK', dep: '2027-03-12', ret: '2027-03-23', price: 412 }),
               row({ origin: 'LHR', dest: 'EWR', dep: '2027-03-12', ret: '2027-03-23', price: 400 }),
             ]),
           ),
