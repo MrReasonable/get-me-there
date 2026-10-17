@@ -64,7 +64,6 @@ export const COPY = {
     alerts: 'Alerts',
     providers: 'Providers',
   },
-  placeholder: 'This view is not available yet.',
   definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No search definitions yet. Create one under Definitions.',
   definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',

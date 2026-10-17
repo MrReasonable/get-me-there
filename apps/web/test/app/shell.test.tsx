@@ -46,7 +46,6 @@ describe('shell (spec §11 layout)', () => {
   it('alerts renders the Alerts view for the selected definition', async () => {
     renderWithProviders(<App />, { search: '?view=alerts&def=def-0001' });
     expect(await screen.findByRole('heading', { name: COPY.alertsView.heading })).toBeInTheDocument();
-    expect(screen.queryByText(COPY.placeholder)).toBeNull();
   });
 
   it('definition selector lists definitions and writes def= to the URL', async () => {
