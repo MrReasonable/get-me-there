@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
+import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
 import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';
@@ -332,6 +333,21 @@ describe('saved definitions (spec §8.1)', () => {
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
     const list = await screen.findByRole('list', { name: 'Notices for this definition' });
     expect(within(list).getByText('alerts running on calendar basis only')).toBeInTheDocument();
+  });
+
+  it('an edit= link to a definition that does not exist says so instead of showing a blank create form', async () => {
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=no-such-definition' });
+    expect(await screen.findByRole('alert')).toHaveTextContent(COPY.definitionNotFound);
+  });
+
+  it('edit=new and an existing definition show no not-found alert', async () => {
+    const first = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=new' });
+    await screen.findByRole('button', { name: importButton });
+    expect(screen.queryByText(COPY.definitionNotFound)).toBeNull();
+    first.unmount();
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
+    await screen.findByRole('button', { name: 'Save changes' });
+    expect(screen.queryByText(COPY.definitionNotFound)).toBeNull();
   });
 
   it('a failed definitions load shows the reason and a retry', async () => {
