@@ -5,14 +5,12 @@
 // code-architect M5). Development and CI only; the image does not carry this script. Logic: ensure-build-lib.mjs.
 import { execFileSync } from 'node:child_process';
 import { utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquire, needsBuild, release, releaseOnSignal } from './ensure-build-lib.mjs';
+import { acquire, lockPathFor, needsBuild, release, releaseOnSignal } from './ensure-build-lib.mjs';
 
 const REPO = join(import.meta.dirname, '..');
 const STAMP = join(REPO, 'node_modules', '.gmt-build-stamp');
-// why: keyed by checkout, so the main checkout and a worktree never wait on each other.
-const LOCK = join(tmpdir(), `gmt-build-${Buffer.from(REPO).toString('hex').slice(-24)}.lock`);
+const LOCK = lockPathFor(REPO);
 
 // why: the lock records this process as its owner; it is released on success, on failure and on SIGINT, SIGTERM or
 // SIGHUP, and a SIGKILL leaves a lock whose dead pid the next run takes over at once (ensure-build-lib.mjs).

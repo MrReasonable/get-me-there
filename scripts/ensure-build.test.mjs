@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquire, breakStale, realOps, release } from './ensure-build-lib.mjs';
+import { acquire, breakStale, lockPathFor, realOps, release } from './ensure-build-lib.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -256,5 +256,20 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
     expect(existsSync(lock)).toBe(true);
     const owned = acquire(lock, noSleep);
     expect(record(lock).token).toBe(owned.token);
+  });
+});
+
+describe('scripts/ensure-build-lib.mjs lock path (CodeRabbit batch 3)', () => {
+  it('is keyed by a hash of the whole checkout path, so checkouts that end alike never share a lock', () => {
+    const a = lockPathFor('/home/a/get-me-there', '/tmp');
+    const b = lockPathFor('/home/a/other/get-me-there', '/tmp');
+    expect(a).not.toBe(b);
+    expect(lockPathFor('/home/a/get-me-there', '/tmp')).toBe(a);
+    expect(a).toMatch(/^\/tmp\/gmt-build-[0-9a-f]{24}\.lock$/);
+  });
+
+  it('is what ensure-build.mjs uses', () => {
+    const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
+    expect(text).toContain('const LOCK = lockPathFor(REPO);');
   });
 });

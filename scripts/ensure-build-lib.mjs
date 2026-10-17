@@ -1,5 +1,5 @@
 // The logic of scripts/ensure-build.mjs, with its file-system, process and clock operations injectable for tests.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
   linkSync,
@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { constants as osConstants } from 'node:os';
+import { constants as osConstants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const PACKAGES = ['packages/core', 'packages/db', 'packages/providers', 'packages/engine', 'apps/api'];
@@ -32,6 +32,15 @@ const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 //   successor's lock.
 // - ensure-build.mjs releases on exit, on failure and on SIGINT, SIGTERM and SIGHUP; a SIGKILL leaves a lock whose
 //   pid is dead, which the next run takes over at once.
+
+/**
+ * The lock for one checkout. why: keyed by checkout, so the main checkout and a worktree never wait on each other; a
+ * hash of the whole path, since the old key (the path's last 12 bytes) was the same for every checkout named
+ * get-me-there (CodeRabbit batch 3).
+ */
+export function lockPathFor(repo, dir = tmpdir()) {
+  return join(dir, `gmt-build-${createHash('sha256').update(repo).digest('hex').slice(0, 24)}.lock`);
+}
 
 /** A lock file's record, or null when it holds none we can trust (an older directory lock, a torn or foreign file). */
 function parseRecord(text) {
