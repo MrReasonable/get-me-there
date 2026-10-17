@@ -356,3 +356,19 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     },
   );
 });
+
+// why: docker-compose.yml fixes the project name, so a second checkout shares the operator's volume; the final pass
+// (2026-10-18) learned this when a fresh clone migrated the real database. The note must name the escape hatch.
+describe('docs/setup.md warns that every checkout shares one volume (section 9)', () => {
+  it('names the fixed project, the shared volume and the -p trial project with its own down -v', () => {
+    const setup = read('docs/setup.md').replace(/\s+/g, ' ');
+    expect(setup).toContain('One volume per project name');
+    expect(setup).toContain('`get-me-there_gmt-data`');
+    expect(setup).toContain('docker compose -p gmt-trial up -d --build --wait --wait-timeout 120');
+    expect(setup).toContain('docker compose -p gmt-trial down -v');
+    // why: both projects publish 127.0.0.1:3000 (CodeRabbit, PR #4), so the note must stop the operator's app first.
+    expect(setup).toContain('Both projects publish `127.0.0.1:3000`, so stop your app first');
+    // why: both checkouts tag get-me-there:local (CodeRabbit, PR #4), so the restart must rebuild from the operator's checkout.
+    expect(setup).toContain('Keep `--build`: both checkouts tag their image `get-me-there:local`');
+  });
+});
