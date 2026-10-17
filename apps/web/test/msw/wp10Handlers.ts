@@ -1,3 +1,4 @@
+import { asIsoDate, daysBetween } from '@gmt/core';
 import { HttpResponse, http } from 'msw';
 import { API } from '../fixtures.js';
 import {
@@ -25,9 +26,14 @@ export const wp10Handlers = [
       ]),
     ),
   ),
-  http.get(`${API}/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`, () =>
-    HttpResponse.json(cellDetail(cellAt('2027-03-14', 14))),
-  ),
+  // why: the detail is for the cell the URL names, so a view that asks for the wrong cell shows the wrong detail
+  http.get(`${API}/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`, ({ params }) => {
+    const departure = asIsoDate(String(params.departureDate));
+    const nights = daysBetween(departure, asIsoDate(String(params.returnDate)));
+    return HttpResponse.json(
+      cellDetail(cellAt(departure, nights, String(params.origin), String(params.destination))),
+    );
+  }),
   http.get(`${API}/routes/:origin/:destination/history`, () => HttpResponse.json(routeHistory())),
   http.get(`${API}/itineraries/:hash/history`, () => HttpResponse.json(itineraryHistory())),
 ];
