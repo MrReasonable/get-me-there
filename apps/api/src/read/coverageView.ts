@@ -62,7 +62,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         cell: withNights(o),
         stage: o.stage,
         providerId: o.providerId,
-        reason: o.reason ?? '',
+        reason: o.reason,
         lastError: o.lastError,
         attempts: o.attempts,
         retryable: retryable(o),

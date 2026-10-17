@@ -198,7 +198,8 @@ export const coverageResponseSchema = z.object({
       cell: cellSchema,
       stage: stageSchema,
       providerId: providerIdSchema,
-      reason: z.string(),
+      /** The stored reason; null when none was recorded, so "no reason" is never shown as an empty one (review prov M3). */
+      reason: z.string().nullable(),
       lastError: z.string().nullable(),
       attempts: count,
       retryable: z.boolean(),

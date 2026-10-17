@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   alertRulesQuerySchema,
   bookingSchema,
+  coverageResponseSchema,
   definitionCreateOptionalSchema,
   definitionCreateRequestSchema,
   definitionShapeSchema,
@@ -70,6 +71,26 @@ describe('WP8 contract additions, round 2', () => {
     expect(alertRulesQuerySchema.parse({ definitionId: 'd1' })).toEqual({ definitionId: 'd1' });
     expect(definitionCreateOptionalSchema.safeParse(undefined).success).toBe(true);
     expect(definitionCreateOptionalSchema.safeParse({ origins: [] }).success).toBe(false);
+  });
+
+  it('a coverage error row may carry a null reason (review prov M3)', () => {
+    const errors = coverageResponseSchema.shape.errors;
+    const base = {
+      cell: {
+        origin: 'LHR',
+        destination: 'JFK',
+        departureDate: '2026-11-02',
+        returnDate: '2026-11-12',
+        nights: 10,
+      },
+      stage: 'discovery',
+      providerId: 'searchapi',
+      lastError: null,
+      attempts: 1,
+      retryable: true,
+    };
+    expect(errors.safeParse([{ ...base, reason: null }]).success).toBe(true);
+    expect(errors.safeParse([{ ...base, reason: 'upstream' }]).success).toBe(true);
   });
 
   it('a verify request may carry a confirmation', () => {
