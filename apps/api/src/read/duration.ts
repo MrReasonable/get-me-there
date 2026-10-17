@@ -1,6 +1,7 @@
 /** Spec §10 `/duration-analysis` (View C). */
 import {
   type apiContract,
+  type Buckets,
   type CellKey,
   cellKeyString,
   daysBetween,
@@ -9,7 +10,7 @@ import {
 } from '@gmt/core';
 import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
-import { SEARCHED } from './coverage.js';
+import { SEARCHED, zeroBuckets } from './coverage.js';
 import { executionSummary } from './executions.js';
 import { pickCalendar, pickVerified } from './pick.js';
 import { confirmedIn, EXECUTIONS_LIMIT, loadRows } from './results.js';
@@ -64,6 +65,19 @@ export function assembleDuration(def: SearchDefinition, ports: Ports): DurationR
     searched: cells.filter((c) => answered.has(`${stage}|${providerId}|${cellKeyString(c)}`)).length,
     total: cells.length,
   });
+  // why: N1 (ruling 4): the latest parent's discovery outcome per cell (children never discover); a cell without one
+  // is not_run. View C names these buckets instead of the "searched" umbrella.
+  const discoveryStatus = new Map(
+    (parent === undefined ? [] : ports.repos.cells.outcomes(parent.id, { stage: 'discovery' })).map((o) => [
+      `${o.providerId}|${cellKeyString(o)}`,
+      o.status,
+    ]),
+  );
+  const bucketsOf = (cells: readonly CellKey[], providerId: string): Buckets => {
+    const b = zeroBuckets();
+    for (const c of cells) b[discoveryStatus.get(`${providerId}|${cellKeyString(c)}`) ?? 'not_run'] += 1;
+    return b;
+  };
   const byNights: DurationResponse['byNights'] = [];
   for (let n = def.minNights; n <= def.maxNights; n++) {
     const v = verified.filter((r) => r.cell.nights === n);
@@ -99,6 +113,7 @@ export function assembleDuration(def: SearchDefinition, ports: Ports): DurationR
         discovery: def.providers.discovery.map((providerId) => ({
           providerId,
           ...count(ofNights, 'discovery', providerId),
+          buckets: bucketsOf(ofNights, providerId),
         })),
       },
     });

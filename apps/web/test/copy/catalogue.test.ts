@@ -182,7 +182,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'durationView.nightsLink': [14],
   'durationView.tooltipDetail': [5, 'Sun 14 Mar'],
   'durationView.seriesLine': ['calendar, Aviasales cache', 'not searched'],
-  'durationView.partlySearchedNoPrice': [3, 48],
   'durationView.partlyItinerarySearchedNoPrice': [1, 4],
   'durationView.cellDetail': [5, 'Sun 14 Mar'],
   'durationView.staleLine': [1, 4],

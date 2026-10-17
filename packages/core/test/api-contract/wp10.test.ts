@@ -39,7 +39,14 @@ describe('WP10 contract additions (plan decision 38)', () => {
       minCalendar: [{ providerId: 'travelpayouts', price: { ...price, cell, superseded: false }, n: 5 }],
       searched: {
         verification: { searched: 0, total: 4 },
-        discovery: [{ providerId: 'travelpayouts', searched: 30, total: 48 }],
+        discovery: [
+          {
+            providerId: 'travelpayouts',
+            searched: 30,
+            total: 48,
+            buckets: { priced: 0, empty: 0, no_data: 30, error: 0, skipped: 0, not_run: 18, reused: 0 },
+          },
+        ],
       },
     };
     const ok = durationAnalysisResponseSchema.safeParse({ byNights: [night], executions: [] });
@@ -110,7 +117,7 @@ describe('WP10 contract additions (plan decision 38)', () => {
     const detail = { cell, outcomes: [], calendarPrices: [], observations: [] };
     expect(cellDetailResponseSchema.safeParse(detail).success).toBe(false);
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify: null }).success).toBe(true);
-    const verify = { maxCalls: 6, headroomCalls: 1840 };
+    const verify = { maxCalls: 6, headroomCalls: 1840, needCalls: 6 };
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify }).success).toBe(true);
     expect(
       cellDetailResponseSchema.safeParse({ ...detail, verify: { ...verify, maxCalls: -1 } }).success,

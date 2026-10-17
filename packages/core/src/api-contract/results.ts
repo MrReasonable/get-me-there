@@ -155,7 +155,8 @@ export const calendarResponseSchema = z.object({
  * its departure date and destination. `searched` counts per series: `total` is the cells of this nights value in the
  * series' scope (verification: the selected cells; discovery: every cell) and `searched` those whose outcome is
  * `priced`, `empty` or `no_data` (verification: any verification provider's outcome; discovery: that provider's), so
- * "not searched", "searched k of N" and "searched, no price" stay distinct per series.
+ * "not searched" and partial coverage stay distinct per series. A discovery series also carries its six buckets, so the
+ * view words a gap by bucket ("12 no cached data"), never with the "searched" umbrella View D alone shows (ruling 4).
  */
 const searchedCount = z.object({ searched: count, total: count });
 export const durationAnalysisResponseSchema = z.object({
@@ -168,7 +169,8 @@ export const durationAnalysisResponseSchema = z.object({
       minCalendar: z.array(z.object({ providerId: providerIdSchema, price: calendarFigure, n: count })),
       searched: z.object({
         verification: searchedCount,
-        discovery: z.array(searchedCount.extend({ providerId: providerIdSchema })),
+        /** `buckets` (N1, ruling 4): the six buckets of the provider's cells at this nights value, which View C names. */
+        discovery: z.array(searchedCount.extend({ providerId: providerIdSchema, buckets: bucketsSchema })),
       }),
     }),
   ),

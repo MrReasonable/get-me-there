@@ -62,9 +62,10 @@ describe('duration data (spec §11 View C; plan decision 38)', () => {
       'not itinerary-searched',
       'not itinerary-searched',
     ]);
+    // why: N1 (ruling 4): the calendar series names its buckets; "searched" is View D's word alone.
     expect(calendar.slice(1)).toEqual([
-      'searched, no price',
-      'searched, no price',
+      '48 no cached data',
+      '48 no cached data',
       'not searched',
       'not searched',
     ]);
@@ -82,10 +83,31 @@ describe('duration data (spec §11 View C; plan decision 38)', () => {
       'itinerary-searched 1 of 4 selected cells, no class-verified price',
     );
     expect(gapLabel(row?.cells['calendar:travelpayouts'], 'calendar')).toBe(
-      'searched 3 of 48 cells, no price',
+      '3 no cached data, 45 not searched',
     );
     expect(gapLabel(undefined, 'calendar')).toBe('not searched');
   });
+  it('a stay length whose cells all came back "no cached data" never reads as searched (N1, ruling 4)', async () => {
+    server.use(
+      http.get(route, () =>
+        HttpResponse.json(
+          durationResponse([
+            night(10, [52000, 3], [41200, 5]),
+            night(11, null, null, { verification: false, travelpayouts: true }),
+          ]),
+        ),
+      ),
+    );
+    const { findByRole } = renderWithProviders(
+      <DurationView definition={definition({ minNights: 10, maxNights: 11 })} />,
+    );
+    const table = await findByRole('table', { name: 'Cheapest found per stay length, with provenance' });
+    expect(table).toHaveTextContent('48 no cached data');
+    expect(
+      document.body.textContent?.replaceAll('not searched', '').replaceAll('itinerary-searched', ''),
+    ).not.toMatch(/\bsearched\b/);
+  });
+
   it('counts the prices shown and the stale ones; the tooltip row is found by label, never by cast', () => {
     const d = data();
     expect([d.shownPrices, d.stalePrices]).toEqual([3, 0]);
@@ -112,7 +134,14 @@ describe('duration data (spec §11 View C; plan decision 38)', () => {
         ],
         searched: {
           verification: { searched: 0, total: 4 },
-          discovery: [{ providerId: 'fixture', searched: 48, total: 48 }],
+          discovery: [
+            {
+              providerId: 'fixture',
+              searched: 48,
+              total: 48,
+              buckets: { priced: 2, empty: 0, no_data: 46, error: 0, skipped: 0, not_run: 0, reused: 0 },
+            },
+          ],
         },
       },
     ]);
@@ -282,7 +311,7 @@ describe('Duration view (spec §11 View C)', () => {
     for (const gap of [
       'not itinerary-searched',
       'itinerary-searched, no class-verified price',
-      'searched, no price',
+      '48 no cached data',
       'not searched',
     ])
       expect(table).toHaveTextContent(gap);

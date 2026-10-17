@@ -125,7 +125,9 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     );
     const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
     expect(limits).not.toContain('that call cap is the only stop');
-    expect(limits).toContain("that call cap and each definition's call cap (Max billed calls per run) are the stops");
+    expect(limits).toContain(
+      "that call cap and each definition's call cap (Max billed calls per run) are the stops",
+    );
   });
 
   it('tells an operator moving to 40usd to remove SEARCHAPI_TRIAL_USED, which otherwise exits 78 (N5, cost-007)', () => {

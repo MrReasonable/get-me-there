@@ -270,7 +270,23 @@ describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () =>
     ).length;
     expect(ten?.searched).toEqual({
       verification: { searched: 3, total: 4 },
-      discovery: [{ providerId: 'fixture', searched: 3, total: tenTotal }],
+      // why: N1: the per-provider buckets, so View C names cache misses as such (C4's tile failed; the rest not run).
+      discovery: [
+        {
+          providerId: 'fixture',
+          searched: 3,
+          total: tenTotal,
+          buckets: {
+            priced: 1,
+            empty: 1,
+            no_data: 1,
+            error: 1,
+            skipped: 0,
+            not_run: tenTotal - 4,
+            reused: 0,
+          },
+        },
+      ],
     });
     expect(d.byNights[1]).toMatchObject({
       nights: 11,
@@ -278,7 +294,14 @@ describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () =>
       minCalendar: [],
       searched: {
         verification: { searched: 0, total: 0 },
-        discovery: [{ providerId: 'fixture', searched: 0, total: tenTotal }],
+        discovery: [
+          {
+            providerId: 'fixture',
+            searched: 0,
+            total: tenTotal,
+            buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: tenTotal, reused: 0 },
+          },
+        ],
       },
     });
   });

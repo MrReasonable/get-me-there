@@ -719,7 +719,7 @@ export const COPY = {
     title: 'Duration',
     chartTitle: 'Cheapest found by stay length',
     chartNote:
-      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A tick marked with a star (*) = no source searched that stay length. A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
+      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A tick marked with a star (*) = no source has answered for that stay length yet (its cells are not searched). A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
     xAxis: 'nights',
     yAxis: 'price (GBP)',
     tickNotSearched: (nights: number) => `${nights}*`,
@@ -733,8 +733,6 @@ export const COPY = {
     seriesLine: (series: string, value: string) => `${series}: ${value}`,
     cellDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
     notSearched: 'not searched',
-    searchedNoPrice: 'searched, no price',
-    partlySearchedNoPrice: (k: number, total: number) => `searched ${k} of ${total} cells, no price`,
     notItinerarySearched: 'not itinerary-searched',
     itinerarySearchedNoPrice: 'itinerary-searched, no class-verified price',
     partlyItinerarySearchedNoPrice: (k: number, total: number) =>
