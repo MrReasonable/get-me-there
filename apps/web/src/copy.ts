@@ -204,6 +204,9 @@ export const COPY = {
   itineraryLineExpand: (c: { searched: number; selected: number; expandTop: number; onDemand: number }) =>
     ` · itinerary-searched ${c.searched} of ${c.selected} selected (${c.expandTop} outbounds each) +${c.onDemand} on demand`,
   noItinerarySearch: ' · itinerary search not configured',
+  // why: ruling 16 (pft-006): when most cells came back "no cached data", say what would answer them; copy only.
+  thinCoverage:
+    'Most cells came back "no cached data", which is not evidence that no flights exist. Next: add SearchApi discovery to this definition, widen its airports, or run the Coverage check on the definition form.',
   truncated: (shown: number, total: number) => `within the cheapest ${shown} of ${total}`,
   excludedByCurrentSpace: (n: number) =>
     `${n} rows outside the current window and nights range are not shown`,

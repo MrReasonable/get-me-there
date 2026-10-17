@@ -3,6 +3,7 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import { isThinCoverage } from '../../lib/thinCoverage.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 
 /**
@@ -97,6 +98,7 @@ export function ResultsHeader({ data, filteredFirst }: ResultsHeaderProps) {
           {line2}
         </a>
       </p>
+      {isThinCoverage(b.no_data, c.total) ? <p className="text-sm">{COPY.thinCoverage}</p> : null}
       {data.truncated ? <p className="text-sm">{COPY.truncated(data.rows.length, data.total)}</p> : null}
       {data.excludedByCurrentSpace > 0 ? (
         <p className="text-sm">{COPY.excludedByCurrentSpace(data.excludedByCurrentSpace)}</p>
