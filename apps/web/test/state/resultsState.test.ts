@@ -135,6 +135,15 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect(parseResultsState(new URLSearchParams(window.location.search)).filters).toEqual({ maxStops: 1 });
   });
 
+  it('updating search parameters keeps the URL fragment', () => {
+    window.history.replaceState(null, '', '/?view=results&f.stops=1#details');
+    expect(hrefWith({ view: 'coverage' })).toBe('/?view=coverage&f.stops=1#details');
+    updateSearchParams({ 'f.stops': null });
+    expect(window.location.search).toBe('?view=results');
+    expect(window.location.hash).toBe('#details');
+    window.history.replaceState(null, '', '/');
+  });
+
   it('a nav click navigates in place; a modified click is left to the browser', () => {
     window.history.replaceState(null, '', '/?view=results');
     let prevented = 0;

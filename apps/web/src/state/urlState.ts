@@ -26,7 +26,8 @@ export function hrefWith(patch: Record<string, string | null>): string {
     if (v === null) p.delete(k);
     else p.set(k, v);
   }
-  return `${window.location.pathname}?${p.toString()}`;
+  // why: the fragment is not a search parameter, so an anchor the page was opened at survives every edit.
+  return `${window.location.pathname}?${p.toString()}${window.location.hash}`;
 }
 
 /** Applies `patch` to the URL: `push` for navigation, `replace` for filter edits. */
