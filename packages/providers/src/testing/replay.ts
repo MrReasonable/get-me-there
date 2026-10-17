@@ -1,7 +1,8 @@
 import { type Dirent, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { HttpResponse, http } from 'msw/http';
-import { loadRecordedFixture, type RecordedFixture } from '../http/recorder.js';
+import { loadRecordedFixture } from '../http/recordedFiles.js';
+import type { RecordedFixture } from '../http/recorder.js';
 import { stripUrl } from '../http/scrub.js';
 import { byPair } from '../util.js';
 import type { RequestHandler } from './handlers.js';

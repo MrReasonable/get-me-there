@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { Secret } from '@gmt/core';
-import { loadRecordedFixture } from '../http/recorder.js';
+import { loadRecordedFixture } from '../http/recordedFiles.js';
 import { containsSecret } from '../http/scrub.js';
 import { loadParamsAllowlist } from '../params/allowlist.js';
 import { isRecord } from '../util.js';

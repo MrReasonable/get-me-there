@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { defaultFixtureRoot, loadFixtureTree } from '../../src/fixture/tree.js';
-import { createRecorder, loadRecordedJson, withContentHash } from '../../src/http/recorder.js';
+import { loadRecordedJson } from '../../src/http/recordedFiles.js';
+import { createRecorder, withContentHash } from '../../src/http/recorder.js';
 import { verifyFixturesTree, verifyRecordedFile, verifyRecordedTree } from '../../src/testing/verify.js';
 import { ALL_SECRETS, req, SEARCH, SENTINELS } from '../fakes.js';
 

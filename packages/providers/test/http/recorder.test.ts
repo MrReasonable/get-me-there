@@ -15,13 +15,12 @@ import { join, relative } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadRecordedFixture, loadRecordedJson } from '../../src/http/recordedFiles.js';
 import {
   assertRecordedRoot,
   canonicalJson,
   contentHash,
   createRecorder,
-  loadRecordedFixture,
-  loadRecordedJson,
   RecorderRefusedError,
   verifyContentHash,
   withContentHash,

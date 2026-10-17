@@ -18,7 +18,7 @@ import {
 import { majorToMinor } from '@gmt/providers/recording';
 import type { Ports } from '../wiring.js';
 import { cheapestOption } from './recordRequests.js';
-import type { Chain, Discovery, SmokeProviderReport, Vendor } from './smoke.js';
+import type { Chain, Discovery, SmokeProviderReport, Vendor } from './smokeStages.js';
 
 /** One line of the checklist. */
 export interface SmokeCheck {
