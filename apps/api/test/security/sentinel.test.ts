@@ -1,6 +1,6 @@
 // Spec §5.3: "the sentinel-key test … asserts none appears in any … fixture file"; CI runs the same scan over
 // fixtures/. The WP0 scan runs with the sentinels in its environment over (a) a tree just recorded through the real
-// recorder with sentinel keys, (b) that tree with a planted sentinel, (c) the committed tree — which proves only the
+// recorder with sentinel keys, (b) that tree with a planted sentinel, (c) the recorded tree — which proves only the
 // shape rules there, since CI has no real keys; the real-value scan is the operator gate of Task 12b (sec-004).
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -67,7 +67,7 @@ describe('no key reaches any recorded file (spec §5.3 sentinel test)', () => {
     expect(r.stderr).toContain('no configured secret value is loaded');
   });
 
-  it('the committed fixture tree passes the shape rules (the real-value scan is the operator gate in Task 12b)', () => {
+  it('the local recorded tree passes the shape rules (the real-value scan is the operator gate in Task 12b)', () => {
     const r = scan(REPO);
     expect(r.stdout).toContain('secret scan: clean');
     expect(r.status).toBe(0);

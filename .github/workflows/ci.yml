@@ -36,7 +36,7 @@ jobs:
           pnpm exec vitest run --project api --project providers --project engine test/recorded/ test/searchapi/recorded.test.ts test/travelpayouts/replay.test.ts test/layerB/ --reporter=verbose | tee recorded-skip.log
           suffix='(skipped: recordings not present, local-only, decision 61)'
           for title in \
-            'committed recorded tree for the worked example' \
+            'local recorded tree for the worked example' \
             'recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (plan decision 17: one session)' \
             'WP4b recordings this brief relies on (§7 "Inputs from WP4b") — pending-fixtures' \
             'SEARCHAPI_PARAMS against the recording (spec §5.2, plan decision 24) — pending-fixtures' \

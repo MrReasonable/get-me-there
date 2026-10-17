@@ -1,7 +1,7 @@
 /**
- * The public worked example's route (brief README, spec §1): the only route the committed recorded tree may hold.
+ * The public worked example's route (brief README, spec §1): the only route the repository's recorded tree (local-only, gitignored) may hold.
  * why: the privacy rule — the operator's own route never enters the repository, so a run that would write into the
- * committed tree with any other route is refused (sec2-002). This is the one apps/api source file that names airports
+ * recorded tree with any other route is refused (sec2-002). This is the one apps/api source file that names airports
  * (the WP4b definition-of-done grep excludes it), as apps/web/src/example.ts is for the web.
  */
 export const WORKED_EXAMPLE_ROUTE = { origins: ['LHR', 'LGW'], destinations: ['JFK', 'EWR'] } as const;

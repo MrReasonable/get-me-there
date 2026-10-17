@@ -11,7 +11,7 @@ import { onCleanup, tempRecordedRoot } from './tmp.js';
 import { stubVendors, type VendorLog, type VendorOptions } from './vendors.js';
 
 /**
- * The signature test recordings carry. WP4's verifier accepts any non-blank signature; the committed-tree check
+ * The signature test recordings carry. WP4's verifier accepts any non-blank signature; the recorded-tree check
  * (checkWorkedExampleTree) requires RECORDED_BY, so a test tree can never pass as a vendor one (prov-wp04b-006).
  */
 export const TEST_RECORDED_BY = '@gmt/api record:fixtures (test)';

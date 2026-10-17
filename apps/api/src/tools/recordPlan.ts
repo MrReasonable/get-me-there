@@ -63,7 +63,7 @@ export interface RecordCli {
   /** Required for a live run when earlier tool runs already ledgered SearchApi credits in the window (decision 20). */
   confirmRerun: boolean;
   /**
-   * `--out DIR`: record into DIR/fixtures/recorded instead of the committed tree. Required for any route other than the
+   * `--out DIR`: record into DIR/fixtures/recorded instead of the recorded tree. Required for any route other than the
    * worked example, and DIR must be outside the repository (sec2-002; the operator's own routes never enter the repo).
    */
   out: string | null;

@@ -76,7 +76,7 @@ export function repositoryRoots(from: string = defaultRecordedRoot()): string[] 
 }
 
 /**
- * Where a record run writes, and under which signature (sec2-002, ruling 2026-10-15): the committed tree only for the
+ * Where a record run writes, and under which signature (sec2-002, ruling 2026-10-15): the recorded tree only for the
  * worked example's route; any other route needs `--out DIR` outside the repository, which writes DIR/fixtures/recorded.
  */
 export function recordingTarget(
@@ -95,7 +95,7 @@ export function recordingTarget(
   }
   if (!isWorkedExampleRoute(cli.args))
     return {
-      refusal: `the committed recorded tree holds only the worked example (--route ${WORKED_EXAMPLE_ROUTE_ARG}); record any other route with --out DIR outside the repository`,
+      refusal: `the repository's recorded tree (local-only, gitignored) holds only the worked example (--route ${WORKED_EXAMPLE_ROUTE_ARG}); record any other route with --out DIR outside the repository`,
     };
   return { root: defaultRecordedRoot(), recordedBy: RECORDED_BY };
 }

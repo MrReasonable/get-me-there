@@ -43,7 +43,7 @@ export interface InProcessOptions {
 /**
  * The record runner over `runRecord`. why: the refusals mirror `runTool`'s order and exit codes (plan exit-code
  * table), which a test pins by running both over the same refusing config: an open synthetic gate (70), a route that
- * may not enter the committed tree (64), a configuration that cannot record (78); the run itself refuses for spend
+ * may not enter the recorded tree (64), a configuration that cannot record (78); the run itself refuses for spend
  * with 65 (no `--confirm-rerun` over HTTP). Every line is URL- and secret-scrubbed with `safeMessage` before it leaves
  * the process (review SEC-7), and `fixturesWritten` lists the files the run added, relative to the recorded root.
  */

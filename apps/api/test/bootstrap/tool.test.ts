@@ -47,24 +47,24 @@ const DRY = [...ROUTE, '--dry-run'];
 afterEach(() => {
   vi.useRealTimers();
 });
-/** Every file of the committed tree with its size and mtime. */
-function committedTree(): string[] {
+/** Every file of the recorded tree with its size and mtime. */
+function recordedTreeSnapshot(): string[] {
   return filesUnder(defaultRecordedRoot()).map((p) => {
     const st = statSync(p);
     return `${p} ${st.size} ${st.mtimeMs}`;
   });
 }
-// why: no test adds, removes or changes a file in the committed tree (prov-wp04b-006); a snapshot, not a fixed list,
+// why: no test adds, removes or changes a file in the recorded tree (prov-wp04b-006); a snapshot, not a fixed list,
 // so the guard holds before and after Task 12b commits the recorded tree (prov-wp04b-r3-001)
-let committedBefore: string[] = [];
+let recordedBefore: string[] = [];
 beforeAll(() => {
-  committedBefore = committedTree();
+  recordedBefore = recordedTreeSnapshot();
 });
 afterAll(() => {
-  expect(committedTree()).toEqual(committedBefore);
+  expect(recordedTreeSnapshot()).toEqual(recordedBefore);
 });
 
-/** A temp database and a temp recorded tree with the test signature (every runTool test records there, never in the committed tree). */
+/** A temp database and a temp recorded tree with the test signature (every runTool test records there, never in the recorded tree). */
 function harness(dbPath = join(tempDir('gmt-tool-'), 'tool.db'), extra: Record<string, string> = {}) {
   const rec = testRecording();
   const out: string[] = [];
@@ -408,7 +408,7 @@ describe('where a record run may write (sec2-002 ruling)', () => {
     return { ...h, opts };
   }
 
-  it('the committed tree takes only the worked example: another route without --out refuses with 64 before anything is opened', async () => {
+  it('the recorded tree takes only the worked example: another route without --out refuses with 64 before anything is opened', async () => {
     const h = bare();
     expect(
       await runTool(
@@ -418,7 +418,7 @@ describe('where a record run may write (sec2-002 ruling)', () => {
       ),
     ).toBe(EXIT.usage);
     expect(h.errors()).toContain(
-      'the committed recorded tree holds only the worked example (--route LHR,LGW:JFK,EWR)',
+      "the repository's recorded tree (local-only, gitignored) holds only the worked example (--route LHR,LGW:JFK,EWR)",
     );
     expect(existsSync(h.dbPath)).toBe(false);
   });
@@ -450,7 +450,7 @@ describe('where a record run may write (sec2-002 ruling)', () => {
     expect(h.text()).toContain(`recording into: ${join(out, 'fixtures', 'recorded')}`);
   });
 
-  it('the worked example without --out writes the committed tree (the dry run names it; nothing is written)', async () => {
+  it('the worked example without --out writes the recorded tree (the dry run names it; nothing is written)', async () => {
     const h = bare();
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain(`recording into: ${defaultRecordedRoot()}`);
@@ -675,7 +675,7 @@ describe('recordingTarget (sec2-002 ruling, r3-ts-004)', () => {
     const given = { root: '/tmp/x/fixtures/recorded', recordedBy: TEST_RECORDED_BY };
     expect(recordingTarget(cli(other), given)).toBe(given);
   });
-  it('the worked example without --out records the committed tree under RECORDED_BY', () => {
+  it('the worked example without --out records the recorded tree under RECORDED_BY', () => {
     expect(recordingTarget(cli(example), undefined)).toEqual({
       root: defaultRecordedRoot(),
       recordedBy: RECORDED_BY,

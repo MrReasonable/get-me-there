@@ -58,7 +58,7 @@ export type { RecordArgs } from './recordPlan.js';
 
 /**
  * recordedBy signature on every file a real run records (spec §5.5). WP4's verifier accepts any non-blank signature;
- * the committed-tree manifest (checkWorkedExampleTree) is the only check that requires this one.
+ * the recorded-tree manifest (checkWorkedExampleTree) is the only check that requires this one.
  */
 export const RECORDED_BY = '@gmt/api record:fixtures';
 
@@ -66,7 +66,7 @@ export const RECORDED_BY = '@gmt/api record:fixtures';
 export function recordPrecheck(c: Config): string | null {
   if (c.providers.travelpayouts === null || c.providers.searchapi === null)
     return 'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY in the environment (.env)';
-  // why: the committed tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
+  // why: the recorded tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
   if (c.pointOfSale !== 'GB') return `record:fixtures records at POINT_OF_SALE=GB; got ${c.pointOfSale}`;
   return null;
 }
