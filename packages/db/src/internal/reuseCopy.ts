@@ -3,6 +3,7 @@ import type { Db } from '../client.js';
 import { ExecutionsRepo } from '../repositories/executions.js';
 import type { CalendarPriceRow, ReuseCriteria, ReusedCopy } from '../types.js';
 import { readSnapshot } from './definitionRow.js';
+import { MANUAL_RETRYABLE, NON_RETRYABLE } from './enums.js';
 import { keyParams, type OutcomeDbRow, toOutcome } from './outcomeRow.js';
 import { SELECT_OUTCOME_SQL, storeOutcome } from './outcomeWrite.js';
 import {
@@ -145,15 +146,18 @@ function assertSourceStored(
 }
 
 /**
- * A target a reused copy may replace (ssr M2): `not_run`, an `error`, or `skipped` for budget or a disabled provider,
- * the outcomes a resume would fetch again; never a fetched result or another skip (departed, not_selected).
+ * A target a reused copy may replace (ssr M2): an outcome some resume fetches again, as RESUMABLE_SQL selects it —
+ * `not_run`, `skipped` for budget or a disabled provider, an `error` an automatic resume retries (retryable reason,
+ * fewer than 3 attempts) or one a manual resume re-admits (MANUAL_RETRYABLE); never a fetched result, another skip
+ * (departed, not_selected) or an error no resume fetches (re-review N3).
  */
 function refetchable(target: OutcomeDbRow): boolean {
-  return (
-    target.status === 'not_run' ||
-    target.status === 'error' ||
-    (target.status === 'skipped' && (target.reason === 'budget' || target.reason === 'provider_disabled'))
-  );
+  const r = target.reason;
+  if (target.status === 'not_run') return true;
+  if (target.status === 'skipped') return r === 'budget' || r === 'provider_disabled';
+  if (target.status !== 'error') return false;
+  const automatic = target.attempts < 3 && (r === null || !NON_RETRYABLE.some((x) => x === r));
+  return automatic || MANUAL_RETRYABLE.some((x) => x === r);
 }
 
 /**

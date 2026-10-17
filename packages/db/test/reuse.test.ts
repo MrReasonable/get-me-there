@@ -417,6 +417,19 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     expect([E, P, N].map((k) => after.get(cellKeyString(k))?.attempts)).toEqual([2, 0, 0]);
   });
 
+  it.each([
+    ['a non-retryable error', { status: 'error', reason: 'no-return-legs', attempts: 1 }],
+    ['an error past its attempts', { status: 'error', reason: 'network', attempts: 3 }],
+  ])('refuses %s as a target: no resume fetches it again (re-review N3)', (_name, fields) => {
+    const { db, clock, cells, prices, definition } = world();
+    const c = newExecution(db, clock, { definition }).execution.id;
+    cells.seed(c, ALL.map(withNights), ['travelpayouts']);
+    rawOutcome(db, c, P, 'discovery', 'travelpayouts', fields);
+    expect(() => reuse(cells, c, 'travelpayouts', [find(ask(prices, definition.id, [P]), P)])).toThrow(
+      expect.objectContaining({ rule: 'reuse-target' }),
+    );
+  });
+
   it('a later target that a resume would not fetch again rolls back the copies already written (test-011)', () => {
     const { db, clock, cells, prices, definition } = world();
     const c = newExecution(db, clock, { definition }).execution.id;

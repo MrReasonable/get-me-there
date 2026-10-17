@@ -128,3 +128,19 @@ export const OPERATOR_MESSAGE_KINDS = exhaustive<OperatorMessageKind>()([
   'alerts_calendar_only',
   'crash_loop',
 ] as const);
+
+/**
+ * Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. `no-priced-options`
+ * (spec §5.4, decision 37) is never retried by either.
+ */
+export const NON_RETRYABLE = [
+  'auth',
+  'quota',
+  'parse',
+  'no-return-legs',
+  'no-priced-options',
+  'fx-unavailable',
+  'currency-unsupported',
+  'unknown-airport-tz',
+] as const;
+export const MANUAL_RETRYABLE = ['auth', 'quota', 'parse'] as const;

@@ -69,27 +69,44 @@ export function sizeChild(
   return { ...childMaxCalls(ctx, def.id, def.budget.maxCalls, need), need };
 }
 
-/** The cell of the definition's current search space that `cell` names, or undefined (shared by verifyCell and the preview). */
-function findCell(built: BuiltSnapshot, cell: CellKey): Cell | undefined {
+/**
+ * The checks verifyCell makes before sizing a child, shared with the preview so a cell it would refuse never shows a
+ * verify button (re-review N4): a verification provider, the cell in the current space, not departed, airports known.
+ */
+function childTarget(
+  ctx: EngineContext,
+  built: BuiltSnapshot,
+  definitionId: string,
+  cell: CellKey,
+): { ok: true; match: Cell } | { ok: false; message: string; details: unknown } {
+  if (built.snapshot.providers.verification.length === 0)
+    return { ok: false, message: 'this definition has no verification provider', details: { definitionId } };
   const key = cellKeyString(cell);
-  return built.cells.find((c) => cellKeyString(c) === key);
+  const match = built.cells.find((c) => cellKeyString(c) === key);
+  if (
+    match === undefined ||
+    match.departureDate <= ctx.clock.todayLondon() ||
+    !ctx.repos.airports.exists(cell.origin) ||
+    !ctx.repos.airports.exists(cell.destination)
+  )
+    return { ok: false, message: 'the cell is not in the current search space', details: { cell } };
+  return { ok: true, match };
 }
 
 /**
  * Decision 45: the cap a child of `cell` would get now and the headroom it is drawn from, for the cell detail's verify
  * button (decisions 38, 42), by the same calculation verifyCell uses. A definition that does not exist (`not_found`)
- * or a cell outside its current search space (`window`) is refused with StartResult's codes and no verify button
- * (code-architect review 16).
+ * and every refusal of `childTarget` (`window`) are refused with StartResult's codes and no verify button
+ * (code-architect review 16, re-review N4).
  */
 export function childCapPreview(ctx: EngineContext, definitionId: string, cell: CellKey): ChildCapPreview {
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
     return { ok: false, code: 'not_found', message: `definition ${definitionId} not found` };
   const built = buildSnapshot(ctx, def, 'manual');
-  const match = findCell(built, cell);
-  if (match === undefined)
-    return { ok: false, code: 'window', message: 'the cell is not in the current search space' };
-  const { maxCalls, headroom } = sizeChild(ctx, def, built.snapshot, match);
+  const target = childTarget(ctx, built, definitionId, cell);
+  if (!target.ok) return { ok: false, code: 'window', message: target.message };
+  const { maxCalls, headroom } = sizeChild(ctx, def, built.snapshot, target.match);
   return { ok: true, maxCalls, headroomCalls: headroom };
 }
 
@@ -110,17 +127,10 @@ export async function verifyCellExecution(
   if (def === null || def.deletedAt !== null)
     return refused('not_found', `definition ${definitionId} not found`, { definitionId });
   const built = buildSnapshot(ctx, def, 'manual');
-  if (built.snapshot.providers.verification.length === 0)
-    return refused('window', 'this definition has no verification provider', { definitionId });
+  const target = childTarget(ctx, built, definitionId, cell);
+  if (!target.ok) return refused('window', target.message, target.details);
+  const match = target.match;
   const key = cellKeyString(cell);
-  const match = findCell(built, cell);
-  if (
-    match === undefined ||
-    match.departureDate <= ctx.clock.todayLondon() ||
-    !ctx.repos.airports.exists(cell.origin) ||
-    !ctx.repos.airports.exists(cell.destination)
-  )
-    return refused('window', 'the cell is not in the current search space', { cell });
   if (ctx.repos.executions.activeChild(def.id, cell) !== null)
     return refused('active', 'this cell is already being verified', { cell });
   const { maxCalls, headroom, need } = sizeChild(ctx, def, built.snapshot, match);

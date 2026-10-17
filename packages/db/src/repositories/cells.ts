@@ -16,7 +16,9 @@ import {
 } from '@gmt/core';
 import type { Db } from '../client.js';
 import {
+  MANUAL_RETRYABLE,
   NO_DATA_REASONS,
+  NON_RETRYABLE,
   OUTCOME_STATUSES,
   PROVIDER_IDS,
   SELECTION_REASONS,
@@ -108,21 +110,6 @@ function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | nul
     throw new RowRejected('outcome-reason', `a not_run outcome carries no reason, got ${reason}`);
 }
 
-/**
- * Spec §7 "Resume": reasons never retried automatically; a manual resume re-admits auth, quota, parse. `no-priced-options`
- * (spec §5.4, decision 37) is never retried by either.
- */
-const NON_RETRYABLE = [
-  'auth',
-  'quota',
-  'parse',
-  'no-return-legs',
-  'no-priced-options',
-  'fx-unavailable',
-  'currency-unsupported',
-  'unknown-airport-tz',
-] as const;
-const MANUAL_RETRYABLE = ['auth', 'quota', 'parse'] as const;
 const sqlList = (xs: readonly string[]) => xs.map((r) => `'${r}'`).join(', ');
 
 /**

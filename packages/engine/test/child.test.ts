@@ -165,6 +165,16 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
         returnDate: asIsoDate('2027-01-11'),
       }),
     ).toEqual({ ok: false, code: 'window', message: 'the cell is not in the current search space' });
+    // why: re-review N4 — every refusal verifyCell makes before sizing, the preview makes too, so no button always fails
+    const discoveryOnly = h.createDefinition({ name: 'discovery only' });
+    expect(childCapPreview(ctx, discoveryOnly.id, cell)).toEqual({
+      ok: false,
+      code: 'window',
+      message: 'this definition has no verification provider',
+    });
+    expect(refusedWith(await o.verifyCell(discoveryOnly.id, cell), 'window')).toBe(
+      'this definition has no verification provider',
+    );
   });
 
   it('asks for confirmation above SOFT_CONFIRM like any execution, and runs once the cost and calls are confirmed (cost M-1)', async () => {

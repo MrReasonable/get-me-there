@@ -18,6 +18,7 @@ import {
   LHR,
   T0,
   tileRule,
+  withVerification,
 } from './support/harness.js';
 
 // why: every test here runs croner, http-kit and the engine on faked timers set to T0, so the process clock and the
@@ -412,7 +413,9 @@ describe('shutdown and status', () => {
       departureDate: asIsoDate('2026-11-03'),
       returnDate: asIsoDate('2026-11-10'),
     };
-    expect(e.childCapPreview(def.id, one)).toEqual({ ok: true, maxCalls: 6, headroomCalls: 1000 }); // decision 45
+    // why: a preview needs a verification provider, as verifyCell does (re-review N4)
+    const verifying = twoPairs(h, { name: 'verifying', providers: withVerification() });
+    expect(e.childCapPreview(verifying.id, one)).toEqual({ ok: true, maxCalls: 6, headroomCalls: 1000 }); // decision 45
     expect(
       (
         await e.coverageCheck({
