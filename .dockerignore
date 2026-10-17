@@ -1,0 +1,41 @@
+# Secrets and local state never enter the build context (spec §13). Patterns without **/ match
+# only at the context root, so the nested forms cover worktrees and package folders too.
+.env*
+**/.env*
+data/
+backups/
+**/backups/
+*.db*
+**/*.db*
+# Keys and certificates, a private notes folder, and any nested npm config that could hold a token.
+# The root .npmrc stays (engine-strict, peer rules) and a test keeps it free of credentials.
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/id_ed25519*
+private/
+**/private/
+**/.npmrc
+!.npmrc
+# Recorded vendor responses are local-only and never committed or shipped (plan decision 61): the
+# whole recorded tree stays out of the image, our params-*.json allowlists included (the runtime
+# allowlists are code constants); raw bodies too.
+fixtures/recorded/
+**/fixtures/recorded/
+**/*.raw.json
+# Rebuilt inside the image.
+node_modules/
+**/node_modules/
+**/dist/
+**/coverage/
+reports/
+**/.stryker-tmp/
+# Repository metadata and other checkouts.
+.git/
+.github/
+.claude/
+.memsearch/
+.worktrees/
+.superpowers/
