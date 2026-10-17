@@ -8,7 +8,7 @@ export {
   type ReadOnlyLockState,
   readOnlyLockState,
 } from './appLock.js';
-export { backupDatabase } from './backup.js';
+export { backupDatabase, checkBackup } from './backup.js';
 export { type BudgetConfig, budgetConfigFromConfig, effectiveCallCap } from './budgetConfig.js';
 export { SqliteBudgetGuard } from './budgetGuard.js';
 export { type Db, openDatabase } from './client.js';

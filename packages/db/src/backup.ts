@@ -16,6 +16,15 @@ export function integrityCheck(file: string): string {
 }
 
 /**
+ * Spec §13 "Restore": throws unless the file opens read-only and SQLite's integrity verdict is `ok`. The rule
+ * scripts/check-backup.mjs runs before a restore; `verify` is injectable like backupDatabase's, for its test.
+ */
+export function checkBackup(file: string, verify: (file: string) => string = integrityCheck): void {
+  const verdict = verify(file);
+  if (verdict !== 'ok') throw new Error(`integrity_check returned ${verdict}`);
+}
+
+/**
  * Spec §7 "Migrations" and §13 "Backup" (decision 14): `VACUUM INTO` a timestamped file under `backupsDir`, check its
  * integrity, keep the newest `keep` backups. Throws on any failure, so the caller refuses migrations and boot fails
  * naming the cause. The copy holds every table, so it is created private (0600 in a 0700 directory).

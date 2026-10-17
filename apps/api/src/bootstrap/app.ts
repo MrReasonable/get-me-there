@@ -26,6 +26,21 @@ import { type AssetPaths, assetPaths } from './paths.js';
 import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
 import { seedIfNeeded } from './seed.js';
 
+/**
+ * In-process shutdown deadline. why: it sits below compose's 30 s `stop_grace_period`, so a hung shutdown ends here
+ * (lock released through release(), exit non-zero) instead of by SIGKILL, which leaves the lock for the next start to
+ * wait out for 90 s.
+ */
+export const SHUTDOWN_DEADLINE_MS = 25_000;
+
+/** close() ran past SHUTDOWN_DEADLINE_MS; already logged once where it was thrown. */
+export class ShutdownTimeoutError extends Error {
+  constructor() {
+    super(`shutdown did not finish within ${SHUTDOWN_DEADLINE_MS} ms`);
+    this.name = 'ShutdownTimeoutError';
+  }
+}
+
 export interface BootDeps {
   config: Config;
   log: Logger;
@@ -157,12 +172,32 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         clearInterval(beat);
         // why: review arch Minor: a shutdown or checkpoint that throws must still release the lock and close the
         // handle, or the next start waits out APP_LOCK_WAIT_MS on a lock nobody holds.
+        // why: review devops M4 — a hang in server.close or engine.shutdown would otherwise run into compose's SIGKILL
+        // at 30 s and cost the next start a 90 s stale-lock wait; past the deadline we give up, release the lock
+        // ourselves and let the caller exit non-zero. unref: the timer alone never keeps the process alive.
+        let deadline: NodeJS.Timeout | undefined;
+        const timedOut = new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => {
+            log.error(
+              { deadlineMs: SHUTDOWN_DEADLINE_MS },
+              'shutdown timed out; releasing the app_lock and exiting',
+            );
+            reject(new ShutdownTimeoutError());
+          }, SHUTDOWN_DEADLINE_MS);
+          deadline.unref();
+        });
         try {
-          await closeServer(bound?.server ?? null); // stop accepting
-          await engine.shutdown();
-          // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
-          ports.db.checkpoint();
+          await Promise.race([
+            (async () => {
+              await closeServer(bound?.server ?? null); // stop accepting
+              await engine.shutdown();
+              // why: spec §7 releases the lock after the checkpoint; db.close() checkpoints again, harmlessly.
+              ports.db.checkpoint();
+            })(),
+            timedOut,
+          ]);
         } finally {
+          clearTimeout(deadline);
           lock.release();
           ports.db.close();
         }
@@ -178,6 +213,30 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     ports.db.close();
     throw err;
   }
+}
+
+/**
+ * The signal handler main() registers: runs `running.close()`, exits 0 when it finishes, EXIT.failed when it throws or
+ * runs past the deadline. `exit` is injected for the test.
+ */
+export function shutdownHandler(
+  running: RunningApp,
+  log: Logger,
+  secrets: readonly Secret[],
+  exit: (code: number) => void = (code) => process.exit(code),
+): (signal: string) => void {
+  return (signal) => {
+    log.info({ signal }, 'shutting down');
+    running.close().then(
+      () => exit(EXIT.ok),
+      (err: unknown) => {
+        // why: a timeout was already logged once by close(); a second 'shutdown failed' line would repeat it.
+        if (!(err instanceof ShutdownTimeoutError))
+          log.error({ err: { message: safeMessage(err, secrets) } }, 'shutdown failed');
+        exit(EXIT.failed);
+      },
+    );
+  };
 }
 
 /** The app entrypoint: env parsed once (spec §12), boot, signals. Throws on refusal; start.ts exits with its code. */
@@ -205,16 +264,7 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
     throw err;
   }
   log.info({ port: running.port, bindAddress: config.bindAddress }, 'listening');
-  const stop = (signal: string) => {
-    log.info({ signal }, 'shutting down');
-    running.close().then(
-      () => process.exit(EXIT.ok),
-      (err: unknown) => {
-        log.error({ err: { message: safeMessage(err, secrets) } }, 'shutdown failed');
-        process.exit(EXIT.failed);
-      },
-    );
-  };
+  const stop = shutdownHandler(running, log, secrets);
   process.once('SIGTERM', () => stop('SIGTERM'));
   process.once('SIGINT', () => stop('SIGINT'));
 }
