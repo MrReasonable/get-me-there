@@ -14,9 +14,9 @@ import { execute } from './execute.js';
 import { lineKey } from './lines.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
-import { buildSnapshot, childSnapshot } from './snapshot.js';
+import { type BuiltSnapshot, buildSnapshot, childSnapshot } from './snapshot.js';
 import { isActiveClash, refused } from './start.js';
-import type { StartResult } from './types.js';
+import type { ChildCapPreview, StartResult } from './types.js';
 
 /** Billed calls an execution may still make under its own snapshot cap. */
 function callsLeft(ctx: EngineContext, e: Execution): number {
@@ -69,23 +69,28 @@ export function sizeChild(
   return { ...childMaxCalls(ctx, def.id, def.budget.maxCalls, need), need };
 }
 
+/** The cell of the definition's current search space that `cell` names, or undefined (shared by verifyCell and the preview). */
+function findCell(built: BuiltSnapshot, cell: CellKey): Cell | undefined {
+  const key = cellKeyString(cell);
+  return built.cells.find((c) => cellKeyString(c) === key);
+}
+
 /**
  * Decision 45: the cap a child of `cell` would get now and the headroom it is drawn from, for the cell detail's verify
- * button (decisions 38, 42), by the same calculation verifyCell uses. Throws for a definition that does not exist or a
- * cell outside its current search space, which have no verify button.
+ * button (decisions 38, 42), by the same calculation verifyCell uses. A definition that does not exist (`not_found`)
+ * or a cell outside its current search space (`window`) is refused with StartResult's codes and no verify button
+ * (code-architect review 16).
  */
-export function childCapPreview(
-  ctx: EngineContext,
-  definitionId: string,
-  cell: CellKey,
-): { maxCalls: number; headroomCalls: number } {
+export function childCapPreview(ctx: EngineContext, definitionId: string, cell: CellKey): ChildCapPreview {
   const def = ctx.repos.definitions.get(definitionId);
-  if (def === null || def.deletedAt !== null) throw new Error(`definition ${definitionId} not found`);
+  if (def === null || def.deletedAt !== null)
+    return { ok: false, code: 'not_found', message: `definition ${definitionId} not found` };
   const built = buildSnapshot(ctx, def, 'manual');
-  const match = built.cells.find((c) => cellKeyString(c) === cellKeyString(cell));
-  if (match === undefined) throw new Error('the cell is not in the current search space');
+  const match = findCell(built, cell);
+  if (match === undefined)
+    return { ok: false, code: 'window', message: 'the cell is not in the current search space' };
   const { maxCalls, headroom } = sizeChild(ctx, def, built.snapshot, match);
-  return { maxCalls, headroomCalls: headroom };
+  return { ok: true, maxCalls, headroomCalls: headroom };
 }
 
 /**
@@ -107,7 +112,7 @@ export async function verifyCellExecution(
   if (built.snapshot.providers.verification.length === 0)
     return refused('window', 'this definition has no verification provider', { definitionId });
   const key = cellKeyString(cell);
-  const match = built.cells.find((c) => cellKeyString(c) === key);
+  const match = findCell(built, cell);
   if (
     match === undefined ||
     match.departureDate <= ctx.clock.todayLondon() ||

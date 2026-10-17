@@ -8,6 +8,7 @@ export { parseCron } from './scheduler/parseCron.js';
 export type {
   AlertsStepHook,
   BudgetFit,
+  ChildCapPreview,
   CoverageCheckRequest,
   CoverageCheckResponse,
   Engine,

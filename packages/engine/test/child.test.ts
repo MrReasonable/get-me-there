@@ -143,23 +143,27 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     const def = verifying(h, {
       verification: { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 3, bookingLinks: true },
     });
-    expect(childCapPreview(ctx, def.id, cell)).toEqual({ maxCalls: 9, headroomCalls: 1000 });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({ ok: true, maxCalls: 9, headroomCalls: 1000 });
     const parent = await o.start(def.id, { trigger: 'manual' });
     if (!parent.ok) throw new Error(parent.message);
     h.spendLedger({ providerId: 'fixture', rows: 991, costMicroGbpEach: 0, executionId: parent.executionId });
-    const preview = childCapPreview(ctx, def.id, cell);
-    expect(preview).toEqual({ maxCalls: 9, headroomCalls: 9 });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({ ok: true, maxCalls: 9, headroomCalls: 9 });
     const r = await o.verifyCell(def.id, cell);
     if (!r.ok) throw new Error(r.message);
-    expect(h.repos.executions.get(r.executionId)?.snapshot.budget.maxCalls).toBe(preview.maxCalls);
-    expect(() => childCapPreview(ctx, 'no-such-definition', cell)).toThrow('not found');
-    expect(() =>
+    expect(h.repos.executions.get(r.executionId)?.snapshot.budget.maxCalls).toBe(9);
+    // why: the refusals carry StartResult's codes, so WP8 tells them apart without reading messages (code-architect review 16)
+    expect(childCapPreview(ctx, 'no-such-definition', cell)).toEqual({
+      ok: false,
+      code: 'not_found',
+      message: 'definition no-such-definition not found',
+    });
+    expect(
       childCapPreview(ctx, def.id, {
         ...cell,
         departureDate: asIsoDate('2027-01-04'),
         returnDate: asIsoDate('2027-01-11'),
       }),
-    ).toThrow('not in the current search space');
+    ).toEqual({ ok: false, code: 'window', message: 'the cell is not in the current search space' });
   });
 
   it('allows at most one active child per cell', async () => {

@@ -76,6 +76,14 @@ export type StartResult =
       details: unknown;
     };
 
+/**
+ * Decision 42/45: the cap and headroom of the next child of a cell, or why it has no verify button, with StartResult's
+ * codes (code-architect review 16).
+ */
+export type ChildCapPreview =
+  | { ok: true; maxCalls: number; headroomCalls: number }
+  | { ok: false; code: 'not_found' | 'window'; message: string };
+
 /** The plan's "Engine" contract. */
 export interface Engine {
   boot(): Promise<void>;
@@ -85,7 +93,7 @@ export interface Engine {
   cancel(executionId: string): Promise<boolean>;
   verifyCell(definitionId: string, cell: CellKey): Promise<StartResult>;
   /** Decision 45: the cap and headroom a child of `cell` would get now, by verifyCell's own calculation. */
-  childCapPreview(definitionId: string, cell: CellKey): { maxCalls: number; headroomCalls: number };
+  childCapPreview(definitionId: string, cell: CellKey): ChildCapPreview;
   estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;
   estimateRemaining(executionId: string): Estimate;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;

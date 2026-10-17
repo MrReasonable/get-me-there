@@ -401,7 +401,7 @@ describe('shutdown and status', () => {
       departureDate: asIsoDate('2026-11-03'),
       returnDate: asIsoDate('2026-11-10'),
     };
-    expect(e.childCapPreview(def.id, one)).toEqual({ maxCalls: 6, headroomCalls: 1000 }); // decision 45
+    expect(e.childCapPreview(def.id, one)).toEqual({ ok: true, maxCalls: 6, headroomCalls: 1000 }); // decision 45
     expect(
       (
         await e.coverageCheck({
