@@ -7,7 +7,6 @@ import {
   generateCells,
   type IsoDate,
   type ProviderId,
-  type ResolvedSpace,
   resolveSpace,
   type SearchDefinition,
   type Stage,
