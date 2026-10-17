@@ -17,6 +17,7 @@ import {
   type ProviderId,
   type Stage,
 } from '@gmt/core';
+import type { FixtureRecorder } from '@gmt/providers';
 import type { Ports } from '../wiring.js';
 import {
   CALENDAR_OUT_DAYS,
@@ -244,6 +245,29 @@ export function openHiddenExecution(ports: Ports, run: HiddenRun): string {
     trigger: 'tool',
     status: 'running',
   }).id;
+}
+
+/**
+ * Wraps a recorder so the paths it writes are collected exactly (`FixtureRecorder.record` resolves to the path it
+ * wrote), retries included; `take()` returns and clears them. Shared by both tools: the record tool attributes them per
+ * call, the smoke lists them once (code-architect M2).
+ */
+export function tracking(inner: FixtureRecorder): { recorder: FixtureRecorder; take(): string[] } {
+  let written: string[] = [];
+  return {
+    recorder: {
+      record: async (r) => {
+        const p = await inner.record(r);
+        written.push(p);
+        return p;
+      },
+    },
+    take: () => {
+      const out = written;
+      written = [];
+      return out;
+    },
+  };
 }
 
 /** The record tool's position: its plan's worst case against `--budget` (plan decision 20). */

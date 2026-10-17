@@ -34,18 +34,18 @@ import {
   type ResponseCache,
   type TilePlan,
 } from '@gmt/core';
-import {
-  createHttpKit,
-  createRecorder,
-  type FixtureRecorder,
-  type HttpKit,
-  type HttpKitDeps,
-} from '@gmt/providers';
+import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@gmt/providers';
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_CABIN, SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
 import { checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
-import { openHiddenExecution, spendPosition, toolEstimate, type WorstCase } from './toolExecution.js';
+import {
+  openHiddenExecution,
+  spendPosition,
+  toolEstimate,
+  tracking,
+  type WorstCase,
+} from './toolExecution.js';
 import { EXIT, type ToolContext } from './types.js';
 
 export type { SmokeCheck } from './smokeChecks.js';
@@ -445,25 +445,20 @@ export async function runSmoke(
       `refusing: credits already ledgered to earlier tool runs plus this run's worst case exceed --budget ${cli.args.budget}; read the first line above and raise --budget only if you mean to spend more (plan decision 20)`,
     );
 
-  const written: string[] = [];
-  let recorder: FixtureRecorder | null = null;
+  // why: the recorder's paths are collected exactly by the tools' one wrapper (toolExecution.ts `tracking`)
+  let track: ReturnType<typeof tracking> | null = null;
   if (opts.fixtures !== null) {
     mkdirSync(opts.fixtures.root, { recursive: true });
-    const inner = createRecorder({
-      root: opts.fixtures.root,
-      secrets: ports.secrets,
-      clock: ports.clock,
-      recordedBy: opts.fixtures.recordedBy,
-    });
-    // why: FixtureRecorder.record resolves to the path it wrote, so fixturesWritten is exact
-    recorder = {
-      record: async (r) => {
-        const p = await inner.record(r);
-        written.push(p);
-        return p;
-      },
-    };
+    track = tracking(
+      createRecorder({
+        root: opts.fixtures.root,
+        secrets: ports.secrets,
+        clock: ports.clock,
+        recordedBy: opts.fixtures.recordedBy,
+      }),
+    );
   }
+  const recorder = track?.recorder ?? null;
   const log = ports.log.child({ tool: 'smoke' });
   const seen: Seen[] = [];
   const all = httpLimitsFor(ports.config);
@@ -542,6 +537,7 @@ export async function runSmoke(
     .map((d) => d.report)
     .concat(itinerary === null ? [] : [itinerary.report]);
   const checks = checklist({ ports, q, executionId, runStart, cap, configured, found, itinerary, seen });
+  const written = track?.take() ?? [];
   const now = ports.clock.now();
   for (const r of reports)
     say(

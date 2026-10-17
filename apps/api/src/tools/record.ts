@@ -44,7 +44,7 @@ import {
   TP_PAGE_LIMIT,
   tpUrl,
 } from './recordRequests.js';
-import { budgetPosition, openRecordingExecution } from './toolExecution.js';
+import { budgetPosition, openRecordingExecution, tracking } from './toolExecution.js';
 import {
   EXIT,
   type RecordedCall,
@@ -69,25 +69,6 @@ export function recordPrecheck(c: Config): string | null {
   // why: the committed tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
   if (c.pointOfSale !== 'GB') return `record:fixtures records at POINT_OF_SALE=GB; got ${c.pointOfSale}`;
   return null;
-}
-
-/** Wraps the recorder so every file written while a call runs (retries included) is attributed to that call. */
-function tracking(inner: FixtureRecorder): { recorder: FixtureRecorder; take(): string[] } {
-  let written: string[] = [];
-  return {
-    recorder: {
-      record: async (r) => {
-        const p = await inner.record(r);
-        written.push(p);
-        return p;
-      },
-    },
-    take: () => {
-      const out = written;
-      written = [];
-      return out;
-    },
-  };
 }
 
 type Sent =
