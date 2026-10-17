@@ -183,4 +183,22 @@ describe('static files and SPA fallback (spec §4, §13)', () => {
     expect(responses.map((r) => r.status)).toEqual([200, 200, 200, 401, 403]);
     for (const r of responses) expect(r.headers.get('cache-control'), String(r.status)).toBe('no-store');
   });
+
+  it.each([
+    '/..%2fsecret.txt',
+    '/..%2f..%2fsecret.txt',
+    '/%2e%2e/secret.txt',
+    '/%2e%2e%2fsecret.txt',
+    '/..%5csecret.txt',
+    '/assets/..%2f..%2fsecret.txt',
+    '/assets/%2e%2e/%2e%2e/secret.txt',
+  ])('never serves a file outside the web root: %s (security review Minor 3)', async (path) => {
+    // why: the web root sits inside a private temp dir that also holds the file a traversal would reach.
+    const outside = tempDir('gmt-trav-');
+    writeFileSync(join(outside, 'secret.txt'), 'outside-the-web-root');
+    const root = webRoot(join(outside, 'web'));
+    const x = await harness({ app: { webRoot: root } });
+    const res = await x.request(path);
+    expect(await res.text()).not.toContain('outside-the-web-root');
+  });
 });
