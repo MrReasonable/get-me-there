@@ -139,7 +139,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
       'dashed outline: a calendar price; constraints not checked',
       'stale: older than one refresh cycle by fetch age plus any known vendor age',
       'price not confirmed: an itinerary search priced this day',
-      'S/M searched with a striped square',
+      'striped square: part of the day not searched',
       'cached from £X',
       'cheapest of the rows read',
       'Nn · back <date>',
@@ -172,15 +172,19 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(price.getAttribute('title')).toContain('onward leg not included');
     expect(v.queryByTestId('provenance')).toBeNull();
     expect(v.getByTestId('day-stay')).toHaveTextContent('14n · back 22 Mar');
-    expect(v.getByTestId('coverage-cue')).toHaveTextContent('48/48 searched');
+    // why: ruling 4: the face names the bucket that applies; the "searched" umbrella is View D's alone.
+    expect(v.getByTestId('coverage-cue')).toHaveTextContent(/^48 priced$/);
     expect(v.getByTestId('coverage-cue')).toHaveAttribute('data-coverage', 'full');
+    expect(v.getByTestId('coverage-cue').querySelector('.cov-full, .cov-swatch')).toBeNull();
+    expect(dayCell('2027-03-08')).not.toHaveTextContent('searched');
     const c = within(dayCell('2027-03-09'));
     expect(priceCellIn(dayCell('2027-03-09'))).toHaveClass('border-dashed');
     expect(priceCellIn(dayCell('2027-03-09')).getAttribute('title')).toContain('constraints not checked');
     expect(dayCell('2027-03-09')).toHaveTextContent('stale');
     expect(dayCell('2027-03-09')).toHaveTextContent('£300');
-    expect(c.getByTestId('coverage-cue')).toHaveTextContent('24/48 searched');
+    expect(c.getByTestId('coverage-cue')).toHaveTextContent('20 priced, 4 no cached data, 24 not searched');
     expect(c.getByTestId('coverage-cue')).toHaveAttribute('data-coverage', 'partial');
+    expect(c.getByTestId('coverage-cue').querySelector('.cov-partial')).not.toBeNull();
   });
 
   it('a verified day that hides a cheaper cached fare shows "cached from" with its own destination, note and stay', () => {
@@ -307,17 +311,16 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(dayCell('2027-03-09')).toHaveClass('bg-slate-100');
   });
 
-  it('a grey day carries the same "S/M searched" cue as a priced day, so its coverage is visible (ui-r2-003)', () => {
-    renderGrid([
-      gDay('2027-03-08', { empty: 1, not_run: 47 }),
-      gDay('2027-03-09', { empty: 47, not_run: 1 }),
-    ]);
-    const a = within(dayCell('2027-03-08')).getByTestId('coverage-cue');
-    expect(a).toHaveTextContent('1/48 searched');
-    expect(a).toHaveAttribute('data-coverage', 'partial');
+  it('a grey day shows its buckets as glyph counts, never a "searched" umbrella (ui-r2-003, ruling 4)', () => {
+    renderGrid([gDay('2027-03-08', { empty: 1, not_run: 47 }), gDay('2027-03-09', { no_data: 12 })]);
     expect(dayCell('2027-03-08')).toHaveTextContent('∅ 1 no fares');
     expect(dayCell('2027-03-08')).toHaveTextContent('○ 47 not searched');
-    expect(within(dayCell('2027-03-09')).getByTestId('coverage-cue')).toHaveTextContent('47/48 searched');
+    // why: a Travelpayouts-only day with 12 no cached data must not read "12/12 searched" (po-002, UI-001).
+    expect(dayCell('2027-03-09')).toHaveTextContent('◇ 12 no cached data');
+    for (const d of ['2027-03-08', '2027-03-09']) {
+      expect(within(dayCell(d)).queryByTestId('coverage-cue')).toBeNull();
+      expect(dayCell(d).textContent?.replace('not searched', '')).not.toMatch(/searched/);
+    }
   });
 
   it('under a destination filter "price not confirmed" follows the count the api returns for it (decision 53, prov-r2-004)', () => {
@@ -350,7 +353,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     // why: decision 53, ui-r2-004 — the api counted JFK's 24 cells, so "not searched" and "no fares" stay distinct.
     expect(dayCell('2027-03-08')).toHaveTextContent('∅ 3 no fares');
     expect(dayCell('2027-03-08')).toHaveTextContent('○ 21 not searched');
-    expect(within(dayCell('2027-03-08')).getByTestId('coverage-cue')).toHaveTextContent('3/24 searched');
+    expect(within(dayCell('2027-03-08')).queryByTestId('coverage-cue')).toBeNull();
   });
 
   it('is keyboard-operable: arrows, Home/End, PageUp/PageDown, Enter and Space, one tab stop, visible focus', async () => {
@@ -474,12 +477,17 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(face).toHaveTextContent(COPY.providerMark.travelpayouts);
     expect(within(priced).getByTestId('day-nights')).toHaveTextContent('12n');
     expect(within(priced).getByTestId('day-nights')).toHaveTextContent('◐');
-    expect(within(dayCell('2027-03-10')).getByTestId('day-nights')).toHaveTextContent('●');
+    // why: ruling 4: no solid "every cell searched" mark on a phone face either.
+    expect(within(dayCell('2027-03-10')).getByTestId('day-nights')).not.toHaveTextContent('●');
     const grey = dayCell('2027-03-21');
     expect([...grey.querySelectorAll('[data-glyph]')].map((g) => g.textContent)).toEqual([
       '∅2 no fares',
       '○46 not searched',
     ]);
+    // why: UI-007: the legend promises counts, so the phone face shows each count beside its glyph, not only spoken.
+    const counts = [...grey.querySelectorAll('[data-glyph-count]')];
+    expect(counts.map((g) => g.textContent)).toEqual(['2', '46']);
+    for (const c of counts) expect(c.closest('.sr-only, [aria-hidden="true"]')).toBeNull();
     expect(dayCell('2027-03-10').querySelector('[data-band-number]')).toHaveTextContent('5');
     expect(document.querySelector('table')).toHaveClass('border-spacing-0.5');
   });

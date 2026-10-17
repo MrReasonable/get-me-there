@@ -7,15 +7,12 @@
   background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgb(0 0 0 / 0.22) 6px 8px);
 }
 
-/* Coverage cue swatch: solid when every cell of the day was searched, striped when part of it was not. */
+/* Coverage cue swatch: striped when part of the day was not searched (ruling 4: no solid "fully searched" mark). */
 .cov-swatch {
   display: inline-block;
   width: 12px;
   height: 12px;
   border: 1px solid currentColor;
-}
-.cov-full {
-  background-color: currentColor;
 }
 .cov-partial {
   background-image: repeating-linear-gradient(45deg, currentColor 0 3px, transparent 3px 6px);

@@ -24,14 +24,14 @@ const bar = (over: Parameters<typeof definition>[0] = {}, showRunNow = true) => 
 afterEach(() => vi.useRealTimers());
 
 describe('status bar (spec §11)', () => {
-  it('one honest progress line per stage × provider: answered cells, skipped and not searched always add up', async () => {
+  it('one honest progress line per stage × provider: the six buckets, never an "attempted" umbrella (ruling 4)', async () => {
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
     renderWithProviders(bar());
     expect(await screen.findByText('running')).toBeInTheDocument();
     const lines = screen.getAllByRole('progressbar');
     expect(lines.map((l) => l.textContent)).toEqual([
-      'discovery · Travelpayouts: attempted 116 of 126 cells (6 error) · 0 skipped · 10 not searched',
-      'itinerary search · SearchApi: attempted 0 of 10 selected (0 error) · 116 skipped · 10 not searched',
+      'discovery · Travelpayouts: 60 priced · 10 no fares · 40 no cached data · 6 error · 0 skipped · 10 not searched of 126 cells',
+      'itinerary search · SearchApi: 0 priced · 0 no fares · 0 no cached data · 0 error of 10 selected · 116 skipped · 10 not searched',
     ]);
     // why: screen readers announce a progressbar's value text, not its child text, so the unsearched count must be in it.
     expect(lines.map((l) => l.getAttribute('aria-valuetext'))).toEqual(lines.map((l) => l.textContent));

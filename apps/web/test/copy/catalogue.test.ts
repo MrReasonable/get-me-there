@@ -9,7 +9,13 @@ const SAMPLES: Record<string, unknown[]> = {
   'alertsView.classPartial': ['checked bag'],
   confirmedWas: ['154', '£1'],
   metroExpanded: ['LON', 'LHR, LGW'],
-  progressSelected: [{ provider: 'SearchApi', done: 8, selected: 10, error: 1, skipped: 116, notRun: 2 }],
+  progressSelected: [
+    {
+      provider: 'SearchApi',
+      buckets: { priced: 8, empty: 0, no_data: 0, error: 1, skipped: 116, not_run: 2 },
+      selected: 10,
+    },
+  ],
   childExecutionNotStarted: ['pending'],
   executionNotStarted: ['pending'],
   loadFailed: ['network error'],
@@ -61,12 +67,8 @@ const SAMPLES: Record<string, unknown[]> = {
     {
       stage: 'discovery',
       provider: 'Travelpayouts',
-      verb: 'searched',
-      done: 116,
+      buckets: { priced: 60, empty: 10, no_data: 40, error: 6, skipped: 0, not_run: 10 },
       total: 126,
-      error: 6,
-      skipped: 0,
-      notRun: 10,
     },
   ],
   progressLabel: ['discovery', 'Travelpayouts'],
@@ -145,7 +147,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'calendarView.unconfirmedCellsFor': [1, 'JFK'],
   'calendarView.stay': [14, '28 Mar'],
   'calendarView.phoneNights': [12],
-  'calendarView.searchedFraction': [12, 48],
+  'calendarView.bucketBreakdown': [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
   'calendarView.staleLine': [3, 40, '8d'],
   'calendarView.unconfirmedCells': [2],
   'calendarView.legend.scaleQuintile': ['itinerary-search basis', 12],
@@ -279,8 +281,17 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(COPY.itineraryLine({ searched: 2, selected: 10, onDemand: 1 })).toBe(
       ' · itinerary-searched 2 of 10 selected +1 on demand',
     );
-    // why: the status bar counts attempts (errors included), so it never borrows View D's "searched" (ruling 1).
-    expect(COPY.progressVerb).toEqual({ discovery: 'attempted', verification: 'attempted' });
+    // why: ruling 4: the status bar shows the bucket breakdown; no umbrella ("attempted" or "searched") on any view but D.
+    expect(
+      COPY.progress({
+        stage: 'discovery',
+        provider: 'Travelpayouts',
+        buckets: { priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 },
+        total: 108,
+      }),
+    ).toBe(
+      'discovery · Travelpayouts: 9 priced · 0 no fares · 99 no cached data · 0 error · 0 skipped · 0 not searched of 108 cells',
+    );
   });
 
   it('confirmations state the estimated calls with the hard stop, and pounds (decisions 36, 44)', () => {

@@ -41,9 +41,18 @@ export function totalReused(slices: readonly DaySlice[]): number {
   return slices.reduce((sum, s) => sum + s.discovery.reduce((acc, d) => acc + d.buckets.reused, 0), 0);
 }
 
-/** The day's coverage cue (plan decision 38): searched cells of the day by its best-covered source. */
+/**
+ * The day's coverage cue (plan decision 38, ruling 4 of decision 67): the best-covered source's buckets, which the face
+ * names bucket by bucket; `searched` (the spec §3 umbrella) only decides whether part of the day was left unsearched.
+ */
 export type Coverage =
-  | { kind: 'fraction'; searched: number; total: number; providerId: DiscoveryEntry['providerId'] }
+  | {
+      kind: 'fraction';
+      searched: number;
+      total: number;
+      buckets: Buckets;
+      providerId: DiscoveryEntry['providerId'];
+    }
   | { kind: 'inconsistent' }
   | { kind: 'none' };
 
@@ -68,6 +77,7 @@ export function coverageOf(slice: DaySlice): Coverage {
     kind: 'fraction',
     searched: searchedCount(best.buckets),
     total: best.total,
+    buckets: best.buckets,
     providerId: best.providerId,
   };
 }

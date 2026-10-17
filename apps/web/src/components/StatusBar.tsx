@@ -19,29 +19,25 @@ const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
 const NEAR_CAP = 0.8;
 
 /**
- * Spec §11 progress, one line per stage × provider (never summed across providers). The bar counts
- * attempts, labelled "attempted": priced, no fares, no cached data, error (decision 36), since "searched" is View D's
- * word and excludes errors;
- * skipped and not-searched cells are stated beside it, so the three always add up to the cell count.
- * The itinerary-search line counts against the selected cells, "itinerary-searched K of N selected"
- * (spec §3, §11), when the results response gives N.
+ * Spec §11 progress, one line per stage × provider (never summed across providers). Ruling 4 (decision 67): the line
+ * names the six buckets, so a run whose cells mostly came back "no cached data" never reads as fully covered; the
+ * "searched" umbrella appears only in View D beside its breakdown (spec §3, §6.6). The progress bar's value is the
+ * cells answered or failed so far (priced, no fares, no cached data, error), which only a screen reader's number uses.
+ * The itinerary-search line counts against the selected cells (spec §3, §11) when the results response gives N.
  */
 function progressLines(e: ExecutionResponse, selected: number | null) {
   return e.progress.map((p) => {
     const l = {
       stage: COPY.stageName[p.stage],
       provider: COPY.provider[p.providerId],
-      verb: COPY.progressVerb[p.stage],
-      done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
+      buckets: p.buckets,
       total: p.total,
-      error: p.buckets.error,
-      skipped: p.buckets.skipped,
-      notRun: p.buckets.not_run,
     };
     const bySelection = p.stage === 'verification' && selected !== null;
     return {
       ...l,
       key: `${p.stage}-${p.providerId}`,
+      done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
       max: bySelection ? selected : p.total,
       text: bySelection ? COPY.progressSelected({ ...l, selected }) : COPY.progress(l),
     };

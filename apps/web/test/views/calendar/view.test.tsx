@@ -149,7 +149,9 @@ describe('Calendar view (spec §11 View B; plan decision 38)', () => {
     expect(asked).toContain('JFK');
     expect(within(at('2027-03-14')).getByTestId('day-stay')).toHaveTextContent('14n · back 28 Mar');
     // why: the api counted JFK's cells, so the cue and the glyphs are JFK's own, never all destinations'.
-    expect(within(at('2027-03-14')).getByTestId('coverage-cue')).toHaveTextContent('24/24 searched');
+    expect(within(at('2027-03-14')).getByTestId('coverage-cue')).toHaveTextContent(
+      '18 priced, 6 no cached data',
+    );
     expect(at('2027-03-15')).toHaveTextContent('∅ 4 no fares');
     expect(at('2027-03-15')).toHaveTextContent('○ 20 not searched');
     expect(document.body).not.toHaveTextContent('all destinations');

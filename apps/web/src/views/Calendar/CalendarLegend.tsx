@@ -78,10 +78,6 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
         <ul className="flex flex-col gap-0.5">
           <li>{L.stale}</li>
           <li>
-            <span aria-hidden="true" className="cov-swatch cov-full mr-1 align-middle" />
-            {L.coverageFull}
-          </li>
-          <li>
             <span aria-hidden="true" className="cov-swatch cov-partial mr-1 align-middle" />
             {L.coveragePartial}
           </li>

@@ -21,6 +21,15 @@ import {
 import type { z } from 'zod';
 
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
+/** The six buckets a progress line names (spec §3); `reused` sits inside its bucket and is not a seventh. */
+type ProgressBuckets = {
+  priced: number;
+  empty: number;
+  no_data: number;
+  error: number;
+  skipped: number;
+  not_run: number;
+};
 type PlanId = z.output<typeof apiContract.providersResponseSchema>['providers'][number]['plan'];
 /** Every outcome reason core can write (review arch2-005): a new or renamed one fails `satisfies` in the panel's map. */
 type OutcomeReasonKey =
@@ -85,7 +94,6 @@ export const COPY = {
   priceMarkGlyph: {
     unconfirmed: '≠',
     stale: '◷',
-    ageUnknown: '?',
     truncated: '…',
     notSeen: '◌',
     superseded: '↺',
@@ -228,28 +236,11 @@ export const COPY = {
 
   // status bar (spec §11)
   statusBarLabel: 'Run status',
-  progress: (p: {
-    stage: string;
-    provider: string;
-    verb: string;
-    done: number;
-    total: number;
-    error: number;
-    skipped: number;
-    notRun: number;
-  }) =>
-    `${p.stage} · ${p.provider}: ${p.verb} ${p.done} of ${p.total} cells (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
-  progressSelected: (p: {
-    provider: string;
-    done: number;
-    selected: number;
-    error: number;
-    skipped: number;
-    notRun: number;
-  }) =>
-    `itinerary search · ${p.provider}: attempted ${p.done} of ${p.selected} selected (${p.error} error) · ${p.skipped} skipped · ${p.notRun} not searched`,
-  // why: the bar counts attempts (answered or failed); "searched" is View D's definition and excludes errors (ruling 1).
-  progressVerb: { discovery: 'attempted', verification: 'attempted' } satisfies Record<Stage, string>,
+  // why: ruling 4 (decision 67): the bar names every bucket; an umbrella ("searched", "attempted") is View D's alone.
+  progress: (p: { stage: string; provider: string; buckets: ProgressBuckets; total: number }) =>
+    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched of ${p.total} cells`,
+  progressSelected: (p: { provider: string; buckets: ProgressBuckets; selected: number }) =>
+    `itinerary search · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error of ${p.selected} selected · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched`,
   progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
   spendRunCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} billed calls`,
   spendRunFreeCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} free calls`,
@@ -551,11 +542,31 @@ export const COPY = {
     cachedFrom: 'cached from',
     glyphCount: (n: number, words: string) => `${n} ${words}`,
     // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
-    phoneMark: { partial: '◐', full: '●' },
+    phoneMark: { partial: '◐' },
     phonePartial: 'part of the day not searched',
     phoneNights: (n: number) => `${n}n`,
-    phoneFull: 'every cell of the day searched',
-    searchedFraction: (searched: number, total: number) => `${searched}/${total} searched`,
+    // why: ruling 4: the buckets that apply, in the spec §3 order, zero buckets left out; never the "searched" umbrella.
+    bucketBreakdown: (b: {
+      priced: number;
+      empty: number;
+      no_data: number;
+      error: number;
+      skipped: number;
+      not_run: number;
+    }) =>
+      (
+        [
+          [b.priced, 'priced'],
+          [b.empty, 'no fares'],
+          [b.no_data, 'no cached data'],
+          [b.error, 'error'],
+          [b.skipped, 'skipped'],
+          [b.not_run, 'not searched'],
+        ] as const
+      )
+        .filter(([n]) => n > 0)
+        .map(([n, words]) => `${n} ${words}`)
+        .join(', '),
     destinationFilter: 'Destination',
     allDestinations: 'All destinations',
     colourBy: 'Colour by',
@@ -589,10 +600,8 @@ export const COPY = {
       dashed: 'dashed outline: a calendar price; constraints not checked',
       stale:
         'stale: older than one refresh cycle by fetch age plus any known vendor age; shown and labelled, never hidden. A price whose vendor age is unknown says "vendor\'s cache age unknown" instead',
-      coverageFull:
-        'S/M searched with a solid square: every cell of the day searched (priced, no fares or no cached data) by its best-covered source',
       coveragePartial:
-        'S/M searched with a striped square: part of the day not searched; per-source counts are in the panel',
+        'counts under the price (e.g. "3 priced, 9 no cached data") name the buckets of its best-covered source; a striped square: part of the day not searched; per-source counts are in the panel',
       cachedFrom:
         'cached from £X: a cheaper calendar price exists for this day, with its destination and stay; constraints not checked',
       unconfirmed:
@@ -601,7 +610,7 @@ export const COPY = {
       stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
       bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
       phone:
-        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, ? vendor cache age unknown, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ● every cell of the day searched, ◐ part of the day not searched. Open a day for the rest.',
+        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ◐ part of the day not searched; under the amount its provider, its age ("5d old", "age unknown") and "not checked" on a calendar price. A day without a price shows each glyph with its count. Open a day for the rest.',
       phoneProviders:
         'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), syn Fixture (synthetic fixture data).',
       glyphs: 'Days without a price show, with how many cells of the best-covered source:',

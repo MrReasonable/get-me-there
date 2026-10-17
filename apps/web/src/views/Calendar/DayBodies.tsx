@@ -23,8 +23,7 @@ export function DayBody(props: {
       <GlyphList glyphs={display.glyphs} />
       {display.reason === 'no-run' ? <span className="block">{C.noRunCoversDay}</span> : null}
       {display.reason === 'no-provider' ? <span className="block">{C.noDiscoveryProvider}</span> : null}
-      {/* why: ui-r2-003 — a grey day says how much of it was looked at, as a priced day does */}
-      {display.reason === 'counts' ? <CoverageCue coverage={coverageOf(slice)} /> : null}
+      {/* why: ui-r2-003, ruling 4: a grey day's glyph counts are its buckets, so it needs no second cue */}
     </span>
   );
 }
@@ -45,8 +44,6 @@ export function PhoneDayBody(props: {
   const C = COPY.calendarView;
   const coverage = coverageOf(slice);
   const partial = coverage.kind === 'fraction' && coverage.searched < coverage.total;
-  const full =
-    display.kind === 'price' && coverage.kind === 'fraction' && coverage.searched === coverage.total;
   const unconfirmed = showsUnconfirmed(slice);
   const marks = (
     <>
@@ -60,13 +57,6 @@ export function PhoneDayBody(props: {
         <span data-coverage="partial">
           <span aria-hidden="true">{C.phoneMark.partial}</span>
           <span className="sr-only">{C.phonePartial}</span>
-        </span>
-      ) : null}
-      {/* why: decision 38 — every priced day carries a visible non-colour coverage cue; fully searched has its own mark */}
-      {full ? (
-        <span data-coverage="full">
-          <span aria-hidden="true">{C.phoneMark.full}</span>
-          <span className="sr-only">{C.phoneFull}</span>
         </span>
       ) : null}
     </>
@@ -102,10 +92,12 @@ export function PhoneDayBody(props: {
     <span className="block min-w-0 text-[11px]">
       {display.glyphs.map((g) => (
         <span key={g.status} data-glyph={g.status}>
+          {/* why: UI-007: the legend promises counts, so the count is visible beside the glyph, not only spoken */}
           <span aria-hidden="true" className="font-bold">
             {C.glyphSymbol[g.status]}
           </span>
-          <span className="sr-only">{glyphWords(g)}</span>
+          {g.count === null ? null : <span data-glyph-count="">{g.count}</span>}
+          <span className="sr-only">{g.count === null ? glyphWords(g) : ` ${COPY.bucket[g.status]}`}</span>
         </span>
       ))}
       {display.reason === 'no-provider' ? <span className="sr-only">{C.noDiscoveryProvider}</span> : null}
