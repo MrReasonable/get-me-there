@@ -148,6 +148,28 @@ describe('View A columns (spec §11)', () => {
     expect(adjusted).toHaveTextContent('£450');
   });
 
+  it("the adjusted price carries the row's destination note and its not-seen mark, like the price beside it", async () => {
+    countResults(
+      resultsResponse({
+        rows: [
+          verifiedRow({
+            adjustedPence: 45000,
+            destinationNote: 'onward leg not included',
+            notSeenInLatest: { ageHours: 30 },
+          }),
+        ],
+      }),
+    );
+    view();
+    await table();
+    const adjusted = screen
+      .getByText('incl. operator-entered onward cost')
+      .closest('[data-testid="price-cell"]');
+    if (adjusted === null) throw new Error('adjusted price not in a PriceCell');
+    expect(adjusted).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(adjusted).toHaveTextContent('onward leg not included');
+  });
+
   it('wide: the price line shows source and age only, since Provider and Destination are columns (ruling on UI-14)', async () => {
     countResults();
     view();

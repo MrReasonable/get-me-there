@@ -245,6 +245,24 @@ describe('itinerary detail (spec §11 expanded row)', () => {
     ).toBeInTheDocument();
   });
 
+  it('at 375px the adjusted price also carries the not-seen mark and the destination note', () => {
+    render(
+      verifiedRow({
+        adjustedPence: 45000,
+        destinationNote: 'onward leg not included',
+        notSeenInLatest: { ageHours: 72 },
+      }),
+      true,
+      true,
+    );
+    const adjusted = screen
+      .getByText('incl. operator-entered onward cost')
+      .closest('[data-testid="price-cell"]');
+    if (adjusted === null) throw new Error('adjusted price not in a PriceCell');
+    expect(adjusted).toHaveTextContent('not seen in latest search (3d ago)');
+    expect(adjusted).toHaveTextContent('onward leg not included');
+  });
+
   it('at 375px the summary repeats the moved columns, the adjusted price through PriceCell with "≈" and "stale" (review prov-009)', () => {
     render(
       verifiedRow({ adjustedPence: 45000, stale: true, provenance: { ...provSearch, fx: fxConverted } }),
