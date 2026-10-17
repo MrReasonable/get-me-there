@@ -69,7 +69,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ## Spike results (2026-10-14)
 
-Measured with real tokens; the full record and redacted fixtures are the operator's private notes outside the repository. Travelpayouts holds no
+Measured with real tokens; the vendors' responses are not published (decision 61 keeps recorded vendor data out of the repository), so these are the findings. Travelpayouts holds no
 UK-market cached round trips to a thin long-haul destination over eight months (busy gateways of the
 same country: 4–6 a month); its `market` and `trip_class` parameters are ignored; `currency=gbp` works; rows carry
 `origin_airport`/`destination_airport` but no `found_at`; one `prices_for_dates` call per

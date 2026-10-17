@@ -249,6 +249,15 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
       expect(readme).toContain(doc);
   });
 
+  // why: CodeRabbit batch 3 — a reader cannot reach the operator's notes, so a doc states what was found and points
+  // at nothing outside the repository
+  it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
+    '%s points at no private notes',
+    (path) => {
+      expect(read(path)).not.toMatch(/private notes|\.local\/share/i);
+    },
+  );
+
   // why: CodeRabbit batch 3 — a providers.md row had one cell fewer than its header, so its verdict sat under
   // "Authorised source?"; every table row in every doc has its header's cell count
   it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
