@@ -10,6 +10,7 @@ import { coverageSummaryFor } from './coverage.js';
 import { executionResponse, overrunOf, planCallsOf } from './executions.js';
 import { EXECUTIONS_LIMIT } from './results.js';
 import { withNights } from './rows.js';
+import { currentSpace } from './space.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
 /**
@@ -24,7 +25,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
   });
   const parent = all.find((e) => !e.isChild) ?? null;
   if (parent === null) throw new ApiError(404, 'no_execution', API_TEXT.noExecution);
-  const summary = coverageSummaryFor(parent, all, ports);
+  const summary = coverageSummaryFor(parent, all, ports, currentSpace(def, ports.clock.todayLondon()));
   const counts = ports.repos.ledger.countsFor(parent.id);
   const parityBreak = ports.repos.notifications.wasSent('parity_break', parent.id, def.id);
   const perStage = executionResponse(ports, parent).progress.map((p) => {

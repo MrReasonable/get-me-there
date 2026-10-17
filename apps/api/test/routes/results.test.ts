@@ -146,6 +146,23 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(r.executions.map((e) => e.id)).toEqual([s.id('E2'), s.id('E1')]); // newest first
   });
 
+  it('"+C on demand" counts only children that searched their cell, inside the current space (ssr-002)', async () => {
+    const { x, def, s } = await world();
+    const searched = (name: string, c: typeof C1, hours: number) => {
+      s.execution(name, { def, status: 'completed', startedAt: at(hours), finishedAt: at(hours), child: c });
+      s.cells(name, [c], { discovery: [], selected: [{ cell: c, reason: 'always_include' }] });
+    };
+    searched('Eok', C1, -0.5);
+    s.verified('Eok', C1, [{ hash: 'hOk', pricePence: 61_000, fetchedAt: at(-0.5) }]);
+    // why: a completed child whose cell never reached a searched outcome (here not_run) searched nothing.
+    searched('Enone', C2, -0.4);
+    const OUT = cell('LHR', 'JFK', '2026-11-02', '2026-11-30'); // 28 nights: outside the example's 10–21
+    searched('Eout', OUT, -0.3);
+    s.verified('Eout', OUT, [{ hash: 'hOut', pricePence: 30_000, fetchedAt: at(-0.3) }]);
+    const r = await results(x, def.id);
+    expect(r.coverage.onDemand).toBe(1);
+  });
+
   it('every execution summary carries the run snapshot expandTop (decision 42)', async () => {
     const x = await createHarness();
     h = x;

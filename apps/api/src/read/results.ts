@@ -259,8 +259,8 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
     // why: with ?executionId= the header describes the run shown, alone (review prov-003, decision 42's principle).
     coverage:
       shown === undefined || q.executionId === undefined
-        ? coverageSummaryFor(loaded.latestParent, loaded.all, ports)
-        : coverageSummaryFor(shown, [], ports),
+        ? coverageSummaryFor(loaded.latestParent, loaded.all, ports, loaded.space)
+        : coverageSummaryFor(shown, [], ports, loaded.space),
     excludedByCurrentSpace: excluded,
     verificationProviderConfigured: verificationConfigured(def),
     // why: decision 45 (review prov I2): the headline is the first ranked row: the best class available and, within it,
