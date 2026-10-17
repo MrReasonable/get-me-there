@@ -160,18 +160,23 @@ describe('View A columns (spec §11)', () => {
     expect(within(line).queryByText('JFK')).toBeNull();
   });
 
-  it('375px: price, full provenance and the class badge stay in the primary row; sort is a select; filters fold away', async () => {
+  it('375px: price, compact provenance and the class badge share the price cell, so dates and stops fit beside it (UI-005)', async () => {
     setViewportWidth(375);
     countResults();
     const { user } = view();
     await table();
-    // why: jsdom loads no CSS, so this asserts the columns the component chose, not Tailwind's layout.
-    expect(headers()).toEqual(['Details', 'Price', 'Class', 'Departure', 'Return', 'Stops']);
+    // why: jsdom loads no CSS, so this asserts the columns the component chose, not Tailwind's layout. UI-005: five
+    // columns, the class badge inside the price cell, so Departure, Return and Stops fit without a sideways scroll.
+    expect(headers()).toEqual(['Details', 'Price', 'Departure', 'Return', 'Stops']);
     const first = dataRows()[0];
     if (first === undefined) throw new Error('no rows');
     expect(within(first).getByText('£412')).toBeInTheDocument();
-    expect(within(within(first).getByTestId('provenance')).getByText('SearchApi')).toBeInTheDocument();
+    const price = within(first).getByTestId('price-cell');
+    // why: spec §11 provenance without hover, in the compact one-line form: the provider mark and the age on the face.
+    expect(within(price).getByText('SA')).toBeInTheDocument();
+    expect(within(price).getByText("vendor's cache age unknown")).toBeInTheDocument();
     expect(within(first).getByTestId('class-badge')).toHaveTextContent('verified');
+    expect(within(first).getByText('14 Mar')).toBeInTheDocument(); // the short date form at this width
     expect(screen.getByRole('combobox', { name: 'Sort rows by' })).toBeInTheDocument();
     expect(screen.getByText('Filters (0 active)').closest('details')).not.toHaveAttribute('open');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sort rows by' }), 'totalTime.asc');

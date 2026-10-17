@@ -20,7 +20,7 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { provenanceConsistent } from '../../components/Provenance.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, formatMinutes } from '../../format.js';
+import { formatIsoDate, formatIsoDateShort, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
 import { SORT_KEYS, type SortDir } from '../../state/resultsState.js';
 import { ExpandedRow, rowName } from './ExpandedRow.js';
@@ -60,18 +60,15 @@ export const WIDE_COLUMNS: readonly ColumnId[] = [
   'provider',
   'adjusted',
 ];
-/** Spec §11 at 375px: price with provenance, the class badge, dates and stops stay in the primary row. */
+/**
+ * Spec §11 at 375px: price with provenance, the class badge, dates and stops stay in the primary row. UI-005: the
+ * class badge sits inside the price cell and the provenance takes PriceCell's compact one-line form, so the dates and
+ * stops fit beside it without a sideways scroll.
+ */
 /** The travel-time band `bandCheapest` marks within, in hours (spec §6.5); the one place the width is stated. */
 export const BAND_HOURS = 6;
 
-export const NARROW_COLUMNS: readonly ColumnId[] = [
-  'expand',
-  'price',
-  'class',
-  'departure',
-  'return',
-  'stops',
-];
+export const NARROW_COLUMNS: readonly ColumnId[] = ['expand', 'price', 'departure', 'return', 'stops'];
 
 /** Which column sorts by which core SortKey; keyed by the column id string TanStack hands back. */
 const SORT_KEY: ReadonlyMap<string, SortKey> = new Map<string, SortKey>(SORT_KEYS.map((k) => [k, k]));
@@ -144,14 +141,16 @@ function FetchedAgo({ row }: { row: ResultRow }) {
 
 /**
  * The price column: every price through PriceCell. Wide, the Provider and Destination columns carry
- * those, so the provenance line shows source and age (ruling on UI-14); narrow, the line is complete.
+ * those, so the provenance line shows source and age (ruling on UI-14); narrow (UI-005), the compact form: provider
+ * mark, destination, short age and "not checked" on the face, the long form in the title, and the class badge below.
  */
 function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
   const banded = useContext(TableContext).banded.has(rowId(row));
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className={`flex flex-col gap-0.5 ${narrow ? 'min-w-[7.5rem]' : ''}`}>
       <PriceBoundary>
         <PriceCell
+          compact={narrow}
           pricePence={row.pricePence}
           provenance={row.provenance}
           calendar={row.basis === 'calendar'}
@@ -171,6 +170,7 @@ function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
         </span>
       ) : null}
       {banded ? <span className="text-xs font-medium">{COPY.bandCheapest(BAND_HOURS)}</span> : null}
+      {narrow ? <ClassBadge cls={row.verdictClass} /> : null}
     </div>
   );
 }
@@ -215,10 +215,11 @@ function cellFor(id: ColumnId, r: ResultRow, narrow: boolean) {
       return <PriceColumn row={r} narrow={narrow} />;
     case 'totalTime':
       return <span>{r.totalMinutes === null ? COPY.notChecked : formatMinutes(r.totalMinutes)}</span>;
+    // why: UI-005: the short date form at phone width, so both dates fit beside the price; the full form is in the row.
     case 'departure':
-      return <span>{formatIsoDate(r.cell.departureDate)}</span>;
+      return <span>{(narrow ? formatIsoDateShort : formatIsoDate)(r.cell.departureDate)}</span>;
     case 'return':
-      return <span>{formatIsoDate(r.cell.returnDate)}</span>;
+      return <span>{(narrow ? formatIsoDateShort : formatIsoDate)(r.cell.returnDate)}</span>;
     case 'nights':
       return <span>{COPY.nightsValue(r.cell.nights)}</span>;
     case 'destination':
