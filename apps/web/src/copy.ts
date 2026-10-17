@@ -751,6 +751,7 @@ export const COPY = {
     cabinNotStated: 'cabin not stated',
     routeProvenance: (source: string, cabin: string, age: string) =>
       `${source} · indicative route-level series · ${cabin} · ${age}`,
+    routeFxUnknown: 'currency conversion not recorded for the route-level series',
     rowLink: 'price history',
     empty: 'No price history yet for this selection. Each run adds a point.',
   },

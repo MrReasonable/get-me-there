@@ -323,6 +323,9 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows.map((row) => row.textContent?.includes('stale'))).toEqual([true, false, false]);
     expect(rows[0]).toHaveAttribute('data-indicative');
+    // why: the route-level point carries no fx record, so its amount is marked approximate (review ui M10).
+    expect(rows[0]).toHaveTextContent('≈');
+    expect(rows[0]).toHaveTextContent(COPY.historyView.routeFxUnknown);
   });
 
   it('a route-level travel date between two missing dates still shows as a dot (ui-r2-008)', async () => {

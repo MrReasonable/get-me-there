@@ -31,6 +31,10 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
             <tr key={p.t} data-indicative>
               <td>{formatIsoDateLong(p.route.date)}</td>
               <td>
+                <span aria-hidden="true" title={H.routeFxUnknown}>
+                  {COPY.fxApprox}
+                </span>
+                <span className="sr-only">{H.routeFxUnknown}</span>
                 {formatPence(p.pricePence)}
                 {/* why: decision 54 — stale by fetch age, labelled like every other price */}
                 {p.route.stale ? <span className="ml-1 rounded bg-amber-200 px-1">{COPY.stale}</span> : null}
