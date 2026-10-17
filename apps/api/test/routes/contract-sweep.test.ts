@@ -176,6 +176,7 @@ function apiTexts(): string[] {
     API_TEXT.noVerificationProvider,
     API_TEXT.basisNoVerificationProvider,
     API_TEXT.basisNoObservations,
+    API_TEXT.basisNoObservationsInSpace,
     API_TEXT.basisItinerarySearch,
     API_TEXT.basisRequestedCalendar,
     API_TEXT.insideSpace(0, 3),

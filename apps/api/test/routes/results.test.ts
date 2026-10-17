@@ -364,6 +364,38 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(true); // 151 + 24 > 168 + 0 declared
   });
 
+  it('decides from the live definition: a parent run without verification plus an on-demand child gives the verified basis (decision 67, F1)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    // why: the parent ran before verification was added, so its frozen snapshot names no verification provider.
+    const parentDef = { ...def, providers: { ...def.providers, verification: [] } };
+    s.execution('E1', { def: parentDef, status: 'completed', startedAt: at(-4), finishedAt: at(-3) });
+    s.cells('E1', [C1, C2]);
+    s.tile('E1', C2, { status: 'priced', pricePence: 47_900, fetchedAt: at(-3) });
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1), child: C1 });
+    s.cells('E2', [C1], { discovery: [], selected: [{ cell: C1, reason: 'always_include' }] });
+    s.verified('E2', C1, [{ hash: 'hD', pricePence: 47_100, fetchedAt: at(-1) }]);
+    const r = await results(x, def.id);
+    expect([r.basis, r.basisReason, r.verificationProviderConfigured]).toEqual([
+      'verified',
+      API_TEXT.basisItinerarySearch,
+      true,
+    ]);
+    expect(r.cheapest?.pricePence).toBe(47_100);
+  });
+
+  it('a definition with verification but no observation in the current space defaults to calendar and says so (decision 67)', async () => {
+    const { x, def } = await world();
+    expect(
+      (await x.request(`/api/definitions/${def.id}`, { method: 'PUT', json: { minNights: 11 } })).status,
+    ).toBe(200);
+    const r = await results(x, def.id);
+    expect(r.basis).toBe('calendar');
+    expect(r.basisReason.startsWith(API_TEXT.basisNoObservationsInSpace)).toBe(true);
+  });
+
   it('is the default when a verification provider exists but nothing was itinerary-searched', async () => {
     const x = await createHarness();
     h = x;

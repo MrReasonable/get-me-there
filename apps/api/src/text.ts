@@ -53,6 +53,8 @@ export const API_TEXT = {
     'calendar basis: no verification provider is configured, so constraints are not checked',
   basisNoObservations:
     'calendar basis: no itinerary-searched observations yet, so constraints are not checked',
+  basisNoObservationsInSpace:
+    'calendar basis: no itinerary-searched observations inside the current space, so constraints are not checked',
   basisItinerarySearch:
     'itinerary-search basis: constraints checked against the current definition at read time',
   basisRequestedCalendar: 'calendar basis as requested: constraints are not checked',
