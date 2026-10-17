@@ -35,7 +35,8 @@ export interface PriceCellProps {
   fullAge?: boolean;
   /**
    * WP10's phone day-cell face (plan decision 52, ruling 3): the amount with "≈", each mark as one glyph, the
-   * provider's short mark, the short age ("5d old", "age unknown") and "not checked" on a calendar price, all visible
+   * provider's short mark with the destination, the short age ("5d old", "age unknown") and "not checked" on a calendar
+   * price, all visible
    * because touch has no hover; the full provider, destination, source, age, note and the marks' words are in the
    * title and in spoken text, so nothing is lost.
    */
@@ -97,9 +98,12 @@ export function PriceCell(props: PriceCellProps) {
         ) : null}
         {formatPence(props.pricePence)}
         {marks.length > 0 ? <span aria-hidden="true">{marks.map((m) => m.glyph).join('')}</span> : null}
-        {/* why: provenance visible without hover (spec §11): the provider's short mark, since touch has no title */}
-        <span aria-hidden="true" className="block font-medium">
-          {COPY.providerMark[p.providerId]}
+        {/* why: provenance visible without hover (spec §11): the provider's short mark and the destination, since touch
+        has no title and two destinations would otherwise leave a price without its airport (CodeRabbit batch 3) */}
+        <span aria-hidden="true" data-testid="face-provider" className="block font-medium">
+          {props.destination === undefined
+            ? COPY.providerMark[p.providerId]
+            : `${COPY.providerMark[p.providerId]} ${props.destination}`}
         </span>
         {/* why: ruling 3: the age and the unchecked mark on the face; 10px words of at most 7 characters fit 45 px */}
         <span aria-hidden="true" data-testid="face-age" className="block text-[10px] font-normal">

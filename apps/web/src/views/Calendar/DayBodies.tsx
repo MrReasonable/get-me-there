@@ -31,8 +31,8 @@ export function DayBody(props: {
 
 /**
  * The phone face (plan decision 52, review ui-r2-001): at 375 px a column is about 45 px, so a day shows its number and
- * band, the amount through PriceCell's `face` (marks as single glyphs, the provider mark, the short age and "not
- * checked" visible, words in its title and spoken text) or the
+ * band, the amount through PriceCell's `face` (marks as single glyphs, the provider mark with the destination, the short
+ * age and "not checked" visible, words in its title and spoken text) or the
  * glyphs of a priceless day, and one-glyph marks for "price not confirmed" and partial coverage. Stay, provider,
  * "cached from" and the counts are in the panel, one tap away.
  */
