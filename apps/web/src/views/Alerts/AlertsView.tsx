@@ -1,6 +1,7 @@
 /** Alerts view (spec §11): the rule form, the rules list and the events list. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/endpoints.js';
+import { LoadError } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { EventsTable } from './EventsTable.js';
 import { RuleForm } from './RuleForm.js';
@@ -45,10 +46,13 @@ export function AlertsView(props: { definitionId: string }) {
         busy={create.isPending}
       />
       {create.isError ? <p role="alert">{C.notSaved(create.error.message)}</p> : null}
+      {remove.isError ? <p role="alert">{COPY.actionFailed(remove.error.message)}</p> : null}
       <div>
         <h3>{C.rulesHeading}</h3>
         <p className="text-sm">{C.deleteKeepsHistory}</p>
-        {rules.isLoading ? (
+        {rules.error ? (
+          <LoadError error={rules.error} retry={() => void rules.refetch()} />
+        ) : rules.isLoading ? (
           <p>{COPY.loading}</p>
         ) : list.length === 0 ? (
           <p>{C.noRules}</p>
@@ -73,7 +77,9 @@ export function AlertsView(props: { definitionId: string }) {
       <div>
         <h3>{C.eventsHeading}</h3>
         {/* why: the Rule column shows each rule in words, so the table waits for both queries */}
-        {rules.isLoading || events.isLoading ? (
+        {events.error ? (
+          <LoadError error={events.error} retry={() => void events.refetch()} />
+        ) : rules.isLoading || events.isLoading ? (
           <p>{COPY.loading}</p>
         ) : (
           <EventsTable events={events.data ?? []} ruleText={ruleText} />

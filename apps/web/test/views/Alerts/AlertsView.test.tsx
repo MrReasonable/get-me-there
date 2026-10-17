@@ -190,6 +190,40 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     expect(within(table).queryByTestId('price-cell')).toBeNull();
   });
 
+  it('a failed rules load shows the error and a retry, never "no rules"', async () => {
+    withData();
+    server.use(http.get(`${API}/alerts`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
+    const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
+    const alert = await screen.findByText(/^Could not load:/);
+    expect(alert).toBeInTheDocument();
+    expect(screen.queryByText(C.noRules)).toBeNull();
+    server.use(http.get(`${API}/alerts`, () => HttpResponse.json(rules)));
+    await user.click(screen.getByRole('button', { name: COPY.retryLoad }));
+    expect((await screen.findAllByText(describeRule({ ...rules[0] }))).length).toBeGreaterThan(0);
+  });
+
+  it('a failed events load shows the error and a retry, never "no alerts have fired"', async () => {
+    withData();
+    server.use(http.get(`${API}/alerts/events`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
+    renderWithProviders(<AlertsView definitionId="def-1" />);
+    expect(await screen.findByText(/^Could not load:/)).toBeInTheDocument();
+    expect(screen.queryByText(C.noEvents)).toBeNull();
+    expect(screen.getByRole('button', { name: COPY.retryLoad })).toBeInTheDocument();
+  });
+
+  it('a delete that failed is announced and the rule stays listed', async () => {
+    withData();
+    server.use(
+      http.delete(`${API}/alerts/:id`, () => HttpResponse.json({ error: 'nope' }, { status: 500 })),
+    );
+    const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
+    const [first] = await screen.findAllByRole('button', { name: C.deleteRule });
+    if (first === undefined) throw new Error('delete button');
+    await user.click(first);
+    expect(await screen.findByText(/^That did not work:/)).toBeInTheDocument();
+    expect(screen.getAllByText(describeRule({ ...rules[0] })).length).toBeGreaterThan(0);
+  });
+
   it('empty states', async () => {
     withData([], []);
     renderWithProviders(<AlertsView definitionId="def-1" />);
