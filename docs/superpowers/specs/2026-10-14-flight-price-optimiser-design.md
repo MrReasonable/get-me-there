@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 24.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 25.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -1623,6 +1623,14 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 25: alert delivery (2026-10-17)
+
+§6.8, §7, §8.1: at most one digest per rule per stop of an execution (a
+budget pause and the later completion may each send one), never a repeated
+firing; alert events are `queued`, `notified` or `suppressed`, written
+queued before sending; outgoing email has an hourly ceiling (plan decisions
+55, 56).
 
 ### Revision 24: stride and resume details (2026-10-16)
 
