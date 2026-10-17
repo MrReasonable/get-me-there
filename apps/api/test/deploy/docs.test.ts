@@ -248,6 +248,17 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
   });
 });
 
+describe('the plan’s exit-code line (decision 65, CodeRabbit batch 3)', () => {
+  it('says 65 refuses a recording or smoke run for spend, as setup.md and EXIT do, without the banned word', () => {
+    const plan = read('docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md');
+    const line = /^\/\/ Exit codes \(one table for every CLI\):.*$/m.exec(plan)?.[0] ?? '';
+    expect(line).toContain(
+      `${EXIT.spendRefused} \`spendRefused\`: a recording or smoke run refused for spend: credits already ledgered to earlier tool runs plus this run's worst case exceed \`--budget\` without \`--confirm-rerun\`, or a provider window with less room than the run's worst case;`,
+    );
+    expect(findBannedWords(line, BANNED_WORD_ALLOWLIST)).toEqual([]);
+  });
+});
+
 describe('operator docs (spec §11 banned words; spec §1 worked example only)', () => {
   it('covers every docs/*.md: the operator docs and the research notes', () => {
     const all = readdirSync(join(REPO, 'docs'))
