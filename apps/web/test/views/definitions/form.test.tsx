@@ -1,6 +1,6 @@
 import { CONSTRAINT_LABELS } from '@gmt/core';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { HttpResponse, http } from 'msw';
+import { delay, HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
@@ -14,9 +14,12 @@ import {
 } from '../../../src/views/Definitions/draft.js';
 import { API, airports, definition, estimate, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
-import { renderWithProviders } from '../../render.js';
+import { renderWithProviders, settled } from '../../render.js';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 const renderForm = (existing: ReturnType<typeof definition> | null = null) =>
   renderWithProviders(<DefinitionForm existing={existing} providers={providersResponse()} />);
@@ -199,8 +202,10 @@ describe('airport entry (review focus 1)', () => {
     // why: fake the clear functions too, or a cleared debounce timer still fires on the real clock.
     vi.useFakeTimers({
       toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
-      shouldAdvanceTime: true,
     });
+    // why: Testing Library drains microtasks with a setTimeout(0) and steps it only when a global `jest` says fake timers
+    // are on; this shim makes it step Vitest's fake clock, so the test needs no real-time `shouldAdvanceTime`.
+    vi.stubGlobal('jest', { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
     const queries: string[] = [];
     server.use(
       http.get(`${API}/airports`, ({ request }) => {
@@ -214,7 +219,8 @@ describe('airport entry (review focus 1)', () => {
     await user.type(screen.getByLabelText('Origins'), 'lon');
     expect(queries).toEqual([]);
     await act(() => vi.advanceTimersByTimeAsync(AIRPORT_DEBOUNCE_MS));
-    await waitFor(() => expect(document.querySelectorAll('#origins-options option')).toHaveLength(2));
+    // why: vi.waitFor steps the fake clock itself, so nothing here depends on the real one
+    await vi.waitFor(() => expect(document.querySelectorAll('#origins-options option')).toHaveLength(2));
     const options = [...document.querySelectorAll('#origins-options option')].map(
       (o) => `${o.getAttribute('value')} ${o.textContent}`,
     );
@@ -238,9 +244,16 @@ describe('airport entry (review focus 1)', () => {
     ],
   ])(
     'a metro code expands to its member airports on %s, before the autocomplete answers (decision 44)',
-    async (_how, act) => {
+    async (_how, enter) => {
+      // why: the autocomplete never answers in this test, so the chips can only come from the table lookup done on Enter or Add
+      const held = http.get(`${API}/airports`, async ({ request }) => {
+        // the typed-code lookup is the exact code; only the debounced autocomplete (the lowercase or partial q) is held
+        if (new URL(request.url).searchParams.get('q') !== 'LON') await delay('infinite');
+        return HttpResponse.json(airports);
+      });
+      server.use(held);
       const { user } = renderForm();
-      await act(user);
+      await enter(user);
       await waitFor(() => expect(chipCodes('Origins')).toEqual(['LHR', 'LGW']));
       expect(screen.getByRole('status')).toHaveTextContent('LON is a city code: added LHR, LGW.');
       expect(chipCodes('Origins')).not.toContain('LON');
@@ -453,7 +466,7 @@ describe('per-destination fields and the example (spec §11)', () => {
 
   it('a half-filled time window disables Show estimate, says why beside it, sends nothing, and re-enables once fixed (coordinator correction)', async () => {
     const bodies = estimateBodies();
-    const { user } = renderForm();
+    const { user, client } = renderForm();
     await user.click(screen.getByText('Advanced: constraints and policy'));
     const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
     await user.clear(screen.getByLabelText(to));
@@ -463,6 +476,8 @@ describe('per-destination fields and the example (spec §11)', () => {
       'Cannot estimate or save: a time window needs both ends, or neither.',
     );
     await user.click(estimate);
+    // why: a POST the click started would arrive after this line; wait until nothing is in flight, then count
+    await settled(client);
     expect(bodies).toHaveLength(0);
     fireEvent.change(screen.getByLabelText(to), { target: { value: '22:00' } });
     expect(screen.getByRole('button', { name: 'Show estimate' })).toBeEnabled();
