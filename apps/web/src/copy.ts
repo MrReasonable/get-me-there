@@ -698,8 +698,10 @@ export const COPY = {
     partlyItinerarySearchedNoPrice: (k: number, total: number) =>
       `itinerary-searched ${k} of ${total} selected cells, no class-verified price`,
     tableCaption: 'Cheapest found per stay length, with provenance',
+    chartScroll: 'Cheapest found by stay length, chart (scrolls sideways on a narrow screen)',
+    tableScroll: 'Cheapest found per stay length, table (scrolls sideways on a narrow screen)',
     staleLine: (stale: number, shown: number) =>
-      `${stale} of ${shown} shown prices are stale (older than one refresh cycle by fetch age)`,
+      `${stale} of ${shown} shown prices are stale (older than one refresh cycle by fetch age plus any known vendor age)`,
     empty:
       "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
   },
@@ -738,6 +740,8 @@ export const COPY = {
     spanLine: (points: number, from: string, to: string) =>
       `${points} ${points === 1 ? 'run' : 'runs'} shown, ${from} to ${to}`,
     tableCaption: (series: string) => `${series}: every point, with provenance`,
+    chartScroll: (title: string) => `${title}, chart (scrolls sideways on a narrow screen)`,
+    tableScroll: (series: string) => `${series}: table of points (scrolls)`,
     whenColumn: 'Fetched (Europe/London)',
     travelDateColumn: 'Travel date',
     priceColumn: 'Price',

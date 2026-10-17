@@ -185,6 +185,8 @@ const SAMPLES: Record<string, unknown[]> = {
   'historyView.itineraryHeading': ['LHR→JFK', 'Sun 14 Mar 2027', 'Sun 28 Mar 2027', 'BA'],
   'historyView.itineraryHash': ['abc123'],
   'historyView.spanLine': [3, '23 Sep 2026', '14 Oct 2026'],
+  'historyView.chartScroll': ['Price by fetch date'],
+  'historyView.tableScroll': ['SearchApi route-level series, indicative · economy'],
   'historyView.tableCaption': ['SearchApi route-level series, indicative · economy'],
   'historyView.routeProvenance': [
     'Google Flights via SearchApi',

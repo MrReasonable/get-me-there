@@ -85,7 +85,7 @@ export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; 
       {coloursRepeat(lines) ? (
         <p className="text-xs">{H.coloursRepeat(lines.length, SERIES_COLOURS.length)}</p>
       ) : null}
-      <div className="overflow-x-auto">
+      <section aria-label={H.chartScroll(H.fetchChartTitle)} className="overflow-x-auto">
         <div className="h-80 min-w-[36rem]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart margin={{ top: 8, right: 16, bottom: 28, left: 24 }}>
@@ -124,7 +124,7 @@ export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; 
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </section>
     </figure>
   );
 }
@@ -142,7 +142,7 @@ export function RouteChart({ lines, tablesId }: { lines: readonly RouteLine[]; t
         {H.routeChartTitle}
       </figcaption>
       <p className="text-xs">{H.routeChartNote}</p>
-      <div className="overflow-x-auto">
+      <section aria-label={H.chartScroll(H.routeChartTitle)} className="overflow-x-auto">
         <div className="h-64 min-w-[36rem]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart margin={{ top: 8, right: 16, bottom: 28, left: 24 }}>
@@ -178,7 +178,7 @@ export function RouteChart({ lines, tablesId }: { lines: readonly RouteLine[]; t
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </section>
     </figure>
   );
 }
@@ -198,7 +198,7 @@ export function HistoryTable(props: {
   const { line, destination, notes } = props;
   const points = line.points.filter((p): p is Priced => p.kind === 'price').reverse();
   return (
-    <div className="max-h-64 overflow-auto">
+    <section aria-label={H.tableScroll(line.name)} className="max-h-64 overflow-auto">
       <table className="w-full text-xs">
         <caption className="text-left font-medium">{H.tableCaption(line.name)}</caption>
         <thead>
@@ -246,6 +246,6 @@ export function HistoryTable(props: {
           })}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }

@@ -16,7 +16,7 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
   const points = line.points.flatMap((p) => (p.kind === 'price' ? [p] : []));
   const cabin = line.cabin === 'unknown' ? H.cabinNotStated : COPY.cabinName[line.cabin];
   return (
-    <div className="max-h-64 overflow-auto">
+    <section aria-label={H.tableScroll(line.name)} className="max-h-64 overflow-auto">
       <table className="w-full text-xs">
         <caption className="text-left font-medium">{H.tableCaption(line.name)}</caption>
         <thead>
@@ -46,6 +46,6 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
           ))}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }

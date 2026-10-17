@@ -90,7 +90,7 @@ export function DurationChart(props: {
       </figcaption>
       <p className="text-xs">{D.chartNote}</p>
       {/* why: ui-r1-010 — on a phone the bars keep a readable width and the chart scrolls sideways */}
-      <div className="overflow-x-auto">
+      <section aria-label={D.chartScroll} className="overflow-x-auto">
         <div className="h-80 min-w-[36rem]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data.rows} margin={{ top: 8, right: 16, bottom: 28, left: 24 }}>
@@ -139,7 +139,7 @@ export function DurationChart(props: {
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </section>
     </figure>
   );
 }
@@ -156,7 +156,7 @@ export function DurationTable(props: {
 }) {
   const { data, id, notes } = props;
   return (
-    <div className="overflow-x-auto">
+    <section aria-label={D.tableScroll} className="overflow-x-auto">
       <table id={id} className="mt-2 w-full text-xs">
         <caption className="text-left font-medium">{D.tableCaption}</caption>
         <thead>
@@ -208,6 +208,6 @@ export function DurationTable(props: {
           })}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }

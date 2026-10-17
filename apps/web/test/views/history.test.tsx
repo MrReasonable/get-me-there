@@ -479,4 +479,15 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     const p = new URLSearchParams(historyHref('abc 123').split('?')[1]);
     expect([p.get('view'), p.get('hash'), p.get('def')]).toEqual(['history', 'abc 123', 'def-0001']);
   });
+
+  it('the scrolling charts and tables are named regions (review ui I4)', async () => {
+    const { findByRole, findAllByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    expect(
+      await findByRole('region', { name: COPY.historyView.chartScroll(COPY.historyView.fetchChartTitle) }),
+    ).toBeInTheDocument();
+    expect(
+      await findByRole('region', { name: COPY.historyView.chartScroll(COPY.historyView.routeChartTitle) }),
+    ).toBeInTheDocument();
+    expect((await findAllByRole('region', { name: /table of points/ })).length).toBeGreaterThan(1);
+  });
 });

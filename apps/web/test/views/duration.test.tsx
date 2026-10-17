@@ -1,6 +1,7 @@
 import { within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { COPY } from '../../src/copy.js';
 import { DurationTooltip } from '../../src/views/Duration/DurationChart.js';
 import { DurationView } from '../../src/views/Duration/DurationView.js';
 import { barValue, buildDurationData, gapLabel, rowAt } from '../../src/views/Duration/data.js';
@@ -329,8 +330,14 @@ describe('Duration view (spec §11 View C)', () => {
     );
     expect(
       await renderWithProviders(<DurationView definition={def} />).findByText(
-        '1 of 2 shown prices are stale (older than one refresh cycle by fetch age)',
+        '1 of 2 shown prices are stale (older than one refresh cycle by fetch age plus any known vendor age)',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('the scrolling chart and table are named regions (review ui I4)', async () => {
+    const { findByRole } = renderWithProviders(<DurationView definition={definition()} />);
+    expect(await findByRole('region', { name: COPY.durationView.chartScroll })).toBeInTheDocument();
+    expect(await findByRole('region', { name: COPY.durationView.tableScroll })).toBeInTheDocument();
   });
 });
