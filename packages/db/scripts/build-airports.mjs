@@ -150,13 +150,13 @@ airports.sort((x, y) => (x.iata < y.iata ? -1 : 1));
 if (airports.length < MIN_ROWS)
   throw new Error(`only ${airports.length} airports with IATA and tz; at least ${MIN_ROWS} required`);
 const version = `${values.date}-${values.commit.slice(0, 7)}`;
-// why: loadAirportsDataset requires exactly one airports.*.json, so the previous version goes when the new one is written.
-for (const f of readdirSync(dataDir))
-  if (/^airports\..+\.json$/.test(f) && f !== `airports.${version}.json`) rmSync(dataDir + f);
 writeFileSync(
   `${dataDir}airports.${version}.json`,
   `${JSON.stringify({ version, source: `mwgg/Airports@${values.commit}`, licence: 'MIT; see airports.LICENSE', airports })}\n`,
 );
+// why: loadAirportsDataset requires exactly one airports.*.json; the old one goes only after the new one is written.
+for (const f of readdirSync(dataDir))
+  if (/^airports\..+\.json$/.test(f) && f !== `airports.${version}.json`) rmSync(dataDir + f);
 console.log(
   `wrote ${airports.length} airports (${skipped} skipped for an unknown tz, missing coordinates or country), version ${version}`,
 );
