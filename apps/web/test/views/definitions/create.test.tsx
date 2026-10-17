@@ -338,6 +338,10 @@ describe('saved definitions (spec §8.1)', () => {
   it('an edit= link to a definition that does not exist says so instead of showing a blank create form', async () => {
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=no-such-definition' });
     expect(await screen.findByRole('alert')).toHaveTextContent(COPY.definitionNotFound);
+    // why: no create flow behind a dead link: nothing to estimate or confirm
+    expect(screen.queryByRole('button', { name: 'Show estimate' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Create and confirm/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
   });
 
   it('edit=new and an existing definition show no not-found alert', async () => {

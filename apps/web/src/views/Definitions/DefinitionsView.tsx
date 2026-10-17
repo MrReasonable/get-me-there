@@ -50,7 +50,7 @@ export function DefinitionsView() {
         ))}
       </ul>
       {/* why: keyed by the URL's edit value, so a create that stays on edit=new keeps its confirmation notice */}
-      <DefinitionForm key={editing} existing={existing} providers={providers.data} />
+      {missing ? null : <DefinitionForm key={editing} existing={existing} providers={providers.data} />}
     </div>
   );
 }
