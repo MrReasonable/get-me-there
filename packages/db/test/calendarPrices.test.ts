@@ -16,7 +16,7 @@ function setup(allowSynthetic = false, onlyLhrJfk = false) {
   const definition = onlyLhrJfk
     ? new DefinitionsRepo(db, clock).create(exampleDefinitionInput({ origins: [LHR], destinations: [JFK] }))
     : undefined;
-  const { execution } = newExecution(db, clock, { definition });
+  const { execution } = newExecution(db, clock, definition ? { definition } : {});
   return {
     db,
     clock,
