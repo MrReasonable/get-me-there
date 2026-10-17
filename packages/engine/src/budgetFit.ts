@@ -1,4 +1,10 @@
-import type { DefinitionSnapshot, ProviderId, SearchDefinition } from '@gmt/core';
+import {
+  type BudgetScope,
+  budgetScopeLabel,
+  type DefinitionSnapshot,
+  type ProviderId,
+  type SearchDefinition,
+} from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { estimateStart } from './estimate.js';
 import { runsPerMonth } from './scheduler/parseCron.js';
@@ -90,22 +96,24 @@ export function budgetFitFor(
   const sum = (xs: Estimate['perProvider'], f: (p: Estimate['perProvider'][number]) => number) =>
     xs.reduce((a, p) => a + f(p), 0);
   const perScope: BudgetFit['perScope'] = [];
-  const scope = (name: string, estimated: number, cap: number | null) => {
+  const scope = (s: BudgetScope, estimated: number, cap: number | null) => {
     const e = Math.ceil(estimated);
-    perScope.push({ scope: name, estimated: e, cap, fits: cap === null || e <= cap });
+    perScope.push({ scope: budgetScopeLabel(s), estimated: e, cap, fits: cap === null || e <= cap });
   };
+  // why: a definition has no execution yet; the label of an execution scope ignores the id (core budgetScopeLabel).
+  const NO_EXECUTION = '';
   scope(
-    'execution-calls',
+    { kind: 'execution-calls', executionId: NO_EXECUTION },
     sum(billed, (p) => p.calls),
     def.budget.maxCalls,
   );
   scope(
-    'execution-free-calls',
+    { kind: 'execution-free-calls', executionId: NO_EXECUTION },
     sum(free, (p) => p.calls),
     def.budget.maxFreeCalls,
   );
   scope(
-    'execution-cost',
+    { kind: 'execution-cost', executionId: NO_EXECUTION },
     sum(billed, (p) => p.costMicroGbp),
     def.budget.maxCostMicroGbp,
   );
@@ -113,7 +121,7 @@ export function budgetFitFor(
   for (const id of ids) {
     const kind = ctx.limitsOf(id).capKind;
     const calls = [own, ...others].reduce((a, l) => a + (l.perProvider.get(id)?.calls ?? 0), 0);
-    scope(`${kind}:${id}`, calls, ctx.budget.usage({ kind, providerId: id }).cap);
+    scope({ kind, providerId: id }, calls, ctx.budget.usage({ kind, providerId: id }).cap);
   }
   const fixed = [...ctx.providers.keys()]
     .filter((id) => ctx.limitsOf(id).billed)
@@ -122,6 +130,6 @@ export function budgetFitFor(
     (a, l) => a + [...l.perProvider.values()].reduce((b, v) => b + v.costMicroGbp, 0),
     0,
   );
-  scope('global-month', fixed + cost, ctx.config.spend.monthlyCapMicroGbp);
+  scope({ kind: 'global-month' }, fixed + cost, ctx.config.spend.monthlyCapMicroGbp);
   return { fits: perScope.every((x) => x.fits), runsPerMonth: own.runsPerMonth, perScope };
 }
