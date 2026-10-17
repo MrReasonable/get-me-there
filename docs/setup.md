@@ -407,9 +407,11 @@ for any change to a provider adapter or the engine: run it before merging such a
 - **One volume per project name.** `docker-compose.yml` fixes the project name to `get-me-there`, so every
   checkout on the same host uses the same volume, `get-me-there_gmt-data`, and the same database. A second
   clone started with plain `docker compose up` replaces the running container and migrates your real data. To
-  try another checkout without touching it, give it its own project name, and so its own volume:
-  `docker compose -p gmt-trial up -d --build --wait --wait-timeout 120`, and remove it afterwards with
-  `docker compose -p gmt-trial down -v`. That `-v` removes only the `gmt-trial` volume.
+  try another checkout without touching it, give it its own project name, and so its own volume. Both
+  projects publish `127.0.0.1:3000`, so stop your app first (`docker compose stop` in your own checkout),
+  then in the other checkout run `docker compose -p gmt-trial up -d --build --wait --wait-timeout 120`.
+  Afterwards remove it with `docker compose -p gmt-trial down -v`, which removes only the `gmt-trial`
+  volume, and start your app again with `docker compose up -d --wait --wait-timeout 120`.
 - **One user.** Run every command against the database as the app's user, which
   `docker compose exec app …` and `docker compose run app …` do by default (`node`). Never add
   `--user root` or `-u 0`: a check that only reads the database can still leave SQLite's `-wal`

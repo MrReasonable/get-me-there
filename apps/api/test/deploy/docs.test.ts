@@ -366,5 +366,7 @@ describe('docs/setup.md warns that every checkout shares one volume (section 9)'
     expect(setup).toContain('`get-me-there_gmt-data`');
     expect(setup).toContain('docker compose -p gmt-trial up -d --build --wait --wait-timeout 120');
     expect(setup).toContain('docker compose -p gmt-trial down -v');
+    // why: both projects publish 127.0.0.1:3000 (CodeRabbit, PR #4), so the note must stop the operator's app first.
+    expect(setup).toContain('Both projects publish `127.0.0.1:3000`, so stop your app first');
   });
 });
