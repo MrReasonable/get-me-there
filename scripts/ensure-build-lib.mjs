@@ -1,9 +1,12 @@
 // The logic of scripts/ensure-build.mjs, with its file-system, process and clock operations injectable for tests.
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   linkSync,
   lstatSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -56,6 +59,43 @@ function parseRecord(text) {
   return { pid: r.pid, token: r.token };
 }
 
+/**
+ * What the lock holds now: the key naming this exact record, its owner pid (null if unknown) and its mtime, all from
+ * one open descriptor. why: PR #3 review — two path lookups (stat, then read) could pair a new owner's token with the
+ * replaced lock's mtime, so a waiter judged a live lock stale by age and removed it. `afterStat` runs between the
+ * metadata and the content read, where tests interleave a takeover.
+ */
+export function readLock(lock, afterStat = () => undefined) {
+  let fd;
+  try {
+    fd = openSync(lock, 'r');
+  } catch (err) {
+    // why: an older directory lock opens on Linux but not everywhere; it has no record, so stat it as unowned
+    if (err.code !== 'EISDIR') throw err;
+    const st = lstatSync(lock);
+    return { key: `unowned-${st.ino}-${Math.trunc(st.mtimeMs)}`, pid: null, mtimeMs: st.mtimeMs };
+  }
+  try {
+    const st = fstatSync(fd);
+    afterStat();
+    let rec = null;
+    if (st.isFile()) {
+      try {
+        rec = parseRecord(readFileSync(fd, 'utf8'));
+      } catch {
+        // a record that cannot be read is no record: the lock is then stale only by age
+      }
+    }
+    // why: a lock without a record (missing pid metadata) is keyed by its inode and mtime, so a claim on it never
+    // matches a lock created later
+    if (rec === null)
+      return { key: `unowned-${st.ino}-${Math.trunc(st.mtimeMs)}`, pid: null, mtimeMs: st.mtimeMs };
+    return { key: rec.token, pid: rec.pid, mtimeMs: st.mtimeMs };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export const realOps = {
   /** Creates the lock holding the record, whole and exclusively; throws EEXIST when it exists. */
   create: (lock, owned) => {
@@ -68,22 +108,7 @@ export const realOps = {
     }
   },
   /** What the lock holds now: the key naming this exact record, its owner pid (null if unknown) and its mtime. */
-  read: (lock) => {
-    const st = lstatSync(lock);
-    let rec = null;
-    if (st.isFile()) {
-      try {
-        rec = parseRecord(readFileSync(lock, 'utf8'));
-      } catch (err) {
-        if (err.code === 'ENOENT') throw err;
-      }
-    }
-    // why: a lock without a record (missing pid metadata) is keyed by its inode and mtime, so a claim on it never
-    // matches a lock created later
-    if (rec === null)
-      return { key: `unowned-${st.ino}-${Math.trunc(st.mtimeMs)}`, pid: null, mtimeMs: st.mtimeMs };
-    return { key: rec.token, pid: rec.pid, mtimeMs: st.mtimeMs };
-  },
+  read: (lock) => readLock(lock),
   /** True while a process with this pid exists (EPERM: it exists under another user). */
   alive: (pid) => {
     try {
@@ -111,10 +136,11 @@ export const realOps = {
 };
 
 /**
- * Removes the lock only if it still holds the record named by key, under the exclusive claim for that key.
+ * Removes the lock only if it still holds the record inspected (its key and, when given, the mtime read with it from
+ * the same descriptor), under the exclusive claim for that key.
  * @returns {'removed' | 'gone' | 'changed' | 'claimed'} claimed: another process holds the claim for this record
  */
-function removeIfStill(lock, key, ops) {
+function removeIfStill(lock, key, mtimeMs, ops) {
   const claim = `${lock}.break-${key}`;
   if (!ops.claim(claim)) return 'claimed';
   try {
@@ -125,7 +151,7 @@ function removeIfStill(lock, key, ops) {
       if (err.code === 'ENOENT') return 'gone';
       throw err;
     }
-    if (now.key !== key) return 'changed';
+    if (now.key !== key || (mtimeMs !== null && now.mtimeMs !== mtimeMs)) return 'changed';
     ops.remove(lock);
     return 'removed';
   } finally {
@@ -135,13 +161,13 @@ function removeIfStill(lock, key, ops) {
 
 /** Takes over the stale lock whose record was inspected as `seen`; false when the lock is no longer that record. */
 export function breakStale(lock, seen, ops = realOps) {
-  const r = removeIfStill(lock, seen.key, ops);
+  const r = removeIfStill(lock, seen.key, seen.mtimeMs ?? null, ops);
   return r === 'removed' || r === 'gone';
 }
 
 /** Releases the lock if this owner still holds it; true when it removed it. */
 export function release(lock, owned, ops = realOps) {
-  return removeIfStill(lock, owned.token, ops) === 'removed';
+  return removeIfStill(lock, owned.token, null, ops) === 'removed';
 }
 
 /** Takes the cross-process lock, waiting for a live holder and taking over a stale one. Returns the owner record. */

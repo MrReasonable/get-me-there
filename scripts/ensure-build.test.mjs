@@ -1,9 +1,9 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquire, breakStale, lockPathFor, realOps, release } from './ensure-build-lib.mjs';
+import { acquire, breakStale, lockPathFor, readLock, realOps, release } from './ensure-build-lib.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -203,6 +203,52 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
     writeFileSync(`${lock}.break-${seen.key}`, '1');
     expect(breakStale(lock, seen)).toBe(false);
     expect(record(lock).token).toBe('stale-owner-token-2');
+  });
+
+  // why: PR #3 review — the metadata and the record came from two path lookups, so a takeover between them gave a
+  // waiter the new owner's token with the old lock's mtime; the waiter then judged the live lock stale by age and
+  // removed it. The key, pid and mtime must describe one file.
+  it('a read interleaved with a takeover describes one file: never the new token with the old mtime', () => {
+    const lock = lockIn();
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'old-owner-token-0001' }));
+    const old = new Date(Date.now() - 60 * 60_000);
+    utimesSync(lock, old, old);
+    const seen = readLock(lock, () => {
+      // another waiter takes the stale lock over exactly here
+      rmSync(lock);
+      writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'new-owner-token-0001' }));
+    });
+    const fresh = Date.now() - seen.mtimeMs < 60_000;
+    expect([seen.key, fresh]).toSatisfy(
+      ([key, isFresh]) =>
+        (key === 'old-owner-token-0001' && !isFresh) || (key === 'new-owner-token-0001' && isFresh),
+    );
+  });
+
+  it('a waiter racing a takeover of an aged lock never removes the new owner’s live lock', () => {
+    const lock = lockIn();
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'aged-owner-token-01' }));
+    const old = new Date(Date.now() - 60 * 60_000);
+    utimesSync(lock, old, old);
+    let raced = false;
+    let t = Date.now();
+    const ops = {
+      ...realOps,
+      read: (l) =>
+        readLock(l, () => {
+          if (raced) return;
+          raced = true;
+          // A takes the aged lock over between B's stat and B's read
+          rmSync(l);
+          writeFileSync(l, JSON.stringify({ pid: process.pid, token: 'live-owner-token-01' }));
+        }),
+      now: () => t,
+      sleep: () => {
+        t += 11 * 60_000;
+      },
+    };
+    expect(() => acquire(lock, ops)).toThrow(/gave up waiting/);
+    expect(record(lock).token).toBe('live-owner-token-01');
   });
 
   it('a lock without owner metadata (an older directory lock) is stale only by age', () => {
