@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   alertRuleInputSchema,
+  alertRuleUpdateRequestSchema,
   cronSchema,
   definitionCreateRequestSchema,
   healthResponseSchema,
@@ -263,5 +264,14 @@ describe('api-contract (spec §10)', () => {
     });
     expect(r.success).toBe(true);
     expect(healthResponseSchema.safeParse({ ok: true, degraded: false }).success).toBe(true);
+  });
+});
+
+describe('alertRuleUpdateRequestSchema (partial PUT)', () => {
+  it('parses a partial body to exactly the fields it named, never filling a default', () => {
+    expect(alertRuleUpdateRequestSchema.parse({ enabled: false })).toEqual({ enabled: false });
+    expect(alertRuleUpdateRequestSchema.parse({})).toEqual({});
+    expect(alertRuleUpdateRequestSchema.parse({ cooldownHours: 24 })).toEqual({ cooldownHours: 24 });
+    expect(alertRuleUpdateRequestSchema.safeParse({ cooldownHours: 0 }).success).toBe(false);
   });
 });

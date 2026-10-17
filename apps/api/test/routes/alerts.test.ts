@@ -51,6 +51,21 @@ describe('alert rules (spec §6.8, §10; storage only, WP11 evaluates)', () => {
     expect((await errorOf(gone)).code).toBe('alert_not_found');
   });
 
+  it('a partial PUT never changes a field it did not name (a custom cooldown survives)', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const r = await expectContract(
+      await x.request('/api/alerts', { json: { ...rule(def.id), cooldownHours: 24 } }),
+      'POST',
+      '/api/alerts',
+      RULE,
+    );
+    const put = await x.request(`/api/alerts/${r.id}`, { method: 'PUT', json: { enabled: false } });
+    const updated = await expectContract(put, 'PUT', '/api/alerts/:id', RULE);
+    expect(updated).toEqual({ ...r, enabled: false });
+    expect(updated.cooldownHours).toBe(24);
+  });
+
   it('requireAllVerified is rejected on calendar basis, on create and through a partial update', async () => {
     const x = await harness();
     const def = x.ports.repos.definitions.create(exampleDefinitionInput());
