@@ -362,6 +362,26 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     ).toBeInTheDocument();
   });
 
+  it('the verify status names the cell that was submitted, and goes away when another cell is picked', async () => {
+    server.use(
+      http.get(cellRoute, () => HttpResponse.json(detail)),
+      http.post(`${API}/cells/verify`, () => HttpResponse.json({ executionId: 'child-1' })),
+    );
+    const { findByText, getByRole, queryByText, user } = renderPanel();
+    await findByText('hard stop 6 calls · 1840 calls of budget headroom left');
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
+    expect(await findByText(COPY.verifyStartedFor(verifyCellName(c)))).toBeInTheDocument();
+    const options = cellsForDay(definition(), date);
+    const otherIndex = options.findIndex((o) => verifyCellName(o) !== verifyCellName(c));
+    expect(otherIndex).toBeGreaterThanOrEqual(0);
+    const other = options[otherIndex];
+    if (other === undefined) throw new Error('another cell');
+    await user.selectOptions(getByRole('combobox'), String(otherIndex));
+    // why: no search was submitted for the picked cell, so no status may say one started for it
+    expect(queryByText(COPY.verifyStartedFor(verifyCellName(other)))).toBeNull();
+    expect(queryByText(COPY.verifyStartedFor(verifyCellName(c)))).toBeNull();
+  });
+
   it('while the cell detail loads, verify is disabled and says its cost is loading (ui-r2-007)', async () => {
     server.use(
       http.get(cellRoute, async () => {
