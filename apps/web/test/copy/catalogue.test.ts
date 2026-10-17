@@ -277,9 +277,15 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'durationView.itinerarySearchedNoPrice',
       'durationView.partlyItinerarySearchedNoPrice',
     ]);
-    const offenders = strings.filter(
-      ({ path, text }) => /(?<![\p{L}])verified(?![\p{L}])/u.test(text) && !allowed.has(path),
-    );
+    // why: the exemption list must not outlive its strings: a renamed or removed key would otherwise leave a stale
+    // entry, and a new string later added at that path would inherit the exemption unreviewed.
+    const paths = new Set(strings.map((s) => s.path));
+    expect([...allowed].filter((p) => !paths.has(p))).toEqual([]);
+    // the guard's own planted cases: it matches the whole word and not "unverified", so it cannot pass by matching nothing
+    const VERIFIED = /(?<![\p{L}])verified(?![\p{L}])/u;
+    expect(VERIFIED.test('verified fares')).toBe(true);
+    expect(VERIFIED.test('unverified')).toBe(false);
+    const offenders = strings.filter(({ path, text }) => VERIFIED.test(text) && !allowed.has(path));
     expect(offenders).toEqual([]);
   });
 
