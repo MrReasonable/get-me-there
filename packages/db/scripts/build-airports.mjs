@@ -4,7 +4,7 @@
 //   node packages/db/scripts/build-airports.mjs --input <mwgg airports.json> --commit <40-hex sha> --date <YYYY-MM-DD>
 //   node packages/db/scripts/build-airports.mjs --wikitext <section wikitext> --revision <Wikipedia revision id> [--retrieved <YYYY-MM-DD>]
 // The second form needs the first's output: metro members are checked against the built airports file (po-002).
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -41,8 +41,10 @@ const { values } = parseArgs({
 if (values.wikitext) {
   if (!/^\d+$/.test(values.revision ?? ''))
     throw new Error('--revision <numeric revision id> is required with --wikitext');
-  const builtFile = readdirSync(dataDir).find((f) => /^airports\..+\.json$/.test(f));
-  if (!builtFile) throw new Error('build the airports file first');
+  // why: loadAirportsDataset requires exactly one airports file; with two present the metros could be checked against a stale one.
+  const built = readdirSync(dataDir).filter((f) => /^airports\..+\.json$/.test(f));
+  if (built.length !== 1) throw new Error(`expected exactly one built airports file, found ${built.length}`);
+  const [builtFile] = built;
   const byIata = new Map(
     JSON.parse(readFileSync(dataDir + builtFile, 'utf8')).airports.map((a) => [a.iata, a]),
   );
@@ -148,6 +150,9 @@ airports.sort((x, y) => (x.iata < y.iata ? -1 : 1));
 if (airports.length < MIN_ROWS)
   throw new Error(`only ${airports.length} airports with IATA and tz; at least ${MIN_ROWS} required`);
 const version = `${values.date}-${values.commit.slice(0, 7)}`;
+// why: loadAirportsDataset requires exactly one airports.*.json, so the previous version goes when the new one is written.
+for (const f of readdirSync(dataDir))
+  if (/^airports\..+\.json$/.test(f) && f !== `airports.${version}.json`) rmSync(dataDir + f);
 writeFileSync(
   `${dataDir}airports.${version}.json`,
   `${JSON.stringify({ version, source: `mwgg/Airports@${values.commit}`, licence: 'MIT; see airports.LICENSE', airports })}\n`,
