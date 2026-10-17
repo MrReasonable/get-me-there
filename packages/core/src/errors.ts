@@ -13,7 +13,7 @@ const BARE_URL_QUERY =
  */
 export function stripUrlsInText(text: string): string {
   return text
-    .replace(/https?:\/\/[^\s)'"]+/g, (raw) => {
+    .replace(/https?:\/\/[^\s)'"]+/gi, (raw) => {
       try {
         const u = new URL(raw);
         return `${u.protocol}//${u.host}${u.pathname}`;
@@ -119,9 +119,11 @@ export class NormalisationError extends Error {
   readonly reason: NormalisationReason;
   readonly detail: string | undefined;
   constructor(reason: NormalisationReason, detail?: string) {
-    super(detail ? `${reason}: ${stripUrlsInText(detail)}` : reason);
+    // why: `detail` is an enumerable own property that error serialisers copy into logs, so it holds the stripped text.
+    const safe = detail === undefined ? undefined : stripUrlsInText(detail);
+    super(safe ? `${reason}: ${safe}` : reason);
     this.name = 'NormalisationError';
     this.reason = reason;
-    this.detail = detail;
+    this.detail = safe;
   }
 }
