@@ -3,11 +3,12 @@ import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppLock, HEARTBEAT_INTERVAL_MS, openDatabase } from '@gmt/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bootApp } from '../../src/bootstrap/app.js';
+import { bootApp, SHUTDOWN_DEADLINE_MS, shutdownHandler } from '../../src/bootstrap/app.js';
 import { assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
+import { EXIT } from '../../src/tools/types.js';
 import { loadConfigFromEnv } from '../../src/wiring.js';
-import { cleanEnv } from '../helpers/env.js';
+import { cleanEnv, silentLog } from '../helpers/env.js';
 import { tempDir } from '../helpers/tmp.js';
 
 /** Boot tests seed the full airports table; this file's tests may take longer than the default 5 s. */
@@ -129,5 +130,69 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     ).rejects.toThrow();
     expect(lockRow(dbPath)).toBeNull();
     expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat());
+  });
+});
+
+describe('shutdown deadline (review devops M4; compose stop_grace_period is 30 s)', {
+  timeout: BOOT_TIMEOUT_MS,
+}, () => {
+  /** A booted app plus a recording logger and exit; only the timeout timers are faked, after boot. */
+  async function booted() {
+    const dbPath = join(tempDir('gmt-sd-'), 's.db');
+    const running = await bootApp({
+      config: devConfig(dbPath),
+      log: silentLog,
+      listen: false,
+      assets: assetPaths(),
+    });
+    const errors = vi.spyOn(silentLog, 'error');
+    const exit = vi.fn<(code: number) => void>();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    return { dbPath, running, errors, exit };
+  }
+  const messages = (spy: { mock: { calls: unknown[][] } }): string[] =>
+    spy.mock.calls.map((c) => String(c[1]));
+
+  it('stays below the 30 s grace period', () => {
+    expect(SHUTDOWN_DEADLINE_MS).toBeLessThan(30_000);
+  });
+
+  it('a hanging shutdown logs one timeout line, releases the lock and exits non-zero at the deadline', async () => {
+    const { dbPath, running, errors, exit } = await booted();
+    vi.spyOn(running.engine, 'shutdown').mockReturnValue(new Promise<void>(() => undefined));
+    const release = vi.spyOn(AppLock.prototype, 'release');
+    shutdownHandler(running, silentLog, [], exit)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS - 1);
+    expect(exit).not.toHaveBeenCalled();
+    expect(lockRow(dbPath)).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(EXIT.failed);
+    expect(release).toHaveBeenCalled();
+    expect(lockRow(dbPath)).toBeNull();
+    expect(messages(errors).filter((m) => m.includes('shutdown timed out'))).toHaveLength(1);
+    expect(messages(errors).some((m) => m.includes('shutdown failed'))).toBe(false);
+  });
+
+  it('a shutdown that finishes before the deadline exits 0 with no timeout line, and the timer is gone', async () => {
+    const { running, errors, exit } = await booted();
+    shutdownHandler(running, silentLog, [], exit)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(EXIT.ok));
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS * 2);
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(messages(errors).some((m) => m.includes('timed out'))).toBe(false);
+  });
+
+  it('the deadline timer does not keep the process alive', async () => {
+    const { running, exit } = await booted();
+    const set = vi.spyOn(globalThis, 'setTimeout');
+    vi.spyOn(running.engine, 'shutdown').mockReturnValue(new Promise<void>(() => undefined));
+    shutdownHandler(running, silentLog, [], exit)('SIGTERM');
+    const i = set.mock.calls.findIndex((c: unknown[]) => c[1] === SHUTDOWN_DEADLINE_MS);
+    const timer = set.mock.results[i];
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(timer?.type === 'return' && timer.value.hasRef()).toBe(false);
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS);
   });
 });

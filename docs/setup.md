@@ -377,6 +377,10 @@ Recording spends SearchApi credits up to `--budget` (choose a month inside the n
   the lock is left behind: the next start logs `waiting for app_lock` with the lock's age for
   up to 90 seconds, until three renewals have been missed, then logs `taking over a stale
   app_lock` and boots. The health check's start period allows for that wait.
+  A graceful stop that hangs does not have to end that way: the app gives its shutdown 25 seconds
+  (inside compose's 30-second grace period), then logs `shutdown timed out`, releases the lock
+  itself and exits 1, so the next start does not wait for the 90-second takeover. Only a
+  `SIGKILL` leaves the lock behind.
 - **One user.** Run every command against the database as the app's user, which
   `docker compose exec app …` and `docker compose run app …` do by default (`node`). Never add
   `--user root` or `-u 0`: a check that only reads the database can still leave SQLite's `-wal`
@@ -395,7 +399,7 @@ Every command-line entry point (the app itself, `pnpm record:fixtures`,
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | a tool run failed (recording: a required call did not return its expected status; the backup scripts: the built packages could not be loaded) |
+| 1 | a tool run failed (recording: a required call did not return its expected status; the backup scripts: the built packages could not be loaded), or the app's shutdown timed out or failed |
 | 64 | bad arguments (usage), or a recording of another route than the worked example without `--out DIR` outside the repository |
 | 65 | recording refused for spend: it would exceed `--budget` with earlier recordings (rerun with `--confirm-rerun`), or a provider's budget window has less room than the run needs |
 | 70 | refused because `NODE_ENV=test`, or because fixture data is enabled |

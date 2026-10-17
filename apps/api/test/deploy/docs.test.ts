@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
+import { SHUTDOWN_DEADLINE_MS } from '../../src/bootstrap/app.js';
 import { EXIT } from '../../src/tools/types.js';
 import { between, REPO, read } from './files.js';
 
@@ -94,6 +95,7 @@ function containerEnv(extra: Record<string, string>): Record<string, string> {
 describe('docs/setup.md operations rules (plan decision 63; round-1 review)', () => {
   const setup = read('docs/setup.md');
   const flat = setup.replace(/\s+/g, ' ');
+  const composeText = read('docker-compose.yml');
 
   it('names the commands that destroy the volume and its backups, and the copy off the volume', () => {
     for (const command of [
@@ -163,6 +165,18 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     // why: review devops M3 and M5
     expect(flat).toContain('run the cron command of section 6 once by hand');
     expect(flat).toContain('The cron user must be in the `docker` group');
+  });
+
+  it('documents the in-process shutdown deadline beside the 90 s stale-lock takeover', () => {
+    // why: review devops M4 — the deadline (25 s) sits below compose's 30 s grace period
+    const seconds = SHUTDOWN_DEADLINE_MS / 1000;
+    const section9 = between(setup, '## 9.', '## 10.').replace(/\s+/g, ' ');
+    expect(section9).toContain(`${seconds} seconds`);
+    expect(section9).toContain('shutdown timed out');
+    expect(section9).toContain('exits 1');
+    expect(section9).toContain('taking over a stale app_lock');
+    expect(composeText).toContain('stop_grace_period: 30s');
+    expect(SHUTDOWN_DEADLINE_MS).toBeLessThan(30_000);
   });
 
   it('leaves the smoke test to WP13 (decision 63)', () => {
