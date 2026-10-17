@@ -50,6 +50,9 @@ const observations = (h: Harness, id: string) =>
     )
     .all(id);
 
+// why: no real airport uses ZZZ, so the airport dataset cannot know it (AAA is Anaa, a real airport).
+const UNKNOWN_AIRPORT = asIata('ZZZ');
+
 describe('verification stage (spec §8.1 "verification", §6.7, §7 atomic units)', () => {
   it('persists selection with verification seeding: selected cells searched, the rest skipped:not_selected', async () => {
     const h = createHarness();
@@ -243,7 +246,7 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
   );
 
   it.each([
-    ['unknown-airport-tz', (s: RawSegment): RawSegment => ({ ...s, to: asIata('AAA') })],
+    ['unknown-airport-tz', (s: RawSegment): RawSegment => ({ ...s, to: UNKNOWN_AIRPORT })],
     ['unmappable-carrier', (s: RawSegment): RawSegment => ({ ...s, marketingCarrier: '!!' })],
   ] as const)('every offer failing with %s → error with that reason', async (reason, seg) => {
     const { h, e } = await run({
