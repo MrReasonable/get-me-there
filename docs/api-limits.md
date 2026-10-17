@@ -45,8 +45,11 @@ How to read it:
   600 requests a minute on this endpoint; the app defaults to 200.
 - `EXECUTION_MAX_FREE_CALLS` (default 2000), `SOFT_CONFIRM_PENCE` (100) and
   `CHILD_MAX_CALLS` (6) are not plan-dependent and are not in the table.
-- A billed provider enabled under a spend cap of 0 makes boot log a warning, and the Providers
-  page says verification will not run.
+- A billed provider whose calls cost money, enabled under a spend cap of 0, makes boot log a
+  warning, and the Providers page says verification will not run. On the `trial` and `40usd`
+  plans calls cost £0 at the margin, so the spend cap cannot stop a call: the Providers page
+  names the call cap that does, and that call cap is the only stop. A `MONTHLY_SPEND_CAP_PENCE`
+  below the subscription fees it counts makes boot log a warning naming the variable.
 - `docs/scheduling.md` turns these caps into calls a run and a month for the worked example.
 
 ## Budget windows

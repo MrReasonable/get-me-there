@@ -202,6 +202,28 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
     },
   );
 
+  it.each([
+    ['3000p, below the £32 fee', '3000', true],
+    ['3500p, the default', '3500', false],
+  ] as const)(
+    'a spend cap of %s on the 40usd plan: boot warns naming MONTHLY_SPEND_CAP_PENCE only when below the fees (cost-006)',
+    async (_l, cap, warns) => {
+      const lines: string[] = [];
+      const running = await bootApp({
+        config: loadConfigFromEnv(
+          envFor({ SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd', MONTHLY_SPEND_CAP_PENCE: cap }),
+        ),
+        log: createLogger({ logLevel: 'info' }, { destination: captureLines(lines) }),
+        listen: false,
+        assets: assetPaths(),
+      });
+      await running.close();
+      const warning = lines.find((l) => l.includes(API_TEXT.spendCapBelowFees(Number(cap), 3200)));
+      expect(warning !== undefined).toBe(warns);
+      if (warns) expect(warning).toContain('MONTHLY_SPEND_CAP_PENCE');
+    },
+  );
+
   it('a password shorter than 12 characters fails boot naming the variable', () => {
     expect(() => loadConfigFromEnv(envFor({ APP_BASIC_AUTH_PASS: 'elevenchars' }))).toThrow(
       /APP_BASIC_AUTH_PASS/,

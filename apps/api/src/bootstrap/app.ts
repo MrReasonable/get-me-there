@@ -121,6 +121,15 @@ export function logProvidersConfigured(ports: Pick<Ports, 'config' | 'providers'
   );
   const blocked = ports.providers.filter((p) => zeroCapBlocks(config, p.id)).map((p) => p.id);
   if (blocked.length > 0) log.warn({ providers: blocked }, API_TEXT.zeroCapBootWarning);
+  // why: cost-006: the same fee sum budgetFit and GET /budget use (the guard's own entries), against the global cap.
+  const fees = ports.providers
+    .map((p) => providerBudget(config, p.id))
+    .reduce((a, b) => a + (b.billable ? b.planFixedMicroGbp : 0), 0);
+  if (fees > 0 && config.spend.monthlyCapMicroGbp < fees)
+    log.warn(
+      { field: 'MONTHLY_SPEND_CAP_PENCE' },
+      API_TEXT.spendCapBelowFees(microGbpToPence(config.spend.monthlyCapMicroGbp), microGbpToPence(fees)),
+    );
 }
 
 function listen(app: Hono<AppEnv>, config: Config): Promise<{ server: ServerType; port: number }> {
