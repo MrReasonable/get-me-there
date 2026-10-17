@@ -15,6 +15,9 @@ import {
   evaluateAlertRules,
   type Firing,
   hoursSince,
+  type IsoDateTime,
+  identityKey,
+  isoDateTimeOfEpochMs,
   type Notifier,
   type ResultBasis,
 } from '@gmt/core';
@@ -22,7 +25,7 @@ import { LogNotifier } from '../notifiers/log.js';
 import type { AlertsPass } from '../types.js';
 import type { AlertRunContext, AlertRunnerDeps } from './context.js';
 import { cellOf, type FiringMarks, marksFor, rowKeyOf } from './marks.js';
-import { calendarPool, type Pool, rowRef, verifiedPool } from './pools.js';
+import { calendarPool, type Pool, rowRef, rowRefOf, verifiedPool } from './pools.js';
 import { cellLine, renderBody, renderSubject } from './templates.js';
 
 export type { AlertRunnerDeps } from './context.js';
@@ -33,6 +36,7 @@ export interface AlertRunResult {
 }
 
 const NONE: AlertRunResult = { digests: 0, events: 0 };
+const HOUR_MS = 3_600_000;
 
 /**
  * Runs every enabled rule of the execution's definition once. Never rejects (spec §8.1: alerts never block completion).
@@ -92,6 +96,11 @@ export async function runAlerts(
   }
 }
 
+/** An instant `hours` before `at`. */
+function hoursBefore(at: IsoDateTime, hours: number): IsoDateTime {
+  return isoDateTimeOfEpochMs(Date.parse(at) - hours * HOUR_MS);
+}
+
 /** The event row (insert form) of one firing; the payload is core's alertEventPayloadSchema shape (decision 56). */
 function eventRow(
   ctx: AlertRunContext,
@@ -142,18 +151,49 @@ function eventRow(
 }
 
 async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promise<AlertRunResult> {
-  // why: no prior firings and no earlier pass until Task 11.5.
-  const firings = evaluateAlertRules([rule], pool.candidates, [], {
+  // why: decisions 25, 56 — a row an earlier pass of this execution notified or suppressed is never judged again; one it
+  // left queued (its send failed) is judged again and sent with this digest, reusing its event row.
+  const earlier = ctx.deps.repos.alerts.eventsForExecution(rule.id, ctx.executionId);
+  const done = new Set<string>();
+  const queued = new Map<string, number>();
+  for (const e of earlier) {
+    if (e.status === 'queued') queued.set(rowRefOf(e), e.id);
+    else done.add(rowRefOf(e));
+  }
+  const candidates = pool.candidates.filter((c) => !done.has(rowRef(c)));
+  if (candidates.length === 0) return NONE;
+  // why: spec §6.8 suppression looks back cooldownHours over this rule's notified firings for these identities.
+  const prior = ctx.deps.repos.alerts.priorFirings(
+    rule.id,
+    [...new Set(candidates.map((c) => identityKey(rule, c)))],
+    hoursBefore(ctx.now, rule.cooldownHours),
+  );
+  const firings = evaluateAlertRules([rule], candidates, prior, {
     now: ctx.now,
     executionId: ctx.executionId,
     cabin: ctx.snapshot.cabin,
     discoveryRefreshHours: ctx.snapshot.providers.discoveryRefreshHours,
   });
   const marks = marksFor(ctx, firings, pool);
+  // why: plan pin — evaluateAlertRules returns suppressed firings too; the runner records them and the digest omits them.
+  const suppressed = firings.filter((f) => f.suppressed !== null);
   const sendable = firings.filter((f) => f.suppressed === null);
+  ctx.deps.db.transaction(() => {
+    for (const f of suppressed) {
+      const id = queued.get(rowRef(f.candidate));
+      if (id === undefined)
+        ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, pool, marks, 'suppressed', null));
+      else
+        ctx.deps.repos.alerts.updateEvents([id], {
+          status: 'suppressed',
+          reason: f.suppressed?.reason ?? null,
+        });
+    }
+  });
   // why: plan decision 10 — "new" listings alone are not a digest.
-  if (!sendable.some((f) => !f.isNew)) return NONE;
-  return deliver(ctx, rule, { firings, sendable, pool, marks });
+  if (!sendable.some((f) => !f.isNew)) return { digests: 0, events: suppressed.length };
+  const delivered = await deliver(ctx, rule, { firings, sendable, pool, marks, queued });
+  return { digests: delivered.digests, events: delivered.events + suppressed.length };
 }
 
 /** "itinerary-searched K of N cells, E outbounds each" for this execution; null without a verification provider. */
@@ -171,6 +211,13 @@ function coverageFor(
   return { itinerarySearched: searched.size, selected, expandTop: ctx.snapshot.verification.expandTop };
 }
 
+/** Decision 59: why an event stays queued, and whether a later pass of this execution will send it. */
+function retryText(ctx: AlertRunContext): string {
+  return ctx.pass.stop === 'budget'
+    ? 'sent again when this run resumes'
+    : 'not retried unless this run is resumed';
+}
+
 /**
  * Spec §8.1 order, decisions 56 and 59: persist the firings as `queued` events (one transaction), send the digest, then
  * move each event on:
@@ -178,8 +225,8 @@ function coverageFor(
  *   id (a retried row no longer reads as failed);
  * - only the log notifier exists (no SMTP configured) → `suppressed`, "email not configured", which the cooldown never
  *   counts;
- * - a notifier refused or threw (including the hourly ceiling) → still `queued`, the failure in its reason (Task 11.5
- *   adds the retry and says in the reason whether one will come).
+ * - a notifier refused or threw (including the hourly ceiling) → still `queued`, the failure and the retry outlook in
+ *   its reason.
  * Every emailed item has an event, "new" listings included (PA-5).
  */
 async function deliver(
@@ -190,6 +237,7 @@ async function deliver(
     sendable: Firing[];
     pool: Pool;
     marks: ReadonlyMap<string, FiringMarks>;
+    queued: ReadonlyMap<string, number>;
   },
 ): Promise<AlertRunResult> {
   const digest = buildDigest(rule, run.firings, {
@@ -201,8 +249,10 @@ async function deliver(
   if (digest === null || first === undefined) return NONE;
   const digestId = randomUUID();
   const ids = ctx.deps.db.transaction(() =>
-    run.sendable.map((f) =>
-      ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, run.pool, run.marks, 'queued', digestId)),
+    run.sendable.map(
+      (f) =>
+        run.queued.get(rowRef(f.candidate)) ??
+        ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, run.pool, run.marks, 'queued', digestId)),
     ),
   );
   const body = renderBody({
@@ -224,7 +274,7 @@ async function deliver(
     if (outcome.status === 'failed')
       ctx.deps.repos.alerts.updateEvents([id], {
         status: 'queued',
-        reason: `${f.reason}; not delivered: ${outcome.detail}`,
+        reason: `${f.reason}; not delivered: ${outcome.detail}; ${retryText(ctx)}`,
       });
     else if (!emailed)
       ctx.deps.repos.alerts.updateEvents([id], {
