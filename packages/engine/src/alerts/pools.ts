@@ -11,10 +11,12 @@ import {
   isoDateTimeOfEpochMs,
   type Observation,
   type Provenance,
+  type ProviderId,
   type ResultBasis,
   unverifiedNames,
   type VerifiedCandidate,
   verdictClass,
+  withAssumedBound,
 } from '@gmt/core';
 import type { AlertRunContext } from './context.js';
 
@@ -72,6 +74,7 @@ function refuseSynthetic<T extends { provenance: Provenance }>(
  */
 export function calendarPool(ctx: AlertRunContext): Pool {
   const previous = new Map<string, PreviousPrice>();
+  const infoOf = (id: ProviderId) => ctx.deps.providers.find((p) => p.id === id)?.discovery?.info;
   const rows = refuseSynthetic(ctx, 'calendar', ctx.deps.repos.calendarPrices.fetchedBy(ctx.executionId));
   const candidates = rows
     .filter((r) => r.cabin === ctx.snapshot.cabin)
@@ -89,12 +92,16 @@ export function calendarPool(ctx: AlertRunContext): Pool {
         calendarPriceId: r.id,
         fetchedByExecutionId: r.executionId,
         pricePence: r.pricePence,
-        provenance: r.provenance,
+        // why: N4 (pie-007): the email and the event payload label an assumed bound "assumed", as the views do.
+        provenance: withAssumedBound(r.provenance, infoOf(r.providerId)),
         cell: { ...r.cell, nights: daysBetween(r.cell.departureDate, r.cell.returnDate) },
         previous: prev === null ? null : { pricePence: prev.pricePence, fetchedAt: prev.fetchedAt },
       };
       if (prev !== null)
-        previous.set(rowRef(c), { pricePence: prev.pricePence, provenance: prev.provenance });
+        previous.set(rowRef(c), {
+          pricePence: prev.pricePence,
+          provenance: withAssumedBound(prev.provenance, infoOf(r.providerId)),
+        });
       return c;
     });
   return { candidates, previous, unconfirmed: 0 };

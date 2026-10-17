@@ -48,6 +48,30 @@ async function world() {
 }
 
 describe('history routes (spec §10, §7)', () => {
+  it('route history marks a calendar point whose bound its provider assumes (N4, pie-007)', async () => {
+    const { x } = await world();
+    const points = async () =>
+      (
+        await expectContract(
+          await x.request('/api/routes/LHR/JFK/history'),
+          'GET',
+          '/api/routes/:origin/:destination/history',
+          ROUTE,
+        )
+      ).calendarSeries.flatMap((c) => c.points.map((p) => p.provenance.maxAgeAssumed));
+    expect(await points()).toEqual([undefined, undefined]);
+    x.ports.providers.splice(
+      0,
+      x.ports.providers.length,
+      ...x.ports.providers.map((p) =>
+        p.discovery === undefined
+          ? p
+          : { ...p, discovery: { ...p.discovery, info: { ...p.discovery.info, maxAgeAssumed: true } } },
+      ),
+    );
+    expect(await points()).toEqual([true, true]);
+  });
+
   it('itinerary history: one series per provider, seller and cabin, points in time order with provenance, stale and confirmation', async () => {
     const { x, s } = await world();
     const body = await expectContract(

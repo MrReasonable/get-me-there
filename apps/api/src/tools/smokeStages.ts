@@ -19,6 +19,7 @@ import {
   priceInGbp,
   type RawOffer,
   type TilePlan,
+  withAssumedBound,
 } from '@gmt/core';
 import { safeMessage } from '../safeMessage.js';
 import type { Ports } from '../wiring.js';
@@ -76,7 +77,11 @@ function describeFailure(e: unknown, ports: Ports): string | null {
 /** A vendor amount in pence with the provenance the adapter declares (spec §3), or why it cannot be shown. */
 function priceOf(
   provider: FlightProvider,
-  info: { sourceKind: Provenance['sourceKind']; maxAgeHours: Provenance['maxAgeHours'] },
+  info: {
+    sourceKind: Provenance['sourceKind'];
+    maxAgeHours: Provenance['maxAgeHours'];
+    maxAgeAssumed?: boolean | undefined;
+  },
   p: { amountMinor: number; currency: string; providerObservedAt?: IsoDateTime } & CellKey,
   fetchedAt: IsoDateTime,
   pointOfSale: string,
@@ -112,16 +117,20 @@ function priceOf(
     confirmed: extra.confirmed,
     truncated: extra.truncated,
     journey: extra.journey ?? null,
-    provenance: {
-      providerId: provider.id,
-      sourceKind: info.sourceKind,
-      fetchedAt,
-      ...(p.providerObservedAt === undefined ? {} : { providerObservedAt: p.providerObservedAt }),
-      maxAgeHours: info.maxAgeHours,
-      fx: money.fx,
-      pointOfSale,
-      cabin: SMOKE_CABIN,
-    },
+    // why: N4 (pie-007): the smoke prints the age line the views print, so an assumed bound reads "assumed" here too.
+    provenance: withAssumedBound(
+      {
+        providerId: provider.id,
+        sourceKind: info.sourceKind,
+        fetchedAt,
+        ...(p.providerObservedAt === undefined ? {} : { providerObservedAt: p.providerObservedAt }),
+        maxAgeHours: info.maxAgeHours,
+        fx: money.fx,
+        pointOfSale,
+        cabin: SMOKE_CABIN,
+      },
+      info,
+    ),
   };
 }
 

@@ -69,6 +69,10 @@ describe('PriceCell face (phone day cell)', () => {
     ['observed', { ...provCalendar, providerObservedAt: '2026-10-01T15:00:00.000Z' }],
     ['bounded', provCalendar],
     ['unknown', { ...provSearch, maxAgeHours: 'unknown' as const }],
+    [
+      'assumed',
+      { ...provCalendar, providerId: 'searchapi' as const, maxAgeHours: 24, maxAgeAssumed: true as const },
+    ],
   ])(
     'a %s age fits the 375 px day column: every visible word is at most 7 characters (about 45 px)',
     (_k, prov) => {
@@ -83,6 +87,22 @@ describe('PriceCell face (phone day cell)', () => {
       expect(within(cell).getByTestId('face-age').className).toContain('text-[10px]');
     },
   );
+
+  it('an assumed SearchApi calendar bound reads "assumed ≤…", never a plain "≤", on the face and in the title (N4)', () => {
+    const prov = {
+      ...provCalendar,
+      providerId: 'searchapi' as const,
+      maxAgeHours: 24,
+      maxAgeAssumed: true as const,
+    };
+    const { getByTestId } = renderWithProviders(
+      <PriceCell face pricePence={30000} provenance={prov} calendar stale={false} />,
+    );
+    const cell = getByTestId('price-cell');
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent('assumed ≤26h');
+    expect(cell.getAttribute('title')).toContain('provider age assumed ≤24h (undocumented)');
+    expect(cell.getAttribute('title')).not.toContain('provider age unknown (≤');
+  });
 
   it('the full form badges a superseded calendar price after "stale" (decision 54)', () => {
     const { getByTestId } = renderWithProviders(

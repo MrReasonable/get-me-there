@@ -116,6 +116,10 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
     expect(lineOf(r, 'travelpayouts discovery: priced')).toContain(
       'cheapest £412 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Aviasales cache · fetched just now · observed 10d ago',
     );
+    // why: N4 (pie-007): SearchApi's date grid states no cache age; the app's 24 h bound reads as assumed
+    expect(lineOf(r, 'searchapi discovery: priced')).toContain(
+      'fetched just now · provider age assumed ≤24h (undocumented) before that',
+    );
     // why: pie-002: the line also says how many priced rows had no readable itinerary, so the guard's gaps are visible.
     expect(r.lines).toContain(
       '  [look] open-jaw drop: 1 open-jaw row(s) dropped in 1 cell(s) (2027-03-03–2027-03-15); 1 row(s) dropped in all; 0 priced row(s) whose link names no readable itinerary',

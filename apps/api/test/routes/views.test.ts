@@ -307,6 +307,39 @@ describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () =>
   });
 });
 
+describe('an assumed calendar bound reaches every price as such (N4, pie-007)', () => {
+  it('a calendar price from a provider whose bound is assumed carries maxAgeAssumed; a stated bound does not', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [C1]);
+    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
+    const calendar = async () =>
+      (
+        await get(
+          x,
+          `/api/definitions/${def.id}/calendar`,
+          '/api/definitions/:id/calendar',
+          apiContract.calendarResponseSchema,
+        )
+      ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
+    expect(await calendar()).not.toHaveProperty('maxAgeAssumed');
+    // why: SearchApi's date grid states no cache age; the app assumes 24 h and its capability says so (pie-007)
+    x.ports.providers.splice(
+      0,
+      x.ports.providers.length,
+      ...x.ports.providers.map((p) =>
+        p.discovery === undefined
+          ? p
+          : { ...p, discovery: { ...p.discovery, info: { ...p.discovery.info, maxAgeAssumed: true } } },
+      ),
+    );
+    expect(await calendar()).toMatchObject({ maxAgeHours: 24, maxAgeAssumed: true });
+  });
+});
+
 describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 shapes)', () => {
   it('a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one', async () => {
     const x = await createHarness();

@@ -7,6 +7,7 @@ import {
   isStale,
   type ProviderId,
   type SearchDefinition,
+  withAssumedBound,
 } from '@gmt/core';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -97,11 +98,14 @@ export function routeHistory(
         s.providerId,
         refreshFor(defs, origin, destination, s.providerId),
       );
+      // why: N4 (pie-007): an assumed bound is labelled "assumed" here as on every other view.
+      const info = ports.providers.find((x) => x.id === s.providerId)?.discovery?.info;
       return {
         providerId: s.providerId,
         cabin,
         points: s.points.map((p) => ({
           ...p,
+          provenance: withAssumedBound(p.provenance, info),
           stale: staleness(p.provenance, threshold, now).stale,
           truncated: truncated({
             executionId: p.executionId,

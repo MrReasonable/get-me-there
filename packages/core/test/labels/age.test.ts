@@ -9,6 +9,7 @@ import {
   formatDuration,
   hoursSince,
   isStale,
+  withAssumedBound,
   worstCaseAgeHours,
 } from '../../src/labels/age.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
@@ -113,6 +114,45 @@ describe('formatAgeShort: the face form of the calendar day and the phone (rulin
   });
   it('is on the barrel', () => {
     expect(barrel.formatAgeShort).toBe(formatAgeShort);
+  });
+});
+
+describe('an assumed bound reads as an assumption on every form (N4, pie-007)', () => {
+  const p = {
+    fetchedAt: asIsoDateTime('2026-10-14T13:00:00.000Z'),
+    maxAgeHours: 24,
+    maxAgeAssumed: true as const,
+  };
+  it('effectiveAge carries the flag; a stated bound has none', () => {
+    expect(effectiveAge(p, now)).toEqual({
+      kind: 'bounded',
+      fetchedHours: 2,
+      maxAgeHours: 24,
+      assumed: true,
+    });
+    expect(effectiveAge({ fetchedAt: p.fetchedAt, maxAgeHours: 48 }, now)).toEqual({
+      kind: 'bounded',
+      fetchedHours: 2,
+      maxAgeHours: 48,
+    });
+  });
+  it('withAssumedBound marks a positive numeric bound from a provider whose bound is assumed, and nothing else', () => {
+    const base = { fetchedAt: p.fetchedAt, maxAgeHours: 24 } as const;
+    expect(withAssumedBound(base, { maxAgeAssumed: true })).toEqual({ ...base, maxAgeAssumed: true });
+    expect(withAssumedBound(base, { maxAgeAssumed: false })).toBe(base);
+    expect(withAssumedBound(base, undefined)).toBe(base);
+    const unknown = { fetchedAt: p.fetchedAt, maxAgeHours: 'unknown' } as const;
+    expect(withAssumedBound(unknown, { maxAgeAssumed: true })).toBe(unknown);
+    const zero = { fetchedAt: p.fetchedAt, maxAgeHours: 0 } as const;
+    expect(withAssumedBound(zero, { maxAgeAssumed: true })).toBe(zero);
+    expect(barrel.withAssumedBound).toBe(withAssumedBound);
+  });
+  it('short, compact and full forms say "assumed", never a plain "≤"', () => {
+    const a = effectiveAge(p, now);
+    expect(formatAgeShort(a)).toBe('assumed ≤26h');
+    expect(formatAgeCompact(a)).toBe('2h ago · assumed ≤24h');
+    expect(formatAgeFull(a)).toBe('fetched 2h ago · provider age assumed ≤24h (undocumented) before that');
+    for (const w of formatAgeShort(a).split(' ')) expect(w.length).toBeLessThanOrEqual(7); // the 45 px phone column
   });
 });
 
