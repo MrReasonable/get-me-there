@@ -610,6 +610,8 @@ describe('GET /definitions/:id/results with more executions than any fixed cap',
     for (let i = 0; i < 520; i++)
       s.execution(`N${i}`, { def, status: 'completed', startedAt: at(-1), finishedAt: at(-1) });
     const all = await results(x, def.id);
+    // why: PR #3 review — every run is listed, so a cap anywhere below the count fails here, not only one that drops E1
+    expect(all.executions).toHaveLength(521);
     expect(all.rows.map((row) => row.itineraryHash)).toEqual(['hV', 'hP', 'hF']);
     const oldest = await results(x, def.id, `?executionId=${s.id('E1')}`);
     expect(oldest.rows.map((row) => row.itineraryHash)).toEqual(['hV', 'hP', 'hF']);
