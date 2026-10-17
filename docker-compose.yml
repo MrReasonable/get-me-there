@@ -1,0 +1,119 @@
+# get-me-there: one app container, one SQLite file on a named volume. Spec §13.
+#
+# Configuration: write your values in .env next to this file (gitignored; see docs/setup.md). Compose
+# reads .env for ${...} interpolation only; the container receives exactly the names listed under
+# `environment:` below. That list is the allowlist of spec §5.5 and §13: NODE_ENV and IN_CONTAINER come
+# from the Dockerfile, and ALLOW_FIXTURE_PROVIDER and FIXTURE_COST_MICRO_GBP are never passed. Do not
+# add `env_file:`, which would forward every line of .env and defeat the allowlist.
+#
+# Basic auth is always on here: ALLOW_UNAUTHENTICATED is not forwarded (plan decision 63). A host reachable only
+# over Tailscale may turn it off with the override file shown in docs/setup.md section 3, never by editing this file.
+# DATABASE_PATH, PORT and BIND_ADDRESS are fixed below because the image layout and the published port depend on
+# them; to use another host port, change the left side of `ports:` and keep 127.0.0.1.
+#
+# One app per volume: a second app started on the same database waits up to 90 s and exits 75 while
+# this one is alive (plan decision 53). Tools and backups run inside this container as its user,
+# `node` (`docker compose exec app …`, never `--user root`; plan decision 26).
+name: get-me-there
+
+services:
+  app:
+    build: .
+    image: get-me-there:local
+    # why: tini as PID 1 forwards SIGTERM so the app checkpoints WAL and releases app_lock (spec §7).
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # why: the app writes only /data (the volume) and temporary files; nothing else needs to change at run time,
+    # and a non-root process needs no capability (review sec-003).
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - gmt-data:/data
+    environment:
+      # --- fixed by the image layout and the published port ---
+      DATABASE_PATH: "/data/get-me-there.db"
+      PORT: "3000"
+      BIND_ADDRESS: "0.0.0.0"
+      # --- core ---
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-}"
+      APP_BASE_URL: "${APP_BASE_URL:-}"
+      APP_BASIC_AUTH_USER: "${APP_BASIC_AUTH_USER:-}"
+      APP_BASIC_AUTH_PASS: "${APP_BASIC_AUTH_PASS:-}"
+      TRUST_PROXY: "${TRUST_PROXY:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-}"
+      POINT_OF_SALE: "${POINT_OF_SALE:-}"
+      STALE_AFTER_HOURS: "${STALE_AFTER_HOURS:-}"
+      CALENDAR_STALE_AFTER_HOURS: "${CALENDAR_STALE_AFTER_HOURS:-}"
+      STUCK_AFTER_HOURS: "${STUCK_AFTER_HOURS:-}"
+      MAX_CELLS_PER_DEFINITION: "${MAX_CELLS_PER_DEFINITION:-}"
+      SCHEDULER_TIMEZONE: "${SCHEDULER_TIMEZONE:-}"
+      AUTO_RESUME: "${AUTO_RESUME:-}"
+      MAX_AUTO_RESUMES: "${MAX_AUTO_RESUMES:-}"
+      MAX_WAIT_SECONDS: "${MAX_WAIT_SECONDS:-}"
+      REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-}"
+      ESTIMATE_RETRY_FACTOR: "${ESTIMATE_RETRY_FACTOR:-}"
+      FX_MAX_RATE_AGE_DAYS: "${FX_MAX_RATE_AGE_DAYS:-}"
+      # --- spend ---
+      MONTHLY_SPEND_CAP_PENCE: "${MONTHLY_SPEND_CAP_PENCE:-}"
+      GLOBAL_BILLING_DAY: "${GLOBAL_BILLING_DAY:-}"
+      SOFT_CONFIRM_PENCE: "${SOFT_CONFIRM_PENCE:-}"
+      EXECUTION_MAX_CALLS: "${EXECUTION_MAX_CALLS:-}"
+      EXECUTION_MAX_FREE_CALLS: "${EXECUTION_MAX_FREE_CALLS:-}"
+      EXECUTION_MAX_COST_PENCE: "${EXECUTION_MAX_COST_PENCE:-}"
+      CHILD_MAX_CALLS: "${CHILD_MAX_CALLS:-}"
+      # --- travelpayouts ---
+      TRAVELPAYOUTS_TOKEN: "${TRAVELPAYOUTS_TOKEN:-}"
+      TRAVELPAYOUTS_BILLING_DAY: "${TRAVELPAYOUTS_BILLING_DAY:-}"
+      TRAVELPAYOUTS_MONTHLY_CALL_CAP: "${TRAVELPAYOUTS_MONTHLY_CALL_CAP:-}"
+      TRAVELPAYOUTS_RATE_PER_MINUTE: "${TRAVELPAYOUTS_RATE_PER_MINUTE:-}"
+      TRAVELPAYOUTS_RATE_PER_HOUR: "${TRAVELPAYOUTS_RATE_PER_HOUR:-}"
+      TRAVELPAYOUTS_CONCURRENCY: "${TRAVELPAYOUTS_CONCURRENCY:-}"
+      TRAVELPAYOUTS_CACHE_TTL_HOURS: "${TRAVELPAYOUTS_CACHE_TTL_HOURS:-}"
+      # --- searchapi ---
+      SEARCHAPI_KEY: "${SEARCHAPI_KEY:-}"
+      SEARCHAPI_PLAN: "${SEARCHAPI_PLAN:-}"
+      SEARCHAPI_BILLING_DAY: "${SEARCHAPI_BILLING_DAY:-}"
+      SEARCHAPI_CACHE_TTL_HOURS: "${SEARCHAPI_CACHE_TTL_HOURS:-}"
+      SEARCHAPI_TRIAL_USED: "${SEARCHAPI_TRIAL_USED:-}"
+      SEARCHAPI_MONTHLY_CALL_CAP: "${SEARCHAPI_MONTHLY_CALL_CAP:-}"
+      SEARCHAPI_RATE_PER_MINUTE: "${SEARCHAPI_RATE_PER_MINUTE:-}"
+      SEARCHAPI_RATE_PER_HOUR: "${SEARCHAPI_RATE_PER_HOUR:-}"
+      SEARCHAPI_CONCURRENCY: "${SEARCHAPI_CONCURRENCY:-}"
+      SEARCHAPI_COST_PER_CALL_MICRO_GBP: "${SEARCHAPI_COST_PER_CALL_MICRO_GBP:-}"
+      SEARCHAPI_PLAN_FIXED_PENCE: "${SEARCHAPI_PLAN_FIXED_PENCE:-}"
+      # --- email (all or nothing) ---
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-}"
+      SMTP_TLS: "${SMTP_TLS:-}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      ALERT_EMAIL_TO: "${ALERT_EMAIL_TO:-}"
+      ALERT_EMAIL_FROM: "${ALERT_EMAIL_FROM:-}"
+      ALERT_EMAIL_MAX_PER_HOUR: "${ALERT_EMAIL_MAX_PER_HOUR:-}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Local mail catcher for host-side development only: `docker compose --profile dev up -d mailpit`.
+  # why: spec §13: it serves the host-side `pnpm dev` process (SMTP_HOST=127.0.0.1, SMTP_PORT=1025,
+  # SMTP_TLS=none). The app container runs with NODE_ENV=production, under which config accepts SMTP_TLS=none
+  # only for a loopback host, so it always uses real SMTP and does not depend on this service.
+  mailpit:
+    image: axllent/mailpit@sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea
+    profiles: ["dev"]
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+volumes:
+  gmt-data: {}
