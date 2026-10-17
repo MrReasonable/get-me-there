@@ -63,7 +63,11 @@ export function App() {
         <header className="flex flex-wrap items-center gap-4 border-b border-slate-300 px-4 py-2">
           <h1 className="text-lg font-bold">{COPY.appTitle}</h1>
           <Nav current={view} />
-          <DefinitionSelector definitions={list} selectedId={selectedId} />
+          {/* why: only a successful load can say there are no definitions; while loading or after a failure (shown with
+          a retry in the main region) the selector waits (CodeRabbit batch 3) */}
+          {definitions.data !== undefined ? (
+            <DefinitionSelector definitions={list} selectedId={selectedId} />
+          ) : null}
         </header>
         <StatusBar definition={selected} showRunNow={view === 'results' || view === 'definitions'} />
         <main id="main" tabIndex={-1} className="px-4 py-3">
