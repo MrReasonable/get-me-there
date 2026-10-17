@@ -49,8 +49,13 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
         `INSERT INTO search_definitions (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`,
       )
       .run(initialRow);
-    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual(['0001_confirmed_calls']);
-    expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({ applied: ['0001_confirmed_calls'] });
+    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([
+      '0001_confirmed_calls',
+      '0002_alert_event_lifecycle',
+    ]);
+    expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
+      applied: ['0001_confirmed_calls', '0002_alert_event_lifecycle'],
+    });
     expect(new DefinitionsRepo(db, fixedClock(T0)).get(created.id)).toEqual({
       ...created,
       confirmedCalls: null,
