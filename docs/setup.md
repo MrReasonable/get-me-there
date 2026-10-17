@@ -377,6 +377,13 @@ pnpm record:fixtures --budget 12 --route LHR,LGW:JFK,EWR --month 2027-03
 
 Recording spends SearchApi credits up to `--budget` (choose a month inside the next year).
 
+Because the recordings never enter git, the test suites that replay them (the SearchApi and
+Travelpayouts replays, the parameter allowlists against the recording, the engine's layer B and
+the worked-example manifest) skip in CI and say so by title. They run in full only on a machine
+that holds the recordings, so that local `pnpm -r --workspace-concurrency=1 test` is the gate
+for any change to a provider adapter or the engine: run it before merging such a change
+(plan decision 67, ruling 12).
+
 ## 9. One app per database, one user for every process
 
 - **One app.** The app holds a lock in the database and renews it every 30 seconds. A second

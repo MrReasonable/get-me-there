@@ -10,7 +10,7 @@ import { EXIT } from '../../src/tools/types.js';
 import { between, REPO, read } from './files.js';
 
 /** Operator-facing docs, held to the spec §11 word list and to the worked example. */
-const OPERATOR_DOCS = ['api-limits.md', 'scheduling.md', 'setup.md'];
+const OPERATOR_DOCS = ['api-limits.md', 'release-notes.md', 'scheduling.md', 'setup.md'];
 /** Research notes that quote vendor terminology verbatim; not operator-facing text. */
 const RESEARCH_NOTES = ['providers.md'];
 /** The worked example's airports and their metro codes: the only places the docs may name (spec §1). */
