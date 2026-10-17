@@ -17,8 +17,10 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
       await box.uncheck();
     await page.locator(`#${prefix}fixture`).check();
   }
-  // why: with no billed provider left the form's billed-call cap is 0, which blocks the fixture's synthetic calls, and a new
-  // definition is created disabled (spec rev 27), which refuses "Run now"; so raise the cap and enable it.
+  // why: "Import example" copies the route, window and constraints but not the budget (WP9's applyExample), so the
+  // draft keeps the form's default of 0 billed calls, and the fixture provider's synthetic calls count against that
+  // cap (the estimate says "blocked: execution-calls"); a new definition is also created disabled (spec rev 27), and
+  // the api refuses "Run now" for a disabled one (409). So the smoke sets the cap and ticks Enabled.
   await page.getByLabel(COPY.maxCalls).fill('2000');
   await page.getByLabel(COPY.enabled).check();
   // why: WP9's form offers the create click only after an estimate for the current draft.
@@ -46,7 +48,8 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
   await expect(page.getByTestId('calendar-legend')).toBeVisible();
   await expect(banner).toBeVisible();
   await expect(page.locator(SMOKE.dayTabStop)).toHaveCount(1);
-  // why: focus-visible applies to keyboard focus, so the tab stop is reached with Tab, not focus().
+  // why: focus-visible applies once the keyboard is in use: focus() puts focus on the tab stop and the arrow keys that
+  // follow switch the page to keyboard modality, so the outline is then computed as for a Tab user.
   await page.locator(SMOKE.dayTabStop).focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowLeft');
