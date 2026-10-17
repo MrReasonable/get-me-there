@@ -58,6 +58,32 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     expect([r.status, r.stderr]).toEqual([0, '']);
   });
 
+  it('a suppression inside real source named coverage (packages/core/src/coverage) still fails', () => {
+    const r = run(
+      tree({
+        'packages/core/src/coverage/x.ts': `${['// @ts', '-ignore'].join('')}\n`,
+        'packages/core/test/coverage/y.test.ts': `${['// biome', '-ignore lint/x: y'].join('')}\n`,
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'packages/core/src/coverage/x.ts has a lint or type-check suppression comment',
+    );
+    expect(r.stderr).toContain(
+      'packages/core/test/coverage/y.test.ts has a lint or type-check suppression comment',
+    );
+  });
+
+  it('a generated coverage report directly under a package root is still skipped', () => {
+    const r = run(
+      tree({
+        'packages/core/coverage/lcov-report/prettify.js': `${['// eslint', '-disable'].join('')}\n`,
+        'apps/web/coverage/block-navigation.js': `${['// @ts', '-nocheck'].join('')}\n`,
+      }),
+    );
+    expect([r.status, r.stderr]).toEqual([0, '']);
+  });
+
   it('installed and generated trees are not scanned', () => {
     const r = run(
       tree({
