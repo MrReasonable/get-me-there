@@ -153,7 +153,10 @@ describe('AppLock (spec §7 app_lock)', () => {
     expect(AppLock.inspect(a)?.holder).toBe('app');
   });
 
-  it('the production sleep waits in real time and then refuses a fresh foreign lock (the single real-time test, test-015)', () => {
+  it('the production sleep waits in real time and then refuses a fresh foreign lock (the single real-time test, test-015)', {
+    // why: uses the real clock and a blocking Atomics.wait sleep; a regression that never reaches its deadline must fail fast.
+    timeout: 2_000,
+  }, () => {
     const db = freshDb();
     new AppLock(db, 'tool', systemClock, silentLog).acquire({ waitMs: 0 });
     const started = performance.now();

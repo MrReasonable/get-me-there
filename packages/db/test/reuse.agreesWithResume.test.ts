@@ -4,6 +4,7 @@
 import { fixedClock, type ProviderId } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { MANUAL_RETRYABLE, NON_RETRYABLE, OUTCOME_STATUSES, SKIP_REASONS } from '../src/internal/enums.js';
+import { RowRejected } from '../src/internal/validate.js';
 import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
 import { CellsRepo, retriedOnResume } from '../src/repositories/cells.js';
 import { at, freshDb, T0 } from './helpers/db.js';
@@ -100,7 +101,9 @@ describe('the reuse-copy target rule agrees with retriedOnResume (plan decision 
     let accepted = true;
     try {
       cells.copyReused(target, PROVIDER, copies, criteria);
-    } catch {
+    } catch (e) {
+      // why: only the target rule's refusal means "not accepted"; any other failure is a regression this test must show.
+      if (!(e instanceof RowRejected && e.rule === 'reuse-target')) throw e;
       accepted = false;
     }
     expect(accepted).toBe(retriedOnResume({ status, reason, attempts }, true));

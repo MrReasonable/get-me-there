@@ -80,11 +80,23 @@ describe('BudgetExceeded', () => {
   });
 });
 
+describe('stripUrlsInText scheme case', () => {
+  it('strips the query of an upper- or mixed-case scheme', () => {
+    expect(stripUrlsInText('GET HTTPS://api.example.com/x?api_key=SECRET')).toBe(
+      'GET https://api.example.com/x',
+    );
+    expect(stripUrlsInText('HTTPS://u:p@api.example.com/x?api_key=SECRET')).toBe('https://api.example.com/x');
+    expect(stripUrlsInText('Http://localhost:8080/x?api_key=SECRET')).toBe('http://localhost:8080/x');
+  });
+});
+
 describe('NormalisationError / AbortedError', () => {
   it('construct', () => {
     const n = new NormalisationError('fx-unavailable', 'CNY 2026-10-14 https://x/?k=1');
     expect(n.reason).toBe('fx-unavailable');
     expect(n.message).toBe('fx-unavailable: CNY 2026-10-14 https://x/');
+    expect(n.detail).toBe('CNY 2026-10-14 https://x/');
+    expect(new NormalisationError('unknown-airport-tz').detail).toBeUndefined();
     expect(new NormalisationError('unknown-airport-tz').message).toBe('unknown-airport-tz');
     expect(new AbortedError().name).toBe('AbortedError');
     expect(new AbortedError('cancelled').message).toBe('cancelled');

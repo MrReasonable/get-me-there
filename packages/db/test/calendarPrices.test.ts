@@ -1,17 +1,32 @@
-import { asIata, asIsoDate, cellKeyString, fixedClock, rollUp } from '@gmt/core';
+import { asIsoDate, cellKeyString, fixedClock, rollUp } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
 import { CellsRepo } from '../src/repositories/cells.js';
+import { DefinitionsRepo } from '../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
 import { at, count, freshDb, sqliteCode, T0 } from './helpers/db.js';
-import { calendarPrice, cell, EWR, newExecution, withNights } from './helpers/factories.js';
+import {
+  calendarPrice,
+  cell,
+  EWR,
+  exampleDefinitionInput,
+  JFK,
+  LGW,
+  LHR,
+  newExecution,
+  withNights,
+} from './helpers/factories.js';
 
-function setup(allowSynthetic = false) {
+function setup(allowSynthetic = false, onlyLhrJfk = false) {
   const db = freshDb();
   const clock = fixedClock(T0);
-  const { execution } = newExecution(db, clock);
+  // why: a definition of just LHR → JFK leaves LGW and EWR as example-route airports outside the definition.
+  const definition = onlyLhrJfk
+    ? new DefinitionsRepo(db, clock).create(exampleDefinitionInput({ origins: [LHR], destinations: [JFK] }))
+    : undefined;
+  const { execution } = newExecution(db, clock, definition ? { definition } : {});
   return {
     db,
     clock,
@@ -285,14 +300,14 @@ describe('CalendarPricesRepo.insert is a prices-only tile write (spec §3, §7 a
   });
 
   it.each([
-    ['an origin outside the definition', cell(asIata('LCY'))],
-    ['a destination outside the definition', cell(undefined, asIata('BOS'))],
+    ['an origin outside the definition', cell(LGW)],
+    ['a destination outside the definition', cell(undefined, EWR)],
     ['a departure before the resolved window', cell(undefined, undefined, '2026-10-20', '2026-11-03')],
     ['a departure after the resolved window', cell(undefined, undefined, '2027-04-21', '2027-05-05')],
     ['too few nights', cell(undefined, undefined, '2027-03-14', '2027-03-23')],
     ['too many nights', cell(undefined, undefined, '2027-03-14', '2027-04-05')],
   ])('refuses a row for %s and writes nothing', (_name, c) => {
-    const { db, repo, executionId } = setup();
+    const { db, repo, executionId } = setup(false, true);
     expect(() => repo.insert(executionId, [calendarPrice(cell()), calendarPrice(c)])).toThrow(
       expect.objectContaining({ rule: 'cell-outside-definition' }),
     );

@@ -184,6 +184,14 @@ describe('planFixtureTiles (tiles partition the cells)', () => {
       returnTo: '2026-11-29',
     });
   });
+  it('refuses a cell of another pair rather than dropping it unreported', () => {
+    const first = planFixtureTiles(q).flatMap((t) => t.coveredCells)[0];
+    if (first === undefined) throw new Error('no cells');
+    const foreign = { ...first, origin: asIata('LGW') };
+    expect(() => planFixtureTiles({ ...q, cells: [first, foreign] })).toThrow(
+      /every cell must belong to the query pair/,
+    );
+  });
   it('re-plans over q.cells: fewer tiles, still a partition of exactly those cells', () => {
     const subset = planFixtureTiles(q)
       .flatMap((t) => t.coveredCells)
@@ -266,6 +274,21 @@ describe('fixture discovery through the real http-kit and msw', () => {
     expect(budget.events.filter((e) => e.type === 'cache-hit')).toEqual([
       expect.objectContaining({ providerId: 'fixture', executionId: 'exec-2', tileIndex: 0 }),
     ]);
+  });
+
+  it('a cached paged tile leaves one cache-hit row, not one per page', async () => {
+    const { discovery, budget } = setup();
+    await scenario([{ match: { path: '/calendar' }, respond: { kind: 'cacheable' } }]);
+    const paged = { ...q, origin: asIata('LGW'), destination: asIata('EWR') };
+    const plan = firstTile(paged);
+    const first = await drive(discovery.fetchTile(plan, paged, ctx()));
+    expect(first.kind).toBe('tile');
+    // why: LGW-EWR is served in pages of 40, so this tile takes more than one call; guard the premise.
+    expect(budget.count('fetch')).toBeGreaterThan(1);
+    const fetched = budget.count('fetch');
+    await drive(discovery.fetchTile(plan, paged, ctx({ executionId: 'exec-2' })));
+    expect(budget.count('fetch')).toBe(fetched); // the repeat is served wholly from the cache
+    expect(budget.count('cache-hit')).toBe(1);
   });
 
   it('returns tile-error for a ProviderError after retries, marking exactly its covered cells', async () => {

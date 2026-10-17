@@ -418,8 +418,8 @@ describe('closed round trips only (decision 35): an open-jaw row, on either end,
 
   it.each([
     ['the outbound starts elsewhere', linkOf('LGWJFK', 'JFKLHR')],
-    ['the outbound lands at another airport of the destination city', linkOf('LHRLGA', 'JFKLHR')],
-    ['the return leaves from another airport of the destination city', linkOf('LHRJFK', 'LGAJFKLHR')],
+    ['the outbound lands at another airport of the destination city', linkOf('LHREWR', 'JFKLHR')],
+    ['the return leaves from another airport of the destination city', linkOf('LHRJFK', 'EWRJFKLHR')],
     ['the return lands at another airport', linkOf('LHRJFK', 'JFKLGW')],
   ])('drops a row where %s', (_label, link) => {
     const r = attributeRows(
