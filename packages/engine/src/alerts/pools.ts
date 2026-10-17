@@ -11,6 +11,7 @@ import {
   isoDateTimeOfEpochMs,
   type Observation,
   type Provenance,
+  type ResultBasis,
   unverifiedNames,
   type VerifiedCandidate,
   verdictClass,
@@ -46,6 +47,23 @@ export function rowRef(c: AlertCandidate): string {
   });
 }
 
+/** Spec §5.5: alerts refuse synthetic rows; the fixture provider ⇔ synthetic invariant is checked both ways. */
+function isSynthetic(p: Pick<Provenance, 'providerId' | 'sourceKind'>): boolean {
+  return p.sourceKind === 'synthetic' || p.providerId === 'fixture';
+}
+
+/** Drops synthetic rows before any rule sees them and logs the count once per basis. */
+function refuseSynthetic<T extends { provenance: Provenance }>(
+  ctx: AlertRunContext,
+  basis: ResultBasis,
+  rows: T[],
+): T[] {
+  const kept = rows.filter((r) => !isSynthetic(r.provenance));
+  const refused = rows.length - kept.length;
+  if (refused > 0) ctx.log.warn({ basis, refused }, 'alerts: synthetic rows refused');
+  return kept;
+}
+
 /**
  * Calendar prices fetched by this execution (reused excluded by the repository) in the snapshot's cabin; previous =
  * the newest earlier fetch for (definition, provider, cabin, cell). Spec §6.8.
@@ -54,8 +72,8 @@ export function rowRef(c: AlertCandidate): string {
  */
 export function calendarPool(ctx: AlertRunContext): Pool {
   const previous = new Map<string, PreviousPrice>();
-  const candidates = ctx.deps.repos.calendarPrices
-    .fetchedBy(ctx.executionId)
+  const rows = refuseSynthetic(ctx, 'calendar', ctx.deps.repos.calendarPrices.fetchedBy(ctx.executionId));
+  const candidates = rows
     .filter((r) => r.cabin === ctx.snapshot.cabin)
     .map((r): CalendarCandidate => {
       const prev = ctx.deps.repos.calendarPrices.previousFor(
@@ -105,7 +123,7 @@ export function verifiedPool(ctx: AlertRunContext): Pool {
   const candidates: VerifiedCandidate[] = [];
   const previous = new Map<string, PreviousPrice>();
   let unconfirmed = 0;
-  for (const row of ctx.deps.repos.itineraries.writtenBy(ctx.executionId)) {
+  for (const row of refuseSynthetic(ctx, 'verified', ctx.deps.repos.itineraries.writtenBy(ctx.executionId))) {
     if (row.offer.cabin !== ctx.snapshot.cabin) continue;
     const verdicts = evaluateConstraints(
       row.itinerary,
