@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   addDays,
   daysBetween,
@@ -9,7 +9,7 @@ import {
   monthsSpanned,
   toEpochDay,
 } from '../../src/dates/epochDay.js';
-import { asIsoDate } from '../../src/types/ids.js';
+import { asIsoDate, type IsoDate } from '../../src/types/ids.js';
 
 const d = asIsoDate;
 // Epoch days of 0001-01-01 and 9999-12-31, the range a four-digit IsoDate can express.
@@ -47,6 +47,12 @@ describe('toEpochDay / fromEpochDay (spec §6.1: epoch-day integers, never Date-
       }),
       { numRuns: 2000 },
     );
+  });
+
+  it('the types reject a plain string where an IsoDate is wanted (the compile-time half of the guard below)', () => {
+    expectTypeOf<string>().not.toExtend<IsoDate>();
+    expectTypeOf<Parameters<typeof toEpochDay>[0]>().toEqualTypeOf<IsoDate>();
+    expectTypeOf<Parameters<typeof monthOf>[0]>().toEqualTypeOf<IsoDate>();
   });
 
   it.each(['2027-02-29', '2026-13-01', '0000-06-01', '2026-1-1', 'garbage'])(

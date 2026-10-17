@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { type AirportLookup, type ValidationResult, validateSearchSpace } from '../../src/space/validate.js';
 import { BANNED_WORD_ALLOWLIST, findBannedWords } from '../../src/text/bannedWords.js';
-import { asIsoDate, iataSchema } from '../../src/types/ids.js';
+import { asIsoDate, type Iata, iataSchema } from '../../src/types/ids.js';
 import { iatas, key } from '../helpers/space.js';
 
 const today = asIsoDate('2026-10-14');
@@ -73,6 +73,10 @@ describe('validateSearchSpace (spec §6.1, §6.7 policy bounds)', () => {
     it('accepts the upper-cased code the schema produced', () => {
       const origins = ['lhr', 'lgw'].map((c) => iataSchema.parse(c));
       expect(run({ ...base, origins }).ok).toBe(true);
+    });
+
+    it('the types reject a plain string[] where Iata[] is wanted (the compile-time half of the next test)', () => {
+      expectTypeOf<string[]>().not.toExtend<Iata[]>();
     });
 
     it('upper-cases nothing itself: a lowercase code that bypassed the schema is a format error', () => {

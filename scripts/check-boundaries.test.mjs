@@ -61,8 +61,8 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
   it('installed and generated trees are not scanned', () => {
     const r = run(
       tree({
-        'apps/web/node_modules/dep/index.js': ['// @ts', '-ignore'].join('') + '\n',
-        'apps/web/dist/assets/x.js': ['// eslint', '-disable'].join('') + '\n',
+        'apps/web/node_modules/dep/index.js': `${['// @ts', '-ignore'].join('')}\n`,
+        'apps/web/dist/assets/x.js': `${['// eslint', '-disable'].join('')}\n`,
       }),
     );
     expect([r.status, r.stderr]).toEqual([0, '']);

@@ -2,7 +2,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { openDatabase } from '../src/client.js';
 import { applyMigrations, pendingMigrations } from '../src/migrate.js';
 import { MIGRATIONS_DIR } from '../src/paths.js';
@@ -31,6 +31,15 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
     const mem = openDatabase(':memory:');
     expect(() => mem.checkpoint()).not.toThrow();
     mem.close();
+  });
+  it('the types reject an async transaction callback (the compile-time half of the guard below)', () => {
+    const db = openDatabase(':memory:');
+    const tx = () => db.transaction<Promise<number>>;
+    const immediate = () => db.immediateTransaction<Promise<number>>;
+    expectTypeOf<ReturnType<Parameters<ReturnType<typeof tx>>[0]>>().toBeNever();
+    expectTypeOf<ReturnType<Parameters<ReturnType<typeof immediate>>[0]>>().toBeNever();
+    expectTypeOf<ReturnType<Parameters<typeof db.transaction<number>>[0]>>().toEqualTypeOf<number>();
+    db.close();
   });
   it('transaction callbacks must be synchronous (better-sqlite3 commits at the first await)', () => {
     const db = openDatabase(':memory:');
