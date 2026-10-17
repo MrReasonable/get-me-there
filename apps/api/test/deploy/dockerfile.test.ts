@@ -81,6 +81,23 @@ describe('Dockerfile (spec §13, §5.5, §9 item 8)', () => {
     ]);
   });
 
+  it('installs from the manifests before the sources are copied, so a source edit keeps the install layer', () => {
+    // why: review devops M1 — `COPY . .` before `pnpm install` re-ran a full install on every source change
+    const build = stages.find((s) => s.from.endsWith(' AS build'))?.instructions ?? [];
+    const prod = stages.find((s) => s.from.endsWith(' AS prod-deps'))?.instructions ?? [];
+    const at = (list: string[], f: (i: string) => boolean) => list.findIndex(f);
+    const installAt = (list: string[]) => at(list, (i) => /pnpm install --frozen-lockfile/.test(i));
+    for (const list of [build, prod]) {
+      const manifests = at(list, (i) => i.startsWith('COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc '));
+      expect(manifests).toBeGreaterThanOrEqual(0);
+      expect(manifests).toBeLessThan(installAt(list));
+      for (const dir of ['packages/core', 'packages/db', 'packages/providers', 'packages/engine', 'apps/api', 'apps/web'])
+        expect(list.some((i) => i.startsWith(`COPY ${dir}/package.json `))).toBe(true);
+    }
+    expect(at(build, (i) => i === 'COPY . .')).toBeGreaterThan(installAt(build));
+    expect(prod).not.toContain('COPY . .');
+  });
+
   it('takes no build argument or build secret, so no credential can enter a layer', () => {
     expect(all.some((i) => /^ARG\b/.test(i) || i.includes('--mount=type=secret'))).toBe(false);
   });

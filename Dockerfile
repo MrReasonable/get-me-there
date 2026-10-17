@@ -16,11 +16,20 @@
 FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS build
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
-COPY . .
+# why: manifests first, sources after the install, so a source edit keeps the install layer (the cache mount also
+# keeps the pnpm store between builds).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/db/package.json ./packages/db/
+COPY packages/providers/package.json ./packages/providers/
+COPY packages/engine/package.json ./packages/engine/
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
 RUN corepack enable pnpm \
  && test "$(pnpm --version)" = "$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').replace(/\\+.*$/, '')")"
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --store-dir /pnpm/store
+COPY . .
 RUN node scripts/assert-sqlite-prebuilt.mjs
 RUN pnpm build
 
@@ -28,12 +37,21 @@ RUN pnpm build
 FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS prod-deps
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
-COPY . .
+# why: manifests first, sources after the install, so a source edit keeps the install layer (the cache mount also
+# keeps the pnpm store between builds).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/db/package.json ./packages/db/
+COPY packages/providers/package.json ./packages/providers/
+COPY packages/engine/package.json ./packages/engine/
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
 RUN corepack enable pnpm \
  && test "$(pnpm --version)" = "$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').replace(/\\+.*$/, '')")"
 # why: the filter keeps the SPA's React/Vite tree out of the runtime image; the SPA ships as static files.
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --filter "@gmt/api..." --store-dir /pnpm/store
+COPY scripts/assert-sqlite-prebuilt.mjs ./scripts/
 RUN node scripts/assert-sqlite-prebuilt.mjs
 
 # ---- runtime ----
