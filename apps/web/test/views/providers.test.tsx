@@ -2,6 +2,7 @@ import { formatDuration } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { COPY } from '../../src/copy.js';
 import { ProvidersView } from '../../src/views/Providers/ProvidersView.js';
 import { API, providersResponse, usage } from '../fixtures.js';
 import { server } from '../msw/server.js';
@@ -132,7 +133,13 @@ describe('Providers view (spec §10, §11)', () => {
         HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 }),
       ),
     );
-    renderWithProviders(<ProvidersView />);
+    const { user } = renderWithProviders(<ProvidersView />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load: boom');
+    // why: the retry is the operator's only way out of the error state, so it is asserted and used
+    const retry = screen.getByRole('button', { name: COPY.retryLoad });
+    server.use(http.get(`${API}/providers`, () => HttpResponse.json(providersResponse())));
+    await user.click(retry);
+    expect(await screen.findByRole('region', { name: COPY.provider.searchapi })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
