@@ -7,7 +7,16 @@ import { createRequire } from 'node:module';
 
 const requireFromApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const failures = [];
-for (const name of ['@gmt/core', '@gmt/db', '@gmt/providers', '@gmt/engine']) {
+// why: the subpath exports carry their own @gmt/source/default pairs and apps/api loads them at boot (fixture) and in
+// the tools (recording); a test keeps this list equal to what apps/api/src imports.
+for (const name of [
+  '@gmt/core',
+  '@gmt/db',
+  '@gmt/providers',
+  '@gmt/providers/fixture',
+  '@gmt/providers/recording',
+  '@gmt/engine',
+]) {
   try {
     const resolved = requireFromApi.resolve(name);
     if (!/[/\\]dist[/\\]/.test(resolved)) failures.push(`${name} resolved outside dist: ${resolved}`);
