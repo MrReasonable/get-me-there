@@ -525,7 +525,11 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   scrubbed of credentials; token-bearing SearchApi step responses never
   cached; TTLs from config.
 - **Egress**: hostname allowlist per provider; `redirect: 'error'`; a test
-  proves a 302 elsewhere sends no credentials.
+  proves a 302 elsewhere sends no credentials. Every credential travels in a
+  header, so http-kit refuses a query parameter named like one (`api_key`,
+  `key`, `token`, `access_token`, `password`, `secret` and the like) whatever
+  its value, before the ledger or the network; SearchApi's `departure_token`
+  and `booking_token` are itinerary tokens, not credentials.
 - **Secret scrubbing**, one rule for every sink: `provider_requests.endpoint_path`
   is the path only (no query); cache keys exclude credentials and cache
   bodies are scrubbed of credentials before storage; `ProviderError.message`

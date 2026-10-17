@@ -39,6 +39,40 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
   it('refuses a credential in the query, keeping it out of the message', async () => {
     expect((await refused({ url: `${SEARCH}?api_key=${key}` })).message).not.toContain(key);
   });
+  // why: CodeRabbit batch 3 — the value check knows only configured secrets, so an unconfigured key in a credential
+  // parameter (?api_key=…) passed, reached fetch and could be recorded; credential names are refused by name
+  it.each([
+    'api_key',
+    'API_KEY',
+    'apikey',
+    'api-key',
+    'key',
+    'token',
+    'access_token',
+    'auth',
+    'auth_token',
+    'password',
+    'secret',
+    'client_secret',
+    'x-access-token',
+  ])(
+    'refuses the credential query parameter %s whatever its value, naming the parameter only',
+    async (name) => {
+      const err = await refused({
+        url: `${SEARCH}?engine=google_flights&${name}=not-a-configured-secret-9f`,
+      });
+      expect(err.message).toContain(`credential query parameter ${name.toLowerCase()}`);
+      expect(err.message).not.toContain('not-a-configured-secret-9f');
+    },
+  );
+  it('allows the itinerary-token parameters SearchApi steps 2 and 3 send', async () => {
+    const { kit } = makeKit();
+    server.use(http.get(SEARCH, () => HttpResponse.json({ ok: true })));
+    for (const name of ['departure_token', 'booking_token'])
+      expect(
+        (await drive(kit.request(req({ url: `${SEARCH}?engine=google_flights&${name}=WyJDalJJ` })))).body,
+      ).toEqual({ ok: true });
+  });
   it('refuses a credential smuggled into a hostname without echoing it (sec-005)', async () => {
     expect((await refused({ url: `https://${key}.evil.example/api/v1/search` })).message).not.toContain(key);
   });

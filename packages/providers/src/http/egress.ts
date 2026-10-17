@@ -5,6 +5,30 @@ import { containsSecret } from './scrub.js';
 import type { HttpKitDeps, HttpKitRequest, ProviderHttpLimits } from './types.js';
 
 const PATH_ONLY = /^\/[^?#]*$/;
+/**
+ * Query parameter names that carry a credential for some vendor, compared lower-cased with `-` read as `_`. why: the
+ * value check knows only the configured secrets, so an unconfigured key in `?api_key=…` would pass, reach fetch and
+ * could be recorded; every credential this app holds goes in a header (spec §5.3), so these names are refused
+ * whatever their value (CodeRabbit batch 3). SearchApi's `departure_token` and `booking_token` are itinerary
+ * tokens, not credentials, and are not in the list.
+ */
+export const CREDENTIAL_PARAMS: ReadonlySet<string> = new Set([
+  'access_token',
+  'api_key',
+  'apikey',
+  'auth',
+  'auth_token',
+  'authorization',
+  'client_secret',
+  'key',
+  'pass',
+  'passwd',
+  'password',
+  'secret',
+  'token',
+  'x_access_token',
+  'x_api_key',
+]);
 /** Shortest secret http-kit accepts; matches scripts/secret-scan.mjs (sec-003). */
 export const MIN_SECRET_LENGTH = 8;
 
@@ -45,7 +69,8 @@ export function assertKitConfig(
  * Spec §5.3 "Egress", checked before the cache, the ledger or the network: the provider has limits; no secret in
  * any form appears in the URL (checked first, so a key in a hostname never reaches a message); no userinfo; no
  * explicit port; https (plain http only for the fixture provider at fixture.local); the hostname is exactly in the
- * provider's allowlist (URL normalises case); `endpointPath` equals the URL path; `fx` and `fixture` requests carry
+ * provider's allowlist (URL normalises case); no query parameter is named like a credential (CREDENTIAL_PARAMS);
+ * `endpointPath` equals the URL path; `fx` and `fixture` requests carry
  * no credential header (ruling 13).
  */
 export function assertEgress(
@@ -69,6 +94,9 @@ export function assertEgress(
   const u = r.url;
   if (containsSecret(u.href, secrets)) deny('a credential appears in the URL');
   if (u.username !== '' || u.password !== '') deny('userinfo in URL');
+  for (const name of u.searchParams.keys())
+    if (CREDENTIAL_PARAMS.has(name.toLowerCase().replaceAll('-', '_')))
+      deny(`credential query parameter ${name.toLowerCase()}`);
   if (u.port !== '') deny('explicit port');
   const schemeOk =
     u.protocol === 'https:' ||
