@@ -308,6 +308,72 @@ describe('a queued event no later pass will send, and the payload of a delivered
     ]);
   });
 
+  it('the replacing offer is itself suppressed by the cooldown: the original is marked superseded, the cheaper one suppressed with its reason, nothing is sent', async () => {
+    const f = fixture({
+      notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
+    });
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { basis: 'verified', thresholdPence: 45000, requireAllVerified: false });
+    const ex = seedExecution(f, def);
+    const departureDate = asIsoDate('2026-11-02');
+    seedObservation(f, ex, { departureDate, pricePence: 42000, seller: 'British Airways' });
+    await runAlerts(f.deps, ex, { stop: 'budget' });
+    // meanwhile another execution notified the same itinerary in the £410 band, which starts the cooldown
+    f.notifier.respondWith({ ok: true });
+    f.clock.advance(HOUR);
+    const other = seedExecution(f, def);
+    seedObservation(f, other, { departureDate, pricePence: 41050, seller: 'British Airways' });
+    expect(await runAlerts(f.deps, other)).toEqual({ digests: 1, events: 1 });
+    f.clock.advance(HOUR);
+    seedObservation(f, ex, { departureDate, pricePence: 41000, seller: 'An agency' });
+    const sentBefore = f.notifier.sent.length;
+    expect(await runAlerts(f.deps, ex)).toEqual({ digests: 0, events: 2 });
+    expect(f.notifier.sent).toHaveLength(sentBefore);
+    const mine = f.repos.alerts.eventsForExecution(rule.id, ex);
+    expect(mine.map((e) => [payloadOf(e).pricePence, e.status])).toEqual([
+      [42000, 'suppressed'],
+      [41000, 'suppressed'],
+    ]);
+    expect(mine[0]?.reason).toContain(
+      'superseded by a cheaper price of the same trip in a later pass; not retried',
+    );
+    expect(mine[1]?.reason).toContain('same price band alerted');
+    // only the other execution's event was ever notified
+    expect(
+      f.repos.alerts.events({ ruleId: rule.id, limit: 10 }).filter((e) => e.status === 'notified'),
+    ).toHaveLength(1);
+  });
+
+  it('the replacing offer fails to send too: it stays queued saying so, the original is superseded, and neither starts a cooldown', async () => {
+    const f = fixture({
+      notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
+    });
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { basis: 'verified', thresholdPence: 45000, requireAllVerified: false });
+    const ex = seedExecution(f, def);
+    const departureDate = asIsoDate('2026-11-02');
+    seedObservation(f, ex, { departureDate, pricePence: 42000, seller: 'British Airways' });
+    await runAlerts(f.deps, ex, { stop: 'budget' });
+    f.clock.advance(HOUR);
+    seedObservation(f, ex, { departureDate, pricePence: 41000, seller: 'An agency' });
+    expect(await runAlerts(f.deps, ex, { stop: 'budget' })).toEqual({ digests: 1, events: 2 });
+    const mine = f.repos.alerts.eventsForExecution(rule.id, ex);
+    expect(mine.map((e) => [payloadOf(e).pricePence, e.status])).toEqual([
+      [42000, 'suppressed'],
+      [41000, 'queued'],
+    ]);
+    expect(mine[0]?.reason).toContain('superseded');
+    expect(mine[1]?.reason).toBe(
+      '£410 is at or below the £450 threshold; not delivered: email: connection refused; sent again when this run resumes',
+    );
+    // cooldown counts notified events only: a later execution at the same price still fires
+    f.notifier.respondWith({ ok: true });
+    f.clock.advance(HOUR);
+    const next = seedExecution(f, def);
+    seedObservation(f, next, { departureDate, pricePence: 41000, seller: 'An agency' });
+    expect(await runAlerts(f.deps, next)).toEqual({ digests: 1, events: 1 });
+  });
+
   it('a retried row records the marks of the send that delivered it, not those of the failed send', async () => {
     const f = fixture({
       notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
