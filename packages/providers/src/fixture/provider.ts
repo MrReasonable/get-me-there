@@ -30,7 +30,7 @@ import {
   toEpochDay,
 } from '@gmt/core';
 import type { HttpKit, HttpKitRequest, HttpKitResponse, ProviderHttpLimits } from '../http/types.js';
-import { type ParseWhere, parseError } from '../shared/errors.js';
+import { isExpansionFailure, type ParseWhere, parseError } from '../shared/errors.js';
 import { NoteCounter } from '../shared/notes.js';
 import { isRecord } from '../util.js';
 import { FIXTURE_HOST, FIXTURE_ORIGIN } from './constants.js';
@@ -254,11 +254,6 @@ function offersOf(
 }
 
 const older = (a: IsoDateTime | undefined, b: IsoDateTime): IsoDateTime => (a === undefined || b < a ? b : a);
-
-/** Spec §5.4 rev 12: a chain step that failed for vendor or transport reasons; refusals of the account are not. */
-function isExpansionFailure(e: unknown): e is ProviderError {
-  return e instanceof ProviderError && (e.kind === 'upstream' || e.kind === 'network' || e.kind === 'parse');
-}
 
 /**
  * The fixture provider (spec §5.5): an ordinary HTTP adapter against http://fixture.local through the real
