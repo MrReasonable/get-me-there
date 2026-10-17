@@ -22,6 +22,7 @@ import {
   snapshotOf,
   withNights,
 } from './helpers/factories.js';
+import { rawOutcome } from './helpers/outcomes.js';
 
 const P = cell(); // priced
 const E = cell(undefined, EWR); // empty
@@ -401,11 +402,26 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
     expect(count(db, 'calendar_prices')).toBe(1);
   });
 
-  it('a later target that is no longer not_run rolls back the copies already written (test-011)', () => {
+  it('copies onto any outcome a resume would fetch again: retryable error (keeping its attempts), skipped:budget, skipped:provider_disabled (ssr M2)', () => {
     const { db, clock, cells, prices, definition } = world();
     const c = newExecution(db, clock, { definition }).execution.id;
     cells.seed(c, ALL.map(withNights), ['travelpayouts']);
-    cells.setOutcome(c, N, 'discovery', 'travelpayouts', { status: 'error', reason: 'network' }); // N sorts after E and P
+    rawOutcome(db, c, E, 'discovery', 'travelpayouts', { status: 'error', reason: 'network', attempts: 2 });
+    cells.setOutcome(c, P, 'discovery', 'travelpayouts', { status: 'skipped', reason: 'budget' });
+    cells.setOutcome(c, N, 'discovery', 'travelpayouts', { status: 'skipped', reason: 'provider_disabled' });
+    reuse(cells, c, 'travelpayouts', ask(prices, definition.id, ALL));
+    const after = new Map(cells.outcomes(c, { cells: [E, P, N] }).map((o) => [cellKeyString(o), o]));
+    expect([E, P, N].map((k) => after.get(cellKeyString(k))?.reusedFromExecutionId ?? null)).not.toContain(
+      null,
+    );
+    expect([E, P, N].map((k) => after.get(cellKeyString(k))?.attempts)).toEqual([2, 0, 0]);
+  });
+
+  it('a later target that a resume would not fetch again rolls back the copies already written (test-011)', () => {
+    const { db, clock, cells, prices, definition } = world();
+    const c = newExecution(db, clock, { definition }).execution.id;
+    cells.seed(c, ALL.map(withNights), ['travelpayouts']);
+    cells.setOutcome(c, N, 'discovery', 'travelpayouts', { status: 'skipped', reason: 'departed' }); // N sorts after E and P
     expect(() => reuse(cells, c, 'travelpayouts', ask(prices, definition.id, ALL))).toThrow(
       expect.objectContaining({ rule: 'reuse-target' }),
     );

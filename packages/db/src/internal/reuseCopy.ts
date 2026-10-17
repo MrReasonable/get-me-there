@@ -145,6 +145,18 @@ function assertSourceStored(
 }
 
 /**
+ * A target a reused copy may replace (ssr M2): `not_run`, an `error`, or `skipped` for budget or a disabled provider,
+ * the outcomes a resume would fetch again; never a fetched result or another skip (departed, not_selected).
+ */
+function refetchable(target: OutcomeDbRow): boolean {
+  return (
+    target.status === 'not_run' ||
+    target.status === 'error' ||
+    (target.status === 'skipped' && (target.reason === 'budget' || target.reason === 'provider_disabled'))
+  );
+}
+
+/**
  * Spec §7 atomic unit "each reused cell's outcome + copied prices + roll-up" (one transaction for the batch).
  * Copies keep the original fetched_at and provenance; reused_from_execution_id is always the execution that
  * fetched the price, even when the source is itself a reused copy.
@@ -168,10 +180,10 @@ export function writeReusedCopies(
     for (const { cell, outcome, price } of copies) {
       const key = { ...keyParams(executionId, cell), stage: 'discovery', providerId };
       const target = db.raw.prepare<Record<string, unknown>, OutcomeDbRow>(SELECT_OUTCOME_SQL).get(key);
-      if (target?.status !== 'not_run')
+      if (target === undefined || !refetchable(target))
         throw new RowRejected(
           'reuse-target',
-          `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}, not not_run`,
+          `${cellKeyString(cell)} in ${executionId} is ${target?.status ?? 'missing'}${target?.reason ? `:${target.reason}` : ''}, not an outcome a resume fetches again`,
         );
       // why: what is written is what the database holds (prov-r3-001), never the caller's objects.
       const { stored, held } = assertSourceStored(
@@ -188,7 +200,8 @@ export function writeReusedCopies(
         executionId,
         stage: 'discovery',
         providerId,
-        attempts: 0,
+        // why: attempts count failed passes (ssr-03); a copy over an error keeps them
+        attempts: target.attempts,
         lastError: null,
         reusedFromExecutionId: reusedFrom,
       });

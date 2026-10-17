@@ -258,7 +258,7 @@ export async function startExecution(
         if (!sellsCabin(ctx, id, snapshot.cabin))
           ctx.repos.cells.markNoData(e.id, 'discovery', id, 'cabin-not-offered');
         else if (check.blocked.has(lineKey('discovery', id)))
-          skipBlockedDiscovery(ctx, { executionId: e.id, definitionId: def.id, snapshot }, id);
+          skipBlockedDiscovery(ctx, { executionId: e.id, definitionId: def.id, snapshot, manual: false }, id);
       }
       return e;
     });

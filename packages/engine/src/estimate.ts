@@ -228,7 +228,8 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
-    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), null, notes);
+    // why: ssr M2 — the same reuse query the pass applies, so a cell another run has priced since is not counted
+    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes);
     if (l !== null) lines.push(l);
   }
   const seeded = ctx.repos.cells.hasVerificationOutcomes(exec.id);

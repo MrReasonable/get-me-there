@@ -10,7 +10,7 @@ import {
 } from '@gmt/core';
 import type { ReuseCriteria, ReusedCopy } from '@gmt/db';
 import type { EngineContext } from '../context.js';
-import { markRemaining, type RunState } from '../run.js';
+import { markRemaining, type RunState, resumableCells } from '../run.js';
 
 /** Spec §8.2: "reuse iff age < 0.9 × refresh, so a weekly cron refreshes weekly" (tested at 151 h, 152 h and a DST interval). */
 export const REUSE_TOLERANCE = 0.9;
@@ -81,10 +81,12 @@ export function reusableFor(
 }
 
 /** What reuse needs of a pass or of a start's seeding transaction (a fresh start or a resume claim, ruling 2). */
-export type ReuseScope = Pick<RunState, 'executionId' | 'definitionId' | 'snapshot' | 'isChild'>;
+export type ReuseScope = Pick<RunState, 'executionId' | 'definitionId' | 'snapshot' | 'isChild' | 'manual'>;
 
 /**
- * Copies every reusable outcome (and its price row) into this execution for the provider's `not_run` discovery cells.
+ * Copies every reusable outcome (and its price row) into this execution for the provider's discovery cells the pass
+ * would fetch (`resumableCells`: not_run, retryable errors, skipped:budget, and on a manual resume the disabled
+ * provider's cells; ssr M2), so a cell another run has priced since is copied, never fetched again.
  * The repository re-checks each copy against the same criteria, keeps the original fetched_at and provenance and names
  * the execution that fetched the price, never an intermediate copier (spec §3, decision 22). Returns the cells reused.
  */
@@ -95,11 +97,9 @@ export function applyReuse(
   info: CapabilityInfo,
 ): number {
   if (run.isChild) return 0; // why: spec §6.7 child executions have no discovery
-  const notRun = ctx.repos.cells
-    .outcomes(run.executionId, { stage: 'discovery', providerId })
-    .filter((o) => o.status === 'not_run');
+  const wanted = resumableCells(ctx, run.executionId, 'discovery', providerId, run.manual);
   const criteria = reuseCriteriaFor(ctx, run.snapshot, providerId, info);
-  const copies = reusableFor(ctx, run.definitionId, run.snapshot, providerId, criteria, notRun);
+  const copies = reusableFor(ctx, run.definitionId, run.snapshot, providerId, criteria, wanted);
   if (copies.length > 0) ctx.repos.cells.copyReused(run.executionId, providerId, copies, criteria);
   return copies.length;
 }

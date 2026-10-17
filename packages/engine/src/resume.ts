@@ -3,6 +3,7 @@ import {
   type Execution,
   type ExecutionStatus,
   type IsoDateTime,
+  type ProviderId,
   RESUMABLE_STATUSES,
 } from '@gmt/core';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
@@ -12,8 +13,15 @@ import { execute } from './execute.js';
 import { lineKey } from './lines.js';
 import type { Orchestrator } from './orchestrator.js';
 import type { RunRegistry } from './registry.js';
-import { markRemaining, newRun } from './run.js';
-import { REUSE_TOLERANCE, refreshHoursOf, skipBlockedDiscovery } from './stages/reuse.js';
+import { disabledBefore, markRemaining, newRun, resumableCells } from './run.js';
+import { sellsCabin } from './snapshot.js';
+import {
+  REUSE_TOLERANCE,
+  refreshHoursOf,
+  reusableFor,
+  reuseCriteriaFor,
+  skipBlockedDiscovery,
+} from './stages/reuse.js';
 import { confirmationNeeded, nothingToSearch, refused } from './start.js';
 import type { StartResult } from './types.js';
 
@@ -73,9 +81,11 @@ export async function resumeExecution(
   const current = refresh ? { ...exec, snapshot: { ...exec.snapshot, budget: def.budget } } : exec;
   const remaining = estimateRemainingFor(ctx, current, opts.manual);
   const needed = remaining.perProvider.filter((p) => p.calls > 0);
-  if (needed.length === 0 && current.status === 'completed')
+  // why: ssr M2 — cells another run has priced since need no call but are still work: the pass copies them
+  const copyable = needed.length === 0 && hasReusableWork(ctx, current, opts.manual);
+  if (needed.length === 0 && !copyable && current.status === 'completed')
     return refused('active', 'nothing left to retry on this execution', { executionId });
-  if (needed.length === 0 && !opts.manual && current.status === 'paused_error')
+  if (needed.length === 0 && !copyable && !opts.manual && current.status === 'paused_error')
     return refused(
       'active',
       'nothing can resume automatically; a manual resume retries the providers that were disabled',
@@ -134,7 +144,12 @@ export async function resumeExecution(
       if (check.blocked.has(lineKey('discovery', id)))
         skipBlockedDiscovery(
           ctx,
-          { executionId, definitionId: current.definitionId, snapshot: current.snapshot },
+          {
+            executionId,
+            definitionId: current.definitionId,
+            snapshot: current.snapshot,
+            manual: opts.manual,
+          },
           id,
         );
     if (ctx.repos.cells.hasVerificationOutcomes(executionId))
@@ -156,6 +171,22 @@ export async function resumeExecution(
   );
   reg.launch(run, () => execute(ctx, run));
   return { ok: true, executionId };
+}
+
+/**
+ * Whether a resumed pass would copy any discovery cell from a newer run (ssr M2): the cells it would fetch, less the
+ * providers an automatic resume keeps disabled, that have a reusable copy.
+ */
+function hasReusableWork(ctx: EngineContext, exec: Execution, manual: boolean): boolean {
+  if (exec.isChild) return false;
+  const disabled = manual ? new Set<ProviderId>() : disabledBefore(ctx, exec.id);
+  return exec.snapshot.providers.discovery.some((id) => {
+    const info = ctx.providers.get(id)?.discovery?.info;
+    if (info === undefined || disabled.has(id) || !sellsCabin(ctx, id, exec.snapshot.cabin)) return false;
+    const cells = resumableCells(ctx, exec.id, 'discovery', id, manual);
+    const criteria = reuseCriteriaFor(ctx, exec.snapshot, id, info);
+    return reusableFor(ctx, exec.definitionId, exec.snapshot, id, criteria, cells).length > 0;
+  });
 }
 
 /** error_text of an execution cancelled because it was never seeded (ssr-07). */

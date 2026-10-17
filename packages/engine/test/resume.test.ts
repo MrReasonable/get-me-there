@@ -5,6 +5,7 @@ import {
   FIXTURE_COST_MICRO_GBP,
   FIXTURE_RULES,
   type Harness,
+  HOUR,
   JFK,
   LGW,
   LHR,
@@ -203,6 +204,25 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
       code: 'active',
       message: 'nothing left to retry on this execution',
     });
+  });
+
+  it('a retry-errors resume copies a newer run’s prices for its errored cells instead of fetching them, and its estimate agrees (ssr M2)', async () => {
+    const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.upstream, 3)]);
+    const def = twoPairs(h);
+    const a = await h.runToCompletion(h.orch(), def.id);
+    expect(h.outcomes(a.id, { status: 'error' })).toHaveLength(14);
+    h.clock.advance(HOUR);
+    const b = await h.runToCompletion(h.orch(), def.id); // fetches the 14 cells A could not
+    h.clock.advance(HOUR);
+    const before = h.requests.length;
+    expect(await h.orch().resume(a.id, { manual: false })).toEqual({ ok: true, executionId: a.id });
+    const after = await h.waitForSettled(a.id);
+    expect(h.requests.length).toBe(before);
+    const copied = h.outcomes(a.id).filter((o) => o.reusedFromExecutionId === b.id);
+    expect(copied).toHaveLength(14);
+    expect(copied.every((o) => o.status === 'priced' && o.attempts === 1)).toBe(true);
+    expect(after.estimate?.totalPlanCalls).toBe(a.estimate?.totalPlanCalls);
   });
 
   it('checks every scope against estimateRemaining; a manual resume checks the current definition budget (only that) and writes it only once claimed', async () => {

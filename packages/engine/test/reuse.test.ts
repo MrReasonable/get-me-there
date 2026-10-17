@@ -272,7 +272,11 @@ describe('the point of sale reuse matches on (arch-r2-013)', () => {
       });
       h.repos.cells.seed(created.id, cells, ['fixture']);
       expect(
-        skipBlockedDiscovery(ctx, { executionId: created.id, definitionId: def.id, snapshot }, 'fixture'),
+        skipBlockedDiscovery(
+          ctx,
+          { executionId: created.id, definitionId: def.id, snapshot, manual: false },
+          'fixture',
+        ),
       ).toBe(14);
       return created;
     });
