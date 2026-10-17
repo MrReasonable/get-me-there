@@ -1,9 +1,10 @@
 import type { ResultFilters } from '@gmt/core';
-import { asIata, asIsoDate } from '@gmt/core';
+import { asIata, asIsoDate, filterRows } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   activeFilterCount,
   DEFAULT_CLASSES,
+  effectiveClasses,
   nightsFilterPatch,
   parseBasis,
   parseResultsState,
@@ -14,6 +15,7 @@ import {
 import { hrefWith, navigateTo, updateSearchParams } from '../../src/state/urlState.js';
 import { parseView } from '../../src/state/view.js';
 import { withKey } from '../../src/state/withKey.js';
+import { calendarRow, failedRow, partialRow, verifiedRow } from '../fixtures.js';
 
 const full: ResultsUiState = {
   sort: { key: 'totalTime', dir: 'desc' },
@@ -47,6 +49,35 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect(parseResultsState(new URLSearchParams()).sort).toBeNull();
     expect(resultsStatePatch({ sort: null, filters: {} }).sort).toBeNull();
     expect(DEFAULT_CLASSES).toEqual(['verified', 'partially-verified', 'unchecked']);
+  });
+
+  it('a URL without f.class applies the default classes: the effective classes and the rows kept, failed ones dropped', () => {
+    const bare = parseResultsState(new URLSearchParams());
+    expect(effectiveClasses(bare.filters)).toEqual(['verified', 'partially-verified', 'unchecked']);
+    const rows = [verifiedRow(), partialRow(), failedRow(), calendarRow()];
+    expect(filterRows(rows, bare.filters).map((r) => r.verdictClass)).toEqual([
+      'verified',
+      'partially-verified',
+      'unchecked',
+    ]);
+    // why: an explicit class list replaces the default, so the failed rows come back only on request
+    const withFailed = parseResultsState(new URLSearchParams('f.class=failed'));
+    expect(effectiveClasses(withFailed.filters)).toEqual(['failed']);
+    expect(filterRows(rows, withFailed.filters).map((r) => r.verdictClass)).toEqual(['failed']);
+  });
+
+  it('numeric filter limits that are not safe integers are dropped, never rounded into a different limit', () => {
+    // 9007199254740993 rounds to 9007199254740992 as a Number; an overlong digit string becomes Infinity
+    const unsafe = '9007199254740993';
+    const huge = '9'.repeat(400);
+    expect(parseResultsState(new URLSearchParams(`f.maxPrice=${unsafe}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.maxPrice=${huge}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.stops=${unsafe}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.nights=10-${unsafe}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams(`f.nights=${unsafe}-${huge}`)).filters).toEqual({});
+    expect(parseResultsState(new URLSearchParams('f.maxPrice=9007199254740991')).filters).toEqual({
+      maxPricePence: 9007199254740991,
+    });
   });
 
   it('ignores malformed values instead of guessing', () => {

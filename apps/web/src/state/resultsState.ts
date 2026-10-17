@@ -35,7 +35,13 @@ const isProvider = oneOf(apiContract.providerIdSchema.options);
 const isConstraint = oneOf(apiContract.constraintNameSchema.options);
 
 const list = (v: string | null): string[] => (v ? v.split(',').filter((s) => s.length > 0) : []);
-const int = (v: string | null): number | undefined => (v !== null && /^\d+$/.test(v) ? Number(v) : undefined);
+// why: a limit the URL spells beyond 2^53 would round (or become Infinity) and silently be a different limit; such a
+// token is malformed like any other and is dropped.
+const safeInt = (v: string): number | undefined => {
+  const n = Number(v);
+  return /^\d+$/.test(v) && Number.isSafeInteger(n) ? n : undefined;
+};
+const int = (v: string | null): number | undefined => (v === null ? undefined : safeInt(v));
 const CARRIER = /^[A-Z0-9]{2}$/;
 
 export function parseBasis(v: string | null): Basis | null {
@@ -46,6 +52,11 @@ export function parseBasis(v: string | null): Basis | null {
 export function parseSelectedRow(p: URLSearchParams): string | null {
   const v = p.get('row');
   return v !== null && v.length > 0 && v.length <= 200 ? v : null;
+}
+
+/** The verdict classes a state shows: its own list, else the spec §6.9 default (failed rows excluded). */
+export function effectiveClasses(f: ResultFilters): readonly ClassFilter[] {
+  return f.verdictClass ?? DEFAULT_CLASSES;
 }
 
 /** Number of filter keys the operator set (the class default does not count). */
@@ -80,8 +91,10 @@ export function parseResultsState(p: URLSearchParams): ResultsUiState {
   if (dests.length > 0) f = withKey(f, 'destination', dests);
   f = withKey(f, 'maxPricePence', int(p.get('f.maxPrice')));
   const nights = /^(\d+)-(\d+)$/.exec(p.get('f.nights') ?? '');
-  if (nights?.[1] !== undefined && nights[2] !== undefined && Number(nights[1]) <= Number(nights[2])) {
-    f = withKey(f, 'nights', { min: Number(nights[1]), max: Number(nights[2]) });
+  const nightsMin = nights?.[1] === undefined ? undefined : safeInt(nights[1]);
+  const nightsMax = nights?.[2] === undefined ? undefined : safeInt(nights[2]);
+  if (nightsMin !== undefined && nightsMax !== undefined && nightsMin <= nightsMax) {
+    f = withKey(f, 'nights', { min: nightsMin, max: nightsMax });
   }
   const [from, to] = (p.get('f.depart') ?? '').split('..');
   const dateOf = apiContract.cellKeySchema.shape.departureDate;
