@@ -3,17 +3,21 @@ import { AppBoundary } from './components/AppBoundary.js';
 import { DefinitionSelector } from './components/DefinitionSelector.js';
 import { LoadError } from './components/LoadState.js';
 import { Nav } from './components/Nav.js';
+import { StatusBar } from './components/StatusBar.js';
 import { SyntheticBanner } from './components/SyntheticBanner.js';
 import { COPY } from './copy.js';
 import { useSearchParams } from './state/urlState.js';
 import { parseView } from './state/view.js';
+import { CoverageView } from './views/Coverage/CoverageView.js';
+import { DefinitionsView } from './views/Definitions/DefinitionsView.js';
 import { Placeholder } from './views/Placeholder.js';
+import { ProvidersView } from './views/Providers/ProvidersView.js';
+import { ResultsView } from './views/Results/ResultsView.js';
 
 /**
- * Spec §11 layout: synthetic banner, header with nav and definition selector. When /providers fails,
- * the page says provider status is unknown instead of silently showing no banner (decision 36); the
- * views stay inside a boundary so a render error never blanks the page. This task's version shows a
- * placeholder for every view; Task 9.13 gives the final file, with the status bar and the views.
+ * Spec §11 layout: synthetic banner, header with nav and definition selector, status bar on every
+ * view. When /providers fails, the page says provider status is unknown instead of silently showing
+ * no banner (decision 36); the views stay inside a boundary so a render error never blanks the page.
  */
 export function App() {
   const params = useSearchParams();
@@ -39,6 +43,7 @@ export function App() {
         <Nav current={view} />
         <DefinitionSelector definitions={list} selectedId={selectedId} />
       </header>
+      <StatusBar definition={selected} showRunNow={view === 'results' || view === 'definitions'} />
       <main className="px-4 py-3">
         <AppBoundary>
           {noProviders ? (
@@ -50,9 +55,13 @@ export function App() {
           {needsDefinition && definitions.data !== undefined && selected === null ? (
             <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
           ) : null}
-          {needsDefinition && selected === null ? null : (
+          {view === 'results' && selected !== null ? <ResultsView definition={selected} /> : null}
+          {view === 'coverage' && selected !== null ? <CoverageView definition={selected} /> : null}
+          {view === 'calendar' || view === 'duration' || view === 'history' || view === 'alerts' ? (
             <Placeholder hint={view === 'calendar' ? COPY.calendarPlaceholderHint : null} />
-          )}
+          ) : null}
+          {view === 'definitions' ? <DefinitionsView /> : null}
+          {view === 'providers' ? <ProvidersView /> : null}
         </AppBoundary>
       </main>
     </div>
