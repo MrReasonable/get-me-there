@@ -2,13 +2,14 @@
 // ParamsAllowlist, hashed like a recorded fixture and loaded through WP4's own loader (arch-010).
 import { mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIsoDate } from '@gmt/core';
+import { asIata, asIsoDate } from '@gmt/core';
 import {
   assertRequestAllowed,
   loadParamsAllowlist,
   type ParamsAllowlist,
   RecorderRefusedError,
 } from '@gmt/providers';
+import { searchApiCalendarParams, searchApiFlightsParams } from '@gmt/providers/recording';
 import { loadRecorded } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 import { ParamLog, paramRules, writeAllowlist } from '../../src/tools/recordParams.js';
@@ -175,5 +176,48 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
     const { root } = tempRecordedRoot();
     symlinkSync(tempDir(), join(root, 'searchapi'));
     expect(() => writeAllowlist(root, doc)).toThrow(/resolves outside/);
+  });
+});
+
+describe("record:fixtures sends the adapter's own SearchApi parameter sets (ruling 18, ca-012)", () => {
+  it('every SearchApi request equals what @gmt/providers builds for the same rectangle or cell', async () => {
+    const { seen } = await runRecording();
+    expect(seen.sa.length).toBeGreaterThan(0);
+    for (const p of seen.sa) {
+      const sent = Object.fromEntries(p);
+      const base = { origin: asIata(sent.departure_id ?? ''), destination: asIata(sent.arrival_id ?? '') };
+      const built =
+        sent.engine === 'google_flights_calendar'
+          ? searchApiCalendarParams(
+              { ...base, cabin: 'economy' },
+              {
+                kind: 'rectangle',
+                departFrom: asIsoDate(sent.outbound_date_start ?? ''),
+                departTo: asIsoDate(sent.outbound_date_end ?? ''),
+                returnFrom: asIsoDate(sent.return_date_start ?? ''),
+                returnTo: asIsoDate(sent.return_date_end ?? ''),
+              },
+              'GB',
+            )
+          : searchApiFlightsParams(
+              {
+                ...base,
+                departureDate: asIsoDate(sent.outbound_date ?? ''),
+                returnDate: asIsoDate(sent.return_date ?? ''),
+                cabin: 'economy',
+                adults: 1,
+                currency: 'GBP',
+                expandTop: 1,
+                bookingLinks: true,
+              },
+              'GB',
+              sent.departure_token !== undefined
+                ? { departure_token: sent.departure_token }
+                : sent.booking_token !== undefined
+                  ? { booking_token: sent.booking_token }
+                  : undefined,
+            );
+      expect(sent).toEqual(built);
+    }
   });
 });

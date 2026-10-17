@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock, Secret } from '@gmt/core';
 import { MIGRATIONS_DIR } from '@gmt/db';
 import { createHttpKit, type HttpKitRequest } from '@gmt/providers';
+import { searchApiUrl } from '@gmt/providers/recording';
 import { describe, expect, it, vi } from 'vitest';
 import { createLogger, REDACT_PATHS, SPEC_REDACT_PATHS } from '../src/logger.js';
-import { recordingLimits, saUrl, tpUrl } from '../src/tools/recordRequests.js';
+import { recordingLimits, tpUrl } from '../src/tools/recordRequests.js';
 import { buildPorts, loadConfigFromEnv } from '../src/wiring.js';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, testEnv } from './helpers/env.js';
 import { onCleanup } from './helpers/tmp.js';
@@ -215,7 +216,7 @@ describe('createLogger (spec §14 redact paths, sec-001, sec-002)', () => {
         (
           await drive(
             http.request(
-              req('searchapi', saUrl({ engine: 'google_flights_calendar' }), {
+              req('searchapi', searchApiUrl({ engine: 'google_flights_calendar' }), {
                 Authorization: `Bearer ${SENTINEL_SA}`,
               }),
             ),
@@ -226,7 +227,7 @@ describe('createLogger (spec §14 redact paths, sec-001, sec-002)', () => {
         (
           await drive(
             http.request(
-              req('searchapi', saUrl({ engine: 'google_flights' }), {
+              req('searchapi', searchApiUrl({ engine: 'google_flights' }), {
                 Authorization: `Bearer ${SENTINEL_SA}`,
               }),
             ),
