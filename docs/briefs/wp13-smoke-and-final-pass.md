@@ -3691,7 +3691,7 @@ git add docs/setup.md apps/api/test/deploy/docs.test.ts && git commit -m "wp13: 
 | Task 13.9's trace: one per-cell verification child | its call cap, shown before it starts (at most 6 at the default `CHILD_MAX_CALLS`) |
 | Margin | 6 |
 
-The smokes are held to it by `budget`: every smoke sends `budget` = the dry run's "already ledgered" figure plus 4, and never above 18 (24 less the child's cap and nothing else), so the cross-run rule refuses any smoke beyond that with 65 before it sends anything. The trace's child is held by its own cap, which the verify control shows before it runs. A dry run costs nothing and may be repeated. Stop and ask Ian if the SearchApi dashboard ever shows more than 24 credits used since Step 0.
+The smokes are held to it by `budget`: every smoke sends `budget` = the dry run's "already ledgered" figure plus 4, and never above 18 (24 less the child's cap and nothing else), so the cross-run rule refuses any smoke beyond that with 65 before it sends anything. The trace's child is held by its own cap, which the verify control shows before it runs. Those two limits are the operator's arithmetic, so the guard itself also holds the ceiling for the whole of Tasks 13.8 and 13.9 (cost review M3, fix round 1): Step 0 sets `SEARCHAPI_MONTHLY_CALL_CAP` so the SearchApi window has exactly 24 credits of room, and every source on the container's ledger (the smokes, the trace's child, a second verify click, a scheduled run, a mistyped `budget`) is refused before the fetch at the 25th; Step 3 restores it. A dry run costs nothing and may be repeated. Stop and ask Ian if the SearchApi dashboard ever shows more than 24 credits used since Step 0.
 
 - [ ] **Step 0: Window, dry run, approval**
 
@@ -3705,7 +3705,8 @@ curl -u operator -H 'Content-Type: application/json' -H 'X-Requested-With: get-m
 ```
 
 Expected: `exitCode` 0, `lines` ending `dry run: nothing sent, no execution opened`, with `SearchApi credits already ledgered to tool runs in this budget window: N`, `this run: at most 4 SearchApi credit(s), frozen at 4 by --budget 4` and `SearchApi window (trial; SEARCHAPI_TRIAL_USED T): U of C used …; room R`. Record N, T, U, C, R beside the dashboard's figures; a difference between the app's window and the dashboard's is a finding to settle before Step 1.
-4. Put the ceiling table, the figures and the planned `budget` values in the PR; Ian approves them there.
+4. Hold the ceiling in the guard: set `SEARCHAPI_MONTHLY_CALL_CAP` in `.env` so the window's room is 24. On the trial plan the guard's cap is `SEARCHAPI_MONTHLY_CALL_CAP − SEARCHAPI_TRIAL_USED`, so set it to T + U + 24; on 40usd set it to U + 24 (this month's ledgered credits). Record the value it had before (empty for the plan default). Apply it (`docker compose up -d --wait`) and send the dry run again: its window line must read `room 24`.
+5. Put the ceiling table, the figures, the cap set in item 4 and the planned `budget` values in the PR; Ian approves them there.
 
 - [ ] **Step 1: The smoke through the route**
 
@@ -3727,7 +3728,7 @@ Record in the PR, under "WP13 smoke rows", the whole report of every run: each p
 
 - [ ] **Step 3: Close**
 
-Read the dashboard again and record the credits used since Step 0; they must equal the app window's increase (the dry run's `U` before and after, Task 13.9's trace included once it has run). Nothing in the repository changes unless a row produced a finding; such a fix is its own commit with a regression test, and re-checking it uses a dry run or the offline tests, not another smoke unless the ceiling table still has room.
+Restore `SEARCHAPI_MONTHLY_CALL_CAP` to the value recorded in Step 0 item 4 (remove the line if it was empty) and apply it with `docker compose up -d --wait`, after Task 13.9's trace if it runs in the same session. Read the dashboard again and record the credits used since Step 0; they must equal the app window's increase (the dry run's `U` before and after, Task 13.9's trace included once it has run). Nothing in the repository changes unless a row produced a finding; such a fix is its own commit with a regression test, and re-checking it uses a dry run or the offline tests, not another smoke unless the ceiling table still has room.
 
 ### Task 13.9: Final pass: the whole-branch review, the integration checks, one real price end to end, the release
 
