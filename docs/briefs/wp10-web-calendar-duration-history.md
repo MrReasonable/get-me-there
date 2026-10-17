@@ -10,7 +10,7 @@ status: draft
 
 # WP10 — web: Calendar (View B), Duration (View C), History, Playwright smoke
 
-Reconciled on 2026-10-17 against spec revision 24, the plan's "Global Constraints", "API contract", "Web" and "Decisions taken at reconciliation" 1–53 (38 holds this brief's round-1 rulings, 51 and 52 its round-2 rulings, 53 the calendar's destination parameter; 42, 44, 46, 48, 49 and 50 the shared names and rules it follows), the real `@gmt/core` on `main` (`a670b49`), WP9's committed revision after its round 3 (the shell WP10 extends, never replaces, decision 46) and WP7's changes that WP9 also takes as preconditions (Tasks 7.1, 7.4's `NoPricedOptionsReason`, 7.8, 7.13, 7.18, and `pnpm casts`). Review rounds 1 (24 High, 46 Medium, 32 Low) and 2 (7 High, 16 Medium, 17 Low) are folded into the sections below. Spec revision 24 changed only §6.7, §7 and §8.1's resume and stride rules (decision 50); §3, §10, §11 and §13 read as in revision 23, so nothing here changes with it.
+Reconciled on 2026-10-17 against spec revision 24, the plan's "Global Constraints", "API contract", "Web" and "Decisions taken at reconciliation" 1–54 (38 holds this brief's round-1 rulings, 51 and 52 its round-2 rulings, 53 the calendar's destination parameter, 54 the "not seen in latest search", "superseded" and route-point marks; 42, 44, 46, 48, 49 and 50 the shared names and rules it follows), the real `@gmt/core` on `main` (`62d6a11`), WP9's committed revision after its round 3 (the shell WP10 extends, never replaces, decision 46) and WP7's changes that WP9 also takes as preconditions (Tasks 7.1, 7.4's `NoPricedOptionsReason`, 7.8, 7.13, 7.18, and `pnpm casts`). Review rounds 1 (24 High, 46 Medium, 32 Low) and 2 (7 High, 16 Medium, 17 Low) are folded into the sections below. Spec revision 24 changed only §6.7, §7 and §8.1's resume and stride rules (decision 50); §3, §10, §11 and §13 read as in revision 23, so nothing here changes with it.
 
 ## 1. Goal
 
@@ -20,29 +20,30 @@ Replace WP9's three "not available yet" views with the calendar heatmap (View B)
 
 **In**
 
-- **Contract additions in `@gmt/core` `api-contract/results.ts`** (decisions 38, 42, 51, 52, 53; WP8 fills them, §13): `calendarQuerySchema` (an optional `destination`) on the calendar route; `verification.unconfirmedCells` on the calendar day; per-series `searched` counts (`searched` of `total` cells) and the `cell` of each per-nights minimum in the duration analysis; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses, while the stored `historyPointSchema` that `@gmt/db` returns is unchanged; `priceConfirmed` and `executionId` on itinerary history points, and the itinerary's `cell` and `carriers`; `verify: { maxCalls, headroomCalls }` on the cell detail (WP7's `childCapPreview`).
+- **Contract additions in `@gmt/core` `api-contract/results.ts`** (decisions 38, 42, 51, 52, 53, 54; WP8 fills them, §13): `calendarQuerySchema` (an optional `destination`) on the calendar route; decision 54's marks on the views' figures (`notSeenInLatest` on the calendar day's verified minima, the duration's `minVerified` and the calendar gap's `cheapestVerified`; `superseded` on the day's and the duration's calendar minima and the cell detail's calendar prices; `stale` on route-level points); `verification.unconfirmedCells` on the calendar day; per-series `searched` counts (`searched` of `total` cells) and the `cell` of each per-nights minimum in the duration analysis; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses, while the stored `historyPointSchema` that `@gmt/db` returns is unchanged; `priceConfirmed` and `executionId` on itinerary history points, and the itinerary's `cell` and `carriers`; `verify: { maxCalls, headroomCalls }` on the cell detail (WP7's `childCapPreview`).
 - **View B Calendar** (`apps/web/src/views/Calendar/*`):
   - Each day shows one price by the spec §11 precedence (core's `compareAges`; a SearchApi verified price has age `'unknown'`) through WP9's PriceCell `compact` form (decision 46); then the stay of the cheapest cell, "cached from £X" with that cheaper fare's own destination, note and stay when the shown verified price hides a cheaper calendar price (decision 52), and a coverage cue ("S/M searched", 11 px, with a solid or striped swatch). Everything else is in the side panel.
   - Colour by one basis at a time. The default basis is the calendar basis unless days showing a class-verified price are a strict majority, judged on the all-destination calendar. Quintile bands with a numeric legend; fewer than ten days or a spread under 10% gives one flat shade and the legend says why; days of the other basis are hatched. Every band carries its text at 4.5:1 or better, neighbouring bands differ clearly in lightness, and the band number is printed on the face.
   - Days without a price show distinct glyphs with their cell counts from the best-covered source ("∅ 1 no fares · ○ 47 not searched") and the same "S/M searched" cue as a priced day; a day no run reaches says "not searched yet"; only a definition without a discovery provider says "no discovery provider configured". A day whose itinerary search priced cells but confirmed none of their prices says "price not confirmed" (decision 48).
   - A destination filter, sent to the api (decision 53): the api computes that destination's buckets, minimums and unconfirmed cells, and the web renders the days as they come, so a filtered day is as honest as an unfiltered one.
   - A bucket total that disagrees with its buckets shows "counts inconsistent".
+  - Decision 54: a verified day price the latest search no longer returned says "not seen in latest search (…)", and a calendar price whose cell a newer run found empty or no fares says "superseded by a later search", in the day, the "cached from" fare and the panel (one glyph each on the phone face); the panel lists superseded calendar prices after current ones.
   - Filter, basis and (at phone width) month live in the URL. At phone width one month is drawn at a time, month navigation before the legend, and each day shows its phone face: day number, band number, the amount through PriceCell's new `face` form (marks as single glyphs, their words in its title and spoken text) and one-glyph marks for "price not confirmed" and partial coverage; the panel then sits below the grid as a page section.
   - The legend keeps the scale, the band swatches and the glyphs open and folds the explanations of the marks into "What the marks mean".
   - Keyboard: each month is a captioned table of day buttons with a roving `tabIndex` (decision 51); arrows, Home/End and PageUp/PageDown move focus, Enter and Space open the day; visible focus.
   - Side panel: the day's six-bucket marker (a "not searched yet" line for each configured provider with no counts, and the unconfirmed cells) and its prices with full provenance; a cell picker in core's generation order; the cell's outcomes per run (newest first, the Run column sticky, the latest run marked, reasons in words from a map typed against core's reason types, "price not confirmed" beside a priced verification outcome whose reason carries `price-unconfirmed`); its prices, an unconfirmed offer badged inside its PriceCell; the per-cell verify action through WP9's `useExecutionActions().verify`, disabled until the cell detail has loaded its hard stop and headroom, with a named budget-cap refusal, and hidden without a verification provider.
-- **View C Duration** (`apps/web/src/views/Duration/*`): Recharts 3 bars per nights for the verified series and one calendar series per provider, labelled from the prices' own provenance with `n` in the label, the tooltip and a note defining it; per-series gaps with counts ("not searched", "searched 3 of 48 cells, no price", "searched, no price"; "not itinerary-searched", "itinerary-searched 1 of 4 selected cells, no class-verified price", "itinerary-searched, no class-verified price"); a star on the axis for a nights value no series searched; stale minima drawn faded with a heavy outline; a tooltip whose fares are PriceCells; price ticks without "£" (the axis title says GBP); a table with destination, note, `n` and departure date per minimum, each nights value linking to Results filtered to it.
-- **History** (`apps/web/src/views/History/*`): route history by pair (or all pairs overlaid, one colour per pair), the pair in the URL; fetch-time series (calendar per provider and cabin; itinerary offers split into confirmed and "price not confirmed by the final step", dotted) joined only between consecutive runs of the definition in run order (decision 52), the runs read from the executions list the status bar uses; the route-level series named by its provider and cabin ("SearchApi route-level series, indicative · cabin not stated") in its own chart, price by travel date, every point dotted; tables of every point with stale, "cheapest of the rows read" and the unconfirmed badge; WP9's `ViewHeader variant="span"`; an itinerary heading from the api's own cell and carriers.
+- **View C Duration** (`apps/web/src/views/Duration/*`): Recharts 3 bars per nights for the verified series and one calendar series per provider, labelled from the prices' own provenance with `n` in the label, the tooltip and a note defining it; per-series gaps with counts ("not searched", "searched 3 of 48 cells, no price", "searched, no price"; "not itinerary-searched", "itinerary-searched 1 of 4 selected cells, no class-verified price", "itinerary-searched, no class-verified price"); a star on the axis for a nights value no series searched; stale minima drawn faded with a heavy outline; a tooltip whose fares are PriceCells, with decision 54's "not seen in latest search" and "superseded" marks there and in the table; price ticks without "£" (the axis title says GBP); a table with destination, note, `n` and departure date per minimum, each nights value linking to Results filtered to it.
+- **History** (`apps/web/src/views/History/*`): route history by pair (or all pairs overlaid, one colour per pair), the pair in the URL; fetch-time series (calendar per provider and cabin; itinerary offers split into confirmed and "price not confirmed by the final step", dotted) joined only between consecutive runs of the definition in run order (decision 52), the runs read from the executions list the status bar uses; the route-level series named by its provider and cabin ("SearchApi route-level series, indicative · cabin not stated") in its own chart, price by travel date, every point dotted, each row "indicative" and, by fetch age, "stale" (decision 54); tables of every point with stale, "cheapest of the rows read" and the unconfirmed badge; WP9's `ViewHeader variant="span"`; an itinerary heading from the api's own cell and carriers.
 - **Run times in Europe/London** (decision 52): WP9's `formatInstantUtc` becomes `formatRunInstant` ("14 Oct 2026 13:00 Europe/London"), used by WP9's `ViewHeader` and status bar; the panel and History name runs by their Europe/London date.
 - **Review focus 3** (dates): the grid and instant forms join WP9's `src/format.ts` on its one month and weekday table (decisions 38, 46); `src/lib/time.ts` turns instants into epoch milliseconds; a guard against `Date` objects over `apps/web/src`; a TZ suite under `America/Los_Angeles` and `Asia/Tokyo` covering the calendar grid and WP9's Results date columns.
 - **Copy** in WP9's `src/copy.ts`: `calendarView`, `durationView`, `historyView`, `priceMarkGlyph`, with SAMPLES in WP9's catalogue test.
-- **WP9 files extended** (§12): `format.ts`, `copy.ts`, `components/{PriceCell,ViewHeader,StatusBar}.tsx`, `api/{types,endpoints,queries}.ts`, `App.tsx`, `views/Results/ExpandedRow.tsx`, `test/guards.ts`, `test/msw/handlers.ts`, `test/copy/{catalogue,sourceGuard}.test.ts`, `test/copy/renderedSweep.test.tsx`, `test/app/shell.test.tsx`, `test/format.test.ts`, `test/components/statusBar.test.tsx`, `test/views/coverage.test.tsx`, `vitest.config.ts`, `vite.config.ts`, `tsconfig.test.json`, `package.json`.
+- **WP9 files extended** (§12): `format.ts`, `copy.ts`, `components/{PriceCell,ViewHeader,StatusBar}.tsx`, `api/{types,endpoints,queries}.ts`, `App.tsx`, `views/Results/{ExpandedRow,CalendarGapBanner}.tsx` (the gap's cheapest verified price says when the latest search no longer returned it, decision 54), `test/fixtures.ts`, `test/guards.ts`, `test/msw/handlers.ts`, `test/copy/{catalogue,sourceGuard}.test.ts`, `test/copy/renderedSweep.test.tsx`, `test/app/shell.test.tsx`, `test/format.test.ts`, `test/components/statusBar.test.tsx`, `test/views/coverage.test.tsx`, `vitest.config.ts`, `vite.config.ts`, `tsconfig.test.json`, `package.json`.
 - **Playwright smoke in fixture mode**: Results, Calendar, Duration and History in a real browser on the synthetic run, plus a 375 px project that checks no day's content spills out of its cell; excluded from `pnpm test`, its calendar selectors shared with a jsdom test that proves they match.
 
 **Out**
 
-- **WP9:** the shell, nav, status bar, `ViewHeader` (with `variant="span"`), `Provenance`, `PriceCell` (with `compact`, `truncated`, `unconfirmed`; WP10 adds `face`), `PriceBoundary`, the client, `COPY` base entries (`truncatedNote`, `providerShort`, `priceNotConfirmed`, `vendorAgeUnknown`, `spanExecutions`), `NowContext`, `format.ts`'s `formatIsoDate`/`formatIsoDateShort`/`formatIsoDateLong`/`formatWeekday`, URL state, Definitions, Results, Coverage, Providers, the msw test API and its guards, and the boundary script's place-name and suppression checks. WP10 edits only the WP9 files named in §12.
-- **WP8:** every route; filling the fields this brief adds (§13); `stale` by fetch age (decision 44), `ageHours` and `truncated` per price; the in-process fixture host (WP4b's wiring).
+- **WP9:** the shell, nav, status bar, `ViewHeader` (with `variant="span"`), `Provenance`, `PriceCell` (with `compact`, `truncated`, `unconfirmed`, `notSeenInLatestHours`; WP10 adds `face` and `superseded`), `PriceBoundary`, the client, `COPY` base entries (`truncatedNote`, `providerShort`, `priceNotConfirmed`, `vendorAgeUnknown`, `spanExecutions`), `NowContext`, `format.ts`'s `formatIsoDate`/`formatIsoDateShort`/`formatIsoDateLong`/`formatWeekday`, URL state, Definitions, Results, Coverage, Providers, the msw test API and its guards, and the boundary script's place-name and suppression checks. WP10 edits only the WP9 files named in §12.
+- **WP8:** every route; filling the fields this brief adds (§13); decision 54's rules (effective-age staleness, which figures were not seen in the latest search, which calendar prices are superseded and their ranking, the execution set behind duration, link re-validation in the contract, request limits); `stale` by fetch age (decision 44), `ageHours` and `truncated` per price; the in-process fixture host (WP4b's wiring).
 - **WP7:** `Engine.childCapPreview` behind `verify`, the `price-unconfirmed` priced reason, `isPriceUnconfirmed` and decision 50's one priced-reason builder, `NoPricedOptionsReason` in `ErrorReason` (Task 7.4), `microGbpToPence`, and `scripts/check-casts.mjs` (preconditions, as for WP9).
 - **WP0/WP1:** everything else in `@gmt/core` the views consume.
 - **WP11:** the Alerts view.
@@ -59,7 +60,7 @@ Replace WP9's three "not available yet" views with the calendar heatmap (View B)
 - **§10:** calendar, duration-analysis, cells, `/cells/verify`, itinerary and route history, all under `/api`.
 - **§9 item 6:** View B states including the partial-day six-bucket marker and the per-basis scale with hatched fallback days; chart empty and loading states; the numeric legend; keyboard operation; banned words; a price lacking provenance fails to render; one Playwright smoke in fixture mode. (§9 item 6 and the §16 table say "five-way marker"; spec §3 defines six buckets, §13.)
 - **§5.5:** synthetic data is labelled on every view beside the red banner.
-- **Plan decisions consumed:** 14 (`resultRowKey`, `?row=`), 15 (route history one point per run), 21 (`DEFAULT_DISCOVERY_REFRESH_HOURS`), 24 (SearchApi itinerary age unknown), 25 and 43 (child caps), 27 and 37 (unconfirmed offers, "price not confirmed by the final step"), 30, 36 and 47 (`truncated`, "cheapest of the rows read"), 38 (this brief's rulings), 42 (the contract fields and the names shared with WP9), 44 (staleness by fetch age; no suppressions; "hard stop", never "up to"), 45 and 48 (`price-unconfirmed`, `childCapPreview`, `pnpm casts`), 46 (WP9 is the base; one date table; PriceCell `compact`; `ViewHeader variant="span"`; no lint suppressions; the place-name word list), 49 (one suppression check; `microGbpToPence`), 50 (one priced-reason builder in core), 51 (`unconfirmedCells`; no `Date` objects; the month table of day buttons), 52 (every fare through PriceCell, tooltips included; `data-scale` only on legend scale values; "cached from" with destination and stay; run times in Europe/London; joins by run order; the route-level series named by provider; History's runs from the executions list), 53 (the calendar's `destination` parameter).
+- **Plan decisions consumed:** 14 (`resultRowKey`, `?row=`), 15 (route history one point per run), 21 (`DEFAULT_DISCOVERY_REFRESH_HOURS`), 24 (SearchApi itinerary age unknown), 25 and 43 (child caps), 27 and 37 (unconfirmed offers, "price not confirmed by the final step"), 30, 36 and 47 (`truncated`, "cheapest of the rows read"), 38 (this brief's rulings), 42 (the contract fields and the names shared with WP9), 44 (staleness by fetch age; no suppressions; "hard stop", never "up to"), 45 and 48 (`price-unconfirmed`, `childCapPreview`, `pnpm casts`), 46 (WP9 is the base; one date table; PriceCell `compact`; `ViewHeader variant="span"`; no lint suppressions; the place-name word list), 49 (one suppression check; `microGbpToPence`), 50 (one priced-reason builder in core), 51 (`unconfirmedCells`; no `Date` objects; the month table of day buttons), 52 (every fare through PriceCell, tooltips included; `data-scale` only on legend scale values; "cached from" with destination and stay; run times in Europe/London; joins by run order; the route-level series named by provider; History's runs from the executions list), 53 (the calendar's `destination` parameter), 54 ("not seen in latest search" on verified-basis figures, "superseded by a later search" on calendar-basis prices ranked after current ones, `stale` and "indicative" on route-level points; vendor links re-validated by the contract, so the web trusts the parsed value).
 
 ## 4. Interfaces consumed
 
@@ -100,7 +101,7 @@ export const BANNED_WORD_ALLOWLIST: readonly string[]; export function findBanne
 export type CalendarDay = z.infer<typeof apiContract.calendarDaySchema>; export * as apiContract;
 ```
 
-From `api-contract/results.ts` and `index.ts` (verbatim shapes; Task 10.1 changes the six marked ⊕):
+From `api-contract/results.ts` and `index.ts` (verbatim shapes; Task 10.1 changes the seven marked ⊕):
 
 ```ts
 priceCellSchema { pricePence; provenance; stale; ageHours: number | 'unknown'; truncated }   // truncated: WP9 Task 9.0
@@ -113,6 +114,7 @@ calendarResponseSchema { days; executions: ExecutionSummary[]; staleAfterHours; 
 ⊕ durationAnalysisResponseSchema { byNights: Array<{ nights; minVerified: (PriceCell & { n }) | null; minCalendar: Array<{ providerId; price: PriceCell; n }>; searched: boolean }>; executions }
 cellOutcomeSchema = CellKey & { executionId; stage; providerId; status; reason: string | null; attempts; lastError: string | null; fetchedAt: IsoDateTime | null; minPence; cabin; pointOfSale; sourceKind; reusedFromExecutionId: string | null }
 ⊕ cellDetailResponseSchema { cell; outcomes: CellOutcome[]; calendarPrices: Array<PriceCell & { executionId; calendarPriceId }>; observations: ResultRow[] }
+⊕ calendarGapResponseSchema { cheapestVerified: (PriceCell & { cell; itineraryHash }) | null; cells: Array<{ cell; calendar: PriceCell; verifyAvailable }> }
 historyPointSchema { at: IsoDateTime; pricePence; provenance }    // @gmt/db's offerHistory and route history return this type
 routeSeriesPointSchema { date: IsoDate; pricePence; fetchedAt: IsoDateTime; providerId; sourceKind }
 ⊕ itineraryHistoryResponseSchema { itineraryHash; series: Array<{ providerId; seller; cabin; points: HistoryPoint[] }> }
@@ -169,6 +171,9 @@ WP9's guards WP10 passes: the AST source guard (no literal copy in JSX or in let
 export const calendarQuerySchema;   // { destination?: Iata }, the calendar route's query (decision 53)
 export const historyPointResponseSchema;   // historyPointSchema + { stale: boolean; truncated: boolean }
 // calendarDaySchema.verification.unconfirmedCells: number   (for the requested destination, else every destination)
+// decision 54: notSeenInLatest: { ageHours } | null on calendarDay.cheapestVerified/cheapestPartiallyVerified, durationAnalysis minVerified,
+//   calendarGap.cheapestVerified; superseded: boolean on calendarDay.cheapestCalendar, durationAnalysis minCalendar[].price,
+//   cellDetail.calendarPrices[]; stale: boolean on routeHistory.routeSeries[].points[] (the stored RouteSeriesPoint is unchanged)
 // durationAnalysisResponseSchema.byNights[]: minVerified: (PriceCell & { cell; n }) | null; minCalendar[].price: PriceCell & { cell };
 //   searched: { verification: { searched; total }; discovery: Array<{ providerId; searched; total }> }
 // itineraryHistoryResponseSchema: { itineraryHash; cell; carriers: string[]; series[].points: Array<HistoryPointResponse & { priceConfirmed; executionId }> }
@@ -185,7 +190,9 @@ export function monthDays(m: IsoMonth): IsoDate[];
 export function formatInstantLondon(ms: number): string;     // '14 Mar 2027 15:00' (Europe/London)
 export function formatInstantDateLondon(ms: number): string; // '14 Mar 2027' (Europe/London)
 export function formatAxisPounds(pence: number): string;     // '1,200': a chart's price tick, no "£"
-// src/components/PriceCell.tsx (WP9's): PriceCellProps.face?: boolean   (the phone day cell's amount; COPY.priceMarkGlyph)
+// src/components/PriceCell.tsx (WP9's): PriceCellProps.face?: boolean (the phone day cell's amount; COPY.priceMarkGlyph); superseded?: boolean
+// src/lib/marks.ts
+export interface FigureMarks; export function figureMarks(p): FigureMarks;   // decision 54's two marks of a figure, spread into PriceCell
 // src/lib
 export function instantMs(t: string): number; export function dateMs(d: IsoDate): number; export function dateOfMs(ms: number): IsoDate;   // time.ts
 export function discoverySourceLabel(providerId: ProviderId, providers: ProvidersResponse | undefined): string; export function sourceLabelOf(kinds: Iterable<SourceKind>): string;   // sources.ts
@@ -211,7 +218,7 @@ export const BAND_COLOURS; export const BAND_CLASSES; export const FLAT_CLASS; e
 export const FOCUS_RING; export function targetOf(date, key): IsoDate | null; export function CalendarGrid({ days, model, months, destinationNotes, compact, onOpen });
 export function CalendarLegend({ model });
 export function cellsForDay(def, date): CellKey[]; export function toKey(c); export function orderOutcomes(outcomes, executions); export function reasonText(reason): string;
-export function runLabel(executionId, executions): string; export function noHeadroom(v): boolean; export function canPressVerify(detail, sending): boolean;   // panel.ts
+export function runLabel(executionId, executions): string; export function orderCalendarPrices(prices); export function noHeadroom(v): boolean; export function canPressVerify(detail, sending): boolean;   // panel.ts
 export function VerifyCost({ verify }); export function DayPrices({ slice, notes }); export function CellDetailBody({ detail, executions, note });   // PanelSections.tsx
 export function CellPanel({ definition, date, slice, executions, initialCell, inline, onClose });
 export const CALENDAR_PARAMS; export function parseDestination(raw, destinations); export function parseBasis(raw); export function CalendarView({ definition });
@@ -228,7 +235,7 @@ export function historySpan(lines); export function newestAllStale(lines); expor
 export function RouteTable({ line, now });   // RouteTable.tsx
 export const MAX_OVERLAY_PAIRS = 6; export function HistoryView({ definition });
 // src/copy.ts
-COPY.calendarView, COPY.durationView, COPY.historyView, COPY.priceMarkGlyph
+COPY.calendarView, COPY.durationView, COPY.historyView, COPY.priceMarkGlyph, COPY.superseded
 // test/guards.ts (WP9's): renderedCopy() and poundsOutsidePrices(), shared by WP9's sweep and WP10's wiring test
 // e2e/selectors.ts: SMOKE, the Playwright smoke's calendar selectors
 // DOM markers WP9's rendered sweep accepts for "£" outside a PriceCell (Task 10.12): [data-scale] (the calendar legend's scale values only), [data-indicative] (route-level rows)
@@ -260,12 +267,12 @@ Versions are from plan Task 0.1 (already in `apps/web/package.json`). Everything
 **Create**
 
 - `packages/core/test/api-contract/wp10.test.ts`
-- `apps/web/src/lib/{time.ts,sources.ts,palette.ts}`, `apps/web/src/state/links.ts`
+- `apps/web/src/lib/{time.ts,sources.ts,palette.ts,marks.ts}`, `apps/web/src/state/links.ts`
 - `apps/web/src/views/Calendar/{types.ts,marker.ts,DayMarker.tsx,display.ts,scale.ts,model.ts,CoverageCue.tsx,CalendarGrid.tsx,CalendarLegend.tsx,panel.ts,PanelSections.tsx,CellPanel.tsx,CalendarView.tsx,calendar.css}`
 - `apps/web/src/views/Duration/{data.ts,DurationChart.tsx,DurationView.tsx}`
 - `apps/web/src/views/History/{lines.ts,HistoryChart.tsx,RouteTable.tsx,HistoryView.tsx}`
 - `apps/web/test/fixtures.wp10.ts`, `apps/web/test/msw/wp10Handlers.ts`, `apps/web/test/setup-tz.ts`, `apps/web/test/setup-charts.ts`
-- `apps/web/test/lib/{dates,time,sources,noDateParsing}.test.ts`, `apps/web/test/components/priceCellFace.test.tsx`
+- `apps/web/test/lib/{dates,time,sources,noDateParsing,marks}.test.ts`, `apps/web/test/components/priceCellFace.test.tsx`, `apps/web/test/views/results/gapNotSeen.test.tsx`
 - `apps/web/test/views/calendar/{marker.test.tsx,display.test.ts,scale.test.ts,grid.test.tsx,panel.test.tsx,view.test.tsx}`
 - `apps/web/test/views/duration.test.tsx`, `apps/web/test/views/history.test.tsx`, `apps/web/test/app/wp10Wiring.test.tsx`, `apps/web/test/tz/dates.tz.test.tsx`, `apps/web/test/e2e/selectors.test.tsx`
 - `apps/web/playwright.config.ts`, `apps/web/e2e/{smoke.spec.ts,selectors.ts,prepare-db.mjs}`
@@ -287,9 +294,9 @@ Every command runs from the repository root. Focused runs use `pnpm --filter @gm
 
 **Interfaces:**
 - Consumes: `priceCellSchema` (with WP9 Task 9.0's `truncated`), `cellSchema`, `iataSchema`, `providerIdSchema`, `executionSummarySchema`, `historyPointSchema`, `ROUTES`.
-- Produces: `calendarQuerySchema` on the calendar route (decision 53); `calendarDaySchema.verification.unconfirmedCells` (decision 51); the per-series `searched` counts and the minimum's `cell` in `durationAnalysisResponseSchema`; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses; `priceConfirmed` and `executionId` on itinerary history points and the itinerary's `cell` and `carriers` (decision 52); `verify: { maxCalls, headroomCalls }` on `cellDetailResponseSchema` (decisions 38, 42, 48).
+- Produces: `calendarQuerySchema` on the calendar route (decision 53); `calendarDaySchema.verification.unconfirmedCells` (decision 51); the per-series `searched` counts and the minimum's `cell` in `durationAnalysisResponseSchema`; `historyPointResponseSchema` (`stale`, `truncated`) on both history responses; `priceConfirmed` and `executionId` on itinerary history points and the itinerary's `cell` and `carriers` (decision 52); `verify: { maxCalls, headroomCalls }` on `cellDetailResponseSchema` (decisions 38, 42, 48); decision 54's `notSeenInLatest` (verified-basis minima of the calendar day, the duration and the calendar gap), `superseded` (calendar-basis minima of the day and the duration, and the cell detail's calendar prices) and `stale` on route-level response points.
 
-Why each field exists: a destination-filtered calendar must count that destination's cells, never every destination's, so the route takes the filter and the api computes the day for it (decision 53); the calendar day must say "price not confirmed" when its itinerary search priced cells but confirmed none of their prices (decisions 48, 51; the day carries counts, not outcome reasons); the duration view must say "not itinerary-searched" where only discovery ran and "searched 3 of 48 cells" where a stay length was only partly searched (a flag cannot tell one cell of hundreds from all of them, review prov-r2-007), and must name the departure date and destination of each minimum; history points must carry the same `stale` and "cheapest of the rows read" labels as every other price; unconfirmed offers must be told apart from confirmed ones; an offer line joins only consecutive runs, so each point names its run, and the itinerary's heading and destination come from the api on a bookmark too (decision 52); the verify button must show the hard stop the child would get and the calls of headroom left (WP7's `childCapPreview`, decisions 42, 45). `historyPointSchema` itself is unchanged because `@gmt/db`'s `offerHistory` and route history return its type; WP8 adds the flags when it answers.
+Why each field exists: a destination-filtered calendar must count that destination's cells, never every destination's, so the route takes the filter and the api computes the day for it (decision 53); the calendar day must say "price not confirmed" when its itinerary search priced cells but confirmed none of their prices (decisions 48, 51; the day carries counts, not outcome reasons); the duration view must say "not itinerary-searched" where only discovery ran and "searched 3 of 48 cells" where a stay length was only partly searched (a flag cannot tell one cell of hundreds from all of them, review prov-r2-007), and must name the departure date and destination of each minimum; history points must carry the same `stale` and "cheapest of the rows read" labels as every other price; unconfirmed offers must be told apart from confirmed ones; an offer line joins only consecutive runs, so each point names its run, and the itinerary's heading and destination come from the api on a bookmark too (decision 52); the verify button must show the hard stop the child would get and the calls of headroom left (WP7's `childCapPreview`, decisions 42, 45); and a minimum the latest search no longer returned, or a calendar price a newer run superseded, must say so wherever it is shown, as a results row already does, while a route-level point says when it is stale (decision 54). The two marks sit on the shapes WP10 renders; `priceCellSchema` and `routeSeriesPointSchema`, which other packages share, are unchanged. `historyPointSchema` itself is unchanged because `@gmt/db`'s `offerHistory` and route history return its type; WP8 adds the flags when it answers.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -299,6 +306,7 @@ Why each field exists: a destination-filtered calendar must count that destinati
 import { describe, expect, it } from 'vitest';
 import {
   calendarDaySchema,
+  calendarGapResponseSchema,
   calendarQuerySchema,
   cellDetailResponseSchema,
   durationAnalysisResponseSchema,
@@ -332,8 +340,8 @@ describe('WP10 contract additions (plan decision 38)', () => {
   it('duration analysis: each minimum carries its cell, and searched counts k of N per series', () => {
     const night = {
       nights: 14,
-      minVerified: { ...price, cell, n: 3 },
-      minCalendar: [{ providerId: 'travelpayouts', price: { ...price, cell }, n: 5 }],
+      minVerified: { ...price, cell, n: 3, notSeenInLatest: null },
+      minCalendar: [{ providerId: 'travelpayouts', price: { ...price, cell, superseded: false }, n: 5 }],
       searched: {
         verification: { searched: 0, total: 4 },
         discovery: [{ providerId: 'travelpayouts', searched: 30, total: 48 }],
@@ -438,13 +446,79 @@ describe('WP10 contract additions (plan decision 38)', () => {
     const calendar = ROUTES.find((r) => r.method === 'GET' && r.path === '/api/definitions/:id/calendar');
     expect(calendar?.query).toBe(calendarQuerySchema);
   });
+
+  it('decision 54: verified minima say when the latest search no longer returned them; calendar prices when superseded; route points their staleness', () => {
+    const notSeen = { ageHours: 30 };
+    const day = {
+      date: '2027-03-14',
+      discovery: [],
+      verification: { selected: 1, itinerarySearched: 1, onDemand: 0, unconfirmedCells: 0 },
+      cheapestVerified: { ...price, cell, itineraryHash: 'h1', notSeenInLatest: notSeen },
+      cheapestPartiallyVerified: null,
+      cheapestCalendar: { ...price, cell, superseded: true },
+      byDestination: [],
+    };
+    expect(calendarDaySchema.safeParse(day).success).toBe(true);
+    const { notSeenInLatest: _n, ...noNotSeen } = day.cheapestVerified;
+    expect(calendarDaySchema.safeParse({ ...day, cheapestVerified: noNotSeen }).success).toBe(false);
+    expect(calendarDaySchema.safeParse({ ...day, cheapestCalendar: { ...price, cell } }).success).toBe(false);
+    const gap = {
+      cheapestVerified: { ...price, cell, itineraryHash: 'h1', notSeenInLatest: null },
+      cells: [],
+    };
+    expect(calendarGapResponseSchema.safeParse(gap).success).toBe(true);
+    const { notSeenInLatest: _g, ...bareGap } = gap.cheapestVerified;
+    expect(calendarGapResponseSchema.safeParse({ ...gap, cheapestVerified: bareGap }).success).toBe(false);
+    const night = {
+      nights: 14,
+      minVerified: { ...price, cell, n: 1, notSeenInLatest: notSeen },
+      minCalendar: [{ providerId: 'travelpayouts', price: { ...price, cell, superseded: false }, n: 1 }],
+      searched: { verification: { searched: 1, total: 1 }, discovery: [] },
+    };
+    expect(durationAnalysisResponseSchema.safeParse({ byNights: [night], executions: [] }).success).toBe(
+      true,
+    );
+    const oldCalendar = [{ providerId: 'travelpayouts', price: { ...price, cell }, n: 1 }];
+    expect(
+      durationAnalysisResponseSchema.safeParse({
+        byNights: [{ ...night, minCalendar: oldCalendar }],
+        executions: [],
+      }).success,
+    ).toBe(false);
+    const detail = { cell, outcomes: [], observations: [], verify: null };
+    const calendarPrice = { ...price, executionId: 'e1', calendarPriceId: 7 };
+    expect(cellDetailResponseSchema.safeParse({ ...detail, calendarPrices: [calendarPrice] }).success).toBe(
+      false,
+    );
+    expect(
+      cellDetailResponseSchema.safeParse({
+        ...detail,
+        calendarPrices: [{ ...calendarPrice, superseded: true }],
+      }).success,
+    ).toBe(true);
+    const routePoint = {
+      date: '2027-03-10',
+      pricePence: 38000,
+      fetchedAt: '2026-10-14T13:00:00.000Z',
+      providerId: 'searchapi',
+      sourceKind: 'scraped-search',
+    };
+    const route = (points: unknown[]) => ({
+      origin: 'LHR',
+      destination: 'JFK',
+      calendarSeries: [],
+      routeSeries: [{ providerId: 'searchapi', cabin: 'unknown', points }],
+    });
+    expect(routeHistoryResponseSchema.safeParse(route([routePoint])).success).toBe(false);
+    expect(routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true }])).success).toBe(true);
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/api-contract/wp10.test.ts`
-Expected: FAIL, 5 of 5: the duration case with `expected false to be true` (the per-series `searched` counts are refused), the other four with `expected true to be false` (the old schemas accept a point without `stale`, an offer point without `priceConfirmed`, a detail without `verify` and a day without `unconfirmedCells`).
+Expected: FAIL, 6 of 6: the duration case with `expected false to be true` (the per-series `searched` counts are refused), the other five with `expected true to be false` (the old schemas accept a point without `stale`, an offer point without `priceConfirmed`, a detail without `verify`, a day without `unconfirmedCells`, and a verified minimum without `notSeenInLatest`).
 
 - [ ] **Step 3: Implement**
 
@@ -453,9 +527,34 @@ Expected: FAIL, 5 of 5: the duration case with `expected false to be true` (the 
 `packages/core/src/api-contract/results.ts` — find:
 
 ```ts
+const pricedCell = priceCellSchema.extend({ cell: cellSchema });
+export const calendarDaySchema = z.object({
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+const pricedCell = priceCellSchema.extend({ cell: cellSchema });
+/**
+ * Plan decision 54 on the views' figures. A verified-basis minimum the latest search no longer returned carries
+ * `notSeenInLatest` (the same shape as a results row's); a calendar-basis price whose cell a newer parent execution
+ * found empty or no_data is `superseded` (WP8 ranks such prices after current ones).
+ */
+const notSeenInLatest = z.object({ ageHours: ageHoursSchema }).nullable();
+const verifiedFigure = pricedCell.extend({ itineraryHash: z.string(), notSeenInLatest });
+const calendarFigure = pricedCell.extend({ superseded: z.boolean() });
+export const calendarDaySchema = z.object({
+```
+
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
   discovery: z.array(z.object({ providerId: providerIdSchema, buckets: bucketsSchema, total: count })),
   verification: z.object({ selected: count, itinerarySearched: count, onDemand: count }),
   cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
+  cheapestPartiallyVerified: pricedCell.extend({ itineraryHash: z.string(), count }).nullable(),
+  cheapestCalendar: pricedCell.nullable(),
+  byDestination: z.array(
 ```
 
 `packages/core/src/api-contract/results.ts` — replace with:
@@ -472,7 +571,10 @@ Expected: FAIL, 5 of 5: the duration case with `expected false to be true` (the 
     onDemand: count,
     unconfirmedCells: count,
   }),
-  cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
+  cheapestVerified: verifiedFigure.nullable(),
+  cheapestPartiallyVerified: verifiedFigure.extend({ count }).nullable(),
+  cheapestCalendar: calendarFigure.nullable(),
+  byDestination: z.array(
 ```
 
 `packages/core/src/api-contract/results.ts` — find:
@@ -531,9 +633,9 @@ export const durationAnalysisResponseSchema = z.object({
 ```ts
       nights: count,
       /** n = cells of this nights value with a class-verified price */
-      minVerified: pricedCell.extend({ n: count }).nullable(),
+      minVerified: pricedCell.extend({ n: count, notSeenInLatest }).nullable(),
       /** n = cells of this nights value the provider priced */
-      minCalendar: z.array(z.object({ providerId: providerIdSchema, price: pricedCell, n: count })),
+      minCalendar: z.array(z.object({ providerId: providerIdSchema, price: calendarFigure, n: count })),
       searched: z.object({
         verification: searchedCount,
         discovery: z.array(searchedCount.extend({ providerId: providerIdSchema })),
@@ -544,6 +646,26 @@ export const durationAnalysisResponseSchema = z.object({
 `packages/core/src/api-contract/results.ts` — find:
 
 ```ts
+export const calendarGapResponseSchema = z.object({
+  cheapestVerified: pricedCell.extend({ itineraryHash: z.string() }).nullable(),
+  cells: z.array(z.object({ cell: cellSchema, calendar: priceCellSchema, verifyAvailable: z.boolean() })),
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+export const calendarGapResponseSchema = z.object({
+  cheapestVerified: verifiedFigure.nullable(),
+  cells: z.array(z.object({ cell: cellSchema, calendar: priceCellSchema, verifyAvailable: z.boolean() })),
+```
+
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+  outcomes: z.array(cellOutcomeSchema),
+  calendarPrices: z.array(
+    priceCellSchema.extend({ executionId: z.string(), calendarPriceId: z.number().int() }),
+  ),
   observations: z.array(resultRowSchema),
 });
 ```
@@ -551,6 +673,15 @@ export const durationAnalysisResponseSchema = z.object({
 `packages/core/src/api-contract/results.ts` — replace with:
 
 ```ts
+  outcomes: z.array(cellOutcomeSchema),
+  /** `superseded` (decision 54): a newer parent execution found this cell empty or no_data. */
+  calendarPrices: z.array(
+    priceCellSchema.extend({
+      executionId: z.string(),
+      calendarPriceId: z.number().int(),
+      superseded: z.boolean(),
+    }),
+  ),
   observations: z.array(resultRowSchema),
   /**
    * What the per-cell verify action would spend now (spec §8.1; plan decisions 42, 45): WP7's childCapPreview, the
@@ -643,6 +774,23 @@ export const itineraryHistoryResponseSchema = z.object({
     }),
 ```
 
+`packages/core/src/api-contract/results.ts` — find:
+
+```ts
+      cabin: z.union([cabinSchema, z.literal('unknown')]),
+      points: z.array(routeSeriesPointSchema),
+    }),
+```
+
+`packages/core/src/api-contract/results.ts` — replace with:
+
+```ts
+      cabin: z.union([cabinSchema, z.literal('unknown')]),
+      /** `stale` by fetch age (decision 54); the stored point type is unchanged */
+      points: z.array(routeSeriesPointSchema.extend({ stale: z.boolean() })),
+    }),
+```
+
 `packages/core/src/api-contract/index.ts`: the calendar route declares its query, which WP9's `call` sends and WP8 parses.
 
 `packages/core/src/api-contract/index.ts` — find:
@@ -678,10 +826,27 @@ export const itineraryHistoryResponseSchema = z.object({
 
 `HistoryPoint`, `RouteSeriesPoint` and `CalendarDay` keep their exports; `byDestination` is unchanged (decision 53 makes the filter the api's job).
 
+`apps/web/test/fixtures.ts` (WP9's): its calendar-gap builder parses through the gap schema, which now requires `notSeenInLatest`:
+
+`test/fixtures.ts` — find:
+
+```ts
+      itineraryHash: 'hash-verified-1',
+    },
+```
+
+`test/fixtures.ts` — replace with:
+
+```ts
+      itineraryHash: 'hash-verified-1',
+      notSeenInLatest: null,
+    },
+```
+
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/core exec vitest run test/api-contract`
-Expected: PASS; `wp10.test.ts` passes 5 tests and the other contract files are unchanged.
+Expected: PASS; `wp10.test.ts` passes 6 tests and the other contract files are unchanged.
 
 Run: `pnpm -r typecheck`
 Expected: clean. `@gmt/db` still compiles because `HistoryPoint` is unchanged; nothing on `main` reads the changed duration, history or cell-detail shapes yet (WP8 is the first producer, §13).
@@ -689,7 +854,7 @@ Expected: clean. `@gmt/db` still compiles because `HistoryPoint` is unchanged; n
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core && git commit -m "wp10: calendar destination query, unconfirmed cells, searched counts, minimum cells, history stale/truncated/confirmed/run, verify"
+git add packages/core apps/web/test/fixtures.ts && git commit -m "wp10: calendar destination query, unconfirmed cells, searched counts, decision-54 marks, history fields, verify"
 ```
 
 ### Task 10.2: Run times in Europe/London, grid and instant forms in format.ts, instant helpers, and the Date guard (review focus 3, part 1)
@@ -1302,14 +1467,24 @@ export function provSyntheticAt(h: number): Provenance {
   return prov(provSynthetic, h);
 }
 
-/** A day price as calendarDaySchema sends it, its age from core's effective-age rule. */
+/** Decision 54's marks on a view figure; a builder that does not set them sends neither. */
+export interface Marks {
+  notSeenInLatest: { ageHours: number | 'unknown' } | null;
+  superseded: boolean;
+}
+
+/**
+ * A day price as calendarDaySchema sends it, its age from core's effective-age rule. It carries both decision-54
+ * fields, so it fits a verified or a calendar minimum (the contract parse keeps the one each shape declares).
+ */
 export function priceAt(
   pricePence: number,
   provenance: Provenance,
   stale: boolean,
   at: Cell,
   truncated = false,
-): PriceCellData & { cell: Cell; itineraryHash: string } {
+  marks: Partial<Marks> = {},
+): PriceCellData & { cell: Cell; itineraryHash: string } & Marks {
   const ageHours = worstCaseAgeHours(effectiveAge(provenance, NOW));
   return {
     pricePence,
@@ -1319,6 +1494,8 @@ export function priceAt(
     truncated,
     cell: at,
     itineraryHash: `it-${at.departureDate}-${pricePence}`,
+    notSeenInLatest: marks.notSeenInLatest ?? null,
+    superseded: marks.superseded ?? false,
   };
 }
 
@@ -1435,14 +1612,23 @@ export function night(
     minVerified:
       verified === null
         ? null
-        : { ...bare(priceAt(verified[0], provItinerary(5), false, at)), cell: at, n: verified[1] },
+        : {
+            ...bare(priceAt(verified[0], provItinerary(5), false, at)),
+            cell: at,
+            n: verified[1],
+            notSeenInLatest: null,
+          },
     minCalendar:
       calendar === null
         ? []
         : [
             {
               providerId: 'travelpayouts',
-              price: { ...bare(priceAt(calendar[0], provCalendarAt(2), false, at)), cell: at },
+              price: {
+                ...bare(priceAt(calendar[0], provCalendarAt(2), false, at)),
+                cell: at,
+                superseded: false,
+              },
               n: calendar[1],
             },
           ],
@@ -1543,6 +1729,7 @@ export function routeHistory(
           fetchedAt: hoursBefore(2),
           providerId: 'searchapi',
           sourceKind: 'scraped-search',
+          stale: false,
         })),
       },
     ],
@@ -2577,8 +2764,15 @@ export function sourceLabelOf(kinds: Iterable<SourceKind>): string {
 import type { Cell, Iata, IsoDate, ProviderId } from '@gmt/core';
 import type { CalendarDay, PriceCellData } from '../../api/types.js';
 
-/** A price shown on a day, with the cell it came from (all destinations or one: plan decisions 38, 52). */
-export type DayPrice = PriceCellData & { cell: Cell };
+/**
+ * A price shown on a day, with the cell it came from (plan decisions 38, 52) and its decision-54 mark: a verified-basis
+ * minimum carries `notSeenInLatest`, a calendar-basis one `superseded`.
+ */
+export type DayPrice = PriceCellData & {
+  cell: Cell;
+  notSeenInLatest?: { ageHours: number | 'unknown' } | null;
+  superseded?: boolean;
+};
 
 /** What one day renders, for all destinations or for one (spec §11 View B, per-destination filter). */
 export interface DaySlice {
@@ -3528,16 +3722,18 @@ git add apps/web && git commit -m "wp10: quintile and flat scales per basis with
 ### Task 10.6: Calendar grid, phone face, coverage cue, legend and keyboard
 
 **Files:**
-- Create: `apps/web/src/views/Calendar/{CoverageCue.tsx,CalendarGrid.tsx,CalendarLegend.tsx,calendar.css}`, `apps/web/test/views/calendar/grid.test.tsx`, `apps/web/test/components/priceCellFace.test.tsx`
-- Modify (WP9): `apps/web/src/components/PriceCell.tsx` (the `face` prop), `apps/web/src/copy.ts` (`priceMarkGlyph`), `apps/web/test/copy/sourceGuard.test.ts` (money files and non-copy props)
+- Create: `apps/web/src/views/Calendar/{CoverageCue.tsx,CalendarGrid.tsx,CalendarLegend.tsx,calendar.css}`, `apps/web/src/lib/marks.ts`, `apps/web/test/views/calendar/grid.test.tsx`, `apps/web/test/components/priceCellFace.test.tsx`, `apps/web/test/lib/marks.test.ts`
+- Modify (WP9): `apps/web/src/components/PriceCell.tsx` (the `face` and `superseded` props), `apps/web/src/copy.ts` (`priceMarkGlyph`, `superseded`), `apps/web/test/copy/sourceGuard.test.ts` (money files and non-copy props)
 
 **Interfaces:**
 - Consumes: `CalendarModel`, `GridDay`, `coverageOf`, `BAND_CLASSES`, `FLAT_CLASS`, `PRICELESS_CLASS`, `MIN_BANDED_DAYS`; WP9's `PriceCell` (`compact`), `PriceBoundary`, `COPY`; the `format.ts` forms (`WEEK_HEADERS`, `formatIsoMonth`, `formatIsoDateLong`, …); `addDays`, `monthOf`.
-- Produces: `PriceCellProps.face`, `COPY.priceMarkGlyph`, `FOCUS_RING`, `targetOf`, `CalendarGrid({ days, model, months, destinationNotes, compact, onOpen })`, `CoverageCue({ coverage })`, `CalendarLegend({ model })`.
+- Produces: `PriceCellProps.face`, `PriceCellProps.superseded`, `COPY.priceMarkGlyph`, `COPY.superseded`, `FigureMarks`, `figureMarks`, `FOCUS_RING`, `targetOf`, `CalendarGrid({ days, model, months, destinationNotes, compact, onOpen })`, `CoverageCue({ coverage })`, `CalendarLegend({ model })`.
 
 Each drawn month is a native table (its caption is its accessible name) with Monday-first column headers; each data day is a `<button>` with a roving `tabIndex` (§6: an ARIA `grid` cannot be written without a lint suppression). Arrows move by a day or a week across drawn months, Home and End to Monday and Sunday, PageUp and PageDown to the same day of the month before or after; focus moves only to a drawn day with data; Enter and Space are the button's own activation. A desktop day shows its number and band number, WP9's PriceCell `compact` form, the stay ("14n · back 28 Mar"), "cached from" with the cheaper calendar price's own compact PriceCell carrying its destination and note, and its stay below it (decision 52: with all destinations shown the cheaper fare can be EWR for 12 nights beside a JFK day price for 14), "price not confirmed" when its itinerary search confirmed no price (decision 48; under a filter the api's count is that destination's, decision 53), and the coverage cue. A priceless day shows its counted glyphs and the same coverage cue (review ui-r2-003). Every meaning has text or a pattern: band number on the face and in screen-reader text, "not on the colour scale", hatching, swatches and glyphs with words.
 
 At phone width (`compact`, review ui-r2-001) a column is about 45 px, which the desktop body cannot fit, so a day shows its number and band, the amount through PriceCell's new `face` form and one-glyph marks: "!" for "price not confirmed" and "◐" for part of the day not searched, each with its words in screen-reader text. `face` is a prop on WP9's PriceCell, not a second price component (decision 46): the amount with "≈", every mark as one glyph from `COPY.priceMarkGlyph` ("!" unconfirmed, "◷" stale, "?" vendor's cache age unknown, "…" cheapest of the rows read), and the marks' words, provider, source, age, destination and note in its title and its spoken text. Stay, provider badge, "cached from" and the counts are in the panel, one tap away; the Playwright phone project checks that no day's content overflows its button (Task 10.13).
+
+Decision 54's marks: a verified-basis minimum the latest search no longer returned carries `notSeenInLatest`, which PriceCell already shows as WP9's "not seen in latest search (…)" note; a calendar-basis price whose cell a newer parent run found empty or no fares carries `superseded`, which the new `superseded` prop shows as a "superseded by a later search" badge after "stale" (on the face, "◌" and "↺"). `lib/marks.ts`'s `figureMarks` reads both from any figure, so every view spreads the same two props into PriceCell; the day price and the "cached from" fare each carry their own.
 
 The legend sits above the grid; its band ranges are scale values, so it carries `data-scale`, the one place WP9's rendered sweep accepts "£" outside a PriceCell besides an indicative row (decision 52, Task 10.12). The scale line, the swatches and the glyph row stay open; the explanations of the marks fold into "What the marks mean" (review ui-r2-006).
 
@@ -3951,6 +4147,24 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(onOpen).toHaveBeenCalledWith('2027-03-08', null);
   });
 
+  it('decision 54: a verified day price the latest search no longer returned, and a superseded cached fare, say so', () => {
+    const d = gridDay('2027-03-08', {
+      cheapestVerified: priceAt(52000, provItinerary(5), false, cellAt('2027-03-08', 14), false, {
+        notSeenInLatest: { ageHours: 30 },
+      }),
+      cheapestCalendar: priceAt(41000, provCalendarAt(2), false, cellAt('2027-03-08', 12), false, {
+        superseded: true,
+      }),
+      discovery: [disc('travelpayouts', { priced: 48 })],
+    });
+    renderGrid([d]);
+    const cells = within(dayCell('2027-03-08')).getAllByTestId('price-cell');
+    expect(cells[0]).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(cells[0]).not.toHaveTextContent('superseded');
+    expect(cells[1]).toHaveTextContent('superseded by a later search');
+    expect(cells[1]).not.toHaveTextContent('not seen in latest search');
+  });
+
   it('at phone width a day shows its number, band, amount face and one-glyph marks; the rest is in the panel (ui-r2-001)', () => {
     const days = [
       ...tenVerified,
@@ -4011,6 +4225,8 @@ describe('PriceCell face (phone day cell)', () => {
         stale
         truncated
         unconfirmed
+        superseded
+        notSeenInLatestHours={30}
         destination="EWR"
         destinationNote="onward leg not included"
       />,
@@ -4019,13 +4235,15 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).toHaveAttribute('data-face');
     expect(cell).not.toHaveClass('border-dashed');
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
-    expect(hidden).toEqual(['≈', '!◷?…']);
+    expect(hidden).toEqual(['≈', '!◷?…↺◌']);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [
       'stale',
       "vendor's cache age unknown",
       'cheapest of the rows read',
+      'superseded by a later search',
+      'not seen in latest search (30h ago)',
       'EWR',
       'onward leg',
     ])
@@ -4044,17 +4262,48 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell.getAttribute('title')).not.toContain('onward');
     expect(cell.getAttribute('title')).toContain('constraints not checked');
   });
+
+  it('the full form badges a superseded calendar price after "stale" (decision 54)', () => {
+    const { getByTestId } = renderWithProviders(
+      <PriceCell pricePence={30000} provenance={provCalendar} calendar stale superseded />,
+    );
+    const text = getByTestId('price-cell').textContent ?? '';
+    expect(text).toContain('superseded by a later search');
+    expect(text.indexOf('stale')).toBeLessThan(text.indexOf('superseded'));
+  });
+});
+```
+
+`apps/web/test/lib/marks.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { figureMarks } from '../../src/lib/marks.js';
+
+describe('figureMarks (decision 54)', () => {
+  it('reads not-seen hours and superseded from a figure, and nothing from a figure without them', () => {
+    expect(figureMarks({ notSeenInLatest: { ageHours: 30 } })).toEqual({
+      notSeenInLatestHours: 30,
+      superseded: false,
+    });
+    expect(figureMarks({ notSeenInLatest: { ageHours: 'unknown' } }).notSeenInLatestHours).toBe('unknown');
+    expect(figureMarks({ notSeenInLatest: null, superseded: true })).toEqual({
+      notSeenInLatestHours: null,
+      superseded: true,
+    });
+    expect(figureMarks({})).toEqual({ notSeenInLatestHours: null, superseded: false });
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/grid.test.tsx test/components/priceCellFace.test.tsx`
-Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views/Calendar/CalendarGrid.js"`; the face tests with `expect(element).toHaveAttribute("data-face")` and `expect(element).toHaveClass("border-dashed")` (WP9's PriceCell ignores the prop and renders its full form).
+Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views/Calendar/CalendarGrid.js"`, the marks file with `Failed to resolve import "../../src/lib/marks.js"`; the face tests with `expect(element).toHaveAttribute("data-face")` and `expect(element).toHaveClass("border-dashed")` (WP9's PriceCell ignores the prop and renders its full form).
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/components/PriceCell.tsx` (WP9's): the `face` prop and its early return, before the compact and full forms.
+`apps/web/src/components/PriceCell.tsx` (WP9's): the `face` prop and its early return, before the compact and full forms, and the `superseded` badge after "stale".
 
 `src/components/PriceCell.tsx` — find:
 
@@ -4067,6 +4316,8 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
 
 ```tsx
   fullAge?: boolean;
+  /** WP10 (decision 54): a newer parent execution found this calendar price's cell empty or no_data. */
+  superseded?: boolean;
   /**
    * WP10's phone day-cell face (plan decision 52): the amount with "≈" and each mark as one glyph; the provider,
    * destination, source, age, note and the marks' words are in the title and in spoken text, so nothing is lost.
@@ -4093,6 +4344,8 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
       ...(props.stale ? [{ glyph: G.stale, words: COPY.stale }] : []),
       ...(age.kind === 'unknown' ? [{ glyph: G.ageUnknown, words: COPY.vendorAgeUnknown }] : []),
       ...(props.truncated === true ? [{ glyph: G.truncated, words: COPY.truncatedNote }] : []),
+      ...(props.superseded === true ? [{ glyph: G.superseded, words: COPY.superseded }] : []),
+      ...(notSeen !== null ? [{ glyph: G.notSeen, words: COPY.notSeenInLatest(COPY.agoOf(notSeen)) }] : []),
     ];
     const spoken = [
       ...marks.map((m) => m.words),
@@ -4122,7 +4375,24 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
   return (
 ```
 
-`apps/web/src/copy.ts`: the face's glyphs, beside WP9's `fxApprox`.
+`src/components/PriceCell.tsx` — find:
+
+```tsx
+        {props.stale ? <span className={`${badge} bg-amber-200`}>{COPY.stale}</span> : null}
+        {age.kind === 'unknown' ? (
+```
+
+`src/components/PriceCell.tsx` — replace with:
+
+```tsx
+        {props.stale ? <span className={`${badge} bg-amber-200`}>{COPY.stale}</span> : null}
+        {props.superseded === true ? (
+          <span className={`${badge} border border-slate-500 bg-slate-100`}>{COPY.superseded}</span>
+        ) : null}
+        {age.kind === 'unknown' ? (
+```
+
+`apps/web/src/copy.ts`: the face's glyphs and the superseded label, beside WP9's `fxApprox`.
 
 `src/copy.ts` — find:
 
@@ -4136,8 +4406,38 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
 ```ts
   fxApprox: '≈',
   /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
-  priceMarkGlyph: { unconfirmed: '!', stale: '◷', ageUnknown: '?', truncated: '…' },
+  priceMarkGlyph: {
+    unconfirmed: '!',
+    stale: '◷',
+    ageUnknown: '?',
+    truncated: '…',
+    notSeen: '◌',
+    superseded: '↺',
+  },
+  /** WP10 (decision 54): a calendar-basis price whose cell a newer parent execution found empty or no_data. */
+  superseded: 'superseded by a later search',
   fxSpoken: (detail: string) => `approximately (${detail})`,
+```
+
+`apps/web/src/lib/marks.ts`:
+
+```ts
+/**
+ * The decision-54 marks a view figure may carry, read once for PriceCell: `notSeenInLatest` on a verified-basis minimum
+ * (the latest search no longer returned it) and `superseded` on a calendar-basis price (a newer parent execution found
+ * its cell empty or no_data). A figure without the field carries no such mark.
+ */
+export interface FigureMarks {
+  notSeenInLatestHours: number | 'unknown' | null;
+  superseded: boolean;
+}
+
+export function figureMarks(p: {
+  notSeenInLatest?: { ageHours: number | 'unknown' } | null;
+  superseded?: boolean;
+}): FigureMarks {
+  return { notSeenInLatestHours: p.notSeenInLatest?.ageHours ?? null, superseded: p.superseded === true };
+}
 ```
 
 `apps/web/src/views/Calendar/calendar.css` (a stylesheet, not inline styles: spec §4's CSP):
@@ -4218,6 +4518,7 @@ import {
   WEEK_HEADERS,
   weekdayIndex,
 } from '../../format.js';
+import { figureMarks } from '../../lib/marks.js';
 import { CoverageCue } from './CoverageCue.js';
 import type { DayDisplay, Glyph } from './display.js';
 import { coverageOf } from './marker.js';
@@ -4461,6 +4762,7 @@ function PhoneDayBody(props: { display: DayDisplay; slice: DaySlice; notes: Part
         <PriceBoundary>
           <PriceCell
             face
+            {...figureMarks(p)}
             pricePence={p.pricePence}
             provenance={p.provenance}
             calendar={display.basis === 'calendar'}
@@ -4513,6 +4815,7 @@ function DayPriceBlock(props: {
       <PriceBoundary>
         <PriceCell
           compact
+          {...figureMarks(p)}
           pricePence={p.pricePence}
           provenance={p.provenance}
           calendar={isCalendar}
@@ -4531,6 +4834,7 @@ function DayPriceBlock(props: {
           <PriceBoundary>
             <PriceCell
               compact
+              {...figureMarks(cached)}
               pricePence={cached.pricePence}
               provenance={cached.provenance}
               calendar
@@ -4752,7 +5056,7 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/grid.test.tsx test/components test/copy`
-Expected: PASS. The grid file passes 17 tests and the face file 2; WP9's PriceCell and provenance tests still pass (the face is a separate branch); the source guard passes.
+Expected: PASS. The grid file passes 18 tests, the face file 3 and the marks file 1; WP9's PriceCell and provenance tests still pass (the face is a separate branch); the source guard passes.
 
 Run: `pnpm lint`
 Expected: no errors, with no suppression comment (`pnpm boundaries` rejects one).
@@ -4770,9 +5074,9 @@ git add apps/web && git commit -m "wp10: calendar month tables of day buttons, p
 
 **Interfaces:**
 - Consumes: `useCellDetail`, WP9's `useExecutionActions().verify`, `ApiError`, `resultRowKey`, `hrefWith`/`navigateTo` and WP9's `?row=`, `PriceCell` with `priceUnconfirmed`, `PriceBoundary`, `DayMarker`, core's `generateCells`, `cellKeyString`, `isPriceUnconfirmed`, `daysBetween`, the `format.ts` forms, `instantMs`.
-- Produces: `cellsForDay`, `toKey`, `orderOutcomes`, `reasonText`, `runLabel`, `noHeadroom`, `canPressVerify` (`panel.ts`); `VerifyCost`, `DayPrices`, `CellDetailBody` (`PanelSections.tsx`); `CellPanel({ definition, date, slice, executions, initialCell, inline, onClose })`.
+- Produces: `cellsForDay`, `toKey`, `orderOutcomes`, `reasonText`, `runLabel`, `orderCalendarPrices`, `noHeadroom`, `canPressVerify` (`panel.ts`); `VerifyCost`, `DayPrices`, `CellDetailBody` (`PanelSections.tsx`); `CellPanel({ definition, date, slice, executions, initialCell, inline, onClose })`.
 
-The panel opens on the day: its six-bucket marker per provider (with a "not searched yet" line for a configured provider with no counts, the partially-verified count and, decision 48, the cells whose itinerary search confirmed no price) and its prices with full provenance, then the cell picker, whose cells come from core's `generateCells` over that one departure date, so the picker follows core's generation order (origins and destinations sorted) and the space has one enumerator (review arch2-004). The cell route returns outcomes from every run of the definition, so rows are ordered by the calendar response's run list (newest first), the latest run is marked, runs are named by their Europe/London start date (decision 52), reasons are in words (each `;`-joined part of core's priced reason, decisions 19, 48 and 50, looked up in a map typed against core's reason types; an unknown reason is shown as it came, marked "other"), a priced outcome whose reason carries `price-unconfirmed` says "price not confirmed" beside its status, and the vendor detail (`lastError`) has its own column. The Run column is each row's header and stays in view while the nine columns scroll sideways (review ui-r2-010). Each observation is a ResultRow through PriceCell with `unconfirmed={priceUnconfirmed(o)}` and `truncated`, so an unconfirmed offer says so first, inside its price, and a page-capped row says "cheapest of the rows read" (decision 44, review prov-r2-001).
+The panel opens on the day: its six-bucket marker per provider (with a "not searched yet" line for a configured provider with no counts, the partially-verified count and, decision 48, the cells whose itinerary search confirmed no price) and its prices with full provenance, then the cell picker, whose cells come from core's `generateCells` over that one departure date, so the picker follows core's generation order (origins and destinations sorted) and the space has one enumerator (review arch2-004). The cell route returns outcomes from every run of the definition, so rows are ordered by the calendar response's run list (newest first), the latest run is marked, runs are named by their Europe/London start date (decision 52), reasons are in words (each `;`-joined part of core's priced reason, decisions 19, 48 and 50, looked up in a map typed against core's reason types; an unknown reason is shown as it came, marked "other"), a priced outcome whose reason carries `price-unconfirmed` says "price not confirmed" beside its status, and the vendor detail (`lastError`) has its own column. The Run column is each row's header and stays in view while the nine columns scroll sideways (review ui-r2-010). The cell's calendar prices list current ones first and those a newer run superseded after them, badged (decision 54); the day's prices carry their own decision-54 marks. Each observation is a ResultRow through PriceCell with `unconfirmed={priceUnconfirmed(o)}` and `truncated`, so an unconfirmed offer says so first, inside its price, and a page-capped row says "cheapest of the rows read" (decision 44, review prov-r2-001).
 
 Verify goes through WP9's single action, whose refresh now covers the WP10 queries. Beside it, "hard stop N calls · M calls of budget headroom left" from the cell detail's `verify` (decisions 42, 45; decision 44 words a cap as a hard stop). Until the cell detail has loaded, the line says it is loading what the search may spend and the button is disabled, so no call is spent before the operator has seen the hard stop (review ui-r2-007); a 409 `active` says a search is already running, a 409 `cap` names the cap with WP8's message, and with no headroom the button is disabled with the reason. At phone width the panel is a section of the page below the grid (`inline`), never a full-screen non-modal overlay that Tab could leave for the hidden grid (review ui-r2-010). The pure helpers live in `panel.ts` under the view-model coverage floor, the sections in `PanelSections.tsx`, and `CellPanel.tsx` keeps the shell, the picker and the action (review arch2-008).
 
@@ -4791,6 +5095,7 @@ import {
   canPressVerify,
   cellsForDay,
   noHeadroom,
+  orderCalendarPrices,
   orderOutcomes,
   reasonText,
 } from '../../../src/views/Calendar/panel.js';
@@ -4835,6 +5140,7 @@ const detail = cellDetail(c, {
       ...bare(priceAt(41200, provCalendarAt(2), false, c, true)),
       executionId: 'exec-0000',
       calendarPriceId: 7,
+      superseded: false,
     },
   ],
   observations: [observation],
@@ -4904,6 +5210,12 @@ describe('outcome order and reason words (prov-011, ui-r1-012)', () => {
     expect(canPressVerify({ ...detail, verify: { maxCalls: 6, headroomCalls: 0 } }, false)).toBe(false);
     expect(canPressVerify(detail, true)).toBe(false);
     expect(canPressVerify(detail, false)).toBe(true);
+  });
+  it('superseded calendar prices come after current ones, each group in api order (decision 54)', () => {
+    const p = (id: number, superseded: boolean) => ({ id, superseded });
+    expect(orderCalendarPrices([p(1, true), p(2, false), p(3, true), p(4, false)]).map((x) => x.id)).toEqual([
+      2, 4, 1, 3,
+    ]);
   });
   it("the cell picker follows core's generation order: origins and destinations sorted (arch2-004)", () => {
     const def = definition();
@@ -5020,6 +5332,22 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     );
     expect(within(second).getByTestId('price-cell')).toHaveTextContent('cheapest of the rows read');
     expect(within(second).getByTestId('price-cell')).not.toHaveTextContent('price not confirmed');
+  });
+
+  it('a superseded calendar price says so and is listed after the current one (decision 54)', async () => {
+    const [first] = detail.calendarPrices;
+    if (first === undefined) throw new Error('fixture has a calendar price');
+    const old = { ...first, calendarPriceId: 8, pricePence: 30000, superseded: true };
+    server.use(
+      http.get(cellRoute, () =>
+        HttpResponse.json({ ...detail, calendarPrices: [old, first], observations: [] }),
+      ),
+    );
+    const { findByText, getByRole } = renderPanel(definition(), slice({}));
+    await findByText('£300');
+    const prices = within(getByRole('dialog')).getAllByTestId('price-cell');
+    expect(prices.map((c) => c.textContent?.includes('superseded by a later search'))).toEqual([false, true]);
+    expect(prices[0]).toHaveTextContent('£412');
   });
 
   it('a cell price lacking provenance fails to render: the contract parse refuses the response, no amount appears', async () => {
@@ -5240,6 +5568,14 @@ export function runLabel(executionId: string, executions: readonly ExecutionSumm
   return P.run(started === null ? executionId.slice(0, 8) : formatInstantDateLondon(instantMs(started)));
 }
 
+/**
+ * The cell's calendar prices with current ones first and those a newer parent execution superseded after them
+ * (decision 54), each group in the order the api sent it.
+ */
+export function orderCalendarPrices<P extends { superseded: boolean }>(prices: readonly P[]): P[] {
+  return [...prices.filter((p) => !p.superseded), ...prices.filter((p) => p.superseded)];
+}
+
 /** True when the child could make no call: a zero cap or no budget headroom left (WP7's childCapPreview). */
 export function noHeadroom(v: VerifyInfo): boolean {
   if (v === null) return false;
@@ -5264,9 +5600,10 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatDayShort, formatInstantLondon } from '../../format.js';
+import { figureMarks } from '../../lib/marks.js';
 import { instantMs } from '../../lib/time.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
-import { noHeadroom, orderOutcomes, reasonText, runLabel } from './panel.js';
+import { noHeadroom, orderCalendarPrices, orderOutcomes, reasonText, runLabel } from './panel.js';
 import type { DayPrice, DaySlice } from './types.js';
 
 // The side panel's sections (review arch2-008: CellPanel.tsx keeps the shell, the picker and the action).
@@ -5327,6 +5664,7 @@ export function DayPrices({ slice, notes }: { slice: DaySlice; notes: Partial<Re
             </span>
             <PriceBoundary>
               <PriceCell
+                {...figureMarks(r.price)}
                 pricePence={r.price.pricePence}
                 provenance={r.price.provenance}
                 calendar={r.calendar}
@@ -5404,7 +5742,7 @@ export function CellDetailBody(props: {
         <p>{P.noPrices}</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {detail.calendarPrices.map((p) => (
+          {orderCalendarPrices(detail.calendarPrices).map((p) => (
             <li key={`cal-${p.calendarPriceId}`}>
               <span className="text-xs">{P.calendarPriceRun(runLabel(p.executionId, executions))}</span>
               <PriceBoundary>
@@ -5414,6 +5752,7 @@ export function CellDetailBody(props: {
                   calendar
                   stale={p.stale}
                   truncated={p.truncated}
+                  superseded={p.superseded}
                   destination={detail.cell.destination}
                   destinationNote={note}
                 />
@@ -5622,7 +5961,7 @@ function verifyError(error: Error): string {
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar/panel.test.tsx test/copy`
-Expected: PASS. The panel file passes 18 tests.
+Expected: PASS. The panel file passes 20 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -6094,7 +6433,7 @@ export function CalendarView({ definition }: { definition: DefinitionResponse })
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/calendar test/copy`
-Expected: PASS. The calendar files pass 87 tests (marker 11, display 16, scale 12, grid 17, panel 18, view 13).
+Expected: PASS. The calendar files pass 90 tests (marker 11, display 16, scale 12, grid 18, panel 20, view 13).
 
 - [ ] **Step 5: Commit**
 
@@ -6372,7 +6711,7 @@ Run: `pnpm --filter @gmt/web exec vitest run test/tz`
 Expected: PASS, 10 tests (5 per zone).
 
 Run: `pnpm --filter @gmt/web run test:tz`
-Expected: two passing runs, each listing `test/tz/dates.tz.test.tsx` and the six `test/views/calendar/*` files, 97 tests each.
+Expected: two passing runs, each listing `test/tz/dates.tz.test.tsx` and the six `test/views/calendar/*` files, 100 tests each.
 
 - [ ] **Step 5: Commit**
 
@@ -6389,7 +6728,7 @@ git add apps/web && git commit -m "wp10: TZ suite under Los Angeles and Tokyo, c
 - Consumes: `useDurationAnalysis`, `ViewHeader` (`variant="span"`), `PriceCell`, `PriceBoundary`, `formatAxisPounds`, `formatDayShort`, `sourceLabelOf`, `seriesColour`, `hrefWith`/`navigateTo` and WP9's `f.nights`; recharts `BarChart`, `Bar`, `Cell`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `ResponsiveContainer`.
 - Produces: `DurationPrice`, `SearchedCount`, `DurationCell`, `DurationRow`, `DurationSeries`, `DurationData` (with `shownPrices` and `stalePrices`), `buildDurationData`, `rowAt`, `barValue`, `gapLabel`, `DurationTooltip`, `DurationChart`, `DurationTable`, `DurationView`; `src/lib/palette.ts`.
 
-One row per nights value in `[minNights, maxNights]`. Each series cell carries its own `searched` count of `total` cells from the contract, so a gap reads "not searched", "searched 3 of 48 cells, no price" or "searched, no price" for a calendar series (review prov-r2-007) and "not itinerary-searched", "itinerary-searched 1 of 4 selected cells, no class-verified price" or "itinerary-searched, no class-verified price" for the verified series: offers that were found but did not qualify are never reported as absent (review prov-r2-006); a nights value the api omits was searched by nothing. A gap is `null`: Recharts draws no bar, never a zero bar, never an interpolated one, and the x axis stars ("13*") a nights value no series searched, which the chart note explains (review ui-r2-011). Series names come from their prices' provenance. The note under the title defines `n` ("priced cells behind each minimum"; the legend's `n` sums over stay lengths) and names the dashed and faded styles the legend swatch cannot show. The tooltip finds its row by the axis label in the data it already holds, so no chart payload is cast, and prints each minimum through PriceCell `compact` with its destination, note and "cheapest of the rows read" (decision 52: every fare in the DOM through PriceCell, tooltips included), then `n` and the departure date. A stale minimum is drawn at 30% opacity with a 2 px black outline. Price ticks are whole pounds without "£" under the axis title "price (GBP)", so the figure needs no exemption from WP9's sweep. The shown and stale counts come from `DurationData`. The table is the chart's text alternative (`aria-describedby`); each nights value links to Results with `f.nights=<n>-<n>`.
+One row per nights value in `[minNights, maxNights]`. Each series cell carries its own `searched` count of `total` cells from the contract, so a gap reads "not searched", "searched 3 of 48 cells, no price" or "searched, no price" for a calendar series (review prov-r2-007) and "not itinerary-searched", "itinerary-searched 1 of 4 selected cells, no class-verified price" or "itinerary-searched, no class-verified price" for the verified series: offers that were found but did not qualify are never reported as absent (review prov-r2-006); a nights value the api omits was searched by nothing. A gap is `null`: Recharts draws no bar, never a zero bar, never an interpolated one, and the x axis stars ("13*") a nights value no series searched, which the chart note explains (review ui-r2-011). Series names come from their prices' provenance. The note under the title defines `n` ("priced cells behind each minimum"; the legend's `n` sums over stay lengths) and names the dashed and faded styles the legend swatch cannot show. The tooltip finds its row by the axis label in the data it already holds, so no chart payload is cast, and prints each minimum through PriceCell `compact` with its destination, note and "cheapest of the rows read" (decision 52: every fare in the DOM through PriceCell, tooltips included), then `n` and the departure date; the tooltip and the table carry decision 54's marks through `figureMarks` ("not seen in latest search" on the verified minimum, "superseded by a later search" on a calendar one). A stale minimum is drawn at 30% opacity with a 2 px black outline. Price ticks are whole pounds without "£" under the axis title "price (GBP)", so the figure needs no exemption from WP9's sweep. The shown and stale counts come from `DurationData`. The table is the chart's text alternative (`aria-describedby`); each nights value links to Results with `f.nights=<n>-<n>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6503,7 +6842,7 @@ describe('duration data (spec §11 View C; plan decision 38)', () => {
         minCalendar: [
           {
             providerId: 'fixture',
-            price: { ...bare(priceAt(30000, provSyntheticAt(1), false, at)), cell: at },
+            price: { ...bare(priceAt(30000, provSyntheticAt(1), false, at)), cell: at, superseded: false },
             n: 2,
           },
         ],
@@ -6639,6 +6978,7 @@ describe('Duration view (spec §11 View C)', () => {
                   price: {
                     ...bare(priceAt(41200, provSyntheticAt(400), true, cellAt('2027-03-14', 10))),
                     cell: cellAt('2027-03-14', 10),
+                    superseded: false,
                   },
                   n: 5,
                 },
@@ -6679,6 +7019,24 @@ describe('Duration view (spec §11 View C)', () => {
     expect(p.get('view')).toBe('results');
     expect(p.get('f.nights')).toBe('12-12');
     expect(p.get('def')).toBe('def-0001');
+  });
+
+  it('decision 54: a verified minimum not seen in the latest search and a superseded calendar minimum say so', async () => {
+    const [first] = resp.byNights;
+    if (first === undefined || first.minVerified === null) throw new Error('fixture has a verified minimum');
+    const [cal] = first.minCalendar;
+    if (cal === undefined) throw new Error('fixture has a calendar minimum');
+    const marked = {
+      ...first,
+      minVerified: { ...first.minVerified, notSeenInLatest: { ageHours: 30 } },
+      minCalendar: [{ ...cal, price: { ...cal.price, superseded: true } }],
+    };
+    server.use(http.get(route, () => HttpResponse.json({ ...resp, byNights: [marked] })));
+    const { findByRole } = renderWithProviders(<DurationView definition={def} />);
+    const table = await findByRole('table', { name: 'Cheapest found per stay length, with provenance' });
+    const [verified, calendar] = within(table).getAllByTestId('price-cell');
+    expect(verified).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(calendar).toHaveTextContent('superseded by a later search');
   });
 
   it('a duration price lacking provenance fails to render: the contract parse refuses it, no amount appears', async () => {
@@ -6746,8 +7104,11 @@ import { COPY } from '../../copy.js';
 import { sourceLabelOf } from '../../lib/sources.js';
 
 type Night = DurationResponse['byNights'][number];
-/** A per-nights minimum as the duration route sends it: a price cell with the cell it came from (plan decision 38). */
-export type DurationPrice = Night['minCalendar'][number]['price'];
+/**
+ * A per-nights minimum as the duration route sends it: a price cell with the cell it came from (plan decision 38), and
+ * its decision-54 mark (`notSeenInLatest` on the verified minimum, `superseded` on a calendar one).
+ */
+export type DurationPrice = Night['minCalendar'][number]['price'] | NonNullable<Night['minVerified']>;
 
 /** Cells of one nights value a series searched, of the cells in its scope (review prov-r2-007). */
 export interface SearchedCount {
@@ -6923,6 +7284,7 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatAxisPounds, formatDayShort } from '../../format.js';
+import { figureMarks } from '../../lib/marks.js';
 import { seriesColour } from '../../lib/palette.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { barValue, type DurationData, type DurationRow, gapLabel, rowAt } from './data.js';
@@ -6957,6 +7319,7 @@ export function DurationTooltip(props: {
                   <PriceBoundary>
                     <PriceCell
                       compact
+                      {...figureMarks(p)}
                       pricePence={p.pricePence}
                       provenance={p.provenance}
                       calendar={s.kind === 'calendar'}
@@ -7095,6 +7458,7 @@ export function DurationTable(props: {
                     <td key={s.key}>
                       <PriceBoundary>
                         <PriceCell
+                          {...figureMarks(p)}
                           pricePence={p.pricePence}
                           provenance={p.provenance}
                           calendar={s.kind === 'calendar'}
@@ -7174,7 +7538,7 @@ export function DurationView({ definition }: { definition: DefinitionResponse })
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/duration.test.tsx test/copy`
-Expected: PASS. The duration file passes 16 tests. Mutation check, once: make `barValue` return `?? 0` instead of `?? null`; "missing prices are null gaps, never 0" must fail. (Recharts draws no visible bar at 0 either, so the DOM test alone cannot catch it; the value test does.) Restore it.
+Expected: PASS. The duration file passes 17 tests. Mutation check, once: make `barValue` return `?? 0` instead of `?? null`; "missing prices are null gaps, never 0" must fail. (Recharts draws no visible bar at 0 either, so the DOM test alone cannot catch it; the value test does.) Restore it.
 
 - [ ] **Step 5: Commit**
 
@@ -7197,7 +7561,7 @@ git add apps/web && git commit -m "wp10: duration view with counted per-series g
 
 **Colours (review ui-r2-009).** In the overlay every line of a pair takes the pair's colour (its place among the definition's pairs; at most six pairs, the palette's size, are drawn) and the kind keeps its dash, so two pairs never share a colour; one pair colours its series by their keys' sorted order, so a series keeps its colour as data refreshes. When more series than colours are drawn the chart says colours repeat.
 
-**Provenance.** Every fetch-time point renders through PriceCell with its own `stale` and `truncated` from the contract, and an offer the final step did not confirm gets `unconfirmed`, so the badge sits first inside its price as everywhere else (decision 44, review prov-r2-010); unconfirmed offers also sit in their own dotted series named "… · price not confirmed by the final step". A calendar point names its cheapest searched cell and says when that cell differs from the previous point's. Route-level points carry no cabin, so (spec §11) `RouteTable.tsx` shows the amount with "indicative route-level series", the cabin as the vendor gave it ("cabin not stated" for `unknown`) and the fetched age, never a PriceCell; it is the one History file allowed to format money, and each row carries `data-indicative`. The charts print price ticks without "£" and carry no `data-scale` (decision 52).
+**Provenance.** Every fetch-time point renders through PriceCell with its own `stale` and `truncated` from the contract, and an offer the final step did not confirm gets `unconfirmed`, so the badge sits first inside its price as everywhere else (decision 44, review prov-r2-010); unconfirmed offers also sit in their own dotted series named "… · price not confirmed by the final step". A calendar point names its cheapest searched cell and says when that cell differs from the previous point's. Route-level points carry no cabin, so (spec §11) `RouteTable.tsx` shows the amount with "indicative route-level series", the cabin as the vendor gave it ("cabin not stated" for `unknown`), the fetched age and, from the point's own `stale` (by fetch age, decision 54), "stale", never a PriceCell; it is the one History file allowed to format money, and each row carries `data-indicative`. The charts print price ticks without "£" and carry no `data-scale` (decision 52).
 
 **State.** The pair (`hist.pair`, or `all` for the overlay of up to six pairs) and the itinerary (`hash`) live in the URL; `HISTORY_PARAMS` and `historyHref` live in `src/state/links.ts` beside WP9's URL state, so Results links here without importing the History module and its chart library (review arch2-011). In itinerary mode the heading names the route, dates and carriers from the itinerary response's own `cell` and `carriers`, and every price its destination and note from that cell, on a bookmark or a fresh load too (decision 52, review prov-005). The header is WP9's `ViewHeader variant="span"` over the definition's runs from the executions list (decision 52: never the calendar response), stale when every series' newest point is stale; a WP10 line below it gives how many runs the lines hold and their first and last date. No tooltip (§6).
 
@@ -7311,6 +7675,7 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
             fetchedAt: fetchPoint(2, 1).at,
             providerId: 'searchapi',
             sourceKind: 'scraped-search',
+            stale: false,
           })),
         },
       ],
@@ -7501,6 +7866,21 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(routeChart.querySelector('.recharts-line-curve')?.getAttribute('d')?.match(/M/g)).toHaveLength(1);
   });
 
+  it('a stale route-level point is labelled stale beside its indicative amount (decision 54)', async () => {
+    const r = routeHistory();
+    const [series] = r.routeSeries;
+    if (series === undefined) throw new Error('fixture has a route series');
+    const [p0, ...rest] = series.points;
+    if (p0 === undefined) throw new Error('fixture has a route point');
+    const stale = { ...r, routeSeries: [{ ...series, points: [{ ...p0, stale: true }, ...rest] }] };
+    server.use(http.get(routeRoute, () => HttpResponse.json(stale)));
+    const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    const table = await findByRole('table', { name: /^SearchApi route-level series, indicative/ });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((row) => row.textContent?.includes('stale'))).toEqual([true, false, false]);
+    expect(rows[0]).toHaveAttribute('data-indicative');
+  });
+
   it('a route-level travel date between two missing dates still shows as a dot (ui-r2-008)', async () => {
     const lone = routeHistory({
       calendarSeries: [],
@@ -7514,6 +7894,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
             fetchedAt: fetchPoint(2, 1).at,
             providerId: 'searchapi',
             sourceKind: 'scraped-search',
+            stale: false,
           })),
         },
       ],
@@ -7557,6 +7938,8 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
       ),
     ).toHaveLength(3);
     expect(routeTable).toHaveTextContent('Wed 10 Mar 2027');
+    // why: decision 54 — a route-level point carries "stale" by fetch age; this fixture's are fresh.
+    expect(routeTable).not.toHaveTextContent('stale');
     expect(within(routeTable).queryAllByTestId('provenance')).toHaveLength(0);
   });
 
@@ -8216,7 +8599,8 @@ const H = COPY.historyView;
 
 /**
  * Every point of one route-level line. Spec §11 exempts these from full provenance (no cabin), so each row shows the
- * amount with its source, "indicative", the cabin as the vendor gave it and the fetched age, never a PriceCell; the
+ * amount with its source, "indicative", the cabin as the vendor gave it, the fetched age and "stale" by fetch age
+ * (decision 54), never a PriceCell; the
  * row is marked `data-indicative`, the rendered sweep's one exemption besides the legend's scale (plan decision 52).
  * The only History file allowed to format money.
  */
@@ -8238,7 +8622,11 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
           {points.map((p) => (
             <tr key={p.t} data-indicative>
               <td>{formatIsoDateLong(p.route.date)}</td>
-              <td>{formatPence(p.pricePence)}</td>
+              <td>
+                {formatPence(p.pricePence)}
+                {/* why: decision 54 — stale by fetch age, labelled like every other price */}
+                {p.route.stale ? <span className="ml-1 rounded bg-amber-200 px-1">{COPY.stale}</span> : null}
+              </td>
               <td>
                 {H.routeProvenance(
                   COPY.source[p.route.sourceKind],
@@ -8426,7 +8814,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/views/history.test.tsx test/copy`
-Expected: PASS. The history file passes 21 tests. Mutation check, once: set `connectNulls` on the fetch-time `Line` to `true`; "breaking only between runs" must fail (one `M`, not two). Restore it.
+Expected: PASS. The history file passes 22 tests. Mutation check, once: set `connectNulls` on the fetch-time `Line` to `true`; "breaking only between runs" must fail (one `M`, not two). Restore it.
 
 - [ ] **Step 5: Commit**
 
@@ -8437,12 +8825,12 @@ git add apps/web && git commit -m "wp10: history joined by run order, runs from 
 ### Task 10.12: Wire the views into WP9's shell, and link Results to history
 
 **Files:**
-- Create: `apps/web/test/app/wp10Wiring.test.tsx`
-- Modify (WP9): `apps/web/src/App.tsx`, `apps/web/src/copy.ts` (the calendar placeholder hint goes), `apps/web/src/views/Results/ExpandedRow.tsx`, `apps/web/test/guards.ts`, `apps/web/test/app/shell.test.tsx`, `apps/web/test/copy/renderedSweep.test.tsx`
+- Create: `apps/web/test/app/wp10Wiring.test.tsx`, `apps/web/test/views/results/gapNotSeen.test.tsx`
+- Modify (WP9): `apps/web/src/App.tsx`, `apps/web/src/copy.ts` (the calendar placeholder hint goes), `apps/web/src/views/Results/{ExpandedRow,CalendarGapBanner}.tsx`, `apps/web/test/guards.ts`, `apps/web/test/app/shell.test.tsx`, `apps/web/test/copy/renderedSweep.test.tsx`
 
 **Interfaces:**
 - Consumes: `App`, `ExpandedRow`, `COPY.placeholder`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`, `historyHref`, `HISTORY_PARAMS` (from `src/state/links.ts`), `navigateTo`.
-- Produces: the Calendar, Duration and History views behind WP9's nav; the "price history" link on expanded rows that have an itinerary hash; `renderedCopy` and `poundsOutsidePrices` exported from WP9's `test/guards.ts`.
+- Produces: the Calendar, Duration and History views behind WP9's nav; the "price history" link on expanded rows that have an itinerary hash; "not seen in latest search" on the calendar gap's cheapest verified price (decision 54); `renderedCopy` and `poundsOutsidePrices` exported from WP9's `test/guards.ts`.
 
 The wiring test renders each view through `App` on the default handlers, asserts it drew its real content (month tables and legend; a chart figure and table; both history charts), checks that WP9's placeholder text is gone using `COPY.placeholder` itself, and runs WP9's two sweep collectors, which move from the sweep test to `test/guards.ts` so both tests share one copy (review arch2-012). The sweep's `[data-scale]` exemption now covers the calendar legend's scale values only: no fare is exempt, chart tooltips included, and chart axes print no "£" (decision 52).
 
@@ -8531,10 +8919,47 @@ describe('WP10 views in the shell: no placeholder left, real content, no banned 
 });
 ```
 
+`apps/web/test/views/results/gapNotSeen.test.tsx`:
+
+```tsx
+import { within } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
+import { describe, expect, it } from 'vitest';
+import { CalendarGapBanner } from '../../../src/views/Results/CalendarGapBanner.js';
+import { API, calendarGap } from '../../fixtures.js';
+import { server } from '../../msw/server.js';
+import { renderWithProviders } from '../../render.js';
+
+// WP10's edit to WP9's calendar-gap banner (plan decision 54): the cheapest verified price the gap is measured
+// against says when the latest search no longer returned it.
+describe('calendar-gap cheapest verified (decision 54)', () => {
+  it('a cheapest verified price not seen in the latest search says so; a current one does not', async () => {
+    const base = calendarGap();
+    const cv = base.cheapestVerified;
+    if (cv === null) throw new Error('fixture has a cheapest verified price');
+    server.use(
+      http.get(`${API}/definitions/:id/calendar-gap`, () =>
+        HttpResponse.json({ ...base, cheapestVerified: { ...cv, notSeenInLatest: { ageHours: 30 } } }),
+      ),
+    );
+    const first = renderWithProviders(<CalendarGapBanner definitionId="def-0001" />);
+    const banner = await first.findByRole('region', { name: 'Cells to search' });
+    const [cheapest, cellPrice] = within(banner).getAllByTestId('price-cell');
+    expect(cheapest).toHaveTextContent('not seen in latest search (30h ago)');
+    expect(cellPrice).not.toHaveTextContent('not seen in latest search');
+    first.unmount();
+    server.use(http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(base)));
+    const second = renderWithProviders(<CalendarGapBanner definitionId="def-0001" />);
+    const current = await second.findByRole('region', { name: 'Cells to search' });
+    expect(current).not.toHaveTextContent('not seen in latest search');
+  });
+});
+```
+
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/app/wp10Wiring.test.tsx`
-Expected: FAIL, 4 of 4: the three view tests time out on `findByRole` (the placeholder renders instead), and the link test fails with `Unable to find an accessible element with the role "link" and name "price history"`.
+Expected: FAIL, 4 of 4: the three view tests time out on `findByRole` (the placeholder renders instead), and the link test fails with `Unable to find an accessible element with the role "link" and name "price history"`. The gap test fails because WP9's banner passes no not-seen hours to its PriceCell.
 
 - [ ] **Step 3: Implement**
 
@@ -8661,6 +9086,23 @@ import { navigateTo } from '../../state/urlState.js';
           </a>
         ) : null}
       </div>
+```
+
+`apps/web/src/views/Results/CalendarGapBanner.tsx`: the cheapest verified price passes its not-seen hours (decision 54):
+
+`src/views/Results/CalendarGapBanner.tsx` — find:
+
+```tsx
+            truncated={cv.truncated}
+            destination={cv.cell.destination}
+```
+
+`src/views/Results/CalendarGapBanner.tsx` — replace with:
+
+```tsx
+            truncated={cv.truncated}
+            notSeenInLatestHours={cv.notSeenInLatest?.ageHours ?? null}
+            destination={cv.cell.destination}
 ```
 
 `apps/web/test/app/shell.test.tsx`: Calendar now renders its month tables, and only Alerts is a placeholder:
@@ -8821,7 +9263,7 @@ import { renderWithProviders } from '../render.js';
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter @gmt/web exec vitest run test/app test/copy test/views test/components test/lib test/tz`
-Expected: PASS: the wiring file 4 tests, WP9's shell, copy (catalogue, source guard, rendered sweep over every view, which now meets the real WP10 views with no "£" outside a PriceCell, a cost, the legend's scale or an indicative row) and every view test.
+Expected: PASS: the wiring file 4 tests, the gap file 1, WP9's shell, copy (catalogue, source guard, rendered sweep over every view, which now meets the real WP10 views with no "£" outside a PriceCell, a cost, the legend's scale or an indicative row) and every view test.
 
 - [ ] **Step 5: Commit**
 
@@ -9233,7 +9675,7 @@ git add apps/web .gitignore && git commit -m "wp10: Playwright smoke in fixture 
 | `pnpm boundaries` | Exit 0: `@gmt/web` imports only `@gmt/core` among workspace packages; no `process.env` under `apps/web/src`; no place name in an `apps/web/src` string literal outside `example.ts` (WP10's literals need no new entry in the committed non-airport word list); no lint or type-check suppression comment in any package (decision 49). |
 | `pnpm casts` | Exit 0: no `as` except `as const`, and no angle-bracket assertion, in any WP10 file (decision 48). |
 
-**Assembly record (2026-10-17, scratch worktree of `main` at `697ad9d`; decision 53 at `a670b49` changes only the plan and WP8's brief).** Preconditions applied first: WP7's `packages/core` and `packages/db` changes of Tasks 7.1, 7.4 (`NoPricedOptionsReason`, its core type test), 7.8, 7.13 and 7.18 with their core tests, and `scripts/check-casts.mjs` with the `casts` script (Task 7.20); then every code block of WP9's committed brief (round 3) in task order. Then this brief, task by task. The red steps quoted were re-run where round 2 changed them: Task 10.1 fails 5 of 5 as quoted against the baseline schema, and the face tests of Task 10.6 fail as quoted against WP9's PriceCell. Final state: `pnpm -r typecheck` exit 0; `pnpm lint` clean (536 files); `pnpm boundaries` exit 0 with no word-list change; `pnpm casts` 371 files, 0 casts; `pnpm --filter @gmt/core test` 48 files, 740 tests, every core threshold met; `pnpm --filter @gmt/web test` 34 files, 381 tests (WP10's 16 files hold 156), coverage 96.5% statements, 90.7% branches, 94.3% functions and 97.0% lines overall with every floor met (WP9's PriceCell back at 100% with the face tests), then `test:tz` 97 tests in each zone. The recorded mutations turn their tests red. Task 10.13's Playwright run was not executed (WP8's api is not on `main`); its config and spec are type-checked and linted, and its calendar selectors pass the jsdom test. Every whole-file code block in this brief is byte-identical to the assembled file, and every find text occurs exactly once in WP9's assembled file.
+**Assembly record (2026-10-17, scratch worktree of `main` at `697ad9d`; decision 53 at `a670b49` changes only the plan and WP8's brief).** Preconditions applied first: WP7's `packages/core` and `packages/db` changes of Tasks 7.1, 7.4 (`NoPricedOptionsReason`, its core type test), 7.8, 7.13 and 7.18 with their core tests, and `scripts/check-casts.mjs` with the `casts` script (Task 7.20); then every code block of WP9's committed brief (round 3) in task order. Then this brief, task by task. The red steps quoted were re-run where rounds 2 and 3 changed them: Task 10.1 fails 6 of 6 as quoted against the baseline schema, and the face tests of Task 10.6 fail as quoted against WP9's PriceCell. The decision-54 pass was re-assembled from the committed round-2 brief on `main` at `6c27a94` the same way. Final state: `pnpm -r typecheck` exit 0; `pnpm lint` clean (539 files); `pnpm boundaries` exit 0 with no word-list change; `pnpm casts` 374 files, 0 casts; `pnpm --filter @gmt/core test` 48 files, 741 tests, every core threshold met; `pnpm --filter @gmt/web test` 36 files, 389 tests (WP10's 18 files hold 164), coverage 96.5% statements, 90.8% branches, 94.4% functions and 97.0% lines overall with every floor met (WP9's PriceCell at 100% with the face tests), then `test:tz` 100 tests in each zone. The recorded mutations turn their tests red. Task 10.13's Playwright run was not executed (WP8's api is not on `main`); its config and spec are type-checked and linted, and its calendar selectors pass the jsdom test. Every whole-file code block in this brief is byte-identical to the assembled file, and every find text occurs exactly once in WP9's assembled file.
 
 ## 11. Open questions
 
@@ -9241,12 +9683,12 @@ None. The Playwright run (Task 10.13) is the one step not yet executed end to en
 
 ## 12. Changes outside WP10's own files
 
-- `packages/core/src/api-contract/{results,index}.ts` (Task 10.1): `calendarQuerySchema` on the calendar route (decision 53); `verification.unconfirmedCells` (decision 51); decision 38's duration fields with `searched` counts; decision 42's `verify`, `priceConfirmed` and `historyPointResponseSchema`; decision 52's itinerary `cell`, `carriers` and point `executionId`.
+- `packages/core/src/api-contract/{results,index}.ts` and WP9's `test/fixtures.ts` (Task 10.1): `calendarQuerySchema` on the calendar route (decision 53); decision 54's `notSeenInLatest`, `superseded` and route-point `stale`; `verification.unconfirmedCells` (decision 51); decision 38's duration fields with `searched` counts; decision 42's `verify`, `priceConfirmed` and `historyPointResponseSchema`; decision 52's itinerary `cell`, `carriers` and point `executionId`.
 - WP9's `src/format.ts`, `src/components/{ViewHeader,StatusBar}.tsx`, `test/format.test.ts`, `test/components/statusBar.test.tsx`, `test/views/coverage.test.tsx` (Task 10.2): `formatRunInstant` replaces `formatInstantUtc` (decision 52); the grid, instant and axis forms on the one table.
 - WP9's `src/api/{types,endpoints,queries}.ts`, `src/copy.ts`, `test/msw/handlers.ts`, `test/copy/catalogue.test.ts` (Task 10.3): WP10 routes and hooks (the calendar's destination, `skipToken`), `useExecutionActions`' refresh list, copy with the typed reason map, default handlers, SAMPLES and the "verified" allowlist.
-- WP9's `src/components/PriceCell.tsx`, `src/copy.ts` (`priceMarkGlyph`), `test/copy/sourceGuard.test.ts` (Task 10.6): the `face` prop; the legend and `RouteTable.tsx` may format money (scale values and the indicative series, never fares); Recharts' `dataKey`, `scale` and `verticalAlign` and `data-*` attributes are non-copy props.
+- WP9's `src/components/PriceCell.tsx`, `src/copy.ts` (`priceMarkGlyph`, `superseded`), `test/copy/sourceGuard.test.ts` (Task 10.6): the `face` and `superseded` props; the legend and `RouteTable.tsx` may format money (scale values and the indicative series, never fares); Recharts' `dataKey`, `scale` and `verticalAlign` and `data-*` attributes are non-copy props.
 - WP9's `vitest.config.ts` and WP0's `package.json` (Task 10.9): `pool: 'forks'` pinned with its reason, `exclude`, setup order, view-model floors; `test`, `test:tz`, `e2e`, `e2e:install`.
-- WP9's `src/App.tsx`, `src/copy.ts` (the unused calendar hint), `src/views/Results/ExpandedRow.tsx` (the history link from `src/state/links.ts`), `test/guards.ts` (the shared sweep collectors), `test/app/shell.test.tsx`, `test/copy/renderedSweep.test.tsx` (Task 10.12).
+- WP9's `src/App.tsx`, `src/copy.ts` (the unused calendar hint), `src/views/Results/ExpandedRow.tsx` (the history link from `src/state/links.ts`), `src/views/Results/CalendarGapBanner.tsx` (decision 54's not-seen note on the cheapest verified price), `test/guards.ts` (the shared sweep collectors), `test/app/shell.test.tsx`, `test/copy/renderedSweep.test.tsx` (Task 10.12).
 - WP9's `vite.config.ts`, `tsconfig.test.json`, and the root `.gitignore` (Task 10.13).
 
 ## 13. For the plan and the WP8 brief (not yet recorded there)
@@ -9255,5 +9697,6 @@ None. The Playwright run (Task 10.13) is the one step not yet executed end to en
    - The calendar route's query is `calendarQuerySchema` (`destination?: Iata`) in `ROUTES`; with it every day's `discovery` buckets and totals, `verification` counts, the three minimums and `unconfirmedCells` cover that destination's cells only. WP8's refreshed brief still says the route takes no query and counts `unconfirmedCells` over every destination (its §13 item 2); decision 53 supersedes both, and `byDestination` stays as it is (the web no longer reads it).
    - `durationAnalysisResponseSchema.byNights[].searched` is a count per series, `{ searched, total }`: verification `total` is the selected cells of that nights value and `searched` those with a `priced`, `empty` or `no_data` verification outcome (latest parent or a completed child); each discovery provider's `total` is every cell of that nights value and `searched` those its own outcome in the latest parent answered. WP8's brief describes booleans.
    - `itineraryHistoryResponseSchema` gains `cell` and `carriers` (the itinerary's own, from its stored row), and each point `executionId` (the run whose observation it is), so History names the trip on a bookmark and joins only consecutive runs (decision 52).
+   - Decision 54's marks on WP10's shapes: `notSeenInLatest` (`{ ageHours } | null`, as on a results row) on the calendar day's `cheapestVerified` and `cheapestPartiallyVerified`, the duration's `minVerified` and the calendar gap's `cheapestVerified`; `superseded: boolean` on the day's `cheapestCalendar`, the duration's `minCalendar[].price` and the cell detail's `calendarPrices[]`; `stale` by fetch age on each route-level response point. The minima are chosen among current prices first (decision 54's ranking), so a superseded calendar price is a day's or a stay length's minimum only when no current one exists. Superseded calendar rows in `/results` and the calendar gap's `cells[].calendar` (WP9's views) carry no field yet; WP8 and WP9 own those.
    - `resultsResponseSchema.executions`, which History reads as the definition's run order, must list every parent run of the definition, newest first, including runs whose rows no longer show; a run left out would join the points on either side of it.
 2. **Spec wording at the next revision:** §9 item 6 and the §16 table say "five-way" day marker where §3 defines six buckets; §11 View B's glyph list gains `skipped`, counts and "price not confirmed", its quintile scale the flat cases, and its destination filter the api parameter (decisions 38, 53); §11 View C's gaps gain "searched k of N" and "no class-verified price"; §11 History gains the separate route-level chart named by provider and the run-order join (decision 52); §11's "provenance on every price, visible without hover" names decision 46's compact day form and decision 52's phone face.
