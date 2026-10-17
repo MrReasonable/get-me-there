@@ -108,7 +108,13 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
       before,
     );
     const ctx = buildContext(h.deps, h.options);
-    expect(childCapPreview(ctx, def.id, cell)).toMatchObject({ ok: true, maxCalls: 0, headroomCalls: 0 });
+    // why: N2: the preview also says how many calls one search of this cell needs, so the operator can be told the fix.
+    expect(childCapPreview(ctx, def.id, cell)).toMatchObject({
+      ok: true,
+      maxCalls: 0,
+      headroomCalls: 0,
+      needCalls: 6,
+    });
   });
 
   it("counts what the definition's other active children may still spend against the headroom (cost-r2-001)", async () => {
@@ -164,11 +170,21 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     const def = verifying(h, {
       verification: { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 3, bookingLinks: true },
     });
-    expect(childCapPreview(ctx, def.id, cell)).toEqual({ ok: true, maxCalls: 9, headroomCalls: 1000 });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({
+      ok: true,
+      maxCalls: 9,
+      headroomCalls: 1000,
+      needCalls: 9,
+    });
     const parent = await o.start(def.id, { trigger: 'manual' });
     if (!parent.ok) throw new Error(parent.message);
     h.spendLedger({ providerId: 'fixture', rows: 991, costMicroGbpEach: 0, executionId: parent.executionId });
-    expect(childCapPreview(ctx, def.id, cell)).toEqual({ ok: true, maxCalls: 9, headroomCalls: 9 });
+    expect(childCapPreview(ctx, def.id, cell)).toEqual({
+      ok: true,
+      maxCalls: 9,
+      headroomCalls: 9,
+      needCalls: 9,
+    });
     const r = await o.verifyCell(def.id, cell);
     if (!r.ok) throw new Error(r.message);
     expect(h.repos.executions.get(r.executionId)?.snapshot.budget.maxCalls).toBe(9);

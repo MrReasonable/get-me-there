@@ -114,14 +114,16 @@ describe('outcome order and reason words (prov-011, ui-r1-012)', () => {
   });
   it('no headroom: a zero cap or no calls of headroom left (WP7 childCapPreview)', () => {
     expect(noHeadroom(null)).toBe(false);
-    expect(noHeadroom({ maxCalls: 0, headroomCalls: 40 })).toBe(true);
-    expect(noHeadroom({ maxCalls: 6, headroomCalls: 0 })).toBe(true);
-    expect(noHeadroom({ maxCalls: 6, headroomCalls: 1840 })).toBe(false);
+    expect(noHeadroom({ maxCalls: 0, headroomCalls: 40, needCalls: 6 })).toBe(true);
+    expect(noHeadroom({ maxCalls: 6, headroomCalls: 0, needCalls: 6 })).toBe(true);
+    expect(noHeadroom({ maxCalls: 6, headroomCalls: 1840, needCalls: 6 })).toBe(false);
   });
   it('verify may be pressed only once its cost has loaded, with headroom, and not while one is sent (ui-r2-007)', () => {
     expect(canPressVerify(undefined, false)).toBe(false);
     expect(canPressVerify({ ...detail, verify: null }, false)).toBe(false);
-    expect(canPressVerify({ ...detail, verify: { maxCalls: 6, headroomCalls: 0 } }, false)).toBe(false);
+    expect(
+      canPressVerify({ ...detail, verify: { maxCalls: 6, headroomCalls: 0, needCalls: 6 } }, false),
+    ).toBe(false);
     expect(canPressVerify(detail, true)).toBe(false);
     expect(canPressVerify(detail, false)).toBe(true);
   });
@@ -381,12 +383,33 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     expect(getByTestId('cell-panel')).not.toHaveClass('fixed');
   });
 
+  it('a definition allowing 0 billed calls says so and names the call cap that fixes it, in plain words (N2)', async () => {
+    server.use(
+      http.get(cellRoute, () =>
+        HttpResponse.json({ ...detail, verify: { maxCalls: 0, headroomCalls: 0, needCalls: 6 } }),
+      ),
+    );
+    const zero = definition({ budget: { maxCalls: 0, maxFreeCalls: 2000, maxCostMicroGbp: 0 } });
+    const { findByText, getByRole, queryByText } = renderPanel(zero);
+    expect(
+      await findByText(
+        "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run).",
+      ),
+    ).toBeInTheDocument();
+    expect(COPY.calendarView.panel.verifyZeroRunCap(6)).toBe(
+      "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run).",
+    );
+    // why: the jargon line is for real headroom exhaustion by a running parent or child, not for a 0-call definition.
+    expect(queryByText('No budget headroom left for this search.')).toBeNull();
+    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) })).toBeDisabled();
+  });
+
   it('with no headroom left the button is disabled and says why', async () => {
     server.use(
       http.get(cellRoute, () =>
         HttpResponse.json({
           ...detail,
-          verify: { maxCalls: 6, headroomCalls: 0 },
+          verify: { maxCalls: 6, headroomCalls: 0, needCalls: 6 },
         }),
       ),
     );

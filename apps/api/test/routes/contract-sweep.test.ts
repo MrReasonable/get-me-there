@@ -170,6 +170,8 @@ function apiTexts(): string[] {
     API_TEXT.coverageCheckUnavailable,
     API_TEXT.zeroCapVerification,
     API_TEXT.zeroCapBootWarning,
+    API_TEXT.verifyZeroRunCap(6),
+    API_TEXT.zeroRunCapDefault,
     API_TEXT.spendCapBelowFees(3000, 3200),
     API_TEXT.callCapGoverns('lifetime', 24),
     API_TEXT.ceilingNote(3500, 3200),

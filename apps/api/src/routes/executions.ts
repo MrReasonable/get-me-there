@@ -93,6 +93,12 @@ export const executionHandlers: HandlerTable = {
         if (!ctx.ports.repos.airports.exists(code))
           throw new ApiError(422, 'unknown_airport', API_TEXT.unknownAirport(code));
       }
+      // why: N2 (ruling 9): a definition that allows 0 billed calls can start no child; the refusal names the fix.
+      if (def.budget.maxCalls === 0) {
+        const preview = ctx.engine.childCapPreview(def.id, body.cell);
+        const need = preview.ok ? preview.needCalls : ctx.ports.config.spend.childMaxCalls;
+        throw new ApiError(409, 'cap', API_TEXT.verifyZeroRunCap(need));
+      }
       return oneAtATime(ctx, def.id, async () =>
         accepted(c, await ctx.engine.verifyCell(def.id, body.cell, confirmation(body))),
       );

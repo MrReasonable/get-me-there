@@ -46,6 +46,8 @@ export function assembleCellDetail(
     ),
     observations: loaded.verified.filter(onCell),
     verify:
-      preview?.ok === true ? { maxCalls: preview.maxCalls, headroomCalls: preview.headroomCalls } : null,
+      preview?.ok === true
+        ? { maxCalls: preview.maxCalls, headroomCalls: preview.headroomCalls, needCalls: preview.needCalls }
+        : null,
   };
 }

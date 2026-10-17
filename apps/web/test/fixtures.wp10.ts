@@ -295,7 +295,7 @@ export function cellDetail(c: Cell, over: Partial<CellDetailResponse> = {}): Cel
     outcomes: [],
     calendarPrices: [],
     observations: [],
-    verify: { maxCalls: 6, headroomCalls: 1840 },
+    verify: { maxCalls: 6, headroomCalls: 1840, needCalls: 6 },
     ...over,
   });
 }

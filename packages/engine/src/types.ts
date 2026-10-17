@@ -92,7 +92,8 @@ export type StartResult =
  * codes (code-architect review 16).
  */
 export type ChildCapPreview =
-  | { ok: true; maxCalls: number; headroomCalls: number }
+  /** needCalls (N2): the cap one search of this cell would take with headroom to spare, max(CHILD_MAX_CALLS, need). */
+  | { ok: true; maxCalls: number; headroomCalls: number; needCalls: number }
   | { ok: false; code: 'not_found' | 'window'; message: string };
 
 /** The plan's "Engine" contract. */

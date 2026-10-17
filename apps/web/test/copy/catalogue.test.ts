@@ -172,6 +172,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'calendarView.panel.observation': ['Example Air', 'verified'],
   'calendarView.panel.verifyCost': [6, 1840],
   'calendarView.panel.verifyCapRefused': ['budget cap: provider-month:searchapi 10000 of 10000 calls'],
+  'calendarView.panel.verifyZeroRunCap': [6],
   'calendarView.panel.verifyConfirmRefused': ['the estimate is above the confirmation threshold'],
   'durationView.tickNotSearched': [13],
   'durationView.verifiedSeries': [3],

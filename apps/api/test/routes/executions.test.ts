@@ -4,6 +4,7 @@ import { RowRejected } from '@gmt/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { cellInSpace } from '../../src/read/space.js';
+import { API_TEXT } from '../../src/text.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
@@ -200,6 +201,22 @@ describe('POST /api/cells/verify (spec §8.1 Single-cell verification)', () => {
     const res = await x.request('/api/cells/verify', { json: { definitionId: def.id, cell: c } });
     expect(res.status).toBe(422);
     expect((await errorOf(res)).code).toBe('cell_not_in_space');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('409 cap in plain words when the definition allows 0 billed calls: why, and the call cap that fixes it (N2)', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ budget: { maxCalls: 0, maxFreeCalls: 2000, maxCostMicroGbp: 0 } }),
+    );
+    const spy = vi.spyOn(x.engine, 'verifyCell');
+    const res = await x.request('/api/cells/verify', { json: { definitionId: def.id, cell: inside } });
+    expect(res.status).toBe(409);
+    const err = await errorOf(res);
+    expect([err.code, err.message]).toEqual(['cap', API_TEXT.verifyZeroRunCap(6)]);
+    expect(err.message).toBe(
+      "this definition allows 0 billed calls, so an itinerary search for one cell cannot start; raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run)",
+    );
     expect(spy).not.toHaveBeenCalled();
   });
 

@@ -108,8 +108,13 @@ export function childCapPreview(ctx: EngineContext, definitionId: string, cell: 
   const built = buildSnapshot(ctx, def, 'manual');
   const target = childTarget(ctx, built, definitionId, cell);
   if (!target.ok) return { ok: false, code: 'window', message: target.message };
-  const { maxCalls, headroom } = sizeChild(ctx, def, built.snapshot, target.match);
-  return { ok: true, maxCalls, headroomCalls: headroom };
+  const { maxCalls, headroom, need } = sizeChild(ctx, def, built.snapshot, target.match);
+  return {
+    ok: true,
+    maxCalls,
+    headroomCalls: headroom,
+    needCalls: Math.max(ctx.config.spend.childMaxCalls, need),
+  };
 }
 
 /**

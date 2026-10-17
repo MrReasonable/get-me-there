@@ -31,8 +31,21 @@ const STICKY = 'sticky left-0 bg-white';
  * "hard stop N calls · M calls of budget headroom left" beside the button (decisions 38, 42, 45: WP7's childCapPreview;
  * decision 44: a cap is stated as a hard stop, never "up to").
  */
-export function VerifyCost({ verify }: { verify: CellDetailResponse['verify'] }) {
+export function VerifyCost({
+  verify,
+  runCapZero = false,
+}: {
+  verify: CellDetailResponse['verify'];
+  /** N2: the definition allows 0 billed calls, which no headroom can fix; the line names the setting that does. */
+  runCapZero?: boolean;
+}) {
   if (verify === null) return null;
+  if (runCapZero)
+    return (
+      <p data-testid="verify-cost" className="text-xs font-medium">
+        {P.verifyZeroRunCap(verify.needCalls)}
+      </p>
+    );
   return (
     <p data-testid="verify-cost" className="text-xs">
       {P.verifyCost(verify.maxCalls, verify.headroomCalls)}

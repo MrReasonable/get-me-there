@@ -541,7 +541,7 @@ describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:re
     const { x, def, s } = await world();
     const preview = vi
       .spyOn(x.engine, 'childCapPreview')
-      .mockReturnValue({ ok: true, maxCalls: 6, headroomCalls: 994 });
+      .mockReturnValue({ ok: true, maxCalls: 6, headroomCalls: 994, needCalls: 6 });
     const d = await get(
       x,
       `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
@@ -558,7 +558,7 @@ describe('GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:re
     expect(d.observations.map((o) => [o.itineraryHash, o.pricePence, o.verdictClass])).toEqual([
       ['hV', 60_000, 'verified'],
     ]);
-    expect(d.verify).toEqual({ maxCalls: 6, headroomCalls: 994 });
+    expect(d.verify).toEqual({ maxCalls: 6, headroomCalls: 994, needCalls: 6 });
     expect(preview).toHaveBeenCalledWith(def.id, C1);
   });
   it('drops a hostile stored booking from the observations it lists (decision 54, review SEC-R2-3)', async () => {

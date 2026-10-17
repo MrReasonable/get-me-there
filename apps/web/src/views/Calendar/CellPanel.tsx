@@ -100,7 +100,7 @@ export function CellPanel(props: CellPanelProps) {
               {P.verifyCostLoading}
             </p>
           ) : (
-            <VerifyCost verify={detail.data.verify} />
+            <VerifyCost verify={detail.data.verify} runCapZero={definition.budget.maxCalls === 0} />
           )}
           <button
             type="button"

@@ -180,6 +180,29 @@ describe('GET /api/providers (spec §10)', () => {
   );
 });
 
+describe('the Providers card says when new definitions allow 0 billed calls (N2, ruling 9)', () => {
+  it('on the trial preset (EXECUTION_MAX_CALLS 0) the capNote adds why Verify is unavailable and what to raise', async () => {
+    const x = await harness({
+      SEARCHAPI_KEY: SENTINEL_SA,
+      SEARCHAPI_PLAN: 'trial',
+      SEARCHAPI_TRIAL_USED: '76',
+      EXECUTION_MAX_CALLS: '',
+    });
+    const body = await expectContract(
+      await x.request('/api/providers'),
+      'GET',
+      '/api/providers',
+      apiContract.providersResponseSchema,
+    );
+    expect(body.providers.find((p) => p.providerId === 'searchapi')?.capNote).toBe(
+      `${API_TEXT.callCapGoverns('lifetime', 24)}; ${API_TEXT.zeroRunCapDefault}`,
+    );
+    expect(API_TEXT.zeroRunCapDefault).toBe(
+      "new definitions on this plan allow 0 billed calls, so Verify stays unavailable until you raise a definition's call cap in Definitions → Run budget",
+    );
+  });
+});
+
 describe('GET /api/budget and GET /api/scheduler/jobs (spec §7 budget windows, §8.2)', () => {
   it('reports every window with bounds, the cap and the subscription fees counted once', async () => {
     const x = await harness({

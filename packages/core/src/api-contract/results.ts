@@ -273,7 +273,8 @@ export const cellDetailResponseSchema = z.object({
    * child's hard stop and the calls of budget headroom left for it. Null when the definition has no verification
    * provider.
    */
-  verify: z.object({ maxCalls: count, headroomCalls: count }).nullable(),
+  /** needCalls (N2): the calls one search of this cell takes, so a 0-call definition can name the cap that fixes it. */
+  verify: z.object({ maxCalls: count, headroomCalls: count, needCalls: count }).nullable(),
 });
 export const historyPointSchema = z.object({
   at: isoDateTimeSchema,

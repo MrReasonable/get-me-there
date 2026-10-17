@@ -432,7 +432,12 @@ describe('shutdown and status', () => {
     };
     // why: a preview needs a verification provider, as verifyCell does (re-review N4)
     const verifying = twoPairs(h, { name: 'verifying', providers: withVerification() });
-    expect(e.childCapPreview(verifying.id, one)).toEqual({ ok: true, maxCalls: 6, headroomCalls: 1000 }); // decision 45
+    expect(e.childCapPreview(verifying.id, one)).toEqual({
+      ok: true,
+      maxCalls: 6,
+      headroomCalls: 1000,
+      needCalls: 6,
+    }); // decision 45, N2
     expect(
       (
         await e.coverageCheck({

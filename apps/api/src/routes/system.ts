@@ -70,7 +70,12 @@ function capNoteOf(ctx: RouteContext, id: ProviderId): string | null {
   if (!b.billable || b.costPerCallMicroGbp > 0) return null;
   const [scope] = providerScopes(ctx.ports.config, id);
   const cap = scope === undefined ? null : usageOf(ctx.ports, scope).cap;
-  return cap === null ? null : API_TEXT.callCapGoverns(b.window, cap);
+  if (cap === null) return null;
+  const governs = API_TEXT.callCapGoverns(b.window, cap);
+  // why: N2 (ruling 9): with a 0-call default, the card's "N calls are the hard stop" must not read as calls available.
+  return ctx.ports.config.spend.executionMaxCalls === 0
+    ? `${governs}; ${API_TEXT.zeroRunCapDefault}`
+    : governs;
 }
 
 /**

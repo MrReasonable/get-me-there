@@ -60,6 +60,11 @@ export const API_TEXT = {
     'calendar basis: no verification provider is configured, so constraints are not checked',
   basisNoObservations:
     'calendar basis: no itinerary-searched observations yet, so constraints are not checked',
+  // why: N2 (ruling 9): a 0-call definition starts no child; say why and which setting fixes it, in the form's words.
+  zeroRunCapDefault:
+    "new definitions on this plan allow 0 billed calls, so Verify stays unavailable until you raise a definition's call cap in Definitions → Run budget",
+  verifyZeroRunCap: (n: number) =>
+    `this definition allows 0 billed calls, so an itinerary search for one cell cannot start; raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run)`,
   basisNoObservationsInSpace:
     'calendar basis: no itinerary-searched observations inside the current space, so constraints are not checked',
   basisItinerarySearch:

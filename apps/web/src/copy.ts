@@ -706,6 +706,9 @@ export const COPY = {
       verifyCost: (maxCalls: number, headroom: number) =>
         `hard stop ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${headroom} ${headroom === 1 ? 'call' : 'calls'} of budget headroom left`,
       verifyNoHeadroom: 'No budget headroom left for this search.',
+      // why: N2 (ruling 9): a 0-call definition is not out of headroom; it allows no billed call, and one setting fixes it.
+      verifyZeroRunCap: (n: number) =>
+        `This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run).`,
       verifyCostLoading: 'Loading what this search may spend…',
       verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
       verifyConfirmRefused: (message: string) => `Needs confirmation: ${message}`,
