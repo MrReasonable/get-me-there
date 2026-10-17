@@ -5,7 +5,7 @@ import {
   daysBetween,
   type IsoDate,
   type ResolvedSpace,
-  resolveWindow,
+  resolveSpace,
   type SearchDefinition,
 } from '@gmt/core';
 import type { AirportsRepo } from '@gmt/db';
@@ -19,15 +19,7 @@ export function isDraft(def: Pick<SearchDefinition, 'origins' | 'destinations'>)
 
 /** The definition's current resolved space (spec §6.1); results filter to it (spec §6.2, §10). */
 export function currentSpace(def: SpaceFields, today: IsoDate): ResolvedSpace {
-  const w = resolveWindow(def.window, today);
-  return {
-    origins: def.origins,
-    destinations: def.destinations,
-    departureFrom: w.departureFrom,
-    departureTo: w.departureTo,
-    minNights: def.minNights,
-    maxNights: def.maxNights,
-  };
+  return resolveSpace(def, today).space;
 }
 
 /**
