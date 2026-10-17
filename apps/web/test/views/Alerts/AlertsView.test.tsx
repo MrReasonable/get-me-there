@@ -207,10 +207,12 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
   it('a failed events load shows the error and a retry, never "no alerts have fired"', async () => {
     withData();
     server.use(http.get(`${API}/alerts/events`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
-    renderWithProviders(<AlertsView definitionId="def-1" />);
+    const { user } = renderWithProviders(<AlertsView definitionId="def-1" />);
     expect(await screen.findByText(/^Could not load:/)).toBeInTheDocument();
     expect(screen.queryByText(C.noEvents)).toBeNull();
-    expect(screen.getByRole('button', { name: COPY.retryLoad })).toBeInTheDocument();
+    server.use(http.get(`${API}/alerts/events`, () => HttpResponse.json(events)));
+    await user.click(screen.getByRole('button', { name: COPY.retryLoad }));
+    expect(await screen.findByRole('table', { name: C.eventsTable })).toBeInTheDocument();
   });
 
   it('a delete that failed is announced and the rule stays listed', async () => {
