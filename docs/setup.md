@@ -24,6 +24,12 @@ Replace `CHANGE-ME` with that random value (the app needs at least 12 characters
 placeholder itself is refused). If a value contains `$`, wrap it in single quotes, because
 compose interpolates `$` in `.env`.
 
+These are the two lines the app asks for when they are missing. If `docker compose logs app`
+shows exit 78 with "add two lines to .env: APP_BASIC_AUTH_USER=<a user name> and APP_BASIC_AUTH_PASS=<a password of at least 12 characters> (docs/setup.md section 1)",
+add exactly these two lines and run `docker compose up -d` again. Do not set
+`ALLOW_UNAUTHENTICATED` in `.env`: compose does not forward it (section 3 is the only way to run
+without auth).
+
 Basic auth sends the password with every request. Over plain HTTP that is only acceptable on
 loopback. To reach the app from another device, put TLS in front of it (section 3).
 
@@ -44,9 +50,14 @@ APP_BASIC_AUTH_PASS=CHANGE-ME
 That is the whole `.env` for £0. Then:
 
 ```bash
-docker compose up -d --build --wait   # the first boot can take up to 4 minutes
+docker compose up -d --build --wait --wait-timeout 120
 docker compose ps                     # "healthy"
 ```
+
+If it has not reported healthy after 2 minutes, run docker compose logs app: a configuration
+refusal (exit 78) names what to fix and restarts until you do. If the log shows the app still
+starting (a lock wait or the first airport seeding), `docker compose ps` turns `healthy` within
+the 4-minute start period.
 
 Open <http://127.0.0.1:3000> and sign in. Then set up the daily backup of section 6 before
 you rely on the app.
@@ -319,7 +330,7 @@ rsync -a /var/backups/get-me-there/ backup-host:get-me-there/
      done && mv restore.db get-me-there.db'
    ```
 
-4. Start and check: `docker compose up -d --wait`, then `curl -fsS http://127.0.0.1:3000/api/health`.
+4. Start and check: `docker compose up -d --wait --wait-timeout 120`, then `curl -fsS http://127.0.0.1:3000/api/health`.
    Delete the `*.pre-restore` files once you are satisfied.
 5. Restoring resets month-to-date spend: ledger rows written after the backup are gone. Lower
    the caps and reconcile with the vendor dashboard before the next run, as described in
@@ -432,13 +443,13 @@ migrations and the first airport seeding.
 - **Logs.** The app writes one JSON object a line; compose keeps 5 files of 10 MB. To follow
   one run: `docker compose logs --no-log-prefix app | jq -R 'fromjson? | select(.executionId == "<id>")'`.
 - **Upgrade.** Back up first (section 6), then from your checkout: `git pull`,
-  `docker compose up -d --build --wait`. When the new version brings schema migrations, the app
+  `docker compose up -d --build --wait --wait-timeout 120`. When the new version brings schema migrations, the app
   backs the database up again before applying them and logs `backup before N migration(s):
   <file>`. That file is the one a rollback needs and it sits on the volume, where newer backups
   prune it: once the log shows that line, run the cron command of section 6 once by hand (or
   `docker compose cp` that file out) so a copy exists off the volume.
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
-  named (section 6, Restore), and run `docker compose up -d --build --wait`. An older version
+  named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 120`. An older version
   cannot use a database a newer one has migrated, so the restore is required.
 - **Base image updates.** The `Dockerfile` pins `node:22-slim` by digest, so security fixes to
   Node and Debian arrive only when the pin moves. Once a month, run

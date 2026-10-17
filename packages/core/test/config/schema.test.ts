@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from '../../src/config/schema.js';
+import { AUTH_MISSING, parseConfig } from '../../src/config/schema.js';
 
 const realpath = (p: string) => p;
 const minimal = {
@@ -48,10 +48,29 @@ describe('parseConfig (spec §12)', () => {
   });
   it('refuses unauthenticated on a non-loopback bind unless ALLOW_UNAUTHENTICATED=true', () => {
     const noAuth = { ...minimal, APP_BASIC_AUTH_USER: undefined, APP_BASIC_AUTH_PASS: undefined };
-    expect(errors(noAuth)).toEqual(expect.arrayContaining(['BIND_ADDRESS', 'ALLOW_UNAUTHENTICATED']));
+    expect(errors({ ...noAuth, IN_CONTAINER: undefined })).toEqual(
+      expect.arrayContaining(['BIND_ADDRESS', 'ALLOW_UNAUTHENTICATED']),
+    );
     expect(ok({ ...noAuth, ALLOW_UNAUTHENTICATED: 'true' }).auth).toBeNull();
     expect(ok({ ...noAuth, BIND_ADDRESS: '127.0.0.1' }).auth).toBeNull();
     expect(ok({ ...noAuth, BIND_ADDRESS: 'localhost' }).auth).toBeNull();
+  });
+  it('the compose refusal without auth names the two lines to add, not the variables compose fixes (devops-final-001, ruling 14)', () => {
+    const noAuth = { ...minimal, APP_BASIC_AUTH_USER: undefined, APP_BASIC_AUTH_PASS: undefined };
+    const r = parseConfig(noAuth, { realpath });
+    if (r.ok) throw new Error('expected failure');
+    // why: in the container BIND_ADDRESS is fixed by compose and ALLOW_UNAUTHENTICATED is not forwarded, so neither
+    // is a field the operator can act on; the two auth lines are.
+    expect(r.errors.map((e) => e.field)).toEqual(['APP_BASIC_AUTH_USER', 'ALLOW_UNAUTHENTICATED']);
+    expect(r.errors[0]?.message).toBe(AUTH_MISSING);
+    const host = parseConfig({ ...noAuth, IN_CONTAINER: undefined }, { realpath });
+    if (host.ok) throw new Error('expected failure');
+    // why: outside the container BIND_ADDRESS is the operator's own, so it is named as well.
+    expect(host.errors.map((e) => e.field)).toEqual([
+      'APP_BASIC_AUTH_USER',
+      'BIND_ADDRESS',
+      'ALLOW_UNAUTHENTICATED',
+    ]);
   });
   it('fills the 40usd preset and lets variables override', () => {
     const c = ok({ ...minimal, SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });

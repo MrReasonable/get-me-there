@@ -2,7 +2,7 @@
 // and no other route, the plan's single exit-code table as the code defines it, and no banned word.
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
+import { AUTH_MISSING, apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
 import { SHUTDOWN_DEADLINE_MS } from '../../src/bootstrap/app.js';
@@ -105,6 +105,18 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
       expect(flat).toContain(command);
     expect(flat).toContain('docker compose cp app:/data/backups/. /var/backups/get-me-there/');
     expect(flat).toContain('install -d -m 0700');
+  });
+
+  it('every documented `docker compose up --wait` bounds the wait at 120 s and says what to look at then (devops-final-003, ruling 14)', () => {
+    const waits = [...setup.matchAll(/docker compose up [^\n`]*--wait\b[^\n`]*/g)].map((m) => m[0]);
+    expect(waits.length).toBeGreaterThanOrEqual(4);
+    for (const w of waits) expect(w).toContain('--wait --wait-timeout 120');
+    expect(flat).toContain('If it has not reported healthy after 2 minutes, run docker compose logs app');
+  });
+
+  it("section 1 names the two lines the refusal asks for, in the refusal's own words (devops-final-001, ruling 14)", () => {
+    const section1 = setup.slice(setup.indexOf('## 1.'), setup.indexOf('## 2.'));
+    expect(section1).toContain(AUTH_MISSING);
   });
 
   it('turns auth off only through the Tailscale-only override file', () => {

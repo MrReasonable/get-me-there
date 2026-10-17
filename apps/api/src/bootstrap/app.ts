@@ -7,7 +7,15 @@
  * wal_checkpoint(TRUNCATE) → lock release → close (spec §7 order). A boot that fails after taking the lock releases
  * it and stops the heartbeat before the database closes.
  */
-import { type Clock, type Config, type Logger, microGbpToPence, type Secret, systemClock } from '@gmt/core';
+import {
+  AUTH_MISSING,
+  type Clock,
+  type Config,
+  type Logger,
+  microGbpToPence,
+  type Secret,
+  systemClock,
+} from '@gmt/core';
 import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
@@ -77,8 +85,9 @@ export function assertAuthInvariants(config: Config, log: Logger): void {
     throw new BootError('APP_BASIC_AUTH_PASS must be at least 12 characters', EXIT.badConfig);
   if (config.auth === null && !LOOPBACK.test(config.bindAddress)) {
     if (!config.allowUnauthenticated)
+      // why: devops-final-001: the same words as config's refusal, so the fix named is the two auth lines.
       throw new BootError(
-        `binding ${config.bindAddress} without auth needs ALLOW_UNAUTHENTICATED=true (spec §4)`,
+        `binding ${config.bindAddress} without auth: ${AUTH_MISSING}; ALLOW_UNAUTHENTICATED=true is only for a Tailscale-only host (spec §4)`,
         EXIT.badConfig,
       );
     log.warn(
