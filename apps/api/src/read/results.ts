@@ -112,7 +112,8 @@ function supersessionOf(
     if (e.isChild) return;
     for (const o of ports.repos.cells.outcomes(e.id, { stage: 'discovery' })) {
       const key = `${o.providerId}|${cellKeyString(o)}`;
-      if (!SEARCHED.has(o.status) || lastSearch.has(key)) continue;
+      // why: a reused copy repeats an older search; the run that made it did not search the cell (review prov M1).
+      if (!SEARCHED.has(o.status) || o.reusedFromExecutionId !== null || lastSearch.has(key)) continue;
       lastSearch.set(key, { at, found: o.status === 'priced' });
     }
   });

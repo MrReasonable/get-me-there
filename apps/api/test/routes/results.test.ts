@@ -417,6 +417,29 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     ]);
   });
 
+  it('superseded: a newer run that reused the cell is not a search of it (review prov M1)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-50), finishedAt: at(-49) });
+    s.cells('E1', [C1]);
+    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-49) });
+    // why: E2 searched after E1 and found no fares, but its outcome carries an older fetch time (a vendor-dated
+    // response), so the reuse query, which orders by fetch time, still offers E1's priced outcome to E3.
+    s.execution('E2', { def, status: 'completed', startedAt: at(-20), finishedAt: at(-19) });
+    s.cells('E2', [C1]);
+    s.tile('E2', C1, { status: 'empty', fetchedAt: at(-60) });
+    s.execution('E3', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E3', [C1]);
+    s.reuse('E3', 'E1', [C1], at(-100));
+    expect(x.ports.repos.cells.outcomes(s.id('E3'), { stage: 'discovery' })[0]?.reusedFromExecutionId).toBe(
+      s.id('E1'),
+    );
+    const r = await results(x, def.id, '?basis=calendar');
+    expect(r.rows.map((row) => [row.pricePence, row.superseded])).toEqual([[30_000, true]]);
+  });
+
   it('a run picked with executionId shows the prices it reused, as its coverage counts them (decision 58)', async () => {
     const x = await createHarness();
     h = x;
