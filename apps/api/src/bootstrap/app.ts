@@ -16,6 +16,7 @@ import { createApp } from '../app.js';
 import { createLogger } from '../logger.js';
 import type { AppEnv, HttpToolRunners } from '../routes/types.js';
 import { safeMessage } from '../safeMessage.js';
+import { inProcessTools } from '../tools/inProcess.js';
 import { EXIT } from '../tools/types.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
 import { BootError } from './errors.js';
@@ -191,6 +192,7 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
       log,
       listen: true,
       assets: assetPaths(),
+      tools: (p) => inProcessTools(p),
     });
   } catch (err) {
     log.error({ err: { message: safeMessage(err, secrets) } }, 'boot failed');
