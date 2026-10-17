@@ -21,6 +21,8 @@ export const SEARCHAPI_DISPLAY_NAME = 'Google Flights via SearchApi';
 export const SEARCHAPI_DISCOVERY_INFO: CapabilityInfo = {
   sourceKind: 'scraped-aggregate',
   maxAgeHours: 24,
+  // why: ruling 17 (pie-007): SearchApi documents no cache window; 24 h is the app's assumption (docs/providers.md).
+  maxAgeAssumed: true,
   provenanceNote:
     'Google date grid via SearchApi: date-grid prices SearchApi scrapes from Google Flights, in the currency the response states. SearchApi may answer a repeat from its own cache, whose window is undocumented; the app assumes up to 24 hours. SearchApi is asked to exclude separate-ticket itineraries.',
 };

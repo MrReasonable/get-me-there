@@ -21,10 +21,9 @@ describe('Providers view (spec §10, §11)', () => {
     renderWithProviders(<ProvidersView />);
     const searchapi = await screen.findByRole('region', { name: 'SearchApi' });
     expect(within(searchapi).getByText('plan: SearchApi $40 a month')).toBeInTheDocument();
+    // why: ruling 17 (pie-007): an assumed bound reads as an assumption, never as the vendor's own.
     expect(
-      within(searchapi).getByText(
-        `Discovery: Google date grid via SearchApi · prices up to ${formatDuration(24)} old when fetched`,
-      ),
+      within(searchapi).getByText('Discovery: Google date grid via SearchApi · assumed ≤24h (undocumented)'),
     ).toBeInTheDocument();
     expect(
       within(searchapi).getByText(

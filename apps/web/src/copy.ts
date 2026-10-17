@@ -408,6 +408,7 @@ export const COPY = {
   capabilityVerification: 'Itinerary search',
   maxAge: (age: string) => `prices up to ${age} old when fetched`,
   maxAgeUnknown: "vendor's cache age unknown",
+  maxAgeAssumed: (age: string) => `assumed ≤${age} (undocumented)`,
   maxAgeAtFetch: 'provider states no age beyond the fetch time',
   usageWindow: (calls: number, cap: string, start: string, end: string) =>
     `${calls} of ${cap} calls · window ${start} to ${end}`,

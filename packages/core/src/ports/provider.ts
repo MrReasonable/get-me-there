@@ -16,6 +16,11 @@ export interface CapabilityInfo {
   sourceKind: SourceKind;
   provenanceNote: string;
   maxAgeHours: number | 'unknown';
+  /**
+   * Ruling 17 (pie-007): true when `maxAgeHours` is the app's own assumption about an undocumented vendor cache, not a
+   * bound the vendor states; the Providers view then words it "assumed ≤24h (undocumented)". Absent means stated.
+   */
+  maxAgeAssumed?: boolean | undefined;
 }
 
 export interface DiscoveryQuery {

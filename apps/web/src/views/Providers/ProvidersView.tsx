@@ -11,15 +11,18 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 
-function maxAgeText(h: CapabilityInfo['maxAgeHours']): string {
+function maxAgeText(info: CapabilityInfo): string {
+  const h = info.maxAgeHours;
   if (h === 'unknown') return COPY.maxAgeUnknown;
-  return h === 0 ? COPY.maxAgeAtFetch : COPY.maxAge(formatDuration(h));
+  if (h === 0) return COPY.maxAgeAtFetch;
+  // why: ruling 17 (pie-007): an assumed bound is worded as an assumption, never as the vendor's.
+  return info.maxAgeAssumed === true ? COPY.maxAgeAssumed(formatDuration(h)) : COPY.maxAge(formatDuration(h));
 }
 
 function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   return (
     <div>
-      <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info.maxAgeHours))}</p>
+      <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info))}</p>
       <p className="text-slate-700">{info.provenanceNote}</p>
     </div>
   );

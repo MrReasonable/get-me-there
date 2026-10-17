@@ -428,6 +428,7 @@ export function providersResponse(
             sourceKind: 'scraped-aggregate',
             provenanceNote: 'Google date grid via SearchApi',
             maxAgeHours: 24,
+            maxAgeAssumed: true,
           },
           verification: {
             sourceKind: 'scraped-search',
