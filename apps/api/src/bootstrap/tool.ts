@@ -12,10 +12,8 @@ import {
   AIRPORTS_DATA_DIR,
   AppLock,
   HEARTBEAT_INTERVAL_MS,
-  loadAirportsDataset,
   MIGRATIONS_DIR,
   readOnlyLockState,
-  seedAirports,
 } from '@gmt/db';
 import { defaultRecordedRoot } from '@gmt/providers';
 import { createLogger } from '../logger.js';
@@ -26,6 +24,7 @@ import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
 import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
 import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
+import { seedIfNeeded } from './seed.js';
 
 export { EXIT, type ToolName } from '../tools/types.js';
 
@@ -274,7 +273,10 @@ async function runToolSteps(
       } catch (e) {
         // why: a throw inside a timer would kill the process with the execution left running (arch-014, cost-wp4b-007)
         lockLost = true;
-        log.error({ error: safeMessage(e, secrets) }, 'app_lock heartbeat failed; aborting the tool');
+        log.error(
+          { err: { message: safeMessage(e, secrets) } },
+          'app_lock heartbeat failed; aborting the tool',
+        );
         err(`app_lock lost (${safeMessage(e, secrets)}); aborting`);
         ac.abort();
       }
@@ -286,7 +288,7 @@ async function runToolSteps(
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
     try {
-      seedIfNeeded(ports, out);
+      seedIfNeeded(ports, AIRPORTS_DATA_DIR, out);
       const code = await prepared.run(ports, {
         signal: ac.signal,
         out,
@@ -308,14 +310,6 @@ async function runToolSteps(
   } finally {
     ports.db.close();
   }
-}
-
-/** Spec §7: seed after migration when `airports` is empty or the dataset version changed; local files, no network. */
-function seedIfNeeded(ports: Ports, out: (line: string) => void): void {
-  const dataset = loadAirportsDataset(AIRPORTS_DATA_DIR);
-  if (ports.repos.airports.count() > 0 && ports.repos.airports.datasetVersion() === dataset.version) return;
-  const r = seedAirports(ports.db, dataset);
-  out(`airports seeded: ${r.inserted} rows, dataset ${r.datasetVersion}`);
 }
 
 /**
