@@ -33,11 +33,13 @@ const isSortValue = oneOf(SORT_VALUES);
 /** Narrow screens lose most sortable headers, so the sort is a select there (review UI-7). */
 function SortSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <span className="flex flex-col text-sm">
+    // why: at 375 px the longest option ("server ranking (class, then price)") must not widen the page, so the control
+    // may shrink to its container.
+    <span className="flex min-w-0 max-w-full flex-col text-sm">
       <label htmlFor="sort-select">{COPY.sortSelect}</label>
       <select
         id="sort-select"
-        className="min-h-11 rounded border border-slate-400 px-1"
+        className="min-h-11 w-full min-w-0 rounded border border-slate-400 px-1"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >

@@ -73,7 +73,11 @@ export function RuleForm(props: {
   }
 
   return (
-    <form onSubmit={submit} className="grid max-w-xl gap-3" aria-label={C.formLabel}>
+    <form
+      onSubmit={submit}
+      className="grid max-w-xl grid-cols-[minmax(0,1fr)] gap-3 [&_input:not([type=checkbox])]:w-full [&_label]:min-w-0 [&_select]:w-full [&_select]:min-w-0"
+      aria-label={C.formLabel}
+    >
       <label className="grid gap-1">
         <span>{C.ruleType}</span>
         <select aria-label={C.ruleType} value={type} onChange={(e) => setType(ruleTypeOf(e.target.value))}>

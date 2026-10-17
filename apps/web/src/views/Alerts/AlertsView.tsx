@@ -37,7 +37,7 @@ export function AlertsView(props: { definitionId: string }) {
   const ruleText = new Map(list.map((r) => [r.id, describeRule(r)] as const));
 
   return (
-    <section aria-labelledby="alerts-heading" className="grid gap-6">
+    <section aria-labelledby="alerts-heading" className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <h2 id="alerts-heading">{C.heading}</h2>
       <p>{C.intro}</p>
       <RuleForm
