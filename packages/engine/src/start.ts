@@ -99,7 +99,6 @@ export interface ConfirmationContext {
  * alone never covers a run of any size. Null when no confirmation is needed, else the refusal details, whose
  * `totalCalls` and `estimatePence` are what a client confirms.
  */
-
 export function confirmationNeeded(
   ctx: ConfirmationContext,
   estimate: Estimate,
