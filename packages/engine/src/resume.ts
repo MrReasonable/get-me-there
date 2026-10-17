@@ -102,7 +102,9 @@ export async function resumeExecution(
   const starved =
     !ctx.repos.cells.hasVerificationOutcomes(executionId) &&
     !ctx.repos.cells.outcomes(executionId, { stage: 'discovery' }).some((o) => o.status === 'priced') &&
-    nothingToSearch(current.snapshot, { perProvider: needed }, check.blocked);
+    nothingToSearch(current.snapshot, { perProvider: needed }, check.blocked, (id) =>
+      sellsCabin(ctx, id, current.snapshot.cabin),
+    );
   const isBlocked = (p: (typeof needed)[number]) => check.blocked.has(lineKey(p.stage, p.providerId));
   if ((needed.length > 0 && needed.every(isBlocked)) || starved)
     return refused('cap', `budget cap: ${breachMessage(check.breaches)}`, { breaches: check.breaches });

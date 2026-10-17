@@ -134,14 +134,17 @@ export function confirmationNeeded(
 /**
  * ssr2-03: a run whose every discovery line is blocked for budget would select only `alwaysInclude` cells, so with
  * none it would search nothing and end `completed`. A line that needs no call (every cell reused, or a cabin the
- * provider does not sell) is never blocked (checkBudget, ruling 2), so reused prices still feed selection.
+ * provider does not sell) is never blocked (checkBudget, ruling 2), so reused prices still feed selection. A line whose
+ * provider does not sell the cabin (`sells`, the start passes `sellsCabin`) feeds nothing, so it is left out before
+ * either test and never keeps a run that can make no call going (re-review N1).
  */
 export function nothingToSearch(
   snapshot: Pick<DefinitionSnapshot, 'verification'>,
   estimate: Pick<Estimate, 'perProvider'>,
   blocked: ReadonlySet<LineKey>,
+  sells: (providerId: ProviderId) => boolean,
 ): boolean {
-  const all = estimate.perProvider;
+  const all = estimate.perProvider.filter((p) => sells(p.providerId));
   const isBlocked = (p: (typeof all)[number]) => blocked.has(lineKey(p.stage, p.providerId));
   if (all.length > 0 && all.every(isBlocked)) return true;
   const discovery = all.filter((p) => p.stage === 'discovery');
@@ -213,7 +216,7 @@ export async function startExecution(
   const planned = estimateStart(ctx, snapshot, cells, def.id);
   const check = checkBudget(ctx, spendOf(planned), snapshot.budget, null, def.id);
   const estimate = withBlocked(planned, check.blockedBy);
-  if (nothingToSearch(snapshot, planned, check.blocked)) {
+  if (nothingToSearch(snapshot, planned, check.blocked, (id) => sellsCabin(ctx, id, snapshot.cabin))) {
     const starved = planned.perProvider.some((p) => !check.blocked.has(lineKey(p.stage, p.providerId)));
     const message = `budget cap: ${breachMessage(check.breaches)}${starved ? '; every discovery provider is blocked, so nothing would be searched' : ''}`;
     if (scheduled) await recordSkipped(ctx, def, snapshot, estimate, 'skipped_budget', `The ${message}.`);

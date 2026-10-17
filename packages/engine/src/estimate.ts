@@ -236,7 +236,12 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const total = ctx.repos.cells.rollUps(exec.id).size;
   for (const id of snapshot.providers.verification) {
     const cells = seeded ? remaining('verification', id) : [];
-    const count = seeded ? cells.length : Math.min(snapshot.verification.maxCells, total);
+    // why: re-review N2 — a provider an automatic resume keeps disabled makes no verification call, seeded or not
+    const count = seeded
+      ? cells.length
+      : disabled.has(id)
+        ? 0
+        : Math.min(snapshot.verification.maxCells, total);
     const sample =
       cells[0] ?? exec.cell ?? snapshot.verification.alwaysInclude[0] ?? firstCellOf(ctx, exec.id);
     const l = verificationLine(ctx, snapshot, id, count, sample, notes);

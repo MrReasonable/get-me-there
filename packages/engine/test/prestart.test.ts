@@ -206,6 +206,7 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
       blocked: null,
     });
     const lines = [line('travelpayouts', 'discovery', 28), line('fixture', 'verification', 8)];
+    const sellsAll = () => true;
     const cell = {
       origin: LHR,
       destination: JFK,
@@ -217,6 +218,7 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
         { verification },
         { perProvider: lines },
         new Set([lineKey('discovery', 'travelpayouts')]),
+        sellsAll,
       ),
     ).toBe(true);
     expect(
@@ -224,19 +226,52 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
         { verification: { ...verification, alwaysInclude: [cell] } },
         { perProvider: lines },
         new Set([lineKey('discovery', 'travelpayouts')]),
+        sellsAll,
       ),
     ).toBe(false);
-    expect(nothingToSearch({ verification }, { perProvider: lines }, new Set())).toBe(false);
+    expect(nothingToSearch({ verification }, { perProvider: lines }, new Set(), sellsAll)).toBe(false);
     expect(
       nothingToSearch(
         { verification },
         { perProvider: lines },
         new Set([lineKey('discovery', 'travelpayouts'), lineKey('verification', 'fixture')]),
+        sellsAll,
       ),
     ).toBe(true);
     // a discovery line needing no call (every cell reused) is never blocked, so reused prices still feed selection
     const reused = [line('travelpayouts', 'discovery', 0), line('fixture', 'verification', 8)];
-    expect(nothingToSearch({ verification }, { perProvider: reused }, new Set())).toBe(false);
+    expect(nothingToSearch({ verification }, { perProvider: reused }, new Set(), sellsAll)).toBe(false);
+  });
+
+  it('a discovery line whose provider does not sell the cabin feeds nothing, so it never keeps a starved run going (re-review N1)', () => {
+    const verification = { maxCells: 2, topN: 2, alwaysInclude: [], expandTop: 1, bookingLinks: true };
+    const line = (providerId: ProviderId, stage: 'discovery' | 'verification', calls: number) => ({
+      providerId,
+      stage,
+      calls,
+      planCalls: calls,
+      costMicroGbp: 0,
+      costPence: 0,
+      seconds: 0,
+      blocked: null,
+    });
+    // why: the trial preset with a business cabin: Travelpayouts sells economy only, so its line is 0 calls and unblocked
+    const economyOnly = (id: ProviderId) => id !== 'travelpayouts';
+    // (a) Travelpayouts discovery only; SearchApi verification blocked
+    const a = [line('travelpayouts', 'discovery', 0), line('searchapi', 'verification', 8)];
+    const verificationBlocked = new Set([lineKey('verification', 'searchapi')]);
+    expect(nothingToSearch({ verification }, { perProvider: a }, verificationBlocked, economyOnly)).toBe(
+      true,
+    );
+    // (b) Travelpayouts and SearchApi discovery; SearchApi blocked in both stages
+    const b = [
+      line('travelpayouts', 'discovery', 0),
+      line('searchapi', 'discovery', 6),
+      line('searchapi', 'verification', 8),
+    ];
+    const both = new Set([lineKey('discovery', 'searchapi'), lineKey('verification', 'searchapi')]);
+    expect(nothingToSearch({ verification }, { perProvider: b }, both, economyOnly)).toBe(true);
+    expect(nothingToSearch({ verification }, { perProvider: b }, new Set(), economyOnly)).toBe(false);
   });
 
   it("totals leave out a blocked provider's lines, which keep their own figures (cost-r1-014)", () => {

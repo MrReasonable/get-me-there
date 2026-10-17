@@ -1,5 +1,7 @@
 import { asIsoDateTime, cellKeyString, ProviderError } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
+import { buildContext } from '../src/context.js';
+import { estimateRemainingFor } from '../src/estimate.js';
 import {
   createHarness,
   FIXTURE_COST_MICRO_GBP,
@@ -179,6 +181,21 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     expect(h.requests.length).toBe(before);
     expect(await h.orch().resume(e.id, { manual: true })).toEqual({ ok: true, executionId: e.id });
     expect((await h.waitForSettled(e.id)).status).toBe('completed');
+  });
+
+  it('before selection, the remaining estimate counts no verification for a provider an automatic resume keeps disabled (re-review N2)', async () => {
+    const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.auth, 1)]);
+    const e = await h.runToCompletion(h.orch(), twoPairs(h, { providers: withVerification() }).id);
+    expect(e.status).toBe('paused_error');
+    expect(h.repos.cells.hasVerificationOutcomes(e.id)).toBe(false);
+    const ctx = buildContext(h.deps, h.options);
+    expect(estimateRemainingFor(ctx, e, false).perProvider.filter((p) => p.calls > 0)).toEqual([]);
+    const before = h.requests.length;
+    expect(refusedWith(await h.orch().resume(e.id, { manual: false }), 'active')).toBe(
+      'nothing can resume automatically; a manual resume retries the providers that were disabled',
+    );
+    expect(h.requests.length).toBe(before);
   });
 
   it('a completed execution with retryable errors resumes (retry-errors); the plan is added to the stored estimate; without any left it is refused', async () => {
