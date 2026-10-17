@@ -55,6 +55,8 @@ export default defineConfig({
         TRAVELPAYOUTS_TOKEN: '',
         SEARCHAPI_KEY: '',
         SMTP_HOST: '',
+        // why: the fixture provider's synthetic calls count as billed, so the plan preset (the draft's budget) needs a billed-call cap.
+        EXECUTION_MAX_CALLS: '2000',
         AUTO_RESUME: 'false',
         SOFT_CONFIRM_PENCE: '100000',
         LOG_LEVEL: 'warn',

@@ -17,11 +17,8 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
       await box.uncheck();
     await page.locator(`#${prefix}fixture`).check();
   }
-  // why: "Import example" copies the route, window and constraints but not the budget (WP9's applyExample), so the
-  // draft keeps the form's default of 0 billed calls, and the fixture provider's synthetic calls count against that
-  // cap (the estimate says "blocked: execution-calls"); a new definition is also created disabled (spec rev 27), and
-  // the api refuses "Run now" for a disabled one (409). So the smoke sets the cap and ticks Enabled.
-  await page.getByLabel(COPY.maxCalls).fill('2000');
+  // why: a new definition is created disabled (spec rev 27), and the api refuses "Run now" for a disabled one (409).
+  // The budget is not touched: Import example leaves the plan preset's budget, which the api's EXECUTION_MAX_CALLS sets.
   await page.getByLabel(COPY.enabled).check();
   // why: WP9's form offers the create click only after an estimate for the current draft.
   await page.getByRole('button', { name: COPY.showEstimate }).click();
