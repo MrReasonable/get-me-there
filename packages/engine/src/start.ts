@@ -197,9 +197,7 @@ export async function startExecution(
   const all = [...new Set([...snapshot.providers.discovery, ...snapshot.providers.verification])];
   if (all.length === 0) {
     // why: a configuration problem, not a spend one (po-003): no skipped_budget row, its own wording, named providers
-    const why =
-      built.notes.filter((n) => n.includes('left out') || n.includes('excluded')).join('; ') ||
-      'the definition names no provider';
+    const why = built.excluded.map((x) => x.note).join('; ') || 'the definition names no provider';
     const message = `no configured provider can run this definition${scheduled ? ' on a schedule' : ''}: ${why}`;
     if (scheduled)
       await notifyOperator(ctx, 'skipped_budget', {

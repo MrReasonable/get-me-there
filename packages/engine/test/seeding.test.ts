@@ -89,6 +89,15 @@ describe('seeding (spec §3, §7 atomic unit "seeding search_cells + discovery c
     const scheduled = buildSnapshot(excluded, def, 'schedule');
     expect(scheduled.snapshot.providers.discovery).toEqual([]);
     expect(scheduled.notes).toContain('fixture is excluded from scheduled runs on its plan');
+    // why: the start's no-runnable-provider refusal reads this data, never the note wording (code-architect review 9)
+    expect(scheduled.excluded).toEqual([
+      {
+        providerId: 'fixture',
+        stage: 'discovery',
+        why: 'schedule-excluded',
+        note: 'fixture is excluded from scheduled runs on its plan',
+      },
+    ]);
     expect(buildSnapshot(excluded, def, 'manual').snapshot.providers.discovery).toEqual(['fixture']);
   });
 

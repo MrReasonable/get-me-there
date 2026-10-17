@@ -10,14 +10,23 @@ import {
   type ResolvedSpace,
   resolveWindow,
   type SearchDefinition,
+  type Stage,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import type { StartOptions } from './types.js';
 
+/** A provider the definition names that the snapshot leaves out of a stage, and why (code-architect review 9). */
+export interface ExcludedProvider {
+  providerId: ProviderId;
+  stage: Stage;
+  why: 'not-configured' | 'schedule-excluded';
+  note: string;
+}
 export interface BuiltSnapshot {
   snapshot: DefinitionSnapshot;
   cells: Cell[];
   notes: string[];
+  excluded: ExcludedProvider[];
 }
 /**
  * Spec rev 10: whether a provider sells the snapshot's cabin. One that does not is never called: its cells are
@@ -65,15 +74,22 @@ export function buildSnapshot(
     notes.push(
       `alwaysInclude: ${dropped} ${dropped === 1 ? 'cell left the window and was dropped' : 'cells left the window and were dropped'}`,
     );
-  const usable = (id: ProviderId, capability: 'discovery' | 'verification'): boolean => {
-    if (ctx.providers.get(id)?.[capability] === undefined) {
-      notes.push(`${id} is not configured; left out of ${capability}`);
-      return false;
-    }
-    if (trigger === 'schedule' && ctx.limitsOf(id).excludedFromSchedule) {
-      notes.push(`${id} is excluded from scheduled runs on its plan`);
-      return false;
-    }
+  const excluded: ExcludedProvider[] = [];
+  const exclude = (providerId: ProviderId, stage: Stage, why: ExcludedProvider['why'], note: string) => {
+    excluded.push({ providerId, stage, why, note });
+    notes.push(note);
+    return false;
+  };
+  const usable = (id: ProviderId, capability: Stage): boolean => {
+    if (ctx.providers.get(id)?.[capability] === undefined)
+      return exclude(id, capability, 'not-configured', `${id} is not configured; left out of ${capability}`);
+    if (trigger === 'schedule' && ctx.limitsOf(id).excludedFromSchedule)
+      return exclude(
+        id,
+        capability,
+        'schedule-excluded',
+        `${id} is excluded from scheduled runs on its plan`,
+      );
     return true;
   };
   const snapshot: DefinitionSnapshot = {
@@ -89,7 +105,7 @@ export function buildSnapshot(
     windowClamped: w.clamped,
     droppedAlwaysInclude: def.verification.alwaysInclude.filter((c) => !inSpace.has(cellKeyString(c))),
   };
-  return { snapshot, cells, notes };
+  return { snapshot, cells, notes, excluded };
 }
 
 /**
