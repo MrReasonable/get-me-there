@@ -116,8 +116,9 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
     expect(lineOf(r, 'travelpayouts discovery: priced')).toContain(
       'cheapest £412 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Aviasales cache · fetched just now · observed 10d ago',
     );
+    // why: pie-002: the line also says how many priced rows had no readable itinerary, so the guard's gaps are visible.
     expect(r.lines).toContain(
-      '  [look] open-jaw drop: 1 open-jaw row(s) dropped in 1 cell(s) (2027-03-03–2027-03-15); 1 row(s) dropped in all',
+      '  [look] open-jaw drop: 1 open-jaw row(s) dropped in 1 cell(s) (2027-03-03–2027-03-15); 1 row(s) dropped in all; 0 priced row(s) whose link names no readable itinerary',
     );
     expect(r.lines.some((l) => l.includes('£603 at step 1, £603 at step 2'))).toBe(true);
     expect(
