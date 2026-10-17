@@ -45,6 +45,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
     };
   });
   const outcomes = ports.repos.cells.outcomes(parent.id);
+  const today = ports.clock.todayLondon();
   const notReached = selectedNotReached(
     ports.repos.cells.selected(parent.id).map((s) => s.cell),
     outcomes.filter((o) => o.stage === 'verification'),
@@ -64,8 +65,9 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         lastError: o.lastError,
         attempts: o.attempts,
         // why: what a manual resume would pick up again: WP3's retriedOnResume, the predicate the resume query is built
-        // from (review arch-005), so View D's "retry" and the resume never disagree.
-        retryable: retriedOnResume(o, true),
+        // from (review arch-005), and, as resumableCells does, only a cell that has not departed (ssr-004), so View D's
+        // "retry" and the resume never disagree and no dead Retry button shows.
+        retryable: retriedOnResume(o, true) && o.departureDate > today,
       })),
     scheduleBlockedSince: engine.scheduler.blockedSince(),
     // why: ruling 15 (UI-004): every on-demand child, newest first, with its own buckets and ledger calls.

@@ -448,6 +448,18 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
     ]);
   });
 
+  it('an error on a cell that has since departed is not offered for retry: a resume would refuse it (ssr-004)', async () => {
+    const { x, def } = await world();
+    x.clock.advance(25 * 24 * 3_600_000); // 2026-11-08: C4 (out 2026-11-05) has departed
+    const cov = await get(
+      x,
+      `/api/definitions/${def.id}/coverage`,
+      '/api/definitions/:id/coverage',
+      apiContract.coverageResponseSchema,
+    );
+    expect(cov.errors.map((e) => [e.cell.departureDate, e.retryable])).toEqual([['2026-11-05', false]]);
+  });
+
   it('an error outcome with no recorded reason says so with null, never an empty string (review prov M3)', async () => {
     const { x, def } = await world();
     x.ports.db.raw.prepare("UPDATE cell_outcomes SET reason = NULL WHERE status = 'error'").run();
