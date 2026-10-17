@@ -32,7 +32,9 @@ export async function execute(ctx: EngineContext, run: RunState): Promise<void> 
 export async function alertsStep(ctx: EngineContext, run: RunState): Promise<boolean> {
   if (run.stop !== null && run.stop.kind !== 'budget') return false;
   try {
-    const r = await ctx.alertsStep(ctx.deps, run.executionId);
+    const r = await ctx.alertsStep(ctx.deps, run.executionId, {
+      stop: run.stop === null ? 'completed' : 'budget',
+    });
     run.log.info({ digests: r.digests, events: r.events }, 'alerts: step done');
     return true;
   } catch (err) {

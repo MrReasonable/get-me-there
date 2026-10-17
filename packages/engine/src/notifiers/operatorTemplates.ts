@@ -1,4 +1,5 @@
-import { type OperatorMessageKind, stripControlChars, stripUrlsInText } from '@gmt/core';
+import { type OperatorMessageKind, stripUrlsInText } from '@gmt/core';
+import { stripControl } from '../text.js';
 
 // why: spec §11 banned words apply to engine templates; every string here is covered by the banned-word test in
 // notifications.test.ts and the runtime sweep of Task 7.20. "Budget cap" covers call caps and spend caps alike; the
@@ -56,11 +57,12 @@ const NO_RUNNABLE_PROVIDER = {
 } as const;
 
 /**
- * One line of provider- or operator-supplied text: URL query and userinfo stripped, every control character (C0 and
- * C1, core's stripControlChars, decision 21) → a space, runs of spaces collapsed (spec §5.3, §8.3).
+ * One line of provider- or operator-supplied text: URL query and userinfo stripped, then the engine's one cleaner
+ * (text.ts stripControl: controls and line separators to a space, hidden format characters removed, runs collapsed;
+ * spec §5.3, §8.3).
  */
 export function cleanLine(s: string): string {
-  return stripControlChars(stripUrlsInText(s), ' ').replace(/ {2,}/g, ' ').trim();
+  return stripControl(stripUrlsInText(s));
 }
 /** Multi-line text: each line cleaned, line breaks kept. */
 export function cleanText(s: string): string {

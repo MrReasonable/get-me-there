@@ -4,6 +4,7 @@ import {
   type IsoDateTime,
   microGbpToPence,
   type ProviderId,
+  stripControlChars,
 } from '@gmt/core';
 
 // Operator-facing wording shared by notices and refusal messages (spec §8.1 "409 naming the cap and numbers"):
@@ -64,4 +65,50 @@ export function formatInstant(at: IsoDateTime, tz: string): string {
     hourCycle: 'h23',
   });
   return `${f.format(new Date(at))} (${tz})`;
+}
+
+/**
+ * Unicode format characters that reorder or hide text in a plain-text mail client (sec-007): the soft hyphen, the
+ * Arabic letter mark, the Mongolian vowel separator, the zero-width space, joiners and directional marks
+ * (U+200B–U+200F), the bidi embeddings and overrides (U+202A–U+202E), the invisible operators (U+2060–U+2064), the
+ * bidi isolates and deprecated format controls (U+2066–U+206F) and the byte-order mark. Removed, not replaced: they
+ * have no width, so a space would add one.
+ */
+function isHiddenFormat(code: number): boolean {
+  return (
+    code === 0x00ad ||
+    code === 0x061c ||
+    code === 0x180e ||
+    (code >= 0x200b && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2060 && code <= 0x2064) ||
+    (code >= 0x2066 && code <= 0x206f) ||
+    code === 0xfeff
+  );
+}
+
+/**
+ * Text with no character that can start a header or a line, or reorder or hide text: every control character (core's
+ * stripControlChars, the Unicode Cc set: C0, U+007F, C1; decision 21) and the line and paragraph separators
+ * (U+2028, U+2029) become a space, one for one; the format characters of isHiddenFormat are removed. No trimming, so a
+ * body line keeps its indentation. The one cleaner of the engine (spec §8.3): the email templates, the EmailNotifier
+ * and the operator templates' cleanLine all use it.
+ */
+export function controlFree(s: string): string {
+  let out = '';
+  for (const ch of stripControlChars(s, ' ')) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code === 0x2028 || code === 0x2029) out += ' ';
+    else if (!isHiddenFormat(code)) out += ch;
+  }
+  return out;
+}
+
+/**
+ * One line of provider-supplied text: controlFree, runs of spaces collapsed, trimmed. Spec §8.3: provider strings are
+ * CRLF/control-stripped, so none can start a header or a line. URLs are left whole: validated links keep their query
+ * in email (decision 10); the operator templates strip them first.
+ */
+export function stripControl(s: string): string {
+  return controlFree(s).replace(/ {2,}/g, ' ').trim();
 }
