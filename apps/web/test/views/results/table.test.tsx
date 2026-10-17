@@ -453,6 +453,30 @@ describe('client-side sort and filter (spec §6.5)', () => {
     expect(screen.getByText('not a whole number')).toBeInTheDocument();
   });
 
+  it('an invalid typed box leaves the active filters as they were: leaving the box or Enter applies nothing (UI-8)', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const { user } = view('?view=results&f.maxPrice=48000&f.nights=10-14');
+    await table();
+    await user.clear(screen.getByLabelText('Max price (£)'));
+    await user.type(screen.getByLabelText('Max price (£)'), 'abc');
+    await user.tab();
+    // why: before the fix the cap vanished from the URL, so rows above it came back while the alert still showed
+    expect(url().get('f.maxPrice')).toBe('48000');
+    expect(url().get('f.nights')).toBe('10-14');
+    await user.type(screen.getByLabelText('Min nights'), 'x{Enter}');
+    expect(url().get('f.maxPrice')).toBe('48000');
+    expect(url().get('f.nights')).toBe('10-14');
+    expect(screen.getByLabelText('Max price (£)')).toBeInvalid();
+  });
+
+  it('a filter value from the URL stays in its option list when no shown row has it', async () => {
+    countResults(resultsResponse({ rows: [verifiedRow()] }));
+    view('?view=results&f.provider=travelpayouts&f.dest=EWR&f.unverified=cabin');
+    expect(await screen.findByRole('checkbox', { name: 'Travelpayouts' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'EWR' })).toBeChecked();
+    expect(screen.getByLabelText('Has this constraint unverified')).toHaveValue('cabin');
+  });
+
   it('carriers: codes apply on leaving the box; entries that are not codes are shown as ignored (review PFT-12)', async () => {
     countResults(resultsResponse({ rows: five }));
     const { user } = view();
