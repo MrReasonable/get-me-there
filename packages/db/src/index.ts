@@ -11,7 +11,7 @@ export {
 export { backupDatabase, checkBackup } from './backup.js';
 export { type BudgetConfig, budgetConfigFromConfig, effectiveCallCap } from './budgetConfig.js';
 export { SqliteBudgetGuard } from './budgetGuard.js';
-export { type Db, openDatabase } from './client.js';
+export { type Db, openDatabase, WalUnavailableError } from './client.js';
 export { RowCorrupt } from './internal/read.js';
 export { RowRejected } from './internal/validate.js';
 export { runMaintenance } from './maintenance.js';

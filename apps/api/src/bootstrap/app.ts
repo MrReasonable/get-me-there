@@ -16,7 +16,7 @@ import {
   type Secret,
   systemClock,
 } from '@gmt/core';
-import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports } from '@gmt/db';
+import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports, WalUnavailableError } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
@@ -172,7 +172,14 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   const backup = backupBeforeMigrations(config.databasePath, deps.assets.migrationsDir, clock, secrets);
   if (!backup.ok) throw new BootError(backup.message, backup.code);
   if (backup.line !== null) log.info({}, backup.line);
-  const ports = buildPorts(config, { log, clock, migrationsDir: deps.assets.migrationsDir });
+  let ports: Ports;
+  try {
+    ports = buildPorts(config, { log, clock, migrationsDir: deps.assets.migrationsDir });
+  } catch (e) {
+    // why: dm-003: a data directory whose file system refuses WAL is a preflight refusal (73), named, not a crash.
+    if (e instanceof WalUnavailableError) throw new BootError(e.message, EXIT.preflightImpossible);
+    throw e;
+  }
   const lock = new AppLock(ports.db, 'app', clock, log);
   let heartbeat: NodeJS.Timeout | null = null;
   try {

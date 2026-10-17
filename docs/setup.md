@@ -340,7 +340,7 @@ rsync -a /var/backups/get-me-there/ backup-host:get-me-there/
 host folder over `/data` goes through Docker Desktop's file-sharing layer, where SQLite's WAL
 locking is not reliable and the database can be corrupted. On a Linux host a bind mount works
 if the directory is owned by uid 1000; the app stops at boot with exit 73 and a message naming
-the directory if it cannot write there.
+the directory if it cannot write there, or if its file system cannot hold SQLite's WAL journal.
 
 ## 7. Expected database growth
 
@@ -424,7 +424,7 @@ Every command-line entry point (the app itself, `pnpm record:fixtures`, `pnpm sm
 | 64 | bad arguments (usage), or a recording of another route than the worked example without `--out DIR` outside the repository |
 | 65 | a recording or smoke test refused for spend: with earlier tool runs in this database it would exceed the budget you gave (raise it only when you mean to spend more), or a provider's budget window has less room than the run needs |
 | 70 | refused because `NODE_ENV=test`, or because fixture data is enabled |
-| 73 | the data directory or `<data dir>/backups` is not writable, the database lock cannot be read, or the pre-migration backup cannot be attempted |
+| 73 | the data directory or `<data dir>/backups` is not writable, its file system cannot hold SQLite's WAL journal, the database lock cannot be read, or the pre-migration backup cannot be attempted |
 | 74 | a backup failed (boot, `scripts/backup.mjs`) or is unusable (`scripts/check-backup.mjs`); at boot, migrations were not applied |
 | 75 | the database lock is held by another running app or tool |
 | 78 | bad configuration; the message names every variable to fix (for the smoke test, also a `DATABASE_PATH` that would put its fixtures inside the repository's recorded fixture tree) |

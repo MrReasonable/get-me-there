@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { openDatabase } from '../src/client.js';
+import { assertWalMode, openDatabase, WalUnavailableError } from '../src/client.js';
 import { applyMigrations, pendingMigrations } from '../src/migrate.js';
 import { MIGRATIONS_DIR } from '../src/paths.js';
 import { count, openTracked, T0, tmpDbPath, tmpDir } from './helpers/db.js';
@@ -14,6 +14,12 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
     expect(db.raw.pragma('busy_timeout', { simple: true })).toBe(5000);
     expect(db.raw.pragma('foreign_keys', { simple: true })).toBe(1);
     db.close();
+  });
+  it('refuses a journal mode other than WAL, naming the file (dm-003): SQLite keeps the old mode without an error', () => {
+    expect(() => assertWalMode('wal', '/data/x.db')).not.toThrow();
+    for (const mode of ['delete', 'memory', undefined])
+      expect(() => assertWalMode(mode, '/data/x.db')).toThrow(WalUnavailableError);
+    expect(() => assertWalMode('delete', '/data/x.db')).toThrow(/\/data\/x\.db.*journal_mode delete/);
   });
   it('uses WAL on a file db', () => {
     const db = openDatabase(join(tmpDir(), 'x.test.db'));

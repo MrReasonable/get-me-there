@@ -94,6 +94,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'RowRejected',
         'SqliteBudgetGuard',
         'SqliteResponseCache',
+        'WalUnavailableError', // dm-003: the boot maps it to exit 73
         'applyMigrations',
         'backupDatabase',
         'budgetConfigFromConfig',
