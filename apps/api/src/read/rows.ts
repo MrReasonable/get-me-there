@@ -171,7 +171,7 @@ export function calendarRow(
     fareConditions: null,
     selfTransfer: null,
     booking: { kind: 'none' },
-    searchLink: safeSearchLink(r.providerId, r.cell, rc.def),
+    searchLink: safeSearchLink(r.providerId, r.cell, rc.def, r.vendorLink),
     otherOffers: [],
     notSeenInLatest: null,
     superseded,

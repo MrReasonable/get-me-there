@@ -50,7 +50,7 @@ export { dedupByItinerary } from './results/dedup.js';
 export { filterRows } from './results/filter.js';
 export { rankRows, sortRows } from './results/rank.js';
 export { resultRowKey } from './results/rowKey.js';
-export { SEARCH_LINK_LABEL, searchLinkFor } from './results/searchLink.js';
+export { SEARCH_LINK_LABEL, SEARCH_LINK_ROW_LABEL, searchLinkFor } from './results/searchLink.js';
 export type { ResultFilters, SortKey } from './results/types.js';
 export * from './selection/select.js';
 export * from './space/generate.js';
