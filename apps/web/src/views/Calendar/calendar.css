@@ -1,0 +1,22 @@
+/* View B patterns (spec §11, plan decision 38). Stylesheet rules, not inline styles: spec §4's CSP blocks inline styles.
+   Patterns, not colours, so each meaning survives greyscale and colour-blindness. */
+
+/* A day showing the other basis: hatched, not on the colour scale. */
+.day-hatched {
+  background-color: #f4f4f5;
+  background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgb(0 0 0 / 0.22) 6px 8px);
+}
+
+/* Coverage cue swatch: solid when every cell of the day was searched, striped when part of it was not. */
+.cov-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1px solid currentColor;
+}
+.cov-full {
+  background-color: currentColor;
+}
+.cov-partial {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 2px, transparent 2px 4px);
+}

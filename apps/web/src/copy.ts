@@ -90,6 +90,15 @@ export const COPY = {
     synthetic: 'synthetic fixture data',
   } satisfies Record<SourceKind, string>,
   fxApprox: '≈',
+  /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
+  priceMarkGlyph: {
+    unconfirmed: '!',
+    stale: '◷',
+    ageUnknown: '?',
+    truncated: '…',
+    notSeen: '◌',
+    superseded: '↺',
+  },
   fxSpoken: (detail: string) => `approximately (${detail})`,
   fxTitle: (rateDate: string, source: string) => `converted to GBP at the ${rateDate} rate (${source})`,
   constraintsNotChecked: 'constraints not checked',
