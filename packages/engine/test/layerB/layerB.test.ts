@@ -132,6 +132,13 @@ describe.skipIf(!PRESENT)(
           'unknown',
           48,
         ]);
+        // why: provenance review, fix round 1: the same row checks as the SearchApi discovery case
+        expect([r.provider_id, r.fx_converted, r.reused_from_execution_id]).toEqual([
+          'travelpayouts',
+          0,
+          null,
+        ]);
+        expect(r.fetched_at >= at).toBe(true);
         expect(r.provider_observed_at === null ? null : r.provider_observed_at < r.fetched_at).toBe(true);
       }
       await engine.shutdown();
