@@ -1,3 +1,4 @@
+import { definitionDefaults } from '@gmt/core';
 import type { DefinitionBody, DefinitionResponse, ProvidersResponse } from '../../api/types.js';
 
 /**
@@ -5,11 +6,11 @@ import type { DefinitionBody, DefinitionResponse, ProvidersResponse } from '../.
  * no brands), so nothing is cast or minted before the API, the one validator, parses it (spec §6.1).
  * The confirmation is not part of it: only the explicit create or confirm click sends one.
  */
-export type Draft = Omit<DefinitionBody, 'confirmedCostPence'>;
+export type Draft = Omit<DefinitionBody, 'confirmedCostPence' | 'confirmedCalls'>;
 export type DraftWindow = Draft['window'];
 
-/** Spec §11 default relative window: starts in 7 days, 182 days long. */
-export const DEFAULT_RELATIVE: DraftWindow = { kind: 'relative', startOffsetDays: 7, lengthDays: 182 };
+/** Spec §11 default relative window, from core's shared defaults. */
+export const DEFAULT_RELATIVE: DraftWindow = definitionDefaults().window;
 /** An absolute window before the operator picks dates; the API rejects it until both are set. */
 export const EMPTY_ABSOLUTE: DraftWindow = { kind: 'absolute', from: '', to: '' };
 
@@ -24,23 +25,19 @@ export function normaliseIata(s: string): string {
 
 /** Spec §11 defaults; providers, policy, budget and time zone come from the plan preset (`/api/providers` presets). */
 export function defaultDraft(presets: ProvidersResponse['presets']): Draft {
+  // why: the spec §11 defaults live in core, shared with the api's default definition.
+  const defaults = definitionDefaults();
   return {
     name: '',
     origins: [],
     destinations: [],
-    window: DEFAULT_RELATIVE,
-    minNights: 10,
-    maxNights: 21,
-    cabin: 'economy',
-    constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
+    ...defaults,
     verification: { ...presets.policy, alwaysInclude: [] },
     budget: { ...presets.budget },
     providers: structuredClone(presets.providers),
     destinationNotes: {},
     onwardCostPence: {},
-    scheduleCron: '0 5 * * 1',
     scheduleTz: presets.schedulerTimezone,
-    enabled: true,
   };
 }
 

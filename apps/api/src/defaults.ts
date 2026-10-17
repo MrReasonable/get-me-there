@@ -3,12 +3,10 @@ import {
   type Config,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   type DefinitionInput,
+  definitionDefaults,
   type FlightProvider,
   type ProviderId,
 } from '@gmt/core';
-
-/** Spec §8.2: weekly, Monday 05:00 in SCHEDULER_TIMEZONE. The refresh default is core's DEFAULT_DISCOVERY_REFRESH_HOURS. */
-export const DEFAULT_CRON = '0 5 * * 1';
 
 /**
  * The default definition for the configured plan (spec §8.2 policy preset, §11 form defaults).
@@ -36,12 +34,7 @@ export function defaultDefinitionInput(
     name: 'New search',
     origins: [],
     destinations: [],
-    window: { kind: 'relative', startOffsetDays: 7, lengthDays: 182 },
-    minNights: 10,
-    maxNights: 21,
-    cabin: 'economy',
-    constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
-    verification: { maxCells: 10, topN: 10, alwaysInclude: [], expandTop: 2, bookingLinks: true },
+    ...definitionDefaults(),
     budget: {
       maxCalls: config.spend.executionMaxCalls,
       maxFreeCalls: config.spend.executionMaxFreeCalls,
@@ -50,8 +43,6 @@ export function defaultDefinitionInput(
     providers: { discovery, verification, discoveryRefreshHours },
     destinationNotes: {},
     onwardCostPence: {},
-    scheduleCron: DEFAULT_CRON,
     scheduleTz: config.schedulerTimezone,
-    enabled: false,
   };
 }

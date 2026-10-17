@@ -148,7 +148,7 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     expect(
       screen.getByText('provider-month:searchapi: 616 estimated a month, cap 10000'),
     ).toBeInTheDocument();
-    expect(estimates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: true });
+    expect(estimates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: false });
     expect(estimates[0]).not.toHaveProperty('confirmedCostPence');
     const createButton = screen.getByRole('button', {
       name: 'Create and confirm about 154 calls (hard stop 2000), £0.02 per run',
@@ -160,7 +160,7 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     await expect.poll(() => creates.length).toBe(1);
     expect(creates[0]).toMatchObject({
       origins: ['LHR', 'LGW'],
-      enabled: true,
+      enabled: false,
       confirmedCostPence: 2,
       confirmedCalls: 154,
     });

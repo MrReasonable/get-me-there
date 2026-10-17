@@ -75,7 +75,7 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(fieldValue('Travelpayouts refresh interval (hours)')).toBe('168');
     expect(fieldValue('Cron (blank: manual runs only)')).toBe('0 5 * * 1');
     expect(fieldValue('Time zone')).toBe('Europe/London');
-    expect(screen.getByRole('checkbox', { name: 'Enabled: scheduled runs happen' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Enabled: scheduled runs happen' })).not.toBeChecked();
   });
 
   it('defaultDraft and draftToRequest carry the spec values; the request never carries a confirmation', () => {
@@ -88,7 +88,7 @@ describe('Definitions form defaults (spec §11)', () => {
       constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
       scheduleCron: '0 5 * * 1',
       verification: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true, alwaysInclude: [] },
-      enabled: true,
+      enabled: false,
     });
     expect(req).not.toHaveProperty('confirmedCostPence');
   });
