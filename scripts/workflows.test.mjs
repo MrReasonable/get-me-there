@@ -106,7 +106,22 @@ describe('the docker job keeps credentials out of the image history', { timeout:
     expect(patterns.length).toBeGreaterThan(1);
   });
 
+  // why: PR #3 review — a suffixed name (SECRET_KEY_BASE) slipped past both patterns; each credential word is tried
+  // inside a longer name, in the = form and in the ENV space form
+  const WORDS = ['token', 'key', 'pass', 'passwd', 'password', 'secret', 'auth', 'bearer', 'credential'];
+  it.each(
+    WORDS.flatMap((w) => [
+      `ENV X_${w.toUpperCase()}_BASE=value`,
+      `ENV ${w.toUpperCase()}_FILE value`,
+      `ENV app_${w}=value`,
+    ]),
+  )('flags %s', (sample) => {
+    expect(hits(sample)).toBe(true);
+  });
+
   it.each([
+    'ENV SECRET_KEY_BASE=value',
+    'ENV AWS_ACCESS_KEY_ID=AKIA0000',
     'ENV SEARCHAPI_KEY=sk-123456',
     '/bin/sh -c #(nop)  ENV APP_BASIC_AUTH_PASS hunter2-value',
     'ENV TRAVELPAYOUTS_TOKEN abc123',

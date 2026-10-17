@@ -79,8 +79,9 @@ jobs:
             'find / -xdev -path /app/node_modules/.pnpm -prune -o \( -name ".env" -o -name ".env.*" -o -name "*.db" -o -name "*.pem" -o -name "*.key" -o -path "*/fixtures/recorded*" \) -print 2>/dev/null; true')"
           if [ -n "$found" ]; then echo "$found"; exit 1; fi
           # why: a credential in any shape a layer can hold: NAME=value, NAME: value or "name": value, and an ENV layer's
-          # space form (ENV NAME value), never only the = form (CodeRabbit batch 3)
-          if docker history --no-trunc get-me-there:local | grep -Ei -e '(token|_key|pass(word)?|secret)"?[[:space:]]*[=:]' -e 'ENV[[:space:]]+[a-z_]*(token|key|pass|secret)[a-z_]*[[:space:]]+[^[:space:]]'; then exit 1; fi
+          # space form (ENV NAME value), the whole name matched so a suffixed one (SECRET_KEY_BASE) counts too
+          # (CodeRabbit batch 3, PR #3 review)
+          if docker history --no-trunc get-me-there:local | grep -Ei -e '(token|key|pass(wd|word)?|secret|auth|bearer|credential)[a-z0-9_]*"?[[:space:]]*[=:]' -e 'ENV[[:space:]]+[a-z0-9_]*(token|key|pass|secret|auth|bearer|credential)[a-z0-9_]*[[:space:]]+[^[:space:]]'; then exit 1; fi
       - name: Compose boots it healthy with the documented three-line .env
         run: |
           # why: CI-only throwaway values that must never match a real credential; the token is a dummy and boot makes no
