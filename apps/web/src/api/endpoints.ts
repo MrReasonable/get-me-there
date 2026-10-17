@@ -1,4 +1,4 @@
-import { apiContract as c } from '@gmt/core';
+import { type Cabin, type CellKey, apiContract as c, type Iata } from '@gmt/core';
 import { call } from './client.js';
 import type {
   Basis,
@@ -44,4 +44,37 @@ export const api = {
   calendarGap: (id: string) =>
     call(c.calendarGapResponseSchema, 'GET', '/api/definitions/:id/calendar-gap', { params: { id } }),
   airports: (q: string) => call(c.airportsResponseSchema, 'GET', '/api/airports', { query: { q } }),
+  // WP10 (spec §10; plan decision 53): both bases per day, for one destination when given, else every destination.
+  calendar: (id: string, destination: Iata | null) =>
+    call(c.calendarResponseSchema, 'GET', '/api/definitions/:id/calendar', {
+      params: { id },
+      query: { destination: destination ?? undefined },
+    }),
+  durationAnalysis: (id: string) =>
+    call(c.durationAnalysisResponseSchema, 'GET', '/api/definitions/:id/duration-analysis', {
+      params: { id },
+    }),
+  cellDetail: (id: string, k: CellKey) =>
+    call(
+      c.cellDetailResponseSchema,
+      'GET',
+      '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
+      {
+        params: {
+          id,
+          origin: k.origin,
+          destination: k.destination,
+          departureDate: k.departureDate,
+          returnDate: k.returnDate,
+        },
+      },
+    ),
+  itineraryHistory: (hash: string) =>
+    call(c.itineraryHistoryResponseSchema, 'GET', '/api/itineraries/:hash/history', { params: { hash } }),
+  // why: routeHistoryQuerySchema { cabin?: Cabin }; the view always passes the definition's cabin.
+  routeHistory: (origin: string, destination: string, cabin: Cabin) =>
+    call(c.routeHistoryResponseSchema, 'GET', '/api/routes/:origin/:destination/history', {
+      params: { origin, destination },
+      query: { cabin },
+    }),
 };
