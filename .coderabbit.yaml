@@ -1,0 +1,42 @@
+# CodeRabbit configuration for get-me-there.
+# why: points the reviewer at the project's hard rules so its comments check what matters here
+# (provenance, spend, secrets, the package boundary) rather than generic style.
+language: en-GB
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!packages/db/data/**"
+    - "!**/dist/**"
+    - "!**/coverage/**"
+    - "!packages/db/drizzle/meta/**"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Project hard rules (spec: docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md; plan decisions in docs/superpowers/plans/):
+        - Provenance: every price carries provider, source kind, fetched/observed time, point of sale and FX status, and every view renders it through PriceCell without hover. Flag any path where synthetic, cached, stale, FX-converted or unconfirmed prices could look live, exact or confirmed.
+        - Coverage honesty: never let unsearched look searched, error look empty, or partial look complete.
+        - Money is integer pence (or micro-GBP); flag float money and pence/pounds mixing.
+        - Spend: every billed call passes the budget guard before the fetch; no retry of quota errors; the ledger never undercounts.
+        - Secrets: API keys only in env and request headers; never in logs, errors, URLs, fixtures or commits. Recorded vendor responses never enter git (decision 61).
+        - No `as` casts except `as const` and `satisfies`; no `any`, non-null assertions or lint/ts suppression comments.
+        - Package boundary: core has no I/O; db and providers depend only on core; engine composes them; api and web sit on top; web imports only @gmt/core.
+        - Route-agnostic: no airport literals in code outside the allowed seed and example files; docs and tests use only the London → New York example (LHR/LGW → JFK/EWR). Flag any other real route.
+        - `process.env` is read only under apps/api/src/bootstrap/.
+    - path: "packages/providers/**"
+      instructions: |
+        Check request parameters against the adapter's allowlist, error mapping (quota and auth never retried), and that a missing vendor field is recorded as unsupplied rather than defaulted.
+    - path: "apps/web/**"
+      instructions: |
+        Check 375 px layout, contrast of badges on every calendar band, unique legend glyphs, and that no Date object is created outside src/now.tsx.
+    - path: "**/*.test.*"
+      instructions: |
+        Flag tests that cannot fail, missing failing-first coverage of the rule under test, real network or real clocks, and slow tests without an explicit timeout.
+chat:
+  auto_reply: true
