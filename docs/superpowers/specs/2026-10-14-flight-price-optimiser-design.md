@@ -586,7 +586,11 @@ the airline. Three cases the vendor can produce: every step-1 option
 unpriced → throw `upstream` with `reason = 'no-priced-options'`
 (non-retryable on resume); a failed step 3 keeps the step-2 airline offer
 and the cell is `priced` with `partial: true`; split bookings
-(`is_split_booking`) are skipped and counted in `notes`. Calls per cell:
+(`is_split_booking`) are skipped and counted in `notes`. A malformed
+option at step 1 or step 2 is dropped and counted in `notes`, and the result
+is `partial: true` (written `partial-expansion`), since its fare may be the
+cheapest; a step whose every option is malformed is a `parse` error, never
+"no options". Calls per cell:
 `1 + expandTop × 2`; the default `expandTop 2` costs 5.
 
 ### 5.5 Fixture provider and the synthetic gates
@@ -1734,8 +1738,9 @@ as specified in §5.3; no secrets, no full URLs.
 
 Folded in from CodeRabbit's third batch (scripts, live docs, and the brief
 findings checked against shipped code). §3: the provenance record's point
-of sale is named as a type, so the declaration is one code span. §5.3
-Egress: http-kit refuses a query parameter named like a credential, whatever
+of sale is named as a type, so the declaration is one code span. §5.4: a
+malformed SearchApi option is dropped, counted and makes the result
+partial. §5.3 Egress: http-kit refuses a query parameter named like a credential, whatever
 its value (`departure_token` and `booking_token` excepted). §7:
 `route_price_history` stores each point's point of sale (migration 0004;
 older rows read 'unknown') and every point's FX status reads "not

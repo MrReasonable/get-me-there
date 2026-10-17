@@ -45,6 +45,8 @@ export function parseFlights(body: unknown, gl: string, step: 'step 1' | 'step 2
   return {
     ...echo,
     options,
+    /** Options dropped as malformed: their fares are missing, so the caller marks the result partial. */
+    dropped: raw.length - options.length,
     // why: null when the vendor sent no series at all (plan decision 40: best-effort), told apart from an empty one.
     priceHistory: data.price_insights?.price_history ?? null,
   };

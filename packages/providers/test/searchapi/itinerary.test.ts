@@ -97,6 +97,29 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
     const res = await searchItinerary(deps(), q1, ctx());
     expect(res.coverage).toBe('priced');
     expect(res.notes).toContain('dropped-malformed-option-step1:2');
+    // why: PR #3 review — a dropped option's fare may be the cheapest, so the result is never complete (spec §3
+    // partial-expansion: the outbound it names could not be expanded)
+    expect(res.partial).toBe(true);
+  });
+
+  it('a wrongly shaped step-2 option is dropped and counted, and the result is partial: a fare is missing (synthetic)', async () => {
+    chain(
+      flightsBody([A]),
+      { dA: ok({ ...ECHO, best_flights: [option(IN_1, 600, { booking_token: 'b1' }), { price: 'cheap' }] }) },
+      { b1: ok(bookingBody([agent(573)])) },
+    );
+    const res = await searchItinerary(deps(), q1, ctx());
+    expect(res).toMatchObject({ coverage: 'priced', partial: true });
+    expect(res.notes).toContain('dropped-malformed-option-step2:1');
+  });
+
+  it('a chain with no malformed option stays complete (synthetic)', async () => {
+    chain(
+      flightsBody([A]),
+      { dA: ok(flightsBody([option(IN_1, 600, { booking_token: 'b1' })])) },
+      { b1: ok(bookingBody([agent(573)])) },
+    );
+    expect((await searchItinerary(deps(), q1, ctx())).partial).toBe(false);
   });
 
   it('a step 1 whose every option is malformed → parse, never coverage empty (synthetic)', async () => {

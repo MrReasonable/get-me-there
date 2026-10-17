@@ -163,6 +163,9 @@ export async function searchItinerary(
     );
   }
 
+  // why: spec §3 partial-expansion (PR #3 review): a malformed step-1 option names an outbound that cannot be
+  // expanded, so its fare may be the cell's cheapest and the result is never complete
+  let partial = r1.dropped > 0;
   const usable1: Array<Usable & { token: string }> = [];
   for (const o of r1.options) {
     const segs = toRawSegments(o.flights);
@@ -202,7 +205,6 @@ export async function searchItinerary(
   // why: returns the vendor priced but the adapter could not use are not "no legs" (PA2-04); their reasons decide
   // the cell's error when no outbound yields a usable leg.
   const legDrops = new Set<'currency-unsupported' | 'parse'>();
-  let partial = false;
   let stop: BudgetExceeded | AbortedError | null = null;
   for (const out of expand) {
     let r2: ReturnType<typeof parseFlights>;
@@ -222,6 +224,9 @@ export async function searchItinerary(
       }
       throw err;
     }
+    // why: decision 31's rule for fares the vendor sent that cannot be written: a malformed step-2 option is a return
+    // fare missing from the cell, so the result is partial (PR #3 review)
+    if (r2.dropped > 0) partial = true;
     const returns: Usable[] = [];
     const dropped = new Set<'currency-unsupported' | 'parse'>();
     for (const o of r2.options) {
