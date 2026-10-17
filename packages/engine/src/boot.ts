@@ -50,8 +50,9 @@ async function detectMissed(ctx: EngineContext, def: SearchDefinition, bootAt: I
  * the boot and running executions → interrupted with auto_resume_count + 1; (2) if AUTO_RESUME, every interrupted
  * execution with count ≤ MAX_AUTO_RESUMES resumes (graceful SIGTERM rows were not incremented); above the cap, the
  * operator is told, and a run older than its discovery refresh allows is superseded instead of resumed from its old
- * snapshot (ssr2-09); (3) one-shot jobs for resume_after are re-registered, except for a stale paused run, which is
- * superseded (ssr-11, ssr2-06: whether or not the definition has a schedule, so none waits forever); (4) then cron
+ * snapshot (ssr2-09); (3) every stale paused run is superseded, with or without a resume_after or a schedule (ssr-11,
+ * ssr2-06, ssr M3), and one-shot jobs are re-registered for the others' resume_after; an interrupted run left alone
+ * here (AUTO_RESUME off, or capped) is superseded by the tick at the next firing once stale; (4) then cron
  * (after recording any missed firing) and the daily system jobs, plus an FX refresh a minute after boot when no rate
  * is a day fresh (po-011).
  * Boot makes no network call.
@@ -117,11 +118,14 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
   let oneShots = 0;
   let stale = 0;
   for (const exec of ctx.repos.executions.listByStatus(['paused_error', 'paused_budget'])) {
-    if (exec.resumeAfter === null || !live(exec.definitionId)) continue;
+    if (!live(exec.definitionId)) continue;
+    // why: ssr M3 — a stale paused run is superseded whether or not it has a resume_after or a schedule, so no run
+    // without either blocks manual starts forever
     if (isStalePaused(exec, bootAt)) {
       if (await supersede(ctx, orch, exec)) stale += 1;
       continue;
     }
+    if (exec.resumeAfter === null) continue;
     sched.registerResume(exec.id, exec.definitionId, exec.resumeAfter);
     oneShots += 1;
   }

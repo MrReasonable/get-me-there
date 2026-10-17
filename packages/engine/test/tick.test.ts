@@ -37,7 +37,10 @@ describe('isStalePaused (spec §8.1/§8.2 supersede, ruling 10: 0.9 × discovery
     expect(isStalePaused(e, at(167))).toBe(true); // a DST-shortened week
     expect(isStalePaused(e, at(168 - 1 / 120))).toBe(true); // the next weekly firing, 30 s short of 168 h
     expect(isStalePaused({ ...e, resumeAfter: at(200) }, at(169))).toBe(false); // resume_after still in the future
-    expect(isStalePaused({ ...e, status: 'interrupted' }, at(400))).toBe(false);
+    // why: ssr M3 — an interrupted run that no automatic resume picked up goes stale the same way
+    expect(isStalePaused({ ...e, status: 'interrupted' }, at(151))).toBe(false);
+    expect(isStalePaused({ ...e, status: 'interrupted' }, at(152))).toBe(true);
+    expect(isStalePaused({ ...e, status: 'running' }, at(400))).toBe(false);
   });
 });
 
@@ -152,6 +155,28 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
     await h.orch().tick(def.id);
     expect(h.repos.executions.get(old.id)).toMatchObject({ status: 'cancelled', errorText: SUPERSEDED });
     const fresh = executions(h, def.id).find((x) => x.id !== old.id);
+    if (fresh === undefined) throw new Error('no fresh execution');
+    expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
+  });
+
+  it('supersedes a stale interrupted run at the next firing and starts the fresh one, so it never blocks the schedule for good (ssr M3)', async () => {
+    const h = createHarness({ fixtureConcurrency: 1 });
+    const def = twoPairs(h);
+    const first = h.orch();
+    h.onTileCommit((n) => {
+      if (n === 1) void first.shutdown();
+    });
+    const r = await first.start(def.id, { trigger: 'manual' });
+    if (!r.ok) throw new Error(r.message);
+    expect((await h.waitForSettled(r.executionId)).status).toBe('interrupted');
+    h.clearHooks();
+    h.clock.advance(168 * HOUR - 30_000); // the next weekly firing
+    await h.orch().tick(def.id);
+    expect(h.repos.executions.get(r.executionId)).toMatchObject({
+      status: 'cancelled',
+      errorText: SUPERSEDED,
+    });
+    const fresh = executions(h, def.id).find((x) => x.id !== r.executionId);
     if (fresh === undefined) throw new Error('no fresh execution');
     expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
   });

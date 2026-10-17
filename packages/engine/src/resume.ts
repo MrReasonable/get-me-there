@@ -192,7 +192,9 @@ function hasReusableWork(ctx: EngineContext, exec: Execution, manual: boolean): 
 /** error_text of an execution cancelled because it was never seeded (ssr-07). */
 export const NEVER_STARTED = 'never finished starting and was cancelled';
 
-const PAUSED: readonly ExecutionStatus[] = ['paused_budget', 'paused_error'];
+// why: ssr M3 — an interrupted run that no automatic resume picked up (AUTO_RESUME off, or above the crash-loop cap)
+// is as dead as a paused one, so it goes stale the same way and never blocks the schedule for good
+const STALEABLE: readonly ExecutionStatus[] = ['paused_budget', 'paused_error', 'interrupted'];
 
 /**
  * Ruling 10: older than 0.9 × the shortest discoveryRefreshHours of the snapshot's discovery providers (168 h by
@@ -213,13 +215,13 @@ export function olderThanRefresh(
 
 /**
  * Spec §8.1/§8.2: "any paused run older than discoveryRefreshHours whose resume_after is not in the future is cancelled
- * and a fresh run started" (olderThanRefresh, ruling 10).
+ * and a fresh run started" (olderThanRefresh, ruling 10); an interrupted run counts as paused here (ssr M3).
  */
 export function isStalePaused(
   exec: Pick<Execution, 'status' | 'resumeAfter' | 'startedAt' | 'createdAt' | 'snapshot'>,
   now: IsoDateTime,
 ): boolean {
-  if (!PAUSED.includes(exec.status)) return false;
+  if (!STALEABLE.includes(exec.status)) return false;
   if (exec.resumeAfter !== null && exec.resumeAfter > now) return false;
   return olderThanRefresh(exec, now);
 }

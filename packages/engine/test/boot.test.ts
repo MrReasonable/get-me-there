@@ -265,6 +265,17 @@ describe('boot (spec §8.1 "Boot order")', () => {
     expect(h.requests.length).toBe(requests);
   });
 
+  it('a stale paused run with no resume_after is superseded at boot even without a schedule, so it never blocks starts (ssr M3)', async () => {
+    const h = createHarness({ ...fake, fixtureConcurrency: 1 });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.auth, 1)]);
+    const def = twoPairs(h); // no schedule
+    const old = await h.runToCompletion(engine(h), def.id);
+    expect(old).toMatchObject({ status: 'paused_error', resumeAfter: null });
+    h.clock.advance(160 * HOUR);
+    await engine(h).boot();
+    expect(h.repos.executions.get(old.id)).toMatchObject({ status: 'cancelled', errorText: SUPERSEDED });
+  });
+
   it('a one-shot job that fires for a run gone stale supersedes it and starts nothing (ssr2-06)', async () => {
     const h = createHarness({ ...fake, fixtureConcurrency: 1, fixtureMonthlyCallCap: 20 });
     h.onStageStart('discovery', () =>
