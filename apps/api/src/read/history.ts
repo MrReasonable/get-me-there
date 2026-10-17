@@ -13,7 +13,7 @@ import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { truncationOf } from './results.js';
-import { calendarThreshold, staleness, withNights } from './rows.js';
+import { calendarThreshold, refreshHoursFor, staleness, withNights } from './rows.js';
 
 export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
@@ -47,19 +47,26 @@ export function itineraryHistory(hash: string, ports: Ports): ItineraryHistoryRe
   };
 }
 
-/** The refresh a route point is judged by: the newest live definition flying the pair with that provider, else the default. */
+/**
+ * The refresh a route point is judged by: the newest live definition flying the pair that discovers with that provider,
+ * through the same `refreshHoursFor` the rows use (its explicit refresh, else core's default); with none, the default.
+ * why: `definitions.list()` is oldest first, so it is walked from the end (review arch Minor).
+ */
 function refreshFor(
   defs: readonly SearchDefinition[],
   origin: Iata,
   destination: Iata,
   providerId: ProviderId,
 ): number {
-  for (const d of defs) {
-    if (!d.origins.includes(origin) || !d.destinations.includes(destination)) continue;
-    const h = d.providers.discoveryRefreshHours[providerId];
-    if (h !== undefined) return h;
-  }
-  return DEFAULT_DISCOVERY_REFRESH_HOURS;
+  const match = [...defs]
+    .reverse()
+    .find(
+      (d) =>
+        d.origins.includes(origin) &&
+        d.destinations.includes(destination) &&
+        d.providers.discovery.includes(providerId),
+    );
+  return match === undefined ? DEFAULT_DISCOVERY_REFRESH_HOURS : refreshHoursFor(match, providerId);
 }
 
 /**

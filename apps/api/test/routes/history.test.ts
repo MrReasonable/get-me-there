@@ -112,6 +112,49 @@ describe('history routes (spec §10, §7)', () => {
     ]);
   });
 
+  it('judges a route point by the newest live definition flying the pair with that discovery provider (review arch Minor)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const fixtureOnly = { verification: ['fixture' as const] };
+    // Oldest: flies the pair with a 24 h refresh. Middle: 24 h too, but discovers with another provider, so not a match.
+    x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        name: 'old',
+        providers: { discovery: ['fixture'], discoveryRefreshHours: { fixture: 24 }, ...fixtureOnly },
+      }),
+    );
+    // Newest flying it with the fixture provider: no explicit refresh, so core's default (168 h) applies.
+    x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        name: 'new',
+        providers: { discovery: ['fixture'], discoveryRefreshHours: {}, ...fixtureOnly },
+      }),
+    );
+    x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        name: 'other provider',
+        providers: { discovery: [], discoveryRefreshHours: { fixture: 24 }, ...fixtureOnly },
+      }),
+    );
+    s.routeLowest({
+      origin: 'LHR',
+      destination: 'JFK',
+      date: '2026-10-13',
+      pricePence: 44_000,
+      fetchedAt: at(-100),
+    });
+    const body = await expectContract(
+      await x.request('/api/routes/LHR/JFK/history'),
+      'GET',
+      '/api/routes/:origin/:destination/history',
+      ROUTE,
+    );
+    expect(body.routeSeries.find((r) => r.providerId === 'fixture')?.points.map((p) => p.stale)).toEqual([
+      false,
+    ]);
+  });
+
   it('reads the requested cabin and rejects a bad airport code', async () => {
     const { x } = await world();
     const business = await expectContract(
