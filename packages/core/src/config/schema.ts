@@ -128,7 +128,11 @@ class Reader {
   }
 }
 
-function isValidTimeZone(tz: string): boolean {
+/**
+ * True when `tz` is an IANA zone this runtime knows. The one zone check: SCHEDULER_TIMEZONE here, a schedule's tz in
+ * the engine's parseCron (spec §8.2 "tz validated") and an airport's tz in db's seed.
+ */
+export function isValidTimeZone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat('en-GB', { timeZone: tz });
     return true;

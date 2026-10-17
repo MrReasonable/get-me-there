@@ -1,4 +1,4 @@
-import type { Iata } from '@gmt/core';
+import { type Iata, isValidTimeZone } from '@gmt/core';
 import type { Db } from '../client.js';
 import { readIata } from '../internal/read.js';
 import { RowRejected } from '../internal/validate.js';
@@ -31,17 +31,6 @@ const toAirport = (r: AirportDbRow): Airport => ({
   datasetVersion: r.dataset_version,
 });
 const IATA = /^[A-Z]{3}$/;
-
-// why: a copy of core's private isValidTimeZone (packages/core/src/config/schema.ts); import it instead once core
-// exports it (arch-M7). Both ask Intl whether it knows the zone.
-function isKnownTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** Metro code per airport; an airport in two metros is a data error, never a guess. Used at build, load and seed. */
 export function metroIndex(metros: Record<string, string[]>): Map<string, string> {
@@ -150,7 +139,7 @@ export class AirportsRepo {
         throw new RowRejected('iata', `airport code must match ^[A-Z]{3}$, got ${a.iata}`);
       if (!/^[A-Z]{2}$/.test(a.country))
         throw new RowRejected('country', `country must be ISO alpha-2, got ${a.country} for ${a.iata}`);
-      if (!isKnownTimeZone(a.tz)) throw new RowRejected('tz', `unknown time zone ${a.tz} for ${a.iata}`);
+      if (!isValidTimeZone(a.tz)) throw new RowRejected('tz', `unknown time zone ${a.tz} for ${a.iata}`);
     }
     const source = `mwgg/Airports ${dataset.version}`;
     const stmt = this.db.raw.prepare(
