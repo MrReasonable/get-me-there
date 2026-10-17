@@ -13,14 +13,31 @@ const ensure = () =>
   execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], {
     cwd: REPO,
     encoding: 'utf8',
-    timeout: 600_000,
+    // why: a call can wait 10 min for another suite's build lock and then build cold (CodeRabbit batch 3)
+    timeout: 1_200_000,
   }).trim();
 
 describe('scripts/ensure-build.mjs', () => {
   it('builds when needed and then reports the build up to date, without rebuilding', () => {
     ensure();
     expect(ensure()).toBe('build up to date');
-  }, 600_000);
+  }, 2_400_000);
+
+  it('every caller allows the lock wait plus a cold build: 1,200 s on the call and on its hook or test (CodeRabbit batch 3)', async () => {
+    const { WAIT_MS } = await import('./ensure-build-lib.mjs');
+    // why: a caller can wait WAIT_MS (10 min) for a live holder and then run a cold build itself
+    expect(1_200_000).toBeGreaterThanOrEqual(WAIT_MS + 10 * 60_000);
+    for (const f of [
+      'scripts/backup.test.mjs',
+      'apps/api/test/deploy/backupCli.test.ts',
+      'scripts/assert-dist-resolution.test.mjs',
+      'scripts/ensure-build.test.mjs',
+    ]) {
+      const text = readFileSync(join(REPO, f), 'utf8');
+      expect(text, f).toMatch(/ensure-build\.mjs'\)\], \{[^}]*timeout: 1_200_000/);
+      expect(text, f).not.toMatch(/\b(300|600)_000\b/);
+    }
+  });
 
   it('is the only thing the CLI tests use to build', () => {
     for (const f of ['scripts/backup.test.mjs', 'apps/api/test/deploy/backupCli.test.ts']) {

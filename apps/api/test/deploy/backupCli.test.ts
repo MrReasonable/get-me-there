@@ -11,9 +11,15 @@ import { EXIT } from '../../src/tools/types.js';
 import { tempDir } from '../helpers/tmp.js';
 import { REPO } from './files.js';
 
+// why: ensure-build can wait up to 10 min for another suite's build lock and then build cold itself, so the call and
+// the hook both allow 20 min (CodeRabbit batch 3).
 beforeAll(() => {
-  execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], { cwd: REPO, stdio: 'ignore' });
-}, 300_000);
+  execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], {
+    cwd: REPO,
+    stdio: 'ignore',
+    timeout: 1_200_000,
+  });
+}, 1_200_000);
 
 /**
  * Per-test timeout. why: each case spawns several node processes in a row (BACKUPS_KEPT + 1 backups, four refusals),

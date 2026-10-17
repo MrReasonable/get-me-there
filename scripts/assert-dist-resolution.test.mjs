@@ -14,9 +14,9 @@ function sources(dir) {
   );
 }
 
-// why: ruling 11: the case may build the workspace (ensure-build) and spawns node; 10 min covers a cold build on a
-// loaded runner, as ensure-build.test.mjs allows.
-describe('scripts/assert-dist-resolution.mjs', { timeout: 600_000 }, () => {
+// why: ruling 11: the case may build the workspace (ensure-build) and spawns node; ensure-build can wait 10 min for
+// another suite's build lock and then build cold, so 20 min, as ensure-build.test.mjs allows (CodeRabbit batch 3).
+describe('scripts/assert-dist-resolution.mjs', { timeout: 1_200_000 }, () => {
   it('checks every @gmt specifier apps/api/src imports, subpaths included', () => {
     const imported = new Set();
     for (const f of sources(join(REPO, 'apps', 'api', 'src')))
@@ -30,11 +30,12 @@ describe('scripts/assert-dist-resolution.mjs', { timeout: 600_000 }, () => {
     execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], {
       cwd: REPO,
       stdio: 'ignore',
+      timeout: 1_200_000,
     });
     const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'assert-dist-resolution.mjs')], {
       encoding: 'utf8',
     });
     expect(r.stderr).toBe('');
     expect(r.stdout).toBe('workspace packages resolve to dist\n');
-  }, 600_000);
+  }, 1_200_000);
 });
