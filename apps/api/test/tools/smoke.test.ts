@@ -2,10 +2,28 @@
 // real adapters, http-kit, recorder and SqliteBudgetGuard. The run against the vendors is an operator step (WP13 Task 13.8).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIata, asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords, fixedClock } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  asIsoDateTime,
+  BANNED_WORD_ALLOWLIST,
+  type DiscoveryTileResult,
+  findBannedWords,
+  fixedClock,
+  type Provenance,
+} from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset, MIGRATIONS_DIR, seedAirports } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
-import { runSmoke, type SmokeCli, type SmokeResult } from '../../src/tools/smoke.js';
+import {
+  type Discovery,
+  runSmoke,
+  type SmokeCli,
+  type SmokeProviderReport,
+  type SmokeResult,
+  smokeQuery,
+  type Vendor,
+} from '../../src/tools/smoke.js';
+import { type ChecklistInput, checklist, type Seen, type SmokeCheck } from '../../src/tools/smokeChecks.js';
 import { EXIT } from '../../src/tools/types.js';
 import { buildPorts, loadConfigFromEnv, type Ports } from '../../src/wiring.js';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, testEnv } from '../helpers/env.js';
@@ -274,5 +292,138 @@ describe('runSmoke (spec §9 item 7)', () => {
     );
     expect(r.lines.at(-1)).toBe('dry run: nothing sent, no execution opened');
     expect(ports.repos.executions.listByStatus(['running', 'completed', 'cancelled'])).toEqual([]);
+  });
+});
+
+/**
+ * Negative controls for the checklist's FAIL branches (provenance review, fix round 1): a vendor answer cannot be made
+ * to break these through the real adapters, so each case hands `checklist` the inputs a dishonest answer would produce
+ * on top of one real run's ledger. Every case asserts `fail`; each was shown to pass vacuously under a mutation that
+ * turns its branch into `pass`.
+ */
+describe('checklist FAIL branches (negative controls)', () => {
+  async function base(): Promise<{ ports: Ports; input: ChecklistInput; tp: SmokeProviderReport }> {
+    const ports = smokePorts();
+    const { r } = await smoke(ports);
+    const tp = r.reports[0];
+    if (tp === undefined || tp.cheapest === null) throw new Error('the base run priced no Travelpayouts row');
+    const input: ChecklistInput = {
+      ports,
+      q: smokeQuery(asIsoDate('2027-02-10'), LHR, JFK),
+      executionId: r.executionId ?? '',
+      runStart: NOW,
+      cap: 4,
+      configured: ['travelpayouts'],
+      found: new Map(),
+      itinerary: null,
+      seen: [],
+    };
+    return { ports, input, tp };
+  }
+  const check = (checks: SmokeCheck[], name: string): SmokeCheck | undefined =>
+    checks.find((c) => c.name === name);
+  /** The base run's Travelpayouts report with its cheapest price's provenance patched. */
+  function withProvenance(tp: SmokeProviderReport, patch: Partial<Provenance>): Map<Vendor, Discovery> {
+    const cheapest = tp.cheapest;
+    if (cheapest === null) throw new Error('no cheapest');
+    return new Map([
+      [
+        'travelpayouts',
+        {
+          report: { ...tp, cheapest: { ...cheapest, provenance: { ...cheapest.provenance, ...patch } } },
+          plans: [],
+          tile: null,
+        },
+      ],
+    ]);
+  }
+
+  it.each([
+    [
+      'a synthetic source kind',
+      { sourceKind: 'synthetic' },
+      'source kind synthetic, expected authorised-cached',
+    ],
+    ['the wrong source kind for the stage', { sourceKind: 'scraped-search' }, 'source kind scraped-search'],
+    [
+      'a point of sale the provider does not declare',
+      { pointOfSale: 'GB' },
+      'point of sale GB, expected unknown',
+    ],
+    [
+      'a fetch before this run',
+      { fetchedAt: asIsoDateTime('2027-02-10T08:00:00.000Z') },
+      'fetched before this run',
+    ],
+  ] as const)('provenance fails on %s', async (_label, patch, detail) => {
+    const { input, tp } = await base();
+    const c = check(checklist({ ...input, found: withProvenance(tp, patch) }), 'provenance');
+    expect(c?.status).toBe('fail');
+    expect(c?.detail).toContain(detail);
+  });
+
+  it('step 1 = step 2 fails when step 2 expanded another outbound than step 1 priced cheapest', async () => {
+    const { input } = await base();
+    const url = (extra: string) =>
+      new URL(
+        `https://www.searchapi.io/api/v1/search?engine=google_flights&departure_id=LHR&arrival_id=JFK${extra}`,
+      );
+    const seen: Seen[] = [
+      {
+        providerId: 'searchapi',
+        tileIndex: null,
+        url: url(''),
+        body: {
+          other_flights: [
+            { price: 603, departure_token: 'DT-cheapest' },
+            { price: 655, departure_token: 'DT-dearer' },
+          ],
+        },
+      },
+      {
+        providerId: 'searchapi',
+        tileIndex: null,
+        url: url('&departure_token=DT-dearer'),
+        body: { other_flights: [{ price: 603, booking_token: 'BT' }] },
+      },
+    ];
+    const c = check(checklist({ ...input, seen }), 'step 1 = step 2');
+    expect(c).toEqual({
+      name: 'step 1 = step 2',
+      status: 'fail',
+      detail: 'step 2 expanded another outbound than step 1 priced cheapest',
+    });
+  });
+
+  it('open-jaw drop fails when the issues count more rows than the tile dropped', async () => {
+    const { input, tp } = await base();
+    const cell = {
+      origin: LHR,
+      destination: JFK,
+      departureDate: asIsoDate('2027-03-03'),
+      returnDate: asIsoDate('2027-03-15'),
+    };
+    const tile: Extract<DiscoveryTileResult, { kind: 'tile' }> = {
+      kind: 'tile',
+      index: 0,
+      coveredCells: [cell],
+      fetchedAt: NOW,
+      pointOfSale: 'unknown',
+      prices: [],
+      noFares: [],
+      notes: ['offers-dropped:1'],
+      cellIssues: [
+        {
+          cell,
+          reason: 'parse',
+          offersDropped: 2,
+          detail: 'travelpayouts: 2 rows were not the closed round trip LHR to JFK and back [open-jaw]',
+        },
+      ],
+    };
+    const found = new Map<Vendor, Discovery>([['travelpayouts', { report: tp, plans: [], tile }]]);
+    const c = check(checklist({ ...input, found }), 'open-jaw drop');
+    expect(c?.status).toBe('fail');
+    expect(c?.detail).toContain('the issues count more rows than the tile dropped');
   });
 });
