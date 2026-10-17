@@ -1,23 +1,8 @@
-import {
-  type ConstraintName,
-  effectiveAge,
-  formatAgeFull,
-  formatAgeShort,
-  sourceLabel,
-  type Verdicts,
-} from '@gmt/core';
+import { effectiveAge, formatAgeFull, formatAgeShort, sourceLabel } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
 import { assertProvenance, isCalendarPrice, Provenance } from './Provenance.js';
-
-/**
- * True when the final step did not confirm the price (decisions 37, 44): core judges `priceConfirmed`
- * only as `unverified`, so either the verdict or the unverified list says so.
- */
-export function priceUnconfirmed(r: { unverified: readonly ConstraintName[]; verdicts?: Verdicts }): boolean {
-  return r.unverified.includes('priceConfirmed') || r.verdicts?.priceConfirmed === 'unverified';
-}
 
 export interface PriceCellProps {
   pricePence: number;

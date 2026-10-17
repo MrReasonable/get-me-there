@@ -48,7 +48,7 @@ export * from './ports/provider.js';
 export { bandCheapest } from './results/band.js';
 export { dedupByItinerary } from './results/dedup.js';
 export { filterRows } from './results/filter.js';
-export { rankRows, sortRows } from './results/rank.js';
+export { priceUnconfirmed, rankRows, sortRows } from './results/rank.js';
 export { resultRowKey } from './results/rowKey.js';
 export { SEARCH_LINK_LABEL, SEARCH_LINK_ROW_LABEL, searchLinkFor } from './results/searchLink.js';
 export type { ResultFilters, SortKey } from './results/types.js';

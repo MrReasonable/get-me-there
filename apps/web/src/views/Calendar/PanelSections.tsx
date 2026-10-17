@@ -1,7 +1,7 @@
-import { isPriceUnconfirmed, resultRowKey } from '@gmt/core';
+import { isPriceUnconfirmed, priceUnconfirmed, resultRowKey } from '@gmt/core';
 import type { CellDetailResponse, ExecutionSummary } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
+import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatDayShort, formatInstantLondon } from '../../format.js';
 import { figureMarks } from '../../lib/marks.js';

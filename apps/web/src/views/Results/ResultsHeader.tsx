@@ -1,6 +1,7 @@
+import { priceUnconfirmed } from '@gmt/core';
 import type { ResultRow, ResultsResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
+import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';

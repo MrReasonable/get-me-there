@@ -1,4 +1,4 @@
-import { effectiveAge, formatFetchedAgo, resultRowKey, type SortKey } from '@gmt/core';
+import { effectiveAge, formatFetchedAgo, priceUnconfirmed, resultRowKey, type SortKey } from '@gmt/core';
 import {
   createColumnHelper,
   type ExpandedState,
@@ -10,7 +10,7 @@ import { createContext, Fragment, useContext, useEffect, useMemo, useState } fro
 import type { ResultRow } from '../../api/types.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell, priceUnconfirmed } from '../../components/PriceCell.js';
+import { PriceCell } from '../../components/PriceCell.js';
 import { provenanceConsistent } from '../../components/Provenance.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatMinutes } from '../../format.js';

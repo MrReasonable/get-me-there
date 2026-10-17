@@ -1,6 +1,7 @@
 import { compareAges, effectiveAge } from '../labels/age.js';
 import { cellKeyString } from '../types/definition.js';
 import type { IsoDateTime } from '../types/ids.js';
+import type { ConstraintName } from '../types/itinerary.js';
 import type { ResultRow, SortKey } from './types.js';
 
 const CLASS_RANK: Readonly<Record<ResultRow['verdictClass'], number>> = {
@@ -25,9 +26,14 @@ function identity(r: ResultRow): string {
 /**
  * True when the final step did not confirm the row's price (no `price` supplied field, so `evaluateConstraints` set
  * `priceConfirmed: 'unverified'`; decisions 27, 37, 45). Such an offer ranks after every confirmed offer of its class.
+ * The one definition (ca-003): core ranks with it and the web badges with it. A row carries `verdicts`; a calendar
+ * panel offer may carry only its `unverified` list, which names `priceConfirmed` for the same fact.
  */
-export function priceUnconfirmed(r: Pick<ResultRow, 'verdicts'>): boolean {
-  return r.verdicts.priceConfirmed === 'unverified';
+export function priceUnconfirmed(r: {
+  verdicts?: Partial<Pick<ResultRow['verdicts'], 'priceConfirmed'>>;
+  unverified?: readonly ConstraintName[];
+}): boolean {
+  return r.verdicts?.priceConfirmed === 'unverified' || (r.unverified?.includes('priceConfirmed') ?? false);
 }
 
 /**
