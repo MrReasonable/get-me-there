@@ -19,7 +19,9 @@ const run = (r) => {
   });
 };
 
-describe('mutation gate: timed-out mutants (ruling 10)', () => {
+// why: the suite starts node several times (the gate script on a written report); 60 s survives a loaded runner, as
+// the other node-spawning suites allow (CodeRabbit, ruling 11).
+describe('mutation gate: timed-out mutants (ruling 10)', { timeout: 60_000 }, () => {
   it('counts Timeout over the tested mutants (killed, survived, timed out, no coverage); ignored and errors are not tested', () => {
     expect(
       timeoutShare(
