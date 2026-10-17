@@ -9,6 +9,7 @@ import {
   FLAT_CLASS,
   quintileBand,
 } from '../../../src/views/Calendar/scale.js';
+import { contrast, luminance } from '../../contrast.js';
 import { cellAt, gridDay, priceAt, provCalendarAt, provItinerary } from '../../fixtures.wp10.js';
 import { NOW } from '../../render.js';
 
@@ -121,20 +122,6 @@ describe('calendar model: one basis at a time, other-basis days hatched and excl
     expect(m.hatchedDays).toBe(10);
   });
 });
-
-/** WCAG 2 relative luminance of a #rrggbb colour. */
-function luminance(hex: string): number {
-  const channel = (i: number) => {
-    const c = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-}
-/** WCAG 2 contrast ratio of two colours, lighter over darker. */
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
-}
 
 describe('band colours (review ui-r2-005)', () => {
   const bands: Band[] = [0, 1, 2, 3, 4];
