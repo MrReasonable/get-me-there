@@ -283,6 +283,25 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('the itinerary line pluralises, and a run that selected nothing names its on-demand searches plainly (pft-008, po-008)', () => {
+    expect(COPY.itineraryLineExpand({ searched: 1, selected: 4, expandTop: 1, onDemand: 0 })).toBe(
+      ' · itinerary-searched 1 of 4 selected (1 outbound each) +0 on demand',
+    );
+    expect(COPY.itineraryLineExpand({ searched: 3, selected: 4, expandTop: 2, onDemand: 0 })).toContain(
+      '(2 outbounds each)',
+    );
+    // why: "0 of 0 selected (1 outbounds each) +1 on demand" read as if nothing happened beside a real search.
+    expect(COPY.itineraryLineExpand({ searched: 0, selected: 0, expandTop: 1, onDemand: 1 })).toBe(
+      ' · itinerary-searched 1 cell on demand; none selected by the run',
+    );
+    expect(COPY.itineraryLine({ searched: 0, selected: 0, onDemand: 2 })).toBe(
+      ' · itinerary-searched 2 cells on demand; none selected by the run',
+    );
+    expect(COPY.itineraryLine({ searched: 0, selected: 0, onDemand: 0 })).toBe(
+      ' · itinerary-searched 0 of 0 selected +0 on demand',
+    );
+  });
+
   it('stage counts say itinerary-searched', () => {
     expect(COPY.itineraryLine({ searched: 2, selected: 10, onDemand: 1 })).toBe(
       ' · itinerary-searched 2 of 10 selected +1 on demand',

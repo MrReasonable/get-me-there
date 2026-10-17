@@ -50,6 +50,13 @@ export type BucketName = Exclude<keyof Buckets, 'reused'>;
  * zero-cap message, provenance notes, search-link labels, airport names) are WP8's and core's and
  * are tested there. The worked example's words live in src/example.ts and arrive as arguments.
  */
+/** The Results header's itinerary-search clause (spec §3, §11); see COPY.itineraryLine. */
+function itineraryLine(c: { searched: number; selected: number; onDemand: number }): string {
+  return c.selected === 0 && c.onDemand > 0
+    ? ` · itinerary-searched ${c.onDemand} ${c.onDemand === 1 ? 'cell' : 'cells'} on demand; none selected by the run`
+    : ` · itinerary-searched ${c.searched} of ${c.selected} selected +${c.onDemand} on demand`;
+}
+
 export const COPY = {
   appTitle: 'get-me-there',
   skipToContent: 'Skip to the main content',
@@ -198,10 +205,13 @@ export const COPY = {
     reused: number;
   }) =>
     `discovery: ${c.priced} priced · ${c.empty} no fares · ${c.noData} no cached data · ${c.error} error · ${c.skipped} skipped · ${c.notRun} not searched of ${c.total} (${c.reused} reused)`,
-  itineraryLine: (c: { searched: number; selected: number; onDemand: number }) =>
-    ` · itinerary-searched ${c.searched} of ${c.selected} selected +${c.onDemand} on demand`,
+  // why: pft-008, po-008: a run that selected nothing beside on-demand searches says so in words, without a policy
+  // clause for a stage it never had; "outbound" agrees with its number.
+  itineraryLine,
   itineraryLineExpand: (c: { searched: number; selected: number; expandTop: number; onDemand: number }) =>
-    ` · itinerary-searched ${c.searched} of ${c.selected} selected (${c.expandTop} outbounds each) +${c.onDemand} on demand`,
+    c.selected === 0
+      ? itineraryLine(c)
+      : ` · itinerary-searched ${c.searched} of ${c.selected} selected (${c.expandTop} ${c.expandTop === 1 ? 'outbound' : 'outbounds'} each) +${c.onDemand} on demand`,
   noItinerarySearch: ' · itinerary search not configured',
   // why: ruling 16 (pft-006): when most cells came back "no cached data", say what would answer them; copy only.
   thinCoverage:
