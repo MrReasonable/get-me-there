@@ -30,6 +30,7 @@ import { RECORDED_BY } from '../../src/tools/record.js';
 import { parseRecordArgs } from '../../src/tools/recordPlan.js';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js';
 import { TEST_RECORDED_BY, testRecording } from '../helpers/recording.js';
+import { stubSmokeVendors } from '../helpers/smokeVendors.js';
 import { filesUnder, tempDir } from '../helpers/tmp.js';
 import { stubVendors } from '../helpers/vendors.js';
 
@@ -126,10 +127,10 @@ describe('runTool refusals (spec §5.5, §7, plan decision 20)', () => {
     expect(existsSync(join(dir, 'tool.fixture.db'))).toBe(false);
   });
 
-  it('refuses smoke (WP13) and a missing budget with the usage code', async () => {
+  it('refuses a smoke without its airports and a recording without a budget with the usage code', async () => {
     const h = harness();
     expect(await runTool('smoke', [], h.opts)).toBe(EXIT.usage);
-    expect(h.errors()).toContain('WP13 adds it');
+    expect(h.errors()).toContain('--origin and --destination are required');
     expect(await runTool('record', ['--route', 'LHR:JFK', '--month', '2027-03'], h.opts)).toBe(EXIT.usage);
     expect(h.errors()).toContain('--budget is required');
   });
@@ -339,6 +340,64 @@ describe('runTool success paths', () => {
     expect(h.text()).toMatch(/session: \S+/);
     expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 21 free call(s)'); // the refused 200 was billed
     expect(`${h.text()}${h.errors()}`).not.toContain(SENTINEL_SA);
+  });
+
+  it('smoke: the same bootstrap (lock, seed, release); one tile per provider and one chain; exit 0; fixtures in the given tree under its signature (WP13)', async () => {
+    const h = harness();
+    const seen = stubSmokeVendors();
+    expect(await runTool('smoke', ['--origin', 'LHR', '--destination', 'JFK', '--budget', '4'], h.opts)).toBe(
+      EXIT.ok,
+    );
+    const text = h.text();
+    expect(text.indexOf('tool lock acquired')).toBeLessThan(text.indexOf('checklist:'));
+    expect(text.indexOf('checklist:')).toBeLessThan(text.indexOf('tool lock released'));
+    expect(text).toMatch(/^cheapest confirmed price £573 · LHR→JFK /m);
+    expect(text).not.toMatch(/\[FAIL\]/);
+    expect(seen.urls).toHaveLength(5);
+    // why: the recorder writes each redacted recording with its raw body beside it (*.raw.json, gitignored everywhere)
+    const files = filesUnder(h.root).filter((f) => !f.endsWith('.raw.json'));
+    expect(files).toHaveLength(5);
+    for (const f of files)
+      expect(JSON.parse(readFileSync(f, 'utf8'))).toMatchObject({ recordedBy: TEST_RECORDED_BY });
+    expect(
+      count(
+        h.dbPath,
+        "SELECT COUNT(*) AS n FROM search_executions WHERE trigger = 'tool' AND status = 'completed'",
+      ),
+    ).toEqual({ n: 1 });
+    expect(count(h.dbPath, 'SELECT COUNT(*) AS n FROM app_lock')).toEqual({ n: 0 });
+    expect(`${text}${h.errors()}`).not.toContain(SENTINEL_SA);
+  });
+
+  it('smoke refusals go to stderr with their codes: zero providers 2, spend 65 (WP13)', async () => {
+    const none = harness(undefined, { TRAVELPAYOUTS_TOKEN: '', SEARCHAPI_KEY: '' });
+    expect(
+      await runTool('smoke', ['--origin', 'LHR', '--destination', 'JFK', '--budget', '4'], none.opts),
+    ).toBe(EXIT.smokeNoProviders);
+    expect(none.errors()).toContain('no provider configured');
+    const short = harness();
+    stubSmokeVendors();
+    expect(
+      await runTool('smoke', ['--origin', 'LHR', '--destination', 'JFK', '--budget', '3'], short.opts),
+    ).toBe(EXIT.spendRefused);
+    expect(short.errors()).toContain('exceed --budget 3');
+  });
+
+  it('smoke --dry-run: the same bootstrap, the spend position, nothing sent, no execution (decision 66)', async () => {
+    const h = harness();
+    const seen = stubSmokeVendors();
+    expect(
+      await runTool(
+        'smoke',
+        ['--origin', 'LHR', '--destination', 'JFK', '--budget', '4', '--dry-run'],
+        h.opts,
+      ),
+    ).toBe(EXIT.ok);
+    expect(h.text()).toContain('dry run: nothing sent, no execution opened');
+    expect(h.text()).toContain('SearchApi window (trial; SEARCHAPI_TRIAL_USED 0)');
+    expect(h.text().indexOf('dry run: nothing sent')).toBeLessThan(h.text().indexOf('tool lock released'));
+    expect(seen.urls).toEqual([]);
+    expect(count(h.dbPath, 'SELECT COUNT(*) AS n FROM search_executions')).toEqual({ n: 0 });
   });
 });
 

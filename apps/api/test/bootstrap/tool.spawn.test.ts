@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asIsoDateTime, fixedClock, systemClock } from '@gmt/core';
-import { AppLock, applyMigrations, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
+import { asIata, asIsoDate, asIsoDateTime, fixedClock, systemClock } from '@gmt/core';
+import { AppLock, applyMigrations, createRepos, MIGRATIONS_DIR, openDatabase } from '@gmt/db';
 import { describe, expect, it } from 'vitest';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js';
 import { tempDir } from '../helpers/tmp.js';
@@ -75,6 +75,93 @@ describe('tool bootstrap as a real process (spec §5.5, §7)', () => {
     const db = openDatabase(dbPath);
     expect(AppLock.inspect(db)).toBeNull();
     db.close();
+  }, 60_000);
+
+  it('the smoke entry starts no execution: the boot sweep, auto-resume and cron never run, nothing is sent, the lock is released (spec §7; WP13)', () => {
+    const dbPath = freshDbPath();
+    const db = openDatabase(dbPath);
+    applyMigrations(db, MIGRATIONS_DIR);
+    const repos = createRepos(db, systemClock, { allowSynthetic: false });
+    // why: an enabled scheduled definition and an interrupted execution give every boot step something to act on
+    const def = repos.definitions.create({
+      name: 'spawn lock test',
+      origins: [asIata('LHR')],
+      destinations: [asIata('JFK')],
+      window: { kind: 'relative', startOffsetDays: 7, lengthDays: 30 },
+      minNights: 10,
+      maxNights: 12,
+      cabin: 'economy',
+      constraints: {},
+      verification: { maxCells: 1, topN: 1, alwaysInclude: [], expandTop: 1, bookingLinks: true },
+      budget: { maxCalls: 0, maxFreeCalls: 10, maxCostMicroGbp: 0 },
+      providers: { discovery: ['travelpayouts'], verification: [], discoveryRefreshHours: {} },
+      destinationNotes: {},
+      onwardCostPence: {},
+      scheduleCron: '0 5 * * 1',
+      scheduleTz: 'Europe/London',
+      enabled: true,
+    });
+    const day = asIsoDate(def.createdAt.slice(0, 10));
+    const ex = repos.executions.create({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: {
+        ...def,
+        resolved: {
+          origins: def.origins,
+          destinations: def.destinations,
+          departureFrom: day,
+          departureTo: day,
+          minNights: 10,
+          maxNights: 12,
+        },
+        resolvedAt: def.createdAt,
+        windowClamped: false,
+        droppedAlwaysInclude: [],
+      },
+      estimate: null,
+      trigger: 'manual',
+      status: 'running',
+    });
+    repos.executions.setStatus(ex.id, 'interrupted');
+    db.close();
+    // why: zero providers (exit 2) keeps the child off the network entirely; the bootstrap steps are the same
+    const r = spawnSync(
+      process.execPath,
+      [
+        ...NODE_ARGS,
+        '--import',
+        'tsx',
+        'src/bootstrap/tool.ts',
+        'smoke',
+        '--origin',
+        'LHR',
+        '--destination',
+        'JFK',
+        '--budget',
+        '4',
+      ],
+      {
+        cwd: API_ROOT,
+        env: {
+          PATH: process.env.PATH ?? '',
+          ...toolEnv(dbPath, { TRAVELPAYOUTS_TOKEN: '', SEARCHAPI_KEY: '', AUTO_RESUME: 'true' }),
+        },
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+    expect(r.stderr).toContain('no provider configured');
+    expect(r.status).toBe(2);
+    expect(r.stdout.indexOf('tool lock acquired')).toBeLessThan(r.stdout.indexOf('tool lock released'));
+    const after = openDatabase(dbPath);
+    expect(
+      after.raw.prepare('SELECT id, status, auto_resume_count AS n FROM search_executions').all(),
+    ).toEqual([{ id: ex.id, status: 'interrupted', n: 0 }]);
+    expect(after.raw.prepare('SELECT COUNT(*) AS n FROM provider_requests').get()).toEqual({ n: 0 });
+    expect(AppLock.inspect(after)).toBeNull();
+    after.close();
   }, 60_000);
 
   it('a stale app lock is taken over', () => {
