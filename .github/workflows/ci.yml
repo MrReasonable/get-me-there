@@ -27,6 +27,23 @@ jobs:
       # package runs its own `test` script (its config, its thresholds, then its TZ runs); the root scripts project follows.
       - run: pnpm -r --workspace-concurrency=1 test
       - run: pnpm exec vitest run --project scripts
+      # why: recorded vendor responses are local-only (plan decisions 61, 64), so this fresh checkout has none. Every suite
+      # that replays them must report its skip by title, never pass vacuously; `shell: bash` adds -o pipefail, so a
+      # failing suite fails the step even through tee.
+      - name: recording-dependent suites skip visibly (decision 61)
+        shell: bash
+        run: |
+          pnpm exec vitest run --project api --project providers --project engine test/recorded/ test/searchapi/recorded.test.ts test/travelpayouts/replay.test.ts test/layerB/ --reporter=verbose | tee recorded-skip.log
+          suffix='(skipped: recordings not present, local-only, decision 61)'
+          for title in \
+            'committed recorded tree for the worked example' \
+            'recorded Travelpayouts fixtures (WP4b) replay through replayHandlers (plan decision 17: one session)' \
+            'WP4b recordings this brief relies on (§7 "Inputs from WP4b") — pending-fixtures' \
+            'SEARCHAPI_PARAMS against the recording (spec §5.2, plan decision 24) — pending-fixtures' \
+            'recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) — pending-fixtures' \
+            'layer B: the engine over the real adapters on the recorded session (spec §9 item 4)'; do
+            grep -qF "$title $suffix" recorded-skip.log || { echo "not skipped visibly: $title"; exit 1; }
+          done
       - run: pnpm secret-scan
       - name: secret scan catches a planted fixture
         run: |

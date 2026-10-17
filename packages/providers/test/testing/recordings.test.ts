@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { recordingsPresent, SKIP_SUFFIX, skipTitle } from '../helpers/recordings.js';
+import { recordingsPresent, SKIP_SUFFIX, skipTitle } from '../../src/testing/recordings.js';
 
 const dirs: string[] = [];
 const tmp = (): string => {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-api-recpresent-'));
+  const d = mkdtempSync(join(tmpdir(), 'gmt-recpresent-'));
   dirs.push(d);
   return d;
 };

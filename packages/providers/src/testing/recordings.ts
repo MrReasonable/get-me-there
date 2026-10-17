@@ -1,11 +1,13 @@
 /**
- * Gate for tests that replay the vendor recordings. The recordings (`fixtures/recorded/**\/*.json` except the tracked
- * `params-*.json`) are gitignored and local-only (plan decisions 61 and 64), so a fresh checkout has none; the suites
- * that need them skip visibly instead of failing or passing vacuously.
+ * The one gate for tests that replay the vendor recordings, shared by api, providers and the engine's layer-B suite
+ * (WP13 moved it here from two test helpers; its unit test is test/testing/recordings.test.ts). The recordings
+ * (`fixtures/recorded/**\/*.json` except the tracked `params-*.json`) are gitignored and local-only (plan decisions 61
+ * and 64), so a fresh checkout has none; the suites that need them skip visibly instead of failing or passing
+ * vacuously.
  */
 import { type Dirent, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { errnoCode } from '../../src/util.js';
+import { errnoCode } from '../util.js';
 
 /** Appended to a skipped suite's title so the reporter shows why it did not run. */
 export const SKIP_SUFFIX = ' (skipped: recordings not present, local-only, decision 61)';

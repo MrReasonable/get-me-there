@@ -1,9 +1,9 @@
 // The committed recorded tree for the worked example (brief WP4b section 7): what WP5, WP6 and WP13 replay.
 // Skipped visibly while the local-only recordings are absent (plan decision 61).
 import { defaultRecordedRoot } from '@gmt/providers';
+import { recordingsPresent, skipTitle } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 import { RECORDED_BY } from '../../src/tools/record.js';
-import { recordingsPresent, skipTitle } from '../helpers/recordings.js';
 import { checkWorkedExampleTree } from '../helpers/workedExampleTree.js';
 
 const present = recordingsPresent(defaultRecordedRoot());

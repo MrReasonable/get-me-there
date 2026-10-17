@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { assertRequestAllowed } from '../../src/params/allowlist.js';
 import { majorToMinor } from '../../src/shared/money.js';
 import { replayHandlers, verifyRecordedTree } from '../../src/testing/index.js';
+import { recordingsPresent, skipTitle } from '../../src/testing/recordings.js';
 import {
   PRICES_FOR_DATES_PATH,
   TRAVELPAYOUTS_HOST,
@@ -23,7 +24,6 @@ import { AVIASALES_BASE, itineraryOf } from '../../src/travelpayouts/response.js
 import { SENTINELS } from '../fakes.js';
 import { arr, obj, str } from '../support/guards.js';
 import { server } from '../support/msw.js';
-import { recordingsPresent, skipTitle } from '../support/recordings.js';
 import {
   ctx,
   discoveryOf,
