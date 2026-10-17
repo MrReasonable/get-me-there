@@ -13,7 +13,7 @@ import type { Ports } from '../wiring.js';
 import { SEARCHED, zeroBuckets } from './coverage.js';
 import { executionSummary } from './executions.js';
 import { pickCalendar, pickVerified } from './pick.js';
-import { confirmedIn, EXECUTIONS_LIMIT, loadRows } from './results.js';
+import { confirmedIn, loadRows } from './results.js';
 import { priceOf, type ResultRow } from './rows.js';
 import { cellInSpace } from './space.js';
 
@@ -33,10 +33,8 @@ const cellsOf = (rows: readonly ResultRow[]): number => new Set(rows.map((r) => 
  * whose outcome in the set is priced, empty or no_data.
  */
 export function assembleDuration(def: SearchDefinition, ports: Ports): DurationResponse {
-  const all = ports.repos.executions.listForDefinition(def.id, {
-    limit: EXECUTIONS_LIMIT,
-    includeChildren: true,
-  });
+  // why: every execution, never the newest N, so no run is silently dropped (CodeRabbit batch 3)
+  const all = ports.repos.executions.listForDefinition(def.id, { limit: 'all', includeChildren: true });
   const parent = all.find((e) => !e.isChild);
   const children = all.filter((e) => e.isChild && e.status === 'completed');
   const set = [...(parent === undefined ? [] : [parent]), ...children];

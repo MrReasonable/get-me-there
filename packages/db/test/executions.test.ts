@@ -154,6 +154,7 @@ describe('ExecutionsRepo (spec §7 search_executions, §8.1)', () => {
     ).toEqual([second.id, missed.id, first.id]);
     expect(repo.listForDefinition(definition.id, { limit: 10, includeChildren: true })).toHaveLength(4);
     expect(repo.listForDefinition(definition.id, { limit: 1, includeChildren: true })).toHaveLength(1);
+    expect(repo.listForDefinition(definition.id, { limit: 'all', includeChildren: true })).toHaveLength(4);
     expect(
       repo
         .listByStatus(['running'])

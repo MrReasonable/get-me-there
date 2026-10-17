@@ -32,8 +32,6 @@ export type ResultsResponse = z.infer<typeof apiContract.resultsResponseSchema>;
 export type ResultsQuery = z.infer<typeof apiContract.resultsQuerySchema>;
 /** Spec §6.5: at most 1000 rows per response. */
 export const RESULTS_CAP = 1000;
-/** Executions read per definition (newest first); far above a year of weekly runs plus children. */
-export const EXECUTIONS_LIMIT = 500;
 
 export interface Loaded {
   def: SearchDefinition;
@@ -135,10 +133,9 @@ function supersessionOf(
 export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: readonly string[]): Loaded {
   const now = ports.clock.now();
   const space = currentSpace(def, ports.clock.todayLondon());
-  const all = ports.repos.executions.listForDefinition(def.id, {
-    limit: EXECUTIONS_LIMIT,
-    includeChildren: true,
-  });
+  // why: every execution, never the newest N: past a fixed cap older prices vanished without `truncated` and an older
+  // run's executionId answered 404 although the run exists (CodeRabbit batch 3)
+  const all = ports.repos.executions.listForDefinition(def.id, { limit: 'all', includeChildren: true });
   const wanted = executionIds === undefined ? null : new Set(executionIds);
   const scoped = wanted === null ? all : all.filter((e) => wanted.has(e.id));
   const ids = scoped.map((e) => e.id);
