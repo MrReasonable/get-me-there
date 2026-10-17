@@ -3,13 +3,14 @@ on:
   push:
     branches: [main, 'wp/**']
   pull_request: {}
+# Actions are pinned by commit SHA (plan decision 63); the comment names the tag the SHA was read from on 2026-10-17.
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (v4.4.0)
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 (v4.3.0)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 (v4.4.0)
         with:
           node-version: 22
           cache: pnpm
@@ -29,6 +30,86 @@ jobs:
           echo '{"url":"https://x/?api_key=ABCDEFGH12345678"}' > packages/providers/fixtures/recorded/planted/p.json
           if pnpm secret-scan; then echo "scan missed the plant"; exit 1; fi
           rm -r packages/providers/fixtures/recorded/planted
-      - name: Dockerfile sets production and container flags
+  docker:
+    # Spec §13 through the shipped docker-compose.yml: the image builds from the lockfile, runs as node with the
+    # production flags, no curl and no secret or recording inside; compose boots it healthy on a fresh volume; it backs
+    # itself up as node; a second app is refused (decision 53); a graceful stop exits 0 and releases the lock; after a
+    # hard kill the restarted app takes the stale lock over (decision 63); a backup restores by the documented steps.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (v4.4.0)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3 (v3.12.0)
+      - name: Compose file is valid
+        run: docker compose --env-file /dev/null config --quiet
+      - name: Build the image through compose
+        run: docker compose --env-file /dev/null build app
+      - name: Image runs as node with the production flags and carries no curl or wget
         run: |
-          if [ -f Dockerfile ]; then grep -q 'ENV NODE_ENV=production' Dockerfile && grep -q 'ENV IN_CONTAINER=1' Dockerfile; fi
+          test "$(docker run --rm --entrypoint id get-me-there:local -u)" = "1000"
+          docker run --rm --entrypoint node get-me-there:local -e "process.exit(process.env.NODE_ENV === 'production' && process.env.IN_CONTAINER === '1' ? 0 : 1)"
+          if docker run --rm --entrypoint sh get-me-there:local -c 'command -v curl || command -v wget'; then exit 1; fi
+      - name: Image holds no secret, database or recording, and its history no credential
+        run: |
+          found="$(docker run --rm --entrypoint sh get-me-there:local -c \
+            'find / -xdev -path "*/node_modules" -prune -o \( -name ".env" -o -name ".env.*" -o -name "*.db" -o -name "*.pem" -o -name "*.key" -o -path "*/fixtures/recorded*" \) -print 2>/dev/null; true')"
+          if [ -n "$found" ]; then echo "$found"; exit 1; fi
+          if docker history --no-trunc get-me-there:local | grep -Ei '(token|_key|pass(word)?|secret)='; then exit 1; fi
+      - name: Compose boots it healthy with the documented three-line .env
+        run: |
+          # why: CI-only values; the token is a dummy and boot makes no vendor call
+          printf 'TRAVELPAYOUTS_TOKEN=ci-dummy-token-0123456789\nAPP_BASIC_AUTH_USER=ci\nAPP_BASIC_AUTH_PASS=ci-password-0123\n' > .env
+          chmod 600 .env
+          docker compose up -d --wait --wait-timeout 300 || { docker compose logs app; exit 1; }
+          curl -fsS http://127.0.0.1:3000/api/health
+          test "$(docker compose exec -T app id -un)" = node
+          test -z "$(docker compose ps --services --status running | grep -v '^app$')"
+      - name: Backup runs inside the container as node, into a private /data/backups
+        run: |
+          docker compose exec -T app node scripts/backup.mjs | tee backup.json
+          test "$(docker compose exec -T app stat -c '%u %a' /data/backups)" = "1000 700"
+      - name: A second app on the same volume refuses with 75 (decision 53)
+        run: |
+          set +e
+          docker compose run --rm --no-deps -T app
+          code=$?
+          set -e
+          test "$code" = 75
+      - name: A graceful stop exits 0 within the grace period and releases the lock (decision 63)
+        run: |
+          start=$(date +%s)
+          docker compose stop app
+          test $(( $(date +%s) - start )) -lt 30
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$(docker compose ps -aq app)")" = 0
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          docker compose up -d --wait --wait-timeout 120
+          if docker compose logs --since "$since" app | grep -F 'waiting for app_lock'; then exit 1; fi
+      - name: After a hard kill the restarted app takes the stale lock over (decision 63)
+        run: |
+          docker compose kill -s KILL app
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          docker compose up -d --wait --wait-timeout 300 || { docker compose logs app; exit 1; }
+          docker compose logs --since "$since" app | grep -F 'waiting for app_lock'
+          docker compose logs --since "$since" app | grep -F 'taking over a stale app_lock'
+      - name: A backup restores by the documented steps (docs/setup.md section 6)
+        run: |
+          file="$(node -p "JSON.parse(require('fs').readFileSync('backup.json','utf8')).file")"
+          mkdir -m 0700 ci-backups
+          docker compose cp "app:$file" ci-backups/
+          docker compose stop app
+          docker compose run --rm --no-deps -T --entrypoint sh app -c 'cat > /data/restore.db' < "ci-backups/$(basename "$file")"
+          docker compose run --rm --no-deps -T --entrypoint node app scripts/check-backup.mjs /data/restore.db
+          docker compose run --rm --no-deps -T --entrypoint sh app -c 'cd /data &&
+            for f in get-me-there.db get-me-there.db-wal get-me-there.db-shm; do
+              if [ -e "$f" ]; then mv "$f" "$f.pre-restore"; fi
+            done && mv restore.db get-me-there.db'
+          docker compose up -d --wait --wait-timeout 300
+          curl -fsS http://127.0.0.1:3000/api/health
+          docker compose exec -T app sh -c 'test -e /data/get-me-there.db.pre-restore'
+      - name: Remove the CI container and its throwaway volume
+        if: always()
+        run: |
+          docker compose logs app | tail -n 50 || true
+          # why: CI's volume only; docs/setup.md forbids `down -v` on a real host
+          docker compose down -v || true
+          rm -f .env backup.json
