@@ -235,6 +235,11 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     withData();
     const { container } = renderWithProviders(<AlertsView definitionId="def-1" />);
     await screen.findByRole('table', { name: C.eventsTable });
-    expect(findBannedWords(container.textContent ?? '', BANNED_WORD_ALLOWLIST)).toEqual([]);
+    // why: textContent glues adjacent cells together ("sent" + "verified" = "sentverified"), so a banned word beside a
+    // neighbour's letters would escape the word-boundary match; the text nodes are joined with spaces instead.
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const parts: string[] = [];
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) parts.push(n.textContent ?? '');
+    expect(findBannedWords(parts.join(' '), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 });
