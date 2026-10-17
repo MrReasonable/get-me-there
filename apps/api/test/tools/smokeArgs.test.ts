@@ -5,7 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { asIata, asIsoDate } from '@gmt/core';
 import { defaultRecordedRoot } from '@gmt/providers';
 import { describe, expect, it } from 'vitest';
-import { parseSmokeArgs, SMOKE_RECORDED_BY, smokeFixtureTarget, smokeQuery } from '../../src/tools/smoke.js';
+import {
+  parseSmokeArgs,
+  SMOKE_RECORDED_BY,
+  smokeFixtureTarget,
+  smokeQuery,
+} from '../../src/tools/smokeArgs.js';
 import { metroRuleCheck } from '../../src/tools/smokeChecks.js';
 
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));

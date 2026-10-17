@@ -17,12 +17,11 @@ import { describe, expect, it } from 'vitest';
 import {
   type Discovery,
   runSmoke,
-  type SmokeCli,
   type SmokeProviderReport,
   type SmokeResult,
-  smokeQuery,
   type Vendor,
 } from '../../src/tools/smoke.js';
+import { type SmokeCli, smokeQuery } from '../../src/tools/smokeArgs.js';
 import { type ChecklistInput, checklist, type Seen, type SmokeCheck } from '../../src/tools/smokeChecks.js';
 import { EXIT } from '../../src/tools/types.js';
 import { buildPorts, loadConfigFromEnv, type Ports } from '../../src/wiring.js';
