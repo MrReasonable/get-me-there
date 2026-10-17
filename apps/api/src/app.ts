@@ -71,9 +71,10 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
   const publicKeys = publicRouteKeys(routes);
   const isPublic = (c: Context<AppEnv>) => publicKeys.has(`${c.req.method} ${c.req.path}`);
   // why: ROUTES paths carry /api, so the public key is 'GET /api/health'.
-  // Order (spec §4, decision 58): no-store first on API calls, so every API response carries it — the 401, 403, 413 and
-  // 429 refusals included → headers on everything → Host → Origin → auth → body size, JSON + X-Requested-With.
-  app.use(`${API_PREFIX}/*`, noStore());
+  // Order (spec §4, decision 58): no-store first on every response, so the 401, 403, 413 and 429 refusals carry it, and
+  // so do the static files and the SPA shell behind auth, which a shared cache must never replay (security review
+  // Minor 1) → headers on everything → Host → Origin → auth → on /api: body size, JSON + X-Requested-With.
+  app.use('*', noStore());
   app.use('*', securityHeaders());
   app.use('*', hostAllowlist(ports.config, isPublic, ports.log));
   app.use('*', originCheck(ports.config, isPublic));

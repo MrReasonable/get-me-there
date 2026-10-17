@@ -126,8 +126,8 @@ describe('failed-auth rate limit (spec §4, plan decision 54)', () => {
 });
 
 describe('static files and SPA fallback (spec §4, §13)', () => {
-  function webRoot(): string {
-    const dir = tempDir('gmt-web-');
+  function webRoot(dir = tempDir('gmt-web-')): string {
+    mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'index.html'), '<!doctype html><title>gmt</title>');
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'assets', 'app.js'), 'console.log(1);');
@@ -153,5 +153,18 @@ describe('static files and SPA fallback (spec §4, §13)', () => {
     expect(api.status).toBe(404);
     expect((await errorOf(api)).code).toBe('not_found');
     expect((await x.request('/somewhere', { method: 'POST', json: {} })).status).toBe(404);
+  });
+
+  it('every response is no-store: static files, the SPA fallback, and the non-API 401 and 403 (security review Minor 1)', async () => {
+    const x = await harness({ app: { webRoot: webRoot() } });
+    const responses = [
+      await x.request('/'),
+      await x.request('/assets/app.js'),
+      await x.request('/results/abc'),
+      await x.request('/', { auth: false }),
+      await x.request('/', { headers: { host: 'evil.example' } }),
+    ];
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 200, 401, 403]);
+    for (const r of responses) expect(r.headers.get('cache-control'), String(r.status)).toBe('no-store');
   });
 });
