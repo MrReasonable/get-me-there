@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -121,5 +129,86 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     const r = run(tree({ [path]: `${text}\n` }));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(`${path} has a lint or type-check suppression comment`);
+  });
+});
+
+/** A package manifest from the repository with extra fields merged into it, as planted file text. */
+function manifest(pkgDir, extra) {
+  const real = JSON.parse(readFileSync(join(REPO, pkgDir, 'package.json'), 'utf8'));
+  const merged = { ...real };
+  for (const [field, deps] of Object.entries(extra)) merged[field] = { ...(real[field] ?? {}), ...deps };
+  return JSON.stringify(merged);
+}
+
+// why: CodeRabbit batch 3 — every rule the script enforces has a planted violation here, asserting its own stderr
+// line, so a regression in any one check fails a test (the place and suppression checks are covered above).
+describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20)', {
+  timeout: 60_000,
+}, () => {
+  it('a static import across the graph fails: web may import only @gmt/core', () => {
+    const r = run(
+      tree({
+        'apps/web/src/a.ts': "import { x } from '@gmt/db';\nexport { y } from '@gmt/engine';\n",
+        'apps/web/src/ok.ts': "import { z } from '@gmt/core';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/a.ts imports @gmt/db');
+    expect(r.stderr).toContain('apps/web/src/a.ts imports @gmt/engine');
+    expect(r.stderr).not.toContain('ok.ts');
+  });
+
+  it('a manifest dependency across the graph fails, and core may depend only on its allowlisted externals', () => {
+    const r = run(
+      tree({
+        'apps/web/package.json': manifest('apps/web', { dependencies: { '@gmt/engine': 'workspace:*' } }),
+        'packages/core/package.json': manifest('packages/core', { dependencies: { 'left-pad': '1.3.0' } }),
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('@gmt/web may not depend on @gmt/engine');
+    expect(r.stderr).toContain('@gmt/core may not depend on left-pad');
+  });
+
+  it('process.env outside the api bootstrap fails, in any package', () => {
+    const r = run(
+      tree({
+        'packages/core/src/a.ts': 'export const a = process.env.X;\n',
+        'apps/api/src/routes/b.ts': 'export const b = process.env.Y;\n',
+        'apps/api/src/bootstrap/start.ts': 'export const ok = process.env.Z;\n',
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('packages/core/src/a.ts reads process.env outside apps/api/src/bootstrap/');
+    expect(r.stderr).toContain('apps/api/src/routes/b.ts reads process.env outside apps/api/src/bootstrap/');
+    expect(r.stderr).not.toContain('apps/api/src/bootstrap/start.ts');
+  });
+
+  it('msw imported outside packages/providers/src/testing/ fails; inside it passes', () => {
+    const r = run(
+      tree({
+        'packages/engine/src/m.ts': "import { http } from 'msw';\n",
+        'packages/providers/src/testing/server.ts': "import { setupServer } from 'msw/node';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'packages/engine/src/m.ts imports msw outside packages/providers/src/testing/',
+    );
+    expect(r.stderr).not.toContain('packages/providers/src/testing/server.ts');
+  });
+
+  it('msw in the apps/api manifests or tests fails: api tests reach it only through @gmt/providers/testing', () => {
+    const r = run(
+      tree({
+        'apps/api/package.json': manifest('apps/api', { devDependencies: { msw: '2.0.0' } }),
+        'apps/api/test/x.test.ts': "import { http } from 'msw';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('@gmt/api lists msw in devDependencies; use @gmt/providers/testing');
+    expect(r.stderr).toContain(
+      'apps/api/test/x.test.ts imports msw; apps/api tests use @gmt/providers/testing',
+    );
   });
 });
