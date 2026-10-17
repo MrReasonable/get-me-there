@@ -1,11 +1,12 @@
 // Spec §10 health, airports, providers, budget and scheduler jobs.
 import { apiContract } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createApp } from '../../src/app.js';
 import { API_TEXT } from '../../src/text.js';
 import { expectContract } from '../helpers/contract.js';
-import { SENTINEL_SA } from '../helpers/env.js';
+import { SENTINEL_AUTH, SENTINEL_SA } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
-import { createHarness, type Harness } from '../helpers/harness.js';
+import { AUTH_USER, basic, createHarness, type Harness, HOST } from '../helpers/harness.js';
 
 let h: Harness | undefined;
 afterEach(async () => {
@@ -150,6 +151,32 @@ describe('GET /api/budget and GET /api/scheduler/jobs (spec §7 budget windows, 
     for (const s of body.scopes) expect(s).toHaveProperty('windowStart');
     expect([body.monthlyCapPence, body.fixedFeesMicroGbp]).toEqual([3500, 32_000_000]);
     expect(body.ceilingNote).toBe(API_TEXT.ceilingNote(3500, 3200));
+  });
+  it("counts fixed fees from the guard's own budget entries, as the engine's budgetFit does (review arch Important)", async () => {
+    const x = await harness({
+      SEARCHAPI_KEY: SENTINEL_SA,
+      SEARCHAPI_PLAN: '40usd',
+      MONTHLY_SPEND_CAP_PENCE: '3500',
+    });
+    const sa = x.ports.config.providers.searchapi;
+    if (sa === null) throw new Error('searchapi is configured above');
+    // A plan billed on a lifetime window with a fixed fee: the guard and budgetFit count the fee whatever the window.
+    const config = {
+      ...x.ports.config,
+      providers: {
+        ...x.ports.config.providers,
+        searchapi: {
+          ...sa,
+          limits: { ...sa.limits, window: 'lifetime' as const, planFixedMicroGbp: 5_000_000 },
+        },
+      },
+    };
+    const app = createApp({ ...x.ports, config }, x.engine, { webRoot: null });
+    const res = await app.request(`http://${HOST}/api/budget`, {
+      headers: { host: HOST, authorization: basic(AUTH_USER, SENTINEL_AUTH) },
+    });
+    const body = await expectContract(res, 'GET', '/api/budget', apiContract.budgetResponseSchema);
+    expect(body.fixedFeesMicroGbp).toBe(5_000_000);
   });
   it('lists registered jobs', async () => {
     const x = await harness();

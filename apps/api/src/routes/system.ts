@@ -10,7 +10,7 @@ import {
 import type { z } from 'zod';
 import { defaultDefinitionInput } from '../defaults.js';
 import { hostAllowed } from '../middleware/hardening.js';
-import { budgetScopes, providerLimits, providerScopes, usageOf } from '../read/usage.js';
+import { budgetScopes, providerBudget, providerScopes, usageOf } from '../read/usage.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { NO_INPUT, plain, route } from './define.js';
@@ -83,7 +83,7 @@ export function providersResponse(ctx: RouteContext): ProvidersResponse {
       capabilities: { discovery: p.discovery?.info ?? null, verification: p.verification?.info ?? null },
       plan: planOf(config, p.id),
       usage: providerScopes(p.id).map((s) => usageOf(ctx.ports, s)),
-      excludedFromSchedule: providerLimits(config, p.id)?.excludedFromSchedule ?? false,
+      excludedFromSchedule: providerBudget(config, p.id).excludedFromSchedule,
       // why: spec §10/§12: a billed provider enabled under a zero cap cannot verify; say so where the operator looks.
       notices:
         p.id === 'searchapi' && config.spend.monthlyCapMicroGbp === 0 ? [API_TEXT.zeroCapVerification] : [],
@@ -108,8 +108,10 @@ export function providersResponse(ctx: RouteContext): ProvidersResponse {
 /** Spec §10 `GET /budget`: every window with bounds; the cap includes subscription fees once (spec §5.3, §12). */
 export function budgetResponse(ctx: RouteContext): BudgetResponse {
   const { config } = ctx.ports;
-  const sa = config.providers.searchapi;
-  const fixedFeesMicroGbp = sa !== null && sa.limits.window === 'month' ? sa.limits.planFixedMicroGbp : 0;
+  // why: the same sum as the engine's budgetFit: every registered billable provider's fixed fee, from the guard's entry.
+  const fixedFeesMicroGbp = ctx.ports.providers
+    .map((p) => providerBudget(config, p.id))
+    .reduce((a, b) => a + (b.billable ? b.planFixedMicroGbp : 0), 0);
   const monthlyCapPence = microGbpToPence(config.spend.monthlyCapMicroGbp);
   return {
     scopes: budgetScopes(ctx.ports, null).map((s) => usageOf(ctx.ports, s)),

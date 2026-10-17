@@ -21,7 +21,7 @@ import type { RouteContext } from '../routes/types.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { isDraft } from './space.js';
-import { providerLimits } from './usage.js';
+import { providerBudget } from './usage.js';
 
 export type DefinitionResponse = z.infer<typeof apiContract.definitionResponseSchema>;
 
@@ -31,14 +31,14 @@ export const ZERO_BUDGET_FIT: BudgetFit = { fits: true, runsPerMonth: 0, perScop
 /**
  * WP7's own confirmation rule over the api's ports (plan decision 58): the soft-confirm threshold, the guard's caps and
  * each provider's cap scope through the engine's `capKindOf`, so the form asks exactly when a start would be refused
- * with `confirm`. The fixture provider has no configured limits and counts monthly, as the guard counts it.
+ * with `confirm`; every provider's window is the guard's own budget entry (db's `budgetConfigFromConfig`).
  */
 function confirmationContext(ports: Ports): ConfirmationContext {
   return {
     config: ports.config,
     budget: ports.budget,
     limitsOf: (id: ProviderId) => ({
-      capKind: capKindOf(providerLimits(ports.config, id)?.window ?? 'month'),
+      capKind: capKindOf(providerBudget(ports.config, id).window),
     }),
   };
 }
