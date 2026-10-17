@@ -78,6 +78,9 @@ export function App() {
             {definitions.error ? (
               <LoadError error={definitions.error} retry={() => void definitions.refetch()} />
             ) : null}
+            {/* why: PR #3 review — until the definitions answer, the selector is hidden and nothing is selected, so the
+            region says it is loading rather than staying blank */}
+            {needsDefinition && definitions.isPending ? <Loading /> : null}
             {needsDefinition && definitions.data !== undefined && selected === null ? (
               <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
             ) : null}
