@@ -43,6 +43,23 @@ export const SORT_BY_PRICE = 'price';
  */
 export const EXCLUDE_SEPARATE_TICKETS = '1';
 
+/**
+ * Ruling 8 (decision 67): the vendor's documented `stops` values for `google_flights` (docs page read 2026-10-17), by
+ * the query's maxStops. Above two there is no narrower documented value, so nothing is sent rather than a filter that
+ * would drop itineraries the rule allows. Verdicts still check stops from the segments (spec §6.2).
+ */
+export const STOPS_VALUE: Readonly<Record<0 | 1 | 2, string>> = {
+  0: 'nonstop',
+  1: 'one_stop_or_fewer',
+  2: 'two_stops_or_fewer',
+};
+const STOPS_VALUES = [STOPS_VALUE[0], STOPS_VALUE[1], STOPS_VALUE[2]];
+
+function stopsOf(maxStops: number | undefined): Record<string, string> {
+  if (maxStops === 0 || maxStops === 1 || maxStops === 2) return { stops: STOPS_VALUE[maxStops] };
+  return {};
+}
+
 // why: the date of WP4b's recording run; the Task 5.9 test fails until it equals the recorded file's
 // recordedAt (print it with the command in Task 5.9 Step 3). The hash is computed, never copied.
 const RECORDED_AT: IsoDate = asIsoDate('2026-10-15');
@@ -115,6 +132,7 @@ export const SEARCHAPI_PARAMS: ParamsAllowlist = withContentHash({
         'return_date',
         'separate_tickets',
         'sort_by',
+        'stops',
         'travel_class',
       ],
       values: {
@@ -132,6 +150,7 @@ export const SEARCHAPI_PARAMS: ParamsAllowlist = withContentHash({
         return_date: 'any',
         separate_tickets: [EXCLUDE_SEPARATE_TICKETS],
         sort_by: [SORT_BY_PRICE],
+        stops: STOPS_VALUES,
         travel_class: TRAVEL_CLASSES,
       },
     },
@@ -191,7 +210,8 @@ export function calendarParams(
 /**
  * `google_flights` parameters for one cell (spec §5.4). Steps 2 and 3 resend them plus one token: the docs show
  * this for `booking_token`; for `departure_token` it is evidenced by WP4b's SA-05 recording, not by the docs.
- * No `stops`: DiscoveryQuery has no maxStops, so neither engine filters stops (§13, Phase 4 gap).
+ * `stops` follows the query's maxStops (ruling 8), so the billed calls go to itineraries the rule allows; the calendar
+ * engine sends none, since DiscoveryQuery has no maxStops (decision 24).
  */
 export function flightsParams(
   q: ItineraryQuery,
@@ -207,6 +227,7 @@ export function flightsParams(
     return_date: q.returnDate,
     sort_by: SORT_BY_PRICE,
     separate_tickets: EXCLUDE_SEPARATE_TICKETS,
+    ...stopsOf(q.maxStops),
     ...common(pointOfSale, q.cabin),
   };
   return token === undefined ? p : { ...p, ...token };

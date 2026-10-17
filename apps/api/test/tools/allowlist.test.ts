@@ -87,12 +87,21 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
         },
       },
       '/api/v1/search?engine=google_flights': {
-        names: [...SA_COMMON, 'booking_token', 'departure_token', 'separate_tickets', 'sort_by'].sort(),
+        names: [
+          ...SA_COMMON,
+          'booking_token',
+          'departure_token',
+          'separate_tickets',
+          'sort_by',
+          'stops',
+        ].sort(),
         values: {
           ...fixedSa,
           engine: ['google_flights'],
           separate_tickets: ['1'],
           sort_by: ['price'],
+          // why: ruling 8: the documented set is listed though the worked example sets no maxStops and sends none.
+          stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'],
           arrival_id: 'any',
           departure_id: 'any',
           outbound_date: 'any',
@@ -104,8 +113,9 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', () => {
     });
     for (const doc of [tp, sa]) {
       for (const ep of Object.values(doc.endpoints))
-        for (const banned of ['api_key', 'token', 'market', 'trip_class', 'return_at', 'stops'])
+        for (const banned of ['api_key', 'token', 'market', 'trip_class', 'return_at'])
           expect(ep.names).not.toContain(banned);
+      expect(sa.endpoints['/api/v1/search?engine=google_flights_calendar']?.names).not.toContain('stops');
     }
     for (const f of loadRecorded(root, 'travelpayouts', '/aviasales/v3/prices_for_dates'))
       assertRequestAllowed(tp, f.endpointPath, new URL(f.request.url));
