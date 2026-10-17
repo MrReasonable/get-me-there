@@ -338,10 +338,12 @@ export function routeHistory(
     routeSeries: [
       {
         providerId: 'searchapi',
-        cabin: 'unknown',
+        trip: { departureDate: '2027-03-10', returnDate: '2027-03-20' },
+        cabin: 'economy',
         points: ['2027-03-10', '2027-03-11', '2027-03-12'].map((d, i) => ({
           date: d,
           pricePence: 38000 + i * 500,
+          currency: 'GBP',
           fetchedAt: hoursBefore(2),
           providerId: 'searchapi',
           sourceKind: 'scraped-search',

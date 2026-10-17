@@ -1,4 +1,5 @@
 import {
+  type Cabin,
   type CapabilityInfo,
   type CellKey,
   cellKeyString,
@@ -151,13 +152,16 @@ async function runVerificationProvider(
 type RouteHistoryRow = Parameters<EngineContext['repos']['routeHistory']['upsert']>[0][number];
 
 /**
- * Spec §7 route_price_history (rev 10): the vendor's route-level lowest-price series, cabin unknown. Only points the
- * vendor states in GBP are stored: the table has no FX columns, and a past date converted at today's rate would be a
- * figure the vendor never gave (prov-wp07-007). Other points are dropped and counted.
+ * Spec §7 route_price_history (rev 28, ruling 6 of decision 67): the vendor's price-history series belongs to the
+ * searched trip, so each point is keyed by the cell's departure and return dates and the request cabin (the run's
+ * snapshot cabin, never 'unknown'). Only points the vendor states in GBP are stored: the table has no FX columns, and a
+ * past date converted at today's rate would be a figure the vendor never gave (prov-wp07-007); the repository asserts
+ * the same rule (prov-004). Other points are dropped and counted.
  */
 export function routeHistoryRows(
   providerId: ProviderId,
   cell: CellKey,
+  cabin: Cabin,
   result: ItinerarySearchResult,
 ): { rows: RouteHistoryRow[]; dropped: number } {
   const rows: RouteHistoryRow[] = [];
@@ -170,10 +174,12 @@ export function routeHistoryRows(
     rows.push({
       origin: cell.origin,
       destination: cell.destination,
-      cabin: 'unknown',
+      trip: { departureDate: cell.departureDate, returnDate: cell.returnDate },
+      cabin,
       providerId,
       date: p.date,
       lowestPricePence: p.lowestPriceMinor,
+      currency: 'GBP',
       fetchedAt: result.fetchedAt,
     });
   }
@@ -272,7 +278,7 @@ export function commitVerifiedCell(
       );
     outcome = { ...base, status: 'error', reason: 'upstream', lastError: breach, minPence: null };
   }
-  const history = routeHistoryRows(provider.id, cell, result);
+  const history = routeHistoryRows(provider.id, cell, run.snapshot.cabin, result);
   ctx.db.transaction(() => {
     ctx.repos.cells.writeVerifiedCell(run.executionId, provider.id, {
       cell,

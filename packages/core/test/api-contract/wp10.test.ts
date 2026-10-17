@@ -194,17 +194,29 @@ describe('WP10 contract additions (plan decision 38)', () => {
     const routePoint = {
       date: '2027-03-10',
       pricePence: 38000,
+      currency: 'GBP',
       fetchedAt: '2026-10-14T13:00:00.000Z',
       providerId: 'searchapi',
       sourceKind: 'scraped-search',
     };
-    const route = (points: unknown[]) => ({
+    const trip = { departureDate: '2027-03-10', returnDate: '2027-03-20' };
+    const route = (points: unknown[], t: unknown = trip) => ({
       origin: 'LHR',
       destination: 'JFK',
       calendarSeries: [],
-      routeSeries: [{ providerId: 'searchapi', cabin: 'unknown', points }],
+      routeSeries: [{ providerId: 'searchapi', trip: t, cabin: 'economy', points }],
     });
     expect(routeHistoryResponseSchema.safeParse(route([routePoint])).success).toBe(false);
     expect(routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true }])).success).toBe(true);
+    // why: ruling 6: a series names its trip, or null for a migrated "trip unknown" series; never omits it.
+    expect(routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true }], null)).success).toBe(
+      true,
+    );
+    const series = { providerId: 'searchapi', cabin: 'economy', points: [{ ...routePoint, stale: true }] };
+    expect(routeHistoryResponseSchema.safeParse({ ...route([]), routeSeries: [series] }).success).toBe(false);
+    // why: prov-004: a point is vendor-stated GBP, by literal.
+    expect(
+      routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true, currency: 'USD' }])).success,
+    ).toBe(false);
   });
 });

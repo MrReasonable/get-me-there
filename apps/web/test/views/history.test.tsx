@@ -96,10 +96,12 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
       routeSeries: [
         {
           providerId: 'searchapi',
+          trip: null,
           cabin: 'unknown',
           points: ['2027-03-10', '2027-03-11', '2027-03-14'].map((date) => ({
             date,
             pricePence: 38000,
+            currency: 'GBP',
             fetchedAt: fetchPoint(2, 1).at,
             providerId: 'searchapi',
             sourceKind: 'scraped-search',
@@ -112,12 +114,18 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
     expect(route[0]?.points[0]?.t).toBe(Date.UTC(2027, 2, 10));
     expect(priced(route[0]?.points ?? [])).toEqual([38000, 38000, null, 38000]);
   });
-  it('names each series by its source and cabin; the route-level series by its provider (decision 52, ui-r2-008)', () => {
+  it("names each series by its source and cabin; the vendor's price history by its trip (decision 52, ui-r2-008, ruling 6)", () => {
     const { fetch, route } = linesFromRoute(threeRuns, order);
     expect(fetch.map((l) => l.name)).toEqual([
       "Aviasales cache · economy · cheapest calendar price across this pair's cells, per run (constraints not checked)",
     ]);
-    expect(route.map((l) => l.name)).toEqual(['SearchApi route-level series, indicative · cabin not stated']);
+    expect(route.map((l) => l.name)).toEqual(["Google's price history for 10–20 Mar · economy, indicative"]);
+    const [first] = routeHistory().routeSeries;
+    if (first === undefined) throw new Error('fixture has a route series');
+    const unknown = routeHistory({ routeSeries: [{ ...first, trip: null, cabin: 'unknown' }] });
+    expect(linesFromRoute(unknown, order).route.map((l) => l.name)).toEqual([
+      "Google's price history, trip unknown · cabin not stated, indicative",
+    ]);
     expect(linesFromRoute(threeRuns, order, 'LHR-JFK').fetch[0]?.name).toMatch(/^LHR-JFK · Aviasales cache/);
   });
   it('one seller in two cabins is two series: own key, own name with the cabin, own colour (review prov I2)', () => {
@@ -288,11 +296,15 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
       <HistoryView definition={definition()} />,
     );
     const fetchChart = await findByRole('figure', { name: 'Price by fetch date' });
-    const routeChart = getByRole('figure', { name: 'Route-level series (indicative): price by travel date' });
+    const routeChart = getByRole('figure', {
+      name: 'Vendor price history for a searched trip (indicative): price by date',
+    });
     expect(fetchChart.querySelector('svg[role="application"]')?.textContent).toContain(
       'fetched (Europe/London)',
     );
-    expect(routeChart.querySelector('svg[role="application"]')?.textContent).toContain('travel date');
+    expect(routeChart.querySelector('svg[role="application"]')?.textContent).toContain(
+      'date of the vendor price',
+    );
     expect(routeChart.querySelector('svg[role="application"]')?.textContent).toContain('10 Mar 2027');
     expect(
       getByText(/^Each point is one run. A line joins two points only when they come from consecutive runs/),
@@ -319,13 +331,13 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     const stale = { ...r, routeSeries: [{ ...series, points: [{ ...p0, stale: true }, ...rest] }] };
     server.use(http.get(routeRoute, () => HttpResponse.json(stale)));
     const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
-    const table = await findByRole('table', { name: /^SearchApi route-level series, indicative/ });
+    const table = await findByRole('table', { name: /^Google's price history for 10–20 Mar/ });
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows.map((row) => row.textContent?.includes('stale'))).toEqual([true, false, false]);
     expect(rows[0]).toHaveAttribute('data-indicative');
-    // why: the route-level point carries no fx record, so its amount is marked approximate (review ui M10).
-    expect(rows[0]).toHaveTextContent('≈');
-    expect(rows[0]).toHaveTextContent(COPY.historyView.routeFxUnknown);
+    // why: prov-004: every stored point is vendor-stated GBP (the repository refuses any other), so no "≈"; it says so.
+    expect(rows[0]).not.toHaveTextContent('≈');
+    expect(rows[0]).toHaveTextContent(COPY.historyView.routeGbp);
   });
 
   it('a route-level travel date between two missing dates still shows as a dot (ui-r2-008)', async () => {
@@ -334,10 +346,12 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
       routeSeries: [
         {
           providerId: 'searchapi',
+          trip: { departureDate: '2027-03-10', returnDate: '2027-03-20' },
           cabin: 'economy',
           points: ['2027-03-10', '2027-03-12', '2027-03-14'].map((date) => ({
             date,
             pricePence: 38000,
+            currency: 'GBP',
             fetchedAt: fetchPoint(2, 1).at,
             providerId: 'searchapi',
             sourceKind: 'scraped-search',
@@ -349,7 +363,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     server.use(http.get(routeRoute, () => HttpResponse.json(lone)));
     const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
     const chart = await findByRole('figure', {
-      name: 'Route-level series (indicative): price by travel date',
+      name: 'Vendor price history for a searched trip (indicative): price by date',
     });
     await waitFor(() => expect(chart.querySelectorAll('.recharts-line-dots circle')).toHaveLength(3));
   });
@@ -397,10 +411,10 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(rows[0]).toHaveTextContent('cheapest searched cell LHR→JFK Sun 21 Mar–Sun 4 Apr');
     expect(rows[0]).toHaveTextContent('a different cell from the previous point');
     expect(rows[1]).toHaveTextContent('stale');
-    const routeTable = getByRole('table', { name: /^SearchApi route-level series, indicative/ });
+    const routeTable = getByRole('table', { name: /^Google's price history for 10–20 Mar/ });
     expect(
       within(routeTable).getAllByText(
-        "Google Flights via SearchApi · indicative route-level series · cabin not stated · fetched 2h ago · vendor's cache age unknown",
+        "Google Flights via SearchApi · indicative price history for 10–20 Mar · economy · fetched 2h ago · vendor's cache age unknown",
       ),
     ).toHaveLength(3);
     expect(routeTable).toHaveTextContent('Wed 10 Mar 2027');

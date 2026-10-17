@@ -28,7 +28,11 @@ export { FxRepo } from './repositories/fx.js';
 export { ItinerariesRepo } from './repositories/itineraries.js';
 export { LedgerRepo } from './repositories/ledger.js';
 export { NotificationsRepo } from './repositories/notifications.js';
-export { RoutePriceHistoryRepo } from './repositories/routePriceHistory.js';
+export {
+  type RouteHistorySeries,
+  type RouteHistoryTrip,
+  RoutePriceHistoryRepo,
+} from './repositories/routePriceHistory.js';
 export { SqliteResponseCache } from './responseCache.js';
 export {
   AIRPORTS_MIN_ROWS,

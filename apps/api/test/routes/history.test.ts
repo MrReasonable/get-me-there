@@ -92,11 +92,13 @@ describe('history routes (spec §10, §7)', () => {
       [45_000, s.id('E1'), true, false],
       [47_000, s.id('E2'), false, true],
     ]);
-    expect(
-      body.routeSeries
-        .find((r) => r.providerId === 'fixture' && r.cabin === 'unknown')
-        ?.points.map((p) => [p.date, p.pricePence]),
-    ).toEqual([['2026-10-13', 44_000]]);
+    // why: ruling 6: the series belongs to the searched trip and its cabin, and every point is vendor-stated GBP.
+    expect(body.routeSeries.map((r) => [r.providerId, r.trip, r.cabin])).toEqual([
+      ['fixture', { departureDate: '2026-11-05', returnDate: '2026-11-15' }, 'economy'],
+    ]);
+    expect(body.routeSeries[0]?.points.map((p) => [p.date, p.pricePence, p.currency])).toEqual([
+      ['2026-10-13', 44_000, 'GBP'],
+    ]);
     // decisions 54, 55: a route-level point is stale by its fetch age (the vendor gives the series no age)
     const route = body.routeSeries.find((r) => r.providerId === 'fixture');
     expect(route?.points.map((p) => p.stale)).toEqual([false]);
@@ -152,6 +154,36 @@ describe('history routes (spec §10, §7)', () => {
     );
     expect(body.routeSeries.find((r) => r.providerId === 'fixture')?.points.map((p) => p.stale)).toEqual([
       false,
+    ]);
+  });
+
+  it('returns one series per trip, and a migrated row with no trip as its own "trip unknown" series (ruling 6)', async () => {
+    const { x, s } = await world();
+    s.routeLowest({
+      origin: 'LHR',
+      destination: 'JFK',
+      date: '2026-10-13',
+      pricePence: 52_000,
+      fetchedAt: at(-1),
+      trip: { departureDate: '2026-12-01', returnDate: '2026-12-11' },
+    });
+    x.ports.db.raw
+      .prepare(
+        `INSERT INTO route_price_history (origin, destination, departure_date, return_date, cabin, provider_id, date, lowest_price_pence, fetched_at) VALUES ('LHR', 'JFK', NULL, NULL, 'unknown', 'fixture', '2026-10-13', 47000, ?)`,
+      )
+      .run(at(-1));
+    const body = await expectContract(
+      await x.request('/api/routes/LHR/JFK/history'),
+      'GET',
+      '/api/routes/:origin/:destination/history',
+      ROUTE,
+    );
+    expect(
+      body.routeSeries.map((r) => [r.trip?.departureDate ?? null, r.cabin, r.points[0]?.pricePence]),
+    ).toEqual([
+      ['2026-11-05', 'economy', 44_000],
+      ['2026-12-01', 'economy', 52_000],
+      [null, 'unknown', 47_000],
     ]);
   });
 

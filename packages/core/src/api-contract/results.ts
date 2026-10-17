@@ -263,10 +263,15 @@ export const historyPointResponseSchema = historyPointSchema.extend({
   stale: z.boolean(),
   truncated: z.boolean(),
 });
-/** No cabin, so no full provenance; plotted by `date`. */
+/**
+ * A point of a vendor's price-history series for one searched trip; no full provenance (spec §11), plotted by `date`.
+ * `currency` is the literal 'GBP': only vendor-stated GBP points are stored (the repository refuses any other, prov-004),
+ * so a point is never FX-converted and never carries "≈".
+ */
 export const routeSeriesPointSchema = z.object({
   date: isoDateSchema,
   pricePence: moneyPenceSchema,
+  currency: z.literal('GBP'),
   fetchedAt: isoDateTimeSchema,
   providerId: providerIdSchema,
   sourceKind: sourceKindSchema,
@@ -304,9 +309,14 @@ export const routeHistoryResponseSchema = z.object({
       points: z.array(historyPointResponseSchema.extend({ cell: cellSchema, executionId: z.string() })),
     }),
   ),
+  /**
+   * Ruling 6 (spec §7, §10 rev 28): one series per searched trip, provider and cabin. `trip` is null for points stored
+   * before migration 0003, whose trip was never recorded ("trip unknown"; their cabin is 'unknown').
+   */
   routeSeries: z.array(
     z.object({
       providerId: providerIdSchema,
+      trip: z.object({ departureDate: isoDateSchema, returnDate: isoDateSchema }).nullable(),
       cabin: z.union([cabinSchema, z.literal('unknown')]),
       /** `stale` by fetch age (decision 54); the stored point type is unchanged */
       points: z.array(routeSeriesPointSchema.extend({ stale: z.boolean() })),

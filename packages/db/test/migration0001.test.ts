@@ -52,9 +52,10 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
     expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([
       '0001_confirmed_calls',
       '0002_alert_event_lifecycle',
+      '0003_route_history_by_trip',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
-      applied: ['0001_confirmed_calls', '0002_alert_event_lifecycle'],
+      applied: ['0001_confirmed_calls', '0002_alert_event_lifecycle', '0003_route_history_by_trip'],
     });
     expect(new DefinitionsRepo(db, fixedClock(T0)).get(created.id)).toEqual({
       ...created,

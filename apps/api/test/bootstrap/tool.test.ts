@@ -245,7 +245,8 @@ describe('runTool success paths', () => {
     const h = harness();
     openDatabase(h.dbPath).close();
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
-    expect(h.text()).toContain('backup before 3 migration(s)'); // 0000, WP7's 0001 (decision 37) and WP11's 0002 (decision 56)
+    // 0000, WP7's 0001 (decision 37), WP11's 0002 (decision 56) and the final review's 0003 (decision 67)
+    expect(h.text()).toContain('backup before 4 migration(s)');
     const [backup] = readdirSync(backupsDirFor(h.dbPath));
     if (backup === undefined) throw new Error('no backup');
     expect(

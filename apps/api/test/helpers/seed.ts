@@ -335,22 +335,29 @@ export function seeder(ports: Ports) {
             .finalise({ outcome: 'ok', httpStatus: 200, durationMs: 1 });
     },
 
-    /** One point of the route-level lowest-price series (spec §7 route_price_history). */
+    /**
+     * One point of a vendor price-history series for one searched trip (spec §7 route_price_history rev 28, ruling 6);
+     * the trip defaults to 5 to 15 Nov 2026, the cabin to economy.
+     */
     routeLowest(s: {
       origin: string;
       destination: string;
       date: string;
       pricePence: number;
       fetchedAt: IsoDateTime;
+      trip?: { departureDate: string; returnDate: string };
     }): void {
+      const trip = s.trip ?? { departureDate: '2026-11-05', returnDate: '2026-11-15' };
       repos.routeHistory.upsert([
         {
           origin: asIata(s.origin),
           destination: asIata(s.destination),
-          cabin: 'unknown',
+          trip: { departureDate: asIsoDate(trip.departureDate), returnDate: asIsoDate(trip.returnDate) },
+          cabin: CABIN,
           providerId: PROVIDER,
           date: asIsoDate(s.date),
           lowestPricePence: s.pricePence,
+          currency: 'GBP',
           fetchedAt: s.fetchedAt,
         },
       ]);

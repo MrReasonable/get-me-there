@@ -47,6 +47,13 @@ export function formatIsoDateShort(d: string): string {
   return `${Number(day)} ${month}`;
 }
 
+/** A trip's dates without the year (ruling 6): "5–15 Nov" in one month, "28 Nov–3 Dec" across two. */
+export function formatTripShort(departure: string, back: string): string {
+  const [from, to] = [formatIsoDateShort(departure), formatIsoDateShort(back)];
+  const [dayFrom, monthFrom] = from.split(' ');
+  return monthFrom !== undefined && to.endsWith(` ${monthFrom}`) ? `${dayFrom}–${to}` : `${from}–${to}`;
+}
+
 /** Weekday form, "2027-03-14" → "Sun", from core's epoch-day arithmetic (never a Date). */
 export function formatWeekday(d: IsoDate): string {
   return WEEKDAYS[(((toEpochDay(d) + 4) % 7) + 7) % 7] ?? '';

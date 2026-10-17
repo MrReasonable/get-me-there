@@ -724,11 +724,20 @@ export const COPY = {
       `${lines} series share ${colours} colours: tell them apart by the legend name and line style`,
     xAxisFetched: 'fetched (Europe/London)',
     yAxis: 'price (GBP)',
-    routeChartTitle: 'Route-level series (indicative): price by travel date',
+    // why: ruling 6: SearchApi's price_insights series is the vendor's history for the one searched trip, not the route.
+    routeChartTitle: 'Vendor price history for a searched trip (indicative): price by date',
     routeChartNote:
-      'Reported by the vendor, not searched cell by cell; the vendor does not state its route scope or which date pairs it covers. Indicative: not an offer, no seller, constraints not checked.',
-    xAxisTravelDate: 'travel date',
-    routeSeries: (provider: string, cabin: string) => `${provider} route-level series, indicative · ${cabin}`,
+      "Each line is the vendor's own price history for one searched trip (the dates in its name), reported with an itinerary search; this app did not search those dates day by day. Indicative: not an offer, no seller, constraints not checked.",
+    xAxisTravelDate: 'date of the vendor price',
+    routeSeries: (vendor: string, trip: string | null, cabin: string) =>
+      trip === null
+        ? `${vendor}'s price history, trip unknown · ${cabin}, indicative`
+        : `${vendor}'s price history for ${trip} · ${cabin}, indicative`,
+    historyVendor: {
+      searchapi: 'Google',
+      travelpayouts: 'Aviasales',
+      fixture: 'Synthetic fixture',
+    } satisfies Record<ProviderId, string>,
     calendarSeries: (source: string, cabin: string) =>
       `${source} · ${cabin} · cheapest calendar price across this pair's cells, per run (constraints not checked)`,
     offerSeries: (source: string, seller: string, cabin: string) =>
@@ -753,13 +762,14 @@ export const COPY = {
     chartScroll: (title: string) => `${title}, chart (scrolls sideways on a narrow screen)`,
     tableScroll: (series: string) => `${series}: table of points (scrolls)`,
     whenColumn: 'Fetched (Europe/London)',
-    travelDateColumn: 'Travel date',
+    travelDateColumn: 'Date',
     priceColumn: 'Price',
     detailColumn: 'Detail',
     cabinNotStated: 'cabin not stated',
-    routeProvenance: (source: string, cabin: string, age: string) =>
-      `${source} · indicative route-level series · ${cabin} · ${age}`,
-    routeFxUnknown: 'currency conversion not recorded for the route-level series',
+    routeProvenance: (source: string, trip: string | null, cabin: string, age: string) =>
+      `${source} · indicative price history for ${trip ?? 'an unknown trip'} · ${cabin} · ${age}`,
+    // why: prov-004: the repository stores vendor-stated GBP points only, so nothing on this table was converted.
+    routeGbp: 'vendor-stated GBP, unconverted',
     rowLink: 'price history',
     empty: 'No price history yet for this selection. Each run adds a point.',
   },

@@ -22,6 +22,13 @@
       "when": 1792221065821,
       "tag": "0002_alert_event_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792256621245,
+      "tag": "0003_route_history_by_trip",
+      "breakpoints": true
     }
   ]
 }

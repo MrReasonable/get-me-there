@@ -44,7 +44,7 @@ describe('WP10 views in the shell: no placeholder left, real content, no banned 
     });
     expect(await findByRole('figure', { name: 'Price by fetch date' })).toBeInTheDocument();
     expect(
-      getByRole('figure', { name: 'Route-level series (indicative): price by travel date' }),
+      getByRole('figure', { name: 'Vendor price history for a searched trip (indicative): price by date' }),
     ).toBeInTheDocument();
     expect(queryByText(COPY.placeholder)).toBeNull();
     expect(swept()).toEqual({ banned: [], pounds: [] });

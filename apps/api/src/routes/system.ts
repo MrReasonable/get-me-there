@@ -1,12 +1,6 @@
 /** Spec §10 system routes: health, airports, providers, budget, scheduler jobs. */
 import { statSync } from 'node:fs';
-import {
-  apiContract,
-  type Config,
-  DEFAULT_DISCOVERY_REFRESH_HOURS,
-  microGbpToPence,
-  type ProviderId,
-} from '@gmt/core';
+import { apiContract, DEFAULT_DISCOVERY_REFRESH_HOURS, microGbpToPence, type ProviderId } from '@gmt/core';
 import type { z } from 'zod';
 import { defaultDefinitionInput } from '../defaults.js';
 import { hostAllowed } from '../middleware/hardening.js';
