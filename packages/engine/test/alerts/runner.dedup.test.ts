@@ -48,6 +48,17 @@ describe('cooldown across executions (spec §6.8, §9 item 4)', () => {
     expect(await runAt(f, def, 41250)).toEqual({ digests: 0, events: 1 }); // 1 h after that firing: suppressed again
   });
 
+  it('the cooldown is judged to the hour, not the database window: 335 h 30 min is inside, 336 h 30 min is out (review ts-3)', async () => {
+    const f = fixture();
+    const def = seedDefinition(f);
+    seedRule(f, def, { thresholdPence: 45000, basis: 'calendar', cooldownHours: 336 });
+    expect(await runAt(f, def, 41200)).toEqual({ digests: 1, events: 1 });
+    f.clock.advance(335 * HOUR + 30 * 60_000);
+    expect(await runAt(f, def, 41250)).toEqual({ digests: 0, events: 1 });
+    f.clock.advance(HOUR);
+    expect(await runAt(f, def, 41250)).toEqual({ digests: 1, events: 1 });
+  });
+
   it('inside the cooldown a repeat needs max(£10, 5%) below the last fired price: the 5% side at ±1p (review TS-2)', async () => {
     const f = fixture();
     const def = seedDefinition(f);
@@ -59,6 +70,17 @@ describe('cooldown across executions (spec §6.8, §9 item 4)', () => {
     expect(await runAt(f, def, 39141)).toEqual({ digests: 0, events: 1 }); // £20.59 below
     f.clock.advance(DAY);
     expect(await runAt(f, def, 39140)).toEqual({ digests: 1, events: 1 }); // £20.60 below
+  });
+
+  it('a fractional 5% rounds the step up to a whole penny: last fired £412.10, 5% = 2060.5p, step 2061p (review ts-2)', async () => {
+    const f = fixture();
+    const def = seedDefinition(f);
+    seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
+    expect(await runAt(f, def, 41210)).toEqual({ digests: 1, events: 1 });
+    f.clock.advance(DAY);
+    expect(await runAt(f, def, 39150)).toEqual({ digests: 0, events: 1 }); // 2060p below: one penny short
+    f.clock.advance(DAY);
+    expect(await runAt(f, def, 39149)).toEqual({ digests: 1, events: 1 }); // 2061p below
   });
 
   it('under £200 the £10 floor applies (5% would be less): £9.99 below is suppressed, £10.00 below fires (review TS-2)', async () => {
@@ -194,6 +216,23 @@ describe('a later pass of the same execution never repeats a firing or a listing
     expect(f.notifier.digests()[1]?.digest.items.map((i) => i.pricePence)).toEqual([42000]);
     expect(await runAlerts(f.deps, ex)).toEqual({ digests: 0, events: 0 });
     expect(f.repos.alerts.events({ ruleId: rule.id, limit: 100 })).toHaveLength(2);
+  });
+
+  it('a suppressed row an earlier pass recorded is not judged or inserted again by a later pass (review ts-1)', async () => {
+    const f = fixture();
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
+    expect(await runAt(f, def, 41200)).toEqual({ digests: 1, events: 1 });
+    f.clock.advance(HOUR);
+    const ex = seedExecution(f, def);
+    seedCalendar(f, ex, [{ cell: cellAt(cells(1), 0), pricePence: 41250 }]);
+    expect(await runAlerts(f.deps, ex)).toEqual({ digests: 0, events: 1 }); // suppressed by the cooldown
+    f.clock.advance(HOUR);
+    expect(await runAlerts(f.deps, ex)).toEqual({ digests: 0, events: 0 });
+    expect(f.repos.alerts.events({ ruleId: rule.id, limit: 100 }).map((e) => e.status)).toEqual([
+      'suppressed',
+      'notified',
+    ]);
   });
 
   it('a "new" cell listed by the first pass is not listed again by the second (review PA-5)', async () => {

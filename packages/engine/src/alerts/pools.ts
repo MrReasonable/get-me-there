@@ -48,7 +48,7 @@ export function rowRef(c: AlertCandidate): string {
 }
 
 /** Spec §5.5: alerts refuse synthetic rows; the fixture provider ⇔ synthetic invariant is checked both ways. */
-function isSynthetic(p: Pick<Provenance, 'providerId' | 'sourceKind'>): boolean {
+export function isSynthetic(p: Pick<Provenance, 'providerId' | 'sourceKind'>): boolean {
   return p.sourceKind === 'synthetic' || p.providerId === 'fixture';
 }
 

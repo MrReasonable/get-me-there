@@ -1,5 +1,6 @@
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { isSynthetic } from '../../src/alerts/pools.js';
 import { runAlerts } from '../../src/alerts/runner.js';
 import {
   cells,
@@ -32,6 +33,13 @@ describe('synthetic rows are refused by the runner (spec §5.5, §6.8, §9 item 
       (l) => l.level === 'warn' && l.msg === 'alerts: synthetic rows refused',
     );
     expect(refusals.map((l) => l.fields.refused).sort()).toEqual([1, 5]);
+  });
+
+  it('the check refuses both halves of the invariant; the database cannot store a mismatch, so the predicate is tested directly (review ts-4)', () => {
+    expect(isSynthetic({ providerId: 'fixture', sourceKind: 'scraped-aggregate' })).toBe(true);
+    expect(isSynthetic({ providerId: 'searchapi', sourceKind: 'synthetic' })).toBe(true);
+    expect(isSynthetic({ providerId: 'fixture', sourceKind: 'synthetic' })).toBe(true);
+    expect(isSynthetic({ providerId: 'searchapi', sourceKind: 'scraped-aggregate' })).toBe(false);
   });
 
   it('runAlerts never rejects: a missing execution is logged and reports nothing', async () => {
