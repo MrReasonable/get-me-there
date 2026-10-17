@@ -37,8 +37,8 @@ export function useDefinitions() {
 export function useResults(definitionId: string | null, basis: Basis | null) {
   return useQuery({
     queryKey: qk.results(definitionId ?? '', basis),
-    queryFn: () => api.results(definitionId ?? '', basis),
-    enabled: definitionId !== null,
+    // why: skipToken idles the query (the pattern from WP10 on, review arch M10), with no rejecting queryFn
+    queryFn: definitionId === null ? skipToken : () => api.results(definitionId, basis),
   });
 }
 
@@ -46,8 +46,7 @@ export function useResults(definitionId: string | null, basis: Basis | null) {
 export function useExecution(id: string | null) {
   return useQuery({
     queryKey: qk.execution(id ?? ''),
-    queryFn: () => api.execution(id ?? ''),
-    enabled: id !== null,
+    queryFn: id === null ? skipToken : () => api.execution(id),
     refetchInterval: (query) =>
       query.state.data !== undefined && POLLING.has(query.state.data.status) ? POLL_MS : false,
   });
@@ -57,8 +56,7 @@ export function useExecution(id: string | null) {
 export function useCoverage(definitionId: string | null) {
   return useQuery({
     queryKey: qk.coverage(definitionId ?? ''),
-    queryFn: () => api.coverage(definitionId ?? ''),
-    enabled: definitionId !== null,
+    queryFn: definitionId === null ? skipToken : () => api.coverage(definitionId),
   });
 }
 
