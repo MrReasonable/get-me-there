@@ -183,14 +183,21 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => posts).toBe(1);
   });
 
-  it('at 375px the numbers fold into one disclosure; status and Cancel stay visible (UI-14)', async () => {
+  it('at 375px the numbers of a finished run fold into one disclosure; an active run keeps them open (UI-14, UI-006)', async () => {
     setViewportWidth(375);
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
-    renderWithProviders(bar());
+    const first = renderWithProviders(bar());
     await screen.findByText('running');
-    const details = screen.getByText('Progress and spend').closest('details');
-    expect(details).not.toHaveAttribute('open');
+    // why: ruling 15: spend against the cap is never folded away while it can still grow.
+    expect(screen.getByText('Progress and spend').closest('details')).toHaveAttribute('open');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    first.unmount();
+    server.use(
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'completed' }))),
+    );
+    renderWithProviders(bar());
+    await screen.findByText('completed');
+    expect(screen.getByText('Progress and spend').closest('details')).not.toHaveAttribute('open');
   });
 
   it('shows "schedule blocked since <date>" from coverage.scheduleBlockedSince', async () => {

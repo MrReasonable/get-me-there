@@ -254,8 +254,9 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
         ) : null}
       </div>
       {e !== undefined ? (
-        // why: on a phone the numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay visible above.
-        <details open={!narrow} className="text-sm">
+        // why: on a phone a finished run's numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay
+        // visible above. An active or paused run keeps them open (ruling 15, UI-006): spend is never hidden while it grows.
+        <details open={!narrow || active} className="text-sm">
           <summary className="min-h-11 cursor-pointer py-2">{COPY.runDetails}</summary>
           <div className="flex flex-wrap items-center gap-3">
             {progressLines(e, results.data?.coverage.selected ?? null).map((l) => (

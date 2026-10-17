@@ -1,10 +1,10 @@
 import { type CellKey, DEFAULT_DISCOVERY_REFRESH_HOURS, hoursSince } from '@gmt/core';
 import { useCoverage, useExecution, useExecutionActions } from '../../api/queries.js';
-import type { DefinitionResponse } from '../../api/types.js';
+import type { CoverageResponse, DefinitionResponse } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { type HeaderRun, ViewHeader } from '../../components/ViewHeader.js';
 import { type BucketName, COPY } from '../../copy.js';
-import { formatIsoDate, formatMicroGbp } from '../../format.js';
+import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../../format.js';
 import { useNow } from '../../now.js';
 
 /** Spec §3 / §6.6: the six buckets, which sum to the cell count. */
@@ -22,6 +22,84 @@ const cellText = (c: CellKey) =>
 /** The two reasons the contract allows (`'not_run' | 'skipped:budget'`), each in words. */
 const reasonText = (r: 'not_run' | 'skipped:budget') =>
   r === 'skipped:budget' ? COPY.reasonBudget : COPY.reasonNotRun;
+/**
+ * Ruling 15 (UI-004): the definition's on-demand itinerary searches below the parent run, each with its own buckets
+ * per stage × provider and its own ledger calls, so the view never presents the parent's ledger as the whole spend.
+ */
+function OnDemand({ rows }: { rows: CoverageResponse['onDemand'] }) {
+  return (
+    <div className="text-sm">
+      <h3 className="font-semibold">{COPY.coverageOnDemandHeading}</h3>
+      {rows.length === 0 ? (
+        <p>{COPY.coverageOnDemandNone}</p>
+      ) : (
+        <section aria-label={COPY.coverageOnDemandScroll} className="overflow-x-auto">
+          <table aria-label={COPY.coverageOnDemandHeading} className="border-collapse">
+            <thead>
+              <tr>
+                <th scope="col" className="p-1 text-left">
+                  {COPY.coverageOnDemandCell}
+                </th>
+                <th scope="col" className="p-1 text-left">
+                  {COPY.coverageOnDemandRun}
+                </th>
+                <th scope="col" className="p-1 text-left">
+                  {COPY.coverageStage}
+                </th>
+                <th scope="col" className="p-1 text-left">
+                  {COPY.coverageProvider}
+                </th>
+                {BUCKETS.map((b) => (
+                  <th key={b} scope="col" className="p-1 text-right">
+                    {COPY.bucket[b]}
+                  </th>
+                ))}
+                <th scope="col" className="p-1 text-left">
+                  {COPY.requestsHeading}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.flatMap((r) =>
+                r.perStage.map((s) => (
+                  <tr
+                    key={`${r.executionId}-${s.stage}-${s.providerId}`}
+                    className="border-t border-slate-200"
+                  >
+                    <th scope="row" className="p-1 text-left font-normal">
+                      {cellText(r.cell)}
+                    </th>
+                    <td className="p-1">
+                      {COPY.coverageOnDemandRunText(
+                        COPY.statusName[r.status],
+                        r.startedAt === null ? COPY.none : formatRunInstant(r.startedAt),
+                      )}
+                    </td>
+                    <td className="p-1">{COPY.stageName[s.stage]}</td>
+                    <td className="p-1">{COPY.provider[s.providerId]}</td>
+                    {BUCKETS.map((b) => (
+                      <td key={b} className="p-1 text-right tabular-nums">
+                        {s.buckets[b]}
+                      </td>
+                    ))}
+                    <td className="p-1" data-cost="">
+                      {COPY.coverageOnDemandCalls(
+                        s.requests.calls,
+                        s.requests.cacheHits,
+                        formatMicroGbp(s.requests.costMicroGbp),
+                      )}
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </div>
+  );
+}
+
 /**
  * View D (spec §11): per stage × provider counts, estimate vs ledger, selected-not-reached, flags,
  * errors with retry. The header names the run these counts come from (coverage.executionId) with
@@ -138,6 +216,7 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
         </section>
       )}
       {c.summary.reused > 0 ? <p className="text-sm">{COPY.reusedNote(c.summary.reused)}</p> : null}
+      <OnDemand rows={c.onDemand} />
       <div className="text-sm">
         <h3 className="font-semibold">{COPY.coverageLegend}</h3>
         <ul aria-label={COPY.coverageLegend}>

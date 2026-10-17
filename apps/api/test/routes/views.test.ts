@@ -414,6 +414,38 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
       }),
     ]);
     expect(cov.scheduleBlockedSince).toBeNull();
+    expect(cov.onDemand).toEqual([]);
+  });
+
+  it('lists the on-demand children below the parent run, each with its own buckets and ledger (UI-004, ruling 15)', async () => {
+    const { x, def, s } = await world();
+    s.execution('Ec', { def, status: 'completed', startedAt: at(-0.5), finishedAt: at(-0.4), child: C1 });
+    s.cells('Ec', [C1], { discovery: [], selected: [{ cell: C1, reason: 'always_include' }] });
+    s.verified('Ec', C1, [{ hash: 'hC', pricePence: 47_100, fetchedAt: at(-0.4) }]);
+    const cov = await get(
+      x,
+      `/api/definitions/${def.id}/coverage`,
+      '/api/definitions/:id/coverage',
+      apiContract.coverageResponseSchema,
+    );
+    expect(cov.executionId).toBe(s.id('E1')); // the parent's table is unchanged
+    expect(cov.onDemand).toEqual([
+      {
+        executionId: s.id('Ec'),
+        status: 'completed',
+        startedAt: at(-0.5),
+        cell: { ...C1, nights: 10 },
+        perStage: [
+          {
+            stage: 'verification',
+            providerId: 'fixture',
+            buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 },
+            total: 1,
+            requests: { calls: 0, cacheHits: 0, costMicroGbp: 0 },
+          },
+        ],
+      },
+    ]);
   });
 
   it('an error outcome with no recorded reason says so with null, never an empty string (review prov M3)', async () => {

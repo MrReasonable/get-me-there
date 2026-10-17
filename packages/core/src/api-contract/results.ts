@@ -9,6 +9,7 @@ import {
   cellSchema,
   constraintNameSchema,
   coverageSummarySchema,
+  executionStatusSchema,
   executionSummarySchema,
   layoverSchema,
   microGbpSchema,
@@ -206,6 +207,28 @@ export const coverageResponseSchema = z.object({
     }),
   ),
   scheduleBlockedSince: isoDateTimeSchema.nullable(),
+  /**
+   * Ruling 15 (UI-004): the definition's on-demand itinerary searches, newest first, below the parent run, each with
+   * its own buckets per stage × provider and its own ledger calls, so View D never presents the parent's ledger as the
+   * definition's whole spend.
+   */
+  onDemand: z.array(
+    z.object({
+      executionId: z.string(),
+      status: executionStatusSchema,
+      startedAt: isoDateTimeSchema.nullable(),
+      cell: cellSchema,
+      perStage: z.array(
+        z.object({
+          stage: stageSchema,
+          providerId: providerIdSchema,
+          buckets: bucketsSchema,
+          total: count,
+          requests: z.object({ calls: count, cacheHits: count, costMicroGbp: microGbpSchema }),
+        }),
+      ),
+    }),
+  ),
 });
 export const calendarGapResponseSchema = z.object({
   cheapestVerified: verifiedFigure.nullable(),

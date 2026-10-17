@@ -78,6 +78,8 @@ const SAMPLES: Record<string, unknown[]> = {
   spendMonth: ['£32', '£35'],
   spendProviderMonth: ['SearchApi', 615, '10000'],
   spendProviderLifetime: ['SearchApi', 7, '24'],
+  coverageOnDemandRunText: ['completed', '14 Oct 2026 13:41 Europe/London'],
+  coverageOnDemandCalls: [3, 0, '£0'],
   paused: ['budget'],
   resumesAt: ['1 Nov 2026 00:00 Europe/London'],
   scheduleBlocked: ['14 Oct 2026'],

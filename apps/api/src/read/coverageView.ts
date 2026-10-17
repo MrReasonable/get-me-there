@@ -67,5 +67,33 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         retryable: retriedOnResume(o, true),
       })),
     scheduleBlockedSince: engine.scheduler.blockedSince(),
+    // why: ruling 15 (UI-004): every on-demand child, newest first, with its own buckets and ledger calls.
+    onDemand: all
+      .flatMap((e) => (e.isChild && e.cell !== null ? [{ e, cell: e.cell }] : []))
+      .map(({ e, cell }) => {
+        const ledger = ports.repos.ledger.countsFor(e.id);
+        return {
+          executionId: e.id,
+          status: e.status,
+          startedAt: e.startedAt,
+          cell: withNights(cell),
+          // why: a child searches one cell at the itinerary stage; a stage line with no cells says nothing.
+          perStage: executionResponse(ports, e)
+            .progress.filter((p) => p.total > 0)
+            .map((p) => {
+              const line = ledger.perProvider.find(
+                (c) => c.providerId === p.providerId && c.stage === p.stage,
+              );
+              return {
+                ...p,
+                requests: {
+                  calls: line?.calls ?? 0,
+                  cacheHits: line?.cacheHits ?? 0,
+                  costMicroGbp: line?.costMicroGbp ?? 0,
+                },
+              };
+            }),
+        };
+      }),
   };
 }

@@ -536,6 +536,7 @@ export function coverageResponse(
       },
     ],
     scheduleBlockedSince: null,
+    onDemand: [],
     ...over,
   });
 }

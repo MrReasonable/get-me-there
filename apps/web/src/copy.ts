@@ -369,6 +369,15 @@ export const COPY = {
   overrunFlag: 'Overrun: ledger calls exceed the plan by more than 10%.',
   parityFlag: 'Parity break: tile requests differ from the plan.',
   requestsHeading: 'Requests (estimate vs ledger)',
+  // why: ruling 15 (UI-004): the children below the parent run, so View D never shows the parent's ledger as all spend.
+  coverageOnDemandHeading: 'On-demand itinerary searches (one cell each)',
+  coverageOnDemandNone: 'No on-demand itinerary search has run for this definition.',
+  coverageOnDemandScroll: 'On-demand itinerary searches (scrolls sideways on a narrow screen)',
+  coverageOnDemandCell: 'Cell',
+  coverageOnDemandRun: 'Run',
+  coverageOnDemandRunText: (status: string, started: string) => `${status}, started ${started}`,
+  coverageOnDemandCalls: (calls: number, hits: number, cost: string) =>
+    `${calls} ${calls === 1 ? 'call' : 'calls'} · ${hits} cache ${hits === 1 ? 'hit' : 'hits'} · ${cost}`,
   requestRow: (calls: number, planned: string, hits: number, cost: string) =>
     `${calls} of ${planned} planned calls · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
   errorsHeading: 'Errors',
