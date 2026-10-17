@@ -108,7 +108,8 @@ describe('View D (spec §11, §6.6)', () => {
         '126',
         '110',
         '60 of 126',
-        '14 of 14 planned calls · 0 cache hits · ledger cost £0, from configured rates',
+        // why: cost-008: discovery is planned and judged in tiles (decision 43), so its line says tiles, calls beside.
+        '14 of 14 planned tiles (14 calls) · 0 cache hits · ledger cost £0, from configured rates',
       ],
       [
         'itinerary search',
@@ -244,7 +245,7 @@ describe('View D (spec §11, §6.6)', () => {
     );
     render();
     expect(
-      await screen.findByText('Overrun: ledger calls exceed the plan by more than 10%.'),
+      await screen.findByText('Overrun: tiles requested exceed the plan by more than 10%.'),
     ).toBeInTheDocument();
     expect(screen.getByText('Parity break: tile requests differ from the plan.')).toBeInTheDocument();
     expect(screen.getByText('(4 reused from earlier runs)')).toBeInTheDocument();

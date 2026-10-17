@@ -185,6 +185,8 @@ export const coverageResponseSchema = z.object({
       total: count,
       requests: z.object({
         calls: count,
+        /** Distinct tiles requested: what discovery's `planCalls` counts and its overrun is judged on (cost-008). */
+        tiles: count,
         cacheHits: count,
         costMicroGbp: microGbpSchema,
         planCalls: count.nullable(),

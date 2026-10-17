@@ -78,6 +78,7 @@ const SAMPLES: Record<string, unknown[]> = {
   spendMonth: ['£32', '£35'],
   spendProviderMonth: ['SearchApi', 615, '10000'],
   spendProviderLifetime: ['SearchApi', 7, '24'],
+  requestRowTiles: [14, '14', 14, 0, '£0'],
   maxAgeAssumed: ['24h'],
   coverageOnDemandRunText: ['completed', '14 Oct 2026 13:41 Europe/London'],
   coverageOnDemandCalls: [3, 0, '£0'],

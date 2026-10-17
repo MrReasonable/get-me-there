@@ -35,6 +35,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
       ...p,
       requests: {
         calls: line?.calls ?? 0,
+        tiles: line?.tiles ?? 0,
         cacheHits: line?.cacheHits ?? 0,
         costMicroGbp: line?.costMicroGbp ?? 0,
         planCalls,

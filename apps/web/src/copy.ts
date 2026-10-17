@@ -369,6 +369,8 @@ export const COPY = {
   reasonBudget: 'skipped: budget',
   noneSelectedNotReached: 'Every selected cell was reached.',
   overrunFlag: 'Overrun: ledger calls exceed the plan by more than 10%.',
+  // why: cost-008: discovery is planned in tiles and a paged tile is one tile (decision 43), so its flag says tiles.
+  overrunFlagTiles: 'Overrun: tiles requested exceed the plan by more than 10%.',
   parityFlag: 'Parity break: tile requests differ from the plan.',
   requestsHeading: 'Requests (estimate vs ledger)',
   // why: ruling 15 (UI-004): the children below the parent run, so View D never shows the parent's ledger as all spend.
@@ -382,6 +384,8 @@ export const COPY = {
     `${calls} ${calls === 1 ? 'call' : 'calls'} · ${hits} cache ${hits === 1 ? 'hit' : 'hits'} · ${cost}`,
   requestRow: (calls: number, planned: string, hits: number, cost: string) =>
     `${calls} of ${planned} planned calls · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
+  requestRowTiles: (tiles: number, planned: string, calls: number, hits: number, cost: string) =>
+    `${tiles} of ${planned} planned tiles (${calls} ${calls === 1 ? 'call' : 'calls'}) · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
   errorsHeading: 'Errors',
   // why: the contract's error reason is nullable; an unrecorded reason is said, never shown as an empty string.
   noReasonRecorded: 'no reason recorded',

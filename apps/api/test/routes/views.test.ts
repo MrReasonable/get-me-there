@@ -398,7 +398,7 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
     expect(cov.perStage.find((p) => p.stage === 'discovery')).toMatchObject({
       providerId: 'fixture',
       total: 4,
-      requests: { calls: 0, cacheHits: 0, costMicroGbp: 0, planCalls: null },
+      requests: { calls: 0, tiles: 0, cacheHits: 0, costMicroGbp: 0, planCalls: null },
       overrun: false,
       parityBreak: false,
     });

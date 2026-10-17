@@ -194,13 +194,25 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
                       {COPY.withPriceValue(s.buckets.priced, s.total)}
                     </td>
                     <td className="p-1" data-cost="">
-                      {COPY.requestRow(
-                        s.requests.calls,
-                        planned,
-                        s.requests.cacheHits,
-                        formatMicroGbp(s.requests.costMicroGbp),
-                      )}
-                      {s.overrun ? <p className="font-semibold">{COPY.overrunFlag}</p> : null}
+                      {s.stage === 'discovery'
+                        ? COPY.requestRowTiles(
+                            s.requests.tiles,
+                            planned,
+                            s.requests.calls,
+                            s.requests.cacheHits,
+                            formatMicroGbp(s.requests.costMicroGbp),
+                          )
+                        : COPY.requestRow(
+                            s.requests.calls,
+                            planned,
+                            s.requests.cacheHits,
+                            formatMicroGbp(s.requests.costMicroGbp),
+                          )}
+                      {s.overrun ? (
+                        <p className="font-semibold">
+                          {s.stage === 'discovery' ? COPY.overrunFlagTiles : COPY.overrunFlag}
+                        </p>
+                      ) : null}
                       {s.parityBreak ? <p className="font-semibold">{COPY.parityFlag}</p> : null}
                       {sum !== s.total ? (
                         <p role="alert" className="font-semibold text-red-800">

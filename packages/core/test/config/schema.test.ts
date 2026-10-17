@@ -79,8 +79,12 @@ describe('parseConfig (spec §12)', () => {
     ]);
     const r = parseConfig({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '9' }, { realpath });
     expect(r.ok ? '' : r.errors[0]?.message).toContain('SEARCHAPI_PLAN');
-    expect(ok({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }).providers.searchapi?.trialUsed).toBe(0);
-    expect(ok({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }).providers.searchapi?.trialUsed).toBe(9);
+    expect(
+      ok({ ...sa, SEARCHAPI_PLAN: '40usd', SEARCHAPI_TRIAL_USED: '0' }).providers.searchapi?.trialUsed,
+    ).toBe(0);
+    expect(
+      ok({ ...sa, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '9' }).providers.searchapi?.trialUsed,
+    ).toBe(9);
   });
   it('fills the 40usd preset and lets variables override', () => {
     const c = ok({ ...minimal, SEARCHAPI_KEY: 'k'.repeat(32), SEARCHAPI_PLAN: '40usd' });
