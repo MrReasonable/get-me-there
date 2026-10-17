@@ -1,7 +1,7 @@
 import { microGbpToPence, PENCE_TO_MICRO, type ProviderId } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
-import { withKey } from '../../state/withKey.js';
+import { type OptionalKeys, withKey } from '../../state/withKey.js';
 import type { Draft } from './draft.js';
 import { AirlinesField, Check, NumberField, PoundsField, TimeWindowField } from './fields.js';
 
@@ -30,9 +30,12 @@ export function AdvancedFields({
 }) {
   const c = draft.constraints;
   const v = draft.verification;
-  const setC = <K extends keyof DraftConstraints>(k: K, value: DraftConstraints[K] | undefined) =>
+  const setC = <K extends OptionalKeys<DraftConstraints>>(k: K, value: DraftConstraints[K] | undefined) =>
     setDraft({ ...draft, constraints: withKey(c, k, value) });
-  const setV = <K extends keyof DraftPolicy>(k: K, value: DraftPolicy[K] | undefined) =>
+  // why: a required policy field always has a value; only the optional ones can be cleared.
+  const setV = <K extends keyof DraftPolicy>(k: K, value: DraftPolicy[K]) =>
+    setDraft({ ...draft, verification: withKey(v, k, value) });
+  const setVOptional = <K extends OptionalKeys<DraftPolicy>>(k: K, value: DraftPolicy[K] | undefined) =>
     setDraft({ ...draft, verification: withKey(v, k, value) });
   // why: spec §5.4, bookingLinks is forced true whenever SearchApi verifies (zod enforces it too).
   const forcedBooking = draft.providers.verification.includes('searchapi');
@@ -204,13 +207,13 @@ export function AdvancedFields({
           id="v-ceiling"
           label={COPY.priceCeiling}
           pence={v.priceCeilingPence}
-          onChange={(p) => setV('priceCeilingPence', p)}
+          onChange={(p) => setVOptional('priceCeilingPence', p)}
         />
         <NumberField
           id="v-perDate"
           label={COPY.perDepartureDateBest}
           value={v.perDepartureDateBest}
-          onChange={(n) => setV('perDepartureDateBest', n)}
+          onChange={(n) => setVOptional('perDepartureDateBest', n)}
         />
         <NumberField
           id="v-expandTop"

@@ -1,6 +1,6 @@
 import type { ResultFilters } from '@gmt/core';
 import { asIata, asIsoDate, filterRows } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   activeFilterCount,
   DEFAULT_CLASSES,
@@ -14,7 +14,7 @@ import {
 } from '../../src/state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams } from '../../src/state/urlState.js';
 import { parseView } from '../../src/state/view.js';
-import { withKey } from '../../src/state/withKey.js';
+import { type OptionalKeys, withKey } from '../../src/state/withKey.js';
 import { calendarRow, failedRow, partialRow, verifiedRow } from '../fixtures.js';
 
 const full: ResultsUiState = {
@@ -99,7 +99,12 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     const a = withKey(none, 'maxStops', 0);
     expect(a).toEqual({ maxStops: 0 });
     expect(Object.keys(withKey(a, 'maxStops', undefined))).toEqual([]);
-    expect(withKey({ a: 1, b: 2 }, 'b', undefined)).toEqual({ a: 1 });
+    const both: { a: number; b?: number } = { a: 1, b: 2 };
+    expect(withKey(both, 'b', undefined)).toEqual({ a: 1 });
+    // why: a required key cannot be deleted. These are compile-time checks (tsconfig.test.json runs tsc over tests):
+    // `undefined` is accepted only for the keys OptionalKeys names, so withKey({ id: 'x' }, 'id', undefined) does not compile.
+    expectTypeOf<OptionalKeys<{ id: string; note?: string }>>().toEqualTypeOf<'note'>();
+    expectTypeOf<OptionalKeys<{ id: string }>>().toEqualTypeOf<never>();
     expect(activeFilterCount(full.filters)).toBe(10);
   });
 
