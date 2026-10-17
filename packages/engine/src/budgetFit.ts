@@ -24,7 +24,7 @@ export interface MonthlyLoad {
 /**
  * Spec §8.2 load of `firings` scheduled runs spread over `hours`, without reuse (po-004): verification runs on every
  * firing; discovery at most once per refresh (reuse iff age < 0.9 × refresh), so a daily cron with a weekly refresh
- * pays weekly discovery (cost-r1-003): discovery runs = min(firings, hours / (0.9 × refresh hours)). The one model
+ * pays weekly discovery (cost-r1-003): discovery runs = min(firings, ⌈hours / (0.9 × refresh hours)⌉). The one model
  * budgetFit (a month) and the pre-start reservation (the rest of a cap window) share (cost-r2-002).
  */
 export function scheduleLoad(
@@ -38,7 +38,9 @@ export function scheduleLoad(
   for (const p of perRun.perProvider) {
     const factor =
       p.stage === 'discovery'
-        ? Math.min(firings, hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, p.providerId)))
+        ? // why: a firing re-fetches discovery in full once the last fetch is older than 0.9 × refresh, so the load
+          // counts whole discovery runs, never a fraction of one (cost M-3)
+          Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, p.providerId))))
         : firings;
     const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0 };
     load.set(p.providerId, {

@@ -1,6 +1,6 @@
 import { apiContract, type Estimate, ProviderError } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { budgetFitFor } from '../src/budgetFit.js';
+import { budgetFitFor, scheduleLoad } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
 import { estimateRemainingFor, estimateStart } from '../src/estimate.js';
 import { buildSnapshot } from '../src/snapshot.js';
@@ -189,8 +189,22 @@ describe('budgetFit (spec §8.2 "compares runsPerMonth × estimate with every ca
   it('a daily schedule pays discovery once per refresh window, not daily (cost-r1-003)', () => {
     const h = createHarness();
     const fit = fitOf(h, h.createDefinition({ scheduleCron: '0 5 * * *' }).id);
-    // why: 3 factored calls × min(365/12, 730 / (0.9 × 168)) = 3 × 4.83 → 15, against 3 × 30.4 = 92 if every firing re-fetched
+    // why: 3 factored calls × min(365/12, ⌈730 / (0.9 × 168)⌉) = 3 × 5 = 15, against 3 × 30.4 = 92 if every firing re-fetched
     expect(fit.perScope.find((x) => x.scope === 'provider-month:fixture')?.estimated).toBe(15);
+  });
+
+  it('a schedule that fires before the window closes holds a whole discovery, never a fraction of one (cost M-3)', () => {
+    const h = createHarness();
+    const ctx = buildContext(h.deps, h.options);
+    const def = h.createDefinition({ scheduleCron: '0 5 * * 1' });
+    const b = buildSnapshot(ctx, def, 'schedule');
+    const perRun = estimateStart(ctx, b.snapshot, b.cells, null);
+    const discovery = perRun.perProvider.find((p) => p.stage === 'discovery')?.calls ?? 0;
+    expect(discovery).toBe(3);
+    // why: 3 days left of a weekly refresh is 72 / 151.2 ≈ 0.48 of a reuse window, but the next firing re-fetches in
+    // full when the last fetch is older than 0.9 × refresh, so the reservation holds the whole discovery
+    expect(scheduleLoad(ctx, perRun, b.snapshot, 1, 72).get('fixture')?.calls).toBe(discovery);
+    expect(scheduleLoad(ctx, perRun, b.snapshot, 0, 72).get('fixture')?.calls).toBe(0);
   });
 
   it('adds every other enabled scheduled definition to the shared monthly scopes (ruling 5)', () => {

@@ -137,8 +137,9 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
     const windowEnd = h.deps.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).windowEnd;
     expect(windowEnd).toBe('2026-11-01T00:00:00.000Z');
     // why: 17 daily firings (15–31 October) of 3 factored discovery calls, but discovery at most once per 0.9 × 168 h
-    // over the 423 h to the window end: ceil(3 × min(17, 423 / 151.2)) = 9, where one per firing would hold 51
-    expect(reservedForSchedules(ctx, 'fixture', def.id, windowEnd)).toBe(Math.ceil(3 * (423 / 151.2)));
+    // over the 423 h to the window end: 3 × min(17, ⌈423 / 151.2⌉) = 9 (whole discovery runs, cost M-3), where one
+    // per firing would hold 51
+    expect(reservedForSchedules(ctx, 'fixture', def.id, windowEnd)).toBe(3 * Math.ceil(423 / 151.2));
     expect(reservedForSchedules(ctx, 'fixture', def.id, windowEnd)).toBe(9);
     expect((await h.orch().start(def.id, { trigger: 'manual' })).ok).toBe(true); // 12 + 9 + 3 ≤ 30
   });
