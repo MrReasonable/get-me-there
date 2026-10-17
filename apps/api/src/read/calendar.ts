@@ -11,6 +11,7 @@ import {
   type SearchDefinition,
   sixBuckets,
 } from '@gmt/core';
+import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
@@ -133,7 +134,11 @@ export function assembleCalendar(
  * later search of that cell found no fares. why: search_cells.best_observation_id is the cheapest observation written,
  * not the cheapest class-verified one, so the yardstick is computed at read time (plan round-2 pin).
  */
-export function assembleCalendarGap(def: SearchDefinition, ports: Ports): CalendarGapResponse {
+export function assembleCalendarGap(
+  def: SearchDefinition,
+  ports: Ports,
+  engine: Engine,
+): CalendarGapResponse {
   if (def.providers.verification.length === 0) return { cheapestVerified: null, cells: [] };
   const loaded = loadRows(def, ports);
   const best = pickVerified(
@@ -145,6 +150,11 @@ export function assembleCalendarGap(def: SearchDefinition, ports: Ports): Calend
     .sort((a, b) => a.pricePence - b.pricePence);
   return {
     cheapestVerified: { ...verifiedFigure(best), cell: best.cell, itineraryHash: best.itineraryHash },
-    cells: below.map((r) => ({ cell: r.cell, calendar: priceOf(r), verifyAvailable: true })),
+    // why: review prov M2: available means the engine's own preview admits the cell, as the cell detail's `verify` does.
+    cells: below.map((r) => ({
+      cell: r.cell,
+      calendar: priceOf(r),
+      verifyAvailable: engine.childCapPreview(def.id, r.cell).ok,
+    })),
   };
 }

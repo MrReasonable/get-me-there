@@ -43,7 +43,7 @@ export const resultHandlers: HandlerTable = {
     c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),
   ),
   'GET /api/definitions/:id/calendar-gap': plain((c, input, ctx) =>
-    c.json(assembleCalendarGap(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
+    c.json(assembleCalendarGap(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),
   ),
   'GET /api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate': plain((c, input, ctx) =>
     c.json(
