@@ -227,6 +227,13 @@ describe('Duration view (spec §11 View C)', () => {
       b.getAttribute('stroke-dasharray'),
     );
     expect(dashed).toEqual(['4 2', '4 2']);
+    // why: review ui M8 — the dash is a calendar bar's only non-colour cue, so it is 2 px, not 1.
+    expect(
+      [...(calendarBars?.querySelectorAll('.recharts-rectangle') ?? [])].map((b) =>
+        b.getAttribute('stroke-width'),
+      ),
+    ).toEqual(['2', '2']);
+    expect(verifiedBars?.querySelector('.recharts-rectangle')?.getAttribute('stroke-width')).toBe('1');
   });
 
   it('a stale minimum is drawn faded with a heavy outline', async () => {

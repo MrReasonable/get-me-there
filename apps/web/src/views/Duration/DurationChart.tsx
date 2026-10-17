@@ -3,9 +3,10 @@ import { useId } from 'react';
 import {
   Bar,
   BarChart,
+  type BarShapeProps,
   CartesianGrid,
-  Cell,
   Legend,
+  Rectangle,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -21,6 +22,29 @@ import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { barValue, type DurationData, type DurationRow, gapLabel, rowAt } from './data.js';
 
 const D = COPY.durationView;
+
+/**
+ * One bar through Bar's `shape` prop (Recharts 3 deprecates Cell). A calendar bar is paler with a 2 px dashed outline
+ * (the dash is its only non-colour cue, so it is not left at 1 px; review ui M8); a stale bar is faded with a heavy
+ * black outline. `data-stale` is what the tests read.
+ */
+function BarRect(props: BarShapeProps & { stale: boolean; calendar: boolean; colour: string }) {
+  const { stale, calendar, colour } = props;
+  return (
+    <Rectangle
+      x={props.x}
+      y={props.y}
+      width={props.width}
+      height={props.height}
+      fill={colour}
+      fillOpacity={stale ? 0.3 : calendar ? 0.6 : 1}
+      stroke={stale ? '#000000' : colour}
+      strokeWidth={stale || calendar ? 2 : 1}
+      {...(calendar ? { strokeDasharray: '4 2' } : {})}
+      data-stale={stale ? 'true' : 'false'}
+    />
+  );
+}
 
 /**
  * Custom tooltip: the nights, then each series' minimum through PriceCell compact (plan decision 52: every fare in the
@@ -118,23 +142,16 @@ export function DurationChart(props: {
                   name={s.name}
                   dataKey={(r: DurationRow) => barValue(r, s.key)}
                   fill={seriesColour(i)}
-                  stroke={seriesColour(i)}
-                  {...(s.kind === 'calendar' ? { strokeDasharray: '4 2' } : {})}
+                  shape={(p: BarShapeProps) => (
+                    <BarRect
+                      {...p}
+                      stale={data.rows[p.index]?.cells[s.key]?.price?.stale === true}
+                      calendar={s.kind === 'calendar'}
+                      colour={seriesColour(i)}
+                    />
+                  )}
                   isAnimationActive={false}
-                >
-                  {data.rows.map((r) => {
-                    const stale = r.cells[s.key]?.price?.stale === true;
-                    return (
-                      <Cell
-                        key={r.nights}
-                        data-stale={stale ? 'true' : 'false'}
-                        fillOpacity={stale ? 0.3 : s.kind === 'calendar' ? 0.6 : 1}
-                        stroke={stale ? '#000000' : seriesColour(i)}
-                        strokeWidth={stale ? 2 : 1}
-                      />
-                    );
-                  })}
-                </Bar>
+                />
               ))}
             </BarChart>
           </ResponsiveContainer>
