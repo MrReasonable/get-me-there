@@ -29,7 +29,10 @@ fixtures/recorded/
 node_modules/
 **/node_modules/
 **/dist/
-**/coverage/
+# why: not `**/coverage/`: packages/core/src/coverage is source (the first image build failed on it)
+/coverage/
+packages/*/coverage/
+apps/*/coverage/
 reports/
 **/.stryker-tmp/
 # Repository metadata and other checkouts.

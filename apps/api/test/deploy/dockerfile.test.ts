@@ -129,6 +129,12 @@ describe('.dockerignore (spec §13; decision 61)', () => {
     expect(lines).toContain(entry);
   });
 
+  it('excludes build coverage output without excluding source folders named coverage', () => {
+    // why: packages/core/src/coverage is source; a `**/coverage/` pattern dropped it from the context and broke the build
+    expect(lines).not.toContain('**/coverage/');
+    expect(lines).toContain('packages/*/coverage/');
+  });
+
   it('keeps the root .npmrc, which holds no credential', () => {
     expect(lines).toContain('!.npmrc');
     expect(read('.npmrc')).not.toMatch(/_auth|_authToken|_password|\/\/[^\s]+:/);
