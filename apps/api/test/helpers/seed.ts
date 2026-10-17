@@ -337,7 +337,7 @@ export function seeder(ports: Ports) {
 
     /**
      * One point of a vendor price-history series for one searched trip (spec §7 route_price_history rev 28, ruling 6);
-     * the trip defaults to 5 to 15 Nov 2026, the cabin to economy.
+     * the trip defaults to 5 to 15 Nov 2026, the cabin to economy, the point of sale to GB.
      */
     routeLowest(s: {
       origin: string;
@@ -346,6 +346,7 @@ export function seeder(ports: Ports) {
       pricePence: number;
       fetchedAt: IsoDateTime;
       trip?: { departureDate: string; returnDate: string };
+      pointOfSale?: string;
     }): void {
       const trip = s.trip ?? { departureDate: '2026-11-05', returnDate: '2026-11-15' };
       repos.routeHistory.upsert([
@@ -359,6 +360,7 @@ export function seeder(ports: Ports) {
           lowestPricePence: s.pricePence,
           currency: 'GBP',
           fetchedAt: s.fetchedAt,
+          pointOfSale: s.pointOfSale ?? 'GB',
         },
       ]);
     },

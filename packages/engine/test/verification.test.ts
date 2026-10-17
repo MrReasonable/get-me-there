@@ -411,13 +411,20 @@ describe('route price history (spec §7 rev 28, ruling 6)', () => {
       { date: asIsoDate('2026-10-13'), lowestPriceMinor: 40_900, currency: 'GBP' },
       { date: asIsoDate('2026-10-11'), lowestPriceMinor: 52_000, currency: 'USD' },
     ];
-    const h = createHarness({ transformFixture: (p) => mapResult(p, (r) => ({ ...r, routeHistory })) });
+    // why: CodeRabbit batch 3 — each point keeps the point of sale of the search that returned it (spec §3)
+    const h = createHarness({
+      transformFixture: (p) => mapResult(p, (r) => ({ ...r, routeHistory, pointOfSale: 'GB' })),
+    });
     await h.runToCompletion(h.orch(), def(h).id);
     const rows = h.db.raw
-      .prepare<[], { dep: string; ret: string; cabin: string; p: string; date: string; pence: number }>(
-        'SELECT departure_date AS dep, return_date AS ret, cabin, provider_id AS p, date, lowest_price_pence AS pence FROM route_price_history ORDER BY dep, ret, date',
+      .prepare<
+        [],
+        { dep: string; ret: string; cabin: string; p: string; date: string; pence: number; pos: string }
+      >(
+        'SELECT departure_date AS dep, return_date AS ret, cabin, provider_id AS p, date, lowest_price_pence AS pence, point_of_sale AS pos FROM route_price_history ORDER BY dep, ret, date',
       )
       .all();
+    expect(new Set(rows.map((r) => r.pos))).toEqual(new Set(['GB']));
     // why: every verified cell stores its own trip's series, so two cells' points never overwrite each other (dm-001).
     const trips = new Set(rows.map((r) => `${r.dep}|${r.ret}`));
     expect(trips.size).toBeGreaterThan(1);

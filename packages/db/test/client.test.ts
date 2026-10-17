@@ -136,6 +136,7 @@ describe('migrations against the first real migration (spec §7 "Migrations", §
       '0001_confirmed_calls',
       '0002_alert_event_lifecycle',
       '0003_route_history_by_trip',
+      '0004_route_history_point_of_sale',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
       applied: [
@@ -143,13 +144,14 @@ describe('migrations against the first real migration (spec §7 "Migrations", §
         '0001_confirmed_calls',
         '0002_alert_event_lifecycle',
         '0003_route_history_by_trip',
+        '0004_route_history_point_of_sale',
       ],
     });
     const before = schemaOf(db);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({ applied: [] });
     expect(schemaOf(db)).toEqual(before);
     expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([]);
-    expect(count(db, '__drizzle_migrations')).toBe(4);
+    expect(count(db, '__drizzle_migrations')).toBe(5);
   });
 
   it('a missing migrations directory fails naming the directory', () => {

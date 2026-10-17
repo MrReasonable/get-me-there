@@ -13,7 +13,11 @@ import { exampleDefinitionInput } from './helpers/factories.js';
 function upTo0001(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  const later = ['0002_alert_event_lifecycle', '0003_route_history_by_trip'];
+  const later = [
+    '0002_alert_event_lifecycle',
+    '0003_route_history_by_trip',
+    '0004_route_history_point_of_sale',
+  ];
   for (const tag of later) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
@@ -44,6 +48,7 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
     expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([
       '0002_alert_event_lifecycle',
       '0003_route_history_by_trip',
+      '0004_route_history_point_of_sale',
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const events = new AlertsRepo(db, fixedClock(T0)).events({ ruleId: 'r1', limit: 10 });

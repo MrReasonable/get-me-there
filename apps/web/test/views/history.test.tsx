@@ -115,6 +115,8 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
             fetchedAt: fetchPoint(2, 1).at,
             providerId: 'searchapi',
             sourceKind: 'scraped-search',
+            pointOfSale: 'unknown',
+            fx: { converted: false },
             stale: false,
           })),
         },
@@ -373,6 +375,8 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
             fetchedAt: fetchPoint(2, 1).at,
             providerId: 'searchapi',
             sourceKind: 'scraped-search',
+            pointOfSale: 'unknown',
+            fx: { converted: false },
             stale: false,
           })),
         },
@@ -483,7 +487,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     const routeTable = getByRole('table', { name: /^Google's price history for 10–20 Mar/ });
     expect(
       within(routeTable).getAllByText(
-        "Google Flights via SearchApi · indicative price history for 10–20 Mar · economy · fetched 2h ago · vendor's cache age unknown",
+        "Google Flights via SearchApi · indicative price history for 10–20 Mar · economy · point of sale GB · fetched 2h ago · vendor's cache age unknown",
       ),
     ).toHaveLength(3);
     expect(routeTable).toHaveTextContent('Wed 10 Mar 2027');

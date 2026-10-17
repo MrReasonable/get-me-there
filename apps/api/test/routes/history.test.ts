@@ -123,6 +123,10 @@ describe('history routes (spec §10, §7)', () => {
     expect(body.routeSeries[0]?.points.map((p) => [p.date, p.pricePence, p.currency])).toEqual([
       ['2026-10-13', 44_000, 'GBP'],
     ]);
+    // why: CodeRabbit batch 3 — the provenance every price carries: point of sale and an FX status, never converted
+    expect(body.routeSeries[0]?.points.map((p) => [p.pointOfSale, p.fx])).toEqual([
+      ['GB', { converted: false }],
+    ]);
     // decisions 54, 55: a route-level point is stale by its fetch age (the vendor gives the series no age)
     const route = body.routeSeries.find((r) => r.providerId === 'fixture');
     expect(route?.points.map((p) => p.stale)).toEqual([false]);

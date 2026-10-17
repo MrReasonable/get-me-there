@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { CABINS, PROVIDER_IDS } from '../internal/enums.js';
-import { isInteger, isIsoTimestamp, isOneOf } from './checks.js';
+import { isInteger, isIsoTimestamp, isOneOf, isPointOfSale } from './checks.js';
 
 const ISO_DATE_GLOB = "'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'";
 
@@ -10,7 +10,8 @@ const ISO_DATE_GLOB = "'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'";
  * the searched trip, not the route, so a point is keyed by origin, destination, the trip's departure and return dates,
  * the request cabin, provider and point date. Rows written before migration 0003 have no known trip: their trip dates
  * are NULL (both or neither, by CHECK) and their cabin stays 'unknown'; the views label them "trip unknown". A UNIQUE
- * index, not a primary key, carries the key, because those NULL trip dates must stay distinct legacy rows.
+ * index, not a primary key, carries the key, because those NULL trip dates must stay distinct legacy rows. Each point
+ * records the point of sale of the search that returned it (migration 0004; older rows read 'unknown').
  */
 export const routePriceHistory = sqliteTable(
   'route_price_history',
@@ -24,6 +25,8 @@ export const routePriceHistory = sqliteTable(
     date: text('date').notNull(),
     lowestPricePence: integer('lowest_price_pence').notNull(),
     fetchedAt: text('fetched_at').notNull(),
+    // why: spec §3 — every price carries its point of sale; rows stored before migration 0004 never recorded it
+    pointOfSale: text('point_of_sale').notNull().default('unknown'),
   },
   (t) => [
     uniqueIndex('route_price_history_trip_uq').on(
@@ -39,6 +42,7 @@ export const routePriceHistory = sqliteTable(
     check('route_price_history_cabin_ck', isOneOf('cabin', [...CABINS, 'unknown'])),
     check('route_price_history_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
     check('route_price_history_fetched_ck', isIsoTimestamp('fetched_at')),
+    check('route_price_history_pos_ck', isPointOfSale('point_of_sale')),
     check(
       'route_price_history_trip_ck',
       sql.raw(

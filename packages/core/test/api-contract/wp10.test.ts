@@ -205,6 +205,8 @@ describe('WP10 contract additions (plan decision 38)', () => {
       fetchedAt: '2026-10-14T13:00:00.000Z',
       providerId: 'searchapi',
       sourceKind: 'scraped-search',
+      pointOfSale: 'GB',
+      fx: { converted: false },
     };
     const trip = { departureDate: '2027-03-10', returnDate: '2027-03-20' };
     const route = (points: unknown[], t: unknown = trip) => ({
@@ -225,5 +227,22 @@ describe('WP10 contract additions (plan decision 38)', () => {
     expect(
       routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true, currency: 'USD' }])).success,
     ).toBe(false);
+    // why: CodeRabbit batch 3 — a point carries its point of sale and an FX status (spec §3), which is never converted
+    const { pointOfSale: _pos, ...noPos } = routePoint;
+    const { fx: _fx, ...noFx } = routePoint;
+    for (const p of [
+      noPos,
+      noFx,
+      { ...routePoint, pointOfSale: 'gb' },
+      { ...routePoint, fx: { converted: true } },
+    ])
+      expect(
+        routeHistoryResponseSchema.safeParse(route([{ ...p, stale: true }])).success,
+        JSON.stringify(p),
+      ).toBe(false);
+    expect(
+      routeHistoryResponseSchema.safeParse(route([{ ...routePoint, pointOfSale: 'unknown', stale: true }]))
+        .success,
+    ).toBe(true);
   });
 });

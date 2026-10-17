@@ -375,6 +375,8 @@ export function routeHistory(
           fetchedAt: hoursBefore(2),
           providerId: 'searchapi',
           sourceKind: 'scraped-search',
+          pointOfSale: 'GB',
+          fx: { converted: false },
           stale: false,
         })),
       },

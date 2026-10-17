@@ -807,8 +807,8 @@ export const COPY = {
     priceColumn: 'Price',
     detailColumn: 'Detail',
     cabinNotStated: 'cabin not stated',
-    routeProvenance: (source: string, trip: string | null, cabin: string, age: string) =>
-      `${source} · indicative price history for ${trip ?? 'an unknown trip'} · ${cabin} · ${age}`,
+    routeProvenance: (source: string, trip: string | null, cabin: string, pointOfSale: string, age: string) =>
+      `${source} · indicative price history for ${trip ?? 'an unknown trip'} · ${cabin} · point of sale ${pointOfSale} · ${age}`,
     // why: prov-004: the repository stores vendor-stated GBP points only, so nothing on this table was converted.
     routeGbp: 'vendor-stated GBP, unconverted',
     rowLink: 'price history',

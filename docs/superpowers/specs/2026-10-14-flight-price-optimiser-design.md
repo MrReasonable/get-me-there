@@ -1002,15 +1002,19 @@ are `toISOString()` text; booleans are integers 0/1.
   sent_at, status).
 - `route_price_history` (origin, destination, departure_date NULL,
   return_date NULL, cabin (a cabin or 'unknown'), provider_id, date,
-  lowest_price_pence, fetched_at) UNIQUE (origin, destination,
+  lowest_price_pence, fetched_at, point_of_sale) UNIQUE (origin, destination,
   departure_date, return_date, cabin, provider_id, date): the
   `price_insights.price_history` series SearchApi returns with a step-1
   response, which belongs to the **searched trip**, not the route, so each
   point is keyed by the cell's departure and return dates and the request
   cabin, and upserted on each verification. Only vendor-stated GBP points
-  are stored (the repository refuses any other currency). Rows written
-  before the trip was recorded keep NULL trip dates (both or neither, by
-  CHECK) and cabin 'unknown', and read "trip unknown". Shown on the History
+  are stored (the repository refuses any other currency). Each point carries
+  the provenance every price carries (§3): provider, source kind, fetch
+  time, the point of sale of the search that returned it, and an FX status
+  that is always "not converted". Rows written before the trip was recorded
+  keep NULL trip dates (both or neither, by CHECK) and cabin 'unknown', and
+  read "trip unknown"; rows written before the point of sale was recorded
+  read point of sale 'unknown'. Shown on the History
   view as its own labelled series per trip ("Google's price history for
   5–15 Nov").
 - `app_lock` (id = 1, holder ∈ app | tool, heartbeat_at, acquired_at).

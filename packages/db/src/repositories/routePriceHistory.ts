@@ -1,10 +1,20 @@
-import type { Cabin, Iata, IsoDate, IsoDateTime, ProviderId, RouteSeriesPoint, SourceKind } from '@gmt/core';
+import type {
+  Cabin,
+  Iata,
+  IsoDate,
+  IsoDateTime,
+  PointOfSale,
+  ProviderId,
+  RouteSeriesPoint,
+  SourceKind,
+} from '@gmt/core';
 import type { Db } from '../client.js';
 import { readDate, readTime } from '../internal/read.js';
 import {
   assertInt,
   assertIsoDate,
   assertIsoDateTime,
+  assertPointOfSale,
   assertProviderKind,
   RowRejected,
 } from '../internal/validate.js';
@@ -33,7 +43,8 @@ export interface RouteHistorySeries {
  * Spec §7 `route_price_history` (rev 28), upserted on every verification: the vendor's price-history series for the
  * searched trip, keyed by trip, request cabin, provider and point date, so two trips never overwrite each other (ruling
  * 6). Only vendor-stated GBP points are accepted (prov-004): the table has no FX columns, and the engine's GBP filter is
- * asserted here too, so no other writer can store a converted or foreign-currency figure.
+ * asserted here too, so no other writer can store a converted or foreign-currency figure; every point reads FX status
+ * "not converted". Each point keeps the point of sale of the search that returned it (spec §3).
  */
 export class RoutePriceHistoryRepo {
   constructor(
@@ -52,6 +63,8 @@ export class RoutePriceHistoryRepo {
       lowestPricePence: number;
       currency: string;
       fetchedAt: IsoDateTime;
+      /** The point of sale of the search that returned the series (spec §3). */
+      pointOfSale: PointOfSale;
     }>,
   ): void {
     for (const r of rows) {
@@ -65,11 +78,12 @@ export class RoutePriceHistoryRepo {
       assertIsoDate('departure_date', r.trip.departureDate);
       assertIsoDate('return_date', r.trip.returnDate);
       assertIsoDateTime('fetched_at', r.fetchedAt);
+      assertPointOfSale(r.pointOfSale);
       assertProviderKind(r.providerId, KIND_OF[r.providerId], this.opts.allowSynthetic);
     }
     const stmt = this.db.raw.prepare(
-      `INSERT INTO route_price_history (origin, destination, departure_date, return_date, cabin, provider_id, date, lowest_price_pence, fetched_at) VALUES (@origin, @destination, @departureDate, @returnDate, @cabin, @providerId, @date, @lowestPricePence, @fetchedAt)
-       ON CONFLICT(origin, destination, departure_date, return_date, cabin, provider_id, date) DO UPDATE SET lowest_price_pence = excluded.lowest_price_pence, fetched_at = excluded.fetched_at`,
+      `INSERT INTO route_price_history (origin, destination, departure_date, return_date, cabin, provider_id, date, lowest_price_pence, fetched_at, point_of_sale) VALUES (@origin, @destination, @departureDate, @returnDate, @cabin, @providerId, @date, @lowestPricePence, @fetchedAt, @pointOfSale)
+       ON CONFLICT(origin, destination, departure_date, return_date, cabin, provider_id, date) DO UPDATE SET lowest_price_pence = excluded.lowest_price_pence, fetched_at = excluded.fetched_at, point_of_sale = excluded.point_of_sale`,
     );
     this.db.transaction(() => {
       for (const r of rows)
@@ -83,6 +97,7 @@ export class RoutePriceHistoryRepo {
           date: r.date,
           lowestPricePence: r.lowestPricePence,
           fetchedAt: r.fetchedAt,
+          pointOfSale: r.pointOfSale,
         });
     });
   }
@@ -106,9 +121,10 @@ export class RoutePriceHistoryRepo {
           date: string;
           lowest_price_pence: number;
           fetched_at: string;
+          point_of_sale: string;
         }
       >(
-        'SELECT departure_date, return_date, date, lowest_price_pence, fetched_at FROM route_price_history WHERE origin = @origin AND destination = @destination AND provider_id = @providerId AND cabin = @cabin ORDER BY departure_date IS NULL, departure_date, return_date, date',
+        'SELECT departure_date, return_date, date, lowest_price_pence, fetched_at, point_of_sale FROM route_price_history WHERE origin = @origin AND destination = @destination AND provider_id = @providerId AND cabin = @cabin ORDER BY departure_date IS NULL, departure_date, return_date, date',
       )
       .all({ origin, destination, providerId, cabin });
     const out: RouteHistorySeries[] = [];
@@ -137,6 +153,9 @@ export class RoutePriceHistoryRepo {
         fetchedAt: readTime('route_price_history.fetched_at', r.fetched_at),
         providerId,
         sourceKind: KIND_OF[providerId],
+        pointOfSale: r.point_of_sale,
+        // why: only vendor-stated GBP points are stored, so none was converted (prov-004)
+        fx: { converted: false },
       });
     }
     return out;

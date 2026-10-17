@@ -181,6 +181,8 @@ export function routeHistoryRows(
       lowestPricePence: p.lowestPriceMinor,
       currency: 'GBP',
       fetchedAt: result.fetchedAt,
+      // why: spec §3 — the series carries the point of sale of the search that returned it (CodeRabbit batch 3)
+      pointOfSale: result.pointOfSale,
     });
   }
   return { rows, dropped };

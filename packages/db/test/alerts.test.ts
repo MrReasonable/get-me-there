@@ -172,6 +172,7 @@ describe('RoutePriceHistoryRepo (spec §7 route_price_history, rev 28: keyed by 
     lowestPricePence: pence,
     currency,
     fetchedAt,
+    pointOfSale: 'GB',
   });
 
   it('upserts by trip, cabin, provider and point date, so two trips never overwrite each other (ruling 6, dm-001)', () => {
@@ -190,6 +191,8 @@ describe('RoutePriceHistoryRepo (spec §7 route_price_history, rev 28: keyed by 
       currency: 'GBP',
       providerId: 'searchapi',
       sourceKind: 'scraped-search',
+      pointOfSale: 'GB',
+      fx: { converted: false },
     });
     expect(repo.series(LHR, JFK, 'searchapi', 'economy')).toEqual([
       {

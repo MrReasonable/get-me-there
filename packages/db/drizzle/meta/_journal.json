@@ -29,6 +29,13 @@
       "when": 1792256621245,
       "tag": "0003_route_history_by_trip",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792274105989,
+      "tag": "0004_route_history_point_of_sale",
+      "breakpoints": true
     }
   ]
 }
