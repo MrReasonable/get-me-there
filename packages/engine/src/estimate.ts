@@ -12,7 +12,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
-import { resumableCells } from './run.js';
+import { disabledBefore, resumableCells } from './run.js';
 import { runsPerMonth } from './scheduler/parseCron.js';
 import { buildSnapshot } from './snapshot.js';
 import { planTiles } from './stages/discovery.js';
@@ -218,7 +218,9 @@ function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefin
  */
 export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual: boolean): Estimate {
   const snapshot = exec.snapshot;
-  const remaining = (stage: Stage, id: ProviderId) => resumableCells(ctx, exec.id, stage, id, manual);
+  const disabled = manual ? new Set<ProviderId>() : disabledBefore(ctx, exec.id);
+  const remaining = (stage: Stage, id: ProviderId) =>
+    disabled.has(id) ? [] : resumableCells(ctx, exec.id, stage, id, manual);
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {

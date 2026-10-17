@@ -162,6 +162,24 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     expect(h.outcomes(e.id, { status: 'skipped' })).toHaveLength(0);
   });
 
+  it('an automatic resume never calls a provider the previous pass disabled, even for its retryable errors (ssr M1)', async () => {
+    const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
+    await h.fixtureScenario([
+      tileRule('LHR', '2026-11-02', FIXTURE_RULES.upstream, 3),
+      tileRule('LHR', '2026-11-09', FIXTURE_RULES.auth, 1),
+    ]);
+    const e = await h.runToCompletion(h.orch(), twoPairs(h).id);
+    expect(e.status).toBe('paused_error');
+    expect(h.outcomes(e.id, { status: 'error' }).some((o) => o.reason === 'upstream')).toBe(true);
+    const before = h.requests.length;
+    expect(refusedWith(await h.orch().resume(e.id, { manual: false }), 'active')).toBe(
+      'nothing can resume automatically; a manual resume retries the providers that were disabled',
+    );
+    expect(h.requests.length).toBe(before);
+    expect(await h.orch().resume(e.id, { manual: true })).toEqual({ ok: true, executionId: e.id });
+    expect((await h.waitForSettled(e.id)).status).toBe('completed');
+  });
+
   it('a completed execution with retryable errors resumes (retry-errors); the plan is added to the stored estimate; without any left it is refused', async () => {
     const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
     await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.upstream, 3)]);

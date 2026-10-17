@@ -58,7 +58,6 @@ export interface RunState {
   readonly manual: boolean;
   /** True for the first pass started by start()/verifyCell(); parity is judged only on such passes. */
   readonly fresh: boolean;
-  /** Providers the pre-start (or resume) budget check excluded from this pass. */
   /** The (stage, provider) lines the pre-start or resume check blocked for budget (ruling 2). */
   readonly blocked: ReadonlySet<LineKey>;
   /** Aborts calls in flight (cancel, SIGTERM, fatal); every provider call of the pass gets its signal. */
@@ -73,6 +72,19 @@ export interface RunState {
   readonly plannedTiles: Map<ProviderId, number>;
   readonly notices: Array<{ kind: OperatorMessageKind; detail: string }>;
   readonly log: Logger;
+}
+
+/**
+ * Providers an earlier pass of the execution disabled (auth, quota, a parse streak): those with skipped:provider_disabled
+ * outcomes. An automatic resume keeps them disabled, in its estimate and its pass alike; only a manual one re-admits them.
+ */
+export function disabledBefore(ctx: EngineContext, executionId: string): Set<ProviderId> {
+  return new Set(
+    ctx.repos.cells
+      .outcomes(executionId)
+      .filter((o) => o.status === 'skipped' && o.reason === 'provider_disabled')
+      .map((o) => o.providerId),
+  );
 }
 
 /** Fresh pass state for an execution row. */
@@ -93,7 +105,8 @@ export function newRun(
     controller: new AbortController(),
     intake: new AbortController(),
     stop: null,
-    disabled: new Set(),
+    // why: spec §8.1 an automatic resume does not re-enable a provider the previous pass disabled (ssr M1)
+    disabled: opts.manual ? new Set() : disabledBefore(ctx, exec.id),
     parseStreak: new Map(),
     lanes: new Map(),
     plannedTiles: new Map(),
