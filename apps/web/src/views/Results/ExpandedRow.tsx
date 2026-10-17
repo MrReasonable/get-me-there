@@ -87,6 +87,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
                       calendar={row.basis === 'calendar'}
                       stale={row.stale}
                       truncated={row.truncated}
+                      superseded={row.superseded}
                       unconfirmed={priceUnconfirmed(row)}
                       qualifier={COPY.adjustedQualifier}
                     />

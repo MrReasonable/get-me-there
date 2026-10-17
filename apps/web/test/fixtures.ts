@@ -549,6 +549,7 @@ export function calendarGap(
       truncated: false,
       cell: cell('LHR', 'JFK', '2027-03-14', '2027-03-28', 14),
       itineraryHash: 'hash-verified-1',
+      notSeenInLatest: null,
     },
     cells: [
       {
