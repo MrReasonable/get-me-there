@@ -200,6 +200,31 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     expect(r.stderr).not.toContain('apps/api/src/bootstrap/start.ts');
   });
 
+  it('process.env is allowed in exactly apps/api/src/bootstrap/ and the scripts/*.mjs entry points (CodeRabbit batch 3)', () => {
+    const r = run(
+      tree({
+        'apps/api/src/bootstrap/tool.ts': 'export const ok = process.env.A;\n',
+        'scripts/backup.mjs': 'const db = process.env.DATABASE_PATH;\n',
+        // a directory named bootstrap anywhere else is not the bootstrap
+        'apps/api/src/routes/bootstrap/x.ts': 'export const x = process.env.B;\n',
+        'packages/db/src/bootstrap/y.ts': 'export const y = process.env.C;\n',
+        // only top-level .mjs files under scripts/ are entry points
+        'scripts/lib/helper.mjs': 'export const h = process.env.D;\n',
+        'scripts/op.js': 'const o = process.env.E;\n',
+      }),
+    );
+    expect(r.status).toBe(1);
+    for (const f of [
+      'apps/api/src/routes/bootstrap/x.ts',
+      'packages/db/src/bootstrap/y.ts',
+      'scripts/lib/helper.mjs',
+      'scripts/op.js',
+    ])
+      expect(r.stderr).toContain(`${f} reads process.env outside apps/api/src/bootstrap/ and scripts/*.mjs`);
+    expect(r.stderr).not.toContain('apps/api/src/bootstrap/tool.ts');
+    expect(r.stderr).not.toContain('scripts/backup.mjs');
+  });
+
   it('msw imported outside packages/providers/src/testing/ fails; inside it passes', () => {
     const r = run(
       tree({

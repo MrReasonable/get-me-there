@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Enforces the spec §4 import graph by reading every package.json `dependencies` and every static, dynamic or
 // side-effect import of '@gmt/…' under src/. Fails on any edge not in ALLOWED, on `process.env`
-// outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
+// outside apps/api/src/bootstrap/ and the scripts/*.mjs entry points, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
 // worked-example files, and on a lint or type-check suppression comment anywhere in a package (root configs and e2e folders included).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -65,8 +65,13 @@ const dirs = {
   '@gmt/api': 'apps/api',
   '@gmt/web': 'apps/web',
 };
-// The only files that may read process.env: the app and tool bootstraps (wiring and logger take the env as an argument).
-const ENV_READERS = ['/bootstrap/'];
+// why: the only code that may read process.env is a command-line entry point: the app and tool bootstraps under
+// exactly apps/api/src/bootstrap/ (wiring and logger take the env as an argument), and the operator scripts directly
+// under scripts/ (backup.mjs reads DATABASE_PATH as the bootstrap does; secret-scan.mjs reads the configured secret
+// values). Anchored to the path start, so a directory named bootstrap elsewhere (apps/api/src/routes/bootstrap/) or a
+// helper nested under scripts/ is not an entry point (CodeRabbit batch 3).
+const ENV_READER = /^(?:apps\/api\/src\/bootstrap\/.+|scripts\/[^/]+\.mjs)$/;
+const ENV_RULE = 'apps/api/src/bootstrap/ and scripts/*.mjs entry points';
 // Any static, side-effect or dynamic import of msw.
 const MSW_IMPORT = /(from\s+|import\s*\(\s*|import\s+)['"]msw/;
 // why: CodeRabbit batch 3 — the graph check matched only `from '@gmt/…'`, so `import('@gmt/engine')` or a bare
@@ -114,8 +119,8 @@ for (const [name, dir] of Object.entries(dirs)) {
         bad++;
       }
     }
-    if (/process\.env/.test(src) && (name !== '@gmt/api' || !ENV_READERS.some((p) => f.includes(p)))) {
-      console.error(`${f} reads process.env outside apps/api/src/bootstrap/`);
+    if (/process\.env/.test(src) && !ENV_READER.test(f)) {
+      console.error(`${f} reads process.env outside ${ENV_RULE}`);
       bad++;
     }
     // why: plan decision 7 — @gmt/providers/testing is the only production-tree module that imports msw, in every package
@@ -123,6 +128,14 @@ for (const [name, dir] of Object.entries(dirs)) {
       console.error(`${f} imports msw outside packages/providers/src/testing/`);
       bad++;
     }
+  }
+}
+// The operator scripts are source too; their tests are not scanned, as no package's test/ tree is.
+for (const f of walk('scripts')) {
+  if (/\.test\.mjs$/.test(f)) continue;
+  if (/process\.env/.test(readFileSync(f, 'utf8')) && !ENV_READER.test(f)) {
+    console.error(`${f} reads process.env outside ${ENV_RULE}`);
+    bad++;
   }
 }
 // why: plan decision 20 — apps/api tests reach msw only through @gmt/providers/testing (its network guards), never directly

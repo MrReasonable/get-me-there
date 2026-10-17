@@ -28,7 +28,7 @@ reviews:
         - No `as` casts except `as const` and `satisfies`; no `any`, non-null assertions or lint/ts suppression comments.
         - Package boundary: core has no I/O; db and providers depend only on core; engine composes them; api and web sit on top; web imports only @gmt/core.
         - Route-agnostic: no airport literals in code outside the allowed seed and example files; docs and tests use only the London → New York example (LHR/LGW → JFK/EWR). Flag any other real route.
-        - `process.env` is read only under apps/api/src/bootstrap/.
+        - `process.env` is read only under apps/api/src/bootstrap/ and by the scripts/*.mjs operator entry points (command-line entry points like the bootstraps; plan decision 9).
     - path: "packages/core/src/types/ids.ts"
       instructions: |
         Do not flag the `as` casts in this file. The asIata/asIsoDate/asIsoMonth/asIsoDateTime helpers and the schema transforms are the sanctioned single mint site for brands (WP0 and the project rules); scripts/check-casts.mjs allows this file deliberately.
