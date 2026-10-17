@@ -58,6 +58,16 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     expect([r.status, r.stderr]).toEqual([0, '']);
   });
 
+  it('installed and generated trees are not scanned', () => {
+    const r = run(
+      tree({
+        'apps/web/node_modules/dep/index.js': ['// @ts', '-ignore'].join('') + '\n',
+        'apps/web/dist/assets/x.js': ['// eslint', '-disable'].join('') + '\n',
+      }),
+    );
+    expect([r.status, r.stderr]).toEqual([0, '']);
+  });
+
   it('an airport code or a metro city in a string literal fails, in web and api alike', () => {
     const r = run(
       tree({
@@ -76,6 +86,8 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     ['apps/web/src/z.tsx', ['const a = <p>{/* @ts', '-ignore */}</p>;'].join('')],
     ['packages/core/src/w.ts', ['/* eslint', '-disable */'].join('')],
     ['apps/api/test/v.test.ts', ['// @ts', '-nocheck'].join('')],
+    ['apps/web/vite.config.ts', ['// biome', '-ignore lint/x: y'].join('')],
+    ['apps/web/e2e/smoke.spec.ts', ['// @ts', '-ignore'].join('')],
   ])('a suppression comment fails in any package: %s', (path, text) => {
     const r = run(tree({ [path]: `${text}\n` }));
     expect(r.status).toBe(1);

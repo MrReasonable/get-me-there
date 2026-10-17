@@ -3,7 +3,7 @@
 // `import ... from '@gmt/…'` under src/. Fails on any edge not in ALLOWED, on `process.env`
 // outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
-// worked-example files, and on a lint or type-check suppression comment in any package's src or test.
+// worked-example files, and on a lint or type-check suppression comment anywhere in a package (root configs and e2e folders included).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
@@ -70,6 +70,9 @@ const ENV_READERS = ['/bootstrap/'];
 // Any static, side-effect or dynamic import of msw.
 const MSW_IMPORT = /(from\s+|import\s*\(\s*|import\s+)['"]msw/;
 
+// why: generated or installed trees are never source: dependencies, build output, coverage and test reports.
+const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'coverage', 'test-results', 'playwright-report']);
+
 function* walk(dir) {
   let names = [];
   try {
@@ -78,6 +81,7 @@ function* walk(dir) {
     return;
   }
   for (const n of names) {
+    if (SKIPPED_DIRS.has(n)) continue;
     const p = join(dir, n);
     if (statSync(p).isDirectory()) yield* walk(p);
     else if (/\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(p)) yield p; // why: .mjs test-support files count too (arch-r3-002)
@@ -192,12 +196,11 @@ for (const tree of PLACE_TREES) {
 const SUPPRESSIONS = '(?:biome-ignore|eslint-disable|@ts-ignore|@ts-expect-error|@ts-nocheck)';
 const SUPPRESSION_COMMENT = new RegExp(`//[^\\n]*${SUPPRESSIONS}|/\\*(?:(?!\\*/)[\\s\\S])*${SUPPRESSIONS}`);
 for (const dir of Object.values(dirs)) {
-  for (const tree of ['src', 'test']) {
-    for (const f of walk(join(dir, tree))) {
-      if (SUPPRESSION_COMMENT.test(readFileSync(f, 'utf8'))) {
-        console.error(`${f} has a lint or type-check suppression comment (decisions 46, 49)`);
-        bad++;
-      }
+  // why: the whole package directory, so root configs (vite.config.ts, vitest.config.ts) and e2e folders count too.
+  for (const f of walk(dir)) {
+    if (SUPPRESSION_COMMENT.test(readFileSync(f, 'utf8'))) {
+      console.error(`${f} has a lint or type-check suppression comment (decisions 46, 49)`);
+      bad++;
     }
   }
 }
