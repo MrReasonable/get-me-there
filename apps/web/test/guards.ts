@@ -12,7 +12,8 @@ let expected: RegExp | null = null;
 
 /** A test that renders a broken price or a crashing view announces the console.error it expects. */
 export function expectConsoleErrors(pattern: RegExp): void {
-  expected = pattern;
+  // why: .test() on a g or y pattern advances lastIndex, so a stateless copy keeps every match independent.
+  expected = new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
 }
 
 /** What the finished test left behind that should fail it; resets the per-test state. */
