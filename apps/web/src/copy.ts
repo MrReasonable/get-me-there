@@ -20,6 +20,9 @@ import {
 } from '@gmt/core';
 import type { z } from 'zod';
 
+/** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
+const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
+
 /** Derived from the contract (decision 46), so a new plan id or bucket fails `satisfies` here. */
 /** The six buckets a progress line names (spec §3); `reused` sits inside its bucket and is not a seventh. */
 type ProgressBuckets = {
@@ -182,7 +185,8 @@ export const COPY = {
   nightsValue: (n: number) => `${n}n`,
   noRowsFromRun: 'This run has no rows on this basis. Coverage shows what was searched and what was not.',
   noRowsAfterFilter: 'No rows match these filters.',
-  showingRows: (shown: number, total: number) => `showing ${shown} of ${total} rows (filters active)`,
+  showingRows: (shown: number, total: number) =>
+    `showing ${shown} of ${total} ${noun(total, 'row', 'rows')} (filters active)`,
   staleHidden: (n: number) => `${n} stale ${n === 1 ? 'row' : 'rows'} hidden`,
   failedHidden: (n: number) => `${n} failed ${n === 1 ? 'row' : 'rows'} hidden by default`,
   showFailed: 'Show failed rows',
@@ -218,7 +222,7 @@ export const COPY = {
     'Most cells came back "no cached data", which is not evidence that no flights exist. Next: add SearchApi discovery to this definition, widen its airports, or run the Coverage check on the definition form.',
   truncated: (shown: number, total: number) => `within the cheapest ${shown} of ${total}`,
   excludedByCurrentSpace: (n: number) =>
-    `${n} rows outside the current window and nights range are not shown`,
+    `${n} ${noun(n, 'row', 'rows')} outside the current window and nights range ${noun(n, 'is', 'are')} not shown`,
 
   // view header (spec §11)
   executionsShown: (list: string) => `showing ${list}`,
@@ -252,18 +256,20 @@ export const COPY = {
   statusBarLabel: 'Run status',
   // why: ruling 4 (decision 67): the bar names every bucket; an umbrella ("searched", "attempted") is View D's alone.
   progress: (p: { stage: string; provider: string; buckets: ProgressBuckets; total: number }) =>
-    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched of ${p.total} cells`,
+    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched of ${p.total} ${noun(p.total, 'cell', 'cells')}`,
   progressSelected: (p: { provider: string; buckets: ProgressBuckets; selected: number }) =>
     `itinerary search · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error of ${p.selected} selected · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched`,
   progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
-  spendRunCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} billed calls`,
-  spendRunFreeCalls: (calls: number, cap: string) => `this run: ${calls} of ${cap} free calls`,
+  spendRunCalls: (calls: number, cap: string) =>
+    `this run: ${calls} of ${cap} billed ${noun(cap, 'call', 'calls')}`,
+  spendRunFreeCalls: (calls: number, cap: string) =>
+    `this run: ${calls} of ${cap} free ${noun(cap, 'call', 'calls')}`,
   spendRunCost: (used: string, cap: string) => `this run: ${used} of ${cap}`,
   spendMonth: (used: string, cap: string) => `this month: ${used} of ${cap}`,
   spendProviderMonth: (provider: string, calls: number, cap: string) =>
-    `this month: ${provider} ${calls} of ${cap} calls`,
+    `this month: ${provider} ${calls} of ${cap} ${noun(cap, 'call', 'calls')}`,
   spendProviderLifetime: (provider: string, calls: number, cap: string) =>
-    `${provider} ${calls} of ${cap} calls over the plan's lifetime`,
+    `${provider} ${calls} of ${cap} ${noun(cap, 'call', 'calls')} over the plan's lifetime`,
   nearCap: 'near cap',
   noCap: 'no cap',
   paused: (reason: string) => `Paused: ${reason}`,
@@ -275,7 +281,7 @@ export const COPY = {
   confirmCancel: 'Confirm: cancel this run',
   keepRunning: 'Keep running',
   runNow: (calls: number, cap: number, cost: string) =>
-    `Run now: about ${calls} calls, hard stop ${cap} · ${cost}`,
+    `Run now: about ${calls} ${noun(calls, 'call', 'calls')}, hard stop ${cap} · ${cost}`,
   runNowUnestimated: 'Run now',
   working: 'Working…',
   runDetails: 'Progress and spend',
@@ -395,9 +401,9 @@ export const COPY = {
   coverageOnDemandCalls: (calls: number, hits: number, cost: string) =>
     `${calls} ${calls === 1 ? 'call' : 'calls'} · ${hits} cache ${hits === 1 ? 'hit' : 'hits'} · ${cost}`,
   requestRow: (calls: number, planned: string, hits: number, cost: string) =>
-    `${calls} of ${planned} planned calls · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
+    `${calls} of ${planned} planned ${noun(planned, 'call', 'calls')} · ${hits} cache ${noun(hits, 'hit', 'hits')} · ledger cost ${cost}, from configured rates`,
   requestRowTiles: (tiles: number, planned: string, calls: number, hits: number, cost: string) =>
-    `${tiles} of ${planned} planned tiles (${calls} ${calls === 1 ? 'call' : 'calls'}) · ${hits} cache hits · ledger cost ${cost}, from configured rates`,
+    `${tiles} of ${planned} planned ${noun(planned, 'tile', 'tiles')} (${calls} ${noun(calls, 'call', 'calls')}) · ${hits} cache ${noun(hits, 'hit', 'hits')} · ledger cost ${cost}, from configured rates`,
   errorsHeading: 'Errors',
   // why: the contract's error reason is nullable; an unrecorded reason is said, never shown as an empty string.
   noReasonRecorded: 'no reason recorded',
@@ -426,10 +432,11 @@ export const COPY = {
   maxAgeAssumed: (age: string) => `assumed ≤${age} (undocumented)`,
   maxAgeAtFetch: 'provider states no age beyond the fetch time',
   usageWindow: (calls: number, cap: string, start: string, end: string) =>
-    `${calls} of ${cap} calls · window ${start} to ${end}`,
-  usageLifetime: (calls: number, cap: string) => `${calls} of ${cap} calls over the plan's lifetime`,
+    `${calls} of ${cap} ${noun(cap, 'call', 'calls')} · window ${start} to ${end}`,
+  usageLifetime: (calls: number, cap: string) =>
+    `${calls} of ${cap} ${noun(cap, 'call', 'calls')} over the plan's lifetime`,
   usageMonth: 'this month: ',
-  usageNoWindow: (calls: number, cap: string) => `${calls} of ${cap} calls`,
+  usageNoWindow: (calls: number, cap: string) => `${calls} of ${cap} ${noun(cap, 'call', 'calls')}`,
   excludedFromSchedule: 'excluded from scheduled runs',
 
   // definitions form (spec §11)
@@ -508,7 +515,7 @@ export const COPY = {
     'Free check of the Aviasales cache for these pairs: cells with a cached price, of the cells in your nights range, per departure month. A count of 0 means the cache has nothing for that pair and month, not that there are no flights; "not checked" means the check could not read that month.',
   coverageCheckNeedsTravelpayouts: 'The free coverage check needs TRAVELPAYOUTS_TOKEN.',
   coverageCheckPair: (o: string, d: string) => `${o} → ${d}`,
-  coverageCheckCalls: (n: number) => `${n} free tile requests used`,
+  coverageCheckCalls: (n: number) => `${n} free tile ${noun(n, 'request', 'requests')} used`,
   coverageCheckMonth: 'Month',
   coverageCheckStale: 'The airports, window or nights changed since this check; run it again.',
   cachedOf: (rows: number, cells: number) => `${rows} of ${cells}`,
@@ -517,31 +524,31 @@ export const COPY = {
   estimateStale: 'The draft changed since this estimate; show the estimate again before creating.',
   save: 'Save changes',
   createConfirm: (calls: number, cap: number, amount: string) =>
-    `Create and confirm about ${calls} calls (hard stop ${cap}), ${amount} per run`,
+    `Create and confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
   created: 'Created. Scheduled runs use the calls and cost you confirmed.',
   saved: 'Saved.',
   fieldErrorsHeading: 'Fix these before saving:',
   fieldError: (field: string, message: string) => `${field}: ${message}`,
   estimateHeading: 'Estimate',
-  estimateCells: (n: number) => `${n} cells`,
+  estimateCells: (n: number) => `${n} ${noun(n, 'cell', 'cells')}`,
   estimateRow: (provider: string, stage: string, calls: number, cost: string, time: string) =>
-    `${provider} ${stage}: ${calls} calls · ${cost} · about ${time}`,
+    `${provider} ${stage}: ${calls} ${noun(calls, 'call', 'calls')} · ${cost} · about ${time}`,
   estimateTotal: (calls: number, cap: number, cost: string, time: string) =>
-    `about ${calls} calls (hard stop ${cap}), ${cost} per run · about ${time}`,
+    `about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${cost} per run · about ${time}`,
   windowClamped: 'The window was moved to start tomorrow.',
   estimateBlocked: (reason: string) => `blocked: ${reason}`,
   definitionNotices: 'Notices for this definition',
   assumptions: 'Assumptions',
-  budgetFitOk: (runs: number) => `Fits every cap at ${runs} runs a month:`,
-  budgetFitWarn: (runs: number) => `Does not fit every cap at ${runs} runs a month:`,
+  budgetFitOk: (runs: number) => `Fits every cap at ${runs} ${noun(runs, 'run', 'runs')} a month:`,
+  budgetFitWarn: (runs: number) => `Does not fit every cap at ${runs} ${noun(runs, 'run', 'runs')} a month:`,
   budgetScope: (scope: string, estimated: number, cap: string) =>
     `${scope}: ${estimated} estimated a month, cap ${cap}`,
   overCap: 'over the cap',
   needsConfirmation: (p: { calls: number; cap: number; estimate: string; confirmed: string }) =>
-    `The new estimate, about ${p.calls} calls (hard stop ${p.cap}) and ${p.estimate} per run, is above what you confirmed (${p.confirmed}). Scheduled runs are skipped until you confirm.`,
-  confirmedWas: (calls: string, amount: string) => `${calls} calls, ${amount}`,
+    `The new estimate, about ${p.calls} ${noun(p.calls, 'call', 'calls')} (hard stop ${p.cap}) and ${p.estimate} per run, is above what you confirmed (${p.confirmed}). Scheduled runs are skipped until you confirm.`,
+  confirmedWas: (calls: string, amount: string) => `${calls} ${noun(calls, 'call', 'calls')}, ${amount}`,
   confirmNew: (calls: number, cap: number, amount: string) =>
-    `Confirm about ${calls} calls (hard stop ${cap}), ${amount} per run`,
+    `Confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
   none: 'none',
   // --- WP10 (spec §11 View B, View C, History; plan decisions 38, 44, 46, 48) ---
   calendarView: {
@@ -600,7 +607,7 @@ export const COPY = {
     colourBy: 'Colour by',
     empty: 'No days to show yet. The calendar fills in as cells are searched.',
     staleLine: (stale: number, shown: number, verifiedAfter: string) =>
-      `${stale} of ${shown} shown prices are stale by fetch age plus any known vendor age (itinerary prices after ${verifiedAfter}, calendar prices after their provider's refresh interval)`,
+      `${stale} of ${shown} shown ${noun(shown, 'price is', 'prices are')} stale by fetch age plus any known vendor age (itinerary prices after ${verifiedAfter}, calendar prices after their provider's refresh interval)`,
     unconfirmedShort: 'price not confirmed',
     unconfirmedCells: (n: number) =>
       `price not confirmed: ${n} itinerary-searched ${n === 1 ? 'cell' : 'cells'} priced nothing the final step confirmed`,
@@ -612,11 +619,11 @@ export const COPY = {
     legend: {
       title: 'Legend',
       scaleQuintile: (basis: string, days: number) =>
-        `Colour: ${basis} prices on ${days} days, in five price bands (quintiles of the days shown)`,
+        `Colour: ${basis} prices on ${days} ${noun(days, 'day', 'days')}, in five price bands (quintiles of the days shown)`,
       scaleFlatFew: (basis: string, days: number, min: number) =>
-        `Colour: one shade for ${basis} prices on ${days} ${days === 1 ? 'day' : 'days'}; fewer than ${min} days are too few for price bands`,
+        `Colour: one shade for ${basis} prices on ${days} ${noun(days, 'day', 'days')}; fewer than ${min} days are too few for price bands`,
       scaleFlatNarrow: (basis: string, days: number, min: string, max: string) =>
-        `Colour: one shade for ${basis} prices on ${days} days; they span ${min}–${max}, less than 10%, too narrow for price bands`,
+        `Colour: one shade for ${basis} prices on ${days} ${noun(days, 'day', 'days')}; they span ${min}–${max}, less than 10%, too narrow for price bands`,
       scaleEmpty: (basis: string) => `Colour: no ${basis} prices to colour yet`,
       band: (band: number, min: string, max: string, days: number) =>
         `band ${band + 1}: ${min}–${max} (${days} ${days === 1 ? 'day' : 'days'})`,
@@ -651,10 +658,11 @@ export const COPY = {
       dayVerified: 'cheapest class-verified price',
       dayPartlyVerified: 'cheapest partially verified itinerary',
       dayCalendar: 'cheapest calendar price',
-      dayCell: (nights: number, back: string) => `${nights} nights · back ${back}`,
+      dayCell: (nights: number, back: string) =>
+        `${nights} ${noun(nights, 'night', 'nights')} · back ${back}`,
       cellPicker: 'Cell',
       cellOption: (origin: string, destination: string, nights: number, back: string) =>
-        `${origin}→${destination} · ${nights} nights · back ${back}`,
+        `${origin}→${destination} · ${nights} ${noun(nights, 'night', 'nights')} · back ${back}`,
       outcomes: 'Outcomes per run, stage and provider (newest run first)',
       columns: {
         run: 'Run',
@@ -727,8 +735,8 @@ export const COPY = {
     verifiedShort: 'min among verified',
     calendarSeries: (source: string, n: number) => `calendar, ${source} (constraints not checked, n=${n})`,
     calendarShort: (source: string) => `calendar, ${source}`,
-    nightsLabel: (n: number) => `${n} nights`,
-    nightsLink: (n: number) => `${n} nights: show in results`,
+    nightsLabel: (n: number) => `${n} ${noun(n, 'night', 'nights')}`,
+    nightsLink: (n: number) => `${n} ${noun(n, 'night', 'nights')}: show in results`,
     tooltipDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
     seriesLine: (series: string, value: string) => `${series}: ${value}`,
     cellDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
@@ -736,12 +744,12 @@ export const COPY = {
     notItinerarySearched: 'not itinerary-searched',
     itinerarySearchedNoPrice: 'itinerary-searched, no class-verified price',
     partlyItinerarySearchedNoPrice: (k: number, total: number) =>
-      `itinerary-searched ${k} of ${total} selected cells, no class-verified price`,
+      `itinerary-searched ${k} of ${total} selected ${noun(total, 'cell', 'cells')}, no class-verified price`,
     tableCaption: 'Cheapest found per stay length, with provenance',
     chartScroll: 'Cheapest found by stay length, chart (scrolls sideways on a narrow screen)',
     tableScroll: 'Cheapest found per stay length, table (scrolls sideways on a narrow screen)',
     staleLine: (stale: number, shown: number) =>
-      `${stale} of ${shown} shown prices are stale (older than one refresh cycle by fetch age plus any known vendor age)`,
+      `${stale} of ${shown} shown ${noun(shown, 'price is', 'prices are')} stale (older than one refresh cycle by fetch age plus any known vendor age)`,
     empty:
       "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
   },
@@ -751,7 +759,7 @@ export const COPY = {
     connectorNote:
       'Each point is one run. A line joins two points only when they come from consecutive runs of this definition; a run that did not fetch the series breaks the line. No price was fetched between two points.',
     coloursRepeat: (lines: number, colours: number) =>
-      `${lines} series share ${colours} colours: tell them apart by the legend name and line style`,
+      `${lines} series share ${colours} ${noun(colours, 'colour', 'colours')}: tell them apart by the legend name and line style`,
     xAxisFetched: 'fetched (Europe/London)',
     yAxis: 'price (GBP)',
     // why: ruling 6: SearchApi's price_insights series is the vendor's history for the one searched trip, not the route.
