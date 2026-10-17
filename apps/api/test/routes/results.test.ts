@@ -190,6 +190,30 @@ describe('GET /definitions/:id/results, verified basis', () => {
     expect(latest.rows.map((r) => r.pricePence)).toEqual([47_000]);
   });
 
+  it('scoped to an older run, an offer the newest search also returned is not marked not-seen (review prov I1)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E1', C1, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-29) }]);
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E2', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E2', C1, [
+      { hash: 'hV', pricePence: 61_000, fetchedAt: at(-1) },
+      { hash: 'hN', pricePence: 70_000, fetchedAt: at(-1) },
+    ]);
+    const old = await results(x, def.id, `?executionId=${s.id('E1')}`);
+    expect(old.rows.map((r) => [r.itineraryHash, r.notSeenInLatest])).toEqual([['hV', null]]);
+    // The control: an offer the newest search did not return is still marked, scoped or not.
+    s.execution('E3', { def, status: 'completed', startedAt: at(-0.5), finishedAt: at(-0.5) });
+    s.cells('E3', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.verified('E3', C1, [{ hash: 'hN', pricePence: 69_000, fetchedAt: at(-0.5) }]);
+    const again = await results(x, def.id, `?executionId=${s.id('E1')}`);
+    expect(again.rows.map((r) => [r.itineraryHash, r.notSeenInLatest])).toEqual([['hV', { ageHours: 0 }]]);
+  });
+
   it.each([
     ['a javascript: URL', { kind: 'get', url: 'javascript:alert(1)', host: 'x' }],
     ['plain http', { kind: 'get', url: 'http://www.google.com/travel/flights', host: 'www.google.com' }],

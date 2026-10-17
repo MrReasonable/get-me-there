@@ -151,9 +151,19 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: rea
     cabin: def.cabin,
     includeChildren: true,
   });
-  // why: "seen in execution X" must consider every observation, not only each offer's latest one.
+  // why: "seen in execution X" must consider every observation of the definition, not only each offer's latest one and
+  // not only the scoped executions: the newest search of a cell may be outside the scope (review prov I1).
+  const everyObservation =
+    wanted === null
+      ? raw
+      : ports.repos.itineraries.observationsForDefinition(def.id, {
+          executionIds: 'all',
+          space: null,
+          cabin: def.cabin,
+          includeChildren: true,
+        });
   const notSeen = notSeenResolver(
-    raw,
+    everyObservation,
     (c) => ports.repos.itineraries.latestVerificationOutcomeForCell(def.id, c, def.cabin),
     now,
   );
