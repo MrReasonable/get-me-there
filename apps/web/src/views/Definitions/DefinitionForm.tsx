@@ -1,6 +1,6 @@
 import { apiContract, londonDateOf, microGbpToPence, resolveWindow } from '@gmt/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ApiError, type FieldError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import type { DefinitionResponse, EstimateResponse, ProvidersResponse } from '../../api/types.js';
@@ -77,6 +77,16 @@ export function DefinitionForm({
   const [estimate, setEstimate] = useState<EstimateResponse | null>(null);
   const [estimatedFor, setEstimatedFor] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
+  // why: a half-filled time window is a local field error; saving or estimating would send a window the operator changed.
+  const [incomplete, setIncomplete] = useState<readonly string[]>([]);
+  const markIncomplete = useCallback(
+    (id: string, on: boolean) =>
+      setIncomplete((prev) =>
+        on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id),
+      ),
+    [],
+  );
+  const blocked = incomplete.length > 0;
   const [notice, setNotice] = useState<string | null>(null);
   const capabilities: ProviderCapabilities[] = providers.providers
     .filter((p) => p.enabled)
@@ -319,18 +329,40 @@ export function DefinitionForm({
       </fieldset>
       <details>
         <summary className="min-h-11 cursor-pointer font-semibold">{COPY.advanced}</summary>
-        <AdvancedFields draft={draft} setDraft={setDraft} capabilities={capabilities} />
+        <AdvancedFields
+          draft={draft}
+          setDraft={setDraft}
+          capabilities={capabilities}
+          onIncomplete={markIncomplete}
+        />
       </details>
       <CoverageCheck draft={draft} available={travelpayouts} />
       {saved === null ? (
-        <button type="button" className={button} onClick={() => estimateDraft.mutate()}>
+        <button
+          type="button"
+          className={button}
+          disabled={blocked}
+          aria-describedby={blocked ? 'd-blocked' : undefined}
+          onClick={() => estimateDraft.mutate()}
+        >
           {COPY.showEstimate}
         </button>
       ) : (
-        <button type="button" className={button} onClick={() => save.mutate(saved)}>
+        <button
+          type="button"
+          className={button}
+          disabled={blocked}
+          aria-describedby={blocked ? 'd-blocked' : undefined}
+          onClick={() => save.mutate(saved)}
+        >
           {COPY.save}
         </button>
       )}
+      {blocked ? (
+        <p id="d-blocked" className="text-red-800">
+          {COPY.blockedByTimeWindow}
+        </p>
+      ) : null}
       {saved === null && estimate !== null ? (
         <CreateConfirmation
           estimate={estimate}

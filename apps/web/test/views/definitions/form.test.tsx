@@ -373,6 +373,32 @@ describe('per-destination fields and the example (spec §11)', () => {
     expect(screen.queryByText('both ends needed')).toBeNull();
   });
 
+  it('a half-filled time window disables Show estimate, says why beside it, sends nothing, and re-enables once fixed (coordinator correction)', async () => {
+    const bodies = estimateBodies();
+    const { user } = renderForm();
+    await user.click(screen.getByText('Advanced: constraints and policy'));
+    const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
+    await user.clear(screen.getByLabelText(to));
+    const estimate = screen.getByRole('button', { name: 'Show estimate' });
+    expect(estimate).toBeDisabled();
+    expect(estimate).toHaveAccessibleDescription(
+      'Cannot estimate or save: a time window needs both ends, or neither.',
+    );
+    await user.click(estimate);
+    expect(bodies).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText(to), { target: { value: '22:00' } });
+    expect(screen.getByRole('button', { name: 'Show estimate' })).toBeEnabled();
+    expect(screen.queryByText(/Cannot estimate or save/)).toBeNull();
+  });
+
+  it('a half-filled time window also disables Save changes on an existing definition (coordinator correction)', async () => {
+    const { user } = renderForm(definition());
+    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.clear(screen.getByLabelText(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(screen.getByText(/Cannot estimate or save/)).toBeInTheDocument();
+  });
+
   it('"import example" loads the route, window, nights, cabin and constraints of docs/examples/london-new-york.json', async () => {
     const { user } = renderForm();
     await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));

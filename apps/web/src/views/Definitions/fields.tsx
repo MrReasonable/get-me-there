@@ -104,11 +104,14 @@ export function TimeWindowField({
   name,
   value,
   onChange,
+  onIncomplete,
 }: {
   id: string;
   name: string;
   value: { from: string; to: string } | undefined;
   onChange: (v: { from: string; to: string } | undefined) => void;
+  /** Told whenever the window is half-filled, so the form can refuse to save or estimate it. */
+  onIncomplete?: (id: string, incomplete: boolean) => void;
 }) {
   const [from, setFrom] = useState(value?.from ?? '');
   const [to, setTo] = useState(value?.to ?? '');
@@ -126,6 +129,10 @@ export function TimeWindowField({
   // why: a half-filled window is an error the operator sees, not a constraint that vanishes (controller-directed).
   const half = (from === '') !== (to === '');
   const errorId = `${id}-errors`;
+  useEffect(() => {
+    onIncomplete?.(id, half);
+    return () => onIncomplete?.(id, false);
+  }, [half, id, onIncomplete]);
   return (
     <span className="flex flex-col gap-1">
       <span className="flex gap-2">

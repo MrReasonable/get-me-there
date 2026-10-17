@@ -427,6 +427,7 @@ export const COPY = {
   minutesAsHours: (text: string) => `= ${text}`,
   // why: one end of a time window alone is an unfinished constraint; say so rather than dropping it silently.
   bothEndsNeeded: 'both ends needed',
+  blockedByTimeWindow: 'Cannot estimate or save: a time window needs both ends, or neither.',
   timeFrom: 'from',
   timeTo: 'to',
   airlinesHelp: 'comma-separated carrier codes',

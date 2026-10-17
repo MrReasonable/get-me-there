@@ -21,10 +21,12 @@ export function AdvancedFields({
   draft,
   setDraft,
   capabilities,
+  onIncomplete,
 }: {
   draft: Draft;
   setDraft: (d: Draft) => void;
   capabilities: readonly ProviderCapabilities[];
+  onIncomplete?: (id: string, incomplete: boolean) => void;
 }) {
   const c = draft.constraints;
   const v = draft.verification;
@@ -83,12 +85,14 @@ export function AdvancedFields({
           name={COPY.constraint.departureWindowLocal}
           value={c.departureWindowLocal}
           onChange={(w) => setC('departureWindowLocal', w)}
+          {...(onIncomplete ? { onIncomplete } : {})}
         />
         <TimeWindowField
           id="c-arrival"
           name={COPY.constraint.arrivalWindowLocal}
           value={c.arrivalWindowLocal}
           onChange={(w) => setC('arrivalWindowLocal', w)}
+          {...(onIncomplete ? { onIncomplete } : {})}
         />
         <Check
           id="c-selfTransfer"
