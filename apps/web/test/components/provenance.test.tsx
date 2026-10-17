@@ -300,9 +300,12 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     );
     const cell = screen.getByTestId('price-cell');
     expect(within(cell).getByText('SA')).toBeInTheDocument();
-    // why: the unknown age is the visible badge; the face adds no second "age unknown" and no "not checked".
+    // why: the unknown age is the visible badge, with no second "age unknown" and no "not checked"; the face line
+    // still says when the price was fetched, since the hard rule is fetched time without hover.
     expect(within(cell).getByText("vendor's cache age unknown")).toBeInTheDocument();
-    expect(within(cell).queryByTestId('face-age')).toBeNull();
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^fetched \d+h ago$|^fetched just now$/);
+    expect(within(cell).getByTestId('face-age')).not.toHaveTextContent('age unknown');
+    expect(within(cell).getByTestId('face-age')).not.toHaveTextContent('not checked');
     expect(cell.getAttribute('title')).toBe(
       `SearchApi · Google Flights via SearchApi · ${ages(searchProvenance).full}`,
     );
@@ -337,7 +340,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     );
     const cell = screen.getByTestId('price-cell');
     expect(within(cell).getByText("vendor's cache age unknown")).toBeInTheDocument();
-    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^not checked$/);
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent(/^fetched .+ ago · not checked$/);
   });
 
   it('an itinerary price of known age shows its short age alone, with no "not checked" (ruling 3)', () => {
