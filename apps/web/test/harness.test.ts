@@ -50,6 +50,14 @@ describe('test harness (reviews tsr-004, tsr-006, tsr2-006, tsr2-010)', () => {
     expect(drainGuards()).toEqual([]);
   });
 
+  it('a sticky pattern still matches only from the start of the message', () => {
+    expectConsoleErrors(/boom/y);
+    console.error('boom one');
+    console.error('boom two');
+    console.error('unexpected boom');
+    expect(drainGuards()).toEqual(['console.error during the test: unexpected boom']);
+  });
+
   it('an unannounced console.error fails the test; an announced one passes; an announced one that never came fails', () => {
     console.error('planted');
     expect(drainGuards()).toEqual(['console.error during the test: planted']);
