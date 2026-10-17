@@ -4,6 +4,8 @@ import {
   type IsoDate,
   type IsoMonth,
   isoDateSchema,
+  isoDateTimeOfEpochMs,
+  londonDateOf,
   microGbpToPence,
   monthOf,
   toEpochDay,
@@ -150,8 +152,9 @@ const LONDON_PARTS = new Intl.DateTimeFormat('en-GB', {
 });
 
 function londonParts(ms: number): { date: string; time: string } {
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    LONDON_PARTS.formatToParts(ms).find((p) => p.type === type)?.value ?? '';
+  // why: one formatToParts per instant (tables format a row per point), not one per field (review arch M6)
+  const byType = new Map(LONDON_PARTS.formatToParts(ms).map((p) => [p.type, p.value]));
+  const part = (type: Intl.DateTimeFormatPartTypes) => byType.get(type) ?? '';
   return {
     date: `${part('year')}-${part('month')}-${part('day')}`,
     time: `${part('hour')}:${part('minute')}`,
@@ -166,7 +169,7 @@ export function formatInstantLondon(ms: number): string {
 
 /** Epoch ms → "14 Mar 2027" in Europe/London (the History fetch axis, run dates). */
 export function formatInstantDateLondon(ms: number): string {
-  return formatIsoDate(londonParts(ms).date);
+  return formatIsoDate(londonDateOf(isoDateTimeOfEpochMs(ms)));
 }
 
 /**
