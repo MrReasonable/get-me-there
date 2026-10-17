@@ -380,10 +380,40 @@ describe('the App (spec §11 layout)', () => {
   });
 
   it('with /providers synthetic and real rows the red banner shows once (spec §5.5)', async () => {
-    server.use(http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))));
+    const base = providersResponse();
+    const [real] = base.providers;
+    if (real === undefined) throw new Error('the providers fixture has a real provider');
+    // why: the mixed case the title names: the fixture provider (synthetic source kind) listed beside the real ones
+    const fixtureRow = {
+      ...real,
+      providerId: 'fixture' as const,
+      displayName: 'Fixture',
+      plan: 'synthetic' as const,
+      capNote: null,
+      usage: [],
+      capabilities: {
+        discovery: {
+          sourceKind: 'synthetic' as const,
+          provenanceNote: 'synthetic fixture data',
+          maxAgeHours: 1,
+        },
+        verification: null,
+      },
+    };
+    server.use(
+      http.get(`${API}/providers`, () =>
+        HttpResponse.json(providersResponse({ synthetic: true, providers: [...base.providers, fixtureRow] })),
+      ),
+    );
     renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
     await screen.findByRole('table', { name: 'Round trips found' });
     expect(screen.getAllByText(/Synthetic data: the fixture provider is enabled/)).toHaveLength(1);
+  });
+
+  it('with /providers real only (synthetic: false) there is no banner', async () => {
+    renderWithProviders(<App />, { search: '?view=results&def=def-0001' });
+    await screen.findByRole('table', { name: 'Round trips found' });
+    expect(screen.queryByText(/Synthetic data: the fixture provider is enabled/)).toBeNull();
   });
 
   it('Coverage is reachable from the Results header link', async () => {
