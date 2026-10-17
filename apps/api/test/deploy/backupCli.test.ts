@@ -15,6 +15,13 @@ beforeAll(() => {
   execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], { cwd: REPO, stdio: 'ignore' });
 }, 300_000);
 
+/**
+ * Per-test timeout. why: each case spawns several node processes in a row (BACKUPS_KEPT + 1 backups, four refusals),
+ * each loading apps/api's build: about 0.4 s alone, but 1–2 s under the full api run's parallel workers, which took the
+ * first case past vitest's 5 s default (7.7 s measured, fix round 1). Sized to the spawns, like WP4b's 30 s tool test.
+ */
+const SPAWNING_TEST_TIMEOUT_MS = 60_000;
+
 function run(script: string, args: string[], env: Record<string, string> = {}) {
   return spawnSync(process.execPath, [join(REPO, 'scripts', script), ...args], {
     cwd: REPO,
@@ -25,24 +32,32 @@ function run(script: string, args: string[], env: Record<string, string> = {}) {
 }
 
 describe('the backup CLIs follow apps/api’s rules (plan decision 32, the single exit-code table)', () => {
-  it('backs up into backupsDirFor(DATABASE_PATH) and keeps BACKUPS_KEPT by default', () => {
-    const dir = tempDir();
-    const db = join(dir, 'get-me-there.db');
-    // why: apps/api never imports better-sqlite3 (decision 23); @gmt/db opens the file
-    const d = openDatabase(db);
-    d.raw.exec('CREATE TABLE t (x INTEGER)');
-    d.close();
-    for (let i = 0; i <= BACKUPS_KEPT; i++)
-      expect(run('backup.mjs', [], { DATABASE_PATH: db }).status).toBe(EXIT.ok);
-    expect(readdirSync(backupsDirFor(db))).toHaveLength(BACKUPS_KEPT);
-  });
+  it(
+    'backs up into backupsDirFor(DATABASE_PATH) and keeps BACKUPS_KEPT by default',
+    () => {
+      const dir = tempDir();
+      const db = join(dir, 'get-me-there.db');
+      // why: apps/api never imports better-sqlite3 (decision 23); @gmt/db opens the file
+      const d = openDatabase(db);
+      d.raw.exec('CREATE TABLE t (x INTEGER)');
+      d.close();
+      for (let i = 0; i <= BACKUPS_KEPT; i++)
+        expect(run('backup.mjs', [], { DATABASE_PATH: db }).status).toBe(EXIT.ok);
+      expect(readdirSync(backupsDirFor(db))).toHaveLength(BACKUPS_KEPT);
+    },
+    SPAWNING_TEST_TIMEOUT_MS,
+  );
 
-  it('maps usage and failures to EXIT.usage and EXIT.backupFailed', () => {
-    const dir = tempDir();
-    expect(run('backup.mjs', ['--db', join(dir, 'x.db'), '--keep', '0']).status).toBe(EXIT.usage);
-    expect(run('backup.mjs', ['--db', join(dir, 'absent.db')]).status).toBe(EXIT.backupFailed);
-    expect(run('check-backup.mjs', []).status).toBe(EXIT.usage);
-    writeFileSync(join(dir, 'bad.db'), 'not a database '.repeat(200));
-    expect(run('check-backup.mjs', [join(dir, 'bad.db')]).status).toBe(EXIT.backupFailed);
-  });
+  it(
+    'maps usage and failures to EXIT.usage and EXIT.backupFailed',
+    () => {
+      const dir = tempDir();
+      expect(run('backup.mjs', ['--db', join(dir, 'x.db'), '--keep', '0']).status).toBe(EXIT.usage);
+      expect(run('backup.mjs', ['--db', join(dir, 'absent.db')]).status).toBe(EXIT.backupFailed);
+      expect(run('check-backup.mjs', []).status).toBe(EXIT.usage);
+      writeFileSync(join(dir, 'bad.db'), 'not a database '.repeat(200));
+      expect(run('check-backup.mjs', [join(dir, 'bad.db')]).status).toBe(EXIT.backupFailed);
+    },
+    SPAWNING_TEST_TIMEOUT_MS,
+  );
 });

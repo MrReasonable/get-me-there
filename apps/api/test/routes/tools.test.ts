@@ -41,16 +41,11 @@ describe('POST /api/tools/record (spec §10, §7 app_lock)', () => {
     );
   });
 
-  it('503 when the runner is not registered; the smoke route is not mounted by WP8', async () => {
+  it('503 when the runner is not registered', async () => {
     const x = await harness();
     const res = await x.request('/api/tools/record', { method: 'POST', json: body });
     expect(res.status).toBe(503);
     expect((await errorOf(res)).code).toBe('tool_unavailable');
-    const smoke = await x.request('/api/tools/smoke', {
-      method: 'POST',
-      json: { origin: 'LHR', destination: 'JFK' },
-    });
-    expect((await errorOf(smoke)).code).toBe('not_found');
   });
 
   it('refuses with 409 inside a container, before the runner runs: recordings are local-only (plan decision 62)', async () => {

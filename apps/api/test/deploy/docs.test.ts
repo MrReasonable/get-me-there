@@ -53,7 +53,6 @@ describe('the example definition (spec §1, §11)', () => {
 });
 
 describe('docs/setup.md exit codes (the plan’s single table, apps/api EXIT)', () => {
-  // why: the smoke test's 2 and 3 are documented by WP13 with its route (decision 63)
   it('lists every code of EXIT and nothing else', () => {
     const table = between(read('docs/setup.md'), '## 10. Exit codes', '\n## 11.');
     const codes = [...table.matchAll(/^\| (\d+) \|/gm)].map((m) => Number(m[1]));
@@ -179,8 +178,29 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(SHUTDOWN_DEADLINE_MS).toBeLessThan(30_000);
   });
 
-  it('leaves the smoke test to WP13 (decision 63)', () => {
-    expect(setup).not.toMatch(/smoke:live|\/api\/tools\/smoke/);
+  it('documents the smoke test: a dry run first, the route with a prompted password and valid bodies, the budget per database, the command line, where fixtures go (WP13, decision 66)', () => {
+    expect(setup).toContain(
+      "curl -u operator -H 'Content-Type: application/json' -H 'X-Requested-With: get-me-there' \\",
+    );
+    expect(setup).toContain('-X POST http://127.0.0.1:3000/api/tools/smoke');
+    const body = /-d '(\{[^']*\})'/.exec(setup)?.[1] ?? '';
+    expect(apiContract.toolSmokeRequestSchema.parse(JSON.parse(body))).toMatchObject({ dryRun: true });
+    expect(flat).toContain('Each database keeps its own count of the SearchApi credits tool runs have used');
+    expect(flat).toContain('SEARCHAPI_TRIAL_USED');
+    expect(setup).toContain('pnpm smoke:live --origin LHR --destination JFK --budget 8 --dry-run');
+    expect(flat).toContain('smoke/fixtures/recorded');
+    expect(flat).toContain('The app writes no fixtures for a smoke test it runs');
+    expect(flat).toContain('`2` and `3`');
+    // why: provenance review, fix round 1: the docs say which line to read and what each check proves
+    expect(flat).toContain(
+      'the line that starts `SearchApi credits already ledgered to tool runs in this budget window: N`',
+    );
+    expect(flat).not.toContain('first report line');
+    expect(flat).toContain(
+      "each price shown carries the source kind, age limit and point of sale its provider's adapter declares, and was fetched during this run",
+    );
+    expect(flat).not.toContain("This checks the providers' answers");
+    expect(flat).not.toContain('--confirm-rerun');
   });
 });
 

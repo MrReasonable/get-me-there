@@ -13,7 +13,6 @@ import {
   API_PREFIX,
   type AppEnv,
   type HttpToolRunners,
-  OWNED_ELSEWHERE,
   type RawInput,
   type RouteContext,
 } from './routes/types.js';
@@ -54,8 +53,8 @@ async function readBody(c: Context<AppEnv>): Promise<{ ok: true; value: unknown 
 /**
  * The single HTTP surface (spec §10): one Hono app mounting every ROUTES entry from `@gmt/core` api-contract (paths
  * carry `/api`), each body and query validated once by its handler against the entry's own schemas (decision 54), the
- * error envelope, the spec §4 hardening and the auth gate. Strict: a ROUTES entry without a handler (unless another
- * package owns it), a handler without a ROUTES entry, or a handler whose schemas are not its entry's refuses to build.
+ * error envelope, the spec §4 hardening and the auth gate. Strict: a ROUTES entry without a handler, a handler without
+ * a ROUTES entry, or a handler whose schemas are not its entry's refuses to build.
  */
 export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}): Hono<AppEnv> {
   const routes = options.routes ?? apiContract.ROUTES;
@@ -102,7 +101,6 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
   }
   for (const route of routes) {
     const key = `${route.method} ${route.path}`;
-    if (OWNED_ELSEWHERE.has(key)) continue; // why: another package mounts it (plan decision 4: smoke is WP13's)
     const handler = HANDLERS[key];
     // why: spec §10 is the route table; an entry without a handler is a contract the api does not honour.
     if (handler === undefined) throw new Error(`no handler for ${key}`);

@@ -14,6 +14,7 @@ import {
   monthOf,
 } from '@gmt/core';
 import { MAX_PAGES } from '@gmt/providers/recording';
+import { positiveInt, readFlags } from './args.js';
 import type { CellDates, Rect } from './recordRequests.js';
 
 export type { CellDates, Rect } from './recordRequests.js';
@@ -62,7 +63,7 @@ export interface RecordCli {
   /** Required for a live run when earlier tool runs already ledgered SearchApi credits in the window (decision 20). */
   confirmRerun: boolean;
   /**
-   * `--out DIR`: record into DIR/fixtures/recorded instead of the committed tree. Required for any route other than the
+   * `--out DIR`: record into DIR/fixtures/recorded instead of the recorded tree. Required for any route other than the
    * worked example, and DIR must be outside the repository (sec2-002; the operator's own routes never enter the repo).
    */
   out: string | null;
@@ -109,10 +110,6 @@ export const USAGE =
 const VALUE_FLAGS = new Set(['budget', 'route', 'month', 'out']);
 const SWITCHES = new Set(['dry-run', 'confirm-rerun']);
 
-function positiveInt(s: string): number | null {
-  return /^[1-9]\d{0,5}$/.test(s) ? Number(s) : null;
-}
-
 function iataList(s: string): Iata[] | null {
   const out: Iata[] = [];
   for (const part of s.split(',')) {
@@ -126,25 +123,9 @@ function iataList(s: string): Iata[] | null {
 /** Parses the CLI. Refuses a missing or too-small budget before anything is opened (spec §9 item 7). */
 export function parseRecordArgs(argv: readonly string[]): ParseRecordResult {
   const fail = (message: string): ParseRecordResult => ({ ok: false, message: `${message}\n${USAGE}` });
-  const flags = new Map<string, string>();
-  const switches = new Set<string>();
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--') continue; // why: pnpm may forward its own separator
-    if (a === undefined || !a.startsWith('--')) return fail(`unexpected argument ${String(a)}`);
-    const eq = a.indexOf('=');
-    const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
-    if (SWITCHES.has(name) && eq === -1) {
-      switches.add(name);
-      continue;
-    }
-    if (!VALUE_FLAGS.has(name)) return fail(`unknown flag --${name}`);
-    if (flags.has(name)) return fail(`--${name} is given twice`);
-    const value = eq === -1 ? argv[i + 1] : a.slice(eq + 1);
-    if (value === undefined || value === '' || value.startsWith('--')) return fail(`--${name} needs a value`);
-    flags.set(name, value);
-    if (eq === -1) i++;
-  }
+  const read = readFlags(argv, VALUE_FLAGS, SWITCHES);
+  if (!read.ok) return fail(read.message);
+  const { flags, switches } = read;
   const budgetRaw = flags.get('budget');
   if (budgetRaw === undefined)
     return fail('--budget is required: the explicit SearchApi call budget (spec §9 item 7)');

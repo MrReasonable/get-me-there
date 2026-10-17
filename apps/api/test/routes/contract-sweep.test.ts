@@ -4,7 +4,6 @@ import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, TRUNCATED_NOTE } f
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp } from '../../src/app.js';
-import { OWNED_ELSEWHERE } from '../../src/routes/types.js';
 import { API_TEXT } from '../../src/text.js';
 import { expectEnvelopeOrContract } from '../helpers/contract.js';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
@@ -24,7 +23,7 @@ async function harness(env: Record<string, string> = {}): Promise<Harness> {
 
 const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
 const C2 = cell('LHR', 'JFK', '2026-11-03', '2026-11-13');
-const mounted = apiContract.ROUTES.filter((r) => !OWNED_ELSEWHERE.has(`${r.method} ${r.path}`));
+const mounted = apiContract.ROUTES;
 
 /**
  * A small world touching every read route and every provenance shape (review TS-4): a parent execution, a calendar
@@ -184,7 +183,7 @@ function apiTexts(): string[] {
     API_TEXT.toolBusy('record'),
     API_TEXT.recordingInContainer,
     API_TEXT.toolFailed('record'),
-    API_TEXT.toolSynthetic,
+    API_TEXT.toolSynthetic('record'),
     API_TEXT.toolSummary('record', 0, 3),
   ];
 }
@@ -201,7 +200,7 @@ describe('ROUTES mounting (spec §10)', () => {
     ).toThrow(/no route for handler GET \/api\/budget/);
   });
 
-  it('every entry WP8 owns is mounted with its method and auth flag, and answers the contract or the envelope', async () => {
+  it('every ROUTES entry is mounted with its method and auth flag, and answers the contract or the envelope', async () => {
     const x = await harness();
     for (const route of mounted) {
       const path = fill(route.path, missing);

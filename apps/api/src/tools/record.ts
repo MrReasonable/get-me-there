@@ -16,7 +16,6 @@ import {
 import { majorToMinor } from '@gmt/providers/recording';
 import { safeMessage } from '../safeMessage.js';
 import type { Ports } from '../wiring.js';
-import { budgetPosition, openRecordingExecution } from './recordExecution.js';
 import { type EndpointKey, ParamLog, paramRules, writeAllowlist } from './recordParams.js';
 import {
   type CellDates,
@@ -45,6 +44,7 @@ import {
   TP_PAGE_LIMIT,
   tpUrl,
 } from './recordRequests.js';
+import { budgetPosition, openRecordingExecution, tracking } from './toolExecution.js';
 import {
   EXIT,
   type RecordedCall,
@@ -58,7 +58,7 @@ export type { RecordArgs } from './recordPlan.js';
 
 /**
  * recordedBy signature on every file a real run records (spec §5.5). WP4's verifier accepts any non-blank signature;
- * the committed-tree manifest (checkWorkedExampleTree) is the only check that requires this one.
+ * the recorded-tree manifest (checkWorkedExampleTree) is the only check that requires this one.
  */
 export const RECORDED_BY = '@gmt/api record:fixtures';
 
@@ -66,28 +66,9 @@ export const RECORDED_BY = '@gmt/api record:fixtures';
 export function recordPrecheck(c: Config): string | null {
   if (c.providers.travelpayouts === null || c.providers.searchapi === null)
     return 'record:fixtures needs TRAVELPAYOUTS_TOKEN and SEARCHAPI_KEY in the environment (.env)';
-  // why: the committed tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
+  // why: the recorded tree is the public worked example's, recorded at point of sale GB (spec §2; po-009)
   if (c.pointOfSale !== 'GB') return `record:fixtures records at POINT_OF_SALE=GB; got ${c.pointOfSale}`;
   return null;
-}
-
-/** Wraps the recorder so every file written while a call runs (retries included) is attributed to that call. */
-function tracking(inner: FixtureRecorder): { recorder: FixtureRecorder; take(): string[] } {
-  let written: string[] = [];
-  return {
-    recorder: {
-      record: async (r) => {
-        const p = await inner.record(r);
-        written.push(p);
-        return p;
-      },
-    },
-    take: () => {
-      const out = written;
-      written = [];
-      return out;
-    },
-  };
 }
 
 type Sent =
@@ -177,7 +158,7 @@ export async function recordFixtures(
     recordedBy: ctx.recordedBy,
   });
   const providers: RecordingProviders = { tp, sa };
-  const executionId = openRecordingExecution(ports, args, plan, sa);
+  const executionId = openRecordingExecution(ports, args, plan);
   let run: PlanRun | null = null;
   try {
     run = new PlanRun(ports, plan, executionId, recorder, ctx, providers);

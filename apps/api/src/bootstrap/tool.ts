@@ -5,7 +5,7 @@
  * its whole run. The one process.env read is here.
  */
 import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Clock, type Config, type Secret, syntheticAllowed, systemClock } from '@gmt/core';
 import {
@@ -18,8 +18,11 @@ import {
 import { defaultRecordedRoot } from '@gmt/providers';
 import { createLogger } from '../logger.js';
 import { safeMessage } from '../safeMessage.js';
+import { isInside } from '../tools/paths.js';
 import { RECORDED_BY, recordPrecheck, runRecord } from '../tools/record.js';
 import { parseRecordArgs, type RecordCli } from '../tools/recordPlan.js';
+import { runSmokeTool } from '../tools/smoke.js';
+import { parseSmokeArgs, type SmokeCli, smokeFixtureTarget } from '../tools/smokeArgs.js';
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
 import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
@@ -28,11 +31,12 @@ import { seedIfNeeded } from './seed.js';
 
 export { EXIT, type ToolName } from '../tools/types.js';
 
-/** The tool runners runTool's switch dispatches to; tests replace them (ts-003). WP13 adds `smoke`. */
+/** The tool runners runTool's switch dispatches to; tests replace them (ts-003). */
 export interface ToolRunners {
   record(ports: Ports, cli: RecordCli, ctx: ToolContext): Promise<number>;
+  smoke(ports: Ports, cli: SmokeCli, ctx: ToolContext): Promise<number>;
 }
-const DEFAULT_RUNNERS: ToolRunners = { record: runRecord };
+const DEFAULT_RUNNERS: ToolRunners = { record: runRecord, smoke: runSmokeTool };
 
 /** Where recordings go and the signature they carry; always given together (prov-wp04b-006, r2-ts-001). */
 export interface RecordingTarget {
@@ -71,16 +75,8 @@ export function repositoryRoots(from: string = defaultRecordedRoot()): string[] 
   return roots;
 }
 
-/** The true-case real path of `p`, or of its nearest existing ancestor with the rest appended (a directory not made yet). */
-function realOrAncestor(p: string): string {
-  const abs = resolve(p);
-  if (existsSync(abs)) return realpathSync.native(abs);
-  const up = dirname(abs);
-  return up === abs ? abs : join(realOrAncestor(up), abs.slice(up.length + 1));
-}
-
 /**
- * Where a record run writes, and under which signature (sec2-002, ruling 2026-10-15): the committed tree only for the
+ * Where a record run writes, and under which signature (sec2-002, ruling 2026-10-15): the recorded tree only for the
  * worked example's route; any other route needs `--out DIR` outside the repository, which writes DIR/fixtures/recorded.
  */
 export function recordingTarget(
@@ -90,8 +86,8 @@ export function recordingTarget(
 ): RecordingTarget | { refusal: string } {
   if (given !== undefined) return given;
   if (cli.out !== null) {
-    const out = realOrAncestor(cli.out);
-    if ((roots ?? repositoryRoots()).some((repo) => out === repo || out.startsWith(`${repo}${sep}`)))
+    const out = cli.out;
+    if ((roots ?? repositoryRoots()).some((repo) => isInside(out, repo)))
       return {
         refusal: `--out ${cli.out} is inside the repository; recordings of other routes stay outside it`,
       };
@@ -99,7 +95,7 @@ export function recordingTarget(
   }
   if (!isWorkedExampleRoute(cli.args))
     return {
-      refusal: `the committed recorded tree holds only the worked example (--route ${WORKED_EXAMPLE_ROUTE_ARG}); record any other route with --out DIR outside the repository`,
+      refusal: `the repository's recorded tree (local-only, gitignored) holds only the worked example (--route ${WORKED_EXAMPLE_ROUTE_ARG}); record any other route with --out DIR outside the repository`,
     };
   return { root: defaultRecordedRoot(), recordedBy: RECORDED_BY };
 }
@@ -141,9 +137,27 @@ function prepare(
         run: (ports, ctx) => runners.record(ports, parsed.value, ctx),
       };
     }
-    case 'smoke':
-      err('smoke:live is not built yet; WP13 adds it');
-      return { ok: false, code: EXIT.usage };
+    case 'smoke': {
+      const parsed = parseSmokeArgs(argv);
+      if (!parsed.ok) {
+        err(parsed.message);
+        return { ok: false, code: EXIT.usage };
+      }
+      // why: dated smoke fixtures go beside the database, never into the recorded tree (plan decision 61); a
+      // DATABASE_PATH that would put them there is a configuration fault (78). Tests pass their own target, as for recording.
+      const target = given ?? smokeFixtureTarget(config.databasePath);
+      if ('refusal' in target) {
+        err(target.refusal);
+        return { ok: false, code: EXIT.badConfig };
+      }
+      // why: no configuration precheck: zero providers is the smoke's own exit 2, reported by runSmoke (spec §9 item 7)
+      return {
+        ok: true,
+        precheck: null,
+        target,
+        run: (ports, ctx) => runners.smoke(ports, parsed.value, ctx),
+      };
+    }
     default: {
       const unknown: never = name;
       err(`unknown tool ${String(unknown)}; expected record or smoke`);

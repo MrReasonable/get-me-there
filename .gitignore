@@ -24,6 +24,10 @@ apps/*/coverage/
 # raw vendor bodies written beside recorded fixtures (sec-008); never committed, wherever a recorded root lives
 **/fixtures/recorded/**/*.raw.json
 
+# why: smoke:live writes its dated recordings beside the database (<data dir>/smoke/fixtures/recorded, WP13); wherever
+# DATABASE_PATH points inside a checkout, those vendor responses stay out of git (plan decision 61)
+**/smoke/fixtures/recorded/**
+
 # why: recorded vendor responses (Google-Flights-derived SearchApi results, Aviasales cache) may not be
 # republished, so they never enter git. They live on the developer's disk only; the parameter allowlists
 # (params-*.json, our own derived data) and .gitkeep stay tracked. Plan decision 61.

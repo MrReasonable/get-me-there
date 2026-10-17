@@ -27,9 +27,9 @@ import {
 } from '../../src/searchapi/shapes.js';
 import { majorToMinor } from '../../src/shared/money.js';
 import { replayHandlers } from '../../src/testing/index.js';
+import { recordingsPresent, skipTitle } from '../../src/testing/recordings.js';
 import { obj } from '../support/guards.js';
 import { server } from '../support/msw.js';
-import { recordingsPresent, skipTitle } from '../support/recordings.js';
 import { assertEverySentAllowed, ctx, KEY, saKit, sentUrls } from './support/kit.js';
 import {
   byEngine,

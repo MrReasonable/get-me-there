@@ -30,6 +30,7 @@ import { RECORDED_BY } from '../../src/tools/record.js';
 import { parseRecordArgs } from '../../src/tools/recordPlan.js';
 import { SENTINEL_SA, SENTINEL_TP, silentLog, toolEnv } from '../helpers/env.js';
 import { TEST_RECORDED_BY, testRecording } from '../helpers/recording.js';
+import { stubSmokeVendors } from '../helpers/smokeVendors.js';
 import { filesUnder, tempDir } from '../helpers/tmp.js';
 import { stubVendors } from '../helpers/vendors.js';
 
@@ -46,24 +47,24 @@ const DRY = [...ROUTE, '--dry-run'];
 afterEach(() => {
   vi.useRealTimers();
 });
-/** Every file of the committed tree with its size and mtime. */
-function committedTree(): string[] {
+/** Every file of the recorded tree with its size and mtime. */
+function recordedTreeSnapshot(): string[] {
   return filesUnder(defaultRecordedRoot()).map((p) => {
     const st = statSync(p);
     return `${p} ${st.size} ${st.mtimeMs}`;
   });
 }
-// why: no test adds, removes or changes a file in the committed tree (prov-wp04b-006); a snapshot, not a fixed list,
+// why: no test adds, removes or changes a file in the recorded tree (prov-wp04b-006); a snapshot, not a fixed list,
 // so the guard holds before and after Task 12b commits the recorded tree (prov-wp04b-r3-001)
-let committedBefore: string[] = [];
+let recordedBefore: string[] = [];
 beforeAll(() => {
-  committedBefore = committedTree();
+  recordedBefore = recordedTreeSnapshot();
 });
 afterAll(() => {
-  expect(committedTree()).toEqual(committedBefore);
+  expect(recordedTreeSnapshot()).toEqual(recordedBefore);
 });
 
-/** A temp database and a temp recorded tree with the test signature (every runTool test records there, never in the committed tree). */
+/** A temp database and a temp recorded tree with the test signature (every runTool test records there, never in the recorded tree). */
 function harness(dbPath = join(tempDir('gmt-tool-'), 'tool.db'), extra: Record<string, string> = {}) {
   const rec = testRecording();
   const out: string[] = [];
@@ -126,10 +127,10 @@ describe('runTool refusals (spec §5.5, §7, plan decision 20)', () => {
     expect(existsSync(join(dir, 'tool.fixture.db'))).toBe(false);
   });
 
-  it('refuses smoke (WP13) and a missing budget with the usage code', async () => {
+  it('refuses a smoke without its airports and a recording without a budget with the usage code', async () => {
     const h = harness();
     expect(await runTool('smoke', [], h.opts)).toBe(EXIT.usage);
-    expect(h.errors()).toContain('WP13 adds it');
+    expect(h.errors()).toContain('--origin and --destination are required');
     expect(await runTool('record', ['--route', 'LHR:JFK', '--month', '2027-03'], h.opts)).toBe(EXIT.usage);
     expect(h.errors()).toContain('--budget is required');
   });
@@ -271,7 +272,7 @@ describe('runTool success paths', () => {
     );
     expect(text).toContain(`recording into: ${h.root}`);
     expect(text).toContain(
-      'SearchApi window: 0 of 100 used (compare with the dashboard); room 100, this run ≤5',
+      'SearchApi window (trial; SEARCHAPI_TRIAL_USED 0): 0 of 100 used (compare with the dashboard); room 100, this run ≤5',
     );
     expect(text).toContain('Travelpayouts per-run cap (EXECUTION_MAX_FREE_CALLS): 2000');
     expect(text).toContain(
@@ -314,7 +315,7 @@ describe('runTool success paths', () => {
     const again = harness(h.dbPath);
     expect(await runTool('record', ROUTE, again.opts)).toBe(EXIT.spendRefused);
     expect(again.errors()).toContain('credits already ledgered to earlier tool runs');
-    expect(again.text()).toContain('(a live run needs --confirm-rerun)');
+    expect(again.text()).toContain('(a run that calls the vendors needs --confirm-rerun)');
     const confirmed = harness(h.dbPath);
     expect(await runTool('record', [...ROUTE, '--confirm-rerun'], confirmed.opts)).toBe(EXIT.ok);
   }, 30_000);
@@ -324,7 +325,7 @@ describe('runTool success paths', () => {
     const seen = stubVendors();
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain(
-      'a live run would be refused: the SearchApi window has room for 3 credit(s) but this run may use 5',
+      'a run that calls the vendors would be refused: the SearchApi window has room for 3 credit(s) but this run may use 5',
     );
     expect(await runTool('record', [...ROUTE, '--confirm-rerun'], h.opts)).toBe(EXIT.spendRefused);
     expect(h.errors()).toContain('the SearchApi window has room for 3 credit(s)');
@@ -340,6 +341,64 @@ describe('runTool success paths', () => {
     expect(h.text()).toContain('ledger: SearchApi 1 credit(s) of budget 5; Travelpayouts 21 free call(s)'); // the refused 200 was billed
     expect(`${h.text()}${h.errors()}`).not.toContain(SENTINEL_SA);
   });
+
+  it('smoke: the same bootstrap (lock, seed, release); one tile per provider and one chain; exit 0; fixtures in the given tree under its signature (WP13)', async () => {
+    const h = harness();
+    const seen = stubSmokeVendors();
+    expect(await runTool('smoke', ['--origin', 'LHR', '--destination', 'JFK', '--budget', '4'], h.opts)).toBe(
+      EXIT.ok,
+    );
+    const text = h.text();
+    expect(text.indexOf('tool lock acquired')).toBeLessThan(text.indexOf('checklist:'));
+    expect(text.indexOf('checklist:')).toBeLessThan(text.indexOf('tool lock released'));
+    expect(text).toMatch(/^cheapest confirmed price £573 · LHR→JFK /m);
+    expect(text).not.toMatch(/\[FAIL\]/);
+    expect(seen.urls).toHaveLength(5);
+    // why: the recorder writes each redacted recording with its raw body beside it (*.raw.json, gitignored everywhere)
+    const files = filesUnder(h.root).filter((f) => !f.endsWith('.raw.json'));
+    expect(files).toHaveLength(5);
+    for (const f of files)
+      expect(JSON.parse(readFileSync(f, 'utf8'))).toMatchObject({ recordedBy: TEST_RECORDED_BY });
+    expect(
+      count(
+        h.dbPath,
+        "SELECT COUNT(*) AS n FROM search_executions WHERE trigger = 'tool' AND status = 'completed'",
+      ),
+    ).toEqual({ n: 1 });
+    expect(count(h.dbPath, 'SELECT COUNT(*) AS n FROM app_lock')).toEqual({ n: 0 });
+    expect(`${text}${h.errors()}`).not.toContain(SENTINEL_SA);
+  });
+
+  it('smoke refusals go to stderr with their codes: zero providers 2, spend 65 (WP13)', async () => {
+    const none = harness(undefined, { TRAVELPAYOUTS_TOKEN: '', SEARCHAPI_KEY: '' });
+    expect(
+      await runTool('smoke', ['--origin', 'LHR', '--destination', 'JFK', '--budget', '4'], none.opts),
+    ).toBe(EXIT.smokeNoProviders);
+    expect(none.errors()).toContain('no provider configured');
+    const short = harness();
+    stubSmokeVendors();
+    expect(
+      await runTool('smoke', ['--origin', 'LHR', '--destination', 'JFK', '--budget', '3'], short.opts),
+    ).toBe(EXIT.spendRefused);
+    expect(short.errors()).toContain('exceed --budget 3');
+  });
+
+  it('smoke --dry-run: the same bootstrap, the spend position, nothing sent, no execution (decision 66)', async () => {
+    const h = harness();
+    const seen = stubSmokeVendors();
+    expect(
+      await runTool(
+        'smoke',
+        ['--origin', 'LHR', '--destination', 'JFK', '--budget', '4', '--dry-run'],
+        h.opts,
+      ),
+    ).toBe(EXIT.ok);
+    expect(h.text()).toContain('dry run: nothing sent, no execution opened');
+    expect(h.text()).toContain('SearchApi window (trial; SEARCHAPI_TRIAL_USED 0)');
+    expect(h.text().indexOf('dry run: nothing sent')).toBeLessThan(h.text().indexOf('tool lock released'));
+    expect(seen.urls).toEqual([]);
+    expect(count(h.dbPath, 'SELECT COUNT(*) AS n FROM search_executions')).toEqual({ n: 0 });
+  });
 });
 
 describe('where a record run may write (sec2-002 ruling)', () => {
@@ -349,7 +408,7 @@ describe('where a record run may write (sec2-002 ruling)', () => {
     return { ...h, opts };
   }
 
-  it('the committed tree takes only the worked example: another route without --out refuses with 64 before anything is opened', async () => {
+  it('the recorded tree takes only the worked example: another route without --out refuses with 64 before anything is opened', async () => {
     const h = bare();
     expect(
       await runTool(
@@ -359,7 +418,7 @@ describe('where a record run may write (sec2-002 ruling)', () => {
       ),
     ).toBe(EXIT.usage);
     expect(h.errors()).toContain(
-      'the committed recorded tree holds only the worked example (--route LHR,LGW:JFK,EWR)',
+      "the repository's recorded tree (local-only, gitignored) holds only the worked example (--route LHR,LGW:JFK,EWR)",
     );
     expect(existsSync(h.dbPath)).toBe(false);
   });
@@ -391,7 +450,7 @@ describe('where a record run may write (sec2-002 ruling)', () => {
     expect(h.text()).toContain(`recording into: ${join(out, 'fixtures', 'recorded')}`);
   });
 
-  it('the worked example without --out writes the committed tree (the dry run names it; nothing is written)', async () => {
+  it('the worked example without --out writes the recorded tree (the dry run names it; nothing is written)', async () => {
     const h = bare();
     expect(await runTool('record', DRY, h.opts)).toBe(EXIT.ok);
     expect(h.text()).toContain(`recording into: ${defaultRecordedRoot()}`);
@@ -616,7 +675,7 @@ describe('recordingTarget (sec2-002 ruling, r3-ts-004)', () => {
     const given = { root: '/tmp/x/fixtures/recorded', recordedBy: TEST_RECORDED_BY };
     expect(recordingTarget(cli(other), given)).toBe(given);
   });
-  it('the worked example without --out records the committed tree under RECORDED_BY', () => {
+  it('the worked example without --out records the recorded tree under RECORDED_BY', () => {
     expect(recordingTarget(cli(example), undefined)).toEqual({
       root: defaultRecordedRoot(),
       recordedBy: RECORDED_BY,

@@ -1,4 +1,4 @@
-// The committed-tree manifest as a function of a root (r2-ts-002), so every predicate is proven against a known-good
+// The recorded-tree manifest as a function of a root (r2-ts-002), so every predicate is proven against a known-good
 // tree recorded from the stand-ins, and against broken copies, before it ever meets the live recording.
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -44,7 +44,7 @@ const REQUEST_HOST: Readonly<Record<string, string>> = {
 /**
  * Every way `root` differs from the worked example's recorded tree (brief WP4b section 7); empty = conforming.
  * `recordedBy` is the one signature every file must carry; `standInsAllowed` is true only for trees recorded from the
- * test stand-ins, whose identifiers carry STANDIN_MARKER (the committed tree must never hold one).
+ * test stand-ins, whose identifiers carry STANDIN_MARKER (the recorded tree must never hold one).
  */
 export function checkWorkedExampleTree(
   root: string,
@@ -72,7 +72,7 @@ export function checkWorkedExampleTree(
   if (!opts.standInsAllowed)
     for (const f of all)
       if (holdsStandInMarker(JSON.stringify([f.request, f.body])))
-        fail(`a ${f.providerId} file holds the test stand-ins' marker: stand-in data in the committed tree`);
+        fail(`a ${f.providerId} file holds the test stand-ins' marker: stand-in data in the recorded tree`);
 
   // replay distinctness (plan decision 20)
   const statuses = new Map<string, Set<number>>();

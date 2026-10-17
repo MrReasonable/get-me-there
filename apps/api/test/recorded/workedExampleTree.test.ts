@@ -1,4 +1,4 @@
-// Every predicate of the committed-tree check passes on a known-good tree recorded from the stand-ins and fails on a
+// Every predicate of the recorded-tree check passes on a known-good tree recorded from the stand-ins and fails on a
 // broken copy (r2-ts-002), before it ever meets the live recording; the stand-in tripwire catches a test tree
 // signed as a real one (prov-wp04b-006).
 import { copyFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -42,7 +42,7 @@ function rewrite(
   renameSync(path, next);
 }
 
-describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
+describe('checkWorkedExampleTree (the recorded-tree manifest)', () => {
   it('accepts a known-good tree recorded from the stand-ins', async () => {
     const { root } = await runRecording();
     expect(checkWorkedExampleTree(root, OK)).toEqual([]);
@@ -53,7 +53,7 @@ describe('checkWorkedExampleTree (the committed-tree manifest)', () => {
     const problems = checkWorkedExampleTree(root, { recordedBy: RECORDED_BY, standInsAllowed: false });
     expect(problems).toContain(`recordedBy ${TEST_RECORDED_BY} on a searchapi file`);
     expect(problems).toContain(
-      "a searchapi file holds the test stand-ins' marker: stand-in data in the committed tree",
+      "a searchapi file holds the test stand-ins' marker: stand-in data in the recorded tree",
     );
   });
 

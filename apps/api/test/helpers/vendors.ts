@@ -1,5 +1,5 @@
 // In-process stand-ins for the two vendors, shaped like spec §2 facts 1–5. Test bodies only; never committed: every
-// identifier they invent carries STANDIN_MARKER, and the committed-tree check rejects any file holding it (prov-wp04b-006).
+// identifier they invent carries STANDIN_MARKER, and the recorded-tree check rejects any file holding it (prov-wp04b-006).
 // why: msw is imported only by @gmt/providers/testing (plan decision 7). While stubbed, this function replaces the
 // msw-patched fetch, so it is itself the barrier: it answers the two vendor hosts and throws for any other host; WP4's
 // network guards (test/support/setup.ts) cover every test that does not stub fetch (r2-ts-006).
@@ -7,7 +7,7 @@ import { vi } from 'vitest';
 import { SENTINEL_SA, SENTINEL_TP } from './env.js';
 
 /**
- * The marker every stand-in identifier carries; the committed-tree check fails on it. why: a token that cannot occur in
+ * The marker every stand-in identifier carries; the recorded-tree check fails on it. why: a token that cannot occur in
  * vendor text, matched case-sensitively, so 'Outstanding legroom' in a real body never trips it (r3-ts-002).
  */
 export const STANDIN_MARKER = 'gmt-standin-7f3a';

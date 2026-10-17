@@ -6,9 +6,9 @@ import { loadParamsAllowlist } from '@gmt/providers';
 import { loadRecorded, verifyRecordedTree } from '@gmt/providers/testing';
 import { describe, expect, it } from 'vitest';
 import { failureOf, recordFixtures } from '../../src/tools/record.js';
-import { priorToolCredits } from '../../src/tools/recordExecution.js';
 import { assessRun } from '../../src/tools/recordReport.js';
 import { cheapestCalendarCell, cheapestOption } from '../../src/tools/recordRequests.js';
+import { priorToolCredits } from '../../src/tools/toolExecution.js';
 import { RecordingFailedError } from '../../src/tools/types.js';
 import { SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
 import {

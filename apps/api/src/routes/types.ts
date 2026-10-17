@@ -16,16 +16,16 @@ export type AppEnv = { Variables: AppVariables };
 
 export type ToolRunResponse = z.infer<typeof apiContract.toolRunResponseSchema>;
 export type ToolRecordRequest = z.infer<typeof apiContract.toolRecordRequestSchema>;
+export type ToolSmokeRequest = z.infer<typeof apiContract.toolSmokeRequestSchema>;
 /**
  * The tools the HTTP surface runs in-process; an absent runner answers 503 tool_unavailable. why: named apart from
  * WP4b's `ToolRunners` in `bootstrap/tool.ts` (the CLI's runners, a different shape) so the two never shadow.
  */
 export interface HttpToolRunners {
   record?: (args: ToolRecordRequest, signal: AbortSignal) => Promise<ToolRunResponse>;
+  /** Spec §10 `/tools/smoke` (WP13): the smoke inside the app process, which holds app_lock. */
+  smoke?: (args: ToolSmokeRequest, signal: AbortSignal) => Promise<ToolRunResponse>;
 }
-
-/** ROUTES entries another package mounts (plan decision 4). WP13 adds the smoke handler and removes its key. */
-export const OWNED_ELSEWHERE: ReadonlySet<string> = new Set(['POST /api/tools/smoke']);
 
 /** The raw inputs of one request: the JSON body (undefined when empty), the query record, the path parameters. */
 export interface RawInput {

@@ -392,21 +392,24 @@ Recording spends SearchApi credits up to `--budget` (choose a month inside the n
 
 ## 10. Exit codes
 
-Every command-line entry point (the app itself, `pnpm record:fixtures`,
+Every command-line entry point (the app itself, `pnpm record:fixtures`, `pnpm smoke:live`,
 `node scripts/backup.mjs`, `node scripts/check-backup.mjs`) and the `exitCode` of the
-`/api/tools/*` routes use this one table:
+`/api/tools/*` routes use this one table. Codes `2` and `3` come only from the smoke test
+(section 13):
 
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | a tool run failed (recording: a required call did not return its expected status; the backup scripts: the built packages could not be loaded), or the app's shutdown timed out or failed |
+| 1 | a tool run failed (recording: a required call did not return its expected status; smoke test: a provider failed or a checklist line reads `FAIL`; the backup scripts: the built packages could not be loaded), or the app's shutdown timed out or failed |
+| 2 | smoke test: no provider is configured; nothing was sent |
+| 3 | smoke test: no error, but a provider had no price for the searched days (an Aviasales cache without a row for that month is common; try the other destination) |
 | 64 | bad arguments (usage), or a recording of another route than the worked example without `--out DIR` outside the repository |
-| 65 | recording refused for spend: it would exceed `--budget` with earlier recordings (rerun with `--confirm-rerun`), or a provider's budget window has less room than the run needs |
+| 65 | a recording or smoke test refused for spend: with earlier tool runs in this database it would exceed the budget you gave (raise it only when you mean to spend more), or a provider's budget window has less room than the run needs |
 | 70 | refused because `NODE_ENV=test`, or because fixture data is enabled |
 | 73 | the data directory or `<data dir>/backups` is not writable, the database lock cannot be read, or the pre-migration backup cannot be attempted |
 | 74 | a backup failed (boot, `scripts/backup.mjs`) or is unusable (`scripts/check-backup.mjs`); at boot, migrations were not applied |
 | 75 | the database lock is held by another running app or tool |
-| 78 | bad configuration; the message names every variable to fix |
+| 78 | bad configuration; the message names every variable to fix (for the smoke test, also a `DATABASE_PATH` that would put its fixtures inside the repository's recorded fixture tree) |
 
 With `restart: unless-stopped`, an app that exits 73, 74, 75 or 78 restarts and fails the same
 way until you fix the cause; `docker compose logs app` shows the message. The health check's
@@ -464,3 +467,68 @@ export ALERT_EMAIL_TO=operator@example.com ALERT_EMAIL_FROM=get-me-there@example
 
 Messages appear at <http://127.0.0.1:8025>. `SMTP_TLS=none` is accepted only for a loopback
 host; the container never uses Mailpit.
+
+## 13. The smoke test
+
+The smoke test asks each configured provider for one small search and checks what comes back:
+Travelpayouts one month of cached prices (a free call), SearchApi one date grid and one
+itinerary search for its cheapest day pair (at most 4 credits). It prints the cheapest price a
+seller confirmed (or, without one, the cheapest calendar price, labelled as such, with its
+age), then a checklist. Run it after setup, after changing a key, and whenever prices look
+wrong.
+
+Each database keeps its own count of the SearchApi credits tool runs have used (smoke tests and
+fixture recordings): the container's volume one, a development checkout's `data/dev.db`
+another. `budget` is the most that count may reach in the current budget window, this run
+included. On the trial plan, first set `SEARCHAPI_TRIAL_USED` in `.env` to the credits the
+SearchApi dashboard shows as used before this app counted any, so the app's window matches the
+vendor's.
+
+Start with a dry run. It sends nothing and shows the count so far, the plan and the window;
+curl asks for the password:
+
+```bash
+curl -u operator -H 'Content-Type: application/json' -H 'X-Requested-With: get-me-there' \
+  -X POST http://127.0.0.1:3000/api/tools/smoke -d '{"origin":"LHR","destination":"JFK","budget":8,"dryRun":true}'
+```
+
+Read the line that starts `SearchApi credits already ledgered to tool runs in this budget
+window: N`. Choose `budget` as N plus 4, then send the same request without `"dryRun":true`.
+When this run's 4 credits would go beyond `budget`, or the window has no room left, the smoke
+test refuses with code 65 before sending anything. The answer's `exitCode` uses the table in
+section 10, and `lines` holds the report. The app writes no fixtures for a smoke test it runs.
+
+With the app stopped, on a development checkout, the same test runs from the command line
+against that checkout's database:
+
+```bash
+pnpm smoke:live --origin LHR --destination JFK --budget 8 --dry-run
+pnpm smoke:live --origin LHR --destination JFK --budget 8
+```
+
+It also writes what the vendors answered, dated, under `smoke/fixtures/recorded` beside the
+database (`data/smoke/fixtures/recorded` for `data/dev.db`). Git ignores those files and they
+stay on that machine, like every recorded vendor response (section 8).
+
+Each checklist line reads `ok`, `FAIL`, `skip` or `look`:
+
+- `one tile per provider`, `tiles read whole`: each provider was asked once, and every page
+  and day of its answer was read.
+- `ledger`: every answer the run received has its own row in the database's request log, with
+  the same endpoint and status (retried attempts are counted separately), and the credits stayed
+  inside this run's limit.
+- `provenance`: each price shown carries the source kind, age limit and point of sale its
+  provider's adapter declares, and was fetched during this run. The stored records are checked
+  by the app's own tests.
+- `airport pairs (metro rule)`: both providers were asked for the airports you named, never a
+  city code.
+- `9-day rectangle`, `step 1 = step 2`, `sellers`: SearchApi accepted the date grid the app
+  uses, the return search priced the outbound it was asked about at the same price, and at
+  least one offer was confirmed by a seller; an offer the last step did not confirm reads
+  "price not confirmed by the final step".
+- `open-jaw drop`, `age labels`, `separate tickets excluded` (`look`): compare these by eye with
+  Google Flights and Aviasales for the same airports and dates; `open-jaw drop` lists the days
+  where Travelpayouts rows that fly back to another airport were left out.
+
+Codes `2` and `3` are not faults of the app: `2` means no provider key is set; `3` means a
+provider had no price for those days.
