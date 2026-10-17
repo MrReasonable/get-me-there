@@ -1,4 +1,10 @@
-import { budgetScopeLabel, type CapabilityInfo, formatDuration, type ProviderId } from '@gmt/core';
+import {
+  budgetScopeLabel,
+  type CapabilityInfo,
+  formatDuration,
+  type ProviderId,
+  sourceLabel,
+} from '@gmt/core';
 import { useProviders } from '../../api/queries.js';
 import type { UsageRow } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
@@ -13,7 +19,7 @@ function maxAgeText(h: CapabilityInfo['maxAgeHours']): string {
 function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   return (
     <div>
-      <p>{COPY.capability(title, COPY.source[info.sourceKind], maxAgeText(info.maxAgeHours))}</p>
+      <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info.maxAgeHours))}</p>
       <p className="text-slate-700">{info.provenanceNote}</p>
     </div>
   );

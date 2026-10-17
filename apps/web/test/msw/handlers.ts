@@ -42,6 +42,8 @@ const url = (path: string) => `${API}${path.slice('/api'.length)}`;
 /** Default API: one definition, both providers, a completed run with two itinerary rows. */
 export const handlers = [
   ...wp10Handlers,
+  http.get(url('/api/alerts'), () => HttpResponse.json([])),
+  http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
   http.get(url('/api/definitions'), () => HttpResponse.json([definition()])),
   http.get(url('/api/definitions/:id/results'), () => HttpResponse.json(resultsResponse())),

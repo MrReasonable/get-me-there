@@ -1,4 +1,4 @@
-import type { ProviderId, SourceKind } from '@gmt/core';
+import { type ProviderId, SOURCE_LABELS, type SourceKind, sourceLabel } from '@gmt/core';
 import type { ProvidersResponse } from '../api/types.js';
 import { COPY } from '../copy.js';
 
@@ -13,7 +13,7 @@ export function discoverySourceLabel(
 ): string {
   const capability =
     providers?.providers.find((p) => p.providerId === providerId)?.capabilities.discovery ?? null;
-  return capability === null ? COPY.provider[providerId] : COPY.source[capability.sourceKind];
+  return capability === null ? COPY.provider[providerId] : sourceLabel(capability);
 }
 
 /**
@@ -21,5 +21,5 @@ export function discoverySourceLabel(
  * kind; if a series mixes kinds every one is named, never only the first.
  */
 export function sourceLabelOf(kinds: Iterable<SourceKind>): string {
-  return [...new Set(kinds)].map((k) => COPY.source[k]).join(' / ');
+  return [...new Set(kinds)].map((k) => SOURCE_LABELS[k]).join(' / ');
 }

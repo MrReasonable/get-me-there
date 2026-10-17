@@ -3,6 +3,7 @@ import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../src/App.js';
 import { AppBoundary } from '../../src/components/AppBoundary.js';
+import { COPY } from '../../src/copy.js';
 import { API, definition, providersResponse } from '../fixtures.js';
 import { expectConsoleErrors } from '../guards.js';
 import { server } from '../msw/server.js';
@@ -42,10 +43,10 @@ describe('shell (spec §11 layout)', () => {
     expect(screen.getByRole('main')).toHaveAttribute('id', 'main');
   });
 
-  it.each(['alerts'])('%s is a placeholder that names no work package', async (view) => {
-    renderWithProviders(<App />, { search: `?view=${view}` });
-    expect(await screen.findByText('This view is not available yet.')).toBeInTheDocument();
-    expect(screen.queryByText(/WP1/)).toBeNull();
+  it('alerts renders the Alerts view for the selected definition', async () => {
+    renderWithProviders(<App />, { search: '?view=alerts&def=def-0001' });
+    expect(await screen.findByRole('heading', { name: COPY.alertsView.heading })).toBeInTheDocument();
+    expect(screen.queryByText(COPY.placeholder)).toBeNull();
   });
 
   it('definition selector lists definitions and writes def= to the URL', async () => {

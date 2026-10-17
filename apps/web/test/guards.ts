@@ -45,7 +45,7 @@ export function renderedCopy(): string {
 
 /**
  * Every "£" in the DOM sits inside a PriceCell (a fare, with provenance), a [data-cost] element (a cost
- * or a cap), a [data-scale] element (WP10: the heatmap legend's band ranges, scale values only; no fare is ever
+ * or a cap), a [data-quote] element (a price quoted in text: an alert threshold or firing reason, decision 55), a [data-scale] element (WP10: the heatmap legend's band ranges, scale values only; no fare is ever
  * exempt, chart tooltips included, and chart axes print no "£": plan decision 52), a [data-indicative] row (WP10:
  * a route-level series, exempt from full provenance by spec §11) or a form label ("Max price (£)"), on every view
  * (reviews tsr-003, prov-r2-007).
@@ -57,8 +57,9 @@ export function poundsOutsidePrices(): string[] {
     const host = n.parentElement;
     if (
       n.textContent?.includes('£') &&
-      host?.closest('[data-testid="price-cell"], [data-cost], [data-scale], [data-indicative], label') ===
-        null
+      host?.closest(
+        '[data-testid="price-cell"], [data-cost], [data-scale], [data-indicative], [data-quote], label',
+      ) === null
     ) {
       outside.push(n.textContent);
     }

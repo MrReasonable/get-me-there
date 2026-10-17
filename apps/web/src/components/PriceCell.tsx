@@ -1,4 +1,4 @@
-import { type ConstraintName, effectiveAge, formatAgeFull, type Verdicts } from '@gmt/core';
+import { type ConstraintName, effectiveAge, formatAgeFull, sourceLabel, type Verdicts } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
@@ -68,7 +68,7 @@ export function PriceCell(props: PriceCellProps) {
   const calendar = isCalendarPrice(p, props.calendar);
   const detail = [
     COPY.provider[p.providerId],
-    COPY.source[p.sourceKind],
+    sourceLabel(p),
     formatAgeFull(age),
     ...(calendar ? [COPY.constraintsNotChecked] : []),
   ];

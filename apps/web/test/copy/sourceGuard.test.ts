@@ -31,6 +31,8 @@ const COPY_ATTRS = new Set([
 /** The files allowed to format money: PriceCell for prices, and the views that show costs and caps (never a fare). */
 const MONEY_FORMATTERS = new Set(['formatPence', 'formatMicroGbp']);
 const MONEY_FILES = new Set([
+  // why: decision 55 — a rule's threshold is a price quoted in text, rendered inside [data-quote], never a fare
+  'src/views/Alerts/ruleText.ts',
   'src/format.ts',
   'src/components/PriceCell.tsx',
   'src/components/StatusBar.tsx',

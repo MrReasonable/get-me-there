@@ -1,3 +1,4 @@
+import { SOURCE_LABELS } from '@gmt/core';
 import { expect, test } from '@playwright/test';
 import { COPY } from '../src/copy.js';
 import { SMOKE } from './selectors.js';
@@ -31,7 +32,7 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
     await page.goto('/?view=results');
     await expect(headline).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 90_000 });
-  await expect(headline).toContainText(COPY.source.synthetic);
+  await expect(headline).toContainText(SOURCE_LABELS.synthetic);
   await expect(headline).toContainText(/ago|just now/);
   const banner = page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
   await expect(banner).toBeVisible();
@@ -58,13 +59,13 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
     page.getByRole('figure', { name: COPY.durationView.chartTitle }).locator('svg[role="application"]'),
   ).toBeVisible();
   await expect(page.getByRole('table', { name: COPY.durationView.tableCaption })).toContainText(
-    COPY.source.synthetic,
+    SOURCE_LABELS.synthetic,
   );
   await page.goto('/?view=history');
   await expect(
     page.getByRole('figure', { name: COPY.historyView.fetchChartTitle }).locator('svg[role="application"]'),
   ).toBeVisible();
-  await expect(page.getByRole('table').first()).toContainText(COPY.source.synthetic);
+  await expect(page.getByRole('table').first()).toContainText(SOURCE_LABELS.synthetic);
 });
 
 test('at 375px the calendar shows one month of compact days, nothing spilling out of its cell @phone', async ({
