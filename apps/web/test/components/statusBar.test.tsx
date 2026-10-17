@@ -14,7 +14,7 @@ import {
   usage,
 } from '../fixtures.js';
 import { server } from '../msw/server.js';
-import { renderWithProviders } from '../render.js';
+import { renderWithProviders, settled } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
 
 const bar = (over: Parameters<typeof definition>[0] = {}, showRunNow = true) => (
@@ -203,14 +203,16 @@ describe('status bar (spec §11)', () => {
         return HttpResponse.json({ executionId: 'exec-0002' });
       }),
     );
-    const { user } = renderWithProviders(bar());
+    const { user, client } = renderWithProviders(bar());
     await user.click(await screen.findByRole('button', { name: /Run now/ }));
     const working = await screen.findByRole('button', { name: 'Working…' });
     expect(working).toBeDisabled();
     expect(working).toHaveAttribute('aria-busy', 'true');
     await user.click(working);
     release();
-    await expect.poll(() => posts).toBe(1);
+    // why: wait until the mutation and every refetch it caused settled, so a late second POST would be counted.
+    await settled(client);
+    expect(posts).toBe(1);
   });
 
   it('at 375px the numbers of a finished run fold into one disclosure; an active run keeps them open (UI-14, UI-006)', async () => {
