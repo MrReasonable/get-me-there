@@ -5,12 +5,12 @@ owner: sonnet
 depends_on: [7, 8, 10]
 spec_sections: ["§3 (effective age, rev 23)", "§5.2", "§5.3", "§5.5", "§6.2", "§6.8", "§7 (alert_events)", "§8.1", "§8.3", "§11", "§12", "§14", "§9 item 4", "§9 item 6"]
 reviewers: [code-architect, test-strategy-reviewer, provenance-auditor, product-owner, persona-flexible-traveller, security-reviewer]
-status: draft
+status: reviewed
 ---
 
 # WP11: alerts runner, digest templates, EmailNotifier, Alerts UI
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 24: §3, §5.5, §6.8, §7, §8.1, §8.3, §11, §12, §14) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`: "Global Constraints", the Notifier, Alert types, Database, Core domain functions, Engine and Web contracts, and decisions 1–56, especially 10, 14, 21, 24, 25, 27, 30, 36, 37, 44–49, 52 and 54–56) before Task 11.0. Revised on 2026-10-17 after review round 1 (51 findings) against main at `a2999df` (WP0–WP7 merged; decisions 55 and 56 rule on the findings that needed judgment). Every core, db, engine and api code block below was assembled on a scratch worktree of main and replayed task by task (§13 item 1 says what stood in for WP8); the web tasks follow the reviewed WP9 and WP10 briefs, which are not on main yet, and are marked blocked until they merge.
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Work task by task: failing test, run, minimal code, run, commit. Steps use `- [ ]` checkboxes. Read the spec (`docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md`, revision 25: §3, §5.5, §6.8, §7, §8.1, §8.3, §11, §12, §14) and the plan (`docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`: "Global Constraints", the Notifier, Alert types, Database, Core domain functions, Engine and Web contracts, and decisions 1–59, especially 10, 14, 21, 24, 25, 27, 30, 36, 37, 44–49, 52, 54–56, 58 and 59) before Task 11.0. Revised on 2026-10-17 after review rounds 1 (51 findings) and 2 (11 findings) against main at `09ed619` (WP0–WP7 merged; decisions 55, 56 and 59 rule on the findings that needed judgment). Every core, db, engine and api code block below was assembled on a scratch worktree of main and replayed task by task (§13 item 1 says what stood in for WP8); the web tasks follow the reviewed WP9 and WP10 briefs, which are not on main yet, and are marked blocked until they merge.
 
 ## 1. Goal
 
@@ -20,11 +20,11 @@ Turn the prices an execution wrote into at most one plain-text email per alert r
 
 **In**
 
-- **Core (Task 11.0):** `alertEventPayloadSchema` and `AlertEventPayload` (decision 56: one payload schema the engine writes and the web reads); event statuses `queued | notified | suppressed`; `sourceLabel(provenance)` and `SOURCE_LABELS`, the one copy of the §11 source wording; `ALERT_EMAIL_MAX_PER_HOUR` in config (`Config.alertEmailMaxPerHour`, default 20); `ALERT_EMAIL_TO`/`ALERT_EMAIL_FROM` validated as one mailbox each (`isMailbox`); `APP_BASE_URL` refused with userinfo, a query or a fragment; `smtpPlaintextAllowed`, the one copy of the SMTP_TLS=none rule.
-- **Db (Task 11.0b):** migration `0002_alert_event_lifecycle` (the status CHECK, old rows mapped); `AlertsRepo.eventsForExecution(ruleId, executionId)` and `AlertsRepo.updateEvents(ids, patch)`; `priorFirings` counts `notified` firings only and never a "new" listing; `NotificationsRepo.lastSent(kind, definitionId)`.
+- **Core (Task 11.0):** `alertEventPayloadSchema` and `AlertEventPayload` (decision 56: one payload schema the engine writes and the web reads); event statuses `queued | notified | suppressed`; `sourceLabel(provenance)` and `SOURCE_LABELS`, the one copy of the §11 source wording; `ALERT_EMAIL_MAX_PER_HOUR` in config (`Config.alertEmailMaxPerHour`, default 20); `ALERT_EMAIL_TO`/`ALERT_EMAIL_FROM` validated as one mailbox each (`isMailbox`); `APP_BASE_URL` refused with userinfo, a query or a fragment; `smtpPlaintextAllowed`, the one copy of the SMTP_TLS=none rule; the payload's verdict class built from the shared `verdictClassSchema` (decision 59).
+- **Db (Task 11.0b):** migration `0002_alert_event_lifecycle` (the status CHECK, old rows mapped); `AlertsRepo.eventsForExecution(ruleId, executionId)` and `AlertsRepo.updateEvents(ids, patch)` (status, and on a successful retry the reason, fire time and digest id, decision 59); `priorFirings` counts `notified` firings only and never a "new" listing; `NotificationsRepo.lastSent(kind, definitionId)`.
 - **Engine:**
   - `src/text.ts`: `controlFree` and `stripControl`, the engine's one cleaner (WP7's `cleanLine` is redefined on it).
-  - `src/alerts/context.ts`, `pools.ts`, `marks.ts`, `templates.ts`, `runner.ts`: `runAlerts`, the `AlertsStepHook` WP7's engine calls after a pass that completed or paused for a budget cap (decision 25). It gathers candidates per basis (refusing synthetic rows, leaving out unconfirmed prices, measuring a drop against a confirmed previous price only), skips rows an earlier pass of the same execution recorded (a db query, decision 56), evaluates rules (core), reads the marks `DigestItem` does not carry, persists the firings as `queued` events, builds and renders one digest per rule, sends it, and marks the events `notified`.
+  - `src/alerts/context.ts`, `pools.ts`, `marks.ts`, `templates.ts`, `runner.ts`: `runAlerts`, the `AlertsStepHook` WP7's engine calls after a pass that completed or paused for a budget cap (decision 25). It gathers candidates per basis (refusing synthetic rows, leaving out unconfirmed prices, measuring a drop against a confirmed previous price only), skips rows an earlier pass of the same execution recorded (a db query, decision 56), evaluates rules (core), reads the marks `DigestItem` does not carry, persists the firings as `queued` events, builds and renders one digest per rule, sends it, and marks the events `notified` — or `suppressed` with "email not configured" when no SMTP is configured, or still `queued` with the failure and whether a retry will come (decision 59). WP7's `AlertsStepHook` gains a third argument, `AlertsPass`, saying whether the pass completed or stopped on a budget cap.
   - `src/notifiers/email.ts`, `src/notifiers/index.ts`: `EmailNotifier` over nodemailer 10 (explicit timeouts, one-mailbox re-check, the outgoing ceiling, scrubbed and URL-stripped error details, codes-only logging) and `buildNotifiers(config, log, clock)`.
   - WP7's `src/notify.ts`: operator messages at most once per kind per definition per London day (decision 56).
 - **Api (Task 11.8):** `apps/api/src/bootstrap/engine.ts` `engineFor(ports, log)`, which WP8's `bootApp` calls, so the production wiring has a test.
@@ -33,7 +33,7 @@ Turn the prices an execution wrote into at most one plain-text email per alert r
 **Out**
 
 - `@gmt/core`, WP2 (merged): `evaluateAlertRules` (eligibility, identity settling, the `isNew` rule, the cooldown and its reasons), `buildDigest`, `identityKey`, `evaluateConstraints`, `verdictClass`, `unverifiedNames`, `searchLinkFor`, `resultRowKey`, `validateVendorUrl`, `formatPence`, `CONSTRAINT_LABELS`, `stripControlChars`, `isTruncated`.
-- `@gmt/core`, WP8 (decisions 55, 56): `isStale(provenance, now, thresholdHours)` and the unknown-age wording of `formatAgeFull` ("vendor's cache age unknown"). This WP consumes both and adds neither.
+- `@gmt/core`, WP8 (decisions 55, 56, 58, 59): `isStale(provenance, now, thresholdHours)`, the unknown-age wording of `formatAgeFull` ("vendor's cache age unknown") and the exported whole-hour helper `hoursSince`. This WP consumes all three and adds none.
 - `@gmt/engine`, WP7 (merged): `createEngine(deps, { alerts })`, `noAlerts`, when the alerts step runs (`execute.ts`), `LogNotifier` and `containsSynthetic`, `renderOperatorMessage`, the "alerts running on calendar basis only" notice, the layer-A harness.
 - `apps/api`, WP8: the `/api/alerts` routes and the rest of `bootApp`.
 - `apps/web`, WP9 and WP10: the shell, `call`, `PriceCell`, `PriceBoundary`, `format.ts`, `now.tsx`, the copy catalogue and its guards, `renderWithProviders`, the msw server and fixtures.
@@ -45,25 +45,25 @@ Turn the prices an execution wrote into at most one plain-text email per alert r
   - The rule shape, with `cooldownHours` defaulting to 336; `requireAllVerified` on the verified basis only.
   - **Itinerary-search (verified) basis.** Identity `(ruleId, itineraryHash)`. Candidates are the observations written by the current execution in the definition's cabin, verdicts recomputed against the current definition (§6.2); `partially-verified` counts only when `requireAllVerified` is false. A drop compares an offer's observation with its newest earlier **confirmed** observation (decisions 37, 45; review PA-1).
   - **Calendar basis.** Identity `(ruleId, providerId, cabin, cellKey)`. Candidates are the calendar prices fetched by the current execution in the definition's cabin; reused rows are excluded. A drop compares only with a previous price fetched within 2 × `discoveryRefreshHours` (167, 168 and 169 h tested); an absent-then-present price, or one whose previous price is older, is listed in the "new" section with that previous price and the fetch gap (review PA-9) and is never a drop firing; absolute rules still apply to it.
-  - Suppression: the same `dedupKey` fired less than `cooldownHours` ago, or the same identity at a price not at least max(£10, 5%) lower; suppressed firings are recorded with status `suppressed` and their reason. Synthetic rows are refused. One digest per rule per **stop** of an execution, the top 10 and a count of the rest (decision 55: a paused_budget stop and the later completion may each send one; neither repeats a firing).
-- **§7, §8.1; decision 56.** Spec order "persist events → notify digests": every firing and every "new" listing is written as a `queued` event in one transaction before the email is sent, and marked `notified` once every notifier accepted it; a failed send leaves it queued (with the failure in its reason) and the next pass of the same execution sends it on the same row. Rows an earlier pass recorded are found by a db query on (rule, execution).
-- **§3 (rev 23), §8.1; decisions 44, 54, 55, 56.** Staleness is core's `isStale` by effective age: the observed age, else the fetch age plus a known `maxAgeHours`, else the fetch age alone — so a price whose vendor age is unknown is still stale when its fetch age alone exceeds the threshold (`STALE_AFTER_HOURS` on the verified basis; on the calendar basis `CALENDAR_STALE_AFTER_HOURS`, else the provider's refresh plus its declared age). The unknown-age label is core's ("vendor's cache age unknown").
+  - Suppression: the same `dedupKey` fired less than `cooldownHours` ago, or the same identity at a price not at least max(£10, 5%) lower; suppressed firings are recorded with status `suppressed` and their reason. The cooldown counts `notified` events only (decision 59). Synthetic rows are refused. One digest per rule per **stop** of an execution, the top 10 and a count of the rest (decision 55: a paused_budget stop and the later completion may each send one; neither repeats a firing).
+- **§7, §8.1; decision 56.** Spec order "persist events → notify digests": every firing and every "new" listing is written as a `queued` event in one transaction before the email is sent, and marked `notified` once every notifier accepted it; a failed send leaves it queued and the next pass of the same execution sends it on the same row. Rows an earlier pass recorded are found by a db query on (rule, execution). **Decision 59:** with no SMTP configured the digest reaches only the log, and its events are recorded `suppressed` ("email not configured"); a queued event's reason says why (send failed, hourly limit, migrated) and whether a retry will come (only a resumed pass of the same execution resends it); a retry that succeeds rewrites the row's reason, fire time and digest id.
+- **§3 (rev 23), §8.1; decisions 44, 54, 55, 56.** Staleness is core's `isStale` by effective age: the observed age (never younger than the fetch age, decision 58), else the fetch age plus a known `maxAgeHours`, else the fetch age alone — so a price whose vendor age is unknown is still stale when its fetch age alone exceeds the threshold (`STALE_AFTER_HOURS` on the verified basis; on the calendar basis `CALENDAR_STALE_AFTER_HOURS`, else the provider's refresh plus its declared age). The unknown-age label is core's ("vendor's cache age unknown").
 - **§6.2, §3 (rev 21, 22); decisions 27, 37, 45.** An offer whose price the final step did not confirm is never alerted on and never the baseline of a drop; the digest states, as a run fact, how many such fares that pass their other constraints the run found.
 - **Decisions 30, 36, 47.** A price from a discovery tile the page cap cut short carries "cheapest of the rows read".
-- **§8.1; decision 54.** "Not seen in latest search" marks a verified-basis fare a newer itinerary search of its cell did not see, with that search's instant (never an invented age, review PA-6); "superseded by a later search" cannot arise at alert time (§13 item 5).
-- **§8.1; decision 25.** The digest of a budget-stopped pass says how many cell searches the cap left undone, and when the itinerary-search stage never ran it says so and gives the count as a lower bound (review PA-2).
-- **§8.3 Notifications.** `EmailNotifier` maps `SMTP_TLS` (implicit → TLS from connect, starttls → `requireTLS`, none → core's `smtpPlaintextAllowed` only) with explicit socket timeouts; plain text only; two subject formats; the body with segments or "calendar price, no itinerary", verdicts naming every unverified constraint, a provenance line with the effective age, a re-validated `https` link with host and expiry (for a POST booking the app's results row), the coverage caveat and the rule. Provider strings: every control character, U+2028/U+2029, and the bidi and zero-width format characters are cleaned (review TS-14, sec-007); a seller or carrier is cut at 200 characters. Synthetic refused. Banned words tested over rendered output.
+- **§8.1; decision 54.** "Not seen in latest search" marks a verified-basis fare a newer itinerary search of its cell did not see, with that search's instant (never an invented age, review PA-6); "superseded by a later search" cannot arise at alert time (§13 item 3).
+- **§8.1; decisions 25, 59.** Only the digest of a pass that stopped on a budget cap says how many cell searches the cap left undone; when that pass's itinerary-search stage never ran it says so and gives the count as a lower bound (review PA-2), never "at least 0". An itinerary search that did not run for another reason (no verification provider registered) reads "itinerary search not run" with no cause (review PA2-1).
+- **§8.3 Notifications.** `EmailNotifier` maps `SMTP_TLS` (implicit → TLS from connect, starttls → `requireTLS`, none → core's `smtpPlaintextAllowed` only) with explicit socket timeouts; plain text only; two subject formats; the body with segments or "calendar price, no itinerary", verdicts naming every unverified constraint, a provenance line with the effective age, a re-validated `https` link with host and expiry (for a POST booking the app's results row), the coverage caveat and the rule. A previous price carries '≈' when FX-converted, like the current one (decision 59). Provider strings: every control character, U+2028/U+2029, and the bidi and zero-width format characters are cleaned (review TS-14, sec-007); a seller or carrier is cut at 200 characters. Synthetic refused. Banned words tested over rendered output.
 - **§5.2, §5.3; decisions 10, 54.** Booking and search links are re-validated at render against `LINK_ALLOWLIST` and keep their query in email; URLs in event reasons and email error details are stripped; the SMTP password never reaches a log line or a reason.
-- **Decision 56.** Operator messages at most once per kind per definition per London day; outgoing email capped at `ALERT_EMAIL_MAX_PER_HOUR` (default 20) per hour, beyond which a message is logged and dropped (a digest's events stay queued for the next pass).
+- **Decision 56.** Operator messages at most once per kind per definition per London day; outgoing email capped at `ALERT_EMAIL_MAX_PER_HOUR` (default 20) per hour, beyond which a message is logged and dropped (a digest's events stay queued, their reason saying whether a retry will come).
 - **§11; decisions 36, 44, 46, 49, 52, 55, 56.** The Alerts view: rule form and events list with status and reason; the fare and the previous price each through `PriceCell`; thresholds and reason text, which quote prices, inside `data-quote`; vocabulary from core's `sourceLabel`; "verified" only beside class-verified values; run times in Europe/London; no cast and no suppression comment.
-- **§12.** `APP_BASE_URL` makes the results-row link absolute (path prefix kept); unset, the link is relative. `ALERT_EMAIL_MAX_PER_HOUR` is new (§13 item 9).
+- **§12.** `APP_BASE_URL` makes the results-row link absolute (path prefix kept); unset, the link is relative. `ALERT_EMAIL_MAX_PER_HOUR` is new (§13 item 7).
 - **§14.** Engine log lines carry `executionId` and `definitionId`; the EmailNotifier logs nodemailer's error code and SMTP response code only.
 - **§9 item 4:** dedup across executions on both bases, digests, synthetic rows refused by alerts and notifiers. **§9 item 6:** banned words over the rendered email and the Alerts view.
 - **§1, Global Constraints:** route-agnostic: no airport, city or country in engine or web source; tests use the worked example (London → New York) only.
 
 ## 4. Interfaces consumed
 
-Copied from the merged code on main (`a2999df`); where the plan's contract text differs, the code is quoted and §13 says so.
+Copied from the merged code on main (`09ed619`); where the plan's contract text differs, the code is quoted and §13 says so.
 
 ```ts
 // @gmt/core — ports/notifier.ts (WP0, as merged after decision 21)
@@ -137,7 +137,7 @@ export function scrubSecrets<T>(value: T, secrets: readonly Secret[]): T;   // t
 
 // @gmt/engine (WP7, as merged)
 export interface EngineDeps { config: Config; db: Db; repos: Repos; budget: BudgetGuard; cache: ResponseCache; http: HttpKit; providers: FlightProvider[]; notifiers: Notifier[]; clock: Clock; log: Logger }
-export type AlertsStepHook = (deps: EngineDeps, executionId: string) => Promise<{ digests: number; events: number }>;
+export type AlertsStepHook = (deps: EngineDeps, executionId: string) => Promise<{ digests: number; events: number }>;   // Task 11.1 adds a third argument, `pass: AlertsPass`
 export interface EngineOptions { alerts?: AlertsStepHook; providerConcurrency?: Partial<Record<ProviderId, number>> }
 export function createEngine(deps: EngineDeps, opts?: EngineOptions): Engine;
 export class LogNotifier implements Notifier { readonly id = 'log'; constructor(log: Logger) }
@@ -156,21 +156,22 @@ export function buildPorts(config: Config, opts: { log: Logger; clock?: Clock; m
 
 **Code that later waves deliver, and what this brief assumes of it** (checked again when wave 7 opens):
 
-1. **WP8, core (decisions 55, 56):** `export function isStale(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime, thresholdHours: number): boolean` — true when the effective age (observed age, else fetch age plus a known `maxAgeHours`, else fetch age alone) exceeds the threshold — and `formatAgeFull` for an unknown vendor age reading `fetched 5h ago · vendor's cache age unknown`. This brief's expected strings use that wording.
-2. **WP8 `bootApp`** (`apps/api/src/bootstrap/app.ts`) builds the engine with `const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });` and the why line "WP11 adds `{ alerts: runAlerts }` to these options". Task 11.8 replaces that statement with a call to `engineFor`.
-3. **WP9's web, as WP10 leaves it:** `call(schema, method, path, opts?)`; `api` in `src/api/endpoints.ts` (`import { apiContract as c } from '@gmt/core'`); `src/api/types.ts` request bodies as `z.input`; `COPY` with `loading`, `placeholder` and `fieldError(field, message)`; `COPY.source` and its readers `COPY.source[x.sourceKind]` (Provenance, PriceCell, the Providers view) and `COPY.source[k]` (`src/lib/sources.ts`); `format.ts` with `formatPence`, `parsePoundsToPence` and `formatRunInstant`; `now.tsx` `useNow()`; `PriceCell` (`pricePence`, `provenance: unknown`, `calendar`, `stale`, `truncated?`, `unconfirmed?`, `notSeenInLatestHours?: number | 'unknown' | null`, root `data-testid="price-cell"`) inside `PriceBoundary`; `test/guards.ts` with `MONEY_FILES` and the sweep's `closest('[data-testid="price-cell"], [data-cost], label')`; `test/copy/catalogue.test.ts` `SAMPLES` and the "verified" `allowed` set; `test/msw/handlers.ts` `url()` and `handlers`; `test/fixtures.ts` `API`, `provSearch`, `provCalendar`; `renderWithProviders(ui, opts?)` returning `user`; `App.tsx`'s `needsDefinition`, `selected` and `{view === 'alerts' ? <Placeholder /> : null}`; `test/app/shell.test.tsx`'s alerts placeholder test.
+1. **WP8, core (decisions 55, 56, 58):** `export function isStale(p: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours'>, now: IsoDateTime, thresholdHours: number): boolean` — true when the effective age (the observed age but never younger than the fetch age, else fetch age plus a known `maxAgeHours`, else fetch age alone) exceeds the threshold — and `formatAgeFull` for an unknown vendor age reading `fetched 5h ago · vendor's cache age unknown`. This brief's expected strings use that wording.
+2. **WP8, core (decision 59):** `export function hoursSince(from: IsoDateTime, now: IsoDateTime): number` from core's barrel — whole hours from `from` to `now`, never negative. WP8 moves it into core and exports it; this brief imports it (Tasks 11.1, 11.2, 11.11) and adds no date helper of its own.
+3. **WP8 `bootApp`** (`apps/api/src/bootstrap/app.ts`) builds the engine with `const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });` and the why line "WP11 adds `{ alerts: runAlerts }` to these options". Task 11.8 replaces that statement with a call to `engineFor`.
+4. **WP9's web, as WP10 leaves it:** `call(schema, method, path, opts?)`; `api` in `src/api/endpoints.ts` (`import { apiContract as c } from '@gmt/core'`); `src/api/types.ts` request bodies as `z.input`; `COPY` with `loading`, `placeholder` and `fieldError(field, message)`; `COPY.source` and its readers `COPY.source[x.sourceKind]` (Provenance, PriceCell, the Providers view) and `COPY.source[k]` (`src/lib/sources.ts`); `format.ts` with `formatPence`, `parsePoundsToPence` and `formatRunInstant`; `now.tsx` `useNow()`; `PriceCell` (`pricePence`, `provenance: unknown`, `calendar`, `stale`, `truncated?`, `unconfirmed?`, `notSeenInLatestHours?: number | 'unknown' | null`, root `data-testid="price-cell"`) inside `PriceBoundary`; `test/guards.ts` with `MONEY_FILES` and the sweep's `closest('[data-testid="price-cell"], [data-cost], label')`; `test/copy/catalogue.test.ts` `SAMPLES` and the "verified" `allowed` set; `test/msw/handlers.ts` `url()` and `handlers`; `test/fixtures.ts` `API`, `provSearch`, `provCalendar`; `renderWithProviders(ui, opts?)` returning `user`; `App.tsx`'s `needsDefinition`, `selected` and `{view === 'alerts' ? <Placeholder /> : null}`; `test/app/shell.test.tsx`'s alerts placeholder test.
 
 ## 5. Interfaces produced
 
 ```ts
 // @gmt/core (Task 11.0)
 export type AlertEventStatus = 'queued' | 'notified' | 'suppressed';            // types/alerts.ts; AlertEvent.status
-export const alertEventPayloadSchema: z.ZodType<AlertEventPayload>;             // api-contract/alerts.ts (apiContract.alertEventPayloadSchema)
+export const alertEventPayloadSchema;   // api-contract/alerts.ts (apiContract.alertEventPayloadSchema), inferred; AlertEventPayload = z.output<typeof alertEventPayloadSchema>:
 export type AlertEventPayload = {
   digestId: string | null; executionId: string; pricePence: number; provenance: Provenance;
   previous: { pricePence: number; provenance: Provenance } | null;                // the drop baseline, or a "new" cell's out-of-window price
   isNew: boolean; route: string /* "LHR→JFK 14 Mar–28 Mar (14n)" */;
-  verdictClass: 'verified' | 'partially-verified' | 'unchecked'; unverified: ConstraintName[];
+  verdictClass: 'verified' | 'partially-verified' | 'unchecked' /* verdictClassSchema less 'failed', plus 'unchecked' */; unverified: ConstraintName[];
   reason: { kind: 'threshold' | 'drop' | 'new'; gapHours: number | null };
   staleThresholdHours: number; truncated: boolean; notSeenInLatest: { at: IsoDateTime | null } | null;
 };
@@ -180,11 +181,16 @@ export function isMailbox(s: string): boolean; export function smtpPlaintextAllo
 // ALERT_EMAIL_TO / ALERT_EMAIL_FROM refuse anything but one mailbox.
 
 // @gmt/db (Task 11.0b)
-// drizzle/0002_alert_event_lifecycle.sql: alert_events.status CHECK (queued, notified, suppressed); sent → notified, failed → queued
+// drizzle/0002_alert_event_lifecycle.sql: alert_events.status CHECK (queued, notified, suppressed); sent → notified, failed → queued (reason: "migrated from a failed send; not retried")
 // AlertsRepo.eventsForExecution(ruleId: string, executionId: string): AlertEvent[]       (oldest first; by the price row's execution)
-// AlertsRepo.updateEvents(ids: readonly number[], patch: { status: AlertEventStatus; reason?: string | null }): void   (one transaction)
+// AlertsRepo.updateEvents(ids: readonly number[], patch: { status: AlertEventStatus; reason?: string | null; firedAt?: IsoDateTime; digestId?: string }): void
+//   (one transaction; a field left out keeps its stored value; digestId is written into payload_json)
 // AlertsRepo.priorFirings: notified events only, never a payload.isNew listing
 // NotificationsRepo.lastSent(kind: OperatorMessageKind, definitionId: string): IsoDateTime | null
+
+// packages/engine/src/types.ts (WP7's, Task 11.1)
+export interface AlertsPass { stop: 'completed' | 'budget' }
+export type AlertsStepHook = (deps: EngineDeps, executionId: string, pass: AlertsPass) => Promise<{ digests: number; events: number }>;
 
 // packages/engine/src/text.ts
 export function controlFree(s: string): string;   // Cc and U+2028/U+2029 → space, hidden format characters removed, no trim
@@ -193,10 +199,10 @@ export function stripControl(s: string): string;  // controlFree, runs collapsed
 // packages/engine/src/alerts/
 export type AlertRunnerDeps = Pick<EngineDeps, 'config' | 'db' | 'repos' | 'providers' | 'notifiers' | 'clock' | 'log'>;   // context.ts
 export interface AlertRunResult { digests: number; events: number }                                                       // runner.ts
-export async function runAlerts(deps: AlertRunnerDeps, executionId: string): Promise<AlertRunResult>;   // an AlertsStepHook; never rejects
-export interface ItemMarks { stale: { thresholdHours: number } | null; truncated: boolean; notSeenInLatest: { at: IsoDateTime | null } | null }   // templates.ts
+export async function runAlerts(deps: AlertRunnerDeps, executionId: string, pass?: AlertsPass): Promise<AlertRunResult>;   // an AlertsStepHook; never rejects; pass defaults to { stop: 'completed' }
+export interface ItemMarks { stale: { thresholdHours: number } | null; truncated: boolean; notSeenInLatest: { at: IsoDateTime | null } | null; previousConverted: boolean }   // templates.ts
 export const NO_MARKS: ItemMarks;
-export interface DigestRenderInput { digest: AlertDigest; definitionName: string; appBaseUrl: string | null; now: IsoDateTime; marks: ReadonlyMap<string, ItemMarks>; budgetUnsearched: number; verificationNotRun: boolean; unconfirmed: number }
+export interface DigestRenderInput { digest: AlertDigest; definitionName: string; appBaseUrl: string | null; now: IsoDateTime; marks: ReadonlyMap<string, ItemMarks>; budgetStop: { unsearched: number } | null /* only after a budget stop */; verificationNotRun: boolean; unconfirmed: number }
 export const MAX_PROVIDER_TEXT = 200;
 export function cellLine(cell: Cell): string; export function routeLine(item: Pick<DigestItem, 'pricePence' | 'provenance' | 'cell'>): string;
 export function renderSubject(item: DigestItem, now: IsoDateTime): string; export function renderBody(input: DigestRenderInput): string;
@@ -224,7 +230,7 @@ export function describeRule(r: AlertRule): string;
 // src/api/types.ts: AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;  src/copy.ts: COPY.alertsView
 ```
 
-`packages/engine/src/index.ts` re-exports `runAlerts`, `AlertRunnerDeps`, `AlertRunResult`, the templates' `appRowLink`, `DigestRenderInput`, `ItemMarks`, `NO_MARKS`, `renderBody`, `renderSubject`, `routeLine`, and the notifier exports above.
+`packages/engine/src/index.ts` re-exports `runAlerts`, `AlertRunnerDeps`, `AlertRunResult`, `AlertsPass`, the templates' `appRowLink`, `DigestRenderInput`, `ItemMarks`, `NO_MARKS`, `renderBody`, `renderSubject`, `routeLine`, and the notifier exports above.
 
 ## 6. Library notes
 
@@ -425,6 +431,9 @@ describe('alertEventPayloadSchema (decision 56)', () => {
   it('accepts the runner payload and refuses a non-integer price, an unknown class or a provenance without its source', () => {
     expect(alertEventPayloadSchema.parse(payload)).toEqual(payload);
     expect(alertEventPayloadSchema.safeParse({ ...payload, pricePence: 412.5 }).success).toBe(false);
+    // the results row's vocabulary less 'failed', derived from verdictClassSchema (decision 59)
+    for (const verdictClass of ['verified', 'partially-verified', 'unchecked'])
+      expect(alertEventPayloadSchema.safeParse({ ...payload, verdictClass }).success).toBe(true);
     expect(alertEventPayloadSchema.safeParse({ ...payload, verdictClass: 'failed' }).success).toBe(false);
     const { sourceKind: _dropped, ...noSource } = provenance;
     expect(alertEventPayloadSchema.safeParse({ ...payload, provenance: noSource }).success).toBe(false);
@@ -478,10 +487,10 @@ In `packages/core/src/api-contract/alerts.ts`, the imports become:
 import { z } from 'zod';
 import { isoDateTimeSchema } from '../types/ids.js';
 import { provenanceSchema } from '../types/provenance.js';
-import { constraintNameSchema, moneyPenceSchema, resultBasisSchema } from './common.js';
+import { constraintNameSchema, moneyPenceSchema, resultBasisSchema, verdictClassSchema } from './common.js';
 ```
 
-`alertEventSchema.status` becomes `z.enum(['queued', 'notified', 'suppressed'])`, and at the end of the file add:
+`alertEventSchema.status` becomes `z.enum(['queued', 'notified', 'suppressed'])`, and at the end of the file add the payload schema. Its verdict class is the results row's vocabulary built from the shared `verdictClassSchema` (less `failed`, which never fires) and `'unchecked'`, never a third spelling (decision 59, review arch-wp11-r2-004):
 
 ```ts
 /**
@@ -502,7 +511,8 @@ export const alertEventPayloadSchema = z.object({
   isNew: z.boolean(),
   /** The cell in words, e.g. "LHR→JFK 14 Mar–28 Mar (14n)". */
   route: z.string(),
-  verdictClass: z.enum(['verified', 'partially-verified', 'unchecked']),
+  /** The results row's vocabulary (verdictClassSchema plus 'unchecked'); `failed` never fires (decision 59). */
+  verdictClass: z.union([verdictClassSchema.exclude(['failed']), z.literal('unchecked')]),
   unverified: z.array(constraintNameSchema),
   /** Reason parts: what fired, and the whole hours between the previous fetch and this one when a previous price exists. */
   reason: z.object({
@@ -731,6 +741,30 @@ describe('AlertsRepo event lifecycle (decision 56)', () => {
     expect(alerts.eventsForExecution(rule.id, second.execution.id)[0]?.status).toBe('queued');
   });
 
+  it('a successful retry rewrites the reason, the fire time and the digest id; other payload fields stay (decision 59)', () => {
+    const { alerts, rule, second, p2, event } = setup();
+    const a = alerts.insertEvent(
+      event({
+        calendarPriceId: p2,
+        reason: 'r; not delivered: refused',
+        payload: { digestId: 'd1', isNew: false },
+      }),
+    );
+    alerts.updateEvents([a], {
+      status: 'notified',
+      reason: 'r',
+      firedAt: at('2026-10-14T13:00:00.000Z'),
+      digestId: 'd2',
+    });
+    expect(alerts.eventsForExecution(rule.id, second.execution.id)[0]).toMatchObject({
+      status: 'notified',
+      reason: 'r',
+      firedAt: '2026-10-14T13:00:00.000Z',
+      payload: { digestId: 'd2', isNew: false },
+    });
+    expect(() => alerts.updateEvents([a], { status: 'notified', firedAt: at('not a time') })).toThrow();
+  });
+
   it('priorFirings counts notified firings only: never a queued event or a "new" listing', () => {
     const { alerts, rule, p1, p2, event } = setup();
     alerts.insertEvent(event({ calendarPriceId: p1, status: 'queued' }));
@@ -786,7 +820,7 @@ function upTo0001(): string {
 }
 
 describe('migration 0002: alert event lifecycle (decision 56)', () => {
-  it("maps 'sent' to 'notified' and 'failed' to 'queued', keeps every other field, and the CHECK refuses the old names", () => {
+  it("maps 'sent' to 'notified' and 'failed' to 'queued' (saying it is not retried), keeps the rest, and the CHECK refuses the old names", () => {
     const db = openTracked(tmpDbPath());
     applyMigrations(db, upTo0001());
     const definition = new DefinitionsRepo(db, fixedClock(T0)).create(exampleDefinitionInput());
@@ -809,7 +843,12 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
     const events = new AlertsRepo(db, fixedClock(T0)).events({ ruleId: 'r1', limit: 10 });
     expect(events.map((e) => [e.id, e.status, e.reason, e.payload]).sort()).toEqual([
       [1, 'notified', null, { isNew: false }],
-      [2, 'queued', 'not delivered: connection refused', { isNew: false }],
+      [
+        2,
+        'queued',
+        'not delivered: connection refused; migrated from a failed send; not retried',
+        { isNew: false },
+      ],
       [3, 'suppressed', 'same price band', { isNew: false }],
     ]);
     expect(sqliteCode(() => insert.run(T0, 'sent', null))).toBe('SQLITE_CONSTRAINT_CHECK');
@@ -826,16 +865,17 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/db exec vitest run test/alertsLifecycle.test.ts test/migration0002.test.ts`. Expected (recorded against main plus Task 11.0): FAIL, 5 failed and 0 passed: the three AlertsRepo tests with `SqliteError: CHECK constraint failed: alert_events_status_ck` (the old CHECK refuses `queued`), "the newest sent instant of the kind …" with `TypeError: n.lastSent is not a function`, and the migration test with `ENOENT … 0002_alert_event_lifecycle.sql`.
+- [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/db exec vitest run test/alertsLifecycle.test.ts test/migration0002.test.ts`. Expected (recorded against main plus Task 11.0): FAIL, 6 failed and 0 passed: the four AlertsRepo tests with `SqliteError: CHECK constraint failed: alert_events_status_ck` (the old CHECK refuses `queued`), "the newest sent instant of the kind …" with `TypeError: n.lastSent is not a function`, and the migration test with `ENOENT … 0002_alert_event_lifecycle.sql`.
 
 - [ ] **Step 3: Implement.**
 
-In `packages/db/src/internal/enums.ts`, `ALERT_EVENT_STATUSES` becomes `['queued', 'notified', 'suppressed']` (the schema's CHECK reads it). Then run `pnpm --filter @gmt/db db:generate --name alert_event_lifecycle`: drizzle-kit writes `drizzle/0002_alert_event_lifecycle.sql`, `drizzle/meta/0002_snapshot.json` and the journal entry. Replace the generated SQL with this hand-edited copy (it maps the old statuses instead of copying them into a CHECK that refuses them, and drops two PRAGMA lines that have no effect inside the migrator's transaction):
+In `packages/db/src/internal/enums.ts`, `ALERT_EVENT_STATUSES` becomes `['queued', 'notified', 'suppressed']` (the schema's CHECK reads it). Then run `pnpm --filter @gmt/db db:generate --name alert_event_lifecycle`: drizzle-kit writes `drizzle/0002_alert_event_lifecycle.sql`, `drizzle/meta/0002_snapshot.json` and the journal entry. Replace the generated SQL with this hand-edited copy (it maps the old statuses instead of copying them into a CHECK that refuses them, says in a mapped failed row's reason that it is not retried (decision 59: only a later pass of its own execution resends a queued event), and drops two PRAGMA lines that have no effect inside the migrator's transaction):
 
 ```sql
 -- why: generated by drizzle-kit 0.31 (decision 56: alert events queued before the send, notified after), then edited by
--- hand in two places. The copy maps the old statuses ('sent' → 'notified', 'failed' → 'queued', so a failed send is
--- retried like a new one) instead of copying them into a CHECK that refuses them. The PRAGMA foreign_keys lines are
+-- hand in two places. The copy maps the old statuses ('sent' → 'notified', 'failed' → 'queued') instead of copying
+-- them into a CHECK that refuses them; a mapped failed row is never retried (only a later pass of its own execution
+-- sends a queued event, decision 59), and its reason says so. The PRAGMA foreign_keys lines are
 -- dropped: inside the migrator's transaction they have no effect, and no table references alert_events. Do not
 -- regenerate; meta/0002_snapshot.json is drizzle-kit's and matches src/schema.
 CREATE TABLE `__new_alert_events` (
@@ -856,7 +896,7 @@ CREATE TABLE `__new_alert_events` (
 	CONSTRAINT "alert_events_fired_ck" CHECK(fired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 );
 --> statement-breakpoint
-INSERT INTO `__new_alert_events`("id", "rule_id", "identity_key", "observation_id", "calendar_price_id", "dedup_key", "fired_at", "status", "reason", "payload_json") SELECT "id", "rule_id", "identity_key", "observation_id", "calendar_price_id", "dedup_key", "fired_at", CASE "status" WHEN 'sent' THEN 'notified' WHEN 'failed' THEN 'queued' ELSE "status" END, "reason", "payload_json" FROM `alert_events`;--> statement-breakpoint
+INSERT INTO `__new_alert_events`("id", "rule_id", "identity_key", "observation_id", "calendar_price_id", "dedup_key", "fired_at", "status", "reason", "payload_json") SELECT "id", "rule_id", "identity_key", "observation_id", "calendar_price_id", "dedup_key", "fired_at", CASE "status" WHEN 'sent' THEN 'notified' WHEN 'failed' THEN 'queued' ELSE "status" END, CASE "status" WHEN 'failed' THEN coalesce("reason" || '; ', '') || 'migrated from a failed send; not retried' ELSE "reason" END, "payload_json" FROM `alert_events`;--> statement-breakpoint
 DROP TABLE `alert_events`;--> statement-breakpoint
 ALTER TABLE `__new_alert_events` RENAME TO `alert_events`;--> statement-breakpoint
 CREATE INDEX `alert_events_rule_dedup_idx` ON `alert_events` (`rule_id`,`dedup_key`,`fired_at`);--> statement-breakpoint
@@ -868,7 +908,7 @@ In `packages/db/src/repositories/alerts.ts`, add `type AlertEventStatus` to the 
 ```ts
   /**
    * Spec §6.8 suppression input for `isSuppressed`: every **notified** event for the identities since `since`, with the
-   * price that fired (from its observation or calendar price). A queued event (not sent yet, or its send failed) does
+   * price that fired (from its observation or calendar price). A queued event (its send pending or failed) does
    * not suppress, and neither does a "new" listing (`payload.isNew`), which was never a firing (decision 56).
    */
   // …
@@ -876,7 +916,7 @@ In `packages/db/src/repositories/alerts.ts`, add `type AlertEventStatus` to the 
            AND coalesce(json_extract(ev.payload_json, '$.isNew'), 0) <> 1
 ```
 
-and add before `insertEvent`:
+and add before `insertEvent` (`updateEvents` keeps a field the patch leaves out; a successful retry passes its reason, fire time and digest id, decision 59):
 
 ```ts
   /**
@@ -898,13 +938,23 @@ and add before `insertEvent`:
   }
 
   /**
-   * Decision 56: moves events on after a send — `notified` when every notifier accepted the digest, `queued` (with the
-   * failure in `reason`) when one did not, `suppressed` when a later pass's cooldown judged a queued firing. One
-   * transaction; URLs in `reason` stripped as on insert. Throws when an id does not exist.
+   * Decisions 56, 59: moves events on after a send — `notified` when every notifier accepted the digest, `queued` (with
+   * the failure in `reason`) when one did not, `suppressed` when a later pass's cooldown judged a queued firing or no
+   * email is configured. A field left out of the patch keeps its stored value; a successful retry passes its own reason,
+   * fire time and digest id, so the row describes the send that delivered it. One transaction; URLs in `reason`
+   * stripped as on insert. Throws when an id does not exist.
    */
-  updateEvents(ids: readonly number[], patch: { status: AlertEventStatus; reason?: string | null }): void {
+  updateEvents(
+    ids: readonly number[],
+    patch: { status: AlertEventStatus; reason?: string | null; firedAt?: IsoDateTime; digestId?: string },
+  ): void {
+    if (patch.firedAt !== undefined) assertIsoDateTime('fired_at', patch.firedAt);
     const update = this.db.raw.prepare(
-      'UPDATE alert_events SET status = @status, reason = CASE WHEN @keepReason = 1 THEN reason ELSE @reason END WHERE id = @id',
+      `UPDATE alert_events SET status = @status,
+         reason = CASE WHEN @keepReason = 1 THEN reason ELSE @reason END,
+         fired_at = coalesce(@firedAt, fired_at),
+         payload_json = CASE WHEN @digestId IS NULL THEN payload_json ELSE json_set(payload_json, '$.digestId', @digestId) END
+       WHERE id = @id`,
     );
     this.db.transaction(() => {
       for (const id of ids) {
@@ -913,6 +963,8 @@ and add before `insertEvent`:
           status: patch.status,
           keepReason: patch.reason === undefined ? 1 : 0,
           reason: patch.reason === undefined || patch.reason === null ? null : stripUrlsInText(patch.reason),
+          firedAt: patch.firedAt ?? null,
+          digestId: patch.digestId ?? null,
         }).changes;
         if (changed !== 1) throw new RowRejected('missing', `alert event ${id} does not exist`);
       }
@@ -952,22 +1004,22 @@ Existing tests that name the old statuses or count migrations:
 - `packages/db/test/migration0001.test.ts`: after the 0001 upgrade, `pendingMigrations` and `applyMigrations` list `['0001_confirmed_calls', '0002_alert_event_lifecycle']`.
 - `packages/db/test/barrel.test.ts`: the table test's migration count becomes 3 and its title names 0002 (decision 56).
 
-- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/db test`. Expected: PASS, 279 tests (5 new), with db's thresholds met (`repositories/alerts.ts` 100% lines).
+- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/db test`. Expected: PASS, 280 tests (6 new), with db's thresholds met (`repositories/alerts.ts` 100% lines).
 
-- [ ] **Step 5: Commit.** `git add packages/db && git commit -m "wp11: alert events queued before the send and notified after, the earlier-pass query, the daily operator check (decision 56)"`
+- [ ] **Step 5: Commit.** `git add packages/db && git commit -m "wp11: alert events queued before the send and notified after, the earlier-pass query, retries rewritten on success, the daily operator check (decisions 56, 59)"`
 
 ### Task 11.1: 50 qualifying cells → one digest (first failing test); the engine's one cleaner
 
 **Files:**
 - Create `packages/engine/src/alerts/context.ts`, `pools.ts` (the calendar pool), `marks.ts`, `templates.ts` (the calendar half), `runner.ts`.
-- Modify WP7's `packages/engine/src/text.ts` (the cleaner), `packages/engine/src/notifiers/operatorTemplates.ts` (`cleanLine` on it), `packages/engine/src/index.ts`.
-- Test `packages/engine/test/alerts/fixtures.ts` (the database fixtures every runner task uses), `packages/engine/test/alerts/runner.digest.test.ts`, `packages/engine/test/alerts/text.test.ts`.
+- Modify WP7's `packages/engine/src/text.ts` (the cleaner), `packages/engine/src/notifiers/operatorTemplates.ts` (`cleanLine` on it), `packages/engine/src/types.ts` and `packages/engine/src/execute.ts` (the hook's `pass` argument), `packages/engine/src/index.ts`.
+- Test `packages/engine/test/alerts/fixtures.ts` (the database fixtures every runner task uses), `packages/engine/test/alerts/runner.digest.test.ts`, `packages/engine/test/alerts/text.test.ts`; modify WP7's `packages/engine/test/budget-breach.test.ts`.
 
 **Interfaces:**
-- **Consumes:** `evaluateAlertRules`, `buildDigest`, `isStale` (WP8), `sourceLabel`, `alertEventPayloadSchema`, `CalendarPricesRepo.fetchedBy`, `CellsRepo.selected/outcomes`, `AlertsRepo.rules/insertEvent/updateEvents`, `ItinerariesRepo.latestVerificationOutcomeForCell/writtenBy`, `Notifier`.
-- **Produces:** `runAlerts`, `AlertRunnerDeps`, `AlertRunResult`, `controlFree`, `stripControl`, the marks and payload of every event, the calendar half of the templates.
+- **Consumes:** `evaluateAlertRules`, `buildDigest`, `isStale` and `hoursSince` (WP8), `sourceLabel`, `alertEventPayloadSchema`, `CalendarPricesRepo.fetchedBy`, `CellsRepo.selected/outcomes`, `AlertsRepo.rules/insertEvent/updateEvents`, `ItinerariesRepo.latestVerificationOutcomeForCell/writtenBy`, `Notifier`.
+- **Produces:** `runAlerts`, `AlertRunnerDeps`, `AlertRunResult`, `AlertsPass` (WP7's hook gains it), `controlFree`, `stripControl`, the marks and payload of every event, the calendar half of the templates.
 
-The runner is split along its seams (review arch-wp11-012): `context.ts` (what one run shares), `pools.ts` (candidates per basis), `marks.ts` (what `DigestItem` does not carry), `templates.ts` (the words), `runner.ts` (evaluate, persist, send, mark). From this task on every firing is written as a `queued` event before the email is sent and marked `notified` after (spec §8.1 order, decision 56), and every event's payload is core's `AlertEventPayload`.
+The runner is split along its seams (review arch-wp11-012): `context.ts` (what one run shares), `pools.ts` (candidates per basis), `marks.ts` (what `DigestItem` does not carry), `templates.ts` (the words), `runner.ts` (evaluate, persist, send, mark). From this task on every firing is written as a `queued` event before the email is sent and marked `notified` after (spec §8.1 order, decision 56), and every event's payload is core's `AlertEventPayload`. With no SMTP configured the only notifier is WP7's `LogNotifier`, so the digest reaches the log alone and its events are recorded `suppressed` with "email not configured", which no cooldown counts (decision 59). WP7's hook gains a third argument, `pass: { stop: 'completed' | 'budget' }`, because the alerts step runs before the execution's status write and the digest must know whether a budget cap stopped this pass (decision 59; review PA2-1).
 
 - [ ] **Step 1: Write the failing tests.** Start with the shared fixtures, which are test-only. Every row they write is of a real provider kind, because alerts refuse synthetic rows (Task 11.6 proves that with `providerId: 'fixture'`). Configuration goes through core's `parseConfig`, rows through the real repositories (`insert`, `writeTile`, `writeVerifiedCell`, `copyReused`), and payloads are parsed with core's schema, so no `Config`, row or payload is cast.
 
@@ -1738,7 +1790,9 @@ describe('the engine cleaner (text.ts)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/runner.digest.test.ts test/alerts/text.test.ts`. Expected: FAIL. `runner.digest.test.ts` cannot resolve `../../src/alerts/runner.js`; in `text.test.ts` all 100 fail: the cleaner cases with `TypeError: controlFree is not a function` (or `stripControl is not a function`), and "the operator templates' cleanLine is the same cleaner after URL stripping" on its expected text (the old cleanLine keeps U+2028 and U+202E).
+In WP7's `packages/engine/test/budget-breach.test.ts`, the two hook assertions name the pass: in "runs once after a completed pass with (deps, executionId); …" (retitled "… with (deps, executionId, pass); …") the call becomes `expect(alerts).toHaveBeenCalledExactlyOnceWith(h.deps, done.id, { stop: 'completed' });`, and in the provider-month verification breach test `expect(alerts).toHaveBeenCalledExactlyOnceWith(h.deps, e.id, { stop: 'budget' });`.
+
+- [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/runner.digest.test.ts test/alerts/text.test.ts test/budget-breach.test.ts`. Expected: FAIL. `runner.digest.test.ts` cannot resolve `../../src/alerts/runner.js`; in `text.test.ts` all 100 fail: the cleaner cases with `TypeError: controlFree is not a function` (or `stripControl is not a function`), and "the operator templates' cleanLine is the same cleaner after URL stripping" on its expected text (the old cleanLine keeps U+2028 and U+202E); in `budget-breach.test.ts` the two edited tests fail with `AssertionError: expected "vi.fn()" to be called once with arguments: [ { config: { …(28) }, …(9) }, …(2) ]` and the other 13 stay green.
 
 - [ ] **Step 3: Implement.**
 
@@ -1805,12 +1859,38 @@ export function cleanLine(s: string): string {
 }
 ```
 
+In WP7's `packages/engine/src/types.ts`, add before `AlertsStepHook` and give the hook its third parameter:
+
+```ts
+/**
+ * How the pass that runs the alerts step ended (decision 59): `completed`, or stopped by a budget cap (`budget`, the
+ * paused_budget stop of decision 25). The alert runner says "a budget cap left … undone" only for the latter.
+ */
+export interface AlertsPass {
+  stop: 'completed' | 'budget';
+}
+/** The alerts step of spec §8.1 ("alerts: evaluateAlertRules → persist events → notify digests"); WP11 provides runAlerts. */
+export type AlertsStepHook = (
+  deps: EngineDeps,
+  executionId: string,
+  pass: AlertsPass,
+) => Promise<{ digests: number; events: number }>;
+```
+
+In WP7's `packages/engine/src/execute.ts` (`alertsStep`), the hook call becomes:
+
+```ts
+    const r = await ctx.alertsStep(ctx.deps, run.executionId, {
+      stop: run.stop === null ? 'completed' : 'budget',
+    });
+```
+
 `packages/engine/src/alerts/context.ts`:
 
 ```ts
 /** What every part of the alert runner shares for one run of the alerts step (spec §6.8, §8.1). */
 import type { DefinitionSnapshot, IsoDateTime, Logger, SearchDefinition } from '@gmt/core';
-import type { EngineDeps } from '../types.js';
+import type { AlertsPass, EngineDeps } from '../types.js';
 
 /** What the runner needs from the engine's dependencies; EngineDeps satisfies it, so runAlerts is an AlertsStepHook. */
 export type AlertRunnerDeps = Pick<
@@ -1826,11 +1906,8 @@ export interface AlertRunContext {
   executionId: string;
   definition: SearchDefinition;
   snapshot: DefinitionSnapshot;
-}
-
-/** Whole hours from `from` to `to`, never negative. */
-export function hoursBetween(from: IsoDateTime, to: IsoDateTime): number {
-  return Math.max(0, Math.floor((Date.parse(to) - Date.parse(from)) / 3_600_000));
+  /** How the pass ended: the budget-stop lines and the retry wording depend on it (decision 59). */
+  pass: AlertsPass;
 }
 ```
 
@@ -1841,7 +1918,13 @@ export function hoursBetween(from: IsoDateTime, to: IsoDateTime): number {
  * Alert candidates of one execution, per basis (spec §6.8): the calendar prices it fetched and the observations it
  * wrote, with each candidate's previous price and that price's provenance (decision 56).
  */
-import { type AlertCandidate, type CalendarCandidate, daysBetween, type Provenance } from '@gmt/core';
+import {
+  type AlertCandidate,
+  type AlertEvent,
+  type CalendarCandidate,
+  daysBetween,
+  type Provenance,
+} from '@gmt/core';
 import type { AlertRunContext } from './context.js';
 
 /** A previous price with its provenance, for the email and the event payload. */
@@ -1857,9 +1940,17 @@ export interface Pool {
   unconfirmed: number;
 }
 
+/** A price row as alert_events references it: the one format (decision 59), for candidates and events alike. */
+export function rowRefOf(r: Pick<AlertEvent, 'observationId' | 'calendarPriceId'>): string {
+  return r.observationId !== null ? `observation:${r.observationId}` : `calendar:${r.calendarPriceId}`;
+}
+
 /** The candidate's row, as alert_events references it. */
 export function rowRef(c: AlertCandidate): string {
-  return c.basis === 'verified' ? `observation:${c.observation.id}` : `calendar:${c.calendarPriceId}`;
+  return rowRefOf({
+    observationId: c.basis === 'verified' ? c.observation.id : null,
+    calendarPriceId: c.basis === 'calendar' ? c.calendarPriceId : null,
+  });
 }
 
 /** Calendar prices fetched by this execution (reused excluded by the repository) in the snapshot's cabin. Spec §6.8. */
@@ -1903,6 +1994,7 @@ import {
   type VerifiedCandidate,
 } from '@gmt/core';
 import type { AlertRunContext } from './context.js';
+import { type Pool, rowRef } from './pools.js';
 import type { ItemMarks } from './templates.js';
 
 /** The marks of one firing plus the threshold its staleness was judged against (stored on the event, decision 56). */
@@ -1970,7 +2062,11 @@ function notSeenMark(
 }
 
 /** Marks for every firing, keyed by rowKeyOf: the digest renders them and every event row stores them. */
-export function marksFor(ctx: AlertRunContext, firings: readonly Firing[]): Map<string, FiringMarks> {
+export function marksFor(
+  ctx: AlertRunContext,
+  firings: readonly Firing[],
+  pool: Pool,
+): Map<string, FiringMarks> {
   const truncated = new Set(
     ctx.deps.repos.cells
       .outcomes(ctx.executionId, { stage: 'discovery' })
@@ -1997,25 +2093,31 @@ export function marksFor(ctx: AlertRunContext, firings: readonly Firing[]): Map<
       truncated:
         c.basis === 'calendar' && truncated.has(`${c.provenance.providerId}|${cellKeyString(c.cell)}`),
       notSeenInLatest: c.basis === 'verified' ? notSeenMark(ctx, c, offersOf) : null,
+      // why: decision 59 — DigestItem carries the previous price but not its provenance, so its '≈' travels here
+      previousConverted: pool.previous.get(rowRef(c))?.provenance.fx.converted === true,
     });
   }
   return out;
 }
 
 /**
- * The run's budget-stop facts (spec §8.1 error table; decision 25 runs the step on paused_budget): cell searches left
- * not_run or skipped:budget, and whether the itinerary-search stage never ran although a verification provider is
- * configured (the cap stopped the run during discovery, PA-2). Then the count is a lower bound: the unplanned stage's
- * searches are not in it.
+ * What the digest says about the pass (decision 59): whether the itinerary-search stage never ran although a
+ * verification provider is configured (any cause: no outcome rows), and — only when the pass stopped on a budget cap
+ * (decision 25) — how many cell searches the cap left undone (not_run or skipped:budget). When the stage never ran
+ * the count is a lower bound: the unplanned stage's searches are not in it (review PA-2).
  */
-export function budgetFacts(ctx: AlertRunContext): { unsearched: number; verificationNotRun: boolean } {
-  const unsearched = ctx.deps.repos.cells
-    .outcomes(ctx.executionId)
-    .filter((o) => o.status === 'not_run' || (o.status === 'skipped' && o.reason === 'budget')).length;
+export function passFacts(ctx: AlertRunContext): {
+  budgetStop: { unsearched: number } | null;
+  verificationNotRun: boolean;
+} {
   const verificationNotRun =
     ctx.snapshot.providers.verification.length > 0 &&
     !ctx.deps.repos.cells.hasVerificationOutcomes(ctx.executionId);
-  return { unsearched, verificationNotRun };
+  if (ctx.pass.stop !== 'budget') return { budgetStop: null, verificationNotRun };
+  const unsearched = ctx.deps.repos.cells
+    .outcomes(ctx.executionId)
+    .filter((o) => o.status === 'not_run' || (o.status === 'skipped' && o.reason === 'budget')).length;
+  return { budgetStop: { unsearched }, verificationNotRun };
 }
 ```
 
@@ -2054,8 +2156,15 @@ export interface ItemMarks {
   truncated: boolean;
   /** A newer itinerary search of the cell did not see this offer; `at` is when it searched, null when unrecorded. */
   notSeenInLatest: { at: IsoDateTime | null } | null;
+  /** The previous price was FX-converted: it prints with '≈' like the current one (decision 59). */
+  previousConverted: boolean;
 }
-export const NO_MARKS: ItemMarks = { stale: null, truncated: false, notSeenInLatest: null };
+export const NO_MARKS: ItemMarks = {
+  stale: null,
+  truncated: false,
+  notSeenInLatest: null,
+  previousConverted: false,
+};
 
 /** Everything renderBody needs; the digest items carry segments, expiry and the row key (plan decision 14). Task 11.7 adds the marks. */
 export interface DigestRenderInput {
@@ -2254,10 +2363,13 @@ import {
   cellKeyString,
   evaluateAlertRules,
   type Firing,
+  hoursSince,
   type Notifier,
   type ResultBasis,
 } from '@gmt/core';
-import { type AlertRunContext, type AlertRunnerDeps, hoursBetween } from './context.js';
+import { LogNotifier } from '../notifiers/log.js';
+import type { AlertsPass } from '../types.js';
+import type { AlertRunContext, AlertRunnerDeps } from './context.js';
 import { cellOf, type FiringMarks, marksFor, rowKeyOf } from './marks.js';
 import { calendarPool, type Pool, rowRef } from './pools.js';
 import { cellLine, renderBody, renderSubject } from './templates.js';
@@ -2271,8 +2383,15 @@ export interface AlertRunResult {
 
 const NONE: AlertRunResult = { digests: 0, events: 0 };
 
-/** Runs every enabled rule of the execution's definition once. Never rejects (spec §8.1: alerts never block completion). */
-export async function runAlerts(deps: AlertRunnerDeps, executionId: string): Promise<AlertRunResult> {
+/**
+ * Runs every enabled rule of the execution's definition once. Never rejects (spec §8.1: alerts never block completion).
+ * `pass` is how the pass ended (WP7's AlertsStepHook passes it); a direct call defaults to a completed pass.
+ */
+export async function runAlerts(
+  deps: AlertRunnerDeps,
+  executionId: string,
+  pass: AlertsPass = { stop: 'completed' },
+): Promise<AlertRunResult> {
   try {
     const execution = deps.repos.executions.get(executionId);
     if (execution === null) throw new Error(`execution ${executionId} not found`);
@@ -2287,6 +2406,7 @@ export async function runAlerts(deps: AlertRunnerDeps, executionId: string): Pro
       executionId,
       definition,
       snapshot: execution.snapshot,
+      pass,
     };
     const pools = new Map<ResultBasis, Pool>();
     const poolFor = (basis: ResultBasis): Pool => {
@@ -2353,7 +2473,7 @@ function eventRow(
     unverified: c.basis === 'verified' ? c.unverified : [],
     reason: {
       kind: f.isNew ? 'new' : f.rule.type === 'absolute' ? 'threshold' : 'drop',
-      gapHours: c.previous === null ? null : hoursBetween(c.previous.fetchedAt, provenance.fetchedAt),
+      gapHours: c.previous === null ? null : hoursSince(c.previous.fetchedAt, provenance.fetchedAt),
     },
     staleThresholdHours: m.staleThresholdHours,
     truncated: m.truncated,
@@ -2380,7 +2500,7 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
     cabin: ctx.snapshot.cabin,
     discoveryRefreshHours: ctx.snapshot.providers.discoveryRefreshHours,
   });
-  const marks = marksFor(ctx, firings);
+  const marks = marksFor(ctx, firings, pool);
   const sendable = firings.filter((f) => f.suppressed === null);
   // why: plan decision 10 — "new" listings alone are not a digest.
   if (!sendable.some((f) => !f.isNew)) return NONE;
@@ -2403,9 +2523,15 @@ function coverageFor(
 }
 
 /**
- * Spec §8.1 order, decision 56: persist the firings as `queued` events (one transaction), send the digest, then mark
- * them `notified`; a failed send leaves them queued with the failure in the reason (Task 11.5 sends them with the next
- * pass of this execution). Every emailed item has an event, "new" listings included (PA-5).
+ * Spec §8.1 order, decisions 56 and 59: persist the firings as `queued` events (one transaction), send the digest, then
+ * move each event on:
+ * - every notifier accepted and one of them is not the log → `notified`, with this send's reason, fire time and digest
+ *   id (a retried row no longer reads as failed);
+ * - only the log notifier exists (no SMTP configured) → `suppressed`, "email not configured", which the cooldown never
+ *   counts;
+ * - a notifier refused or threw (including the hourly ceiling) → still `queued`, the failure in its reason (Task 11.5
+ *   adds the retry and says in the reason whether one will come).
+ * Every emailed item has an event, "new" listings included (PA-5).
  */
 async function deliver(
   ctx: AlertRunContext,
@@ -2442,16 +2568,28 @@ async function deliver(
     subject: renderSubject(first, ctx.now),
     body,
   });
-  if (outcome.status === 'sent') ctx.deps.repos.alerts.updateEvents(ids, { status: 'notified' });
-  else
-    run.sendable.forEach((f, i) => {
-      const id = ids[i];
-      if (id !== undefined)
-        ctx.deps.repos.alerts.updateEvents([id], {
-          status: 'queued',
-          reason: `${f.reason}; not delivered: ${outcome.detail}`,
-        });
-    });
+  const emailed = ctx.deps.notifiers.some((n) => !(n instanceof LogNotifier));
+  run.sendable.forEach((f, i) => {
+    const id = ids[i];
+    if (id === undefined) return;
+    if (outcome.status === 'failed')
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'queued',
+        reason: `${f.reason}; not delivered: ${outcome.detail}`,
+      });
+    else if (!emailed)
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'suppressed',
+        reason: `${f.reason}; email not configured`,
+      });
+    else
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'notified',
+        reason: f.reason,
+        firedAt: ctx.now,
+        digestId,
+      });
+  });
   return { digests: 1, events: ids.length };
 }
 
@@ -2490,15 +2628,17 @@ export {
 } from './alerts/templates.js';
 ```
 
-- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`. Expected: PASS, 104 tests (4 in `runner.digest.test.ts`, 100 in `text.test.ts`); then `pnpm --filter @gmt/engine exec vitest run test/notifications.test.ts`, which stays green with the new `cleanLine`.
+and add `AlertsPass` to its `export type { … } from './types.js'` list, before `AlertsStepHook`.
 
-- [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: alert runner persists, sends and marks one digest per rule per execution; the engine's one cleaner (spec §6.8, §8.1, §8.3)"`
+- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`. Expected: PASS, 104 tests (4 in `runner.digest.test.ts`, 100 in `text.test.ts`); then `pnpm --filter @gmt/engine exec vitest run test/notifications.test.ts test/budget-breach.test.ts`, which stay green (15 in `budget-breach.test.ts`).
+
+- [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: alert runner persists, sends and marks one digest per rule per execution; the engine's one cleaner; the hook names the pass (spec §6.8, §8.1, §8.3; decision 59)"`
 
 ### Task 11.2: Itinerary-search item lines, link re-validation, hostile strings, exact digests, banned words
 
 **Files:** Modify `packages/engine/src/alerts/templates.ts`. Create `packages/engine/test/alerts/builders.ts` and `packages/engine/test/alerts/templates.test.ts`.
 
-**Interfaces:** Consumes `CONSTRAINT_LABELS` (with `priceConfirmed`), `validateVendorUrl`, `LINK_ALLOWLIST`, `sourceLabel`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`.
+**Interfaces:** Consumes `CONSTRAINT_LABELS` (with `priceConfirmed`), `hoursSince` (WP8), `validateVendorUrl`, `LINK_ALLOWLIST`, `sourceLabel`, `findBannedWords`, `BANNED_WORD_ALLOWLIST`.
 
 - [ ] **Step 1: Write the failing test.** The builders hand-build digest items with no database. The itinerary-search item is a SearchApi price, whose vendor age is `'unknown'` (spec rev 15, decision 24), so its age reads "fetched 5h ago · vendor's cache age unknown" (core's wording after WP8, decision 55); the calendar item keeps the spec §8.3 example's "(≤7d before that)". Two tests compare a whole rendered digest with `toBe` (review TS-13).
 
@@ -2982,7 +3122,7 @@ Green from the start, because Task 11.1 already renders calendar items, both sub
 - "a gap under an hour reads "under an hour", never "just now""
 - "no banned word in any rendered subject or body"
 
-- [ ] **Step 3: Implement.** Six edits to `templates.ts`; each shows the full replacement.
+- [ ] **Step 3: Implement.** Five edits to `templates.ts`; each shows the full replacement. `expiryText` and `agoText` measure whole hours with core's `hoursSince`, the one whole-hour helper (decision 59).
 
 In `templates.ts`, the `@gmt/core` import becomes:
 
@@ -2996,6 +3136,7 @@ import {
   formatAgeFull,
   formatDuration,
   formatPence,
+  hoursSince,
   type IsoDateTime,
   LINK_ALLOWLIST,
   type Provenance,
@@ -3004,13 +3145,6 @@ import {
   sourceLabel,
   validateVendorUrl,
 } from '@gmt/core';
-```
-
-and add the context import after the text import (expiryText and agoText measure whole hours with it):
-
-```ts
-import { stripControl } from '../text.js';
-import { hoursBetween } from './context.js';
 ```
 
 Replace `verdictSegment` with:
@@ -3037,10 +3171,10 @@ function segmentLine(s: Segment): string {
 function expiryText(expiresAt: IsoDateTime | null, now: IsoDateTime): string {
   if (expiresAt === null) return 'expiry not stated';
   if (Date.parse(expiresAt) > Date.parse(now)) {
-    const h = hoursBetween(now, expiresAt);
+    const h = hoursSince(now, expiresAt);
     return h < 1 ? 'expires within the hour' : `expires in ${formatDuration(h)}`;
   }
-  const h = hoursBetween(expiresAt, now);
+  const h = hoursSince(expiresAt, now);
   return h < 1 ? 'expired just now' : `expired ${formatDuration(h)} ago`;
 }
 
@@ -3396,6 +3530,7 @@ In `pools.ts`, the `@gmt/core` import becomes:
 ```ts
 import {
   type AlertCandidate,
+  type AlertEvent,
   type CalendarCandidate,
   daysBetween,
   evaluateConstraints,
@@ -3637,6 +3772,7 @@ In `pools.ts`, add `isoDateTimeOfEpochMs` to the `@gmt/core` import:
 ```ts
 import {
   type AlertCandidate,
+  type AlertEvent,
   type CalendarCandidate,
   daysBetween,
   evaluateConstraints,
@@ -3712,6 +3848,7 @@ export function calendarPool(ctx: AlertRunContext): Pool {
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { runAlerts } from '../../src/alerts/runner.js';
+import { LogNotifier } from '../../src/notifiers/log.js';
 import {
   ALL_FIELDS,
   cellAt,
@@ -3836,7 +3973,7 @@ describe('event lifecycle: queued before the send, notified after (spec §8.1; d
     expect(f.repos.alerts.events({ ruleId: rule.id, limit: 10 }).map((e) => e.status)).toEqual(['notified']);
   });
 
-  it('a failed send stays queued with the reason; the next pass sends it again on the same row; it never suppresses', async () => {
+  it('a failed send stays queued saying why and whether it is retried; the resumed pass resends it on the same row, rewritten (decision 59)', async () => {
     const f = fixture({
       notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
     });
@@ -3844,23 +3981,32 @@ describe('event lifecycle: queued before the send, notified after (spec §8.1; d
     const rule = seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
     const ex = seedExecution(f, def);
     seedCalendar(f, ex, [{ cell: cellAt(cells(1), 0), pricePence: 41200 }]);
-    expect(await runAlerts(f.deps, ex)).toEqual({ digests: 1, events: 1 });
+    // a pass that stopped on a budget cap: the resumed pass will send it
+    expect(await runAlerts(f.deps, ex, { stop: 'budget' })).toEqual({ digests: 1, events: 1 });
     const [queued] = f.repos.alerts.events({ ruleId: rule.id, limit: 10 });
     expect(queued).toMatchObject({
       status: 'queued',
-      reason: '£412 is at or below the £450 threshold; not delivered: email: connection refused',
+      reason:
+        '£412 is at or below the £450 threshold; not delivered: email: connection refused; sent again when this run resumes',
     });
-    // the next pass of the same execution (a resume) retries it
+    const failedDigest = queued === undefined ? null : payloadOf(queued).digestId;
+    // the resumed pass of the same execution retries it
     f.notifier.respondWith({ ok: true });
     f.clock.advance(HOUR);
+    const resent = f.clock.now();
     expect(await runAlerts(f.deps, ex)).toEqual({ digests: 1, events: 1 });
     expect(f.notifier.digests().map((d) => d.digest.items.map((i) => i.pricePence))).toEqual([
       [41200],
       [41200],
     ]);
-    expect(f.repos.alerts.events({ ruleId: rule.id, limit: 10 }).map((e) => [e.id, e.status])).toEqual([
-      [queued?.id, 'notified'],
-    ]);
+    const [notified] = f.repos.alerts.events({ ruleId: rule.id, limit: 10 });
+    expect(notified).toMatchObject({
+      id: queued?.id,
+      status: 'notified',
+      reason: '£412 is at or below the £450 threshold',
+      firedAt: resent,
+    });
+    expect(notified === undefined ? null : payloadOf(notified).digestId).not.toBe(failedDigest);
     // and a third pass has nothing left to send
     expect(await runAlerts(f.deps, ex)).toEqual({ digests: 0, events: 0 });
   });
@@ -3923,12 +4069,45 @@ describe('a later pass of the same execution never repeats a firing or a listing
     expect(f.notifier.digests()[1]?.digest.items.map((i) => i.pricePence)).toEqual([42000]);
     expect(f.notifier.digests()[1]?.digest.newItems).toEqual([]);
   });
+
+  it('a failure on a completed pass says it is not retried unless the run is resumed', async () => {
+    const f = fixture({
+      notifier: new RecordingNotifier('email', { ok: false, detail: 'connection refused' }),
+    });
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
+    await runAt(f, def, 41200);
+    expect(f.repos.alerts.events({ ruleId: rule.id, limit: 1 })[0]?.reason).toBe(
+      '£412 is at or below the £450 threshold; not delivered: email: connection refused; not retried unless this run is resumed',
+    );
+  });
+});
+
+describe('with no SMTP configured the digest only reaches the log (decision 59; review PA2-3)', () => {
+  it('its firings are suppressed, "email not configured", and never start a cooldown', async () => {
+    const f = fixture();
+    f.deps.notifiers.splice(0, f.deps.notifiers.length, new LogNotifier(f.log));
+    const def = seedDefinition(f);
+    const rule = seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
+    expect(await runAt(f, def, 41200)).toEqual({ digests: 1, events: 1 });
+    expect(f.log.lines.some((l) => l.fields.kind === 'alert_digest')).toBe(true);
+    expect(f.repos.alerts.events({ ruleId: rule.id, limit: 10 }).map((e) => [e.status, e.reason])).toEqual([
+      ['suppressed', '£412 is at or below the £450 threshold; email not configured'],
+    ]);
+    // the same band a day later is not held back by a cooldown the operator never received
+    f.clock.advance(DAY);
+    expect(await runAt(f, def, 41200)).toEqual({ digests: 1, events: 1 });
+    expect(f.repos.alerts.events({ ruleId: rule.id, limit: 10 }).map((e) => e.reason)).toEqual([
+      '£412 is at or below the £450 threshold; email not configured',
+      '£412 is at or below the £450 threshold; email not configured',
+    ]);
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/runner.dedup.test.ts`.
 
-Expected: FAIL, 7 failed and 3 passed.
+Expected: FAIL, 8 failed and 4 passed.
 
 Failing first (test, then its first assertion message):
 
@@ -3936,17 +4115,19 @@ Failing first (test, then its first assertion message):
 - "inside the cooldown a repeat needs max(£10, 5%) below the last fired price: the 5% side at ±1p (review TS-2)": `AssertionError: expected { digests: 1, events: 1 } to deeply equal { digests: +0, events: 1 }`
 - "under £200 the £10 floor applies (5% would be less): £9.99 below is suppressed, £10.00 below fires (review TS-2)": `AssertionError: expected { digests: 1, events: 1 } to deeply equal { digests: +0, events: 1 }`
 - "itinerary-search basis: the same itinerary and band in the next execution is suppressed": `AssertionError: expected { digests: 1, events: 1 } to deeply equal { digests: +0, events: 1 }`
-- "a failed send stays queued with the reason; the next pass sends it again on the same row; it never suppresses": `AssertionError: expected [ [ 2, 'notified' ], [ 1, 'queued' ] ] to deeply equal [ [ 1, 'notified' ] ]`
+- "a failed send stays queued saying why and whether it is retried; the resumed pass resends it on the same row, rewritten (decision 59)": `AssertionError: expected { id: 1, …(9) } to match object { status: 'queued', …(1) }`
 - "the second pass sends only prices the first pass did not record; with none, it sends and records nothing": `AssertionError: expected { digests: 1, events: 2 } to deeply equal { digests: 1, events: 1 }`
 - "a "new" cell listed by the first pass is not listed again by the second (review PA-5)": `AssertionError: expected { digests: 1, events: 3 } to deeply equal { digests: 1, events: 1 }`
+- "a failure on a completed pass says it is not retried unless the run is resumed": `AssertionError: expected '£412 is at or below the £450 threshol…' to be '£412 is at or below the £450 threshol…' // Object.is equality`
 
-Green from the start, because Task 11.1 already persists before the send, a queued event never suppresses (no prior firings are read yet), and identity settling is core's:
+Green from the start, because Task 11.1 already persists before the send and records a log-only digest as suppressed, a queued event never suppresses (no prior firings are read yet), and identity settling is core's:
 
 - "one identity is judged on its cheapest eligible offer whatever its class; class order is the results ranking, not alerts (review TS-3)"
 - "events exist as queued while the notifier is sending, and are notified once it accepted"
 - "a queued (never delivered) firing does not suppress the next execution"
+- "its firings are suppressed, "email not configured", and never start a cooldown"
 
-- [ ] **Step 3: Implement.** Five edits to `runner.ts`. A later pass of the same execution (after a paused_budget stop, or a retry-errors resume of a completed run) reads this rule's events for the execution through the db query, never judges again a row it notified or suppressed, and sends again on the same event row a firing whose send failed (decisions 25, 55, 56).
+- [ ] **Step 3: Implement.** Seven edits to `runner.ts`. A later pass of the same execution (after a paused_budget stop, or a retry-errors resume of a completed run) reads this rule's events for the execution through the db query, matches them to candidates through `pools.ts`'s one row-reference format (`rowRefOf`, review arch-wp11-r2-003), never judges again a row it notified or suppressed, and sends again on the same event row a firing whose send failed (decisions 25, 55, 56). Decision 59: a failure's reason says why the event is queued and whether a retry will come ("sent again when this run resumes" after a budget stop, "not retried unless this run is resumed" after a completed pass; nothing else resends a queued event), and a retry that succeeds rewrites the row's reason, fire time and digest id, so a delivered row never reads "not delivered" and its cooldown counts from the send that delivered it.
 
 In `runner.ts`, add `type IsoDateTime`, `identityKey` and `isoDateTimeOfEpochMs` to the `@gmt/core` import:
 
@@ -3959,6 +4140,7 @@ import {
   cellKeyString,
   evaluateAlertRules,
   type Firing,
+  hoursSince,
   type IsoDateTime,
   identityKey,
   isoDateTimeOfEpochMs,
@@ -3982,6 +4164,12 @@ function hoursBefore(at: IsoDateTime, hours: number): IsoDateTime {
 }
 ```
 
+and the pools import becomes:
+
+```ts
+import { calendarPool, type Pool, rowRef, rowRefOf, verifiedPool } from './pools.js';
+```
+
 Replace `runRule` with:
 
 ```ts
@@ -3992,9 +4180,8 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
   const done = new Set<string>();
   const queued = new Map<string, number>();
   for (const e of earlier) {
-    const ref = e.observationId !== null ? `observation:${e.observationId}` : `calendar:${e.calendarPriceId}`;
-    if (e.status === 'queued') queued.set(ref, e.id);
-    else done.add(ref);
+    if (e.status === 'queued') queued.set(rowRefOf(e), e.id);
+    else done.add(rowRefOf(e));
   }
   const candidates = pool.candidates.filter((c) => !done.has(rowRef(c)));
   if (candidates.length === 0) return NONE;
@@ -4010,7 +4197,7 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
     cabin: ctx.snapshot.cabin,
     discoveryRefreshHours: ctx.snapshot.providers.discoveryRefreshHours,
   });
-  const marks = marksFor(ctx, firings);
+  const marks = marksFor(ctx, firings, pool);
   // why: plan pin — evaluateAlertRules returns suppressed firings too; the runner records them and the digest omits them.
   const suppressed = firings.filter((f) => f.suppressed !== null);
   const sendable = firings.filter((f) => f.suppressed === null);
@@ -4033,13 +4220,30 @@ async function runRule(ctx: AlertRunContext, rule: AlertRule, pool: Pool): Promi
 }
 ```
 
-Replace `deliver` (with its doc comment) with this version, which reuses an earlier pass's queued event row:
+Add before `deliver`'s doc comment:
+
+```ts
+/** Decision 59: why an event stays queued, and whether a later pass of this execution will send it. */
+function retryText(ctx: AlertRunContext): string {
+  return ctx.pass.stop === 'budget'
+    ? 'sent again when this run resumes'
+    : 'not retried unless this run is resumed';
+}
+```
+
+Replace `deliver` (with its doc comment) with this version, which reuses an earlier pass's queued event row and says in a failure's reason whether a retry will come:
 
 ```ts
 /**
- * Spec §8.1 order, decision 56: persist the firings as `queued` events (one transaction), send the digest, then mark
- * them `notified`; a failed send leaves them queued with the failure in the reason, for the next pass of this
- * execution. Every emailed item has an event, "new" listings included (PA-5).
+ * Spec §8.1 order, decisions 56 and 59: persist the firings as `queued` events (one transaction), send the digest, then
+ * move each event on:
+ * - every notifier accepted and one of them is not the log → `notified`, with this send's reason, fire time and digest
+ *   id (a retried row no longer reads as failed);
+ * - only the log notifier exists (no SMTP configured) → `suppressed`, "email not configured", which the cooldown never
+ *   counts;
+ * - a notifier refused or threw (including the hourly ceiling) → still `queued`, the failure and the retry outlook in
+ *   its reason.
+ * Every emailed item has an event, "new" listings included (PA-5).
  */
 async function deliver(
   ctx: AlertRunContext,
@@ -4079,23 +4283,35 @@ async function deliver(
     subject: renderSubject(first, ctx.now),
     body,
   });
-  if (outcome.status === 'sent') ctx.deps.repos.alerts.updateEvents(ids, { status: 'notified' });
-  else
-    run.sendable.forEach((f, i) => {
-      const id = ids[i];
-      if (id !== undefined)
-        ctx.deps.repos.alerts.updateEvents([id], {
-          status: 'queued',
-          reason: `${f.reason}; not delivered: ${outcome.detail}`,
-        });
-    });
+  const emailed = ctx.deps.notifiers.some((n) => !(n instanceof LogNotifier));
+  run.sendable.forEach((f, i) => {
+    const id = ids[i];
+    if (id === undefined) return;
+    if (outcome.status === 'failed')
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'queued',
+        reason: `${f.reason}; not delivered: ${outcome.detail}; ${retryText(ctx)}`,
+      });
+    else if (!emailed)
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'suppressed',
+        reason: `${f.reason}; email not configured`,
+      });
+    else
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'notified',
+        reason: f.reason,
+        firedAt: ctx.now,
+        digestId,
+      });
+  });
   return { digests: 1, events: ids.length };
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`. Expected: PASS, 138 tests.
+- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`. Expected: PASS, 140 tests.
 
-- [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: cooldown across executions, queued firings sent by the next pass on the same row, later passes never repeat a firing or a listing"`
+- [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: cooldown across executions, queued firings sent by the next pass on the same row and rewritten on success, later passes never repeat a firing or a listing"`
 
 ### Task 11.6: Synthetic rows refused by the runner; never-reject behaviour
 
@@ -4195,6 +4411,7 @@ In `pools.ts`, add `type ResultBasis` to the `@gmt/core` import:
 ```ts
 import {
   type AlertCandidate,
+  type AlertEvent,
   type CalendarCandidate,
   daysBetween,
   evaluateConstraints,
@@ -4275,21 +4492,21 @@ and in `verifiedPool`, replace the loop header with:
   for (const row of refuseSynthetic(ctx, 'verified', ctx.deps.repos.itineraries.writtenBy(ctx.executionId))) {
 ```
 
-- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`. Expected: PASS, 141 tests.
+- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`. Expected: PASS, 143 tests.
 
 - [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: alert runner refuses synthetic rows before evaluation"`
 
-### Task 11.7: The digest renders the marks: staleness by isStale, truncated tiles, not seen in latest search, unconfirmed fares, budget stops
+### Task 11.7: The digest renders the marks: staleness by isStale, truncated tiles, not seen in latest search, unconfirmed fares, budget stops, converted previous prices
 
 **Files:**
 - Modify `packages/engine/src/alerts/templates.ts`, `packages/engine/src/alerts/runner.ts`, `packages/engine/test/alerts/builders.ts`.
 - Test `packages/engine/test/alerts/runner.marks.test.ts`, `packages/engine/test/alerts/templates.marks.test.ts`.
 
-**Interfaces:** Consumes `TRUNCATED_NOTE`, `isStale` (WP8), `budgetFacts` (Task 11.1's `marks.ts`). Produces `DigestRenderInput.marks/budgetUnsearched/verificationNotRun/unconfirmed`.
+**Interfaces:** Consumes `TRUNCATED_NOTE`, `isStale` (WP8), `passFacts` (Task 11.1's `marks.ts`), `AlertsPass`. Produces `DigestRenderInput.marks/budgetStop/verificationNotRun/unconfirmed`; renders `ItemMarks.previousConverted`.
 
 `DigestItem` carries none of these marks and core is not changed for them: Task 11.1's `marks.ts` already reads them and stores them on every event; this task renders them.
 
-- [ ] **Step 1: Write the failing tests.** Staleness is tested at the threshold and one hour over on both bases, for an observed age, for fetch age plus a declared age, and with the observed age and fetch-plus-declared on opposite sides of the threshold (reviews TS-4, TS-15); an unknown vendor age is stale by its fetch age alone (PA-8, decision 56); "not seen in latest search" has its negative case and a case with no recorded instant (PA-6); the itinerary search that never ran (PA-2).
+- [ ] **Step 1: Write the failing tests.** Staleness is tested at the threshold and one hour over on both bases, for an observed age, for fetch age plus a declared age, and with the observed age and fetch-plus-declared on opposite sides of the threshold (reviews TS-4, TS-15); an unknown vendor age is stale by its fetch age alone (PA-8, decision 56); "not seen in latest search" has its negative case and a case with no recorded instant (PA-6); the itinerary search that never ran (PA-2). Decision 59: the "Not searched" line and the budget cause appear only when the pass stopped on a budget cap, never as "at least 0", and a completed run whose itinerary search never ran (no verification provider registered) names no cause (review PA2-1); a converted previous price prints '≈' in the item and in the "new" section (PA2-4).
 
 `packages/engine/test/alerts/runner.marks.test.ts`:
 
@@ -4549,7 +4766,7 @@ describe('truncated tiles, newer searches, unconfirmed fares and budget stops (d
       reason: 'budget',
     });
     seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
-    await runAlerts(f.deps, ex);
+    await runAlerts(f.deps, ex, { stop: 'budget' });
     const body = f.notifier.digests()[0]?.body ?? '';
     expect(body).toContain(
       'Not searched: a budget cap left 3 cell searches of this run undone; the prices above come from the cells that were searched.',
@@ -4565,7 +4782,7 @@ describe('truncated tiles, newer searches, unconfirmed fares and budget stops (d
     seedCalendar(f, ex, [{ cell: cellAt(list, 0), pricePence: 40000 }]);
     f.repos.cells.seed(ex, [cellAt(list, 1), cellAt(list, 2)], ['travelpayouts']);
     seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
-    await runAlerts(f.deps, ex);
+    await runAlerts(f.deps, ex, { stop: 'budget' });
     const body = f.notifier.digests()[0]?.body ?? '';
     expect(body).toContain(
       'Not searched: a budget cap left at least 2 cell searches of this run undone; the prices above come from the cells that were searched.',
@@ -4573,6 +4790,19 @@ describe('truncated tiles, newer searches, unconfirmed fares and budget stops (d
     expect(body).toContain(
       'Coverage: itinerary search not run (a budget cap stopped the run during discovery)',
     );
+  });
+
+  it('a completed pass whose itinerary search never ran (no verification provider registered) names no budget cap (review PA2-1)', async () => {
+    const f = fixture();
+    const def = seedDefinition(f); // the snapshot names SearchApi for verification; nothing seeded verification outcomes
+    const ex = seedExecution(f, def);
+    seedCalendar(f, ex, [{ cell: cellAt(cells(1), 0), pricePence: 40000 }]);
+    seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
+    await runAlerts(f.deps, ex); // a completed pass
+    const body = f.notifier.digests()[0]?.body ?? '';
+    expect(body).toContain('Coverage: itinerary search not run\n');
+    expect(body).not.toContain('budget cap');
+    expect(body).not.toContain('Not searched');
   });
 });
 ```
@@ -4582,30 +4812,25 @@ describe('truncated tiles, newer searches, unconfirmed fares and budget stops (d
 ```ts
 import { asIsoDateTime, BANNED_WORD_ALLOWLIST, findBannedWords, TRUNCATED_NOTE } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { renderBody } from '../../src/alerts/templates.js';
+import { type ItemMarks, NO_MARKS, renderBody } from '../../src/alerts/templates.js';
 import { calendarItem, digestOf, HASH, renderInput, verifiedItem } from './builders.js';
 
-describe('marks the runner reads from the repositories (spec §3, §8.1; decisions 25, 30, 54, 55)', () => {
-  it('not seen in latest search with and without its instant, stale, cheapest of the rows read; the unconfirmed and budget lines', () => {
+const marks = (over: Partial<ItemMarks>): ItemMarks => ({ ...NO_MARKS, ...over });
+
+describe('marks the runner reads from the repositories (spec §3, §8.1; decisions 25, 30, 54, 55, 59)', () => {
+  it('not seen in latest search, stale, cheapest of the rows read; the unconfirmed and budget lines', () => {
     const body = renderBody(
       renderInput({
         digest: digestOf([verifiedItem(), calendarItem()], {
           newItems: [calendarItem({ isNew: true, rowKey: 'calendar:6' })],
         }),
         marks: new Map([
-          [
-            HASH,
-            {
-              stale: null,
-              truncated: false,
-              notSeenInLatest: { at: asIsoDateTime('2026-10-14T12:00:00.000Z') },
-            },
-          ],
-          ['calendar:5', { stale: { thresholdHours: 192 }, truncated: true, notSeenInLatest: null }],
-          ['calendar:6', { stale: null, truncated: true, notSeenInLatest: null }],
+          [HASH, marks({ notSeenInLatest: { at: asIsoDateTime('2026-10-14T12:00:00.000Z') } })],
+          ['calendar:5', marks({ stale: { thresholdHours: 192 }, truncated: true })],
+          ['calendar:6', marks({ truncated: true })],
         ]),
         unconfirmed: 2,
-        budgetUnsearched: 1,
+        budgetStop: { unsearched: 1 },
       }),
     );
     expect(body).toContain('   Notes: not seen in latest search (3h ago)');
@@ -4621,18 +4846,42 @@ describe('marks the runner reads from the repositories (spec §3, §8.1; decisio
 
   it('a newer search with no recorded instant reads "not seen in latest search" with no age (review PA-6)', () => {
     const body = renderBody(
-      renderInput({
-        marks: new Map([[HASH, { stale: null, truncated: false, notSeenInLatest: { at: null } }]]),
-      }),
+      renderInput({ marks: new Map([[HASH, marks({ notSeenInLatest: { at: null } })]]) }),
     );
     expect(body).toContain('   Notes: not seen in latest search\n');
   });
 
-  it('when the itinerary search never ran the coverage says so and the count is a lower bound (review PA-2)', () => {
+  it('a converted previous price carries "≈" in the item and in the "new" section (decision 59)', () => {
+    const body = renderBody(
+      renderInput({
+        digest: digestOf([calendarItem({ previousPricePence: 43000, fetchGapHours: 72 })], {
+          basis: 'calendar',
+          newItems: [
+            calendarItem({
+              isNew: true,
+              rowKey: 'calendar:6',
+              previousPricePence: 50000,
+              fetchGapHours: 169,
+            }),
+          ],
+        }),
+        marks: new Map([
+          ['calendar:5', marks({ previousConverted: true })],
+          ['calendar:6', marks({ previousConverted: true })],
+        ]),
+      }),
+    );
+    expect(body).toContain('   Previous: ≈£430, fetched 3d before this price');
+    expect(body).toContain(' · previous ≈£500, fetched 7d before this price');
+  });
+});
+
+describe('the budget-stop lines appear only after a budget stop (decision 59; review PA2-1)', () => {
+  it('a budget stop during discovery: "not run" with its cause, and the count as a lower bound', () => {
     const body = renderBody(
       renderInput({
         digest: digestOf([calendarItem()], { basis: 'calendar' }),
-        budgetUnsearched: 14,
+        budgetStop: { unsearched: 14 },
         verificationNotRun: true,
       }),
     );
@@ -4644,19 +4893,40 @@ describe('marks the runner reads from the repositories (spec §3, §8.1; decisio
     );
     expect(body).not.toContain('itinerary-searched');
   });
+
+  it('a budget stop with nothing left unsearched but no itinerary search says so without a count ("at least 0" never)', () => {
+    const body = renderBody(
+      renderInput({
+        digest: digestOf([calendarItem()]),
+        budgetStop: { unsearched: 0 },
+        verificationNotRun: true,
+      }),
+    );
+    expect(body).toContain(
+      'Not searched: a budget cap stopped this run before its itinerary search; the prices above are calendar prices only.',
+    );
+    expect(body).not.toContain('at least 0');
+  });
+
+  it('no budget stop: no "Not searched" line, and an itinerary search that never ran names no cause', () => {
+    const body = renderBody(renderInput({ digest: digestOf([calendarItem()]), verificationNotRun: true }));
+    expect(body).not.toContain('Not searched');
+    expect(body).not.toContain('budget cap');
+    expect(body).toContain('Coverage: itinerary search not run\n');
+  });
 });
 
 describe('banned words over the marks and run lines (spec §11)', () => {
   it('no banned word with every mark and both run lines set', () => {
     const body = renderBody(
       renderInput({
-        digest: digestOf([verifiedItem(), calendarItem()]),
+        digest: digestOf([verifiedItem(), calendarItem({ previousPricePence: 43000, fetchGapHours: 2 })]),
         marks: new Map([
-          [HASH, { stale: { thresholdHours: 192 }, truncated: false, notSeenInLatest: { at: null } }],
-          ['calendar:5', { stale: { thresholdHours: 216 }, truncated: true, notSeenInLatest: null }],
+          [HASH, marks({ stale: { thresholdHours: 192 }, notSeenInLatest: { at: null } })],
+          ['calendar:5', marks({ stale: { thresholdHours: 216 }, truncated: true, previousConverted: true })],
         ]),
         unconfirmed: 1,
-        budgetUnsearched: 3,
+        budgetStop: { unsearched: 3 },
         verificationNotRun: true,
       }),
     );
@@ -4675,7 +4945,7 @@ export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRender
     appBaseUrl: null,
     now: NOW,
     marks: new Map(),
-    budgetUnsearched: 0,
+    budgetStop: null,
     verificationNotRun: false,
     unconfirmed: 0,
     ...over,
@@ -4685,7 +4955,7 @@ export function renderInput(over: Partial<DigestRenderInput> = {}): DigestRender
 
 - [ ] **Step 2: Run to verify it fails.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/runner.marks.test.ts test/alerts/templates.marks.test.ts` (under `pnpm --filter @gmt/engine typecheck` the new `renderInput` fields are also TS2353 until Step 3).
 
-Expected: FAIL, 10 failed and 2 passed.
+Expected: FAIL, 14 failed and 2 passed.
 
 Failing first (test, then its first assertion message):
 
@@ -4696,16 +4966,20 @@ Failing first (test, then its first assertion message):
 - "the digest counts the fares whose price the final step did not confirm, leaving out ones that fail a constraint anyway": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Unconfirmed: 1 fare in this run had n…'`
 - "a run a budget cap stopped says how many cell searches did not run": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Not searched: a budget cap left 3 cel…'`
 - "a cap that stopped the run during discovery: the itinerary search is "not run" and the count a lower bound (review PA-2)": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Not searched: a budget cap left at le…'`
-- "not seen in latest search with and without its instant, stale, cheapest of the rows read; the unconfirmed and budget lines": `AssertionError: expected 'get-me-there alert for "London to New…' to contain '   Notes: not seen in latest search (…'`
+- "a completed pass whose itinerary search never ran (no verification provider registered) names no budget cap (review PA2-1)": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Coverage: itinerary search not run\n'`
+- "not seen in latest search, stale, cheapest of the rows read; the unconfirmed and budget lines": `AssertionError: expected 'get-me-there alert for "London to New…' to contain '   Notes: not seen in latest search (…'`
 - "a newer search with no recorded instant reads "not seen in latest search" with no age (review PA-6)": `AssertionError: expected 'get-me-there alert for "London to New…' to contain '   Notes: not seen in latest search\n'`
-- "when the itinerary search never ran the coverage says so and the count is a lower bound (review PA-2)": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Not searched: a budget cap left at le…'`
+- "a converted previous price carries "≈" in the item and in the "new" section (decision 59)": `AssertionError: expected 'get-me-there alert for "London to New…' to contain '   Previous: ≈£430, fetched 3d before…'`
+- "a budget stop during discovery: "not run" with its cause, and the count as a lower bound": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Not searched: a budget cap left at le…'`
+- "a budget stop with nothing left unsearched but no itinerary search says so without a count ("at least 0" never)": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Not searched: a budget cap stopped th…'`
+- "no budget stop: no "Not searched" line, and an itinerary search that never ran names no cause": `AssertionError: expected 'get-me-there alert for "London to New…' to contain 'Coverage: itinerary search not run\n'`
 
 Green from the start, because Task 11.1 already stores the threshold on every payload and the banned-word sweep has nothing new to find before the marks render:
 
 - "the calendar threshold defaults to the refresh plus the declared age"
 - "no banned word with every mark and both run lines set"
 
-- [ ] **Step 3: Implement.** Five edits to `templates.ts`:
+- [ ] **Step 3: Implement.** Eight edits to `templates.ts`:
 
 In `templates.ts`, add `TRUNCATED_NOTE` to the `@gmt/core` import:
 
@@ -4719,6 +4993,7 @@ import {
   formatAgeFull,
   formatDuration,
   formatPence,
+  hoursSince,
   type IsoDateTime,
   LINK_ALLOWLIST,
   type Provenance,
@@ -4741,9 +5016,9 @@ export interface DigestRenderInput {
   now: IsoDateTime;
   /** Per `DigestItem.rowKey`; an item without an entry has no marks. */
   marks: ReadonlyMap<string, ItemMarks>;
-  /** Cell searches of this run a budget cap left undone (not_run or skipped:budget outcomes; decision 25). */
-  budgetUnsearched: number;
-  /** The itinerary-search stage never ran: a budget cap stopped the run during discovery (PA-2). */
+  /** Only when the pass stopped on a budget cap: the cell searches it left undone (decisions 25, 59). */
+  budgetStop: { unsearched: number } | null;
+  /** The itinerary-search stage never ran although a verification provider is configured (any cause). */
   verificationNotRun: boolean;
   /** Fares of this run left out of the itinerary-search basis because the final step did not confirm their price. */
   unconfirmed: number;
@@ -4755,7 +5030,7 @@ Replace the Task 11.2 `notesOf` (with its doc comment) with `agoText` and the fu
 ```ts
 /** "3h ago", or "just now" under an hour. */
 function agoText(at: IsoDateTime, now: IsoDateTime): string {
-  const h = hoursBetween(at, now);
+  const h = hoursSince(at, now);
   return h < 1 ? 'just now' : `${formatDuration(h)} ago`;
 }
 
@@ -4776,15 +5051,53 @@ function notesOf(item: DigestItem, input: DigestRenderInput): string[] {
 }
 ```
 
+Replace `previousLine` with `previousPrice` and this `previousLine`, which mark a converted previous price '≈' (decision 59):
+
+```ts
+/** The previous price with '≈' when it was FX-converted (decision 59). */
+function previousPrice(item: DigestItem, input: DigestRenderInput, pence: number): string {
+  return `${(input.marks.get(item.rowKey) ?? NO_MARKS).previousConverted ? '≈' : ''}${formatPence(pence)}`;
+}
+
+function previousLine(item: DigestItem, input: DigestRenderInput): string | null {
+  if (item.previousPricePence === null) return null;
+  const gap = item.fetchGapHours === null ? '' : `, ${gapText(item.fetchGapHours)}`;
+  return `   Previous: ${previousPrice(item, input, item.previousPricePence)}${gap}`;
+}
+```
+
+In `itemLines`, pass the input on:
+
+```ts
+  const prev = previousLine(item, input);
+```
+
 Replace `coverageText` with:
 
 ```ts
-function coverageText(c: AlertDigest['coverageCaveat'], verificationNotRun: boolean): string {
-  if (verificationNotRun)
-    return 'Coverage: itinerary search not run (a budget cap stopped the run during discovery)';
+function coverageText(c: AlertDigest['coverageCaveat'], input: DigestRenderInput): string {
+  // why: decision 59 — a cause is named only when the pass did stop on a budget cap (review PA2-1)
+  if (input.verificationNotRun)
+    return input.budgetStop === null
+      ? 'Coverage: itinerary search not run'
+      : 'Coverage: itinerary search not run (a budget cap stopped the run during discovery)';
   return c === null
     ? 'Coverage: itinerary-searched 0 cells (no verification provider configured)'
     : `Coverage: itinerary-searched ${c.itinerarySearched} of ${c.selected} cells, ${c.expandTop} outbounds each`;
+}
+```
+
+Replace `newItemLine` (with its doc comment) with:
+
+```ts
+/** One line per new item; the out-of-window previous price, when core states one, with its fetch gap (spec §6.8). */
+function newItemLine(item: DigestItem, input: DigestRenderInput): string {
+  const prev =
+    item.previousPricePence === null
+      ? ''
+      : ` · previous ${previousPrice(item, input, item.previousPricePence)}${item.fetchGapHours === null ? '' : `, ${gapText(item.fetchGapHours)}`}`;
+  const notes = notesOf(item, input);
+  return `- ${routeLine(item)} · ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}${prev}${notes.length > 0 ? ` · ${notes.join('; ')}` : ''}`;
 }
 ```
 
@@ -4811,33 +5124,44 @@ export function renderBody(input: DigestRenderInput): string {
       `Unconfirmed: ${n} ${n === 1 ? 'fare' : 'fares'} in this run had no price confirmed by the final step; they are never alerted.`,
     );
   }
-  if (input.budgetUnsearched > 0 || input.verificationNotRun) {
-    const n = input.budgetUnsearched;
+  const stop = input.budgetStop;
+  if (stop !== null && stop.unsearched > 0) {
+    const n = stop.unsearched;
     const count = `${input.verificationNotRun ? 'at least ' : ''}${n} cell ${n === 1 ? 'search' : 'searches'}`;
     lines.push(
       `Not searched: a budget cap left ${count} of this run undone; the prices above come from the cells that were searched.`,
     );
+  } else if (stop !== null && input.verificationNotRun) {
+    lines.push(
+      'Not searched: a budget cap stopped this run before its itinerary search; the prices above are calendar prices only.',
+    );
   }
-  lines.push(coverageText(d.coverageCaveat, input.verificationNotRun), `Rule: ${ruleText(d.rule)}`);
+  lines.push(coverageText(d.coverageCaveat, input), `Rule: ${ruleText(d.rule)}`);
   return lines.join('\n');
 }
 ```
 
 Two edits to `runner.ts`:
 
-In `runner.ts`, add `budgetFacts` to the marks import:
+In `runner.ts`, add `passFacts` to the marks import:
 
 ```ts
-import { budgetFacts, cellOf, type FiringMarks, marksFor, rowKeyOf } from './marks.js';
+import { cellOf, type FiringMarks, marksFor, passFacts, rowKeyOf } from './marks.js';
 ```
 
 Replace `deliver` (with its doc comment) with:
 
 ```ts
 /**
- * Spec §8.1 order, decision 56: persist the firings as `queued` events (one transaction), send the digest, then mark
- * them `notified`; a failed send leaves them queued with the failure in the reason, for the next pass of this
- * execution. Every emailed item has an event, "new" listings included (PA-5).
+ * Spec §8.1 order, decisions 56 and 59: persist the firings as `queued` events (one transaction), send the digest, then
+ * move each event on:
+ * - every notifier accepted and one of them is not the log → `notified`, with this send's reason, fire time and digest
+ *   id (a retried row no longer reads as failed);
+ * - only the log notifier exists (no SMTP configured) → `suppressed`, "email not configured", which the cooldown never
+ *   counts;
+ * - a notifier refused or threw (including the hourly ceiling) → still `queued`, the failure and the retry outlook in
+ *   its reason.
+ * Every emailed item has an event, "new" listings included (PA-5).
  */
 async function deliver(
   ctx: AlertRunContext,
@@ -4865,15 +5189,15 @@ async function deliver(
         ctx.deps.repos.alerts.insertEvent(eventRow(ctx, f, run.pool, run.marks, 'queued', digestId)),
     ),
   );
-  const budget = budgetFacts(ctx);
+  const facts = passFacts(ctx);
   const body = renderBody({
     digest,
     definitionName: ctx.definition.name,
     appBaseUrl: ctx.deps.config.appBaseUrl,
     now: ctx.now,
     marks: run.marks,
-    budgetUnsearched: budget.unsearched,
-    verificationNotRun: budget.verificationNotRun,
+    budgetStop: facts.budgetStop,
+    verificationNotRun: facts.verificationNotRun,
     unconfirmed: run.pool.unconfirmed,
   });
   const outcome = await sendToAll(ctx.deps.notifiers, {
@@ -4882,23 +5206,35 @@ async function deliver(
     subject: renderSubject(first, ctx.now),
     body,
   });
-  if (outcome.status === 'sent') ctx.deps.repos.alerts.updateEvents(ids, { status: 'notified' });
-  else
-    run.sendable.forEach((f, i) => {
-      const id = ids[i];
-      if (id !== undefined)
-        ctx.deps.repos.alerts.updateEvents([id], {
-          status: 'queued',
-          reason: `${f.reason}; not delivered: ${outcome.detail}`,
-        });
-    });
+  const emailed = ctx.deps.notifiers.some((n) => !(n instanceof LogNotifier));
+  run.sendable.forEach((f, i) => {
+    const id = ids[i];
+    if (id === undefined) return;
+    if (outcome.status === 'failed')
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'queued',
+        reason: `${f.reason}; not delivered: ${outcome.detail}; ${retryText(ctx)}`,
+      });
+    else if (!emailed)
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'suppressed',
+        reason: `${f.reason}; email not configured`,
+      });
+    else
+      ctx.deps.repos.alerts.updateEvents([id], {
+        status: 'notified',
+        reason: f.reason,
+        firedAt: ctx.now,
+        digestId,
+      });
+  });
   return { digests: 1, events: ids.length };
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`, then `pnpm --filter @gmt/engine typecheck`. Expected: PASS, 153 tests; typecheck clean.
+- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine exec vitest run test/alerts/`, then `pnpm --filter @gmt/engine typecheck`. Expected: PASS, 159 tests; typecheck clean.
 
-- [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: digest renders staleness by isStale, truncation, not-seen-in-latest, the unconfirmed count and budget stops"`
+- [ ] **Step 5: Commit.** `git add packages/engine && git commit -m "wp11: digest renders staleness by isStale, truncation, not-seen-in-latest, the unconfirmed count, budget stops only after a budget stop, and '≈' on converted previous prices (decision 59)"`
 
 ### Task 11.8: The alerts step with real-kind prices through a pause and a resume (layer A); the production engine wiring
 
@@ -5092,7 +5428,7 @@ describe('the §8.1 alerts step runs the alert runner (layer A)', () => {
     calendarRule(h, def.id);
     const execution = await h.runToCompletion(h.orch({ ...h.options, alerts: hook }), def.id);
     expect(execution.status).toBe('completed');
-    expect(hook).toHaveBeenCalledExactlyOnceWith(h.deps, execution.id);
+    expect(hook).toHaveBeenCalledExactlyOnceWith(h.deps, execution.id, { stop: 'completed' });
     await expect(hook.mock.results[0]?.value).resolves.toEqual({ digests: 0, events: 0 });
     expect(refusals(h).length).toBeGreaterThan(0);
     expect(h.repos.alerts.events({ definitionId: def.id, limit: 100 })).toHaveLength(0);
@@ -5110,7 +5446,7 @@ describe('the §8.1 alerts step runs the alert runner (layer A)', () => {
     calendarRule(h, def.id);
     const e = await h.runToCompletion(h.orch({ ...h.options, alerts: hook }), def.id);
     expect(e.status).toBe('paused_budget');
-    expect(hook).toHaveBeenCalledExactlyOnceWith(h.deps, e.id);
+    expect(hook).toHaveBeenCalledExactlyOnceWith(h.deps, e.id, { stop: 'budget' });
     expect(refusals(h).length).toBeGreaterThan(0);
     expect(h.digests).toHaveLength(0);
   });
@@ -5280,7 +5616,7 @@ import `engineFor` from `./engine.js`, and drop `createEngine` and `LogNotifier`
 
 **Interfaces:** Consumes `Secret`, `isMailbox`, `smtpPlaintextAllowed`, `scrubSecrets`, `stripUrlsInText`, `containsSynthetic` (WP7), `controlFree`, `stripControl`, `NotificationsRepo.lastSent`, `londonDateOf`. Produces `EmailNotifier`, `EmailNotifierOptions`, `SMTP_TIMEOUTS`, `smtpTransportOptions`, `buildNotifiers(config, log, clock)` and the types of §5.
 
-- [ ] **Step 1: Write the failing tests.** `packages/engine/test/notifiers/email.test.ts` (one test per TLS mode and hostile host, review TS-17; exact subjects for hostile digests and operator messages, TS-9 and TS-14; the ceiling, decision 56; codes-only logging, sec-008; the scrub fallback, sec-002; no socket from `buildNotifiers`, TS-8):
+- [ ] **Step 1: Write the failing tests.** `packages/engine/test/notifiers/email.test.ts` (one test per TLS mode and hostile host, review TS-17; exact subjects for hostile digests and operator messages, TS-9 and TS-14; the ceiling, decision 56; codes-only logging, sec-008; the scrub fallback, sec-002, which logs a codes-only `scrub_refused` warning rather than failing silently (decision 59, review arch-wp11-r2-006); no socket from `buildNotifiers`, TS-8):
 
 ```ts
 import { Socket } from 'node:net';
@@ -5588,8 +5924,12 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
     vi.spyOn(providers, 'scrubSecrets').mockImplementation(() => {
       throw new Error('scrubSecrets: a secret survived scrubbing');
     });
-    const { n } = notifier({ createTransport: failing });
+    const log = captureLogger();
+    const { n } = notifier({ log, createTransport: failing });
     expect(await n.send(digestMessage())).toEqual({ ok: false, detail: 'smtp send failed; detail withheld' });
+    expect(log.lines.find((l) => l.msg === 'email failure detail withheld')?.fields).toMatchObject({
+      code: 'scrub_refused',
+    });
   });
 });
 
@@ -5830,6 +6170,8 @@ export class EmailNotifier implements Notifier {
         scrubSecrets(err instanceof Error ? err.message : String(err), [this.#smtp.pass]),
       );
     } catch {
+      // why: decision 59 — no silent catch: the operator needs to know a failure detail was withheld
+      this.#log.warn({ code: 'scrub_refused' }, 'email failure detail withheld');
       return 'smtp send failed; detail withheld';
     }
   }
@@ -5921,7 +6263,7 @@ In `packages/engine/vitest.config.ts`, `thresholds` becomes (review TS-12: the r
 
 In WP4b's `apps/api/test/helpers/env.ts`, add `'ALERT_EMAIL_MAX_PER_HOUR'` to `ALL_VARS` after `'ALERT_EMAIL_FROM'`; in `apps/api/test/bootstrap/tool.test.ts`, the backup line reads `'backup before 3 migration(s)'` (0000, WP7's 0001, this WP's 0002).
 
-- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine test`: PASS with the thresholds met, the `src/alerts/**` floor included (assembled: 36 files, 464 tests; `src/alerts` 99.6% lines, 89.4% branches; `notifiers/email.ts` 100% lines). Then `pnpm --filter @gmt/api test`: PASS.
+- [ ] **Step 4: Run to verify it passes.** Run `pnpm --filter @gmt/engine test`: PASS with the thresholds met, the `src/alerts/**` floor included (assembled: 36 files, 470 tests; `src/alerts` 99.6% lines, 90.5% branches; `notifiers/email.ts` 100% lines). Then `pnpm --filter @gmt/api test`: PASS.
 
 - [ ] **Step 5: Commit.** `git add packages/engine apps/api && git commit -m "wp11: EmailNotifier with timeouts, one-mailbox check, hourly ceiling and scrubbed details; operator messages once a day per kind and definition"`
 
@@ -6044,7 +6386,7 @@ describe('Alerts rule form (spec §6.8, §11)', () => {
 
 - [ ] **Step 3: Implement.**
 
-In `apps/web/src/copy.ts`, add this entry to `COPY` (the "£" in the threshold label is a form label, which the sweep allows; "verified" sits beside class names only):
+In `apps/web/src/copy.ts`, add this entry to `COPY` (the "£" in the threshold label is a form label, which the sweep allows; "verified" sits beside class names only; a queued event reads "not delivered", because only a later pass of its own execution resends it and its reason says whether one will, decision 59, review PA2-5):
 
 ```ts
   // Alerts view (WP11; spec §6.8, §11). "verified" appears only beside class-verified values.
@@ -6086,7 +6428,8 @@ In `apps/web/src/copy.ts`, add this entry to `COPY` (the "£" in the threshold l
     colPrevious: 'Previous price',
     colClass: 'Constraints',
     colReason: 'Reason',
-    status: { queued: 'not sent yet', notified: 'sent', suppressed: 'suppressed' },
+    // why: decision 59 — only a later pass of its own execution resends a queued event; its reason says if one will
+    status: { queued: 'not delivered', notified: 'sent', suppressed: 'suppressed' },
     listedAsNew: 'listed as new (not a drop)',
     classVerified: 'class verified',
     classPartial: (unverified: string) => `partially-verified; unverified: ${unverified}`,
@@ -6405,9 +6748,9 @@ In `apps/web/test/app/shell.test.tsx`, replace the `it.each(['alerts'])('%s is a
 
 **Files:** Create `apps/web/src/views/Alerts/EventsTable.tsx`. Modify `apps/web/src/views/Alerts/AlertsView.tsx`. Test `apps/web/test/views/Alerts/AlertsView.test.tsx`.
 
-**Interfaces:** Consumes `PriceCell` (with `unconfirmed`, `truncated`, `notSeenInLatestHours`), `PriceBoundary`, `useNow`, `formatRunInstant`, core's `alertEventPayloadSchema`, `isStale` (WP8), `CONSTRAINT_LABELS`, `provCalendar`, `provSearch`.
+**Interfaces:** Consumes `PriceCell` (with `unconfirmed`, `truncated`, `notSeenInLatestHours`), `PriceBoundary`, `useNow`, `formatRunInstant`, core's `alertEventPayloadSchema`, `isStale` and `hoursSince` (WP8), `CONSTRAINT_LABELS`, `provCalendar`, `provSearch`.
 
-The payload is core's schema (decision 56), so the view and the runner cannot drift. Marks are stored as facts and judged now: the stale threshold goes through core's `isStale` against `useNow()`, and "not seen in latest search" is measured from the stored instant (review PA-7). The verdict class and every unverified constraint are shown in words (PA-3); the previous price is a `PriceCell` with its own provenance, so no fare reaches the page without one (PA-4, decision 52); the reason, which quotes those prices, sits in `data-quote` (decision 55).
+The payload is core's schema (decision 56), so the view and the runner cannot drift. Marks are stored as facts and judged now: the stale threshold goes through core's `isStale` against `useNow()`, and "not seen in latest search" is measured from the stored instant with core's `hoursSince` (review PA-7; decision 59: no local date helper). The verdict class and every unverified constraint are shown in words (PA-3); the previous price is a `PriceCell` with its own provenance, so no fare reaches the page without one (PA-4, decision 52); the reason, which quotes those prices, sits in `data-quote` (decision 55).
 
 - [ ] **Step 1: Write the failing test** in `apps/web/test/views/Alerts/AlertsView.test.tsx`:
 
@@ -6615,6 +6958,7 @@ import {
   type AlertEventPayload,
   apiContract,
   CONSTRAINT_LABELS,
+  hoursSince,
   type IsoDateTime,
   isStale,
 } from '@gmt/core';
@@ -6630,11 +6974,6 @@ const C = COPY.alertsView;
 function payloadOf(e: AlertEvent): AlertEventPayload | null {
   const p = apiContract.alertEventPayloadSchema.safeParse(e.payload);
   return p.success ? p.data : null;
-}
-
-/** Whole hours since `at`, for PriceCell's "not seen in latest search" (the payload stores the instant, review PA-7). */
-function hoursSince(at: IsoDateTime, now: IsoDateTime): number {
-  return Math.max(0, Math.floor((Date.parse(now) - Date.parse(at)) / 3_600_000));
 }
 
 /** The verdict class in words; "verified" only beside the class-verified value (spec §11). */
@@ -6840,16 +7179,19 @@ WP11 owns none of the plan's Review Focus lines. The requirements this package c
 | Decisions 27, 37, 45: an unconfirmed price never fires and is never a baseline; counted in the digest | Tasks 11.3, 11.7 |
 | §6.8: drop window 167/168/169 h; absent-then-present listed as new with its previous price | Task 11.4 |
 | §9 item 4: dedup across executions, both bases; cooldown at 335/336/337 h; the max(£10, 5%) step to the penny | Task 11.5 |
-| Decision 56: queued before the send, notified after; a failed send retried on the same row; queued never suppresses | Task 11.5 |
+| Decisions 56, 59: queued before the send, notified after; a failed send retried on the same row, its reason saying whether a retry will come, and rewritten when the retry succeeds; queued never suppresses | Task 11.5 (and Task 11.0b for the row rewrite) |
+| Decision 59: with no SMTP configured a digest's events are suppressed ("email not configured") and start no cooldown | Task 11.5 |
 | Decisions 25, 55: a later pass never repeats a firing or a listing | Tasks 11.5, 11.8 |
 | §9 item 4: synthetic refused by alerts | Task 11.6; Task 11.8 (layer A) |
-| §3 rev 23, decisions 54–56: stale by isStale at the threshold and one hour over, both bases, unknown vendor age by fetch age | Task 11.7 |
+| §3 rev 23, decisions 54–56, 58: stale by isStale at the threshold and one hour over, both bases, unknown vendor age by fetch age | Task 11.7 |
 | Decisions 30, 36: "cheapest of the rows read" | Task 11.7 |
 | §8.1, decision 54: "not seen in latest search", with and without its instant, and its negative case | Task 11.7 |
 | Decision 25: alerts on paused_budget; a cap in discovery says "itinerary search not run" | Tasks 11.7, 11.8 |
+| Decision 59: the budget-stop lines only after a budget stop, never "at least 0"; no cause named otherwise; the hook names the pass | Tasks 11.1, 11.7 |
+| Decision 59: '≈' on a converted previous price in the email | Task 11.7 |
 | §8.1: the production engine passes runAlerts and the configured notifiers | Task 11.8 (`engineFor`) |
 | §9 item 4: synthetic refused by notifiers | Task 11.9 |
-| §5.3, §14: the SMTP password never in a log line or detail; codes-only logging; scrub fallback | Task 11.9 |
+| §5.3, §14: the SMTP password never in a log line or detail; codes-only logging; scrub fallback, logged (decision 59) | Task 11.9 |
 | Decision 56: operator messages once per kind per definition per day; the hourly ceiling | Task 11.9 |
 | §8.3: SMTP_TLS per mode, hostile hosts refused, timeouts set, no `tls` override | Tasks 11.0, 11.9 |
 | §9 item 6, decisions 52, 55, 56: banned words over the Alerts view; every fare and previous price through PriceCell; quotes in `data-quote` | Task 11.11 (plus WP9's catalogue, source guard and rendered sweep) |
@@ -6860,7 +7202,7 @@ WP11 owns none of the plan's Review Focus lines. The requirements this package c
 
 - `pnpm --filter @gmt/core test` passes with core's 100% thresholds (`vitest.config.ts`, CI fails below them).
 - `pnpm --filter @gmt/db test` passes with db's thresholds (85% lines, 70% branches).
-- `pnpm --filter @gmt/engine test` passes with the engine's thresholds (85% lines, 70% branches) and the `src/alerts/**` floor (95% lines, 80% branches), both in `packages/engine/vitest.config.ts` (assembled: 36 files, 464 tests).
+- `pnpm --filter @gmt/engine test` passes with the engine's thresholds (85% lines, 70% branches) and the `src/alerts/**` floor (95% lines, 80% branches), both in `packages/engine/vitest.config.ts` (assembled: 36 files, 470 tests).
 - `pnpm --filter @gmt/api test` passes (assembled: 19 files, 197 tests).
 - `pnpm -r typecheck` reports no errors; `pnpm lint` reports no diagnostics.
 - `pnpm boundaries` exits 0: no `biome-ignore`, `eslint-disable` or `@ts-*` suppression anywhere (decision 49).
@@ -6876,26 +7218,24 @@ WP11 owns none of the plan's Review Focus lines. The requirements this package c
 
 ## 11. Open questions
 
-None requires the operator's judgment. Decisions 55 and 56 settled the round-1 findings marked for judgment; the coordination items for the plan owner and other briefs are in §13.
+None requires the operator's judgment. Decisions 55 and 56 settled the round-1 findings marked for judgment and decision 59 the round-2 ones; the coordination items for the plan owner and other briefs are in §13.
 
 ## 12. Changes outside WP11's own files
 
-- WP0's core (Task 11.0): `src/types/alerts.ts` (`AlertEventStatus`), `src/api-contract/alerts.ts` (statuses, `alertEventPayloadSchema`), `src/config/schema.ts` (`alertEmailMaxPerHour`, `isMailbox`, `smtpPlaintextAllowed`, the base-URL check), `src/index.ts`, `test/config/schema.test.ts` (two test addresses).
+- WP0's core (Task 11.0): `src/types/alerts.ts` (`AlertEventStatus`), `src/api-contract/alerts.ts` (statuses, `alertEventPayloadSchema` with its verdict class from `verdictClassSchema`), `src/config/schema.ts` (`alertEmailMaxPerHour`, `isMailbox`, `smtpPlaintextAllowed`, the base-URL check), `src/index.ts`, `test/config/schema.test.ts` (two test addresses).
 - WP3's db (Task 11.0b): migration 0002 and its generated snapshot and journal entry, `src/internal/enums.ts`, `src/repositories/alerts.ts`, `src/repositories/notifications.ts`, and the tests `alerts.test.ts`, `client.test.ts`, `migration0001.test.ts`, `barrel.test.ts`.
-- WP7's engine: `src/text.ts` and `src/notifiers/operatorTemplates.ts` (Task 11.1: the one cleaner); `src/index.ts` (Tasks 11.1, 11.9); `src/notify.ts`, `test/notifications.test.ts` and `vitest.config.ts` (Task 11.9).
+- WP7's engine: `src/text.ts` and `src/notifiers/operatorTemplates.ts` (Task 11.1: the one cleaner); `src/types.ts` (`AlertsPass`, the hook's third argument), `src/execute.ts` (passes it) and `test/budget-breach.test.ts` (two assertions name it) (Task 11.1, decision 59); `src/index.ts` (Tasks 11.1, 11.9); `src/notify.ts`, `test/notifications.test.ts` and `vitest.config.ts` (Task 11.9).
 - WP4b's api tests: `test/helpers/env.ts` (`ALERT_EMAIL_MAX_PER_HOUR` in `ALL_VARS`) and `test/bootstrap/tool.test.ts` (three migrations) (Task 11.9). WP8's `src/bootstrap/app.ts` (Task 11.8: `engineFor`).
 - WP9's and WP10's web (Task 11.10): `src/api/types.ts`, `src/api/endpoints.ts`, `src/copy.ts` (`alertsView`; `source` removed), `src/App.tsx`, `src/views/Placeholder.tsx` (why line), `src/components/Provenance.tsx`, `src/components/PriceCell.tsx`, the Providers view and `src/lib/sources.ts` (`sourceLabel`/`SOURCE_LABELS`), `test/msw/handlers.ts`, `test/guards.ts` (`MONEY_FILES`, the `[data-quote]` sweep selector), `test/copy/catalogue.test.ts`, `test/app/shell.test.tsx`.
 
 ## 13. For the plan (not yet recorded there)
 
-1. **Assembly.** On 2026-10-17 the core, db, engine and api parts were assembled on a detached scratch worktree of main at `a2999df` and replayed task by task: each engine task's tests were run first against the previous task's code (the outcomes listed in Step 2 are those runs), then green, with `tsc` and Biome clean after every task. Stand-ins: WP8's core `isStale` (the rule of §4 assumption 1) and its "vendor's cache age unknown" wording in `formatAgeFull`, with a five-case test, in the scratch tree only; WP8's `bootApp` is not on main, so its one statement was not replayed (Task 11.8 tests `engineFor` instead). Results: `pnpm -r typecheck`, `pnpm lint`, `pnpm boundaries` and `pnpm casts` (0 casts) clean; core 776 tests (one of them the stand-in's) and db 279 tests with their thresholds; engine 464 tests with the `src/alerts/**` floor; api 197 tests. The web tasks were linted and cast-checked only.
-2. **WP8, `isStale` and the label (decisions 55, 56).** This brief consumes `isStale(provenance, now, thresholdHours)` by effective age (an unknown vendor age by its fetch age) and the unknown-age wording "fetched 5h ago · vendor's cache age unknown". WP8's refreshed brief still computes staleness inline from fetch age plus a known age (ignoring an observed age) and keeps "provider age unknown"; both change there.
-3. **The calendar stale threshold pick** (`CALENDAR_STALE_AFTER_HOURS`, else the provider's refresh plus its declared age) is one line in this WP's `marks.ts` and one in WP8's `calendarThreshold`; the rule itself is core's `isStale`. A core helper for the threshold would remove the second line; a request to WP8, not a blocker.
-4. **WP8's alert routes and tests** store and read events with the statuses `queued | notified | suppressed` (Task 11.0b's migration maps old rows); WP8's route test inserts `'sent'` events and must use `'notified'`. The events route returns the payload as stored; the web parses it with core's `alertEventPayloadSchema`.
-5. **"Superseded by a later search"** (decision 54) cannot arise at alert time: calendar candidates are the execution's own fetches, one parent runs per definition, children never discover, and the step runs before the status write. Nothing renders it here.
-6. **Unconfirmed prices and requireAllVerified.** Core's `evaluateAlertRules` would admit a partially-verified candidate whose only unverified constraint is `priceConfirmed`; this WP removes such candidates (and never uses one as a drop baseline) before evaluation and states the count as a run fact. If the plan prefers core to own the rule, `eligible()` in `alerts/evaluate.ts` is the place.
-7. **Spec wording at the next revision:** §6.8 "one digest per rule per execution" becomes "per stop of an execution" (decision 55); §7 `alert_events.status` lists `queued | notified | suppressed` (decision 56) and §8.1's alerts line says the events are queued before and marked after the send; §8.3's itinerary-search example subject omits the unknown-age clause SearchApi itinerary prices always carry (decision 24); §8.3 names the hidden format characters it strips and the 200-character cut.
-8. **The email's results-row link** uses WP9's URL parameters `view=results&def=<id>&basis=<basis>&row=<rowKey>`; the plan's Web section names only `row=`.
-9. **`ALERT_EMAIL_MAX_PER_HOUR`** (decision 56, default 20) is new: spec §12's environment listing, WP12's `.env.example` and setup docs, and the api's config-variable list (done here) carry it.
-10. **A real SMTP conversation was not added (review TS-8).** The package's network guard refuses every DNS lookup, and nodemailer looks up even an IP literal, so a loopback SMTP stand-in cannot be reached from the engine's tests without loosening the guard. The fail-closed STARTTLS behaviour rests on nodemailer's `requireTLS`, whose mapping is asserted per mode; `buildNotifiers` is asserted to open no socket. WP13's smoke could exercise a real conversation against Mailpit.
-11. **The SMTP user** is an account name, not a secret: it may appear in an event's failure reason (stored and shown in the Alerts view); the password never does, and the log holds codes only.
+1. **Assembly.** On 2026-10-17 the core, db, engine and api parts were assembled on a detached scratch worktree of main at `09ed619` and replayed task by task: each engine task's tests were run first against the previous task's code (the outcomes listed in Step 2 are those runs), then green, with `tsc` and Biome clean after every task. Stand-ins for WP8 (§4 items 1 and 2), in the scratch tree only: core's `isStale` by decision 58's effective age, with a six-case test; the "vendor's cache age unknown" wording in `formatAgeFull`; and `hoursSince` exported from core's barrel (the existing `alerts/dedup.ts` helper, moved to the public list of `test/wp2-barrel.test.ts`). WP8's `bootApp` is not on main, so its one statement was not replayed (Task 11.8 tests `engineFor` instead). Results: `pnpm -r typecheck`, `pnpm lint`, `pnpm boundaries` and `pnpm casts` (0 casts) clean; core 776 tests (one of them the stand-in's) and db 280 tests with their thresholds; engine 470 tests with the `src/alerts/**` floor; api 197 tests. The web tasks were linted and cast-checked only.
+2. **The calendar stale threshold pick** (`CALENDAR_STALE_AFTER_HOURS`, else the provider's refresh plus its declared age) is one line in this WP's `marks.ts` and one in WP8's `calendarThreshold`; the rule itself is core's `isStale`. A core helper for the threshold would remove the second line; a request to WP8, not a blocker.
+3. **"Superseded by a later search"** (decision 54) cannot arise at alert time: calendar candidates are the execution's own fetches, one parent runs per definition, children never discover, and the step runs before the status write. Nothing renders it here.
+4. **Unconfirmed prices and requireAllVerified.** Core's `evaluateAlertRules` would admit a partially-verified candidate whose only unverified constraint is `priceConfirmed`; this WP removes such candidates (and never uses one as a drop baseline) before evaluation and states the count as a run fact. If the plan prefers core to own the rule, `eligible()` in `alerts/evaluate.ts` is the place.
+5. **Spec wording at the next revision:** §7 and §8.1 say that a digest which reached no email is recorded `suppressed` ("email not configured") and that a queued event is resent only by a later pass of its own execution (decision 59); §8.3's itinerary-search example subject omits the unknown-age clause SearchApi itinerary prices always carry (decision 24); §8.3 names the hidden format characters it strips and the 200-character cut.
+6. **The email's results-row link** uses WP9's URL parameters `view=results&def=<id>&basis=<basis>&row=<rowKey>`; the plan's Web section names only `row=`.
+7. **`ALERT_EMAIL_MAX_PER_HOUR`** (decision 56, default 20) is new: spec §12's environment listing, WP12's `.env.example` and setup docs, and the api's config-variable list (done here) carry it.
+8. **A real SMTP conversation was not added (review TS-8).** The package's network guard refuses every DNS lookup, and nodemailer looks up even an IP literal, so a loopback SMTP stand-in cannot be reached from the engine's tests without loosening the guard. The fail-closed STARTTLS behaviour rests on nodemailer's `requireTLS`, whose mapping is asserted per mode; `buildNotifiers` is asserted to open no socket. WP13's smoke could exercise a real conversation against Mailpit.
+9. **The SMTP user** is an account name, not a secret: it may appear in an event's failure reason (stored and shown in the Alerts view); the password never does, and the log holds codes only.
