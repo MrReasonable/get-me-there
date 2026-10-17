@@ -13,7 +13,7 @@ import {
   type Provenance,
 } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset, MIGRATIONS_DIR, seedAirports } from '@gmt/db';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type Discovery,
   runSmoke,
@@ -260,13 +260,23 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
   it('ledger: a retried attempt cannot stand in for an answer; each answer is matched by endpoint and status (cost review M2)', async () => {
     const ports = smokePorts();
     let tpCalls = 0;
-    const { r, urls } = await smoke(ports, cli(), {
+    // why: http-kit's retry backoff runs on setTimeout, so the run is advanced in fake time instead of waited for.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onCleanup(() => vi.useRealTimers());
+    const run = smoke(ports, cli(), {
       // why: the first Travelpayouts request answers 500, so http-kit retries it once (spec §5.3)
       failOn: (u) =>
         u.hostname === 'api.travelpayouts.com' && ++tpCalls === 1
           ? { status: 500, body: { error: 'x' } }
           : undefined,
     });
+    let settled = false;
+    const markSettled = () => {
+      settled = true;
+    };
+    run.then(markSettled, markSettled);
+    while (!settled) await vi.advanceTimersByTimeAsync(500);
+    const { r, urls } = await run;
     expect(urls.filter((u) => u.hostname === 'api.travelpayouts.com')).toHaveLength(2);
     const ledger = r.checks.find((c) => c.name === 'ledger');
     expect(ledger?.status).toBe('pass');
@@ -274,7 +284,7 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
       'travelpayouts 1 tile, 1 answer(s) matched in the ledger by endpoint and status, 1 retried attempt(s), 0 cache hit(s)',
     );
     expect(r.exitCode).toBe(EXIT.ok);
-  }, 60_000); // why: ruling 11: a real-time http-kit retry plus a seeded database; 60 s survives a loaded runner
+  });
 
   it('1: step 2 showing another price than step 1 fails the check', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step2Price: 610 });
