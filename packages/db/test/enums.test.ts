@@ -1,5 +1,5 @@
 import { apiContract, cabinSchema, providerIdSchema, sourceKindSchema } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CABINS,
   ERROR_REASONS,
@@ -24,8 +24,10 @@ describe('internal/enums', () => {
 
   it('every other list must name every member of its union (compile-time check)', () => {
     expect(exhaustive<'a' | 'b'>()(['a', 'b'] as const)).toEqual(['a', 'b']);
-    // @ts-expect-error a list missing a member of the union does not compile
-    exhaustive<'a' | 'b'>()(['a'] as const);
+    // why: the list parameter of a list missing a member is `never`, so no such call compiles; checked by tsc.
+    const ab = exhaustive<'a' | 'b'>();
+    expectTypeOf<Parameters<typeof ab<readonly ['a']>>[0]>().toBeNever();
+    expectTypeOf<Parameters<typeof ab<readonly ['a', 'b']>>[0]>().not.toBeNever();
   });
 
   it('the error-reason list follows core: cell-mismatch (a NormalisationReason) is accepted', () => {

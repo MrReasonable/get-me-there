@@ -1,0 +1,8 @@
+/* Tailwind v4, CSS-first: no tailwind.config.js. */
+@import "tailwindcss";
+
+/* Visible focus on every interactive element (spec §11 accessibility). */
+:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}

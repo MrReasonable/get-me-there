@@ -42,7 +42,7 @@ Replace WP9's three "not available yet" views with the calendar heatmap (View B)
 
 **Out**
 
-- **WP9:** the shell, nav, status bar, `ViewHeader` (with `variant="span"`), `Provenance`, `PriceCell` (with `compact`, `truncated`, `unconfirmed`, `notSeenInLatestHours`; WP10 adds `face` and `superseded`), `PriceBoundary`, the client, `COPY` base entries (`truncatedNote`, `providerShort`, `priceNotConfirmed`, `vendorAgeUnknown`, `spanExecutions`), `NowContext`, `format.ts`'s `formatIsoDate`/`formatIsoDateShort`/`formatIsoDateLong`/`formatWeekday`, URL state, Definitions, Results, Coverage, Providers, the msw test API and its guards, and the boundary script's place-name and suppression checks. WP10 edits only the WP9 files named in §12.
+- **WP9:** the shell, nav, status bar, `ViewHeader` (with `variant="span"`), `Provenance`, `PriceCell` (with `compact`, `truncated`, `superseded` (decision 57; the words "superseded by a later search"), `unconfirmed`, `notSeenInLatestHours`; WP10 adds only `face`), `PriceBoundary`, the client, `COPY` base entries (`truncatedNote`, `providerShort`, `priceNotConfirmed`, `vendorAgeUnknown`, `spanExecutions`), `NowContext`, `format.ts`'s `formatIsoDate`/`formatIsoDateShort`/`formatIsoDateLong`/`formatWeekday`, URL state, Definitions, Results, Coverage, Providers, the msw test API and its guards, and the boundary script's place-name and suppression checks. WP10 edits only the WP9 files named in §12.
 - **WP8:** every route; filling the fields this brief adds (§13); decision 54's rules (effective-age staleness, which figures were not seen in the latest search, which calendar prices are superseded and their ranking, the execution set behind duration, link re-validation in the contract, request limits); `stale` by fetch age (decision 44), `ageHours` and `truncated` per price; the in-process fixture host (WP4b's wiring).
 - **WP7:** `Engine.childCapPreview` behind `verify`, the `price-unconfirmed` priced reason, `isPriceUnconfirmed` and decision 50's one priced-reason builder, `NoPricedOptionsReason` in `ErrorReason` (Task 7.4), `microGbpToPence`, and `scripts/check-casts.mjs` (preconditions, as for WP9).
 - **WP0/WP1:** everything else in `@gmt/core` the views consume.
@@ -190,7 +190,7 @@ export function monthDays(m: IsoMonth): IsoDate[];
 export function formatInstantLondon(ms: number): string;     // '14 Mar 2027 15:00' (Europe/London)
 export function formatInstantDateLondon(ms: number): string; // '14 Mar 2027' (Europe/London)
 export function formatAxisPounds(pence: number): string;     // '1,200': a chart's price tick, no "£"
-// src/components/PriceCell.tsx (WP9's): PriceCellProps.face?: boolean (the phone day cell's amount; COPY.priceMarkGlyph); superseded?: boolean
+// src/components/PriceCell.tsx (WP9's): PriceCellProps.face?: boolean (the phone day cell's amount; COPY.priceMarkGlyph); `superseded?: boolean` and `COPY.superseded` are WP9's already (decision 57)
 // src/lib/marks.ts
 export interface FigureMarks; export function figureMarks(p): FigureMarks;   // decision 54's two marks of a figure, spread into PriceCell
 // src/lib
@@ -235,7 +235,7 @@ export function historySpan(lines); export function newestAllStale(lines); expor
 export function RouteTable({ line, now });   // RouteTable.tsx
 export const MAX_OVERLAY_PAIRS = 6; export function HistoryView({ definition });
 // src/copy.ts
-COPY.calendarView, COPY.durationView, COPY.historyView, COPY.priceMarkGlyph, COPY.superseded
+COPY.calendarView, COPY.durationView, COPY.historyView, COPY.priceMarkGlyph (`COPY.superseded` is WP9's)
 // test/guards.ts (WP9's): renderedCopy() and poundsOutsidePrices(), shared by WP9's sweep and WP10's wiring test
 // e2e/selectors.ts: SMOKE, the Playwright smoke's calendar selectors
 // DOM markers WP9's rendered sweep accepts for "£" outside a PriceCell (Task 10.12): [data-scale] (the calendar legend's scale values only), [data-indicative] (route-level rows)
@@ -3727,13 +3727,13 @@ git add apps/web && git commit -m "wp10: quintile and flat scales per basis with
 
 **Interfaces:**
 - Consumes: `CalendarModel`, `GridDay`, `coverageOf`, `BAND_CLASSES`, `FLAT_CLASS`, `PRICELESS_CLASS`, `MIN_BANDED_DAYS`; WP9's `PriceCell` (`compact`), `PriceBoundary`, `COPY`; the `format.ts` forms (`WEEK_HEADERS`, `formatIsoMonth`, `formatIsoDateLong`, …); `addDays`, `monthOf`.
-- Produces: `PriceCellProps.face`, `PriceCellProps.superseded`, `COPY.priceMarkGlyph`, `COPY.superseded`, `FigureMarks`, `figureMarks`, `FOCUS_RING`, `targetOf`, `CalendarGrid({ days, model, months, destinationNotes, compact, onOpen })`, `CoverageCue({ coverage })`, `CalendarLegend({ model })`.
+- Produces: `PriceCellProps.face`, `COPY.priceMarkGlyph`, `FigureMarks`, `figureMarks`, `FOCUS_RING`, `targetOf`, `CalendarGrid({ days, model, months, destinationNotes, compact, onOpen })`, `CoverageCue({ coverage })`, `CalendarLegend({ model })`.
 
 Each drawn month is a native table (its caption is its accessible name) with Monday-first column headers; each data day is a `<button>` with a roving `tabIndex` (§6: an ARIA `grid` cannot be written without a lint suppression). Arrows move by a day or a week across drawn months, Home and End to Monday and Sunday, PageUp and PageDown to the same day of the month before or after; focus moves only to a drawn day with data; Enter and Space are the button's own activation. A desktop day shows its number and band number, WP9's PriceCell `compact` form, the stay ("14n · back 28 Mar"), "cached from" with the cheaper calendar price's own compact PriceCell carrying its destination and note, and its stay below it (decision 52: with all destinations shown the cheaper fare can be EWR for 12 nights beside a JFK day price for 14), "price not confirmed" when its itinerary search confirmed no price (decision 48; under a filter the api's count is that destination's, decision 53), and the coverage cue. A priceless day shows its counted glyphs and the same coverage cue (review ui-r2-003). Every meaning has text or a pattern: band number on the face and in screen-reader text, "not on the colour scale", hatching, swatches and glyphs with words.
 
 At phone width (`compact`, review ui-r2-001) a column is about 45 px, which the desktop body cannot fit, so a day shows its number and band, the amount through PriceCell's new `face` form and one-glyph marks: "!" for "price not confirmed" and "◐" for part of the day not searched, each with its words in screen-reader text. `face` is a prop on WP9's PriceCell, not a second price component (decision 46): the amount with "≈", every mark as one glyph from `COPY.priceMarkGlyph` ("!" unconfirmed, "◷" stale, "?" vendor's cache age unknown, "…" cheapest of the rows read), and the marks' words, provider, source, age, destination and note in its title and its spoken text. Stay, provider badge, "cached from" and the counts are in the panel, one tap away; the Playwright phone project checks that no day's content overflows its button (Task 10.13).
 
-Decision 54's marks: a verified-basis minimum the latest search no longer returned carries `notSeenInLatest`, which PriceCell already shows as WP9's "not seen in latest search (…)" note; a calendar-basis price whose cell a newer parent run found empty or no fares carries `superseded`, which the new `superseded` prop shows as a "superseded by a later search" badge after "stale" (on the face, "◌" and "↺"). `lib/marks.ts`'s `figureMarks` reads both from any figure, so every view spreads the same two props into PriceCell; the day price and the "cached from" fare each carry their own.
+Decision 54's marks: a verified-basis minimum the latest search no longer returned carries `notSeenInLatest`, which PriceCell already shows as WP9's "not seen in latest search (…)" note; a calendar-basis price whose cell a newer parent run found empty or no fares carries `superseded`, which WP9's `superseded` prop shows as the words "superseded by a later search" (on the face, "◌" and "↺"). `lib/marks.ts`'s `figureMarks` reads both from any figure, so every view spreads the same two props into PriceCell; the day price and the "cached from" fare each carry their own.
 
 The legend sits above the grid; its band ranges are scale values, so it carries `data-scale`, the one place WP9's rendered sweep accepts "£" outside a PriceCell besides an indicative row (decision 52, Task 10.12). The scale line, the swatches and the glyph row stay open; the explanations of the marks fold into "What the marks mean" (review ui-r2-006).
 
@@ -4303,7 +4303,7 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
 
 - [ ] **Step 3: Implement**
 
-`apps/web/src/components/PriceCell.tsx` (WP9's): the `face` prop and its early return, before the compact and full forms, and the `superseded` badge after "stale".
+`apps/web/src/components/PriceCell.tsx` (WP9's): the `face` prop and its early return, before the compact and full forms. WP9 already provides the `superseded` prop and its words (decision 57), so WP10 adds neither a prop nor a badge for it; the face uses them.
 
 `src/components/PriceCell.tsx` — find:
 
@@ -4316,8 +4316,6 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
 
 ```tsx
   fullAge?: boolean;
-  /** WP10 (decision 54): a newer parent execution found this calendar price's cell empty or no_data. */
-  superseded?: boolean;
   /**
    * WP10's phone day-cell face (plan decision 52): the amount with "≈" and each mark as one glyph; the provider,
    * destination, source, age, note and the marks' words are in the title and in spoken text, so nothing is lost.
@@ -4375,24 +4373,7 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
   return (
 ```
 
-`src/components/PriceCell.tsx` — find:
-
-```tsx
-        {props.stale ? <span className={`${badge} bg-amber-200`}>{COPY.stale}</span> : null}
-        {age.kind === 'unknown' ? (
-```
-
-`src/components/PriceCell.tsx` — replace with:
-
-```tsx
-        {props.stale ? <span className={`${badge} bg-amber-200`}>{COPY.stale}</span> : null}
-        {props.superseded === true ? (
-          <span className={`${badge} border border-slate-500 bg-slate-100`}>{COPY.superseded}</span>
-        ) : null}
-        {age.kind === 'unknown' ? (
-```
-
-`apps/web/src/copy.ts`: the face's glyphs and the superseded label, beside WP9's `fxApprox`.
+`apps/web/src/copy.ts`: the face's glyphs, beside WP9's `fxApprox` (WP9's `superseded` entry stays).
 
 `src/copy.ts` — find:
 
@@ -4414,8 +4395,6 @@ Expected: FAIL: the grid file with `Failed to resolve import "../../../src/views
     notSeen: '◌',
     superseded: '↺',
   },
-  /** WP10 (decision 54): a calendar-basis price whose cell a newer parent execution found empty or no_data. */
-  superseded: 'superseded by a later search',
   fxSpoken: (detail: string) => `approximately (${detail})`,
 ```
 

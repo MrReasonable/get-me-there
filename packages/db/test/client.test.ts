@@ -2,7 +2,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { openDatabase } from '../src/client.js';
 import { applyMigrations, pendingMigrations } from '../src/migrate.js';
 import { MIGRATIONS_DIR } from '../src/paths.js';
@@ -32,12 +32,20 @@ describe('openDatabase (spec §7 SQLite settings)', () => {
     expect(() => mem.checkpoint()).not.toThrow();
     mem.close();
   });
+  it('the types reject an async transaction callback (the compile-time half of the guard below)', () => {
+    const db = openDatabase(':memory:');
+    const tx = () => db.transaction<Promise<number>>;
+    const immediate = () => db.immediateTransaction<Promise<number>>;
+    expectTypeOf<ReturnType<Parameters<ReturnType<typeof tx>>[0]>>().toBeNever();
+    expectTypeOf<ReturnType<Parameters<ReturnType<typeof immediate>>[0]>>().toBeNever();
+    expectTypeOf<ReturnType<Parameters<typeof db.transaction<number>>[0]>>().toEqualTypeOf<number>();
+    db.close();
+  });
   it('transaction callbacks must be synchronous (better-sqlite3 commits at the first await)', () => {
     const db = openDatabase(':memory:');
-    // @ts-expect-error async callbacks are rejected by the type and at runtime
-    expect(() => db.transaction(async () => 1)).toThrow(/synchronous/);
-    // @ts-expect-error same guard on the BEGIN IMMEDIATE variant
-    expect(() => db.immediateTransaction(async () => 1)).toThrow(/synchronous/);
+    // why: the type rejects an async callback; Reflect.apply passes one untyped so the runtime guard is what is tested.
+    expect(() => Reflect.apply(db.transaction, db, [async () => 1])).toThrow(/synchronous/);
+    expect(() => Reflect.apply(db.immediateTransaction, db, [async () => 1])).toThrow(/synchronous/);
     expect(db.transaction(() => 41 + 1)).toBe(42);
     expect(db.immediateTransaction(() => 'locked')).toBe('locked');
     db.close();
@@ -137,12 +145,14 @@ describe('migrations against the first real migration (spec §7 "Migrations", §
   it('an async transaction callback is rejected and its synchronous writes are rolled back', () => {
     const db = openTracked(':memory:');
     applyMigrations(db, MIGRATIONS_DIR);
-    // @ts-expect-error repository transaction callbacks are typed to return non-Promise values (Task 0.10's conditional type)
-    expect(() => db.transaction(async () => insertLedgerRow(db))).toThrow(/synchronous/);
+    // why: callbacks are typed to return non-Promise values (Task 0.10's conditional type); Reflect.apply bypasses the type.
+    expect(() => Reflect.apply(db.transaction, db, [async () => insertLedgerRow(db)])).toThrow(/synchronous/);
     // why: better-sqlite3 runs the callback up to its first await, so the insert happened; the rollback must undo it.
     expect(count(db, 'provider_requests')).toBe(0);
-    // @ts-expect-error the same guard on the BEGIN IMMEDIATE variant (ruling 14)
-    expect(() => db.immediateTransaction(async () => insertLedgerRow(db))).toThrow(/synchronous/);
+    // why: the same guard on the BEGIN IMMEDIATE variant (ruling 14).
+    expect(() => Reflect.apply(db.immediateTransaction, db, [async () => insertLedgerRow(db)])).toThrow(
+      /synchronous/,
+    );
     expect(count(db, 'provider_requests')).toBe(0);
   });
 });

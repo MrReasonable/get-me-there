@@ -59,6 +59,7 @@ export { hasControlChars, stripControlChars } from './text/control.js';
 export { formatPence } from './text/money.js';
 export * from './types/alerts.js';
 export * from './types/definition.js';
+export * from './types/definitionDefaults.js';
 export * from './types/execution.js';
 export * from './types/ids.js';
 export * from './types/itinerary.js';
