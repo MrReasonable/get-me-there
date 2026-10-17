@@ -101,6 +101,29 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => cancelled).toEqual(['exec-0002']);
   });
 
+  it('returning to a run whose confirmation was abandoned does not bring the old confirmation back', async () => {
+    let newest = 'exec-0001';
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: [summary({ id: newest, status: 'running' })] })),
+      ),
+      http.get(`${API}/executions/:id`, ({ params }) =>
+        HttpResponse.json(execution({ id: String(params.id) })),
+      ),
+    );
+    const { user, client } = renderWithProviders(bar());
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    newest = 'exec-0002';
+    await client.invalidateQueries({ queryKey: ['results'] });
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    newest = 'exec-0001';
+    await client.invalidateQueries({ queryKey: ['results'] });
+    // why: back on the first run, Cancel must be asked for again; the earlier confirmation was abandoned
+    await settled(client);
+    expect(screen.queryByRole('button', { name: 'Confirm: cancel this run' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
   it('a failed action is announced (cancel answered 409)', async () => {
     server.use(
       http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())),

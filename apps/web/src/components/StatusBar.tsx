@@ -116,6 +116,13 @@ export function StatusBar({ definition, showRunNow }: StatusBarProps) {
   // why: the confirmation is bound to the run it was opened for; if the bar moves to another run, it must be asked again.
   const [confirmingCancelId, setConfirmingCancelId] = useState<string | null>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
+  // why: a confirmation belongs to the run on display; once another run (or none) is shown it is abandoned, and coming
+  // back to the first run must ask for Cancel again rather than revive it.
+  const displayedId = execution.data?.id;
+  useEffect(() => {
+    setConfirmingCancelId((open) => (open !== null && open !== displayedId ? null : open));
+    return () => setConfirmingCancelId(null);
+  }, [displayedId]);
 
   // why: when a polled run changes status, the rows and coverage it produced change too.
   const status = execution.data?.status;
