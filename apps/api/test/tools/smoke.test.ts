@@ -57,6 +57,8 @@ async function smoke(
 
 const status = (r: SmokeResult) => Object.fromEntries(r.checks.map((c) => [c.name, c.status]));
 const lineOf = (r: SmokeResult, start: string): string => r.lines.find((l) => l.startsWith(start)) ?? '';
+const billed = (ports: Ports, r: SmokeResult): number =>
+  ports.budget.usage({ kind: 'execution-calls', executionId: r.executionId ?? '' }).calls;
 
 describe('runSmoke (spec §9 item 7)', () => {
   it('exits 0 with provenance: one tile per provider, one chain, the confirmed price as headline, every check passed, dated fixtures outside the recorded tree', async () => {
@@ -127,5 +129,150 @@ describe('runSmoke (spec §9 item 7)', () => {
     ].join('\n');
     for (const s of [SENTINEL_SA, SENTINEL_TP]) expect(everything).not.toContain(s);
     for (const l of r.lines) expect(findBannedWords(l, BANNED_WORD_ALLOWLIST), l).toEqual([]);
+  });
+
+  it('2: no provider configured, nothing sent, no execution', async () => {
+    const ports = smokePorts({ TRAVELPAYOUTS_TOKEN: '', SEARCHAPI_KEY: '' });
+    const { r, urls } = await smoke(ports);
+    expect(r.exitCode).toBe(EXIT.smokeNoProviders);
+    expect(r.lines).toEqual(['no provider configured: set TRAVELPAYOUTS_TOKEN or SEARCHAPI_KEY']);
+    expect([urls, r.executionId]).toEqual([[], null]);
+  });
+
+  it.each([
+    ['LON', 'JFK', 'LON is a city code; the smoke takes one airport'],
+    ['QQQ', 'JFK', 'unknown airport QQQ'],
+    ['LHR', 'LHR', 'origin and destination must differ'],
+  ])('64: %s→%s is refused before anything is sent', async (o, d, message) => {
+    const ports = smokePorts();
+    const { r, urls } = await smoke(ports, cli(4, false, asIata(o), asIata(d)));
+    expect(r.exitCode).toBe(EXIT.usage);
+    expect(r.summary).toContain(message);
+    expect(urls).toEqual([]);
+  });
+
+  it('65: the same cross-run rule as recording; a higher --budget lifts it, --confirm-rerun too', async () => {
+    const ports = smokePorts();
+    const short = await smoke(ports, cli(3));
+    expect(short.r.exitCode).toBe(EXIT.spendRefused);
+    expect(short.urls).toEqual([]);
+    expect((await smoke(ports, cli(4))).r.exitCode).toBe(EXIT.ok);
+    // why: the first run ledgered 4 credits to a tool execution; 4 + 4 > 4
+    const again = await smoke(ports, cli(4));
+    expect(again.r.exitCode).toBe(EXIT.spendRefused);
+    expect(again.r.summary).toContain('raise --budget only if you mean to spend more');
+    // why: the route returns these lines in its body, so spec §11's banned words apply to them too
+    for (const l of again.r.lines) expect(findBannedWords(l, BANNED_WORD_ALLOWLIST), l).toEqual([]);
+    expect((await smoke(ports, cli(8))).r.exitCode).toBe(EXIT.ok);
+    expect((await smoke(ports, cli(4, true))).r.exitCode).toBe(EXIT.ok);
+  });
+
+  it("the cap is frozen at min(--budget, worst case): --budget 3 --confirm-rerun lets the guard refuse the chain's last step before the fetch (decision 66, cost-wp4b-011)", async () => {
+    const ports = smokePorts();
+    const { r, urls } = await smoke(ports, cli(3, true));
+    expect(urls.filter((u) => u.hostname === 'www.searchapi.io')).toHaveLength(3);
+    expect(billed(ports, r)).toBe(3);
+    expect(ports.repos.executions.get(r.executionId ?? '')?.snapshot.budget.maxCalls).toBe(3);
+    expect(r.exitCode).toBe(EXIT.failed);
+  });
+
+  it('65: a SearchApi window with less room than the worst case refuses even with --confirm-rerun', async () => {
+    const ports = smokePorts({ SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '97' });
+    const { r, urls } = await smoke(ports, cli(4, true));
+    expect(r.exitCode).toBe(EXIT.spendRefused);
+    expect(r.summary).toContain('the SearchApi window has room for');
+    expect(urls).toEqual([]);
+  });
+
+  it('1: a SearchApi 401 is an error; Travelpayouts still prices, no chain credit is spent, the headline is a labelled calendar price', async () => {
+    const ports = smokePorts();
+    const { r } = await smoke(ports, cli(), {
+      failOn: (u) =>
+        u.hostname === 'www.searchapi.io' ? { status: 401, body: { error: 'Invalid API key.' } } : undefined,
+    });
+    expect(r.exitCode).toBe(EXIT.failed);
+    expect(r.reports.map((p) => [p.providerId, p.stage, p.status])).toEqual([
+      ['travelpayouts', 'discovery', 'priced'],
+      ['searchapi', 'discovery', 'error'],
+      ['searchapi', 'itinerary', 'skipped'],
+    ]);
+    expect(r.reports[1]?.detail).toMatch(/^auth/);
+    const sa = ports.repos.ledger
+      .countsFor(r.executionId ?? '')
+      .perProvider.filter((p) => p.providerId === 'searchapi');
+    expect(sa.map((p) => [p.stage, p.calls])).toEqual([['discovery', 1]]);
+    expect(r.summary).toBe(
+      'cheapest calendar price £412 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Aviasales cache · fetched just now · observed 10d ago · not checked by an itinerary search',
+    );
+  });
+
+  it('1: step 2 showing another price than step 1 fails the check', async () => {
+    const { r } = await smoke(smokePorts(), cli(), { step2Price: 610 });
+    expect(r.exitCode).toBe(EXIT.failed);
+    expect(status(r)['step 1 = step 2']).toBe('fail');
+    expect(r.lines.some((l) => l.includes('£603 at step 1, £610 at step 2'))).toBe(true);
+  });
+
+  it('an unconfirmed step-2 price is never "sold by": it names the airline and carries the decision-44 label', async () => {
+    const { r } = await smoke(smokePorts(), cli(), { step3Dearer: true });
+    expect(lineOf(r, 'searchapi itinerary: priced')).toContain(
+      "cheapest £603 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Google Flights via SearchApi, airline stated by the vendor: Synthetic Air One · fetched just now · vendor's cache age unknown · price not confirmed by the final step",
+    );
+    expect(r.summary.startsWith('cheapest confirmed price £650 ·')).toBe(true);
+    expect(r.exitCode).toBe(EXIT.ok);
+  });
+
+  it('1: no seller listing at step 3: the sellers check fails and the headline falls back to the labelled calendar price', async () => {
+    const { r } = await smoke(smokePorts(), cli(), { step3Empty: true });
+    expect(status(r).sellers).toBe('fail');
+    expect(r.summary.startsWith('cheapest calendar price £412 ·')).toBe(true);
+    expect(r.exitCode).toBe(EXIT.failed);
+  });
+
+  it.each([
+    ['a tile stopped at the page cap', { tpTruncated: true }, 'travelpayouts stopped at the page cap'],
+    ['a row with an unusable price', { tpBadPrice: true }, 'travelpayouts 2027-03-02–2027-03-16 parse'],
+  ] as const)(
+    '1: %s fails "tiles read whole" (decision 30, prov-wp13-r1-003)',
+    async (_label, vendors, detail) => {
+      const { r } = await smoke(smokePorts(), cli(), vendors);
+      expect(status(r)['tiles read whole']).toBe('fail');
+      expect(r.checks.find((c) => c.name === 'tiles read whole')?.detail).toContain(detail);
+      expect(r.exitCode).toBe(EXIT.failed);
+    },
+  );
+
+  it('a truncated tile\'s cheapest reads "cheapest of the rows read" (decision 30)', async () => {
+    const { r, urls } = await smoke(smokePorts(), cli(), { tpTruncated: true });
+    expect(urls.filter((u) => u.hostname === 'api.travelpayouts.com')).toHaveLength(3);
+    expect(lineOf(r, 'travelpayouts discovery: priced')).toContain('(cheapest of the rows read)');
+  });
+
+  it('3: no error, but the Travelpayouts tile held no price (Travelpayouts only: no credit)', async () => {
+    const ports = smokePorts({ SEARCHAPI_KEY: '' });
+    const { r, urls } = await smoke(ports, cli(1), { tpEmpty: true });
+    expect(r.exitCode).toBe(EXIT.smokeEmpty);
+    expect(r.reports.map((p) => p.status)).toEqual(['empty']);
+    expect(r.reports[0]?.detail).toContain('no row in the Aviasales cache for these days');
+    expect(r.summary).toBe('no price found');
+    expect(urls.map((u) => u.hostname)).toEqual(['api.travelpayouts.com']);
+  });
+
+  it('0: a dry run prints the query, the frozen cap and the spend position, sends nothing and opens no execution (decision 66)', async () => {
+    const ports = smokePorts();
+    // why: --budget 3 is below the worst case, so a run that called the vendors would need --confirm-rerun; the dry run
+    // still answers 0 and shows the cap the guard would freeze
+    const { r, urls } = await smoke(ports, cli(3, false, LHR, JFK, true));
+    expect([r.exitCode, r.summary, r.executionId]).toEqual([EXIT.ok, 'dry run: nothing sent', null]);
+    expect(urls).toEqual([]);
+    expect(r.fixturesWritten).toEqual([]);
+    expect(r.lines).toContain(
+      'this run: at most 4 SearchApi credit(s), frozen at 3 by --budget 3; at most 3 free Travelpayouts call(s)',
+    );
+    expect(r.lines.some((l) => l.includes('(a run that calls the vendors needs --confirm-rerun)'))).toBe(
+      true,
+    );
+    expect(r.lines.at(-1)).toBe('dry run: nothing sent, no execution opened');
+    expect(ports.repos.executions.listByStatus(['running', 'completed', 'cancelled'])).toEqual([]);
   });
 });
