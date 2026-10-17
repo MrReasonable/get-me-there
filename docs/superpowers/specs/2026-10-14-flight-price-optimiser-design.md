@@ -1507,7 +1507,7 @@ SMTP_USER=
 SMTP_PASS=
 ALERT_EMAIL_TO=
 ALERT_EMAIL_FROM=
-ALERT_EMAIL_MAX_PER_HOUR=20                # outgoing email ceiling; messages beyond it are logged and dropped
+ALERT_EMAIL_MAX_PER_HOUR=20                # outgoing email ceiling per hour, counted per process lifetime (a restart starts a fresh hour); digests and operator messages share it; messages beyond it are logged and dropped
 # --- set by the Dockerfile, never by the operator ---
 # IN_CONTAINER=1
 # --- never in production; development only, not passed by compose ---
