@@ -6,7 +6,6 @@ import {
   cellKeyString,
   type ErrorReason,
   type FxInfo,
-  type IsoDate,
   type IsoDateTime,
   LINK_ALLOWLIST,
   NormalisationError,
@@ -18,6 +17,7 @@ import {
   type Provenance,
   type ProviderId,
   priceInGbp,
+  type RateLookup,
   type RawCalendarPrice,
   type RawOffer,
   type SuppliedField,
@@ -41,10 +41,7 @@ export const FX_SOURCE = 'frankfurter.dev (ECB reference rates)';
  * The newest ECB rate no older than FX_MAX_RATE_AGE_DAYS, in the shape core's NormaliseDeps.rateFor asks for: the one
  * FX lookup shared by calendar prices and offers (spec §5.6).
  */
-export function rateFor(
-  deps: RepoDeps,
-  currency: string,
-): { rateNano: number; rateDate: IsoDate; source: string } | null {
+export function rateFor(deps: RepoDeps, currency: string): ReturnType<RateLookup> {
   const r = deps.fx.latest(currency.toUpperCase(), deps.fxMaxRateAgeDays, deps.clock.todayLondon());
   return r === null ? null : { rateNano: r.rateNano, rateDate: r.date, source: r.source };
 }

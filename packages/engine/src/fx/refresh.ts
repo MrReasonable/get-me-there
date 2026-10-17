@@ -2,6 +2,7 @@ import { ECB_CURRENCIES, type IsoDate, isoDateSchema, ProviderError } from '@gmt
 import { z } from 'zod';
 import type { EngineContext } from '../context.js';
 import { FX_SOURCE } from '../normalise.js';
+import { FRANKFURTER_HOST } from './limits.js';
 
 /**
  * frankfurter's latest ECB reference rates against GBP. Verified 2026-10-14: the `.app` host answers 301 to this URL,
@@ -9,7 +10,7 @@ import { FX_SOURCE } from '../normalise.js';
  * `api.frankfurter.dev` (plan decision 2). Body: `{ amount, base, date, rates }` where `rates[C]` is units of C per `amount`
  * GBP; the schema pins `amount` to 1, which the stored rate assumes (prov M2).
  */
-export const FRANKFURTER_LATEST_URL = 'https://api.frankfurter.dev/v1/latest?from=GBP';
+export const FRANKFURTER_LATEST_URL = `https://${FRANKFURTER_HOST}/v1/latest?from=GBP`;
 
 const frankfurterSchema = z.object({
   amount: z.literal(1),

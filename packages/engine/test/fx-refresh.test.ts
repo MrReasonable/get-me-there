@@ -18,6 +18,10 @@ describe('FX refresh (spec §5.3 "FX refresh goes through http-kit under the id 
       billable: 'never',
       costPerCallMicroGbp: 0,
     });
+    // why: the allowlist and the URL read one host constant, so decision 2's host cannot drift (code-architect review 15)
+    expect(fxHttpLimits({ maxWaitSeconds: 60, requestTimeoutSeconds: 10 }).hosts).toEqual([
+      new URL(FRANKFURTER_LATEST_URL).host,
+    ]);
   });
 
   it('fetches the latest GBP rates through http-kit, stores GBP-per-unit × 1e9 for ECB currencies only, never ledgered', async () => {
