@@ -59,11 +59,43 @@ describe('classifySearchApiError (spec §5.2, §2 fact 5)', () => {
     ['a 401 with another body', 401, { error: 'something else' }],
     ['a 401 with a text body', 401, 'Unauthorized'],
     ['a 429 with no body', 429, null],
-    ['a 429 with a quota-like body (no quota body is recorded)', 429, { error: 'Monthly quota exceeded' }],
+    ['a 429 that names neither credits nor quota', 429, { error: 'Too many requests per second' }],
+    ['a 403 that names neither', 403, { error: 'Forbidden' }],
     ['a 400', 400, { error: 'Unsupported value' }],
     ['a 500', 500, { error: 'boom' }],
   ] as const)('falls through to the default table for %s (synthetic)', (_label, status, body) => {
     expect(classifySearchApiError(facts(status, body))).toBeUndefined();
+  });
+});
+
+describe('quota exhaustion (ruling 17, pie-005): stop, never retry, log the code', () => {
+  it.each([
+    ['any 402', 402, null],
+    ['a 402 with a body', 402, { error: 'Payment required' }],
+    ['a 429 whose body names quota', 429, { error: 'Monthly quota exceeded' }],
+    ['a 429 whose body names credits', 429, { error: 'You have run out of search credits.' }],
+    ['a 403 whose body names credits', 403, { error: 'No credits remaining on this plan' }],
+    ['a 403 whose text body names quota', 403, 'Quota exhausted'],
+  ] as const)(
+    '%s is quota-exhausted, non-retryable, the HTTP code in the message (synthetic)',
+    (_l, status, body) => {
+      const e = classifySearchApiError(facts(status, body));
+      expect(e).toMatchObject({
+        kind: 'quota',
+        retryable: false,
+        httpStatus: status,
+        providerId: 'searchapi',
+      });
+      expect(e?.message).toContain(`HTTP ${status}`);
+      expect(e?.message).toContain('quota exhausted');
+    },
+  );
+
+  it('through http-kit a quota 429 is one attempt, never retried, even with Retry-After', async () => {
+    const kit = serve({ status: 429, body: { error: 'out of credits' }, headers: { 'retry-after': '1' } });
+    const err = asProviderError(await driveError(kit.kit.request(request())));
+    expect([err.kind, err.retryable, err.httpStatus]).toEqual(['quota', false, 429]);
+    expect(kit.budget.count('reserve')).toBe(1);
   });
 });
 
@@ -138,11 +170,6 @@ describe('error table through the real http-kit with SearchApi limits (spec §5.
     const err = asProviderError(await driveError(k.kit.request(request())));
     expect(err).toMatchObject({ kind: 'rate-limit', retryable: false });
     expect(k.budget.count('reserve')).toBe(1);
-  });
-
-  it('a 429 with a quota-like body stays rate-limit: no quota body is recorded (synthetic)', async () => {
-    const k = serve({ status: 429, body: { error: 'Monthly quota exceeded' } });
-    expect(asProviderError(await driveError(k.kit.request(request()))).kind).toBe('rate-limit');
   });
 
   it('a 429 with Retry-After: 30 waits and retries; the retry succeeds (synthetic)', async () => {
