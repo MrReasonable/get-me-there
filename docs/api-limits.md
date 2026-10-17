@@ -48,7 +48,9 @@ How to read it:
 - A billed provider whose calls cost money, enabled under a spend cap of 0, makes boot log a
   warning, and the Providers page says verification will not run. On the `trial` and `40usd`
   plans calls cost £0 at the margin, so the spend cap cannot stop a call: the Providers page
-  names the call cap that does, and that call cap is the only stop. A `MONTHLY_SPEND_CAP_PENCE`
+  names the call cap that does, and that call cap and each definition's call cap (Max billed
+  calls per run) are the stops; on the trial preset a new definition's call cap is 0, so it
+  cannot verify a cell on demand until that cap is raised. A `MONTHLY_SPEND_CAP_PENCE`
   below the subscription fees it counts makes boot log a warning naming the variable.
 - `docs/scheduling.md` turns these caps into calls a run and a month for the worked example.
 

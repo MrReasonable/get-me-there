@@ -76,7 +76,11 @@ SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1â
 ```
 
 then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
-`trial` allowance and scheduled runs leave SearchApi out.
+`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new definitions
+allow 0 billed calls per run, so Verify in the calendar is unavailable until you raise the
+definition's call cap in Definitions â†’ Run budget (Max billed calls per run); 6 covers one
+cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
+on `40usd` the app refuses to start with it (exit 78).
 
 **Secrets are kept only in `.env`.** The repository's `.gitignore` keeps `.env` and every
 `.env.*` file except `.env.example` out of git, `.dockerignore` keeps them out of the image,

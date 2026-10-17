@@ -119,6 +119,21 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(section1).toContain(AUTH_MISSING);
   });
 
+  it('explains that trial definitions allow 0 billed calls and how to verify a cell anyway (N3, ruling 9)', () => {
+    expect(flat).toContain(
+      "On the trial plan new definitions allow 0 billed calls per run, so Verify in the calendar is unavailable until you raise the definition's call cap in Definitions → Run budget (Max billed calls per run); 6 covers one cell.",
+    );
+    const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
+    expect(limits).not.toContain('that call cap is the only stop');
+    expect(limits).toContain("that call cap and each definition's call cap (Max billed calls per run) are the stops");
+  });
+
+  it('tells an operator moving to 40usd to remove SEARCHAPI_TRIAL_USED, which otherwise exits 78 (N5, cost-007)', () => {
+    expect(flat).toContain(
+      'If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0): on `40usd` the app refuses to start with it (exit 78).',
+    );
+  });
+
   it('turns auth off only through the Tailscale-only override file', () => {
     expect(setup).toContain('ALLOW_UNAUTHENTICATED: "true"');
     expect(setup).toContain('COMPOSE_FILE=docker-compose.yml:tailscale-only.yml');
