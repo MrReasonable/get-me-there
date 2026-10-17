@@ -21,7 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
-| Self-scraping: Google Flights in a Camoufox (anti-detection Firefox) browser via Playwright | Free software; residential proxies and selector upkeep are the real cost | Google's page | Yes (the date-grid page) | Yes | Yes | Yes | **Unauthorised; the operator carries the exposure directly** on their own server and IP | Phase 4 continuity fallback only (spec §2); not built |
+| Self-scraping: Google Flights in a Camoufox (anti-detection Firefox) browser via Playwright | Self-run; no vendor account | Free software; residential proxies and selector upkeep are the real cost | Google's page | Yes (the date-grid page) | Yes | Yes | Yes | **Unauthorised; the operator carries the exposure directly** on their own server and IP | Phase 4 continuity fallback only (spec §2); not built |
 
 ## Key facts with sources
 

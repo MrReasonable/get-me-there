@@ -249,6 +249,31 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
       expect(readme).toContain(doc);
   });
 
+  // why: CodeRabbit batch 3 — a providers.md row had one cell fewer than its header, so its verdict sat under
+  // "Authorised source?"; every table row in every doc has its header's cell count
+  it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
+    '%s: every table row has as many cells as its header',
+    (path) => {
+      const cells = (line: string): number =>
+        line
+          .replace(/`[^`]*`/g, 'code')
+          .replace(/\\\|/g, '')
+          .replace(/^\||\|$/g, '')
+          .split('|').length;
+      const bad: string[] = [];
+      let header: number | null = null;
+      for (const [i, line] of read(path).split('\n').entries()) {
+        if (!line.startsWith('|')) {
+          header = null;
+          continue;
+        }
+        if (header === null) header = cells(line);
+        else if (cells(line) !== header) bad.push(`line ${i + 1}: ${cells(line)} cells, header ${header}`);
+      }
+      expect(bad).toEqual([]);
+    },
+  );
+
   it.each([...OPERATOR_DOCS.map((f) => `docs/${f}`), 'README.md'])('%s contains no banned word', (path) => {
     const text = read(path);
     const hits = findBannedWords(text, BANNED_WORD_ALLOWLIST).map(
