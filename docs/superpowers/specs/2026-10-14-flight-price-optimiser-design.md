@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 26.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 27.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -1409,7 +1409,8 @@ merged into price.
   `bandCheapest` marks the cheapest row per 6h travel-time band. Calendar
   rows show the "not applied: …" note. Banner (only when a verification
   provider is configured): "N cells have calendar prices below your
-  cheapest verified (£X)" with per-cell verify.
+  reference verified price (latest seen, then fresh, then cheapest) (£X)"
+  with per-cell verify.
 - **View B Calendar**: day shows, by precedence, the cheapest class-verified
   price under `STALE_AFTER_HOURS`, else the fresher of a stale verified and
   the cheapest calendar price (labelled; unknown age loses to known), else
@@ -1625,6 +1626,12 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 27: web wording and defaults (2026-10-17)
+
+§11: the calendar-gap banner names the reference verified price (plan
+decision 58). §10: a new definition defaults to disabled (no unattended
+runs until the operator enables it); definition defaults live once in core.
 
 ### Revision 26: deployment details (2026-10-17)
 
