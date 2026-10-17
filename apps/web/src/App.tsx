@@ -20,7 +20,7 @@ import { ResultsView } from './views/Results/ResultsView.js';
 /**
  * Spec §11 layout: synthetic banner, header with nav and definition selector, status bar on every
  * view. When /providers fails, the page says provider status is unknown instead of silently showing
- * no banner (decision 36); the views stay inside a boundary so a render error never blanks the page.
+ * no banner (decision 36); the shell and the views each sit inside a boundary, so a render error never blanks the page.
  */
 export function App() {
   const params = useSearchParams();
@@ -42,61 +42,66 @@ export function App() {
     view === 'duration' ||
     view === 'history' ||
     view === 'alerts';
+  // why: two boundaries. The outer one wraps the whole shell, so a render error in the banners, the header (Nav, the
+  // definition selector) or the status bar shows a message instead of a blank page (CodeRabbit batch 3); the inner one
+  // keeps a failing view from taking the nav and status bar with it.
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      {providers.data?.synthetic === true ? <SyntheticBanner /> : null}
-      {providers.error ? (
-        <p role="alert" className="bg-red-100 px-4 py-2 font-semibold text-red-900">
-          {COPY.providersUnknown(providers.error.message)}
-        </p>
-      ) : null}
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-10 focus:bg-white focus:p-2 focus:underline"
-      >
-        {COPY.skipToContent}
-      </a>
-      <header className="flex flex-wrap items-center gap-4 border-b border-slate-300 px-4 py-2">
-        <h1 className="text-lg font-bold">{COPY.appTitle}</h1>
-        <Nav current={view} />
-        <DefinitionSelector definitions={list} selectedId={selectedId} />
-      </header>
-      <StatusBar definition={selected} showRunNow={view === 'results' || view === 'definitions'} />
-      <main id="main" tabIndex={-1} className="px-4 py-3">
-        <AppBoundary>
-          {noProviders ? (
-            <p className="mb-3 rounded border border-slate-400 p-3">{COPY.emptyNoProviders}</p>
-          ) : null}
-          {definitions.error ? (
-            <LoadError error={definitions.error} retry={() => void definitions.refetch()} />
-          ) : null}
-          {needsDefinition && definitions.data !== undefined && selected === null ? (
-            <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
-          ) : null}
-          {needsDefinition && selected !== null && !providerStatusKnown ? <Loading /> : null}
-          {view === 'results' && selected !== null && providerStatusKnown ? (
-            <ResultsView definition={selected} />
-          ) : null}
-          {view === 'coverage' && selected !== null && providerStatusKnown ? (
-            <CoverageView definition={selected} />
-          ) : null}
-          {view === 'calendar' && selected !== null && providerStatusKnown ? (
-            // why: a new definition starts with no panel open and its own filter defaults.
-            <CalendarView key={selected.id} definition={selected} />
-          ) : null}
-          {view === 'duration' && selected !== null && providerStatusKnown ? (
-            <DurationView definition={selected} />
-          ) : null}
-          {view === 'history' && selected !== null && providerStatusKnown ? (
-            <HistoryView definition={selected} />
-          ) : null}
-          {view === 'alerts' && selected !== null && providerStatusKnown ? (
-            <AlertsView definitionId={selected.id} />
-          ) : null}
-          {view === 'definitions' ? <DefinitionsView /> : null}
-          {view === 'providers' ? <ProvidersView /> : null}
-        </AppBoundary>
-      </main>
-    </div>
+    <AppBoundary>
+      <div className="min-h-screen bg-white text-slate-900">
+        {providers.data?.synthetic === true ? <SyntheticBanner /> : null}
+        {providers.error ? (
+          <p role="alert" className="bg-red-100 px-4 py-2 font-semibold text-red-900">
+            {COPY.providersUnknown(providers.error.message)}
+          </p>
+        ) : null}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:z-10 focus:bg-white focus:p-2 focus:underline"
+        >
+          {COPY.skipToContent}
+        </a>
+        <header className="flex flex-wrap items-center gap-4 border-b border-slate-300 px-4 py-2">
+          <h1 className="text-lg font-bold">{COPY.appTitle}</h1>
+          <Nav current={view} />
+          <DefinitionSelector definitions={list} selectedId={selectedId} />
+        </header>
+        <StatusBar definition={selected} showRunNow={view === 'results' || view === 'definitions'} />
+        <main id="main" tabIndex={-1} className="px-4 py-3">
+          <AppBoundary>
+            {noProviders ? (
+              <p className="mb-3 rounded border border-slate-400 p-3">{COPY.emptyNoProviders}</p>
+            ) : null}
+            {definitions.error ? (
+              <LoadError error={definitions.error} retry={() => void definitions.refetch()} />
+            ) : null}
+            {needsDefinition && definitions.data !== undefined && selected === null ? (
+              <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
+            ) : null}
+            {needsDefinition && selected !== null && !providerStatusKnown ? <Loading /> : null}
+            {view === 'results' && selected !== null && providerStatusKnown ? (
+              <ResultsView definition={selected} />
+            ) : null}
+            {view === 'coverage' && selected !== null && providerStatusKnown ? (
+              <CoverageView definition={selected} />
+            ) : null}
+            {view === 'calendar' && selected !== null && providerStatusKnown ? (
+              // why: a new definition starts with no panel open and its own filter defaults.
+              <CalendarView key={selected.id} definition={selected} />
+            ) : null}
+            {view === 'duration' && selected !== null && providerStatusKnown ? (
+              <DurationView definition={selected} />
+            ) : null}
+            {view === 'history' && selected !== null && providerStatusKnown ? (
+              <HistoryView definition={selected} />
+            ) : null}
+            {view === 'alerts' && selected !== null && providerStatusKnown ? (
+              <AlertsView definitionId={selected.id} />
+            ) : null}
+            {view === 'definitions' ? <DefinitionsView /> : null}
+            {view === 'providers' ? <ProvidersView /> : null}
+          </AppBoundary>
+        </main>
+      </div>
+    </AppBoundary>
   );
 }
