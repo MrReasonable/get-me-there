@@ -1,7 +1,7 @@
 import type { OperatorMessage, OperatorMessageKind } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import { errorText } from './errors.js';
 import { type MessageParams, renderOperatorMessage } from './notifiers/operatorTemplates.js';
-import { errorText } from './run.js';
 
 export interface NotifyParams extends MessageParams {
   definitionId: string;

@@ -52,5 +52,10 @@ export function classifyFailure(err: unknown, aborted: boolean, now: IsoDateTime
       disableProvider: err.kind === 'auth' || err.kind === 'quota',
     };
   }
-  return { kind: 'fatal', message: stripUrlsInText(err instanceof Error ? err.message : String(err)) };
+  return { kind: 'fatal', message: errorText(err) };
+}
+
+/** Message text for any thrown value, URL-free (spec §5.3 secret scrubbing). */
+export function errorText(err: unknown): string {
+  return stripUrlsInText(err instanceof Error ? err.message : String(err));
 }

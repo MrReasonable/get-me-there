@@ -1,5 +1,6 @@
 import type { Logger } from '@gmt/core';
-import { errorText, type RunState } from './run.js';
+import { errorText } from './errors.js';
+import type { RunState } from './run.js';
 
 /** The passes running in this process, so cancel/shutdown can reach them and resume can refuse duplicates. */
 export interface RunRegistry {

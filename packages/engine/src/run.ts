@@ -11,7 +11,6 @@ import {
   type ProviderId,
   type SkipReason,
   type Stage,
-  stripUrlsInText,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { classifyFailure } from './errors.js';
@@ -195,11 +194,6 @@ export function runnableCells(
   // why: a provider the pre-start or resume check blocked for budget makes no call in this pass (cost-r1-001)
   if (run.disabled.has(providerId) || run.blocked.has(lineKey(stage, providerId))) return [];
   return resumableCells(ctx, run.executionId, stage, providerId, run.manual);
-}
-
-/** Message text for any thrown value, URL-free (spec §5.3 secret scrubbing). */
-export function errorText(err: unknown): string {
-  return stripUrlsInText(err instanceof Error ? err.message : String(err));
 }
 
 /**

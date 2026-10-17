@@ -1,6 +1,6 @@
 import { type IsoDateTime, isoDateTimeOfEpochMs, type Logger, type SearchDefinition } from '@gmt/core';
 import { Cron } from 'croner';
-import { errorText } from '../run.js';
+import { errorText } from '../errors.js';
 import type { SchedulerJob } from '../types.js';
 import { parseCron } from './parseCron.js';
 

@@ -1,8 +1,9 @@
 import type { ExecutionStatus, IsoDateTime, OperatorMessageKind } from '@gmt/core';
 import type { ExecutionPatch } from '@gmt/db';
 import type { EngineContext } from './context.js';
+import { errorText } from './errors.js';
 import { notifyOperator } from './notify.js';
-import { errorText, type RunState, type StopReason, stopRun } from './run.js';
+import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { runVerification } from './stages/verification.js';
 import { breachText, formatInstant } from './text.js';

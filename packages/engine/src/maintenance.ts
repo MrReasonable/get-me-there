@@ -1,7 +1,7 @@
 import { runMaintenance } from '@gmt/db';
 import type { EngineContext } from './context.js';
+import { errorText } from './errors.js';
 import { refreshFx } from './fx/refresh.js';
-import { errorText } from './run.js';
 import type { SystemJob } from './scheduler/scheduler.js';
 
 /** Daily at 06:00 in SCHEDULER_TIMEZONE (spec §5.6 "refreshed daily"). */

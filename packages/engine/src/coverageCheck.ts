@@ -10,7 +10,7 @@ import {
   resolveWindow,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
-import { errorText } from './run.js';
+import { errorText } from './errors.js';
 import type { CoverageCheckRequest, CoverageCheckResponse } from './types.js';
 
 type MonthRow = CoverageCheckResponse['pairs'][number]['months'][number];
