@@ -23,12 +23,14 @@ function repo() {
   dirs.push(d);
   return d;
 }
+// why: an empty environment, so no secret a developer's shell holds reaches the scan and the cases stay deterministic;
+// node is started by its absolute path, so the child needs no PATH and the test reads no environment (PR #3 review)
 const scan = (/** @type {string} */ cwd) =>
   spawnSync(process.execPath, [SCRIPT], {
     cwd,
     encoding: 'utf8',
     timeout: 30_000,
-    env: { PATH: process.env.PATH ?? '' },
+    env: {},
   });
 
 // why: ruling 11: each case spawns node; 60 s survives a loaded runner.
