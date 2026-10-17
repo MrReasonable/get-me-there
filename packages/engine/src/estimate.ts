@@ -6,19 +6,16 @@ import {
   type Execution,
   microGbpToPence,
   type ProviderId,
-  type SearchDefinition,
   type SourceKind,
   type Stage,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledBefore, resumableCells } from './run.js';
-import { runsPerMonth } from './scheduler/parseCron.js';
-import { buildSnapshot } from './snapshot.js';
 import { planTiles } from './stages/discovery.js';
-import { REUSE_TOLERANCE, refreshHoursOf, reusableFor, reuseCriteriaFor } from './stages/reuse.js';
+import { reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
-import type { BudgetFit, Estimate } from './types.js';
+import type { Estimate } from './types.js';
 
 /** Typical wall time per call by source kind (spec §2: SearchApi calendar 9–29 s; Travelpayouts about 1 s; the fixture is local). */
 export const SECONDS_PER_CALL: Readonly<Record<SourceKind, number>> = {
@@ -27,8 +24,20 @@ export const SECONDS_PER_CALL: Readonly<Record<SourceKind, number>> = {
   'scraped-search': 15,
   synthetic: 0,
 };
-/** Hours in an average month (365 × 24 / 12), for discovery refreshes per month. */
-const HOURS_PER_MONTH = 730;
+
+/** The totals of an estimate over the lines given (one sum, shared by assemble, addPass and withBlocked). */
+function totalsOf(
+  lines: Estimate['perProvider'],
+): Pick<Estimate, 'totalCalls' | 'totalPlanCalls' | 'totalCostMicroGbp' | 'totalCostPence' | 'seconds'> {
+  const totalCostMicroGbp = lines.reduce((a, p) => a + p.costMicroGbp, 0);
+  return {
+    totalCalls: lines.reduce((a, p) => a + p.calls, 0),
+    totalPlanCalls: lines.reduce((a, p) => a + p.planCalls, 0),
+    totalCostMicroGbp,
+    totalCostPence: microGbpToPence(totalCostMicroGbp),
+    seconds: lines.reduce((a, p) => a + p.seconds, 0),
+  };
+}
 
 interface Line {
   providerId: ProviderId;
@@ -59,15 +68,10 @@ function assemble(
       blocked: null,
     };
   });
-  const totalCostMicroGbp = perProvider.reduce((a, p) => a + p.costMicroGbp, 0);
   return {
     cells,
     perProvider,
-    totalCalls: perProvider.reduce((a, p) => a + p.calls, 0),
-    totalPlanCalls: perProvider.reduce((a, p) => a + p.planCalls, 0),
-    totalCostMicroGbp,
-    totalCostPence: microGbpToPence(totalCostMicroGbp),
-    seconds: perProvider.reduce((a, p) => a + p.seconds, 0),
+    ...totalsOf(perProvider),
     assumptions: [`every call count includes the retry factor ${f}`, ...assumptions],
     windowClamped,
     retryFactor: f,
@@ -240,118 +244,6 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   return assemble(ctx, lines, total, snapshot.windowClamped, notes);
 }
 
-/** One scheduled definition's monthly load per provider: calls and billed cost. */
-export interface MonthlyLoad {
-  runsPerMonth: number;
-  perRun: Estimate;
-  /** The schedule's snapshot, as a scheduled run would freeze it now (its providers and refresh hours). */
-  snapshot: DefinitionSnapshot;
-  perProvider: Map<ProviderId, { calls: number; costMicroGbp: number }>;
-}
-
-/**
- * Spec §8.2 load of `firings` scheduled runs spread over `hours`, without reuse (po-004): verification runs on every
- * firing; discovery at most once per refresh (reuse iff age < 0.9 × refresh), so a daily cron with a weekly refresh
- * pays weekly discovery (cost-r1-003): discovery runs = min(firings, hours / (0.9 × refresh hours)). The one model
- * budgetFit (a month) and the pre-start reservation (the rest of a cap window) share (cost-r2-002).
- */
-export function scheduleLoad(
-  ctx: EngineContext,
-  perRun: Estimate,
-  snapshot: DefinitionSnapshot,
-  firings: number,
-  hours: number,
-): Map<ProviderId, { calls: number; costMicroGbp: number }> {
-  const load = new Map<ProviderId, { calls: number; costMicroGbp: number }>();
-  for (const p of perRun.perProvider) {
-    const factor =
-      p.stage === 'discovery'
-        ? Math.min(firings, hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, p.providerId)))
-        : firings;
-    const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0 };
-    load.set(p.providerId, {
-      calls: acc.calls + p.calls * factor,
-      costMicroGbp: acc.costMicroGbp + (ctx.limitsOf(p.providerId).billed ? p.costMicroGbp * factor : 0),
-    });
-  }
-  return load;
-}
-
-/** Spec §8.2 monthly load of a schedule: scheduleLoad over runsPerMonth firings in an average month (730 h). */
-export function monthlyLoad(ctx: EngineContext, def: SearchDefinition): MonthlyLoad {
-  const built = buildSnapshot(ctx, def, 'schedule');
-  const perRun = estimateStart(ctx, built.snapshot, built.cells, null);
-  const runs = runsPerMonth(def.scheduleCron, def.scheduleTz, new Date(ctx.clock.now()));
-  return {
-    runsPerMonth: runs,
-    perRun,
-    snapshot: built.snapshot,
-    perProvider: scheduleLoad(ctx, perRun, built.snapshot, runs, HOURS_PER_MONTH),
-  };
-}
-
-/** The other enabled, scheduled, live definitions (ruling 5: they share the provider-month and global caps). */
-export function otherSchedules(ctx: EngineContext, definitionId: string | null): SearchDefinition[] {
-  return ctx.repos.definitions
-    .list()
-    .filter((d) => d.id !== definitionId && d.enabled && d.deletedAt === null && d.scheduleCron !== null);
-}
-
-/**
- * Spec §8.2 "budgetFit at save time compares runsPerMonth × estimate with every cap and warns", worst case without
- * reuse (po-004). Execution scopes compare one run with the definition's budget. Monthly scopes add the monthly load
- * of every other enabled scheduled definition, because they share the caps (ruling 5: the API refuses enabling or
- * changing a schedule whose provider-month scope does not fit); global adds each billed provider's fixed fee once
- * (spec §5.3). `definitionId` is null for an unsaved definition.
- */
-export function budgetFitFor(
-  ctx: EngineContext,
-  def: SearchDefinition,
-  definitionId: string | null,
-): BudgetFit {
-  const own = monthlyLoad(ctx, def);
-  const others = otherSchedules(ctx, definitionId).map((d) => monthlyLoad(ctx, d));
-  const billed = own.perRun.perProvider.filter((p) => ctx.limitsOf(p.providerId).billed);
-  const free = own.perRun.perProvider.filter((p) => !ctx.limitsOf(p.providerId).billed);
-  const sum = (xs: Estimate['perProvider'], f: (p: Estimate['perProvider'][number]) => number) =>
-    xs.reduce((a, p) => a + f(p), 0);
-  const perScope: BudgetFit['perScope'] = [];
-  const scope = (name: string, estimated: number, cap: number | null) => {
-    const e = Math.ceil(estimated);
-    perScope.push({ scope: name, estimated: e, cap, fits: cap === null || e <= cap });
-  };
-  scope(
-    'execution-calls',
-    sum(billed, (p) => p.calls),
-    def.budget.maxCalls,
-  );
-  scope(
-    'execution-free-calls',
-    sum(free, (p) => p.calls),
-    def.budget.maxFreeCalls,
-  );
-  scope(
-    'execution-cost',
-    sum(billed, (p) => p.costMicroGbp),
-    def.budget.maxCostMicroGbp,
-  );
-  const ids = new Set([...own.perProvider.keys(), ...others.flatMap((o) => [...o.perProvider.keys()])]);
-  for (const id of ids) {
-    const kind = ctx.limitsOf(id).window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
-    const calls = [own, ...others].reduce((a, l) => a + (l.perProvider.get(id)?.calls ?? 0), 0);
-    scope(`${kind}:${id}`, calls, ctx.budget.usage({ kind, providerId: id }).cap);
-  }
-  const fixed = [...ctx.providers.keys()]
-    .filter((id) => ctx.limitsOf(id).billed)
-    .reduce((a, id) => a + ctx.limitsOf(id).planFixedMicroGbp, 0);
-  const cost = [own, ...others].reduce(
-    (a, l) => a + [...l.perProvider.values()].reduce((b, v) => b + v.costMicroGbp, 0),
-    0,
-  );
-  scope('global-month', fixed + cost, ctx.config.spend.monthlyCapMicroGbp);
-  return { fits: perScope.every((x) => x.fits), runsPerMonth: own.runsPerMonth, perScope };
-}
-
 /**
  * The stored estimate after a resumed pass: its plan added line by line (cost-r1-009), so View D's overrun rule
  * (ledger calls > pre-factor plan + 10%) judges every pass the execution made, retries included.
@@ -370,15 +262,10 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
       l.seconds += p.seconds;
     }
   }
-  const totalCostMicroGbp = lines.reduce((a, p) => a + p.costMicroGbp, 0);
   return {
     ...stored,
     perProvider: lines,
-    totalCalls: lines.reduce((a, p) => a + p.calls, 0),
-    totalPlanCalls: lines.reduce((a, p) => a + p.planCalls, 0),
-    totalCostMicroGbp,
-    totalCostPence: microGbpToPence(totalCostMicroGbp),
-    seconds: lines.reduce((a, p) => a + p.seconds, 0),
+    ...totalsOf(lines),
     assumptions: [...stored.assumptions, `a resumed pass planned ${pass.totalPlanCalls} more calls`],
   };
 }
@@ -393,15 +280,10 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
     blocked: blockedBy.get(lineKey(p.stage, p.providerId)) ?? null,
   }));
   const runs = perProvider.filter((p) => p.blocked === null);
-  const totalCostMicroGbp = runs.reduce((a, p) => a + p.costMicroGbp, 0);
   return {
     ...e,
     perProvider,
-    totalCalls: runs.reduce((a, p) => a + p.calls, 0),
-    totalPlanCalls: runs.reduce((a, p) => a + p.planCalls, 0),
-    totalCostMicroGbp,
-    totalCostPence: microGbpToPence(totalCostMicroGbp),
-    seconds: runs.reduce((a, p) => a + p.seconds, 0),
+    ...totalsOf(runs),
     assumptions:
       runs.length === perProvider.length
         ? e.assumptions

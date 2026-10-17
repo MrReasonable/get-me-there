@@ -1,10 +1,11 @@
 import type { DefinitionInput, SearchDefinition } from '@gmt/core';
 import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
+import { budgetFitFor } from './budgetFit.js';
 import { childCapPreview } from './child.js';
 import { buildContext, type EngineContext } from './context.js';
 import { coverageCheckFor } from './coverageCheck.js';
-import { budgetFitFor, estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
+import { estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
 import { runSystemJob } from './maintenance.js';
 import { createOrchestrator, type Orchestrator } from './orchestrator.js';
 import { isStalePaused, supersede } from './resume.js';

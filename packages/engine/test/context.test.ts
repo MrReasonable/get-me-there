@@ -29,3 +29,15 @@ describe('buildContext: the engine-level synthetic gate (spec §5.5; prov-wp07-0
     expect(h.repos.executions.listByStatus(['pending', 'running'])).toEqual([]);
   });
 });
+
+describe('ProviderRunLimits.capKind (code-architect review 8)', () => {
+  it('names the cap a provider counts against, derived once: provider-month, or provider-lifetime for a lifetime plan', () => {
+    // why: the limits come from budgetConfigFromConfig(config); SearchApi's plan sets its window (the trial is lifetime)
+    const kindFor = (plan: string) => {
+      const h = createHarness({ env: { SEARCHAPI_KEY: 'layer-a-placeholder', SEARCHAPI_PLAN: plan } });
+      return buildContext(h.deps, h.options).limitsOf('searchapi').capKind;
+    };
+    expect(kindFor('40usd')).toBe('provider-month');
+    expect(kindFor('trial')).toBe('provider-lifetime');
+  });
+});

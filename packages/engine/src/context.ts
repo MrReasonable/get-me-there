@@ -33,6 +33,8 @@ export interface ProviderRunLimits {
   ratePerMinute: number;
   ratePerHour: number;
   window: 'month' | 'lifetime';
+  /** The cap scope this provider's calls count against, derived from `window` once (code-architect review 8). */
+  capKind: 'provider-month' | 'provider-lifetime';
   planFixedMicroGbp: number;
   excludedFromSchedule: boolean;
   billed: boolean;
@@ -81,6 +83,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       ratePerMinute: b.ratePerMinute,
       ratePerHour: b.ratePerHour,
       window: b.window,
+      capKind: b.window === 'lifetime' ? 'provider-lifetime' : 'provider-month',
       planFixedMicroGbp: b.planFixedMicroGbp,
       excludedFromSchedule: b.excludedFromSchedule,
       billed: b.billable,

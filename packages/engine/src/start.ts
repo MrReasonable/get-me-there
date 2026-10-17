@@ -107,12 +107,11 @@ export function confirmationNeeded(
   const calls = new Map<ProviderId, number>();
   for (const p of runnable) calls.set(p.providerId, (calls.get(p.providerId) ?? 0) + p.calls);
   const heavy = [...calls].flatMap(([id, n]) => {
-    const window = ctx.limitsOf(id).window;
-    const kind = window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
+    const kind = ctx.limitsOf(id).capKind;
     const cap = ctx.budget.usage({ kind, providerId: id }).cap;
     return cap !== null && n > SOFT_CONFIRM_CALL_SHARE * cap
       ? [
-          `${n} ${id} calls, more than ${SOFT_CONFIRM_CALL_SHARE * 100}% of its ${window === 'lifetime' ? 'lifetime' : 'monthly'} call cap`,
+          `${n} ${id} calls, more than ${SOFT_CONFIRM_CALL_SHARE * 100}% of its ${kind === 'provider-lifetime' ? 'lifetime' : 'monthly'} call cap`,
         ]
       : [];
   });

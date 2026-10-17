@@ -363,7 +363,11 @@ describe('SOFT_CONFIRM in pence and calls; confirmed_cost_pence and confirmed_ca
     // why: the guard and the engine both read the fixture's window as lifetime here, as they read the trial's
     const lifetime = {
       ...ctx,
-      limitsOf: (id: ProviderId) => ({ ...ctx.limitsOf(id), window: 'lifetime' as const }),
+      limitsOf: (id: ProviderId) => ({
+        ...ctx.limitsOf(id),
+        window: 'lifetime' as const,
+        capKind: 'provider-lifetime' as const,
+      }),
     };
     const orch = h.track(createOrchestrator(lifetime));
     const def = h.createDefinition();

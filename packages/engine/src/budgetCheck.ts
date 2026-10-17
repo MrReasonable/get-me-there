@@ -1,6 +1,6 @@
 import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage } from '@gmt/core';
+import { monthlyLoad, otherSchedules, scheduleLoad } from './budgetFit.js';
 import type { EngineContext } from './context.js';
-import { monthlyLoad, otherSchedules, scheduleLoad } from './estimate.js';
 import { type LineKey, lineKey } from './lines.js';
 import { firingsBetween } from './scheduler/parseCron.js';
 import { breachText } from './text.js';
@@ -143,7 +143,7 @@ export function checkBudget(
     billed,
   );
   for (const id of ids(spend)) {
-    const kind = ctx.limitsOf(id).window === 'lifetime' ? 'provider-lifetime' : 'provider-month';
+    const kind = ctx.limitsOf(id).capKind;
     const u = ctx.budget.usage({ kind, providerId: id });
     const reserved = kind === 'provider-month' ? reservedForSchedules(ctx, id, definitionId, u.windowEnd) : 0;
     const lines = spend.filter((s) => s.providerId === id);

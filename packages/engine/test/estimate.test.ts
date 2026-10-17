@@ -1,7 +1,8 @@
 import { apiContract, type Estimate, ProviderError } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { budgetFitFor } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
-import { budgetFitFor, estimateRemainingFor, estimateStart } from '../src/estimate.js';
+import { estimateRemainingFor, estimateStart } from '../src/estimate.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import {
   createHarness,
