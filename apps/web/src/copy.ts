@@ -638,7 +638,7 @@ export const COPY = {
       coveragePartial:
         'counts under the price (e.g. "3 priced, 9 no cached data") name the buckets of its best-covered source; a striped square: part of the day not searched; per-source counts are in the panel',
       cachedFrom:
-        'cached from £X: a cheaper calendar price exists for this day, with its destination and stay; constraints not checked',
+        '"cached from" and a price: a cheaper calendar price exists for this day, with its destination and stay; constraints not checked',
       unconfirmed:
         'price not confirmed: an itinerary search priced this day, but the final step confirmed none of its prices',
       truncated: 'cheapest of the rows read: the provider returned more rows than were read for that month',

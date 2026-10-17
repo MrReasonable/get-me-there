@@ -9,7 +9,8 @@ import type { DayBasis } from './types.js';
  * Numeric legend (spec §11 View B): the basis on the scale and how it is banded (or why it is flat), each band's pence
  * range and day count, the hatched days, the dashed outline and the glyphs stay open; the explanations of the marks (stale,
  * coverage cue, "cached from", "cheapest of the rows read", the stay, the band number and the phone glyphs) fold into "What the marks mean" (review ui-r2-006), so a phone reaches the grid soon.
- * `data-scale` marks the legend's scale values, the one exemption the rendered sweep grants (plan decision 52).
+ * `data-scale` marks the legend's scale values (the band items and a flat range), never the whole legend: the one
+ * exemption the rendered sweep grants (plan decision 52).
  */
 export function CalendarLegend({ model }: { model: CalendarModel }) {
   const C = COPY.calendarView;
@@ -20,13 +21,10 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
   const range =
     s.minPence !== null && s.maxPence !== null ? [formatPence(s.minPence), formatPence(s.maxPence)] : null;
   return (
-    <section
-      aria-label={L.title}
-      data-testid="calendar-legend"
-      data-scale
-      className="flex flex-col gap-1 text-sm"
-    >
-      <p>
+    <section aria-label={L.title} data-testid="calendar-legend" className="flex flex-col gap-1 text-sm">
+      {/* why: data-scale marks the scale values only, the flat range here and the band items below, so the sweep's
+      exemption never covers the legend's explanations or a fare (plan decision 52, CodeRabbit batch 3) */}
+      <p {...(s.mode === 'flat-narrow' && range !== null ? { 'data-scale': '' } : {})}>
         {s.mode === 'quintile'
           ? L.scaleQuintile(basis, s.count)
           : s.mode === 'flat-few'
@@ -37,7 +35,7 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
       </p>
       <ul className="flex flex-wrap gap-x-4 gap-y-1">
         {s.legend.map((e) => (
-          <li key={e.band}>
+          <li key={e.band} data-scale>
             <span
               aria-hidden="true"
               className={`mr-1 inline-block h-3 w-3 align-middle ${BAND_CLASSES[e.band]}`}
