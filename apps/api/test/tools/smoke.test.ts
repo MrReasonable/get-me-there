@@ -109,7 +109,7 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
     );
     // why: decision 66: the headline is the cheapest price a seller listing confirmed (the agent's £573 at step 3)
     expect(r.summary).toBe(
-      "cheapest confirmed price £573 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Google Flights via SearchApi, sold by Synthetic Travel Agent · fetched just now · vendor's cache age unknown",
+      "cheapest confirmed price £573 · LHR→JFK 2027-03-02–2027-03-16 (14n) · out 19h 00m nonstop, back 10h 00m nonstop · Google Flights via SearchApi, sold by Synthetic Travel Agent · fetched just now · vendor's cache age unknown",
     );
     expect(r.lines).toContain(r.summary);
     // why: Travelpayouts' £412 row is its cheapest; the £377 row flew back to another airport and was dropped (decision 39)
@@ -278,10 +278,19 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
     expect(r.lines.some((l) => l.includes('£603 at step 1, £610 at step 2'))).toBe(true);
   });
 
+  it('an itinerary price says how long each way takes and its stops; a calendar price says nothing it does not know (pft-005)', async () => {
+    const { r } = await smoke(smokePorts(), cli());
+    // why: the smoke applies no definition constraint, but it says what it found, so a 41-hour fare never hides.
+    expect(r.summary).toMatch(
+      / · out \d+h \d\dm (nonstop|\d stops?), back \d+h \d\dm (nonstop|\d stops?) · /,
+    );
+    expect(lineOf(r, 'travelpayouts discovery: priced')).not.toMatch(/ · out \d/);
+  });
+
   it('an unconfirmed step-2 price is never "sold by": it names the airline and carries the decision-44 label', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step3Dearer: true });
     expect(lineOf(r, 'searchapi itinerary: priced')).toContain(
-      "cheapest £603 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Google Flights via SearchApi, airline stated by the vendor: Synthetic Air One · fetched just now · vendor's cache age unknown · price not confirmed by the final step",
+      "cheapest £603 · LHR→JFK 2027-03-02–2027-03-16 (14n) · out 19h 00m nonstop, back 10h 00m nonstop · Google Flights via SearchApi, airline stated by the vendor: Synthetic Air One · fetched just now · vendor's cache age unknown · price not confirmed by the final step",
     );
     expect(r.summary.startsWith('cheapest confirmed price £650 ·')).toBe(true);
     expect(r.exitCode).toBe(EXIT.ok);

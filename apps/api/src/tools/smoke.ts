@@ -30,9 +30,11 @@ import {
   type ItineraryQuery,
   type ItinerarySearchResult,
   NormalisationError,
+  normaliseOffer,
   type Provenance,
   ProviderError,
   priceInGbp,
+  type RawOffer,
   type ResponseCache,
   type TilePlan,
 } from '@gmt/core';
@@ -77,6 +79,11 @@ export interface SmokePrice {
    * rows the adapter could not use for another reason than an open-jaw drop (provenance review, fix round 1).
    */
   truncated: boolean;
+  /**
+   * pft-005: an itinerary offer's time each way and stops, from core's normaliseOffer (the engine's own step), so the
+   * headline never hides a 41-hour fare; null for a calendar price, which states neither, or when it could not be computed.
+   */
+  journey: { outboundMinutes: number; inboundMinutes: number; stopsOut: number; stopsIn: number } | null;
 }
 export interface SmokeProviderReport {
   providerId: Vendor;
@@ -163,7 +170,12 @@ function priceOf(
   p: { amountMinor: number; currency: string; providerObservedAt?: IsoDateTime } & CellKey,
   fetchedAt: IsoDateTime,
   pointOfSale: string,
-  extra: { displayName: string; confirmed: boolean | null; truncated: boolean },
+  extra: {
+    displayName: string;
+    confirmed: boolean | null;
+    truncated: boolean;
+    journey?: SmokePrice['journey'];
+  },
 ): SmokePrice | string {
   // why: both adapters ask for GBP (spec §5.2). Core's one money step (spec §5.6) passes GBP through with its integer
   // check; with no rate lookup, any other currency throws, and the smoke reports it instead of comparing (arch M1).
@@ -189,6 +201,7 @@ function priceOf(
     displayName: extra.displayName,
     confirmed: extra.confirmed,
     truncated: extra.truncated,
+    journey: extra.journey ?? null,
     provenance: {
       providerId: provider.id,
       sourceKind: info.sourceKind,
@@ -202,15 +215,54 @@ function priceOf(
   };
 }
 
+const hoursMinutes = (m: number): string => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+const stops = (n: number): string => (n === 0 ? 'nonstop' : `${n} ${n === 1 ? 'stop' : 'stops'}`);
+
+/**
+ * pft-005: an offer's time each way and stops through core's normaliseOffer, as the engine computes them; null when the
+ * offer cannot be normalised (an airport with no time zone, a cell mismatch), so nothing is guessed.
+ */
+function journeyOf(
+  o: RawOffer,
+  cell: CellKey,
+  provider: FlightProvider,
+  ports: Ports,
+): SmokePrice['journey'] {
+  let r: ReturnType<typeof normaliseOffer>;
+  try {
+    r = normaliseOffer(o, cell, {
+      providerId: provider.id,
+      cabin: SMOKE_CABIN,
+      tzOf: (iata) => ports.repos.airports.tzOf(iata),
+      rateFor: () => null,
+    });
+  } catch (e) {
+    // why: an unusable amount is priceOf's to report (RangeError); the journey just goes unsaid.
+    if (e instanceof RangeError) return null;
+    throw e;
+  }
+  if (!r.ok) return null;
+  const { outboundMinutes, inboundMinutes, stopsOut, stopsIn } = r.itinerary;
+  // why: a direction without segment times has no duration; say nothing rather than a partial journey.
+  if (outboundMinutes === undefined || inboundMinutes === undefined) return null;
+  return { outboundMinutes, inboundMinutes, stopsOut, stopsIn };
+}
+
 /**
  * `£412 · LHR→JFK 2027-03-02–2027-03-16 (14n) · Aviasales cache · fetched … · observed …`, with "cheapest of the rows
  * read" for a truncated or partly unusable tile (decision 30) and the decision-44 label for an unconfirmed offer.
  */
 export function describePrice(p: SmokePrice, now: IsoDateTime): string {
   const c = p.cell;
+  const j = p.journey;
   return [
     `${formatPence(p.pricePence)}${p.truncated ? ' (cheapest of the rows read)' : ''}`,
     `${c.origin}→${c.destination} ${c.departureDate}–${c.returnDate} (${p.nights}n)`,
+    ...(j === null
+      ? []
+      : [
+          `out ${hoursMinutes(j.outboundMinutes)} ${stops(j.stopsOut)}, back ${hoursMinutes(j.inboundMinutes)} ${stops(j.stopsIn)}`,
+        ]),
     p.displayName,
     formatAgeFull(effectiveAge(p.provenance, now)),
     ...(p.confirmed === false ? [NOT_CONFIRMED] : []),
@@ -374,6 +426,7 @@ async function chain(
           : `${provider.displayName}, airline stated by the vendor: ${o.seller}`,
         confirmed: o.verified,
         truncated: false,
+        journey: journeyOf(o, cell, provider, ports),
       },
     );
   const priced = shown(best);

@@ -495,6 +495,11 @@ seller confirmed (or, without one, the cheapest calendar price, labelled as such
 age), then a checklist. Run it after setup, after changing a key, and whenever prices look
 wrong.
 
+The smoke test applies none of a definition's constraints (stops, journey time, baggage): it
+shows the cheapest offer whatever its route, and says for each itinerary price how long each
+way takes and how many stops it makes (`out 19h 05m 2 stops, back 9h 30m nonstop`), so a long
+connection is visible before you compare it with Google Flights.
+
 Each database keeps its own count of the SearchApi credits tool runs have used (smoke tests and
 fixture recordings): the container's volume one, a development checkout's `data/dev.db`
 another. `budget` is the most that count may reach in the current budget window, this run
