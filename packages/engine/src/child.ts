@@ -27,11 +27,13 @@ function callsLeft(ctx: EngineContext, e: Execution): number {
 }
 
 /**
- * Spec rev 18 §6.7 and ruling 7: a child's call cap is its per-cell estimate (already × ESTIMATE_RETRY_FACTOR) for the
- * billed providers, bounded by the parent's headroom, never below CHILD_MAX_CALLS. The headroom is the active parent's
- * execution-calls left (else the definition's maxCalls) less what the definition's other active children may still
- * spend, so concurrent children do not each size themselves against the same calls (cost-r2-001). The floor can go
- * past that headroom by at most CHILD_MAX_CALLS a child; the provider-month and global caps still bound every call.
+ * Spec §8.1 (rev 28), ruling 7 and ruling 9 of decision 67: a child's call cap is its per-cell estimate (already ×
+ * ESTIMATE_RETRY_FACTOR) for the billed providers, raised to CHILD_MAX_CALLS, and never above the headroom. The headroom
+ * is the active parent's execution-calls left (else the definition's maxCalls) less what the definition's other active
+ * children may still spend, so concurrent children do not each size themselves against the same calls (cost-r2-001).
+ * A definition whose run cap is 0 billed calls therefore has headroom 0 and gets a cap of 0, which the pre-start check
+ * refuses: no child is created that could not spend its own cap (cost-005). The provider and global caps still bound
+ * every call.
  */
 export function childMaxCalls(
   ctx: EngineContext,
@@ -47,7 +49,7 @@ export function childMaxCalls(
     .reduce((a, e) => a + callsLeft(ctx, e), 0);
   const headroom = Math.max(0, parentLeft - held);
   return {
-    maxCalls: Math.max(ctx.config.spend.childMaxCalls, Math.min(perCellBilledCalls, headroom)),
+    maxCalls: Math.min(headroom, Math.max(ctx.config.spend.childMaxCalls, perCellBilledCalls)),
     headroom,
   };
 }
