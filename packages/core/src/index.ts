@@ -58,7 +58,7 @@ export * from './space/validate.js';
 export * from './space/window.js';
 export * from './text/bannedWords.js';
 export { hasControlChars, stripControlChars } from './text/control.js';
-export { formatPence } from './text/money.js';
+export { formatPence, groupThousands } from './text/money.js';
 export * from './types/alerts.js';
 export * from './types/definition.js';
 export * from './types/definitionDefaults.js';

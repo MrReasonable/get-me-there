@@ -13,6 +13,7 @@ import { parseCron } from './scheduler/parseCron.js';
 import { createScheduler, type Scheduler } from './scheduler/scheduler.js';
 import { buildSnapshot } from './snapshot.js';
 import type { Engine, EngineDeps, EngineOptions } from './types.js';
+import { HOUR_MS } from './units.js';
 
 /** Spec §10 `/health` degraded: job count ≠ enabled scheduled definitions, or an execution running past STUCK_AFTER_HOURS. */
 export function statusOf(
@@ -33,9 +34,7 @@ export function statusOf(
   const running = orch.running();
   const stuck = running.some((id) => {
     const e = ctx.repos.executions.get(id);
-    return (
-      e !== null && now - Date.parse(e.startedAt ?? e.createdAt) > ctx.config.stuckAfterHours * 3_600_000
-    );
+    return e !== null && now - Date.parse(e.startedAt ?? e.createdAt) > ctx.config.stuckAfterHours * HOUR_MS;
   });
   const nextRuns = sched
     .jobs()

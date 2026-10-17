@@ -1,4 +1,5 @@
 import { daysBetween } from '../dates/epochDay.js';
+import { groupThousands } from '../text/money.js';
 import {
   type CellKey,
   cellKeyString,
@@ -143,7 +144,7 @@ export function validateSearchSpace(
       errors: [
         {
           field: 'window',
-          message: `the space has ${thousands(cells)} cells (${factors}); the limit MAX_CELLS_PER_DEFINITION is ${thousands(maxCells)}. Shorten the window, narrow the nights or remove an airport.`,
+          message: `the space has ${groupThousands(cells)} cells (${factors}); the limit MAX_CELLS_PER_DEFINITION is ${groupThousands(maxCells)}. Shorten the window, narrow the nights or remove an airport.`,
         },
       ],
     };
@@ -172,14 +173,7 @@ function isCount(n: number): boolean {
 
 /** "1 origin", "2 origins". */
 function plural(n: number, word: string): string {
-  return `${thousands(n)} ${word}${n === 1 ? '' : 's'}`;
-}
-
-const GROUPED = new Intl.NumberFormat('en-GB');
-
-/** en-GB digit grouping, the same convention as WP2's money formatter: 13104 → "13,104". */
-function thousands(n: number): string {
-  return GROUPED.format(n);
+  return `${groupThousands(n)} ${word}${n === 1 ? '' : 's'}`;
 }
 
 function checkAirports(

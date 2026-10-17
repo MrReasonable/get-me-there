@@ -25,6 +25,7 @@ import {
 import { scrubSecrets } from '@gmt/providers';
 import { LogNotifier } from '../notifiers/log.js';
 import type { AlertsPass } from '../types.js';
+import { HOUR_MS } from '../units.js';
 import type { AlertRunContext, AlertRunnerDeps } from './context.js';
 import { cellOf, type FiringMarks, marksFor, passFacts, rowKeyOf } from './marks.js';
 import { calendarPool, type Pool, rowRef, rowRefOf, verifiedPool } from './pools.js';
@@ -38,7 +39,6 @@ export interface AlertRunResult {
 }
 
 const NONE: AlertRunResult = { digests: 0, events: 0 };
-const HOUR_MS = 3_600_000;
 
 /**
  * Runs every enabled rule of the execution's definition once. Never rejects (spec §8.1: alerts never block completion).

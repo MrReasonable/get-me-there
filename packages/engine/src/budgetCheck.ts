@@ -5,6 +5,7 @@ import { type LineKey, lineKey } from './lines.js';
 import { firingsBetween } from './scheduler/parseCron.js';
 import { breachText } from './text.js';
 import type { Estimate } from './types.js';
+import { HOUR_MS } from './units.js';
 
 export interface PlannedSpend {
   providerId: ProviderId;
@@ -54,7 +55,7 @@ export function reservedForSchedules(
 ): number {
   if (windowEnd === null) return 0;
   const now = ctx.clock.now();
-  const hours = (Date.parse(windowEnd) - Date.parse(now)) / 3_600_000;
+  const hours = (Date.parse(windowEnd) - Date.parse(now)) / HOUR_MS;
   let reserved = 0;
   for (const d of otherSchedules(ctx, definitionId)) {
     if (d.scheduleCron === null) continue;

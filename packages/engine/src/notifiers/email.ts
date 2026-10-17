@@ -16,6 +16,7 @@ import {
 import { scrubSecrets } from '@gmt/providers';
 import nodemailer from 'nodemailer';
 import { controlFree, stripControl } from '../text.js';
+import { HOUR_MS } from '../units.js';
 import { containsSynthetic } from './log.js';
 
 export type SmtpConfig = NonNullable<Config['smtp']>;
@@ -98,8 +99,6 @@ function failureCodes(err: unknown): { code: string | null; responseCode: number
     'responseCode' in err && typeof err.responseCode === 'number' ? err.responseCode : null;
   return { code, responseCode };
 }
-
-const HOUR_MS = 3_600_000;
 
 export interface EmailNotifierOptions {
   smtp: SmtpConfig;
