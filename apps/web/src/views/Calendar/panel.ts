@@ -1,7 +1,7 @@
-import { type CellKey, daysBetween, generateCells, type IsoDate } from '@gmt/core';
+import { type CellKey, generateCells, type IsoDate } from '@gmt/core';
 import type { CellDetailResponse, DefinitionResponse, ExecutionSummary } from '../../api/types.js';
 import { COPY } from '../../copy.js';
-import { formatInstantDateLondon, formatIsoDate } from '../../format.js';
+import { formatInstantDateLondon } from '../../format.js';
 import { instantMs } from '../../lib/time.js';
 
 // The side panel's pure helpers (review arch2-008: under the view-model coverage floor, beside the components).
@@ -96,17 +96,4 @@ export function noHeadroom(v: VerifyInfo): boolean {
  */
 export function canPressVerify(detail: CellDetailResponse | undefined, sending: boolean): boolean {
   return detail !== undefined && detail.verify !== null && !noHeadroom(detail.verify) && !sending;
-}
-
-/**
- * The per-cell verify action's name: WP9's own wording for a single-cell itinerary search (COPY.verifyCellFor names
- * the cell, as WP9's VerifyCellButton does), so one cell is called the same thing on Coverage and in the panel.
- */
-export function verifyCellName(cell: CellKey): string {
-  const nights = daysBetween(cell.departureDate, cell.returnDate);
-  return `${COPY.coverageCheckPair(cell.origin, cell.destination)} ${COPY.dateRange(
-    formatIsoDate(cell.departureDate),
-    formatIsoDate(cell.returnDate),
-    nights,
-  )}`;
 }

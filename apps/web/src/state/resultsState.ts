@@ -100,6 +100,11 @@ const joined = (xs: readonly string[] | undefined): string | null =>
   xs && xs.length > 0 ? xs.join(',') : null;
 const num = (n: number | undefined): string | null => (n === undefined ? null : String(n));
 
+/** The one place the nights filter's URL key and encoding live; Duration links to Results through it. */
+export function nightsFilterPatch(min: number, max: number): Record<string, string> {
+  return { 'f.nights': `${min}-${max}` };
+}
+
 /** The URL patch for a state; null removes the parameter. */
 export function resultsStatePatch(s: ResultsUiState): Record<string, string | null> {
   const f = s.filters;
@@ -111,7 +116,7 @@ export function resultsStatePatch(s: ResultsUiState): Record<string, string | nu
     'f.carriers': joined(f.carriers),
     'f.dest': joined(f.destination),
     'f.maxPrice': num(f.maxPricePence),
-    'f.nights': f.nights === undefined ? null : `${f.nights.min}-${f.nights.max}`,
+    ...(f.nights === undefined ? { 'f.nights': null } : nightsFilterPatch(f.nights.min, f.nights.max)),
     'f.depart': f.departure === undefined ? null : `${f.departure.from}..${f.departure.to}`,
     'f.stale': f.hideStale === true ? 'hide' : null,
     'f.unverified': joined(f.unverified),

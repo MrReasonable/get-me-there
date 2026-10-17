@@ -2,6 +2,7 @@ import { asIsoDate, generateCells, resultRowKey } from '@gmt/core';
 import { waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
+import { verifyCellName } from '../../../src/components/VerifyCellButton.js';
 import { COPY } from '../../../src/copy.js';
 import { CellPanel } from '../../../src/views/Calendar/CellPanel.js';
 import {
@@ -11,7 +12,6 @@ import {
   orderCalendarPrices,
   orderOutcomes,
   reasonText,
-  verifyCellName,
 } from '../../../src/views/Calendar/panel.js';
 import { API, calendarRow, definition, summary, verifiedRow } from '../../fixtures.js';
 import {

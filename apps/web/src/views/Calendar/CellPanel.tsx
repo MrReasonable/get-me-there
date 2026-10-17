@@ -3,11 +3,12 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { ApiError } from '../../api/client.js';
 import { useCellDetail, useExecutionActions } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionSummary } from '../../api/types.js';
+import { verifyCellName } from '../../components/VerifyCellButton.js';
 import { COPY } from '../../copy.js';
 import { formatDayShort, formatIsoDateLong } from '../../format.js';
 import { DayMarker } from './DayMarker.js';
 import { CellDetailBody, DayPrices, VerifyCost } from './PanelSections.js';
-import { canPressVerify, cellsForDay, toKey, verifyCellName } from './panel.js';
+import { canPressVerify, cellsForDay, toKey } from './panel.js';
 import type { DaySlice } from './types.js';
 
 const P = COPY.calendarView.panel;

@@ -207,7 +207,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
       ) : null}
       {row.basis === 'calendar' && verificationConfigured ? (
         <div>
-          <VerifyCellButton definitionId={definitionId} cell={cellKey} nights={row.cell.nights} />
+          <VerifyCellButton definitionId={definitionId} cell={cellKey} />
         </div>
       ) : null}
     </section>

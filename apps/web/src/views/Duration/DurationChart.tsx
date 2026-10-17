@@ -18,6 +18,7 @@ import { COPY } from '../../copy.js';
 import { formatAxisPounds, formatDayShort } from '../../format.js';
 import { figureMarks } from '../../lib/marks.js';
 import { seriesColour } from '../../lib/palette.js';
+import { nightsFilterPatch } from '../../state/resultsState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { barValue, type DurationData, type DurationRow, gapLabel, rowAt } from './data.js';
 
@@ -190,7 +191,7 @@ export function DurationTable(props: {
         </thead>
         <tbody>
           {data.rows.map((r) => {
-            const patch = { view: 'results', 'f.nights': `${r.nights}-${r.nights}` };
+            const patch = { view: 'results', ...nightsFilterPatch(r.nights, r.nights) };
             return (
               <tr key={r.nights}>
                 <th scope="row" className="sticky left-0 bg-white">
