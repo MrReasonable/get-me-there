@@ -8,6 +8,8 @@ import type { ProviderHttpLimits, ResponseFacts } from '../http/types.js';
 import { isRecord } from '../util.js';
 import { SEARCHAPI_HOST } from './params.js';
 
+/** SearchApi's hourly ceiling as a share of the plan's credits (pricing page, read 2026-10-17). */
+export const SEARCHAPI_HOURLY_SHARE = 0.2;
 /** The 401 body the spike recorded (spec §2 fact 5). */
 const INVALID_KEY = 'Invalid API key.';
 /** Ruling 17 (pie-005): a 403 or 429 whose body names credits or quota is the plan running out, not a rate limit. */
@@ -63,7 +65,10 @@ export function searchApiHttpLimits(
   return {
     hosts: [SEARCHAPI_HOST],
     ratePerMinute: limits.ratePerMinute,
-    ratePerHour: limits.ratePerHour,
+    // why: pie-006: the vendor's one published rule is "up to 20% of your plan's credits each hour" (pricing page, read
+    // 2026-10-17); an override above it would draw 429s the adapter cannot tell from quota, so it is clamped, as
+    // Travelpayouts' per-minute rate is.
+    ratePerHour: Math.min(limits.ratePerHour, Math.floor(SEARCHAPI_HOURLY_SHARE * limits.monthlyCallCap)),
     concurrency: limits.concurrency,
     billable: 'http-200',
     costPerCallMicroGbp: limits.costPerCallMicroGbp,

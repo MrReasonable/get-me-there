@@ -121,6 +121,14 @@ describe('searchApiHttpLimits (spec §5.3, §5.2)', () => {
       searchApiHttpLimits(PLAN_PRESETS.trial, { maxWaitSeconds: 1, requestTimeoutSeconds: 1 }),
     ).toMatchObject({ ratePerMinute: 2, ratePerHour: 20, concurrency: 1 });
   });
+
+  it("clamps an hourly-rate override to the vendor's 20% of the plan's credits an hour (pie-006)", () => {
+    const t = { maxWaitSeconds: 1, requestTimeoutSeconds: 1 };
+    expect(searchApiHttpLimits({ ...PLAN_PRESETS['40usd'], ratePerHour: 5000 }, t).ratePerHour).toBe(2000);
+    expect(searchApiHttpLimits({ ...PLAN_PRESETS.trial, ratePerHour: 60 }, t).ratePerHour).toBe(20);
+    // why: a lower override is the operator's own choice and stands.
+    expect(searchApiHttpLimits({ ...PLAN_PRESETS['40usd'], ratePerHour: 100 }, t).ratePerHour).toBe(100);
+  });
 });
 
 // why: plan decision 20: the vendor's 429 shape and headers are undocumented and unrecorded, so these bodies are
