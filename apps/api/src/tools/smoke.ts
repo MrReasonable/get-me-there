@@ -387,18 +387,29 @@ async function chain(
 }
 
 /**
- * The headline (decision 66): the cheapest price a seller listing confirmed, else the cheapest discovery price labelled
- * as a calendar price no itinerary search checked, with its age.
+ * The headline (decision 66): the cheapest price a seller listing confirmed, else the cheapest discovery price with its
+ * age, labelled by what the chain did with its cell: "not checked by an itinerary search" for a cell the chain never
+ * searched; for the cell it searched and priced without a confirmation, that fact and the chain's own cheapest offer
+ * with its decision-44 label (provenance review, fix round 1).
  */
 function headline(reports: readonly SmokeProviderReport[], now: IsoDateTime): string {
-  const confirmed = reports.find((r) => r.stage === 'itinerary')?.cheapestConfirmed ?? null;
+  const itinerary = reports.find((r) => r.stage === 'itinerary');
+  const confirmed = itinerary?.cheapestConfirmed ?? null;
   if (confirmed !== null) return `cheapest confirmed price ${describePrice(confirmed, now)}`;
   const calendar = reports
     .filter((r) => r.stage === 'discovery')
     .flatMap((r) => (r.cheapest === null ? [] : [r.cheapest]))
     .sort((a, b) => a.pricePence - b.pricePence)[0];
-  return calendar === undefined
-    ? 'no price found'
+  if (calendar === undefined) return 'no price found';
+  const searched = itinerary?.status === 'priced' ? itinerary.cheapest : null;
+  const sameCell =
+    searched !== null &&
+    searched.cell.origin === calendar.cell.origin &&
+    searched.cell.destination === calendar.cell.destination &&
+    searched.cell.departureDate === calendar.cell.departureDate &&
+    searched.cell.returnDate === calendar.cell.returnDate;
+  return sameCell
+    ? `cheapest calendar price ${describePrice(calendar, now)} · itinerary search found no confirmed price; its cheapest: ${formatPence(searched.pricePence)} · ${searched.displayName} · ${NOT_CONFIRMED}`
     : `cheapest calendar price ${describePrice(calendar, now)} · not checked by an itinerary search`;
 }
 

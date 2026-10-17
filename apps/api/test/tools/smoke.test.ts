@@ -290,6 +290,18 @@ describe('runSmoke (spec §9 item 7)', () => {
     expect(r.exitCode).toBe(EXIT.failed);
   });
 
+  it('a calendar price whose cell the chain searched without a confirmed price never reads "not checked by an itinerary search" (provenance review)', async () => {
+    const { r } = await smoke(smokePorts({ TRAVELPAYOUTS_TOKEN: '' }), cli(), { step3Empty: true });
+    expect(r.summary.startsWith('cheapest calendar price £603 · LHR→JFK 2027-03-02–2027-03-16 (14n) ·')).toBe(
+      true,
+    );
+    expect(r.summary).not.toContain('not checked by an itinerary search');
+    expect(r.summary).toContain(
+      '· itinerary search found no confirmed price; its cheapest: £603 · Google Flights via SearchApi, airline stated by the vendor: Synthetic Air One · price not confirmed by the final step',
+    );
+    expect(findBannedWords(r.summary, BANNED_WORD_ALLOWLIST)).toEqual([]);
+  });
+
   it.each([
     ['a tile stopped at the page cap', { tpTruncated: true }, 'travelpayouts stopped at the page cap'],
     ['a row with an unusable price', { tpBadPrice: true }, 'travelpayouts 2027-03-02–2027-03-16 parse'],
