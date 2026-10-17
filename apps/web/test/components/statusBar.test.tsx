@@ -71,6 +71,36 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => seen).toEqual(['exec-0001 get-me-there']);
   });
 
+  it('a confirmation opened for one run cannot cancel a newer run that replaced it (cancel bound to the selected run)', async () => {
+    const cancelled: string[] = [];
+    let newest = 'exec-0001';
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: [summary({ id: newest, status: 'running' })] })),
+      ),
+      http.get(`${API}/executions/:id`, ({ params }) =>
+        HttpResponse.json(execution({ id: String(params.id) })),
+      ),
+      http.post(`${API}/executions/:id/cancel`, ({ params }) => {
+        cancelled.push(String(params.id));
+        return HttpResponse.json(execution({ id: String(params.id), status: 'cancelled' }));
+      }),
+    );
+    const { user, client } = renderWithProviders(bar());
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Confirm: cancel this run' })).toBeInTheDocument();
+    // why: a newer run starts while the confirmation is open; the bar now follows that run.
+    newest = 'exec-0002';
+    await client.invalidateQueries({ queryKey: ['results'] });
+    // the open confirmation was for exec-0001, so it is gone and Cancel must be asked for again
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm: cancel this run' })).toBeNull();
+    expect(cancelled).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm: cancel this run' }));
+    await expect.poll(() => cancelled).toEqual(['exec-0002']);
+  });
+
   it('a failed action is announced (cancel answered 409)', async () => {
     server.use(
       http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())),
