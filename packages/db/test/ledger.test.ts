@@ -47,6 +47,34 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     });
   });
 
+  it('answeredFor: upstream attempts that recorded an HTTP status, per (provider, endpoint, status); never cache hits, pending rows or socket errors (smoke ledger check, WP13 cost M2)', () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, { maxCalls: 100, maxFreeCalls: 100, maxCostMicroGbp: 100_000 });
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    const reserve = (providerId: 'travelpayouts' | 'searchapi', endpointPath: string, httpAttempt = 1) =>
+      guard.reserve({
+        providerId,
+        executionId,
+        tileIndex: providerId === 'travelpayouts' ? 0 : null,
+        costMicroGbp: providerId === 'searchapi' ? 3200 : 0,
+        httpAttempt,
+        endpointPath,
+      });
+    reserve('travelpayouts', '/p').finalise({ outcome: 'error', httpStatus: 500, durationMs: 1 }); // retried
+    reserve('travelpayouts', '/p', 2).finalise(ok);
+    reserve('searchapi', '/s').finalise(ok);
+    reserve('searchapi', '/s').finalise(ok);
+    reserve('searchapi', '/s').finalise({ outcome: 'error', durationMs: 1 }); // socket error
+    reserve('searchapi', '/s'); // left pending
+    guard.recordCacheHit({ providerId: 'travelpayouts', executionId, tileIndex: 1, endpointPath: '/p' });
+    expect(new LedgerRepo(db).answeredFor(executionId)).toEqual([
+      { providerId: 'searchapi', endpointPath: '/s', httpStatus: 200, attempts: 2 },
+      { providerId: 'travelpayouts', endpointPath: '/p', httpStatus: 200, attempts: 1 },
+      { providerId: 'travelpayouts', endpointPath: '/p', httpStatus: 500, attempts: 1 },
+    ]);
+    expect(new LedgerRepo(db).answeredFor('no-such-execution')).toEqual([]);
+  });
+
   it('countsFor: upstream calls, cost, first-attempt upstream tiles and cache hits, total and per (provider, stage)', () => {
     const db = freshDb();
     const { executionId } = rawExecution(db, { maxCalls: 100, maxFreeCalls: 100, maxCostMicroGbp: 100_000 });

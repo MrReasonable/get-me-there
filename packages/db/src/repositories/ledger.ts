@@ -61,6 +61,25 @@ export class LedgerRepo {
     };
   }
 
+  /**
+   * Upstream attempts of one execution that recorded an HTTP status, counted per (provider, endpoint, status), ordered
+   * by those three. Cache hits, pending rows and attempts that ended without a status (a socket error, a timeout) are
+   * left out. The smoke matches each answer it received against these, like with like (WP13 cost review M2).
+   */
+  answeredFor(
+    executionId: string,
+  ): Array<{ providerId: ProviderId; endpointPath: string; httpStatus: number; attempts: number }> {
+    return this.db.raw
+      .prepare<[string], { providerId: string; endpointPath: string; httpStatus: number; attempts: number }>(
+        `SELECT provider_id AS providerId, endpoint_path AS endpointPath, http_status AS httpStatus, COUNT(*) AS attempts
+         FROM provider_requests
+         WHERE execution_id = ? AND outcome <> 'cache_hit' AND outcome <> 'pending' AND http_status IS NOT NULL
+         GROUP BY provider_id, endpoint_path, http_status ORDER BY provider_id, endpoint_path, http_status`,
+      )
+      .all(executionId)
+      .map((r) => ({ ...r, providerId: oneOf('provider_id', PROVIDER_IDS, r.providerId) }));
+  }
+
   /** Spec §8.1 parity numerator for one provider (add its cache hits for the full count). */
   firstAttemptTiles(executionId: string, providerId: ProviderId): number {
     return (

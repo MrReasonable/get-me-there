@@ -35,6 +35,16 @@ export interface Seen {
   body: unknown;
 }
 
+/**
+ * One answer the vendor gave this run, resolved or thrown by http-kit (a 401, a 5xx after its retries): the endpoint and
+ * the HTTP status, which the ledger row of that attempt also records (cost review M2).
+ */
+export interface Answer {
+  providerId: string;
+  endpointPath: string;
+  status: number;
+}
+
 /** What the checklist reads. `cap` is the run's frozen SearchApi cap, min(--budget, worst case). */
 export interface ChecklistInput {
   ports: Ports;
@@ -46,6 +56,7 @@ export interface ChecklistInput {
   found: ReadonlyMap<Vendor, Discovery>;
   itinerary: Chain | null;
   seen: readonly Seen[];
+  answers: readonly Answer[];
 }
 
 /** Calls the chain may make: one step 1, then step 2 and step 3 for the one outbound it expands (spec §5.4). */
@@ -134,24 +145,41 @@ export function checklist(i: ChecklistInput): SmokeCheck[] {
         : partial.join('; '),
   );
 
-  // 3. The ledger (spec §8.1): one first-attempt tile per provider, no cache hit, every request this run's kit answered
-  // ledgered, the chain inside its estimate, and billed calls inside the frozen cap (the guard's own count, cost-wp13-r1-008).
+  // 3. The ledger (spec §8.1): one first-attempt tile per provider, no cache hit, every answer this run received matched
+  // like with like by a ledger row of its own endpoint and HTTP status (so a retried attempt's row cannot stand in for
+  // it; cost review M2), the chain inside its estimate, and billed calls inside the frozen cap (the guard's own count,
+  // cost-wp13-r1-008). Rows beyond the answers are http-kit's retries, reported.
   const counts = ports.repos.ledger.countsFor(executionId);
+  const statuses = ports.repos.ledger.answeredFor(executionId);
   const line = (id: Vendor, stage: 'discovery' | 'verification') =>
     counts.perProvider.find((p) => p.providerId === id && p.stage === stage);
   const faults: string[] = [];
   const parts: string[] = [];
   for (const id of configured) {
     const d = line(id, 'discovery');
-    const attempts = counts.perProvider.filter((p) => p.providerId === id).reduce((n, p) => n + p.calls, 0);
-    const answered = seen.filter((s) => s.providerId === id).length;
+    const mine = i.answers.filter((a) => a.providerId === id);
+    const keys = new Map<string, { endpointPath: string; status: number; n: number }>();
+    for (const a of mine) {
+      const k = `${a.endpointPath} ${a.status}`;
+      const e = keys.get(k);
+      if (e === undefined) keys.set(k, { endpointPath: a.endpointPath, status: a.status, n: 1 });
+      else e.n += 1;
+    }
+    const rows = statuses.filter((s) => s.providerId === id);
+    for (const { endpointPath, status, n } of keys.values()) {
+      const ledgered =
+        rows.find((s) => s.endpointPath === endpointPath && s.httpStatus === status)?.attempts ?? 0;
+      if (ledgered < n)
+        faults.push(
+          `${id}: ${n - ledgered} answer(s) (${endpointPath} HTTP ${status}) missing from the ledger`,
+        );
+    }
+    const retried = Math.max(0, rows.reduce((n, s) => n + s.attempts, 0) - mine.length);
     parts.push(
-      `${id} ${d?.tiles ?? 0} tile, ${attempts} attempt(s) for ${answered} answer(s), ${d?.cacheHits ?? 0} cache hit(s)`,
+      `${id} ${d?.tiles ?? 0} tile, ${mine.length} answer(s) matched in the ledger by endpoint and status, ${retried} retried attempt(s), ${d?.cacheHits ?? 0} cache hit(s)`,
     );
     if (found.get(id)?.plans.length === 1 && (d?.tiles !== 1 || d.cacheHits !== 0))
       faults.push(`${id} discovery is not one fetched tile`);
-    if (attempts < answered)
-      faults.push(`${id}: ${answered - attempts} answered request(s) missing from the ledger`);
   }
   const v = line('searchapi', 'verification');
   if (v !== undefined && v.calls > CHAIN_CALLS) faults.push('the chain exceeded its estimate');

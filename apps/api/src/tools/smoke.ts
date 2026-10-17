@@ -40,7 +40,7 @@ import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_CABIN, SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
-import { checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
+import { type Answer, checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
 import {
   openHiddenExecution,
   spendPosition,
@@ -510,9 +510,19 @@ export async function runSmoke(
     ...(recorder === null ? {} : { recorder }),
   });
   // why: the checklist reads what the vendors answered (step prices, request parameters) from this run only
+  // why: the ledger check matches every answer, thrown ones too, against the ledger by endpoint and status (cost M2)
+  const answers: Answer[] = [];
   const http: HttpKit = {
     request: async (r) => {
-      const res = await kit.request(r);
+      let res: Awaited<ReturnType<HttpKit['request']>>;
+      try {
+        res = await kit.request(r);
+      } catch (e) {
+        if (e instanceof ProviderError && e.httpStatus !== undefined)
+          answers.push({ providerId: r.providerId, endpointPath: r.endpointPath, status: e.httpStatus });
+        throw e;
+      }
+      answers.push({ providerId: r.providerId, endpointPath: r.endpointPath, status: res.status });
       seen.push({ providerId: r.providerId, tileIndex: r.tileIndex, url: r.url, body: res.body });
       return res;
     },
@@ -575,7 +585,18 @@ export async function runSmoke(
   const reports = [...found.values()]
     .map((d) => d.report)
     .concat(itinerary === null ? [] : [itinerary.report]);
-  const checks = checklist({ ports, q, executionId, runStart, cap, configured, found, itinerary, seen });
+  const checks = checklist({
+    ports,
+    q,
+    executionId,
+    runStart,
+    cap,
+    configured,
+    found,
+    itinerary,
+    seen,
+    answers,
+  });
   const written = track?.take() ?? [];
   const now = ports.clock.now();
   for (const r of reports)

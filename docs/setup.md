@@ -514,8 +514,9 @@ Each checklist line reads `ok`, `FAIL`, `skip` or `look`:
 
 - `one tile per provider`, `tiles read whole`: each provider was asked once, and every page
   and day of its answer was read.
-- `ledger`: every answer the run received is in the database's request log, and the credits
-  stayed inside this run's limit.
+- `ledger`: every answer the run received has its own row in the database's request log, with
+  the same endpoint and status (retried attempts are counted separately), and the credits stayed
+  inside this run's limit.
 - `provenance`: each price shown carries the source, fetch time, point of sale and age limit
   its provider declares. This checks the providers' answers; the stored records are checked by
   the app's own tests.

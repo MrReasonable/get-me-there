@@ -248,6 +248,25 @@ describe('runSmoke (spec §9 item 7)', () => {
     },
   );
 
+  it('ledger: a retried attempt cannot stand in for an answer; each answer is matched by endpoint and status (cost review M2)', async () => {
+    const ports = smokePorts();
+    let tpCalls = 0;
+    const { r, urls } = await smoke(ports, cli(), {
+      // why: the first Travelpayouts request answers 500, so http-kit retries it once (spec §5.3)
+      failOn: (u) =>
+        u.hostname === 'api.travelpayouts.com' && ++tpCalls === 1
+          ? { status: 500, body: { error: 'x' } }
+          : undefined,
+    });
+    expect(urls.filter((u) => u.hostname === 'api.travelpayouts.com')).toHaveLength(2);
+    const ledger = r.checks.find((c) => c.name === 'ledger');
+    expect(ledger?.status).toBe('pass');
+    expect(ledger?.detail).toContain(
+      'travelpayouts 1 tile, 1 answer(s) matched in the ledger by endpoint and status, 1 retried attempt(s), 0 cache hit(s)',
+    );
+    expect(r.exitCode).toBe(EXIT.ok);
+  }, 20_000);
+
   it('1: step 2 showing another price than step 1 fails the check', async () => {
     const { r } = await smoke(smokePorts(), cli(), { step2Price: 610 });
     expect(r.exitCode).toBe(EXIT.failed);
@@ -352,6 +371,7 @@ describe('checklist FAIL branches (negative controls)', () => {
       found: new Map(),
       itinerary: null,
       seen: [],
+      answers: [],
     };
     return { ports, input, tp };
   }
@@ -395,6 +415,21 @@ describe('checklist FAIL branches (negative controls)', () => {
     const c = check(checklist({ ...input, found: withProvenance(tp, patch) }), 'provenance');
     expect(c?.status).toBe('fail');
     expect(c?.detail).toContain(detail);
+  });
+
+  it('ledger fails when an answer the run received has no ledger row of its own endpoint and status', async () => {
+    const { input } = await base();
+    const answer = {
+      providerId: 'travelpayouts',
+      endpointPath: '/aviasales/v3/prices_for_dates',
+      status: 200,
+    };
+    // why: the base run ledgered one Travelpayouts 200; a second 200 answer has no row to match
+    const c = check(checklist({ ...input, answers: [answer, answer] }), 'ledger');
+    expect(c?.status).toBe('fail');
+    expect(c?.detail).toContain(
+      'travelpayouts: 1 answer(s) (/aviasales/v3/prices_for_dates HTTP 200) missing from the ledger',
+    );
   });
 
   it('step 1 = step 2 fails when step 2 expanded another outbound than step 1 priced cheapest', async () => {
