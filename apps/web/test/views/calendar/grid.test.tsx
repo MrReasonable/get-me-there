@@ -470,7 +470,7 @@ describe('calendar grid (spec §11 View B, Accessibility; plan decision 38)', ()
     expect(within(priced).queryByTestId('day-stay')).toBeNull();
     expect(within(priced).queryByTestId('coverage-cue')).toBeNull();
     // why: provenance without hover (spec §11): the face carries the provider's short mark, the night count and a coverage mark.
-    expect(face).toHaveTextContent(COPY.providerShort.travelpayouts);
+    expect(face).toHaveTextContent(COPY.providerMark.travelpayouts);
     expect(within(priced).getByTestId('day-nights')).toHaveTextContent('12n');
     expect(within(priced).getByTestId('day-nights')).toHaveTextContent('◐');
     expect(within(dayCell('2027-03-10')).getByTestId('day-nights')).toHaveTextContent('●');

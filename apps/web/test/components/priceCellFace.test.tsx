@@ -26,7 +26,7 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).toHaveAttribute('data-face');
     expect(cell).not.toHaveClass('border-dashed');
     const hidden = [...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent);
-    expect(hidden).toEqual(['≈', '≠◷?…↺◌', COPY.providerShort.searchapi]);
+    expect(hidden).toEqual(['≈', '≠◷?…↺◌', COPY.providerMark.searchapi]);
     const title = cell.getAttribute('title') ?? '';
     expect(title.indexOf('price not confirmed by the final step')).toBe(0);
     for (const words of [
@@ -51,7 +51,7 @@ describe('PriceCell face (phone day cell)', () => {
     expect(cell).toHaveClass('border-dashed');
     // why: no marks, so the only aria-hidden part is the provider's short mark (visible provenance without hover)
     expect([...cell.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent)).toEqual([
-      COPY.providerShort.travelpayouts,
+      COPY.providerMark.travelpayouts,
     ]);
     expect(cell.getAttribute('title')).not.toContain('onward');
     expect(cell.getAttribute('title')).toContain('constraints not checked');

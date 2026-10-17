@@ -105,7 +105,7 @@ export function PriceCell(props: PriceCellProps) {
         {marks.length > 0 ? <span aria-hidden="true">{marks.map((m) => m.glyph).join('')}</span> : null}
         {/* why: provenance visible without hover (spec §11): the provider's short mark, since touch has no title */}
         <span aria-hidden="true" className="block font-medium">
-          {COPY.providerShort[p.providerId]}
+          {COPY.providerMark[p.providerId]}
         </span>
         <span className="sr-only">{spoken}</span>
       </span>

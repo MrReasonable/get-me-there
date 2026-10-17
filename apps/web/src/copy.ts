@@ -115,6 +115,8 @@ export const COPY = {
     ProviderId,
     string
   >,
+  /** The three-letter-or-less provider mark of the phone day face, where `providerShort`'s "synthetic" is 50 px wide. */
+  providerMark: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'syn' } satisfies Record<ProviderId, string>,
   ageUnknown: 'age unknown',
   agoOf: (hours: number | 'unknown') => (hours === 'unknown' ? 'age unknown' : formatAgo(hours)),
   adjustedQualifier: 'incl. operator-entered onward cost',
