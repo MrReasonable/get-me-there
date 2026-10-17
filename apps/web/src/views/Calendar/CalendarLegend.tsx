@@ -90,6 +90,7 @@ export function CalendarLegend({ model }: { model: CalendarModel }) {
           <li>{L.stay}</li>
           <li>{L.bandNumber}</li>
           <li>{L.phone}</li>
+          <li>{L.phoneProviders}</li>
         </ul>
       </details>
     </section>

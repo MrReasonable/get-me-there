@@ -303,6 +303,15 @@ describe('glyph set (review ui I2)', () => {
     ];
     expect(new Set(all).size).toBe(all.length);
   });
+  it('the phone provider-marks line names every provider mark with its full name, and the fixture as synthetic', () => {
+    const line = COPY.calendarView.legend.phoneProviders;
+    for (const id of ['travelpayouts', 'searchapi', 'fixture'] as const) {
+      expect(line).toContain(`${COPY.providerMark[id]} `);
+      expect(line).toContain(COPY.provider[id]);
+    }
+    expect(line).toContain(COPY.source.synthetic);
+    expect(new Set(Object.values(COPY.providerMark)).size).toBe(3);
+  });
   it('the phone legend line names every mark glyph', () => {
     for (const g of [...Object.values(COPY.priceMarkGlyph), ...Object.values(COPY.calendarView.phoneMark)])
       expect(COPY.calendarView.legend.phone).toContain(g);

@@ -607,6 +607,8 @@ export const COPY = {
       bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
       phone:
         'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, ? vendor cache age unknown, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ● every cell of the day searched, ◐ part of the day not searched. Open a day for the rest.',
+      phoneProviders:
+        'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), syn Fixture (synthetic fixture data).',
       glyphs: 'Days without a price show, with how many cells of the best-covered source:',
       skippedWhy: ' (a budget stop, a disabled provider or a passed date; reasons in the panel)',
     },
