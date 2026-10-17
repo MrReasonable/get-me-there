@@ -1,5 +1,14 @@
 import { useId } from 'react';
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
+import {
+  CartesianGrid,
+  type DotItemDotProps,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
@@ -29,6 +38,33 @@ const DASH: Readonly<Record<PlotLine['kind'], string | null>> = {
 };
 
 const fetchValue = (p: PlotPoint) => p.pricePence;
+
+/** True for a plotted fetch point whose price is stale (decision 54's flag from the api). */
+function isStalePoint(payload: unknown): boolean {
+  return typeof payload === 'object' && payload !== null && 'stale' in payload && payload.stale === true;
+}
+
+/**
+ * A fetch-time dot: filled for a fresh price, hollow (white fill, coloured ring) for a stale one, so staleness shows
+ * in the chart as well as the table (review ui M9; no meaning by colour alone). `data-stale` is what the tests read.
+ */
+function fetchDot(colour: string) {
+  return function FetchDot(props: DotItemDotProps) {
+    const stale = isStalePoint(props.payload);
+    return (
+      <circle
+        key={`${props.index}`}
+        cx={props.cx}
+        cy={props.cy}
+        r={4}
+        data-stale={stale}
+        fill={stale ? '#ffffff' : colour}
+        stroke={colour}
+        strokeWidth={2}
+      />
+    );
+  };
+}
 const routeValue = (p: RoutePlotPoint) => p.pricePence;
 
 /**
@@ -80,7 +116,7 @@ export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; 
                     connectNulls={false}
                     stroke={seriesColour(l.colour)}
                     {...(dash === null ? {} : { strokeDasharray: dash })}
-                    dot
+                    dot={fetchDot(seriesColour(l.colour))}
                     isAnimationActive={false}
                   />
                 );

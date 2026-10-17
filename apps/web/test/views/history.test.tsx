@@ -351,6 +351,25 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     await waitFor(() => expect(chart.querySelectorAll('.recharts-line-dots circle')).toHaveLength(3));
   });
 
+  it('a stale point is drawn as a hollow dot, a fresh one filled (review ui M9)', async () => {
+    const r = routeHistory({
+      calendarSeries: [
+        {
+          providerId: 'travelpayouts',
+          cabin: 'economy',
+          points: [fetchPoint(2, 39900, cellAt('2027-03-14', 14), { stale: true }), fetchPoint(170, 42000)],
+        },
+      ],
+    });
+    server.use(http.get(routeRoute, () => HttpResponse.json(r)));
+    const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    const chart = await findByRole('figure', { name: 'Price by fetch date' });
+    await waitFor(() => expect(chart.querySelectorAll('circle[data-stale]').length).toBeGreaterThan(1));
+    expect(chart.querySelectorAll('circle[data-stale="true"]')).toHaveLength(1);
+    expect(chart.querySelector('circle[data-stale="true"]')).toHaveAttribute('fill', '#ffffff');
+    expect(chart.querySelectorAll('circle[data-stale="false"]').length).toBeGreaterThan(0);
+  });
+
   it('tables every point: provider prices through PriceCell with stale and rows-read labels and the changed cell; route rows labelled indicative', async () => {
     const r = routeHistory({
       calendarSeries: [
