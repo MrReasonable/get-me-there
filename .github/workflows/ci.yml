@@ -78,10 +78,13 @@ jobs:
           found="$(docker run --rm --entrypoint sh get-me-there:local -c \
             'find / -xdev -path /app/node_modules/.pnpm -prune -o \( -name ".env" -o -name ".env.*" -o -name "*.db" -o -name "*.pem" -o -name "*.key" -o -path "*/fixtures/recorded*" \) -print 2>/dev/null; true')"
           if [ -n "$found" ]; then echo "$found"; exit 1; fi
-          if docker history --no-trunc get-me-there:local | grep -Ei '(token|_key|pass(word)?|secret)='; then exit 1; fi
+          # why: a credential in any shape a layer can hold: NAME=value, NAME: value or "name": value, and an ENV layer's
+          # space form (ENV NAME value), never only the = form (CodeRabbit batch 3)
+          if docker history --no-trunc get-me-there:local | grep -Ei -e '(token|_key|pass(word)?|secret)"?[[:space:]]*[=:]' -e 'ENV[[:space:]]+[a-z_]*(token|key|pass|secret)[a-z_]*[[:space:]]+[^[:space:]]'; then exit 1; fi
       - name: Compose boots it healthy with the documented three-line .env
         run: |
-          # why: CI-only values; the token is a dummy and boot makes no vendor call
+          # why: CI-only throwaway values that must never match a real credential; the token is a dummy and boot makes no
+          # vendor call, and the file is written here, never printed or archived
           printf 'TRAVELPAYOUTS_TOKEN=ci-dummy-token-0123456789\nAPP_BASIC_AUTH_USER=ci\nAPP_BASIC_AUTH_PASS=ci-password-0123\n' > .env
           chmod 600 .env
           docker compose up -d --wait --wait-timeout 300 || { docker compose logs app; exit 1; }

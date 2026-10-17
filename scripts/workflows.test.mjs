@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -83,5 +84,48 @@ describe('GitHub workflows (least privilege)', () => {
 
   it('the docker job builds on the default builder, so the image is in the daemon the later steps run', () => {
     expect(text('ci.yml')).not.toContain('docker/setup-buildx-action');
+  });
+});
+
+// why: CodeRabbit batch 3 — the image-history check matched only NAME=value, so a credential baked in another shape
+// (an `ENV NAME value` layer, a JSON "token": value) passed; and the compose step's throwaway credentials are said to
+// be CI-only and never a real value. The check's own grep patterns are run over sample history lines here.
+describe('the docker job keeps credentials out of the image history', () => {
+  const ci = text('ci.yml');
+  const line = ci.split('\n').find((l) => l.includes('docker history --no-trunc get-me-there:local')) ?? '';
+  const patterns = [...line.matchAll(/-e '([^']+)'/g)].map((m) => m[1]);
+  const hits = (sample) =>
+    spawnSync('grep', ['-Ei', ...patterns.flatMap((p) => ['-e', p])], {
+      input: `${sample}\n`,
+      encoding: 'utf8',
+    }).status === 0;
+
+  it('greps with explicit -e patterns', () => {
+    expect(patterns.length).toBeGreaterThan(1);
+  });
+
+  it.each([
+    'ENV SEARCHAPI_KEY=sk-123456',
+    '/bin/sh -c #(nop)  ENV APP_BASIC_AUTH_PASS hunter2-value',
+    'ENV TRAVELPAYOUTS_TOKEN abc123',
+    'ARG SMTP_PASS=abc',
+    'LABEL config={"token": "abc"}',
+    'ENV client_secret: abc',
+  ])('flags %s', (sample) => {
+    expect(hits(sample)).toBe(true);
+  });
+
+  it.each([
+    'RUN /bin/sh -c pnpm install --frozen-lockfile',
+    'ENV NODE_ENV=production',
+    'ENV PNPM_HOME=/pnpm',
+    'COPY --chown=node:node packages/ ./packages/',
+    'LABEL org.opencontainers.image.description=no secret is baked in',
+  ])('passes %s', (sample) => {
+    expect(hits(sample)).toBe(false);
+  });
+
+  it("says the compose step's credentials are throwaway CI values that must never match a real credential", () => {
+    expect(ci).toContain('# why: CI-only throwaway values that must never match a real credential');
   });
 });
