@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 import { gmtAliases } from '../../vitest.aliases.js';
@@ -11,7 +12,7 @@ const VIEW_MODEL = { lines: 95, branches: 85, functions: 95, statements: 95 };
 // Coverage counts src/ only; barrels and the browser entry point are excluded.
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: gmtAliases(new URL('../..', import.meta.url).pathname) },
+  resolve: { alias: gmtAliases(fileURLToPath(new URL('../..', import.meta.url))) },
   test: {
     name: 'web',
     include: ['test/**/*.test.tsx', 'test/**/*.test.ts'],
