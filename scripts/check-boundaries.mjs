@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Enforces the spec §4 import graph by reading every package.json `dependencies` and every
-// `import ... from '@gmt/…'` under src/. Fails on any edge not in ALLOWED, on `process.env`
+// Enforces the spec §4 import graph by reading every package.json `dependencies` and every static, dynamic or
+// side-effect import of '@gmt/…' under src/. Fails on any edge not in ALLOWED, on `process.env`
 // outside apps/api/src/bootstrap/, on msw imported outside providers' src/testing/, on msw anywhere in apps/api, on
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
 // worked-example files, and on a lint or type-check suppression comment anywhere in a package (root configs and e2e folders included).
@@ -69,6 +69,9 @@ const dirs = {
 const ENV_READERS = ['/bootstrap/'];
 // Any static, side-effect or dynamic import of msw.
 const MSW_IMPORT = /(from\s+|import\s*\(\s*|import\s+)['"]msw/;
+// why: CodeRabbit batch 3 — the graph check matched only `from '@gmt/…'`, so `import('@gmt/engine')` or a bare
+// `import '@gmt/db'` in web passed; the same three import forms as MSW_IMPORT, so both checks read one rule.
+const GMT_IMPORT = /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)['"](@gmt\/[a-z]+)/g;
 
 // why: installed dependencies are never source, at any depth. Build output and reports are generated only directly
 // under a package root, so they are skipped there by path and never by bare name (packages/core/src/coverage/ is
@@ -105,7 +108,7 @@ for (const [name, dir] of Object.entries(dirs)) {
   }
   for (const f of walk(join(dir, 'src'))) {
     const src = readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/from\s+['"](@gmt\/[a-z]+)/g)) {
+    for (const m of src.matchAll(GMT_IMPORT)) {
       if (!ALLOWED[name].includes(m[1])) {
         console.error(`${f} imports ${m[1]}`);
         bad++;

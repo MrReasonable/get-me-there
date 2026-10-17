@@ -158,6 +158,22 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     expect(r.stderr).not.toContain('ok.ts');
   });
 
+  it('a dynamic or side-effect import across the graph fails too (CodeRabbit batch 3)', () => {
+    const r = run(
+      tree({
+        'apps/web/src/lazy.ts': "export const load = () => import('@gmt/engine');\n",
+        'apps/web/src/spaced.ts': "export const load = async () => await import ( '@gmt/providers' );\n",
+        'apps/web/src/side.ts': "import '@gmt/db';\n",
+        'apps/web/src/ok.ts': "import '@gmt/core';\nexport const c = () => import('@gmt/core');\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/web/src/lazy.ts imports @gmt/engine');
+    expect(r.stderr).toContain('apps/web/src/spaced.ts imports @gmt/providers');
+    expect(r.stderr).toContain('apps/web/src/side.ts imports @gmt/db');
+    expect(r.stderr).not.toContain('ok.ts');
+  });
+
   it('a manifest dependency across the graph fails, and core may depend only on its allowlisted externals', () => {
     const r = run(
       tree({
