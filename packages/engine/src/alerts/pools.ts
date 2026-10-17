@@ -8,6 +8,7 @@ import {
   type CalendarCandidate,
   daysBetween,
   evaluateConstraints,
+  isoDateTimeOfEpochMs,
   type Observation,
   type Provenance,
   unverifiedNames,
@@ -29,6 +30,9 @@ export interface Pool {
   unconfirmed: number;
 }
 
+/** previousFor's lower bound: none. Core judges the 2 × discoveryRefreshHours window itself (in whole minutes). */
+const NO_LOWER_BOUND = isoDateTimeOfEpochMs(0);
+
 /** A price row as alert_events references it: the one format (decision 59), for candidates and events alike. */
 export function rowRefOf(r: Pick<AlertEvent, 'observationId' | 'calendarPriceId'>): string {
   return r.observationId !== null ? `observation:${r.observationId}` : `calendar:${r.calendarPriceId}`;
@@ -42,23 +46,40 @@ export function rowRef(c: AlertCandidate): string {
   });
 }
 
-/** Calendar prices fetched by this execution (reused excluded by the repository) in the snapshot's cabin. Spec §6.8. */
+/**
+ * Calendar prices fetched by this execution (reused excluded by the repository) in the snapshot's cabin; previous =
+ * the newest earlier fetch for (definition, provider, cabin, cell). Spec §6.8.
+ * why: core compares only within 2 × discoveryRefreshHours and lists an older previous price in the "new" section with
+ * its age, so the repository query has no lower bound.
+ */
 export function calendarPool(ctx: AlertRunContext): Pool {
+  const previous = new Map<string, PreviousPrice>();
   const candidates = ctx.deps.repos.calendarPrices
     .fetchedBy(ctx.executionId)
     .filter((r) => r.cabin === ctx.snapshot.cabin)
-    .map(
-      (r): CalendarCandidate => ({
+    .map((r): CalendarCandidate => {
+      const prev = ctx.deps.repos.calendarPrices.previousFor(
+        ctx.definition.id,
+        r.providerId,
+        r.cabin,
+        r.cell,
+        r.fetchedAt,
+        NO_LOWER_BOUND,
+      );
+      const c: CalendarCandidate = {
         basis: 'calendar',
         calendarPriceId: r.id,
         fetchedByExecutionId: r.executionId,
         pricePence: r.pricePence,
         provenance: r.provenance,
         cell: { ...r.cell, nights: daysBetween(r.cell.departureDate, r.cell.returnDate) },
-        previous: null,
-      }),
-    );
-  return { candidates, previous: new Map(), unconfirmed: 0 };
+        previous: prev === null ? null : { pricePence: prev.pricePence, fetchedAt: prev.fetchedAt },
+      };
+      if (prev !== null)
+        previous.set(rowRef(c), { pricePence: prev.pricePence, provenance: prev.provenance });
+      return c;
+    });
+  return { candidates, previous, unconfirmed: 0 };
 }
 
 /**
