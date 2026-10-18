@@ -1,4 +1,5 @@
-import { createInterface } from 'node:readline/promises';
+import { createInterface } from 'node:readline';
+import type { Readable, Writable } from 'node:stream';
 import { type Clock, systemClock } from '@gmt/core';
 import { type Entry, type EntryContext, EX_CONFIG } from './run.js';
 import { ConsentNotCaptured, writeCapture } from './socs.js';
@@ -52,12 +53,31 @@ export async function captureSocs(ctx: EntryContext, ask: Ask, clock: Clock): Pr
   }
 }
 
-/** The command: asks on the terminal. */
+/**
+ * One answer per prompt, read through readline's async line iterator (fix round 2): the iterator is created before
+ * the first prompt, so lines that arrive together (piped input) are buffered and each reaches its own prompt.
+ * Input that ends before every answer was given throws ConsentNotCaptured, so the command refuses with EX_CONFIG.
+ */
+export function lineAsker(input: Readable, output: Writable): { ask: Ask; close(): void } {
+  const rl = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY, terminal: false });
+  const lines = rl[Symbol.asyncIterator]();
+  return {
+    ask: async (question) => {
+      output.write(question);
+      const next = await lines.next();
+      if (next.done === true) throw new ConsentNotCaptured('the input ended before every answer was given');
+      return next.value;
+    },
+    close: () => rl.close(),
+  };
+}
+
+/** The command: asks on the terminal, or reads piped answers one line per prompt. */
 export const entry: Entry = async (ctx) => {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const asker = lineAsker(process.stdin, process.stdout);
   try {
-    return await captureSocs(ctx, (q) => rl.question(q), systemClock);
+    return await captureSocs(ctx, asker.ask, systemClock);
   } finally {
-    rl.close();
+    asker.close();
   }
 };

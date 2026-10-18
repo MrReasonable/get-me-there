@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { captureSocs, parseExpiry } from '../src/captureSocs.js';
+import { captureSocs, lineAsker, parseExpiry } from '../src/captureSocs.js';
 import { type EntryContext, EX_CONFIG } from '../src/run.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -70,5 +71,48 @@ describe('capture-socs (devops-010)', () => {
     expect(await captureSocs(u.c, asker(['v', '1800000000', 'yes', 'None']), clock)).toBe(0);
     const w = ctx(join(tmpDir(), 'camoufox'));
     expect(await captureSocs(w.c, asker(['v', '1800000000', '1', 'strict']), clock)).toBe(0);
+  });
+});
+
+// why: fix round 2: piped answers arrive before any prompt is asked; every line must still reach its prompt, and input
+// that ends early must refuse, never exit 0 having written nothing
+describe('capture-socs over a piped stream', () => {
+  const piped = (text: string) => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const shown: string[] = [];
+    output.on('data', (b: Buffer) => shown.push(b.toString()));
+    input.end(text);
+    return { input, output, shown };
+  };
+  it('all four answers piped at once: every prompt is answered and the capture is written', async () => {
+    const dir = join(tmpDir(), 'camoufox');
+    const t = ctx(dir);
+    const p = piped('synthetic-reject-value\n2027-11-20T10:00:00.000Z\ny\nLax\n');
+    const asker = lineAsker(p.input, p.output);
+    try {
+      expect(await captureSocs(t.c, asker.ask, clock)).toBe(0);
+    } finally {
+      asker.close();
+    }
+    expect(JSON.parse(readFileSync(join(dir, 'socs.json'), 'utf8'))).toMatchObject({
+      value: 'synthetic-reject-value',
+      sameSite: 'Lax',
+      secure: true,
+    });
+    expect(p.shown.join('')).toContain('SameSite (Lax, Strict or None): ');
+  });
+  it('only two answers piped: refuses with EX_CONFIG, naming the input ending, and writes nothing', async () => {
+    const dir = join(tmpDir(), 'camoufox');
+    const t = ctx(dir);
+    const p = piped('synthetic-reject-value\n2027-11-20T10:00:00.000Z\n');
+    const asker = lineAsker(p.input, p.output);
+    try {
+      expect(await captureSocs(t.c, asker.ask, clock)).toBe(EX_CONFIG);
+    } finally {
+      asker.close();
+    }
+    expect(t.err.join()).toMatch(/input ended before every answer was given/);
+    expect(existsSync(join(dir, 'socs.json'))).toBe(false);
   });
 });
