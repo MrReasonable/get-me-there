@@ -95,12 +95,13 @@ export class CooldownStore {
   }
 
   /**
-   * Starts a cool-down for `cause` and returns the end in force. A later, shorter cool-down never shortens a longer
-   * one; equal ends keep the record already there, so the earlier cause stands (TS2-06).
+   * Starts a cool-down for `cause` (for `hours`, the cause's own period by default) and returns the end in force. A
+   * later, shorter cool-down never shortens a longer one; equal ends keep the record already there, so the earlier cause
+   * stands (TS2-06). The session passes `hours` when one page met two causes: the longer period, the earlier cause.
    */
-  start(cause: BlockedPage): CooldownRecord {
+  start(cause: BlockedPage, hours: number = this.hoursFor(cause)): CooldownRecord {
     const current = this.active();
-    const end = this.endFrom(cause);
+    const end = isoDateTimeOfEpochMs(Date.parse(this.clock.now()) + hours * HOUR_MS);
     if (current !== null && Date.parse(current.until) >= Date.parse(end)) return current;
     return this.write({ until: end, cause });
   }

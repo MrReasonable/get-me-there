@@ -1,0 +1,319 @@
+import { rmSync } from 'node:fs';
+import {
+  type BlockedPage,
+  type Clock,
+  type Logger,
+  type PageRequest,
+  stripUrlsInText,
+  type Versions,
+  type WorkerAnswer,
+} from '@gmt/core';
+import { checkAccountCookies } from './accountCookies.js';
+import type { CooldownStore } from './cooldown.js';
+import {
+  type ContextLike,
+  createDriver,
+  type Driver,
+  type PageLike,
+  pollUntilSettled,
+  type Settled,
+} from './driver.js';
+import { checkForm } from './form.js';
+import { installGuard } from './guard.js';
+import { readList } from './list.js';
+import type { Pacer } from './pacer.js';
+import type { Refusal } from './refusal.js';
+import { SELECTORS, type Selectors } from './selectors.js';
+import { readBack, type SocsCapture, socsCookie } from './socs.js';
+import { bounded, DeadlineExceeded, type Timers } from './timers.js';
+import { pageUrl } from './url.js';
+
+/**
+ * One Google page per call (spec §2; brief Task 14.4; decision 69 rulings 5, 6 and 9; TS-09, TS-10, TS2-14). The order
+ * is fixed: grid is refused; a standing refusal or cool-down answers without opening anything; the pacer claims a start
+ * or answers `spacing`; then, inside a `try` whose `finally` releases the pacer first and unconditionally: SOCS is set,
+ * the account cookies are checked, the page opens and is polled until settled (blocked kinds on every poll), the search
+ * form is checked, verified controls only are clicked, and the list is read. On every path after `goto`, SOCS is read
+ * back by value under its own bound, then the page is closed under its own bound. Every thrown error maps to one
+ * answer; `googleContacted` is true once `goto` was called.
+ */
+export interface PageResult {
+  answer: WorkerAnswer;
+  googleContacted: boolean;
+  /** The cool-down store could not be read: main answers, then exits 70 for the operator to look. */
+  fatal?: true;
+}
+
+export interface SessionDeps {
+  /** Launches (or relaunches, after a wipe) the persistent context. */
+  launch(): Promise<ContextLike>;
+  profileDir: string;
+  socs: SocsCapture;
+  cooldown: CooldownStore;
+  pacer: Pacer;
+  refusal: Refusal;
+  clock: Clock;
+  timers: Timers;
+  selectors?: Selectors;
+  pageTimeoutMs: number;
+  finallyTimeoutMs?: number;
+  pollMs?: number;
+  log: Logger;
+  versions: Versions;
+  /** Test seam: builds the driver over a page (createDriver by default). */
+  driverFor?: typeof createDriver;
+}
+
+type Stage = 'launch' | 'navigate' | 'read';
+
+function detailOf(e: unknown): string {
+  return stripUrlsInText(e instanceof Error ? e.message : String(e)).slice(0, 200);
+}
+
+export class PageSession {
+  private context: ContextLike | null = null;
+  private readonly S: Selectors;
+  private readonly finallyMs: number;
+  private readonly pollMs: number;
+  private busySince: string | null = null;
+
+  constructor(private readonly d: SessionDeps) {
+    this.S = d.selectors ?? SELECTORS;
+    this.finallyMs = d.finallyTimeoutMs ?? 5000;
+    this.pollMs = d.pollMs ?? 2000;
+  }
+
+  /** The start of the page in flight, for `/v1/status`. */
+  busy(): string | null {
+    return this.busySince;
+  }
+
+  /** The context, launched on first use and after a wipe. */
+  async currentContext(): Promise<ContextLike> {
+    this.context ??= await this.d.launch();
+    return this.context;
+  }
+
+  /** Closes the context (bounded) and forgets it; with `wipe`, removes the profile so the next page starts clean. */
+  async discard(wipe: boolean): Promise<void> {
+    const c = this.context;
+    this.context = null;
+    if (c !== null) await bounded(() => c.close(), this.finallyMs, this.d.timers);
+    if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
+  }
+
+  async page(req: PageRequest): Promise<PageResult> {
+    if (req.mode === 'grid')
+      return { answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false };
+    let active: ReturnType<CooldownStore['active']>;
+    let refusal: ReturnType<Refusal['active']>;
+    try {
+      active = this.d.cooldown.active();
+      refusal = this.d.refusal.active();
+    } catch (e) {
+      return {
+        answer: {
+          kind: 'browser-error',
+          stage: 'read',
+          detail: `cool-down store unreadable: ${detailOf(e)}`,
+        },
+        googleContacted: false,
+        fatal: true,
+      };
+    }
+    if (refusal !== null)
+      return {
+        answer: {
+          kind: 'cooling-down',
+          cause: 'signed-in',
+          cooldownUntil: active?.until ?? this.d.clock.now(),
+        },
+        googleContacted: false,
+      };
+    if (active !== null)
+      return {
+        answer: { kind: 'cooling-down', cause: active.cause, cooldownUntil: active.until },
+        googleContacted: false,
+      };
+    const claim = this.d.pacer.claim();
+    if (!claim.ok)
+      return {
+        answer: { kind: 'spacing', retryAfterSeconds: claim.retryAfterSeconds },
+        googleContacted: false,
+      };
+
+    this.busySince = this.d.clock.now();
+    const started = this.d.timers.now();
+    const deadline = this.d.timers.deadline(this.d.pageTimeoutMs);
+    let stage: Stage = 'launch';
+    let contacted = false;
+    let page: PageLike | null = null;
+    let context: ContextLike | null = null;
+    let answer: WorkerAnswer;
+    let stop: BlockedPage | null = null;
+    let wipe = false;
+    let merged = false;
+    try {
+      context = await this.currentContext();
+      // why: TS2-10: the only cookie the worker ever sets.
+      await context.addCookies([socsCookie(this.d.socs)]);
+      const account = await checkAccountCookies(context, this.d.clock);
+      if (account.found) {
+        stop = 'signed-in';
+        answer = this.blockedPlaceholder('signed-in');
+      } else {
+        const p = await context.newPage();
+        page = p;
+        deadline.onExpire(() => {
+          void p.close().catch(() => undefined);
+        });
+        const guard = await installGuard(context, p, this.d.log, this.S);
+        const driver = (this.d.driverFor ?? createDriver)(p, guard, this.S);
+        stage = 'navigate';
+        contacted = true;
+        let refused: BlockedPage | null = null;
+        try {
+          await driver.goto(pageUrl(req), deadline);
+        } catch (e) {
+          if (guard.refused === null) throw e;
+          refused = guard.refused;
+        }
+        stage = 'read';
+        if (refused !== null) {
+          stop = refused;
+          answer = this.blockedPlaceholder(refused);
+        } else {
+          const r = await this.read(driver, req, deadline);
+          answer = r.answer;
+          stop = r.stop;
+        }
+      }
+    } catch (e) {
+      answer =
+        e instanceof DeadlineExceeded || deadline.expired()
+          ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started) }
+          : { kind: 'browser-error', stage, detail: detailOf(e) };
+    } finally {
+      this.d.pacer.release();
+    }
+    deadline.clear();
+
+    // Rule 5: after goto, on every path, the SOCS read-back by value, then the page closed, each under its own bound.
+    let discard = false;
+    if (contacted && context !== null) {
+      const c = context;
+      const back = await bounded(() => c.cookies(), this.finallyMs, this.d.timers);
+      if (back.overran) {
+        discard = true;
+        if (answer.kind === 'cells')
+          answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran' };
+      } else if (readBack(back.value, this.d.socs) !== 'same') {
+        wipe = true;
+        // why: ruling 9: a block keeps its own kind; anything else becomes consent-unhandled.
+        if (stop === null) {
+          stop = 'consent-unhandled';
+          answer = this.blockedPlaceholder('consent-unhandled');
+        } else merged = true;
+      }
+    }
+    if (page !== null) {
+      const p = page;
+      const closed = await bounded(() => p.close(), this.finallyMs, this.d.timers);
+      if (closed.overran) {
+        discard = true;
+        if (answer.kind === 'cells')
+          answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran' };
+      }
+    }
+    if (stop === 'consent-unhandled') wipe = true;
+    if (wipe || discard) await this.discard(wipe);
+    this.busySince = null;
+
+    if (stop !== null) {
+      try {
+        // why: one page met two causes: the longer period, the earlier cause (Task 14.4 rule 5).
+        const hours = merged
+          ? Math.max(this.d.cooldown.hoursFor(stop), this.d.cooldown.hoursFor('consent-unhandled'))
+          : this.d.cooldown.hoursFor(stop);
+        const rec = this.d.cooldown.start(stop, hours);
+        if (stop === 'signed-in') this.d.refusal.set('a signed-in account control or account cookie');
+        answer = { kind: 'blocked', page: stop, cooldownUntil: rec.until };
+      } catch (e) {
+        return {
+          answer: {
+            kind: 'browser-error',
+            stage: 'read',
+            detail: `cool-down store unwritable: ${detailOf(e)}`,
+          },
+          googleContacted: contacted,
+          fatal: true,
+        };
+      }
+    }
+    return { answer, googleContacted: contacted };
+  }
+
+  /** A blocked answer whose end the stop handling fills in; it never leaves the session as it is. */
+  private blockedPlaceholder(page: BlockedPage): WorkerAnswer {
+    return { kind: 'blocked', page, cooldownUntil: this.d.clock.now() };
+  }
+
+  private async read(
+    driver: Driver,
+    req: PageRequest,
+    d: ReturnType<Timers['deadline']>,
+  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
+    const S = this.S;
+    let settled: Settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S);
+    if (settled.kind.kind === 'blocked')
+      return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
+    if (settled.kind.kind === 'no-flights')
+      return { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
+    const form = checkForm(await driver.formFacts(d), req);
+    if (form !== 'ok') return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    // why: the worker clicks only names its selectors module marks verified (PIE-09), re-reading the facts after each.
+    const clicks: Array<[boolean, 'tab' | 'button', string]> = [
+      [S.CHEAPEST_FLOW_VERIFIED, 'tab', settled.facts.page.cheapestTabs[0]?.name ?? ''],
+      [S.VIEW_MORE_ADDS_CHEAPER, 'button', S.results.viewMoreButton],
+    ];
+    for (const [verified, role, name] of clicks) {
+      if (!verified || name === '') continue;
+      await driver.click(role, name, d);
+      settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S);
+      if (settled.kind.kind !== 'results') {
+        const page: BlockedPage = settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised';
+        return { answer: this.blockedPlaceholder(page), stop: page };
+      }
+    }
+    const list = readList(await driver.listFacts(d), req);
+    // why: decision 69: a page in another currency, or one with no option for any cell, is not a page this app reads.
+    if (list.currency !== 'GBP' || list.minMinor === null)
+      return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    return {
+      answer: this.cells(
+        {
+          status: 'price',
+          amountMinor: list.minMinor,
+          tabMinor: list.tabMinor,
+          optionsUnparsed: list.optionsUnparsed,
+          optionsOtherCell: list.optionsOtherCell,
+          returnDateFrom: 'query-and-form',
+        },
+        list.pointOfSale,
+      ),
+      stop: null,
+    };
+  }
+
+  private cells(cell: Extract<WorkerAnswer, { kind: 'cells' }>['cell'], pointOfSale: string): WorkerAnswer {
+    return {
+      kind: 'cells',
+      fetchedAt: this.d.clock.now(),
+      currency: 'GBP',
+      pointOfSale,
+      cell,
+      notes: [],
+      versions: this.d.versions,
+    };
+  }
+}
