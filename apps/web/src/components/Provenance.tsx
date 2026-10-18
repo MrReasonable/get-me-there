@@ -3,6 +3,7 @@ import {
   formatAgeCompact,
   formatAgeFull,
   type Provenance as ProvenanceT,
+  pointOfSaleLabel,
   provenanceSchema,
   type SourceKind,
   sourceLabel,
@@ -83,6 +84,7 @@ export function Provenance({
         </span>
       ) : null}
       <span>{sourceLabel(p)}</span>
+      <span data-testid="point-of-sale">{pointOfSaleLabel(p)}</span>
       {fullAge ? (
         <span>{formatAgeFull(age)}</span>
       ) : (

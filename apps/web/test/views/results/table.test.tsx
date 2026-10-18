@@ -772,3 +772,32 @@ describe('keyboard operation of the table (spec §9 item 6, §11 accessibility)'
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 });
+
+describe('Results point of sale (spec §11)', () => {
+  it('wide: each row names its market in its price cell; 375px: nothing is added and no row prints it', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const wide = view();
+    await table();
+    const first = dataRows()[0];
+    if (first === undefined) throw new Error('no rows');
+    expect(within(first).getByTestId('point-of-sale')).toHaveTextContent('UK market');
+    const calendar = dataRows()[4];
+    if (calendar === undefined) throw new Error('no calendar row');
+    expect(within(calendar).getByTestId('point-of-sale')).toHaveTextContent('market not stated');
+    wide.unmount();
+
+    setViewportWidth(375);
+    view();
+    await table();
+    // why: jsdom has no layout, so "nothing overflows" is asserted as structure: the phone row's price cell is the
+    // compact form, which carries no market words, so the 375px row is exactly as wide as before.
+    for (const r of dataRows()) {
+      expect(within(r).queryByTestId('point-of-sale')).toBeNull();
+      expect(r.textContent ?? '').not.toMatch(/market/);
+    }
+    // the full headline above the rows is a full display: it names its market and wraps (flex-wrap) rather than widening
+    const header = screen.getAllByTestId('point-of-sale');
+    expect(header).toHaveLength(1);
+    expect(header[0]?.closest('[data-testid="provenance"]')).toHaveClass('flex-wrap');
+  });
+});

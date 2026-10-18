@@ -592,3 +592,23 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect((await findAllByRole('region', { name: /table of points/ })).length).toBeGreaterThan(1);
   });
 });
+
+describe('History tables point of sale (spec §11)', () => {
+  it('every provider price in the table names its market', async () => {
+    const r = routeHistory({
+      calendarSeries: [
+        {
+          providerId: 'travelpayouts',
+          cabin: 'economy',
+          points: [fetchPoint(2, 39900, cellAt('2027-03-21', 14)), fetchPoint(170, 42000)],
+        },
+      ],
+    });
+    server.use(http.get(routeRoute, () => HttpResponse.json(r)));
+    const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    const t = await findByRole('table', { name: /Aviasales cache · economy · cheapest calendar price/ });
+    const pos = within(t).getAllByTestId('point-of-sale');
+    expect(pos).toHaveLength(2);
+    for (const e of pos) expect(e).toHaveTextContent(/^(UK market|market not stated)$/);
+  });
+});

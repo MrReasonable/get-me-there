@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 29.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 30.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -1457,8 +1457,14 @@ a variant of `PriceCell`, never a second price renderer: `PriceCell`
 validates the complete provenance (provider, source kind, fetched and
 observed time, point of sale, FX status) before it prints an amount, and a
 face keeps "≈" on a converted price. Point of sale is validated on every
-price but is not a face item: it is one install-wide setting (§12
-`POINT_OF_SALE`), or `'unknown'` where the vendor ignores it. Each row also carries the operator's per-destination note from
+price and shown, in words from `core` ("UK market" for GB, "market not stated"
+for `'unknown'`, otherwise the code and "market"), on the full price displays:
+the Results rows and header, the cell detail panel, Duration, History and the
+alert events table, and on the alert email's provenance line, because the same
+flight can be priced differently by market. It is not a face item: the compact
+calendar face and the phone face leave it out, so the 375px widths do not change.
+It is one install-wide setting (§12 `POINT_OF_SALE`), or `'unknown'` where the
+vendor ignores it. Each row also carries the operator's per-destination note from
 the definition (free text such as "onward leg not included") on every row
 for that destination. Optional operator-entered onward cost per destination
 renders as an "adjusted" column, labelled operator-entered, sortable, never
@@ -1733,6 +1739,13 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 30: point of sale on full price displays (2026-10-18)
+
+§11: the provenance line lists point of sale ("UK market", "market not
+stated", or the code and "market", from `core`'s labels) on the full price
+displays and the alert email's provenance line, and keeps it off the compact
+calendar face and the phone face.
 
 ### Revision 29: CodeRabbit batch 3 (2026-10-17)
 

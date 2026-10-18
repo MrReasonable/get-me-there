@@ -379,3 +379,18 @@ describe('Duration view (spec §11 View C)', () => {
     expect(await findByRole('region', { name: COPY.durationView.tableScroll })).toBeInTheDocument();
   });
 });
+
+describe('Duration table point of sale (spec §11)', () => {
+  it('each fare in the full table names its market; the compact hover tooltip does not', async () => {
+    server.use(http.get(route, () => HttpResponse.json(resp)));
+    const { findByRole } = renderWithProviders(<DurationView definition={def} />);
+    const table = await findByRole('table', { name: 'Cheapest found per stay length, with provenance' });
+    const pos = within(table).getAllByTestId('point-of-sale');
+    expect(pos.length).toBeGreaterThan(0);
+    for (const e of pos) expect(e).toHaveTextContent(/^(UK market|market not stated)$/);
+    const tip = renderWithProviders(
+      <DurationTooltip active label={10} data={data()} notes={def.destinationNotes} />,
+    ).getByTestId('duration-tooltip');
+    expect(within(tip).queryByTestId('point-of-sale')).toBeNull();
+  });
+});

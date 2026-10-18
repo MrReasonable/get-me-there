@@ -15,6 +15,7 @@ import {
   type IsoDateTime,
   LINK_ALLOWLIST,
   type Provenance,
+  pointOfSaleLabel,
   type ResultBasis,
   type Segment,
   sourceLabel,
@@ -244,7 +245,9 @@ function itemLines(n: number, item: DigestItem, input: DigestRenderInput): strin
   ];
   const prev = previousLine(item, input);
   if (prev !== null) lines.push(prev);
-  lines.push(`   Provenance: ${sourceLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}`);
+  lines.push(
+    `   Provenance: ${sourceLabel(item.provenance)} · ${pointOfSaleLabel(item.provenance)} · ${ageLine(item.provenance, input.now)}`,
+  );
   const notes = notesOf(item, input);
   if (notes.length > 0) lines.push(`   Notes: ${notes.join('; ')}`);
   lines.push(`   ${linkLine(item, input)}`);
