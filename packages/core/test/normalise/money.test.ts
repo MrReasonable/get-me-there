@@ -52,8 +52,24 @@ describe('toGbp (spec §6.3): rateNano = GBP per 1 native unit × 1e9, half-up t
     expect(() => toGbp(100, 'EUR', r)).toThrow(RangeError);
   });
 
-  it('a currency without an exponent is currency-unsupported', () => {
+  it('a currency without an exponent is currency-unsupported, naming the currency', () => {
     expect(() => toGbp(100, 'XAU', 1)).toThrow(NormalisationError);
+    expect(() => toGbp(100, 'XAU', 1)).toThrow('currency-unsupported: XAU');
+  });
+
+  it('each RangeError names the offending value', () => {
+    expect(() => toGbp(412.5, 'EUR', 860_000_000)).toThrow(
+      'amountMinor must be a non-negative integer: 412.5',
+    );
+    expect(() => toGbp(100, 'EUR', 0)).toThrow('rateNano must be a positive integer: 0');
+  });
+
+  it('a result of exactly Number.MAX_SAFE_INTEGER pence is returned; one penny-scale step beyond throws, naming it', () => {
+    // rate 1.000000000 keeps the penny count equal to the minor amount for a 2-exponent currency
+    expect(toGbp(Number.MAX_SAFE_INTEGER, 'USD', 1_000_000_000)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => toGbp(Number.MAX_SAFE_INTEGER, 'USD', 1_000_000_001)).toThrow(
+      'converted amount too large: 9007199263748190',
+    );
   });
 
   it('ECB list and exponents (frankfurter 2026-10-14)', () => {
