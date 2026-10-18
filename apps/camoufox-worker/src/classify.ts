@@ -1,5 +1,6 @@
 import type { BlockedPage } from '@gmt/core';
 import { onAllowlist } from './guard.js';
+import type { View } from './ready.js';
 import { SELECTORS, type Selectors } from './selectors.js';
 
 /**
@@ -18,7 +19,8 @@ export interface PageFacts {
     noFlights: boolean;
   };
   accountControl: boolean;
-  cheapestTabs: Array<{ name: string; inTablist: boolean }>;
+  /** `selected`: the tab is the selected one (aria-selected), read for the tabs in the tablist. */
+  cheapestTabs: Array<{ name: string; inTablist: boolean; selected?: boolean }>;
   dateGridButtons: number;
   resultLinks: number;
 }
@@ -54,16 +56,22 @@ export type ClassifyRule =
   | 'cheapest-tab-count'
   | 'cheapest-tab-outside-tablist'
   | 'date-grid-buttons'
+  | 'cheapest-tab-not-selected'
+  | 'cheapest-tab-unpriced'
   | 'no-result-links';
 
-export function classifyPage(f: PageFacts, S: Selectors = SELECTORS): PageKind {
-  return classifyPageWithRule(f, S).kind;
+export function classifyPage(f: PageFacts, S: Selectors = SELECTORS, view: View = 'best'): PageKind {
+  return classifyPageWithRule(f, S, view).kind;
 }
 
-/** The same decision as classifyPage, with the rule that fired. */
+/**
+ * The same decision as classifyPage, with the rule that fired. `view` (ruling of 2026-10-18): the Best view is a results page with exactly one Date grid button; the Cheapest view
+ * has none and is recognised by its one tab in the tablist being selected and priced. Either needs result links.
+ */
 export function classifyPageWithRule(
   f: PageFacts,
   S: Selectors = SELECTORS,
+  view: View = 'best',
 ): { kind: PageKind; rule: ClassifyRule } {
   const blocked = (page: BlockedPage, rule: ClassifyRule) => ({
     kind: { kind: 'blocked' as const, page },
@@ -87,12 +95,18 @@ export function classifyPageWithRule(
   if (f.text.signInHeading) return blocked('sign-in', 'sign-in-heading');
   // why: the guard's one allowlist rule (fix round 1: the port and user checks live there once)
   if (![f.url, ...f.hops].every((x) => onAllowlist(x, S))) return blocked('off-allowlist', 'off-allowlist');
-  if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights)
+  // why: ruling of 2026-10-18: the line counts only on a page with no result links, so the flag can never misread a
+  // results page (the Cheapest view carries a status line matching it beside 21 links)
+  if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights && f.resultLinks === 0)
     return { kind: { kind: 'no-flights' }, rule: 'no-flights-line' };
   const tabs = f.cheapestTabs;
   if (tabs.length !== 1) return blocked('unrecognised', 'cheapest-tab-count');
   if (!tabs.every((x) => x.inTablist)) return blocked('unrecognised', 'cheapest-tab-outside-tablist');
-  if (f.dateGridButtons !== 1) return blocked('unrecognised', 'date-grid-buttons');
+  if (view === 'best' && f.dateGridButtons !== 1) return blocked('unrecognised', 'date-grid-buttons');
+  if (view === 'cheapest' && !tabs.every((x) => x.selected === true))
+    return blocked('unrecognised', 'cheapest-tab-not-selected');
+  if (view === 'cheapest' && !tabs.every((x) => /\d/.test(x.name)))
+    return blocked('unrecognised', 'cheapest-tab-unpriced');
   if (f.resultLinks <= 0) return blocked('unrecognised', 'no-result-links');
   return { kind: { kind: 'results' }, rule: 'results' };
 }

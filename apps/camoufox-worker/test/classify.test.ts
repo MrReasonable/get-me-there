@@ -198,7 +198,7 @@ describe('classifyPageWithRule', () => {
   it('results and no-flights name their rules too', () => {
     expect(classifyPageWithRule(facts())).toEqual({ kind: { kind: 'results' }, rule: 'results' });
     expect(
-      classifyPageWithRule(facts({ text: t({ noFlights: true }) }), {
+      classifyPageWithRule(facts({ text: t({ noFlights: true }), resultLinks: 0 }), {
         ...SELECTORS,
         NO_FLIGHTS_VERIFIED: true,
       }),
@@ -207,5 +207,94 @@ describe('classifyPageWithRule', () => {
   it('classifyPage is the same decision without the rule', () => {
     for (const f of [facts(), facts({ resultLinks: 0 }), facts({ accountControl: true })])
       expect(classifyPage(f)).toEqual(classifyPageWithRule(f).kind);
+  });
+});
+
+// why: ruling of 2026-10-18 (the Cheapest run on 052976e): the Cheapest view has no Date grid button; it is recognised
+// by its selected, priced tab, and the "no flights" line counts only on a page with no result links
+describe('classify by view (ruling of 2026-10-18)', () => {
+  const tab = (o: { selected?: boolean; name?: string } = {}) => [
+    { name: o.name ?? 'Cheapest from £443', inTablist: true, selected: o.selected ?? true },
+  ];
+  it('the Cheapest view: one selected, priced tab in the tablist and result links → results, without a Date grid', () => {
+    expect(
+      classifyPageWithRule(
+        facts({ cheapestTabs: tab(), dateGridButtons: 0, resultLinks: 21 }),
+        SELECTORS,
+        'cheapest',
+      ),
+    ).toEqual({
+      kind: { kind: 'results' },
+      rule: 'results',
+    });
+  });
+  it.each([
+    ['cheapest-tab-not-selected', facts({ cheapestTabs: tab({ selected: false }), dateGridButtons: 0 })],
+    ['cheapest-tab-unpriced', facts({ cheapestTabs: tab({ name: 'Cheapest' }), dateGridButtons: 0 })],
+    ['no-result-links', facts({ cheapestTabs: tab(), dateGridButtons: 0, resultLinks: 0 })],
+    ['cheapest-tab-count', facts({ cheapestTabs: [], dateGridButtons: 0 })],
+  ])('the Cheapest view without its signs is unrecognised by %s', (rule, f) => {
+    expect(classifyPageWithRule(f, SELECTORS, 'cheapest')).toEqual({
+      kind: { kind: 'blocked', page: 'unrecognised' },
+      rule,
+    });
+  });
+  it('a Best page with no Date grid button is still unrecognised', () => {
+    expect(
+      classifyPageWithRule(facts({ cheapestTabs: tab(), dateGridButtons: 0 }), SELECTORS, 'best').rule,
+    ).toBe('date-grid-buttons');
+  });
+  it('the no-flights line on a page with result links is never no-flights, even with the flag on', () => {
+    const on = { ...SELECTORS, NO_FLIGHTS_VERIFIED: true };
+    const evidence = facts({
+      text: t({ noFlights: true }),
+      cheapestTabs: tab(),
+      dateGridButtons: 0,
+      resultLinks: 21,
+    });
+    expect(classifyPageWithRule(evidence, on, 'cheapest').kind).toEqual({ kind: 'results' });
+    expect(classifyPage(facts({ text: t({ noFlights: true }), resultLinks: 21 }), on).kind).toBe('results');
+    expect(classifyPage(facts({ text: t({ noFlights: true }), resultLinks: 0 }), on)).toEqual({
+      kind: 'no-flights',
+    });
+  });
+  // why: the stop record of 2026-10-18 15:02 UTC (fixtures/recorded/stopped), its shape as the classifier received it,
+  // URLs back to https with no query; the tab name keeps its recorded form
+  it('the Cheapest page from the stop record classifies as results', () => {
+    const record: PageFacts = {
+      url: 'https://www.google.com/travel/flights/search',
+      hops: ['https://www.google.com/travel/flights', 'https://www.google.com/travel/flights/search'],
+      frameUrls: [
+        'https://www.google.com/travel/flights/search',
+        'https://www.google.com/_/FlightsFrontendUi/bscframe',
+        'about:blank',
+      ],
+      text: {
+        unusualTraffic: false,
+        consentHeading: false,
+        signInHeading: false,
+        challenge: false,
+        noFlights: true,
+      },
+      accountControl: false,
+      cheapestTabs: [
+        {
+          name: 'Cheapestfrom  £443Close dialogueLooking for the lowest fares? These additional budget picks help you save but may involve trade-offs, such as flying back to a different airport in the same city that you departed from, self-transferring luggage or booking via a third-party site. Learn more',
+          inTablist: true,
+          selected: true,
+        },
+      ],
+      dateGridButtons: 0,
+      resultLinks: 21,
+    };
+    expect(classifyPageWithRule(record, SELECTORS, 'cheapest')).toEqual({
+      kind: { kind: 'results' },
+      rule: 'results',
+    });
+    expect(
+      classifyPageWithRule(record, { ...SELECTORS, NO_FLIGHTS_VERIFIED: true }, 'cheapest').kind,
+    ).toEqual({ kind: 'results' });
+    // the same facts on the Best view are not a Best page (no Date grid)
+    expect(classifyPageWithRule(record, SELECTORS, 'best').rule).toBe('date-grid-buttons');
   });
 });

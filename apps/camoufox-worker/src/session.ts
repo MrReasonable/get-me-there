@@ -346,7 +346,7 @@ export class PageSession {
           return null;
         });
         if (seen !== null) {
-          const k = classifyPageWithRule(seen.page, S);
+          const k = classifyPageWithRule(seen.page, S, 'cheapest');
           if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
             return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page };
         }

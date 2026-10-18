@@ -294,7 +294,11 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const inList = await countOf(tabsInList, d);
       const cheapestTabs: PageFacts['cheapestTabs'] = [];
       for (let i = 0; i < inList; i++)
-        cheapestTabs.push({ name: (await nameOf(tabsInList.nth(i), d)) ?? '', inTablist: true });
+        cheapestTabs.push({
+          name: (await nameOf(tabsInList.nth(i), d)) ?? '',
+          inTablist: true,
+          selected: (await d.race(tabsInList.nth(i).getAttribute('aria-selected', timeoutOf(d)))) === 'true',
+        });
       for (let i = inList; i < total; i++) cheapestTabs.push({ name: '', inTablist: false });
       const facts: PageFacts = {
         url,
@@ -305,7 +309,8 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
           consentHeading: await has(page.getByRole('heading', { name: S.consent.heading }), d),
           signInHeading: await has(page.getByRole('heading', { name: S.blocked.signInHeading }), d),
           challenge: await has(page.getByText(S.blocked.challenge), d),
-          noFlights: await has(page.getByText(S.results.noFlights), d),
+          // why: ruling of 2026-10-18: visible only, as the loading check (a hidden status line never counts)
+          noFlights: (await visibleCount(page.getByText(S.results.noFlights), d)) > 0,
         },
         accountControl: accountButtons + accountLinks > 0,
         cheapestTabs,
@@ -484,7 +489,7 @@ export async function pollUntilSettled(
         : await driver.readFacts(d);
     const pollDurationMs = timers.now() - pollStart;
     const facts = { page: read.page, settle: read.settle };
-    const { kind, rule } = classifyPageWithRule(facts.page, S);
+    const { kind, rule } = classifyPageWithRule(facts.page, S, view);
     if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
       return { kind, rule, facts, polls };
     const current = {

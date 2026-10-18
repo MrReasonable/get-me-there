@@ -500,7 +500,7 @@ async function interact(
           return null;
         });
         if (seen !== null) {
-          const k = classifyPageWithRule(seen.page, deps.selectors);
+          const k = classifyPageWithRule(seen.page, deps.selectors, 'cheapest');
           if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
             return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
         }

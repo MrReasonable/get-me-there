@@ -48,7 +48,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
           noFlights: false,
         },
         accountControl: false,
-        cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }],
+        cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: false }],
         dateGridButtons: 1,
         resultLinks: 2,
       },
@@ -93,7 +93,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
     ]);
     const r = await driver.readFacts(d);
     expect(r.page.cheapestTabs).toEqual([
-      { name: 'Cheapest from Fetching results 451 British pounds', inTablist: true },
+      { name: 'Cheapest from Fetching results 451 British pounds', inTablist: true, selected: false },
       { name: '', inTablist: false },
     ]);
     // why: ruling of 2026-10-18: a loading word in the tab's own name is not the page loading
@@ -212,7 +212,9 @@ describe('createDriver list, form and click', () => {
       departure: 'Thu, 5 Nov',
       return: '',
     });
-    expect((await driver.readFacts(d)).page.cheapestTabs).toEqual([{ name: '', inTablist: true }]);
+    expect((await driver.readFacts(d)).page.cheapestTabs).toEqual([
+      { name: '', inTablist: true, selected: false },
+    ]);
   });
   it('click presses the exact name with the remaining deadline', async () => {
     const { driver, d, page } = setup();
@@ -686,5 +688,26 @@ describe('Cheapest poll and lookup bounds', () => {
     timers.runOut();
     await expect(run).rejects.toMatchObject({ name: 'LookupTimedOut' });
     expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(5000);
+  });
+});
+
+// why: ruling of 2026-10-18: the no-flights text counts only when a visitor would see it (a hidden status line on a
+// results page never does)
+describe('no-flights text is visible-only', () => {
+  it('a hidden "No results returned" line is not noFlights; a visible one is', async () => {
+    const hidden = resultsTree({ extra: [{ ...text('No results returned for this search'), hidden: true }] });
+    expect((await setup([hidden]).driver.readFacts(setup([hidden]).d)).page.text.noFlights).toBe(false);
+    const shown = n('document', '', [text('No results returned for this search')]);
+    const t = setup([shown]);
+    expect((await t.driver.readFacts(t.d)).page.text.noFlights).toBe(true);
+  });
+  it('readFacts reports the Cheapest tab’s own selected state', async () => {
+    const tree = resultsTree({ tab: 'Cheapest from £443' });
+    for (const c of descendants([tree]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+    const t = setup([tree]);
+    expect((await t.driver.readFacts(t.d)).page.cheapestTabs).toEqual([
+      { name: 'Cheapest from £443', inTablist: true, selected: true },
+    ]);
   });
 });
