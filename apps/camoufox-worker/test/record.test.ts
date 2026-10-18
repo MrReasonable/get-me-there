@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import type { BlockedPage } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadWorkerConfig } from '../src/config.js';
 import { CooldownStore } from '../src/cooldown.js';
@@ -20,7 +29,7 @@ import { Refusal } from '../src/refusal.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
-import { FakePage, n, option, resultsTree, text } from './support/fakePage.js';
+import { FakePage, type Navigation, n, option, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
@@ -548,6 +557,65 @@ describe('the recorder under the server’s stop rules (fix round 1)', () => {
     expect(t.err.join()).toMatch(/read-back overran/);
     expect(written(t.root)).toEqual([]);
   });
+  // why: fix round 2 (re-review N1, CodeRabbit): a stop keeps its cool-down, refusal and wipe when the read-back then
+  // overruns, as the server's does; only a page that met no stop is refused for the overrun
+  it.each([
+    [
+      'captcha',
+      {
+        hops: [URL0, LANDED],
+        tree: resultsTree(),
+        frames: ['https://www.google.com/recaptcha/api2/anchor?k=x'],
+      },
+    ],
+    [
+      'unusual-traffic',
+      { hops: [URL0, LANDED], tree: n('document', '', [text('Our systems have detected unusual traffic')]) },
+    ],
+    ['sign-in', { hops: [URL0, 'https://accounts.google.com/ServiceLogin'] }],
+    [
+      'signed-in',
+      { hops: [URL0, LANDED], tree: resultsTree({ extra: [n('button', 'Google Account: Example Person')] }) },
+    ],
+    [
+      'consent-unhandled',
+      {
+        hops: [URL0, 'https://consent.google.com/ml?continue=x'],
+        tree: n('document', '', [n('heading', 'Before you continue to Google')]),
+      },
+    ],
+    ['off-allowlist', { hops: [URL0, 'https://www.example.test/x'], tree: resultsTree() }],
+  ] satisfies Array<[BlockedPage, Navigation]>)(
+    'a %s stop whose read-back overruns still cools down by its cause',
+    async (cause, nav) => {
+      const t = setup({ navigations: [nav] });
+      const deps = withContext(t, (c) => (c.hangCookiesOn = 1));
+      expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
+      expect(cooldownOf(t)).toEqual({ until: '2026-10-20T05:00:05.000Z', cause });
+      expect(new Refusal({ dir: t.dataDir, clock: t.timers.clock }).active() !== null).toBe(
+        cause === 'signed-in',
+      );
+      expect(existsSync(profileDir(t.dataDir))).toBe(cause !== 'consent-unhandled');
+      expect(t.contexts[0]?.closed).toBeGreaterThanOrEqual(1);
+    },
+  );
+  it('an account-cookie stop whose read-back overruns sets the refusal and cools down', async () => {
+    const t = setup();
+    const deps = withContext(t, (c) => {
+      c.jar.push({ name: 'SID', value: 'x', domain: '.google.com', path: '/' });
+      c.hangCookiesOn = 1;
+    });
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('signed-in');
+    expect(new Refusal({ dir: t.dataDir, clock: t.timers.clock }).active()).not.toBeNull();
+  });
+  it('a read-back overrun on a page with no stop closes the context and refuses', async () => {
+    const t = setup();
+    const deps = withContext(t, (c) => (c.hangCookiesOn = 1));
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_CONFIG);
+    expect(cooldownOf(t)).toBeNull();
+    expect(t.contexts[0]?.closed).toBeGreaterThanOrEqual(1);
+  });
   it('a captcha page whose SOCS also changed keeps captcha, and the profile is wiped', async () => {
     const t = setup({
       navigations: [
@@ -564,6 +632,20 @@ describe('the recorder under the server’s stop rules (fix round 1)', () => {
     expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
     expect(cooldownOf(t)?.cause).toBe('captcha');
     expect(existsSync(profileDir(t.dataDir))).toBe(false);
+  });
+  // why: fix round 2 (re-review N4): directories and files an earlier recording made 0755/0644 are tightened at start
+  it('existing recording directories become 0700 and their files 0600 when the recorder starts', async () => {
+    const t = setup();
+    const old = join(t.root, 'cheapest', '2026-10-01');
+    mkdirSync(old, { recursive: true, mode: 0o755 });
+    chmodSync(join(t.root, 'cheapest'), 0o755);
+    chmodSync(old, 0o755);
+    writeFileSync(join(old, '1.facts.json'), '{}', { mode: 0o644 });
+    writeFileSync(join(t.root, 'cheapest', '.gitkeep'), '', { mode: 0o644 });
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
+    expect(statSync(join(t.root, 'cheapest')).mode & 0o777).toBe(0o700);
+    expect(statSync(old).mode & 0o777).toBe(0o700);
+    expect(statSync(join(old, '1.facts.json')).mode & 0o777).toBe(0o600);
   });
   it('recordings are written 0600 in 0700 directories', async () => {
     const t = setup();

@@ -83,7 +83,7 @@ describe('CooldownStore (spec §2: cool-down by cause, persisted, fail closed)',
     ['a non-date until', JSON.stringify({ until: 'tomorrow', cause: 'captcha' })],
     ['an unknown cause', JSON.stringify({ until: '2026-10-19T00:00:00.000Z', cause: 'x' })],
     ['a missing cause', JSON.stringify({ until: '2026-10-19T00:00:00.000Z' })],
-  ])('a record that is %s fails closed: a fresh bot-length cool-down from now', (_n, content) => {
+  ])('a record that is %s fails closed: a fresh full-length cool-down from now', (_n, content) => {
     const dir = tmpDir();
     writeFileSync(join(dir, 'cooldown.json'), content);
     expect(new CooldownStore({ dir, challengeHours: 48, clock: fixedClock(T0) }).active()).toEqual({
@@ -102,7 +102,7 @@ describe('CooldownStore (spec §2: cool-down by cause, persisted, fail closed)',
       );
     },
   );
-  it('refuses fewer than 24 bot hours, and a fraction', () => {
+  it('refuses fewer than 24 hours, and a fraction', () => {
     expect(() => new CooldownStore({ dir: tmpDir(), challengeHours: 23, clock: fixedClock(T0) })).toThrow(
       /CAMOUFOX_COOLDOWN_HOURS/,
     );

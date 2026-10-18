@@ -29,7 +29,7 @@ import {
   type RecordingKind,
   RecordingRefused,
 } from './recordArgs.js';
-import { stripQuery, writeRecording, writeUnrecorded } from './recordWrite.js';
+import { stripQuery, tightenRecordings, writeRecording, writeUnrecorded } from './recordWrite.js';
 import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
@@ -107,6 +107,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   }
   try {
     sweepProbeProfiles(ctx.dataDir);
+    tightenRecordings(deps.root);
     const cooldown = new CooldownStore({
       dir: ctx.dataDir,
       challengeHours: cfg.cooldownHours,
@@ -202,23 +203,32 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             );
           throw failure;
         }
-        if (back === 'overran') throw new RecordingRefused('the SOCS read-back overran; nothing written');
         if (outcome === null) throw new RecordingRefused('no outcome');
         // why: rule 1 for every kind (no --no-flights exemption, prov-int I3): the landing and every hop the guard saw,
         // up to now (a late hop included, sec M4), on the allowlist
         const landing = page?.url() ?? '';
         const late = guard === null ? [] : [...guard.hops];
         const offList = page !== null && [landing, ...late].some((u) => !onAllowlist(u, deps.selectors));
+        // why: fix round 2 (N1): an overrun read-back says nothing about the cookie, so it never makes a stop on its
+        // own (the page is refused below), and it never unmakes one: a stop keeps its cool-down, refusal and wipe
+        const overran = back === 'overran';
         const stopKind: BlockedPage | null =
           outcome.kind === 'stop'
             ? outcome.page
-            : back !== 'same'
-              ? 'consent-unhandled'
-              : offList
-                ? 'off-allowlist'
+            : offList
+              ? 'off-allowlist'
+              : !overran && back !== 'same'
+                ? 'consent-unhandled'
                 : null;
+        if (stopKind === null && overran) {
+          // why: as the server: an overrun discards the context, and nothing from the page is written
+          await bounded(() => c.close(), FINALLY_MS, deps.timers);
+          context = null;
+          throw new RecordingRefused('the SOCS read-back overran; nothing written');
+        }
         if (stopKind !== null) {
-          const merged = outcome.kind === 'stop' && back !== 'same' && stopKind !== 'consent-unhandled';
+          const changed = !overran && back !== 'same';
+          const merged = changed && stopKind !== 'consent-unhandled';
           const hours = merged
             ? Math.max(cooldown.hoursFor(stopKind), cooldown.hoursFor('consent-unhandled'))
             : cooldown.hoursFor(stopKind);
@@ -227,10 +237,11 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             refusal.set('a signed-in account control or account cookie (recorder)');
           // why: ruling 9 / session rule 5: a consent stop or a SOCS that is not the captured one leaves Google's
           // consent state in the shared profile; it is wiped before the server's next page
-          if (stopKind === 'consent-unhandled' || back !== 'same') {
+          if (stopKind === 'consent-unhandled' || changed || overran) {
             await bounded(() => c.close(), FINALLY_MS, deps.timers);
             context = null;
-            rmSync(profile, { recursive: true, force: true });
+            if (stopKind === 'consent-unhandled' || changed)
+              rmSync(profile, { recursive: true, force: true });
           }
           if (stopKind === 'consent-unhandled')
             writeRecording(
@@ -396,7 +407,7 @@ async function interact(
 function meta(
   deps: RecordDeps,
   kind: RecordingKind,
-  back: ReadBack,
+  back: ReadBack | 'overran',
   stepMs: Record<string, number>,
   extra: Record<string, unknown>,
 ): Record<string, unknown> {

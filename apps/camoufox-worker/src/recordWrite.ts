@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RECORDED_BY, type RecordingKind, RecordingRefused } from './recordArgs.js';
 
@@ -78,4 +78,25 @@ export function stripQuery(u: string): string {
   } catch {
     return 'unparsable';
   }
+}
+
+/**
+ * Fix round 2 (re-review N4): tightens what an earlier recording left under `root`: every directory below it 0700 and
+ * every file 0600, so recordings made before the modes above were applied are no longer readable by others. Symbolic
+ * links are left alone (never followed). `root` itself is the checkout's tracked directory and keeps its mode.
+ */
+export function tightenRecordings(root: string): void {
+  if (!existsSync(root)) return;
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      const st = lstatSync(p);
+      if (st.isSymbolicLink()) continue;
+      if (st.isDirectory()) {
+        chmodSync(p, DIR_MODE);
+        walk(p);
+      } else if (st.isFile()) chmodSync(p, FILE_MODE);
+    }
+  };
+  walk(root);
 }
