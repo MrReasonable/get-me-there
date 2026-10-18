@@ -7,7 +7,12 @@ import {
 } from '@gmt/core';
 import { isRecord } from '../util.js';
 import { scrubSecrets } from './scrub.js';
-import type { HttpProviderId, ProviderHttpLimits, ResponseFacts } from './types.js';
+import {
+  errorProviderId,
+  type HttpProviderId,
+  type ProviderHttpLimits,
+  type ResponseFacts,
+} from './types.js';
 
 type Where = { providerId: HttpProviderId; endpointPath: string };
 interface ErrorParts {
@@ -30,7 +35,7 @@ function providerError(w: Where, p: ErrorParts): ProviderError {
   return new ProviderError({
     kind: p.kind,
     retryable: p.retryable,
-    providerId: w.providerId,
+    providerId: errorProviderId(w.providerId),
     message: `${w.providerId} ${w.endpointPath}: ${p.detail}${p.code === undefined ? '' : ` [${p.code}]`}`,
     ...(p.httpStatus === undefined ? {} : { httpStatus: p.httpStatus }),
     ...(p.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: p.retryAfterSeconds }),
@@ -109,6 +114,9 @@ const NEVER_RETRIED: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>
   'quota',
   'parse',
   'limiter-timeout',
+  // why: spec §5.1 rev 32: camoufox's blocked page and unreachable worker are never retried.
+  'blocked',
+  'provider-unavailable',
 ]);
 
 /**
@@ -126,7 +134,7 @@ export function finishError(err: ProviderError, c: FinishContext): ProviderError
   const base = {
     kind: err.kind,
     retryable,
-    providerId: c.facts.providerId,
+    providerId: errorProviderId(c.facts.providerId),
     ...(err.httpStatus === undefined ? {} : { httpStatus: err.httpStatus }),
     ...(err.reason === undefined ? {} : { reason: clean(err.reason) }),
     ...(err.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: err.retryAfterSeconds }),
@@ -179,21 +187,30 @@ export function redirectRefused(w: Where, httpStatus?: number): ProviderError {
   });
 }
 
-/** Per-request timeout. Spec §5.2: network, finalised unknown, not retried for billed vendors. */
-export function requestTimeout(w: Where, billable: 'http-200' | 'never'): ProviderError {
+/** Per-request timeout. Spec §5.2: network, finalised unknown, not retried for billed vendors nor for camoufox. */
+export function requestTimeout(
+  w: Where,
+  billable: 'http-200' | 'never',
+  retryTransport = true,
+): ProviderError {
   return providerError(w, {
     kind: 'network',
-    retryable: billable === 'never',
+    retryable: billable === 'never' && retryTransport,
     code: 'timeout',
     detail: 'request timed out (REQUEST_TIMEOUT_SECONDS)',
   });
 }
 
 /** The status line arrived but the body could not be read; billed 200s are not retried (the vendor charged them). */
-export function bodyReadFailed(w: Where, httpStatus: number, billed: boolean): ProviderError {
+export function bodyReadFailed(
+  w: Where,
+  httpStatus: number,
+  billed: boolean,
+  retryTransport = true,
+): ProviderError {
   return providerError(w, {
     kind: 'network',
-    retryable: !billed,
+    retryable: !billed && retryTransport,
     httpStatus,
     code: 'body-read-failed',
     detail: `HTTP ${httpStatus}, body read failed`,
@@ -211,10 +228,51 @@ export function bodyTooLarge(w: Where, httpStatus: number): ProviderError {
   });
 }
 
-/** A rejection from fetch itself: a refused redirect, or a socket-level failure (network, retryable). */
-export function classifyThrown(err: unknown, w: Where): ProviderError {
+/** The connection-refused codes (decision 69): nothing was sent, so nothing was loaded. */
+const REFUSED_CODES: ReadonlySet<string> = new Set(['ECONNREFUSED', 'EHOSTUNREACH']);
+
+/** True when a fetch rejection's `cause` (or every error of an AggregateError cause) carries a refused-connection code. */
+export function connectionRefused(err: unknown): boolean {
+  const cause = err instanceof Error ? err.cause : undefined;
+  const codeOf = (x: unknown): unknown =>
+    typeof x === 'object' && x !== null && 'code' in x ? x.code : undefined;
+  const code = codeOf(cause);
+  if (typeof code === 'string' && REFUSED_CODES.has(code)) return true;
+  const errors = typeof cause === 'object' && cause !== null && 'errors' in cause ? cause.errors : undefined;
+  return (
+    Array.isArray(errors) &&
+    errors.length > 0 &&
+    errors.every((e) => {
+      const c = codeOf(e);
+      return typeof c === 'string' && REFUSED_CODES.has(c);
+    })
+  );
+}
+
+/**
+ * A rejection from fetch itself: a refused redirect; a refused connection, which an adapter may name its own kind
+ * (camoufox: `provider-unavailable`, non-retryable); or another socket-level failure (network, retryable unless the
+ * provider never retries transport failures).
+ */
+export function classifyThrown(
+  err: unknown,
+  w: Where,
+  o: { retryTransport?: false; connectRefusedKind?: 'provider-unavailable' } = {},
+): ProviderError {
   const cause = err instanceof Error ? err.cause : undefined;
   const text = `${err instanceof Error ? err.message : String(err)} ${cause instanceof Error ? cause.message : String(cause ?? '')}`;
   if (/redirect/i.test(text)) return redirectRefused(w);
-  return providerError(w, { kind: 'network', retryable: true, code: 'socket', detail: 'network error' });
+  if (o.connectRefusedKind !== undefined && connectionRefused(err))
+    return providerError(w, {
+      kind: o.connectRefusedKind,
+      retryable: false,
+      code: 'connection-refused',
+      detail: 'connection refused',
+    });
+  return providerError(w, {
+    kind: 'network',
+    retryable: o.retryTransport !== false,
+    code: 'socket',
+    detail: 'network error',
+  });
 }

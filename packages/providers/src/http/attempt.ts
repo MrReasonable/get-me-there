@@ -4,13 +4,20 @@ import {
   bodyTooLarge,
   classifyResponse,
   classifyThrown,
+  connectionRefused,
   finishError,
   malformedBody,
   redirectRefused,
   requestTimeout,
 } from './classify.js';
 import { scrubSecrets } from './scrub.js';
-import type { HttpKitDeps, HttpKitRequest, ProviderHttpLimits, ResponseFacts } from './types.js';
+import {
+  type HttpKitDeps,
+  type HttpKitRequest,
+  ledgeredId,
+  type ProviderHttpLimits,
+  type ResponseFacts,
+} from './types.js';
 
 /** Response bodies above this are refused (sec-014): a misbehaving vendor cannot exhaust memory. */
 export const MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -94,12 +101,13 @@ export async function runAttempt(
 ): Promise<AttemptResult> {
   if (r.signal.aborted) throw new AbortedError();
   const w = { providerId: r.providerId, endpointPath: r.endpointPath };
-  // why: 'fx' is not a ProviderId in the BudgetGuard port and spec §5.6 says FX calls are never ledgered.
+  // why: 'fx' and 'camoufox-status' are not ProviderIds in the BudgetGuard port; neither is ever ledgered (spec §5.3, §5.6).
+  const ledgered = ledgeredId(r.providerId);
   const reservation: Reservation | null =
-    r.providerId === 'fx'
+    ledgered === null
       ? null
       : deps.budget.reserve({
-          providerId: r.providerId,
+          providerId: ledgered,
           executionId: r.executionId,
           tileIndex: r.tileIndex,
           costMicroGbp: limits.costPerCallMicroGbp,
@@ -108,12 +116,19 @@ export async function runAttempt(
         });
   // why: durations use Date.now() so vitest fake timers drive them; instants (fetchedAt) use the Clock port.
   const started = Date.now();
-  const finalise = (outcome: 'ok' | 'error' | 'unknown', httpStatus?: number): void =>
+  // why: spec §5.3 rev 32: a pages-only provider states, per attempt, whether a page was loaded (`page_class`).
+  let classOverride: 'no-page' | undefined;
+  let responseFacts: { status: number | null; headers: Headers | null } = { status: null, headers: null };
+  const finalise = (outcome: 'ok' | 'error' | 'unknown', httpStatus?: number): void => {
+    const pageClass =
+      limits.pageClass === undefined ? undefined : (classOverride ?? limits.pageClass(responseFacts));
     reservation?.finalise({
       outcome,
       durationMs: Date.now() - started,
       ...(httpStatus === undefined ? {} : { httpStatus }),
+      ...(pageClass === undefined ? {} : { pageClass }),
     });
+  };
   // why: setTimeout + AbortController rather than AbortSignal.timeout, whose Node-internal timer vitest cannot fake.
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), limits.requestTimeoutSeconds * 1000);
@@ -153,13 +168,20 @@ export async function runAttempt(
     }
     if (timeout.signal.aborted) {
       finalise('unknown');
-      throw requestTimeout(w, limits.billable);
+      throw requestTimeout(w, limits.billable, limits.retryTransport !== false);
     }
+    const thrown = classifyThrown(err, w, {
+      ...(limits.retryTransport === undefined ? {} : { retryTransport: limits.retryTransport }),
+      ...(limits.connectRefusedKind === undefined ? {} : { connectRefusedKind: limits.connectRefusedKind }),
+    });
+    // why: a refused connection sent nothing, so it loaded nothing (decision 69: `no-page`).
+    if (connectionRefused(err)) classOverride = 'no-page';
     finalise('error');
-    throw classifyThrown(err, w);
+    throw thrown;
   }
 
   const status = res.status;
+  responseFacts = { status, headers: res.headers };
   // why (cost-001): once a 200 status line has arrived a billed vendor has charged the call, so a body failure is
   // finalised 'unknown' with the status (counted by the cap predicate) and not retried.
   const billed200 = limits.billable === 'http-200' && status === 200;
@@ -174,10 +196,10 @@ export async function runAttempt(
     }
     if (timeout.signal.aborted) {
       finalise('unknown', status);
-      throw requestTimeout(w, limits.billable);
+      throw requestTimeout(w, limits.billable, limits.retryTransport !== false);
     }
     finalise(billed200 ? 'unknown' : 'error', status);
-    throw bodyReadFailed(w, status, billed200);
+    throw bodyReadFailed(w, status, billed200, limits.retryTransport !== false);
   } finally {
     clearTimeout(timer);
   }
