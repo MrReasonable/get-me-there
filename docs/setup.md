@@ -650,6 +650,20 @@ recordings set it, with the results, Cheapest and no-flights flags. A page chang
 back. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
 lock, the spacing and the cool-down are kept there, so a recording and a running worker can never load pages at once.
 
+Recordings are written under `apps/camoufox-worker/fixtures/recorded/` in the checkout or worktree that made them, and
+are never committed, so removing that worktree deletes them. Back them up after each recording session with
+`pnpm --filter @gmt/camoufox-worker recordings:backup`: it copies them (never a `.gitkeep`) to
+`~/.local/share/get-me-there/private/fixtures/camoufox-<YYYY-MM-DD>/`, with directories 0700 and files 0600, and adds to
+a backup already made that day. In a fresh checkout, `pnpm --filter @gmt/camoufox-worker recordings:restore` copies the
+latest backup back (or `recordings:restore 2026-10-18` for a named day); it refuses a tree that already holds a
+recording.
+
+`record --graph-explore` (with the same `--origin`, `--destination`, `--depart` and `--return`) settles the results page
+as the other kinds do, clicks its one "Price graph" button and writes what appeared to
+`fixtures/recorded/graph-explore/<date>/<n>.json`: the region's accessibility snapshot, the names and roles of its
+controls, what was clicked, the cookie read-back and the timings. It is an exploration for building a later mode; the
+provider never clicks the graph and nothing reads these files yet.
+
 ### Point the app at it
 
 - **Docker:** add `CAMOUFOX_ENABLED=true` and the same `CAMOUFOX_WORKER_KEY=` line to `.env` with an editor, and leave
