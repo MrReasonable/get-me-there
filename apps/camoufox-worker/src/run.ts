@@ -121,7 +121,10 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
 }
 
 /** The entry functions, loaded lazily so a command loads only its own modules. */
-export const ENTRIES: Readonly<Record<string, () => Promise<Entry>>> = {};
+export const ENTRIES: Readonly<Record<string, () => Promise<Entry>>> = {
+  record: async () => (await import('./record.js')).entry,
+  'capture-socs': async () => (await import('./captureSocs.js')).entry,
+};
 
 /** The process entry: the live environment, this user's uid and the real stdout and stderr. */
 export async function main(argv: readonly string[], entries = ENTRIES): Promise<number> {

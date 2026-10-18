@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { ContextLike } from './driver.js';
+import { ensureInstallLayout, type InstallFacts } from './install.js';
+import { assertMacOS } from './platform.js';
 
 /**
  * The launch options (spec §2 "Limits"; decision 69; brief §7, verified in camoufox-js 0.11.5's source): headless,
@@ -77,4 +79,35 @@ export async function launchContext(options: LaunchOptions, userDataDir: string)
     env: { ...options.env },
     user_data_dir: userDataDir,
   });
+}
+
+/**
+ * Everything a launch needs, checked in order (brief Task 14.5 "Start"): macOS, the install layout for the pinned
+ * build (verified or created), the camoufox-js pin, then the launch options from the bundle's own Firefox major.
+ */
+export function prepareLaunch(o: {
+  platform: string;
+  installDir: string;
+  pinnedBuild: string;
+  installDirOverride: string | undefined;
+  home: string;
+  path: string;
+  tmp: string;
+}): { options: LaunchOptions; install: InstallFacts; camoufoxJs: string } {
+  assertMacOS(o.platform);
+  const install = ensureInstallLayout({
+    installDir: o.installDir,
+    pinnedBuild: o.pinnedBuild,
+    installDirOverride: o.installDirOverride,
+  });
+  const camoufoxJs = installedCamoufoxJsVersion();
+  if (camoufoxJs !== CAMOUFOX_JS_VERSION)
+    throw new Error(
+      `camoufox-js is ${camoufoxJs}; this worker is verified against ${CAMOUFOX_JS_VERSION} only`,
+    );
+  return {
+    options: buildLaunchOptions({ ffMajor: install.ffMajor, home: o.home, path: o.path, tmp: o.tmp }),
+    install,
+    camoufoxJs,
+  };
 }

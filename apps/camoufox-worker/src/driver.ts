@@ -8,10 +8,11 @@
  * `Frame`, `Locator`, `Route` and `Request` the worker uses (verified in `types/types.d.ts`); the real objects satisfy
  * them, and the tests' fakes implement them.
  */
-import type { PageFacts } from './classify.js';
+import { classifyPage, type PageFacts, type PageKind } from './classify.js';
 import type { GuardState } from './guard.js';
+import { isSettled } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
-import type { Deadline } from './timers.js';
+import type { Deadline, Timers } from './timers.js';
 
 export interface LocatorLike {
   count(): Promise<number>;
@@ -90,6 +91,8 @@ export type FormFacts = { tripType: string; passengers: string; departure: strin
 
 export interface Driver {
   goto(url: string, d: Deadline): Promise<void>;
+  /** The page's heading names (what a recording stores of a page it could not classify). */
+  headingNames(d: Deadline): Promise<string[]>;
   readFacts(d: Deadline): Promise<{ page: PageFacts; settle: SettleFacts }>;
   resultNames(d: Deadline): Promise<Array<string | null>>;
   listFacts(d: Deadline): Promise<ListFacts>;
@@ -119,7 +122,26 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
   const firstName = async (l: LocatorLike, d: Deadline): Promise<string | null> =>
     (await countOf(l, d)) === 0 ? null : nameOf(l.nth(0), d);
 
+  async function resultNames(d: Deadline): Promise<Array<string | null>> {
+    const links = resultLinks();
+    const n = await countOf(links, d);
+    const names: Array<string | null> = [];
+    for (let i = 0; i < n; i++) {
+      const name = await nameOf(links.nth(i), d);
+      // why: PIE-R2-10: a name too long is counted as unparsed upstream, never parsed and never dropped.
+      names.push(name === null || name.length > S.maxNameLength ? null : name);
+    }
+    return names;
+  }
+
   return {
+    async headingNames(d) {
+      const h = page.getByRole('heading');
+      const out: string[] = [];
+      for (let i = 0, n = await countOf(h, d); i < n; i++) out.push((await nameOf(h.nth(i), d)) ?? '');
+      return out;
+    },
+
     async goto(url, d) {
       await d.race(page.goto(url, { ...timeoutOf(d), waitUntil: 'domcontentloaded' }));
     },
@@ -165,20 +187,10 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       return { page: facts, settle };
     },
 
-    async resultNames(d) {
-      const links = resultLinks();
-      const n = await countOf(links, d);
-      const names: Array<string | null> = [];
-      for (let i = 0; i < n; i++) {
-        const name = await nameOf(links.nth(i), d);
-        // why: PIE-R2-10: a name too long is counted as unparsed upstream, never parsed and never dropped.
-        names.push(name === null || name.length > S.maxNameLength ? null : name);
-      }
-      return names;
-    },
+    resultNames,
 
     async listFacts(d) {
-      const names = await this.resultNames(d);
+      const names = await resultNames(d);
       const tab = await firstName(
         page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab }),
         d,
@@ -225,4 +237,49 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
 async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
   if ((await countOf(l, d)) === 0) return null;
   return d.race(l.nth(0).textContent(timeoutOf(d)));
+}
+
+/**
+ * The consent probe's page (Task 14.2; SEC-R2-003): the driver without `click`, so a click on a consent page does not
+ * compile. Imported only by record.ts (rules.test.ts pins that).
+ */
+export type ProbePage = Omit<Driver, 'click'>;
+export function probePage(d: Driver): ProbePage {
+  return {
+    goto: d.goto,
+    headingNames: d.headingNames,
+    readFacts: d.readFacts,
+    resultNames: d.resultNames,
+    listFacts: d.listFacts,
+    formFacts: d.formFacts,
+  };
+}
+
+/** Why `pollUntilSettled` stopped: a blocked kind, a no-flights page, or a settled page and how it classified. */
+export interface Settled {
+  kind: PageKind;
+  facts: { page: PageFacts; settle: SettleFacts };
+  polls: number;
+}
+
+/**
+ * Polls `readFacts` every `pollMs` within the deadline (spec §2 "settled"; brief Task 14.4 rule 4): a blocked kind other
+ * than `unrecognised` stops at once on any poll; a no-flights page stops; a settled page returns however it classified
+ * (`results` or `unrecognised`). The deadline's expiry surfaces as DeadlineExceeded (the caller's `not-ready`).
+ */
+export async function pollUntilSettled(
+  driver: Pick<Driver, 'readFacts'>,
+  d: Deadline,
+  timers: Timers,
+  pollMs: number,
+  S: Selectors = SELECTORS,
+): Promise<Settled> {
+  for (let polls = 1; ; polls++) {
+    const facts = await driver.readFacts(d);
+    const kind = classifyPage(facts.page, S);
+    if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
+      return { kind, facts, polls };
+    if (isSettled(facts.page, facts.settle)) return { kind, facts, polls };
+    await timers.sleep(pollMs, d.signal);
+  }
 }

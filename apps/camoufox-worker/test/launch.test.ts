@@ -4,7 +4,9 @@ import {
   buildLaunchOptions,
   installedCamoufoxJsVersion,
   launchOptionsForMeta,
+  prepareLaunch,
 } from '../src/launch.js';
+import { fakeInstall } from './support/tmp.js';
 
 const opts = buildLaunchOptions({ ffMajor: 152, home: '/Users/op', path: '/usr/bin', tmp: '/tmp' });
 
@@ -70,5 +72,27 @@ describe('buildLaunchOptions (spec §2 limits; brief §7)', () => {
   });
   it('reads camoufox-js’s own package.json version', () => {
     expect(installedCamoufoxJsVersion()).toBe('0.11.5');
+  });
+});
+
+describe('prepareLaunch (brief Task 14.5 start checks, in order)', () => {
+  const base = {
+    pinnedBuild: '152.0.4-beta.28',
+    installDirOverride: undefined,
+    home: '/Users/op',
+    path: '/usr/bin',
+    tmp: '/tmp',
+  };
+  it('checks macOS, the install layout and the camoufox-js pin, then builds the options from the bundle', () => {
+    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
+    const p = prepareLaunch({ ...base, platform: 'darwin', installDir: f.installDir });
+    expect(p.camoufoxJs).toBe('0.11.5');
+    expect(p.install.build).toBe('152.0.4-beta.28');
+    expect(p.options).toEqual(
+      buildLaunchOptions({ ffMajor: 152, home: '/Users/op', path: '/usr/bin', tmp: '/tmp' }),
+    );
+  });
+  it('refuses off macOS before touching the install directory', () => {
+    expect(() => prepareLaunch({ ...base, platform: 'linux', installDir: '/nowhere' })).toThrow(/macOS only/);
   });
 });
