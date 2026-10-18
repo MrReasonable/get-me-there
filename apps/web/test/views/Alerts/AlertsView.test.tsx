@@ -245,3 +245,16 @@ describe('Alerts events list (spec §11; decisions 52, 55, 56)', () => {
     expect(findBannedWords(parts.join(' '), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 });
+
+describe('Alerts events table point of sale (spec §11)', () => {
+  it('each fare names its market: Aviasales cache "market not stated", SearchApi "UK market"', async () => {
+    withData();
+    renderWithProviders(<AlertsView definitionId="def-1" />);
+    const table = await screen.findByRole('table', { name: C.eventsTable });
+    const rows = within(table).getAllByRole('row').slice(1);
+    const [first, , third] = rows;
+    if (first === undefined || third === undefined) throw new Error('rows');
+    expect(within(first).getByTestId('point-of-sale')).toHaveTextContent('market not stated');
+    for (const e of within(third).getAllByTestId('point-of-sale')) expect(e).toHaveTextContent('UK market');
+  });
+});
