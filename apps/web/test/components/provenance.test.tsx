@@ -450,7 +450,7 @@ describe('camoufox grid provenance', () => {
       />,
     );
     expect(screen.getByTestId('provenance')).toHaveTextContent(
-      "SearchApi's date grid marked this the lowest of the prices it returned",
+      "SearchApi's response flagged this the lowest of the prices it returned",
     );
   });
 });

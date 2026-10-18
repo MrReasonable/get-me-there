@@ -148,6 +148,15 @@ describe('an assumed bound reads as an assumption on every form (N4, pie-007)', 
     expect(withAssumedBound(zero, { maxAgeAssumed: true })).toBe(zero);
     expect(barrel.withAssumedBound).toBe(withAssumedBound);
   });
+  it('a grid-cell row is assumed from its own facts, with camoufox in list mode or off (fix round 1, PA I2)', () => {
+    const grid = { fetchedAt: p.fetchedAt, maxAgeHours: 24, returnDateSource: 'grid-cell' } as const;
+    expect(withAssumedBound(grid, undefined)).toEqual({ ...grid, maxAgeAssumed: true });
+    expect(withAssumedBound(grid, { maxAgeAssumed: false })).toEqual({ ...grid, maxAgeAssumed: true });
+    const asked = { fetchedAt: p.fetchedAt, maxAgeHours: 24, returnDateSource: 'asked' } as const;
+    expect(withAssumedBound(asked, undefined)).toBe(asked);
+    const gridZero = { fetchedAt: p.fetchedAt, maxAgeHours: 0, returnDateSource: 'grid-cell' } as const;
+    expect(withAssumedBound(gridZero, undefined)).toBe(gridZero);
+  });
   it('short, compact and full forms say "assumed", never a plain "≤"', () => {
     const a = effectiveAge(p, now);
     expect(formatAgeShort(a)).toBe('assumed ≤26h');

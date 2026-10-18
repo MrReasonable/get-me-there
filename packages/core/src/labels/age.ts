@@ -156,12 +156,16 @@ export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
 /**
  * N4 (pie-007): marks a price's bound as the app's assumption when its provider's capability says the bound is assumed
  * (SearchApi's undocumented date-grid cache). Provenance is stored without the flag, so readers apply this from the
- * provider list; a bound of 0 or 'unknown' asserts nothing to qualify and is returned as is.
+ * provider list; a bound of 0 or 'unknown' asserts nothing to qualify and is returned as is. A row read from a date grid
+ * cell (camoufox grid mode) is assumed from its own facts, whatever mode the provider runs in now, or when it is off
+ * (fix round 1, PA I2).
  */
-export function withAssumedBound<P extends Pick<Provenance, 'maxAgeHours' | 'maxAgeAssumed'>>(
-  p: P,
-  info: { maxAgeAssumed?: boolean | undefined } | undefined,
-): P {
-  if (info?.maxAgeAssumed !== true || p.maxAgeHours === 'unknown' || p.maxAgeHours === 0) return p;
+export function withAssumedBound<
+  P extends Pick<Provenance, 'maxAgeHours' | 'maxAgeAssumed'> & {
+    returnDateSource?: Provenance['returnDateSource'];
+  },
+>(p: P, info: { maxAgeAssumed?: boolean | undefined } | undefined): P {
+  if (p.maxAgeHours === 'unknown' || p.maxAgeHours === 0) return p;
+  if (p.returnDateSource !== 'grid-cell' && info?.maxAgeAssumed !== true) return p;
   return { ...p, maxAgeAssumed: true };
 }

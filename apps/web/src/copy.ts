@@ -122,7 +122,7 @@ export const COPY = {
     low: "Google's date grid marked this a low price among the prices shown in that view",
   },
   scrollsRow: (n: number) => `${n} scroll${n === 1 ? '' : 's'} in the date grid beside the pages`,
-  vendorMarkSearchApi: "SearchApi's date grid marked this the lowest of the prices it returned",
+  vendorMarkSearchApi: "SearchApi's response flagged this the lowest of the prices it returned",
   notChecked: 'not checked',
   stale: 'stale',
   vendorAgeUnknown: "vendor's cache age unknown",

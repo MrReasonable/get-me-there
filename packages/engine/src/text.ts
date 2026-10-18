@@ -15,9 +15,18 @@ export function isCostScope(scope: BudgetScopeKind): boolean {
   return scope === 'execution-cost' || scope === 'global-month';
 }
 
-/** Plain-English name of a cap scope (po-012). */
-export function scopeName(scope: BudgetScopeKind, providerId: ProviderId | null): string {
+/** The unit a cap counts: calls (or money) by default; a camoufox grid page's scrolls (spec §2 rev 34). */
+export type CapUnit = 'calls' | 'scrolls';
+
+/** Plain-English name of a cap scope (po-012); a scroll cap is named as one (fix round 1, CA 2). */
+export function scopeName(
+  scope: BudgetScopeKind,
+  providerId: ProviderId | null,
+  unit: CapUnit = 'calls',
+): string {
   const p = providerId ?? 'the provider';
+  if (unit === 'scrolls')
+    return scope === 'provider-execution' ? `${p}'s scroll cap for this run` : `${p}'s monthly scroll cap`;
   switch (scope) {
     case 'execution-calls':
       return "this run's billed-call cap";
@@ -37,7 +46,8 @@ export function scopeName(scope: BudgetScopeKind, providerId: ProviderId | null)
 }
 
 /** A cap figure with its unit: pounds for cost scopes (micro-GBP rounded up to the penny), "N calls" otherwise (arch-018). */
-export function scopeAmount(scope: BudgetScopeKind, n: number): string {
+export function scopeAmount(scope: BudgetScopeKind, n: number, unit: CapUnit = 'calls'): string {
+  if (unit === 'scrolls') return `${n} ${n === 1 ? 'scroll' : 'scrolls'}`;
   if (isCostScope(scope)) return formatPence(microGbpToPence(n));
   return `${n} ${n === 1 ? 'call' : 'calls'}`;
 }
@@ -50,8 +60,11 @@ export function breachText(
   used: number,
   needs: number,
   needsLabel: string,
+  unit: CapUnit = 'calls',
 ): string {
-  return `${scopeName(scope, providerId)} is ${scopeAmount(scope, cap)}; ${scopeAmount(scope, used)} used; ${needsLabel} ${scopeAmount(scope, needs)}`;
+  // why: a scroll cap is reached by a page's planned scrolls, so the figure that did not fit is the next page's
+  const label = unit === 'scrolls' ? needsLabel.replace(/\bcall\b/, 'page') : needsLabel;
+  return `${scopeName(scope, providerId, unit)} is ${scopeAmount(scope, cap, unit)}; ${scopeAmount(scope, used, unit)} used; ${label} ${scopeAmount(scope, needs, unit)}`;
 }
 
 /** An instant as a readable local date and time in `tz`, e.g. "Mon, 19 Oct 2026, 05:00 (Europe/London)" (po-015). */

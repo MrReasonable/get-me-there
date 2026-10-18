@@ -377,7 +377,7 @@ export function applyBudgetBreach(
   }
   run.notices.push({
     kind: 'provider_capped',
-    detail: `${affected.join(', ')}: ${breachText(err.scope, providerId, err.cap, err.current, err.requested, 'the next call needed')}. Its remaining ${stage} cells are skipped (budget) in this run and the other providers continue.`,
+    detail: `${affected.join(', ')}: ${breachText(err.scope, providerId, err.cap, err.current, err.requested, 'the next call needed', err.unit ?? 'calls')}. Its remaining ${stage} cells are skipped (budget) in this run and the other providers continue.`,
   });
 }
 

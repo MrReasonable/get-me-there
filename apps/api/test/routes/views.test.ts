@@ -338,6 +338,36 @@ describe('an assumed calendar bound reaches every price as such (N4, pie-007)', 
     );
     expect(await calendar()).toMatchObject({ maxAgeHours: 24, maxAgeAssumed: true });
   });
+  it('a stored grid-cell price is assumed from its own row, with camoufox off or in list mode (fix round 1, PA I2)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [C1]);
+    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
+    // why: the row as a grid page stored it; no provider in the list says its bound is assumed
+    x.ports.db.raw
+      .prepare(
+        "UPDATE calendar_prices SET provider_id = 'camoufox', source_kind = 'scraped-self', return_date_source = 'grid-cell', vendor_price_mark = 'none'",
+      )
+      .run();
+    expect(x.ports.providers.some((p) => p.id === 'camoufox')).toBe(false);
+    const provenance = async () =>
+      (
+        await get(
+          x,
+          `/api/definitions/${def.id}/calendar`,
+          '/api/definitions/:id/calendar',
+          apiContract.calendarResponseSchema,
+        )
+      ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
+    expect(await provenance()).toMatchObject({
+      providerId: 'camoufox',
+      maxAgeHours: 24,
+      maxAgeAssumed: true,
+    });
+  });
 });
 
 describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 shapes)', () => {

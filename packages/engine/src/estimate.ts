@@ -4,13 +4,11 @@ import {
   cellKeyString,
   type DefinitionSnapshot,
   type Execution,
-  GRID_TIMES,
   microGbpToPence,
   type ProviderId,
   type SourceKind,
   type Stage,
 } from '@gmt/core';
-import { gridTileEstimate } from '@gmt/providers';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
@@ -172,16 +170,23 @@ function discoveryLine(
         : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId }).calls;
     const left = Math.max(0, pageCap - used);
     const pages = tiles === 0 ? 0 : left === 0 ? 1 : Math.min(tiles, left);
-    if (planned.some((t) => t.plan.request.kind === 'grid-path')) {
-      // why: spec §2 rev 34 (CB-3): the run's pages are the first `pages` of the plan; each takes the page time and its
-      // scrolls the measured scroll time (GRID_TIMES)
-      const run = planned.slice(0, pages);
-      const scrolls = run.reduce((n, t) => n + gridTileEstimate(t.plan, GRID_TIMES).scrolls, 0);
-      const seconds = run.reduce((n, t) => n + gridTileEstimate(t.plan, GRID_TIMES).seconds, 0);
-      const read = run.reduce((n, t) => n + t.plan.coveredCells.length, 0);
+    const perTile = cap.estimateTile;
+    if (perTile !== undefined) {
+      // why: spec §2 rev 34 (CB-3): the run's pages are the first `pages` of the plan; each states its own scrolls and
+      // seconds (the provider's estimateTile: the page time and the measured scroll time)
+      const run = planned.slice(0, pages).map((t) => perTile(t.plan));
+      const scrolls = run.reduce((n, t) => n + t.scrolls, 0);
+      const seconds = run.reduce((n, t) => n + t.seconds, 0);
+      const read = planned.slice(0, pages).reduce((n, t) => n + t.plan.coveredCells.length, 0);
       notes.push(
         `${providerId} grid mode reads ${read} of ${fresh.length} cells this run in ${pages} pages and ${scrolls} scrolls; a full pass takes ${Math.max(1, Math.ceil(tiles / pageCap))} run${Math.ceil(tiles / pageCap) > 1 ? 's' : ''}`,
       );
+      // why: CB-7: at the maximum spacing and per-page scrolls a run can outlast the stuck-run threshold; say so
+      const stuck = ctx.config.stuckAfterHours;
+      if (seconds > stuck * 3600)
+        notes.push(
+          `${providerId}: this run takes about ${(seconds / 3600).toFixed(1)} h, past STUCK_AFTER_HOURS (${stuck} h), so /health reports it stuck while it runs`,
+        );
       return {
         providerId,
         stage: 'discovery',
