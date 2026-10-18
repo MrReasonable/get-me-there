@@ -15,7 +15,13 @@ const ALLOWED = {
   '@gmt/engine': ['@gmt/core', '@gmt/db', '@gmt/providers'],
   '@gmt/api': ['@gmt/core', '@gmt/db', '@gmt/providers', '@gmt/engine'],
   '@gmt/web': ['@gmt/core'],
+  // why: WP14 (decision 69, arch-009): the host-side worker speaks to the app over HTTP; it imports core only, and its
+  // tests may take @gmt/providers/testing (the decision-61 skip guard) and nothing else of providers.
+  '@gmt/camoufox-worker': ['@gmt/core'],
 };
+/** The worker's browser libraries, allowed only in its launch and driver modules (arch-009, TS-04). */
+const WORKER_BROWSER_LIBS = ['camoufox-js', 'playwright-core'];
+const WORKER_BROWSER_FILES = /^apps\/camoufox-worker\/src\/(launch|driver)\.ts$/;
 const CORE_ALLOWED_EXTERNAL = ['zod', '@noble/hashes', '@date-fns/tz'];
 // Three-letter words that appear in string literals and are also dataset airport codes (decision 46): currencies,
 // HTTP, formats, standards and plain English. A later package adds the words it needs here, in its own diff.
@@ -64,14 +70,17 @@ const dirs = {
   '@gmt/engine': 'packages/engine',
   '@gmt/api': 'apps/api',
   '@gmt/web': 'apps/web',
+  '@gmt/camoufox-worker': 'apps/camoufox-worker',
 };
 // why: the only code that may read process.env is a command-line entry point: the app and tool bootstraps under
 // exactly apps/api/src/bootstrap/ (wiring and logger take the env as an argument), and the operator scripts directly
 // under scripts/ (backup.mjs reads DATABASE_PATH as the bootstrap does; secret-scan.mjs reads the configured secret
 // values). Anchored to the path start, so a directory named bootstrap elsewhere (apps/api/src/routes/bootstrap/) or a
 // helper nested under scripts/ is not an entry point (CodeRabbit batch 3).
-const ENV_READER = /^(?:apps\/api\/src\/bootstrap\/.+|scripts\/[^/]+\.mjs)$/;
-const ENV_RULE = 'apps/api/src/bootstrap/ and scripts/*.mjs entry points';
+// why: WP14: the camoufox worker's one launcher, run.ts, is its only environment reader (SEC-R2-006).
+const ENV_READER =
+  /^(?:apps\/api\/src\/bootstrap\/.+|apps\/camoufox-worker\/src\/run\.ts|scripts\/[^/]+\.mjs)$/;
+const ENV_RULE = 'apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts and scripts/*.mjs entry points';
 /**
  * Every module specifier a file imports, read from the parsed source: static imports and re-exports, bare side-effect
  * imports, `import x = require()`, `require()`, `import()` types and dynamic `import()` with a string or template
@@ -158,6 +167,15 @@ for (const [name, dir] of Object.entries(dirs)) {
       console.error(`${f} reads process.env outside ${ENV_RULE}`);
       bad++;
     }
+    for (const spec of specs)
+      if (
+        spec !== null &&
+        WORKER_BROWSER_LIBS.some((l) => spec === l || spec.startsWith(`${l}/`)) &&
+        !WORKER_BROWSER_FILES.test(f)
+      ) {
+        console.error(`${f} imports ${spec}; only apps/camoufox-worker/src/launch.ts and driver.ts may`);
+        bad++;
+      }
     // why: plan decision 7 — @gmt/providers/testing is the only production-tree module that imports msw, in every package
     if (
       !(name === '@gmt/providers' && f.includes('/src/testing/')) &&
@@ -168,6 +186,29 @@ for (const [name, dir] of Object.entries(dirs)) {
     }
   }
 }
+// why: nothing imports the worker (decision 69): no package depends on it, and no source or test names it.
+for (const [name, dir] of Object.entries(dirs)) {
+  if (name === '@gmt/camoufox-worker') continue;
+  const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+  for (const field of ['dependencies', 'devDependencies'])
+    if (Object.hasOwn(pkg[field] ?? {}, '@gmt/camoufox-worker')) {
+      console.error(`${name} lists @gmt/camoufox-worker in ${field}; nothing may import the worker`);
+      bad++;
+    }
+  for (const f of [...walk(join(dir, 'src')), ...walk(join(dir, 'test'))])
+    if (importsOf(f, readFileSync(f, 'utf8')).some((x) => x?.startsWith('@gmt/camoufox-worker'))) {
+      console.error(`${f} imports @gmt/camoufox-worker; nothing may`);
+      bad++;
+    }
+}
+// why: the worker's tests take @gmt/providers only through its testing export, and its devDependency is the only one.
+for (const f of walk('apps/camoufox-worker/test'))
+  for (const spec of importsOf(f, readFileSync(f, 'utf8')))
+    if (spec?.startsWith('@gmt/providers') && spec !== '@gmt/providers/testing') {
+      console.error(`${f} imports ${spec}; worker tests may import only @gmt/providers/testing`);
+      bad++;
+    }
+
 // The operator scripts are source too; their tests are not scanned, as no package's test/ tree is.
 for (const f of walk('scripts')) {
   if (/\.test\.mjs$/.test(f)) continue;
