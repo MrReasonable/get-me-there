@@ -36,7 +36,9 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
       stubTravelpayouts({ cells: 3 }),
     ]);
     await e.runToEnd();
-    e.ctx.repos.notifications.record('provider_disabled', null, e.definition.id, 'failed');
+    // why: fix round 1 (CodeRabbit): decision 56's once-a-day rule would hide the repeat on its own; clearing its record
+    // makes the second run stand for a later day, so only the cool-down key can suppress the notice
+    e.ctx.db.raw.prepare('DELETE FROM operator_notifications').run();
     await e.runToEnd();
     expect(
       e.notifications.filter((n) => n.kind === 'provider_disabled' && n.body.includes('cooling down until')),
@@ -59,6 +61,7 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
       stubTravelpayouts({ cells: 5 }),
     ]);
     const a = await e.runToEnd();
+    e.ctx.db.raw.prepare('DELETE FROM operator_notifications').run();
     const b = await e.runToEnd();
     expect(outcomes(e, a.id, 'camoufox').map((o) => [o.status, o.reason])).toEqual(
       Array(5).fill(['skipped', 'provider_disabled']),

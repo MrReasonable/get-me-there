@@ -42,6 +42,9 @@ export const CAMOUFOX_CABINS: readonly Cabin[] = ['economy'];
 const PAGE_PATH = '/v1/page';
 const WHERE = { providerId: 'camoufox' as const, endpointPath: PAGE_PATH };
 export const RETURN_DATE_LABEL = 'return date: the date asked for';
+/** The clock difference tolerated between the app (perhaps in a container) and the host worker (fix round 1). */
+export const CLOCK_SKEW_MS = 5000;
+const shifted = (at: string, ms: number): string => new Date(Date.parse(at) + ms).toISOString();
 
 export interface CamoufoxProviderOptions {
   http: HttpKit;
@@ -145,7 +148,11 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
     const answer = a.data;
     // why: prov-010: the page was read between this request's start and now; anything else is not this request's page.
-    if (answer.fetchedAt < started || answer.fetchedAt > o.clock.now())
+    // The app may run in a container whose clock differs a little from the host worker's: CLOCK_SKEW_MS either way.
+    if (
+      answer.fetchedAt < shifted(started, -CLOCK_SKEW_MS) ||
+      answer.fetchedAt > shifted(o.clock.now(), CLOCK_SKEW_MS)
+    )
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${answer.fetchedAt} is outside this request`, WHERE),
       );

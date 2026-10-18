@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -119,5 +119,17 @@ describe('Pacer bounds', () => {
         () => new Pacer({ dir: tmpDir(), minSpacingSeconds: bad, clock: fixedClock(T0) }),
         String(bad),
       ).toThrow(/from 30 to 600/);
+  });
+});
+
+// why: fix round 1 (CodeRabbit): a failed write must not leave the pacer busy for the life of the process
+describe('Pacer write failure', () => {
+  it('a claim whose record cannot be written throws and leaves the pacer free', () => {
+    const dir = join(tmpDir(), 'gone');
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: fixedClock(T0) });
+    expect(() => p.claim()).toThrow();
+    expect(p.isBusy()).toBe(false);
+    mkdirSync(dir);
+    expect(p.claim()).toEqual({ ok: true });
   });
 });

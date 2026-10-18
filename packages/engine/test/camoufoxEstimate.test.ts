@@ -57,6 +57,8 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
       cap: 1500,
       fits: false,
     });
+    // why: fix round 1 (CodeRabbit): the coverage line warns; it is no cap, so the overall fit stays true
+    expect(fit.fits).toBe(true);
   });
   it('SECONDS_PER_CALL has no per-call figure for scraped-self', async () => {
     const { SECONDS_PER_CALL } = await import('../src/estimate.js');

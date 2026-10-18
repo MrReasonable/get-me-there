@@ -354,6 +354,31 @@ describe('smoke: camoufox rows (brief Task 14.13; cost-013, prov-014, TS-19)', {
   });
 });
 
+// why: fix round 1 (CodeRabbit): a camoufox-only run's summary, exit code and price line say what camoufox found
+describe('a camoufox-only smoke: summary, exit code and provenance', { timeout: 60_000 }, () => {
+  it('a priced page is the headline, with its provenance, and the discovery line carries the same', async () => {
+    const p = ports();
+    worker({});
+    const r = await smoke(p);
+    expect(r.summary).toBe(
+      'cheapest camoufox price £451 · scraped-self · fetched 2027-02-10T09:00:00.000Z · point of sale GB · GBP, not converted',
+    );
+    expect(r.lines).toContain(
+      'camoufox discovery: priced · £451 · scraped-self · fetched 2027-02-10T09:00:00.000Z · point of sale GB · GBP, not converted',
+    );
+    expect(r.exitCode).toBe(EXIT.ok);
+  });
+  it('a no-flights page exits smokeEmpty, as a vendor tile with no price does', async () => {
+    const p = ports();
+    worker({
+      pages: [{ status: 200, body: { ...cells(), cell: { status: 'no-flights' } }, contacted: true }],
+    });
+    const r = await smoke(p);
+    expect(r.summary).toBe('no price found');
+    expect(r.exitCode).toBe(EXIT.smokeEmpty);
+  });
+});
+
 describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { timeout: 60_000 }, () => {
   const cell = {
     origin: asIata('LHR'),
@@ -394,7 +419,7 @@ describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { tim
         `INSERT INTO provider_requests (${names.join(', ')}) SELECT ${names.join(', ')} FROM provider_requests WHERE execution_id = ? AND provider_id = 'camoufox' AND page_class = 'page'`,
       )
       .run(id);
-    expect(camoufoxChecks(p, base(), id).find((c) => c.name === 'camoufox one page')).toMatchObject({
+    expect(camoufoxChecks(p, base(), id, NOW).find((c) => c.name === 'camoufox one page')).toMatchObject({
       status: 'fail',
       detail: '2 page(s) loaded',
     });
@@ -417,16 +442,27 @@ describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { tim
         },
       }),
       'none',
+      NOW,
     );
     expect(rows.find((c) => c.name === 'camoufox provenance')?.status).toBe('fail');
     expect(rows.find((c) => c.name === 'camoufox cell')?.status).toBe('fail');
+  });
+  it('a tile fetched before the run started → provenance FAIL, the fetch time and observed values printed', async () => {
+    const p = ports();
+    const rows = camoufoxChecks(p, base(), 'none', asIsoDateTime('2027-02-10T09:00:01.000Z'));
+    expect(rows.find((c) => c.name === 'camoufox provenance')).toEqual({
+      name: 'camoufox provenance',
+      status: 'fail',
+      detail:
+        'scraped-self, maxAgeHours 0, GBP, point of sale GB as the page stated, fetched 2027-02-10T09:00:00.000Z (before this run started)',
+    });
   });
   it('a stored point of sale that is not the page’s → provenance FAIL', async () => {
     const p = ports();
     const t = base();
     const tile = t.tile?.kind === 'tile' ? { ...t.tile, pointOfSale: 'US' } : null;
     expect(
-      camoufoxChecks(p, { ...t, tile }, 'none').find((c) => c.name === 'camoufox provenance')?.status,
+      camoufoxChecks(p, { ...t, tile }, 'none', NOW).find((c) => c.name === 'camoufox provenance')?.status,
     ).toBe('fail');
   });
 });

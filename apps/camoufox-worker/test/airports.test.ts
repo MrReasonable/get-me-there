@@ -10,7 +10,8 @@ describe('airportMatches (prov-006)', () => {
     expect(
       airportMatches('John F. Kennedy International Airport', ['John F Kennedy International Airport']),
     ).toBe(true);
-    expect(fold('  São Paulo–Guarulhos ')).toBe('sao paulo guarulhos');
+    // why: the worked example's airport only; a synthetic diacritic keeps the NFKD fold covered
+    expect(fold('  John F. Kennedy–Internatiönal ')).toBe('john f kennedy international');
   });
   it('Newark does not match JFK’s names; a generic suffix never matches', () => {
     expect(

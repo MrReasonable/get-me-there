@@ -26,7 +26,13 @@ import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
-import { type CamoufoxRun, camoufoxChecks, camoufoxStage } from './smokeCamoufox.js';
+import {
+  type CamoufoxRun,
+  camoufoxChecks,
+  camoufoxEmpty,
+  camoufoxStage,
+  describeCamoufoxPrice,
+} from './smokeCamoufox.js';
 import { type Answer, checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
 import {
   openHiddenExecution,
@@ -147,7 +153,11 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
  * searched; for the cell it searched and priced without a confirmation, that fact and the chain's own cheapest offer
  * with its decision-44 label (provenance review, fix round 1).
  */
-function headline(reports: readonly SmokeProviderReport[], now: IsoDateTime): string {
+function headline(
+  reports: readonly SmokeProviderReport[],
+  now: IsoDateTime,
+  camoufox: CamoufoxRun | null,
+): string {
   const itinerary = reports.find((r) => r.stage === 'itinerary');
   const confirmed = itinerary?.cheapestConfirmed ?? null;
   if (confirmed !== null) return `cheapest confirmed price ${describePrice(confirmed, now)}`;
@@ -155,7 +165,11 @@ function headline(reports: readonly SmokeProviderReport[], now: IsoDateTime): st
     .filter((r) => r.stage === 'discovery')
     .flatMap((r) => (r.cheapest === null ? [] : [r.cheapest]))
     .sort((a, b) => a.pricePence - b.pricePence)[0];
-  if (calendar === undefined) return 'no price found';
+  if (calendar === undefined) {
+    // why: fix round 1 (CodeRabbit): a camoufox-only run's price is the headline, with its provenance
+    const cf = camoufox === null ? null : describeCamoufoxPrice(camoufox);
+    return cf === null ? 'no price found' : `cheapest camoufox price ${cf}`;
+  }
   const searched = itinerary?.status === 'priced' ? itinerary.cheapest : null;
   const sameCell =
     searched !== null &&
@@ -368,7 +382,7 @@ export async function runSmoke(
     ...(configured.length === 0
       ? []
       : checklist({ ports, q, executionId, runStart, cap, configured, found, itinerary, seen, answers })),
-    ...camoufoxChecks(ports, camoufox ? cfRun : null, executionId),
+    ...camoufoxChecks(ports, camoufox ? cfRun : null, executionId, runStart),
   ];
   const written = track?.take() ?? [];
   const now = ports.clock.now();
@@ -379,7 +393,7 @@ export async function runSmoke(
   if (cfRun !== null) {
     const t = cfRun.tile;
     say(
-      `camoufox discovery: ${t === null ? 'no tile' : t.kind === 'tile' ? (t.prices[0] === undefined ? 'no flights listed' : `priced · ${formatPence(t.prices[0].amountMinor)}`) : `error · ${t.error.message}`}`,
+      `camoufox discovery: ${t === null ? 'no tile' : t.kind === 'tile' ? (t.prices[0] === undefined ? 'no price for the cell' : `priced · ${describeCamoufoxPrice(cfRun) ?? ''}`) : `error · ${t.error.message}`}`,
     );
     const until = t?.kind === 'tile-error' ? t.error.cooldownUntil : undefined;
     if (until !== undefined)
@@ -387,7 +401,7 @@ export async function runSmoke(
   }
   say('checklist:');
   for (const c of checks) say(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
-  const summary = headline(reports, now);
+  const summary = headline(reports, now, cfRun);
   say(summary);
   say(
     opts.fixtures === null
@@ -401,7 +415,7 @@ export async function runSmoke(
     checks.some((c) => c.status === 'fail');
   const exitCode = failed
     ? EXIT.failed
-    : reports.some((r) => r.status === 'empty')
+    : reports.some((r) => r.status === 'empty') || camoufoxEmpty(cfRun)
       ? EXIT.smokeEmpty
       : EXIT.ok;
   ports.repos.executions.setStatus(executionId, opts.signal.aborted ? 'cancelled' : 'completed', {

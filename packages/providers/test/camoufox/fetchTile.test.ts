@@ -319,7 +319,10 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     expect(hits).toBe(1);
     expect(classes(budget)).toEqual(['page']);
   });
-  it('a dropped socket (a real server that destroys the connection) is one attempt, never retried, a page row', async () => {
+  // why: fix round 1 (CodeRabbit): real loopback sockets get an explicit short timeout
+  it('a dropped socket (a real server that destroys the connection) is one attempt, never retried, a page row', {
+    timeout: 10_000,
+  }, async () => {
     const { p, budget, tile } = await setupWithRealSocket('destroy');
     expect(await p.discovery?.fetchTile(tile, Q, ctx)).toMatchObject({
       kind: 'tile-error',
@@ -327,7 +330,9 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     });
     expect(classes(budget)).toEqual(['page']);
   });
-  it('a refused connection (a real closed port) is provider-unavailable, one no-page row', async () => {
+  it('a refused connection (a real closed port) is provider-unavailable, one no-page row', {
+    timeout: 10_000,
+  }, async () => {
     const { p, budget, tile } = await setupWithRealSocket('closed');
     expect(await p.discovery?.fetchTile(tile, Q, ctx)).toMatchObject({
       kind: 'tile-error',
@@ -366,9 +371,11 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       error: { kind: 'parse' },
     });
   });
+  // why: fix round 1 (CodeRabbit): the container's clock may trail or lead the host's by a little; 5 s either way
   it.each([
-    ['after the adapter clock', '2026-10-14T15:00:01.000Z'],
-    ['before the request', '2026-10-14T14:59:00.000Z'],
+    ['6 s after the adapter clock', '2026-10-14T15:00:06.000Z'],
+    ['6 s before the request', '2026-10-14T14:59:54.000Z'],
+    ['a minute before the request', '2026-10-14T14:59:00.000Z'],
   ])('a fetchedAt %s is refused as parse', async (_n, at) => {
     const { p, tile } = setup();
     server.use(http.post(URL_, () => HttpResponse.json({ ...price(), fetchedAt: at }, contacted(true))));
@@ -376,6 +383,14 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       kind: 'tile-error',
       error: { kind: 'parse' },
     });
+  });
+  it.each([
+    ['5 s after the adapter clock', '2026-10-14T15:00:05.000Z'],
+    ['5 s before the request', '2026-10-14T14:59:55.000Z'],
+  ])('a fetchedAt %s (clock skew within 5 s) is read', async (_n, at) => {
+    const { p, tile } = setup();
+    server.use(http.post(URL_, () => HttpResponse.json({ ...price(), fetchedAt: at }, contacted(true))));
+    expect((await p.discovery?.fetchTile(tile, Q, ctx))?.kind).toBe('tile');
   });
   it('the key travels in x-gmt-worker-key, never in the URL; the body is one valid page request', async () => {
     const { p, events, tile } = setup();
@@ -415,6 +430,10 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     expect(
       await p.discovery?.fetchTile(tile, { ...Q, airportNames: { origin: [''], destination: [] } }, ctx),
     ).toMatchObject({ kind: 'tile-error' });
+    // why: fix round 1 (prov M2, CodeRabbit): two empty lists are no names at all
+    expect(
+      await p.discovery?.fetchTile(tile, { ...Q, airportNames: { origin: [], destination: [] } }, ctx),
+    ).toMatchObject({ kind: 'tile-error', error: { kind: 'parse' } });
     expect(budget.rowsOf('camoufox')).toEqual([]);
   });
   it('a budget refusal propagates to the engine', async () => {

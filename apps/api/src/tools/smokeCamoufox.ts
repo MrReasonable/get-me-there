@@ -16,6 +16,7 @@ import {
   daysBetween,
   type FlightProvider,
   formatPence,
+  type IsoDateTime,
   londonDateOf,
   searchLinkFor,
   WORKER_KEY_HEADER,
@@ -121,7 +122,29 @@ export async function camoufoxStage(
 }
 
 /** The eleven rows; each is skip when camoufox is not configured. */
-export function camoufoxChecks(ports: Ports, run: CamoufoxRun | null, executionId: string): SmokeCheck[] {
+/** A camoufox price with its provenance, for the CLI's lines (fix round 1, CodeRabbit: never a bare amount). */
+export function describeCamoufoxPrice(run: CamoufoxRun): string | null {
+  const t = run.tile;
+  const price = t?.kind === 'tile' ? t.prices[0] : undefined;
+  if (t?.kind !== 'tile' || price === undefined) return null;
+  const fx =
+    price.currency === 'GBP'
+      ? 'GBP, not converted'
+      : `${price.currency}, not converted (this smoke compares GBP only)`;
+  return `${formatPence(price.amountMinor)} · ${run.info?.sourceKind ?? 'unknown source'} · fetched ${t.fetchedAt} · point of sale ${t.pointOfSale} · ${fx}`;
+}
+
+/** True when the camoufox page was read and priced nothing (no flights, or no option for the cell). */
+export function camoufoxEmpty(run: CamoufoxRun | null): boolean {
+  return run?.tile?.kind === 'tile' && run.tile.prices.length === 0;
+}
+
+export function camoufoxChecks(
+  ports: Ports,
+  run: CamoufoxRun | null,
+  executionId: string,
+  runStart: IsoDateTime,
+): SmokeCheck[] {
   const cfg = ports.config.providers.camoufox;
   if (run === null || cfg === null)
     return CAMOUFOX_ROWS.map((name) => ({ name, status: 'skip', detail: 'not configured' }));
@@ -232,10 +255,12 @@ export function camoufoxChecks(ports: Ports, run: CamoufoxRun | null, executionI
       info.provenanceNote === CAMOUFOX_DISCOVERY_INFO.provenanceNote;
     const stored = tile.pointOfSale === answer.pointOfSale && answer.currency === 'GBP';
     const market = answer.pointOfSale === ports.config.pointOfSale;
+    // why: fix round 1 (CodeRabbit): read during this run, as the vendor provenance row requires
+    const fresh = tile.fetchedAt >= runStart;
     add(
       'camoufox provenance',
-      !labelled || !stored ? 'fail' : market ? 'pass' : 'look',
-      `scraped-self, maxAgeHours ${info?.maxAgeHours ?? '?'}, ${answer.currency}, point of sale ${answer.pointOfSale} as the page stated${market ? '' : ` (POINT_OF_SALE is ${ports.config.pointOfSale})`}`,
+      !labelled || !stored || !fresh ? 'fail' : market ? 'pass' : 'look',
+      `${info?.sourceKind ?? 'no source kind'}, maxAgeHours ${info?.maxAgeHours ?? '?'}, ${answer.currency}, point of sale ${answer.pointOfSale} as the page stated${market ? '' : ` (POINT_OF_SALE is ${ports.config.pointOfSale})`}${fresh ? '' : `, fetched ${tile.fetchedAt} (before this run started)`}`,
     );
   }
   const falseFlags =

@@ -261,6 +261,11 @@ export interface CamoufoxEngine {
   logs: LogLine[];
   runToEnd(): Promise<Execution>;
   resume(executionId: string, o: { manual: boolean }): Promise<Execution>;
+  /** The orchestrator's own answer to a resume (fix round 1). */
+  resumeResult(
+    executionId: string,
+    o: { manual: boolean },
+  ): ReturnType<ReturnType<typeof createOrchestrator>['resume']>;
   tick(): Promise<{ resumed: boolean }>;
   ledgerRows(providerId: ProviderId): Array<{ pageClass: string | null; outcome: string }>;
 }
@@ -384,6 +389,7 @@ export function engineWith(
       }
       return settle(id);
     },
+    resumeResult: (id, ro) => orch.resume(id, ro),
     tick: async () => {
       const before = repos.executions.activeParent(definition.id);
       await orch.tick(definition.id);

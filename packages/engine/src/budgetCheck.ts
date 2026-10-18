@@ -143,6 +143,26 @@ export function checkBudget(
     total(billed, (s) => s.costMicroGbp),
     billed,
   );
+  // why: fix round 1 (CodeRabbit): a provider's own page cap within the execution (camoufox, decision 69), so a resume
+  // that has none left is refused before it is claimed, not on its first reservation
+  for (const id of ids(spend)) {
+    const cap = budget.providerMaxCalls?.[id];
+    if (cap === undefined) continue;
+    const used =
+      executionId === null
+        ? 0
+        : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId: id }).calls;
+    const lines = spend.filter((s) => s.providerId === id);
+    check(
+      'provider-execution',
+      id,
+      cap,
+      used,
+      0,
+      total(lines, (s) => s.calls),
+      lines,
+    );
+  }
   for (const id of ids(spend)) {
     const kind = ctx.limitsOf(id).capKind;
     const u = ctx.budget.usage({ kind, providerId: id });

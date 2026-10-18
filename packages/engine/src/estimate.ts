@@ -113,6 +113,8 @@ function discoveryLine(
   cells: readonly CellKey[],
   definitionId: string | null,
   notes: string[],
+  /** The execution a resume continues (its pages already loaded count against the cap); null for a start. */
+  executionId: string | null = null,
 ): Line | null {
   const provider = ctx.providers.get(providerId);
   const cap = provider?.discovery;
@@ -147,7 +149,14 @@ function discoveryLine(
     // why: spec §2 rev 32, cost-004/009/011, prov-013: one page per cell, at most the snapshot's page cap a run; a page
     // takes about 20–60 s plus the start-to-start spacing, estimated as spacing + 40 s
     const perPage = l.minSpacingSeconds + 40;
-    const pages = Math.min(tiles, pageCap);
+    // why: fix round 1 (CodeRabbit): a resume has the cap less the pages this execution already loaded; with none left
+    // the line still asks one page, so checkBudget's provider-execution check refuses the resume instead of the guard
+    const used =
+      executionId === null
+        ? 0
+        : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId }).calls;
+    const left = Math.max(0, pageCap - used);
+    const pages = tiles === 0 ? 0 : left === 0 ? 1 : Math.min(tiles, left);
     if (fresh.length > 0)
       notes.push(
         `${providerId} list mode prices ${pages} of ${fresh.length} cells this run; a full pass takes ${Math.ceil(fresh.length / pageCap)} runs; the month cap allows about ${l.monthlyCallCap} cells`,
@@ -254,7 +263,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
     // why: ssr M2 — the same reuse query the pass applies, so a cell another run has priced since is not counted
-    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes);
+    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes, exec.id);
     if (l !== null) lines.push(l);
   }
   const seeded = ctx.repos.cells.hasVerificationOutcomes(exec.id);

@@ -59,11 +59,12 @@ export class Pacer {
       const wait = Date.parse(last) + this.spacingMs - TOLERANCE_MS - now;
       if (wait > 0) return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil(wait / 1000)) };
     }
-    this.busy = true;
     const tmp = `${this.path}.tmp`;
     writeFileSync(tmp, JSON.stringify({ lastPageAt: this.clock.now() }), { mode: 0o600 });
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
+    // why: busy only once the record is written, so a failed write never wedges the pacer (CodeRabbit, fix round 1)
+    this.busy = true;
     return { ok: true };
   }
 

@@ -151,3 +151,25 @@ describe('the real adapter through the engine: what is stored for each answer (p
     expect(e.ctx.repos.notifications.noticeKeyClaimed(cooldownNoticeKey('camoufox', B))).toBe(true);
   });
 });
+
+// why: fix round 1 (CodeRabbit major): a resume counts the pages the execution already loaded
+describe('a resume reads the page cap the execution has left', () => {
+  it('with the cap spent, a manual resume is refused naming the provider-execution cap, and nothing is reserved', async () => {
+    const e = engineWith([stubCamoufox({ cells: 6 })], { camoufoxConfigCap: 2 });
+    const ex = await e.runToEnd();
+    expect(ex.status).toBe('paused_budget');
+    const r = await e.resumeResult(ex.id, { manual: true });
+    expect(r).toMatchObject({ ok: false, code: 'cap' });
+    expect(r.ok ? '' : r.message).toMatch(/camoufox/);
+    expect(e.ledgerRows('camoufox')).toHaveLength(2);
+  });
+  it('with no page left the remaining line asks one page (which the cap refuses), never the whole cap', async () => {
+    const e = engineWith([stubCamoufox({ cells: 6 })], { camoufoxConfigCap: 4 });
+    const ex = await e.runToEnd();
+    const { estimateRemainingFor } = await import('../src/estimate.js');
+    const exec = e.ctx.repos.executions.get(ex.id);
+    if (exec === null) throw new Error('gone');
+    const line = estimateRemainingFor(e.ctx, exec, true).perProvider.find((p) => p.providerId === 'camoufox');
+    expect(line?.planCalls).toBe(1);
+  });
+});
