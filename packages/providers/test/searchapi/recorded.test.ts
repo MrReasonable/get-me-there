@@ -28,7 +28,7 @@ import {
   optionSchema,
 } from '../../src/searchapi/shapes.js';
 import { majorToMinor } from '../../src/shared/money.js';
-import { replayHandlers } from '../../src/testing/index.js';
+import { loadParamsHistory, replayHandlers } from '../../src/testing/index.js';
 import { recordingsPresent, skipTitle } from '../../src/testing/recordings.js';
 import { obj } from '../support/guards.js';
 import { server } from '../support/msw.js';
@@ -50,9 +50,12 @@ import { bookingBody, CELL_QUERY, ECHO, flightsBody, OUT_A, option } from './sup
 const present = recordingsPresent(RECORDED_ROOT);
 
 let misses: (() => string[]) | null = null;
-/** Serves the recorded tree for this test; afterEach asserts nothing missed. */
+/**
+ * Serves the recorded tree for this test; afterEach asserts nothing missed. The dated allowlist history lets a recording
+ * made before a parameter was added answer the request that now carries it (spec §5.2).
+ */
 function replay(): void {
-  const r = replayHandlers(RECORDED_ROOT);
+  const r = replayHandlers(RECORDED_ROOT, { allowlists: loadParamsHistory(RECORDED_ROOT) });
   server.use(...r.handlers);
   misses = r.misses;
 }

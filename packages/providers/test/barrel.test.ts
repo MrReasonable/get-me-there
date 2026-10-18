@@ -42,6 +42,7 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       'fixtureRouter',
       'fixtureHandlers',
       'replayHandlers',
+      'loadParamsHistory',
       'createFixtureServer',
       'loadRecordedFixture',
       'classifyResponse',
@@ -63,12 +64,13 @@ describe('@gmt/providers public surface (plan "http-kit" contract, arch-008)', (
       expect(name in main, name).toBe(false);
     }
   });
-  it('./testing exports fixtureHandlers, replayHandlers, loadRecorded, withContentHash and the network guards', () => {
+  it('./testing exports fixtureHandlers, replayHandlers, loadRecorded, loadParamsHistory, withContentHash and the network guards', () => {
     const t = surface(testing);
     for (const name of [
       'fixtureHandlers',
       'replayHandlers',
       'loadRecorded',
+      'loadParamsHistory',
       'withContentHash',
       'installNetworkGuards',
       'hangUntilAborted',

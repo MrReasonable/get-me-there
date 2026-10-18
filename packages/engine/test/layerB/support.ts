@@ -38,7 +38,13 @@ import {
   travelpayoutsHttpLimits,
   travelpayoutsProvider,
 } from '@gmt/providers';
-import { guardedServer, loadRecorded, recordingsPresent, replayHandlers } from '@gmt/providers/testing';
+import {
+  guardedServer,
+  loadParamsHistory,
+  loadRecorded,
+  recordingsPresent,
+  replayHandlers,
+} from '@gmt/providers/testing';
 import { fxHttpLimits } from '../../src/fx/limits.js';
 import type { EngineDeps } from '../../src/types.js';
 import { capturingLogger, capturingNotifier, type LogLine } from '../support/harness.js';
@@ -174,7 +180,8 @@ export function layerB(session: string, now: IsoDateTime): LayerB {
       paramsAllowlist: SEARCHAPI_PARAMS,
     }),
   ];
-  const replay = replayHandlers(RECORDED_ROOT, { session });
+  // why: the dated allowlist history lets a recording made before a parameter was added answer it (spec §5.2).
+  const replay = replayHandlers(RECORDED_ROOT, { session, allowlists: loadParamsHistory(RECORDED_ROOT) });
   guardedServer.use(...replay.handlers);
   const deps: EngineDeps = {
     config,
