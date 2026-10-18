@@ -1,9 +1,18 @@
 // WP14 Task 14.13: the smoke's camoufox rows, offline, against a scripted worker (its /v1/status and /v1/page) through
 // the real adapter, http-kit and SqliteBudgetGuard. No Google page is loaded and no vendor is called.
-import { asIata, asIsoDateTime, fixedClock } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  asIsoDateTime,
+  fixedClock,
+  workerAnswerSchema,
+  workerStatusSchema,
+} from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset, MIGRATIONS_DIR, seedAirports } from '@gmt/db';
+import { CAMOUFOX_DISCOVERY_INFO } from '@gmt/providers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSmoke, type SmokeResult } from '../../src/tools/smoke.js';
+import { type CamoufoxRun, camoufoxChecks } from '../../src/tools/smokeCamoufox.js';
 import { EXIT } from '../../src/tools/types.js';
 import { buildPorts, loadConfigFromEnv, type Ports } from '../../src/wiring.js';
 import { silentLog, testEnv } from '../helpers/env.js';
@@ -144,7 +153,9 @@ describe('smoke: camoufox rows (brief Task 14.13; cost-013, prov-014, TS-19)', {
       'camoufox selectors': 'pass',
       'camoufox compare': 'look',
     });
-    expect(row(r, 'camoufox cell')?.detail).toContain('(the date asked for, shown in the search form)');
+    expect(row(r, 'camoufox cell')?.detail).toContain(
+      "(the dates asked for; the page's search form showed them, the options state only the departure)",
+    );
     expect(row(r, 'camoufox signed out')?.detail).toContain(`checked ${NOW}`);
     expect(r.exitCode).toBe(EXIT.ok);
   });
@@ -296,4 +307,132 @@ describe('smoke: camoufox rows (brief Task 14.13; cost-013, prov-014, TS-19)', {
     expect(cf).toHaveLength(11);
     expect(cf.every((c) => c.status === 'skip' && c.detail === 'not configured')).toBe(true);
   });
+
+  // why: fix round 1 (TS I5, TS M7, prov M4): every row's fail arm is reached
+  it('camoufox settings match: a page-timeout mismatch alone is FAIL', async () => {
+    const p = ports({ CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120' });
+    worker({});
+    expect(row(await smoke(p), 'camoufox settings match')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringContaining('page timeout 90 s (app 120)'),
+    });
+  });
+  it('camoufox consent: a capture 396 days old passes, 397 fails', async () => {
+    for (const [at, status] of [
+      ['2026-01-10T09:00:00.000Z', 'pass'],
+      ['2026-01-09T09:00:00.000Z', 'fail'],
+    ] as const) {
+      vi.unstubAllGlobals();
+      const p = ports();
+      worker({ status: { ...STATUS, socsCapturedAt: at } });
+      expect(row(await smoke(p), 'camoufox consent')?.status, at).toBe(status);
+    }
+  });
+  it('camoufox cell: every option for another cell is FAIL with the count', async () => {
+    const p = ports();
+    worker({
+      pages: [
+        {
+          status: 200,
+          body: { ...cells(), cell: { status: 'none-for-cell', optionsOtherCell: 3, optionsUnparsed: 0 } },
+          contacted: true,
+        },
+      ],
+    });
+    expect(row(await smoke(p), 'camoufox cell')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringContaining('every option was for another cell (3)'),
+    });
+  });
+  it('camoufox provenance: a page that states another point of sale is look, naming both', async () => {
+    const p = ports();
+    worker({ pages: [{ status: 200, body: { ...cells(), pointOfSale: 'unknown' }, contacted: true }] });
+    expect(row(await smoke(p), 'camoufox provenance')).toMatchObject({
+      status: 'look',
+      detail: expect.stringContaining('point of sale unknown as the page stated (POINT_OF_SALE is GB)'),
+    });
+  });
 });
+
+describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { timeout: 60_000 }, () => {
+  const cell = {
+    origin: asIata('LHR'),
+    destination: asIata('JFK'),
+    departureDate: asIsoDate('2027-03-01'),
+    returnDate: asIsoDate('2027-03-02'),
+  };
+  const base = (o: Partial<CamoufoxRun> = {}): CamoufoxRun => ({
+    status: workerStatusSchema.parse(STATUS),
+    statusError: null,
+    cell,
+    info: CAMOUFOX_DISCOVERY_INFO,
+    answer: cellsAnswer(),
+    tile: {
+      kind: 'tile',
+      index: 0,
+      coveredCells: [cell],
+      fetchedAt: NOW,
+      pointOfSale: 'GB',
+      notes: [],
+      prices: [{ ...cell, amountMinor: 45100, currency: 'GBP' }],
+      noFares: [],
+    },
+    ...o,
+  });
+  it('two page rows → one page FAIL', async () => {
+    const p = ports();
+    worker({});
+    const r = await smoke(p);
+    const id = r.executionId ?? '';
+    const names = p.db.raw
+      .prepare<[string], { name: string }>('SELECT name FROM pragma_table_info(?)')
+      .all('provider_requests')
+      .map((c) => c.name)
+      .filter((n) => n !== 'id');
+    p.db.raw
+      .prepare(
+        `INSERT INTO provider_requests (${names.join(', ')}) SELECT ${names.join(', ')} FROM provider_requests WHERE execution_id = ? AND provider_id = 'camoufox' AND page_class = 'page'`,
+      )
+      .run(id);
+    expect(camoufoxChecks(p, base(), id).find((c) => c.name === 'camoufox one page')).toMatchObject({
+      status: 'fail',
+      detail: '2 page(s) loaded',
+    });
+  });
+  it('info with maxAgeHours 48 → provenance FAIL; a stored price not the worker’s → cell FAIL', async () => {
+    const p = ports();
+    const rows = camoufoxChecks(
+      p,
+      base({
+        info: { ...CAMOUFOX_DISCOVERY_INFO, maxAgeHours: 48 },
+        tile: {
+          kind: 'tile',
+          index: 0,
+          coveredCells: [cell],
+          fetchedAt: NOW,
+          pointOfSale: 'GB',
+          notes: [],
+          prices: [{ ...cell, amountMinor: 1, currency: 'GBP' }],
+          noFares: [],
+        },
+      }),
+      'none',
+    );
+    expect(rows.find((c) => c.name === 'camoufox provenance')?.status).toBe('fail');
+    expect(rows.find((c) => c.name === 'camoufox cell')?.status).toBe('fail');
+  });
+  it('a stored point of sale that is not the page’s → provenance FAIL', async () => {
+    const p = ports();
+    const t = base();
+    const tile = t.tile?.kind === 'tile' ? { ...t.tile, pointOfSale: 'US' } : null;
+    expect(
+      camoufoxChecks(p, { ...t, tile }, 'none').find((c) => c.name === 'camoufox provenance')?.status,
+    ).toBe('fail');
+  });
+});
+
+function cellsAnswer() {
+  const a = workerAnswerSchema.parse({ ...cells(), fetchedAt: NOW });
+  if (a.kind !== 'cells') throw new Error('cells');
+  return a;
+}

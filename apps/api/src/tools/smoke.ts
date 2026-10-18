@@ -16,34 +16,18 @@
 import { mkdirSync } from 'node:fs';
 import { relative } from 'node:path';
 import {
-  AbortedError,
   type DiscoveryQuery,
-  type FlightProvider,
   formatPence,
   type IsoDateTime,
   ProviderError,
   type ResponseCache,
-  WORKER_KEY_HEADER,
-  workerStatusSchema,
 } from '@gmt/core';
-import {
-  createHttpKit,
-  createRecorder,
-  type HttpKit,
-  type HttpKitDeps,
-  planSingleCells,
-} from '@gmt/providers';
+import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@gmt/providers';
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
-import {
-  type Answer,
-  type CamoufoxRun,
-  camoufoxChecks,
-  checklist,
-  type Seen,
-  type SmokeCheck,
-} from './smokeChecks.js';
+import { type CamoufoxRun, camoufoxChecks, camoufoxStage } from './smokeCamoufox.js';
+import { type Answer, checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
 import {
   openHiddenExecution,
   spendPosition,
@@ -367,6 +351,7 @@ export async function runSmoke(
         q,
         ctx,
         http,
+        seen,
       );
   } catch (e) {
     ports.repos.executions.setStatus(executionId, 'cancelled', {
@@ -396,10 +381,7 @@ export async function runSmoke(
     say(
       `camoufox discovery: ${t === null ? 'no tile' : t.kind === 'tile' ? (t.prices[0] === undefined ? 'no flights listed' : `priced · ${formatPence(t.prices[0].amountMinor)}`) : `error · ${t.error.message}`}`,
     );
-    const until =
-      t?.kind === 'tile-error'
-        ? /cooling down until (\S+?)[;,)\s]/.exec(`${t.error.message} `)?.[1]
-        : undefined;
+    const until = t?.kind === 'tile-error' ? t.error.cooldownUntil : undefined;
     if (until !== undefined)
       say(`camoufox is cooling down until ${until}; every further page will be refused until then`);
   }
@@ -436,59 +418,6 @@ export async function runSmoke(
     fixturesWritten: root === undefined ? [] : written.map((f) => relative(root, f)).sort(),
     executionId,
   };
-}
-
-/**
- * WP14 Task 14.13: the camoufox stage. The worker's /v1/status (never ledgered), then one list tile for the query's
- * first cell (at most one Google page load), through the real adapter and this run's http-kit. Never throws for a worker
- * failure: the rows say what happened.
- */
-async function camoufoxStage(
-  ports: Ports,
-  provider: FlightProvider | undefined,
-  q: DiscoveryQuery,
-  ctx: Ctx,
-  http: HttpKit,
-): Promise<CamoufoxRun> {
-  const cfg = ports.config.providers.camoufox;
-  const cap = provider?.discovery;
-  if (cfg === null || cap === undefined)
-    return { status: null, statusError: 'not configured', tile: null, cell: null, info: null };
-  let status: CamoufoxRun['status'] = null;
-  let statusError: string | null = null;
-  try {
-    const res = await http.request({
-      providerId: 'camoufox-status',
-      executionId: ctx.executionId,
-      tileIndex: null,
-      endpointPath: '/v1/status',
-      method: 'GET',
-      url: new URL('/v1/status', cfg.workerUrl),
-      headers: { [WORKER_KEY_HEADER]: cfg.key.reveal(), accept: 'application/json' },
-      cache: 'never',
-      signal: ctx.signal,
-      recordFixtures: false,
-    });
-    const parsed = workerStatusSchema.safeParse(res.body);
-    if (parsed.success) status = parsed.data;
-    else statusError = 'an answer this build of the worker protocol cannot read';
-  } catch (e) {
-    if (e instanceof AbortedError) throw e;
-    statusError = safeMessage(e, ports.secrets);
-  }
-  const names = (iata: string): string[] => {
-    const a = ports.repos.airports.get(iata);
-    return a === null ? [] : [a.name];
-  };
-  const query: DiscoveryQuery = {
-    ...q,
-    airportNames: { origin: names(q.origin), destination: names(q.destination) },
-  };
-  const [plan] = planSingleCells(query);
-  if (plan === undefined) return { status, statusError, tile: null, cell: null, info: cap.info };
-  // why: a spend refusal or an abort propagates as for the vendors; every worker answer is a tile result
-  const tile = await cap.fetchTile({ ...plan, index: 0 }, query, ctx);
-  return { status, statusError, tile, cell: plan.coveredCells[0] ?? null, info: cap.info };
 }
 
 /**

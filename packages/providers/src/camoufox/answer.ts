@@ -41,6 +41,8 @@ function error(
     httpStatus: f.status,
     providerId: 'camoufox',
     message: `camoufox ${f.endpointPath}: ${detail} [${code}]`,
+    // why: fix round 1 (arch I1): the code as data, so a reader never parses the message
+    reason: code,
     ...(cooldownUntil === undefined ? {} : { cooldownUntil }),
   });
 }
