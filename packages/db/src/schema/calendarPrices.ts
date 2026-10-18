@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm';
 import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { PROVIDER_IDS } from '../internal/enums.js';
+import { PROVIDER_IDS, RETURN_DATE_SOURCES, VENDOR_PRICE_MARKS } from '../internal/enums.js';
 import { isOneOf, isProviderKind, priceTableChecks } from './checks.js';
 import { searchExecutions } from './searchExecutions.js';
 
@@ -31,6 +32,13 @@ export const calendarPrices = sqliteTable(
     maxAgeHours: integer('max_age_hours'),
     vendorLink: text('vendor_link'),
     reusedFromExecutionId: text('reused_from_execution_id').references(() => searchExecutions.id),
+    /**
+     * Spec §7 rev 34 (migration 0006): where the return date came from; no default, so every insert states it, and a
+     * reused row keeps its source.
+     */
+    returnDateSource: text('return_date_source').notNull(),
+    /** The vendor's own price mark (cheapest, low, none), NULL where the vendor states no marks. */
+    vendorPriceMark: text('vendor_price_mark'),
   },
   (t) => [
     uniqueIndex('calendar_prices_execution_provider_cell_uq').on(
@@ -53,5 +61,12 @@ export const calendarPrices = sqliteTable(
     ...priceTableChecks('calendar_prices'),
     check('calendar_prices_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
     check('calendar_prices_provider_kind_ck', isProviderKind()),
+    check('calendar_prices_return_source_ck', isOneOf('return_date_source', RETURN_DATE_SOURCES)),
+    // why: spec §7 rev 34: only the camoufox grid reads a return date from a grid cell
+    check(
+      'calendar_prices_grid_cell_ck',
+      sql.raw("return_date_source <> 'grid-cell' OR provider_id = 'camoufox'"),
+    ),
+    check('calendar_prices_mark_ck', isOneOf('vendor_price_mark', VENDOR_PRICE_MARKS, true)),
   ],
 );

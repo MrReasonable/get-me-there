@@ -294,8 +294,8 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
       fetchedAt: '2026-10-10T05:00:00.000Z',
     });
     db.raw
-      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id)
-                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', '2026-10-10T05:00:00.000Z', 48, ?)`)
+      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id, return_date_source)
+                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', '2026-10-10T05:00:00.000Z', 48, ?, 'vendor')`)
       .run(executionId, origin);
     cells.writeTile(
       executionId,
@@ -327,8 +327,8 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
       reusedFrom: origin,
     });
     db.raw
-      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id)
-                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', ?, 48, ?)`)
+      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id, return_date_source)
+                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', ?, 48, ?, 'vendor')`)
       .run(executionId, T0, origin);
     cells.writeTile(executionId, 'travelpayouts', tile([A], [out(A, 'empty')]));
     expect(cells.outcomes(executionId, { cells: [A] })[0]).toMatchObject({
@@ -348,8 +348,8 @@ describe('CellsRepo.writeTile (spec §7 atomic unit "each tile\'s prices, outcom
       reusedFrom: origin,
     });
     db.raw
-      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id)
-                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', ?, 48, ?)`)
+      .prepare(`INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, reused_from_execution_id, return_date_source)
+                VALUES (?, 'travelpayouts', 'authorised-cached', 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-28', 30000, 30000, 'GBP', 0, 'unknown', ?, 48, ?, 'vendor')`)
       .run(executionId, T0, origin);
     cells.writeTileError(executionId, 'travelpayouts', [A], 'upstream', 'HTTP 503');
     expect(cells.outcomes(executionId, { cells: [A] })[0]).toMatchObject({

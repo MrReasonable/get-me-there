@@ -18,6 +18,8 @@ const price = (amountMinor: number, currency = 'GBP'): RawCalendarPrice => ({
   ...cell,
   amountMinor,
   currency,
+  returnDateSource: 'vendor',
+  vendorPriceMark: null,
 });
 const deps = (h: Harness) => normaliseDeps(buildContext(h.deps, h.options));
 const reasonOf = (r: ReturnType<typeof calendarPriceInGbp>): string => {

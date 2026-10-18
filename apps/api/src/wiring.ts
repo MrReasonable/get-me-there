@@ -233,6 +233,13 @@ export function providersFor(
         key: cf.key,
         workerUrl: cf.workerUrl,
         pointOfSale: config.pointOfSale,
+        // why: spec §2 rev 34: grid mode plans pages and scrolls within the run's caps, split across the pairs
+        grid: {
+          mode: cf.mode,
+          executionPageCap: cf.executionPageCap,
+          executionScrollCap: cf.executionScrollCap,
+          scrollCap: cf.gridScrollCap,
+        },
       }),
     );
   return out;

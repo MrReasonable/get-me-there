@@ -209,6 +209,9 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
                             s.requests.cacheHits,
                             formatMicroGbp(s.requests.costMicroGbp),
                           )}
+                      {s.requests.scrolls !== undefined ? (
+                        <p data-testid="scrolls">{COPY.scrollsRow(s.requests.scrolls)}</p>
+                      ) : null}
                       {s.overrun ? (
                         <p className="font-semibold">
                           {s.stage === 'discovery' ? COPY.overrunFlagTiles : COPY.overrunFlag}

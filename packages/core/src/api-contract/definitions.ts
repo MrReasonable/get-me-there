@@ -172,6 +172,7 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
       costPence: moneyPenceSchema,
       seconds: z.number().min(0),
       blocked: z.string().nullable(),
+      scrolls: positiveInt.exactOptional(),
     }),
   ),
   totalCalls: positiveInt,

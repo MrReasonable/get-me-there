@@ -1,7 +1,9 @@
-// A synthetic "Price insights" dialog in the shape the 2026-10-18 graph exploration 2 recorded (roles, names and order
-// only; every date and price here is synthetic): a tablist, the stay buttons, the Dates tabpanel holding the legend, the
-// left and right scroll buttons, an empty grid "Date grid", the departures, 49 sibling cell buttons in rows of one
-// return date, the returns, the up and down scroll buttons and the selected-pair line; then Cancel and OK.
+// A synthetic "Price insights" dialog in the shape the --grid recordings of 2026-10-18 showed (roles, names, text and
+// order only; every date and price here is synthetic): a tablist, the stay buttons, the Dates tabpanel holding the
+// legend, the left and right scroll buttons, an empty grid "Date grid", the departures line (one element whose text
+// runs its seven labels together, holding one element per label), 49 sibling cell buttons in rows of one return date
+// (less the pairs whose return precedes the departure), the returns line, "Return", the up and down scroll buttons,
+// the selected range and the price line; then Cancel and OK. A scrolled view reuses and rotates its elements.
 import { type FakeNode, n, text } from './fakePage.js';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -21,35 +23,38 @@ export interface GridTreeOptions {
   /** The first departure and the first return the view shows. */
   depart: string;
   ret: string;
-  /** The price in pounds for a pair, or null for a cell named by `unpriced`. */
-  price?: (d: string, r: string) => number | null;
+  /** The price in pounds for a pair. */
+  price?: (d: string, r: string) => number;
   cheapest?: Array<[string, string]>;
+  low?: Array<[string, string]>;
   /** The selected pair; defaults to the view's centre (the query a page load opens). */
   selected?: [string, string];
-  /** The departures and returns as one text line each (recording 2's printed form), or one node per label. */
-  labels?: 'lines' | 'labels';
   /** Overrides one cell's name (a reworded or unpriced cell). */
   names?: (d: string, r: string, i: number) => string | undefined;
   /** Leaves the scroll buttons out. */
   scroll?: boolean;
   /** The dialog as the Price graph click opens it: the Price graph tab selected, no Dates panel. */
   tab?: 'dates' | 'graph';
+  /** The labels and cells start this many places in, as after a scroll (run 2, view 3). */
+  rotate?: number;
   /** Extra nodes inside the panel (an e-mail address, a challenge line). */
   extra?: FakeNode[];
+  /** The year the page leaves out of a range in it (2026 in the recordings). */
+  thisYear?: number;
 }
 
 export function cellName(
   d: string,
   r: string,
-  pounds: number | null,
-  marks: { cheapest: boolean; selected: boolean },
+  pounds: number,
+  marks: { cheapest?: boolean; low?: boolean; selected: boolean },
 ): string {
-  if (pounds === null) return `No price, ${dm(d)} to ${dm(r)}`;
-  return `£${pounds.toLocaleString('en-GB')}${marks.cheapest ? ', cheapest price' : ''}, ${dm(d)} to ${dm(r)}${marks.selected ? ', selected' : ''}`;
+  const mark = marks.cheapest === true ? ', cheapest price' : marks.low === true ? ', low price' : '';
+  return `£${pounds.toLocaleString('en-GB')}${mark}, ${dm(d)} to ${dm(r)}${marks.selected ? ', selected' : ''}`;
 }
 
-/** The selected-pair line: "14 – 24 Mar 2027£462 · Round trip" (other month and year forms are hypotheses). */
-export function selectedLine(d: string, r: string, pounds: number): string {
+/** The selected range: "14 – 24 Mar 2027", "28 Mar – 7 Apr 2027", "27 Dec 2026 – 6 Jan 2027", "20 – 23 Oct". */
+export function selectedRange(d: string, r: string, thisYear = 2026): string {
   const [a, b] = [at(d), at(r)];
   const yr = b.getUTCFullYear();
   const left =
@@ -58,8 +63,11 @@ export function selectedLine(d: string, r: string, pounds: number): string {
       : a.getUTCMonth() !== b.getUTCMonth()
         ? dm(d)
         : String(a.getUTCDate());
-  return `${left} – ${dm(r)} ${yr}£${pounds} · Round trip`;
+  return `${left} – ${dm(r)}${yr === thisYear && a.getUTCFullYear() === yr ? '' : ` ${yr}`}`;
 }
+
+const has = (list: Array<[string, string]> | undefined, d: string, r: string): boolean =>
+  (list ?? []).some(([cd, cr]) => cd === d && cr === r);
 
 export function gridTree(o: GridTreeOptions): FakeNode {
   const price =
@@ -70,19 +78,24 @@ export function gridTree(o: GridTreeOptions): FakeNode {
   const cells: FakeNode[] = [];
   for (const [row, r] of rets.entries())
     for (const [col, d] of deps.entries()) {
+      // why: the grid shows no pair whose return precedes its departure (run 4: 39 cells); a same-day pair is shown
+      if (r < d) continue;
       const p = price(d, r);
-      const marks = {
-        cheapest: (o.cheapest ?? []).some(([cd, cr]) => cd === d && cr === r),
-        selected: sel[0] === d && sel[1] === r,
-      };
-      const name = o.names?.(d, r, row * 7 + col) ?? cellName(d, r, p, marks);
-      cells.push(n('button', name, p === null ? [] : [text(`£${p}`)]));
+      const name =
+        o.names?.(d, r, row * 7 + col) ??
+        cellName(d, r, p, {
+          cheapest: has(o.cheapest, d, r),
+          low: has(o.low, d, r),
+          selected: sel[0] === d && sel[1] === r,
+        });
+      cells.push(n('button', name, [text(`£${p}`)]));
     }
-  const depLabels = deps.map(dayLabel);
-  const retLabels = rets.map(dayLabel);
-  const lines = (o.labels ?? 'lines') === 'lines';
+  const k = o.rotate ?? 0;
+  const turn = <T>(xs: T[]): T[] =>
+    xs.length === 0 ? xs : [...xs.slice(k % xs.length), ...xs.slice(0, k % xs.length)];
+  const line = (labels: string[]): FakeNode =>
+    n('generic', '', labels.map(text), { text: `0000${labels.join('')}0000` });
   const scroll = o.scroll !== false;
-  const selPrice = price(sel[0], sel[1]) ?? 0;
   const tabs = n('tablist', '', [
     n('tab', 'Dates', [], { selected: o.tab !== 'graph' }),
     n('tab', 'Price graph', [], { selected: o.tab === 'graph' }),
@@ -95,13 +108,13 @@ export function gridTree(o: GridTreeOptions): FakeNode {
           text('Cheapest Compared with other prices shown Departure'),
           ...(scroll ? [n('button', 'Scroll left'), n('button', 'Scroll right')] : []),
           n('grid', 'Date grid'),
-          ...(lines ? [text(`0000 ${depLabels.join(' ')}`)] : depLabels.map(text)),
-          ...cells,
-          ...(lines
-            ? [text(`${retLabels.join(' ')} 0000 Return`)]
-            : [...retLabels.map(text), text('Return')]),
+          line(turn(deps.map(dayLabel))),
+          ...turn(cells),
+          line(rets.map(dayLabel)),
+          text('Return'),
           ...(scroll ? [n('button', 'Scroll up'), n('button', 'Scroll down')] : []),
-          text(selectedLine(sel[0], sel[1], selPrice)),
+          text(selectedRange(sel[0], sel[1], o.thisYear)),
+          text(`£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`),
           ...(o.extra ?? []),
         ]);
   return n('dialog', 'Price insights', [

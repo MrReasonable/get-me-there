@@ -48,6 +48,8 @@ export default defineConfig({
         'src/guard.ts': SAFETY,
         'src/ready.ts': SAFETY,
         'src/accountCookies.ts': SAFETY,
+        // why: WP15: the date grid's dated grammar joins the safety modules
+        'src/gridNames.ts': SAFETY,
       },
     },
   },

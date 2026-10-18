@@ -1,4 +1,4 @@
-import type { PageRequest } from '@gmt/core';
+import type { ListRequest } from '@gmt/core';
 
 /**
  * The one URL form (spec §2; brief §6), the feasibility load's: `?q=Flights from <origin> to <destination> on
@@ -8,7 +8,7 @@ import type { PageRequest } from '@gmt/core';
 export const RESULTS_BASE = 'https://www.google.com/travel/flights';
 
 export function pageUrl(
-  req: Pick<PageRequest, 'origin' | 'destination' | 'departureDate' | 'returnDate' | 'gl'>,
+  req: Pick<ListRequest, 'origin' | 'destination' | 'departureDate' | 'returnDate' | 'gl'>,
 ): string {
   const u = new URL(RESULTS_BASE);
   u.search = new URLSearchParams({

@@ -18,8 +18,10 @@ import type {
   PointOfSale,
   Provenance,
   ProviderId,
+  ReturnDateSource,
   SourceKind,
   SuppliedField,
+  VendorPriceMark,
 } from '@gmt/core';
 
 /** Spec §7 `airports` row. */
@@ -108,6 +110,10 @@ export interface CalendarPriceInsert {
   maxAgeHours: number | null;
   vendorLink: string | null;
   reusedFromExecutionId: string | null;
+  /** Spec §7 rev 34: where the return date came from; stated on every insert (no default). */
+  returnDateSource: ReturnDateSource;
+  /** The vendor's own price mark, null where the vendor states no marks. */
+  vendorPriceMark: VendorPriceMark | null;
 }
 export interface CalendarPriceRow extends CalendarPriceInsert {
   id: number;

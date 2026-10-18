@@ -80,6 +80,27 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
       expect(String(e)).not.toContain(KEY);
     }
   });
+  // why: spec §2 rev 34: grid pages only with CAMOUFOX_MODE=grid; the scroll spacing at least 5 s, the cap at most 60
+  it('grid settings: list by default, grid when asked, spacing 5–30 and a cap of 0–60', () => {
+    expect(loadWorkerConfig(ENV)).toMatchObject({
+      mode: 'list',
+      gridScrollSpacingSeconds: 5,
+      gridScrollCap: 30,
+    });
+    expect(
+      loadWorkerConfig({
+        ...ENV,
+        CAMOUFOX_MODE: 'grid',
+        CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '30',
+        CAMOUFOX_GRID_SCROLL_CAP: '0',
+      }),
+    ).toMatchObject({ mode: 'grid', gridScrollSpacingSeconds: 30, gridScrollCap: 0 });
+    expect(fields({ ...ENV, CAMOUFOX_MODE: 'calendar' })).toEqual(['CAMOUFOX_MODE']);
+    expect(fields({ ...ENV, CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '4' })).toEqual([
+      'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
+    ]);
+    expect(fields({ ...ENV, CAMOUFOX_GRID_SCROLL_CAP: '61' })).toEqual(['CAMOUFOX_GRID_SCROLL_CAP']);
+  });
   it('a missing key refuses', () => {
     expect(fields({ HOME: '/h' })).toEqual(['CAMOUFOX_WORKER_KEY']);
   });

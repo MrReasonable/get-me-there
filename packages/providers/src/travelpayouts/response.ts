@@ -319,7 +319,13 @@ export function attributeRows(rows: readonly unknown[], input: AttributionInput)
       droppedFor(key, cell).badPrice += 1;
       continue;
     }
-    const price: RawCalendarPrice = { ...cell, amountMinor, currency: input.currency.code };
+    const price: RawCalendarPrice = {
+      ...cell,
+      amountMinor,
+      currency: input.currency.code,
+      returnDateSource: 'vendor',
+      vendorPriceMark: null,
+    };
     // why: day resolution (decision 35). A search day that is the fetch day, or later, would read "just now" from its
     // midnight, so the row is observed at the fetch itself; an earlier day stays its 00:00 UTC start.
     const seen = searchedAt(row.link);

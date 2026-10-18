@@ -159,6 +159,9 @@ export function normaliseCalendarPrice(
     maxAgeHours: c.info.maxAgeHours === 'unknown' ? null : c.info.maxAgeHours,
     vendorLink: vendorLinkOf(raw.vendorLink, c.providerId),
     reusedFromExecutionId: null,
+    // why: spec §7 rev 34: where the return date came from, and the vendor's own mark, as the adapter stated them
+    returnDateSource: raw.returnDateSource,
+    vendorPriceMark: raw.vendorPriceMark,
   };
 }
 

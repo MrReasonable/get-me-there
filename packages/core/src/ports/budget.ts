@@ -43,6 +43,8 @@ export interface Reservation {
     httpStatus?: number;
     durationMs: number;
     pageClass?: 'page' | 'no-page';
+    /** Spec §7 rev 34: the scroll clicks a camoufox grid page made, from its answer; absent when no answer came. */
+    scrollCount?: number;
   }): void;
 }
 
@@ -59,6 +61,11 @@ export interface BudgetGuard {
     costMicroGbp: number;
     httpAttempt: number;
     endpointPath: string;
+    /**
+     * Spec §2 rev 34: a camoufox grid page's planned scrolls; they must fit what the provider's run and month scroll
+     * caps leave, and the pending row holds them until it finalises.
+     */
+    scrolls?: number;
   }): Reservation;
   recordCacheHit(p: {
     providerId: ProviderId;

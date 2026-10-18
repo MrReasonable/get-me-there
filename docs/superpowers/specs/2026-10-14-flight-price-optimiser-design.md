@@ -2027,6 +2027,11 @@ CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per calendar month (provid
 CAMOUFOX_BILLING_DAY=1                   # 1–28, the month boundary for the page cap
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; minimum 24 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
+CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
+CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; minimum 5, maximum 30; never randomised
+CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
+CAMOUFOX_EXECUTION_SCROLL_CAP=600        # grid: scrolls per execution, checked before every page's scrolls; 0–6000
+CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per calendar month
 # worker side only, macOS only (its one 0600 env file <data>/worker.env, docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_BINARY_BUILD, CAMOUFOX_WORKER_PORT
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
 # --- email (all or nothing) ---
@@ -2253,13 +2258,12 @@ settles classified on every poll, a stop discarding the whole page, the
 §5.2 gains the `grid-path` tile; §7 gains `calendar_prices.return_date_source`
 and `vendor_price_mark` and `provider_requests.scroll_count` (migration
 0006) and lists `page_class`; §2's ledger paragraph counts scrolls on the
-page row, never as pages; §16 adds work package 15. §12's block is
-unchanged until work package 15 lands, which adds `CAMOUFOX_MODE=grid`,
+page row, never as pages; §16 adds work package 15. §12's block and
+`.env.example` gain `CAMOUFOX_MODE` (list or grid),
 `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, at least 5),
 `CAMOUFOX_GRID_SCROLL_CAP` (default 30, at most 60),
 `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and
-`CAMOUFOX_MONTHLY_SCROLL_CAP` (default 6,000) to it and to `.env.example`
-together. After the round-1 review (0 Critical, 9 High, 19 Medium, 11 Low;
+`CAMOUFOX_MONTHLY_SCROLL_CAP` (default 6,000). After the round-1 review (0 Critical, 9 High, 19 Medium, 11 Low;
 rulings folded into plan decision 70): a dialog view `dates-grid` for the
 classifier, cells found by position, a grammar-drift stop, the assumed 24 h
 age, whole pounds stated, SearchApi's `is_lowest_price` stored as the

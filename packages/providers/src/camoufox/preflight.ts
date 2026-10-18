@@ -6,6 +6,7 @@
  */
 import {
   AbortedError,
+  GRID_STEP_DAYS,
   type PreflightResult,
   type ProviderContext,
   ProviderError,
@@ -20,9 +21,11 @@ export const UNREACHABLE = 'browser worker not reachable';
 export const KEY_REFUSED = 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)';
 export const UNREADABLE = "the worker's status could not be read by this build (versions differ?)";
 export const SIGNED_IN_REFUSED = 'signed-in profile refused';
+export const GRID_NOT_VERIFIED =
+  'grid mode not verified on the worker (CAMOUFOX_MODE=grid in worker.env, and the same measured grid step)';
 
 export async function camoufoxPreflight(
-  o: { http: HttpKit; key: Secret; workerUrl: string },
+  o: { http: HttpKit; key: Secret; workerUrl: string; grid?: boolean },
   ctx: ProviderContext,
 ): Promise<PreflightResult> {
   let body: unknown;
@@ -65,5 +68,15 @@ export async function camoufoxPreflight(
     };
   if (st.signedInRefusal || st.accountCookie.found)
     return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
+  // why: spec §2 rev 34: grid pages are planned from the measured step, so the worker must report the same one
+  const step = st.gridStepDays;
+  if (
+    o.grid === true &&
+    (step === undefined ||
+      step === null ||
+      step.departures !== GRID_STEP_DAYS.departures ||
+      step.returns !== GRID_STEP_DAYS.returns)
+  )
+    return { ok: false, skip: 'provider_disabled', detail: GRID_NOT_VERIFIED };
   return { ok: true };
 }

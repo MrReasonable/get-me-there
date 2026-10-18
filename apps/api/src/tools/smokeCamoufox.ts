@@ -17,6 +17,7 @@ import {
   daysBetween,
   type FlightProvider,
   formatPence,
+  GRID_SOURCE_LABEL,
   type IsoDateTime,
   londonDateOf,
   searchLinkFor,
@@ -26,7 +27,7 @@ import {
   workerAnswerSchema,
   workerStatusSchema,
 } from '@gmt/core';
-import { CAMOUFOX_DISCOVERY_INFO, type HttpKit } from '@gmt/providers';
+import { CAMOUFOX_DISCOVERY_INFO, CAMOUFOX_GRID_INFO, type HttpKit } from '@gmt/providers';
 import { safeMessage } from '../safeMessage.js';
 import type { Ports } from '../wiring.js';
 import type { Seen, SmokeCheck } from './smokeChecks.js';
@@ -42,6 +43,8 @@ export interface CamoufoxRun {
   info: CapabilityInfo | null;
   /** The worker's own `cells` answer for the page, when it answered one. */
   answer: Extract<WorkerAnswer, { kind: 'cells' }> | null;
+  /** Grid mode (spec §2 rev 34): the worker's own `grid` answer for the page, when it answered one. */
+  gridAnswer?: Extract<WorkerAnswer, { kind: 'grid' }> | null;
 }
 
 /** The SOCS cookie's stated lifetime in days (13 months; the worker refuses an older capture). */
@@ -119,6 +122,7 @@ export async function camoufoxStage(
     cell: plan.coveredCells[0] ?? null,
     info: cap.info,
     answer: a.success && a.data.kind === 'cells' ? a.data : null,
+    gridAnswer: a.success && a.data.kind === 'grid' ? a.data : null,
   };
 }
 
@@ -218,7 +222,47 @@ export function camoufoxChecks(
   );
   const tile = run.tile?.kind === 'tile' ? run.tile : null;
   const answer = run.answer;
-  if (tile === null || run.cell === null || answer === null) {
+  const grid = run.gridAnswer ?? null;
+  if (tile !== null && grid !== null) {
+    // why: spec §2 rev 34 (Task 15.11): a grid page's prices come from the date grid, its ledger row holds the scrolls
+    // the worker made, and its provenance is the grid's (the assumed 24 h age)
+    const scrolled = ports.db.raw
+      .prepare<[string], { n: number | null }>(
+        "SELECT scroll_count AS n FROM provider_requests WHERE execution_id = ? AND provider_id = 'camoufox' AND page_class IS NOT 'no-page' ORDER BY id",
+      )
+      .all(executionId)
+      .map((r) => r.n);
+    const fromGrid = tile.prices.length > 0 && tile.prices.every((p) => p.returnDateSource === 'grid-cell');
+    const counted = scrolled.length === 1 && scrolled[0] === grid.scrolls;
+    add(
+      'camoufox cell',
+      grid.ended === 'no-flights' ? 'look' : fromGrid && counted ? 'pass' : 'fail',
+      grid.ended === 'no-flights'
+        ? 'no price: the page was Google’s no-flights page (past the sale window)'
+        : `${tile.prices.length} day pair(s) priced from the date grid; ${grid.scrolls} scroll(s), the ledger row holds ${scrolled.map((n) => (n === null ? 'none' : String(n))).join(', ')}`,
+    );
+    const issues = tile.cellIssues ?? [];
+    add(
+      'camoufox partial',
+      issues.length > 0 ? 'look' : 'pass',
+      issues.length === 0
+        ? 'every covered day pair read'
+        : `${issues.length} day pair(s) not read: ${issues[0]?.detail ?? ''}`,
+    );
+    const info = run.info;
+    const labelled =
+      info !== null &&
+      info.sourceKind === 'scraped-self' &&
+      info.maxAgeHours === 24 &&
+      info.maxAgeAssumed === true &&
+      info.provenanceNote === CAMOUFOX_GRID_INFO.provenanceNote;
+    const fresh = Date.parse(tile.fetchedAt) >= Date.parse(runStart) - CAMOUFOX_CLOCK_SKEW_MS;
+    add(
+      'camoufox provenance',
+      labelled && fresh && grid.currency === 'GBP' ? 'pass' : 'fail',
+      `${info?.sourceKind ?? 'no source kind'}, maxAgeHours ${info?.maxAgeHours ?? '?'}${info?.maxAgeAssumed === true ? ' (assumed)' : ''}, ${grid.currency}, ${GRID_SOURCE_LABEL}`,
+    );
+  } else if (tile === null || run.cell === null || answer === null) {
     for (const name of ['camoufox cell', 'camoufox partial', 'camoufox provenance'] as const)
       add(name, 'skip', blocked ? 'blocked' : 'no page read');
   } else {

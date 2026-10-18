@@ -5,11 +5,14 @@ export {
   BLOCKED_WORDS,
   CAMOUFOX_DISCOVERY_INFO,
   CAMOUFOX_DISPLAY_NAME,
+  CAMOUFOX_GRID_INFO,
   camoufoxHttpLimits,
   camoufoxProvider,
   camoufoxStatusHttpLimits,
   classifyWorkerAnswer,
   coolingDownWords,
+  gridTileEstimate,
+  planGridTiles,
   planSingleCells,
 } from './camoufox/index.js'; // WP14: apps/api httpLimitsFor and providersFor; the smoke rows; classifyWorkerAnswer: engine tests
 export { fixtureHttpLimits, fixtureProvider } from './fixture/provider.js'; // fixtureHttpLimits: WP4b httpLimitsFor

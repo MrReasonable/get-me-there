@@ -2,7 +2,14 @@ import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
 import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
 import type { BaggageSnapshot, FareConditions, SuppliedField } from '../types/itinerary.js';
-import type { Cabin, PointOfSale, ProviderId, SourceKind } from '../types/provenance.js';
+import type {
+  Cabin,
+  PointOfSale,
+  ProviderId,
+  ReturnDateSource,
+  SourceKind,
+  VendorPriceMark,
+} from '../types/provenance.js';
 
 export { AbortedError, BudgetExceeded, ProviderError } from '../errors.js';
 export type { CellKey } from '../types/definition.js';
@@ -21,6 +28,8 @@ export interface CapabilityInfo {
    * bound the vendor states; the Providers view then words it "assumed ≤24h (undocumented)". Absent means stated.
    */
   maxAgeAssumed?: boolean | undefined;
+  /** Spec §2 rev 34: where this capability's return dates come from, when it names its own source label by it. */
+  returnDateSource?: ReturnDateSource | undefined;
 }
 
 export interface DiscoveryQuery {
@@ -39,13 +48,28 @@ export interface DiscoveryQuery {
    * provider that matches airports by name (camoufox reads names, never codes) can tell this cell's options apart.
    */
   airportNames?: { origin: string[]; destination: string[] };
+  /**
+   * Spec §2 rev 34: how many pairs the stage plans for this provider, set by the engine, so a provider whose caps are
+   * per run (camoufox grid pages and scrolls) gives each pair its share. Absent: one pair.
+   */
+  share?: { pairs: number };
 }
 /** Vendor-neutral, typed tile requests; `month` is the Travelpayouts tile. */
 export type TileRequest =
   | { kind: 'month'; month: IsoMonth }
   | { kind: 'length-month'; length: number; month: IsoMonth }
   | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
-  | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
+  | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate }
+  /**
+   * Spec §2 rev 34 (camoufox grid): one page: its first block's centre as the query, its scroll moves, and which views
+   * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`).
+   */
+  | {
+      kind: 'grid-path';
+      start: { departureDate: IsoDate; returnDate: IsoDate };
+      moves: Array<'left' | 'right' | 'up' | 'down'>;
+      reads: boolean[];
+    };
 export interface TilePlan {
   index: number;
   coveredCells: CellKey[];
@@ -70,6 +94,10 @@ export interface RawCalendarPrice extends CellKey {
   currency: string;
   providerObservedAt?: IsoDateTime;
   vendorLink?: string;
+  /** Where the return date came from (spec §7 rev 34); every adapter states it. */
+  returnDateSource: ReturnDateSource;
+  /** The vendor's own mark, or null where the vendor states no marks (PA-08); never this app's minimum. */
+  vendorPriceMark: VendorPriceMark | null;
 }
 export type DiscoveryTileResult =
   | {
@@ -162,6 +190,8 @@ export interface CostEstimate {
   costMicroGbp: number;
   seconds: number;
   notes: string[];
+  /** camoufox grid only (spec §2 rev 34, CB-3): the scroll clicks the plan makes beside its pages. */
+  scrolls?: number;
 }
 /**
  * Spec §5.1 rev 32: an unledgered check before a stage plans tiles (camoufox reads its worker's `/v1/status`). A refusal

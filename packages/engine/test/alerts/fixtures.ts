@@ -319,6 +319,8 @@ function calendarRow(f: Fixture, r: CalendarSeed) {
             : 0,
     vendorLink: null,
     reusedFromExecutionId: null,
+    returnDateSource: 'vendor',
+    vendorPriceMark: null,
   } as const;
 }
 

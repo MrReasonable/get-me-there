@@ -18,6 +18,7 @@ export type {
   SchedulerJob,
 } from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
+export * from './camoufox/grid.js';
 export * from './camoufox/protocol.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
@@ -32,7 +33,7 @@ export * from './dates/epochDay.js';
 export * from './errors.js';
 export * from './labels/age.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
-export { SOURCE_LABELS, sourceLabel } from './labels/source.js';
+export { GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
 export { itineraryHash } from './normalise/hashing.js';

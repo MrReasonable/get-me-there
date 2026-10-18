@@ -145,7 +145,24 @@ describe('the worker server (brief §6 table, one it per row)', () => {
   });
   it('409 for grid', async () => {
     const t = await start({ answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false });
-    expect((await t.post({ ...BODY, mode: 'grid' })).status).toBe(409);
+    const grid = {
+      mode: 'grid',
+      origin: 'LHR',
+      destination: 'JFK',
+      gl: 'GB',
+      start: { departureDate: '2026-11-05', returnDate: '2026-11-15' },
+      moves: ['down'],
+      reads: [true, true],
+      scrollAllowance: 1,
+    };
+    expect((await t.post(grid)).status).toBe(409);
+    // why: spec §2 rev 34: a grid request past the worker's scroll cap is refused, 400
+    const capped = await start({
+      answer: { kind: 'mode-unavailable', mode: 'grid' },
+      googleContacted: false,
+      rejected: true,
+    });
+    expect((await capped.post(grid)).status).toBe(400);
   });
   it.each([
     ['an oversize body', { raw: JSON.stringify({ ...BODY, pad: 'x'.repeat(MAX_BODY_BYTES) }) }],

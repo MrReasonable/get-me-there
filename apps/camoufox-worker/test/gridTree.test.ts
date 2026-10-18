@@ -1,15 +1,16 @@
-// The synthetic grid builder holds recording 2's shape (WP15 PIE-16): the names in the recorded forms, the two lines,
-// the four scroll buttons and the cells as the panel's own buttons, never the grid's.
+// The synthetic grid builder holds the --grid recordings' shape (WP15 PIE-16): names in the recorded forms, two line
+// elements whose text runs their labels together, 14 label elements, the cells as the panel's own buttons, the four
+// scroll buttons, the range and price lines as separate elements, and the rotation a scroll leaves.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { descendants } from './support/fakePage.js';
-import { cellName, dayLabel, gridTree, selectedLine } from './support/gridTree.js';
+import { cellName, dayLabel, gridTree, selectedRange } from './support/gridTree.js';
 
 beforeEach(() => {
   expect.hasAssertions();
 });
 
 describe('gridTree', () => {
-  it('builds 49 cells in rows of one return, the lines, the scroll buttons and the selected line', () => {
+  it('builds 49 cells in rows of one return, the lines, the scroll buttons and the selected lines', () => {
     const t = gridTree({ depart: '2027-03-11', ret: '2027-03-21', cheapest: [['2027-03-15', '2027-03-23']] });
     const panel = descendants([t]).find((x) => x.role === 'tabpanel');
     const kids = panel?.children ?? [];
@@ -27,11 +28,32 @@ describe('gridTree', () => {
     expect(cells.filter((c) => c.includes(', cheapest price, '))).toHaveLength(1);
     expect(cells.find((c) => c.endsWith(', selected'))).toMatch(/, 14 Mar to 24 Mar, selected$/);
     expect(descendants([t]).find((x) => x.role === 'grid')?.children).toEqual([]);
-    expect(kids.map((x) => x.name).filter((x) => x?.includes('Return'))).toEqual([
-      'Sun 21 Mar Mon 22 Mar Tue 23 Mar Wed 24 Mar Thu 25 Mar Fri 26 Mar Sat 27 Mar 0000 Return',
+    const lines = kids.filter((x) => x.role === 'generic').map((x) => x.text);
+    expect(lines).toEqual([
+      '0000Thu 11 MarFri 12 MarSat 13 MarSun 14 MarMon 15 MarTue 16 MarWed 17 Mar0000',
+      '0000Sun 21 MarMon 22 MarTue 23 MarWed 24 MarThu 25 MarFri 26 MarSat 27 Mar0000',
     ]);
+    expect(
+      descendants(kids).filter((x) => x.role === 'text' && /^\w{3} \d+ \w{3}$/.test(x.name ?? '')),
+    ).toHaveLength(14);
+    expect(
+      kids
+        .filter((x) => x.role === 'text')
+        .map((x) => x.name)
+        .slice(-2),
+    ).toEqual(['14 – 24 Mar 2027', expect.stringMatching(/^£\d+ · Round trip$/)]);
   });
-  it('names the forms the recording shows', () => {
+  it('rotates the departures and the cells as a scrolled view does', () => {
+    const t = gridTree({ depart: '2027-03-27', ret: '2027-04-04', rotate: 6 });
+    const kids = descendants([t]).find((x) => x.role === 'tabpanel')?.children ?? [];
+    expect(kids.find((x) => x.role === 'generic')?.text).toBe(
+      '0000Fri 2 AprSat 27 MarSun 28 MarMon 29 MarTue 30 MarWed 31 MarThu 1 Apr0000',
+    );
+    expect(kids.find((x) => x.role === 'button' && x.name?.startsWith('£'))?.name).toMatch(
+      /, 2 Apr to 4 Apr$/,
+    );
+  });
+  it('names the forms the recordings show', () => {
     expect(dayLabel('2027-03-11')).toBe('Thu 11 Mar');
     expect(cellName('2027-03-15', '2027-03-23', 397, { cheapest: true, selected: false })).toBe(
       '£397, cheapest price, 15 Mar to 23 Mar',
@@ -39,14 +61,14 @@ describe('gridTree', () => {
     expect(cellName('2027-03-14', '2027-03-24', 1204, { cheapest: false, selected: true })).toBe(
       '£1,204, 14 Mar to 24 Mar, selected',
     );
-    expect(selectedLine('2027-03-14', '2027-03-24', 462)).toBe('14 – 24 Mar 2027£462 · Round trip');
-    expect(selectedLine('2026-12-27', '2027-01-06', 500)).toBe('27 Dec 2026 – 6 Jan 2027£500 · Round trip');
-    expect(selectedLine('2027-03-28', '2027-04-07', 500)).toBe('28 Mar – 7 Apr 2027£500 · Round trip');
+    expect(selectedRange('2027-03-14', '2027-03-24')).toBe('14 – 24 Mar 2027');
+    expect(selectedRange('2026-12-27', '2027-01-06')).toBe('27 Dec 2026 – 6 Jan 2027');
+    expect(selectedRange('2027-03-28', '2027-04-07')).toBe('28 Mar – 7 Apr 2027');
+    expect(selectedRange('2026-10-20', '2026-10-23')).toBe('20 – 23 Oct');
   });
-  it('builds the labels form, the Price graph tab form and a dialog without scroll buttons', () => {
-    const labels = gridTree({ depart: '2027-03-11', ret: '2027-03-21', labels: 'labels', scroll: false });
-    const kids = descendants([labels]).find((x) => x.role === 'tabpanel')?.children ?? [];
-    expect(kids.filter((x) => x.role === 'text' && /^\w{3} \d+ \w{3}$/.test(x.name ?? ''))).toHaveLength(14);
+  it('builds the Price graph tab form and a dialog without scroll buttons', () => {
+    const none = gridTree({ depart: '2027-03-11', ret: '2027-03-21', scroll: false });
+    const kids = descendants([none]).find((x) => x.role === 'tabpanel')?.children ?? [];
     expect(kids.some((x) => (x.name ?? '').startsWith('Scroll'))).toBe(false);
     const graph = gridTree({ depart: '2027-03-11', ret: '2027-03-21', tab: 'graph' });
     expect(descendants([graph]).some((x) => x.role === 'tabpanel')).toBe(false);

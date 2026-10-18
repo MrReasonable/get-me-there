@@ -18,6 +18,7 @@ function upTo0001(): string {
     '0003_route_history_by_trip',
     '0004_route_history_point_of_sale',
     '0005_camoufox_provider',
+    '0006_grid_return_source',
   ];
   for (const tag of later) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
@@ -51,6 +52,7 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
       '0003_route_history_by_trip',
       '0004_route_history_point_of_sale',
       '0005_camoufox_provider',
+      '0006_grid_return_source',
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const events = new AlertsRepo(db, fixedClock(T0)).events({ ruleId: 'r1', limit: 10 });

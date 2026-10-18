@@ -192,6 +192,8 @@ export const coverageResponseSchema = z.object({
         cacheHits: count,
         costMicroGbp: microGbpSchema,
         planCalls: count.nullable(),
+        /** camoufox grid pages' scroll clicks beside their pages (spec §2 rev 34, CB-5). */
+        scrolls: count.exactOptional(),
       }),
       overrun: z.boolean(),
       parityBreak: z.boolean(),

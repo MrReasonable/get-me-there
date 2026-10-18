@@ -58,6 +58,15 @@ export interface Config {
       executionPageCap: number;
       cooldownHours: number;
       pageTimeoutSeconds: number;
+      /** Spec §2 rev 34: `grid` reads the Dates tab's date grid once the worker reports it verified. */
+      mode: 'list' | 'grid';
+      /** Grid mode (spec §2 rev 34): scroll clicks start to start, at least 5 s; never randomised. */
+      gridScrollSpacingSeconds: number;
+      /** Grid mode: scrolls a page may make. */
+      gridScrollCap: number;
+      /** Grid mode: scrolls a run may make, and a month. */
+      executionScrollCap: number;
+      monthlyScrollCap: number;
       limits: ProviderLimits;
     } | null;
     /** only outside production; the fixture provider itself is gated by syntheticAllowed */
@@ -228,8 +237,13 @@ export function camoufoxWorkerUrlOk(raw: string): boolean {
 /** Spec §12 rev 32: the camoufox block; validated whether or not it is enabled, built only when it is. */
 function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
   const enabled = r.bool('CAMOUFOX_ENABLED') ?? false;
-  // why: decision 69: grid mode stays refused until stored rows record where a return date came from.
-  r.oneOf('CAMOUFOX_MODE', ['list']);
+  // why: decision 70: grid mode is offered now that stored rows record where a return date came from; the provider
+  // still skips it until the worker reports GRID_VERIFIED and its measured step
+  const mode = r.oneOf('CAMOUFOX_MODE', ['list', 'grid']) ?? 'list';
+  const gridScrollSpacingSeconds = r.int('CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', 5, 30) ?? 5;
+  const gridScrollCap = r.int('CAMOUFOX_GRID_SCROLL_CAP', 0, 60) ?? 30;
+  const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
+  const monthlyScrollCap = r.int('CAMOUFOX_MONTHLY_SCROLL_CAP', 0) ?? 6000;
   const minSpacingSeconds = r.int('CAMOUFOX_MIN_SPACING_SECONDS', 30, 600) ?? 30;
   const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
   const monthlyCallCap = r.int('CAMOUFOX_MONTHLY_PAGE_CAP', 0) ?? 1500;
@@ -253,6 +267,11 @@ function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
     executionPageCap,
     cooldownHours,
     pageTimeoutSeconds,
+    mode,
+    gridScrollSpacingSeconds,
+    gridScrollCap,
+    executionScrollCap,
+    monthlyScrollCap,
     limits: {
       monthlyCallCap,
       window: 'month',
@@ -268,6 +287,8 @@ function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
       executionCallCap: executionPageCap,
       pagesOnly: true,
       minSpacingSeconds,
+      executionScrollCap,
+      monthlyScrollCap,
     },
   };
 }

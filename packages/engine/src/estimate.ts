@@ -4,11 +4,13 @@ import {
   cellKeyString,
   type DefinitionSnapshot,
   type Execution,
+  GRID_TIMES,
   microGbpToPence,
   type ProviderId,
   type SourceKind,
   type Stage,
 } from '@gmt/core';
+import { gridTileEstimate } from '@gmt/providers';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
@@ -49,6 +51,10 @@ interface Line {
   rawSeconds: number;
   /** A provider's own per-execution cap (camoufox pages): calls and seconds are clamped to it after the factor. */
   cap?: { calls: number; seconds: number };
+  /** camoufox grid: the scrolls beside the pages (spec §2 rev 34). */
+  scrolls?: number;
+  /** Ruling 13: a provider that never retries (camoufox) carries no retry factor. */
+  noRetry?: true;
 }
 
 function assemble(
@@ -58,8 +64,9 @@ function assemble(
   windowClamped: boolean,
   assumptions: readonly string[],
 ): Estimate {
-  const f = ctx.config.estimateRetryFactor;
+  const factor = ctx.config.estimateRetryFactor;
   const perProvider = lines.map((l) => {
+    const f = l.noRetry === true ? 1 : factor;
     const costMicroGbp = Math.ceil(l.rawCostMicroGbp * f);
     // why: cost-004: the guard refuses a page past the snapshot cap, so the factor can never ask for more than it
     const clamp = (n: number, cap: number | undefined): number => (cap === undefined ? n : Math.min(n, cap));
@@ -72,15 +79,22 @@ function assemble(
       costPence: microGbpToPence(costMicroGbp),
       seconds: clamp(Math.ceil(l.rawSeconds * f), l.cap?.seconds),
       blocked: null,
+      ...(l.scrolls === undefined ? {} : { scrolls: l.scrolls }),
     };
   });
   return {
     cells,
     perProvider,
     ...totalsOf(perProvider),
-    assumptions: [`every call count includes the retry factor ${f}`, ...assumptions],
+    assumptions: [
+      `every call count includes the retry factor ${factor}`,
+      ...(lines.some((l) => l.noRetry === true)
+        ? ['camoufox never retries: its pages, scrolls and seconds carry no retry factor']
+        : []),
+      ...assumptions,
+    ],
     windowClamped,
-    retryFactor: f,
+    retryFactor: factor,
   };
 }
 
@@ -138,7 +152,8 @@ function discoveryLine(
     notes.push(`${providerId}: ${reused.length} cells reuse earlier prices and are not planned`);
   const reusedKeys = new Set(reused.map((r) => cellKeyString(r.cell)));
   const fresh = cells.filter((c) => !reusedKeys.has(cellKeyString(c)));
-  const tiles = fresh.length === 0 ? 0 : planTiles(providerId, cap, snapshot, fresh).length;
+  const planned = fresh.length === 0 ? [] : planTiles(providerId, cap, snapshot, fresh);
+  const tiles = planned.length;
   // why: cost-r1-007 — planCalls counts tiles; a tile that pages spends a call a page, so discovery overrun is judged on
   // distinct tiles (LedgerRepo.countsFor tiles), never on calls
   if (tiles > 0)
@@ -157,6 +172,27 @@ function discoveryLine(
         : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId }).calls;
     const left = Math.max(0, pageCap - used);
     const pages = tiles === 0 ? 0 : left === 0 ? 1 : Math.min(tiles, left);
+    if (planned.some((t) => t.plan.request.kind === 'grid-path')) {
+      // why: spec §2 rev 34 (CB-3): the run's pages are the first `pages` of the plan; each takes the page time and its
+      // scrolls the measured scroll time (GRID_TIMES)
+      const run = planned.slice(0, pages);
+      const scrolls = run.reduce((n, t) => n + gridTileEstimate(t.plan, GRID_TIMES).scrolls, 0);
+      const seconds = run.reduce((n, t) => n + gridTileEstimate(t.plan, GRID_TIMES).seconds, 0);
+      const read = run.reduce((n, t) => n + t.plan.coveredCells.length, 0);
+      notes.push(
+        `${providerId} grid mode reads ${read} of ${fresh.length} cells this run in ${pages} pages and ${scrolls} scrolls; a full pass takes ${Math.max(1, Math.ceil(tiles / pageCap))} run${Math.ceil(tiles / pageCap) > 1 ? 's' : ''}`,
+      );
+      return {
+        providerId,
+        stage: 'discovery',
+        rawCalls: pages,
+        rawCostMicroGbp: 0,
+        rawSeconds: seconds,
+        cap: { calls: Math.max(left, 1), seconds: Math.ceil(seconds) },
+        scrolls,
+        noRetry: true,
+      };
+    }
     if (fresh.length > 0)
       notes.push(
         `${providerId} list mode prices ${pages} of ${fresh.length} cells this run; a full pass takes ${Math.ceil(fresh.length / pageCap)} runs; the month cap allows about ${l.monthlyCallCap} cells`,
@@ -170,6 +206,8 @@ function discoveryLine(
       // why: fix round 2 (CodeRabbit): the retry factor is clamped to the pages this execution has left (one when none
       // are, which checkBudget refuses), never to the whole cap
       cap: { calls: Math.max(left, 1), seconds: Math.max(left, 1) * perPage },
+      // why: ruling 13: camoufox never retries, so its estimate is the plan's own
+      noRetry: true,
     };
   }
   return {

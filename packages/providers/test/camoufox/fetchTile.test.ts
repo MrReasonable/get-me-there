@@ -132,7 +132,15 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     server.use(http.post(URL_, () => HttpResponse.json(price(), contacted(true))));
     const r = await p.discovery?.fetchTile(tile, Q, ctx);
     if (r?.kind !== 'tile') throw new Error('tile');
-    expect(r.prices).toEqual([{ ...tile.coveredCells[0], amountMinor: 45100, currency: 'GBP' }]);
+    expect(r.prices).toEqual([
+      {
+        ...tile.coveredCells[0],
+        amountMinor: 45100,
+        currency: 'GBP',
+        returnDateSource: 'asked',
+        vendorPriceMark: null,
+      },
+    ]);
     expect(r.cellIssues).toEqual([
       {
         cell: tile.coveredCells[0],

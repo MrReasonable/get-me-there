@@ -268,7 +268,14 @@ export function parseCalendarBody(
       dropped.set(key, (dropped.get(key) ?? 0) + 1);
       continue;
     }
-    prices.push({ ...cell, amountMinor: m.minor, currency: echo.currency });
+    // why: spec §7 rev 34 (PA-08): the vendor's own lowest-price flag is kept as its mark, never as this app's minimum
+    prices.push({
+      ...cell,
+      amountMinor: m.minor,
+      currency: echo.currency,
+      returnDateSource: 'vendor',
+      vendorPriceMark: e.is_lowest_price === undefined ? null : e.is_lowest_price ? 'cheapest' : 'none',
+    });
   }
   const noFares = plan.coveredCells.filter((c) => {
     const key = cellKeyString(c);

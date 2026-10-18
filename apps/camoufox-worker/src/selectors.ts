@@ -181,8 +181,9 @@ export const SELECTORS: Selectors = {
   NO_FLIGHTS_VERIFIED: true,
   // why: set 2026-10-18 by operator ruling: the socs-stability recording's passes 1–3 all read the cookie back `same`
   SOCS_STABLE: true,
-  // why: decision 69: grid mode is not built in WP14; this flag stays false here whatever a recording shows.
-  GRID_VERIFIED: false,
+  // why: decision 70: set 2026-10-18 from the --grid recordings (the dialog view, the cell grammar, the lines, the
+  // one-day step on both axes); grid pages still need CAMOUFOX_MODE=grid in worker.env
+  GRID_VERIFIED: true,
 };
 
 /** The recording that proved each true flag (TS-13): its date and what it was. */
@@ -197,6 +198,8 @@ export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
     '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
   SOCS_STABLE:
     '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
+  GRID_VERIFIED:
+    '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
 };
 
 /** The flags as `/v1/status` reports them. */

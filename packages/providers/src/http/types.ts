@@ -85,6 +85,11 @@ export interface ProviderHttpLimits {
    * whatever this says for a null response.
    */
   pageClass?: (f: { status: number | null; headers: Headers | null }) => 'page' | 'no-page';
+  /**
+   * Spec §7 rev 34 (camoufox grid): the scroll clicks an answer states, read from its body text, for the ledger row's
+   * `scroll_count`; undefined when the body states none.
+   */
+  scrollCountOf?: (bodyText: string) => number | undefined;
 }
 
 /** What createHttpKit needs (spec §5.3 rev 11). */
@@ -124,6 +129,8 @@ export interface HttpKitRequest {
    * §5.2, §8.1; plan decision 24). Absent or `true`: the row is written. Upstream attempts are always ledgered.
    */
   ledgerCacheHit?: boolean;
+  /** Spec §2 rev 34 (camoufox grid): the page's planned scrolls, which the reservation checks against the scroll caps. */
+  scrolls?: number;
 }
 
 /** `fetchedAt` is the original `storedAt` on a cache hit and the leader's on a joined request (spec §2). */

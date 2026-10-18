@@ -6,12 +6,13 @@ import { assertIsoDateTime } from '../internal/validate.js';
 
 /** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
 const TILE_EXPR = `COUNT(DISTINCT CASE WHEN tile_index IS NOT NULL AND http_attempt = 1 AND outcome <> 'cache_hit' THEN provider_id || ':' || tile_index END)`;
-const COUNTS = `COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits`;
+const COUNTS = `COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits, COALESCE(SUM(scroll_count), 0) AS scrolls`;
 interface CountsRow {
   calls: number;
   cost: number;
   tiles: number;
   cacheHits: number;
+  scrolls: number;
 }
 
 /** Reads and housekeeping over `provider_requests` (spec §7). Inserts and finalisation belong to `SqliteBudgetGuard`. */
@@ -34,6 +35,8 @@ export class LedgerRepo {
       costMicroGbp: number;
       tiles: number;
       cacheHits: number;
+      /** camoufox grid pages' scroll clicks (spec §7 rev 34); 0 for every other provider. */
+      scrolls: number;
     }>;
   } {
     const total = this.db.raw
@@ -57,6 +60,7 @@ export class LedgerRepo {
         costMicroGbp: r.cost,
         tiles: r.tiles,
         cacheHits: r.cacheHits,
+        scrolls: r.scrolls,
       })),
     };
   }

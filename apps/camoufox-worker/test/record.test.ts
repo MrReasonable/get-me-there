@@ -1508,14 +1508,12 @@ describe('record --grid', () => {
     expect(v0.candidates).toHaveLength(49);
     expect(v0.candidates[0]).toMatch(/, 11 Mar to 21 Mar$/);
     expect(v0.lines.texts).toEqual([
-      '0000 Thu 11 Mar Fri 12 Mar Sat 13 Mar Sun 14 Mar Mon 15 Mar Tue 16 Mar Wed 17 Mar',
-      'Sun 21 Mar Mon 22 Mar Tue 23 Mar Wed 24 Mar Thu 25 Mar Fri 26 Mar Sat 27 Mar 0000 Return',
+      '0000Thu 11 MarFri 12 MarSat 13 MarSun 14 MarMon 15 MarTue 16 MarWed 17 Mar0000',
+      '0000Sun 21 MarMon 22 MarTue 23 MarWed 24 MarThu 25 MarFri 26 MarSat 27 Mar0000',
     ]);
-    expect(v0.labels.count).toBe(0);
+    expect(v0.labels.count).toBe(14);
     expect(v0.datesGrid).toEqual({ dialog: 1, datesSelected: 1, grid: 1, scrollButtons: 4 });
-    expect(v0.selectedLines).toEqual([
-      `14 – 24 Mar 2027£${v0.candidates[24].match(/^£(\d+)/)?.[1]} · Round trip`,
-    ]);
+    expect(v0.selectedLines).toEqual([`£${v0.candidates[24].match(/^£(\d+)/)?.[1]} · Round trip`]);
     expect(v0.snapshot).toContain('- tabpanel "Dates":');
     expect(rec.moves.map((m: { dir: string; delta: unknown }) => [m.dir, m.delta])).toEqual([
       ['right', { departures: 7, returns: 0 }],
@@ -1533,15 +1531,16 @@ describe('record --grid', () => {
     ]);
     expect(cooldownOf(t)).toBeNull();
   });
-  it('reads the labels form the same way, and measures a step other than seven', async () => {
+  // why: the recordings of 2026-10-18: one scroll moves one day, and the page rotates its elements after a scroll
+  it('measures a one-day step from rotated lines', async () => {
+    let n0 = 0;
     const { t, deps } = gridRun({
       step: 1,
-      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, labels: 'labels' }))],
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, rotate: n0++ * 6 }))],
     });
     expect(await record(t.ctx([...G, '--moves', 'right,down']), cfg, deps)).toBe(0);
     const rec = recOf(t);
-    expect(rec.views[0].labels.count).toBe(14);
-    expect(rec.views[0].lines.count).toBe(0);
+    expect(rec.views[1].lines.texts[0]).toMatch(/^0000Thu 18 Mar/);
     expect(rec.moves.map((m: { delta: unknown }) => m.delta)).toEqual([
       { departures: 1, returns: 0 },
       { departures: 0, returns: 1 },

@@ -72,7 +72,13 @@ export function realKindProvider(o: RealKindProviderOptions): FlightProvider {
           coveredCells: plan.coveredCells,
           fetchedAt: o.clock.now(),
           pointOfSale: 'unknown',
-          prices: plan.coveredCells.map((c) => ({ ...c, amountMinor: o.priceOf(c), currency: 'GBP' })),
+          prices: plan.coveredCells.map((c) => ({
+            ...c,
+            amountMinor: o.priceOf(c),
+            currency: 'GBP',
+            returnDateSource: 'vendor' as const,
+            vendorPriceMark: null,
+          })),
           noFares: [],
           notes: [],
         };

@@ -210,6 +210,8 @@ export function seeder(ports: Ports) {
                 maxAgeHours: s.maxAgeHours === undefined ? 24 : s.maxAgeHours,
                 vendorLink: null,
                 reusedFromExecutionId: null,
+                returnDateSource: 'vendor',
+                vendorPriceMark: null,
               },
             ]
           : [],

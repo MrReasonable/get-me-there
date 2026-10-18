@@ -91,6 +91,14 @@ export function Provenance({
         <span title={formatAgeFull(age)}>{formatAgeCompact(age)}</span>
       )}
       {isCalendar ? <span className="font-medium">{COPY.constraintsNotChecked}</span> : null}
+      {p.returnDateSource === 'grid-cell' ? <span>{COPY.returnDateFromGrid}</span> : null}
+      {p.returnDateSource === 'asked' ? <span>{COPY.returnDateAsked}</span> : null}
+      {p.providerId === 'camoufox' && (p.vendorPriceMark === 'cheapest' || p.vendorPriceMark === 'low') ? (
+        <span className="italic">{COPY.vendorMark[p.vendorPriceMark]}</span>
+      ) : null}
+      {p.providerId === 'searchapi' && p.vendorPriceMark === 'cheapest' ? (
+        <span className="italic">{COPY.vendorMarkSearchApi}</span>
+      ) : null}
       {destination !== undefined ? <span>{destination}</span> : null}
       {destinationNote ? <span className="italic">{destinationNote}</span> : null}
     </span>

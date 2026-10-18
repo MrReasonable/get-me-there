@@ -12,7 +12,8 @@
     "src/names.ts",
     "src/guard.ts",
     "src/ready.ts",
-    "src/accountCookies.ts"
+    "src/accountCookies.ts",
+    "src/gridNames.ts"
   ],
   "thresholds": {
     "high": 90,

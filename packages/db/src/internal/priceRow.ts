@@ -1,7 +1,7 @@
 import type { FxInfo, Provenance } from '@gmt/core';
 import type { Db } from '../client.js';
 import type { CalendarPriceInsert, CalendarPriceRow } from '../types.js';
-import { CABINS, PROVIDER_IDS, SOURCE_KINDS } from './enums.js';
+import { CABINS, PROVIDER_IDS, RETURN_DATE_SOURCES, SOURCE_KINDS, VENDOR_PRICE_MARKS } from './enums.js';
 import { oneOf, RowCorrupt, readDate, readIata, readNullableTime, readTime } from './read.js';
 import {
   assertIsoDate,
@@ -36,6 +36,8 @@ export interface CalendarPriceDbRow {
   max_age_hours: number | null;
   vendor_link: string | null;
   reused_from_execution_id: string | null;
+  return_date_source: string;
+  vendor_price_mark: string | null;
 }
 
 /** Every repository rule for a calendar price (spec §5.5, §6.3, §7). `fresh` refuses a reused marker (reuse goes through copyReused). */
@@ -52,6 +54,12 @@ export function validateCalendarPrice(
   assertPointOfSale(row.pointOfSale);
   assertIsoDate('departure_date', row.cell.departureDate);
   assertIsoDate('return_date', row.cell.returnDate);
+  // why: spec §7 rev 34: only the camoufox grid reads a return date from a grid cell (the CHECK's twin)
+  if (row.returnDateSource === 'grid-cell' && row.providerId !== 'camoufox')
+    throw new RowRejected(
+      'return_date_source',
+      'only the camoufox grid reads a return date from a grid cell',
+    );
   if (fresh && row.reusedFromExecutionId !== null)
     throw new RowRejected(
       'reused',
@@ -61,9 +69,11 @@ export function validateCalendarPrice(
 
 const INSERT_SQL = `
 INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, price_pence, price_native_minor,
-  currency_native, fx_rate_nano, fx_rate_date, fx_source, fx_converted, point_of_sale, fetched_at, provider_observed_at, max_age_hours, vendor_link, reused_from_execution_id)
+  currency_native, fx_rate_nano, fx_rate_date, fx_source, fx_converted, point_of_sale, fetched_at, provider_observed_at, max_age_hours, vendor_link, reused_from_execution_id,
+  return_date_source, vendor_price_mark)
 VALUES (@executionId, @providerId, @sourceKind, @cabin, @origin, @destination, @departureDate, @returnDate, @pricePence, @priceNativeMinor,
-  @currencyNative, @fxRateNano, @fxRateDate, @fxSource, @fxConverted, @pointOfSale, @fetchedAt, @providerObservedAt, @maxAgeHours, @vendorLink, @reusedFrom)`;
+  @currencyNative, @fxRateNano, @fxRateDate, @fxSource, @fxConverted, @pointOfSale, @fetchedAt, @providerObservedAt, @maxAgeHours, @vendorLink, @reusedFrom,
+  @returnDateSource, @vendorPriceMark)`;
 
 /** Inserts one validated row; the caller owns the transaction. `max_age_hours` NULL = unknown, written explicitly (spec §7). */
 export function insertCalendarPrice(db: Db, executionId: string, row: CalendarPriceInsert): number {
@@ -91,6 +101,8 @@ export function insertCalendarPrice(db: Db, executionId: string, row: CalendarPr
       maxAgeHours: row.maxAgeHours,
       vendorLink: row.vendorLink,
       reusedFrom: row.reusedFromExecutionId,
+      returnDateSource: row.returnDateSource,
+      vendorPriceMark: row.vendorPriceMark,
     }).lastInsertRowid,
   );
 }
@@ -125,6 +137,11 @@ export function toCalendarPriceRow(r: CalendarPriceDbRow): CalendarPriceRow {
   const cabin = oneOf(`${c}.cabin`, CABINS, r.cabin);
   const fetchedAt = readTime(`${c}.fetched_at`, r.fetched_at);
   const providerObservedAt = readNullableTime(`${c}.provider_observed_at`, r.provider_observed_at);
+  const returnDateSource = oneOf(`${c}.return_date_source`, RETURN_DATE_SOURCES, r.return_date_source);
+  const vendorPriceMark =
+    r.vendor_price_mark === null
+      ? null
+      : oneOf(`${c}.vendor_price_mark`, VENDOR_PRICE_MARKS, r.vendor_price_mark);
   const provenance: Provenance = {
     providerId,
     sourceKind,
@@ -134,6 +151,8 @@ export function toCalendarPriceRow(r: CalendarPriceDbRow): CalendarPriceRow {
     fx,
     pointOfSale: r.point_of_sale,
     cabin,
+    returnDateSource,
+    ...(vendorPriceMark === null ? {} : { vendorPriceMark }),
   };
   return {
     id: r.id,
@@ -158,5 +177,7 @@ export function toCalendarPriceRow(r: CalendarPriceDbRow): CalendarPriceRow {
     maxAgeHours: r.max_age_hours,
     vendorLink: r.vendor_link,
     reusedFromExecutionId: r.reused_from_execution_id,
+    returnDateSource,
+    vendorPriceMark,
   };
 }

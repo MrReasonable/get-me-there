@@ -376,6 +376,8 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
       maxAgeHours: 48,
       vendorLink,
       reusedFromExecutionId: null,
+      returnDateSource: 'vendor' as const,
+      vendorPriceMark: null,
     });
     const outcome = (c: typeof C1, pence: number) => ({
       ...c,

@@ -1,8 +1,12 @@
 import { rmSync } from 'node:fs';
 import {
+  asIsoDate,
   type BlockedPage,
   type Clock,
+  GRID_GRAMMAR_VERSION,
+  type GridRequest,
   type IsoDateTime,
+  type ListRequest,
   type Logger,
   type PageRequest,
   stripUrlsInText,
@@ -25,9 +29,12 @@ import {
   type Settled,
 } from './driver.js';
 import { checkForm } from './form.js';
+import { gridPage } from './gridPage.js';
+import { MOVE_BUDGET_MS, MOVE_RESERVE_MS } from './gridRecord.js';
 import { installGuard } from './guard.js';
 import { readList } from './list.js';
 import type { Pacer } from './pacer.js';
+import { pointOfSaleOf } from './pointOfSale.js';
 import type { Refusal } from './refusal.js';
 import { SELECTORS, type Selectors } from './selectors.js';
 import { readBack, type SocsCapture, socsCookie } from './socs.js';
@@ -48,6 +55,16 @@ export interface PageResult {
   googleContacted: boolean;
   /** The cool-down store could not be read: main answers, then exits 70 for the operator to look. */
   fatal?: true;
+  /** The request asks for more than this worker allows (a grid page past its scroll cap): the server answers 400. */
+  rejected?: true;
+}
+
+/** Grid mode's worker-side settings (spec §2 rev 34): off unless worker.env sets CAMOUFOX_MODE=grid. */
+export interface GridSettings {
+  mode: 'list' | 'grid';
+  spacingMs: number;
+  scrollCap: number;
+  stepDays: { departures: number; returns: number };
 }
 
 export interface SessionDeps {
@@ -68,6 +85,7 @@ export interface SessionDeps {
   versions: Versions;
   /** Test seam: builds the driver over a page (createDriver by default). */
   driverFor?: typeof createDriver;
+  grid?: GridSettings;
 }
 
 type Stage = 'launch' | 'navigate' | 'read';
@@ -127,8 +145,15 @@ export class PageSession {
   }
 
   async page(req: PageRequest): Promise<PageResult> {
-    if (req.mode === 'grid')
+    // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
+    if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
       return { answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false };
+    if (req.mode === 'grid' && req.moves.length > (this.d.grid?.scrollCap ?? 0))
+      return {
+        answer: { kind: 'mode-unavailable', mode: 'grid' },
+        googleContacted: false,
+        rejected: true,
+      };
     let active: ReturnType<CooldownStore['active']>;
     let refusal: ReturnType<Refusal['active']>;
     try {
@@ -170,7 +195,16 @@ export class PageSession {
     const started = this.d.timers.now();
     // why: ruling of 2026-10-18: the first view has CAMOUFOX_PAGE_TIMEOUT_SECONDS; the Cheapest flow gets the same again
     // from its click (budget.next), never past twice that from the start. `budget.d` is whichever deadline is current.
-    const budget = pageBudget(this.d.timers, this.d.pageTimeoutMs, started);
+    // why: WP15 ruling 10: a grid page's overall cap adds, per move, the scroll spacing and the move's own budget
+    const moves = req.mode === 'grid' ? req.moves.length : 0;
+    const budget = pageBudget(
+      this.d.timers,
+      this.d.pageTimeoutMs,
+      started,
+      2 * this.d.pageTimeoutMs + moves * ((this.d.grid?.spacingMs ?? 0) + MOVE_BUDGET_MS + MOVE_RESERVE_MS),
+    );
+    const counter = { scrolls: 0 };
+    const scrolls = (): { scrolls?: number } => (req.mode === 'grid' ? { scrolls: counter.scrolls } : {});
     const deadline = budget.d;
     let stage: Stage = 'launch';
     let contacted = false;
@@ -204,7 +238,20 @@ export class PageSession {
         contacted = true;
         let refused: BlockedPage | null = null;
         try {
-          await driver.goto(pageUrl(req), deadline);
+          await driver.goto(
+            pageUrl(
+              req.mode === 'grid'
+                ? {
+                    origin: req.origin,
+                    destination: req.destination,
+                    departureDate: req.start.departureDate,
+                    returnDate: req.start.returnDate,
+                    gl: req.gl,
+                  }
+                : req,
+            ),
+            deadline,
+          );
         } catch (e) {
           if (guard.refused === null) throw e;
           refused = guard.refused;
@@ -214,7 +261,10 @@ export class PageSession {
           stop = refused;
           answer = this.blockedPlaceholder(refused);
         } else {
-          const r = await this.read(driver, req, budget, started);
+          const r =
+            req.mode === 'grid'
+              ? await this.readGrid(driver, p, req, budget, started, counter)
+              : await this.read(driver, req, budget, started);
           answer = r.answer;
           stop = r.stop;
         }
@@ -223,8 +273,8 @@ export class PageSession {
       preGotoFailed = !contacted;
       answer =
         e instanceof DeadlineExceeded || budget.d.expired()
-          ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started) }
-          : { kind: 'browser-error', stage, detail: detailOf(e) };
+          ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started), ...scrolls() }
+          : { kind: 'browser-error', stage, detail: detailOf(e), ...scrolls() };
     } finally {
       this.d.pacer.release();
     }
@@ -237,8 +287,8 @@ export class PageSession {
       const back = await bounded(() => c.cookies(), this.finallyMs, this.d.timers);
       if (back.overran) {
         discard = true;
-        if (answer.kind === 'cells')
-          answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran' };
+        if (answer.kind === 'cells' || answer.kind === 'grid')
+          answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran', ...scrolls() };
       } else if (readBack(back.value, this.d.socs) !== 'same') {
         wipe = true;
         // why: ruling 9: a block keeps its own kind; anything else becomes consent-unhandled.
@@ -253,8 +303,8 @@ export class PageSession {
       const closed = await bounded(() => p.close(), this.finallyMs, this.d.timers);
       if (closed.overran) {
         discard = true;
-        if (answer.kind === 'cells')
-          answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran' };
+        if (answer.kind === 'cells' || answer.kind === 'grid')
+          answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran', ...scrolls() };
       }
     }
     if (stop === 'consent-unhandled') wipe = true;
@@ -269,7 +319,7 @@ export class PageSession {
           : this.d.cooldown.hoursFor(stop);
         const rec = this.d.cooldown.start(stop, hours);
         if (stop === 'signed-in') this.d.refusal.set('a signed-in account control or account cookie');
-        answer = { kind: 'blocked', page: stop, cooldownUntil: rec.until };
+        answer = { kind: 'blocked', page: stop, cooldownUntil: rec.until, ...scrolls() };
       } catch (e) {
         return {
           answer: {
@@ -290,9 +340,71 @@ export class PageSession {
     return { kind: 'blocked', page, cooldownUntil: this.d.clock.now() };
   }
 
+  /**
+   * A grid page (spec §2 rev 34): the Best view settled and classified, the search form and the currency checked
+   * before anything is clicked (PA-12), then the dialog flow. Google's no-flights page (past the sale window) is a grid
+   * answer with no views, which the adapter reads as no data for the tile's cells.
+   */
+  private async readGrid(
+    driver: Driver,
+    page: PageLike,
+    req: GridRequest,
+    budget: PageBudget,
+    started: number,
+    counter: { scrolls: number },
+  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
+    const S = this.S;
+    const d = budget.d;
+    const settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
+      view: 'best',
+      log: this.d.log,
+      startedAt: started,
+    });
+    if (settled.kind.kind === 'blocked')
+      return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
+    const grid = (
+      views: Extract<WorkerAnswer, { kind: 'grid' }>['views'],
+      ended: Extract<WorkerAnswer, { kind: 'grid' }>['ended'],
+      notes: string[],
+      pointOfSale: string,
+    ): WorkerAnswer => ({
+      kind: 'grid',
+      fetchedAt: this.d.clock.now(),
+      currency: 'GBP',
+      pointOfSale,
+      views,
+      scrolls: counter.scrolls,
+      ended,
+      notes,
+      versions: { ...this.d.versions, gridGrammar: GRID_GRAMMAR_VERSION },
+    });
+    if (settled.kind.kind === 'no-flights')
+      return { answer: grid([], 'no-flights', [], 'unknown'), stop: null };
+    const form = checkForm(await driver.formFacts(d), {
+      departureDate: req.start.departureDate,
+      returnDate: req.start.returnDate,
+    });
+    const list = await driver.listFacts(d);
+    if (form !== 'ok' || list.currencyName !== 'Currency GBP')
+      return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    const g = this.d.grid;
+    const r = await gridPage(driver, page, budget, req, {
+      timers: this.d.timers,
+      pollMs: this.pollMs,
+      S,
+      steps: { timers: this.d.timers, log: this.d.log, startedAt: started },
+      spacingMs: g?.spacingMs ?? 0,
+      stepDays: g?.stepDays ?? { departures: 1, returns: 1 },
+      today: asIsoDate(this.d.clock.now().slice(0, 10)),
+      counter,
+    });
+    if (r.kind === 'stop') return { answer: this.blockedPlaceholder(r.page), stop: r.page };
+    return { answer: grid(r.views, r.ended, r.notes, pointOfSaleOf(list.locationName)), stop: null };
+  }
+
   private async read(
     driver: Driver,
-    req: PageRequest,
+    req: ListRequest,
     budget: PageBudget,
     started: number,
   ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {

@@ -44,7 +44,10 @@ const DAY = '(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \\d{1,2} [A-Z][a-z]{2,3}';
 const LABEL = new RegExp(`^${DAY}$`);
 /** A text holding at least two day labels (recording 2 printed each line as one text). */
 const LINE = new RegExp(`${DAY}.*${DAY}`);
-const DAY_TOKEN = /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) ([A-Z][a-z]{2,3})\b/g;
+// why: the recordings of 2026-10-18 print each line's labels with no space between them ("0000Thu 11 MarFri 12 Mar…"),
+// so a token is matched without word boundaries, and its month by name (fix of the recorder's null deltas)
+const DAY_TOKEN =
+  /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)/g;
 const SELECTED_LINE = /Round trip/;
 const MONTH_INDEX: Readonly<Record<string, number>> = {
   Jan: 0,
@@ -147,6 +150,23 @@ export function dayDelta(a: string | undefined, b: string | undefined): number |
   if (x === null || y === null) return null;
   const days = Math.round((y - x) / 86_400_000);
   return days > 182 ? days - 365 : days < -182 ? days + 365 : days;
+}
+
+/**
+ * How many days a line moved: the change in the mean of its dates, each counted from the old line's first (a scrolled
+ * line's order is rotated, so first-to-first says nothing); null when a line is unreadable.
+ */
+export function shift(before: readonly string[], after: readonly string[]): number | null {
+  const base = before[0];
+  const offsets = (xs: readonly string[]): number[] | null => {
+    const out = xs.map((x) => dayDelta(base, x));
+    return out.every((x): x is number => x !== null) && out.length > 0 ? out : null;
+  };
+  const a = offsets(before);
+  const b = offsets(after);
+  if (a === null || b === null) return null;
+  const mean = (xs: number[]): number => xs.reduce((p, q) => p + q, 0) / xs.length;
+  return Math.round(mean(b) - mean(a));
 }
 
 /** The lines' identity: what must change before a view after a scroll counts. */
@@ -322,8 +342,8 @@ export async function exploreGrid(
       readMs: v.readMs,
       polls: v.read.polls,
       delta: {
-        departures: dayDelta(before.departures[0], after.departures[0]),
-        returns: dayDelta(before.returns[0], after.returns[0]),
+        departures: shift(before.departures, after.departures),
+        returns: shift(before.returns, after.returns),
       },
     });
     views.push(v.read);

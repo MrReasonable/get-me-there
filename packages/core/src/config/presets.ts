@@ -21,6 +21,9 @@ export interface ProviderLimits {
   minSpacingSeconds?: number;
   /** Pages-only counting (camoufox): ledger rows of class `no-page` count toward neither page cap (spec §5.3 rev 32). */
   pagesOnly?: true;
+  /** camoufox grid (spec §2 rev 34): the scroll clicks a run may make, and a calendar month; the guard sums them. */
+  executionScrollCap?: number;
+  monthlyScrollCap?: number;
 }
 
 export const PENCE_TO_MICRO = 10_000;

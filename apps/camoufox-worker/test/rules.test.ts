@@ -238,6 +238,36 @@ describe('worker rules: source facts through the compiler API', () => {
     ]);
     expect(importersOf(['exploreGraph', 'exploreGrid'])).toEqual(['record.ts']);
   });
+  // why: WP15 Task 15.11: the grid flows click only the dialog's named controls (Price graph, Dates, the four scrolls)
+  it('the grid flows find buttons and tabs only by the selectors module’s names', () => {
+    const named: string[] = [];
+    for (const { f, sf } of sources.filter((x) =>
+      ['gridPage.ts', 'gridRecord.ts', 'gridView.ts'].includes(x.f),
+    ))
+      visit(sf, (x) => {
+        if (!ts.isCallExpression(x)) return;
+        const e = x.expression;
+        if (!ts.isPropertyAccessExpression(e) || e.name.text !== 'getByRole') return;
+        const [role, opts] = x.arguments;
+        if (role === undefined || !ts.isStringLiteral(role) || !['button', 'tab'].includes(role.text)) return;
+        const name =
+          opts !== undefined && ts.isObjectLiteralExpression(opts)
+            ? opts.properties.find((p) => p.name?.getText(sf) === 'name')
+            : undefined;
+        // a button lookup without a name lists the panel's cells (it is never clicked); with one, the name is the module's
+        named.push(
+          name === undefined
+            ? `${f}: unnamed ${role.text}`
+            : `${f}: ${/S\.results\.|G\.(datesTab|scroll|grid|dialog)|name\b|nm\b/.test(name.getText(sf)) ? 'module' : name.getText(sf)}`,
+        );
+      });
+    expect(named.filter((n) => !n.endsWith(': module') && !n.endsWith(': unnamed button'))).toEqual([]);
+    expect(named.length).toBeGreaterThan(0);
+  });
+  it('the grid page is reached only from the page session, and the recorder’s flow only from record.ts', () => {
+    expect(importersOf(['gridPage'])).toEqual(['session.ts']);
+    expect(importersOf(['exploreGrid'])).toEqual(['record.ts']);
+  });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>
       c.call.arguments.some(

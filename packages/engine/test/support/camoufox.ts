@@ -13,6 +13,9 @@ import {
   type Execution,
   type FlightProvider,
   fixedClock,
+  GRID_HORIZON_DAYS,
+  GRID_STEP_DAYS,
+  GRID_TIMES,
   type OperatorMessage,
   type PreflightResult,
   ProviderError,
@@ -36,6 +39,7 @@ import {
   classifyWorkerAnswer,
   createHttpKit,
   type HttpKit,
+  planGridTiles,
   planSingleCells,
 } from '@gmt/providers';
 import { vi } from 'vitest';
@@ -107,6 +111,8 @@ function stub(
     preflight?: PreflightResult;
     /** One preflight answer per run, in order (fix round 1, arch M3); the last repeats. */
     preflights?: PreflightResult[];
+    /** Spec §2 rev 34: plan grid pages with the run's allowances (the real planner), not one page per cell. */
+    grid?: { pageAllowance: number; scrollAllowance: number };
   },
 ): Stub {
   let ctxOf: () => EngineContext = () => {
@@ -147,7 +153,18 @@ function stub(
       coveredCells: plan.coveredCells,
       fetchedAt: ctxOf().clock.now(),
       pointOfSale: id === 'camoufox' ? 'GB' : 'unknown',
-      prices: cell === undefined ? [] : [{ ...cell, amountMinor: 45_100, currency: 'GBP' }],
+      prices:
+        cell === undefined
+          ? []
+          : [
+              {
+                ...cell,
+                amountMinor: 45_100,
+                currency: 'GBP',
+                returnDateSource: 'asked',
+                vendorPriceMark: null,
+              },
+            ],
       noFares: [],
       notes: [],
     };
@@ -172,7 +189,22 @@ function stub(
     },
     discovery: {
       info: { sourceKind, maxAgeHours: sourceKind === 'scraped-self' ? 0 : 48, provenanceNote: `${id} stub` },
-      plan: planSingleCells,
+      plan:
+        o.grid === undefined
+          ? planSingleCells
+          : (q: DiscoveryQuery) => {
+              const g = o.grid ?? { pageAllowance: 0, scrollAllowance: 0 };
+              const pairs = Math.max(1, q.share?.pairs ?? 1);
+              return planGridTiles(q, {
+                stepDays: GRID_STEP_DAYS,
+                scrollCap: 30,
+                pageAllowance: Math.floor(g.pageAllowance / pairs),
+                scrollAllowance: Math.floor(g.scrollAllowance / pairs),
+                today: asIsoDate(T0.slice(0, 10)),
+                horizonDays: GRID_HORIZON_DAYS,
+                times: GRID_TIMES,
+              });
+            },
       fetchTile,
       ...(preflight === undefined ? {} : { preflight }),
     },

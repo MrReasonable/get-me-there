@@ -1,4 +1,4 @@
-import type { PageRequest } from '@gmt/core';
+import type { ListRequest } from '@gmt/core';
 import type { FormFacts } from './driver.js';
 import { MONTHS } from './names.js';
 
@@ -53,7 +53,7 @@ function sameDate(shown: ShownDate | null, iso: string): boolean {
 
 export function checkForm(
   form: FormFacts,
-  req: Pick<PageRequest, 'departureDate' | 'returnDate'>,
+  req: Pick<ListRequest, 'departureDate' | 'returnDate'>,
 ): FormCheck {
   if (form === null) return 'absent';
   if (!/\bRound trip$/.test(form.tripType)) return 'mismatch';

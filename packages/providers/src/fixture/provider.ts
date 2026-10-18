@@ -246,7 +246,14 @@ export function fixtureProvider(opts: {
             cellKeyString({ origin: q.origin, destination: q.destination, departureDate, returnDate }),
           );
           if (cell === undefined) dropped += 1;
-          else prices.push({ ...cell, amountMinor: amount, currency });
+          else
+            prices.push({
+              ...cell,
+              amountMinor: amount,
+              currency,
+              returnDateSource: 'vendor',
+              vendorPriceMark: null,
+            });
         }
         for (const raw of rawNoFares) {
           const { departureDate, returnDate } = dated('/calendar', raw);

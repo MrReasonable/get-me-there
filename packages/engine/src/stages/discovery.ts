@@ -108,7 +108,11 @@ export function planTiles(
     for (const destination of snapshot.resolved.destinations) {
       const pairCells = byPair.get(`${origin}|${destination}`);
       if (pairCells === undefined) continue;
-      const query = discoveryQuery(snapshot, origin, destination, pairCells, names);
+      // why: spec §2 rev 34: a provider whose caps are per run (camoufox grid) gives each pair its share
+      const query = {
+        ...discoveryQuery(snapshot, origin, destination, pairCells, names),
+        share: { pairs: byPair.size },
+      };
       const plans = cap.plan(query);
       if (
         !sameCells(

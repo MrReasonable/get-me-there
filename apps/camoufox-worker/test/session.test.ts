@@ -454,14 +454,25 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       fatal: true,
     });
   });
-  it('mode grid → mode-unavailable, nothing opened; GRID_VERIFIED is false', async () => {
+  // why: decision 70: grid pages need CAMOUFOX_MODE=grid as well as the verified flag (gridPage.test.ts has the flow)
+  it('mode grid without the worker’s grid settings → mode-unavailable, nothing opened', async () => {
     const t = setup();
-    expect(await t.session.page({ ...REQ, mode: 'grid' })).toEqual({
+    const grid: PageRequest = {
+      mode: 'grid',
+      origin: REQ.origin,
+      destination: REQ.destination,
+      gl: 'GB',
+      start: { departureDate: asIsoDate('2026-11-05'), returnDate: asIsoDate('2026-11-15') },
+      moves: [],
+      reads: [true],
+      scrollAllowance: 0,
+    };
+    expect(await t.session.page(grid)).toEqual({
       answer: { kind: 'mode-unavailable', mode: 'grid' },
       googleContacted: false,
     });
     expect(t.contexts).toEqual([]);
-    expect(SELECTORS.GRID_VERIFIED).toBe(false);
+    expect(SELECTORS.GRID_VERIFIED).toBe(true);
   });
   it('a request inside the spacing → spacing, nothing opened', async () => {
     const t = setup();

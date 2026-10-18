@@ -277,6 +277,19 @@ describe('fetchTile parsing (spec §5.2), synthetic shapes', () => {
     });
   });
 
+  // why: spec §7 rev 34 (PA-08): SearchApi states its own lowest-price flag; it is kept as the vendor's mark only
+  it('is_lowest_price fills vendorPriceMark (cheapest or none), absent is null; every row states its return source', async () => {
+    const plan = smallPlan();
+    const body = gridFor(plan);
+    const [a, b] = body.calendar;
+    if (a === undefined || b === undefined) throw new Error('entries');
+    body.calendar[0] = { ...a, is_lowest_price: true };
+    body.calendar[1] = { ...b, is_lowest_price: false };
+    answer(ok(body));
+    const res = await tileOf(plan);
+    expect(res.prices.slice(0, 3).map((p) => p.vendorPriceMark)).toEqual(['cheapest', 'none', null]);
+    expect(res.prices.every((p) => p.returnDateSource === 'vendor')).toBe(true);
+  });
   it('has_no_flights: true on an entry → that cell in noFares, no price (synthetic)', async () => {
     const plan = smallPlan();
     const [first] = plan.coveredCells;

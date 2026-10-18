@@ -236,6 +236,8 @@ export function calendarPrice(c: CellKey, over: Partial<CalendarPriceInsert> = {
     maxAgeHours: 48,
     vendorLink: null,
     reusedFromExecutionId: null,
+    returnDateSource: 'vendor',
+    vendorPriceMark: null,
     ...over,
   };
 }

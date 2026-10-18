@@ -87,6 +87,8 @@ export interface Estimate {
     costPence: number;
     seconds: number;
     blocked: string | null;
+    /** camoufox grid only (spec §2 rev 34, CB-3): the scroll clicks the plan makes beside its pages. */
+    scrolls?: number;
   }>;
   totalCalls: number;
   totalPlanCalls: number;

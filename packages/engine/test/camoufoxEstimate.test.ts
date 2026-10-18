@@ -65,3 +65,40 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
     expect(SECONDS_PER_CALL['scraped-self']).toBe(0);
   });
 });
+
+// WP15 Task 15.8 (spec §2, §8.1 rev 34; rulings 12 and 13): the grid estimate counts pages and scrolls at the measured
+// times, with no retry factor, since camoufox never retries.
+describe('the camoufox grid estimate', () => {
+  function workedGrid(grid: { pageAllowance: number; scrollAllowance: number }) {
+    const e = engineWith([stubCamoufox({ cells: 1, grid })]);
+    const def = e.ctx.repos.definitions.update(e.definition.id, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
+      minNights: 10,
+      maxNights: 21,
+    });
+    return { e, def };
+  }
+  it('with room for a page a block: 78 pages, no scroll, 30 s a page, and the retry factor 1.0', () => {
+    const { e, def } = workedGrid({ pageAllowance: 100, scrollAllowance: 600 });
+    const built = buildSnapshot(e.ctx, def);
+    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
+    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
+    expect(line).toMatchObject({ planCalls: 78, calls: 78, seconds: 78 * 30, scrolls: 0 });
+    expect(est.assumptions).toContain(
+      'camoufox grid mode reads 2184 of 2184 cells this run in 78 pages and 0 scrolls; a full pass takes 1 run',
+    );
+    expect(est.assumptions).toContain(
+      'camoufox never retries: its pages, scrolls and seconds carry no retry factor',
+    );
+  });
+  it('under a tight page allowance: pages up to the cap and scrolls within theirs, at 9.3 s a scroll', () => {
+    const { e, def } = workedGrid({ pageAllowance: 25, scrollAllowance: 150 });
+    const built = buildSnapshot(e.ctx, def);
+    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
+    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
+    expect(line?.scrolls).toBeGreaterThan(0);
+    expect(line?.scrolls).toBeLessThanOrEqual(150);
+    expect(line?.calls).toBe(57);
+    expect(line?.seconds).toBe(Math.ceil(57 * 30 + (line?.scrolls ?? 0) * 9.3));
+  });
+});
