@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 34.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 35.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -224,8 +224,10 @@ never silently dropped.
   ("£462 · Round trip"), else `unrecognised`.
   **Stay range.** A block of departures `d…d+6` and returns `r…r+6` holds
   stays of `r − d − 6` to `r − d + 6` nights on its 13 diagonals. Blocks are
-  laid on a lattice anchored at the window's first departure and that date
-  plus `minNights`: column `c` covers departures `7c…7c+6`, and its stays
+  laid on a lattice anchored at the later of the window's first departure and
+  today (a re-plan of a window that has started never opens a view on days
+  already past), and that date plus `minNights`: column `c` covers departures
+  `7c…7c+6`, and its stays
   need returns `7c + minNights … 7c + 6 + maxNights`, which is
   `⌈(7 + maxNights − minNights) / 7⌉` blocks; so a pair needs
   `⌈D / 7⌉ × ⌈(7 + maxNights − minNights) / 7⌉` blocks. Cells inside a block
@@ -240,16 +242,27 @@ never silently dropped.
   planner orders a pair's blocks in one path and chooses, move by move,
   between a new page and the scrolls, whichever is quicker within both the
   page and the scroll caps (the caps shared across the run's pairs); a move
-  passes its intermediate views unread. It plans no departure past the sale
-  window's horizon (`GRID_HORIZON_DAYS`, 320 days, dated 2026-10-18: a page
-  327 days out showed the no-flights page). Pages hold at most
+  passes its intermediate views unread, and makes its later-return and
+  earlier-departure scrolls first, so every view on the way holds round
+  trips. A block of a 0-night stay on the diagonal would open on a same-day
+  pair, which no page query is: its page opens a day later on the returns and
+  scrolls up once before the block is read. It plans no block cell whose
+  departure or return passes the sale window's horizon
+  (`GRID_HORIZON_DAYS`, 320 days, dated 2026-10-18: a page 327 days out showed
+  the no-flights page); one probe page covers those cells, opened at their
+  least departure and least return. Pages hold at most
   `CAMOUFOX_GRID_SCROLL_CAP` scrolls (default 30, at most 60). Scroll clicks
   are at least `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` apart start to start
   (default 5, at least 5, fixed, never randomised). A run makes at most
   `CAMOUFOX_EXECUTION_SCROLL_CAP` scrolls (default 600) and a month at most
-  `CAMOUFOX_MONTHLY_SCROLL_CAP` (default 6,000); the caps are checked before
-  every scroll (the adapter passes the page its remaining allowance, and the
-  worker never scrolls past it).
+  `CAMOUFOX_MONTHLY_SCROLL_CAP` (default 6,000); the adapter asks the budget
+  guard what the two caps leave, passes the page no more than that as its
+  allowance and reserves that many, and the worker never scrolls past it: a
+  page with no scroll left still reads its first block, and the blocks it did
+  not reach are `error` (`parse`, `scroll-allowance`), resumable. The worker
+  reports its scroll cap and spacing in its status, and the preflight skips
+  the provider (`provider_disabled`, naming the setting) while they differ
+  from the app's.
   **Settles and deadlines.** The first view, after the Dates click, settles by
   the two-stable-polls rule. A view after a scroll counts only when its
   departures or returns line differs from the view before the move, and then
@@ -261,14 +274,22 @@ never silently dropped.
   settle in its budget ends the page: the views read so far are kept, and the
   covered cells of the blocks not reached are `error` (`parse`, detail
   `page-not-ready`), resumable, with no cool-down. A grid page that settles
-  on Google's no-flights page (past the sale window) is `no_data` for its
-  covered cells.
+  on Google's no-flights page (past the sale window) is `no_data` only for
+  its covered cells on or after the page's first pair on both dates, which
+  the sale window's end implies; every other covered cell is `error`
+  (`parse`, `no-flights-at-start`), resumable, and a note counts the inferred
+  cells. A pair read in two views of one page fails the tile (`parse`), and
+  nothing from the page is stored.
   **Edges of the sale window.** The departures and returns lines are the
   source of truth for which dates a view shows. A first view shifted near
   today, or a short move at an edge, is accepted when its dates are
-  consistent and inside the sale window, and recorded as an "off-plan view"
-  issue naming its cause, never as `unrecognised`; the page ends there and the
-  planner re-plans the remaining cells from the dates the view showed.
+  consistent, and recorded as an "off-plan view" issue naming its cause
+  (`near-today` when it starts at today or earlier, `sale-window-end` when the
+  planned block reaches within a block of the horizon, else `shifted`), never
+  as `unrecognised`; the page ends there and the resume re-plans the cells it
+  did not read on the lattice anchored at today. A scroll that moves the
+  other axis or the wrong way is `unrecognised`; a re-render that only
+  reorders the labels is a scroll that did not settle.
   **Return date source:** grid prices take both dates from the cell, checked
   against the departures and returns lines; each stored row records where its
   return date came from (`return_date_source`, §7), the gate the earlier
@@ -417,9 +438,12 @@ failures after the request was sent (a timeout, a dropped socket) are never
 retried for camoufox, so one tile never costs two Google loads. In `grid`
 mode a scroll is not a page load: a page's row carries `scroll_count`, the
 scroll clicks it made (every answer to a grid request that reached Google
-carries them, a stop included; a transport failure with no answer leaves it
-NULL, unknown), the page caps count rows, and the scroll caps count
-`scroll_count`.
+carries them, a stop included; a timeout or an abort after the request left,
+outcome `unknown`, keeps the planned scrolls the reservation held, so the
+scroll caps never undercount; a refused connection, a `no-page` row, leaves
+it NULL), the page caps count rows, and the scroll caps count
+`scroll_count`. A scroll-cap breach is worded as one ("camoufox's scroll cap
+for this run is 600 scrolls; …").
 
 *Labels.* Display name "Google Flights via Camoufox"; source label "Google
 Flights prices via Camoufox"; compact mark `CF`. `provenanceNote`: "Google
@@ -450,18 +474,22 @@ most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a
 month, against 2,184 day pairs for one worked-example airport pair (8,736 for
 its four pairs). The estimate says how many cells a run will price and how
 many runs a full pass takes; the rest of the cells read skipped or not
-searched in View D. The designed `grid` mode changes the arithmetic: 7 × 7
+searched in View D. The `grid` mode changes the arithmetic: 7 × 7
 blocks laid over a 12-night band need `⌈182 / 7⌉ × ⌈18 / 7⌉ = 26 × 3 = 78`
 blocks a pair (3,822 grid cells, of which the 2,184 in the band are stored,
 57%), 312 for the four pairs. At the measured one-day step a block-to-block
 move is 7 scrolls (about 65 s) against about 30 s for a new page, so the
-planner opens pages until the page cap binds and scrolls only past it: with
-the defaults (100 pages and 600 scrolls a run, 30 scrolls a page) a run
-reaches 100 + 85 = 185 blocks in about 100 × 30 + 595 × 9.3 ≈ 8,530 s (2.4
-hours), and a full pass of the four pairs takes two runs (about 200 pages,
-785 scrolls and 3.7 hours in all); with `CAMOUFOX_EXECUTION_PAGE_CAP` raised
-to 312 it is one run of 312 pages and about 2.6 hours. `list` mode needs
-8,736 pages for the same pass.
+planner opens pages until the page cap binds and scrolls only past it, each
+pair within its share of the caps (25 pages and 150 scrolls of the defaults'
+100 and 600 for four pairs). The engine runs the pairs' pages in order up to
+the page cap, so with the defaults the run's estimate is 100 pages and 294
+scrolls, about 1.6 hours, reading 3,976 of the 8,736 day pairs, and a full
+pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP` raised to 312 it is one
+run of 312 pages and no scrolls, about 2.6 hours. A scroll takes the measured
+9.3 s or the configured spacing when that is longer, and the estimate says
+when a run would pass `STUCK_AFTER_HOURS`; `budgetFit` warns when a month's
+scrolls pass the monthly scroll cap. `list` mode needs 8,736 pages for the
+same pass.
 
 *Costs, stated plainly.* **Terms:** Read the provider's terms before enabling
 it; the operator is responsible for how it is used. **The operator's IP and account:** every page
@@ -1394,8 +1422,9 @@ are `toISOString()` text; booleans are integers 0/1.
   billable NULL until finalised, cost_micro_gbp NOT NULL, http_attempt,
   page_class NULL ∈ page | no-page (camoufox only, migration 0005),
   scroll_count NULL (camoufox `grid` pages only: the scroll clicks the page
-  made, ≥ 0; NULL on every other row, camoufox `list` included, and on a grid
-  call that ended with no answer; migration 0006)). Inserted at reserve.
+  made, ≥ 0, or the planned scrolls when an `unknown` call ended with no
+  answer; NULL on every other row, camoufox `list` included, and on a grid
+  call refused before any page; migration 0006)). Inserted at reserve.
   Index (provider_id, started_at, outcome, billable), (execution_id).
 - `provider_cache` (key PK, provider_id NULL, body_json, stored_at,
   expires_at).
@@ -2243,6 +2272,24 @@ cost that stated the terms position reads "Read the provider's terms before
 enabling it; the operator is responsible for how it is used"; the
 provenance note drops the same sentence. No rule, test or safety check
 changes.
+
+### Revision 35: the camoufox grid mode's fix round 1 (2026-10-18)
+
+§2's `grid` paragraph, from the branch review of work package 15 and
+CodeRabbit's pass on its pull request: the lattice anchored at today once a
+window has started; the horizon bounding returns as well as departures, with
+the probe opened at the least pair past it; a no-flights page `no_data` only
+for the cells on or after its first pair on both dates, the others resumable
+issues; a 0-night diagonal block opened a day later and scrolled up to; block
+moves that keep every view holding round trips; the page's scroll allowance
+from what the guard says the caps leave; the preflight's check of the
+worker's scroll cap and spacing; the off-plan causes named only from what is
+known; a pair read twice failing the tile. §2's ledger paragraph and §7's
+`scroll_count`: an `unknown` call keeps its planned scrolls. §2's coverage
+paragraph states the estimate's own figures (100 pages and 294 scrolls a run
+at the defaults, 3 runs a full pass), the scroll time as the longer of the
+measured time and the spacing, the stuck-run note and the month's scroll
+warning. A stored grid-cell price is labelled assumed from its own row.
 
 ### Revision 34: the camoufox grid mode designed (2026-10-18)
 

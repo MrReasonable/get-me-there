@@ -693,20 +693,24 @@ verified on the worker").
   Scrolls have their own caps: `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and `CAMOUFOX_MONTHLY_SCROLL_CAP`
   (default 6,000), at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
   `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, never randomised) between scroll clicks. Keep the grid settings
-  equal in `worker.env` and the app's settings.
+  equal in `worker.env` and the app's settings: the worker reports its scroll cap and spacing, and the app skips the
+  provider, naming the setting, while they differ. A page asks for no more scrolls than the run's and the month's
+  scroll caps leave; with none left it still reads its first block, and the blocks it did not reach stay for the next
+  run.
 - **Speed and coverage.** A page opens a block in about 30 s and a scroll takes about 9.3 s (measured 2026-10-18), so
   a new page is the quicker way to a new block, and the planner opens pages until the page cap binds, then scrolls.
   For the worked example's four airport pairs (312 blocks of 7 × 7, of which the 8,736 day pairs in the 10–21-night
-  band are stored): with the defaults a run reaches about 185 blocks (100 pages and 595 scrolls, about 2.4 hours), and a
-  full pass takes two runs (about 3.7 hours in all); with `CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages,
-  about 2.6 hours. A page with its full 30 scrolls takes about 5 minutes; at the maximums (60 scrolls, 30 s spacing)
-  about 30 minutes.
+  band are stored), the run's estimate with the defaults is 100 pages and 294 scrolls, about 1.6 hours, reading 3,976 of
+  the 8,736 day pairs, and a full pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages
+  and no scrolls, about 2.6 hours. A page with its full 30 scrolls takes about 5 minutes; at the maximums (60 scrolls,
+  30 s spacing) about 30 minutes, and the estimate says when a run would pass `STUCK_AFTER_HOURS`.
 - **What a page does when something is off.** A challenge, sign-in, consent or account page on any poll stops it with
   its cool-down, and nothing from that page is kept. A scroll whose view never changes ends the page with the views
-  already read. A view whose dates differ from the plan at the edge of the sale window is kept and ends the page. A
-  view the worker cannot read as the grid, or whose cells no longer match the dated grammar, stops it for an hour.
-  Past the sale window Google shows its no-flights page: those day pairs read as no data. Day pairs the grid could not
-  show read as issues on the cell (resumable), never as prices.
+  already read. A view whose dates differ from the plan (near today, or at the end of the sale window) is kept and
+  ends the page. A view the worker cannot read as the grid, or whose cells no longer match the dated grammar, stops it
+  for an hour. Past the sale window Google shows its no-flights page: the day pairs on or after the page's first pair
+  on both dates read as no data, and the others as issues. Day pairs the grid could not show read as issues on the
+  cell (resumable), never as prices. A 0-night stay opens its first block a day later and scrolls up once to it.
 
 ### Choose it
 

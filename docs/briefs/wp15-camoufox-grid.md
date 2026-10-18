@@ -76,7 +76,10 @@ query, 2027-09-10, landed on the no-flights page). `SOCS` read back unchanged on
   page takes the year nearest the query's departure.
 - **Year boundary.** Run 3 (27 Dec 2026 to 6 Jan 2027) read December departures and January returns correctly.
 - **Sale window.** A query 327 days out (2027-09-10) answered with the no-flights page, no grid. A grid page that lands
-  there is `no_data` for its covered cells, and the planner plans no departure past `GRID_HORIZON_DAYS` (320, dated).
+  there is `no_data` only for its covered cells on or after its first pair on both dates (which the sale window's end
+  implies); its other covered cells are `no-flights-at-start` issues. The planner plans no block cell whose departure or
+  return passes `GRID_HORIZON_DAYS` (320, dated); one probe page covers those cells, opened at their least departure and
+  least return.
 - **Grid vs list.** The selected cell's grid price equals the Best list's minimum in all four runs (£462, £499, £481,
   £705), and the Cheapest tab is lower in three (£453, £455, £669): the grid follows the Best list, not the cheapest set,
   and states whole pounds. The provenance note says so ("the price Google's date grid showed").
@@ -84,13 +87,15 @@ query, 2027-09-10, landed on the no-flights page). `SOCS` read back unchanged on
 **Cost, restated** (the worked example's four pairs, 312 blocks; a block-to-block move is 7 scrolls, about 65 s, against
 about 30 s for a page, so the planner opens pages until the page cap binds, then scrolls):
 
-| Caps | Run 1 | Run 2 | A full pass |
-|---|---|---|---|
-| Defaults (100 pages, 600 scrolls, 30 a page) | 100 pages + 85 moves (595 scrolls) = 185 blocks, ≈ 8,530 s (2.4 h) | 100 pages + 27 moves (189 scrolls) = 127 blocks, ≈ 4,760 s (1.3 h) | 2 runs, ≈ 200 pages, 785 scrolls, 3.7 h |
-| Page cap 312 | 312 pages, ≈ 9,360 s (2.6 h) | — | 1 run |
+| Caps | The run's estimate | A full pass |
+|---|---|---|
+| Defaults (100 pages, 600 scrolls, 30 a page) | 100 pages and 294 scrolls, ≈ 5,735 s (1.6 h), 3,976 of the 8,736 day pairs | 3 runs |
+| Page cap 312 | 312 pages and no scrolls, ≈ 9,360 s (2.6 h) | 1 run |
 
 The planner splits each run's page and scroll allowances evenly across the stage's pairs (`DiscoveryQuery.share`, set by
-the engine), so every pair gets its share of pages first.
+the engine): each pair's plan joins blocks by scrolls within its share (25 pages and 150 scrolls of the defaults' 100
+and 600), and the engine runs the pairs' pages in order up to the page cap. These are the estimate's own figures,
+pinned by the engine's docs test (Task 15.10).
 
 ## 1. Goal
 
@@ -167,69 +172,83 @@ and never parsed; stored only by the recorders), `Locator.isVisible()`.
 ```ts
 // packages/core/src/types/provenance.ts
 export type ReturnDateSource = 'vendor' | 'asked' | 'grid-cell';
-export interface Provenance { /* existing fields */ returnDateSource: ReturnDateSource; vendorPriceMark: boolean | null }
-  // vendorPriceMark: true = the vendor marked it its cheapest of the prices shown with it; false = not marked
-  // in the view it was read from; null = the vendor states no mark (Travelpayouts, camoufox list, fixture)
+export type VendorPriceMark = 'cheapest' | 'low' | 'none';
+export interface Provenance { /* existing fields */ returnDateSource?: ReturnDateSource; vendorPriceMark?: VendorPriceMark | null }
+  // both exactOptional on Provenance; vendorPriceMark: the vendor's own mark in the view it was read from ('cheapest',
+  // 'low'), 'none' when that view marked it neither; null = the vendor states no marks (Travelpayouts, camoufox list,
+  // fixture). A stored grid-cell row is labelled assumed from its own returnDateSource (withAssumedBound)
 // packages/core/src/ports/provider.ts
-export type GridMove = 'left' | 'right' | 'up' | 'down';
 export type TileRequest =
   | /* the four existing kinds */
   | { kind: 'grid-path'; start: { departureDate: IsoDate; returnDate: IsoDate }; moves: GridMove[]; reads: boolean[] };
   // reads[0] is the first view; reads[i + 1] whether the view after moves[i] is read (false: a transit view)
-export interface RawCalendarPrice { /* existing fields */ returnDateSource: ReturnDateSource; vendorPriceMark: boolean | null }
+export interface RawCalendarPrice { /* existing fields */ returnDateSource: ReturnDateSource; vendorPriceMark: VendorPriceMark | null }
+export interface DiscoveryCapability { /* existing fields */ estimateTile?(plan: TilePlan): { scrolls: number; seconds: number } }
+  // a provider timed per tile (camoufox grid) states each tile's scrolls and seconds; the engine's estimate reads them
+// packages/core/src/ports/budget.ts
+export interface BudgetGuard { /* existing methods */ scrollsLeft(providerId: ProviderId, executionId: string | null): number | null }
+  // what the run's and the month's scroll caps leave (the lesser, never below 0), null with neither
 // packages/core/src/labels/source.ts
 export function sourceLabel(p: Pick<Provenance, 'sourceKind' | 'returnDateSource'>): string;
   // scraped-self + grid-cell → 'Google Flights date grid via Camoufox'; scraped-self otherwise → 'Google Flights prices via Camoufox'
 
 // packages/core/src/camoufox/protocol.ts
+export const GRID_MOVES = ['left', 'right', 'up', 'down'] as const;
+export type GridMove = (typeof GRID_MOVES)[number];   // the grid-path tile's moves use it
 export const gridRequestSchema;   // { mode: 'grid'; origin; destination; gl; start: { departureDate; returnDate };
                                   //   moves: GridMove[]; reads: boolean[] (moves.length + 1);
                                   //   scrollAllowance: number (≤ moves.length: the scrolls the run and month caps leave) }
 export type GridCell = { status: 'price'; departureDate: IsoDate; returnDate: IsoDate; amountMinor: number;
-                         vendorPriceMark: boolean };
+                         mark: VendorPriceMark };
   // a 'no-flights' cell is added only in the commit whose recording pins Google's unpriced form (PA-13)
 export interface GridView {
   index: number;                 // 0 the first view, i + 1 the view after moves[i]
   departures: IsoDate[];         // the departures line's seven, in order
   returns: IsoDate[];            // the returns line's seven, in order
-  cells: GridCell[];             // parsed cells matching their position's pair
+  cells: GridCell[];             // parsed cells, each dated by its own name
   unparsed: number;              // cells counted, never guessed
   structural: 'ok' | 'unparsed'; // 'unparsed': duplicate pairs or a failed cross-product; nothing from it is stored
-  offPlan: null | 'near-today' | 'sale-window-end' | 'short-move';
+  offPlan: null | 'near-today' | 'sale-window-end' | 'shifted' | 'short-move';
 }
 // WorkerAnswer gains:
 //   | { kind: 'grid'; fetchedAt; currency: 'GBP'; pointOfSale; views: GridView[]; scrolls: number;
 //       ended: 'complete' | 'scroll-not-settled' | 'off-plan' | 'allowance'; notes: string[]; versions }   // 200
 // and every answer to a grid request that reached Google (blocked, not-ready, browser-error) carries `scrolls` (CB-4).
-// versions gains gridGrammar and dialogSelectors (PIE-15). /v1/status gains gridStepDays: { departures; returns } | null.
+// versions gains gridGrammar and dialogSelectors (PIE-15). /v1/status gains gridStepDays: { departures; returns } | null,
+// and gridScrollCap and gridScrollSpacingSeconds (null outside grid mode), which the preflight compares with the app's.
 
 // packages/providers/src/camoufox/grid.ts
 export const GRID_SIDE = 7;      // the recorded side at the pinned 1280 × 900 window
 export function gridBlocks(q: DiscoveryQuery): Block[];
 export function gridPath(blocks: Block[], stepDays: { departures: number; returns: number }):
   { start: Block; moves: GridMove[]; reads: boolean[] };
-export function planGridTiles(q: DiscoveryQuery, o: { stepDays; scrollCap: number; today: IsoDate }): TilePlan[];
+export function planGridTiles(q: DiscoveryQuery, o: { stepDays; scrollCap: number; pageAllowance: number;
+  scrollAllowance: number; today: IsoDate; horizonDays: number; times: GridTimes }): TilePlan[];
 export function gridTileEstimate(tile: TilePlan, c: GridTimes): { scrolls: number; seconds: number };   // CB-3
 export function gridRequestTimeoutMs(tile: TilePlan, c: CamoufoxConfig): number;
-// packages/core: CostEstimate gains scrolls?: number (camoufox grid only; CB-3)
 ```
 
 Config (`Config.providers.camoufox`): `mode: 'list' | 'grid'`, `gridScrollSpacingSeconds` (5–30, default 5),
 `gridScrollCap` (0–60, default 30), `executionScrollCap` (0–6,000, default 600), `monthlyScrollCap` (default 6,000).
 Grid mode is skipped at preflight (`skipped:provider_disabled`, "grid mode not verified") while the worker's
-`GRID_VERIFIED` flag is false or its `gridStepDays` is null.
+`GRID_VERIFIED` flag is false or its `gridStepDays` is null, and (naming the setting) while the worker's scroll cap or
+spacing differs from the app's.
 
 ## 6. Endpoints, parameters and cost
 
 **Worker.** `POST /v1/page` takes either request; a `grid` request is answered `mode-unavailable` (409, Google not
 contacted) unless `GRID_VERIFIED` is true and `worker.env` sets `CAMOUFOX_MODE=grid`. Every other WP14 answer and status
 applies unchanged. A request whose `moves` exceed the worker's own `CAMOUFOX_GRID_SCROLL_CAP` is 400, Google not
-contacted. The worker never scrolls more than `scrollAllowance` (it ends `allowance` there).
+contacted. The worker never scrolls more than `scrollAllowance` (it ends `allowance` there). The adapter sets the
+allowance, and reserves it, from what the budget guard says the run's and the month's scroll caps leave
+(`scrollsLeft`); a page with none left still reads its first block.
 
 **The page URL** is list mode's, with the first block's centre as its dates: a view opened by `…on <d> returning <r>`
 shows departures `d − 3 … d + 3` and returns `r − 3 … r + 3` (observed 2026-10-18). The planner asks for `d = a + 3`,
-`r = b + 3` to open the block with departures `a … a + 6` and returns `b … b + 6`, and clamps `d` to at least
-`today + 3` (PIE-05); a view shifted anyway is an off-plan view (§9).
+`r = b + 3` to open the block with departures `a … a + 6` and returns `b … b + 6`. The lattice is anchored at the later
+of the window's first departure and today, so `d` is at least `today + 3` (PIE-05); a view shifted anyway is an off-plan
+view (§9). A 0-night block on the diagonal (`b = a`) would ask a same-day pair: its page asks `r = b + 4` and scrolls up
+once, its first view unread.
 
 **Budgets.** Load through the Dates tab's settle: the page budget as the Cheapest flow (the page timeout, then the same
 again from the first click, never past twice it from the start). Each move: the scroll spacing, then its own budget,
@@ -238,8 +257,9 @@ again from the first click, never past twice it from the start). Each move: the 
 timeout is that plus 15 s (`gridRequestTimeoutMs`). Per-move timings (click, settle, read, polls) from Task 15.1 are dated
 constants (`GRID_TIMES`) the estimate and docs use (CB-9).
 
-**Cost, the worked example** (one airport pair: a 182-day window, 10–21 nights, so D = 182 and 12 stays; a 7-day step
-assumed until Task 15.1 measures it; about 60 s a page and about 11 s a move, 5 s spacing plus settle and read, PIE-14):
+**Cost, the worked example, as first designed** (one airport pair: a 182-day window, 10–21 nights, so D = 182 and 12
+stays; a 7-day step assumed until Task 15.1 measured one day; about 60 s a page and about 11 s a move, PIE-14). §0's
+table, from the measured step and the estimate, is the one that holds; this one shows the design's arithmetic:
 
 | Step | Arithmetic | Per pair | Four pairs |
 |---|---|---|---|
@@ -319,8 +339,8 @@ is `unrecognised` (1 h).
 | View (structural) | `dates-grid` recognised; one `grid "Date grid"`; exactly 49 candidate cells; a departures line and a returns line of seven consecutive dates each, every weekday agreeing; a selected-pair line | exploration 2 | `unrecognised` (1 h) |
 | View (data) | each candidate's name parses and names its position's pair | exploration 2 | that cell unparsed; duplicates or a failed cross-product: the view structurally unparsed; drift (below): `unrecognised` |
 | First view | its selected cell is the query's pair, at the selected-pair line's price (PA-11) | exploration 2 | `unrecognised` |
-| Move | exactly one `button` named "Scroll left/right/up/down" in the panel; click; the departures or returns line differs from the view before the move, then holds for two polls 2 s apart | names: exploration 2; axes and step: Task 15.1 | not found: `unrecognised`; no change within the move's budget: `scroll-not-settled` (no cool-down) |
-| Edges | a first view or a move whose dates differ from the plan but are consistent (seven consecutive dates per line, on the planned axis) and inside the sale window | Task 15.1 | the view is kept, flagged `offPlan` with its cause; the page ends `off-plan`; the planner re-plans from the dates shown |
+| Move | exactly one `button` named "Scroll left/right/up/down" in the dialog (stricter than the panel the view check counts in); counted, then clicked; the departures or returns line differs from the view before the move, then holds for two polls 2 s apart | names: exploration 2; axes and step: Task 15.1 | not found: `unrecognised`; no change within the move's budget: `scroll-not-settled` (no cool-down) |
+| Edges | a first view or a move whose dates differ from the plan but are consistent (seven consecutive dates per line, on the planned axis) | Task 15.1 | the view is kept, flagged `offPlan` with its cause (`near-today` from today or earlier, `sale-window-end` when the planned block reaches within a block of the horizon, else `shifted`; `short-move` on a move); the page ends `off-plan`; the resume re-plans the unread cells on the lattice anchored at today. A move on the other axis or the wrong way is `unrecognised` (`wrong-move`) |
 
 **Grammar drift** (ruling 3): when more than half of a view's priced-looking candidates (names starting "£") fail the
 grammar, the page stops as `unrecognised`, no further scrolls run, and the notes name `selector-drift`, pointing to
@@ -345,12 +365,15 @@ unparsed until a recording proves Google's unpriced form, and then `no_data` (ru
   label on both lines takes the year in {Y − 1, Y, Y + 1} nearest the planned block, and every weekday on both lines
   must agree with its computed date; a cell takes its dates only by matching the resolved lines. So a view of
   departures in December and returns in January rolls over, and a wrong weekday on either line is `unrecognised`.
-- **Positional match** (ruling 2): candidate `i` must name departures[`i mod 7`] to returns[`⌊i / 7⌋`]; a cell that
-  names another pair is unparsed. A pair named twice makes both copies unparsed and, with a pair left missing, the view
-  structurally unparsed: nothing from it is stored and its covered cells are issues (PA-06).
-- **Order:** a departure on or after its return is unparsed (a block holding such pairs keeps them as unparsed
+- **Name match** (§0: the page rotates its elements after a scroll, so position says nothing): each cell's dates come
+  from its own name; a cell naming a date outside the lines is unparsed. The lines are a set check: the dates the cells
+  name must be exactly the lines' sets, and the count must be 49 less the pairs whose return precedes the departure. A
+  pair named twice, a count that is not that, or a set that is not the lines' makes the view structurally unparsed:
+  nothing from it is stored and its covered cells are issues (PA-06). The change key after a scroll is the lines' dates
+  as sets.
+- **Order:** a return before its departure is unparsed (a same-day pair is shown) (a block holding such pairs keeps them as unparsed
   candidates, never priced; PIE-04).
-- **Flags.** ", cheapest price" sets `vendorPriceMark` (relative to that view: the legend reads "Cheapest Compared
+- **Flags.** ", cheapest price" and ", low price" set the cell's `mark` (`cheapest`, `low`; else `none`), relative to that view: the legend reads "Cheapest Compared
   with other prices shown"; PA-04, PIE-11); each cell is read in exactly one view (`reads`), so no flag is merged. ",
   selected" is checked on the first view and not stored.
 
@@ -459,11 +482,14 @@ pnpm --filter @gmt/camoufox-worker recordings:backup
   - The path: 102 moves with 78 read views and 24 transit views; first column top to bottom, then right, up, down,
     down per column.
   - Pages: a page ends on a read view; the next opens the next read block; greedy at 30 moves gives 4 tiles and 97
-    scrolls (CB-1); each tile's `start` centres its first block, clamped to `today + 3`; tiles' covered cells partition
-    the pair's cells; `scrollCap` 0 gives 78 one-view pages.
+    scrolls (CB-1); each tile's `start` centres its first block on the lattice anchored at the later of the window's
+    first departure and today; tiles' covered cells partition the pair's cells; `scrollCap` 0 gives 78 one-view pages.
+  - Moves keep every view holding round trips (later returns and earlier departures first); a 0-night diagonal block
+    opens a day later and scrolls up once; no block cell passes the horizon on either date, and the probe opens at the
+    least pair past it.
   - Stay range: 1–3 nights, a single 7-night stay, 10–21 across 31 December; cells outside the band in no tile.
-  - Re-plan: `q.cells` with 5 resumable cells in two blocks plans those blocks; an off-plan view's dates re-anchor the
-    remaining blocks (`planGridTiles` with `shown`).
+  - Re-plan: `q.cells` with 5 resumable cells in two blocks plans those blocks; a re-plan of a window that has started
+    anchors at today, so no page opens on days already past.
   - `gridTileEstimate` gives each tile's scrolls and seconds from `GRID_TIMES`; determinism (no clock but `today`).
 - [ ] **Step 2: Implement; run; commit.**
 
@@ -498,7 +524,7 @@ pnpm --filter @gmt/camoufox-worker recordings:backup
   than 49 cells, and a `no-flights` cell (PA-13). `sourceLabel` gives the two camoufox labels. The grid capability info
   declares `maxAgeHours` 24, assumed, with the age line "Google's date grid; age not stated (assumed ≤24h)" (ruling 4;
   PA-03), list mode keeping 0. The config accepts `CAMOUFOX_MODE=grid`, spacing 5–30, cap 0–60, the two scroll caps, and
-  refuses a spacing under 5. `RawCalendarPrice.vendorPriceMark` is required (`boolean | null`, PA-08).
+  refuses a spacing under 5. `RawCalendarPrice.vendorPriceMark` is required (`VendorPriceMark | null`, PA-08).
 - [ ] **Step 2: Implement; run; commit.**
 
 ### Task 15.6: db: migration 0006 and the scroll caps
@@ -508,9 +534,11 @@ pnpm --filter @gmt/camoufox-worker recordings:backup
     otherwise) and leaves `vendor_price_mark` and `scroll_count` NULL; the column has no default and an insert
     without it fails (PA-09).
   - CHECKs: `return_date_source` NOT NULL in the three values, `grid-cell` only with `camoufox`; `vendor_price_mark`
-    NULL or 0/1; `scroll_count` NULL or an integer ≥ 0, NULL unless `camoufox`. The repository writes NULL for list
+    NULL or one of `cheapest`, `low`, `none`; `scroll_count` NULL or an integer ≥ 0, NULL unless `camoufox`. The repository writes NULL for list
     rows and the count (0 allowed) for grid pages (CB-8).
-  - A grid page blocked after 3 scrolls writes `scroll_count` 3; a timed-out grid call writes NULL (CB-4).
+  - A grid page blocked after 3 scrolls writes `scroll_count` 3; a timed-out grid call (`unknown`, no answer) keeps its
+    planned scrolls, so the scroll caps never undercount; a call refused before any page writes NULL (CB-4).
+  - `scrollsLeft` is the lesser of what the run's and the month's scroll caps leave, never below 0.
   - The page caps count rows; `provider-execution-scrolls` and `provider-month-scrolls` sum `scroll_count` and refuse a
     tile whose allowance would pass them (ruling 12).
   - A reused grid-cell row keeps `grid-cell` and its `vendor_price_mark` (PA-09).
@@ -526,7 +554,10 @@ pnpm --filter @gmt/camoufox-worker recordings:backup
     dropped and counted in `notes`; each view's unparsed count goes to `notes` as `unparsed:<n>@<view>` (PA-07); a covered
     cell with no parsed cell on a read view is an issue `error`/`parse`/`cell-unparsed`, resumable, never `empty` or
     `no_data`; a structurally unparsed view's covered cells are issues `view-unparsed`; cells of views not reached are
-    issues `page-not-ready`, `off-plan-view:<cause>` or `scroll-allowance`; a cell read twice throws.
+    issues `page-not-ready`, `off-plan-view:<cause>` or `scroll-allowance`; a no-flights page is `no_data` only for the
+    covered cells on or after its first pair on both dates, the others `no-flights-at-start`; a cell read twice fails the
+    tile (`parse`, `grid-cell-read-twice`), nothing stored; the preflight refuses a worker scroll cap or spacing that
+    differs; `estimateTile` gives each tile's seconds with a scroll at the longer of 9.3 s and the spacing.
   - `scrolls` reaches `scroll_count` through `finalise` on every answer that carries it.
   - SearchApi `google_flights_calendar`: `is_lowest_price` true or false fills `vendorPriceMark`; absent is `null`.
     Travelpayouts and the fixture write `null`; camoufox list writes `null` and `returnDateSource: 'asked'`.
@@ -534,10 +565,11 @@ pnpm --filter @gmt/camoufox-worker recordings:backup
 
 ### Task 15.8: Engine: estimate, budget fit, resume
 
-- [ ] **Step 1: Failing tests.** The worked example's grid estimate is 16 pages, 388 scrolls and the seconds from
-  `GRID_TIMES`, at retry factor 1.0 (the plan's own figures, CB-2), and says a full pass fits one run; `scrollCap` 0
-  gives 312 pages and 4 runs; spacing 30 with cap 60 gives its seconds and a note when the run would pass
-  `STUCK_AFTER_HOURS` (CB-7); `budgetFit` counts pages and scrolls against their caps; a resume after a
+- [ ] **Step 1: Failing tests.** The worked example's grid estimate is the pages, scrolls and seconds the provider's
+  `estimateTile` states, at retry factor 1.0 (the plan's own figures, CB-2), with the runs a full pass takes, and the
+  docs state the same figures (§0); a scroll-cap breach is worded as a scroll cap in every notice; spacing 30 with cap 60 gives its seconds and a note when the run would pass
+  `STUCK_AFTER_HOURS` (CB-7); `budgetFit` counts pages against their caps and warns when a month's scrolls pass the
+  monthly scroll cap; a resume after a
   `scroll-not-settled` or `off-plan` page re-plans only the unread cells (decision 50); a blocked grid page disables the
   provider as in list mode.
 - [ ] **Step 2: Implement; run; commit.**
