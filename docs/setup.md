@@ -652,9 +652,9 @@ lock, the spacing and the cool-down are kept there, so a recording and a running
 
 Recordings are written under `apps/camoufox-worker/fixtures/recorded/` in the checkout or worktree that made them, and
 are never committed, so removing that worktree deletes them. Back them up after each recording session with
-`pnpm --filter @gmt/camoufox-worker recordings:backup`: it copies them (never a `.gitkeep`) to
-`~/.local/share/get-me-there/private/fixtures/camoufox-<YYYY-MM-DD>/`, with directories 0700 and files 0600, and adds to
-a backup already made that day. In a fresh checkout, `pnpm --filter @gmt/camoufox-worker recordings:restore` copies the
+`pnpm --filter @gmt/camoufox-worker recordings:backup`: it copies them (never a `.gitkeep`) into a dated
+`camoufox-<YYYY-MM-DD>` directory in your private data store outside the checkout, which it prints, with directories 0700
+and files 0600, and adds to a backup already made that day. In a fresh checkout, `pnpm --filter @gmt/camoufox-worker recordings:restore` copies the
 latest backup back (or `recordings:restore 2026-10-18` for a named day); it refuses a tree that already holds a
 recording.
 
