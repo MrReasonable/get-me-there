@@ -5,13 +5,14 @@ import { canonicalCacheKey } from './cacheKey.js';
 import { assertEgress, assertKitConfig } from './egress.js';
 import { createLimiter, HOUR_MS, type ProviderLimiter } from './limiter.js';
 import { sleep } from './sleep.js';
-import type {
-  HttpKit,
-  HttpKitDeps,
-  HttpKitRequest,
-  HttpKitResponse,
-  HttpProviderId,
-  ProviderHttpLimits,
+import {
+  type HttpKit,
+  type HttpKitDeps,
+  type HttpKitRequest,
+  type HttpKitResponse,
+  type HttpProviderId,
+  ledgeredId,
+  type ProviderHttpLimits,
 } from './types.js';
 
 /** Spec §5.3: p-retry, max 3 attempts. */
@@ -21,8 +22,10 @@ export const BACKOFF_BASE_MS = 1000;
 const HTTP_PROVIDER_IDS = [
   'travelpayouts',
   'searchapi',
+  'camoufox',
   'fixture',
   'fx',
+  'camoufox-status',
 ] as const satisfies readonly HttpProviderId[];
 
 /** Only a ProviderError marked retryable is retried; auth, quota, parse and BudgetExceeded never are. */
@@ -61,9 +64,10 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
     const l = deps.limits[id];
     if (l === undefined) continue;
     // why: seed the hourly reservoir from the ledger so a restart inside an hour does not grant a fresh one (ruling 9); fx is not ledgered.
+    const ledgered = ledgeredId(id);
     limiters.set(
       id,
-      createLimiter(l, { usedThisHour: id === 'fx' ? 0 : deps.budget.recentCalls(id, since) }),
+      createLimiter(l, { usedThisHour: ledgered === null ? 0 : deps.budget.recentCalls(ledgered, since) }),
     );
   }
   const inFlight = new Map<string, Flight>();
@@ -134,9 +138,10 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
 
   // why: parity counts first-attempt rows plus cache hits per tile (spec §8.1), so a joiner leaves its own row.
   function recordJoin(r: HttpKitRequest): void {
-    if (r.providerId === 'fx' || r.ledgerCacheHit === false) return;
+    const ledgered = ledgeredId(r.providerId);
+    if (ledgered === null || r.ledgerCacheHit === false) return;
     deps.budget.recordCacheHit({
-      providerId: r.providerId,
+      providerId: ledgered,
       executionId: r.executionId,
       tileIndex: r.tileIndex,
       endpointPath: r.endpointPath,
@@ -185,9 +190,10 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
       if (hit !== undefined) {
         // why: spec §5.3 — cache hits are ledgered as non-billable rows so parity counts them; 'fx' is not ledgered.
         // why: a later page of a paginated tile (ledgerCacheHit false) adds no row; the tile's first page already did.
-        if (r.providerId !== 'fx' && r.ledgerCacheHit !== false)
+        const ledgered = ledgeredId(r.providerId);
+        if (ledgered !== null && r.ledgerCacheHit !== false)
           deps.budget.recordCacheHit({
-            providerId: r.providerId,
+            providerId: ledgered,
             executionId: r.executionId,
             tileIndex: r.tileIndex,
             endpointPath: r.endpointPath,

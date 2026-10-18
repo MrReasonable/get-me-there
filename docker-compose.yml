@@ -89,6 +89,17 @@ services:
       SEARCHAPI_CONCURRENCY: "${SEARCHAPI_CONCURRENCY:-}"
       SEARCHAPI_COST_PER_CALL_MICRO_GBP: "${SEARCHAPI_COST_PER_CALL_MICRO_GBP:-}"
       SEARCHAPI_PLAN_FIXED_PENCE: "${SEARCHAPI_PLAN_FIXED_PENCE:-}"
+      # --- camoufox (off by default; the worker runs on the Mac, never in this image; docs/setup.md section 14) ---
+      CAMOUFOX_ENABLED: "${CAMOUFOX_ENABLED:-}"
+      # why: Docker Desktop resolves host.docker.internal to the Mac's loopback, where the worker binds (decision 69).
+      CAMOUFOX_WORKER_URL: "${CAMOUFOX_WORKER_URL:-http://host.docker.internal:8090}"
+      CAMOUFOX_WORKER_KEY: "${CAMOUFOX_WORKER_KEY:-}"
+      CAMOUFOX_MIN_SPACING_SECONDS: "${CAMOUFOX_MIN_SPACING_SECONDS:-}"
+      CAMOUFOX_EXECUTION_PAGE_CAP: "${CAMOUFOX_EXECUTION_PAGE_CAP:-}"
+      CAMOUFOX_MONTHLY_PAGE_CAP: "${CAMOUFOX_MONTHLY_PAGE_CAP:-}"
+      CAMOUFOX_BILLING_DAY: "${CAMOUFOX_BILLING_DAY:-}"
+      CAMOUFOX_COOLDOWN_HOURS: "${CAMOUFOX_COOLDOWN_HOURS:-}"
+      CAMOUFOX_PAGE_TIMEOUT_SECONDS: "${CAMOUFOX_PAGE_TIMEOUT_SECONDS:-}"
       # --- email (all or nothing) ---
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_PORT: "${SMTP_PORT:-}"

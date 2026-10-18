@@ -35,6 +35,25 @@ export function sellsCabin(ctx: EngineContext, providerId: ProviderId, cabin: Ca
   return (ctx.providers.get(providerId)?.cabins ?? []).includes(cabin);
 }
 
+/**
+ * The execution's budget: the definition's, plus each discovery provider's own per-execution cap from config
+ * (`providerMaxCalls`, camoufox's page cap; decision 69, arch-007). Frozen at creation, and refreshed only where a
+ * manual resume refreshes the rest of the budget; the guard reads it from the snapshot, never from config.
+ */
+export function snapshotBudget(
+  ctx: EngineContext,
+  budget: SearchDefinition['budget'],
+  discovery: readonly ProviderId[],
+): SearchDefinition['budget'] {
+  const caps: Partial<Record<ProviderId, number>> = {};
+  for (const id of discovery) {
+    const cap = ctx.limitsOf(id).executionCallCap;
+    if (cap !== null) caps[id] = cap;
+  }
+  const { providerMaxCalls: _ignored, ...rest } = budget;
+  return Object.keys(caps).length === 0 ? rest : { ...rest, providerMaxCalls: caps };
+}
+
 /** Who started the run; the same union as `StartOptions['trigger']`, never restated (code-architect review 17). */
 export type Trigger = StartOptions['trigger'];
 
@@ -83,12 +102,14 @@ export function buildSnapshot(
       );
     return true;
   };
+  const discovery = def.providers.discovery.filter((id) => usable(id, 'discovery'));
   const snapshot: DefinitionSnapshot = {
     ...def,
+    budget: snapshotBudget(ctx, def.budget, discovery),
     verification: { ...def.verification, alwaysInclude: kept },
     providers: {
       ...def.providers,
-      discovery: def.providers.discovery.filter((id) => usable(id, 'discovery')),
+      discovery,
       verification: def.providers.verification.filter((id) => usable(id, 'verification')),
     },
     resolved,

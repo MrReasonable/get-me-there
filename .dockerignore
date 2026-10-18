@@ -25,6 +25,10 @@ private/
 fixtures/recorded/
 **/fixtures/recorded/
 **/*.raw.json
+# why: WP14 (arch-002, devops-002): the camoufox worker runs on the operator's Mac and never in the image. Only its
+# manifest enters the build context, so the frozen lockfile's importer resolves; nothing else of it is copied.
+apps/camoufox-worker/**
+!apps/camoufox-worker/package.json
 # Rebuilt inside the image.
 node_modules/
 **/node_modules/

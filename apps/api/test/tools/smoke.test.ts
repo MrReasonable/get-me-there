@@ -72,6 +72,19 @@ async function smoke(
   return { r, root, urls: log.urls };
 }
 
+const CAMOUFOX_ROWS = [
+  'camoufox worker',
+  'camoufox signed out',
+  'camoufox consent',
+  'camoufox settings match',
+  'camoufox one page',
+  'camoufox not blocked',
+  'camoufox cell',
+  'camoufox partial',
+  'camoufox provenance',
+  'camoufox selectors',
+  'camoufox compare',
+];
 const status = (r: SmokeResult) => Object.fromEntries(r.checks.map((c) => [c.name, c.status]));
 const lineOf = (r: SmokeResult, start: string): string => r.lines.find((l) => l.startsWith(start)) ?? '';
 const billed = (ports: Ports, r: SmokeResult): number =>
@@ -103,6 +116,8 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
       sellers: 'pass',
       'route history': 'look',
       'separate tickets excluded': 'look',
+      // why: WP14 Task 14.13: camoufox is off in this environment, so each of its rows is skip
+      ...Object.fromEntries(CAMOUFOX_ROWS.map((n) => [n, 'skip'])),
     });
     expect(r.lines).toContain(
       '  [look] route history: 2 point(s) from 2027-02-10 to 2027-02-20, lowest £610',

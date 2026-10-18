@@ -1,6 +1,17 @@
 // Barrel for @gmt/providers (spec §4: imports @gmt/core only; no SQLite, reads no environment variables). The plan contract plus the
 // named-consumer extras; the fixture router lives in ./fixture and msw-based helpers in ./testing (plan decision 7).
 
+export {
+  BLOCKED_WORDS,
+  CAMOUFOX_DISCOVERY_INFO,
+  CAMOUFOX_DISPLAY_NAME,
+  camoufoxHttpLimits,
+  camoufoxProvider,
+  camoufoxStatusHttpLimits,
+  classifyWorkerAnswer,
+  coolingDownWords,
+  planSingleCells,
+} from './camoufox/index.js'; // WP14: apps/api httpLimitsFor and providersFor; the smoke rows; classifyWorkerAnswer: engine tests
 export { fixtureHttpLimits, fixtureProvider } from './fixture/provider.js'; // fixtureHttpLimits: WP4b httpLimitsFor
 export { CREDENTIAL_HEADERS, canonicalCacheKey } from './http/cacheKey.js'; // CREDENTIAL_HEADERS: WP4b createLogger
 export { createHttpKit } from './http/httpKit.js';

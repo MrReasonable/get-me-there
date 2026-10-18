@@ -54,9 +54,11 @@ function oracle(all: readonly O[]): RollUp {
     ? 'budget'
     : rs.includes('provider_disabled')
       ? 'provider_disabled'
-      : rs.includes('departed')
-        ? 'departed'
-        : 'not_selected';
+      : rs.includes('provider_unavailable')
+        ? 'provider_unavailable'
+        : rs.includes('departed')
+          ? 'departed'
+          : 'not_selected';
   return { status: 'skipped', reason, minPence: null };
 }
 
@@ -72,6 +74,7 @@ const VARIANTS: O[] = [
   o('error'), // an error with no reason: mixes with a named reason as 'mixed'
   skipped('budget'),
   skipped('provider_disabled'),
+  skipped('provider_unavailable'),
   skipped('departed'),
   skipped('not_selected'),
 ];
@@ -118,6 +121,16 @@ describe('rollUp precedence (spec §6.6)', () => {
       'row 6: provider_disabled over departed',
       [skipped('departed'), skipped('provider_disabled')],
       { status: 'skipped', reason: 'provider_disabled', minPence: null },
+    ],
+    [
+      'row 6: provider_disabled over provider_unavailable (camoufox, spec §3 rev 32)',
+      [skipped('provider_unavailable'), skipped('provider_disabled')],
+      { status: 'skipped', reason: 'provider_disabled', minPence: null },
+    ],
+    [
+      'row 6: provider_unavailable over departed',
+      [skipped('departed'), skipped('provider_unavailable')],
+      { status: 'skipped', reason: 'provider_unavailable', minPence: null },
     ],
     [
       'row 6: departed over not_selected',
@@ -214,7 +227,7 @@ describe('rollUp precedence (spec §6.6)', () => {
     });
   });
 
-  it('matches the independent oracle on every sequence of up to three outcomes (1,885 cases)', () => {
+  it('matches the independent oracle on every sequence of up to three outcomes (2,955 cases)', () => {
     let cases = 0;
     const walk = (prefix: O[]) => {
       expect(rollUp(prefix), JSON.stringify(prefix.map((x) => [x.status, x.reason]))).toEqual(oracle(prefix));
@@ -222,7 +235,7 @@ describe('rollUp precedence (spec §6.6)', () => {
       if (prefix.length < 3) for (const v of VARIANTS) walk([...prefix, v]);
     };
     walk([]);
-    expect(cases).toBe(1 + 13 + 169 + 2197);
+    expect(cases).toBe(1 + 14 + 196 + 2744);
   });
 
   const arbOutcome: fc.Arbitrary<O> = fc.oneof(
@@ -235,7 +248,15 @@ describe('rollUp precedence (spec §6.6)', () => {
         fc.constantFrom(null, 'partial-expansion', 'offers-dropped:1', 'partial-expansion;offers-dropped:1'),
       )
       .map(([p, r]) => priced(p, r)),
-    fc.constantFrom<SkipReason>('budget', 'provider_disabled', 'departed', 'not_selected').map(skipped),
+    fc
+      .constantFrom<SkipReason>(
+        'budget',
+        'provider_disabled',
+        'provider_unavailable',
+        'departed',
+        'not_selected',
+      )
+      .map(skipped),
   );
 
   it('property: agrees with the oracle, ignores order, and only ever reports a status it was given', () => {

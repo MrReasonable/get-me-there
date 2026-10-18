@@ -131,5 +131,20 @@ export function budgetFitFor(
     0,
   );
   scope({ kind: 'global-month' }, fixed + cost, ctx.config.spend.monthlyCapMicroGbp);
-  return { fits: perScope.every((x) => x.fits), runsPerMonth: own.runsPerMonth, perScope };
+  // why: fix round 1 (CodeRabbit): `fits` reads the cap scopes only; the coverage line below is a warning
+  const fits = perScope.every((x) => x.fits);
+  // why: spec §2 rev 32 (cost-011): a page-capped provider prices at most its monthly cap of cells, so a schedule whose
+  // every refresh needs more cells than that never covers its space; the line warns (it is not a cap scope the API
+  // refuses a schedule for).
+  for (const p of own.perRun.perProvider) {
+    if (p.stage !== 'discovery' || ctx.limitsOf(p.providerId).executionCallCap === null) continue;
+    const cap = ctx.limitsOf(p.providerId).monthlyCallCap;
+    perScope.push({
+      scope: `cells-per-refresh:${p.providerId}`,
+      estimated: own.perRun.cells,
+      cap,
+      fits: own.perRun.cells <= cap,
+    });
+  }
+  return { fits, runsPerMonth: own.runsPerMonth, perScope };
 }

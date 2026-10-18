@@ -5,9 +5,12 @@ import { envExampleVariables, read, specEnvBlock } from './files.js';
 
 /**
  * Variables the config reads that .env.example must not offer: IN_CONTAINER is set by the Dockerfile (it appears
- * only commented), FIXTURE_COST_MICRO_GBP exists for engine tests under the synthetic gate (plan "Config").
+ * only commented), FIXTURE_COST_MICRO_GBP exists for engine tests under the synthetic gate (plan "Config"), and
+ * CAMOUFOX_MODE only refuses grid.
  */
-const NOT_OPERATOR = ['IN_CONTAINER', 'FIXTURE_COST_MICRO_GBP'];
+// why: CAMOUFOX_MODE accepts only `list` (its default) and exists so `grid` fails boot naming it (decision 69); spec §12
+// offers no line for it.
+const NOT_OPERATOR = ['IN_CONTAINER', 'FIXTURE_COST_MICRO_GBP', 'CAMOUFOX_MODE'];
 
 describe('.env.example (spec §12)', () => {
   it('is the spec §12 block verbatim', () => {

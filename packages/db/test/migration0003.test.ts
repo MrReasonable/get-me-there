@@ -9,15 +9,16 @@ import { openTracked, sqliteCode, T0, tmpDbPath, tmpDir } from './helpers/db.js'
 
 const TAG = '0003_route_history_by_trip';
 const LATER = '0004_route_history_point_of_sale';
+const LATEST = '0005_camoufox_provider';
 
 /** A copy of the migrations folder that stops at 0002, as an install made before this migration has it. */
 function upTo0002(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  for (const tag of [TAG, LATER]) rmSync(join(dir, `${tag}.sql`));
+  for (const tag of [TAG, LATER, LATEST]) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
-  journal.entries = journal.entries.filter((e) => e.tag !== TAG && e.tag !== LATER);
+  journal.entries = journal.entries.filter((e) => ![TAG, LATER, LATEST].includes(e.tag));
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
 }
@@ -31,7 +32,7 @@ describe('migration 0003: route price history keyed by trip (ruling 6, spec §7 
     );
     insertOld.run('2026-09-01', 48_000, T0);
     insertOld.run('2026-09-02', 47_500, T0);
-    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG, LATER]);
+    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG, LATER, LATEST]);
     applyMigrations(db, MIGRATIONS_DIR);
     const rows = db.raw
       .prepare(

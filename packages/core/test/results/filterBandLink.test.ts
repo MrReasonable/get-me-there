@@ -153,6 +153,10 @@ describe('searchLinkFor (spec §6.9)', () => {
     expect(u.searchParams.get('curr')).toBe('GBP');
   });
 
+  it('camoufox rows link to the same Google Flights search (spec §5.2 rev 32)', () => {
+    expect(searchLinkFor('camoufox', cell, 'economy')).toEqual(searchLinkFor('searchapi', cell, 'economy'));
+  });
+
   it('fixture (synthetic) rows get no link (review sec-003)', () => {
     expect(searchLinkFor('fixture', cell, 'economy')).toBeNull();
   });
@@ -178,7 +182,7 @@ describe('searchLinkFor (spec §6.9)', () => {
 
   it('every link carries the label and passes the vendor-link rule for its provider', () => {
     for (const cabin of ['economy', 'premium_economy', 'business', 'first'] as const) {
-      for (const id of ['travelpayouts', 'searchapi'] as const) {
+      for (const id of ['travelpayouts', 'searchapi', 'camoufox'] as const) {
         const link = searchLinkFor(id, cell, cabin);
         expect(link?.label.startsWith(SEARCH_LINK_LABEL)).toBe(true);
         expect(validateVendorUrl(link?.url ?? '', LINK_ALLOWLIST[id])).toEqual({

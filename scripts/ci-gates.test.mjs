@@ -26,6 +26,8 @@ describe('CI enforces every package’s own coverage thresholds', () => {
       'packages/engine',
       'apps/api',
       'apps/web',
+      // why: WP14 fix round 1 (TS I7): the worker's 90/80/90/90 and safety floors run through its test script too
+      'apps/camoufox-worker',
     ]) {
       const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', dir, 'package.json'), 'utf8'));
       expect(pkg.scripts.test, dir).toContain('--coverage');

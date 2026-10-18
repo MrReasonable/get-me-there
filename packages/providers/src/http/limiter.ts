@@ -1,6 +1,6 @@
 import { AbortedError, BudgetExceeded, ProviderError } from '@gmt/core';
 import Bottleneck from 'bottleneck';
-import type { HttpProviderId, ProviderHttpLimits } from './types.js';
+import { errorProviderId, type HttpProviderId, type ProviderHttpLimits } from './types.js';
 
 export interface LimiterRunOptions {
   signal: AbortSignal;
@@ -42,8 +42,9 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
   });
   const perMinute = new Bottleneck({
     maxConcurrent: l.concurrency,
-    // why: smoothing only — the rate guarantee is per fixed bottleneck window from creation (plan decision 17).
-    minTime: Math.ceil(MINUTE_MS / l.ratePerMinute),
+    // why: smoothing only — the rate guarantee is per fixed bottleneck window from creation (plan decision 17);
+    // a provider that states its own start-to-start spacing (camoufox, ruling 7) uses it directly.
+    minTime: l.minIntervalMs ?? Math.ceil(MINUTE_MS / l.ratePerMinute),
     reservoir: l.ratePerMinute,
     reservoirRefreshAmount: l.ratePerMinute,
     reservoirRefreshInterval: MINUTE_MS,
@@ -71,7 +72,7 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
           new ProviderError({
             kind: 'limiter-timeout',
             retryable: false,
-            providerId: o.providerId,
+            providerId: errorProviderId(o.providerId),
             retryAfterSeconds: seconds,
             message: `${o.providerId} ${o.endpointPath}: waited more than ${Math.round(o.maxWaitMs / 1000)}s for a rate-limit slot [queue-wait-exceeded]`,
           });

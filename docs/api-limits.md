@@ -100,6 +100,29 @@ window's start and end with calls and cost so far.
   every HTTP 200 attempt, so it can read higher than the dashboard, never lower.
 - The key travels in an `Authorization: Bearer` header, never in a URL.
 
+### Camoufox (own Google Flights pages): self-scraped, opt-in, free
+
+- Off by default (`CAMOUFOX_ENABLED=false`); a definition must also name it. Discovery only, `list` mode: one page per
+  day pair, through the host-side worker on the operator's Mac (docs/setup.md section 14).
+- Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
+  pages a calendar month from `CAMOUFOX_BILLING_DAY`. The run's cap is frozen into the execution's snapshot when it is
+  created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
+  rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
+  providers continue, or pauses the run for a manual resume when none remains.
+- Spacing: at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 30 to 600) from the start of one page to the start of the
+  next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
+  derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and
+  120 at the default). Concurrency is 1.
+- Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, at least 24) after a challenge, sign-in or consent page or a
+  signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
+- Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every
+  free provider shares.
+- Coverage: with the defaults, 100 day pairs a run and 1,500 a month, against 2,184 day pairs for one worked-example
+  airport pair (8,736 for its four pairs), so a full pass of one pair takes 22 runs.
+- Costs (the spec's §2, in full on docs/setup.md section 14): **Terms** (read the provider's terms before enabling
+  it; the operator is responsible for how it is used), **The operator's IP and account**, **Brittleness**, **Speed** (50–90 s a
+  page, 1½–2½ hours a run), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
+
 ## Reconciling with the vendor dashboard
 
 Once a week (or before raising a cap), compare the app with SearchApi's dashboard:
@@ -115,6 +138,10 @@ Once a week (or before raising a cap), compare the app with SearchApi's dashboar
    `docker compose up -d` until the next billing day.
 5. Travelpayouts is free; there is nothing to reconcile, only the call counts on the
    Providers page.
+6. Camoufox has no vendor dashboard; the ledger's camoufox rows are the only record of what it did. Rows of class
+   `page` loaded a Google page (`200`, `423` blocked, `504`, and `502` after launch); rows of class `no-page` did not
+   (`423` cooling-down, `429`, `409`, `400`, `401`, `502` at launch, and a refused connection). A `423` blocked row is a
+   block; a `423` cooling-down row is a refusal that loaded no page. Only `page` rows count toward its page caps.
 
 ## Restoring a backup resets month-to-date spend
 

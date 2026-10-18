@@ -21,7 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
-| Self-scraping: Google Flights in a Camoufox (anti-detection Firefox) browser via Playwright | Self-run; no vendor account | Free software; residential proxies and selector upkeep are the real cost | Google's page | Yes (the date-grid page) | Yes | Yes | Yes | **Unauthorised; the operator carries the exposure directly** on their own server and IP | Phase 4 continuity fallback only (spec §2); not built |
+| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | The page as Google showed it when it was read (`maxAgeHours` 0) | `list` mode, one day pair a page (`grid` designed, not built) | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); built in WP14 |
 
 ## Key facts with sources
 
@@ -63,6 +63,70 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 - ToS: recommended for informing users/content pages; caching on your side encouraged; no ban on scheduled queries found.
 - Live Flight Search API: ≥50k MAU required, bans automated collection, 9% conversion required → not usable.
 - RISK: coverage of thin long-haul routes in `uk` market unknown; expect sparse. Needs a token + probe before committing.
+
+### Camoufox provider (self-scraped, opt-in)
+
+**Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the operator's Mac; macOS only) launches the
+operator's installed Camoufox through `camoufox-js` 0.11.5 and `playwright-core` 1.59.1, in a persistent signed-out
+profile of its own, with service workers blocked. The app's adapter calls the worker over HTTP at `CAMOUFOX_WORKER_URL`
+with `CAMOUFOX_WORKER_KEY`; one worker call makes at most one Google page load at
+`https://www.google.com/travel/flights?q=Flights from <origin> to <destination> on <depart> returning <return>&curr=GBP&hl=en-GB&gl=<POINT_OF_SALE>`.
+Before reading it checks the page's own search form (round trip, one adult, the query's dates) and waits until the page
+is settled; it reads every result link's accessible name through Playwright locators (never printed accessibility
+text), parses each with one dated grammar, keeps the options whose departure date and airports (matched by the airports
+dataset's names) are the cell's, and takes the minimum itself. An option it cannot read is counted, never dropped
+silently. It never calls the camofox-browser REST server.
+
+**Evidence.**
+
+- *Feasibility load, 2026-10-18* (signed in, through camofox-browser): the worked example's search loaded the full
+  results with no challenge: a `tablist` with "Best" and "Cheapest from £451", "24 results returned.", lists "Top
+  departing flights" and "Other departing flights" of `listitem`s each holding one `link` named with the whole option,
+  the "Date grid" button, and the footer's "Currency GBP" and "Location·United Kingdom", all on the Best tab.
+- *Signed-out test, 2026-10-18* (a fresh profile, since deleted): it landed on `consent.google.com` ("Before you
+  continue", "Reject all" / "Accept all"), with no CAPTCHA and no "unusual traffic"; the results page that followed held
+  26 result links in the same name grammar.
+- Both loads ran through camofox-browser's own launch (humanised input, its cache preferences, uBlock Origin); the
+  worker launches without them, so its own recordings (WP14 Task 14.2) are the evidence for its configuration.
+
+**`camoufox-js` facts, read in source on 2026-10-18 (0.11.5).** `Camoufox({ user_data_dir })` returns a
+`BrowserContext` from `firefox.launchPersistentContext`. Without `executable_path` it resolves the binary and
+`properties.json` under its install directory (`~/Library/Caches/camoufox/Camoufox.app/Contents/…`) and reads the
+top-level `version.json` (`{version, release}`), starting an unawaited download when that directory is missing, empty
+or unsupported; the worker verifies or creates both entries at start (a symlink to the pinned bundle, the top-level file
+from the bundle's own `version.json`, whose build field is named `build`) and never modifies the bundle. It passes
+`ff_version` from the bundle with `i_know_what_im_doing: true`, `exclude_addons: ['UBO']` (no add-on download),
+`geoip: false` (no IP lookup or GeoIP download), no proxy, no humanised input, headless, `serviceWorkers: 'block'`, its
+own signal handling, six preferences that switch off telemetry, crash reports, Normandy and the captive-portal check,
+and a minimal browser environment (`HOME`, `PATH`, `TMPDIR`, `LANG`), since without `env` the library passes the whole
+process environment to the browser. Any other `camoufox-js` version or Camoufox build is refused at start.
+
+**Limits.** One page at a time; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never lower, never randomised)
+from the start of one page to the next, persisted across restarts; `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, at most
+400) pages a run, frozen into the execution's snapshot; `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500) a month. No
+proxies; no challenge is ever solved, clicked through or waited out; consent is rejected, never accepted (the
+operator's saved cookie choice, Reject all, is applied before every page and compared by value after it; a consent page
+stops it). The worker stops and cools down whenever a page is not a recognised results page: a challenge or
+verification page, a sign-in page, a signed-in control, a consent page or an off-allowlist navigation stops it for `CAMOUFOX_COOLDOWN_HOURS` (default 48,
+at least 24); an unrecognised page for 1 hour.
+
+**Costs.** **Terms:** Read the provider's terms before enabling it; the operator is responsible for how it is used. **The operator's IP and account:** every page
+comes from the operator's own address, so a block lands on that address; the profile is never signed in. **Brittleness:**
+a changed page reads as unrecognised and stops the provider for an hour; the selectors and grammar must be re-dated
+against a new recording, and an upgrade of `camoufox-js`, `playwright-core` or the binary is a re-verification.
+**Speed:** about 50–90 s a page, so 100 cells a run take about 1½–2½ hours. **Availability:** only while the Mac is on
+and the worker runs; otherwise its cells read skipped ("browser worker not reachable"). **Image size:** none in the app
+image. **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the
+Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
+
+**Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs
+and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a month, against 2,184 day pairs
+for one worked-example airport pair (8,736 for its four pairs).
+
+**Provenance note, exactly as the app states it:** "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read."
+
+**Labels.** Display name "Google Flights via Camoufox"; source label "Google Flights prices via Camoufox"; compact mark
+`CF`; source kind `scraped-self`, `maxAgeHours` 0; vendor links to `google.com` only.
 
 ### Ignav
 - https://ignav.com/pricing — 1000 free once, $2/1k successful, cache hits billed, spend cap. POST /api/fares/round-trip; /api/fares/booking-links; market=GB. Source undisclosed; ToS page JS-only. Markets itself as "Amadeus Self-Service replacement".

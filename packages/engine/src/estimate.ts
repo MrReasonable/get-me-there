@@ -11,7 +11,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
-import { disabledBefore, resumableCells } from './run.js';
+import { disabledFor, resumableCells } from './run.js';
 import { planTiles } from './stages/discovery.js';
 import { reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
@@ -22,6 +22,8 @@ export const SECONDS_PER_CALL: Readonly<Record<SourceKind, number>> = {
   'authorised-cached': 1,
   'scraped-aggregate': 20,
   'scraped-search': 15,
+  // why: camoufox's seconds are pages × (spacing + 40) on its own line (brief WP14 Task 14.9), not a per-call figure.
+  'scraped-self': 0,
   synthetic: 0,
 };
 
@@ -45,6 +47,8 @@ interface Line {
   rawCalls: number;
   rawCostMicroGbp: number;
   rawSeconds: number;
+  /** A provider's own per-execution cap (camoufox pages): calls and seconds are clamped to it after the factor. */
+  cap?: { calls: number; seconds: number };
 }
 
 function assemble(
@@ -57,14 +61,16 @@ function assemble(
   const f = ctx.config.estimateRetryFactor;
   const perProvider = lines.map((l) => {
     const costMicroGbp = Math.ceil(l.rawCostMicroGbp * f);
+    // why: cost-004: the guard refuses a page past the snapshot cap, so the factor can never ask for more than it
+    const clamp = (n: number, cap: number | undefined): number => (cap === undefined ? n : Math.min(n, cap));
     return {
       providerId: l.providerId,
       stage: l.stage,
-      calls: Math.ceil(l.rawCalls * f),
+      calls: clamp(Math.ceil(l.rawCalls * f), l.cap?.calls),
       planCalls: l.rawCalls,
       costMicroGbp,
       costPence: microGbpToPence(costMicroGbp),
-      seconds: Math.ceil(l.rawSeconds * f),
+      seconds: clamp(Math.ceil(l.rawSeconds * f), l.cap?.seconds),
       blocked: null,
     };
   });
@@ -107,6 +113,8 @@ function discoveryLine(
   cells: readonly CellKey[],
   definitionId: string | null,
   notes: string[],
+  /** The execution a resume continues (its pages already loaded count against the cap); null for a start. */
+  executionId: string | null = null,
 ): Line | null {
   const provider = ctx.providers.get(providerId);
   const cap = provider?.discovery;
@@ -136,6 +144,34 @@ function discoveryLine(
   if (tiles > 0)
     notes.push(`${providerId}: ${tiles} discovery tiles planned; a tile that pages spends one call a page`);
   const l = ctx.limitsOf(providerId);
+  const pageCap = snapshot.budget.providerMaxCalls?.[providerId];
+  if (pageCap !== undefined && l.minSpacingSeconds !== null) {
+    // why: spec §2 rev 32, cost-004/009/011, prov-013: one page per cell, at most the snapshot's page cap a run; a page
+    // takes about 20–60 s plus the start-to-start spacing, estimated as spacing + 40 s
+    const perPage = l.minSpacingSeconds + 40;
+    // why: fix round 1 (CodeRabbit): a resume has the cap less the pages this execution already loaded; with none left
+    // the line still asks one page, so checkBudget's provider-execution check refuses the resume instead of the guard
+    const used =
+      executionId === null
+        ? 0
+        : ctx.budget.usage({ kind: 'provider-execution', executionId, providerId }).calls;
+    const left = Math.max(0, pageCap - used);
+    const pages = tiles === 0 ? 0 : left === 0 ? 1 : Math.min(tiles, left);
+    if (fresh.length > 0)
+      notes.push(
+        `${providerId} list mode prices ${pages} of ${fresh.length} cells this run; a full pass takes ${Math.ceil(fresh.length / pageCap)} runs; the month cap allows about ${l.monthlyCallCap} cells`,
+      );
+    return {
+      providerId,
+      stage: 'discovery',
+      rawCalls: pages,
+      rawCostMicroGbp: 0,
+      rawSeconds: pages * perPage,
+      // why: fix round 2 (CodeRabbit): the retry factor is clamped to the pages this execution has left (one when none
+      // are, which checkBudget refuses), never to the whole cap
+      cap: { calls: Math.max(left, 1), seconds: Math.max(left, 1) * perPage },
+    };
+  }
   return {
     providerId,
     stage: 'discovery',
@@ -222,14 +258,14 @@ function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefin
  */
 export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual: boolean): Estimate {
   const snapshot = exec.snapshot;
-  const disabled = manual ? new Set<ProviderId>() : disabledBefore(ctx, exec.id);
+  const disabled = disabledFor(ctx, exec.id, manual);
   const remaining = (stage: Stage, id: ProviderId) =>
     disabled.has(id) ? [] : resumableCells(ctx, exec.id, stage, id, manual);
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
     // why: ssr M2 — the same reuse query the pass applies, so a cell another run has priced since is not counted
-    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes);
+    const l = discoveryLine(ctx, snapshot, id, remaining('discovery', id), exec.definitionId, notes, exec.id);
     if (l !== null) lines.push(l);
   }
   const seeded = ctx.repos.cells.hasVerificationOutcomes(exec.id);

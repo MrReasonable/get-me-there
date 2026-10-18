@@ -24,6 +24,7 @@ const PACKAGES = [
   'packages/engine',
   'apps/api',
   'apps/web',
+  'apps/camoufox-worker',
 ];
 let scratch = null;
 
@@ -223,6 +224,65 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     expect(r.stderr).toContain('@gmt/core may not depend on left-pad');
   });
 
+  it('WP14: the worker’s browser libraries only in launch.ts and driver.ts; its env only in run.ts', () => {
+    const bad = tree({
+      'apps/camoufox-worker/src/session.ts': "import { firefox } from 'playwright-core';\n",
+      'apps/camoufox-worker/src/main.ts': 'export const k = process.env.CAMOUFOX_WORKER_KEY;\n',
+    });
+    const r = run(bad);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/session\.ts imports playwright-core/);
+    expect(r.stderr).toMatch(/main\.ts reads process\.env/);
+    const ok = tree({
+      'apps/camoufox-worker/src/launch.ts': "export const load = () => import('camoufox-js');\n",
+      'apps/camoufox-worker/src/driver.ts':
+        "import type { Page } from 'playwright-core';\nexport type P = Page;\n",
+      'apps/camoufox-worker/src/run.ts': 'export const env = process.env;\n',
+    });
+    expect(run(ok).status).toBe(0);
+  });
+  it('WP14: worker tests import only @gmt/providers/testing, and nothing imports the worker', () => {
+    const r = run(
+      tree({
+        'apps/camoufox-worker/test/x.test.ts': "import { makeKit } from '@gmt/providers';\n",
+        'apps/api/src/x.ts': "import '@gmt/camoufox-worker';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/worker tests may import only @gmt\/core and @gmt\/providers\/testing/);
+    expect(r.stderr).toMatch(/imports @gmt\/camoufox-worker/);
+    expect(
+      run(
+        tree({
+          'apps/camoufox-worker/test/y.test.ts': "import { skipTitle } from '@gmt/providers/testing';\n",
+        }),
+      ).status,
+    ).toBe(0);
+  });
+  // why: WP14 fix round 1 (arch M10): worker tests reach no other workspace package but core and the testing export
+  it('WP14: a worker test importing @gmt/db or @gmt/engine fails; @gmt/core passes', () => {
+    const r = run(
+      tree({
+        'apps/camoufox-worker/test/a.test.ts': "import { openDatabase } from '@gmt/db';\n",
+        'apps/camoufox-worker/test/b.test.ts': "import { buildContext } from '@gmt/engine';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(
+      /a\.test\.ts imports @gmt\/db; worker tests may import only @gmt\/core and @gmt\/providers\/testing/,
+    );
+    expect(r.stderr).toMatch(/b\.test\.ts imports @gmt\/engine/);
+    expect(
+      run(tree({ 'apps/camoufox-worker/test/c.test.ts': "import { asIata } from '@gmt/core';\n" })).status,
+    ).toBe(0);
+  });
+  it('WP14: the worker’s @gmt devDependencies are exactly @gmt/providers', () => {
+    const pkg = JSON.parse(readFileSync(join(REPO, 'apps/camoufox-worker/package.json'), 'utf8'));
+    pkg.devDependencies['@gmt/db'] = 'workspace:*';
+    const r = run(tree({ 'apps/camoufox-worker/package.json': JSON.stringify(pkg) }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/@gmt\/camoufox-worker's @gmt devDependencies must be exactly @gmt\/providers/);
+  });
   it('process.env outside the api bootstrap fails, in any package', () => {
     const r = run(
       tree({
@@ -257,7 +317,9 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
       'scripts/lib/helper.mjs',
       'scripts/op.js',
     ])
-      expect(r.stderr).toContain(`${f} reads process.env outside apps/api/src/bootstrap/ and scripts/*.mjs`);
+      expect(r.stderr).toContain(
+        `${f} reads process.env outside apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts and scripts/*.mjs`,
+      );
     expect(r.stderr).not.toContain('apps/api/src/bootstrap/tool.ts');
     expect(r.stderr).not.toContain('scripts/backup.mjs');
   });

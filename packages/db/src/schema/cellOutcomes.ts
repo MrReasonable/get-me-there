@@ -58,7 +58,7 @@ export const cellOutcomes = sqliteTable(
     check(
       'cell_outcomes_skip_reason_ck',
       sql.raw(
-        "status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'departed')",
+        "status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'provider_unavailable', 'departed')",
       ),
     ),
     check('cell_outcomes_attempts_ck', isInteger('attempts')),

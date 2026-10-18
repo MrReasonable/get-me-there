@@ -47,6 +47,10 @@ const FIXED: Readonly<Record<string, string>> = {
   PORT: '3000',
   BIND_ADDRESS: '0.0.0.0',
 };
+/** The one interpolated default: the worker on the Mac, reached through Docker Desktop (spec §12 rev 32, ruling 2). */
+const DEFAULTED: Readonly<Record<string, string>> = {
+  CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
+};
 
 describe('docker-compose.yml app service (spec §13, §5.5)', () => {
   it('passes an explicit allowlist: every .env.example variable except the never-passed and override-only ones', () => {
@@ -62,7 +66,8 @@ describe('docker-compose.yml app service (spec §13, §5.5)', () => {
   });
 
   it('interpolates every non-fixed variable with an empty default and nothing else', () => {
-    for (const [name, value] of Object.entries(env)) expect(value).toBe(FIXED[name] ?? `\${${name}:-}`);
+    for (const [name, value] of Object.entries(env))
+      expect(value).toBe(FIXED[name] ?? `\${${name}:-${DEFAULTED[name] ?? ''}}`);
   });
 
   it("publishes on loopback only and runs as the image's user", () => {

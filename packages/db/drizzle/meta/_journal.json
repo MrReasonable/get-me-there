@@ -36,6 +36,13 @@
       "when": 1792274105989,
       "tag": "0004_route_history_point_of_sale",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792312482474,
+      "tag": "0005_camoufox_provider",
+      "breakpoints": true
     }
   ]
 }

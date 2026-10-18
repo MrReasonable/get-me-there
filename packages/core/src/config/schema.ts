@@ -47,6 +47,19 @@ export interface Config {
   providers: {
     travelpayouts: { token: Secret; limits: ProviderLimits } | null;
     searchapi: { key: Secret; plan: PlanId; trialUsed: number; limits: ProviderLimits } | null;
+    /**
+     * Spec §2 and §12 rev 32 (decisions 68, 69): the opt-in camoufox provider, null unless CAMOUFOX_ENABLED=true. The
+     * app reaches its host-side worker at `workerUrl` with `key`; `limits` derive from the spacing and the page caps.
+     */
+    camoufox: {
+      key: Secret;
+      workerUrl: string;
+      minSpacingSeconds: number;
+      executionPageCap: number;
+      cooldownHours: number;
+      pageTimeoutSeconds: number;
+      limits: ProviderLimits;
+    } | null;
     /** only outside production; the fixture provider itself is gated by syntheticAllowed */
     fixture: { costMicroGbp: number } | null;
   };
@@ -180,6 +193,85 @@ function appBaseUrlOk(raw: string): boolean {
   );
 }
 
+/** Hosts the camoufox worker URL may name (spec §12 rev 32): the Mac's loopback, or Docker Desktop's name for it. */
+export const CAMOUFOX_WORKER_HOSTS: readonly string[] = [
+  '127.0.0.1',
+  'localhost',
+  '[::1]',
+  'host.docker.internal',
+];
+
+/**
+ * CAMOUFOX_WORKER_URL (spec §12 rev 32, arch-012): http or https, a host from CAMOUFOX_WORKER_HOSTS, an explicit port,
+ * and nothing else: no path, query, fragment or userinfo. The one copy of the rule; http-kit's egress test reuses it.
+ */
+export function camoufoxWorkerUrlOk(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  return (
+    (u.protocol === 'http:' || u.protocol === 'https:') &&
+    CAMOUFOX_WORKER_HOSTS.includes(u.hostname) &&
+    u.port !== '' &&
+    u.pathname === '/' &&
+    u.username === '' &&
+    u.password === '' &&
+    !raw.includes('@') &&
+    !raw.includes('?') &&
+    !raw.includes('#')
+  );
+}
+
+/** Spec §12 rev 32: the camoufox block; validated whether or not it is enabled, built only when it is. */
+function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
+  const enabled = r.bool('CAMOUFOX_ENABLED') ?? false;
+  // why: decision 69: grid mode stays refused until stored rows record where a return date came from.
+  r.oneOf('CAMOUFOX_MODE', ['list']);
+  const minSpacingSeconds = r.int('CAMOUFOX_MIN_SPACING_SECONDS', 30, 600) ?? 30;
+  const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
+  const monthlyCallCap = r.int('CAMOUFOX_MONTHLY_PAGE_CAP', 0) ?? 1500;
+  const billingDay = r.int('CAMOUFOX_BILLING_DAY', 1, 28) ?? 1;
+  const cooldownHours = r.int('CAMOUFOX_COOLDOWN_HOURS', 24) ?? 48;
+  const pageTimeoutSeconds = r.int('CAMOUFOX_PAGE_TIMEOUT_SECONDS', 30, 240) ?? 90;
+  if (!enabled) return null;
+  const key = r.required('CAMOUFOX_WORKER_KEY');
+  if (key !== '' && key.length < 32)
+    r.fail('CAMOUFOX_WORKER_KEY', 'CAMOUFOX_WORKER_KEY must be at least 32 characters');
+  const workerUrl = r.required('CAMOUFOX_WORKER_URL');
+  if (workerUrl !== '' && !camoufoxWorkerUrlOk(workerUrl))
+    r.fail(
+      'CAMOUFOX_WORKER_URL',
+      'CAMOUFOX_WORKER_URL must be http(s) to 127.0.0.1, localhost, [::1] or host.docker.internal with an explicit port and no path, query or user',
+    );
+  return {
+    key: new Secret(key),
+    workerUrl,
+    minSpacingSeconds,
+    executionPageCap,
+    cooldownHours,
+    pageTimeoutSeconds,
+    limits: {
+      monthlyCallCap,
+      window: 'month',
+      billingDay,
+      // why: display and reservoirs only; the app's limiter spaces starts by minIntervalMs = spacing × 1000 (ruling 7).
+      ratePerMinute: Math.max(1, Math.floor(60 / minSpacingSeconds)),
+      ratePerHour: Math.floor(3600 / minSpacingSeconds),
+      concurrency: 1,
+      cacheTtlHours: 0,
+      costPerCallMicroGbp: 0,
+      planFixedMicroGbp: 0,
+      excludedFromSchedule: false,
+      executionCallCap: executionPageCap,
+      pagesOnly: true,
+      minSpacingSeconds,
+    },
+  };
+}
+
 /** `maxCacheTtlHours` bounds the response cache for a provider whose data has a stated freshness window (Travelpayouts: 48). */
 function providerLimits(
   r: Reader,
@@ -296,6 +388,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
     );
   const billedPreset = searchapi === null ? null : preset;
+  const camoufox = camoufoxConfig(r);
   // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
   const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };
 
@@ -394,7 +487,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       estimateRetryFactor,
       fxMaxRateAgeDays,
       spend,
-      providers: { travelpayouts, searchapi, fixture },
+      providers: { travelpayouts, searchapi, camoufox, fixture },
       alertEmailMaxPerHour,
       smtp,
       inContainer,

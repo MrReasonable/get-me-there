@@ -570,3 +570,114 @@ Each checklist line reads `ok`, `FAIL`, `skip` or `look`:
 
 Codes `2` and `3` are not faults of the app: `2` means no provider key is set; `3` means a
 provider had no price for those days.
+
+## 14. The Camoufox provider (optional, off by default; macOS only)
+
+### What it is and what it costs
+
+The `camoufox` provider reads Google Flights itself, in Camoufox (a Firefox-based browser you have installed on your
+Mac), started by a small worker process on the Mac. It is a continuity fallback for when SearchApi is
+not available. It prices discovery cells only: one day pair a page, the cheapest round-trip price Google Flights lists,
+labelled "Google Flights prices via Camoufox". Read its costs before you turn it on:
+
+**Terms:** Read the provider's terms before enabling it; the operator is responsible for how it is used. **The operator's IP and account:** every page load comes from the operator's own
+address (no proxies), so a block, CAPTCHA or wider restriction lands on that address, and through it on the operator's
+other Google use from the same network; the worker's profile is never signed in, so the operator's account is never
+used. **Brittleness:** Google changes the page without notice; a changed page reads as unrecognised and stops the
+provider for an hour (never a silent zero), and the selectors and grammar must be re-dated against a new recording;
+`camoufox-js` is marked experimental by its authors, and an upgrade of it, of `playwright-core` or of the Camoufox
+binary is a re-verification. **Speed:** a page takes about 20–60 s (load, settle, read) plus the 30 s spacing, about
+50–90 s in all, so 100 cells a run take about 1½–2½ hours. **Availability:** the provider runs only while the
+operator's machine is on and the worker is running; otherwise its cells read skipped ("browser worker not reachable")
+and every other provider runs. **Image size:** none in the app image, which is unchanged; Camoufox (several hundred
+megabytes) and the worker's dependencies stay on the operator's Mac. **The worker key:** any process or container that
+can reach the worker's address (Docker Desktop forwards `host.docker.internal` to the Mac's loopback for every
+container) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
+
+Coverage, stated plainly: in `list` mode a page prices one day pair, so a run prices at most
+`CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and
+1,500 a month, against 2,184 day pairs for one worked-example airport pair (8,736 for its four pairs). The estimate says
+how many cells a run will price and how many runs a full pass takes; the rest of the cells read skipped or not searched
+in View D. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
+with no pause, as long as the line shows and the page has no result links. A page change that needs new recordings
+sets the flag back, and empty routes then read as not searched again.
+
+### How it behaves
+
+- One page at a time, at least 30 seconds from the start of one page to the start of the next (never randomised).
+- Its own signed-out browser profile, never shared and never seeded from any cookie file; service workers are blocked
+  and every redirect is checked, so a page that leaves `https://www.google.com/travel/flights` stops at once.
+- Your saved cookie choice (Reject all) is applied before every page and checked by value after it; a consent page, or a
+  changed or missing choice, stops it.
+- The worker stops and cools down whenever a page is not a recognised results page: a challenge or verification page,
+  a sign-in page, a consent page, or anything unrecognised. It pauses 48 hours after a challenge, sign-in or consent
+  page and 1 hour after a page it does not recognise. It never solves or clicks through a challenge, and nothing
+  retries it.
+- The camofox-browser server is not used and need not run.
+
+### Set it up (macOS)
+
+1. Create the worker's data directory, private to you:
+   `mkdir -p -m 700 ~/.local/state/get-me-there/camoufox`
+2. Run `pnpm install` in a checkout of this repository. The worker runs from source; repeat it after every `git pull`.
+   The worker launches the Camoufox bundle already installed under `~/Library/Caches/camoufox/browsers/official/`
+   (`<version>-<build>-<id>/`, the layout the camofox-browser installer leaves; the pinned build is `152.0.4-beta.28`).
+   It creates the `Camoufox.app` link and the top-level `version.json` beside it itself, and refuses anything that
+   disagrees rather than rewriting it. It never downloads a browser: camoufox-js's own `fetch` unpacks into a different,
+   flat layout, which the worker refuses. `pnpm --filter @gmt/camoufox-worker status` names the build it launched. macOS
+   may purge `~/Library/Caches`: if the bundle is gone, reinstall it with the same installer, then run `status`.
+3. Capture your cookie choice. In an ordinary private browser window open `https://www.google.com/travel/flights`, click
+   **Reject all**, then open the cookie view (developer tools, Storage or Application, cookies for
+   `https://www.google.com`). Run `pnpm --filter @gmt/camoufox-worker capture-socs` and paste the `SOCS` cookie's value,
+   expiry, Secure and SameSite when asked. It stamps the time and writes the file 0600; capture again within 13 months.
+4. Create `~/.local/state/get-me-there/camoufox/worker.env` in an editor (never with `echo`) and make it private with
+   `chmod 600 ~/.local/state/get-me-there/camoufox/worker.env`. It holds `CAMOUFOX_WORKER_KEY`, at least 32 random
+   characters: generate them with `openssl rand -hex 24 > ~/.local/state/get-me-there/camoufox/key.tmp`, paste them from
+   that file into `worker.env`, then delete `key.tmp`. Add `CAMOUFOX_BINARY_BUILD` only if your Camoufox build is not the
+   default one. That file is the only place the key lives on the Mac.
+5. Start it: `pnpm --filter @gmt/camoufox-worker start` to try it, from a shell that has not loaded the app's
+   `CAMOUFOX_*` lines (the worker refuses an inherited `CAMOUFOX_*` or `POINT_OF_SALE` that differs from `worker.env`,
+   and any `DEBUG`). To keep it running, install the launchd agent: copy
+   `apps/camoufox-worker/launchd/local.get-me-there.camoufox-worker.plist.example` to
+   `~/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist`, set your checkout path, your home and a `PATH` that finds
+   `node` and `pnpm` in it (it starts the worker with an emptied environment), and run
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist`. A start check
+   that fails exits 78 and the agent does not restart it faster than once a minute; logs go to
+   `~/Library/Logs/get-me-there/`.
+
+The search-form check is mandatory: the worker refuses to start while `FORM_VERIFIED` is false. The 2026-10-18
+recordings set it, with the results, Cheapest and no-flights flags. A page change that needs new recordings sets them
+back. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
+lock, the spacing and the cool-down are kept there, so a recording and a running worker can never load pages at once.
+
+### Point the app at it
+
+- **Docker:** add `CAMOUFOX_ENABLED=true` and the same `CAMOUFOX_WORKER_KEY=` line to `.env` with an editor, and leave
+  `CAMOUFOX_WORKER_URL` unset: the compose default, `http://host.docker.internal:8090`, reaches the worker through
+  Docker Desktop. Then `docker compose up -d`.
+- **`pnpm dev`:** keep the two lines and `CAMOUFOX_WORKER_URL=http://127.0.0.1:8090` in a 0600 file such as
+  `~/.config/get-me-there/dev-camoufox.env`, and load it into the shell that runs `pnpm dev` with
+  `set -a; . ~/.config/get-me-there/dev-camoufox.env; set +a`, so the key is never typed or exported by hand and never
+  reaches your shell history. Never put that URL in `.env`, where it would break the container.
+
+Keep `CAMOUFOX_COOLDOWN_HOURS` and `CAMOUFOX_PAGE_TIMEOUT_SECONDS` equal on both sides (`worker.env` and the app's); the
+smoke test flags a mismatch.
+
+### Choose it
+
+Add "Google Flights prices via Camoufox" to a definition's discovery providers. New definitions never include it.
+
+### Check it
+
+`pnpm --filter @gmt/camoufox-worker status` reads the key from `worker.env` itself and prints the worker's current status:
+the cool-down, the account-cookie check, the verification flags and the versions. `lsof -nP -iTCP:8090 -sTCP:LISTEN`
+shows it listening on `127.0.0.1` only. To see which navigation a stopped page refused, add `CAMOUFOX_LOG_DEBUG=true` to
+`worker.env` and restart the worker: each refusal then also logs its path (never its query) in the agent's error log.
+
+### Turn it off or recover
+
+- Set `CAMOUFOX_ENABLED=false` and restart the app.
+- Stop the worker: `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker`. A page in flight finishes
+  before the worker exits.
+- After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes the profile first).
+- Deleting the cool-down record ends a pause early, which defeats its purpose.

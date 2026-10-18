@@ -1,0 +1,27 @@
+{
+  "name": "@gmt/camoufox-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --conditions=@gmt/source --import tsx src/run.ts main",
+    "record": "node --conditions=@gmt/source --import tsx src/run.ts record",
+    "capture-socs": "node --conditions=@gmt/source --import tsx src/run.ts capture-socs",
+    "clear-signed-in": "node --conditions=@gmt/source --import tsx src/run.ts clear-signed-in",
+    "status": "node --conditions=@gmt/source --import tsx src/run.ts status",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run --coverage",
+    "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
+  },
+  "dependencies": {
+    "@gmt/core": "workspace:*",
+    "camoufox-js": "0.11.5",
+    "playwright-core": "1.59.1"
+  },
+  "devDependencies": {
+    "@gmt/providers": "workspace:*",
+    "@stryker-mutator/core": "10.0.0",
+    "tsx": "4.23.15",
+    "zod": "4.6.7"
+  }
+}

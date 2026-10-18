@@ -35,6 +35,8 @@ jobs:
         shell: bash
         run: |
           pnpm exec vitest run --project api --project providers --project engine test/recorded/ test/searchapi/recorded.test.ts test/travelpayouts/replay.test.ts test/layerB/ --reporter=verbose | tee recorded-skip.log
+          # why: WP14: the camoufox worker's recorded pages are local-only too (decision 61)
+          pnpm exec vitest run --project camoufox-worker test/recorded.test.ts test/names.test.ts --reporter=verbose | tee -a recorded-skip.log
           suffix='(skipped: recordings not present, local-only, decision 61)'
           for title in \
             'local recorded tree for the worked example' \
@@ -42,7 +44,15 @@ jobs:
             'WP4b recordings this brief relies on (§7 "Inputs from WP4b") — pending-fixtures' \
             'SEARCHAPI_PARAMS against the recording (spec §5.2, plan decision 24) — pending-fixtures' \
             'recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) — pending-fixtures' \
-            'layer B: the engine over the real adapters on the recorded session (spec §9 item 4)'; do
+            'layer B: the engine over the real adapters on the recorded session (spec §9 item 4)' \
+            'recorded results pages (spec §2, Task 14.2)' \
+            'recorded cheapest pages (spec §2, Task 14.2)' \
+            'recorded view-more pages (spec §2, Task 14.2)' \
+            'recorded SOCS stability (ruling 9)' \
+            'recorded consent probe (rule 3)' \
+            'recorded no-flights page (rule 4)' \
+            'recorded result names parse (Task 14.2 results kind)' \
+            'recorded operated-by names parse (Task 14.2 view-more kind)'; do
             grep -qF "$title $suffix" recorded-skip.log || { echo "not skipped visibly: $title"; exit 1; }
           done
       - run: pnpm secret-scan
@@ -64,6 +74,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # why: the image-size step builds origin/main beside this one
+          fetch-depth: 0
       - name: Compose file is valid
         run: docker compose --env-file /dev/null config --quiet
       - name: Build the image through compose
@@ -73,6 +85,19 @@ jobs:
           test "$(docker run --rm --entrypoint id get-me-there:local -u)" = "1000"
           docker run --rm --entrypoint node get-me-there:local -e "process.exit(process.env.NODE_ENV === 'production' && process.env.IN_CONTAINER === '1' ? 0 : 1)"
           if docker run --rm --entrypoint sh get-me-there:local -c 'command -v curl || command -v wget'; then exit 1; fi
+      - name: Image carries no camoufox worker, no browser library and no browser (WP14, arch-002)
+        run: |
+          # why: a glob, since pnpm suffixes peer-resolved directories (camoufox-js@0.11.5_playwright-core@…; TS2-11)
+          docker run --rm --entrypoint sh get-me-there:local -c '! test -e /app/apps/camoufox-worker && ! ls -d /app/node_modules/.pnpm/camoufox-js@* /app/node_modules/.pnpm/playwright-core@* 2>/dev/null && ! command -v firefox'
+      - name: Image size stays within 5 MB of main's (WP14, arch-002)
+        run: |
+          # why: the worker and its browser libraries never reach the image, so its size must not move with them
+          git worktree add ../gmt-main origin/main
+          docker build -q -t get-me-there:main ../gmt-main > /dev/null
+          new="$(docker image inspect get-me-there:local --format '{{.Size}}')"
+          old="$(docker image inspect get-me-there:main --format '{{.Size}}')"
+          echo "image size: $new bytes (main: $old bytes)"
+          test $(( new - old )) -le 5000000
       - name: Image holds no secret, database or recording, and its history no credential
         run: |
           found="$(docker run --rm --entrypoint sh get-me-there:local -c \
@@ -141,6 +166,32 @@ jobs:
           docker compose up -d --wait --wait-timeout 300
           curl -fsS http://127.0.0.1:3000/api/health
           docker compose exec -T app sh -c 'test -e /data/get-me-there.db.pre-restore'
+      - name: app runs with the camoufox-worker absent (WP14, devops-012)
+        shell: bash
+        run: |
+          # why: the default project's app holds the published port; its checks are done, and cleanup removes it
+          docker compose stop app
+          # why: a separate project with its own volume; the dummy 32-character key comes through the shell, never .env
+          export CAMOUFOX_ENABLED=true CAMOUFOX_WORKER_KEY=ci-dummy-camoufox-key-0123456789abcd
+          trap 'docker compose -p gmt-cfabsent down -v || true' EXIT
+          docker compose -p gmt-cfabsent up -d --wait --wait-timeout 300 || { docker compose -p gmt-cfabsent logs app; exit 1; }
+          base=http://127.0.0.1:3000/api
+          auth=(-u ci:ci-password-0123 -H 'Content-Type: application/json' -H 'X-Requested-With: get-me-there')
+          curl -fsS "$base/health"
+          curl -fsS "${auth[@]}" "$base/providers" | grep -F '"camoufox"'
+          # a one-cell definition naming camoufox only, from the worked example 40 days out
+          body="$(node -e 'const e=require("./docs/examples/london-new-york.json");const d=new Date(Date.now()+40*864e5).toISOString().slice(0,10);Object.assign(e,{name:"camoufox absent",origins:["LHR"],destinations:["JFK"],window:{kind:"absolute",from:d,to:d},minNights:10,maxNights:10,scheduleCron:null,providers:{discovery:["camoufox"],verification:[],discoveryRefreshHours:{camoufox:168}}});delete e.confirmedCostPence;delete e.confirmedCalls;process.stdout.write(JSON.stringify(e))')"
+          def="$(curl -fsS "${auth[@]}" -X POST --data "$body" "$base/definitions" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).id')"
+          exe="$(curl -fsS "${auth[@]}" -X POST --data '{}' "$base/definitions/$def/executions" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).executionId')"
+          status=pending
+          for _ in $(seq 1 60); do
+            status="$(curl -fsS "${auth[@]}" "$base/executions/$exe" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).status')"
+            case "$status" in pending|running) sleep 2 ;; *) break ;; esac
+          done
+          echo "execution $exe ended $status"
+          # the camoufox cells were skipped by the preflight, and no camoufox ledger row exists
+          check='const D=require(require.resolve("better-sqlite3",{paths:["/app/packages/db"]}));const d=new D("/data/get-me-there.db",{readonly:true});const o=d.prepare("SELECT status, reason FROM cell_outcomes WHERE provider_id = ?").all("camoufox");const r=d.prepare("SELECT COUNT(*) AS n FROM provider_requests WHERE provider_id = ?").get("camoufox").n;console.log(JSON.stringify({o,r}));process.exit(o.length>0&&o.every((x)=>x.status==="skipped"&&x.reason==="provider_unavailable")&&r===0?0:1)'
+          docker compose -p gmt-cfabsent exec -T app node -e "$check"
       - name: Remove the CI container and its throwaway volume
         if: always()
         run: |

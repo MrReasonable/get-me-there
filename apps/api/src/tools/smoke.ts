@@ -26,6 +26,13 @@ import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
+import {
+  type CamoufoxRun,
+  camoufoxChecks,
+  camoufoxEmpty,
+  camoufoxStage,
+  describeCamoufoxPrice,
+} from './smokeCamoufox.js';
 import { type Answer, checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
 import {
   openHiddenExecution,
@@ -75,10 +82,17 @@ export interface SmokeResult {
   executionId: string | null;
 }
 
+/**
+ * The free calls camoufox's one tile may ledger (WP14): one page, and up to two refusals for the worker's spacing that
+ * load nothing; it draws on the execution's free-call cap like any free provider.
+ */
+export const CAMOUFOX_SMOKE_ATTEMPTS = 3;
+
 /** The hidden tool execution: the run's space, min(--budget, worst case) as its cap, and its stored estimate. */
 function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, budget: number): string {
   const tp = ports.config.providers.travelpayouts !== null;
   const sa = ports.config.providers.searchapi !== null;
+  const cf = ports.config.providers.camoufox !== null;
   const chainCalls = 1 + 2 * SMOKE_EXPAND_TOP;
   return openHiddenExecution(ports, {
     tool: 'smoke:live',
@@ -92,7 +106,7 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
     expandTop: SMOKE_EXPAND_TOP,
     budget,
     worst,
-    maxFreeCalls: worst.freeCalls,
+    maxFreeCalls: worst.freeCalls + (cf ? CAMOUFOX_SMOKE_ATTEMPTS : 0),
     estimate: toolEstimate(
       ports,
       [
@@ -117,6 +131,16 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
               },
             ]
           : []),
+        ...(cf
+          ? [
+              {
+                providerId: 'camoufox' as const,
+                stage: 'discovery' as const,
+                calls: CAMOUFOX_SMOKE_ATTEMPTS,
+                planCalls: 1,
+              },
+            ]
+          : []),
       ],
       'smoke:live: one tile per configured provider (Travelpayouts at the page cap), one SearchApi chain expanding one outbound',
     ),
@@ -129,7 +153,11 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
  * searched; for the cell it searched and priced without a confirmation, that fact and the chain's own cheapest offer
  * with its decision-44 label (provenance review, fix round 1).
  */
-function headline(reports: readonly SmokeProviderReport[], now: IsoDateTime): string {
+function headline(
+  reports: readonly SmokeProviderReport[],
+  now: IsoDateTime,
+  camoufox: CamoufoxRun | null,
+): string {
   const itinerary = reports.find((r) => r.stage === 'itinerary');
   const confirmed = itinerary?.cheapestConfirmed ?? null;
   if (confirmed !== null) return `cheapest confirmed price ${describePrice(confirmed, now)}`;
@@ -137,7 +165,11 @@ function headline(reports: readonly SmokeProviderReport[], now: IsoDateTime): st
     .filter((r) => r.stage === 'discovery')
     .flatMap((r) => (r.cheapest === null ? [] : [r.cheapest]))
     .sort((a, b) => a.pricePence - b.pricePence)[0];
-  if (calendar === undefined) return 'no price found';
+  if (calendar === undefined) {
+    // why: fix round 1 (CodeRabbit): a camoufox-only run's price is the headline, with its provenance
+    const cf = camoufox === null ? null : describeCamoufoxPrice(camoufox);
+    return cf === null ? 'no price found' : `cheapest camoufox price ${cf}`;
+  }
   const searched = itinerary?.status === 'priced' ? itinerary.cheapest : null;
   const sameCell =
     searched !== null &&
@@ -195,7 +227,8 @@ export async function runSmoke(
     );
   }
   const configured = VENDORS.filter((v) => ports.config.providers[v] !== null);
-  if (configured.length === 0)
+  const camoufox = ports.config.providers.camoufox !== null;
+  if (configured.length === 0 && !camoufox)
     return refuse(EXIT.smokeNoProviders, 'no provider configured: set TRAVELPAYOUTS_TOKEN or SEARCHAPI_KEY');
 
   const q = smokeQuery(ports.clock.todayLondon(), origin, destination);
@@ -205,7 +238,7 @@ export async function runSmoke(
     `smoke: ${origin}→${destination} departures ${q.departureFrom}–${q.departureTo}, ${q.minNights}–${q.maxNights} nights; one tile per provider${configured.includes('searchapi') ? ', then one SearchApi itinerary chain' : ''}`,
   );
   say(
-    `this run: at most ${worst.credits} SearchApi credit(s), frozen at ${cap} by --budget ${cli.args.budget}; at most ${worst.freeCalls} free Travelpayouts call(s)`,
+    `this run: at most ${worst.credits} SearchApi credit(s), frozen at ${cap} by --budget ${cli.args.budget}; at most ${worst.freeCalls} free Travelpayouts call(s)${camoufox ? '; one camoufox list tile (at most one Google page load) after its worker status' : ''}`,
   );
   const position = spendPosition(ports, worst, cli.args.budget);
   for (const l of position.lines) say(l);
@@ -246,6 +279,9 @@ export async function runSmoke(
   const limits: HttpKitDeps['limits'] = {
     ...(all.travelpayouts === undefined ? {} : { travelpayouts: all.travelpayouts }),
     ...(all.searchapi === undefined ? {} : { searchapi: all.searchapi }),
+    // why: WP14: the worker's status route (unledgered) and its page route, when camoufox is configured
+    ...(all.camoufox === undefined ? {} : { camoufox: all.camoufox }),
+    ...(all['camoufox-status'] === undefined ? {} : { 'camoufox-status': all['camoufox-status'] }),
   };
   const kit = createHttpKit({
     budget: ports.budget,
@@ -276,15 +312,15 @@ export async function runSmoke(
     },
     stats: () => kit.stats(),
   };
-  const providers = providersFor(ports.config, { http, log, clock: ports.clock }).filter((p) =>
-    configured.some((id) => id === p.id),
-  );
+  const wired = providersFor(ports.config, { http, log, clock: ports.clock });
+  const providers = wired.filter((p) => configured.some((id) => id === p.id));
   const runStart = ports.clock.now();
   const executionId = openSmokeExecution(ports, q, worst, cli.args.budget);
   const ctx: Ctx = { executionId, signal: opts.signal, recordFixtures: recorder !== null };
 
   const found = new Map<Vendor, Discovery>();
   let itinerary: Chain | null = null;
+  let cfRun: CamoufoxRun | null = null;
   try {
     const blocked = 'Travelpayouts failed first (auth, quota or configuration); no credit spent';
     for (const id of configured) {
@@ -322,6 +358,15 @@ export async function runSmoke(
         saCell,
         ctx,
       );
+    if (camoufox && !opts.signal.aborted)
+      cfRun = await camoufoxStage(
+        ports,
+        wired.find((p) => p.id === 'camoufox'),
+        q,
+        ctx,
+        http,
+        seen,
+      );
   } catch (e) {
     ports.repos.executions.setStatus(executionId, 'cancelled', {
       finishedAt: ports.clock.now(),
@@ -333,27 +378,30 @@ export async function runSmoke(
   const reports = [...found.values()]
     .map((d) => d.report)
     .concat(itinerary === null ? [] : [itinerary.report]);
-  const checks = checklist({
-    ports,
-    q,
-    executionId,
-    runStart,
-    cap,
-    configured,
-    found,
-    itinerary,
-    seen,
-    answers,
-  });
+  const checks = [
+    ...(configured.length === 0
+      ? []
+      : checklist({ ports, q, executionId, runStart, cap, configured, found, itinerary, seen, answers })),
+    ...camoufoxChecks(ports, camoufox ? cfRun : null, executionId, runStart),
+  ];
   const written = track?.take() ?? [];
   const now = ports.clock.now();
   for (const r of reports)
     say(
       `${r.providerId} ${r.stage}: ${r.status}${r.prices > 0 ? ` · ${r.prices} price(s)` : ''}${r.cheapest === null ? '' : ` · cheapest ${describePrice(r.cheapest, now)}`}${r.detail === '' ? '' : ` · ${r.detail}`}`,
     );
+  if (cfRun !== null) {
+    const t = cfRun.tile;
+    say(
+      `camoufox discovery: ${t === null ? 'no tile' : t.kind === 'tile' ? (t.prices[0] === undefined ? 'no price for the cell' : `priced · ${describeCamoufoxPrice(cfRun) ?? ''}`) : `error · ${t.error.message}`}`,
+    );
+    const until = t?.kind === 'tile-error' ? t.error.cooldownUntil : undefined;
+    if (until !== undefined)
+      say(`camoufox is cooling down until ${until}; every further page will be refused until then`);
+  }
   say('checklist:');
   for (const c of checks) say(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
-  const summary = headline(reports, now);
+  const summary = headline(reports, now, cfRun);
   say(summary);
   say(
     opts.fixtures === null
@@ -367,7 +415,7 @@ export async function runSmoke(
     checks.some((c) => c.status === 'fail');
   const exitCode = failed
     ? EXIT.failed
-    : reports.some((r) => r.status === 'empty')
+    : reports.some((r) => r.status === 'empty') || camoufoxEmpty(cfRun)
       ? EXIT.smokeEmpty
       : EXIT.ok;
   ports.repos.executions.setStatus(executionId, opts.signal.aborted ? 'cancelled' : 'completed', {

@@ -21,6 +21,11 @@ export const providerRequests = sqliteTable(
     billable: integer('billable'),
     costMicroGbp: integer('cost_micro_gbp').notNull(),
     httpAttempt: integer('http_attempt').notNull(),
+    /**
+     * Spec §5.3 rev 32 (decision 69): for camoufox, whether the attempt loaded a Google page (the worker's
+     * `x-gmt-google-contacted`); `no-page` rows count toward neither page cap. NULL for every other provider.
+     */
+    pageClass: text('page_class'),
   },
   (t) => [
     check('provider_requests_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
@@ -29,6 +34,7 @@ export const providerRequests = sqliteTable(
       isOneOf('outcome', ['pending', 'ok', 'error', 'unknown', 'cache_hit']),
     ),
     check('provider_requests_billable_ck', isBool('billable', true)),
+    check('provider_requests_page_class_ck', isOneOf('page_class', ['page', 'no-page'], true)),
     check('provider_requests_cost_ck', isInteger('cost_micro_gbp')),
     check('provider_requests_attempt_ck', isInteger('http_attempt')),
     check('provider_requests_tile_ck', isNullOrInteger('tile_index')),

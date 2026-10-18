@@ -2,7 +2,7 @@ import { ProviderError, type Secret } from '@gmt/core';
 import { FIXTURE_HOST } from '../fixture/constants.js';
 import { CREDENTIAL_HEADERS } from './cacheKey.js';
 import { containsSecret } from './scrub.js';
-import type { HttpKitDeps, HttpKitRequest, ProviderHttpLimits } from './types.js';
+import { errorProviderId, type HttpKitDeps, type HttpKitRequest, type ProviderHttpLimits } from './types.js';
 
 const PATH_ONLY = /^\/[^?#]*$/;
 /**
@@ -72,14 +72,16 @@ export function assertKitConfig(
   const fixtureHosts = deps.limits.fixture?.hosts;
   if (fixtureHosts !== undefined && (fixtureHosts.length !== 1 || fixtureHosts[0] !== FIXTURE_HOST))
     throw new Error(`limits.fixture.hosts must be exactly ['${FIXTURE_HOST}']`);
-  for (const id of ['searchapi', 'travelpayouts', 'fx'] as const)
+  for (const id of ['searchapi', 'travelpayouts', 'fx', 'camoufox', 'camoufox-status'] as const)
     if (deps.limits[id]?.hosts.includes(FIXTURE_HOST))
       throw new Error(`limits.${id}.hosts may not include ${FIXTURE_HOST}`);
   const values = deps.secrets.map((s) => s.reveal()).filter((v) => v !== '');
   if (values.some((v) => v.length < MIN_SECRET_LENGTH))
     throw new Error(`every configured secret must be at least ${MIN_SECRET_LENGTH} characters`);
   if (
-    (deps.limits.searchapi !== undefined || deps.limits.travelpayouts !== undefined) &&
+    (deps.limits.searchapi !== undefined ||
+      deps.limits.travelpayouts !== undefined ||
+      deps.limits.camoufox !== undefined) &&
     values.length === 0
   ) {
     throw new Error('secrets must be non-empty when a real provider is configured');
@@ -107,7 +109,7 @@ export function assertEgress(
     throw new ProviderError({
       kind: 'upstream',
       retryable: false,
-      providerId: r.providerId,
+      providerId: errorProviderId(r.providerId),
       message: `${r.providerId} ${safePath}: egress denied (${why}) [egress-denied]`,
     });
   }
@@ -117,11 +119,22 @@ export function assertEgress(
   if (u.username !== '' || u.password !== '') deny('userinfo in URL');
   for (const name of u.searchParams.keys())
     if (isCredentialParam(name)) deny(`credential query parameter ${name.toLowerCase()}`);
-  if (u.port !== '') deny('explicit port');
-  const schemeOk =
-    u.protocol === 'https:' ||
-    (u.protocol === 'http:' && r.providerId === 'fixture' && u.hostname === FIXTURE_HOST);
-  if (!schemeOk) deny(`scheme ${u.protocol} not allowed`);
+  // why: spec §12 rev 32: the camoufox worker listens on the operator's machine at an explicit port, http or https;
+  // its scheme, host and port must be exactly the configured worker URL's, and no other provider may use a port.
+  const worker = r.providerId === 'camoufox' || r.providerId === 'camoufox-status';
+  if (worker) {
+    if (limits.workerPort === undefined || u.port !== String(limits.workerPort))
+      deny('port is not the worker’s');
+    if (u.protocol !== limits.workerScheme) deny(`scheme ${u.protocol} is not the worker’s`);
+    if (r.providerId === 'camoufox-status' && (r.method !== 'GET' || u.pathname !== '/v1/status'))
+      deny('camoufox-status is GET /v1/status only');
+  } else {
+    if (u.port !== '') deny('explicit port');
+    const schemeOk =
+      u.protocol === 'https:' ||
+      (u.protocol === 'http:' && r.providerId === 'fixture' && u.hostname === FIXTURE_HOST);
+    if (!schemeOk) deny(`scheme ${u.protocol} not allowed`);
+  }
   if (!limits.hosts.includes(u.hostname)) deny(`host ${u.hostname} not in the allowlist`);
   if (!PATH_ONLY.test(r.endpointPath) || r.endpointPath !== u.pathname)
     deny('endpointPath must equal the URL path');

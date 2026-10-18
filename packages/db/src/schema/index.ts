@@ -9,6 +9,7 @@ export * from './cellOutcomes.js';
 export * from './fareOffers.js';
 export * from './fxRates.js';
 export * from './itineraries.js';
+export * from './operatorNoticeKeys.js';
 export * from './operatorNotifications.js';
 export * from './priceObservations.js';
 export * from './providerCache.js';

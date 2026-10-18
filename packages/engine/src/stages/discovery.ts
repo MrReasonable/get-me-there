@@ -3,6 +3,7 @@ import {
   type CellIssue,
   type CellKey,
   cellKeyString,
+  cooldownNoticeKey,
   type DefinitionSnapshot,
   type DiscoveryCapability,
   type DiscoveryQuery,
@@ -36,15 +37,33 @@ export function normaliseDeps(ctx: EngineContext): RepoDeps {
   };
 }
 
-/** The discovery query for one pair, re-planned over exactly `cells` (spec §5.1 `cells`, §8.1). */
+/** The airports dataset's names for a code (spec §5.1 rev 32 `airportNames`); none when the code is unknown. */
+export type AirportNames = (iata: Iata) => string[];
+
+/** Names from the airports repository, the engine's one source of them. */
+export function airportNamesOf(ctx: Pick<EngineContext, 'repos'>): AirportNames {
+  return (iata) => {
+    const a = ctx.repos.airports.get(iata);
+    return a === null ? [] : [a.name];
+  };
+}
+
+/**
+ * The discovery query for one pair, re-planned over exactly `cells` (spec §5.1 `cells`, §8.1), with the airports
+ * dataset's names for its codes (spec §5.1 rev 32: set for every query; camoufox matches airports by name).
+ */
 export function discoveryQuery(
   snapshot: DefinitionSnapshot,
   origin: Iata,
   destination: Iata,
   cells: readonly CellKey[],
+  names?: AirportNames,
 ): DiscoveryQuery {
   const r = snapshot.resolved;
   return {
+    ...(names === undefined
+      ? {}
+      : { airportNames: { origin: names(origin), destination: names(destination) } }),
     origin,
     destination,
     departureFrom: r.departureFrom,
@@ -74,6 +93,7 @@ export function planTiles(
   cap: DiscoveryCapability,
   snapshot: DefinitionSnapshot,
   cells: readonly CellKey[],
+  names?: AirportNames,
 ): PlannedTile[] {
   const byPair = new Map<string, CellKey[]>();
   for (const c of cells) {
@@ -88,7 +108,7 @@ export function planTiles(
     for (const destination of snapshot.resolved.destinations) {
       const pairCells = byPair.get(`${origin}|${destination}`);
       if (pairCells === undefined) continue;
-      const query = discoveryQuery(snapshot, origin, destination, pairCells);
+      const query = discoveryQuery(snapshot, origin, destination, pairCells, names);
       const plans = cap.plan(query);
       if (
         !sameCells(
@@ -134,8 +154,44 @@ async function runDiscoveryProvider(
         .info({ stage: 'discovery', reused }, 'discovery: reused cells from earlier runs');
   }
   const cells = runnableCells(ctx, run, 'discovery', providerId);
-  if (cells.length > 0) await fetchTiles(ctx, run, providerId, cap, cells);
+  if (cells.length > 0 && (await preflightPasses(ctx, run, providerId, cap)))
+    await fetchTiles(ctx, run, providerId, cap, cells);
   settleLane(ctx, run, 'discovery', providerId);
+}
+
+/**
+ * Spec §2, §8.1 rev 32 (decision 69): a capability with an unledgered preflight (camoufox) is asked before its tiles
+ * are planned. A refusal skips every one of the provider's cells in the stage with the given reason and the detail in
+ * `last_error`, writes no ledger row, and (for a cool-down) queues one notice keyed by the cool-down's end.
+ */
+async function preflightPasses(
+  ctx: EngineContext,
+  run: RunState,
+  providerId: ProviderId,
+  cap: DiscoveryCapability,
+): Promise<boolean> {
+  if (cap.preflight === undefined) return true;
+  const r = await cap.preflight({
+    executionId: run.executionId,
+    signal: run.controller.signal,
+    recordFixtures: false,
+  });
+  if (r.ok) return true;
+  ctx.repos.cells.setOutcomesForProvider(run.executionId, 'discovery', providerId, ['not_run'], {
+    status: 'skipped',
+    reason: r.skip,
+    lastError: r.detail,
+  });
+  run.disabled.add(providerId);
+  run.disabledReason.set(providerId, r.skip);
+  run.log.child({ providerId }).warn({ skip: r.skip, detail: r.detail }, 'discovery: preflight refused');
+  if (r.until !== undefined)
+    run.notices.push({
+      kind: 'provider_disabled',
+      detail: `${providerId} is ${r.detail}; its cells are skipped until then and the other providers continue.`,
+      key: cooldownNoticeKey(providerId, r.until),
+    });
+  return false;
 }
 
 async function fetchTiles(
@@ -146,7 +202,7 @@ async function fetchTiles(
   cells: readonly CellKey[],
 ): Promise<void> {
   const log = run.log.child({ providerId });
-  const tiles = planTiles(providerId, cap, run.snapshot, cells);
+  const tiles = planTiles(providerId, cap, run.snapshot, cells, airportNamesOf(ctx));
   run.plannedTiles.set(providerId, (run.plannedTiles.get(providerId) ?? 0) + tiles.length);
   log.info({ stage: 'discovery', cells: cells.length, tiles: tiles.length }, 'discovery: planned tiles');
   const lane = laneFor(run, 'discovery', providerId);

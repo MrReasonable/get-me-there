@@ -11,6 +11,8 @@ export const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   'x-access-token',
   'x-api-key',
   'cookie',
+  // why: arch-013: the camoufox worker key (WORKER_KEY_HEADER in core's protocol).
+  'x-gmt-worker-key',
 ]);
 
 /**

@@ -25,6 +25,8 @@ const KIND_OF: Record<ProviderId, SourceKind> = {
   searchapi: 'scraped-search',
   fixture: 'synthetic',
   travelpayouts: 'authorised-cached',
+  // why: camoufox offers no itinerary search, so it never writes route history; the map is total over ProviderId.
+  camoufox: 'scraped-self',
 };
 
 /** The searched trip a price-history series belongs to (ruling 6). */

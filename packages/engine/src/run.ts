@@ -3,6 +3,7 @@ import {
   type BudgetScope,
   type CellKey,
   cellKeyString,
+  cooldownNoticeKey,
   type DefinitionSnapshot,
   type Execution,
   type IsoDateTime,
@@ -65,11 +66,17 @@ export interface RunState {
   readonly intake: AbortController;
   stop: StopReason | null;
   readonly disabled: Set<ProviderId>;
+  /**
+   * The skip reason a disabled provider's remaining cells get: provider_disabled, or provider_unavailable when the
+   * camoufox worker could not be reached (spec §3, §8.1 rev 32). Absent: provider_disabled.
+   */
+  readonly disabledReason: Map<ProviderId, SkipReason>;
   readonly parseStreak: Map<ProviderId, number>;
   readonly lanes: Map<string, Lane>;
   /** Discovery tiles planned in this pass, per provider (parity, spec §8.1). */
   readonly plannedTiles: Map<ProviderId, number>;
-  readonly notices: Array<{ kind: OperatorMessageKind; detail: string }>;
+  /** `key` makes a notice once-only across runs (camoufox's once-per-cool-down notice, cost-015). */
+  readonly notices: Array<{ kind: OperatorMessageKind; detail: string; key?: string }>;
   readonly log: Logger;
 }
 
@@ -84,6 +91,26 @@ export function disabledBefore(ctx: EngineContext, executionId: string): Set<Pro
       .filter((o) => o.status === 'skipped' && o.reason === 'provider_disabled')
       .map((o) => o.providerId),
   );
+}
+
+/**
+ * Providers the execution holds a `blocked` outcome for (camoufox's stops, spec §8.1 rev 32): kept disabled by every
+ * resume, a manual one included, because the worker's cool-down, not the operator's click, ends a block.
+ */
+export function blockedBefore(ctx: EngineContext, executionId: string): Set<ProviderId> {
+  return new Set(
+    ctx.repos.cells
+      .outcomes(executionId)
+      .filter((o) => o.status === 'error' && o.reason === 'blocked')
+      .map((o) => o.providerId),
+  );
+}
+
+/** The providers a resumed pass starts without: those blocked, and (automatic resumes) those disabled before. */
+export function disabledFor(ctx: EngineContext, executionId: string, manual: boolean): Set<ProviderId> {
+  const out = blockedBefore(ctx, executionId);
+  if (!manual) for (const id of disabledBefore(ctx, executionId)) out.add(id);
+  return out;
 }
 
 /** Fresh pass state for an execution row. */
@@ -104,8 +131,10 @@ export function newRun(
     controller: new AbortController(),
     intake: new AbortController(),
     stop: null,
-    // why: spec §8.1 an automatic resume does not re-enable a provider the previous pass disabled (ssr M1)
-    disabled: opts.manual ? new Set() : disabledBefore(ctx, exec.id),
+    // why: spec §8.1 an automatic resume does not re-enable a provider the previous pass disabled (ssr M1), and no
+    // resume re-enables a blocked one (rev 32)
+    disabled: disabledFor(ctx, exec.id, opts.manual),
+    disabledReason: new Map(),
     parseStreak: new Map(),
     lanes: new Map(),
     plannedTiles: new Map(),
@@ -232,8 +261,29 @@ export function onFailure(
       const streak = d.parse ? (run.parseStreak.get(providerId) ?? 0) + 1 : 0;
       run.parseStreak.set(providerId, streak);
       log.warn({ stage, reason: d.reason, cells: cells.length, parseStreak: streak }, 'cells marked error');
-      if (d.disableProvider) disableProvider(run, providerId, `an ${d.reason} error`);
-      else if (streak >= 2) disableProvider(run, providerId, 'two consecutive parse errors');
+      if (d.unavailable)
+        disableProvider(
+          run,
+          providerId,
+          'its worker refused the connection (browser worker not reachable)',
+          'provider_unavailable',
+        );
+      else if (d.disableProvider) {
+        const until = d.reason === 'blocked' ? d.cooldownUntil : null;
+        // why: cost-015: a block is notified once per cool-down, keyed by its end (data on the error), never once per run
+        disableProvider(
+          run,
+          providerId,
+          `an ${d.reason} error`,
+          'provider_disabled',
+          until === null
+            ? undefined
+            : {
+                detail: `${providerId} stopped: ${d.lastError}. Its remaining cells are skipped (provider disabled) and it is not called again until the cool-down ends.`,
+                key: cooldownNoticeKey(providerId, until),
+              },
+        );
+      } else if (streak >= 2) disableProvider(run, providerId, 'two consecutive parse errors');
       return;
     }
     case 'limiter-timeout':
@@ -316,6 +366,11 @@ export function applyBudgetBreach(
       !run.disabled.has(id) && !run.blocked.has(lineKey(stage, id)) && !laneFor(run, stage, id).budgetOut,
   );
   if (remaining.length === 0) {
+    // why: a provider's own per-run cap (camoufox pages, spec §8.1 rev 32) has no window to wait for: manual resume only.
+    if (err.scope === 'provider-execution') {
+      stopRun(run, { kind: 'budget', error: err, resumeAfter: null });
+      return;
+    }
     const scope: BudgetScope = global ? { kind: 'global-month' } : { kind: err.scope, providerId };
     stopRun(run, { kind: 'budget', error: err, resumeAfter: ctx.budget.usage(scope).windowEnd });
     return;
@@ -330,19 +385,32 @@ export function applyBudgetBreach(
  * Spec §8.1 "provider disabled for the run": its lanes stop taking cells; calls already in flight finish and are
  * written (decision 25); settleLane marks what is left skipped:provider_disabled once the pool drains.
  */
-export function disableProvider(run: RunState, providerId: ProviderId, why: string): void {
+export function disableProvider(
+  run: RunState,
+  providerId: ProviderId,
+  why: string,
+  reason: SkipReason = 'provider_disabled',
+  notice?: { detail: string; key: string },
+): void {
   if (run.disabled.has(providerId)) return;
   run.disabled.add(providerId);
+  run.disabledReason.set(providerId, reason);
   for (const [key, lane] of run.lanes) if (key.endsWith(`|${providerId}`)) lane.intake.abort();
-  run.notices.push({
-    kind: 'provider_disabled',
-    detail: `${providerId} was disabled for this run after ${why}; its remaining cells are skipped (provider disabled).`,
-  });
+  const skipped = reason === 'provider_unavailable' ? 'browser worker not reachable' : 'provider disabled';
+  run.notices.push(
+    notice === undefined
+      ? {
+          kind: 'provider_disabled',
+          detail: `${providerId} was disabled for this run after ${why}; its remaining cells are skipped (${skipped}).`,
+        }
+      : { kind: 'provider_disabled', ...notice },
+  );
   run.log.warn({ providerId, why }, 'provider disabled for the run');
 }
 
 /** After a lane's pool drains: budget and disable marking of whatever is still not_run (spec §8.1 "remaining cells …"). */
 export function settleLane(ctx: EngineContext, run: RunState, stage: Stage, providerId: ProviderId): void {
   if (laneFor(run, stage, providerId).budgetOut) markRemaining(ctx, run, stage, providerId, 'budget');
-  if (run.disabled.has(providerId)) markRemaining(ctx, run, stage, providerId, 'provider_disabled');
+  if (run.disabled.has(providerId))
+    markRemaining(ctx, run, stage, providerId, run.disabledReason.get(providerId) ?? 'provider_disabled');
 }

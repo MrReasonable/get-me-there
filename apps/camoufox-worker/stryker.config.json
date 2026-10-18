@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "pnpm exec vitest run --coverage.enabled=false"
+  },
+  "mutate": [
+    "src/classify.ts",
+    "src/cooldown.ts",
+    "src/pacer.ts",
+    "src/socs.ts",
+    "src/names.ts",
+    "src/guard.ts",
+    "src/ready.ts",
+    "src/accountCookies.ts"
+  ],
+  "thresholds": {
+    "high": 90,
+    "low": 80,
+    "break": 80
+  },
+  "reporters": ["html", "json", "progress"],
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "timeoutMS": 60000,
+  "timeoutFactor": 3,
+  "concurrency": 2,
+  "ignorePatterns": ["dist", "/coverage", "reports", "data", "fixtures/recorded"],
+  "inPlace": false
+}

@@ -23,6 +23,8 @@ export default defineConfig({
         'src/shared/**': { lines: 95, branches: 90, functions: 95, statements: 95 },
         // why: the SearchApi adapter holds to its own floor so the package average cannot mask it (plan decision 31).
         'src/searchapi/**': { lines: 90, branches: 80, functions: 90, statements: 90 },
+        // why: WP14 Task 14.8: the camoufox adapter holds to its own floor beside the package's.
+        'src/camoufox/**': { lines: 90, branches: 80, functions: 90, statements: 90 },
       },
     },
   },

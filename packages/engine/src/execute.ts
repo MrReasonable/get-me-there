@@ -64,6 +64,8 @@ export function calendarOnlyNotice(ctx: EngineContext, run: RunState, alertsRan:
 export interface Notice {
   kind: OperatorMessageKind;
   detail: string;
+  /** A once-only key across runs (camoufox's cool-down notice, cost-015). */
+  key?: string;
 }
 
 /** Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants. */
@@ -156,12 +158,16 @@ export async function finish(ctx: EngineContext, run: RunState, alertsRan: boole
   if (calendarOnly !== null) notices.push(calendarOnly);
   const name = ctx.repos.definitions.get(run.definitionId)?.name ?? run.snapshot.name;
   for (const n of notices) {
-    await notifyOperator(ctx, n.kind, {
+    // why: a keyed notice (camoufox's cool-down, cost-015) is sent once, whatever run meets it
+    const key = n.key;
+    if (key !== undefined && ctx.repos.notifications.noticeKeyClaimed(key)) continue;
+    const sent = await notifyOperator(ctx, n.kind, {
       executionId: run.executionId,
       definitionId: run.definitionId,
       definitionName: name,
       detail: n.detail,
     });
+    if (sent && key !== undefined) ctx.repos.notifications.claimNoticeKey(key);
   }
   ctx.repos.executions.setStatus(run.executionId, status, patch);
   if (patch.resumeAfter !== undefined && patch.resumeAfter !== null)

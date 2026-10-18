@@ -57,7 +57,10 @@ export function planOf(config: Config, id: ProviderId): PlanName {
 }
 
 /** Every scope of the spec §8.1 pre-start check: execution scopes (when given), each provider, global. */
-export function budgetScopes(ports: Ports, executionId: string | null): BudgetScope[] {
+export function budgetScopes(
+  ports: Pick<Ports, 'providers' | 'config'>,
+  executionId: string | null,
+): BudgetScope[] {
   const execution: BudgetScope[] =
     executionId === null
       ? []
@@ -65,6 +68,10 @@ export function budgetScopes(ports: Ports, executionId: string | null): BudgetSc
           { kind: 'execution-calls', executionId },
           { kind: 'execution-free-calls', executionId },
           { kind: 'execution-cost', executionId },
+          // WP14: a provider's own page cap for this execution (camoufox), read from the snapshot by the guard.
+          ...ports.providers
+            .filter((p) => providerBudget(ports.config, p.id).executionCallCap !== undefined)
+            .map((p): BudgetScope => ({ kind: 'provider-execution', executionId, providerId: p.id })),
         ];
   return [
     ...execution,

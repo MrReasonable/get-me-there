@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { recordingsPresent, SKIP_SUFFIX, skipTitle } from '../../src/testing/recordings.js';
+import {
+  recordingsPresent,
+  recordingsPresentForKind,
+  SKIP_SUFFIX,
+  skipTitle,
+} from '../../src/testing/recordings.js';
 
 const dirs: string[] = [];
 const tmp = (): string => {
@@ -39,5 +44,20 @@ describe('recordingsPresent', () => {
   it('suffixes the title only when skipped', () => {
     expect(skipTitle('t', true)).toBe('t');
     expect(skipTitle('t', false)).toBe(`t${SKIP_SUFFIX}`);
+  });
+});
+
+describe('recordingsPresentForKind (TS2-12: one gate per recording kind)', () => {
+  it('one kind present, the others absent, and the absent ones skip with SKIP_SUFFIX', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'results', '2026-10-20'), { recursive: true });
+    writeFileSync(join(root, 'results', '2026-10-20', '1.facts.json'), '{}');
+    mkdirSync(join(root, 'cheapest'), { recursive: true });
+    writeFileSync(join(root, 'cheapest', '.gitkeep'), '');
+    expect(recordingsPresentForKind(root, 'results')).toBe(true);
+    for (const kind of ['cheapest', 'view-more', 'consent-probe']) {
+      expect(recordingsPresentForKind(root, kind)).toBe(false);
+      expect(skipTitle(kind, recordingsPresentForKind(root, kind))).toBe(`${kind}${SKIP_SUFFIX}`);
+    }
   });
 });

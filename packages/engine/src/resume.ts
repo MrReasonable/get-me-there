@@ -3,7 +3,6 @@ import {
   type Execution,
   type ExecutionStatus,
   type IsoDateTime,
-  type ProviderId,
   RESUMABLE_STATUSES,
 } from '@gmt/core';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
@@ -13,8 +12,8 @@ import { execute } from './execute.js';
 import { lineKey } from './lines.js';
 import type { Orchestrator } from './orchestrator.js';
 import type { RunRegistry } from './registry.js';
-import { disabledBefore, markRemaining, newRun, resumableCells } from './run.js';
-import { sellsCabin } from './snapshot.js';
+import { disabledFor, markRemaining, newRun, resumableCells } from './run.js';
+import { sellsCabin, snapshotBudget } from './snapshot.js';
 import {
   REUSE_TOLERANCE,
   refreshHoursOf,
@@ -79,7 +78,15 @@ export async function resumeExecution(
     return refused('not_found', `this execution ${NEVER_STARTED}; start a new run`, { executionId });
   }
   const refresh = opts.manual && exec.status === 'paused_budget' && !exec.isChild;
-  const current = refresh ? { ...exec, snapshot: { ...exec.snapshot, budget: def.budget } } : exec;
+  const current = refresh
+    ? {
+        ...exec,
+        snapshot: {
+          ...exec.snapshot,
+          budget: snapshotBudget(ctx, def.budget, exec.snapshot.providers.discovery),
+        },
+      }
+    : exec;
   const remaining = estimateRemainingFor(ctx, current, opts.manual);
   const needed = remaining.perProvider.filter((p) => p.calls > 0);
   // why: ssr M2 — cells another run has priced since need no call but are still work: the pass copies them
@@ -182,7 +189,7 @@ export async function resumeExecution(
  */
 function hasReusableWork(ctx: EngineContext, exec: Execution, manual: boolean): boolean {
   if (exec.isChild) return false;
-  const disabled = manual ? new Set<ProviderId>() : disabledBefore(ctx, exec.id);
+  const disabled = disabledFor(ctx, exec.id, manual);
   return exec.snapshot.providers.discovery.some((id) => {
     const info = ctx.providers.get(id)?.discovery?.info;
     if (info === undefined || disabled.has(id) || !sellsCabin(ctx, id, exec.snapshot.cabin)) return false;

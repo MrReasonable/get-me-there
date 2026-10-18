@@ -2,17 +2,25 @@ import { z } from 'zod';
 import { type IsoDate, type IsoDateTime, isoDateSchema, isoDateTimeSchema } from './ids.js';
 
 /** Spec §5.1. Defined here (not in ports/provider.ts) so types and ports share one source. */
-export type ProviderId = 'travelpayouts' | 'searchapi' | 'fixture';
-export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'synthetic';
+/** `camoufox` (spec §2 rev 32, plan decisions 68 and 69): the opt-in, self-scraped Google Flights fallback. */
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'camoufox' | 'fixture';
+/** `scraped-self`: a page this app's own browser read (camoufox, `maxAgeHours` 0). */
+export type SourceKind =
+  | 'authorised-cached'
+  | 'scraped-aggregate'
+  | 'scraped-search'
+  | 'scraped-self'
+  | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
 /** ISO 3166-1 alpha-2 of the vendor's echoed point of sale (POINT_OF_SALE), or 'unknown' when the vendor ignores it. */
 export type PointOfSale = string | 'unknown';
 
-export const providerIdSchema = z.enum(['travelpayouts', 'searchapi', 'fixture']);
+export const providerIdSchema = z.enum(['travelpayouts', 'searchapi', 'camoufox', 'fixture']);
 export const sourceKindSchema = z.enum([
   'authorised-cached',
   'scraped-aggregate',
   'scraped-search',
+  'scraped-self',
   'synthetic',
 ]);
 export const cabinSchema = z.enum(['economy', 'premium_economy', 'business', 'first']);

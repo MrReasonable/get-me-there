@@ -12,6 +12,8 @@ import {
   Secret,
   type Usage,
 } from '@gmt/core';
+import { classifyWorkerAnswer } from '../src/camoufox/answer.js';
+import { pageClassOf } from '../src/camoufox/limits.js';
 import { createHttpKit } from '../src/http/httpKit.js';
 import type {
   FixtureRecorder,
@@ -44,6 +46,8 @@ interface Row {
   executionId: string | null;
   outcome: 'pending' | 'ok' | 'error' | 'unknown';
   httpStatus: number | undefined;
+  /** camoufox's page class from finalise (spec §5.3 rev 32); undefined for every other provider. */
+  pageClass: 'page' | 'no-page' | undefined;
 }
 
 /** Every FakeBudget built by makeKit; test/support/setup.ts asserts none holds an open reservation after a test. */
@@ -80,6 +84,7 @@ export class FakeBudget implements BudgetGuard {
       executionId: p.executionId,
       outcome: 'pending',
       httpStatus: undefined,
+      pageClass: undefined,
     };
     this.rows.push(row);
     this.events.push({ type: 'reserve', at: Date.now(), ...p });
@@ -89,6 +94,7 @@ export class FakeBudget implements BudgetGuard {
         if (row.outcome !== 'pending') throw new Error(`reservation ${row.id} finalised twice`);
         row.outcome = r.outcome;
         row.httpStatus = r.httpStatus;
+        row.pageClass = r.pageClass;
         this.events.push({ type: 'finalise', at: Date.now(), ...r });
       },
     };
@@ -130,6 +136,11 @@ export class FakeBudget implements BudgetGuard {
     // why: tests seed the count directly and assert the window through recentSince (WP3 filters started_at >= since).
     this.recentSince.push(since);
     return this.recent.get(providerId) ?? 0;
+  }
+
+  /** One provider's rows in reserve order. */
+  rowsOf(providerId: ProviderId): Row[] {
+    return this.rows.filter((r) => r.providerId === providerId);
   }
 
   /** Reservation ids never finalised. */
@@ -194,12 +205,14 @@ export const SENTINELS = {
   // why: reserved characters make its URL-encoded, form-encoded and base64url forms differ from the raw value (test-r2-003).
   smtp: new Secret('test-smtp-pass/0123+4567 89abcdef'),
   basicAuth: new Secret('test-basic-auth-pass-0123456789abcdef'),
+  camoufox: new Secret('test-camoufox-worker-key-0123456789abcdef'),
 };
 export const ALL_SECRETS: Secret[] = [
   SENTINELS.searchapi,
   SENTINELS.travelpayouts,
   SENTINELS.smtp,
   SENTINELS.basicAuth,
+  SENTINELS.camoufox,
 ];
 
 export const SEARCH = 'https://www.searchapi.io/api/v1/search';
@@ -231,6 +244,35 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
       costPerCallMicroGbp: 0,
       rateLimitFallbackWaitSeconds: 60,
       ...over.travelpayouts,
+    },
+    // why: the worker's own rules (camoufoxHttpLimits) at the test rates, so the adapter tests exercise them.
+    camoufox: {
+      ...base,
+      hosts: ['127.0.0.1'],
+      workerPort: 8090,
+      workerScheme: 'http:',
+      billable: 'never',
+      costPerCallMicroGbp: 0,
+      concurrency: 1,
+      requestTimeoutSeconds: 105,
+      retryTransport: false,
+      connectRefusedKind: 'provider-unavailable',
+      pageClass: pageClassOf,
+      classifyError: classifyWorkerAnswer,
+      ...over.camoufox,
+    },
+    'camoufox-status': {
+      ...base,
+      hosts: ['127.0.0.1'],
+      workerPort: 8090,
+      workerScheme: 'http:',
+      billable: 'never',
+      costPerCallMicroGbp: 0,
+      concurrency: 1,
+      requestTimeoutSeconds: 10,
+      retryTransport: false,
+      connectRefusedKind: 'provider-unavailable',
+      ...over['camoufox-status'],
     },
     fixture: {
       ...base,

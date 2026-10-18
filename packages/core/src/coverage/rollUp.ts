@@ -5,8 +5,10 @@ import type { CellOutcome, CellOutcomeStatus, NoDataReason, RollUp, SkipReason }
 const SKIP_RANK: Record<SkipReason, number> = {
   budget: 0,
   provider_disabled: 1,
-  departed: 2,
-  not_selected: 3,
+  // why: spec §6.6 row 6 does not rank it; an unreachable worker sits beside a disabled provider, before departed.
+  provider_unavailable: 2,
+  departed: 3,
+  not_selected: 4,
 };
 const CABIN_NOT_OFFERED: NoDataReason = 'cabin-not-offered';
 /**

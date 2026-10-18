@@ -82,6 +82,11 @@ export interface ExecutionBudget {
   maxCalls: number;
   maxFreeCalls: number;
   maxCostMicroGbp: number;
+  /**
+   * A provider's own page cap for this execution (camoufox, decision 69), set by the engine when the execution is
+   * created and read by the budget guard from the snapshot, never from config at reserve time. Absent: no such cap.
+   */
+  providerMaxCalls?: Partial<Record<ProviderId, number>>;
 }
 
 export interface ProvidersConfig {

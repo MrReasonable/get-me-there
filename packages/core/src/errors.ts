@@ -1,3 +1,4 @@
+import type { IsoDateTime } from './types/ids.js';
 import type { ProviderId } from './types/provenance.js';
 
 /**
@@ -31,7 +32,10 @@ export type ProviderErrorKind =
   | 'upstream'
   | 'parse'
   | 'network'
-  | 'limiter-timeout';
+  | 'limiter-timeout'
+  // why: camoufox only (spec §5.1 rev 32): a page the worker stopped on, and a worker that refused the connection; never retried.
+  | 'blocked'
+  | 'provider-unavailable';
 
 /** Spec §5.1. Thrown by http-kit (classified) and adapters (parse); never retried at adapter level. */
 export class ProviderError extends Error {
@@ -41,6 +45,8 @@ export class ProviderError extends Error {
   readonly httpStatus: number | undefined;
   readonly retryAfterSeconds: number | undefined;
   readonly providerId: ProviderId | 'fx' | undefined;
+  /** A `blocked` error's cool-down end, as the worker stated it (fix round 1, arch I1); keys the once-per-cool-down notice. */
+  readonly cooldownUntil: IsoDateTime | undefined;
   constructor(p: {
     kind: ProviderErrorKind;
     retryable: boolean;
@@ -49,6 +55,7 @@ export class ProviderError extends Error {
     httpStatus?: number;
     retryAfterSeconds?: number;
     providerId?: ProviderId | 'fx';
+    cooldownUntil?: IsoDateTime;
   }) {
     super(stripUrlsInText(p.message));
     this.name = 'ProviderError';
@@ -58,13 +65,21 @@ export class ProviderError extends Error {
     this.httpStatus = p.httpStatus;
     this.retryAfterSeconds = p.retryAfterSeconds;
     this.providerId = p.providerId;
+    this.cooldownUntil = p.cooldownUntil;
   }
+}
+
+/** The once-per-cool-down notice key (cost-015): one spelling for the engine's block path and its preflight. */
+export function cooldownNoticeKey(providerId: ProviderId, until: IsoDateTime): string {
+  return `${providerId}-cooldown:${until}`;
 }
 
 export type BudgetScopeKind =
   | 'execution-calls'
   | 'execution-free-calls'
   | 'execution-cost'
+  // why: a provider's own per-execution cap (camoufox pages), read from the execution's snapshot (decision 69).
+  | 'provider-execution'
   | 'provider-month'
   | 'provider-lifetime'
   | 'global-month';

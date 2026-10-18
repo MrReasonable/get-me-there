@@ -32,6 +32,14 @@ export function recordingsPresent(root: string): boolean {
   return hasRecording(root);
 }
 
+/**
+ * True when at least one recording exists under `root/<kind>` (TS2-12): the camoufox worker keeps one directory per
+ * recording kind, so each kind's suite is gated on its own recordings, never on another kind's.
+ */
+export function recordingsPresentForKind(root: string, kind: string): boolean {
+  return hasRecording(join(root, kind));
+}
+
 /** The suite title, suffixed with the skip reason only when the suite is skipped. */
 export const skipTitle = (title: string, present: boolean): string =>
   present ? title : `${title}${SKIP_SUFFIX}`;
