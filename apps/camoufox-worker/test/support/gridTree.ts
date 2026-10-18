@@ -41,6 +41,20 @@ export interface GridTreeOptions {
   extra?: FakeNode[];
   /** The year the page leaves out of a range in it (2026 in the recordings). */
   thisYear?: number;
+  /**
+   * How the selected pair's lines sit in the DOM. `shared` (the default): one element whose text runs the range and the
+   * price together ("14 – 24 Mar 2027£462 · Round trip", as the recordings print it), holding the price as its own
+   * element and the range as bare text; `separate`: one element each; `spaced`: as shared, with no-break and thin
+   * spaces around the dash and the dot.
+   */
+  selectedForm?: 'shared' | 'separate' | 'spaced';
+}
+
+function selectedLines(range: string, price: string, form: 'shared' | 'separate' | 'spaced'): FakeNode[] {
+  if (form === 'separate') return [text(range), text(price)];
+  const r = form === 'spaced' ? range.replace(' – ', '\u2009–\u2009') : range;
+  const p = form === 'spaced' ? price.replace(' · ', '\u00a0·\u00a0') : price;
+  return [n('generic', '', [text(p)], { text: `${r}${p}` })];
 }
 
 export function cellName(
@@ -113,8 +127,11 @@ export function gridTree(o: GridTreeOptions): FakeNode {
           line(rets.map(dayLabel)),
           text('Return'),
           ...(scroll ? [n('button', 'Scroll up'), n('button', 'Scroll down')] : []),
-          text(selectedRange(sel[0], sel[1], o.thisYear)),
-          text(`£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`),
+          ...selectedLines(
+            selectedRange(sel[0], sel[1], o.thisYear),
+            `£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`,
+            o.selectedForm ?? 'shared',
+          ),
           ...(o.extra ?? []),
         ]);
   return n('dialog', 'Price insights', [

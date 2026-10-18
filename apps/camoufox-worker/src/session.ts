@@ -212,6 +212,8 @@ export class PageSession {
     let context: ContextLike | null = null;
     let answer: WorkerAnswer;
     let stop: BlockedPage | null = null;
+    // why: the live grid run of 2026-10-18 on 8885ba8: every stop logs the rule that made it, as the recorder does
+    let rule = 'unknown';
     let wipe = false;
     let merged = false;
     // why: fix round 1 (prov-int I1): every call before goto races the page deadline (rule 9), so a stalled browser
@@ -225,6 +227,7 @@ export class PageSession {
       const account = await deadline.race(checkAccountCookies(c, this.d.clock));
       if (account.found) {
         stop = 'signed-in';
+        rule = 'account-cookie';
         answer = this.blockedPlaceholder('signed-in');
       } else {
         const p = await deadline.race(c.newPage());
@@ -259,6 +262,7 @@ export class PageSession {
         stage = 'read';
         if (refused !== null) {
           stop = refused;
+          rule = `guard-refused:${refused}`;
           answer = this.blockedPlaceholder(refused);
         } else {
           const r =
@@ -267,6 +271,7 @@ export class PageSession {
               : await this.read(driver, req, budget, started);
           answer = r.answer;
           stop = r.stop;
+          rule = r.rule ?? 'read';
         }
       }
     } catch (e) {
@@ -294,6 +299,7 @@ export class PageSession {
         // why: ruling 9: a block keeps its own kind; anything else becomes consent-unhandled.
         if (stop === null) {
           stop = 'consent-unhandled';
+          rule = 'socs-read-back';
           answer = this.blockedPlaceholder('consent-unhandled');
         } else merged = true;
       }
@@ -312,6 +318,10 @@ export class PageSession {
     this.busySince = null;
 
     if (stop !== null) {
+      this.d.log.debug(
+        { cause: stop, rule, elapsedMs: Math.max(0, this.d.timers.now() - started) },
+        'classifier decision',
+      );
       try {
         // why: one page met two causes: the longer period, the earlier cause (Task 14.4 rule 5).
         const hours = merged
@@ -352,7 +362,7 @@ export class PageSession {
     budget: PageBudget,
     started: number,
     counter: { scrolls: number },
-  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
+  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
     const S = this.S;
     const d = budget.d;
     const settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
@@ -361,7 +371,11 @@ export class PageSession {
       startedAt: started,
     });
     if (settled.kind.kind === 'blocked')
-      return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
+      return {
+        answer: this.blockedPlaceholder(settled.kind.page),
+        stop: settled.kind.page,
+        rule: settled.rule,
+      };
     const grid = (
       views: Extract<WorkerAnswer, { kind: 'grid' }>['views'],
       ended: Extract<WorkerAnswer, { kind: 'grid' }>['ended'],
@@ -386,7 +400,11 @@ export class PageSession {
     });
     const list = await driver.listFacts(d);
     if (form !== 'ok' || list.currencyName !== 'Currency GBP')
-      return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+      return {
+        answer: this.blockedPlaceholder('unrecognised'),
+        stop: 'unrecognised',
+        rule: form !== 'ok' ? `search-form:${form}` : 'currency',
+      };
     const g = this.d.grid;
     const r = await gridPage(driver, page, budget, req, {
       timers: this.d.timers,
@@ -398,7 +416,12 @@ export class PageSession {
       today: asIsoDate(this.d.clock.now().slice(0, 10)),
       counter,
     });
-    if (r.kind === 'stop') return { answer: this.blockedPlaceholder(r.page), stop: r.page };
+    if (r.kind === 'stop')
+      return {
+        answer: this.blockedPlaceholder(r.page),
+        stop: r.page,
+        rule: `grid:${r.notes.at(-1) ?? r.page}`,
+      };
     return { answer: grid(r.views, r.ended, r.notes, pointOfSaleOf(list.locationName)), stop: null };
   }
 
@@ -407,7 +430,7 @@ export class PageSession {
     req: ListRequest,
     budget: PageBudget,
     started: number,
-  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
+  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
     const S = this.S;
     let d = budget.d;
     const poll = (view: 'best' | 'cheapest') =>
@@ -419,11 +442,20 @@ export class PageSession {
     let settled: Settled = await poll('best');
     let fellBack = false;
     if (settled.kind.kind === 'blocked')
-      return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
+      return {
+        answer: this.blockedPlaceholder(settled.kind.page),
+        stop: settled.kind.page,
+        rule: settled.rule,
+      };
     if (settled.kind.kind === 'no-flights')
       return { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
     const form = checkForm(await driver.formFacts(d), req);
-    if (form !== 'ok') return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    if (form !== 'ok')
+      return {
+        answer: this.blockedPlaceholder('unrecognised'),
+        stop: 'unrecognised',
+        rule: `search-form:${form}`,
+      };
     // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
     const after = async (view: 'best' | 'cheapest'): Promise<WorkerAnswer | null> => {
       settled = await poll(view);

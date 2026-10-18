@@ -69,6 +69,7 @@ interface Run {
   step?: number;
   onScroll?: (at: number) => void;
   today?: string;
+  log?: ReturnType<typeof memoryLog>;
 }
 function setup(o: Run = {}) {
   const dataDir = tmpDir();
@@ -123,7 +124,7 @@ function setup(o: Run = {}) {
     timers,
     selectors: o.selectors ?? { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false },
     pageTimeoutMs: 90_000,
-    log: memoryLog(),
+    log: o.log ?? memoryLog(),
     versions,
     grid: o.grid ?? GRID,
   });
@@ -145,6 +146,48 @@ describe('grid pages: gating', () => {
     const t = setup({ grid: { ...GRID, scrollCap: 2 } });
     const r = await t.session.page(req(['down', 'down', 'down']));
     expect([r.rejected, r.googleContacted, t.contexts.length]).toEqual([true, false, 0]);
+  });
+});
+
+// why: the live run of 2026-10-18 on 8885ba8 (LHR→JFK, departures 8–21 Mar 2027, 10–12 nights): the planner's first
+// page is the block 8–14 Mar by 18–24 Mar, opened at 11 → 21 Mar; the range line sits inside the price line's element,
+// as the recordings print it, and the first view was refused. It must be read, and a refusal must name its rule.
+describe('grid pages: the live run’s first page', () => {
+  it('the planner’s first block for 8–21 Mar, 10–12 nights, is read', async () => {
+    const t = setup({
+      tree: best({ dep: 'Thu, 11 Mar', ret: 'Sun, 21 Mar' }),
+      view: () => [dialogPage(gridTree({ depart: '2027-03-08', ret: '2027-03-18' }))],
+    });
+    const r = await t.session.page(req([], { dep: '2027-03-11', ret: '2027-03-21' }));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 0 });
+    expect(
+      r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural, v.offPlan]),
+    ).toEqual([[49, 'ok', null]]);
+  });
+  it('a refused view logs the rule and the failing check with counts only', async () => {
+    const log = memoryLog();
+    const t = setup({
+      tree: best({ dep: 'Thu, 11 Mar', ret: 'Sun, 21 Mar' }),
+      view: () => [
+        dialogPage(
+          gridTree({ depart: '2027-03-08', ret: '2027-03-18', selected: ['2027-03-12', '2027-03-21'] }),
+        ),
+      ],
+      log,
+    });
+    const r = await t.session.page(req([], { dep: '2027-03-11', ret: '2027-03-21' }));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+    const lines = log.lines.filter((l) => l.msg === 'classifier decision').map((l) => l.o);
+    expect(lines[0]).toMatchObject({
+      cause: 'unrecognised',
+      rule: 'grid:first-view',
+      check: 'selected-cell',
+      candidates: 49,
+      ranges: 1,
+      prices: 1,
+    });
+    expect(lines[1]).toMatchObject({ cause: 'unrecognised', rule: 'grid:first-view' });
+    expect(JSON.stringify(lines)).not.toMatch(/Mar|£|https?:/);
   });
 });
 

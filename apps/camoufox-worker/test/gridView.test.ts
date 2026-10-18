@@ -186,11 +186,33 @@ describe('interpretView', () => {
     ],
     ['no range line', { ...raw({ depart: '2027-03-11', ret: '2027-03-21' }), ranges: [] }],
   ])('the first view: %s is unrecognised (PA-11)', (_l, r) => {
-    expect(interpretView(r, Q.dep, Q)).toEqual({ kind: 'unrecognised', why: 'first-view' });
+    expect(interpretView(r, Q.dep, Q)).toMatchObject({ kind: 'unrecognised', why: 'first-view' });
   });
 });
 
 describe('readRawView over the synthetic dialog', () => {
+  // why: the live run of 2026-10-18 on 8885ba8 stopped at the first view: the range line is not an element of its own
+  // (the recordings print it run together with the price, which is), so an anchored lookup found no range
+  it.each(['shared', 'separate', 'spaced'] as const)(
+    'reads the selected range and price when they sit %s',
+    async (selectedForm) => {
+      const page = new FakePage(null);
+      page.setTrees([
+        n('document', '', [gridTree({ depart: '2027-03-08', ret: '2027-03-18', selectedForm })]),
+      ]);
+      page.url();
+      const t = fakeTimers();
+      const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true }).nth(0);
+      const r = await readRawView(dialog, dialog.getByRole('tabpanel').nth(0), t.deadline(10_000), SELECTORS);
+      expect(r.ranges).toEqual(['11 – 21 Mar 2027']);
+      expect(r.prices).toHaveLength(1);
+      const v = interpretView(r, asIsoDate('2027-03-11'), {
+        dep: asIsoDate('2027-03-11'),
+        ret: asIsoDate('2027-03-21'),
+      });
+      expect(v.kind).toBe('view');
+    },
+  );
   it('reads the lines, the candidates, the selected lines and the dates-grid check through locators', async () => {
     const page = new FakePage(null);
     page.setTrees([n('document', '', [gridTree({ depart: '2027-03-11', ret: '2027-03-21', rotate: 2 })])]);

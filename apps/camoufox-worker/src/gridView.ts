@@ -31,8 +31,19 @@ const DAY =
   '(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)';
 /** A line: one element whose text holds at least two day labels. */
 const LINE = new RegExp(`${DAY}.*${DAY}`);
-const RANGE = /^\d{1,2}(?: [A-Z][a-z]{2,3})?(?: \d{4})? – \d{1,2} [A-Z][a-z]{2,3}(?: \d{4})?$/;
-const PRICE_LINE = /^£[\d,]+ · Round trip$/;
+/**
+ * The selected pair's range and price, found anywhere in an element's text: the live run of 2026-10-18 showed the range
+ * is no element of its own (the page runs it together with the price, "14 – 24 Mar 2027£462 · Round trip"), so it is
+ * read from whichever element holds it, its spacing normalised, and each distinct value kept once.
+ */
+const RANGE = /\d{1,2}(?:\s[A-Z][a-z]{2,3})?(?:\s\d{4})?\s–\s\d{1,2}\s[A-Z][a-z]{2,3}(?:\s\d{4})?/;
+const PRICE_LINE = /£[\d,]+\s·\sRound trip/;
+/** Any run of spaces (no-break and thin ones included) as one space. */
+const spaced = (t: string): string => t.replace(/\s+/g, ' ').trim();
+/** Each distinct match of `re` in the texts, spacing normalised. */
+const found = (xs: readonly string[], re: RegExp): string[] => [
+  ...new Set(xs.flatMap((x) => re.exec(spaced(x))?.[0] ?? [])),
+];
 
 export interface DatesGridCheck {
   dialog: number;
@@ -77,8 +88,8 @@ export async function readRawView(
   return {
     lines: await texts(panel.getByText(LINE), d),
     candidates,
-    ranges: await texts(panel.getByText(RANGE), d),
-    prices: await texts(panel.getByText(PRICE_LINE), d),
+    ranges: found(await texts(panel.getByText(RANGE), d), RANGE),
+    prices: found(await texts(panel.getByText(PRICE_LINE), d), PRICE_LINE),
     datesGrid: {
       dialog: await countOf(dialog, d),
       datesSelected: await countOf(
@@ -102,8 +113,29 @@ export type Interpreted =
       cells: GridCell[];
       unparsed: number;
       structural: 'ok' | 'unparsed';
+      /** Which structural check failed, for the debug decision line (counts only, never names). */
+      structuralCheck: 'duplicate' | 'count' | 'sets' | null;
     }
-  | { kind: 'unrecognised'; why: 'not-dates-grid' | 'lines' | 'selector-drift' | 'first-view' };
+  | {
+      kind: 'unrecognised';
+      why: 'not-dates-grid' | 'lines' | 'selector-drift' | 'first-view';
+      /** Which part of the first view failed (the decision line names it). */
+      check?: 'selected-cell' | 'range' | 'price';
+    };
+
+/** A view's counts for the debug decision line (never a name, a date or a URL). */
+export function viewCounts(r: RawView): Record<string, number> {
+  return {
+    candidates: r.candidates.length,
+    pricedLooking: r.candidates.filter((x) => x?.startsWith('£') === true).length,
+    lines: r.lines.length,
+    labelsLine1: dayLabels(r.lines[0] ?? '').length,
+    labelsLine2: dayLabels(r.lines[1] ?? '').length,
+    ranges: r.ranges.length,
+    prices: r.prices.length,
+    ...r.datesGrid,
+  };
+}
 
 const epochDay = (s: string): number => Date.parse(`${s}T00:00:00Z`) / 86_400_000;
 
@@ -133,7 +165,7 @@ export function interpretView(
   const g = r.datesGrid;
   if (g.dialog !== 1 || g.datesSelected !== 1 || g.grid !== 1 || g.scrollButtons !== 4)
     return { kind: 'unrecognised', why: 'not-dates-grid' };
-  const [depLine, retLine] = r.lines;
+  const [depLine, retLine] = r.lines.map(spaced);
   const departures = r.lines.length === 2 && depLine !== undefined ? lineDates(depLine, anchor) : null;
   const returns = r.lines.length === 2 && retLine !== undefined ? lineDates(retLine, anchor) : null;
   if (departures === null || returns === null) return { kind: 'unrecognised', why: 'lines' };
@@ -146,7 +178,8 @@ export function interpretView(
   let pricedFailed = 0;
   let duplicate = false;
   let selected: { key: string; pounds: number } | null = null;
-  for (const name of r.candidates) {
+  for (const raw of r.candidates) {
+    const name = raw === null ? null : spaced(raw);
     const looksPriced = name !== null && name.startsWith('£');
     if (looksPriced) pricedLooking++;
     const c = name === null ? null : parseCellName(name);
@@ -181,15 +214,11 @@ export function interpretView(
       dm.day === Number(iso.slice(8, 10)) &&
       dm.month === Number(iso.slice(5, 7)) &&
       (dm.year === null || dm.year === Number(iso.slice(0, 4)));
-    if (
-      selected === null ||
-      selected.key !== `${first.dep}/${first.ret}` ||
-      range === null ||
-      !named(range.dep, first.dep) ||
-      !named(range.ret, first.ret) ||
-      price !== selected.pounds
-    )
-      return { kind: 'unrecognised', why: 'first-view' };
+    if (selected === null || selected.key !== `${first.dep}/${first.ret}`)
+      return { kind: 'unrecognised', why: 'first-view', check: 'selected-cell' };
+    if (range === null || !named(range.dep, first.dep) || !named(range.ret, first.ret))
+      return { kind: 'unrecognised', why: 'first-view', check: 'range' };
+    if (price !== selected.pounds) return { kind: 'unrecognised', why: 'first-view', check: 'price' };
   }
   const possible = departures.flatMap((d) => returns.filter((x) => x >= d)).length;
   const namedDeps = new Set(cells.map((c) => c.departureDate));
@@ -199,7 +228,14 @@ export function interpretView(
     [...namedDeps].every((x) => depSet.has(x)) &&
     namedRets.size === retSet.size &&
     [...namedRets].every((x) => retSet.has(x));
-  const structural = duplicate || r.candidates.length !== possible || !setsMatch ? 'unparsed' : 'ok';
+  const structuralCheck = duplicate
+    ? 'duplicate'
+    : r.candidates.length !== possible
+      ? 'count'
+      : !setsMatch
+        ? 'sets'
+        : null;
+  const structural = structuralCheck === null ? 'ok' : 'unparsed';
   return {
     kind: 'view',
     departures,
@@ -207,5 +243,6 @@ export function interpretView(
     cells: structural === 'ok' ? cells : [],
     unparsed,
     structural,
+    structuralCheck,
   };
 }

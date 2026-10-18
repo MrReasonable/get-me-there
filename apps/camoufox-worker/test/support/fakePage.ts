@@ -201,9 +201,7 @@ export class FakeLocator implements LocatorLike {
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this.page, () =>
-      descendants(this.find()).filter((x) => textMatches(x, t, o.exact)),
-    );
+    return new FakeLocator(this.page, () => innermost(descendants(this.find()), t, o.exact));
   }
   innerText(o?: { timeout?: number }): Promise<string> {
     if (this.node()?.innerTextHang === true) return this.page.hangUntilClosed<string>();
@@ -254,6 +252,16 @@ function roleMatches(
 function candidates(nodes: FakeNode[], role: Role, o: { name?: string | RegExp; exact?: boolean }): boolean {
   return nodes.some(
     (x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact) && x.selectedQueryHang === true,
+  );
+}
+
+/**
+ * Playwright's text matching returns the innermost elements whose text matches: an element whose match comes from a
+ * child that matches too is left out.
+ */
+function innermost(nodes: FakeNode[], t: string | RegExp, exact: boolean | undefined): FakeNode[] {
+  return nodes.filter(
+    (x) => textMatches(x, t, exact) && !descendants([x]).some((c) => textMatches(c, t, exact)),
   );
 }
 
@@ -384,7 +392,7 @@ export class FakePage implements PageLike {
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this, () => descendants(this.root()).filter((x) => textMatches(x, t, o.exact)));
+    return new FakeLocator(this, () => innermost(descendants(this.root()), t, o.exact));
   }
   close(): Promise<void> {
     this.calls.closed += 1;

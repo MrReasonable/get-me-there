@@ -24,7 +24,14 @@ import {
   type StepOptions,
 } from './driver.js';
 import { MOVE_BUDGET_MS, MOVE_RESERVE_MS } from './gridRecord.js';
-import { changeKeyOf, type Interpreted, interpretView, readRawView } from './gridView.js';
+import {
+  changeKeyOf,
+  type Interpreted,
+  interpretView,
+  type RawView,
+  readRawView,
+  viewCounts,
+} from './gridView.js';
 import type { Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
 
@@ -92,10 +99,23 @@ export async function gridPage(
   const G = S.results.dateGrid;
   const steps: StepOptions = { ...o.steps, flow: 'grid' };
   const notes: string[] = [];
-  const unrecognised = (why: string): GridPageResult => {
+  // why: the live run of 2026-10-18 on 8885ba8: every grid stop logs its rule at debug, with counts only (never a name,
+  // a date or a URL), as the recorder's decision line does
+  const unrecognised = (why: string, extra: Record<string, number | string> = {}): GridPageResult => {
     notes.push(why);
+    o.steps.log?.debug(
+      {
+        cause: 'unrecognised',
+        rule: `grid:${why}`,
+        elapsedMs: timers.now() - (o.steps.startedAt ?? timers.now()),
+        ...extra,
+      },
+      'classifier decision',
+    );
     return { kind: 'stop', page: 'unrecognised', notes };
   };
+  const rejected = (r: Extract<Interpreted, { kind: 'unrecognised' }>, raw: RawView): GridPageResult =>
+    unrecognised(r.why, { ...(r.check === undefined ? {} : { check: r.check }), ...viewCounts(raw) });
   const so = { timers, pollMs: o.pollMs, S, reserveMs: MOVE_RESERVE_MS };
   const click = (name: string, l: LocatorLike, st0: Deadline) =>
     runStep(name, CLICK_TIMEOUT_MS, st0, steps, async (st) => {
@@ -146,7 +166,7 @@ export async function gridPage(
       anchor,
       first ? { dep: req.start.departureDate, ret: req.start.returnDate } : undefined,
     );
-    return { kind: 'read' as const, read, key: changeKeyOf(s.value) };
+    return { kind: 'read' as const, read, key: changeKeyOf(s.value), raw: s.value };
   };
   const toView = (r: Read, index: number, offPlan: GridView['offPlan']): GridView => ({
     index,
@@ -160,7 +180,7 @@ export async function gridPage(
 
   const firstRead = await view('dates', d, undefined, true);
   if (firstRead.kind === 'blocked') return { kind: 'stop', page: firstRead.page, notes };
-  if (firstRead.read.kind === 'unrecognised') return unrecognised(firstRead.read.why);
+  if (firstRead.read.kind === 'unrecognised') return rejected(firstRead.read, firstRead.raw);
   const views: GridView[] = [];
   let prev = firstRead.read;
   let prevKey = firstRead.key;
@@ -195,7 +215,7 @@ export async function gridPage(
       throw e;
     }
     if (next.kind === 'blocked') return { kind: 'stop', page: next.page, notes };
-    if (next.read.kind === 'unrecognised') return unrecognised(next.read.why);
+    if (next.read.kind === 'unrecognised') return rejected(next.read, next.raw);
     const cur = next.read;
     const want = expected(prev, move, o.stepDays);
     const reads = req.reads[i + 1] === true;
@@ -207,7 +227,8 @@ export async function gridPage(
         (new Date(`${cur[want.axis][0] ?? ''}T00:00:00Z`).getTime() -
           new Date(`${prev[want.axis][0] ?? ''}T00:00:00Z`).getTime()) /
         86_400_000;
-      if (!same(cur[other], prev[other]) || Math.sign(moved) !== want.sign) return unrecognised('wrong-move');
+      if (!same(cur[other], prev[other]) || Math.sign(moved) !== want.sign)
+        return unrecognised('wrong-move', { movedDays: moved, move: i + 1 });
       if (reads) views.push(toView(cur, i + 1, 'short-move'));
       return { kind: 'grid', views, ended: 'off-plan', notes };
     }

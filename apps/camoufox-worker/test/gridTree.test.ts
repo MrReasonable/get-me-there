@@ -28,7 +28,10 @@ describe('gridTree', () => {
     expect(cells.filter((c) => c.includes(', cheapest price, '))).toHaveLength(1);
     expect(cells.find((c) => c.endsWith(', selected'))).toMatch(/, 14 Mar to 24 Mar, selected$/);
     expect(descendants([t]).find((x) => x.role === 'grid')?.children).toEqual([]);
-    const lines = kids.filter((x) => x.role === 'generic').map((x) => x.text);
+    const lines = kids
+      .filter((x) => x.role === 'generic')
+      .map((x) => x.text)
+      .slice(0, 2);
     expect(lines).toEqual([
       '0000Thu 11 MarFri 12 MarSat 13 MarSun 14 MarMon 15 MarTue 16 MarWed 17 Mar0000',
       '0000Sun 21 MarMon 22 MarTue 23 MarWed 24 MarThu 25 MarFri 26 MarSat 27 Mar0000',
@@ -36,12 +39,10 @@ describe('gridTree', () => {
     expect(
       descendants(kids).filter((x) => x.role === 'text' && /^\w{3} \d+ \w{3}$/.test(x.name ?? '')),
     ).toHaveLength(14);
-    expect(
-      kids
-        .filter((x) => x.role === 'text')
-        .map((x) => x.name)
-        .slice(-2),
-    ).toEqual(['14 – 24 Mar 2027', expect.stringMatching(/^£\d+ · Round trip$/)]);
+    // why: as the recordings print it: the range runs into the price line's element, which holds the price as its own
+    const selected = kids.at(-1);
+    expect(selected?.text).toMatch(/^14 – 24 Mar 2027£\d+ · Round trip$/);
+    expect(selected?.children?.map((x) => x.name)).toEqual([expect.stringMatching(/^£\d+ · Round trip$/)]);
   });
   it('rotates the departures and the cells as a scrolled view does', () => {
     const t = gridTree({ depart: '2027-03-27', ret: '2027-04-04', rotate: 6 });
