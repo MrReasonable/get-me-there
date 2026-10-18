@@ -72,9 +72,9 @@ export function selectCandidates(
   }
 
   if (!hasDiscoveryProvider) {
+    // why: m is never negative (alwaysInclude ≤ maxCells is enforced above). m = 0 needs no special
+    // case: k becomes Infinity (or NaN) and `slice(0, 0)` adds nothing.
     const m = maxCells - out.length;
-    // why: m is never negative (alwaysInclude ≤ maxCells is enforced above); m = 0 adds nothing.
-    if (m === 0) return out;
     const remaining = cells.filter((c) => !chosen.has(cellKeyString(c)));
     const k = Math.max(1, Math.floor(remaining.length / m));
     for (const cell of remaining.filter((_, j) => j % k === 0).slice(0, m)) take(cell, 'stride');
@@ -82,15 +82,16 @@ export function selectCandidates(
   }
 
   const ranked = cells
-    .flatMap((cell, i) => {
+    .flatMap((cell) => {
       const r = discovery.get(cellKeyString(cell));
       if (r?.status !== 'priced') return [];
       if (r.minPence === null) {
         throw new Error(`priced discovery roll-up without minPence for ${cellKeyString(cell)}`);
       }
-      return [{ cell, i, minPence: r.minPence }];
+      return [{ cell, minPence: r.minPence }];
     })
-    .sort((a, b) => a.minPence - b.minPence || a.i - b.i);
+    // why: `sort` is stable (ES2019) and `flatMap` yields generation order, so equal prices keep it.
+    .sort((a, b) => a.minPence - b.minPence);
 
   const fits = (cell: CellKey) =>
     out.length < maxCells && (pdb === undefined || (perDate.get(cell.departureDate) ?? 0) < pdb);
@@ -106,9 +107,8 @@ export function selectCandidates(
       }
       continue;
     }
-    // step 4
-    if (ceiling === undefined) break;
-    if (free && minPence <= ceiling) take(cell, 'ceiling');
+    // step 4: with no ceiling nothing qualifies, so the rest of the walk adds nothing
+    if (free && minPence <= (ceiling ?? Number.NEGATIVE_INFINITY)) take(cell, 'ceiling');
   }
   return out;
 }

@@ -117,8 +117,8 @@ export function evaluateAlertRules(
       const j = judge(rule, c, ctx);
       if (j === null) continue;
       const key = dedupKey(id, priceOf(c).pricePence);
-      const verdict: Suppression = j.isNew
-        ? { suppressed: false, reason: null }
+      const verdict: Suppression | null = j.isNew
+        ? null
         : isSuppressed({ identityKey: id, dedupKey: key, candidate: c }, prior, rule.cooldownHours, ctx.now);
       out.push({
         rule,
@@ -126,7 +126,7 @@ export function evaluateAlertRules(
         identityKey: id,
         dedupKey: key,
         ...j,
-        suppressed: verdict.suppressed ? { reason: verdict.reason } : null,
+        suppressed: verdict?.suppressed ? { reason: verdict.reason } : null,
       });
     }
   }

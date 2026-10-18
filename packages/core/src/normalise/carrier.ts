@@ -26,7 +26,8 @@ export function canonicalCarrier(s: string): string {
  */
 export function canonicalFlightNumber(s: string | number, carrier?: string): number {
   // why: some vendors send the number as JSON number; it gets the same range check as a string.
-  const text = typeof s === 'number' ? (Number.isInteger(s) && s >= 0 ? String(s) : 'x') : s;
+  // A fraction, a sign or an exponent stringifies to something FLIGHT_RE refuses, so no guard is needed.
+  const text = String(s);
   const m = FLIGHT_RE.exec(text.trim().toUpperCase());
   const prefix = m?.[1];
   const digits = m?.[2];
