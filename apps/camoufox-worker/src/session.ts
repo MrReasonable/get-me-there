@@ -19,6 +19,7 @@ import {
   type Driver,
   LOOKUP_TIMEOUT_MS,
   type PageLike,
+  POLL_TIMEOUT_MS,
   pollUntilSettled,
   runStep,
   type Settled,
@@ -317,25 +318,29 @@ export class PageSession {
       return this.blockedPlaceholder(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
     };
     if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
-      let read = true;
       d = budget.next();
       const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
+      const lookups = { timers: this.d.timers, lookupMs: LOOKUP_TIMEOUT_MS };
+      let cheapStop: WorkerAnswer | null = null;
       try {
         await driver.clickCheapest(d, steps);
-        // why: the first Cheapest poll is a timed step too, so a view that never answers falls back, never hangs
+        // why: rulings of 2026-10-18: the first Cheapest poll and every later one is a 20 s step with 5 s lookups
+        // inside it, so a slow or stalled view fails a step and falls back, never hangs
         const cur = d;
-        await runStep('first-cheapest-poll', LOOKUP_TIMEOUT_MS, cur, steps, (st) => driver.readFacts(st));
+        await runStep('first-cheapest-poll', POLL_TIMEOUT_MS, cur, steps, (st) =>
+          driver.readFacts(st, lookups),
+        );
+        cheapStop = await after('cheapest');
       } catch (e) {
         // why: the honesty rule (rulings of 2026-10-18): a Cheapest flow whose step fails or times out is read as the
         // Best view stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the page
         // deadline still ends the page as not-ready
         if (e instanceof DeadlineExceeded || d.expired()) throw e;
-        read = false;
         // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
         // classified once, under its own step, and a blocked kind stops the page with its cool-down, as on any poll
         const cur = d;
-        const seen = await runStep('classify-after-failed-step', LOOKUP_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st),
+        const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
+          driver.readFacts(st, lookups),
         ).catch((err: unknown) => {
           if (err instanceof DeadlineExceeded || cur.expired()) throw err;
           return null;
@@ -346,10 +351,8 @@ export class PageSession {
             return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page };
         }
       }
-      if (read) {
-        const stop = await after('cheapest');
-        if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
-      }
+      if (cheapStop !== null && cheapStop.kind === 'blocked')
+        return { answer: cheapStop, stop: cheapStop.page };
     }
     if (S.VIEW_MORE_ADDS_CHEAPER) {
       await driver.click('button', S.results.viewMoreButton, d);

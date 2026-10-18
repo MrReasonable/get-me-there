@@ -738,6 +738,11 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       'confirm-selected:end',
       'first-cheapest-poll:start',
       'first-cheapest-poll:end',
+      // each later Cheapest poll is its own bounded step (two polls show the links stable)
+      'cheapest-poll:start',
+      'cheapest-poll:end',
+      'cheapest-poll:start',
+      'cheapest-poll:end',
     ]);
   });
 

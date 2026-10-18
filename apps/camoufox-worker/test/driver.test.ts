@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLICK_TIMEOUT_MS, createDriver, pollUntilSettled } from '../src/driver.js';
+import {
+  CLICK_TIMEOUT_MS,
+  createDriver,
+  LOOKUP_TIMEOUT_MS,
+  POLL_TIMEOUT_MS,
+  pollUntilSettled,
+} from '../src/driver.js';
 import type { GuardState } from '../src/guard.js';
 import { SELECTORS } from '../src/selectors.js';
 import { bounded, DeadlineExceeded } from '../src/timers.js';
@@ -307,6 +313,7 @@ describe('settling on stable content (ruling of 2026-10-18)', () => {
       {
         view: 'best',
         elapsedMs: 0,
+        pollDurationMs: 0,
         resultsReturned: true,
         fetching: false,
         cheapestPriced: true,
@@ -317,6 +324,7 @@ describe('settling on stable content (ruling of 2026-10-18)', () => {
       {
         view: 'best',
         elapsedMs: 2000,
+        pollDurationMs: 0,
         resultsReturned: true,
         fetching: false,
         cheapestPriced: true,
@@ -605,5 +613,78 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
         startedAt: timers.now(),
       }),
     ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'confirm-selected' });
+  });
+});
+
+// why: ruling of 2026-10-18 (the rerun on 59115d9): a poll is about fifteen lookups, so each Cheapest-view poll has its
+// own 20 s bound, and each single lookup inside it keeps 5 s
+describe('Cheapest poll and lookup bounds', () => {
+  const view = () => {
+    const t = resultsTree({ tab: 'Cheapest from £443' });
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+    t.children = (t.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+    return t;
+  };
+  /** A driver whose every poll takes `ms` of fake time before it answers. */
+  const slow = (ms: number) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([view()]);
+    const timers = fakeTimers();
+    const real = createDriver(page, guard());
+    const driver = {
+      readFacts: async (
+        d: Parameters<typeof real.readFacts>[0],
+        o?: Parameters<typeof real.readFacts>[1],
+      ) => {
+        await timers.sleep(ms, d.signal);
+        return real.readFacts(d, o);
+      },
+    };
+    return { driver, timers };
+  };
+  it('a Cheapest poll that takes 8 s completes (and the settle line names its duration)', async () => {
+    const { driver, timers } = slow(8000);
+    const lines = memoryLog();
+    const s = await pollUntilSettled(driver, timers.deadline(90_000), timers, 2000, SELECTORS, {
+      view: 'cheapest',
+      log: lines,
+      startedAt: timers.now(),
+    });
+    expect(s.kind).toEqual({ kind: 'results' });
+    expect(
+      lines.lines.filter((l) => l.msg === 'settle poll').map((l) => Reflect.get(l.o, 'pollDurationMs')),
+    ).toEqual([8000, 8000]);
+  });
+  it('a Cheapest poll that takes 25 s times out at 20 s with its step name', async () => {
+    const { driver, timers } = slow(25_000);
+    const lines = memoryLog();
+    await expect(
+      pollUntilSettled(driver, timers.deadline(90_000), timers, 2000, SELECTORS, {
+        view: 'cheapest',
+        log: lines,
+        startedAt: timers.now(),
+      }),
+    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'cheapest-poll', reason: 'timed-out' });
+    // why: the fake sleep advances the clock in one jump, so the 20 s bound is seen at the 25 s mark here
+    expect(lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o)).toMatchObject([
+      { step: 'cheapest-poll', timeoutMs: POLL_TIMEOUT_MS },
+    ]);
+  });
+  it('a single lookup inside a bounded poll still times out at 5 s', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([view()]);
+    page.hangAll = true;
+    const timers = fakeTimers();
+    const run = createDriver(page, guard()).readFacts(timers.deadline(90_000), {
+      timers,
+      lookupMs: LOOKUP_TIMEOUT_MS,
+    });
+    for (let i = 0; i < 5; i++) await flush();
+    timers.runOut();
+    await expect(run).rejects.toMatchObject({ name: 'LookupTimedOut' });
+    expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(5000);
   });
 });

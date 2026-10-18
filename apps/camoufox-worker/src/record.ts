@@ -14,6 +14,7 @@ import {
   type Driver,
   LOOKUP_TIMEOUT_MS,
   type PageLike,
+  POLL_TIMEOUT_MS,
   type ProbePage,
   pollUntilSettled,
   probePage,
@@ -478,18 +479,22 @@ async function interact(
       // why: ruling of 2026-10-18: the tab's own information pop-up closed through its exact button, then the tab
       d = budget.next();
       const steps = { timers: deps.timers, log: deps.log, startedAt: pageStart };
+      const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
       try {
         clicked.push(...(await driver.clickCheapest(d, steps)));
-        // why: the first Cheapest poll is a timed step too (ruling of 2026-10-18)
+        // why: rulings of 2026-10-18: the first Cheapest poll and every later one is a 20 s step with 5 s lookups
         const cur = d;
-        await runStep('first-cheapest-poll', LOOKUP_TIMEOUT_MS, cur, steps, (st) => driver.readFacts(st));
+        await runStep('first-cheapest-poll', POLL_TIMEOUT_MS, cur, steps, (st) =>
+          driver.readFacts(st, lookups),
+        );
+        settled = await poll(deps.selectors, 'cheapest');
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
         // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
         // classified once, under its own step, and a blocked kind is that stop, with its cool-down
         const cur = d;
-        const seen = await runStep('classify-after-failed-step', LOOKUP_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st),
+        const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
+          driver.readFacts(st, lookups),
         ).catch((err: unknown) => {
           if (err instanceof DeadlineExceeded || cur.expired()) throw err;
           return null;
@@ -510,7 +515,8 @@ async function interact(
       clicked.push(`button:${deps.selectors.results.viewMoreButton}`);
     }
     if (clicked.length > 0) {
-      settled = await poll(deps.selectors, kind === 'cheapest' ? 'cheapest' : 'best');
+      // why: the Cheapest view was polled inside its try above; View more settles here
+      if (kind !== 'cheapest') settled = await poll(deps.selectors, 'best');
       if (settled.kind.kind !== 'results')
         return await stop(
           settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised',

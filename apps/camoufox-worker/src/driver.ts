@@ -104,7 +104,10 @@ export interface Driver {
   /** The page's heading names (what a recording stores of a page it could not classify). */
   headingNames(d: Deadline): Promise<string[]>;
   /** One poll: the page facts, the settle facts and the result names the signature hashes (never recorded twice). */
-  readFacts(d: Deadline): Promise<{ page: PageFacts; settle: SettleFacts; names: Array<string | null> }>;
+  readFacts(
+    d: Deadline,
+    o?: LookupBound,
+  ): Promise<{ page: PageFacts; settle: SettleFacts; names: Array<string | null> }>;
   resultNames(d: Deadline): Promise<Array<string | null>>;
   listFacts(d: Deadline): Promise<ListFacts>;
   formFacts(d: Deadline): Promise<FormFacts>;
@@ -125,6 +128,50 @@ export interface StepOptions {
 
 /** Each lookup's own bound in the Cheapest flow, inside the page deadline (ruling of 2026-10-18). */
 export const LOOKUP_TIMEOUT_MS = 5000;
+/**
+ * Each Cheapest-view poll's own bound (ruling of 2026-10-18, after the rerun on 59115d9): a poll is about fifteen
+ * lookups, which the larger Cheapest view slows, so the poll has 20 s and each lookup inside it keeps its 5 s.
+ */
+export const POLL_TIMEOUT_MS = 20_000;
+
+/** Bounds each single lookup of a readFacts call (the Cheapest view's polls). */
+export interface LookupBound {
+  timers: Timers;
+  lookupMs: number;
+}
+
+/** A single lookup that overran its own bound inside a bounded poll. */
+export class LookupTimedOut extends Error {
+  constructor() {
+    super('a single lookup overran its bound');
+    this.name = 'LookupTimedOut';
+  }
+}
+
+/**
+ * A deadline whose every `race` is also bounded on its own by `ms` (never past `d`): each lookup through it gets a fresh
+ * bound, cleared once it answers. `remaining()` (the Playwright timeout) is the smaller of the two.
+ */
+function perLookup(d: Deadline, timers: Timers, ms: number): Deadline {
+  return {
+    signal: d.signal,
+    remaining: () => Math.min(ms, d.remaining()),
+    expired: () => d.expired(),
+    onExpire: (fn) => d.onExpire(fn),
+    clear: () => d.clear(),
+    race: async <T>(p: Promise<T>): Promise<T> => {
+      const one = timers.deadline(Math.max(1, Math.min(ms, d.remaining())));
+      try {
+        return await d.race(one.race(p));
+      } catch (e) {
+        if (one.expired() && !d.expired()) throw new LookupTimedOut();
+        throw e;
+      } finally {
+        one.clear();
+      }
+    },
+  };
+}
 
 /** A Cheapest-flow step that failed or timed out; the caller falls back (never a hang to the page deadline). */
 export class CheapestStepFailed extends Error {
@@ -235,7 +282,9 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       await d.race(page.goto(url, { ...timeoutOf(d), waitUntil: 'domcontentloaded' }));
     },
 
-    async readFacts(d) {
+    async readFacts(outer, o) {
+      // why: inside a bounded poll every single lookup keeps its own 5 s bound (ruling of 2026-10-18)
+      const d = o === undefined ? outer : perLookup(outer, o.timers, o.lookupMs);
       const url = page.url();
       const accountButtons = await countOf(page.getByRole('button', { name: S.blocked.accountControl }), d);
       const accountLinks = await countOf(page.getByRole('link', { name: S.blocked.accountControl }), d);
@@ -421,7 +470,19 @@ export async function pollUntilSettled(
   let previous: Previous | null = null;
   let previousNames: Array<string | null> | null = null;
   for (let polls = 1; ; polls++) {
-    const read = await driver.readFacts(d);
+    const pollStart = timers.now();
+    // why: ruling of 2026-10-18: each Cheapest-view poll is its own 20 s step with 5 s lookups inside it
+    const read =
+      view === 'cheapest'
+        ? await runStep(
+            'cheapest-poll',
+            POLL_TIMEOUT_MS,
+            d,
+            { timers, ...(log === undefined ? {} : { log }), startedAt },
+            (st) => driver.readFacts(st, { timers, lookupMs: LOOKUP_TIMEOUT_MS }),
+          )
+        : await driver.readFacts(d);
+    const pollDurationMs = timers.now() - pollStart;
     const facts = { page: read.page, settle: read.settle };
     const { kind, rule } = classifyPageWithRule(facts.page, S);
     if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
@@ -441,6 +502,7 @@ export async function pollUntilSettled(
       {
         view,
         elapsedMs,
+        pollDurationMs,
         resultsReturned: facts.settle.resultsReturned,
         fetching: facts.settle.fetching,
         cheapestPriced: facts.settle.cheapestPriced,
