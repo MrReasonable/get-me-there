@@ -608,7 +608,7 @@ describe('History tables point of sale (spec §11)', () => {
     const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
     const t = await findByRole('table', { name: /Aviasales cache · economy · cheapest calendar price/ });
     const pos = within(t).getAllByTestId('point-of-sale');
-    expect(pos).toHaveLength(2);
-    for (const e of pos) expect(e).toHaveTextContent(/^(UK market|market not stated)$/);
+    // why: both points are Aviasales calendar prices, whose point of sale is 'unknown'
+    expect(pos.map((e) => e.textContent)).toEqual(['market not stated', 'market not stated']);
   });
 });

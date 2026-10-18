@@ -778,12 +778,21 @@ describe('Results point of sale (spec §11)', () => {
     countResults(resultsResponse({ rows: five }));
     const wide = view();
     await table();
-    const first = dataRows()[0];
-    if (first === undefined) throw new Error('no rows');
-    expect(within(first).getByTestId('point-of-sale')).toHaveTextContent('UK market');
-    const calendar = dataRows()[4];
-    if (calendar === undefined) throw new Error('no calendar row');
-    expect(within(calendar).getByTestId('point-of-sale')).toHaveTextContent('market not stated');
+    // why: every wide row's own market words (rows one, three and four are SearchApi GB, the calendar row Aviasales
+    // 'unknown'); each row's price-cell labels are all checked, so a wrong or missing one on any row fails.
+    const expected = ['UK market', 'UK market', 'UK market', 'UK market', 'market not stated'];
+    expect(five.map((r) => r.provenance.pointOfSale)).toEqual(['GB', 'GB', 'GB', 'GB', 'unknown']);
+    const rows = dataRows();
+    expect(rows).toHaveLength(five.length);
+    rows.forEach((r, n) => {
+      const labels = within(r).getAllByTestId('point-of-sale');
+      expect(labels.length).toBeGreaterThan(0);
+      for (const e of labels) expect(e).toHaveTextContent(new RegExp(`^${expected[n]}$`));
+    });
+    // the headline above the rows is the server's cheapest, a SearchApi (GB) row, so it names the UK market
+    const inRows = new Set(rows.flatMap((r) => [...r.querySelectorAll('[data-testid="point-of-sale"]')]));
+    const headline = screen.getAllByTestId('point-of-sale').filter((e) => !inRows.has(e));
+    expect(headline.map((e) => e.textContent)).toEqual(['UK market']);
     wide.unmount();
 
     setViewportWidth(375);

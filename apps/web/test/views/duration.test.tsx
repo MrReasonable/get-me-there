@@ -385,9 +385,12 @@ describe('Duration table point of sale (spec §11)', () => {
     server.use(http.get(route, () => HttpResponse.json(resp)));
     const { findByRole } = renderWithProviders(<DurationView definition={def} />);
     const table = await findByRole('table', { name: 'Cheapest found per stay length, with provenance' });
-    const pos = within(table).getAllByTestId('point-of-sale');
-    expect(pos.length).toBeGreaterThan(0);
-    for (const e of pos) expect(e).toHaveTextContent(/^(UK market|market not stated)$/);
+    // why: table order is night 10 verified (SearchApi, GB), night 10 calendar and night 12 calendar (Aviasales, unknown)
+    expect(
+      within(table)
+        .getAllByTestId('point-of-sale')
+        .map((e) => e.textContent),
+    ).toEqual(['UK market', 'market not stated', 'market not stated']);
     const tip = renderWithProviders(
       <DurationTooltip active label={10} data={data()} notes={def.destinationNotes} />,
     ).getByTestId('duration-tooltip');
