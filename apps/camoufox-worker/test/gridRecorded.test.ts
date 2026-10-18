@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asIata, asIsoDate, GRID_STEP_DAYS, type GridMove, type IsoDate } from '@gmt/core';
+import { asIata, GRID_STEP_DAYS, type GridMove, type IsoDate } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';

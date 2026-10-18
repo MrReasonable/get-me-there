@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asIsoDate, GRID_STEP_DAYS } from '@gmt/core';
+import { GRID_STEP_DAYS } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';

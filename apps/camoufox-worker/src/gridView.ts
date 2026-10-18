@@ -196,7 +196,7 @@ export function interpretView(
   let selected: { key: string; pounds: number } | null = null;
   for (const raw of r.candidates) {
     const name = raw === null ? null : spaced(raw);
-    const looksPriced = name !== null && name.startsWith('£');
+    const looksPriced = name?.startsWith('£') === true;
     if (looksPriced) pricedLooking++;
     const c = name === null ? null : parseCellName(name);
     const dep = c === null ? null : resolveDay(c.dep, anchor);
