@@ -181,10 +181,11 @@ export function interpretView(
   const g = r.datesGrid;
   if (g.dialog !== 1 || g.datesSelected !== 1 || g.grid !== 1 || g.scrollButtons !== 4)
     return { kind: 'unrecognised', why: 'not-dates-grid' };
-  const [depLine, retLine] = r.lines.map(spaced);
-  const departures = r.lines.length === 2 && depLine !== undefined ? lineDates(depLine, anchor) : null;
-  const returns = r.lines.length === 2 && retLine !== undefined ? lineDates(retLine, anchor) : null;
-  if (departures === null || returns === null) return { kind: 'unrecognised', why: 'lines' };
+  const [depLine = '', retLine = '', ...more] = r.lines.map(spaced);
+  const departures = lineDates(depLine, anchor);
+  const returns = lineDates(retLine, anchor);
+  if (more.length > 0 || departures === null || returns === null)
+    return { kind: 'unrecognised', why: 'lines' };
   const depSet = new Set<string>(departures);
   const retSet = new Set<string>(returns);
   const cells: GridCell[] = [];
@@ -241,11 +242,8 @@ export function interpretView(
   const possible = departures.flatMap((d) => returns.filter((x) => x >= d)).length;
   const namedDeps = new Set(cells.map((c) => c.departureDate));
   const namedRets = new Set(cells.map((c) => c.returnDate));
-  const setsMatch =
-    namedDeps.size === depSet.size &&
-    [...namedDeps].every((x) => depSet.has(x)) &&
-    namedRets.size === retSet.size &&
-    [...namedRets].every((x) => retSet.has(x));
+  // why: every kept cell names dates on the lines, so the named sets are the lines' sets when their sizes are
+  const setsMatch = namedDeps.size === depSet.size && namedRets.size === retSet.size;
   const structuralCheck = duplicate
     ? 'duplicate'
     : r.candidates.length !== possible

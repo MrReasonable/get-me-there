@@ -172,6 +172,16 @@ describe('interpretView', () => {
       false,
     );
   });
+  it('no-break and thin spaces in the names and the lines read as spaces', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    const odd = (t: string) => t.replace(/ /g, '\u00a0');
+    const v = interpretView(
+      { ...r, lines: r.lines.map(odd), candidates: r.candidates.map((x) => (x === null ? x : odd(x))) },
+      Q.dep,
+    );
+    expect(v.kind === 'view' && [v.cells.length, v.unparsed]).toEqual([49, 0]);
+    expect(changeKeyOf({ lines: r.lines.map(odd) })).toBe(changeKeyOf(r));
+  });
   it('the change key is the lines’ dates: a re-render that only reorders the labels is no change', () => {
     const a = raw({ depart: '2027-03-11', ret: '2027-03-21' });
     const b = raw({ depart: '2027-03-11', ret: '2027-03-21', rotate: 3 });
@@ -186,6 +196,30 @@ describe('interpretView', () => {
       'not-dates-grid',
     ],
     ['one line', (r: RawView): RawView => ({ ...r, lines: r.lines.slice(0, 1) }), 'lines'],
+    ['three lines', (r: RawView): RawView => ({ ...r, lines: [...r.lines, r.lines[1] ?? ''] }), 'lines'],
+    [
+      'two dialogs',
+      (r: RawView): RawView => ({ ...r, datesGrid: { ...r.datesGrid, dialog: 2 } }),
+      'not-dates-grid',
+    ],
+    [
+      'the Dates tab not selected',
+      (r: RawView): RawView => ({ ...r, datesGrid: { ...r.datesGrid, datesSelected: 0 } }),
+      'not-dates-grid',
+    ],
+    [
+      'no date grid',
+      (r: RawView): RawView => ({ ...r, datesGrid: { ...r.datesGrid, grid: 0 } }),
+      'not-dates-grid',
+    ],
+    [
+      'a day twice on a line, spanning a week',
+      (r: RawView): RawView => ({
+        ...r,
+        lines: [r.lines[0]?.replace('Fri 12 Mar', 'Thu 11 Mar') ?? '', r.lines[1] ?? ''],
+      }),
+      'lines',
+    ],
     [
       'a wrong weekday',
       (r: RawView): RawView => ({
@@ -245,12 +279,32 @@ describe('interpretView', () => {
         prices: ['£462 · Round trip', '£463 · Round trip'],
       },
     ],
-  ])('the first view: %s is unrecognised (PA-11)', (_l, r) => {
-    expect(interpretView(r, Q.dep, Q)).toMatchObject({ kind: 'unrecognised', why: 'first-view' });
+  ])('the first view: %s is unrecognised (PA-11)', (label, r) => {
+    const check = label.includes('price') ? 'price' : label.includes('selected') ? 'selected-cell' : 'range';
+    expect(interpretView(r, Q.dep, Q)).toEqual({ kind: 'unrecognised', why: 'first-view', check });
   });
 });
 
 describe('viewCounts', () => {
+  it('counts the candidates, the priced-looking ones, the lines and their labels, and the selected lines', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    const names = [...r.candidates];
+    names[0] = null;
+    names[1] = 'No flights, 12 Mar to 21 Mar';
+    expect(viewCounts({ ...r, candidates: names })).toEqual({
+      candidates: 49,
+      pricedLooking: 47,
+      lines: 2,
+      labelsLine1: 7,
+      labelsLine2: 7,
+      ranges: 1,
+      prices: 1,
+      dialog: 1,
+      datesSelected: 1,
+      grid: 1,
+      scrollButtons: 4,
+    });
+  });
   it('counts a view with no lines as no labels', () => {
     const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
     expect(viewCounts({ ...r, lines: [] })).toMatchObject({ lines: 0, labelsLine1: 0, labelsLine2: 0 });
