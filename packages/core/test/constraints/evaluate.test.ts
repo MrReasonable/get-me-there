@@ -248,6 +248,20 @@ describe('evaluateConstraints (spec §6.2)', () => {
     expect(evaluateConstraints(IT, OFFER, w, 'economy', ALL).departureWindowLocal).toBe('fail');
   });
 
+  it('a window whose edges are equal passes when every departure is at exactly that minute', () => {
+    const [firstBack, ...restBack] = IT.inbound;
+    if (firstBack === undefined) throw new Error('fixture has an inbound segment');
+    const bothAt2000 = {
+      ...IT,
+      inbound: [{ ...firstBack, departLocal: '2027-03-28T20:00' }, ...restBack],
+    };
+    const w = { departureWindowLocal: { from: '20:00', to: '20:00' } };
+    expect(evaluateConstraints(bothAt2000, OFFER, w, 'economy', ALL).departureWindowLocal).toBe('pass');
+    // one minute off either side of the single-minute window fails
+    const off = { departureWindowLocal: { from: '20:01', to: '20:01' } };
+    expect(evaluateConstraints(bothAt2000, OFFER, off, 'economy', ALL).departureWindowLocal).toBe('fail');
+  });
+
   it('a window wrapping midnight includes both of its edges', () => {
     // departures are exactly 20:00 (outbound) and 10:00 (inbound)
     const w = { departureWindowLocal: { from: '20:00', to: '10:00' } };
