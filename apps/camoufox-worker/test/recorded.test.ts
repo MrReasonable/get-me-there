@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { classifyPage } from '../src/classify.js';
 import { onAllowlist } from '../src/guard.js';
+import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS } from '../src/selectors.js';
 
@@ -109,6 +110,11 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
         expect(r.meta.socsReadBack, r.file).toBe('same');
         expect(r.facts.page === null ? 'no page' : classifyPage(r.facts.page).kind, r.file).toBe('results');
       }
+    });
+    it('every readable name parses with the dated grammar (Task 14.3)', () => {
+      for (const r of common(kind))
+        for (const name of r.facts.names)
+          if (name !== null && name !== '') expect(parseOptionName(name), name).not.toBeNull();
     });
   });
 }
