@@ -143,6 +143,8 @@ export const OPERATOR_MESSAGE_KINDS = exhaustive<OperatorMessageKind>()([
  * (spec §5.4, decision 37) is never retried by either.
  */
 export const NON_RETRYABLE = [
+  // why: spec §8.1 rev 32: a camoufox block is never retried by any resume; the cool-down is the worker's to end.
+  'blocked',
   'auth',
   'quota',
   'parse',

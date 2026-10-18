@@ -32,6 +32,26 @@ export class NotificationsRepo {
     return r === undefined ? null : readTime('operator_notifications.sent_at', r.sentAt);
   }
 
+  /**
+   * Spec §2, §8.1 rev 32 (cost-015): claims a once-only notice key such as `camoufox-cooldown:<until>`; true the first
+   * time, false ever after, so a cool-down that outlives several runs is notified once.
+   */
+  claimNoticeKey(key: string): boolean {
+    return (
+      this.db.raw
+        .prepare('INSERT OR IGNORE INTO operator_notice_keys (key, sent_at) VALUES (@key, @sentAt)')
+        .run({ key, sentAt: this.clock.now() }).changes === 1
+    );
+  }
+
+  /** True once `claimNoticeKey(key)` has succeeded. */
+  noticeKeyClaimed(key: string): boolean {
+    return (
+      this.db.raw.prepare('SELECT 1 AS present FROM operator_notice_keys WHERE key = ?').get(key) !==
+      undefined
+    );
+  }
+
   record(
     kind: OperatorMessageKind,
     executionId: string | null,

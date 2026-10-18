@@ -38,6 +38,15 @@ export interface ProviderRunLimits {
   planFixedMicroGbp: number;
   excludedFromSchedule: boolean;
   billed: boolean;
+  /**
+   * The provider's own per-execution call cap (camoufox's CAMOUFOX_EXECUTION_PAGE_CAP, decision 69), frozen into each
+   * new execution's snapshot as `budget.providerMaxCalls`; null when the provider has none.
+   */
+  executionCallCap: number | null;
+  /** The provider's own fixed spacing between call starts in seconds (camoufox), or null. */
+  minSpacingSeconds: number | null;
+  /** The calls the provider may make in its cap window (CAMOUFOX_MONTHLY_PAGE_CAP for camoufox). */
+  monthlyCallCap: number;
 }
 
 /**
@@ -95,6 +104,9 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       planFixedMicroGbp: b.planFixedMicroGbp,
       excludedFromSchedule: b.excludedFromSchedule,
       billed: b.billable,
+      executionCallCap: b.executionCallCap ?? null,
+      minSpacingSeconds: id === 'camoufox' ? (config.providers.camoufox?.minSpacingSeconds ?? null) : null,
+      monthlyCallCap: b.monthlyCallCap,
     };
   };
   for (const id of providers.keys()) limitsOf(id); // why: a missing limit is a wiring bug; fail at construction, not mid-run

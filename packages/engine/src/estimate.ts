@@ -11,7 +11,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
-import { disabledBefore, resumableCells } from './run.js';
+import { disabledFor, resumableCells } from './run.js';
 import { planTiles } from './stages/discovery.js';
 import { reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
@@ -47,6 +47,8 @@ interface Line {
   rawCalls: number;
   rawCostMicroGbp: number;
   rawSeconds: number;
+  /** A provider's own per-execution cap (camoufox pages): calls and seconds are clamped to it after the factor. */
+  cap?: { calls: number; seconds: number };
 }
 
 function assemble(
@@ -59,14 +61,16 @@ function assemble(
   const f = ctx.config.estimateRetryFactor;
   const perProvider = lines.map((l) => {
     const costMicroGbp = Math.ceil(l.rawCostMicroGbp * f);
+    // why: cost-004: the guard refuses a page past the snapshot cap, so the factor can never ask for more than it
+    const clamp = (n: number, cap: number | undefined): number => (cap === undefined ? n : Math.min(n, cap));
     return {
       providerId: l.providerId,
       stage: l.stage,
-      calls: Math.ceil(l.rawCalls * f),
+      calls: clamp(Math.ceil(l.rawCalls * f), l.cap?.calls),
       planCalls: l.rawCalls,
       costMicroGbp,
       costPence: microGbpToPence(costMicroGbp),
-      seconds: Math.ceil(l.rawSeconds * f),
+      seconds: clamp(Math.ceil(l.rawSeconds * f), l.cap?.seconds),
       blocked: null,
     };
   });
@@ -138,6 +142,25 @@ function discoveryLine(
   if (tiles > 0)
     notes.push(`${providerId}: ${tiles} discovery tiles planned; a tile that pages spends one call a page`);
   const l = ctx.limitsOf(providerId);
+  const pageCap = snapshot.budget.providerMaxCalls?.[providerId];
+  if (pageCap !== undefined && l.minSpacingSeconds !== null) {
+    // why: spec §2 rev 32, cost-004/009/011, prov-013: one page per cell, at most the snapshot's page cap a run; a page
+    // takes about 20–60 s plus the start-to-start spacing, estimated as spacing + 40 s
+    const perPage = l.minSpacingSeconds + 40;
+    const pages = Math.min(tiles, pageCap);
+    if (fresh.length > 0)
+      notes.push(
+        `${providerId} list mode prices ${pages} of ${fresh.length} cells this run; a full pass takes ${Math.ceil(fresh.length / pageCap)} runs; the month cap allows about ${l.monthlyCallCap} cells`,
+      );
+    return {
+      providerId,
+      stage: 'discovery',
+      rawCalls: pages,
+      rawCostMicroGbp: 0,
+      rawSeconds: pages * perPage,
+      cap: { calls: pageCap, seconds: pageCap * perPage },
+    };
+  }
   return {
     providerId,
     stage: 'discovery',
@@ -224,7 +247,7 @@ function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefin
  */
 export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual: boolean): Estimate {
   const snapshot = exec.snapshot;
-  const disabled = manual ? new Set<ProviderId>() : disabledBefore(ctx, exec.id);
+  const disabled = disabledFor(ctx, exec.id, manual);
   const remaining = (stage: Stage, id: ProviderId) =>
     disabled.has(id) ? [] : resumableCells(ctx, exec.id, stage, id, manual);
   const notes: string[] = [];

@@ -124,7 +124,7 @@ SELECT origin, destination, departure_date, return_date FROM cell_outcomes
 WHERE execution_id = @executionId AND stage = @stage AND provider_id = @providerId AND (
   status = 'not_run'
   OR (status = 'error' AND attempts < 3 AND (reason IS NULL OR reason NOT IN (${sqlList(NON_RETRYABLE)})))
-  OR (status = 'skipped' AND reason = 'budget')
+  OR (status = 'skipped' AND reason IN ('budget', 'provider_unavailable'))
   OR (@manual = 1 AND ((status = 'skipped' AND reason = 'provider_disabled') OR (status = 'error' AND reason IN (${sqlList(MANUAL_RETRYABLE)}))))
 )
 ORDER BY origin, destination, departure_date, return_date`;
@@ -240,7 +240,7 @@ export class CellsRepo {
     stage: Stage,
     providerId: ProviderId,
     from: CellOutcomeStatus[],
-    to: { status: CellOutcomeStatus; reason: string | null },
+    to: { status: CellOutcomeStatus; reason: string | null; lastError?: string },
   ): number {
     assertProviderAllowed(providerId, this.opts.allowSynthetic);
     if (from.some(isTerminal))
@@ -252,7 +252,7 @@ export class CellsRepo {
     return this.db.transaction(() => {
       const changes = this.db.raw
         .prepare(
-          `UPDATE cell_outcomes SET status = @status, reason = @reason, ${CLEARED} WHERE execution_id = @executionId AND stage = @stage AND provider_id = @providerId AND status IN (SELECT value FROM json_each(@from))`,
+          `UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = COALESCE(@lastError, last_error), ${CLEARED} WHERE execution_id = @executionId AND stage = @stage AND provider_id = @providerId AND status IN (SELECT value FROM json_each(@from))`,
         )
         .run({
           executionId,
@@ -261,6 +261,8 @@ export class CellsRepo {
           from: JSON.stringify(from),
           status: to.status,
           reason: to.reason,
+          // why: a camoufox preflight refusal says why in last_error (spec §8.1 rev 32); other callers keep the old one
+          lastError: to.lastError === undefined ? null : stripUrlsInText(to.lastError),
         }).changes;
       if (changes > 0) storeRollUps(this.db, executionId, stage);
       return changes;

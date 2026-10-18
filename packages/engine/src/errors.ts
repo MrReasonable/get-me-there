@@ -14,7 +14,15 @@ const KEPT_REASONS = ['no-return-legs', 'no-priced-options'] as const satisfies 
 /** What the engine does with one failed tile or cell call (spec §8.1 error table, both stages). */
 export type FailureDecision =
   | { kind: 'abort' }
-  | { kind: 'cell-error'; reason: ErrorReason; lastError: string; parse: boolean; disableProvider: boolean }
+  | {
+      kind: 'cell-error';
+      reason: ErrorReason;
+      lastError: string;
+      parse: boolean;
+      disableProvider: boolean;
+      /** camoufox's worker refused the connection (spec §8.1 rev 32): disabled for the run as provider_unavailable. */
+      unavailable: boolean;
+    }
   | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime | null }
   | { kind: 'budget'; error: BudgetExceeded }
   | { kind: 'fatal'; message: string };
@@ -49,7 +57,9 @@ export function classifyFailure(err: unknown, aborted: boolean, now: IsoDateTime
       reason: kept ?? err.kind,
       lastError: stripUrlsInText(err.message),
       parse: err.kind === 'parse',
-      disableProvider: err.kind === 'auth' || err.kind === 'quota',
+      // why: spec §8.1 rev 32: a camoufox block disables the provider like auth and quota do
+      disableProvider: err.kind === 'auth' || err.kind === 'quota' || err.kind === 'blocked',
+      unavailable: err.kind === 'provider-unavailable',
     };
   }
   return { kind: 'fatal', message: errorText(err) };

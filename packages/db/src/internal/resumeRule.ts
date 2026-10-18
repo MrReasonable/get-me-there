@@ -16,7 +16,12 @@ export function retriedOnResume(
     case 'not_run':
       return true;
     case 'skipped':
-      return o.reason === 'budget' || (manual && o.reason === 'provider_disabled');
+      // why: a camoufox worker that was not reachable may be back; its cells are retried like a budget stop (WP14).
+      return (
+        o.reason === 'budget' ||
+        o.reason === 'provider_unavailable' ||
+        (manual && o.reason === 'provider_disabled')
+      );
     case 'error':
       return (
         (o.attempts < 3 && !listed(NON_RETRYABLE, o.reason)) || (manual && listed(MANUAL_RETRYABLE, o.reason))
