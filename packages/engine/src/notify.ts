@@ -10,7 +10,9 @@ export interface NotifyParams extends MessageParams {
 /**
  * Sends one operator notification to every notifier, at most once per (kind, execution) — per (kind, definition) when
  * there is no execution (spec §8.1 "deduplicated per execution and kind") — and at most once per kind per definition
- * per London day (decision 56), so a pause-and-resume loop cannot flood the inbox. Returns false when deduplicated.
+ * per London day (decision 56), so a pause-and-resume loop cannot flood the inbox. Returns true only when every notifier
+ * accepted the message: false when deduplicated, when there is no notifier, or when one failed (fix round 1, arch M4: a
+ * keyed notice is claimed only once it was really sent).
  * Never throws: a failing notifier is logged and recorded as failed, because a notification must not stop a run.
  */
 export async function notifyOperator(
@@ -67,5 +69,5 @@ export async function notifyOperator(
     }
   }
   ctx.repos.notifications.record(kind, p.executionId, p.definitionId, ok ? 'sent' : 'failed');
-  return true;
+  return ok;
 }

@@ -3,6 +3,7 @@ import {
   type CellIssue,
   type CellKey,
   cellKeyString,
+  cooldownNoticeKey,
   type DefinitionSnapshot,
   type DiscoveryCapability,
   type DiscoveryQuery,
@@ -188,7 +189,7 @@ async function preflightPasses(
     run.notices.push({
       kind: 'provider_disabled',
       detail: `${providerId} is ${r.detail}; its cells are skipped until then and the other providers continue.`,
-      key: `${providerId}-cooldown:${r.until}`,
+      key: cooldownNoticeKey(providerId, r.until),
     });
   return false;
 }

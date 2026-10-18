@@ -1,3 +1,4 @@
+import type { IsoDateTime } from './types/ids.js';
 import type { ProviderId } from './types/provenance.js';
 
 /**
@@ -44,6 +45,8 @@ export class ProviderError extends Error {
   readonly httpStatus: number | undefined;
   readonly retryAfterSeconds: number | undefined;
   readonly providerId: ProviderId | 'fx' | undefined;
+  /** A `blocked` error's cool-down end, as the worker stated it (fix round 1, arch I1); keys the once-per-cool-down notice. */
+  readonly cooldownUntil: IsoDateTime | undefined;
   constructor(p: {
     kind: ProviderErrorKind;
     retryable: boolean;
@@ -52,6 +55,7 @@ export class ProviderError extends Error {
     httpStatus?: number;
     retryAfterSeconds?: number;
     providerId?: ProviderId | 'fx';
+    cooldownUntil?: IsoDateTime;
   }) {
     super(stripUrlsInText(p.message));
     this.name = 'ProviderError';
@@ -61,7 +65,13 @@ export class ProviderError extends Error {
     this.httpStatus = p.httpStatus;
     this.retryAfterSeconds = p.retryAfterSeconds;
     this.providerId = p.providerId;
+    this.cooldownUntil = p.cooldownUntil;
   }
+}
+
+/** The once-per-cool-down notice key (cost-015): one spelling for the engine's block path and its preflight. */
+export function cooldownNoticeKey(providerId: ProviderId, until: IsoDateTime): string {
+  return `${providerId}-cooldown:${until}`;
 }
 
 export type BudgetScopeKind =

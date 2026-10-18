@@ -156,7 +156,8 @@ describe('operator notifications (spec §8.1 "deduplicated per execution and kin
         definitionName: 'x',
         detail: 'd',
       }),
-    ).toBe(true);
+      // why: fix round 1 (arch M4): false when a notifier failed, so a keyed notice is not claimed by a failed send
+    ).toBe(false);
     const warn = h.logs.find((l) => l.msg === 'operator notification failed');
     expect(warn?.fields.err).toBe('smtp down at https://mail.example/x');
     // why: a failed send is recorded as failed, so the next occurrence tries again (wasSent counts only sent rows)

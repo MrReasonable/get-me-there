@@ -3,6 +3,7 @@ import {
   type BudgetScope,
   type CellKey,
   cellKeyString,
+  cooldownNoticeKey,
   type DefinitionSnapshot,
   type Execution,
   type IsoDateTime,
@@ -268,21 +269,18 @@ export function onFailure(
           'provider_unavailable',
         );
       else if (d.disableProvider) {
-        const until =
-          d.reason === 'blocked'
-            ? /cooling down until (\S+?)[;,)\s]/.exec(`${d.lastError} `)?.[1]
-            : undefined;
-        // why: cost-015: a block is notified once per cool-down, keyed by its end, never once per run
+        const until = d.reason === 'blocked' ? d.cooldownUntil : null;
+        // why: cost-015: a block is notified once per cool-down, keyed by its end (data on the error), never once per run
         disableProvider(
           run,
           providerId,
           `an ${d.reason} error`,
           'provider_disabled',
-          until === undefined
+          until === null
             ? undefined
             : {
                 detail: `${providerId} stopped: ${d.lastError}. Its remaining cells are skipped (provider disabled) and it is not called again until the cool-down ends.`,
-                key: `${providerId}-cooldown:${until}`,
+                key: cooldownNoticeKey(providerId, until),
               },
         );
       } else if (streak >= 2) disableProvider(run, providerId, 'two consecutive parse errors');

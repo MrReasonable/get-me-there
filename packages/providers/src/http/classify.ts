@@ -138,6 +138,8 @@ export function finishError(err: ProviderError, c: FinishContext): ProviderError
     ...(err.httpStatus === undefined ? {} : { httpStatus: err.httpStatus }),
     ...(err.reason === undefined ? {} : { reason: clean(err.reason) }),
     ...(err.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: err.retryAfterSeconds }),
+    // why: fix round 1 (arch I1): a block's cool-down end survives the re-scrub as data
+    ...(err.cooldownUntil === undefined ? {} : { cooldownUntil: err.cooldownUntil }),
   };
   if (!retryable) return new ProviderError({ ...base, message });
   const is429 = c.facts.status === 429;

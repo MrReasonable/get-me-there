@@ -15,16 +15,23 @@ import type {
  */
 export type HttpProviderId = ProviderId | 'fx' | 'camoufox-status';
 /** The ids http-kit never ledgers: no reservation, no cache-hit row, no hourly seed from the ledger. */
-export const UNLEDGERED_IDS: ReadonlySet<HttpProviderId> = new Set<HttpProviderId>(['fx', 'camoufox-status']);
+export const UNLEDGERED_IDS: ReadonlySet<HttpProviderId> = new Set<'fx' | 'camoufox-status'>([
+  'fx',
+  'camoufox-status',
+]);
 /**
  * The id a ProviderError carries (core's port knows the providers and 'fx'): the worker's status route is camoufox's.
  */
 export function errorProviderId(id: HttpProviderId): ProviderId | 'fx' {
   return id === 'camoufox-status' ? 'camoufox' : id;
 }
-/** Narrows an id to a ledgered ProviderId (every id but the unledgered ones). */
+/** Narrows an id to a ledgered ProviderId: every id but UNLEDGERED_IDS (fix round 1, arch M6: the one list). */
 export function ledgeredId(id: HttpProviderId): ProviderId | null {
-  return id === 'fx' || id === 'camoufox-status' ? null : id;
+  return isUnledgered(id) ? null : id;
+}
+/** The type guard over UNLEDGERED_IDS (the set's members are exactly these two ids). */
+function isUnledgered(id: HttpProviderId): id is 'fx' | 'camoufox-status' {
+  return UNLEDGERED_IDS.has(id);
 }
 
 /** What a classifier sees about one non-2xx response (plan http-kit block). `body` and header values are scrubbed. */

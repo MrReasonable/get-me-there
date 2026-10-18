@@ -70,6 +70,19 @@ export function priceIssue(
   };
 }
 
+/**
+ * Fix round 1 (prov I1): the page was read but every option was for another day or airport. The engine writes the cell
+ * `error` with reason `parse` and this detail: never a block, never `no_data` or `empty`.
+ */
+export function noneForCellIssue(
+  cell: TilePlan['coveredCells'][number],
+  p: { optionsOtherCell: number; optionsUnparsed: number },
+): CellIssue {
+  const parts = ['no option for this cell', `options for another cell: ${p.optionsOtherCell}`];
+  if (p.optionsUnparsed > 0) parts.push(`options unread: ${p.optionsUnparsed}`);
+  return { cell, reason: 'parse', offersDropped: p.optionsUnparsed, detail: parts.join('; ') };
+}
+
 export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
@@ -145,6 +158,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       notes: answer.notes,
     };
     if (answer.cell.status === 'no-flights') return { ...base, prices: [], noFares: [] };
+    if (answer.cell.status === 'none-for-cell')
+      return { ...base, prices: [], noFares: [], cellIssues: [noneForCellIssue(cell, answer.cell)] };
     return {
       ...base,
       prices: [{ ...cell, amountMinor: answer.cell.amountMinor, currency: answer.currency }],

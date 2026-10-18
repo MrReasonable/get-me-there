@@ -105,7 +105,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       excludedFromSchedule: b.excludedFromSchedule,
       billed: b.billable,
       executionCallCap: b.executionCallCap ?? null,
-      minSpacingSeconds: id === 'camoufox' ? (config.providers.camoufox?.minSpacingSeconds ?? null) : null,
+      minSpacingSeconds: b.minSpacingSeconds ?? null,
       monthlyCallCap: b.monthlyCallCap,
     };
   };

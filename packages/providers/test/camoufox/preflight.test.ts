@@ -1,8 +1,9 @@
 import { HttpResponse, http } from 'msw/http';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { camoufoxProvider } from '../../src/camoufox/index.js';
 import { makeKit, SENTINELS } from '../fakes.js';
 import { server } from '../support/msw.js';
+import { drive, useFakeTime } from '../support/time.js';
 
 const STATUS_URL = 'http://127.0.0.1:8090/v1/status';
 const AT = '2026-10-18T05:00:00.000Z';
@@ -35,7 +36,10 @@ function setup() {
   });
   return { p, budget, events };
 }
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  vi.useRealTimers();
+});
 beforeEach(() => {
   expect.hasAssertions();
 });
@@ -66,7 +70,11 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
     [
       'an unreadable status',
       { ok: true },
-      { ok: false, skip: 'provider_unavailable', detail: 'browser worker not reachable' },
+      {
+        ok: false,
+        skip: 'provider_unavailable',
+        detail: "the worker's status could not be read by this build (versions differ?)",
+      },
     ],
   ])('%s', async (_n, body, expected) => {
     const { p, budget, events } = setup();
@@ -91,6 +99,27 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
       detail: 'browser worker not reachable',
     });
     expect(budget.rows).toEqual([]);
+  });
+  // why: fix round 1 (arch M9, prov M1): a wrong key is not an absent worker, and never retried on every resume
+  it('a 401 (wrong CAMOUFOX_WORKER_KEY) → provider_disabled naming the key, no row', async () => {
+    const { p, budget } = setup();
+    server.use(http.get(STATUS_URL, () => new HttpResponse(null, { status: 401 })));
+    expect(await p.discovery?.preflight?.(ctx)).toEqual({
+      ok: false,
+      skip: 'provider_disabled',
+      detail: 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)',
+    });
+    expect(budget.rows).toEqual([]);
+  });
+  it('a 5xx → provider_unavailable with its own detail', async () => {
+    useFakeTime();
+    const { p } = setup();
+    server.use(http.get(STATUS_URL, () => HttpResponse.json({}, { status: 503 })));
+    expect(await drive(p.discovery?.preflight?.(ctx) ?? Promise.reject(new Error('no preflight')))).toEqual({
+      ok: false,
+      skip: 'provider_unavailable',
+      detail: 'the browser worker answered HTTP 503',
+    });
   });
   it('an abort propagates', async () => {
     const { p } = setup();

@@ -6,6 +6,7 @@
  */
 import {
   asIsoDate,
+  type BlockedPage,
   type CellOutcome,
   type DiscoveryQuery,
   type DiscoveryTileResult,
@@ -18,6 +19,7 @@ import {
   type ProviderId,
   parseConfig,
   type SearchDefinition,
+  Secret,
   type TilePlan,
 } from '@gmt/core';
 import {
@@ -29,7 +31,13 @@ import {
   SqliteBudgetGuard,
   SqliteResponseCache,
 } from '@gmt/db';
-import { createHttpKit, planSingleCells } from '@gmt/providers';
+import {
+  camoufoxProvider,
+  classifyWorkerAnswer,
+  createHttpKit,
+  type HttpKit,
+  planSingleCells,
+} from '@gmt/providers';
 import { vi } from 'vitest';
 import { buildContext, type EngineContext } from '../../src/context.js';
 import { createOrchestrator } from '../../src/orchestrator.js';
@@ -57,13 +65,14 @@ const AIRPORTS = {
   ),
 };
 
-export const blockedError = (page: string): ProviderError =>
-  new ProviderError({
-    kind: 'blocked',
-    retryable: false,
+/** A block as the real adapter's classifier makes it (fix round 1, arch I1: the engine reads what the adapter sends). */
+export const blockedError = (page: BlockedPage): ProviderError =>
+  classifyWorkerAnswer({
+    status: 423,
+    body: { kind: 'blocked', page, cooldownUntil: '2026-10-16T09:00:00.000Z' },
+    headers: new Headers(),
     providerId: 'camoufox',
-    httpStatus: 423,
-    message: `camoufox /v1/page: Google showed a bot check (CAPTCHA); cooling down until 2026-10-16T09:00:00.000Z [blocked:${page}]`,
+    endpointPath: '/v1/page',
   });
 export const unavailableError = (): ProviderError =>
   new ProviderError({
@@ -91,7 +100,14 @@ export interface Stub extends FlightProvider {
 function stub(
   id: ProviderId,
   sourceKind: 'scraped-self' | 'authorised-cached',
-  o: { cells: number; failTile?: number; error?: ProviderError; preflight?: PreflightResult },
+  o: {
+    cells: number;
+    failTile?: number;
+    error?: ProviderError;
+    preflight?: PreflightResult;
+    /** One preflight answer per run, in order (fix round 1, arch M3); the last repeats. */
+    preflights?: PreflightResult[];
+  },
 ): Stub {
   let ctxOf: () => EngineContext = () => {
     throw new Error('stub not bound');
@@ -136,7 +152,13 @@ function stub(
       notes: [],
     };
   };
-  const preflight = o.preflight;
+  const preflights = [...(o.preflights ?? [])];
+  const preflight =
+    o.preflight !== undefined
+      ? async () => o.preflight ?? { ok: true as const }
+      : preflights.length > 0
+        ? async () => (preflights.length > 1 ? preflights.shift() : preflights[0]) ?? { ok: true as const }
+        : undefined;
   return {
     id,
     displayName: id,
@@ -152,7 +174,7 @@ function stub(
       info: { sourceKind, maxAgeHours: sourceKind === 'scraped-self' ? 0 : 48, provenanceNote: `${id} stub` },
       plan: planSingleCells,
       fetchTile,
-      ...(preflight === undefined ? {} : { preflight: async () => preflight }),
+      ...(preflight === undefined ? {} : { preflight }),
     },
     healthcheck: async () => ({ ok: true, detail: 'stub' }),
   };
@@ -160,6 +182,77 @@ function stub(
 export const stubCamoufox = (o: Parameters<typeof stub>[2]): Stub => stub('camoufox', 'scraped-self', o);
 export const stubTravelpayouts = (o: { cells: number }): Stub =>
   stub('travelpayouts', 'authorised-cached', o);
+
+/**
+ * Fix round 1 (prov I3): the real camoufox adapter over a scripted HttpKit. Each request reserves and finalises one
+ * ledger row as http-kit would, then answers the next scripted worker answer (a non-200 goes through the real
+ * classifyWorkerAnswer), so the engine stores exactly what the adapter makes of the worker's answers.
+ */
+export function realCamoufox(answers: Array<{ status: number; body: unknown }>, cells: number): Stub {
+  let ctxOf: () => EngineContext = () => {
+    throw new Error('stub not bound');
+  };
+  const queue = [...answers];
+  const http: HttpKit = {
+    request: async (r) => {
+      const a = queue.shift() ?? { status: 599, body: {} };
+      const res = ctxOf().budget.reserve({
+        providerId: 'camoufox',
+        executionId: r.executionId,
+        tileIndex: r.tileIndex,
+        costMicroGbp: 0,
+        httpAttempt: 1,
+        endpointPath: r.endpointPath,
+      });
+      res.finalise({
+        outcome: a.status === 200 ? 'ok' : 'error',
+        httpStatus: a.status,
+        durationMs: 1,
+        pageClass: 'page',
+      });
+      if (a.status !== 200)
+        throw classifyWorkerAnswer({
+          status: a.status,
+          body: a.body,
+          headers: new Headers(),
+          providerId: 'camoufox',
+          endpointPath: r.endpointPath,
+        });
+      return { status: 200, body: a.body, fetchedAt: ctxOf().clock.now(), fromCache: false, cacheKey: '' };
+    },
+    stats: () => ({ inFlight: 0 }),
+  };
+  const calls: TilePlan[] = [];
+  const queries: DiscoveryQuery[] = [];
+  const real = camoufoxProvider({
+    http,
+    log: capturingLogger([]),
+    clock: fixedClock(T0),
+    key: new Secret(KEY),
+    workerUrl: 'http://127.0.0.1:8090',
+    pointOfSale: 'GB',
+  });
+  const discovery = real.discovery;
+  if (discovery === undefined) throw new Error('camoufox has discovery');
+  return {
+    ...real,
+    calls,
+    queries,
+    cells,
+    bind: (f) => {
+      ctxOf = f;
+    },
+    discovery: {
+      info: discovery.info,
+      plan: discovery.plan,
+      fetchTile: (plan, q, pctx) => {
+        calls.push(plan);
+        queries.push(q);
+        return discovery.fetchTile(plan, q, pctx);
+      },
+    },
+  };
+}
 
 export interface CamoufoxEngine {
   ctx: EngineContext;
@@ -174,7 +267,14 @@ export interface CamoufoxEngine {
 
 export function engineWith(
   stubs: Stub[],
-  o: { camoufoxConfigCap?: number; snapshotCap?: number; monthlyCap?: number; scheduleCron?: string } = {},
+  o: {
+    camoufoxConfigCap?: number;
+    snapshotCap?: number;
+    monthlyCap?: number;
+    scheduleCron?: string;
+    /** Every operator notice fails to send (fix round 1, arch M4). */
+    notifierFails?: boolean;
+  } = {},
 ): CamoufoxEngine {
   const parsed = parseConfig(
     {
@@ -224,7 +324,11 @@ export function engineWith(
     cache,
     http,
     providers: stubs,
-    notifiers: [capturingNotifier(notifications, [])],
+    notifiers: [
+      o.notifierFails === true
+        ? { id: 'failing', send: async () => ({ ok: false, detail: 'smtp down' }) }
+        : capturingNotifier(notifications, []),
+    ],
     clock,
     log,
   });

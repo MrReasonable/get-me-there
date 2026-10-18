@@ -3,6 +3,7 @@ import {
   ANSWER_STATUS,
   BLOCKED_PAGES,
   blockedPageSchema,
+  CAMOUFOX_JS_VERSION,
   GOOGLE_CONTACTED_HEADER,
   pageRequestSchema,
   WORKER_KEY_HEADER,
@@ -137,5 +138,62 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
       'not-ready': 504,
       'browser-error': 502,
     });
+  });
+
+  // why: fix round 1 (prov I1): a page whose every option is for another cell was read; it is a cell issue, never a block
+  it('a none-for-cell cell round-trips with its counts', () => {
+    const a = {
+      kind: 'cells',
+      fetchedAt: AT,
+      currency: 'GBP',
+      pointOfSale: 'GB',
+      notes: [],
+      versions,
+      cell: { status: 'none-for-cell', optionsOtherCell: 3, optionsUnparsed: 1 },
+    };
+    expect(workerAnswerSchema.parse(a)).toEqual(a);
+    expect(
+      workerAnswerSchema.safeParse({
+        ...a,
+        cell: { status: 'none-for-cell', optionsOtherCell: 0, optionsUnparsed: 0 },
+      }).success,
+    ).toBe(false);
+  });
+  // why: fix round 1 (prov M3, arch M12): the wire contract's edges
+  it('refuses a zero price, a non-GBP answer and a malformed point of sale', () => {
+    const cell = {
+      status: 'price',
+      amountMinor: 1,
+      tabMinor: 1,
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      returnDateFrom: 'query-and-form',
+    };
+    const a = { kind: 'cells', fetchedAt: AT, currency: 'GBP', pointOfSale: 'GB', notes: [], versions, cell };
+    expect(workerAnswerSchema.safeParse(a).success).toBe(true);
+    expect(workerAnswerSchema.safeParse({ ...a, cell: { ...cell, amountMinor: 0 } }).success).toBe(false);
+    expect(workerAnswerSchema.safeParse({ ...a, cell: { ...cell, tabMinor: 0 } }).success).toBe(false);
+    expect(workerAnswerSchema.safeParse({ ...a, currency: 'USD' }).success).toBe(false);
+    for (const pos of ['gb', 'GBR', 'G', 'Unknown', ''])
+      expect(workerAnswerSchema.safeParse({ ...a, pointOfSale: pos }).success, pos).toBe(false);
+  });
+  it('airport names: one to eight names of 1 to 120 characters each (the 4 KiB body bound)', () => {
+    const names = (origin: string[]) => ({ ...request, airportNames: { ...request.airportNames, origin } });
+    expect(pageRequestSchema.safeParse(names([])).success).toBe(false);
+    expect(pageRequestSchema.safeParse(names(Array(8).fill('A'))).success).toBe(true);
+    expect(pageRequestSchema.safeParse(names(Array(9).fill('A'))).success).toBe(false);
+    expect(pageRequestSchema.safeParse(names(['A'.repeat(120)])).success).toBe(true);
+    expect(pageRequestSchema.safeParse(names(['A'.repeat(121)])).success).toBe(false);
+    expect(pageRequestSchema.safeParse(names([''])).success).toBe(false);
+  });
+  it('status: cooldownHours from 24, pageTimeoutSeconds 30 to 240', () => {
+    expect(workerStatusSchema.safeParse({ ...status, cooldownHours: 24 }).success).toBe(true);
+    expect(workerStatusSchema.safeParse({ ...status, cooldownHours: 23 }).success).toBe(false);
+    expect(workerStatusSchema.safeParse({ ...status, pageTimeoutSeconds: 29 }).success).toBe(false);
+    expect(workerStatusSchema.safeParse({ ...status, pageTimeoutSeconds: 241 }).success).toBe(false);
+  });
+  // why: fix round 1 (arch M11): the one copy of the camoufox-js pin, read by the worker and the smoke
+  it('names the pinned camoufox-js version', () => {
+    expect(CAMOUFOX_JS_VERSION).toBe('0.11.5');
   });
 });

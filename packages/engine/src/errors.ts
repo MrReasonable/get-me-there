@@ -22,6 +22,8 @@ export type FailureDecision =
       disableProvider: boolean;
       /** camoufox's worker refused the connection (spec §8.1 rev 32): disabled for the run as provider_unavailable. */
       unavailable: boolean;
+      /** A block's cool-down end, as the worker stated it (fix round 1, arch I1); keys the once-per-cool-down notice. */
+      cooldownUntil: IsoDateTime | null;
     }
   | { kind: 'limiter-timeout'; resumeAfter: IsoDateTime | null }
   | { kind: 'budget'; error: BudgetExceeded }
@@ -60,6 +62,7 @@ export function classifyFailure(err: unknown, aborted: boolean, now: IsoDateTime
       // why: spec §8.1 rev 32: a camoufox block disables the provider like auth and quota do
       disableProvider: err.kind === 'auth' || err.kind === 'quota' || err.kind === 'blocked',
       unavailable: err.kind === 'provider-unavailable',
+      cooldownUntil: err.cooldownUntil ?? null,
     };
   }
   return { kind: 'fatal', message: errorText(err) };

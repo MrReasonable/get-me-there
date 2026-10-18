@@ -11,6 +11,9 @@ export const GOOGLE_CONTACTED_HEADER = 'x-gmt-google-contacted';
 /** The request header that carries CAMOUFOX_WORKER_KEY (spec §2); a credential header everywhere it is handled. */
 export const WORKER_KEY_HEADER = 'x-gmt-worker-key';
 
+/** The camoufox-js version the worker is pinned to and the smoke checks (spec §2; one copy, fix round 1 arch M11). */
+export const CAMOUFOX_JS_VERSION = '0.11.5';
+
 /** The seven page kinds the worker stops on (brief §9), in the classifier's order. */
 export const BLOCKED_PAGES = [
   'captcha',
@@ -25,7 +28,8 @@ export const blockedPageSchema = z.enum(BLOCKED_PAGES);
 export type BlockedPage = z.infer<typeof blockedPageSchema>;
 
 // why: names from the airports dataset; bounded so a body stays well under the worker's 4 KiB limit.
-const airportNameList = z.array(z.string().min(1).max(120)).max(8);
+// why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
+const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(8);
 
 /**
  * One page request: one cell (`mode: 'list'`), never a range. `gl` is POINT_OF_SALE. `grid` parses so the worker
@@ -75,6 +79,14 @@ export const pageCellSchema = z.discriminatedUnion('status', [
     returnDateFrom: z.literal('query-and-form'),
   }),
   z.strictObject({ status: z.literal('no-flights') }),
+  // why: fix round 1 (prov I1): the page was read, but every option was for another day or airport (or unreadable):
+  // a cell issue for the engine, never a block and never `no_data`
+  z
+    .strictObject({ status: z.literal('none-for-cell'), optionsOtherCell: count, optionsUnparsed: count })
+    .refine((c) => c.optionsOtherCell > 0, {
+      message: 'none-for-cell names at least one option for another cell',
+      path: ['optionsOtherCell'],
+    }),
 ]);
 export type PageCell = z.infer<typeof pageCellSchema>;
 

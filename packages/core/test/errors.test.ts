@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AbortedError,
   BudgetExceeded,
+  cooldownNoticeKey,
   NormalisationError,
   ProviderError,
   stripUrlsInText,
 } from '../src/errors.js';
+import { asIsoDateTime } from '../src/types/ids.js';
 
 describe('ProviderError', () => {
   it('carries kind, retryable and status', () => {
@@ -100,5 +102,26 @@ describe('NormalisationError / AbortedError', () => {
     expect(new NormalisationError('unknown-airport-tz').message).toBe('unknown-airport-tz');
     expect(new AbortedError().name).toBe('AbortedError');
     expect(new AbortedError('cancelled').message).toBe('cancelled');
+  });
+});
+
+// why: fix round 1 (arch I1): a block's cool-down end travels as data, never parsed from the message
+describe('ProviderError.cooldownUntil', () => {
+  it('carries the end it was given, and is undefined otherwise', () => {
+    const e = new ProviderError({
+      kind: 'blocked',
+      retryable: false,
+      message: 'm',
+      cooldownUntil: asIsoDateTime('2027-02-12T09:00:00.000Z'),
+    });
+    expect(e.cooldownUntil).toBe('2027-02-12T09:00:00.000Z');
+    expect(
+      new ProviderError({ kind: 'blocked', retryable: false, message: 'm' }).cooldownUntil,
+    ).toBeUndefined();
+  });
+  it('cooldownNoticeKey is the one spelling of the once-per-cool-down key', () => {
+    expect(cooldownNoticeKey('camoufox', asIsoDateTime('2027-02-12T09:00:00.000Z'))).toBe(
+      'camoufox-cooldown:2027-02-12T09:00:00.000Z',
+    );
   });
 });

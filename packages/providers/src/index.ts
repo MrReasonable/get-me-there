@@ -8,9 +8,10 @@ export {
   camoufoxHttpLimits,
   camoufoxProvider,
   camoufoxStatusHttpLimits,
+  classifyWorkerAnswer,
   coolingDownWords,
   planSingleCells,
-} from './camoufox/index.js'; // WP14: apps/api httpLimitsFor and providersFor; the smoke rows
+} from './camoufox/index.js'; // WP14: apps/api httpLimitsFor and providersFor; the smoke rows; classifyWorkerAnswer: engine tests
 export { fixtureHttpLimits, fixtureProvider } from './fixture/provider.js'; // fixtureHttpLimits: WP4b httpLimitsFor
 export { CREDENTIAL_HEADERS, canonicalCacheKey } from './http/cacheKey.js'; // CREDENTIAL_HEADERS: WP4b createLogger
 export { createHttpKit } from './http/httpKit.js';

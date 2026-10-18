@@ -53,6 +53,7 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
       excludedFromSchedule: false,
       executionCallCap: 100,
       pagesOnly: true,
+      minSpacingSeconds: 30,
     });
   });
   it('a 45 s spacing gives 1 a minute and 80 an hour', () => {
@@ -92,6 +93,17 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     ['CAMOUFOX_ENABLED', 'yes'],
   ])('%s=%s fails boot naming the field', (name, value) => {
     expect(errors({ ...ON, [name]: value })).toContain(name);
+  });
+  it('fix round 1 (TS M6): the key must be at least 32 characters, exactly', () => {
+    expect(errors({ ...ON, CAMOUFOX_WORKER_KEY: 'k'.repeat(31) })).toEqual(['CAMOUFOX_WORKER_KEY']);
+    expect(ok({ ...ON, CAMOUFOX_WORKER_KEY: 'k'.repeat(32) }).providers.camoufox?.key.reveal()).toBe(
+      'k'.repeat(32),
+    );
+  });
+  it('fix round 1 (arch M7): the spacing is a ProviderLimits value, so the engine reads it like the other limits', () => {
+    expect(
+      ok({ ...ON, CAMOUFOX_MIN_SPACING_SECONDS: '600' }).providers.camoufox?.limits.minSpacingSeconds,
+    ).toBe(600);
   });
   it('enabled without a key or URL fails boot naming each', () => {
     expect(errors({ ...minimal, CAMOUFOX_ENABLED: 'true' })).toEqual(

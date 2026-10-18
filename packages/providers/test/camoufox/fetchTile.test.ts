@@ -232,6 +232,68 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       "camoufox /v1/page: Google's page was not one this app reads (it may have changed); cooling down until 2026-10-14T16:00:00.000Z [blocked:unrecognised]",
     );
   });
+  // why: fix round 1 (arch I1): the end travels as data, so the engine's once-per-cool-down key never parses wording
+  it('a blocked or cooling-down answer carries its cool-down end on the error', async () => {
+    for (const body of [
+      { kind: 'blocked', page: 'captcha', cooldownUntil: '2026-10-16T15:00:00.000Z' },
+      { kind: 'cooling-down', cause: 'captcha', cooldownUntil: '2026-10-16T15:00:00.000Z' },
+    ]) {
+      const { p, tile } = setup();
+      server.use(http.post(URL_, () => HttpResponse.json(body, { status: 423, ...contacted(false) })));
+      const r = await p.discovery?.fetchTile(tile, Q, ctx);
+      expect(r?.kind === 'tile-error' ? r.error.cooldownUntil : null, body.kind).toBe(
+        '2026-10-16T15:00:00.000Z',
+      );
+    }
+  });
+  // why: fix round 1 (prov I1): every option was for another cell: read, but no price for this one; a cell issue, no block
+  it('none for this cell: no price, a parse issue naming the other-cell and unread counts', async () => {
+    const { p, tile } = setup();
+    server.use(
+      http.post(URL_, () =>
+        HttpResponse.json(
+          { ...price(), cell: { status: 'none-for-cell', optionsOtherCell: 4, optionsUnparsed: 1 } },
+          contacted(true),
+        ),
+      ),
+    );
+    const r = await p.discovery?.fetchTile(tile, Q, ctx);
+    if (r?.kind !== 'tile') throw new Error('tile');
+    expect([r.prices, r.noFares]).toEqual([[], []]);
+    expect(r.cellIssues).toEqual([
+      {
+        cell: tile.coveredCells[0],
+        reason: 'parse',
+        offersDropped: 1,
+        detail: 'no option for this cell; options for another cell: 4; options unread: 1',
+      },
+    ]);
+  });
+  // why: fix round 1 (prov I2, prov-004): the point of sale is the page's own, never the one asked for
+  it.each(['unknown', 'US'])(
+    'the point of sale is the answer’s (%s), not POINT_OF_SALE (GB)',
+    async (pos) => {
+      const { p, tile } = setup();
+      server.use(http.post(URL_, () => HttpResponse.json({ ...price(), pointOfSale: pos }, contacted(true))));
+      const r = await p.discovery?.fetchTile(tile, Q, ctx);
+      expect(r?.kind === 'tile' ? r.pointOfSale : null).toBe(pos);
+    },
+  );
+  // why: fix round 1 (arch M12): the adapter's own key bound, at its edge
+  it('the adapter refuses a 31-character key and accepts 32', () => {
+    const { kit, log, clock } = makeKit();
+    const make = (k: string) => () =>
+      camoufoxProvider({
+        http: kit,
+        log,
+        clock,
+        key: new Secret(k),
+        workerUrl: 'http://127.0.0.1:8090',
+        pointOfSale: 'GB',
+      });
+    expect(make('k'.repeat(31))).toThrow(/at least 32/);
+    expect(make('k'.repeat(32))).not.toThrow();
+  });
   it('a missing contacted header reads as a page (the conservative reading)', async () => {
     const { p, budget, tile } = setup();
     server.use(

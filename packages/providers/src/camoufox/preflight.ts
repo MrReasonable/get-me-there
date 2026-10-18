@@ -8,6 +8,7 @@ import {
   AbortedError,
   type PreflightResult,
   type ProviderContext,
+  ProviderError,
   type Secret,
   WORKER_KEY_HEADER,
   workerStatusSchema,
@@ -15,6 +16,9 @@ import {
 import type { HttpKit } from '../http/types.js';
 
 export const UNREACHABLE = 'browser worker not reachable';
+/** Fix round 1 (arch M9, prov M1): the distinct details, so a wrong key never reads as an absent worker. */
+export const KEY_REFUSED = 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)';
+export const UNREADABLE = "the worker's status could not be read by this build (versions differ?)";
 export const SIGNED_IN_REFUSED = 'signed-in profile refused';
 
 export async function camoufoxPreflight(
@@ -38,10 +42,19 @@ export async function camoufoxPreflight(
     body = res.body;
   } catch (e) {
     if (e instanceof AbortedError) throw e;
+    // why: a wrong key is a configuration fault: provider_disabled, which a resume does not retry on every run
+    if (e instanceof ProviderError && e.kind === 'auth')
+      return { ok: false, skip: 'provider_disabled', detail: KEY_REFUSED };
+    if (e instanceof ProviderError && e.httpStatus !== undefined)
+      return {
+        ok: false,
+        skip: 'provider_unavailable',
+        detail: `the browser worker answered HTTP ${e.httpStatus}`,
+      };
     return { ok: false, skip: 'provider_unavailable', detail: UNREACHABLE };
   }
   const s = workerStatusSchema.safeParse(body);
-  if (!s.success) return { ok: false, skip: 'provider_unavailable', detail: UNREACHABLE };
+  if (!s.success) return { ok: false, skip: 'provider_unavailable', detail: UNREADABLE };
   const st = s.data;
   if (st.coolingDownUntil !== null)
     return {

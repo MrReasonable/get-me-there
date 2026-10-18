@@ -45,6 +45,19 @@ describe('validateVendorUrl (spec §5.2 "Vendor links")', () => {
     expect(validateVendorUrl(url, LINK_ALLOWLIST.searchapi)).toEqual({ kind: 'none' });
   });
 
+  // why: fix round 1 (prov M3): camoufox links reach google.com and its subdomains only
+  it('camoufox: www.google.com is kept; any other host is none', () => {
+    expect(validateVendorUrl('https://www.google.com/travel/flights', LINK_ALLOWLIST.camoufox).kind).toBe(
+      'get',
+    );
+    for (const u of [
+      'https://www.searchapi.io/x',
+      'https://www.aviasales.com/x',
+      'https://google.com.evil.test/x',
+    ])
+      expect(validateVendorUrl(u, LINK_ALLOWLIST.camoufox), u).toEqual({ kind: 'none' });
+    expect(LINK_ALLOWLIST.camoufox).toEqual(['google.com']);
+  });
   it('the fixture provider has an empty allowlist, so nothing it supplies is linked', () => {
     expect(validateVendorUrl('https://www.google.com/x', LINK_ALLOWLIST.fixture)).toEqual({ kind: 'none' });
   });

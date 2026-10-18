@@ -17,6 +17,8 @@ export interface ProviderLimits {
    * into the execution's snapshot (`budget.providerMaxCalls`), and the guard reads it from there. Absent: none.
    */
   executionCallCap?: number;
+  /** camoufox (fix round 1, arch M7): the least seconds between page starts; the engine's estimate reads it. */
+  minSpacingSeconds?: number;
   /** Pages-only counting (camoufox): ledger rows of class `no-page` count toward neither page cap (spec §5.3 rev 32). */
   pagesOnly?: true;
 }

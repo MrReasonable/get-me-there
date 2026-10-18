@@ -5,7 +5,13 @@
  * 502 → `upstream`; 429 `spacing` → `rate-limit` (http-kit waits its Retry-After); 401 → `auth`; 400 → `parse`.
  * None is retried but the spacing (http-kit's NEVER_RETRIED and `retryTransport: false` hold the rest).
  */
-import { type BlockedPage, ProviderError, type ProviderErrorKind, workerAnswerSchema } from '@gmt/core';
+import {
+  type BlockedPage,
+  type IsoDateTime,
+  ProviderError,
+  type ProviderErrorKind,
+  workerAnswerSchema,
+} from '@gmt/core';
 import type { ResponseFacts } from '../http/types.js';
 
 /** brief Task 14.10: each page kind worded distinctly; only a real check is called a bot check (prov-008). */
@@ -27,6 +33,7 @@ function error(
   detail: string,
   code: string,
   retryable = false,
+  cooldownUntil?: IsoDateTime,
 ): ProviderError {
   return new ProviderError({
     kind,
@@ -34,6 +41,7 @@ function error(
     httpStatus: f.status,
     providerId: 'camoufox',
     message: `camoufox ${f.endpointPath}: ${detail} [${code}]`,
+    ...(cooldownUntil === undefined ? {} : { cooldownUntil }),
   });
 }
 
@@ -51,6 +59,8 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         'blocked',
         `${BLOCKED_WORDS[answer.page]}; cooling down until ${answer.cooldownUntil}`,
         `blocked:${answer.page}`,
+        false,
+        answer.cooldownUntil,
       );
     case 'cooling-down':
       return error(
@@ -58,6 +68,8 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         'blocked',
         `${coolingDownWords(answer.cooldownUntil)} (${answer.cause})`,
         `cooling-down:${answer.cause}`,
+        false,
+        answer.cooldownUntil,
       );
     case 'spacing':
       return error(f, 'rate-limit', 'the worker asked to wait for its spacing', 'spacing', true);

@@ -267,6 +267,7 @@ function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
       excludedFromSchedule: false,
       executionCallCap: executionPageCap,
       pagesOnly: true,
+      minSpacingSeconds,
     },
   };
 }
