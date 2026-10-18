@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The camoufox worker as a launchd agent (docs/setup.md section 14; brief Task 14.5). Copy it to
+  ~/Library/LaunchAgents/uk.dominey.get-me-there.camoufox-worker.plist, replace /PATH/TO/get-me-there with your
+  checkout and /Users/YOU with your home, then: launchctl bootstrap gui/$(id -u) <that plist>.
+  No secret lives here: the key stays in ~/.local/state/get-me-there/camoufox/worker.env (0600), which run.ts loads.
+  A start-check failure exits 78; KeepAlive restarts only an unsuccessful exit, never faster than once a minute.
+  Stop it with: launchctl bootout gui/$(id -u)/uk.dominey.get-me-there.camoufox-worker
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>uk.dominey.get-me-there.camoufox-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /PATH/TO/get-me-there &amp;&amp; exec pnpm --filter @gmt/camoufox-worker start</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/PATH/TO/get-me-there</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/get-me-there/camoufox-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/get-me-there/camoufox-worker.err.log</string>
+</dict>
+</plist>

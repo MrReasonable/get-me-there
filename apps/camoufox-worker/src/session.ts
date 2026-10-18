@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import {
   type BlockedPage,
   type Clock,
+  type IsoDateTime,
   type Logger,
   type PageRequest,
   stripUrlsInText,
@@ -75,7 +76,7 @@ export class PageSession {
   private readonly S: Selectors;
   private readonly finallyMs: number;
   private readonly pollMs: number;
-  private busySince: string | null = null;
+  private busySince: IsoDateTime | null = null;
 
   constructor(private readonly d: SessionDeps) {
     this.S = d.selectors ?? SELECTORS;
@@ -84,7 +85,7 @@ export class PageSession {
   }
 
   /** The start of the page in flight, for `/v1/status`. */
-  busy(): string | null {
+  busy(): IsoDateTime | null {
     return this.busySince;
   }
 

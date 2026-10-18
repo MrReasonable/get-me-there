@@ -122,7 +122,10 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
 
 /** The entry functions, loaded lazily so a command loads only its own modules. */
 export const ENTRIES: Readonly<Record<string, () => Promise<Entry>>> = {
+  main: async () => (await import('./main.js')).entry,
   record: async () => (await import('./record.js')).entry,
+  status: async () => (await import('./status.js')).entry,
+  'clear-signed-in': async () => (await import('./clearSignedIn.js')).entry,
   'capture-socs': async () => (await import('./captureSocs.js')).entry,
 };
 

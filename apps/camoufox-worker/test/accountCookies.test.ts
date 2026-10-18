@@ -3,6 +3,30 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { ACCOUNT_COOKIE_NAMES, accountCookiesIn, checkAccountCookies } from '../src/accountCookies.js';
 import { FakeContext } from './support/fakeContext.js';
 
+// Brief §6, verbatim and independent of the module's list (so a mutated name in the module is caught).
+const BRIEF_NAMES = [
+  'SID',
+  'HSID',
+  'SSID',
+  'APISID',
+  'SAPISID',
+  '__Secure-1PSID',
+  '__Secure-3PSID',
+  '__Secure-1PAPISID',
+  '__Secure-3PAPISID',
+  '__Secure-1PSIDTS',
+  '__Secure-3PSIDTS',
+  '__Secure-1PSIDCC',
+  '__Secure-3PSIDCC',
+  'SIDCC',
+  'LSID',
+  '__Host-1PLSID',
+  '__Host-3PLSID',
+  '__Host-GAPS',
+  'OSID',
+  '__Secure-OSID',
+  'ACCOUNT_CHOOSER',
+];
 const c = (name: string, domain: string, value = 'synthetic-value-never-logged') => ({
   name,
   value,
@@ -15,10 +39,10 @@ beforeEach(() => {
 });
 
 describe('account cookies (spec §2; brief §6; ruling 8, PIE-R2-08, SEC-R2-002)', () => {
-  it('the dated set has the 21 names of brief §6', () => {
-    expect(ACCOUNT_COOKIE_NAMES).toHaveLength(21);
+  it('the dated set is exactly the 21 names of brief §6', () => {
+    expect([...ACCOUNT_COOKIE_NAMES].sort()).toEqual([...BRIEF_NAMES].sort());
   });
-  it.each([...ACCOUNT_COOKIE_NAMES])('%s on .google.com is a signed-in profile', (name) => {
+  it.each(BRIEF_NAMES)('%s on .google.com is a signed-in profile', (name) => {
     expect(accountCookiesIn([c(name, '.google.com')])).toEqual({ found: true, names: [name] });
   });
   it('a set name on accounts.google.com and on www.google.com both count', () => {
