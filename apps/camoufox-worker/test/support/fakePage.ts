@@ -71,12 +71,17 @@ export function resultsTree(
 ): FakeNode {
   const top = o.top ?? [option(478)];
   const other = o.other ?? [option(451)];
+  // why: the evidence's shape (2026-10-18): unnamed lists inside `main`, each after its level-3 heading
   return n('document', 'Google Flights', [
     ...(o.form ?? formNodes()),
     n('tablist', '', [n('tab', 'Best'), n('tab', o.tab ?? 'Cheapest from 451 British pounds')]),
     text(`${o.count ?? top.length + other.length} results returned.`),
-    n('list', 'Top departing flights', top),
-    n('list', 'Other departing flights', other),
+    n('main', '', [
+      n('heading', 'Top departing flights'),
+      n('list', '', top),
+      n('heading', 'Other departing flights'),
+      n('list', '', other),
+    ]),
     n('button', 'View more flights'),
     n('button', 'Date grid'),
     n('button', 'Currency GBP'),

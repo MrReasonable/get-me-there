@@ -331,7 +331,11 @@ describe('the recorder (brief Task 14.2 rules)', () => {
           hops: [URL0, LANDED],
           tree: resultsTree({
             top: [option(478)],
-            other: [n('listitem', '', [n('link', 'Contact someone@example.test')])],
+            other: [
+              n('listitem', '', [
+                n('link', 'From 9 British pounds round trip total. Contact someone@example.test'),
+              ]),
+            ],
           }),
         },
       ],

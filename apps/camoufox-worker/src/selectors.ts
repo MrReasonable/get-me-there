@@ -5,8 +5,8 @@
  * proving it, and `PROOFS` names that recording's date; `/v1/status` reports the flags.
  *
  * What is verified (2026-10-18): the results page's structure, from the feasibility load (a `tablist` with "Best" and
- * "Cheapest from £…", "N results returned.", lists "Top departing flights" and "Other departing flights" of
- * `listitem`s each holding one `link` named with the whole option, the "Date grid" button, "Currency GBP" and
+ * "Cheapest from £…", "N results returned.", unnamed lists, each after a heading "Top departing flights" or
+ * "Other departing flights", of `listitem`s each holding one `link` named with the whole option, the "Date grid" button, "Currency GBP" and
  * "Location·United Kingdom"), and the consent page's heading from the signed-out test. Everything else (the search
  * form's controls, the Cheapest flow, "View more", the no-flights line, SOCS stability, the grid) is unverified until
  * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked.
@@ -23,7 +23,8 @@ export type Role =
   | 'list'
   | 'listitem'
   | 'combobox'
-  | 'textbox';
+  | 'textbox'
+  | 'main';
 
 export const FLAG_NAMES = [
   'RESULTS_VERIFIED',
@@ -59,8 +60,8 @@ export interface Selectors {
     /** The Cheapest tab, whose name carries the tab price once settled. */
     cheapestTab: RegExp;
     dateGridButton: string;
-    /** The result lists ("Top departing flights", "Other departing flights"). */
-    resultLists: RegExp;
+    /** A result link's own accessible name (the result-name grammar then reads it whole). */
+    resultLink: RegExp;
     resultsReturned: RegExp;
     fetching: RegExp;
     currencyButton: RegExp;
@@ -109,7 +110,10 @@ export const SELECTORS: Selectors = {
   results: {
     cheapestTab: /^Cheapest\b/,
     dateGridButton: 'Date grid',
-    resultLists: /departing flights$/,
+    // why: observed 2026-10-18 (feasibility snapshot; recording run 3): the result lists carry no accessible name (a
+    // level-3 heading "Top departing flights" / "Other departing flights" precedes each), so results are found by the
+    // link's own name inside `main`, never by a list name. The grammar still checks the price and currency.
+    resultLink: /^From [\d,]+ [A-Za-z ]+ round trip total\. /,
     resultsReturned: /^\d+ results? returned\.$/,
     fetching: /Fetching results/,
     currencyButton: /^Currency /,

@@ -125,7 +125,7 @@ async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
 /** The driver over one page; `guard` is that page's guard state (hops and frame URLs). */
 export function createDriver(page: PageLike, guard: GuardState, S: Selectors = SELECTORS): Driver {
   const resultLinks = (): LocatorLike =>
-    page.getByRole('list', { name: S.results.resultLists }).getByRole('listitem').getByRole('link');
+    page.getByRole('main').getByRole('link', { name: S.results.resultLink });
   const has = async (l: LocatorLike, d: Deadline): Promise<boolean> => (await countOf(l, d)) > 0;
   // why: ruling of 2026-10-18: a hidden label (the Cheapest tab keeps "Fetching results" in its name once loaded) is
   // never read as the page still loading; only the matches a visitor would see count

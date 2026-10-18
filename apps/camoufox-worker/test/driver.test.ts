@@ -103,24 +103,28 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
   });
 });
 
+// why: every link below carries a result-shaped accessible name, which is how results are found (ruling of
+// 2026-10-18); what is read from each is its aria-label, else its text
+const P = 'From 2 British pounds round trip total. ';
+
 describe('createDriver.resultNames (PIE-R2-10)', () => {
   it('one entry per result link: aria-label, else text; nameless is empty; too long is null', async () => {
-    const long = 'x'.repeat(SELECTORS.maxNameLength + 1);
+    const long = `${P}${'x'.repeat(SELECTORS.maxNameLength)}`;
     const { driver, d } = setup([
       resultsTree({
         top: [
           option(478),
-          n('listitem', '', [n('link', 'from text', [], { ariaLabel: null, text: 'from text' })]),
+          n('listitem', '', [n('link', `${P}from text`, [], { ariaLabel: null, text: `${P}from text` })]),
         ],
         other: [
-          n('listitem', '', [n('link', '', [], { ariaLabel: null, text: null })]),
+          n('listitem', '', [n('link', `${P}unreadable`, [], { ariaLabel: null, text: null })]),
           n('listitem', '', [n('link', long)]),
         ],
       }),
     ]);
     const names = await driver.resultNames(d);
     expect(names).toHaveLength(4);
-    expect(names.slice(1)).toEqual(['from text', null, null]);
+    expect(names.slice(1)).toEqual([`${P}from text`, null, null]);
     expect(names[0]).toMatch(/^From 478 British pounds/);
   });
 });
@@ -131,15 +135,17 @@ describe('createDriver.resultNames reads aria-label before the text', () => {
     const { driver, d } = setup([
       resultsTree({
         top: [
-          n('listitem', '', [n('link', 'the label', [], { ariaLabel: 'the label', text: 'the card text' })]),
+          n('listitem', '', [
+            n('link', `${P}the label`, [], { ariaLabel: `${P}the label`, text: 'the card text' }),
+          ]),
         ],
         other: [],
       }),
     ]);
-    expect(await driver.resultNames(d)).toEqual(['the label']);
+    expect(await driver.resultNames(d)).toEqual([`${P}the label`]);
   });
   it('a name of exactly the length bound is kept; one more character is null', async () => {
-    const at = 'x'.repeat(SELECTORS.maxNameLength);
+    const at = `${P}${'x'.repeat(SELECTORS.maxNameLength - P.length)}`;
     const { driver, d } = setup([
       resultsTree({
         top: [n('listitem', '', [n('link', at)]), n('listitem', '', [n('link', `${at}x`)])],
@@ -313,5 +319,33 @@ describe('settling on stable content (ruling of 2026-10-18)', () => {
       tree({ tab: 'Cheapest from Fetching results British pounds Learn more about ranking' }),
     ]);
     await expect(run).rejects.toThrow(DeadlineExceeded);
+  });
+});
+
+// why: ruling of 2026-10-18 (recording run 3): the result lists carry no accessible name; a heading precedes each, and
+// each result is a listitem holding a link whose own name starts "From <n> British pounds round trip total. "
+describe('result links by their own name (ruling of 2026-10-18)', () => {
+  const evidence = () =>
+    n('document', 'Google Flights', [
+      n('main', '', [
+        n('heading', 'Top departing flights'),
+        n('list', '', [option(534)]),
+        n('heading', 'Other departing flights'),
+        n('list', '', [option(600), option(612)]),
+        n('link', 'Learn more about tracked prices'),
+      ]),
+      n('link', 'From 1 British pounds round trip total. outside main'),
+    ]);
+  it('unnamed lists under the departing-flights headings yield their links', async () => {
+    const { driver, d } = setup([evidence()]);
+    expect((await driver.readFacts(d)).page.resultLinks).toBe(3);
+    const names = await driver.resultNames(d);
+    expect(names).toHaveLength(3);
+    expect(names.every((x) => x?.startsWith('From ') === true)).toBe(true);
+  });
+  it('a link that does not match the result-name pattern is not counted, nor one outside main', async () => {
+    const { driver, d } = setup([evidence()]);
+    expect(await driver.resultNames(d)).not.toContain('Learn more about tracked prices');
+    expect((await driver.resultNames(d)).some((x) => x?.includes('outside main') === true)).toBe(false);
   });
 });
