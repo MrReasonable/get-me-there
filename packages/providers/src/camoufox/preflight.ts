@@ -24,8 +24,18 @@ export const SIGNED_IN_REFUSED = 'signed-in profile refused';
 export const GRID_NOT_VERIFIED =
   'grid mode not verified on the worker (CAMOUFOX_MODE=grid in worker.env, and the same measured grid step)';
 
+/** Fix round 1 (CA 9): a grid setting the worker and the app read separately differs. */
+export const gridSettingDiffers = (name: string, worker: number | null | undefined, app: number): string =>
+  `${name} differs: the worker has ${worker ?? 'none'}, the app ${app} (set the same value in worker.env and the app)`;
+
 export async function camoufoxPreflight(
-  o: { http: HttpKit; key: Secret; workerUrl: string; grid?: boolean },
+  o: {
+    http: HttpKit;
+    key: Secret;
+    workerUrl: string;
+    /** Grid mode, with the app's scroll cap and spacing, which the worker's must equal. */
+    grid?: { scrollCap: number; spacingSeconds: number };
+  },
   ctx: ProviderContext,
 ): Promise<PreflightResult> {
   let body: unknown;
@@ -70,13 +80,31 @@ export async function camoufoxPreflight(
     return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
   // why: spec §2 rev 34: grid pages are planned from the measured step, so the worker must report the same one
   const step = st.gridStepDays;
+  if (o.grid === undefined) return { ok: true };
   if (
-    o.grid === true &&
-    (step === undefined ||
-      step === null ||
-      step.departures !== GRID_STEP_DAYS.departures ||
-      step.returns !== GRID_STEP_DAYS.returns)
+    step === undefined ||
+    step === null ||
+    step.departures !== GRID_STEP_DAYS.departures ||
+    step.returns !== GRID_STEP_DAYS.returns
   )
     return { ok: false, skip: 'provider_disabled', detail: GRID_NOT_VERIFIED };
+  // why: fix round 1 (CA 9): a lower worker cap refuses every page (400); a longer worker spacing outlasts the app's
+  // request timeout; either is a configuration fault, named
+  if (st.gridScrollCap !== o.grid.scrollCap)
+    return {
+      ok: false,
+      skip: 'provider_disabled',
+      detail: gridSettingDiffers('CAMOUFOX_GRID_SCROLL_CAP', st.gridScrollCap, o.grid.scrollCap),
+    };
+  if (st.gridScrollSpacingSeconds !== o.grid.spacingSeconds)
+    return {
+      ok: false,
+      skip: 'provider_disabled',
+      detail: gridSettingDiffers(
+        'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
+        st.gridScrollSpacingSeconds,
+        o.grid.spacingSeconds,
+      ),
+    };
   return { ok: true };
 }

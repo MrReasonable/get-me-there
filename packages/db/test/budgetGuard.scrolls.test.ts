@@ -45,8 +45,10 @@ describe('scroll caps (spec §2 rev 34)', () => {
     expect(scopeOf(() => g.reserve(r('e2', 0, 6)))).toMatch(
       /^provider-month:budget exceeded: provider-month scrolls cap 25/,
     );
+    // why: fix round 1 (TS 7): the boundary: 20 + 5 is the cap itself, and is reserved
+    expect(() => g.reserve(r('e2', 1, 5))).not.toThrow();
   });
-  it('a page blocked after 3 scrolls holds 3; a call that ended with no answer holds NULL; a list page never a count', () => {
+  it('a page blocked after 3 scrolls holds 3; a call that ended with no answer keeps its planned scrolls; a list page never a count', () => {
     const { g, rows } = guardWithDb({ snapshotCaps: { e1: { camoufox: 100 } } });
     g.reserve(r('e1', 0, 10)).finalise({
       outcome: 'error',
@@ -57,9 +59,40 @@ describe('scroll caps (spec §2 rev 34)', () => {
     });
     g.reserve(r('e1', 1, 10)).finalise({ outcome: 'unknown', durationMs: 1 });
     g.reserve(r('e1', 2)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(rows().map((x) => x.scrollCount)).toEqual([3, null, null]);
+    // why: CodeRabbit on PR #9: a timeout or an abort may come after the worker scrolled; the planned count stands,
+    // so the scroll caps never undercount
+    expect(rows().map((x) => x.scrollCount)).toEqual([3, 10, null]);
     // why: the page caps still count rows: three pages
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).calls).toBe(3);
+  });
+  it('a call that ended with no answer counts its planned scrolls against the caps (CodeRabbit)', () => {
+    const g = guardFor({ executionScrollCap: 30, snapshotCaps: { e1: { camoufox: 100 } } });
+    g.reserve(r('e1', 0, 14)).finalise({ outcome: 'unknown', durationMs: 1 });
+    expect(g.scrollUsage('camoufox', 'e1')).toEqual({ execution: 14, month: 14 });
+  });
+  it('an error with no answer (the worker refused the connection) holds NULL: no page was loaded', () => {
+    const { g, rows } = guardWithDb({ snapshotCaps: { e1: { camoufox: 100 } } });
+    g.reserve(r('e1', 0, 14)).finalise({ outcome: 'error', durationMs: 1, pageClass: 'no-page' });
+    expect(rows().map((x) => x.scrollCount)).toEqual([null]);
+  });
+  it('scrollsLeft is what the run’s and the month’s caps leave, the lesser, never below 0 (CA 1)', () => {
+    const g = guardFor({
+      executionScrollCap: 30,
+      monthlyScrollCap: 25,
+      snapshotCaps: { e1: { camoufox: 100 }, e2: { camoufox: 100 } },
+    });
+    expect(g.scrollsLeft('camoufox', 'e1')).toBe(25);
+    g.reserve(r('e2', 0, 20)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page', scrollCount: 20 });
+    expect(g.scrollsLeft('camoufox', 'e1')).toBe(5);
+    g.reserve(r('e1', 0, 5)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page', scrollCount: 5 });
+    expect(g.scrollsLeft('camoufox', 'e1')).toBe(0);
+    const run = guardFor({ executionScrollCap: 30, snapshotCaps: { e1: { camoufox: 100 } } });
+    run
+      .reserve(r('e1', 0, 12))
+      .finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page', scrollCount: 12 });
+    expect(run.scrollsLeft('camoufox', 'e1')).toBe(18);
+    // why: with no execution only the month cap applies (6,000 by default)
+    expect(run.scrollsLeft('camoufox', null)).toBe(6000 - 12);
   });
   it('a pending reservation holds its planned scrolls until it finalises', () => {
     const g = guardFor({ executionScrollCap: 30, snapshotCaps: { e1: { camoufox: 100 } } });

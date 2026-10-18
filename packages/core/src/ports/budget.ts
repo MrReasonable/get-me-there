@@ -76,4 +76,9 @@ export interface BudgetGuard {
   usage(scope: BudgetScope): Usage;
   /** Upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart. */
   recentCalls(providerId: ProviderId, since: IsoDateTime): number;
+  /**
+   * Spec §2 rev 34 (fix round 1, CA 1): the scrolls a provider's run and month scroll caps leave (the lesser, never
+   * below 0), or null when no scroll cap applies; a camoufox grid page asks for no more.
+   */
+  scrollsLeft(providerId: ProviderId, executionId: string | null): number | null;
 }

@@ -6,7 +6,6 @@
  * tile-error (answer.ts). No airport is named here (spec §1).
  */
 import {
-  asIsoDate,
   CAMOUFOX_CLOCK_SKEW_MS,
   type Cabin,
   type CapabilityInfo,
@@ -32,7 +31,7 @@ import {
 } from '@gmt/core';
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
-import { planGridTiles } from './grid.js';
+import { gridTileEstimate, planGridTiles } from './grid.js';
 import { gridTile } from './gridTile.js';
 import { camoufoxPreflight } from './preflight.js';
 import { planSingleCells } from './tiles.js';
@@ -77,7 +76,19 @@ export interface CamoufoxProviderOptions {
    * Spec §2 rev 34: grid mode and the run's page and scroll caps, which the planner splits across the stage's pairs
    * (`DiscoveryQuery.share`); absent or `list`: one page per cell.
    */
-  grid?: { mode: 'list' | 'grid'; executionPageCap: number; executionScrollCap: number; scrollCap: number };
+  grid?: {
+    mode: 'list' | 'grid';
+    executionPageCap: number;
+    executionScrollCap: number;
+    scrollCap: number;
+    /** CAMOUFOX_GRID_SCROLL_SPACING_SECONDS, which the preflight checks against the worker's. */
+    scrollSpacingSeconds: number;
+  };
+  /**
+   * Fix round 1 (CA 1): the scrolls the run's and the month's scroll caps leave for camoufox (the budget guard's), or
+   * null for no cap. A grid page asks for, and reserves, no more than that.
+   */
+  scrollsLeft?: (executionId: string | null) => number | null;
 }
 
 /** The detail and dropped count stored on a priced cell (prov-001, prov-003, prov-005). */
@@ -223,6 +234,10 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     ctx: ProviderContext,
     fail: (e: ProviderError) => DiscoveryTileResult,
   ): Promise<DiscoveryTileResult> {
+    // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the caps leave; the worker stops there (`allowance`)
+    // and the unreached cells are resumable issues, while a page with no scroll left still reads its first block
+    const left = o.scrollsLeft?.(ctx.executionId) ?? null;
+    const allowance = left === null ? path.moves.length : Math.max(0, Math.min(path.moves.length, left));
     const request = pageRequestSchema.safeParse({
       mode: 'grid',
       origin: q.origin,
@@ -231,7 +246,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       start: path.start,
       moves: path.moves,
       reads: path.reads,
-      scrollAllowance: path.moves.length,
+      scrollAllowance: allowance,
     });
     if (!request.success)
       return fail(parseError('bad-grid-path', 'the grid path is not a valid request', WHERE));
@@ -254,8 +269,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
         cache: 'never',
         signal: ctx.signal,
         recordFixtures: ctx.recordFixtures,
-        // why: ruling 12: the reservation checks the page's planned scrolls against the run's and the month's caps
-        scrolls: path.moves.length,
+        // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
+        scrolls: allowance,
       });
       body = res.body;
     } catch (e) {
@@ -276,6 +291,11 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   }
 
   const grid = o.grid?.mode === 'grid' ? o.grid : null;
+  // why: CB-7: a scroll takes the measured time, or the configured spacing when that is longer (spacing binds then)
+  const timesOf = (g: { scrollSpacingSeconds: number }): typeof GRID_TIMES => ({
+    ...GRID_TIMES,
+    scrollSeconds: Math.max(GRID_TIMES.scrollSeconds, g.scrollSpacingSeconds),
+  });
   const plan = (q: DiscoveryQuery): TilePlan[] => {
     if (grid === null) return planSingleCells(q);
     const pairs = Math.max(1, q.share?.pairs ?? 1);
@@ -284,9 +304,10 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       scrollCap: grid.scrollCap,
       pageAllowance: Math.floor(grid.executionPageCap / pairs),
       scrollAllowance: Math.floor(grid.executionScrollCap / pairs),
-      today: asIsoDate(o.clock.now().slice(0, 10)),
+      // why: CA 10: the operator's date, as the worker's near-today check takes it
+      today: o.clock.todayLondon(),
       horizonDays: GRID_HORIZON_DAYS,
-      times: GRID_TIMES,
+      times: timesOf(grid),
     });
   };
 
@@ -299,8 +320,19 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       info: grid === null ? CAMOUFOX_DISCOVERY_INFO : CAMOUFOX_GRID_INFO,
       plan,
       fetchTile,
+      ...(grid === null ? {} : { estimateTile: (t: TilePlan) => gridTileEstimate(t, timesOf(grid)) }),
       preflight: (ctx) =>
-        camoufoxPreflight({ http: o.http, key: o.key, workerUrl: o.workerUrl, grid: grid !== null }, ctx),
+        camoufoxPreflight(
+          {
+            http: o.http,
+            key: o.key,
+            workerUrl: o.workerUrl,
+            ...(grid === null
+              ? {}
+              : { grid: { scrollCap: grid.scrollCap, spacingSeconds: grid.scrollSpacingSeconds } }),
+          },
+          ctx,
+        ),
     },
     // why: decision 24: healthchecks probe nothing; the preflight is the engine's only call that asks the worker.
     healthcheck: async () => ({

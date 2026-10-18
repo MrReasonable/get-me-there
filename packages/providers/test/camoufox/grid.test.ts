@@ -1,7 +1,19 @@
 // WP15 Task 15.3: the grid planner (spec §2 rev 34; decision 70), pure: the 7 × 7 block lattice from the window and the
 // stay range, the path, and the choice per move between a new page and the measured one-day scrolls within the page
 // and scroll allowances. Synthetic queries; the worked example's figures.
-import { addDays, asIata, asIsoDate, cellKeyString, type DiscoveryQuery, GRID_TIMES } from '@gmt/core';
+import {
+  addDays,
+  asIata,
+  asIsoDate,
+  cellKeyString,
+  type DiscoveryQuery,
+  daysBetween,
+  GRID_TIMES,
+  type GridMove,
+  gridRequestSchema,
+  type IsoDate,
+  type TilePlan,
+} from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { gridBlocks, gridTileEstimate, planGridTiles } from '../../src/camoufox/grid.js';
 import { cellsOfQuery } from '../../src/camoufox/tiles.js';
@@ -55,10 +67,13 @@ describe('gridBlocks', () => {
   it('plans no block past the horizon (the sale window, 2026-10-18); one probe page covers the cells beyond it', () => {
     const blocks = gridBlocks(WORKED, TODAY, 300);
     const last = addDays(TODAY, 300);
-    expect(blocks.every((b) => b.cells.every((c) => c.departureDate <= last))).toBe(true);
+    // why: fix round 1 (PA I1): the horizon bounds the returns as well as the departures
+    expect(blocks.every((b) => b.cells.every((c) => c.departureDate <= last && c.returnDate <= last))).toBe(
+      true,
+    );
     const tiles = planGridTiles(WORKED, opts({ horizonDays: 300, pageAllowance: 400 }));
     const probe = tiles.at(-1);
-    expect(probe?.coveredCells.every((c) => c.departureDate > last)).toBe(true);
+    expect(probe?.coveredCells.every((c) => c.departureDate > last || c.returnDate > last)).toBe(true);
     expect(probe?.request).toMatchObject({ kind: 'grid-path', moves: [], reads: [true] });
     expect(tiles.flatMap((t) => t.coveredCells).length).toBe(2184);
     expect(tiles).toHaveLength(blocks.length + 1);
@@ -127,6 +142,103 @@ describe('planGridTiles', () => {
     expect(planGridTiles(WORKED, opts({ pageAllowance: 30 }))).toEqual(
       planGridTiles(WORKED, opts({ pageAllowance: 30 })),
     );
+  });
+});
+
+/** Every view a page shows along its moves: its first departure and first return. */
+function viewsOf(t: TilePlan): Array<{ dep: IsoDate; ret: IsoDate }> {
+  if (t.request.kind !== 'grid-path') return [];
+  let at = { dep: addDays(t.request.start.departureDate, -3), ret: addDays(t.request.start.returnDate, -3) };
+  const out = [at];
+  const by: Record<GridMove, [number, number]> = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
+  for (const m of t.request.moves) {
+    const [dd, dr] = by[m];
+    at = { dep: addDays(at.dep, dd), ret: addDays(at.ret, dr) };
+    out.push(at);
+  }
+  return out;
+}
+const asRequest = (t: TilePlan) =>
+  t.request.kind === 'grid-path'
+    ? gridRequestSchema.safeParse({
+        mode: 'grid',
+        origin: 'LHR',
+        destination: 'JFK',
+        gl: 'GB',
+        start: t.request.start,
+        moves: t.request.moves,
+        reads: t.request.reads,
+        scrollAllowance: t.request.moves.length,
+      }).success
+    : false;
+
+describe('planGridTiles: fix round 1', () => {
+  it('the probe opens at the least departure and the least return past the horizon, so no flights there implies no flights for every cell it covers (PA I1, M4)', () => {
+    const tiles = planGridTiles(WORKED, opts({ horizonDays: 300, pageAllowance: 400 }));
+    const probe = tiles.at(-1);
+    if (probe?.request.kind !== 'grid-path') throw new Error('probe');
+    const deps = probe.coveredCells.map((c) => c.departureDate).sort();
+    const rets = probe.coveredCells.map((c) => c.returnDate).sort();
+    expect(probe.request.start).toEqual({ departureDate: deps[0], returnDate: rets[0] });
+    expect(probe.request.start.returnDate > addDays(TODAY, 300)).toBe(true);
+  });
+  it('a stay of 0 nights: a block on the diagonal opens a day later and scrolls up once before it is read (PIE I1)', () => {
+    const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 0, maxNights: 3 };
+    const tiles = planGridTiles(q, opts({ pageAllowance: 400 }));
+    expect(tiles.every(asRequest)).toBe(true);
+    expect(tiles[0]?.request).toEqual({
+      kind: 'grid-path',
+      start: { departureDate: '2027-03-04', returnDate: '2027-03-05' },
+      moves: ['up'],
+      reads: [false, true],
+    });
+    const keys = tiles.flatMap((t) => t.coveredCells.map(cellKeyString));
+    expect(new Set(keys)).toEqual(new Set(cellsOfQuery(q).map(cellKeyString)));
+  });
+  it('a stay of 0 nights under the page allowance keeps every page within the scroll cap and every view holding a pair (PIE I1, M1)', () => {
+    const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 27), minNights: 0, maxNights: 3 };
+    const tiles = planGridTiles(q, opts({ pageAllowance: 1, scrollCap: 30 }));
+    expect(tiles.every(asRequest)).toBe(true);
+    for (const t of tiles) {
+      expect(t.request.kind === 'grid-path' && t.request.moves.length).toBeLessThanOrEqual(30);
+      // why: a view whose last return precedes its first departure holds no round trip at all
+      for (const v of viewsOf(t)) expect(daysBetween(v.dep, addDays(v.ret, 6))).toBeGreaterThanOrEqual(0);
+    }
+    expect(
+      tiles.flatMap((t) => (t.request.kind === 'grid-path' ? t.request.moves : [])).length,
+    ).toBeGreaterThan(0);
+  });
+  it('between blocks the returns move first when they go later, and the departures first when they go earlier (PIE M1)', () => {
+    // why: one stay, two columns: the move between them is 7 days later on both axes
+    const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 10, maxNights: 10 };
+    const [t0] = planGridTiles(q, opts({ pageAllowance: 1 }));
+    if (t0?.request.kind !== 'grid-path') throw new Error('grid-path');
+    // why: each block move is the moves up to the next read view; within one, no widening move follows a narrowing one
+    const { moves, reads } = t0.request;
+    const segments: GridMove[][] = [[]];
+    for (const [i, m] of moves.entries()) {
+      segments.at(-1)?.push(m);
+      if (reads[i + 1] === true) segments.push([]);
+    }
+    expect(segments.filter((x) => x.includes('right') && x.includes('down')).length).toBeGreaterThan(0);
+    for (const x of segments) {
+      const firstNarrow = x.findIndex((m) => m === 'right' || m === 'up');
+      expect(
+        firstNarrow === -1 || x.slice(firstNarrow).every((m) => m === 'right' || m === 'up'),
+        x.join(' '),
+      ).toBe(true);
+    }
+  });
+  it('a re-plan whose window starts before today anchors the lattice at today: no page opens on days already past (CA 3)', () => {
+    const today = asIsoDate('2027-03-05');
+    const cells = cellsOfQuery(WORKED).filter((c) => c.departureDate > today);
+    const tiles = planGridTiles({ ...WORKED, cells }, opts({ today }));
+    for (const t of tiles)
+      expect(t.request.kind === 'grid-path' && t.request.start.departureDate >= addDays(today, 3)).toBe(true);
+    expect(tiles[0]?.request.kind === 'grid-path' && tiles[0].request.start.departureDate).toBe('2027-03-08');
+    const keys = tiles.flatMap((t) => t.coveredCells.map(cellKeyString));
+    expect(new Set(keys)).toEqual(new Set(cells.map(cellKeyString)));
+    expect(keys).toHaveLength(cells.length);
   });
 });
 

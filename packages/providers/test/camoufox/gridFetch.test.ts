@@ -2,7 +2,15 @@
 // step and the run's allowances, the grid-path request with its planned scrolls on the reservation, the answer mapped
 // to prices with their return-date source and Google's mark, and every covered cell either priced, no data on the
 // no-flights page, or an issue that names why. Synthetic worker answers (msw).
-import { addDays, asIata, asIsoDate, cellKeyString, type GridView, type IsoDate } from '@gmt/core';
+import {
+  addDays,
+  asIata,
+  asIsoDate,
+  asIsoDateTime,
+  cellKeyString,
+  type GridView,
+  type IsoDate,
+} from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { camoufoxProvider } from '../../src/camoufox/index.js';
@@ -69,7 +77,10 @@ const answer = (o: { views?: GridView[]; ended?: string; scrolls?: number } = {}
   notes: [],
   versions,
 });
-const status = (gridStepDays: unknown) => ({
+const status = (
+  gridStepDays: unknown,
+  grid: { gridScrollCap?: number; gridScrollSpacingSeconds?: number } = {},
+) => ({
   ok: true,
   coolingDownUntil: null,
   cooldownCause: null,
@@ -84,9 +95,24 @@ const status = (gridStepDays: unknown) => ({
   cooldownHours: 48,
   pageTimeoutSeconds: 90,
   gridStepDays,
+  gridScrollCap: grid.gridScrollCap ?? 30,
+  gridScrollSpacingSeconds: grid.gridScrollSpacingSeconds ?? 5,
 });
-function setup(grid = { executionPageCap: 100, executionScrollCap: 600, scrollCap: 30 }) {
+function setup(
+  grid: {
+    executionPageCap: number;
+    executionScrollCap: number;
+    scrollCap: number;
+    scrollSpacingSeconds?: number;
+  } = {
+    executionPageCap: 100,
+    executionScrollCap: 600,
+    scrollCap: 30,
+  },
+  o: { scrollsLeft?: (executionId: string | null) => number | null; now?: string } = {},
+) {
   const { kit, budget, log, clock } = makeKit({ limits: testLimits() });
+  if (o.now !== undefined) clock.set(asIsoDateTime(o.now));
   const p = camoufoxProvider({
     http: kit,
     log,
@@ -94,7 +120,8 @@ function setup(grid = { executionPageCap: 100, executionScrollCap: 600, scrollCa
     key: SENTINELS.camoufox,
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
-    grid: { mode: 'grid', ...grid },
+    grid: { mode: 'grid', scrollSpacingSeconds: 5, ...grid },
+    ...(o.scrollsLeft === undefined ? {} : { scrollsLeft: o.scrollsLeft }),
   });
   const d = p.discovery;
   if (d === undefined) throw new Error('discovery');
@@ -152,6 +179,105 @@ describe('camoufox grid mode', () => {
     expect(await d.preflight?.(ctx)).toMatchObject({ ok: false, skip: 'provider_disabled' });
     server.use(http.get(STATUS, () => HttpResponse.json(status({ departures: 1, returns: 1 }))));
     expect(await d.preflight?.(ctx)).toEqual({ ok: true });
+  });
+  it('preflight refuses grid mode when the worker’s scroll cap or spacing differs from the app’s (CA 9)', async () => {
+    const { d } = setup();
+    server.use(
+      http.get(STATUS, () => HttpResponse.json(status({ departures: 1, returns: 1 }, { gridScrollCap: 20 }))),
+    );
+    expect(await d.preflight?.(ctx)).toMatchObject({
+      ok: false,
+      skip: 'provider_disabled',
+      detail: expect.stringMatching(/CAMOUFOX_GRID_SCROLL_CAP.*20.*30/),
+    });
+    server.use(
+      http.get(STATUS, () =>
+        HttpResponse.json(status({ departures: 1, returns: 1 }, { gridScrollSpacingSeconds: 9 })),
+      ),
+    );
+    expect(await d.preflight?.(ctx)).toMatchObject({
+      ok: false,
+      skip: 'provider_disabled',
+      detail: expect.stringMatching(/CAMOUFOX_GRID_SCROLL_SPACING_SECONDS.*9.*5/),
+    });
+  });
+  it('a page asks for no more scrolls than the run’s and the month’s caps leave, and reserves that many (CA 1)', async () => {
+    const left: Array<string | null> = [];
+    const { d, budget } = setup(
+      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
+      {
+        scrollsLeft: (id) => {
+          left.push(id);
+          return 10;
+        },
+      },
+    );
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
+    const [tile] = d.plan(wide);
+    if (tile?.request.kind !== 'grid-path') throw new Error('tile');
+    expect(tile.request.moves).toHaveLength(14);
+    let sent: unknown;
+    server.use(
+      http.post(URL_, async ({ request }) => {
+        sent = await body(request);
+        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 10 }), contacted);
+      }),
+    );
+    const r = await d.fetchTile(tile, wide, ctx);
+    expect(sent).toMatchObject({ scrollAllowance: 10 });
+    expect(left).toEqual(['exec-1']);
+    expect(budget.rowsOf('camoufox').map((x) => [x.scrolls, x.scrollCount])).toEqual([[10, 10]]);
+    if (r.kind !== 'tile') throw new Error('tile');
+    expect(r.cellIssues?.map((i) => i.detail.split(' ')[0])).toEqual(Array(7).fill('scroll-allowance'));
+  });
+  it('with no scrolls left, a page still opens and reads its first block, reserving none (CA 1)', async () => {
+    const { d, budget } = setup(
+      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
+      { scrollsLeft: () => 0 },
+    );
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
+    const [tile] = d.plan(wide);
+    if (tile === undefined) throw new Error('tile');
+    let sent: unknown;
+    server.use(
+      http.post(URL_, async ({ request }) => {
+        sent = await body(request);
+        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 0 }), contacted);
+      }),
+    );
+    const r = await d.fetchTile(tile, wide, ctx);
+    expect(sent).toMatchObject({ scrollAllowance: 0 });
+    expect(budget.rowsOf('camoufox').map((x) => x.scrolls)).toEqual([0]);
+    expect(r.kind === 'tile' && r.prices).toHaveLength(7);
+  });
+  it('estimates each page at the page time and each scroll at the measured time, or the spacing when longer (CB-7)', () => {
+    const t = {
+      index: 0,
+      coveredCells: [],
+      request: {
+        kind: 'grid-path' as const,
+        start: { departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-24') },
+        moves: ['down' as const, 'down' as const],
+        reads: [true, false, true],
+      },
+    };
+    expect(setup().d.estimateTile?.(t)).toEqual({ scrolls: 2, seconds: 30 + 2 * 9.3 });
+    const slow = setup({
+      executionPageCap: 100,
+      executionScrollCap: 600,
+      scrollCap: 30,
+      scrollSpacingSeconds: 30,
+    });
+    expect(slow.d.estimateTile?.(t)).toEqual({ scrolls: 2, seconds: 30 + 2 * 30 });
+  });
+  it('plans from the operator’s date (London), not the UTC date (CA 10)', () => {
+    // why: 23:30 UTC on 18 Oct 2026 is 00:30 on 19 Oct in London; a window that has started anchors at today
+    const { d } = setup(undefined, { now: '2026-10-18T23:30:00.000Z' });
+    const q = { ...Q, departureFrom: asIsoDate('2026-10-15'), departureTo: asIsoDate('2026-10-28') };
+    const cells = d.plan(q).flatMap((t) => t.coveredCells);
+    const later = cells.filter((c) => c.departureDate > '2026-10-19');
+    const [first] = d.plan({ ...q, cells: later });
+    expect(first?.request.kind === 'grid-path' && first.request.start.departureDate).toBe('2026-10-22');
   });
   it('sends the grid path, reserves its planned scrolls, and maps priced cells with their source and Google’s mark', async () => {
     const { d, budget } = setup();
@@ -237,8 +363,10 @@ describe('camoufox grid mode', () => {
     expect(r.cellIssues?.map((i) => [i.reason, i.detail.split(' ')[0]])).toEqual(
       Array(7).fill(['parse', detail]),
     );
+    // why: PA M3: the words state only what is known, never a cause the page did not show
+    for (const i of r.cellIssues ?? []) expect(i.detail).not.toMatch(/sale window/);
   });
-  it('the no-flights page (past the sale window) is no data for every covered cell: no price, no issue', async () => {
+  it('the no-flights page is no data only for the covered cells on or after its start on both axes; the rest are issues (PA I1)', async () => {
     const { d } = setup();
     const [tile] = d.plan(Q);
     if (tile === undefined) throw new Error('tile');
@@ -246,7 +374,69 @@ describe('camoufox grid mode', () => {
       http.post(URL_, () => HttpResponse.json(answer({ views: [], ended: 'no-flights' }), contacted)),
     );
     const r = await d.fetchTile(tile, Q, ctx);
-    expect(r.kind === 'tile' && [r.prices, r.noFares, r.cellIssues ?? []]).toEqual([[], [], []]);
+    if (r.kind !== 'tile') throw new Error('tile');
+    // why: the page opened at 14 → 24 Mar; the sale window's end implies nothing for the departures 11–13 Mar
+    expect([r.prices, r.noFares]).toEqual([[], []]);
+    expect(r.cellIssues?.map((i) => [i.cell.departureDate, i.reason, i.detail.split(' ')[0]])).toEqual([
+      ['2027-03-11', 'parse', 'no-flights-at-start'],
+      ['2027-03-12', 'parse', 'no-flights-at-start'],
+      ['2027-03-13', 'parse', 'no-flights-at-start'],
+    ]);
+    expect(r.notes).toContain('no-flights-inferred:4');
+  });
+  it('a joined page that lands on no flights infers nothing for its blocks reached by scrolls that lie before its start on an axis (PA I1)', async () => {
+    const { d } = setup({ executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 });
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-31'), maxNights: 21 };
+    server.use(
+      http.post(URL_, () => HttpResponse.json(answer({ views: [], ended: 'no-flights' }), contacted)),
+    );
+    let before = 0;
+    for (const tile of d.plan(wide)) {
+      if (tile.request.kind !== 'grid-path') throw new Error('tile');
+      const start = tile.request.start;
+      const r = await d.fetchTile(tile, wide, ctx);
+      if (r.kind !== 'tile') throw new Error('tile');
+      const issues = r.cellIssues ?? [];
+      const earlier = tile.coveredCells.filter(
+        (c) => c.departureDate < start.departureDate || c.returnDate < start.returnDate,
+      );
+      expect(issues.map((i) => cellKeyString(i.cell)).sort()).toEqual(earlier.map(cellKeyString).sort());
+      expect(r.notes).toContain(`no-flights-inferred:${tile.coveredCells.length - earlier.length}`);
+      before += earlier.length;
+    }
+    expect(before).toBeGreaterThan(0);
+    // why: a block reached by scrolling up the returns holds cells departing on or after the start but returning
+    // before it: those are issues too
+    const [one] = d.plan(Q);
+    if (one?.request.kind !== 'grid-path') throw new Error('tile');
+    const shifted = {
+      ...one,
+      request: {
+        ...one.request,
+        start: { departureDate: asIsoDate('2027-03-12'), returnDate: asIsoDate('2027-03-25') },
+      },
+    };
+    const r = await d.fetchTile(shifted, Q, ctx);
+    expect(r.kind === 'tile' && r.cellIssues?.map((i) => i.cell.departureDate)).toEqual([
+      '2027-03-11',
+      '2027-03-12',
+      '2027-03-13',
+      '2027-03-14',
+    ]);
+  });
+  it('two views that both price one covered pair fail the tile: nothing from the page is stored (PA M1, CodeRabbit)', async () => {
+    const { d } = setup();
+    const [tile] = d.plan(Q);
+    if (tile === undefined) throw new Error('tile');
+    server.use(
+      http.post(URL_, () =>
+        HttpResponse.json(answer({ views: [view(), view({ index: 1 })], scrolls: 1 }), contacted),
+      ),
+    );
+    const r = await d.fetchTile(tile, Q, ctx);
+    if (r.kind !== 'tile-error') throw new Error(JSON.stringify(r));
+    expect(r.error).toMatchObject({ kind: 'parse', retryable: false, reason: 'grid-cell-read-twice' });
+    expect(r.coveredCells).toEqual(tile.coveredCells);
   });
   it('a blocked grid answer is the blocked tile-error and its scrolls reach the ledger row (CB-4)', async () => {
     const { d, budget } = setup();

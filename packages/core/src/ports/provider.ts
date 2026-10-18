@@ -1,3 +1,4 @@
+import type { GridMove } from '../camoufox/protocol.js';
 import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
 import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
@@ -67,7 +68,7 @@ export type TileRequest =
   | {
       kind: 'grid-path';
       start: { departureDate: IsoDate; returnDate: IsoDate };
-      moves: Array<'left' | 'right' | 'up' | 'down'>;
+      moves: GridMove[];
       reads: boolean[];
     };
 export interface TilePlan {
@@ -190,8 +191,6 @@ export interface CostEstimate {
   costMicroGbp: number;
   seconds: number;
   notes: string[];
-  /** camoufox grid only (spec §2 rev 34, CB-3): the scroll clicks the plan makes beside its pages. */
-  scrolls?: number;
 }
 /**
  * Spec §5.1 rev 32: an unledgered check before a stage plans tiles (camoufox reads its worker's `/v1/status`). A refusal
@@ -209,6 +208,11 @@ export type PreflightResult =
 export interface DiscoveryCapability {
   info: CapabilityInfo;
   plan(q: DiscoveryQuery): TilePlan[];
+  /**
+   * Spec §2 rev 34 (CB-3; fix round 1, CA 5): a provider whose tiles are timed per tile (camoufox grid pages: the page
+   * time and each scroll's) states each tile's scrolls and seconds; the engine's estimate reads them from here.
+   */
+  estimateTile?(plan: TilePlan): { scrolls: number; seconds: number };
   fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult>;
   /** Optional, unledgered (spec §5.1 rev 32); absent for every provider but camoufox. */
   preflight?(ctx: ProviderContext): Promise<PreflightResult>;

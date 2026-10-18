@@ -50,10 +50,12 @@ WHERE provider_id IN (SELECT value FROM json_each(@billedProviders)) AND outcome
 const INSERT_PENDING_SQL = `
 INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, outcome, billable, cost_micro_gbp, http_attempt, scroll_count)
 VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @startedAt, 'pending', NULL, @cost, @httpAttempt, @scrolls)`;
-// why: spec §7 rev 34 (CB-4): a finalised row holds the scrolls the answer stated, or NULL when no answer came
+// why: spec §7 rev 34 (CB-4): a finalised row holds the scrolls the answer stated; an `unknown` attempt with no answer
+// (a timeout or an abort after the request left) keeps its planned scrolls, so the scroll caps never undercount
+// (CodeRabbit on PR #9); any other attempt with no answer holds NULL
 const FINALISE_SQL = `
 UPDATE provider_requests SET outcome = @outcome, http_status = @httpStatus, duration_ms = @durationMs, finished_at = @finishedAt, billable = @billable, page_class = @pageClass,
-  scroll_count = @scrollCount,
+  scroll_count = CASE WHEN @scrollCount IS NULL AND @outcome = 'unknown' THEN scroll_count ELSE @scrollCount END,
   cost_micro_gbp = CASE WHEN @zeroCost = 1 THEN 0 ELSE cost_micro_gbp END
 WHERE id = @id AND outcome = 'pending'`;
 const INSERT_CACHE_HIT_SQL = `
@@ -322,6 +324,21 @@ export class SqliteBudgetGuard implements BudgetGuard {
         providerId: p.providerId,
         unit: 'scrolls',
       });
+  }
+
+  /**
+   * Fix round 1 (CA 1): the scrolls the provider's run and month scroll caps leave (the lesser, never below 0), or null
+   * when neither cap applies. A grid page asks for no more than this.
+   */
+  scrollsLeft(providerId: ProviderId, executionId: string | null): number | null {
+    const budget = this.budgetFor(providerId);
+    const used = this.scrollUsage(providerId, executionId);
+    const run = executionId === null ? undefined : budget.executionScrollCap;
+    const left = [
+      ...(run === undefined ? [] : [run - used.execution]),
+      ...(budget.monthlyScrollCap === undefined ? [] : [budget.monthlyScrollCap - used.month]),
+    ];
+    return left.length === 0 ? null : Math.max(0, Math.min(...left));
   }
 
   /** The provider's scroll clicks in the execution and in its current month window (spec §2 rev 34). */
