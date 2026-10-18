@@ -179,7 +179,10 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
     const all = contexts.flatMap((c) => c.added);
     expect(all.length).toBeGreaterThan(0);
     for (const call of all) expect(call).toEqual([socsCookie(socs)]);
-    expect(contexts.flatMap((c) => c.pages.flatMap((p) => p.calls.clicks))).toEqual([]);
+    // why: with the module's verified flags the results page clicks only its Cheapest tab; the consent page nothing
+    const pages = contexts.flatMap((c) => c.pages);
+    expect(pages.at(-1)?.calls.clicks).toEqual([]);
+    for (const click of pages.flatMap((p) => p.calls.clicks)) expect(click).toMatch(/^tab:Cheapest/);
   });
 });
 

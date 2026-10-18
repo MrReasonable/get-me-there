@@ -644,8 +644,9 @@ page and pauses the provider for an hour, so empty routes read as not searched.
    that fails exits 78 and the agent does not restart it faster than once a minute; logs go to
    `~/Library/Logs/get-me-there/`.
 
-Until the recordings described in the WP14 brief have been made, the worker refuses to start (`FORM_VERIFIED`): the
-search-form check is mandatory. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
+The search-form check is mandatory: the worker refuses to start while `FORM_VERIFIED` is false. The 2026-10-18
+recordings set it, with the results, Cheapest and no-flights flags. A page change that needs new recordings sets them
+back. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
 lock, the spacing and the cool-down are kept there, so a recording and a running worker can never load pages at once.
 
 ### Point the app at it

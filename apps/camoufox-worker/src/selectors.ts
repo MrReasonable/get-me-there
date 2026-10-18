@@ -136,11 +136,13 @@ export const SELECTORS: Selectors = {
     return: 'Return',
   },
   maxNameLength: 4000,
+  // why: the flags below were set 2026-10-18 from that day's recordings (operator instruction); PROOFS names each file
   RESULTS_VERIFIED: true,
-  FORM_VERIFIED: false,
-  CHEAPEST_FLOW_VERIFIED: false,
+  FORM_VERIFIED: true,
+  CHEAPEST_FLOW_VERIFIED: true,
+  // why: stays false: the view-more recording's minimum (81 links) was no lower than the results page's
   VIEW_MORE_ADDS_CHEAPER: false,
-  NO_FLIGHTS_VERIFIED: false,
+  NO_FLIGHTS_VERIFIED: true,
   // why: set 2026-10-18 by operator ruling: the socs-stability recording's passes 1–3 all read the cookie back `same`
   SOCS_STABLE: true,
   // why: decision 69: grid mode is not built in WP14; this flag stays false here whatever a recording shows.
@@ -149,7 +151,14 @@ export const SELECTORS: Selectors = {
 
 /** The recording that proved each true flag (TS-13): its date and what it was. */
 export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
-  RESULTS_VERIFIED: '2026-10-18 feasibility load (signed in, through camofox-browser; brief introduction)',
+  RESULTS_VERIFIED:
+    '2026-10-18 results/2026-10-18/1 (23 links, every name parses; first seen in the feasibility load)',
+  FORM_VERIFIED:
+    '2026-10-18 results/2026-10-18/1 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-18/1 (1 Dec to 10 Dec as asked)',
+  CHEAPEST_FLOW_VERIFIED:
+    '2026-10-18 cheapest/2026-10-18/1 (21 links after the tab click; their minimum equals the tab price, SOCS same)',
+  NO_FLIGHTS_VERIFIED:
+    '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
   SOCS_STABLE:
     '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
 };

@@ -95,7 +95,8 @@ function setup(
       refusal,
       clock,
       timers,
-      selectors: o.selectors ?? SELECTORS,
+      // why: a Best-only baseline (the module's verified Cheapest flow off) so each test states the flows it exercises
+      selectors: o.selectors ?? { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false },
       pageTimeoutMs: 90_000,
       log: o.log ?? memoryLog(),
       versions,
@@ -196,7 +197,10 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
   it.each([false, true])(
     'SOCS changed after a settled page → consent-unhandled, profile wiped (SOCS_STABLE %s)',
     async (stable) => {
-      const t = setup({ selectors: { ...SELECTORS, SOCS_STABLE: stable }, shape: changeSocs });
+      const t = setup({
+        selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false, SOCS_STABLE: stable },
+        shape: changeSocs,
+      });
       const r = await t.session.page(REQ);
       expect(r.answer).toEqual({
         kind: 'blocked',
@@ -488,7 +492,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
   });
   it('a page that turns into a block after a verified click is that block', async () => {
     const t = setup({
-      selectors: { ...SELECTORS, VIEW_MORE_ADDS_CHEAPER: true },
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false, VIEW_MORE_ADDS_CHEAPER: true },
       shape: (c) =>
         (c.onNewPage = (p) => {
           p.onClick = () =>

@@ -296,7 +296,6 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     const t = setup();
     expect(await record(t.ctx([...Q, '--no-flights']), cfg, t.deps)).toBe(0);
     expect(written(t.root)).toEqual(['no-flights/unrecorded.meta.json']);
-    expect(SELECTORS.NO_FLIGHTS_VERIFIED).toBe(false);
   });
   it('rule 4: --no-flights with the line records the page', async () => {
     const t = setup({

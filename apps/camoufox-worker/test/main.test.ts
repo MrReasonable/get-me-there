@@ -102,8 +102,8 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toMatch(/supports macOS only/);
   });
-  it('FORM_VERIFIED false exits 78 (the module default), launching nothing', async () => {
-    const t = setup({ deps: { selectors: SELECTORS } });
+  it('FORM_VERIFIED false exits 78, launching nothing', async () => {
+    const t = setup({ deps: { selectors: { ...SELECTORS, FORM_VERIFIED: false } } });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toMatch(/FORM_VERIFIED/);
     expect(t.contexts).toEqual([]);

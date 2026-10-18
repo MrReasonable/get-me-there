@@ -40,7 +40,9 @@ const pageFactsSchema = z.object({
     noFlights: z.boolean(),
   }),
   accountControl: z.boolean(),
-  cheapestTabs: z.array(z.object({ name: z.string(), inTablist: z.boolean() })),
+  cheapestTabs: z.array(
+    z.object({ name: z.string(), inTablist: z.boolean(), selected: z.boolean().exactOptional() }),
+  ),
   dateGridButtons: z.number(),
   resultLinks: z.number(),
 });
@@ -108,7 +110,12 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
           r.file,
         ).toBe(true);
         expect(r.meta.socsReadBack, r.file).toBe('same');
-        expect(r.facts.page === null ? 'no page' : classifyPage(r.facts.page).kind, r.file).toBe('results');
+        // why: each recording is classified in the view it shows (the Cheapest recording has no Date grid button)
+        const view = kind === 'cheapest' ? 'cheapest' : 'best';
+        expect(
+          r.facts.page === null ? 'no page' : classifyPage(r.facts.page, SELECTORS, view).kind,
+          r.file,
+        ).toBe('results');
       }
     });
     it('every readable name parses with the dated grammar (Task 14.3)', () => {

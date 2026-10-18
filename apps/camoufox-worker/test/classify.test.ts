@@ -110,7 +110,10 @@ describe('classifyPage (spec §2, brief §9; blocked kinds first, total)', () =>
   });
   it('no-flights text is no-flights only when the flag is set (injected selectors)', () => {
     const f = facts({ text: t({ noFlights: true }), resultLinks: 0 });
-    expect(classifyPage(f)).toEqual({ kind: 'blocked', page: 'unrecognised' });
+    expect(classifyPage(f, { ...SELECTORS, NO_FLIGHTS_VERIFIED: false })).toEqual({
+      kind: 'blocked',
+      page: 'unrecognised',
+    });
     expect(classifyPage(f, { ...SELECTORS, NO_FLIGHTS_VERIFIED: true })).toEqual({ kind: 'no-flights' });
   });
   it('a blocked kind beats no-flights even with the flag set', () => {
