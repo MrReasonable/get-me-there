@@ -240,6 +240,37 @@ describe('replay through the dated allowlist history (spec §5.2: a parameter ad
     }
   });
 
+  it('picks the governing allowlist by date when the history is supplied out of order (CodeRabbit, PR #6)', async () => {
+    const replay = replayHandlers(await oldRecording(), { allowlists: [AFTER, BEFORE] });
+    server.use(...replay.handlers);
+    const res = await fetch(`${OLD_URL}&show_cheapest_flights=true`);
+    expect(obj(await jsonOf(res))).toEqual({ best_flights: [{ price: 603 }] });
+    expect(replay.misses()).toEqual([]);
+    // why: both allowlists predate this recording, so only a date-ordered pick finds AFTER, which lists the name.
+    const later = tree();
+    await rec(later).record(at(OLD_URL, { run: 'after' }, 200, asIsoDateTime('2026-10-19T09:00:00.000Z')));
+    const strict = replayHandlers(later, { allowlists: [AFTER, BEFORE] });
+    server.use(...strict.handlers);
+    await expect(fetch(`${OLD_URL}&show_cheapest_flights=true`)).rejects.toThrow();
+    expect(strict.misses()).toHaveLength(1);
+  });
+
+  it.each([
+    ['the last millisecond before the allowlist’s UTC date', '2026-10-17T23:59:59.999Z', true],
+    ['the first millisecond of the allowlist’s UTC date', '2026-10-18T00:00:00.000Z', false],
+  ])('a recording at %s is governed by the allowlist of its own UTC date', async (_, when, tolerated) => {
+    const root = tree();
+    await rec(root).record(at(OLD_URL, { at: when }, 200, asIsoDateTime(when)));
+    for (const allowlists of [HISTORY, [AFTER, BEFORE]]) {
+      const replay = replayHandlers(root, { allowlists });
+      server.use(...replay.handlers);
+      const sent = fetch(`${OLD_URL}&show_cheapest_flights=true`);
+      if (tolerated) expect(obj(await jsonOf(await sent))).toEqual({ at: when });
+      else await expect(sent).rejects.toThrow();
+      expect(replay.misses()).toHaveLength(tolerated ? 0 : 1);
+    }
+  });
+
   it('a request the old allowlist selects no entry for is a miss, never matched loosely', async () => {
     const replay = replayHandlers(await oldRecording(), { allowlists: HISTORY });
     server.use(...replay.handlers);

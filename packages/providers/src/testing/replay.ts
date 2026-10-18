@@ -50,12 +50,15 @@ export function loadRecorded(root: string, providerId: string, endpointPath: str
   return loadAll(root, join(root, providerId, endpointPath.replaceAll('/', '_'))).map(({ f }) => f);
 }
 
+/** The UTC calendar date of an instant, read through Date so it never depends on how the string was written. */
+const utcDay = (at: string): string => new Date(at).toISOString().slice(0, 10);
+
 /**
  * The allowlist a recording was made under: its provider's latest dated allowlist on or before the recording's UTC
- * date, or undefined when the history holds none that early.
+ * date, or undefined when the history holds none that early. `history` must be in date order (replayHandlers sorts it).
  */
 function governing(history: readonly ParamsAllowlist[], f: RecordedFixture): ParamsAllowlist | undefined {
-  const day = f.recordedAt.slice(0, 10);
+  const day = utcDay(f.recordedAt);
   return history.filter((a) => a.provider === f.providerId && a.recordedAt <= day).at(-1);
 }
 
@@ -96,7 +99,11 @@ export function replayHandlers(
   const all = loadAll(recordedRoot, recordedRoot).filter(
     ({ f }) => opts.session === undefined || f.session === opts.session,
   );
-  const history = opts.allowlists ?? [];
+  // why: governing() and the newest-first lookup both read the history in date order; a caller's array may be in any
+  // order, so a sorted copy is taken once (CodeRabbit, PR #6).
+  const history = [...(opts.allowlists ?? [])].sort((a, b) =>
+    byPair([a.recordedAt, a.provider], [b.recordedAt, b.provider]),
+  );
   const byKey = new Map<string, RecordedFixture[]>();
   // why: the tolerant index pairs a recording's own allowlist with its key, so a reduced request matches only
   // recordings that allowlist governs.
