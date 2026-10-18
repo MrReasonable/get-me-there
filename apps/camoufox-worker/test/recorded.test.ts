@@ -17,6 +17,7 @@ import { onAllowlist } from '../src/guard.js';
 import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS } from '../src/selectors.js';
+import { recordedAnchor } from './support/recordedGrid.js';
 
 const ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 
@@ -192,6 +193,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
             scrollButtons: z.number(),
           }),
           selectedLines: z.array(z.string()),
+          snapshot: z.string(),
         })
         .loose();
       const fileSchema = z
@@ -220,10 +222,10 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
                 });
         return out;
       };
-      // why: the recordings hold no query; every recorded date lies within the sale window after recordedAt, so the
-      // anchor for the year rule is half a window on
-      const anchorOf = (recordedAt: string) =>
-        asIsoDate(new Date(Date.parse(recordedAt) + 180 * 86_400_000).toISOString().slice(0, 10));
+      // why: fix round 1 (TS 13): the recordings hold no query; the year rule is anchored on the first view's own range
+      // line (test/support/recordedGrid.ts), never on an offset from the recording time
+      const anchorOf = (rec: z.infer<typeof fileSchema>) =>
+        recordedAnchor(rec.views[0]?.snapshot ?? '', rec.recordedAt);
       it('every view is the dates-grid view; every candidate parses; the cells name exactly the lines’ dates', () => {
         const recs = files().filter((f) => !f.file.endsWith('0-explore.json'));
         expect(recs.length).toBeGreaterThan(0);
@@ -238,7 +240,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
                 prices: v.selectedLines,
                 datesGrid: v.datesGrid,
               },
-              anchorOf(rec.recordedAt),
+              anchorOf(rec),
             );
             expect(r.kind === 'view' && [r.unparsed, r.structural], `${file} view ${i}`).toEqual([0, 'ok']);
             const sel = v.candidates.find((c) => c?.endsWith(', selected'));
@@ -260,7 +262,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
                 prices: v.selectedLines,
                 datesGrid: v.datesGrid,
               },
-              anchorOf(rec.recordedAt),
+              anchorOf(rec),
             ),
           );
           for (const [i, m] of rec.moves.entries()) {
@@ -284,6 +286,8 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
       });
       it('the renamed exploration’s 49 cell names parse', () => {
         const explore = files().filter((f) => f.file.endsWith('0-explore.json'));
+        // why: CodeRabbit on PR #9: a tree with grid recordings but no renamed exploration fails, never passes empty
+        expect(explore.length).toBeGreaterThan(0);
         for (const { raw } of explore) {
           const names = exploreSchema
             .parse(raw)

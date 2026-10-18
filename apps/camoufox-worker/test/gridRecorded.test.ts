@@ -20,6 +20,7 @@ import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, formNodes, n, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
+import { rangeOf, recordedAnchor } from './support/recordedGrid.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -60,8 +61,7 @@ function dialogOf(v: z.infer<typeof viewSchema>): FakeNode {
   const line = (t: string): FakeNode => n('generic', '', [], { text: t });
   // why: the range comes from the stored snapshot's line (this test's reading of a recording; the provider path never
   // parses printed text)
-  const range =
-    /text: (\d{1,2}(?: \w{3})?(?: \d{4})? – \d{1,2} \w{3}(?: \d{4})?)£/.exec(v.snapshot)?.[1] ?? '';
+  const range = rangeOf(v.snapshot);
   const price = v.selectedLines[0] ?? '';
   return n('dialog', 'Price insights', [
     n('tablist', '', [n('tab', 'Dates', [], { selected: true }), n('tab', 'Price graph')]),
@@ -98,9 +98,7 @@ function recordings(): Array<{ file: string; rec: z.infer<typeof fileSchema> }> 
 async function serve(rec: z.infer<typeof fileSchema>) {
   const first = rec.views[0];
   if (first === undefined) throw new Error('no view');
-  const anchor = asIsoDate(
-    new Date(Date.parse(rec.recordedAt) + 180 * 86_400_000).toISOString().slice(0, 10),
-  );
+  const anchor = recordedAnchor(first.snapshot, rec.recordedAt);
   const sel = parseCellName(first.candidates.find((c) => c?.endsWith(', selected')) ?? '');
   if (sel === null) throw new Error('no selected cell');
   const dep = resolveDay(sel.dep, anchor);
@@ -187,25 +185,58 @@ async function serve(rec: z.infer<typeof fileSchema>) {
 describe.skipIf(!present)(
   skipTitle('recorded grid views through the server path (Task 15.4, the live run)', present),
   () => {
-    it('every recorded page is read, or ends with an off-plan note; none is refused', async () => {
+    it('a page whose first view is on plan reads every recorded view, complete; one near today ends off-plan as such', async () => {
       const recs = recordings();
       expect(recs.length).toBeGreaterThan(0);
-      let read = 0;
+      let onPlan = 0;
+      let nearToday = 0;
       for (const { file, rec } of recs) {
         const r = await serve(rec);
-        if (r.answer.kind === 'grid') read += r.answer.views.length;
         if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
-        expect(['complete', 'off-plan'], file).toContain(r.answer.ended);
-        if (r.answer.ended === 'off-plan')
-          expect(
-            r.answer.views.some((v) => v.offPlan !== null),
-            file,
-          ).toBe(true);
         for (const v of r.answer.views)
           expect([v.structural, v.unparsed], `${file} view ${v.index}`).toEqual(['ok', 0]);
+        // why: TS 3: the step is pinned per recording: a wrong step makes the first move off-plan, and fails here
+        const today = rec.recordedAt.slice(0, 10);
+        if ((r.answer.views[0]?.departures[0] ?? '') <= today) {
+          nearToday++;
+          expect(r.answer.ended, file).toBe('off-plan');
+          expect(
+            r.answer.views.map((v) => v.offPlan),
+            file,
+          ).toEqual(['near-today']);
+        } else {
+          onPlan++;
+          expect(r.answer.ended, file).toBe('complete');
+          expect(r.answer.views, file).toHaveLength(rec.views.length);
+          expect(r.answer.views.every((v) => v.offPlan === null)).toBe(true);
+        }
+        expect(
+          r.answer.views.map((v) => v.cells.length),
+          file,
+        ).toEqual(rec.views.slice(0, r.answer.views.length).map((v) => v.candidates.length));
       }
-      // why: the moves ran: more views were read than there are recordings
-      expect(read).toBeGreaterThan(recs.length);
+      expect([onPlan > 0, nearToday > 0]).toEqual([true, true]);
+    });
+    // why: PA M5: the recorded facts the grammar stands on, pinned on what the server path reads from them
+    it('the recorded facts hold: the low mark, a December to January year, a thousands separator, a short view near today', async () => {
+      const views = [];
+      for (const { rec } of recordings()) {
+        const r = await serve(rec);
+        if (r.answer.kind === 'grid') views.push(...r.answer.views);
+      }
+      const cells = views.flatMap((v) => v.cells);
+      expect(cells.some((c) => c.mark === 'low')).toBe(true);
+      expect(cells.some((c) => c.mark === 'cheapest')).toBe(true);
+      expect(
+        cells.some(
+          (c) =>
+            c.departureDate.slice(5, 7) === '12' &&
+            c.returnDate.slice(5, 7) === '01' &&
+            Number(c.returnDate.slice(0, 4)) === Number(c.departureDate.slice(0, 4)) + 1,
+        ),
+      ).toBe(true);
+      expect(cells.some((c) => c.amountMinor >= 100_000)).toBe(true);
+      expect(views.some((v) => v.offPlan === 'near-today' && v.cells.length < 49)).toBe(true);
     });
   },
 );
