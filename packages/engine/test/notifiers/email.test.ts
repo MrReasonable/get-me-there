@@ -155,7 +155,7 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
     );
     expect(m?.parsed.html).toBeUndefined();
     expect(m?.parsed.text).toContain(
-      "   Provenance: Google Flights via SearchApi · fetched 5h ago · vendor's cache age unknown",
+      "   Provenance: Google Flights via SearchApi · UK market · fetched 5h ago · vendor's cache age unknown",
     );
     expect(m?.parsed.text).toContain('Coverage: itinerary-searched 3 of 10 cells, 2 outbounds each');
     expect(m?.parsed.text).toContain(

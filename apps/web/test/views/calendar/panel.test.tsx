@@ -469,3 +469,13 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('View B side panel point of sale (spec §11)', () => {
+  it('each price in the panel names its market', async () => {
+    server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
+    const { findByText, getByRole } = renderPanel(definition(), slice({}));
+    await findByText('£412');
+    const pos = within(getByRole('dialog')).getAllByTestId('point-of-sale');
+    expect(pos.map((e) => e.textContent)).toEqual(['market not stated', 'UK market']);
+  });
+});

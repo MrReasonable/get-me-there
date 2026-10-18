@@ -360,3 +360,38 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(NOW).toBe(asIsoDateTime('2026-10-14T15:00:00.000Z'));
   });
 });
+
+describe('point of sale on the full price display (spec §11; core pointOfSaleLabel)', () => {
+  const cell = (p: ProvenanceInput, extra: { compact?: boolean; face?: boolean } = {}) =>
+    within(
+      renderWithProviders(
+        <PriceCell pricePence={41200} provenance={p} calendar={false} stale={false} {...extra} />,
+      ).container,
+    ).getByTestId('price-cell');
+
+  it('words GB as "UK market", unknown as "market not stated", any other code as the code and "market"', () => {
+    expect(within(cell(searchProvenance)).getByTestId('point-of-sale')).toHaveTextContent(/^UK market$/);
+    expect(within(cell(calendarProvenance)).getByTestId('point-of-sale')).toHaveTextContent(
+      /^market not stated$/,
+    );
+    expect(
+      within(cell({ ...searchProvenance, pointOfSale: 'US' })).getByTestId('point-of-sale'),
+    ).toHaveTextContent(/^US market$/);
+  });
+
+  it('sits inside the provenance block, and Provenance prints it too', () => {
+    const block = renderWithProviders(
+      <Provenance provenance={searchProvenance} calendar={false} />,
+    ).getByTestId('provenance');
+    expect(within(block).getByTestId('point-of-sale')).toHaveTextContent('UK market');
+  });
+
+  it('is not on the compact calendar face or the phone face, in text or in the title', () => {
+    for (const variant of [{ compact: true }, { face: true }]) {
+      const c = cell(searchProvenance, variant);
+      expect(within(c).queryByTestId('point-of-sale')).toBeNull();
+      expect(c.textContent ?? '').not.toMatch(/market/);
+      expect(c.getAttribute('title') ?? '').not.toMatch(/market/);
+    }
+  });
+});
