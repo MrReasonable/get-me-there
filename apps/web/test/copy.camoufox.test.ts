@@ -28,8 +28,8 @@ describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
     for (const t of texts) expect(findBannedWords(t, BANNED_WORD_ALLOWLIST), t).toEqual([]);
   });
   // why: prov-008 and fix round 1 (CodeRabbit): only the CAPTCHA kind is called a challenge page; every other kind,
-  // the cooling-down line and the note never are, and no camoufox copy says "bot"
-  it('only the CAPTCHA kind is called a challenge page, and no copy says bot', () => {
+  // the cooling-down line and the note never are, and no camoufox copy uses the ruled words
+  it('only the CAPTCHA kind is called a challenge page, and no copy uses the ruled words', () => {
     const { captcha, ...others } = COPY.camoufox.pageKinds;
     expect(captcha).toMatch(/challenge page/);
     for (const [kind, words] of Object.entries(others)) expect(words, kind).not.toMatch(/challenge page/i);

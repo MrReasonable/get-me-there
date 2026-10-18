@@ -852,7 +852,7 @@ Rules (round 1's, corrected by rulings 5, 6 and 9):
    in every mismatch case the profile is wiped (close the context, remove `<data>/profile`, relaunch lazily). Then the
    page is closed under its own bound; an overrun of either `finally` step discards the context and, if the answer was
    `cells`, replaces it with `browser-error` `read`.
-6. A stop records its cause (`unrecognised` 1 h, the rest `botHours`); `signed-in` also sets the persisted refusal,
+6. A stop records its cause (`unrecognised` 1 h, the rest `challengeHours`); `signed-in` also sets the persisted refusal,
    cleared only by `clear-signed-in`, which wipes the profile first.
 7. Every thrown error maps to one answer: the page deadline → `not-ready`; an error before `goto` (from `addCookies`,
    the cookie check or `newPage`) → `browser-error` `launch` (Google not contacted); during `goto` → `browser-error`

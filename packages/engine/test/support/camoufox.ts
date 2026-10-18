@@ -279,6 +279,8 @@ export function engineWith(
     scheduleCron?: string;
     /** Every operator notice fails to send (fix round 1, arch M4). */
     notifierFails?: boolean;
+    /** The definition's free-call cap (fix round 2: a pause for another cap while camoufox has pages left). */
+    maxFreeCalls?: number;
   } = {},
 ): CamoufoxEngine {
   const parsed = parseConfig(
@@ -347,6 +349,9 @@ export function engineWith(
   const ids = stubs.map((s) => s.id);
   const definition = repos.definitions.create({
     ...baseDefinition(),
+    ...(o.maxFreeCalls === undefined
+      ? {}
+      : { budget: { ...baseDefinition().budget, maxFreeCalls: o.maxFreeCalls } }),
     window: { kind: 'absolute', from: first, to: last },
     minNights: 10,
     maxNights: 10,

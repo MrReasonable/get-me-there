@@ -8,6 +8,7 @@
  */
 import {
   AbortedError,
+  CAMOUFOX_CLOCK_SKEW_MS,
   CAMOUFOX_JS_VERSION,
   type CapabilityInfo,
   type CellKey,
@@ -255,8 +256,9 @@ export function camoufoxChecks(
       info.provenanceNote === CAMOUFOX_DISCOVERY_INFO.provenanceNote;
     const stored = tile.pointOfSale === answer.pointOfSale && answer.currency === 'GBP';
     const market = answer.pointOfSale === ports.config.pointOfSale;
-    // why: fix round 1 (CodeRabbit): read during this run, as the vendor provenance row requires
-    const fresh = tile.fetchedAt >= runStart;
+    // why: fix round 1 (CodeRabbit): read during this run, as the vendor provenance row requires, within the adapter's
+    // clock-skew allowance (fix round 2)
+    const fresh = Date.parse(tile.fetchedAt) >= Date.parse(runStart) - CAMOUFOX_CLOCK_SKEW_MS;
     add(
       'camoufox provenance',
       !labelled || !stored || !fresh ? 'fail' : market ? 'pass' : 'look',

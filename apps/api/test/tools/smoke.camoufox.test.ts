@@ -449,13 +449,22 @@ describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { tim
   });
   it('a tile fetched before the run started → provenance FAIL, the fetch time and observed values printed', async () => {
     const p = ports();
-    const rows = camoufoxChecks(p, base(), 'none', asIsoDateTime('2027-02-10T09:00:01.000Z'));
+    const rows = camoufoxChecks(p, base(), 'none', asIsoDateTime('2027-02-10T09:00:06.000Z'));
     expect(rows.find((c) => c.name === 'camoufox provenance')).toEqual({
       name: 'camoufox provenance',
       status: 'fail',
       detail:
         'scraped-self, maxAgeHours 0, GBP, point of sale GB as the page stated, fetched 2027-02-10T09:00:00.000Z (before this run started)',
     });
+  });
+  // why: fix round 2 (CodeRabbit): the same 5 s clock-skew allowance the adapter applies to fetchedAt
+  it('a tile fetched within 5 s before the run started passes provenance; 6 s before fails', async () => {
+    const p = ports();
+    const row = (start: string) =>
+      camoufoxChecks(p, base(), 'none', asIsoDateTime(start)).find((c) => c.name === 'camoufox provenance')
+        ?.status;
+    expect(row('2027-02-10T09:00:05.000Z')).toBe('pass');
+    expect(row('2027-02-10T09:00:06.000Z')).toBe('fail');
   });
   it('a stored point of sale that is not the page’s → provenance FAIL', async () => {
     const p = ports();

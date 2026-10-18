@@ -14,6 +14,12 @@ export const WORKER_KEY_HEADER = 'x-gmt-worker-key';
 /** The camoufox-js version the worker is pinned to and the smoke checks (spec §2; one copy, fix round 1 arch M11). */
 export const CAMOUFOX_JS_VERSION = '0.11.5';
 
+/**
+ * The clock difference tolerated between the app (perhaps in a container) and the host worker, each way: the adapter's
+ * fetchedAt window and the smoke's freshness row read this one value (fix rounds 1 and 2).
+ */
+export const CAMOUFOX_CLOCK_SKEW_MS = 5000;
+
 /** The seven page kinds the worker stops on (brief §9), in the classifier's order. */
 export const BLOCKED_PAGES = [
   'captcha',

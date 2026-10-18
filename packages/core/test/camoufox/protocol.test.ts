@@ -3,6 +3,7 @@ import {
   ANSWER_STATUS,
   BLOCKED_PAGES,
   blockedPageSchema,
+  CAMOUFOX_CLOCK_SKEW_MS,
   CAMOUFOX_JS_VERSION,
   GOOGLE_CONTACTED_HEADER,
   pageRequestSchema,
@@ -193,7 +194,8 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
     expect(workerStatusSchema.safeParse({ ...status, pageTimeoutSeconds: 241 }).success).toBe(false);
   });
   // why: fix round 1 (arch M11): the one copy of the camoufox-js pin, read by the worker and the smoke
-  it('names the pinned camoufox-js version', () => {
+  it('names the pinned camoufox-js version and the clock-skew allowance', () => {
     expect(CAMOUFOX_JS_VERSION).toBe('0.11.5');
+    expect(CAMOUFOX_CLOCK_SKEW_MS).toBe(5000);
   });
 });

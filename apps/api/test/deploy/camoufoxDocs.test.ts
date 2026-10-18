@@ -71,7 +71,7 @@ describe('docs/providers.md and docs/api-limits.md', () => {
   it('no doc describes evading detection or the provider’s terms position', () => {
     for (const doc of [setup, providers, limits, read('docs/scheduling.md')])
       expect(doc).not.toMatch(
-        /anti-detectio[n]|bot chec[k]|bot detec[t]|bot protectio[n]|robot[s]\.txt|terms of servic[e]|recognised as automatio[n]|evad[e]|stealt[h]/i,
+        /anti-detectio[n]|bo[t] chec[k]|bo[t] detec[t]|bo[t] protectio[n]|robot[s]\.txt|terms of servic[e]|recognised as automatio[n]|evad[e]|stealt[h]|\bbo[t]s?\b/i,
       );
     expect(flat(section)).toContain('whenever a page is not a recognised results page');
     expect(flat(section)).toContain('Your saved cookie choice (Reject all) is applied before every page');

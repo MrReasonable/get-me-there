@@ -167,7 +167,9 @@ function discoveryLine(
       rawCalls: pages,
       rawCostMicroGbp: 0,
       rawSeconds: pages * perPage,
-      cap: { calls: pageCap, seconds: pageCap * perPage },
+      // why: fix round 2 (CodeRabbit): the retry factor is clamped to the pages this execution has left (one when none
+      // are, which checkBudget refuses), never to the whole cap
+      cap: { calls: Math.max(left, 1), seconds: Math.max(left, 1) * perPage },
     };
   }
   return {

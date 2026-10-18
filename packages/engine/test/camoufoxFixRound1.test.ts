@@ -79,13 +79,45 @@ describe('the cool-down notice key (arch I1, M3, M4)', () => {
 });
 
 describe('a manual resume of paused_budget keeps the camoufox page cap (arch I2)', () => {
+  // why: fix round 2 (re-review N3): the resume must run, so the snapshot it persists is the refreshed one. The run
+  // pauses at the page cap with cells left; two of its page rows are then removed, so the cap has two pages left; the
+  // definition's cost cap is lowered (no confirmation needed), which the refreshed snapshot must show
   it('the refreshed snapshot still carries providerMaxCalls, and no page past the cap is loaded', async () => {
-    const e = engineWith([stubCamoufox({ cells: 6 })], { camoufoxConfigCap: 2 });
+    const e = engineWith([stubCamoufox({ cells: 8 })], { camoufoxConfigCap: 4 });
     const ex = await e.runToEnd();
     expect(ex.status).toBe('paused_budget');
-    const after = await e.resume(ex.id, { manual: true });
-    expect(e.ctx.repos.executions.get(after.id)?.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 2 });
-    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(2);
+    e.ctx.db.raw
+      .prepare(
+        "DELETE FROM provider_requests WHERE id IN (SELECT id FROM provider_requests WHERE execution_id = ? AND provider_id = 'camoufox' ORDER BY id LIMIT 2)",
+      )
+      .run(ex.id);
+    // why: fix round 2 (CodeRabbit major): the retry factor never asks more pages than the cap has left
+    const { estimateRemainingFor } = await import('../src/estimate.js');
+    const paused = e.ctx.repos.executions.get(ex.id);
+    if (paused === null) throw new Error('gone');
+    expect(
+      estimateRemainingFor(e.ctx, paused, true).perProvider.find((p) => p.providerId === 'camoufox')?.calls,
+    ).toBe(2);
+    e.ctx.repos.definitions.update(e.definition.id, {
+      budget: { ...e.definition.budget, maxCostMicroGbp: 999 },
+    });
+    const r = await e.resumeResult(ex.id, { manual: true });
+    expect(r.ok ? 'ok' : `${r.code}: ${r.message}`).toBe('ok');
+    for (
+      let i = 0;
+      i < 500 && ['pending', 'running'].includes(e.ctx.repos.executions.get(ex.id)?.status ?? '');
+      i++
+    )
+      await new Promise((res) => setTimeout(res, 2));
+    const stored = e.ctx.repos.executions.get(ex.id);
+    expect(stored?.snapshot.budget.maxCostMicroGbp).toBe(999);
+    expect(stored?.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 4 });
+    // two pages left: the resumed pass loads two of the four remaining cells and stops at the cap
+    expect(e.ledgerRows('camoufox').filter((row) => row.pageClass === 'page')).toHaveLength(4);
+    expect(
+      outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'skipped' && o.reason === 'budget'),
+    ).toHaveLength(2);
+    expect(stored?.status).toBe('paused_budget');
   });
 });
 
