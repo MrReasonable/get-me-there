@@ -103,13 +103,9 @@ describe('a manual resume of paused_budget keeps the camoufox page cap (arch I2)
     });
     const r = await e.resumeResult(ex.id, { manual: true });
     expect(r.ok ? 'ok' : `${r.code}: ${r.message}`).toBe('ok');
-    for (
-      let i = 0;
-      i < 500 && ['pending', 'running'].includes(e.ctx.repos.executions.get(ex.id)?.status ?? '');
-      i++
-    )
-      await new Promise((res) => setTimeout(res, 2));
-    const stored = e.ctx.repos.executions.get(ex.id);
+    // why: the final review of 2026-10-18: wait through the harness's bounded settle, which fails loudly, never a loop
+    // that can fall through
+    const stored = await e.settled(ex.id);
     expect(stored?.snapshot.budget.maxCostMicroGbp).toBe(999);
     expect(stored?.snapshot.budget.providerMaxCalls).toEqual({ camoufox: 4 });
     // two pages left: the resumed pass loads two of the four remaining cells and stops at the cap

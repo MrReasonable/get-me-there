@@ -598,8 +598,9 @@ Coverage, stated plainly: in `list` mode a page prices one day pair, so a run pr
 `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and
 1,500 a month, against 2,184 day pairs for one worked-example airport pair (8,736 for its four pairs). The estimate says
 how many cells a run will price and how many runs a full pass takes; the rest of the cells read skipped or not searched
-in View D. Until a recording proves Google's "no flights" line, a day pair with no service reads as an unrecognised
-page and pauses the provider for an hour, so empty routes read as not searched.
+in View D. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
+with no pause, as long as the line shows and the page has no result links. A page change that needs new recordings
+sets the flag back, and empty routes then read as not searched again.
 
 ### How it behaves
 

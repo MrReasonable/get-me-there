@@ -874,6 +874,30 @@ describe('the recorder under the server’s stop rules (fix round 1)', () => {
       { cause: 'signed-in', rule: 'account-cookie' },
     ]);
   });
+  // why: the final review of 2026-10-18: the stop record is a diagnostic only; a page whose heading shows an account
+  // address fails its fail-closed scan, and that must never skip the cool-down or the signed-in refusal
+  it('a stop record that cannot be written still leaves the cool-down and the refusal, with a warning', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [URL0, LANDED],
+          tree: resultsTree({
+            extra: [n('button', 'Google Account: Example Person'), n('heading', 'someone@example.test')],
+          }),
+        },
+      ],
+    });
+    const log = memoryLog();
+    expect(await record(t.ctx(Q), cfg, { ...t.deps, log })).toBe(EX_UNAVAILABLE);
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active()?.cause,
+    ).toBe('signed-in');
+    expect(new Refusal({ dir: t.dataDir, clock: t.timers.clock }).active()).not.toBeNull();
+    expect(written(t.root, { stopped: true })).toEqual([]);
+    expect(
+      log.lines.filter((l) => l.level === 'warn' && l.msg === 'stop record not written').map((l) => l.o),
+    ).toEqual([{ cause: 'signed-in', reason: 'RecordingRefused' }]);
+  });
   it('recordings are written 0600 in 0700 directories', async () => {
     const t = setup();
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);

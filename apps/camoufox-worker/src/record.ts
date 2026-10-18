@@ -289,23 +289,6 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             { cause: stopKind, rule, elapsedMs: deps.timers.now() - pageStart },
             'classifier decision',
           );
-          writeStopRecord(
-            deps.root,
-            day,
-            stopRecord({
-              cause: stopKind,
-              rule,
-              kind: args.kind,
-              landing: outcome.kind === 'stop' ? outcome.landing : landing,
-              hops: outcome.kind === 'stop' ? outcome.hops : late,
-              socsReadBack: back,
-              recordedAt: deps.clock.now(),
-              facts: seen.facts,
-              clicked: seen.clicked,
-              headings: seen.headings,
-            }),
-            secrets,
-          );
           const changed = !overran && back !== 'same';
           const merged = changed && stopKind !== 'consent-unhandled';
           const hours = merged
@@ -314,6 +297,33 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           const until = cooldown.start(stopKind, hours).until;
           if (stopKind === 'signed-in')
             refusal.set('a signed-in account control or account cookie (recorder)');
+          // why: the final review of 2026-10-18: the stop record is a diagnostic only, written after the cool-down and
+          // the refusal; a write the fail-closed scan refuses (an account address in a heading) is a warning, never a
+          // reason to skip either
+          try {
+            writeStopRecord(
+              deps.root,
+              day,
+              stopRecord({
+                cause: stopKind,
+                rule,
+                kind: args.kind,
+                landing: outcome.kind === 'stop' ? outcome.landing : landing,
+                hops: outcome.kind === 'stop' ? outcome.hops : late,
+                socsReadBack: back,
+                recordedAt: deps.clock.now(),
+                facts: seen.facts,
+                clicked: seen.clicked,
+                headings: seen.headings,
+              }),
+              secrets,
+            );
+          } catch (e) {
+            deps.log.warn(
+              { cause: stopKind, reason: e instanceof Error ? e.name : 'unknown' },
+              'stop record not written',
+            );
+          }
           // why: ruling 9 / session rule 5: a consent stop or a SOCS that is not the captured one leaves Google's
           // consent state in the shared profile; it is wiped before the server's next page
           if (stopKind === 'consent-unhandled' || changed || overran) {

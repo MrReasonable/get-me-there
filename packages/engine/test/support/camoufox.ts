@@ -261,6 +261,8 @@ export interface CamoufoxEngine {
   logs: LogLine[];
   runToEnd(): Promise<Execution>;
   resume(executionId: string, o: { manual: boolean }): Promise<Execution>;
+  /** Waits for an execution to leave pending/running; throws when it does not settle (never falls through). */
+  settled(executionId: string): Promise<Execution>;
   /** The orchestrator's own answer to a resume (fix round 1). */
   resumeResult(
     executionId: string,
@@ -395,6 +397,7 @@ export function engineWith(
       return settle(id);
     },
     resumeResult: (id, ro) => orch.resume(id, ro),
+    settled: (id) => settle(id),
     tick: async () => {
       const before = repos.executions.activeParent(definition.id);
       await orch.tick(definition.id);

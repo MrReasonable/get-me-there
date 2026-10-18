@@ -44,6 +44,13 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       expect(section, w).toContain(w);
     expect(flat(section)).toContain('is stopped only by `CAMOUFOX_WORKER_KEY`');
   });
+  // why: the final review of 2026-10-18: the no-flights line is verified, so an empty day pair is no data, not unknown
+  it('says a day pair with no service reads as no data, while the no-flights line stays verified', () => {
+    expect(flat(section)).toContain('a day pair with no service reads as no data');
+    expect(flat(section)).not.toContain(
+      'reads as an unrecognised page and pauses the provider for an hour, so empty routes',
+    );
+  });
   it('never puts the key on a command line, and has no Linux, docker0 or systemd setup text', () => {
     expect(setup).not.toMatch(/\$\(grep[^)]*CAMOUFOX_WORKER_KEY/);
     expect(setup).not.toMatch(/export CAMOUFOX_WORKER_KEY=/);
