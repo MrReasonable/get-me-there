@@ -614,7 +614,11 @@ export async function pollUntilSettled(
         { view, elapsedMs, changed: changedNames(previousNames, read.names) },
         'settle names changed',
       );
-    previous = settled ? current : null;
+    // why: fix round 1 (TS 8): the first poll of a run of matching ones is kept, so a short poll interval still needs
+    // two matching polls STABLE_MS apart
+    const same: boolean =
+      previous !== null && previous.signature === current.signature && previous.links === current.links;
+    previous = !settled ? null : same ? previous : current;
     previousNames = settled ? read.names : null;
     await timers.sleep(pollMs, d.signal);
   }

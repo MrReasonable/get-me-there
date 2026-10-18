@@ -8,7 +8,17 @@
  * as the dates-grid view, or whose cells drift from the grammar, is `unrecognised`. A view whose dates are off the plan
  * but consistent is kept, flagged with its cause, and ends the page; a scroll that does not settle ends it too.
  */
-import type { BlockedPage, GridMove, GridRequest, GridView, IsoDate } from '@gmt/core';
+import {
+  type BlockedPage,
+  GRID_HORIZON_DAYS,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
+  GRID_SIDE,
+  type GridMove,
+  type GridRequest,
+  type GridView,
+  type IsoDate,
+} from '@gmt/core';
 import type { PageBudget } from './budget.js';
 import { panelOf, settle, snapshotOf } from './dialogSettle.js';
 import {
@@ -23,7 +33,6 @@ import {
   runStep,
   type StepOptions,
 } from './driver.js';
-import { MOVE_BUDGET_MS, MOVE_RESERVE_MS } from './gridRecord.js';
 import {
   changeKeyOf,
   type Interpreted,
@@ -116,7 +125,7 @@ export async function gridPage(
   };
   const rejected = (r: Extract<Interpreted, { kind: 'unrecognised' }>, raw: RawView): GridPageResult =>
     unrecognised(r.why, { ...(r.check === undefined ? {} : { check: r.check }), ...viewCounts(raw) });
-  const so = { timers, pollMs: o.pollMs, S, reserveMs: MOVE_RESERVE_MS };
+  const so = { timers, pollMs: o.pollMs, S, reserveMs: GRID_MOVE_RESERVE_MS };
   const click = (name: string, l: LocatorLike, st0: Deadline) =>
     runStep(name, CLICK_TIMEOUT_MS, st0, steps, async (st) => {
       await st.race(l.click(clickTimeoutOf(st)));
@@ -128,7 +137,9 @@ export async function gridPage(
   // why: as the Cheapest flow: the dialog has its own budget from the first click, within twice the page timeout
   const d = budget.next();
   await click('click-graph', button.nth(0), d);
-  const dialog = page.getByRole('dialog', { name: G.dialog, exact: true }).nth(0);
+  // why: PIE M3: the check counts every "Price insights" dialog, so a second one fails it; the flow reads the first
+  const dialogs = page.getByRole('dialog', { name: G.dialog, exact: true });
+  const dialog = dialogs.nth(0);
   const opened = await settle('dialog', driver, d, so, steps, async (st) => {
     const n = await countOf(dialog, st);
     return { value: n, id: `dialog:${n}`, snapshot: n === 0 ? '' : await snapshotOf(dialog, st) };
@@ -150,7 +161,7 @@ export async function gridPage(
       steps,
       async (st) => {
         const p = await panelOf(dialog, st);
-        const raw = await readRawView(dialog, p.locator, st, S);
+        const raw = await readRawView(dialogs, p.locator, st, S);
         return {
           value: raw,
           id: `panel:${p.index ?? 'dialog'}`,
@@ -184,12 +195,20 @@ export async function gridPage(
   const views: GridView[] = [];
   let prev = firstRead.read;
   let prevKey = firstRead.key;
-  // why: the departures and returns lines are the truth for what a view shows; a first view the sale window shifted
-  // (its first departure at today, or later than planned at the window's end) is kept and ends the page (ruling 11)
+  // why: the departures and returns lines are the truth for what a view shows; a first view on other dates than planned
+  // is kept and ends the page (ruling 11). Its cause is named only from what is known (fix round 1, PA M3): near today
+  // when it starts at today or earlier, the sale window's end only when the planned block reaches within a block of the
+  // planning horizon, and otherwise only that it shifted
   const plannedDeps = days(plus(req.start.departureDate, -3));
   const plannedRets = days(plus(req.start.returnDate, -3));
   if (!same(prev.departures, plannedDeps) || !same(prev.returns, plannedRets)) {
-    const cause = (prev.departures[0] ?? '') <= o.today ? 'near-today' : 'sale-window-end';
+    const edge = plus(o.today, GRID_HORIZON_DAYS - GRID_SIDE);
+    const cause =
+      (prev.departures[0] ?? '') <= o.today
+        ? 'near-today'
+        : (plannedRets.at(-1) ?? '') >= edge || (plannedDeps.at(-1) ?? '') >= edge
+          ? 'sale-window-end'
+          : 'shifted';
     if (req.reads[0] === true) views.push(toView(prev, 0, cause));
     return { kind: 'grid', views, ended: 'off-plan', notes };
   }
@@ -200,13 +219,17 @@ export async function gridPage(
     // why: ruling 12: scroll clicks start at least the fixed spacing apart; never randomised
     const wait = lastScrollAt === null ? 0 : lastScrollAt + o.spacingMs - timers.now();
     if (wait > 0) await timers.sleep(wait);
-    const dm = budget.nextFor(MOVE_BUDGET_MS + MOVE_RESERVE_MS);
+    const dm = budget.nextFor(GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS);
+    // why: PIE M4: the button is looked up in the whole dialog, which is stricter than the panel the view check counts
+    // in: a second control of that name anywhere in the dialog is a page this app does not recognise
     const target = dialog.getByRole('button', { name: G.scroll[move], exact: true });
     if ((await runStep('find-scroll', LOOKUP_TIMEOUT_MS, dm, steps, (st) => countOf(target, st))) !== 1)
       return unrecognised('no-scroll-button');
     lastScrollAt = timers.now();
-    await click('click-scroll', target.nth(0), dm);
+    // why: CodeRabbit on PR #9: a click that overruns its step may still have reached the page; it is counted before
+    // the click, so the ledger never undercounts the scrolls
     o.counter.scrolls++;
+    await click('click-scroll', target.nth(0), dm);
     let next: Awaited<ReturnType<typeof view>>;
     try {
       next = await view(`move-${i + 1}`, dm, prevKey, false);

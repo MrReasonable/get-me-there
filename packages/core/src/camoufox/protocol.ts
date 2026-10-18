@@ -166,7 +166,7 @@ export const gridViewSchema = z.strictObject({
   cells: z.array(gridCellSchema).max(49),
   unparsed: count,
   structural: z.enum(['ok', 'unparsed']),
-  offPlan: z.enum(['near-today', 'sale-window-end', 'short-move']).nullable(),
+  offPlan: z.enum(['near-today', 'sale-window-end', 'shifted', 'short-move']).nullable(),
 });
 export type GridView = z.infer<typeof gridViewSchema>;
 /** How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights. */
@@ -257,5 +257,8 @@ export const workerStatusSchema = z.strictObject({
     .strictObject({ departures: z.number().int().min(1), returns: z.number().int().min(1) })
     .nullable()
     .exactOptional(),
+  /** The worker's own CAMOUFOX_GRID_SCROLL_CAP and spacing (fix round 1, CA 9), which the app's must equal in grid mode. */
+  gridScrollCap: z.number().int().min(0).nullable().exactOptional(),
+  gridScrollSpacingSeconds: z.number().int().min(0).nullable().exactOptional(),
 });
 export type WorkerStatus = z.infer<typeof workerStatusSchema>;

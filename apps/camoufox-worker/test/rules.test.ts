@@ -56,6 +56,19 @@ function importersOf(names: readonly string[]): string[] {
         for (const el of st.importClause.namedBindings.elements) if (names.includes(el.name.text)) out.add(f);
   return [...out].sort();
 }
+/** Files importing anything from the module `spec` (as written, e.g. './gridRecord.js'). */
+function moduleImporters(spec: string): string[] {
+  const out = new Set<string>();
+  for (const { f, sf } of sources)
+    for (const st of sf.statements)
+      if (
+        ts.isImportDeclaration(st) &&
+        ts.isStringLiteral(st.moduleSpecifier) &&
+        st.moduleSpecifier.text === spec
+      )
+        out.add(f);
+  return [...out].sort();
+}
 /** A delay a reviewer can read: a number, a name, a field, or arithmetic over those; never a call (no jitter). */
 function plainDelay(e: ts.Expression): boolean {
   if (ts.isNumericLiteral(e) || ts.isIdentifier(e) || ts.isPropertyAccessExpression(e)) return true;
@@ -267,6 +280,8 @@ describe('worker rules: source facts through the compiler API', () => {
   it('the grid page is reached only from the page session, and the recorder’s flow only from record.ts', () => {
     expect(importersOf(['gridPage'])).toEqual(['session.ts']);
     expect(importersOf(['exploreGrid'])).toEqual(['record.ts']);
+    // why: CA 6: the server process never loads the recorder's module; the move budgets live in core
+    expect(moduleImporters('./gridRecord.js')).toEqual(['record.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>

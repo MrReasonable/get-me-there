@@ -2,10 +2,10 @@
 // 2026-10-18): cells by their own names, the lines as a set check, the cell count less the impossible pairs, duplicates
 // and set mismatches structural, drift a stop, weekdays and years checked, and the first view's selected pair.
 import { asIsoDate } from '@gmt/core';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { interpretView, type RawView, readRawView } from '../src/gridView.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { changeKeyOf, interpretView, type RawView, readRawView, viewCounts } from '../src/gridView.js';
 import { SELECTORS } from '../src/selectors.js';
-import { FakePage, n } from './support/fakePage.js';
+import { FakeLocator, FakePage, n } from './support/fakePage.js';
 import { cellName, dayLabel, gridTree, plusDays, selectedRange } from './support/gridTree.js';
 import { fakeTimers } from './support/timers.js';
 
@@ -141,6 +141,44 @@ describe('interpretView', () => {
     const fine = r.candidates.map((x, i) => (i < 24 ? `${x ?? ''}, from` : x));
     expect(interpretView({ ...r, candidates: fine }, Q.dep).kind).toBe('view');
   });
+  it('exactly half of the priced-looking cells failing is not drift (the boundary)', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    // why: 48 priced-looking names (the last is unnamed), 24 of them failing: half, not more than half
+    const half = r.candidates.map((x, i) => (i === 48 ? null : i < 24 ? `${x ?? ''}, from` : x));
+    expect(interpretView({ ...r, candidates: half }, Q.dep).kind).toBe('view');
+  });
+  it('a departure whose seven names all fail leaves a line date no cell names: structural `sets`, nothing kept', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    // why: 7 of 49 fail (under the drift half) and the count holds, so only the set check can catch it
+    const names = r.candidates.map((x, i) =>
+      i % 7 === 6 ? `—, 17 Mar to ${21 + Math.floor(i / 7)} Mar` : x,
+    );
+    expect(interpretView({ ...r, candidates: names }, Q.dep)).toMatchObject({
+      kind: 'view',
+      structural: 'unparsed',
+      structuralCheck: 'sets',
+      cells: [],
+      unparsed: 7,
+    });
+  });
+  it('a cell whose return precedes its departure, both on the lines, is unparsed and never a cell', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-15' });
+    const names = [...r.candidates];
+    names[0] = '£450, 17 Mar to 15 Mar';
+    const v = interpretView({ ...r, candidates: names }, Q.dep);
+    if (v.kind !== 'view') throw new Error(v.why);
+    expect([v.unparsed, v.structural, v.cells.length]).toEqual([1, 'ok', r.candidates.length - 1]);
+    expect(v.cells.some((c) => c.departureDate === '2027-03-17' && c.returnDate === '2027-03-15')).toBe(
+      false,
+    );
+  });
+  it('the change key is the lines’ dates: a re-render that only reorders the labels is no change', () => {
+    const a = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    const b = raw({ depart: '2027-03-11', ret: '2027-03-21', rotate: 3 });
+    expect(b.lines).not.toEqual(a.lines);
+    expect(changeKeyOf(b)).toBe(changeKeyOf(a));
+    expect(changeKeyOf(raw({ depart: '2027-03-12', ret: '2027-03-21' }))).not.toBe(changeKeyOf(a));
+  });
   it.each([
     [
       'not the dates-grid view',
@@ -153,6 +191,14 @@ describe('interpretView', () => {
       (r: RawView): RawView => ({
         ...r,
         lines: [r.lines[0]?.replace('Thu 11 Mar', 'Fri 11 Mar') ?? '', r.lines[1] ?? ''],
+      }),
+      'lines',
+    ],
+    [
+      'seven labels with the right weekdays that are not consecutive days',
+      (r: RawView): RawView => ({
+        ...r,
+        lines: [r.lines[0]?.replace('Wed 17 Mar', 'Thu 18 Mar') ?? '', r.lines[1] ?? ''],
       }),
       'lines',
     ],
@@ -185,12 +231,66 @@ describe('interpretView', () => {
       { ...raw({ depart: '2027-03-11', ret: '2027-03-21' }), prices: ['£463 · Round trip'] },
     ],
     ['no range line', { ...raw({ depart: '2027-03-11', ret: '2027-03-21' }), ranges: [] }],
+    [
+      'two distinct range lines',
+      {
+        ...raw({ depart: '2027-03-11', ret: '2027-03-21' }),
+        ranges: ['14 – 24 Mar 2027', '15 – 24 Mar 2027'],
+      },
+    ],
+    [
+      'two distinct price lines',
+      {
+        ...raw({ depart: '2027-03-11', ret: '2027-03-21' }),
+        prices: ['£462 · Round trip', '£463 · Round trip'],
+      },
+    ],
   ])('the first view: %s is unrecognised (PA-11)', (_l, r) => {
     expect(interpretView(r, Q.dep, Q)).toMatchObject({ kind: 'unrecognised', why: 'first-view' });
   });
 });
 
+describe('viewCounts', () => {
+  it('counts a view with no lines as no labels', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    expect(viewCounts({ ...r, lines: [] })).toMatchObject({ lines: 0, labelsLine1: 0, labelsLine2: 0 });
+  });
+});
+
 describe('readRawView over the synthetic dialog', () => {
+  it('a missing scroll button is counted out of the dates-grid check', async () => {
+    const page = new FakePage(null);
+    page.setTrees([
+      n('document', '', [gridTree({ depart: '2027-03-11', ret: '2027-03-21', scroll: false })]),
+    ]);
+    page.url();
+    const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true });
+    const r = await readRawView(
+      dialog,
+      dialog.getByRole('tabpanel').nth(0),
+      fakeTimers().deadline(10_000),
+      SELECTORS,
+    );
+    expect(r.datesGrid.scrollButtons).toBe(0);
+  });
+  it('an element whose text reads as null is read as no text, and matches nothing', async () => {
+    const page = new FakePage(null);
+    page.setTrees([n('document', '', [gridTree({ depart: '2027-03-11', ret: '2027-03-21' })])]);
+    page.url();
+    const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true });
+    const spy = vi.spyOn(FakeLocator.prototype, 'textContent').mockResolvedValue(null);
+    try {
+      const r = await readRawView(
+        dialog,
+        dialog.getByRole('tabpanel').nth(0),
+        fakeTimers().deadline(10_000),
+        SELECTORS,
+      );
+      expect([r.lines, r.ranges, r.prices]).toEqual([['', ''], [], []]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
   // why: the live run of 2026-10-18 on 8885ba8 stopped at the first view: the range line is not an element of its own
   // (the recordings print it run together with the price, which is), so an anchored lookup found no range
   it.each(['shared', 'separate', 'spaced'] as const)(

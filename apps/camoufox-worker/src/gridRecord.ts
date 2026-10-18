@@ -9,6 +9,7 @@
  * order, the dates-grid check, and per move its timings and how many days each line moved. Nothing parses the printed
  * snapshot; it is stored for people to read. Only `record --grid` calls this module (rules.test.ts pins that).
  */
+import { GRID_MIN_SCROLL_SPACING_SECONDS, GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS } from '@gmt/core';
 import { type ClassifyRule, classifyPageWithRule } from './classify.js';
 import { type Blocked, type Facts, panelOf, type Skipped, settle, snapshotOf, soft } from './dialogSettle.js';
 import {
@@ -32,10 +33,10 @@ import type { Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
 
 /** Scroll clicks start at least this far apart (ruling 12: 5 s, fixed, never randomised). */
-export const GRID_SCROLL_SPACING_MS = 5000;
+export const GRID_SCROLL_SPACING_MS = GRID_MIN_SCROLL_SPACING_SECONDS * 1000;
 /** A move's own budget for its click, settle and read (ruling 10), and the reserve kept past it for the read. */
-export const MOVE_BUDGET_MS = 45_000;
-export const MOVE_RESERVE_MS = 15_000;
+export const MOVE_BUDGET_MS = GRID_MOVE_BUDGET_MS;
+export const MOVE_RESERVE_MS = GRID_MOVE_RESERVE_MS;
 /** One view's read: the lines, the labels, the 49 candidates' names and the dates-grid check. */
 export const READ_VIEW_MS = MOVE_RESERVE_MS;
 

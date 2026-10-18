@@ -28,3 +28,9 @@ export const GRID_GRAMMAR_VERSION = '2026-10-18';
 export const GRID_MIN_SCROLL_SPACING_SECONDS = 5;
 /** The most scrolls a page may make (CAMOUFOX_GRID_SCROLL_CAP's maximum). */
 export const GRID_MAX_SCROLLS_PER_PAGE = 60;
+/**
+ * One scroll's own budget, its click, settle and read, inside the page's overall cap, and the part of it kept for
+ * reading the view once it settles (WP15 ruling 10). The worker's moves and the app's request timeout both use them.
+ */
+export const GRID_MOVE_BUDGET_MS = 45_000;
+export const GRID_MOVE_RESERVE_MS = 15_000;

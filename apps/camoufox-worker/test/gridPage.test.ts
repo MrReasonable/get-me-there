@@ -1,8 +1,8 @@
 // WP15 Task 15.4: the worker's grid page through the page session (spec §2 rev 34; decision 70). Fake browser objects
 // and synthetic grids in the --grid recordings' shape (test/support/gridTree.ts); no Google page is loaded.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIata, asIsoDate, type GridMove, type PageRequest } from '@gmt/core';
+import { asIata, asIsoDate, asIsoDateTime, type GridMove, type PageRequest } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
 import { Pacer } from '../src/pacer.js';
@@ -68,8 +68,14 @@ interface Run {
   /** Days a scroll actually moves (the synthetic page's step). */
   step?: number;
   onScroll?: (at: number) => void;
-  today?: string;
   log?: ReturnType<typeof memoryLog>;
+  /** The days a scroll in `dir` moves each axis, overriding `step` (a page that moves the wrong way). */
+  moveOf?: (dir: string) => [number, number];
+  /** What the Price graph click shows, overriding the dialog on its Price graph tab. */
+  graph?: FakeNode;
+  /** Called on each scroll with the context, to change its cookie jar. */
+  onScrollContext?: (c: FakeContext) => void;
+  pollMs?: number;
 }
 function setup(o: Run = {}) {
   const dataDir = tmpDir();
@@ -80,6 +86,7 @@ function setup(o: Run = {}) {
   const clock = timers.clock;
   const contexts: FakeContext[] = [];
   const cooldown = new CooldownStore({ dir: dataDir, challengeHours: 48, clock });
+  const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
   let at = { dep: '2027-03-11', ret: '2027-03-21' };
   let index = 0;
   const step = o.step ?? 1;
@@ -98,13 +105,16 @@ function setup(o: Run = {}) {
       c.onNewPage = (pg) => {
         pg.onClick = (x) => {
           if (x.role === 'button' && x.name === 'Price graph')
-            pg.setTrees([dialogPage(gridTree({ depart: at.dep, ret: at.ret, tab: 'graph' }))]);
+            pg.setTrees([o.graph ?? dialogPage(gridTree({ depart: at.dep, ret: at.ret, tab: 'graph' }))]);
           else if (x.role === 'tab' && x.name === 'Dates') show(pg);
           else if (x.role === 'button' && (x.name ?? '').startsWith('Scroll ')) {
             o.onScroll?.(timers.now());
+            o.onScrollContext?.(c);
             const dir = (x.name ?? '').slice(7);
-            const dd = dir === 'right' ? step : dir === 'left' ? -step : 0;
-            const dr = dir === 'down' ? step : dir === 'up' ? -step : 0;
+            const [dd, dr] = o.moveOf?.(dir) ?? [
+              dir === 'right' ? step : dir === 'left' ? -step : 0,
+              dir === 'down' ? step : dir === 'up' ? -step : 0,
+            ];
             at = { dep: plusDays(at.dep, dd), ret: plusDays(at.ret, dr) };
             index++;
             show(pg);
@@ -118,7 +128,7 @@ function setup(o: Run = {}) {
     profileDir,
     socs: loadSocs(dataDir, clock),
     cooldown,
-    pacer: new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock }),
+    pacer,
     refusal: new Refusal({ dir: dataDir, clock }),
     clock,
     timers,
@@ -127,10 +137,13 @@ function setup(o: Run = {}) {
     log: o.log ?? memoryLog(),
     versions,
     grid: o.grid ?? GRID,
+    ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
   });
-  return { session, timers, cooldown, contexts };
+  return { session, timers, cooldown, contexts, pacer, profileDir };
 }
 const clicksOf = (t: ReturnType<typeof setup>) => t.contexts[0]?.pages[0]?.calls.clicks ?? [];
+const decisions = (log: ReturnType<typeof memoryLog>) =>
+  log.lines.filter((l) => l.msg === 'classifier decision').map((l) => l.o);
 
 describe('grid pages: gating', () => {
   it('GRID_VERIFIED false, or CAMOUFOX_MODE=list, answers mode-unavailable without opening anything', async () => {
@@ -303,5 +316,175 @@ describe('grid pages: the flow', () => {
     });
     const r = await t.session.page(req(['down'], { dep: '2027-09-10', ret: '2027-09-20' }));
     expect(r.answer).toMatchObject({ kind: 'grid', views: [], scrolls: 0, ended: 'no-flights' });
+  });
+});
+
+describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () => {
+  it.each([
+    ['moves the other axis too', (dir: string): [number, number] => (dir === 'right' ? [1, 1] : [0, 0])],
+    ['moves the wrong way', (dir: string): [number, number] => (dir === 'right' ? [-1, 0] : [0, 0])],
+  ])(
+    'a scroll that %s is unrecognised (grid:wrong-move): no view kept, no further click (PIE-12)',
+    async (_l, moveOf) => {
+      const log = memoryLog();
+      const t = setup({ moveOf, log });
+      const r = await t.session.page(req(['right', 'right']));
+      expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 1 });
+      expect(clicksOf(t).filter((c) => c.startsWith('button:Scroll'))).toEqual(['button:Scroll right']);
+      expect(decisions(log)[0]).toMatchObject({ cause: 'unrecognised', rule: 'grid:wrong-move', move: 1 });
+    },
+  );
+  it('a re-render that only reorders the labels after a scroll is a scroll that did not settle, not a wrong move (PIE M2)', async () => {
+    // why: the default view rotates its elements on every scroll; with a step of 0 its dates never change
+    const t = setup({ step: 0 });
+    const r = await t.session.page(req(['down', 'down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', scrolls: 1, ended: 'scroll-not-settled' });
+    expect(t.cooldown.active()).toBeNull();
+  });
+  it('no Price graph button: unrecognised (grid:no-price-graph-button), nothing clicked', async () => {
+    const log = memoryLog();
+    const t = setup({
+      tree: resultsTree({ form: formNodes({ dep: 'Sun, 14 Mar', ret: 'Wed, 24 Mar' }), extra: [] }),
+      log,
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
+    expect(clicksOf(t)).toEqual([]);
+    expect(decisions(log)[0]).toMatchObject({ rule: 'grid:no-price-graph-button' });
+  });
+  it('a dialog with no Dates tab: unrecognised (grid:no-dates-tab), no tab clicked', async () => {
+    const log = memoryLog();
+    const t = setup({
+      graph: dialogPage(
+        n('dialog', 'Price insights', [n('tablist', '', [n('tab', 'Price graph', [], { selected: true })])]),
+      ),
+      log,
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+    expect(clicksOf(t)).toEqual(['button:Price graph']);
+    expect(decisions(log)[0]).toMatchObject({ rule: 'grid:no-dates-tab' });
+  });
+  it('a second "Scroll down" in the dialog, outside the panel: unrecognised (grid:no-scroll-button), never clicked', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r) => {
+        const g = gridTree({ depart: d, ret: r });
+        g.children = [...(g.children ?? []), n('button', 'Scroll down')];
+        return [dialogPage(g)];
+      },
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
+    expect(clicksOf(t).filter((c) => c.startsWith('button:Scroll'))).toEqual([]);
+    expect(decisions(log)[0]).toMatchObject({ rule: 'grid:no-scroll-button' });
+  });
+  it('two "Price insights" dialogs: not the dates-grid view (PIE M3)', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r) => [
+        n('document', '', [
+          ...formNodes({ dep: 'Sun, 14 Mar', ret: 'Wed, 24 Mar' }),
+          gridTree({ depart: d, ret: r }),
+          gridTree({ depart: d, ret: r }),
+        ]),
+      ],
+    });
+    const r = await t.session.page(req([]));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+    expect(decisions(log)[0]).toMatchObject({ rule: 'grid:not-dates-grid', dialog: 2 });
+  });
+  it('a scroll click that overruns its step is counted: the ledger never undercounts (CodeRabbit)', async () => {
+    const t = setup({
+      view: (d, r) => {
+        const g = gridTree({ depart: d, ret: r });
+        const panel = (g.children ?? []).find((x) => x.role === 'tabpanel');
+        for (const b of panel?.children ?? []) if (b.name === 'Scroll down') b.clickHang = true;
+        return [dialogPage(g)];
+      },
+    });
+    let done = false;
+    const pending = t.session.page(req(['down', 'down'])).finally(() => {
+      done = true;
+    });
+    // why: only the click's own step bound is pending once it hangs; the fake clock runs it out
+    for (let i = 0; i < 80 && !done; i++) {
+      for (let j = 0; j < 5; j++) await new Promise((res) => setImmediate(res));
+      if (!done) t.timers.runOut();
+    }
+    const r = await pending;
+    expect(r.answer).toMatchObject({ scrolls: 1 });
+    expect(r.answer.kind).not.toBe('grid');
+  });
+  it('SOCS changed by a scroll: consent-unhandled, the profile wiped, the scroll counted', async () => {
+    const t = setup({
+      onScrollContext: (c) => {
+        c.afterGoto = (jar) => jar;
+        c.jar = c.jar.map((x) => (x.name === 'SOCS' ? { ...x, value: 'an-accept-value' } : x));
+      },
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'consent-unhandled', scrolls: 1 });
+    expect(existsSync(t.profileDir)).toBe(false);
+  });
+  it('the pacer is released after a grid page, and the next page waits 30 s from this page’s start', async () => {
+    const t = setup();
+    const start = t.timers.now();
+    await t.session.page(req(['down']));
+    expect(t.timers.now() - start).toBeLessThan(30_000 - 2000);
+    expect(t.pacer.claim().ok).toBe(false);
+    t.timers.clock.set(asIsoDateTime(new Date(start + 30_000).toISOString()));
+    const c = t.pacer.claim();
+    t.pacer.release();
+    expect(c.ok).toBe(true);
+  });
+  it('a view settles only once two polls 2 s apart match, however short the poll interval (ruling 9)', async () => {
+    const log = memoryLog();
+    const t = setup({ pollMs: 500, log });
+    const r = await t.session.page(req([]));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete' });
+    const get = (o: object | undefined, k: string): unknown =>
+      o === undefined ? undefined : Reflect.get(o, k);
+    const polls = log.lines
+      .filter((l) => l.msg === 'dialog poll' && get(l.o, 'view') === 'dates')
+      .map((l) => l.o);
+    const last = polls.at(-1);
+    const firstSame = polls.find((p) => get(p, 'container') === get(last, 'container'));
+    expect(get(last, 'stable')).toBe(true);
+    expect(Number(get(last, 'elapsedMs')) - Number(get(firstSame, 'elapsedMs'))).toBeGreaterThanOrEqual(2000);
+    expect(polls.length).toBeGreaterThanOrEqual(5);
+  });
+  it.each([
+    [
+      'a shifted first view far from both ends of the sale window is `shifted`',
+      '2027-03-14',
+      '2027-03-24',
+      'shifted',
+    ],
+    [
+      'a shifted first view at the end of the planning horizon is `sale-window-end`',
+      '2027-09-01',
+      '2027-09-11',
+      'sale-window-end',
+    ],
+  ])('%s (PA M3)', async (_l, dep, ret, cause) => {
+    const shown = (x: string) => {
+      const d = new Date(`${x}T00:00:00Z`);
+      return d
+        .toUTCString()
+        .slice(0, 11)
+        .replace(/^(\w{3}), (\d{2}) (\w{3})$/, (_m, w, dd, mm) => `${w}, ${Number(dd)} ${mm}`);
+    };
+    const t = setup({
+      tree: best({ dep: shown(dep), ret: shown(ret) }),
+      view: () => [
+        dialogPage(gridTree({ depart: plusDays(dep, -4), ret: plusDays(ret, -3), selected: [dep, ret] })),
+      ],
+    });
+    const r = await t.session.page(req(['down'], { dep, ret }));
+    expect(r.answer).toMatchObject({ kind: 'grid', scrolls: 0, ended: 'off-plan' });
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => v.offPlan)).toEqual([cause]);
   });
 });

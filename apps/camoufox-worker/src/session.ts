@@ -1,9 +1,10 @@
 import { rmSync } from 'node:fs';
 import {
-  asIsoDate,
   type BlockedPage,
   type Clock,
   GRID_GRAMMAR_VERSION,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
   type GridRequest,
   type IsoDateTime,
   type ListRequest,
@@ -30,7 +31,6 @@ import {
 } from './driver.js';
 import { checkForm } from './form.js';
 import { gridPage } from './gridPage.js';
-import { MOVE_BUDGET_MS, MOVE_RESERVE_MS } from './gridRecord.js';
 import { installGuard } from './guard.js';
 import { readList } from './list.js';
 import type { Pacer } from './pacer.js';
@@ -201,7 +201,8 @@ export class PageSession {
       this.d.timers,
       this.d.pageTimeoutMs,
       started,
-      2 * this.d.pageTimeoutMs + moves * ((this.d.grid?.spacingMs ?? 0) + MOVE_BUDGET_MS + MOVE_RESERVE_MS),
+      2 * this.d.pageTimeoutMs +
+        moves * ((this.d.grid?.spacingMs ?? 0) + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
     );
     const counter = { scrolls: 0 };
     const scrolls = (): { scrolls?: number } => (req.mode === 'grid' ? { scrolls: counter.scrolls } : {});
@@ -413,7 +414,8 @@ export class PageSession {
       steps: { timers: this.d.timers, log: this.d.log, startedAt: started },
       spacingMs: g?.spacingMs ?? 0,
       stepDays: g?.stepDays ?? { departures: 1, returns: 1 },
-      today: asIsoDate(this.d.clock.now().slice(0, 10)),
+      // why: CA 10: the operator's date, as the app's planner takes it
+      today: this.d.clock.todayLondon(),
       counter,
     });
     if (r.kind === 'stop')

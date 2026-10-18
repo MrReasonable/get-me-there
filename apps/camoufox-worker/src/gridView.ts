@@ -42,8 +42,11 @@ const PRICE_LINE = /£[\d,]+\s·\sRound trip/;
 const spaced = (t: string): string => t.replace(/\s+/g, ' ').trim();
 /** Each distinct match of `re` in the texts, spacing normalised. */
 const found = (xs: readonly string[], re: RegExp): string[] => [
-  ...new Set(xs.flatMap((x) => re.exec(spaced(x))?.[0] ?? [])),
+  ...new Set(xs.flatMap((x) => [...(re.exec(spaced(x)) ?? [])].slice(0, 1))),
 ];
+/** The one value of a list, or null when it holds none or more than one. */
+const one = ([x, ...rest]: readonly string[]): string | null =>
+  x !== undefined && rest.length === 0 ? x : null;
 
 export interface DatesGridCheck {
   dialog: number;
@@ -102,8 +105,20 @@ export async function readRawView(
   };
 }
 
-/** What must change before a view after a scroll counts: its lines. */
-export const changeKeyOf = (r: Pick<RawView, 'lines'>): string => r.lines.join('|');
+/**
+ * What must change before a view after a scroll counts: the dates on its lines, as sets (fix round 1, PIE M2). A
+ * re-render that only reorders the label elements is no change, so it ends as a scroll that did not settle, never as a
+ * wrong move.
+ */
+export const changeKeyOf = (r: Pick<RawView, 'lines'>): string =>
+  r.lines
+    .map((l) =>
+      dayLabels(spaced(l))
+        .map((x) => `${x.month}-${x.day}`)
+        .sort()
+        .join(','),
+    )
+    .join('|');
 
 export type Interpreted =
   | {
@@ -129,8 +144,8 @@ export function viewCounts(r: RawView): Record<string, number> {
     candidates: r.candidates.length,
     pricedLooking: r.candidates.filter((x) => x?.startsWith('£') === true).length,
     lines: r.lines.length,
-    labelsLine1: dayLabels(r.lines[0] ?? '').length,
-    labelsLine2: dayLabels(r.lines[1] ?? '').length,
+    labelsLine1: dayLabels(r.lines.slice(0, 1).join('')).length,
+    labelsLine2: dayLabels(r.lines.slice(1, 2).join('')).length,
     ranges: r.ranges.length,
     prices: r.prices.length,
     ...r.datesGrid,
@@ -149,8 +164,9 @@ function lineDates(text: string, anchor: IsoDate): IsoDate[] | null {
     if (date === null || !weekdayMatches(l.weekday, date)) return null;
     dates.push(date);
   }
-  const sorted = [...dates].sort();
-  return sorted.every((x, i) => i === 0 || epochDay(x) - epochDay(sorted[i - 1] ?? x) === 1) ? sorted : null;
+  // why: seven distinct days spanning six are seven consecutive days
+  const days = dates.map(epochDay);
+  return new Set(days).size === 7 && Math.max(...days) - Math.min(...days) === 6 ? [...dates].sort() : null;
 }
 
 /**
@@ -204,8 +220,10 @@ export function interpretView(
   }
   if (pricedFailed * 2 > pricedLooking) return { kind: 'unrecognised', why: 'selector-drift' };
   if (first !== undefined) {
-    const range = r.ranges.length === 1 ? parseSelectedRange(r.ranges[0] ?? '') : null;
-    const price = r.prices.length === 1 ? parseSelectedPrice(r.prices[0] ?? '') : null;
+    const rangeLine = one(r.ranges);
+    const priceLine = one(r.prices);
+    const range = rangeLine === null ? null : parseSelectedRange(rangeLine);
+    const price = priceLine === null ? null : parseSelectedPrice(priceLine);
     const named = (
       dm: { day: number; month: number; year: number | null } | undefined,
       iso: IsoDate,

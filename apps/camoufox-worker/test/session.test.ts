@@ -53,6 +53,7 @@ function setup(
     log?: ReturnType<typeof memoryLog>;
     /** Replaces the fake launch (fix round 1: a launch that never resolves). */
     launch?: () => Promise<FakeContext>;
+    pollMs?: number;
   } = {},
 ) {
   const dataDir = tmpDir();
@@ -100,6 +101,7 @@ function setup(
       pageTimeoutMs: 90_000,
       log: o.log ?? memoryLog(),
       versions,
+      ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
     });
   return {
     dataDir,
@@ -185,6 +187,19 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(page0(t).calls.closed).toBe(1);
     expect(page0(t).calls.clicks).toEqual([]);
     expect(released(t)).toBe(true);
+  });
+  it('a Best view settles at a short poll interval, on two matching polls at least 2 s apart (fix round 1, TS 8)', async () => {
+    const log = memoryLog();
+    const t = setup({ pollMs: 500, log });
+    const r = await t.session.page(REQ);
+    expect(r.answer.kind).toBe('cells');
+    const polls = log.lines.filter((l) => l.msg === 'settle poll').map((l) => l.o);
+    const get = (o: object | undefined, k: string): unknown =>
+      o === undefined ? undefined : Reflect.get(o, k);
+    expect(get(polls.at(-1), 'stable')).toBe(true);
+    expect(
+      Number(get(polls.at(-1), 'elapsedMs')) - Number(get(polls.at(-5), 'elapsedMs')),
+    ).toBeGreaterThanOrEqual(2000);
   });
   it('two pages in a row, each preceded by addCookies with SOCS', async () => {
     const t = setup();

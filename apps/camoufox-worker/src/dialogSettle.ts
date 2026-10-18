@@ -176,7 +176,9 @@ export async function settle<T>(
         rule,
         pageKind: kind.kind,
       };
-    previous = moved ? { key, at } : null;
+    // why: fix round 1 (TS 8): the first poll of a run of matching ones is kept, so a short poll interval still needs
+    // two matching polls STABLE_MS apart, and never settles on two polls closer than that
+    previous = !moved ? null : previous !== null && previous.key === key ? previous : { key, at };
     await o.timers.sleep(o.pollMs, d.signal);
   }
 }

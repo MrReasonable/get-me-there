@@ -50,6 +50,8 @@ export default defineConfig({
         'src/accountCookies.ts': SAFETY,
         // why: WP15: the date grid's dated grammar joins the safety modules
         'src/gridNames.ts': SAFETY,
+        // why: fix round 1 (TS 5): the rules that decide "nothing stored from this view" are safety rules too
+        'src/gridView.ts': SAFETY,
       },
     },
   },
