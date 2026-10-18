@@ -14,15 +14,25 @@ Written 2026-10-18 against spec revision 32, plan decisions 1–68 and `main` at
 Phase 4 continuity fallback to be built, then ruled that its browser is Camoufox, the anti-detection Firefox build
 already installed on their machine, driven through the camofox-browser REST server they already run. The provider id
 stays `'camoufox'`, as spec §2 always planned. The limits that still bind (no proxies, never solving a challenge, a hard
-stop and cool-down on any bot check, consent "Reject all", a fixed low rate, a dedicated signed-out profile, off by
-default) are plan decision 68, and every task below enforces them with a test.
+stop and cool-down on any bot check, consent rejected and never accepted, a fixed low rate, a dedicated signed-out
+profile, the camofox-browser access key, off by default) are plan decision 68, and every task below enforces them with a test.
 
 This brief folds in the feasibility load of 2026-10-18: one Google Flights search for the worked example
 (`?q=Flights from LHR to JFK on 2026-11-05 returning 2026-11-15&curr=GBP&hl=en-GB&gl=GB`) through the operator's
 Camoufox (`@askjo/camofox-browser` 1.13.1, Camoufox 152.0.4-beta.28) loaded the full results with no consent page, no
 CAPTCHA and no "unusual traffic" page. The structure it saw is the verified part of the selectors module (§9); the
-consent page and the date grid were not seen and stay unverified until Task 14.12 records them. That load ran signed in
-to the operator's Google account, which this brief now forbids (the dedicated profile of Task 14.5).
+date grid was not seen and stays unverified until Task 14.12 records it. That load ran signed in to the operator's
+Google account, which this brief now forbids (the dedicated profile of Task 14.5).
+
+It also folds in the signed-out test of 2026-10-18: a fresh camofox-browser profile (`gmt-probe-signedout`, no Google
+login) landed on `consent.google.com` ("Before you continue", buttons "Reject all" and "Accept all"), with no CAPTCHA
+and no "unusual traffic" page; camofox-browser 1.13.1's built-in `dismissConsentDialogs` (`server.js:1934`) then clicked
+`button[aria-label="Accept all"]` by itself, twice (it runs after every navigation and no setting turns it off), and the
+results page loaded with 26 result links in the same name grammar. The probe profile was deleted. So the worker never
+lets the consent page appear: it pre-sets Google's `SOCS` rejection cookie, and treats any consent page as a stop (Task
+14.4). The operator's rulings of the same day settle the rest: camofox-browser's `CAMOFOX_ACCESS_KEY` is set and sent;
+the robots.txt disallow and Google's terms are known costs the operator accepted in choosing Camoufox; the cool-down is
+48 hours by default and configurable; a list-mode return date is labelled as the query's date.
 
 ## 1. Goal
 
@@ -37,25 +47,26 @@ the same contract, ledger, caps and labels as every other provider.
 
 - **The worker** `apps/camoufox-worker` (Tasks 14.1–14.6): a host-side Node process with no browser library. A typed
   client for the camofox-browser REST API pinned at 1.13.1; an accessibility-snapshot model; a pure page classifier
-  (consent / results / blocked kinds, signed-in included); the dated selectors module and the dated result-name grammar;
+  (results / blocked kinds, consent and signed-in included); the dated selectors module and the dated result-name grammar;
   the `list` reader ("Cheapest" tab, "View more flights", every result's accessible name) and the `grid` reader (refused
-  until verified); consent "Reject all"; the URL allowlist checked after every step; the fixed spacing; the persisted
-  cool-down; the start checks (REST version, dedicated profile, no Google account cookie); the token-authenticated HTTP
+  until verified); the `SOCS` rejection cookie set before every page and read back after it; the URL allowlist checked
+  after every step; the fixed spacing; the persisted
+  cool-down; the start checks (REST version, access key enforced, dedicated profile, no Google account cookie, a dated
+  `SOCS` rejection value present and younger than 13 months); the token-authenticated HTTP
   API with its answers.
 - **Core widening** (Task 14.7): `ProviderId` gains `'camoufox'`; `SourceKind` gains `'scraped-self'`;
   `ProviderErrorKind` gains `'blocked'`; `BudgetScopeKind` gains `'provider-execution'`; `SOURCE_LABELS` gains
   "Google Flights prices via Camoufox"; the config schema gains the `CAMOUFOX_*` block of spec §12 with its bounds.
 - **db** (Task 14.8): migration 0005 widens every `provider_id` and `source_kind` CHECK; the `provider-execution` cap.
 - **The adapter** `packages/providers/src/camoufox/` (Task 14.9): `list` tiling (one cell per tile) and `grid` tiling
-  (7 × 7), `fetchTile` through http-kit, the answer mapping, the consent continuation as the tile's second ledgered
-  step, `cellIssues` for dropped options and unread cells, `camoufoxHttpLimits` and the one egress exception (exactly
+  (7 × 7), `fetchTile` through http-kit, the answer mapping, `cellIssues` for dropped options and unread cells, `camoufoxHttpLimits` and the one egress exception (exactly
   `CAMOUFOX_WORKER_URL`).
 - **Engine** (Task 14.10): the two new rows of the spec §8.1 error table; a manual resume never re-admits a provider
   that was blocked in that execution.
 - **Wiring and copy** (Task 14.11): `httpLimitsFor`, `providersFor`, `collectSecrets`; the compact mark `CF`.
 - **Recording and replay** (Task 14.12): a development-only recorder that saves accessibility snapshots of the pages the
   worker sees, gitignored and local-only under decision 61, and replay tests that skip visibly without them; the step
-  that verifies the consent and grid selectors.
+  that verifies the grid selectors; a recorded consent page, taken in a throwaway profile, proves the worker refuses it.
 - **Compose and checks** (Task 14.13): the `CAMOUFOX_*` environment lines and one `extra_hosts` entry on `app`; CI
   checks that the default image carries no browser and the app runs with the worker absent; the dependency and source
   rules (no proxy, no challenge solver, no cookie import).
@@ -67,7 +78,8 @@ the same contract, ledger, caps and labels as every other provider.
 - Itinerary search (spec §2: a result's accessible name gives the outbound only, with no return leg, flight numbers or
   IATA codes, so a `RawOffer` would be partly invented). The parsed outbound facts (carrier names, stops, duration) are
   read only to validate the grammar and to print in the smoke; nothing stores them.
-- Proxies of any kind, CAPTCHA solving, clicking or waiting out a challenge, cookie import, signing in. Forbidden by
+- Proxies of any kind, CAPTCHA solving, clicking or waiting out a challenge, setting any cookie but the `SOCS`
+  rejection, signing in, clicking anything on a consent page. Forbidden by
   decision 68; Task 14.13's tests fail the build if code or a dependency does any of them.
 - Installing or configuring Camoufox or camofox-browser. The operator's own; the docs name the versions verified.
 - The http-kit pipeline and recorder (**WP4**), normalisation (**WP2/WP7**), the other adapters (**WP5/WP6**).
@@ -75,8 +87,8 @@ the same contract, ledger, caps and labels as every other provider.
 ## 3. Spec sections and plan decisions
 
 - **§2 Continuity fallback (rev 32).** Method (the worker as the REST server's client; `list` and `grid` modes),
-  discovery only, limits (dedicated signed-out profile, no proxies, no challenge solved, spacing, caps, allowlist,
-  consent, hard stop, cool-down), ledger rows, labels, costs. The costs go verbatim into the operator docs (Task 14.14).
+  discovery only, limits (dedicated signed-out profile, access key, no proxies, no challenge solved, spacing, caps,
+  allowlist, consent rejected through `SOCS` and never accepted, hard stop, cool-down), ledger rows, labels, costs. The costs go verbatim into the operator docs (Task 14.14).
 - **§2 table, `camoufox` row.** `scraped-self`, `maxAgeHours` 0.
 - **§3.** `error` with reason `blocked`.
 - **§5.1.** The widened unions; `BudgetExceeded` scope `provider-execution`.
@@ -146,12 +158,11 @@ export function camoufoxHttpLimits(c: NonNullable<Config['providers']['camoufox'
 export type PageRequest = { mode: 'list' | 'grid'; origin: Iata; destination: Iata; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate; gl: string };
 export type WorkerAnswer =
   | { kind: 'cells'; fetchedAt: IsoDateTime; currency: string; pointOfSale: string; cells: PageCell[]; dropped: DroppedCell[]; optionsDropped: number; notes: string[]; selectorsVersion: string }
-  | { kind: 'consent-rejected'; fetchedAt: IsoDateTime; selectorsVersion: string }
   | { kind: 'blocked'; page: BlockedPage; cooldownUntil: IsoDateTime }       // HTTP 423
   | { kind: 'cooling-down'; cooldownUntil: IsoDateTime }                    // HTTP 423, Google not contacted
   | { kind: 'spacing'; retryAfterSeconds: number }                          // HTTP 429, Google not contacted
   | { kind: 'mode-unavailable'; mode: 'grid' };                             // HTTP 409, grid selectors unverified
-export type BlockedPage = 'captcha' | 'unusual-traffic' | 'sign-in' | 'signed-in' | 'off-allowlist' | 'unrecognised';
+export type BlockedPage = 'captcha' | 'unusual-traffic' | 'consent-unhandled' | 'sign-in' | 'signed-in' | 'off-allowlist' | 'unrecognised';
 export type PageCell = { departureDate: IsoDate; returnDate: IsoDate; amountMinor: number | null };   // null: no price shown
 export type DroppedCell = { departureDate: IsoDate | null; returnDate: IsoDate | null; detail: string };
 
@@ -161,6 +172,10 @@ export interface Snapshot { url: string; tree: AxNode }
 // apps/camoufox-worker/src/rest.ts
 export interface CamofoxRest {
   version(): Promise<string>;
+  openWithoutKey(): Promise<'refused' | 'answered'>;                 // one keyless request; the worker refuses to start on 'answered'
+  setConsentCookie(profileId: string, socsValue: string): Promise<void>;   // POST /sessions/:userId/cookies, name SOCS only
+  consentCookie(profileId: string): Promise<string | null>;          // the session's SOCS value, read back after every page
+  discardSession(profileId: string): Promise<void>;                  // close the session and drop its cookies
   accountCookie(profileId: string): Promise<boolean | 'unchecked'>;   // 'unchecked' only when 1.13.1 has no cookie listing
   openTab(profileId: string, url: string): Promise<{ tabId: string }>;
   snapshot(tabId: string): Promise<Snapshot>;
@@ -169,14 +184,15 @@ export interface CamofoxRest {
 }
 ```
 
-`CamofoxRest` has no navigate-elsewhere, no cookie-import, no type-text and no script-evaluation method, by design:
-the worker cannot ask the browser for anything the rules do not allow.
+`CamofoxRest` has no navigate-elsewhere, no general cookie import (the one cookie method writes `SOCS` and nothing
+else), no type-text and no script-evaluation method, by design: the worker cannot ask the browser for anything the
+rules do not allow. Every request carries `CAMOFOX_ACCESS_KEY` in the way the README names.
 
 ## 6. Endpoints and parameters
 
 **Worker (host-side, `CAMOUFOX_WORKER_URL`, default `http://127.0.0.1:8090`).** Every request carries
 `x-gmt-worker-token: <CAMOUFOX_WORKER_TOKEN>` (constant-time compare; a mismatch is 401 with no detail).
-`GET /v1/status` answers `{ ok, coolingDownUntil | null, lastPageAt | null, selectorsVersion, profileId, accountCookie }`
+`GET /v1/status` answers `{ ok, coolingDownUntil | null, lastPageAt | null, selectorsVersion, profileId, accountCookie, accessKeyEnforced, socsCapturedAt }`
 and never touches Google. `POST /v1/page` takes a `PageRequest` and makes **at most one Google document load**.
 
 **Google (worker side only).** One URL form, the one the feasibility load used, built in `src/url.ts`:
@@ -186,19 +202,36 @@ selected dates ± 3 days). The reverse-engineered `tfs` parameter is never built
 selectors and the result grammar match English names.
 
 **URL allowlist (worker `src/classify.ts`).** The worker only ever opens a tab on that URL form and clicks only the
-references the selectors module names ("Reject all", the "Cheapest" tab, "View more flights", "Date grid"). After every
+references the selectors module names (the "Cheapest" tab, "View more flights", "Date grid"). After every
 open and click it re-reads the snapshot and checks the tab's URL: `https://www.google.com` with a path under
-`/travel/flights`, or `https://consent.google.com` while the page is classified `consent`. Any other URL is the blocked
-page `off-allowlist` (`accounts.google.com` is `sign-in`). The REST API offers no request filter, so subresources load
+`/travel/flights`. `consent.google.com` is the blocked page `consent-unhandled`, `accounts.google.com` is `sign-in`, and
+any other URL is `off-allowlist`. The worker clicks nothing on a consent page, ever. The REST API offers no request filter, so subresources load
 as in any browser; spec §2 says so.
+
+**The consent cookie.** Name `SOCS`, verified 2026-10-18 against Google's cookie policy
+(<https://policies.google.com/technologies/cookies>: "Google uses the 'SOCS' cookie, which lasts for 13 months, to store
+a user's state regarding their cookies choices"). The policy does not document the value, so the worker never invents
+one: the operator captures it once, in an ordinary private browser window and never through camofox-browser (whose
+`dismissConsentDialogs` would click "Accept all"), by opening `https://www.google.com/travel/flights`, clicking
+**Reject all**, and copying the `SOCS` cookie's value, domain and path from the browser's storage view into
+`<stateDir>/socs.json` as `{ value, domain, path, capturedAt }` (mode 0600). The worker sets exactly that cookie on its
+session before the first navigation and before every page, reads it back after every page, and refuses to start when
+the file is missing, malformed, or older than 13 months (the cookie's stated lifetime). If a page shows consent anyway,
+or the value read back differs, the answer is `blocked` `consent-unhandled`: the worker discards the session, cools
+down, and the operator re-captures the value. An operator may also patch camofox-browser to prefer "Reject all"
+(`dismissConsentDialogs`); the worker works the same with or without that patch and never depends on it.
 
 ## 7. Library and tool notes
 
 - **camofox-browser 1.13.1** (`@askjo/camofox-browser`, operator-installed, REST on `:9377`, Camoufox
   152.0.4-beta.28). Task 14.1 reads its README at exactly that version and records in `src/rest.ts`'s header the URL,
   the version, the date read and every path and body used. A different server version makes the worker refuse to start
-  (`startChecks`), so an upgrade is a deliberate re-verification. If the README shows an API key or token option for
-  the REST server, the worker sends it and `docs/setup.md` tells the operator to set it (open question 2).
+  (`startChecks`), so an upgrade is a deliberate re-verification. The server's `CAMOFOX_ACCESS_KEY` gates every
+  route; Step 0 records how the key is sent (header name), and `startChecks` makes one keyless request and refuses to
+  start if it is answered. `POST /sessions/:userId/cookies` sets the `SOCS` cookie (Step 0 records its body); Step 0
+  also records the route that lists a session's cookies, which `consentCookie` and the account-cookie check use, and
+  the route that deletes a session. 1.13.1's `dismissConsentDialogs` (`server.js:1934`) clicks "Accept all" after every
+  navigation and cannot be turned off; the design never lets it find a consent page.
 - **node:http** for the worker server; **global fetch** for the REST client (Node 22).
 - **zod 4** through `@gmt/core` only.
 - **msw 3** for the adapter tests (decision 18's guarded server).
@@ -245,9 +278,9 @@ The classifier is a pure function of the snapshot (`{ url, tree }`). The order i
 | 3 | `signed-in` | any `button` or `link` named /^Google Account: / | feasibility load (it showed "Google Account: <operator>") | stop, cool down, 423, and refuse to serve until restarted (Task 14.5) |
 | 4 | `sign-in` | URL host `accounts.google.com`, or role `heading` named /^Sign in$/ | not seen; generic | stop, cool down, 423 |
 | 5 | `off-allowlist` | URL outside §6's allowlist | rule | stop, cool down, 423 |
-| 6 | `consent` | URL host `consent.google.com` and exactly one `button` named exactly "Reject all" | not seen; Task 14.12 | click "Reject all", 200 `consent-rejected` |
+| 6 | `consent-unhandled` | URL host `consent.google.com`, or a `heading` named "Before you continue" (tested right after `signed-in`, before rows 4 and 5) | signed-out test 2026-10-18 | stop, discard the session, cool down, 423; nothing on the page is clicked |
 | 7 | `results` | URL `www.google.com/travel/flights…`, a `tablist` holding a `tab` named /^Cheapest/, and a `button` named "Date grid" | feasibility load | read per mode, 200 `cells` |
-| 8 | `unrecognised` | anything else, including a consent page with no "Reject all" | rule | stop, cool down, 423 |
+| 8 | `unrecognised` | anything else | rule | stop, cool down, 423 |
 
 Seen in the feasibility load (2026-10-18) and therefore the verified half of `selectors.ts`: the `tablist` with `tab`
 "Best" and `tab` "Cheapest from £451" (accessible name "Cheapest from Fetching results 451 British pounds"), the text
@@ -278,7 +311,7 @@ gitignored files.
 `test/{rest.test.ts,classify.test.ts,cooldown.test.ts}`.
 
 **Interfaces:** produces `AxNode`, `Snapshot`, `CamofoxRest`, `restClient`, `parseSnapshot`, `classifyPage`,
-`PageKind`, `CooldownStore`, `SELECTORS`, `SELECTORS_VERSION`, `GRID_VERIFIED`, `CONSENT_VERIFIED`.
+`PageKind`, `CooldownStore`, `SELECTORS`, `SELECTORS_VERSION`, `GRID_VERIFIED`.
 
 `package.json`:
 
@@ -304,9 +337,11 @@ gitignored files.
 that version). In `src/rest.ts`'s header comment record: the README URL, "version 1.13.1, read <date>", and for each
 `CamofoxRest` method the HTTP method, path, request body and the response fields used. Write `parseSnapshot(raw)` in
 `src/ax.ts` against the snapshot format that README documents (structured or text), producing `AxNode` trees; if the
-README documents only a text form, parse that form and record its grammar in `ax.ts`'s header. Record whether 1.13.1
-has a version route, a cookie listing for a user id, and an API key option; a missing version route makes
-`startChecks` read the version from the server's `package.json` field the README names, or refuse to start.
+README documents only a text form, parse that form and record its grammar in `ax.ts`'s header. Record how 1.13.1
+takes `CAMOFOX_ACCESS_KEY`, the body of `POST /sessions/:userId/cookies`, its cookie-listing and session-deletion
+routes, and its version route; a missing version route makes `startChecks` read the version from the field the README
+names, or refuse to start. A missing cookie listing stops this work package (the `SOCS` read-back and the
+account-cookie check both need it): report it to Fable rather than weaken either check.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -349,8 +384,8 @@ export const captchaTree: Snapshot = { url: RESULTS, tree: n('document', '', [n(
 export const sorryTree: Snapshot = { url: SORRY, tree: n('document', '', [n('text', 'Our systems have detected unusual traffic from your computer network.')]) };
 export const signInTree: Snapshot = { url: RESULTS, tree: n('document', '', [n('heading', 'Sign in')]) };
 export const signedInTree = (): Snapshot => resultsTree({ extra: [n('button', 'Google Account: Example Person (example@example.test)')] });
-export const consentTree: Snapshot = { url: CONSENT, tree: n('document', '', [n('button', 'Accept all'), n('button', 'Reject all')]) };
-export const consentNoRejectTree: Snapshot = { url: CONSENT, tree: n('document', '', [n('button', 'Accept all')]) };
+/** Shaped like the signed-out test's consent page (2026-10-18): roles and names only. */
+export const consentTree: Snapshot = { url: CONSENT, tree: n('document', '', [n('heading', 'Before you continue'), n('button', 'Reject all'), n('button', 'Accept all')]) };
 export const blankTree: Snapshot = { url: RESULTS, tree: n('document', '', [n('text', 'Something else')]) };
 ```
 
@@ -380,11 +415,11 @@ describe('classifyPage (spec §2, brief §9: stop on anything not recognised)', 
   it('accounts.google.com is blocked:sign-in', () => {
     expect(classifyPage({ url: 'https://accounts.google.com/ServiceLogin', tree: T.blankTree.tree })).toEqual({ kind: 'blocked', page: 'sign-in' });
   });
-  it('a consent page with one "Reject all" is consent', () => {
-    expect(classifyPage(T.consentTree)).toEqual({ kind: 'consent' });
+  it('the consent page is blocked:consent-unhandled (the SOCS cookie should have prevented it)', () => {
+    expect(classifyPage(T.consentTree)).toEqual({ kind: 'blocked', page: 'consent-unhandled' });
   });
-  it('a consent page without "Reject all" is unrecognised, never accepted', () => {
-    expect(classifyPage(T.consentNoRejectTree)).toEqual({ kind: 'blocked', page: 'unrecognised' });
+  it('a consent heading on a results URL is still consent-unhandled', () => {
+    expect(classifyPage({ url: T.RESULTS, tree: T.consentTree.tree })).toEqual({ kind: 'blocked', page: 'consent-unhandled' });
   });
   it('the feasibility-shaped results page is results', () => {
     expect(classifyPage(T.resultsTree())).toEqual({ kind: 'results' });
@@ -474,12 +509,11 @@ Expected: FAIL, `Cannot find module '../src/classify.js'` (and the others).
  * changes its page without notice; a change must surface as `unrecognised` (a stop), never as a wrong parse, and the
  * fix is a new recording, an edit here and a new version, in one commit.
  *
- * Results-page entries were seen in the feasibility load of 2026-10-18 (brief §9). Consent and grid entries were not
- * seen: CONSENT_VERIFIED and GRID_VERIFIED stay false until Task 14.12's recordings confirm them, and the worker refuses
- * grid mode while GRID_VERIFIED is false.
+ * Results-page entries were seen in the feasibility load of 2026-10-18 and the consent page in the signed-out test of
+ * the same day (brief §9). Grid entries were not seen: GRID_VERIFIED stays false until Task 14.12's recording confirms
+ * them, and the worker refuses grid mode while it is false.
  */
 export const SELECTORS_VERSION = '2026-10-18-results';
-export const CONSENT_VERIFIED = false;
 export const GRID_VERIFIED = false;
 
 export const SELECTORS = {
@@ -493,7 +527,7 @@ export const SELECTORS = {
     signInHeading: /^Sign in$/,
     accountControl: /^Google Account: /,
   },
-  consent: { rejectAll: 'Reject all' },
+  consent: { heading: /^Before you continue$/ },
   results: {
     cheapestTab: /^Cheapest\b/,
     cheapestTabPrice: /([0-9][0-9,]*) British pounds$/,
@@ -537,7 +571,7 @@ import { find, type Snapshot, walk } from './ax.js';
 import type { BlockedPage } from './protocol.js';
 import { SELECTORS as S } from './selectors.js';
 
-export type PageKind = { kind: 'consent' } | { kind: 'results' } | { kind: 'blocked'; page: BlockedPage };
+export type PageKind = { kind: 'results' } | { kind: 'blocked'; page: BlockedPage };
 
 /** Spec §2 and brief §9: blocked kinds first; anything not positively recognised is `unrecognised`. Pure. */
 export function classifyPage(s: Snapshot): PageKind {
@@ -548,13 +582,14 @@ export function classifyPage(s: Snapshot): PageKind {
   if (url.pathname.startsWith(S.blocked.sorryPathPrefix) || nodes.some((x) => S.blocked.unusualTraffic.test(x.name)))
     return { kind: 'blocked', page: 'unusual-traffic' };
   if (find(s.tree, ['button', 'link'], S.blocked.accountControl).length > 0) return { kind: 'blocked', page: 'signed-in' };
+  // why: camofox-browser accepts consent on its own; a consent page means the SOCS rejection did not hold (spec §2).
+  if (url.hostname === S.hosts.consent || find(s.tree, 'heading', S.consent.heading).length > 0)
+    return { kind: 'blocked', page: 'consent-unhandled' };
   if (url.hostname === S.hosts.signIn || find(s.tree, 'heading', S.blocked.signInHeading).length > 0)
     return { kind: 'blocked', page: 'sign-in' };
   const https = url.protocol === 'https:';
   const onResults = https && url.hostname === S.hosts.results && url.pathname.startsWith(S.resultsPathPrefix);
-  const onConsent = https && url.hostname === S.hosts.consent;
-  if (!onResults && !onConsent) return { kind: 'blocked', page: 'off-allowlist' };
-  if (onConsent) return find(s.tree, 'button', S.consent.rejectAll).length === 1 ? { kind: 'consent' } : { kind: 'blocked', page: 'unrecognised' };
+  if (!onResults) return { kind: 'blocked', page: 'off-allowlist' };
   const tabs = find(s.tree, 'tab', S.results.cheapestTab);
   if (tabs.length === 1 && find(s.tree, 'button', S.results.dateGridButton).length === 1) return { kind: 'results' };
   return { kind: 'blocked', page: 'unrecognised' };
@@ -624,7 +659,8 @@ export class CooldownStore {
 `snapshot` returns `parseSnapshot(body)`; every non-2xx throws `RestError(status)`.
 
 `test/support/fakeRest.ts`: `FakeRest implements CamofoxRest` with a queue of snapshots per tab, a `calls` log
-(`{ op, profileId?, url?, ref? }`), and setters for `version` and `accountCookie`.
+(`{ op, profileId?, url?, ref?, value? }`), options `version`, `accountCookie` and `keyless`, and `consentAfterPage`
+(the `SOCS` value `consentCookie` returns; by default the last value set).
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -822,70 +858,113 @@ same exact-digit rule as `names.ts`.
 
 - [ ] **Step 5: Commit** — `git commit -am "wp14: grid reader over the accessibility tree, gated until verified"`
 
-### Task 14.4: Consent: "Reject all", never accept
+### Task 14.4: Consent: the SOCS rejection cookie, never an accept
 
 **Files:** create `src/consent.ts`, `test/consent.test.ts`.
 
-**Interfaces:** `rejectRef(snap): string` (the reference of the single exact "Reject all" button; throws
-`ConsentUnrecognised` when there is not exactly one).
+**Interfaces:** `loadSocs(stateDir, clock): SocsValue` (throws `ConsentNotCaptured` when `<stateDir>/socs.json` is
+missing, malformed or older than 13 months); `SocsValue = { value: string; domain: '.google.com'; path: '/';
+capturedAt: IsoDateTime }`; `SOCS_NAME = 'SOCS'`.
+
+Why this shape (spec §2, the signed-out test): camofox-browser 1.13.1 clicks "Accept all" on its own after every
+navigation, so the worker cannot reach "Reject all" by clicking. Instead it never lets the consent page appear: the
+rejection cookie is already on the session when Google is asked for the page. The value comes from a real rejection the
+operator makes in an ordinary private browser window (brief §6), because Google does not document it.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { asIsoDateTime } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { ConsentUnrecognised, rejectRef } from '../src/consent.js';
-import { CONSENT, consentNoRejectTree, consentTree, n } from './support/trees.js';
+import { ConsentNotCaptured, loadSocs, SOCS_NAME } from '../src/consent.js';
 
-describe('rejectRef (spec §2: "Reject all", never accept)', () => {
-  it('returns the reference of "Reject all" and not of "Accept all"', () => {
-    const reject = consentTree.tree.children.find((c) => c.name === 'Reject all');
-    expect(rejectRef(consentTree)).toBe(reject?.ref);
+const clock = { now: () => asIsoDateTime('2026-10-18T05:00:00.000Z') };
+// A synthetic value: the real one is captured by the operator and never enters git.
+const SYNTHETIC = { value: 'synthetic-socs-rejection-value', domain: '.google.com', path: '/', capturedAt: '2026-10-18T04:00:00.000Z' };
+function dirWith(content: string | null): string {
+  const d = mkdtempSync(join(tmpdir(), 'socs-'));
+  if (content !== null) writeFileSync(join(d, 'socs.json'), content);
+  return d;
+}
+
+describe('loadSocs (spec §2: the consent rejection is a captured, dated value)', () => {
+  it('loads a captured value', () => {
+    expect(loadSocs(dirWith(JSON.stringify(SYNTHETIC)), clock)).toEqual(SYNTHETIC);
   });
-  it('a page with only "Accept all" is refused', () => {
-    expect(() => rejectRef(consentNoRejectTree)).toThrow(ConsentUnrecognised);
+  it.each([
+    ['missing', null],
+    ['malformed', '{not json'],
+    ['another domain', JSON.stringify({ ...SYNTHETIC, domain: '.example.test' })],
+    ['an empty value', JSON.stringify({ ...SYNTHETIC, value: '' })],
+    ['older than 13 months', JSON.stringify({ ...SYNTHETIC, capturedAt: '2025-09-01T00:00:00.000Z' })],
+  ])('%s refuses, naming how to capture it', (_n, content) => {
+    expect(() => loadSocs(dirWith(content), clock)).toThrow(ConsentNotCaptured);
+    expect(() => loadSocs(dirWith(content), clock)).toThrow(/private browser window.*Reject all/);
   });
-  it('two "Reject all" buttons are ambiguous and refused', () => {
-    expect(() => rejectRef({ url: CONSENT, tree: n('document', '', [n('button', 'Reject all'), n('button', 'Reject all')]) })).toThrow(ConsentUnrecognised);
+  it('the cookie name is SOCS, from Google\'s cookie policy', () => {
+    expect(SOCS_NAME).toBe('SOCS');
   });
-  it('a near match ("Reject all cookies") is not "Reject all"', () => {
-    expect(() => rejectRef({ url: CONSENT, tree: n('document', '', [n('button', 'Reject all cookies')]) })).toThrow(ConsentUnrecognised);
-  });
-  it('no worker source names an accept control', () => {
-    const src = ['consent.ts', 'selectors.ts', 'session.ts'].map((f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8')).join('');
+  it('no worker source names an accept control, and the selectors name no consent button at all', () => {
+    const src = ['consent.ts', 'selectors.ts', 'session.ts', 'classify.ts'].map((f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8')).join('');
     expect(src).not.toMatch(/accept all|i agree|i accept/i);
+    const selectors = readFileSync(new URL('../src/selectors.ts', import.meta.url), 'utf8');
+    expect(selectors).not.toMatch(/reject all/i);
   });
 });
 ```
 
-(The last test reads `session.ts`, so it passes only once Task 14.5 exists; until then the implementer runs the first
-four.)
+(The last test reads `session.ts`, so it passes once Task 14.5 exists; until then run the others. The selectors never
+name "Reject all": the worker never looks for that button, because it never acts on a consent page; the words appear
+only in the operator's capture instructions.)
 
-- [ ] **Step 2: Run** — FAIL, module not found.
+- [ ] **Step 2: Run** — `pnpm --filter @gmt/camoufox-worker exec vitest run test/consent.test.ts`; FAIL, module not found.
 
 - [ ] **Step 3: Implement**
 
 ```ts
-import { find, type Snapshot } from './ax.js';
-import { SELECTORS as S } from './selectors.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
 
-export class ConsentUnrecognised extends Error {}
+/** Google's consent-choice cookie (https://policies.google.com/technologies/cookies, read 2026-10-18). */
+export const SOCS_NAME = 'SOCS';
+/** The cookie's stated lifetime; a captured value older than this is refused. */
+const LIFETIME_MS = 13 * 30.44 * 86_400_000;
+
+export interface SocsValue { value: string; domain: '.google.com'; path: '/'; capturedAt: IsoDateTime }
+export class ConsentNotCaptured extends Error {}
+
+const HOW = 'capture it: in an ordinary private browser window (not camofox-browser), open https://www.google.com/travel/flights, click Reject all, and copy the SOCS cookie into socs.json (docs/setup.md section 14)';
 
 /**
- * Spec §2 and the operator's ruling: on Google's consent interstitial choose "Reject all", the privacy-preserving option,
- * and never accept. Exactly one exact-name button is required; anything else is refused and the session stops.
+ * The rejection value the worker pre-sets on its session (spec §2). why: camofox-browser 1.13.1 clicks "Accept all" by
+ * itself, so the rejection must already be in place before Google is asked for a page; Google does not document the
+ * value, so it is captured from a real rejection, never invented.
  */
-export function rejectRef(s: Snapshot): string {
-  const hits = find(s.tree, 'button', S.consent.rejectAll);
-  const ref = hits.length === 1 ? hits[0]?.ref : undefined;
-  if (ref === undefined) throw new ConsentUnrecognised('reject-all not found exactly once');
-  return ref;
+export function loadSocs(stateDir: string, clock: Clock): SocsValue {
+  let v: unknown;
+  try {
+    v = JSON.parse(readFileSync(join(stateDir, 'socs.json'), 'utf8'));
+  } catch {
+    throw new ConsentNotCaptured(`no readable socs.json in ${stateDir}; ${HOW}`);
+  }
+  if (typeof v !== 'object' || v === null || !('value' in v) || !('domain' in v) || !('path' in v) || !('capturedAt' in v))
+    throw new ConsentNotCaptured(`socs.json is incomplete; ${HOW}`);
+  const at = isoDateTimeSchema.safeParse(v.capturedAt);
+  if (typeof v.value !== 'string' || v.value === '' || v.domain !== '.google.com' || v.path !== '/' || !at.success)
+    throw new ConsentNotCaptured(`socs.json is not a .google.com SOCS value; ${HOW}`);
+  if (Date.parse(clock.now()) - Date.parse(at.data) > LIFETIME_MS)
+    throw new ConsentNotCaptured(`the SOCS value is older than its 13-month lifetime; ${HOW}`);
+  return { value: v.value, domain: '.google.com', path: '/', capturedAt: at.data };
 }
 ```
 
-- [ ] **Step 4: Run** — PASS, 4 tests (5 after Task 14.5).
+- [ ] **Step 4: Run** — PASS, 7 tests (8 after Task 14.5).
 
-- [ ] **Step 5: Commit** — `git commit -am "wp14: consent handling chooses Reject all only"`
+- [ ] **Step 5: Commit** — `git commit -am "wp14: the captured SOCS rejection value, refused when missing or stale"`
 
 ### Task 14.5: Spacing, the start checks and the page session (one page at a time; stop and cool down)
 
@@ -898,12 +977,13 @@ export function rejectRef(s: Snapshot): string {
 Rules: concurrency 1; spacing from the end of one page load to the start of the next, never below 30 s, never
 randomised; a request during a cool-down answers `cooling-down` and opens no tab; a request while refusing (after a
 `signed-in` stop) answers `blocked` `signed-in` and opens no tab; every tab is opened under `CAMOUFOX_PROFILE_ID` and
-closed in `finally`; the only clicks are the references `rejectRef`, the "Cheapest" tab, "View more flights" and (grid
-mode) "Date grid"; after every open and click the session re-reads the snapshot and re-classifies; `grid` mode is
+closed in `finally`; before opening the tab the session sets the `SOCS` rejection cookie on its profile, and after the
+page it reads `SOCS` back: a different value, or a consent page at any step, is `blocked` `consent-unhandled`, and the
+session is discarded (`discardSession`) before the cool-down starts; the only clicks are the "Cheapest" tab, "View more
+flights" and (grid mode) "Date grid", never anything on a consent page; after every open and click the session re-reads the snapshot and re-classifies; `grid` mode is
 answered `mode-unavailable` while `GRID_VERIFIED` is false. Start checks: the REST server's version equals the pinned
-1.13.1; `CAMOUFOX_PROFILE_ID` matches `^gmt-[a-z0-9-]{1,40}$` (so it can never be the operator's everyday profile by
-accident); `accountCookie(profileId)` is not `true` (an `'unchecked'` answer is allowed only when Step 0 recorded that
-1.13.1 has no cookie listing, and is reported by `/v1/status` and the smoke).
+1.13.1; a request made without `CAMOFOX_ACCESS_KEY` is refused by the server; `loadSocs` succeeds; `CAMOUFOX_PROFILE_ID` matches `^gmt-[a-z0-9-]{1,40}$` (so it can never be the operator's everyday profile by
+accident); `accountCookie(profileId)` is `false`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -969,26 +1049,37 @@ describe('pageUrl (brief §6, the feasibility form)', () => {
 
 ```ts
 import { describe, expect, it } from 'vitest';
+import { asIsoDateTime } from '@gmt/core';
+import { ConsentNotCaptured } from '../src/consent.js';
 import { startChecks } from '../src/startChecks.js';
 import { FakeRest } from './support/fakeRest.js';
 
-describe('startChecks (spec §2: dedicated signed-out profile; pinned REST version)', () => {
-  it('passes on the pinned version, a gmt- profile and no account cookie', async () => {
-    await expect(startChecks(new FakeRest({ version: '1.13.1', accountCookie: false }), { profileId: 'gmt-worker' })).resolves.toBeUndefined();
+const OK = { version: '1.13.1', accountCookie: false, keyless: 'refused' as const };
+const SOCS = { value: 'synthetic-socs-rejection-value', domain: '.google.com' as const, path: '/' as const, capturedAt: asIsoDateTime('2026-10-18T04:00:00.000Z') };
+
+describe('startChecks (spec §2: dedicated signed-out profile; access key; pinned REST version; captured SOCS)', () => {
+  it('passes on the pinned version, an enforced key, a gmt- profile, no account cookie and a captured SOCS', async () => {
+    await expect(startChecks(new FakeRest(OK), { profileId: 'gmt-worker', socs: () => SOCS })).resolves.toBeUndefined();
+  });
+  it('refuses a server that answers without the access key', async () => {
+    await expect(startChecks(new FakeRest({ ...OK, keyless: 'answered' }), { profileId: 'gmt-worker', socs: () => SOCS })).rejects.toThrow(/CAMOFOX_ACCESS_KEY/);
+  });
+  it('refuses without a captured SOCS value', async () => {
+    await expect(startChecks(new FakeRest(OK), { profileId: 'gmt-worker', socs: () => { throw new ConsentNotCaptured('no socs.json'); } })).rejects.toThrow(ConsentNotCaptured);
   });
   it('refuses another REST version', async () => {
-    await expect(startChecks(new FakeRest({ version: '1.14.0', accountCookie: false }), { profileId: 'gmt-worker' })).rejects.toThrow(/1\.13\.1/);
+    await expect(startChecks(new FakeRest({ ...OK, version: '1.14.0' }), { profileId: 'gmt-worker', socs: () => SOCS })).rejects.toThrow(/1\.13\.1/);
   });
   it.each(['default', 'ian', '', 'gmt-'])('refuses the profile id %j', async (id) => {
-    await expect(startChecks(new FakeRest({ version: '1.13.1', accountCookie: false }), { profileId: id })).rejects.toThrow(/CAMOUFOX_PROFILE_ID/);
+    await expect(startChecks(new FakeRest(OK), { profileId: id, socs: () => SOCS })).rejects.toThrow(/CAMOUFOX_PROFILE_ID/);
   });
   it('refuses a profile holding a Google account cookie', async () => {
-    await expect(startChecks(new FakeRest({ version: '1.13.1', accountCookie: true }), { profileId: 'gmt-worker' })).rejects.toThrow(/signed in/);
+    await expect(startChecks(new FakeRest({ ...OK, accountCookie: true }), { profileId: 'gmt-worker', socs: () => SOCS })).rejects.toThrow(/signed in/);
   });
-  it('never imports cookies or opens a tab while checking', async () => {
-    const r = new FakeRest({ version: '1.13.1', accountCookie: false });
-    await startChecks(r, { profileId: 'gmt-worker' });
-    expect(r.calls.map((c) => c.op)).toEqual(['version', 'accountCookie']);
+  it('sets no cookie and opens no tab while checking', async () => {
+    const r = new FakeRest(OK);
+    await startChecks(r, { profileId: 'gmt-worker', socs: () => SOCS });
+    expect(r.calls.map((c) => c.op)).toEqual(['version', 'openWithoutKey', 'accountCookie']);
   });
 });
 ```
@@ -1012,10 +1103,12 @@ const LIST = { mode: 'list' as const, origin: asIata('LHR'), destination: asIata
   departFrom: asIsoDate('2026-11-05'), departTo: asIsoDate('2026-11-05'), returnFrom: asIsoDate('2026-11-15'), returnTo: asIsoDate('2026-11-15') };
 const clock = { now: () => asIsoDateTime('2026-10-18T05:00:00.000Z') };
 
+const SOCS = { value: 'synthetic-socs-rejection-value', domain: '.google.com' as const, path: '/' as const, capturedAt: asIsoDateTime('2026-10-18T04:00:00.000Z') };
+
 function session(...snaps: Snapshot[]) {
-  const rest = new FakeRest({ version: '1.13.1', accountCookie: false, snapshots: snaps });
+  const rest = new FakeRest({ version: '1.13.1', accountCookie: false, keyless: 'refused', snapshots: snaps });
   const cooldown = new CooldownStore({ dir: mkdtempSync(join(tmpdir(), 'ws-')), hours: 48, clock });
-  const s = new PageSession({ rest, profileId: 'gmt-worker', pacer: new Pacer({ minSpacingSeconds: 30, nowMs: () => 0 }), cooldown, clock });
+  const s = new PageSession({ rest, profileId: 'gmt-worker', socs: SOCS, pacer: new Pacer({ minSpacingSeconds: 30, nowMs: () => 0 }), cooldown, clock });
   return { s, rest, cooldown, opens: () => rest.calls.filter((c) => c.op === 'openTab').length };
 }
 
@@ -1049,17 +1142,32 @@ describe('PageSession: the hard stop (spec §2)', () => {
     expect(await h.s.page(LIST)).toMatchObject({ kind: 'blocked', page: 'captcha' });
     expect(h.rest.calls.filter((c) => c.op === 'click')).toHaveLength(1);
   });
-  it('consent answers consent-rejected after clicking exactly the Reject all reference', async () => {
+  it('sets the SOCS rejection on the profile before the tab is opened', async () => {
+    const t = T.resultsTree({ cheapestSelected: true, moreButton: false });
+    const h = session(T.resultsTree(), t, t);
+    await h.s.page(LIST);
+    const ops = h.rest.calls.map((c) => c.op);
+    expect(ops.indexOf('setConsentCookie')).toBeLessThan(ops.indexOf('openTab'));
+    expect(h.rest.calls.find((c) => c.op === 'setConsentCookie')).toMatchObject({ profileId: 'gmt-worker', value: SOCS.value });
+  });
+  it('a consent page anyway: blocked consent-unhandled, nothing clicked, session discarded, cool-down started', async () => {
     const h = session(T.consentTree);
-    expect(await h.s.page(LIST)).toMatchObject({ kind: 'consent-rejected' });
-    const reject = T.consentTree.tree.children.find((c) => c.name === 'Reject all');
-    expect(h.rest.calls.filter((c) => c.op === 'click').map((c) => c.ref)).toEqual([reject?.ref]);
-    expect(h.cooldown.activeUntil()).toBeNull();
+    expect(await h.s.page(LIST)).toMatchObject({ kind: 'blocked', page: 'consent-unhandled' });
+    expect(h.rest.calls.some((c) => c.op === 'click')).toBe(false);
+    expect(h.rest.calls.some((c) => c.op === 'discardSession')).toBe(true);
+    expect(h.cooldown.activeUntil()).not.toBeNull();
+  });
+  it('SOCS changed after the page (an accept happened): consent-unhandled, and the cells are not answered', async () => {
+    const t = T.resultsTree({ cheapestSelected: true, moreButton: false });
+    const h = session(T.resultsTree(), t, t);
+    h.rest.consentAfterPage = 'an-accept-value';
+    expect(await h.s.page(LIST)).toMatchObject({ kind: 'blocked', page: 'consent-unhandled' });
+    expect(h.rest.calls.some((c) => c.op === 'discardSession')).toBe(true);
   });
 });
 
 describe('PageSession: list mode (spec §2)', () => {
-  it('clicks Cheapest then View more flights, then answers the minimum parsed price for the cell', async () => {
+  it('clicks Cheapest then View more flights, then answers the minimum parsed price, its return date labelled as the query\'s', async () => {
     const before = T.resultsTree();
     const cheapest = T.resultsTree({ cheapestSelected: true });
     const expanded = T.resultsTree({ cheapestSelected: true, moreButton: false, top: [T.option(478), T.option(534)], other: [T.option(451), T.option(499)] });
@@ -1067,6 +1175,7 @@ describe('PageSession: list mode (spec §2)', () => {
     const a = await h.s.page(LIST);
     expect(a).toMatchObject({ kind: 'cells', currency: 'GBP', pointOfSale: 'GB', optionsDropped: 0,
       cells: [{ departureDate: '2026-11-05', returnDate: '2026-11-15', amountMinor: 45100 }] });
+    expect(a).toMatchObject({ notes: expect.arrayContaining(['return-date-from-query']) });
     expect(h.rest.calls.filter((c) => c.op === 'click')).toHaveLength(2);
     expect(h.rest.calls.filter((c) => c.op === 'openTab').every((c) => c.profileId === 'gmt-worker')).toBe(true);
   });
@@ -1154,7 +1263,7 @@ export function pageUrl(r: PageRequest): URL {
 import type { Clock } from '@gmt/core';
 import { find, type Snapshot } from './ax.js';
 import { classifyPage } from './classify.js';
-import { ConsentUnrecognised, rejectRef } from './consent.js';
+import type { SocsValue } from './consent.js';
 import type { CooldownStore } from './cooldown.js';
 import { GridUnreadable, readGrid } from './grid.js';
 import { readList } from './list.js';
@@ -1165,12 +1274,13 @@ import { GRID_VERIFIED, SELECTORS as S, SELECTORS_VERSION } from './selectors.js
 import { pageUrl } from './url.js';
 
 /**
- * One Google document load per call (spec §2): refusal and cool-down checks, pacer claim, one tab under the dedicated
- * profile, classification after every step, then exactly one of: reject consent, read the page, or stop. No retries.
+ * One Google document load per call (spec §2): refusal and cool-down checks, pacer claim, the SOCS rejection set on the
+ * dedicated profile, one tab, classification after every step, the SOCS value read back, then either the page's cells or
+ * a stop. Nothing on a consent page is ever clicked. No retries.
  */
 export class PageSession {
   private refusingSignedIn = false;
-  constructor(private readonly o: { rest: CamofoxRest; profileId: string; pacer: Pacer; cooldown: CooldownStore; clock: Clock }) {}
+  constructor(private readonly o: { rest: CamofoxRest; profileId: string; socs: SocsValue; pacer: Pacer; cooldown: CooldownStore; clock: Clock }) {}
 
   async page(req: PageRequest): Promise<WorkerAnswer> {
     if (req.mode === 'grid' && !GRID_VERIFIED) return { kind: 'mode-unavailable', mode: 'grid' };
@@ -1181,19 +1291,12 @@ export class PageSession {
     if (!claim.ok) return { kind: 'spacing', retryAfterSeconds: claim.retryAfterSeconds };
     let tabId: string | undefined;
     try {
+      // why: camofox-browser accepts consent by itself after every navigation; the rejection must already be set.
+      await this.o.rest.setConsentCookie(this.o.profileId, this.o.socs.value);
       tabId = (await this.o.rest.openTab(this.o.profileId, pageUrl(req).href)).tabId;
       let snap = await this.o.rest.snapshot(tabId);
       let kind = classifyPage(snap);
-      if (kind.kind === 'blocked') return this.stop(kind.page);
-      if (kind.kind === 'consent') {
-        try {
-          await this.o.rest.click(tabId, rejectRef(snap));
-        } catch (e) {
-          if (e instanceof ConsentUnrecognised) return this.stop('unrecognised');
-          throw e;
-        }
-        return { kind: 'consent-rejected', fetchedAt: this.o.clock.now(), selectorsVersion: SELECTORS_VERSION };
-      }
+      if (kind.kind === 'blocked') return await this.stop(kind.page);
       // why: read Google's cheapest set, not its "Best" ranking (feasibility consequence 2).
       for (const target of req.mode === 'list' ? (['cheapest', 'more'] as const) : (['grid'] as const)) {
         const ref = this.refFor(snap, target);
@@ -1201,9 +1304,11 @@ export class PageSession {
         await this.o.rest.click(tabId, ref);
         snap = await this.o.rest.snapshot(tabId);
         kind = classifyPage(snap);
-        if (kind.kind !== 'results') return this.stop(kind.kind === 'blocked' ? kind.page : 'unrecognised');
+        if (kind.kind !== 'results') return await this.stop(kind.kind === 'blocked' ? kind.page : 'unrecognised');
       }
-      return req.mode === 'list' ? this.listAnswer(snap, req) : this.gridAnswer(snap, req);
+      // why: an accept may have happened without a consent page we could see; the cookie tells (spec §2).
+      if ((await this.o.rest.consentCookie(this.o.profileId)) !== this.o.socs.value) return await this.stop('consent-unhandled');
+      return req.mode === 'list' ? await this.listAnswer(snap, req) : await this.gridAnswer(snap, req);
     } finally {
       if (tabId !== undefined) await this.o.rest.closeTab(tabId);
       this.o.pacer.release();
@@ -1219,11 +1324,12 @@ export class PageSession {
     return find(s.tree, 'button', name)[0]?.ref ?? null;
   }
 
-  private listAnswer(s: Snapshot, req: PageRequest): WorkerAnswer {
+  private async listAnswer(s: Snapshot, req: PageRequest): Promise<WorkerAnswer> {
     const r = readList(s, req);
     if (r.currency !== 'GBP' || r.options.length === 0) return this.stop('unrecognised');
     const min = Math.min(...r.options.map((o) => o.amountMinor));
-    const notes = r.cheapestTabMinor !== null && r.cheapestTabMinor < min ? ['cheapest-tab-below-parsed'] : [];
+    // why: a result's name states the departure only; the return date is the worker's own query (operator ruling 5).
+    const notes = ['return-date-from-query', ...(r.cheapestTabMinor !== null && r.cheapestTabMinor < min ? ['cheapest-tab-below-parsed'] : [])];
     return {
       kind: 'cells', fetchedAt: this.o.clock.now(), currency: 'GBP', pointOfSale: r.pointOfSale,
       cells: [{ departureDate: req.departFrom, returnDate: req.returnFrom, amountMinor: min }],
@@ -1231,7 +1337,7 @@ export class PageSession {
     };
   }
 
-  private gridAnswer(s: Snapshot, req: PageRequest): WorkerAnswer {
+  private async gridAnswer(s: Snapshot, req: PageRequest): Promise<WorkerAnswer> {
     try {
       const g = readGrid(s, req);
       return { kind: 'cells', fetchedAt: this.o.clock.now(), ...g, optionsDropped: 0, notes: [], selectorsVersion: SELECTORS_VERSION };
@@ -1241,8 +1347,10 @@ export class PageSession {
     }
   }
 
-  private stop(page: BlockedPage): WorkerAnswer {
+  private async stop(page: BlockedPage): Promise<WorkerAnswer> {
     if (page === 'signed-in') this.refusingSignedIn = true;
+    // why: a session that saw consent (or an accept) is never reused; its cookies go with it.
+    if (page === 'consent-unhandled') await this.o.rest.discardSession(this.o.profileId);
     return { kind: 'blocked', page, cooldownUntil: this.o.cooldown.start(page) };
   }
 }
@@ -1252,12 +1360,13 @@ export class PageSession {
 worker cannot read is never "no fares". A list page that Google itself states has no flights is a later refinement once
 a recording shows that page; until then it too reads as unrecognised and stops, which errs toward stopping.)
 
-`src/startChecks.ts`: the three checks of the rules above, each failing with an `Error` naming the variable or the
+`src/startChecks.ts`: the checks of the rules above, in order (version, keyless request refused, profile id, no
+account cookie, `socs()` loads), each failing with an `Error` naming the variable or the
 version.
 
-- [ ] **Step 4: Run** — PASS (4 + 3 + 8 + 10 tests); then the consent source test of Task 14.4 passes too.
+- [ ] **Step 4: Run** — PASS (4 + 3 + 9 + 12 tests); then the source test of Task 14.4 passes too.
 
-- [ ] **Step 5: Commit** — `git commit -am "wp14: one-page session with fixed spacing, dedicated profile, hard stop and consent continuation"`
+- [ ] **Step 5: Commit** — `git commit -am "wp14: one-page session with fixed spacing, dedicated profile, SOCS rejection and hard stop"`
 
 ### Task 14.6: The worker HTTP server and its entry point
 
@@ -1267,14 +1376,15 @@ version.
 
 Answers: 401 (bad or missing token, constant-time compare, no detail); 400 (`PageRequest` invalid: `iataSchema`,
 `isoDateSchema`, `mode` `list` with both ranges one day or `grid` with each block exactly 7 days, `gl` `^[A-Z]{2}$`);
-409 `mode-unavailable` for `grid` while the grid selectors are unverified; 200 for `cells` and `consent-rejected`; 423
+409 `mode-unavailable` for `grid` while the grid selectors are unverified; 200 for `cells`; 423
 for `blocked` and `cooling-down`; 429 with `Retry-After` for `spacing`; 404 otherwise. `GET /v1/status` never touches
-Google and reports `{ ok, coolingDownUntil, lastPageAt, selectorsVersion, profileId, accountCookie: false |
-'unchecked' }`. Logs are one JSON line per request with the answer kind, never the token. `main.ts` reads
+Google and reports `{ ok, coolingDownUntil, lastPageAt, selectorsVersion, profileId, accountCookie,
+accessKeyEnforced, socsCapturedAt }`. Logs are one JSON line per request with the answer kind, never the token. `main.ts` reads
 `CAMOUFOX_WORKER_TOKEN`, `CAMOUFOX_WORKER_BIND` (refusing `0.0.0.0` and `::`), `CAMOUFOX_WORKER_PORT` (8090),
-`CAMOFOX_REST_URL` (loopback only), `CAMOUFOX_PROFILE_ID`, `CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_COOLDOWN_HOURS`,
+`CAMOFOX_REST_URL` (loopback only), `CAMOFOX_ACCESS_KEY` (required, sent on every REST request, never logged),
+`CAMOUFOX_PROFILE_ID`, `CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_COOLDOWN_HOURS`,
 `CAMOUFOX_PAGE_TIMEOUT_SECONDS` and `CAMOUFOX_STATE_DIR` (default `~/.local/state/get-me-there/camoufox`, created 0700)
-once, runs `startChecks` (Task 14.1), and listens.
+once, runs `startChecks` (Task 14.5) with `socs: () => loadSocs(stateDir, clock)`, and listens.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1295,7 +1405,7 @@ async function serve(answer: WorkerAnswer) {
   const server = createWorkerServer({
     token: TOKEN,
     session: { page: async (r) => { seen.push(r); return answer; } },
-    status: () => ({ ok: true, coolingDownUntil: null, lastPageAt: null, selectorsVersion: 'v', profileId: 'gmt-worker', accountCookie: false }),
+    status: () => ({ ok: true, coolingDownUntil: null, lastPageAt: null, selectorsVersion: 'v', profileId: 'gmt-worker', accountCookie: false, accessKeyEnforced: true, socsCapturedAt: '2026-10-18T04:00:00.000Z' }),
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   stop = () => server.close();
@@ -1660,19 +1770,17 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     expect(r).toMatchObject({ kind: 'tile-error', error: { kind: 'blocked' } });
     expect(r?.kind === 'tile-error' ? r.error.message : '').toMatch(/cooling down until 2026-10-20T05:00:00.000Z/);
   });
-  it('consent-rejected is followed by exactly one more call for the same tile, both ledgered with its tile_index', async () => {
+  it('a consent-unhandled block is tile-error kind blocked, its page kind in the message, one ledger row', async () => {
     const { p, budget } = provider();
+    server.use(http.post(URL_, () => HttpResponse.json({ kind: 'blocked', page: 'consent-unhandled', cooldownUntil: '2026-10-20T05:00:00.000Z' }, { status: 423 })));
     const tile = planDateGrid(Q)[0];
     if (tile === undefined) throw new Error('no tile');
-    const answers = [
-      { kind: 'consent-rejected', fetchedAt: '2026-10-18T05:00:00.000Z', selectorsVersion: 'v' },
-      { kind: 'cells', fetchedAt: '2026-10-18T05:00:31.000Z', currency: 'GBP', pointOfSale: 'GB', selectorsVersion: 'v', cells: [], dropped: [], optionsDropped: 0, notes: [] },
-    ];
-    server.use(http.post(URL_, () => HttpResponse.json(answers.shift())));
-    await p.discovery?.fetchTile(tile, Q, ctx);
-    expect(budget.rows('camoufox').map((r) => r.tileIndex)).toEqual([tile.index, tile.index]);
+    const r = await p.discovery?.fetchTile(tile, Q, ctx);
+    expect(r).toMatchObject({ kind: 'tile-error', error: { kind: 'blocked', retryable: false } });
+    expect(r?.kind === 'tile-error' ? r.error.message : '').toMatch(/consent-unhandled/);
+    expect(budget.rows('camoufox')).toHaveLength(1);
   });
-  it('a second consent page in one tile is a parse error, never a loop', async () => {
+  it('a consent-rejected answer does not exist: an unknown answer kind is a parse error', async () => {
     const { p } = provider();
     server.use(http.post(URL_, () => HttpResponse.json({ kind: 'consent-rejected', fetchedAt: '2026-10-18T05:00:00.000Z', selectorsVersion: 'v' })));
     const tile = planDateGrid(Q)[0];
@@ -1832,7 +1940,7 @@ export const CAMOUFOX_DISCOVERY_INFO: CapabilityInfo = {
   sourceKind: 'scraped-self',
   maxAgeHours: 0,
   provenanceNote:
-    "Google Flights prices via Camoufox: the cheapest round-trip prices Google Flights showed this app's own Camoufox browser on the operator's machine when the page was read (the cheapest results in list mode, the date grid in grid mode), from the operator's IP address, in the currency the page states. Camoufox presents a generated browser fingerprint; Google's terms do not permit this automated access; the operator turned it on. Constraints are not checked; no return leg, seller or baggage is read.",
+    "Google Flights prices via Camoufox: the cheapest round-trip prices Google Flights showed this app's own Camoufox browser on the operator's machine when the page was read (the cheapest results in list mode, the date grid in grid mode), from the operator's IP address, in the currency the page states; in list mode the return date is the date the worker asked for, not one the page showed. Camoufox presents a generated browser fingerprint; Google's terms do not permit this automated access; the operator turned it on. Constraints are not checked; no return leg, seller or baggage is read.",
 };
 ```
 
@@ -1841,13 +1949,14 @@ plan: mode === 'grid' ? planDateGrid : planSingleCells, fetchTile }, healthcheck
 requested without a cabin and the page states none; a non-economy definition gets `no_data`/`cabin-not-offered`
 from the engine, never a mislabelled price. `fetchTile` posts the `PageRequest` (`mode`, the rectangle, `gl` = `POINT_OF_SALE`) through `http.request({ providerId: 'camoufox', tileIndex: plan.index, endpointPath: '/v1/page',
 method: 'POST', cache: 'never', headers: { 'x-gmt-worker-token': token.reveal(), 'content-type': 'application/json' } … })`,
-continues once after `consent-rejected` (a second `consent-rejected` is `parseError('consent-loop')`), and wraps every
+makes exactly one call per tile (there is no consent continuation: consent is a stop), and wraps every
 `ProviderError` as a `tile-error`. The healthcheck probes nothing (decision 24): `{ ok: true, detail: 'not probed:
 worker configured' }`. `index.ts` exports the provider, `camoufoxHttpLimits`, `planDateGrid`, `planSingleCells`, `GRID_DAYS`, the two
 constants. `tiles.ts` adds `planSingleCells(q)`: one `rectangle` per cell with both ranges collapsed to the cell's
 dates, in `generateCells` (or `q.cells`) order, indexed from 0. `answer.ts` turns the answer's `optionsDropped` (list
 mode) into one `CellIssue` on the tile's cell (`offersDropped` = the count, `detail: 'options-unparsed'`) so a priced
-cell carries `offers-dropped:n`, adds the note `cheapest-tab-below-parsed` when the worker reports it, and maps a 409
+cell carries `offers-dropped:n`, passes the worker's `return-date-from-query` and `cheapest-tab-below-parsed` notes
+through, and maps a 409
 `mode-unavailable` to `parseError('mode-unavailable')`.
 
 `egress.ts`: one branch, `r.providerId === 'camoufox'` allows `http:` and an explicit port only when
@@ -2022,7 +2131,7 @@ every page for the cool-down. Google's terms do not permit this automated access
 
 - [ ] **Step 5: Commit** — `git commit -am "wp14: wire the camoufox provider, copy and env example"`
 
-### Task 14.12: Recording and replay (local-only, decision 61), and verifying consent and grid
+### Task 14.12: Recording and replay (local-only, decision 61): the grid, and the consent page as a stop
 
 **Files:** create `apps/camoufox-worker/src/record.ts`, `test/recorded.test.ts`; modify `.gitignore`,
 `src/selectors.ts`, `src/names.ts` (after the recording).
@@ -2034,11 +2143,16 @@ it is verified; it reads and records, and answers nothing to an app). It uses th
 checks, spacing, allowlist, consent rule and hard stop all apply; `--pages` is at most 3 and each page is printed before
 it is loaded. After each step it writes `apps/camoufox-worker/fixtures/recorded/<yyyy-mm-dd>/<n>-<kind>.snapshot.json`
 (the parsed `Snapshot`) and `<n>-<kind>.meta.json` (`{ recordedAt, recordedBy, url, kind, request, restVersion,
-selectorsVersion, grammarVersion, contentSha256 }`). It fails closed when any configured secret, or any node name
-matching `/^Google Account: /`, appears (a signed-in page is never written; the run stops and says why). On a blocked
-page it records nothing, prints the cool-down end and exits 69. The operator also keeps the consent page's snapshot if
-Google shows one; if Google shows none from that address, `CONSENT_VERIFIED` stays false and the consent row of brief §9
-keeps its generic rule.
+selectorsVersion, grammarVersion, contentSha256 }`). It fails closed when any configured secret, the access key, the `SOCS`
+value, or any node name matching `/^Google Account: /` appears (a signed-in page is never written; the run stops and
+says why). On a blocked page it records nothing, prints the cool-down end and exits 69.
+
+**The consent recording is separate and never uses the worker's profile.** Because camofox-browser 1.13.1 accepts
+consent by itself, a consent page can only be captured in a throwaway profile: `record --consent-probe` creates a
+camofox-browser session `gmt-probe-<random>` with no `SOCS` cookie, opens the results URL once, snapshots the first page
+before anything else, writes `<n>-consent.snapshot.json` and its meta, then deletes that session and its profile at
+once, whatever the page showed (an auto-accept may have happened inside it; it is never reused). It refuses to run
+while the worker is running. The probe is a page load like any other and honours the spacing.
 
 `.gitignore` gains:
 
@@ -2061,7 +2175,17 @@ import { classifyPage } from '../src/classify.js';
 import { readGrid } from '../src/grid.js';
 import { readList } from '../src/list.js';
 import { GRAMMAR_VERSION } from '../src/names.js';
-import { CONSENT_VERIFIED, GRID_VERIFIED, SELECTORS_VERSION } from '../src/selectors.js';
+import { GRID_VERIFIED, SELECTORS_VERSION } from '../src/selectors.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { asIsoDateTime } from '@gmt/core';
+import { CooldownStore } from '../src/cooldown.js';
+import { Pacer } from '../src/pacer.js';
+import { PageSession } from '../src/session.js';
+import { FakeRest } from './support/fakeRest.js';
+
+const clock = { now: () => asIsoDateTime('2026-10-18T05:00:00.000Z') };
+const SOCS = { value: 'synthetic-socs-rejection-value', domain: '.google.com' as const, path: '/' as const, capturedAt: asIsoDateTime('2026-10-18T04:00:00.000Z') };
 
 const ROOT = new URL('../fixtures/recorded/', import.meta.url).pathname;
 const present = recordingsPresent(ROOT);
@@ -2092,10 +2216,16 @@ describe.skipIf(!present)(skipTitle('recorded Google snapshots (decision 61, loc
       expect(l.cheapestTabMinor).toBe(Math.min(...l.options.map((o) => o.amountMinor)));
     }
   });
-  it('a recorded consent page, if any, classifies as consent; CONSENT_VERIFIED follows the evidence', () => {
-    const c = recorded('consent');
-    for (const r of c) expect(classifyPage(r.snap)).toEqual({ kind: 'consent' });
-    expect(CONSENT_VERIFIED).toBe(c.length > 0);
+  it('the recorded consent page is a stop: consent-unhandled, nothing clicked, session discarded', async () => {
+    for (const r of recorded('consent')) {
+      expect(classifyPage(r.snap)).toEqual({ kind: 'blocked', page: 'consent-unhandled' });
+      const rest = new FakeRest({ version: '1.13.1', accountCookie: false, keyless: 'refused', snapshots: [r.snap] });
+      const s = new PageSession({ rest, profileId: 'gmt-worker', socs: SOCS, pacer: new Pacer({ minSpacingSeconds: 30, nowMs: () => 0 }),
+        cooldown: new CooldownStore({ dir: mkdtempSync(join(tmpdir(), 'rc-')), hours: 48, clock }), clock });
+      expect(await s.page(r.meta.request as Parameters<PageSession['page']>[0])).toMatchObject({ kind: 'blocked', page: 'consent-unhandled' });
+      expect(rest.calls.some((c) => c.op === 'click')).toBe(false);
+      expect(rest.calls.some((c) => c.op === 'discardSession')).toBe(true);
+    }
   });
   it('a recorded grid, if any, parses 49 keyed cells; GRID_VERIFIED follows the evidence', () => {
     const g = recorded('grid');
@@ -2120,8 +2250,8 @@ recordings present: FAIL wherever the selectors, grammar or verified flags do no
 
 - [ ] **Step 3: Implement** `record.ts`; the operator runs it (one to three page loads per mode, spacing honoured, in
 the dedicated profile); the implementer edits `selectors.ts` and `names.ts` from the recorded snapshots (the grid's real
-roles, the consent button, the non-stop name), sets `SELECTORS_VERSION` and `GRAMMAR_VERSION` to the recording date,
-flips `CONSENT_VERIFIED` / `GRID_VERIFIED` only where a recording proves them, and rewrites `grid.ts` against the
+roles, the consent page's heading, the non-stop name), sets `SELECTORS_VERSION` and `GRAMMAR_VERSION` to the recording
+date, flips `GRID_VERIFIED` only when a recording proves it, and rewrites `grid.ts` against the
 recorded roles if they differ from Task 14.3's hypothesis, keeping Task 14.3's tests green with synthetic trees updated
 to those roles. Every rule that changed is listed in the commit message.
 
@@ -2178,8 +2308,18 @@ describe('plan decision 68: the rules that still bind', () => {
     expect(lock).not.toMatch(/captcha|2captcha|capsolver|anti-captcha|nopecha/i);
     expect(src).not.toMatch(/solve|bypass/i);
   });
-  it('no cookie import, no sign-in, no typing, no script evaluation through the REST client', () => {
+  it('no general cookie import, no sign-in, no typing, no script evaluation through the REST client', () => {
     expect(src).not.toMatch(/import_?cookies|importCookies|signIn|typeText|evaluate/i);
+  });
+  it('the only cookie the worker ever sets is SOCS, from one call site', () => {
+    const rest = readFileSync(new URL('../src/rest.ts', import.meta.url), 'utf8');
+    const set = [...rest.matchAll(/method:\s*'POST'[\s\S]{0,300}?\/cookies[\s\S]{0,300}?name:\s*([A-Za-z_]+)/g)].map((m) => m[1]);
+    expect(set).toEqual(['SOCS_NAME']);
+    expect([...src.matchAll(/setConsentCookie\(/g)].length).toBe(2);   // its definition in rest.ts and its one call in session.ts
+  });
+  it('the worker sends the camofox-browser access key on every request', () => {
+    const rest = readFileSync(new URL('../src/rest.ts', import.meta.url), 'utf8');
+    expect(rest).toMatch(/accessKey/);
   });
   it('no delay is randomised', () => {
     expect(src).not.toMatch(/Math\.random|randomInt|jitter/);
@@ -2241,10 +2381,16 @@ describe('camoufox docs (spec §2 costs, §13)', () => {
     expect(s).toContain('http://127.0.0.1:8090');
     expect(s).toContain('CAMOUFOX_ENABLED=true');
     expect(s).toMatch(/signed-out profile/);
+    expect(s).toContain('CAMOFOX_ACCESS_KEY');
+    expect(s).toContain('socs.json');
+    expect(s).toMatch(/host\.docker\.internal.*every port/s);
   });
   it.each(["Google's terms", "operator's IP", 'Brittleness', 'Speed', 'Availability', 'Image size'])('providers.md and api-limits.md state the %s cost', (cost) => {
     expect(doc('providers.md')).toContain(cost);
     expect(doc('api-limits.md')).toContain(cost);
+  });
+  it('providers.md and api-limits.md state the robots.txt disallow as a known cost', () => {
+    for (const d of ['providers.md', 'api-limits.md']) expect(doc(d)).toContain('/travel/flights/search');
   });
   it('providers.md quotes the provenance note exactly', () => {
     expect(doc('providers.md')).toContain(CAMOUFOX_DISCOVERY_INFO.provenanceNote);
@@ -2271,52 +2417,75 @@ it never searches itineraries. Read its costs below before you turn it on.
 
 **What it costs you**
 
-- **Google's terms.** Google's Terms of Service bar automated access that ignores its machine-readable instructions,
-  and google.com's robots.txt disallows `/travel/flights/search`, where Google's results live (read 2026-10-18).
-  Camoufox is built not to look automated, which makes the access deliberate. With SearchApi, SearchApi took that
-  step; with this provider, you do.
+- **Google's terms.** Scraping Google is against its terms; you chose Camoufox knowing that. Google's Terms of Service
+  bar automated access that ignores its machine-readable instructions, and google.com's robots.txt disallows
+  `/travel/flights/search` for every user agent, the path Google's results live under (read 2026-10-18). Camoufox is
+  built not to look automated, which makes the access deliberate. With SearchApi, SearchApi took that step; with this
+  provider, you do.
 - **Your IP address and account.** Every page comes from your own address; the app never uses a proxy. If Google
   blocks or challenges it, other Google use from the same network may be affected. The provider uses its own
   signed-out profile so your Google account is never involved.
 - **Brittleness.** Google changes the page without notice. When it does, the provider stops (it never guesses) until
   the app is updated. A camofox-browser upgrade needs the same re-check.
 - **Speed.** About 40 seconds a page with the fixed 30-second gap, and in the default `list` mode one page prices one
-  day pair: the default cap of 100 pages a run prices 100 day pairs. Use it on a narrow window or a fixed stay.
+  day pair: the default cap of 100 pages a run prices 100 day pairs. Use it on a narrow window or a fixed stay. A list
+  price's return date is the date the app asked for (the page states only the departure).
 - **Availability.** It runs only while your machine is on and the worker is running. Without them, those day pairs show
   an error and every other provider runs as usual.
 - **Image size.** None: the app's image does not change. Camoufox stays on your machine.
 
 **How it behaves.** One page at a time, at least 30 seconds apart, no more than `CAMOUFOX_EXECUTION_PAGE_CAP` pages a
-run and `CAMOUFOX_MONTHLY_PAGE_CAP` a month, in a separate signed-out profile (`gmt-worker`). On Google's cookie page it
-chooses **Reject all**. If Google shows a CAPTCHA, an "unusual traffic" page, a sign-in page, a signed-in account, or
-anything it does not recognise, it stops at once, marks that day pair "blocked", stops for the rest of the run, and
-refuses every page for `CAMOUFOX_COOLDOWN_HOURS` (48 by default). It never solves or clicks through a challenge, and
+run and `CAMOUFOX_MONTHLY_PAGE_CAP` a month, in a separate signed-out profile (`gmt-worker`). Your cookie choice is
+**Reject all**, set before every page from the value you capture below, so Google's cookie page never appears.
+camofox-browser 1.13.1 clicks "Accept all" on that page by itself, so if the page appears anyway the worker treats it as
+a stop: it closes the session and cools down, and never carries on after an accept. If Google shows a CAPTCHA, an
+"unusual traffic" page, a cookie page, a sign-in page, a signed-in account, or anything it does not recognise, it stops
+at once, marks that day pair "blocked", stops for the rest of the run, and
+refuses every page for `CAMOUFOX_COOLDOWN_HOURS` (48 by default; set it higher for a longer pause, never below 24). It never solves or clicks through a challenge, and
 nothing retries it.
 
 **Turn it on**
 
-1. Make sure camofox-browser 1.13.1 is running on this machine (`http://127.0.0.1:9377`).
-2. Make a token of at least 32 random characters (for example `openssl rand -hex 24`) and add to `.env`:
+1. Run camofox-browser 1.13.1 on this machine (`http://127.0.0.1:9377`) with an access key: start it with
+   `CAMOFOX_ACCESS_KEY` set to at least 32 random characters. The key gates every route of that server. Without it,
+   any program on this machine, and any Docker container (Docker Desktop forwards `host.docker.internal` to every port
+   here), could drive the browser directly and skip every rule below; the worker refuses to start if the server answers
+   without the key.
+2. Capture your cookie choice once. In an ordinary private browser window (not camofox-browser, which would click
+   "Accept all" for you), open `https://www.google.com/travel/flights`, click **Reject all**, then open the browser's
+   storage view (developer tools, cookies for `https://www.google.com`) and copy the `SOCS` cookie's value. Save it as
+   `~/.local/state/get-me-there/camoufox/socs.json`:
+
+   ```json
+   { "value": "<the SOCS value>", "domain": ".google.com", "path": "/", "capturedAt": "2026-10-18T09:00:00.000Z" }
+   ```
+
+   Google keeps this choice for 13 months; the worker refuses an older capture and tells you to repeat this step.
+3. Make a worker token of at least 32 random characters (for example `openssl rand -hex 24`) and add to `.env`:
 
    ```bash
    CAMOUFOX_ENABLED=true
    CAMOUFOX_WORKER_TOKEN=<your token>
    ```
 
-3. Start the worker from a checkout, in its own terminal or as a login item:
-   `CAMOUFOX_WORKER_TOKEN=<your token> pnpm --filter @gmt/camoufox-worker start`. It refuses to start if the
-   camofox-browser version is not the one it was checked against, or if its profile is signed in to Google.
-4. Point the app at it. With `pnpm dev`, set `CAMOUFOX_WORKER_URL=http://127.0.0.1:8090`. In Docker the default is
+4. Start the worker from a checkout, in its own terminal or as a login item:
+   `CAMOUFOX_WORKER_TOKEN=<your token> CAMOFOX_ACCESS_KEY=<the camofox key> pnpm --filter @gmt/camoufox-worker start`.
+   It refuses to start if the camofox-browser version is not the one it was checked against, if that server answers
+   without its key, if the `SOCS` capture is missing or stale, or if its profile is signed in to Google.
+5. Point the app at it. With `pnpm dev`, set `CAMOUFOX_WORKER_URL=http://127.0.0.1:8090`. In Docker the default is
    `http://host.docker.internal:8090`, which Docker Desktop forwards to this machine; on Linux, also start the worker
    with `CAMOUFOX_WORKER_BIND` set to the Docker bridge address (`ip -4 addr show docker0`), never `0.0.0.0`.
-5. Restart the app, then add "Google Flights prices via Camoufox" to the discovery providers of the definitions you
+6. Restart the app, then add "Google Flights prices via Camoufox" to the discovery providers of the definitions you
    choose. New definitions never include it by themselves.
+
+**Optional.** You may patch camofox-browser so its consent helper prefers "Reject all"; the worker behaves the same
+with or without that patch and never relies on it.
 
 **Turn it off.** Set `CAMOUFOX_ENABLED=false` and restart the app; stop the worker. The worker's cool-down record lives
 in `~/.local/state/get-me-there/camoufox/`; deleting it ends a cool-down early, which defeats its purpose.
 
 **Check it.** `curl -s -H "x-gmt-worker-token: <your token>" http://127.0.0.1:8090/v1/status` shows whether it is
-cooling down, its profile and whether that profile holds a Google account cookie.
+cooling down, its profile, whether that profile holds a Google account cookie, and the date of your `SOCS` capture.
 ```
 
 `docs/providers.md`: replace the Camoufox row of the summary table with:
@@ -2326,13 +2495,16 @@ cooling down, its profile and whether that profile holds a Google account cookie
 ```
 
 and add a section `### Camoufox provider (self-scraped, opt-in)` with the method, the feasibility load (date, versions,
-passed, structure seen, and that it ran signed in, which the dedicated profile now forbids), the limits, the six costs
+passed, structure seen, and that it ran signed in, which the dedicated profile now forbids), the signed-out test (the
+consent page, camofox-browser's own "Accept all" click, and the `SOCS` design that answers it), the access key, the
+limits, the six costs
 under the bold names of spec §2 (**Google's terms**, **The operator's IP and account**, **Brittleness**, **Speed**,
 **Availability**, **Image size**), the provenance note quoted exactly, and the labels.
 
 `docs/api-limits.md`: a `### Camoufox (own Google Flights pages): self-scraped, opt-in, free` subsection under
 "Per-provider facts" with the page caps and window, the spacing and derived rates, the cool-down, "never billable,
-cost 0, never cached", both tilings with the worked-example figures, the six costs (same names), and under
+cost 0, never cached", both tilings with the worked-example figures, the six costs (same names, the robots.txt
+disallow of `/travel/flights/search` stated under **Google's terms**), and under
 "Reconciling" one line: there is no vendor dashboard; the ledger's `camoufox` rows are the only record, and a `423` row
 is a block.
 
@@ -2345,30 +2517,31 @@ is a block.
 **Files:** modify `apps/api/src/tools/smoke.ts`, `smokeChecks.ts`; test `apps/api/test/tools/smoke.camoufox.test.ts`.
 
 The smoke already runs one discovery tile per configured provider (spec §9 item 7, decision 65). With the camoufox provider
-configured it adds **one** camoufox tile (one cell in `list` mode, the 7 × 7 grid in `grid` mode; at most two worker
-calls if a consent page comes first), spending no SearchApi credit, and these checklist rows:
+configured it adds **one** camoufox tile (one cell in `list` mode, the 7 × 7 grid in `grid` mode; one worker call), spending no SearchApi credit, and these checklist rows:
 
 | Row | `ok` when | `FAIL` when | `skip` when |
 |---|---|---|---|
-| `camoufox one page` | the ledger holds one `camoufox` row for the tile (two with a consent page, both on its tile index) | more rows, or a row on another tile index | camoufox is not configured |
-| `camoufox consent` | no consent page, or one answered `consent-rejected` | the worker answered consent twice | not configured |
+| `camoufox one page` | the ledger holds exactly one `camoufox` row for the tile | more rows, or a row on another tile index | camoufox is not configured |
+| `camoufox consent rejected` | the answer was not `consent-unhandled`, and the worker's status shows a `SOCS` capture younger than 13 months | a `consent-unhandled` block, or no capture | not configured |
+| `camoufox access key` | the worker's status reports that the REST server refused a keyless request at start | anything else | not configured |
 | `camoufox not blocked` | the answer was `cells` | the answer was `blocked` or `cooling-down`; the line names the page kind and the cool-down end | not configured |
 | `camoufox grid keys` | every price's dates lie in the tile and came from the grid's headers (no `out-of-tile` note) | any `out-of-tile` note | not configured or blocked |
 | `camoufox partial` | `look` when any cell issue exists (the line counts them), else `ok` | — | not configured or blocked |
 | `camoufox provenance` | `scraped-self`, `maxAgeHours` 0, the note equals `CAMOUFOX_DISCOVERY_INFO.provenanceNote`, currency GBP | anything else | not configured or blocked |
 | `camoufox selectors` | the answer's `selectorsVersion` has no `-unverified` suffix | `-unverified` (selectors never checked against a recording) | not configured or blocked |
 | `camoufox signed out` | the worker's status reports the dedicated profile id and `accountCookie: false` | `accountCookie` other than false, or the operator's own profile id | not configured |
+| `camoufox return date` | `look`: the line prints the cell's return date with "(the date asked for)" | — | not configured or blocked |
 | `camoufox compare` | `look`: the operator opens Google Flights for the cheapest cell and compares the price by eye | — | not configured or blocked |
 
 A blocked smoke exits 1, prints the cool-down end, and says that every further smoke will be refused until then.
 
 - [ ] **Step 1: Write the failing test** — one `it` per row, over a scripted worker answer through msw at
-`http://127.0.0.1:8090/v1/page` (cells; consent then cells; consent twice; blocked; cooling-down; an out-of-tile
+`http://127.0.0.1:8090/v1/page` (cells; consent-unhandled; blocked; cooling-down; an out-of-tile
 cell; a dropped cell; an `-unverified` version), each asserting the row's status and the exit code.
 
 - [ ] **Step 2: Run** — `pnpm --filter @gmt/api exec vitest run test/tools/smoke.camoufox.test.ts`; FAIL (no rows).
 
-- [ ] **Step 3: Implement** the rows in `smokeChecks.ts` and the one camoufox tile in `smoke.ts` (one tile from the configured mode's planner; the per-run cap for camoufox is 2 page loads).
+- [ ] **Step 3: Implement** the rows in `smokeChecks.ts` and the one camoufox tile in `smoke.ts` (one tile from the configured mode's planner; the per-run cap for camoufox is 1 page load).
 
 - [ ] **Step 4: Run** — PASS; `pnpm --filter @gmt/api test` PASS.
 
@@ -2382,7 +2555,11 @@ None of the plan's five Review Focus lines is owned by WP14. The inputs most lik
   re-classifies after every click).
 - A signed-in account control stops the worker and keeps it refusing until restarted (Tasks 14.1, 14.5); a profile
   holding an account cookie never starts (Task 14.5).
-- A consent page with no "Reject all", two of them, or a near match is a stop, never an accept (Tasks 14.1, 14.4).
+- The `SOCS` rejection is set before every tab, and a consent page, or a `SOCS` value changed after a page, is a
+  `consent-unhandled` stop with the session discarded and nothing clicked (Tasks 14.1, 14.4, 14.5), proved on a
+  recorded consent page (Task 14.12).
+- A camofox-browser server that answers without its access key, or a missing or stale `SOCS` capture, stops the worker
+  at start (Task 14.5).
 - A block is never retried in the execution, not even by a manual resume (Task 14.10).
 - The cool-down survives a worker restart and fails closed on a corrupt record (Task 14.1).
 - A second request inside the spacing opens no tab (Task 14.5).
@@ -2411,9 +2588,10 @@ None of the plan's five Review Focus lines is owned by WP14. The inputs most lik
   exits 0, and `docker image ls get-me-there:local` shows the size unchanged from main within 5 MB.
 - With `CAMOUFOX_ENABLED=true` and no worker running, `docker compose up -d` then `/api/health` answers ok.
 - On the operator's machine: `pnpm --filter @gmt/camoufox-worker start` refuses to start against any camofox-browser
-  version but 1.13.1 and against a signed-in profile; `lsof -nP -iTCP:8090 -sTCP:LISTEN` shows the worker on
+  version but 1.13.1, against a server started without `CAMOFOX_ACCESS_KEY`, without a `socs.json` capture, and against a
+  signed-in profile; `lsof -nP -iTCP:8090 -sTCP:LISTEN` shows the worker on
   `127.0.0.1` only.
-- The operator's own smoke with camoufox configured: at most 2 page loads; every row of Task 14.15 reads `ok` or
+- The operator's own smoke with camoufox configured: exactly 1 page load, no consent page; every row of Task 14.15 reads `ok` or
   `look`.
 - Every task's checkbox ticked.
 
@@ -2430,28 +2608,26 @@ Decision 68 records the provider id, the limits, the capabilities and the deploy
    new recording (Task 14.12's command), edits to `selectors.ts` and `names.ts` and new versions in one commit, with
    the recorded suite green. Worth a line in the plan's process as a standing maintenance task, and the same for a
    camofox-browser upgrade (the pinned version in `rest.ts` and `startChecks`).
-4. **`docs/scheduling.md`** (generated) gains camoufox rows from both planners and the spacing: `list` 100 cells per
+4. **`SOCS` re-capture.** The captured rejection lasts 13 months (Google's cookie policy); the worker refuses a stale
+   capture and the smoke reports its date. A reminder in the operator's maintenance list (or an operator notification a
+   month before expiry, read from the worker's status) is a small follow-up.
+5. **`docs/scheduling.md`** (generated) gains camoufox rows from both planners and the spacing: `list` 100 cells per
    run at the default cap (about 67 minutes); `grid` 78 pages and about 52 minutes per worked-example pair.
-5. **Smoke cross-check.** Once grid mode is verified, a smoke row comparing one grid cell with the list price for the
+6. **Smoke cross-check.** Once grid mode is verified, a smoke row comparing one grid cell with the list price for the
    same day pair would show whether the grid and the cheapest list agree.
 
 ## 14. Open questions
 
-- **`requires_human_judgment`: robots.txt.** `www.google.com/robots.txt` (read 2026-10-18) disallows
-  `/travel/flights/search` for every user agent, and Google's Terms of Service name automated access contrary to such
-  instructions as prohibited; using an anti-detection browser makes that access deliberate. The operator's rulings of
-  2026-10-18 do not mention this reading. This brief is not dispatchable until the operator confirms the build with
-  that fact in view.
-- **`requires_human_judgment`: the REST server's exposure.** Docker Desktop forwards `host.docker.internal` to every
-  port on the host's loopback, so the app container (or any container) can reach camofox-browser's `:9377` directly,
-  bypassing the worker's rules; the app's egress check refuses it, but other containers are not this app's to police.
-  If camofox-browser 1.13.1 offers an API key (Task 14.1 Step 0 records it), the operator should set it and the worker
-  will send it; otherwise the operator accepts that residual or runs camofox-browser only while the worker needs it.
-- **Cool-down length.** 48 hours by default, never below 24; the operator may prefer longer.
-- **Return-date echo in list mode.** A result's accessible name states the departure date, not the return date; the
-  worker checks the departure against the cell and takes the return from its own query. If the recorded results page
-  exposes the selected return date (a date field's name or value), Task 14.12 adds that check; until then the list
-  price's return date rests on the query, and the smoke's `look` row compares it by eye.
-- **Signed-in feasibility.** The feasibility load passed while signed in to the operator's account; the signed-out
-  dedicated profile may meet consent pages or challenges that load did not. The first recording (Task 14.12) is the
-  test; a block there starts the cool-down like any other.
+None. The operator's rulings of 2026-10-18 settled every question the earlier drafts raised:
+
+- **robots.txt and Google's terms:** a known cost the operator accepted in choosing Camoufox; stated in spec §2, the
+  operator docs and the Providers copy (Task 14.14). No gate.
+- **The REST server's exposure:** closed by camofox-browser's `CAMOFOX_ACCESS_KEY`, which the operator sets, the
+  worker sends, and the worker's start check enforces (Tasks 14.5, 14.14).
+- **Consent:** the `SOCS` rejection is pre-set and any consent page is a stop (Task 14.4); the optional camofox patch is
+  documented and never depended on.
+- **Cool-down:** 48 hours by default, configurable, never below 24.
+- **Return date in list mode:** the worker's own query date, labelled so (the `return-date-from-query` note, the
+  provenance note, the smoke's `look` row).
+- **Signed-out behaviour:** the signed-out test of 2026-10-18 showed a consent page and no challenge; the design above
+  answers it.

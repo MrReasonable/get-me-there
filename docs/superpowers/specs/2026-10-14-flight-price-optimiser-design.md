@@ -180,55 +180,84 @@ length is implied by the selected dates, not stated per day.
 browser, with the fingerprint it generates itself; nothing is layered on top
 of it. **A dedicated, signed-out profile:** the worker uses its own
 camofox-browser user id (`CAMOUFOX_PROFILE_ID`, default `gmt-worker`), never
-the operator's, never imports cookies, refuses to start when that profile
-holds a Google account cookie, and stops at once (`blocked`, page
-`signed-in`) if any page shows a signed-in account control ("Google
-Account: …"); the only cookie it sets by choice is the consent rejection. **No proxies** of any kind: every page comes from the operator's own
-IP address. **No challenge is ever solved or bypassed**: no CAPTCHA solver,
-no clicking a challenge, no waiting a challenge out. One page at a time
-(concurrency 1), at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never
-lower, never randomised) between the end of one page load and the start of
-the next, enforced in both the app's limiter and the worker; at most
-`CAMOUFOX_EXECUTION_PAGE_CAP` page loads per execution (default 100, at most
-400) and `CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500). Navigation is
-limited to a hostname allowlist: the worker only ever asks the REST server to
-open `https://www.google.com/travel/flights…`, clicks only the consent
-page's "Reject all", the "Cheapest" tab, "View more flights" and "Date grid",
-and checks the tab's URL after every step: `www.google.com` under
-`/travel/flights`, or `consent.google.com` while handling consent; any other
-URL is the blocked page `off-allowlist`. (Subresources load as in any
-browser; the REST API offers no request filter, so the allowlist governs
-navigations, which is where a sign-in wall or a redirect would show.) On Google's consent interstitial the worker
-clicks "Reject all", never an accept, and keeps the resulting cookie in its
-own profile. On a CAPTCHA, an "unusual traffic" page (`/sorry/`), a
-sign-in wall, a navigation off the allowlist or any page it cannot classify
-as the consent page or a results page with a date grid, the worker **stops at
-once**: the cell outcome is `error` with reason `blocked` (a `ProviderError`
-of kind `blocked`, never retried by http-kit), the provider is disabled for
-the rest of that execution (including a manual resume of it), and the worker
-refuses every page load for `CAMOUFOX_COOLDOWN_HOURS` (default 48, at least
-24), answering without contacting Google; the cool-down survives a worker
-restart. A grid row the parser cannot read drops that option and marks the
-tile's affected cells through `cellIssues`, so a partial grid is never
+the operator's; it refuses to start when that profile holds a Google account
+cookie, and stops at once (`blocked`, page `signed-in`) if any page shows a
+signed-in account control ("Google Account: …"). **An access key:** the
+operator sets camofox-browser's `CAMOFOX_ACCESS_KEY`, which gates every route
+of that server, and the worker sends it; the worker refuses to start if the
+server answers a request made without the key, because an open server would
+let any local process or container drive the browser. **No proxies** of any
+kind: every page comes from the operator's own IP address. **No challenge is
+ever solved or bypassed**: no CAPTCHA solver, no clicking a challenge, no
+waiting a challenge out. One page at a time (concurrency 1), at least
+`CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never lower, never randomised)
+between the end of one page load and the start of the next, enforced in both
+the app's limiter and the worker; at most `CAMOUFOX_EXECUTION_PAGE_CAP` page
+loads per execution (default 100, at most 400) and `CAMOUFOX_MONTHLY_PAGE_CAP`
+per month (default 1,500).
+
+*Consent: rejected, never accepted.* A fresh signed-out profile lands on
+Google's consent page ("Before you continue", "Reject all" / "Accept all";
+signed-out test, 2026-10-18), and camofox-browser 1.13.1 itself clicks
+"Accept all" after every navigation (its built-in `dismissConsentDialogs`,
+which no setting turns off). So the worker never lets that page appear:
+before the session's first navigation, and again before every page, it sets
+Google's consent-choice cookie `SOCS` (named in Google's cookie policy as the
+cookie that "store[s] a user's state regarding their cookies choices", read
+2026-10-18) to a **rejection** value on `.google.com` for its own session,
+through camofox-browser's `POST /sessions/:userId/cookies`; that is the only
+cookie the worker ever sets. Google does not document the value's format, so
+the value is taken once from a real rejection: the operator clicks "Reject
+all" on the consent page in an ordinary private browser window (never
+through camofox-browser, whose auto-dismiss would accept) and copies the
+resulting `SOCS` value into the worker's state directory, dated; the worker
+refuses to start without it. After every page the worker reads the
+session's `SOCS` back and checks it still holds that value. If the consent
+page appears anyway, or the value has changed (an accept happened), the
+worker treats it as **`blocked`, page `consent-unhandled`**, closes the
+session, discards its cookies and cools down; it never continues on a page
+reached through an accept. An operator may patch camofox-browser to prefer
+"Reject all", but the worker never depends on such a patch.
+
+*Navigation and the hard stop.* Navigation is limited to a hostname
+allowlist: the worker only ever asks the REST server to open
+`https://www.google.com/travel/flights…`, clicks only the "Cheapest" tab,
+"View more flights" and "Date grid", and checks the tab's URL after every
+step: `www.google.com` under `/travel/flights`; `consent.google.com` is
+`consent-unhandled` and any other URL is `off-allowlist`. (Subresources load
+as in any browser; the REST API offers no request filter, so the allowlist
+governs navigations, which is where a consent page, a sign-in wall or a
+redirect would show.) On a CAPTCHA, an "unusual traffic" page (`/sorry/`), a
+sign-in wall, a consent page, a navigation off the allowlist or any page it
+cannot classify as a results page, the worker **stops at once**: the cell
+outcome is `error` with reason `blocked` (a `ProviderError` of kind
+`blocked`, never retried by http-kit; the page kind goes to `last_error`),
+the provider is disabled for the rest of that execution (including a manual
+resume of it), and the worker refuses every page load for
+`CAMOUFOX_COOLDOWN_HOURS` (default 48, configurable, at least 24), answering
+without contacting Google; the cool-down survives a worker restart. A grid
+row or result name the parser cannot read drops that option and marks the
+tile's affected cells through `cellIssues`, so a partial page is never
 mistaken for "no fares".
 
 *Ledger and caps.* Every worker call is one page load and one
 `provider_requests` row under the **free-provider rules** (never billable,
 cost 0, counted by `provider-month` and `execution-free-calls`), plus a
-per-execution page cap (`BudgetExceeded` scope `provider-execution`). A
-consent page is its own row with the tile's `tile_index`, so parity still
-counts tiles. Responses are never cached (`cache: 'never'`); engine reuse
+per-execution page cap (`BudgetExceeded` scope `provider-execution`). One
+tile is one call, so parity counts tiles. Responses are never cached (`cache: 'never'`); engine reuse
 (§8.1) is the only reuse.
 
 *Labels.* Display name "Google Flights via Camoufox"; source label "Google
-Flights prices via Camoufox"; compact mark `CF`. `provenanceNote`: "Google Flights prices via Camoufox: the cheapest round-trip prices Google Flights showed this app's own Camoufox browser on the operator's machine when the page was read (the cheapest results in list mode, the date grid in grid mode), from the operator's IP address, in the currency the page states. Camoufox presents a generated browser fingerprint; Google's terms do not permit this automated access; the operator turned it on. Constraints are not checked; no return leg, seller or baggage is read." Vendor links: `google.com` only.
+Flights prices via Camoufox"; compact mark `CF`. `provenanceNote`: "Google Flights prices via Camoufox: the cheapest round-trip prices Google Flights showed this app's own Camoufox browser on the operator's machine when the page was read (the cheapest results in list mode, the date grid in grid mode), from the operator's IP address, in the currency the page states; in list mode the return date is the date the worker asked for, not one the page showed. Camoufox presents a generated browser fingerprint; Google's terms do not permit this automated access; the operator turned it on. Constraints are not checked; no return leg, seller or baggage is read." Vendor links: `google.com` only.
 `pointOfSale` is the page's stated location when it states one, else
 `'unknown'`.
 
-*Costs, stated plainly.* **Google's terms:** Google's Terms of Service bar
-automated access that ignores its machine-readable instructions, and
-`www.google.com/robots.txt` disallows `/travel/flights/search` (read
-2026-10-18), the path Google's results live under; Camoufox exists to avoid
+*Costs, stated plainly.* **Google's terms:** scraping Google is against its
+terms, which this spec has stated since revision 1 and the operator accepted
+in choosing Camoufox. Google's Terms of Service bar automated access that
+ignores its machine-readable instructions, and `www.google.com/robots.txt`
+disallows `/travel/flights/search` for every user agent (read 2026-10-18),
+the path Google's results live under: a known cost, not an open question; Camoufox exists to avoid
 being recognised as automation, which makes the access deliberate rather
 than incidental; SearchApi carried this exposure one step removed, this
 provider carries it directly. **The operator's IP and account:** every page
@@ -1749,6 +1778,7 @@ CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExcee
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per calendar month (provider-month, free-provider rules)
 CAMOUFOX_BILLING_DAY=1                   # 1–28, the month boundary for the page cap
 CAMOUFOX_COOLDOWN_HOURS=48               # refusal period after a block; minimum 24 (the worker reads the same name)
+# worker side only (the app never reads it): CAMOFOX_ACCESS_KEY, camofox-browser's own key, required
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=45         # one page load including the date grid; above it → network, not retried
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
 # --- email (all or nothing) ---
@@ -1832,7 +1862,10 @@ server, started with `pnpm --filter @gmt/camoufox-worker start` from a
 checkout (or the operator's own launchd or systemd unit running the same
 command). It reaches the REST server at `CAMOFOX_REST_URL` (default
 `http://127.0.0.1:9377`, loopback only), refuses to start when that server's
-version is not the pinned one or its profile holds a Google account cookie,
+version is not the pinned one, when it answers without `CAMOFOX_ACCESS_KEY`
+(which the worker then sends on every request), when its profile holds a
+Google account cookie, or when no recorded `SOCS` rejection value is in its
+state directory,
 and listens on `CAMOUFOX_WORKER_BIND` (default `127.0.0.1`; never `0.0.0.0`
 or `::`) port 8090. Docker Desktop forwards `host.docker.internal` to the
 host's loopback; on Linux, compose maps `host.docker.internal` to
@@ -1915,7 +1948,10 @@ as specified in §5.3; no secrets, no full URLs.
 host-side worker; discovery only, `list` mode from the results list and
 `grid` mode from the date grid once recorded; a dedicated signed-out
 profile; `scraped-self` with `maxAgeHours` 0, no
-proxies, consent "Reject all", a hard stop and cool-down on any bot check,
+proxies, consent rejected through a pre-set `SOCS` rejection cookie with any
+consent page a `consent-unhandled` stop (camofox-browser auto-accepts), the
+camofox-browser access key, robots.txt stated as a known cost, a hard stop
+and cool-down on any bot check,
 never solving a challenge, a page cap and fixed spacing, its costs), with
 the §1, §3, §5.1–§5.3, §8.1, §11, §12, §13, §15 and §16 rules it needs (plan
 decision 68).
