@@ -21,7 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
-| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | The page as Google showed it when it was read (`maxAgeHours` 0) | `list` mode, one day pair a page (`grid` designed, not built) | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); built in WP14 |
+| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | The page as Google showed it when it was read (`maxAgeHours` 0) | `list` mode, one day pair a page (`grid` designed: up to 49 day pairs a view, not built) | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); built in WP14 |
 
 ## Key facts with sources
 
@@ -121,7 +121,12 @@ Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
 
 **Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs
 and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a month, against 2,184 day pairs
-for one worked-example airport pair (8,736 for its four pairs).
+for one worked-example airport pair (8,736 for its four pairs). The designed `grid` mode (work package 15, not yet
+built) reads up to 49 day pairs per view of the Dates tab's 7 × 7 grid: for one worked-example pair, 78 views on a
+lattice of 7 × 7 blocks (26 departure columns × 3 return blocks for the 10–21-night band; 2,184 of their 3,822 cells are
+in the band and stored), visited in 4 pages and 99 scrolls, about 17 minutes; the four pairs take 16 pages, 396 scrolls
+and about 70 minutes, a full pass in one run. These figures assume a scroll moves one 7-day block; the grid recording
+measures it.
 
 **Provenance note, exactly as the app states it:** "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read."
 
