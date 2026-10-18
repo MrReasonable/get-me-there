@@ -94,6 +94,7 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', { timeo
           'booking_token',
           'departure_token',
           'separate_tickets',
+          'show_cheapest_flights',
           'sort_by',
           'stops',
         ].sort(),
@@ -102,6 +103,8 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', { timeo
           engine: ['google_flights'],
           separate_tickets: ['1'],
           sort_by: ['price'],
+          // why: sent on every google_flights step (vendor docs read 2026-10-18), so a run records the value it sent.
+          show_cheapest_flights: ['true'],
           // why: ruling 8: the documented set is listed though the worked example sets no maxStops and sends none.
           stops: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'],
           arrival_id: 'any',
@@ -123,6 +126,16 @@ describe('parameter allowlist files (spec §5.2, plan ParamsAllowlist)', { timeo
       assertRequestAllowed(tp, f.endpointPath, new URL(f.request.url));
     for (const f of loadRecorded(root, 'searchapi', '/api/v1/search'))
       assertRequestAllowed(sa, f.endpointPath, new URL(f.request.url));
+    // why: the tool builds its requests with the providers' builders, so every itinerary step it records asks for the
+    // cheapest set, as production does; the calendar engine has no such parameter.
+    const sent = loadRecorded(root, 'searchapi', '/api/v1/search').map(
+      (f) => new URL(f.request.url).searchParams,
+    );
+    const flights = sent.filter((p) => p.get('engine') === 'google_flights');
+    expect(flights.length).toBeGreaterThan(0);
+    for (const p of flights) expect(p.get('show_cheapest_flights')).toBe('true');
+    for (const p of sent.filter((x) => x.get('engine') === 'google_flights_calendar'))
+      expect(p.has('show_cheapest_flights')).toBe(false);
   });
 
   it('ParamLog refuses an unlisted parameter or value before the request leaves, naming the parameter only (ts-015)', () => {

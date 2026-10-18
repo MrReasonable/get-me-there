@@ -84,6 +84,13 @@ describe('egress allowlist (spec §5.3 "Egress")', () => {
     });
     expect(err.message).toContain('credential query parameter access_token');
   });
+  it('a google_flights request with show_cheapest_flights=true passes the credential-name rule', async () => {
+    const { kit } = makeKit();
+    server.use(http.get(SEARCH, () => HttpResponse.json({ ok: true })));
+    expect(isCredentialParam('show_cheapest_flights')).toBe(false);
+    const url = `${SEARCH}?engine=google_flights&sort_by=price&show_cheapest_flights=true`;
+    expect((await drive(kit.request(req({ url })))).body).toEqual({ ok: true });
+  });
   it('every parameter name the adapters send passes the name check', () => {
     const names = [SEARCHAPI_PARAMS, TRAVELPAYOUTS_PARAMS].flatMap((a) =>
       Object.values(a.endpoints).flatMap((e) => e.names),
