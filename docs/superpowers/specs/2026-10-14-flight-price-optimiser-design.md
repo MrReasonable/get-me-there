@@ -195,14 +195,18 @@ never silently dropped.
   `dates-grid`, is recognised instead when the "Price insights" dialog is
   open, its "Dates" tab is selected and its panel holds the four scroll
   buttons; anything else is `unrecognised`.
-  **Cells by position.** A view holds exactly 49 cell buttons: the panel's
-  buttons other than the four scroll buttons, between the departures and
-  returns lines, whatever their names; another count is `unrecognised`. Each
-  is matched by its position against the departures × returns pairs, and its
-  name must then name that same pair. **Cell grammar** (dated, observed
-  2026-10-18): `£<price>[, cheapest price], <d> <Mon> to <d> <Mon>[,
-  selected]`, read through locators from each button's accessible name,
-  never from printed accessibility text. A priced cell that parses and names
+  **Cells by name** (the `--grid` recordings of 2026-10-18: after a scroll
+  the page reuses its elements and rotates their order, so position says
+  nothing). The cell candidates are the panel's buttons other than the four
+  scroll buttons, whatever their names; each name carries both of its dates,
+  and the departures and returns lines are only a set check: the dates the
+  cells name must equal the lines' sets. A view holds 49 cells less the pairs
+  whose return precedes the departure (a same-day pair is shown; 39 near
+  today in the recordings). **Cell grammar** (dated, observed 2026-10-18):
+  `£<price>[, cheapest price | , low price], <d> <Mon> to <d> <Mon>[,
+  selected]`, the price with thousands separators ("£1,308"), read through
+  locators from each button's accessible name, never from printed
+  accessibility text. A priced cell that parses and names
   its position's pair is kept; an unpriced cell is counted as `no_data` once a
   recording proves Google's unpriced form, and until then as unparsed, never
   guessed. Duplicate pairs, or names that fail the departures × returns
@@ -210,14 +214,14 @@ never silently dropped.
   is stored, and its covered cells are issues. **Grammar drift:** when more
   than half of a view's priced-looking cells (names starting "£") fail the
   grammar, the page stops as `unrecognised` and no further scrolls run.
-  **Years.** The year comes from the selected-pair line and the query; each
-  `<d> <Mon>` on the departures and returns lines takes the year in {Y − 1,
-  Y, Y + 1} (Y the query's year) that puts it nearest the planned block, and
-  every weekday on both lines must agree with its computed date, else the view
-  is `unrecognised`; cell dates take their years only by matching the
-  resolved lines. So a block across 31 December rolls over. The first view's
-  selected cell must be the query's pair, and its price the selected-pair
-  line's price, else `unrecognised`.
+  **Years.** Each `<d> <Mon>` takes the year in {Y − 1, Y, Y + 1} (Y the
+  query's) that puts it nearest the query's departure, and every weekday on
+  both lines must agree with its computed date, else the view is
+  `unrecognised`; so a view across 31 December rolls over. The selected-pair
+  line ("14 – 24 Mar 2027", "28 Mar – 7 Apr 2027", "27 Dec 2026 – 6 Jan
+  2027", or "20 – 23 Oct" in the current year) must name the query's pair;
+  the first view's selected cell must be that pair, at the price line's price
+  ("£462 · Round trip"), else `unrecognised`.
   **Stay range.** A block of departures `d…d+6` and returns `r…r+6` holds
   stays of `r − d − 6` to `r − d + 6` nights on its 13 diagonals. Blocks are
   laid on a lattice anchored at the window's first departure and that date
@@ -226,16 +230,19 @@ never silently dropped.
   `⌈(7 + maxNights − minNights) / 7⌉` blocks; so a pair needs
   `⌈D / 7⌉ × ⌈(7 + maxNights − minNights) / 7⌉` blocks. Cells inside a block
   but outside the definition's window or nights are ignored, never stored.
-  **Scrolls.** How many days one scroll moves on each axis is measured by the
-  `--grid` recording, kept as a dated value the worker reports in its status,
-  and passed to the planner (`stepDays`); the planner orders a pair's blocks
-  in one path and counts its moves. With a 7-day step and a three-block
-  column (the worked example's band) the path runs the first column top to
-  bottom (two moves); each later column is reached by one step right, which
-  lands on its middle block, then one up to its top block and two down to its
-  bottom block, passing the middle again unread (a transit view): four moves
-  a column. A page ends on a read view only, and the next page opens the next
-  read block by its query, skipping any transit view; pages hold at most
+  **Scrolls.** The `--grid` recordings of 2026-10-18 measured the step: one
+  scroll moves one day on its axis (left and right the departures, up and
+  down the returns), revealing 7 new cells; the dated value (`stepDays` 1 and
+  1) is reported by the worker in its status and passed to the planner. A
+  block-to-block move is therefore 7 scrolls (about 65 s at the measured 9.3 s
+  a scroll), while a new page opens a block directly in about 30 s (the page
+  spacing; the first view is ready about 21–26 s after the load starts). The
+  planner orders a pair's blocks in one path and chooses, move by move,
+  between a new page and the scrolls, whichever is quicker within both the
+  page and the scroll caps (the caps shared across the run's pairs); a move
+  passes its intermediate views unread. It plans no departure past the sale
+  window's horizon (`GRID_HORIZON_DAYS`, 320 days, dated 2026-10-18: a page
+  327 days out showed the no-flights page). Pages hold at most
   `CAMOUFOX_GRID_SCROLL_CAP` scrolls (default 30, at most 60). Scroll clicks
   are at least `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` apart start to start
   (default 5, at least 5, fixed, never randomised). A run makes at most
@@ -253,7 +260,9 @@ never silently dropped.
   the whole page, the views already read included. A scroll that does not
   settle in its budget ends the page: the views read so far are kept, and the
   covered cells of the blocks not reached are `error` (`parse`, detail
-  `page-not-ready`), resumable, with no cool-down.
+  `page-not-ready`), resumable, with no cool-down. A grid page that settles
+  on Google's no-flights page (past the sale window) is `no_data` for its
+  covered cells.
   **Edges of the sale window.** The departures and returns lines are the
   source of truth for which dates a view shows. A first view shifted near
   today, or a short move at an edge, is accepted when its dates are
@@ -273,9 +282,10 @@ never silently dropped.
   and the note says so. Google's "cheapest price" mark is relative to the
   prices shown in that view (the panel's legend: "Cheapest Compared with
   other prices shown") and is stored as the vendor's flag
-  (`vendor_marked_cheapest`, false meaning not marked in the view it was read
-  from), never taken as this app's own minimum; SearchApi's
-  `google_flights_calendar` `is_lowest_price` fills the same field.
+  (`vendor_price_mark` ∈ `cheapest | low | none`; the grid also marks "low
+  price"), never taken as this app's own minimum; SearchApi's
+  `google_flights_calendar` `is_lowest_price` fills the same field
+  (`cheapest` or `none`).
 
 Cell keys and currency come from the page; in `list` mode the return date
 is the date the worker asked for (the page's options state only the
@@ -440,20 +450,18 @@ most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a
 month, against 2,184 day pairs for one worked-example airport pair (8,736 for
 its four pairs). The estimate says how many cells a run will price and how
 many runs a full pass takes; the rest of the cells read skipped or not
-searched in View D. The designed `grid` mode changes the arithmetic: 2,184
-cells ÷ 49 is a floor of 45 blocks a pair, but 7 × 7 blocks laid over a
-12-night band need `⌈182 / 7⌉ × ⌈18 / 7⌉ = 26 × 3 = 78` blocks (3,822 grid
-cells, of which the 2,184 in the band are stored, 57%); with a 7-day step the
-path visits them with `2 + 25 × 4 = 102` moves, 24 of them into transit views,
-and cut at 30 scrolls a page (each page ending on a read view, the next
-opening the next read block) into 4 pages and 97 scrolls a pair; at about
-60 s a page (load, settle, two clicks) and about 11 s a scroll (5 s spacing,
-settle, read), a pair takes about 4 × 60 + 97 × 11 ≈ 1,307 s (22 minutes),
-and the worked example's four pairs 16 pages, 388 scrolls and about 87
-minutes: a full pass in one run, within the default caps (16 of 100 pages
-and 388 of 600 scrolls a run; on a weekly schedule about 70 of 1,500 pages
-and 1,680 of 6,000 scrolls a month). The `--grid` recording measures the
-step and the times, and work package 15 restates these figures from them.
+searched in View D. The designed `grid` mode changes the arithmetic: 7 × 7
+blocks laid over a 12-night band need `⌈182 / 7⌉ × ⌈18 / 7⌉ = 26 × 3 = 78`
+blocks a pair (3,822 grid cells, of which the 2,184 in the band are stored,
+57%), 312 for the four pairs. At the measured one-day step a block-to-block
+move is 7 scrolls (about 65 s) against about 30 s for a new page, so the
+planner opens pages until the page cap binds and scrolls only past it: with
+the defaults (100 pages and 600 scrolls a run, 30 scrolls a page) a run
+reaches 100 + 85 = 185 blocks in about 100 × 30 + 595 × 9.3 ≈ 8,530 s (2.4
+hours), and a full pass of the four pairs takes two runs (about 200 pages,
+785 scrolls and 3.7 hours in all); with `CAMOUFOX_EXECUTION_PAGE_CAP` raised
+to 312 it is one run of 312 pages and about 2.6 hours. `list` mode needs
+8,736 pages for the same pass.
 
 *Costs, stated plainly.* **Terms:** Read the provider's terms before enabling
 it; the operator is responsible for how it is used. **The operator's IP and account:** every page
@@ -467,9 +475,10 @@ must be re-dated against a new recording; `camoufox-js` is marked
 experimental by its authors, and an upgrade of it, of `playwright-core` or of
 the Camoufox binary is a re-verification. **Speed:** a page takes about 20–60
 s (load, settle, read) plus the 30 s spacing, about 50–90 s in all, so 100
-cells a run take about 1½–2½ hours; in the designed `grid` mode a page holds
-up to 30 scrolls of about 11 s each, so a page takes about 6½ minutes at the
-defaults and about 30 minutes at the maximums (60 scrolls, 30 s spacing). **Availability:** the provider runs only
+cells a run take about 1½–2½ hours; in the designed `grid` mode a page opens a
+block in about 30 s and each scroll takes about 9.3 s (measured 2026-10-18),
+so a page with its full 30 scrolls takes about 5 minutes, and about 30
+minutes at the maximums (60 scrolls, 30 s spacing). **Availability:** the provider runs only
 while the operator's machine is on and the worker is running; otherwise its
 cells read skipped ("browser worker not reachable") and every other provider
 runs. **Image size:** none in the app image, which is unchanged; Camoufox
@@ -1329,18 +1338,19 @@ are `toISOString()` text; booleans are integers 0/1.
   fx_source NULL, fx_converted NOT NULL, point_of_sale, fetched_at NOT NULL,
   provider_observed_at NULL, max_age_hours NULL, vendor_link NULL,
   reused_from_execution_id NULL, return_date_source NOT NULL ∈ vendor |
-  asked | grid-cell, vendor_marked_cheapest NULL ∈ 0 | 1). `return_date_source`
+  asked | grid-cell, vendor_price_mark NULL ∈ cheapest | low | none). `return_date_source`
   (migration 0006) says where the row's return date came from: `vendor` (the
   vendor's response states it: Travelpayouts, SearchApi, fixture), `asked`
   (camoufox `list`: the date the worker asked for, checked against the search
   form) or `grid-cell` (camoufox `grid`: the cell's own, checked against the
   grid's return row); existing rows are backfilled `asked` for camoufox and
   `vendor` otherwise, and the column has no default, so every insert states
-  it (a reused row keeps its source). `vendor_marked_cheapest` is the
-  vendor's own cheapest mark: the grid's "cheapest price" (relative to the
-  view it was read from) and SearchApi `google_flights_calendar`'s
-  `is_lowest_price`; NULL where the vendor states none (Travelpayouts, camoufox
-  `list`, fixture). Insert-only; **one row per (execution,
+  it (a reused row keeps its source). `vendor_price_mark` is the
+  vendor's own price mark: the grid's "cheapest price" (`cheapest`) or "low
+  price" (`low`), relative to the view it was read from, and SearchApi
+  `google_flights_calendar`'s `is_lowest_price` (`cheapest`); `none` where the
+  vendor marks prices and marked this one not at all; NULL where the vendor
+  states no marks (Travelpayouts, camoufox `list`, fixture). Insert-only; **one row per (execution,
   provider, cell)** (the engine reduces a tile to the minimum per cell with
   a deterministic tie-break and counts discards; an in-tile conflict
   throws); UNIQUE (execution_id, provider_id, cell keys). Indexes (origin,
@@ -2241,7 +2251,7 @@ settles classified on every poll, a stop discarding the whole page, the
 "Google Flights date grid via Camoufox" label and note, the vendor's
 "cheapest price" mark kept as a vendor flag, and the coverage arithmetic.
 §5.2 gains the `grid-path` tile; §7 gains `calendar_prices.return_date_source`
-and `vendor_marked_cheapest` and `provider_requests.scroll_count` (migration
+and `vendor_price_mark` and `provider_requests.scroll_count` (migration
 0006) and lists `page_class`; §2's ledger paragraph counts scrolls on the
 page row, never as pages; §16 adds work package 15. §12's block is
 unchanged until work package 15 lands, which adds `CAMOUFOX_MODE=grid`,
@@ -2256,7 +2266,14 @@ age, whole pounds stated, SearchApi's `is_lowest_price` stored as the
 vendor's mark, the viewport pinned at 1280 × 900, the scroll step measured
 and passed to the planner, a post-scroll view counted only once it changes,
 a budget per move, off-plan views at the sale window's edges, the scroll
-caps and 5 s spacing, and a retry factor of 1.0 for camoufox in §8.1. No built behaviour changes (plan
+caps and 5 s spacing, and a retry factor of 1.0 for camoufox in §8.1. After the `--grid` recordings
+of 2026-10-18: a one-day scroll step measured on both axes, cells read by
+their names with the lines as a set check (the page rotates its elements
+after a scroll), the "low price" mark (`vendor_price_mark` an enum),
+thousands separators, views of fewer than 49 cells, the year rule from the
+query, the no-flights page past the sale window as `no_data` and a planning
+horizon, the measured times, and a planner that chooses between a new page
+and scrolls within both caps. No built behaviour changes (plan
 decision 70).
 
 ### Revision 29: CodeRabbit batch 3 (2026-10-17)
