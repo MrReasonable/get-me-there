@@ -552,7 +552,7 @@ async function interact(
       stepMs.click = g.clickMs;
       stepMs.graph = deps.timers.now() - before - g.datesMs - g.scrollMs;
       if (g.dates !== null) stepMs.dates = g.datesMs;
-      if (g.scrolled !== null) stepMs.scroll = g.scrollMs;
+      if (g.scrolled !== null && 'snapshot' in g.scrolled) stepMs.scroll = g.scrollMs;
       stepMs.read = deps.timers.now() - t0;
       return {
         kind: 'read',
@@ -564,14 +564,12 @@ async function interact(
           snapshot: stripSnapshotQueries(g.snapshot),
           controls: g.controls,
           unnamedControls: g.unnamed,
-          chart: g.chart === null ? null : { ...g.chart, text: stripSnapshotQueries(g.chart.text) },
+          // why: graph.ts strips the queries from the chart text and every panel snapshot as it reads them
+          chart: g.chart,
           datesTabs: g.datesTabs,
-          dates: g.dates === null ? null : { ...g.dates, snapshot: stripSnapshotQueries(g.dates.snapshot) },
+          dates: g.dates,
           scrollButtons: g.scrollButtons,
-          scrolled:
-            g.scrolled === null
-              ? null
-              : { ...g.scrolled, snapshot: stripSnapshotQueries(g.scrolled.snapshot) },
+          scrolled: g.scrolled,
           clicked,
           polls: g.polls,
           classification: g.classification,

@@ -34,7 +34,8 @@ export type Role =
   | 'slider'
   | 'option'
   | 'tabpanel'
-  | 'gridcell';
+  | 'gridcell'
+  | 'img';
 
 export const FLAG_NAMES = [
   'RESULTS_VERIFIED',

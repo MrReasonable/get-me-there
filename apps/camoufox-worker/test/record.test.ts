@@ -1226,7 +1226,10 @@ describe('record --graph-explore', () => {
     // why: text and attributes only, never HTML
     expect(rec.chart).toEqual({
       text: '£462',
+      ariaLabel: 'Price graph',
       count: 2,
+      imgCount: 1,
+      buttonCount: 0,
       elements: [
         { role: 'generic', ariaLabel: null },
         { role: 'img', ariaLabel: 'Bar for 14 March' },
@@ -1262,7 +1265,10 @@ describe('record --graph-explore', () => {
       'click-graph',
       'graph-poll',
       'read-controls',
+      'chart-find',
       'chart-text',
+      'chart-summary',
+      'chart-elements',
       'find-dates-tab',
       'click-dates-tab',
       'dates-poll',
@@ -1295,26 +1301,70 @@ describe('record --graph-explore', () => {
     expect(rec.dates.cells).toHaveLength(3);
     expect(Object.keys(rec.timings)).not.toContain('scroll');
   });
-  it('a chart text read that never answers ends plainly at the chart-text step (5 s), with no cool-down', async () => {
+  // why: ruling of 2026-10-18 (the run on 802e405): an exploration step that overruns is recorded and the run goes on
+  it('a chart text read that never answers is recorded as timed out after its 10 s, and the Dates phase still runs', async () => {
     const region = insights();
     for (const x of descendants([region])) if (x.role === 'region') x.innerTextHang = true;
     const { t, deps } = graphRun([page({ extra: [region] })]);
-    expect(await drive(t, record(t.ctx(G), cfg, deps))).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/chart-text \(timed-out\)/);
+    expect(await drive(t, record(t.ctx(G), cfg, deps))).toBe(0);
+    const rec = recOf(t);
+    expect(rec.chart).toMatchObject({ timedOut: true, text: null, ariaLabel: 'Price graph', count: 0 });
+    expect(rec.chart.skipped).toEqual([{ step: 'chart-text', reason: 'timed-out', timedOut: true }]);
+    expect(rec.clicked).toEqual(['button:Price graph', 'tab:Dates', 'button:Scroll forwards']);
+    expect(rec.dates.cells).toHaveLength(3);
+    expect(rec.scrolled.cells).toHaveLength(3);
     expect(cooldownOf(t)).toBeNull();
-    expect(written(t.root, { stopped: true })).toEqual([]);
   });
-  it('a Dates panel that never holds still ends plainly at the dates-settle step', async () => {
+  it('a chart element read that never answers keeps the summary (aria-label, img and button counts)', async () => {
+    const chart = [n('img', 'Bar', [], { hang: true }), n('button', 'Previous')];
+    const { t, deps } = graphRun([page({ extra: [insights({ chart })] })]);
+    expect(await drive(t, record(t.ctx(G), cfg, deps))).toBe(0);
+    const rec = recOf(t);
+    expect(rec.chart).toMatchObject({
+      timedOut: true,
+      ariaLabel: 'Price graph',
+      count: 2,
+      imgCount: 1,
+      buttonCount: 1,
+      elements: null,
+    });
+    expect(rec.chart.skipped).toEqual([{ step: 'chart-elements', reason: 'timed-out', timedOut: true }]);
+    expect(rec.dates).not.toBeNull();
+  });
+  it('a Scroll forwards click that never answers is recorded as timed out, and the file is still written', async () => {
+    const { t, deps } = graphRun([page({ extra: [insights()] })], {
+      dates: [
+        page({
+          extra: [
+            n('dialog', 'Price insights', [
+              n('tablist', '', [n('tab', 'Dates', [], { selected: true })]),
+              n('tabpanel', 'Dates', month('March')),
+              n('button', 'Scroll forwards', [], { clickHang: true }),
+            ]),
+          ],
+        }),
+      ],
+    });
+    expect(await drive(t, record(t.ctx(G), cfg, deps))).toBe(0);
+    const rec = recOf(t);
+    expect(rec.scrollButtons).toBe(1);
+    expect(rec.scrolled).toEqual({ step: 'click-scroll-forwards', reason: 'timed-out', timedOut: true });
+    expect(rec.dates.cells).toHaveLength(3);
+    expect(cooldownOf(t)).toBeNull();
+  });
+  it('a Dates panel that never holds still is recorded as such at the dates-settle step; no scroll, no cool-down', async () => {
     let i = 0;
     const { t, deps } = graphRun([page({ extra: [insights()] })], {
       dates: Array.from({ length: 200 }, () =>
         page({ extra: [insights({ dates: month('March', [text(`Loading ${i++}`)]) })] }),
       ),
     });
-    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/dates-settle/);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(rec.dates).toEqual({ step: 'dates-settle', reason: 'timed-out', timedOut: true });
+    expect(rec.scrolled).toBeNull();
+    expect(rec.clicked).toEqual(['button:Price graph', 'tab:Dates']);
     expect(cooldownOf(t)).toBeNull();
-    expect(written(t.root)).toEqual([]);
   });
   it.each([
     ['the Dates panel', 'dates'],

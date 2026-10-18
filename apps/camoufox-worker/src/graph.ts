@@ -106,11 +106,30 @@ async function readControls(
   return { controls, unnamed };
 }
 
-/** The chart region's rendered text and the elements inside it, by role and aria-label attribute (never HTML). */
+/**
+ * An exploration step that overran or failed (ruling of 2026-10-18, the run on 802e405): recorded, and the run goes on.
+ * Only a classifier stop or the page deadline ends the run once the graph has settled.
+ */
+export interface Skipped {
+  step: string;
+  reason: string;
+  timedOut: boolean;
+}
+
+/**
+ * The chart region, by text and attributes only (never HTML): its rendered text (10 s), its own aria-label and the
+ * counts of its elements, images and buttons (5 s), then the first MAX_CHART_ELEMENTS elements' role and aria-label
+ * (5 s). A part that overruns is null, listed in `skipped`, and `timedOut` is set.
+ */
 export interface ChartRead {
-  text: string;
-  count: number;
-  elements: Array<{ role: string | null; ariaLabel: string | null }>;
+  text: string | null;
+  ariaLabel: string | null;
+  count: number | null;
+  imgCount: number | null;
+  buttonCount: number | null;
+  elements: Array<{ role: string | null; ariaLabel: string | null }> | null;
+  timedOut?: true;
+  skipped?: Skipped[];
 }
 /** One settled view of the Dates tab: its panel, its printed snapshot, and its buttons' and day cells' names. */
 export interface DatesRead {
@@ -130,7 +149,7 @@ export type GraphOutcome =
       kind: 'explored';
       region: { role: RegionRole | 'main'; name: string; appeared: boolean };
       snapshot: string;
-      controls: Control[];
+      controls: Control[] | Skipped;
       /** Controls past MAX_CONTROLS_PER_ROLE, by role, counted and not named. */
       unnamed: Record<string, number>;
       polls: number;
@@ -138,13 +157,13 @@ export type GraphOutcome =
       facts: Facts;
       clickMs: number;
       /** The chart region's text and elements, or null when the dialog holds no such region. */
-      chart: ChartRead | null;
-      /** How many Dates tabs the dialog held; the tab is clicked only when there is exactly one. */
-      datesTabs: number;
-      dates: DatesRead | null;
-      /** How many Scroll forwards buttons the dialog held; it is clicked once only when there is exactly one. */
-      scrollButtons: number;
-      scrolled: DatesRead | null;
+      chart: ChartRead | Skipped | null;
+      /** How many Dates tabs the dialog held (null when the lookup overran); clicked only when exactly one. */
+      datesTabs: number | null;
+      dates: DatesRead | Skipped | null;
+      /** How many Scroll forwards buttons the panel's dialog held (null when the lookup overran); clicked once only when exactly one. */
+      scrollButtons: number | null;
+      scrolled: DatesRead | Skipped | null;
       datesMs: number;
       scrollMs: number;
     }
@@ -161,22 +180,75 @@ export interface GraphOptions {
   next?: () => Deadline;
 }
 
-/** At most this many elements of the chart region are read. */
-export const MAX_CHART_ELEMENTS = 1000;
+/** At most this many elements of the chart region are read (ruling of 2026-10-18). */
+export const MAX_CHART_ELEMENTS = 200;
+/** The chart text's own bound (ruling of 2026-10-18). */
+export const CHART_TEXT_MS = 10_000;
 
-async function readChart(region: LocatorLike, d: Deadline): Promise<ChartRead> {
-  const text = await d.race(region.innerText(timeoutOf(d)));
-  const all = region.locator('*');
-  const count = await countOf(all, d);
-  const elements: ChartRead['elements'] = [];
-  for (let i = 0; i < Math.min(count, MAX_CHART_ELEMENTS); i++) {
-    const el = all.nth(i);
-    elements.push({
-      role: await d.race(el.getAttribute('role', timeoutOf(d))),
-      ariaLabel: await d.race(el.getAttribute('aria-label', timeoutOf(d))),
-    });
+/** Runs a step whose overrun or failure is recorded instead of ending the run; the page deadline still ends it. */
+async function soft<T>(
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; skipped: Skipped }> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (e) {
+    if (!(e instanceof CheapestStepFailed)) throw e;
+    return { ok: false, skipped: { step: e.step, reason: e.reason, timedOut: e.reason === 'timed-out' } };
   }
-  return { text, count, elements };
+}
+
+async function readChart(region: LocatorLike, d: Deadline, steps: StepOptions): Promise<ChartRead> {
+  const skipped: Skipped[] = [];
+  const part = async <T>(r: { ok: true; value: T } | { ok: false; skipped: Skipped }): Promise<T | null> => {
+    if (r.ok) return r.value;
+    skipped.push(r.skipped);
+    return null;
+  };
+  const text = await part(
+    await soft(() =>
+      runStep('chart-text', CHART_TEXT_MS, d, steps, async (st) =>
+        stripSnapshotQueries(await st.race(region.innerText(timeoutOf(st)))),
+      ),
+    ),
+  );
+  const all = region.locator('*');
+  const summary = await part(
+    await soft(() =>
+      runStep('chart-summary', LOOKUP_TIMEOUT_MS, d, steps, async (st) => ({
+        ariaLabel: await st.race(region.getAttribute('aria-label', timeoutOf(st))),
+        count: await countOf(all, st),
+        imgCount: await countOf(region.getByRole('img'), st),
+        buttonCount: await countOf(region.getByRole('button'), st),
+      })),
+    ),
+  );
+  const elements =
+    summary === null
+      ? null
+      : await part(
+          await soft(() =>
+            runStep('chart-elements', LOOKUP_TIMEOUT_MS, d, steps, async (st) => {
+              const out: Array<{ role: string | null; ariaLabel: string | null }> = [];
+              for (let i = 0; i < Math.min(summary.count, MAX_CHART_ELEMENTS); i++) {
+                const el = all.nth(i);
+                out.push({
+                  role: await st.race(el.getAttribute('role', timeoutOf(st))),
+                  ariaLabel: await st.race(el.getAttribute('aria-label', timeoutOf(st))),
+                });
+              }
+              return out;
+            }),
+          ),
+        );
+  return {
+    text,
+    ariaLabel: summary?.ariaLabel ?? null,
+    count: summary?.count ?? null,
+    imgCount: summary?.imgCount ?? null,
+    buttonCount: summary?.buttonCount ?? null,
+    elements,
+    ...(skipped.length === 0 ? {} : { timedOut: true as const, skipped }),
+  };
 }
 
 /** The names of every button and day cell in the panel, buttons first. */
@@ -305,15 +377,20 @@ export async function exploreGraph(
   if (graph.kind === 'blocked') return graph;
   const ref = graph.value;
   const container = regionOf(page, ref);
-  const read = await runStep('read-controls', READ_CONTROLS_MS, d, steps, (st) =>
-    readControls(container, st, S),
+  const read = await soft(() =>
+    runStep('read-controls', READ_CONTROLS_MS, d, steps, (st) => readControls(container, st, S)),
   );
   const G = S.results.graphDialog;
-  // why: request of 2026-10-18: the chart region's text and its elements' role and aria-label, bounded at 5 s
-  const chart = await runStep('chart-text', LOOKUP_TIMEOUT_MS, d, steps, async (st) => {
-    const region = container.getByRole('region', { name: G.chartRegion, exact: true });
-    return (await countOf(region, st)) === 0 ? null : readChart(region.nth(0), st);
-  });
+  // why: rulings of 2026-10-18: the chart region by text and attributes only, each part bounded and never fatal
+  const region = container.getByRole('region', { name: G.chartRegion, exact: true });
+  const charts = await soft(() =>
+    runStep('chart-find', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(region, st)),
+  );
+  const chart = !charts.ok
+    ? charts.skipped
+    : charts.value === 0
+      ? null
+      : await readChart(region.nth(0), d, steps);
   const base = {
     kind: 'explored' as const,
     region:
@@ -321,27 +398,27 @@ export async function exploreGraph(
         ? { role: 'main' as const, name: '', appeared: false }
         : { role: ref.role, name: ref.name, appeared: true },
     snapshot: graph.snapshot,
-    controls: read.controls,
-    unnamed: read.unnamed,
+    controls: read.ok ? read.value.controls : read.skipped,
+    unnamed: read.ok ? read.value.unnamed : {},
     polls: graph.polls,
     classification: { kind: graph.pageKind, rule: graph.rule },
     facts: graph.facts,
     clickMs,
     chart,
   };
-  // why: the Dates tab and the scroll are exploration only; a dialog without them is recorded as it is, counted
+  const none = { datesTabs: 0, dates: null, scrollButtons: 0, scrolled: null, datesMs: 0, scrollMs: 0 };
+  if (ref === null) return { ...base, ...none };
+  // why: the Dates tab and the scroll are exploration only; a dialog without them is recorded as it is, counted, and
+  // a step of theirs that overruns is recorded and the file still written
   const tab = container.getByRole('tab', { name: G.datesTab, exact: true });
-  const datesTabs =
-    ref === null ? 0 : await runStep('find-dates-tab', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(tab, st));
-  const none = { datesTabs, dates: null, scrollButtons: 0, scrolled: null, datesMs: 0, scrollMs: 0 };
-  if (datesTabs !== 1) return { ...base, ...none };
+  const tabs = await soft(() =>
+    runStep('find-dates-tab', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(tab, st)),
+  );
+  if (!tabs.ok) return { ...base, ...none, datesTabs: null, dates: tabs.skipped };
+  if (tabs.value !== 1) return { ...base, ...none, datesTabs: tabs.value };
   // why: as the Cheapest flow: the Dates tab has its own budget from here, within twice the page timeout
   const dd = o.next?.() ?? d;
   const datesAt = timers.now();
-  await runStep('click-dates-tab', CLICK_TIMEOUT_MS, dd, steps, async (st) => {
-    await st.race(tab.nth(0).click(clickTimeoutOf(st)));
-    o.clicked.push(`tab:${G.datesTab}`);
-  });
   const view = async (name: string, readStep: string): Promise<DatesRead | Blocked> => {
     const s = await settle(name, driver, dd, o, steps, async (st) => {
       const p = await panelOf(container, st);
@@ -354,27 +431,44 @@ export async function exploreGraph(
     );
     return {
       panel: { found: s.value.found, index: s.value.index },
-      snapshot: s.snapshot,
+      snapshot: stripSnapshotQueries(s.snapshot),
       cells,
       polls: s.polls,
     };
   };
-  const dates = await view('dates', 'read-dates-cells');
+  const flat = (r: { ok: true; value: DatesRead | Blocked } | { ok: false; skipped: Skipped }) =>
+    r.ok ? r.value : r.skipped;
+  const dates = flat(
+    await soft(async () => {
+      await runStep('click-dates-tab', CLICK_TIMEOUT_MS, dd, steps, async (st) => {
+        await st.race(tab.nth(0).click(clickTimeoutOf(st)));
+        o.clicked.push(`tab:${G.datesTab}`);
+      });
+      return view('dates', 'read-dates-cells');
+    }),
+  );
   if ('kind' in dates) return dates;
   const datesMs = timers.now() - datesAt;
+  const after = { ...base, ...none, datesTabs: 1, dates, datesMs };
+  if (!('snapshot' in dates)) return after;
   const scroll = container.getByRole('button', { name: G.scrollForwards, exact: true });
-  const scrollButtons = await runStep('find-scroll-forwards', LOOKUP_TIMEOUT_MS, dd, steps, (st) =>
-    countOf(scroll, st),
+  const buttons = await soft(() =>
+    runStep('find-scroll-forwards', LOOKUP_TIMEOUT_MS, dd, steps, (st) => countOf(scroll, st)),
   );
-  if (scrollButtons !== 1) return { ...base, ...none, datesTabs, dates, scrollButtons, datesMs };
+  if (!buttons.ok) return { ...after, scrollButtons: null, scrolled: buttons.skipped };
+  if (buttons.value !== 1) return { ...after, scrollButtons: buttons.value };
   const scrollAt = timers.now();
-  await runStep('click-scroll-forwards', CLICK_TIMEOUT_MS, dd, steps, async (st) => {
-    await st.race(scroll.nth(0).click(clickTimeoutOf(st)));
-    o.clicked.push(`button:${G.scrollForwards}`);
-  });
-  const scrolled = await view('scroll', 'read-scrolled-cells');
+  const scrolled = flat(
+    await soft(async () => {
+      await runStep('click-scroll-forwards', CLICK_TIMEOUT_MS, dd, steps, async (st) => {
+        await st.race(scroll.nth(0).click(clickTimeoutOf(st)));
+        o.clicked.push(`button:${G.scrollForwards}`);
+      });
+      return view('scroll', 'read-scrolled-cells');
+    }),
+  );
   if ('kind' in scrolled) return scrolled;
-  return { ...base, datesTabs, dates, scrollButtons, scrolled, datesMs, scrollMs: timers.now() - scrollAt };
+  return { ...after, scrollButtons: 1, scrolled, scrollMs: timers.now() - scrollAt };
 }
 
 /** Matches a URL's query and fragment: from `?` or `#` to the next space, quote or line end. */
