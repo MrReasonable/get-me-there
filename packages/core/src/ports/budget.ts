@@ -4,6 +4,8 @@ import type { ProviderId } from '../types/provenance.js';
 /** Spec §5.3 cap scopes. */
 export type BudgetScope =
   | { kind: 'execution-calls' | 'execution-free-calls' | 'execution-cost'; executionId: string }
+  /** A provider's own cap within one execution (camoufox pages, spec §2); labelled `provider-execution:<provider>`. */
+  | { kind: 'provider-execution'; executionId: string; providerId: ProviderId }
   | { kind: 'provider-month' | 'provider-lifetime'; providerId: ProviderId }
   | { kind: 'global-month' };
 
@@ -30,9 +32,18 @@ export interface Usage {
   windowEnd: IsoDateTime | null;
 }
 
+/**
+ * `pageClass` (spec §5.3 rev 32, decision 69): for a pages-only provider (camoufox), whether the attempt loaded a
+ * Google page; a `no-page` row stays in the ledger but counts toward neither page cap. Absent for every other provider.
+ */
 export interface Reservation {
   id: string;
-  finalise(r: { outcome: 'ok' | 'error' | 'unknown'; httpStatus?: number; durationMs: number }): void;
+  finalise(r: {
+    outcome: 'ok' | 'error' | 'unknown';
+    httpStatus?: number;
+    durationMs: number;
+    pageClass?: 'page' | 'no-page';
+  }): void;
 }
 
 /**

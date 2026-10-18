@@ -12,6 +12,13 @@ export interface ProviderLimits {
   costPerCallMicroGbp: number;
   planFixedMicroGbp: number;
   excludedFromSchedule: boolean;
+  /**
+   * A provider's own per-execution call cap (camoufox's CAMOUFOX_EXECUTION_PAGE_CAP, decision 69); the engine freezes it
+   * into the execution's snapshot (`budget.providerMaxCalls`), and the guard reads it from there. Absent: none.
+   */
+  executionCallCap?: number;
+  /** Pages-only counting (camoufox): ledger rows of class `no-page` count toward neither page cap (spec §5.3 rev 32). */
+  pagesOnly?: true;
 }
 
 export const PENCE_TO_MICRO = 10_000;

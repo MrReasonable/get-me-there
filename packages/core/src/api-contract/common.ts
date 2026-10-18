@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { LINK_ALLOWLIST, validateVendorUrl } from '../normalise/vendorUrl.js';
 import type { Buckets } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
-import { cabinSchema, provenanceSchema, providerIdSchema } from '../types/provenance.js';
+import { cabinSchema, provenanceSchema, providerIdSchema, sourceKindSchema } from '../types/provenance.js';
 
 /** Spec §10: errors `{ error: { code, message, details? } }`; a 422 carries `details.fields[]`. */
 export const fieldErrorSchema = z.object({ field: z.string(), message: z.string() });
@@ -163,7 +163,7 @@ export const verdictsSchema = z.partialRecord(constraintNameSchema, verdictSchem
 export const verdictClassSchema = z.enum(['verified', 'partially-verified', 'failed']);
 export const resultBasisSchema = z.enum(['verified', 'calendar']);
 export const capabilityInfoSchema = z.object({
-  sourceKind: z.enum(['authorised-cached', 'scraped-aggregate', 'scraped-search', 'synthetic']),
+  sourceKind: sourceKindSchema,
   provenanceNote: z.string(),
   maxAgeHours: z.union([z.number().int().min(0), z.literal('unknown')]),
   /** Ruling 17 (pie-007): `maxAgeHours` is the app's assumption, not a vendor-stated bound. */

@@ -27,11 +27,17 @@ export const exhaustive =
   <U extends string>() =>
   <const L extends readonly U[]>(list: L & ([Exclude<U, L[number]>] extends [never] ? unknown : never)): L =>
     list;
-export const PROVIDER_IDS = exhaustive<ProviderId>()(['travelpayouts', 'searchapi', 'fixture'] as const);
+export const PROVIDER_IDS = exhaustive<ProviderId>()([
+  'travelpayouts',
+  'searchapi',
+  'camoufox',
+  'fixture',
+] as const);
 export const SOURCE_KINDS = exhaustive<SourceKind>()([
   'authorised-cached',
   'scraped-aggregate',
   'scraped-search',
+  'scraped-self',
   'synthetic',
 ] as const);
 export const CABINS = exhaustive<Cabin>()(['economy', 'premium_economy', 'business', 'first'] as const);
@@ -48,6 +54,7 @@ export const SKIP_REASONS = exhaustive<SkipReason>()([
   'not_selected',
   'budget',
   'provider_disabled',
+  'provider_unavailable',
   'departed',
 ] as const);
 export const SELECTION_REASONS = exhaustive<SelectionReason>()([
@@ -88,6 +95,8 @@ export const ERROR_REASONS = exhaustive<ErrorReason>()([
   'parse',
   'network',
   'limiter-timeout',
+  'blocked',
+  'provider-unavailable',
   'fx-unavailable',
   'currency-unsupported',
   'unknown-airport-tz',

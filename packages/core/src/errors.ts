@@ -31,7 +31,10 @@ export type ProviderErrorKind =
   | 'upstream'
   | 'parse'
   | 'network'
-  | 'limiter-timeout';
+  | 'limiter-timeout'
+  // why: camoufox only (spec §5.1 rev 32): a page the worker stopped on, and a worker that refused the connection; never retried.
+  | 'blocked'
+  | 'provider-unavailable';
 
 /** Spec §5.1. Thrown by http-kit (classified) and adapters (parse); never retried at adapter level. */
 export class ProviderError extends Error {
@@ -65,6 +68,8 @@ export type BudgetScopeKind =
   | 'execution-calls'
   | 'execution-free-calls'
   | 'execution-cost'
+  // why: a provider's own per-execution cap (camoufox pages), read from the execution's snapshot (decision 69).
+  | 'provider-execution'
   | 'provider-month'
   | 'provider-lifetime'
   | 'global-month';

@@ -18,6 +18,7 @@ export type {
   SchedulerJob,
 } from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
+export * from './camoufox/protocol.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
 export * from './config/secret.js';

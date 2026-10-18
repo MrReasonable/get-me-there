@@ -232,6 +232,14 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
       rateLimitFallbackWaitSeconds: 60,
       ...over.travelpayouts,
     },
+    camoufox: {
+      ...base,
+      hosts: ['127.0.0.1'],
+      billable: 'never',
+      costPerCallMicroGbp: 0,
+      concurrency: 1,
+      ...over.camoufox,
+    },
     fixture: {
       ...base,
       hosts: ['fixture.local'],

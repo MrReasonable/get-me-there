@@ -10,6 +10,8 @@ import type { ProviderId } from '../types/provenance.js';
 export const LINK_ALLOWLIST: Record<ProviderId, string[]> = {
   travelpayouts: ['aviasales.com'],
   searchapi: ['google.com'],
+  // why: spec §5.2 rev 32: camoufox links go to google.com only.
+  camoufox: ['google.com'],
   fixture: [],
 };
 

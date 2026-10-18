@@ -22,6 +22,8 @@ export const SECONDS_PER_CALL: Readonly<Record<SourceKind, number>> = {
   'authorised-cached': 1,
   'scraped-aggregate': 20,
   'scraped-search': 15,
+  // why: camoufox's seconds are pages × (spacing + 40) on its own line (brief WP14 Task 14.9), not a per-call figure.
+  'scraped-self': 0,
   synthetic: 0,
 };
 

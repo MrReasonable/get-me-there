@@ -60,7 +60,9 @@ export function searchLinkFor(
         cabin === 'premium_economy' ? `${SEARCH_LINK_LABEL}; cabin not prefilled` : SEARCH_LINK_LABEL;
       return { url: url.href, host: url.hostname, label };
     }
-    case 'searchapi': {
+    // why: camoufox reads the same Google Flights search, and its links stay on google.com (spec §5.2 rev 32).
+    case 'searchapi':
+    case 'camoufox': {
       const url = new URL('https://www.google.com/travel/flights');
       url.search = new URLSearchParams({
         q: `Flights from ${cell.origin} to ${cell.destination} on ${cell.departureDate} through ${cell.returnDate} ${GOOGLE_CABIN[cabin]} 1 adult`,

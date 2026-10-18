@@ -8,6 +8,7 @@ export const SOURCE_LABELS: Readonly<Record<SourceKind, string>> = {
   'authorised-cached': 'Aviasales cache',
   'scraped-aggregate': 'Google date grid via SearchApi',
   'scraped-search': 'Google Flights via SearchApi',
+  'scraped-self': 'Google Flights prices via Camoufox',
   synthetic: 'synthetic fixture data',
 };
 

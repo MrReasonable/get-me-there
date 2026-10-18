@@ -25,6 +25,8 @@ export function scopeName(scope: BudgetScopeKind, providerId: ProviderId | null)
       return "this run's free-call cap";
     case 'execution-cost':
       return "this run's spend cap";
+    case 'provider-execution':
+      return `${p}'s page cap for this run`;
     case 'provider-month':
       return `${p}'s monthly call cap`;
     case 'provider-lifetime':

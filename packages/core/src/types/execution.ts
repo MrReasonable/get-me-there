@@ -33,7 +33,13 @@ export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
 export type Stage = 'discovery' | 'verification';
 /** Spec §3 cell outcome statuses. */
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';
-export type SkipReason = 'not_selected' | 'budget' | 'provider_disabled' | 'departed';
+/** `provider_unavailable`: the camoufox worker could not be reached (spec §3 rev 32). */
+export type SkipReason =
+  | 'not_selected'
+  | 'budget'
+  | 'provider_disabled'
+  | 'provider_unavailable'
+  | 'departed';
 /** A provider whose `cabins` excludes the definition's cabin: every cell no_data, no call. Spec §3. */
 export type NoDataReason = 'cabin-not-offered';
 /**

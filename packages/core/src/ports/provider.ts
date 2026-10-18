@@ -34,6 +34,11 @@ export interface DiscoveryQuery {
   currency: 'GBP';
   /** when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it */
   cells?: CellKey[];
+  /**
+   * Spec §5.1 rev 32: the airports dataset's names for the query's codes, set by the engine for every query, so a
+   * provider that matches airports by name (camoufox reads names, never codes) can tell this cell's options apart.
+   */
+  airportNames?: { origin: string[]; destination: string[] };
 }
 /** Vendor-neutral, typed tile requests; `month` is the Travelpayouts tile. */
 export type TileRequest =
@@ -158,10 +163,25 @@ export interface CostEstimate {
   seconds: number;
   notes: string[];
 }
+/**
+ * Spec §5.1 rev 32: an unledgered check before a stage plans tiles (camoufox reads its worker's `/v1/status`). A refusal
+ * skips every cell of the provider in the stage with `skip` as the reason and `detail` in `last_error`; `until` is the
+ * end of a cool-down, which keys the once-per-cool-down notice.
+ */
+export type PreflightResult =
+  | { ok: true }
+  | {
+      ok: false;
+      skip: 'provider_disabled' | 'provider_unavailable';
+      detail: string;
+      until?: IsoDateTime;
+    };
 export interface DiscoveryCapability {
   info: CapabilityInfo;
   plan(q: DiscoveryQuery): TilePlan[];
   fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult>;
+  /** Optional, unledgered (spec §5.1 rev 32); absent for every provider but camoufox. */
+  preflight?(ctx: ProviderContext): Promise<PreflightResult>;
 }
 export interface VerificationCapability {
   info: CapabilityInfo;

@@ -69,6 +69,8 @@ export const executionBudgetSchema = z.object({
   maxCalls: positiveInt,
   maxFreeCalls: positiveInt,
   maxCostMicroGbp: microGbpSchema,
+  /** Set by the engine at creation (camoufox's page cap, decision 69); a definition's own budget never carries it. */
+  providerMaxCalls: z.partialRecord(providerIdSchema, z.number().int().min(1)).exactOptional(),
 });
 export const providersConfigSchema = z.object({
   discovery: z.array(providerIdSchema),

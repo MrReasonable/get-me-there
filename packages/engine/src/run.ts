@@ -316,6 +316,11 @@ export function applyBudgetBreach(
       !run.disabled.has(id) && !run.blocked.has(lineKey(stage, id)) && !laneFor(run, stage, id).budgetOut,
   );
   if (remaining.length === 0) {
+    // why: a provider's own per-run cap (camoufox pages, spec §8.1 rev 32) has no window to wait for: manual resume only.
+    if (err.scope === 'provider-execution') {
+      stopRun(run, { kind: 'budget', error: err, resumeAfter: null });
+      return;
+    }
     const scope: BudgetScope = global ? { kind: 'global-month' } : { kind: err.scope, providerId };
     stopRun(run, { kind: 'budget', error: err, resumeAfter: ctx.budget.usage(scope).windowEnd });
     return;

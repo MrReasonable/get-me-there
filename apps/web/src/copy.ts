@@ -94,10 +94,12 @@ export const COPY = {
   // why: a fixture-provider row that is not tagged synthetic cannot be trusted for any of its fields (ruling 3).
   rowWithheld: "details withheld: this row's provenance is invalid",
   withheldCell: 'withheld',
-  provider: { travelpayouts: 'Travelpayouts', searchapi: 'SearchApi', fixture: 'Fixture' } satisfies Record<
-    ProviderId,
-    string
-  >,
+  provider: {
+    travelpayouts: 'Travelpayouts',
+    searchapi: 'SearchApi',
+    camoufox: 'Camoufox',
+    fixture: 'Fixture',
+  } satisfies Record<ProviderId, string>,
   fxApprox: '≈',
   /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
   priceMarkGlyph: {
@@ -121,12 +123,17 @@ export const COPY = {
   truncatedNote: TRUNCATED_NOTE,
   // why: a newer parent search found this cell empty; the price stays visible, ranked after current rows (decision 54, 57).
   superseded: 'superseded by a later search',
-  providerShort: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'synthetic' } satisfies Record<
+  providerShort: {
+    travelpayouts: 'TP',
+    searchapi: 'SA',
+    camoufox: 'CF',
+    fixture: 'synthetic',
+  } satisfies Record<ProviderId, string>,
+  /** The three-letter-or-less provider mark of the phone day face, where `providerShort`'s "synthetic" is 50 px wide. */
+  providerMark: { travelpayouts: 'TP', searchapi: 'SA', camoufox: 'CF', fixture: 'syn' } satisfies Record<
     ProviderId,
     string
   >,
-  /** The three-letter-or-less provider mark of the phone day face, where `providerShort`'s "synthetic" is 50 px wide. */
-  providerMark: { travelpayouts: 'TP', searchapi: 'SA', fixture: 'syn' } satisfies Record<ProviderId, string>,
   ageUnknown: 'age unknown',
   agoOf: (hours: number | 'unknown') => (hours === 'unknown' ? 'age unknown' : formatAgo(hours)),
   adjustedQualifier: 'incl. operator-entered onward cost',
@@ -647,7 +654,7 @@ export const COPY = {
       phone:
         'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ◐ part of the day not searched, ? the counts of a day disagree with its total; under the amount its provider, its age ("5d old", or "5h ago · age unknown" when the vendor gives none) and "not checked" on a calendar price. A day without a price shows each glyph with its count. Open a day for the rest.',
       phoneProviders:
-        'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), syn Fixture (synthetic fixture data).',
+        'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), CF Camoufox (Google Flights prices via Camoufox), syn Fixture (synthetic fixture data).',
       glyphs: 'Days without a price show, with how many cells of the best-covered source:',
       skippedWhy: ' (a budget stop, a disabled provider or a passed date; reasons in the panel)',
     },
@@ -681,6 +688,7 @@ export const COPY = {
         not_selected: 'not selected for itinerary search',
         budget: 'stopped: a budget cap was reached',
         provider_disabled: 'provider disabled',
+        provider_unavailable: 'browser worker not reachable',
         departed: 'departure date has passed',
         'cabin-not-offered': "the provider does not offer this definition's cabin",
         auth: 'the provider refused the credentials',
@@ -690,6 +698,8 @@ export const COPY = {
         parse: "the provider's answer could not be read",
         network: 'network failure',
         'limiter-timeout': 'waited too long for a request slot',
+        blocked: 'stopped: Google showed a page this app does not read, or a check (the detail says which)',
+        'provider-unavailable': 'browser worker not reachable',
         'fx-unavailable': 'no exchange rate available',
         'currency-unsupported': 'currency not supported',
         'unknown-airport-tz': 'airport time zone unknown',
@@ -774,6 +784,7 @@ export const COPY = {
     historyVendor: {
       searchapi: 'Google',
       travelpayouts: 'Aviasales',
+      camoufox: 'Google',
       fixture: 'Synthetic fixture',
     } satisfies Record<ProviderId, string>,
     calendarSeries: (source: string, cabin: string) =>
