@@ -24,7 +24,16 @@ export interface CadenceCase {
   label: string;
   plan: 'none' | 'trial' | '40usd';
   definition: DefinitionInput;
+  /** Extra environment (WP14: camoufox on, with a synthetic worker key; no worker is called by an estimate). */
+  env?: Record<string, string>;
 }
+
+/** The camoufox row's environment: on, with a synthetic key and the compose default worker URL. */
+export const CAMOUFOX_ENV = {
+  CAMOUFOX_ENABLED: 'true',
+  CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
+  CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
+};
 
 /** The table's rows: the £0 configuration, the example on SearchApi `40usd` weekly and daily, its maxCells headroom, the trial. */
 export function cadenceCases(): CadenceCase[] {
@@ -51,12 +60,25 @@ export function cadenceCases(): CadenceCase[] {
       definition: { ...example, verification: { ...example.verification, maxCells: 200 } },
     },
     { label: 'SearchApi `trial`: both providers, weekly', plan: 'trial', definition: example },
+    {
+      // why: WP14: list mode prices one day pair a page, so one airport pair (2,184 cells) is the honest unit
+      label: 'Camoufox: list mode, one airport pair (LHR → JFK), weekly',
+      plan: 'none',
+      env: CAMOUFOX_ENV,
+      definition: {
+        ...example,
+        origins: example.origins.slice(0, 1),
+        destinations: example.destinations.slice(0, 1),
+        providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
+      },
+    },
   ];
 }
 
 const PROVIDER_LABEL = new Map<string, string>([
   ['travelpayouts', 'Travelpayouts'],
   ['searchapi', 'SearchApi'],
+  ['camoufox', 'Camoufox'],
 ]);
 const label = (id: string): string => PROVIDER_LABEL.get(id) ?? id;
 
@@ -69,7 +91,7 @@ function computeRow(c: CadenceCase): { cells: string[]; retryFactor: number } {
   // why: WP4b's seededPorts (both providers on sentinel credentials, airports seeded, closed after the test); its
   // raised rate limits change only the estimate's seconds, never its calls or any cap, so the table is the default one.
   const ports = seededPorts(
-    c.plan === 'none' ? { SEARCHAPI_KEY: '' } : { SEARCHAPI_PLAN: c.plan },
+    { ...(c.plan === 'none' ? { SEARCHAPI_KEY: '' } : { SEARCHAPI_PLAN: c.plan }), ...c.env },
     fixedClock(asIsoDateTime(`${CADENCE_DAY}T09:00:00.000Z`)),
   );
   const engine = createEngine({ ...ports, notifiers: [] });
