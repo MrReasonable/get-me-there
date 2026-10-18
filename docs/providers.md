@@ -124,9 +124,9 @@ and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run an
 for one worked-example airport pair (8,736 for its four pairs). The designed `grid` mode (work package 15, not yet
 built) reads up to 49 day pairs per view of the Dates tab's 7 × 7 grid: for one worked-example pair, 78 views on a
 lattice of 7 × 7 blocks (26 departure columns × 3 return blocks for the 10–21-night band; 2,184 of their 3,822 cells are
-in the band and stored), visited in 4 pages and 99 scrolls, about 17 minutes; the four pairs take 16 pages, 396 scrolls
-and about 70 minutes, a full pass in one run. These figures assume a scroll moves one 7-day block; the grid recording
-measures it.
+in the band and stored), visited in 4 pages and 97 scrolls, about 22 minutes; the four pairs take 16 pages, 388 scrolls
+and about 87 minutes, a full pass in one run, inside the scroll caps (600 a run, 6,000 a month). These figures assume a
+scroll moves one 7-day block; the grid recording measures it.
 
 **Provenance note, exactly as the app states it:** "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read."
 
