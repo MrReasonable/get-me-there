@@ -85,7 +85,7 @@ into `docs/scheduling.md` (§8.2).
 multimodal totals (§7 keeps two columns; the operator may enter an
 onward-cost estimate shown as a separate "adjusted" sort, never folded into
 a price); split-ticket optimisation; booking inside the app; multi-user;
-price prediction; any provider not in §2 (the `browser` continuity fallback
+price prediction; any provider not in §2 (the `camoufox` continuity fallback
 in §2 is built as an opt-in provider, off by default).
 
 ---
@@ -105,7 +105,7 @@ Google has no public API.
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (the app's own conservative assumption, flagged as assumed and shown as "assumed ≤24h (undocumented)": a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
-| `browser`: Google Flights date grid read by the app's own stock Playwright Chromium (a separate `browser` compose service) | Self-scraped by this app from the operator's own IP; one 7 × 7 date grid (departure × return) per page load, cell keys read from the grid's own headers; no segments, carriers, sellers or baggage; the results path is disallowed by Google's `robots.txt` (read 2026-10-18) | £0 in money; the operator's IP, Google's terms and selector upkeep | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the grid as Google showed it when the page was read) |
+| `camoufox`: Google Flights read by Camoufox on the operator's own machine (the local camofox-browser REST server), through a host-side worker | Self-scraped by this app from the operator's own IP, in a dedicated signed-out profile; `list` mode reads one cell's cheapest round-trip total from the results list per page load (structure seen in the feasibility load of 2026-10-18); `grid` mode reads a 7 × 7 date grid per page load, unverified until a recording pins it; no return legs, flight numbers or sellers; the results path is disallowed by Google's `robots.txt` (read 2026-10-18) | £0 in money; the operator's IP, Google's terms and selector upkeep | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the grid as Google showed it when the page was read) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
 on the understanding that its data is obtained in a way Google's terms
@@ -114,67 +114,103 @@ and the mitigation is the provider abstraction and labelling. SerpApi is not
 integrated.
 
 **Continuity fallback (Ian, 2026-10-14; built as an opt-in provider on
-2026-10-18): the `browser` provider.** If SearchApi is withdrawn, re-priced
+2026-10-18): the `camoufox` provider.** If SearchApi is withdrawn, re-priced
 above the ceiling or loses Google's date grid, discovery can fall back to a
-`FlightProvider` with id `'browser'` that reads Google Flights' **date grid**
-in a stock Playwright Chromium, behind the same contract, ledger, caps and
-labels as every other provider. It is **off by default**: nothing runs until
-the operator starts the `browser` compose profile and sets
-`BROWSER_ENABLED=true` (§12, §13), and a definition must still name it.
+`FlightProvider` with id `'camoufox'` that reads Google Flights' **date grid**
+in Camoufox (an anti-detection Firefox build the operator installs on their
+own machine), behind the same contract, ledger, caps and labels as every
+other provider. It is **off by default**: nothing runs until the operator
+starts the worker and sets `CAMOUFOX_ENABLED=true` (§12, §13), and a
+definition must still name it.
 
-*Method.* The browser runs in its own container, a small worker
-(`apps/browser-worker`) that the app's adapter calls over an internal compose
-network; the app image carries no browser (§13). One tile is one page load:
-the worker opens `https://www.google.com/travel/flights` with a plain-text
-`q` query for the tile's centre dates (`hl=en-GB`, `curr=GBP`, `gl` from
-`POINT_OF_SALE`), opens the page's "Date grid" view and reads its 7 departure
-× 7 return cells, taking every cell key from the grid's own row and column
-headers and every currency from the page, never from the request. Tiles are
-`rectangle` tiles of 7 departure days × 7 return days; a pair needs
-`⌈D / 7⌉ × ⌈(7 + maxNights − minNights) / 7⌉` of them (the worked example's
-182-day window and 10–21-night band: 26 × 3 = 78 page loads per pair, 312 for
-its four pairs, about 3½ hours at the minimum spacing). Selectors prefer
-accessible roles and names over CSS classes and live in one dated module.
+*Method.* The browser is the operator's own Camoufox, driven through the
+camofox-browser REST server the operator already runs on their machine
+(`@askjo/camofox-browser`, `http://127.0.0.1:9377` by default; the
+feasibility load of 2026-10-18 used v1.13.1 with Camoufox 152.0.4-beta.28).
+A small host-side worker (`apps/camoufox-worker`, a Node process on the same
+machine, no browser library of its own) is that server's only client for
+this app: it opens tabs under its own dedicated profile, navigates, reads the
+page's accessibility snapshot and clicks by reference through the REST API,
+and it holds every rule below. The app's adapter calls the worker, never the
+REST server, over HTTP at `CAMOUFOX_WORKER_URL`, a loopback or host-internal
+address (`http://127.0.0.1:8090` for `pnpm dev`,
+`http://host.docker.internal:8090` for the app in Docker); the app image
+carries no browser (§13). One worker call is one Google document load at
+`https://www.google.com/travel/flights?q=Flights from <origin> to
+<destination> on <depart> returning <return>&curr=GBP&hl=en-GB&gl=<POINT_OF_SALE>`,
+the form the feasibility load used, and the worker reads the page in one of
+two modes:
 
-*Capabilities: discovery only.* Google's date grid shows one price per
-(departure, return) pair and nothing else, which is exactly a
-`RawCalendarPrice`, and its headers state both dates, so the cell key is read
-from the page. Itinerary search is not offered: the itinerary pages need a
-click per outbound and per return (`1 + expandTop × 2` page states per cell,
-over a minute each at the spacing below), keep segments behind expanders
-and free-text labels, and put each seller behind a link to a host outside
-the allowlist, so the browser could never confirm a seller's price
-(`RawOffer.verified`) and would multiply page loads by five. Its prices are
-therefore calendar basis (§6.9): "constraints not checked", with the search
-link. The date picker's per-day prices were also rejected: their trip length
-is implied by the selected dates, not stated per day, so a cell key could not
-be read from the page.
+- **`list` (default):** one cell per page. The worker selects the
+  "Cheapest" tab, expands "View more flights", and parses every result's
+  accessible name ("From 478 British pounds round trip total. 1 stop flight
+  with …"), whose grammar lives in one dated module; the cell's price is the
+  minimum round-trip total over the options it parsed. An option whose name
+  does not parse is dropped and counted (`offers-dropped:n` on a priced cell,
+  never a guessed price), and a page whose "Cheapest" tab price is below
+  every parsed option marks the cell partial.
+- **`grid`:** up to 49 cells per page from the "Date grid" view (7 departure
+  × 7 return days, `rectangle` tiles, cell keys from the grid's own row and
+  column headers). The button exists (feasibility load), but the grid's
+  contents have not been seen, so `grid` mode is refused by the worker until
+  a recorded page pins its selectors (the selectors module's grid section
+  carries a dated, verified version). A pair then needs
+  `⌈D / 7⌉ × ⌈(7 + maxNights − minNights) / 7⌉` pages (the worked example:
+  78 per pair, 312 for its four pairs).
 
-*Limits (operator decision 2026-10-18, plan decision 68).* No anti-detection
-tooling: no Camoufox, no fingerprint or user-agent changes, no stealth
-plugins, no proxies of any kind, no randomised delays or simulated human
-input; the browser identifies as itself (its stock user agent names it as
-headless Chromium). One page at a time (concurrency 1), at least
-`BROWSER_MIN_SPACING_SECONDS` (default 30, never lower) between the end of one
-page load and the start of the next, enforced in both the app's limiter and
-the worker; at most `BROWSER_EXECUTION_PAGE_CAP` page loads per execution
-(default 100, at most 400) and `BROWSER_MONTHLY_PAGE_CAP` per month (default
-1,500). Navigation is limited to a hostname allowlist: `www.google.com`
-(paths under `/travel/flights` only) and `consent.google.com` for the consent
-reject click only; subresources only from the Google hosts the dated
-selectors module lists; anything else is aborted. On Google's consent
-interstitial the worker clicks "Reject all", never an accept, and keeps the
-resulting cookie in its own profile volume. On a CAPTCHA, an "unusual
-traffic" page (`/sorry/`), a sign-in wall, a navigation off the allowlist or
-any page it cannot classify as the consent page or a results page with a
-date grid, the worker **stops at once**: the cell outcome is `error` with
-reason `blocked` (a `ProviderError` of kind `blocked`, never retried by
-http-kit), the provider is disabled for the rest of that execution
-(including a manual resume of it), and the worker refuses every page load
-for `BROWSER_COOLDOWN_HOURS` (default 48, at least 24), answering without
-contacting Google; the cool-down survives a worker restart. A grid row the
-parser cannot read drops that option and marks the tile's affected cells
-through `cellIssues`, so a partial grid is never mistaken for "no fares".
+Cell keys and currency always come from the page (the query's own dates,
+echoed in the results' "Leaves … on <date>" text, for `list`; the grid's
+headers for `grid`), never from the request alone. Selectors are
+accessible roles and names, never CSS classes, in one dated module.
+
+*Capabilities: discovery only.* Both modes yield one price per (departure,
+return) pair, which is exactly a `RawCalendarPrice`. Itinerary search is
+not offered: a result's accessible name states the outbound only (airline
+names, airport names rather than codes, local times, stops, duration) and a
+round-trip total, with no return leg and no flight numbers, so a
+`RawOffer` (segments both ways, flight numbers, IATA airports) could not be
+built without inventing fields; the return leg needs a "Select flight" click
+per outbound and the sellers sit behind links to hosts outside the allowlist,
+so no price could be confirmed by a seller (`RawOffer.verified`). Its prices
+are therefore calendar basis (§6.9): "constraints not checked", with the
+search link. The date picker's per-day prices were also rejected: their trip
+length is implied by the selected dates, not stated per day.
+
+*Limits (operator rulings of 2026-10-18, plan decision 68).* Camoufox is the
+browser, with the fingerprint it generates itself; nothing is layered on top
+of it. **A dedicated, signed-out profile:** the worker uses its own
+camofox-browser user id (`CAMOUFOX_PROFILE_ID`, default `gmt-worker`), never
+the operator's, never imports cookies, refuses to start when that profile
+holds a Google account cookie, and stops at once (`blocked`, page
+`signed-in`) if any page shows a signed-in account control ("Google
+Account: …"); the only cookie it sets by choice is the consent rejection. **No proxies** of any kind: every page comes from the operator's own
+IP address. **No challenge is ever solved or bypassed**: no CAPTCHA solver,
+no clicking a challenge, no waiting a challenge out. One page at a time
+(concurrency 1), at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never
+lower, never randomised) between the end of one page load and the start of
+the next, enforced in both the app's limiter and the worker; at most
+`CAMOUFOX_EXECUTION_PAGE_CAP` page loads per execution (default 100, at most
+400) and `CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500). Navigation is
+limited to a hostname allowlist: the worker only ever asks the REST server to
+open `https://www.google.com/travel/flights…`, clicks only the consent
+page's "Reject all", the "Cheapest" tab, "View more flights" and "Date grid",
+and checks the tab's URL after every step: `www.google.com` under
+`/travel/flights`, or `consent.google.com` while handling consent; any other
+URL is the blocked page `off-allowlist`. (Subresources load as in any
+browser; the REST API offers no request filter, so the allowlist governs
+navigations, which is where a sign-in wall or a redirect would show.) On Google's consent interstitial the worker
+clicks "Reject all", never an accept, and keeps the resulting cookie in its
+own profile. On a CAPTCHA, an "unusual traffic" page (`/sorry/`), a
+sign-in wall, a navigation off the allowlist or any page it cannot classify
+as the consent page or a results page with a date grid, the worker **stops at
+once**: the cell outcome is `error` with reason `blocked` (a `ProviderError`
+of kind `blocked`, never retried by http-kit), the provider is disabled for
+the rest of that execution (including a manual resume of it), and the worker
+refuses every page load for `CAMOUFOX_COOLDOWN_HOURS` (default 48, at least
+24), answering without contacting Google; the cool-down survives a worker
+restart. A grid row the parser cannot read drops that option and marks the
+tile's affected cells through `cellIssues`, so a partial grid is never
+mistaken for "no fares".
 
 *Ledger and caps.* Every worker call is one page load and one
 `provider_requests` row under the **free-provider rules** (never billable,
@@ -184,34 +220,39 @@ consent page is its own row with the tile's `tile_index`, so parity still
 counts tiles. Responses are never cached (`cache: 'never'`); engine reuse
 (§8.1) is the only reuse.
 
-*Labels.* Display name "Google Flights via own browser"; source label "Google
-date grid via own browser"; compact mark `BR`. `provenanceNote`: "Google date
-grid via own browser: the prices Google Flights' date grid showed this app's
-own headless Chromium when the page was read, from this server's IP address,
-in the currency the page states. Google's terms do not permit this automated
-access; the operator turned it on. Constraints are not checked; no
-itinerary, seller or baggage is read." Vendor links: `google.com` only.
+*Labels.* Display name "Google Flights via Camoufox"; source label "Google
+Flights prices via Camoufox"; compact mark `CF`. `provenanceNote`: "Google Flights prices via Camoufox: the cheapest round-trip prices Google Flights showed this app's own Camoufox browser on the operator's machine when the page was read (the cheapest results in list mode, the date grid in grid mode), from the operator's IP address, in the currency the page states. Camoufox presents a generated browser fingerprint; Google's terms do not permit this automated access; the operator turned it on. Constraints are not checked; no return leg, seller or baggage is read." Vendor links: `google.com` only.
 `pointOfSale` is the page's stated location when it states one, else
 `'unknown'`.
 
 *Costs, stated plainly.* **Google's terms:** Google's Terms of Service bar
 automated access that ignores its machine-readable instructions, and
 `www.google.com/robots.txt` disallows `/travel/flights/search` (read
-2026-10-18), the path Google's results live under; SearchApi carried this
-exposure one step removed, this provider carries it directly. **The
-operator's IP:** every page load comes from the server's own address, so a
-block, CAPTCHA or wider restriction lands on that address, and through it on
-the operator's other Google use from the same network. **Brittleness:**
-Google changes the page without notice; a changed page reads as unrecognised
-and stops the provider (never a silent zero), and the selectors module must
-be re-dated against a new recording. **Speed:** 5–15 s a page plus the 30 s
-spacing, so the worked example's full scan is about 3½ hours and exceeds the
-default page cap (it covers about a third); a single pair (78 pages) fits.
-**Image size:** the browser image is about 0.6–0.7 GB (Node, the Chromium
-headless shell and its system libraries; an estimate WP14 replaces with the
-measured figure) and the worker is limited to 1 GB of memory and one CPU, all
-in a separate image and service; the default image is unchanged. **Money:** none, against SearchApi's ~£32 a
-month.
+2026-10-18), the path Google's results live under; Camoufox exists to avoid
+being recognised as automation, which makes the access deliberate rather
+than incidental; SearchApi carried this exposure one step removed, this
+provider carries it directly. **The operator's IP and account:** every page
+load comes from the operator's own address (no proxies), so a block, CAPTCHA or wider
+restriction lands on that address, and through it on the operator's other
+Google use from the same network; the feasibility load ran signed in to the
+operator's Google account, which the dedicated signed-out profile now
+forbids, so a signed-out profile may meet challenges that load did not. **Brittleness:** Google changes the page
+without notice; a changed page reads as unrecognised and stops the provider
+(never a silent zero), and the selectors module must be re-dated against a
+new recording; the worker depends on the camofox-browser REST API at a
+pinned version, and an upgrade of that server is a re-verification. **Speed:**
+5–15 s a page plus the 30 s spacing. In `list` mode a page prices one cell,
+so the default cap of 100 pages prices 100 cells a run (the worked example
+has 2,184 cells per pair): `list` suits a narrow window or a fixed stay. In
+`grid` mode the worked example's full scan is 312 pages, about 3½ hours, and
+exceeds the default page cap (it covers about a third); a single pair (78
+pages) fits. **Availability:** the provider runs only while
+the operator's machine is on and the worker is running; a run with the
+worker absent records `network` errors for its cells and every other
+provider runs. **Image size:** none in the app image, which is unchanged;
+Camoufox and the camofox-browser server live on the operator's machine
+(several hundred megabytes there, already installed). **Money:** none, against
+SearchApi's ~£32 a month.
 
 **Consequences baked into the design:**
 
@@ -325,7 +366,7 @@ verification as a free history source (§7 `route_price_history`).
     every cell of a provider whose `cabins` excludes the definition's cabin;
     no call is made and parity is unaffected.
   - `error`: `reason` is the `ProviderError.kind` (including `blocked`,
-    the `browser` provider's hard stop on a bot check, §2), or `fx-unavailable`,
+    the `camoufox` provider's hard stop on a bot check, §2), or `fx-unavailable`,
     `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
     `no-priced-options`, `unmappable-carrier`; the vendor's message,
     URL-stripped, is in `last_error`, never in `reason`.
@@ -413,7 +454,7 @@ synchronous `better-sqlite3` transactions.
 ### 5.1 Contract (`core/provider.ts`, WP0)
 
 ```ts
-export type ProviderId = 'travelpayouts' | 'searchapi' | 'browser' | 'fixture';
+export type ProviderId = 'travelpayouts' | 'searchapi' | 'camoufox' | 'fixture';
 export type SourceKind = 'authorised-cached' | 'scraped-aggregate' | 'scraped-search' | 'scraped-self' | 'synthetic';
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first';
 
@@ -481,8 +522,8 @@ export interface BudgetGuard {
 export interface ResponseCache { get(key: string): { body: unknown; storedAt: IsoDateTime } | undefined; set(key: string, body: unknown, ttlSeconds: number, storedAt: IsoDateTime): void }
 export interface Notifier { id: string; send(msg: AlertDigest | OperatorMessage): Promise<{ ok: boolean; detail?: string }> }
 
-export class ProviderError extends Error { kind: 'auth' | 'rate-limit' | 'quota' | 'upstream' | 'parse' | 'network' | 'limiter-timeout' | 'blocked'; reason?: string; retryable: boolean; httpStatus?: number; retryAfterSeconds?: number }   // 'blocked': browser only, never retryable
-export class BudgetExceeded extends Error { scope: 'execution-calls' | 'execution-free-calls' | 'execution-cost' | 'provider-execution' | 'provider-month' | 'provider-lifetime' | 'global-month' }   // 'provider-execution': a provider's own per-execution cap (browser pages)
+export class ProviderError extends Error { kind: 'auth' | 'rate-limit' | 'quota' | 'upstream' | 'parse' | 'network' | 'limiter-timeout' | 'blocked'; reason?: string; retryable: boolean; httpStatus?: number; retryAfterSeconds?: number }   // 'blocked': camoufox only, never retryable
+export class BudgetExceeded extends Error { scope: 'execution-calls' | 'execution-free-calls' | 'execution-cost' | 'provider-execution' | 'provider-month' | 'provider-lifetime' | 'global-month' }   // 'provider-execution': a provider's own per-execution cap (camoufox pages)
 export class AbortedError extends Error {}
 ```
 
@@ -504,8 +545,9 @@ export class AbortedError extends Error {}
   b × (b + maxNights − minNights) ≤ 200 (9 days × a 20-day return span for
   the 10–21-night band: 180 combinations), asserted ≤200 before reserve;
   ~21 tiles per pair for a 182-day window (the worked example: 4 pairs ≈ 84).
-  **Browser** (§2): `rectangle` tiles of exactly 7 departure days × 7 return
-  days (Google's date grid), departure blocks from the window start and, per
+  **Camoufox** (§2): in `list` mode one tile per cell (a 1 × 1
+  `rectangle`); in `grid` mode `rectangle` tiles of exactly 7 departure days
+  × 7 return days (Google's date grid), departure blocks from the window start and, per
   block, return blocks from `blockStart + minNights`;
   `⌈D / 7⌉ × ⌈(7 + maxNights − minNights) / 7⌉` tiles per pair (78 for the
   worked example's pair, 312 for its four pairs).
@@ -551,15 +593,17 @@ export class AbortedError extends Error {}
   retry time at the hourly window;
   other 5xx → `upstream`; malformed → `parse`; socket → `network`; per-request timeout (`REQUEST_TIMEOUT_SECONDS`, separate from
   `ctx.signal`) → `network` finalised `unknown` and **not retried for billed
-  vendors**; limiter deadline → `limiter-timeout`; the `browser` worker's
+  vendors**; limiter deadline → `limiter-timeout`; the `camoufox` worker's
   `blocked` and `cooling-down` answers (HTTP 423, §2) → `blocked`,
-  non-retryable; a worker that is down → `network`. `signal.aborted` →
+  non-retryable; its `mode-unavailable` answer (HTTP 409, `grid` mode before a
+  recording verifies it) → `parse`, non-retryable; a worker that is down →
+  `network`. `signal.aborted` →
   `AbortedError`. No adapter-level retries anywhere; http-kit retries.
 - **Vendor links.** `vendorLink` and `booking.url` are validated in `core`
   at normalisation and again in `api-contract`: `https:`, no userinfo, host
   equal to or a subdomain of an entry in the provider's link allowlist
   (`aviasales.com` for Travelpayouts; `google.com` for SearchApi, whose
-  step-3 `booking_request` always targets Google, and for `browser`), else
+  step-3 `booking_request` always targets Google, and for `camoufox`), else
   `{ kind: 'none' }`.
   Seller or airline hosts are never linked directly.
 
@@ -590,7 +634,7 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
 
 - **Billable rule**: `searchapi` iff upstream HTTP 200 **and** the plan is
   a per-call plan (on subscription plans every call is billable for the
-  call cap but costs 0 micro-GBP); `travelpayouts`, `browser` and `fx` never; cache
+  call cap but costs 0 micro-GBP); `travelpayouts`, `camoufox` and `fx` never; cache
   hits never; `fixture` iff HTTP 200 at the configured test cost (only
   under `syntheticAllowed`).
 - **Cap predicates** (SQL in `reserve`):
@@ -615,9 +659,9 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   cached; TTLs from config.
 - **Egress**: hostname allowlist per provider; `redirect: 'error'`; a test
   proves a 302 elsewhere sends no credentials. One exception to `https:` and
-  no explicit port: `browser` requests go to `http://<BROWSER_WORKER_HOST>:<BROWSER_WORKER_PORT>`
-  exactly (default `browser:8080`, a compose-internal network that never
-  leaves the host), with the worker token in a header; the worker, not
+  no explicit port: `camoufox` requests go to `CAMOUFOX_WORKER_URL` exactly
+  (scheme, host and port), which must be `http:` only on a loopback host or
+  `host.docker.internal`, with the worker token in a header; the worker, not
   http-kit, holds the Google hostname allowlist (§2). Every credential travels in a
   header, so http-kit refuses a query parameter named like one (`api_key`,
   `key`, `token`, `access_token`, `password`, `secret` and the like) whatever
@@ -1210,8 +1254,8 @@ completed
 | `ProviderError` parse | `error`, attempts+1; 2 consecutive for one provider (counted in ledger finalisation order) → provider disabled for the run, remaining cells `skipped:provider_disabled` | continue other providers; if none remain, `paused_error` + notify |
 | `ProviderError` auth or quota on **any** call | provider disabled for the run; remaining cells `skipped:provider_disabled` | continue other providers; if none remain, `paused_error` + notify |
 | `ProviderError` upstream with reason `no-return-legs` or `no-priced-options` | `error`, non-retryable on resume | continue |
-| `ProviderError` blocked (`browser` only, §2) | `error` reason `blocked`, non-retryable on resume; provider disabled for the run, remaining cells `skipped:provider_disabled`, and kept disabled by a manual resume of that run | continue other providers; if none remain, `paused_error` + notify (the notification names the cool-down end) |
-| `BudgetExceeded` provider-execution (`browser` page cap) | remaining cells for that provider and stage `skipped:budget` | continue if another provider remains in the stage, else `paused_budget` + notify; needs a manual `/resume` |
+| `ProviderError` blocked (`camoufox` only, §2) | `error` reason `blocked`, non-retryable on resume; provider disabled for the run, remaining cells `skipped:provider_disabled`, and kept disabled by a manual resume of that run | continue other providers; if none remain, `paused_error` + notify (the notification names the cool-down end) |
+| `BudgetExceeded` provider-execution (`camoufox` page cap) | remaining cells for that provider and stage `skipped:budget` | continue if another provider remains in the stage, else `paused_budget` + notify; needs a manual `/resume` |
 | `BudgetExceeded` on a new reservation | the cell stays `not_run`; calls already reserved finish and write (plan decision 25) | `paused_budget` per §5.3; sibling calls are never aborted |
 | `limiter-timeout` | cell returns to `not_run` | `paused_error` with `resume_after` = window reopen; a **one-shot croner job** resumes it at that instant (re-registered at boot, cancelled on cancel or manual resume) |
 | `BudgetExceeded` provider-month / provider-lifetime, other providers remain in the stage | remaining cells for that provider and stage `skipped:budget` | continue; notify once; no one-shot job |
@@ -1511,8 +1555,8 @@ boundaries and a small allowlist over web, engine templates and API
 strings):** "exhaustive", "all combinations", "every combination", "live",
 "bookable", "guaranteed", "real-time". Use "fetched 12m ago", "Google
 Flights via SearchApi" (itinerary search), "Google date grid via SearchApi"
-(calendar), "Google date grid via own browser" (the `browser` provider, compact
-mark `BR`), "Aviasales cache", "estimate vs ledger". The word "verified"
+(calendar), "Google Flights prices via Camoufox" (the `camoufox` provider, compact
+mark `CF`), "Aviasales cache", "estimate vs ledger". The word "verified"
 appears only beside class-`verified` values; the `verified` basis is
 labelled "itinerary-search basis"; stage counts say "itinerary-searched".
 
@@ -1695,17 +1739,17 @@ SEARCHAPI_CACHE_TTL_HOURS=1              # local cache window; the vendor does n
 SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime window when the trial was partly spent elsewhere; above 0 on 40usd fails boot
 # overrides: SEARCHAPI_MONTHLY_CALL_CAP, _RATE_PER_MINUTE, _RATE_PER_HOUR, _CONCURRENCY, _COST_PER_CALL_MICRO_GBP, _PLAN_FIXED_PENCE
 # the hourly rate is clamped to 20% of the call cap, the vendor's own hourly rule
-# --- browser (self-scraped Google date grid, discovery only, off by default; see docs/providers.md and §2) ---
-BROWSER_ENABLED=false                    # true only with the `browser` compose profile running; false = the provider does not exist
-BROWSER_WORKER_TOKEN=                    # ≥ 32 chars, shared by app and worker; required when BROWSER_ENABLED=true
-BROWSER_WORKER_HOST=browser              # compose service name on the internal network
-BROWSER_WORKER_PORT=8080
-BROWSER_MIN_SPACING_SECONDS=30           # gap between page loads, end to start; minimum 30, maximum 600; no jitter
-BROWSER_EXECUTION_PAGE_CAP=100           # page loads per execution (BudgetExceeded provider-execution); 1–400
-BROWSER_MONTHLY_PAGE_CAP=1500            # page loads per calendar month (provider-month, free-provider rules)
-BROWSER_BILLING_DAY=1                    # 1–28, the month boundary for the page cap
-BROWSER_COOLDOWN_HOURS=48                # refusal period after a block; minimum 24
-BROWSER_PAGE_TIMEOUT_SECONDS=45          # one page load including the date grid; above it → network, not retried
+# --- camoufox (self-scraped Google date grid, discovery only, off by default; see docs/providers.md and §2) ---
+CAMOUFOX_ENABLED=false                   # true only with the host-side worker running; false = the provider does not exist
+CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or http://host.docker.internal:8090 (app in Docker); http only on loopback or host.docker.internal
+CAMOUFOX_WORKER_TOKEN=                   # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
+CAMOUFOX_MIN_SPACING_SECONDS=30          # gap between page loads, end to start; minimum 30, maximum 600; never randomised
+CAMOUFOX_MODE=list                       # list (one cell per page; default) | grid (7 × 7 per page; refused by the worker until its selectors are verified)
+CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution); 1–400
+CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per calendar month (provider-month, free-provider rules)
+CAMOUFOX_BILLING_DAY=1                   # 1–28, the month boundary for the page cap
+CAMOUFOX_COOLDOWN_HOURS=48               # refusal period after a block; minimum 24 (the worker reads the same name)
+CAMOUFOX_PAGE_TIMEOUT_SECONDS=45         # one page load including the date grid; above it → network, not retried
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
 # --- email (all or nothing) ---
 SMTP_HOST=
@@ -1782,21 +1826,26 @@ type with Tailscale and reverse-proxy examples, TLS termination, expected DB
 growth), `api-limits.md` (preset table, per-provider facts, reconciliation),
 `scheduling.md` (cron examples, cadence table, pausing).
 
-**The `browser` service** (§2, opt-in): a second compose service under the
-`browser` profile, built from its own `apps/browser-worker/Dockerfile`
-(`node:22-slim` pinned by digest plus `playwright-core` at the workspace's
-Playwright version and its Chromium headless shell), never from the app's
-Dockerfile, so the default image keeps no browser, no curl and its size.
-The worker listens on `BROWSER_WORKER_PORT` on an `internal: true` network
-shared only with `app`, publishes no port, runs as a non-root user with the
-Chromium sandbox on and a committed seccomp profile (Docker's default plus
-the user-namespace calls Playwright's Docker page names), `read_only` with a
-tmpfs `/tmp`, `cap_drop: ALL`, `mem_limit: 1g`, `cpus: 1`, `pids_limit: 256`,
-`shm_size: 512m`, and its own small named volume for the browser profile (the
-consent-reject cookie) and the cool-down record. The app works unchanged with
-the service absent: with `BROWSER_ENABLED=false` the provider is not built;
-with it true and the worker down, each call is a `network` error on that
-provider's cells and every other provider runs.
+**The `camoufox` worker** (§2, opt-in) is not part of the image or of
+compose: it runs on the operator's machine beside the camofox-browser REST
+server, started with `pnpm --filter @gmt/camoufox-worker start` from a
+checkout (or the operator's own launchd or systemd unit running the same
+command). It reaches the REST server at `CAMOFOX_REST_URL` (default
+`http://127.0.0.1:9377`, loopback only), refuses to start when that server's
+version is not the pinned one or its profile holds a Google account cookie,
+and listens on `CAMOUFOX_WORKER_BIND` (default `127.0.0.1`; never `0.0.0.0`
+or `::`) port 8090. Docker Desktop forwards `host.docker.internal` to the
+host's loopback; on Linux, compose maps `host.docker.internal` to
+`host-gateway` and the operator binds the worker to the Docker bridge
+gateway address instead. The worker keeps its own state (the cool-down
+record, the last page time) in `~/.local/state/get-me-there/camoufox/`, mode
+0700, so one pacer and one cool-down serve every app that calls it, the
+container and `pnpm dev` alike. The app image and the `app` service are
+unchanged apart from the `CAMOUFOX_*` environment lines and one
+`extra_hosts` entry; the app works unchanged with the worker absent: with
+`CAMOUFOX_ENABLED=false` the provider is not built; with it true and the
+worker down, each call is a `network` error on that provider's cells and
+every other provider runs.
 
 ---
 
@@ -1813,7 +1862,7 @@ as specified in §5.3; no secrets, no full URLs.
 |---|---|---|
 | Research providers, pick one, integrate ≥1 | Two integrated; Amadeus/Duffel rejected | §2 |
 | "Documented, authorised interfaces" | SearchApi scraping-derived, opt-in, labelled | Ian's decision 2026-10-14 |
-| No brittle scraping that violates provider terms | The `browser` provider (§2) scrapes Google's date grid itself: opt-in, off by default, stock Playwright with no anti-detection tooling, a fixed low rate, a hard stop and cool-down on any bot check, labelled `scraped-self` | Ian's decisions 2026-10-14 and 2026-10-18 (continuity if SearchApi goes); its costs are stated in §2 |
+| No brittle scraping that violates provider terms | The `camoufox` provider (§2) scrapes Google's date grid itself in the operator's own Camoufox: opt-in, off by default, no proxies, a fixed low rate, a hard stop and cool-down on any bot check, never solving a challenge, labelled `scraped-self` | Ian's decisions 2026-10-14 and 2026-10-18 (continuity if SearchApi goes); its costs are stated in §2 |
 | "Cheapest available / bookable" | "Cheapest round trip found"; provenance and age on every price | No path guarantees bookability |
 | Free to operate | £0 config is Travelpayouts-only; SearchApi means the $40 plan | Its free allowance is a one-off trial |
 | A specific set of origins and destinations as the initial set | No airports in code at all; every definition names its own, with autocomplete and a free coverage check; the docs example is London → New York | A personal tool should not need a code change to search a different route, and the operator's own route is private |
@@ -1853,20 +1902,23 @@ as specified in §5.3; no secrets, no full URLs.
 | 11 | alerts, email, Alerts UI | Sonnet | 7, 8, 10 | 50 firings → one digest |
 | 12 | Docker, compose, env, backup, docs | Sonnet | 8, 9 | Dockerfile sets production + container flag |
 | 13 | `smoke:live`, layer-B engine tests (real adapters replaying recorded fixtures), the `app_lock` "tool bootstrap starts no execution" test, integration review, final pass | Fable | all | live smoke exits 0 with provenance |
-| 14 | `browser` provider: core widening, worker (`apps/browser-worker`), adapter, compose profile, docs | Opus | 13 | a recognised CAPTCHA page stops the worker and starts the cool-down |
+| 14 | `camoufox` provider: core widening, host-side worker (`apps/camoufox-worker`), adapter, docs | Opus | 13 | a recognised CAPTCHA page stops the worker and starts the cool-down |
 
 ---
 
 ## 17. Changelog
 
-### Revision 32: the browser provider (2026-10-18)
+### Revision 32: the camoufox provider (2026-10-18)
 
-§2 "Continuity fallback" rewritten as a built, opt-in `browser` provider
-(renamed from `'camoufox'`; stock Playwright, no anti-detection tooling,
-discovery only from Google's date grid, `scraped-self` with `maxAgeHours` 0,
-consent "Reject all", hard stop `blocked` and cool-down, page cap and
-spacing, its costs), with the §1, §3, §5.1–§5.3, §8.1, §11, §12, §13, §15
-and §16 rules it needs (plan decision 68).
+§2 "Continuity fallback" rewritten as a built, opt-in `camoufox` provider
+(the operator's Camoufox through its camofox-browser REST server, behind a
+host-side worker; discovery only, `list` mode from the results list and
+`grid` mode from the date grid once recorded; a dedicated signed-out
+profile; `scraped-self` with `maxAgeHours` 0, no
+proxies, consent "Reject all", a hard stop and cool-down on any bot check,
+never solving a challenge, a page cap and fixed spacing, its costs), with
+the §1, §3, §5.1–§5.3, §8.1, §11, §12, §13, §15 and §16 rules it needs (plan
+decision 68).
 
 ### Revision 29: CodeRabbit batch 3 (2026-10-17)
 
