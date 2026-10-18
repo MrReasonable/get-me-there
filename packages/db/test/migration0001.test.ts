@@ -1,4 +1,4 @@
-import { cpSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ import { exampleDefinitionInput } from './helpers/factories.js';
 function onlyInitial(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  rmSync(join(dir, '0001_confirmed_calls.sql'));
+  for (const f of readdirSync(dir)) if (f.endsWith('.sql') && f !== '0000_initial.sql') rmSync(join(dir, f));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
   journal.entries = journal.entries.filter((e) => e.tag === '0000_initial');
@@ -45,6 +45,7 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
       '0002_alert_event_lifecycle',
       '0003_route_history_by_trip',
       '0004_route_history_point_of_sale',
+      '0005_camoufox_provider',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
       applied: [
@@ -52,6 +53,7 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
         '0002_alert_event_lifecycle',
         '0003_route_history_by_trip',
         '0004_route_history_point_of_sale',
+        '0005_camoufox_provider',
       ],
     });
     expect(new DefinitionsRepo(db, fixedClock(T0)).get(created.id)).toEqual({
