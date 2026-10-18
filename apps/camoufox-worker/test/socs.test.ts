@@ -2,7 +2,6 @@ import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SELECTORS } from '../src/selectors.js';
 import {
   ConsentNotCaptured,
   loadSocs,
@@ -64,6 +63,14 @@ describe('loadSocs (spec §2: a captured, dated rejection value)', () => {
     expect(() => loadSocs(d, clock)).toThrow(ConsentNotCaptured);
     expect(() => loadSocs(d, clock)).toThrow(/capture-socs/);
   });
+  // why: fix round 1 (prov-int M11): a capture whose cookie has expired would be dropped by addCookies
+  it('refuses a capture whose cookie expiry has passed, naming capture-socs', () => {
+    const now = Date.parse(clock.now()) / 1000;
+    expect(() => loadSocs(dirWith(JSON.stringify({ ...OK, expires: now })), clock)).toThrow(
+      /expired.*capture-socs/,
+    );
+    expect(loadSocs(dirWith(JSON.stringify({ ...OK, expires: now + 1 })), clock).expires).toBe(now + 1);
+  });
   it('accepts exactly 13 months old', () => {
     expect(
       loadSocs(dirWith(JSON.stringify({ ...OK, capturedAt: '2025-09-18T05:00:00.000Z' })), clock).capturedAt,
@@ -106,13 +113,31 @@ describe('readBack (ruling 9: compared by value everywhere)', () => {
     ],
     ['missing', [{ name: 'NID', value: 'x', domain: '.google.com' }], 'missing'],
     ['a SOCS on another domain', [{ name: 'SOCS', value: OK.value, domain: 'www.google.com' }], 'missing'],
+    // why: fix round 1 (sec M1): any SOCS the browser would send to www.google.com counts, host-only ones included
+    ...(['google.com', 'www.google.com', '.www.google.com'] as const).map(
+      (domain) =>
+        [
+          `a host-only SOCS on ${domain} with another value`,
+          [
+            { name: 'SOCS', value: OK.value, domain: '.google.com' },
+            { name: 'SOCS', value: 'an-accept-value', domain },
+          ],
+          'changed',
+        ] as const,
+    ),
+    [
+      'a SOCS with another value on a domain never sent to www.google.com',
+      [
+        { name: 'SOCS', value: OK.value, domain: '.google.com' },
+        { name: 'SOCS', value: 'x', domain: '.google.co.uk' },
+      ],
+      'same',
+    ],
   ] as const;
-  it.each(cases)('%s → %s, with SOCS_STABLE false and true alike', (_n, cookies, expected) => {
-    for (const stable of [false, true]) {
-      const S = { ...SELECTORS, SOCS_STABLE: stable };
-      expect(S.SOCS_STABLE).toBe(stable);
-      expect(readBack(cookies, capture)).toBe(expected);
-    }
+  // why: fix round 1 (TS M10): readBack never reads SOCS_STABLE; that the flag changes nothing is proved by the session
+  // test "SOCS changed after a settled page → consent-unhandled (SOCS_STABLE …)"
+  it.each(cases)('%s', (_n, cookies, expected) => {
+    expect(readBack(cookies, capture)).toBe(expected);
   });
 });
 

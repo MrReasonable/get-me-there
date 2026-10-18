@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { checkEnvFiles, type Entry, EX_CONFIG, EX_SOFTWARE, main, resolveDataDir, run } from '../src/run.js';
@@ -20,19 +20,23 @@ function deps(env: Record<string, string | undefined>, over: Partial<Parameters<
   const loaded: string[] = [];
   const errs: string[] = [];
   const ran: string[][] = [];
+  const envs: Array<Record<string, string | undefined>> = [];
   const entry: Entry = async (ctx) => {
     ran.push(ctx.args);
+    envs.push({ ...ctx.env });
     return 0;
   };
   return {
     loaded,
     errs,
     ran,
+    envs,
     d: {
       env,
       uid,
-      loadEnvFile: (p: string) => {
+      readEnvFile: (p: string) => {
         loaded.push(p);
+        return readFileSync(p, 'utf8');
       },
       entries: { status: async () => entry, 'capture-socs': async () => entry },
       withoutEnvFile: new Set(['capture-socs']),
@@ -56,6 +60,57 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
     expect(await run(['status', '--x'], t.d)).toBe(0);
     expect(t.loaded).toEqual([join(dir, 'worker.env')]);
     expect(t.ran).toEqual([['--x']]);
+  });
+  // why: fix round 1 (sec I1): worker.env is the one source; the inherited environment never overrides it
+  it('the entry sees the file’s values plus HOME, PATH, TMPDIR and CAMOUFOX_DATA_DIR only', async () => {
+    const dir = dataDir();
+    const env = { CAMOUFOX_DATA_DIR: dir, HOME: '/Users/op', PATH: '/bin', TMPDIR: '/t', FOO: 'shell' };
+    const t = deps(env);
+    expect(await run(['status'], t.d)).toBe(0);
+    expect(t.envs).toEqual([
+      {
+        CAMOUFOX_DATA_DIR: dir,
+        HOME: '/Users/op',
+        PATH: '/bin',
+        TMPDIR: '/t',
+        CAMOUFOX_WORKER_KEY: 'synthetic-worker-key-0123456789abcdef',
+      },
+    ]);
+    expect(env).toEqual({
+      CAMOUFOX_DATA_DIR: dir,
+      HOME: '/Users/op',
+      PATH: '/bin',
+      TMPDIR: '/t',
+      FOO: 'shell',
+    });
+  });
+  it('a pre-set CAMOUFOX_WORKER_KEY that differs from the file refuses with 78, naming it and never a value', async () => {
+    const dir = dataDir();
+    const t = deps({ CAMOUFOX_DATA_DIR: dir, CAMOUFOX_WORKER_KEY: 'shell-key-0123456789abcdef0123456789' });
+    expect(await run(['status'], t.d)).toBe(EX_CONFIG);
+    expect(t.errs.join('\n')).toMatch(
+      /CAMOUFOX_WORKER_KEY is set in the environment and differs from .*worker\.env/,
+    );
+    expect(t.errs.join('\n')).not.toContain('shell-key');
+    expect(t.errs.join('\n')).not.toContain('synthetic-worker-key');
+    expect(t.ran).toEqual([]);
+  });
+  it('an inherited CAMOUFOX_* or POINT_OF_SALE the file lacks refuses; one equal to the file passes', async () => {
+    const dir = dataDir();
+    for (const extra of [{ CAMOUFOX_INSTALL_DIR: '/x' }, { POINT_OF_SALE: 'US' }, { CAMOUFOX_DEBUG: '1' }]) {
+      const t = deps({ CAMOUFOX_DATA_DIR: dir, ...extra });
+      expect(await run(['status'], t.d), JSON.stringify(extra)).toBe(EX_CONFIG);
+    }
+    const ok = deps({ CAMOUFOX_DATA_DIR: dir, CAMOUFOX_WORKER_KEY: 'synthetic-worker-key-0123456789abcdef' });
+    expect(await run(['status'], ok.d)).toBe(0);
+  });
+  it('DEBUG or PWDEBUG in the environment refuses (playwright-core would log protocol traffic, the SOCS value)', async () => {
+    const dir = dataDir();
+    for (const extra of [{ DEBUG: 'pw:protocol' }, { PWDEBUG: '1' }]) {
+      const t = deps({ CAMOUFOX_DATA_DIR: dir, ...extra });
+      expect(await run(['status'], t.d), JSON.stringify(extra)).toBe(EX_CONFIG);
+      expect(t.errs.join()).toMatch(/DEBUG/);
+    }
   });
   it('a 0644 file refuses with exit 78', async () => {
     const t = deps({ CAMOUFOX_DATA_DIR: dataDir({ fileMode: 0o644 }) });

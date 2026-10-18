@@ -14,6 +14,14 @@ const form = (
 });
 
 describe('checkForm (decision 69; prov-011, PIE-15; hypothesis names until Task 14.2’s recording)', () => {
+  // why: fix round 1 (prov-int M5): the option names under hl=en-GB are month-first, so the field may be too
+  it('ok for a month-first shown date (Thu, Nov 5; Sunday, November 15 2026)', () => {
+    expect(checkForm(form({ departure: 'Thu, Nov 5', return: 'Sun, Nov 15' }), REQ)).toBe('ok');
+    expect(checkForm(form({ departure: 'Nov 5, 2026', return: 'Sunday, November 15, 2026' }), REQ)).toBe(
+      'ok',
+    );
+    expect(checkForm(form({ departure: 'Fri, Nov 5' }), REQ)).toBe('mismatch');
+  });
   it('ok for the query’s round trip, one passenger and dates', () => {
     expect(checkForm(form(), REQ)).toBe('ok');
     expect(checkForm(form({ departure: '5 Nov 2026', return: 'Sunday, 15 November 2026' }), REQ)).toBe('ok');

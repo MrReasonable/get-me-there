@@ -1,18 +1,9 @@
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  type BlockedPage,
-  type Clock,
-  type Iata,
-  type IsoDate,
-  iataSchema,
-  isoDateSchema,
-  type Logger,
-  systemClock,
-} from '@gmt/core';
+import { type BlockedPage, CAMOUFOX_JS_VERSION, type Clock, type Logger, systemClock } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
+import { classifyPage } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import {
@@ -25,118 +16,55 @@ import {
   probePage,
   type Settled,
 } from './driver.js';
-import { installGuard, installProbeGuard, onAllowlist } from './guard.js';
-import {
-  CAMOUFOX_JS_VERSION,
-  type LaunchOptions,
-  launchContext,
-  launchOptionsForMeta,
-  prepareLaunch,
-} from './launch.js';
+import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
+import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
+import { stderrLog } from './log.js';
 import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
+import {
+  parseRecordArgs,
+  RECORDED_BY,
+  type RecordArgs,
+  type RecordingKind,
+  RecordingRefused,
+} from './recordArgs.js';
+import { stripQuery, writeRecording, writeUnrecorded } from './recordWrite.js';
+import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
-import { DeadlineExceeded, realTimers, type Timers } from './timers.js';
+import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
 import { pageUrl, probeUrl } from './url.js';
 
+export { stderrLog } from './log.js';
 /**
  * The recorder (spec §2 "Recordings first"; brief Task 14.2; decision 69 round 2, item 4; PIE-R2-01, PIE-R2-12,
- * SEC-R2-003, SEC-015, TS-05, TS2-10, TS2-12). It loads Google pages in the worker's own browser, under every rule the
- * server applies (the lock, the shared pacer, the allowlist guard, SOCS set before and read back after every page, the
- * cool-down on any block), and writes what the locators read to `fixtures/recorded/<kind>/<date>/<n>.{facts,meta}.json`
- * (gitignored, local-only: decision 61). It never stores printed ARIA text, a cookie value, the worker key, an account
- * name or an e-mail address. The consent probe is the one navigation exception, and it lives only here.
+ * SEC-R2-003, SEC-015, TS-05, TS2-10, TS2-12). It loads Google pages in the worker's own browser and profile under every
+ * rule the server applies (fix round 1, sec I2/I3, prov-int I2/I3/I4): the lock, the shared pacer, a standing signed-in
+ * refusal refuses before any launch, the allowlist guard, SOCS set before every page, one page deadline over the load,
+ * any click and every read, each re-poll after a click classified, SOCS read back by value after the whole interaction
+ * (bounded), the cool-down on any block, the persisted refusal on either signed-in cause, and the profile wiped on a
+ * consent stop or a SOCS that is not the captured one. It writes what the locators read to
+ * `fixtures/recorded/<kind>/<date>/<n>.{facts,meta}.json` (gitignored, local-only, 0600: decision 61). It never stores
+ * printed ARIA text, a cookie value, the worker key, an account name or an e-mail address. The consent probe is the
+ * one navigation exception, and it lives only here.
  */
-export const KINDS = [
-  'results',
-  'cheapest',
-  'view-more',
-  'socs-stability',
-  'consent-probe',
-  'no-flights',
-] as const;
-export type RecordingKind = (typeof KINDS)[number];
-export const RECORDED_BY = 'camoufox-worker record';
-export const MAX_PAGES = 3;
-/** The stability check's spacing between its three pages (rule 2). */
-export const STABILITY_PAGES = 3;
+export {
+  KINDS,
+  MAX_PAGES,
+  parseRecordArgs,
+  RECORDED_BY,
+  type RecordArgs,
+  type RecordingKind,
+  RecordingRefused,
+  STABILITY_PAGES,
+} from './recordArgs.js';
+export { assertClean, writeRecording } from './recordWrite.js';
+
 export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
-
-export class RecordingRefused extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RecordingRefused';
-  }
-}
-
-export interface RecordArgs {
-  kind: RecordingKind;
-  request: { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate } | null;
-  pages: number;
-}
-
-/** Parses the recorder's flags; throws RecordingRefused naming what is wrong. */
-export function parseRecordArgs(args: readonly string[]): RecordArgs {
-  const flags = new Set<string>();
-  const values = new Map<string, string>();
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i] ?? '';
-    if (['--origin', '--destination', '--depart', '--return', '--pages'].includes(a)) {
-      const v = args[i + 1];
-      if (v === undefined) throw new RecordingRefused(`${a} needs a value`);
-      values.set(a, v);
-      i++;
-    } else if (
-      ['--cheapest', '--view-more', '--stability', '--consent-probe', '--no-flights', '--grid'].includes(a)
-    )
-      flags.add(a);
-    else throw new RecordingRefused(`unknown argument ${a}`);
-  }
-  // why: decision 69: grid mode is not built in WP14, so nothing (the recorder included) loads the grid.
-  if (flags.has('--grid'))
-    throw new RecordingRefused('--grid: grid mode is not built in this work package (decision 69)');
-  if (flags.size > 1)
-    throw new RecordingRefused(
-      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --no-flights',
-    );
-  const kind: RecordingKind = flags.has('--cheapest')
-    ? 'cheapest'
-    : flags.has('--view-more')
-      ? 'view-more'
-      : flags.has('--stability')
-        ? 'socs-stability'
-        : flags.has('--consent-probe')
-          ? 'consent-probe'
-          : flags.has('--no-flights')
-            ? 'no-flights'
-            : 'results';
-  const pagesRaw = values.get('--pages') ?? (kind === 'socs-stability' ? String(STABILITY_PAGES) : '1');
-  const pages = Number(pagesRaw);
-  if (!/^\d+$/.test(pagesRaw) || pages < 1 || pages > MAX_PAGES)
-    throw new RecordingRefused(`--pages must be 1 to ${MAX_PAGES}`);
-  if (kind === 'consent-probe') return { kind, request: null, pages: 1 };
-  const origin = iataSchema.safeParse(values.get('--origin') ?? '');
-  const destination = iataSchema.safeParse(values.get('--destination') ?? '');
-  const departureDate = isoDateSchema.safeParse(values.get('--depart') ?? '');
-  const returnDate = isoDateSchema.safeParse(values.get('--return') ?? '');
-  if (!origin.success || !destination.success)
-    throw new RecordingRefused('--origin and --destination must be IATA codes');
-  if (!departureDate.success || !returnDate.success || returnDate.data <= departureDate.data)
-    throw new RecordingRefused('--depart and --return must be dates, the return after the departure');
-  return {
-    kind,
-    request: {
-      origin: origin.data,
-      destination: destination.data,
-      departureDate: departureDate.data,
-      returnDate: returnDate.data,
-    },
-    pages,
-  };
-}
+/** The bound on the read-back and the page close after a page (the session's own, brief §7 "Deadlines"). */
+const FINALLY_MS = 5000;
 
 export interface RecordDeps {
   clock: Clock;
@@ -153,61 +81,11 @@ export interface RecordDeps {
   isAlive?: (pid: number) => boolean;
 }
 
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
-/** Rule 6: nothing is written when the recording holds the key, the SOCS value, an account name or an e-mail address. */
-export function assertClean(text: string, secrets: readonly string[]): void {
-  for (const s of secrets)
-    if (s !== '' && text.includes(s))
-      throw new RecordingRefused('the recording holds a secret; nothing written');
-  if (text.includes('Google Account:'))
-    throw new RecordingRefused('the recording holds an account name; nothing written');
-  if (EMAIL.test(text)) throw new RecordingRefused('the recording holds an e-mail address; nothing written');
-}
-
-function nextIndex(dir: string): number {
-  if (!existsSync(dir)) return 1;
-  const used = readdirSync(dir)
-    .map((f) => /^(\d+)\.meta\.json$/.exec(f)?.[1])
-    .filter((x): x is string => x !== undefined)
-    .map(Number);
-  return used.length === 0 ? 1 : Math.max(...used) + 1;
-}
-
-interface PageRecording {
-  facts: unknown;
-  meta: Record<string, unknown>;
-}
-
-/** Writes one recording pair after the fail-closed scan; returns the facts path. */
-export function writeRecording(
-  root: string,
-  kind: RecordingKind,
-  day: string,
-  rec: PageRecording,
-  secrets: readonly string[],
-): string {
-  const factsText = `${JSON.stringify(rec.facts, null, 2)}\n`;
-  const contentSha256 = createHash('sha256').update(factsText).digest('hex');
-  const metaText = `${JSON.stringify({ ...rec.meta, contentSha256 }, null, 2)}\n`;
-  assertClean(factsText + metaText, secrets);
-  const dir = join(root, kind, day);
-  mkdirSync(dir, { recursive: true });
-  const n = nextIndex(dir);
-  writeFileSync(join(dir, `${n}.facts.json`), factsText);
-  writeFileSync(join(dir, `${n}.meta.json`), metaText);
-  return join(dir, `${n}.facts.json`);
-}
-
-interface LoadedPage {
-  settled: Settled | null;
-  /** The blocked kind the page or its guard stopped on. */
-  blocked: BlockedPage | null;
-  landing: string;
-  hops: string[];
-  stepMs: Record<string, number>;
-  driverOrProbe: Driver | ProbePage;
-  page: PageLike;
-}
+/** One page's outcome: the facts read (or what appeared), or the stop it met. */
+type Outcome =
+  | { kind: 'read'; data: Record<string, unknown>; noFlights: boolean; stepMs: Record<string, number> }
+  | { kind: 'appeared'; data: Record<string, unknown>; stepMs: Record<string, number> }
+  | { kind: 'stop'; page: BlockedPage; landing: string; hops: string[]; stepMs: Record<string, number> };
 
 export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordDeps): Promise<number> {
   let args: RecordArgs;
@@ -230,6 +108,13 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   try {
     sweepProbeProfiles(ctx.dataDir);
     const cooldown = new CooldownStore({ dir: ctx.dataDir, botHours: cfg.cooldownHours, clock: deps.clock });
+    const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
+    // why: fix round 1 (sec I2): the server's first stop, before anything opens: a standing refusal is cleared only by
+    // clear-signed-in, which wipes the profile first
+    if (refusal.active() !== null) {
+      ctx.err('a signed-in refusal stands; run clear-signed-in before recording');
+      return EX_UNAVAILABLE;
+    }
     const active = cooldown.active();
     if (active !== null) {
       ctx.err(`cooling down until ${active.until} (${active.cause}); no page is loaded before then`);
@@ -250,60 +135,121 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
       return EX_CONFIG;
     }
     const secrets = [cfg.key.reveal(), capture.value];
-    const context = await deps.launch(profileDir(ctx.dataDir));
+    const profile = profileDir(ctx.dataDir);
+    let context: ContextLike | null = await deps.launch(profile);
     const readBacks: ReadBack[] = [];
     try {
       for (let i = 0; i < args.pages; i++) {
         const req = args.request;
         if (req === null) throw new RecordingRefused('no request');
         await claim(pacer, deps, ctx);
-        let loaded: LoadedPage | null = null;
-        let back: ReadBack = 'missing';
+        const c: ContextLike = context ?? (await deps.launch(profile));
+        context = c;
+        const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
+        let outcome: Outcome | null = null;
+        let failure: unknown = null;
+        let page: PageLike | null = null;
+        let guard: GuardState | null = null;
         try {
           // why: TS2-10: the only cookie the recorder sets is socsCookie(capture).
-          await context.addCookies([socsCookie(capture)]);
-          const account = await checkAccountCookies(context, deps.clock);
+          await d.race(c.addCookies([socsCookie(capture)]));
+          const account = await d.race(checkAccountCookies(c, deps.clock));
           if (account.found) {
-            const until = cooldown.start('signed-in').until;
-            ctx.err(
-              `the profile holds Google account cookies (${account.names.join(', ')}); cooling down until ${until}`,
+            ctx.err(`the profile holds Google account cookies (${account.names.join(', ')})`);
+            outcome = { kind: 'stop', page: 'signed-in', landing: '', hops: [], stepMs: {} };
+          } else {
+            const p = await d.race(c.newPage());
+            page = p;
+            // why: --no-flights reads what appeared once the deadline passes, so its page stays open until then
+            if (args.kind !== 'no-flights') d.onExpire(() => void p.close().catch(() => undefined));
+            guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
+            const driver = createDriver(p, guard, deps.selectors);
+            outcome = await interact(
+              driver,
+              p,
+              guard,
+              d,
+              deps,
+              args.kind,
+              pageUrl({ ...req, gl: cfg.pointOfSale }),
             );
-            return EX_UNAVAILABLE;
           }
-          loaded = await loadPage(context, deps, cfg, pageUrl({ ...req, gl: cfg.pointOfSale }), false);
+        } catch (e) {
+          failure = e;
         } finally {
-          back = readBack(await context.cookies(), capture);
-          readBacks.push(back);
-          pacer.release();
+          d.clear();
         }
-        const blocked = loaded.blocked ?? (back === 'same' ? null : 'consent-unhandled');
-        // why: rule 1: a recording counts only when it landed on the allowlist with every hop on it.
-        const offList = [loaded.landing, ...loaded.hops].some((u) => !onAllowlist(u, deps.selectors));
-        if (blocked !== null || (offList && args.kind !== 'no-flights')) {
-          const kind: BlockedPage = blocked ?? 'off-allowlist';
-          const until = cooldown.start(kind).until;
-          if (kind === 'consent-unhandled')
+        // Rule 5, as the server: after the whole interaction, the read-back by value, then the page closed, bounded.
+        let back: ReadBack | 'overran' = 'missing';
+        if (page !== null || outcome?.kind === 'stop') {
+          const r = await bounded(() => c.cookies(), FINALLY_MS, deps.timers);
+          back = r.overran ? 'overran' : readBack(r.value, capture);
+        }
+        if (page !== null) {
+          const p = page;
+          await bounded(() => p.close(), FINALLY_MS, deps.timers);
+        }
+        pacer.release();
+        if (back !== 'overran') readBacks.push(back);
+        if (failure !== null && !(outcome?.kind === 'stop')) {
+          if (failure instanceof DeadlineExceeded)
+            throw new RecordingRefused(
+              `the page did not settle within CAMOUFOX_PAGE_TIMEOUT_SECONDS (${cfg.pageTimeoutSeconds})`,
+            );
+          throw failure;
+        }
+        if (back === 'overran') throw new RecordingRefused('the SOCS read-back overran; nothing written');
+        if (outcome === null) throw new RecordingRefused('no outcome');
+        // why: rule 1 for every kind (no --no-flights exemption, prov-int I3): the landing and every hop the guard saw,
+        // up to now (a late hop included, sec M4), on the allowlist
+        const landing = page?.url() ?? '';
+        const late = guard === null ? [] : [...guard.hops];
+        const offList = page !== null && [landing, ...late].some((u) => !onAllowlist(u, deps.selectors));
+        const stopKind: BlockedPage | null =
+          outcome.kind === 'stop'
+            ? outcome.page
+            : back !== 'same'
+              ? 'consent-unhandled'
+              : offList
+                ? 'off-allowlist'
+                : null;
+        if (stopKind !== null) {
+          const merged = outcome.kind === 'stop' && back !== 'same' && stopKind !== 'consent-unhandled';
+          const hours = merged
+            ? Math.max(cooldown.hoursFor(stopKind), cooldown.hoursFor('consent-unhandled'))
+            : cooldown.hoursFor(stopKind);
+          const until = cooldown.start(stopKind, hours).until;
+          if (stopKind === 'signed-in')
+            refusal.set('a signed-in account control or account cookie (recorder)');
+          // why: ruling 9 / session rule 5: a consent stop or a SOCS that is not the captured one leaves Google's
+          // consent state in the shared profile; it is wiped before the server's next page
+          if (stopKind === 'consent-unhandled' || back !== 'same') {
+            await bounded(() => c.close(), FINALLY_MS, deps.timers);
+            context = null;
+            rmSync(profile, { recursive: true, force: true });
+          }
+          if (stopKind === 'consent-unhandled')
             writeRecording(
               deps.root,
               args.kind,
               day,
               {
                 facts: {
-                  failure: kind,
-                  landing: stripQuery(loaded.landing),
-                  hops: loaded.hops.map(stripQuery),
+                  failure: stopKind,
+                  landing: stripQuery(outcome.kind === 'stop' ? outcome.landing : landing),
+                  hops: (outcome.kind === 'stop' ? outcome.hops : late).map(stripQuery),
                   socsReadBack: back,
                 },
-                meta: meta(deps, args.kind, back, loaded.stepMs, { failure: kind }),
+                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind }),
               },
               secrets,
             );
-          ctx.err(`stopped: ${kind}; cooling down until ${until}; the work stops for an operator ruling`);
+          ctx.err(`stopped: ${stopKind}; cooling down until ${until}; the work stops for an operator ruling`);
           return EX_UNAVAILABLE;
         }
-        const facts = await readRecording(loaded, deps, args.kind);
-        if (args.kind === 'no-flights' && !facts.noFlights) {
-          writeUnrecorded(deps.root, day, facts, secrets);
+        if (outcome.kind === 'stop') throw new RecordingRefused('unreachable');
+        if (outcome.kind === 'appeared' || (args.kind === 'no-flights' && !outcome.noFlights)) {
+          writeUnrecorded(deps.root, day, { data: outcome.data }, secrets);
           ctx.out(
             'no recognisable "no flights" line appeared; wrote no-flights/unrecorded.meta.json, NO_FLIGHTS_VERIFIED stays false',
           );
@@ -314,15 +260,16 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           args.kind,
           day,
           {
-            facts: { ...facts.data, socsReadBack: back },
-            meta: meta(deps, args.kind, back, loaded.stepMs, {}),
+            facts: { ...outcome.data, socsReadBack: back },
+            meta: meta(deps, args.kind, back, outcome.stepMs, {}),
           },
           secrets,
         );
         ctx.out(`recorded ${path}`);
       }
     } finally {
-      await context.close().catch(() => undefined);
+      const c = context;
+      if (c !== null) await bounded(() => c.close(), FINALLY_MS, deps.timers);
     }
     if (args.kind === 'socs-stability' && !readBacks.every((b) => b === 'same')) {
       ctx.err(
@@ -349,101 +296,97 @@ async function claim(pacer: Pacer, deps: RecordDeps, ctx: EntryContext): Promise
   if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
 }
 
-function stripQuery(u: string): string {
-  try {
-    const x = new URL(u);
-    return `${x.origin}${x.pathname}`;
-  } catch {
-    return 'unparsable';
-  }
-}
+/** The recorder reads with the no-flights hypothesis on, so it can see the line it is recording. */
+const reading = (S: Selectors): Selectors => ({ ...S, NO_FLIGHTS_VERIFIED: true });
 
-async function loadPage(
-  context: ContextLike,
-  deps: RecordDeps,
-  cfg: WorkerConfig,
-  url: string,
-  probe: boolean,
-): Promise<LoadedPage> {
-  const page = await context.newPage();
-  const guard = probe
-    ? await installProbeGuard(context, page, deps.log, deps.selectors)
-    : await installGuard(context, page, deps.log, deps.selectors);
-  const driver = createDriver(page, guard, deps.selectors);
-  const driverOrProbe: Driver | ProbePage = probe ? probePage(driver) : driver;
-  const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
-  d.onExpire(() => {
-    void page.close().catch(() => undefined);
-  });
-  const stepMs: Record<string, number> = {};
-  const t0 = deps.timers.now();
-  let settled: Settled | null = null;
-  let blocked: BlockedPage | null = null;
-  try {
-    try {
-      await driverOrProbe.goto(url, d);
-    } catch (e) {
-      if (guard.refused === null) throw e;
-      blocked = guard.refused;
-    }
-    stepMs.goto = deps.timers.now() - t0;
-    if (blocked === null) {
-      // why: the probe expects the consent page; the recorder reads with the no-flights hypothesis on so it can see it.
-      const S = { ...deps.selectors, NO_FLIGHTS_VERIFIED: true };
-      settled = await pollUntilSettled(driverOrProbe, d, deps.timers, deps.pollMs, S);
-      if (settled.kind.kind === 'blocked' && !(probe && settled.kind.page === 'consent-unhandled'))
-        blocked = settled.kind.page;
-    }
-    stepMs.settle = deps.timers.now() - t0;
-  } catch (e) {
-    if (!(e instanceof DeadlineExceeded)) throw e;
-    throw new RecordingRefused(
-      `the page did not settle within CAMOUFOX_PAGE_TIMEOUT_SECONDS (${cfg.pageTimeoutSeconds})`,
-    );
-  }
-  return { settled, blocked, landing: page.url(), hops: [...guard.hops], stepMs, driverOrProbe, page };
-}
-
-async function readRecording(
-  loaded: LoadedPage,
+/**
+ * One page under one deadline: goto, the settle, for --cheapest and --view-more the click and its re-poll (classified:
+ * any blocked kind, or a page that is not results, is a stop; prov-int I2), then every read.
+ */
+async function interact(
+  driver: Driver,
+  page: PageLike,
+  guard: GuardState,
+  d: Deadline,
   deps: RecordDeps,
   kind: RecordingKind,
-): Promise<{ data: Record<string, unknown>; noFlights: boolean }> {
-  const cfgMs = 30_000;
-  const d = deps.timers.deadline(cfgMs);
-  const facts = loaded.settled?.facts ?? null;
+  url: string,
+): Promise<Outcome> {
+  const stepMs: Record<string, number> = {};
+  const t0 = deps.timers.now();
+  const stop = (p: BlockedPage): Outcome => ({
+    kind: 'stop',
+    page: p,
+    landing: page.url(),
+    hops: [...guard.hops],
+    stepMs,
+  });
+  try {
+    await driver.goto(url, d);
+  } catch (e) {
+    if (guard.refused === null) throw e;
+    return stop(guard.refused);
+  }
+  stepMs.goto = deps.timers.now() - t0;
+  let settled: Settled;
+  try {
+    settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, reading(deps.selectors));
+  } catch (e) {
+    // why: rule 4 (prov-int I3): a --no-flights page that never settles is "what appeared", read once more
+    if (!(e instanceof DeadlineExceeded) || kind !== 'no-flights') throw e;
+    const after = deps.timers.deadline(FINALLY_MS * 2);
+    try {
+      const facts = await driver.readFacts(after);
+      const k = classifyPage(facts.page, reading(deps.selectors));
+      if (k.kind === 'blocked' && k.page !== 'unrecognised') return stop(k.page);
+      return {
+        kind: 'appeared',
+        data: {
+          kind,
+          landing: page.url(),
+          hops: [...guard.hops],
+          page: facts.page,
+          headings: await driver.headingNames(after),
+        },
+        stepMs: { ...stepMs, settle: deps.timers.now() - t0 },
+      };
+    } finally {
+      after.clear();
+    }
+  }
+  if (settled.kind.kind === 'blocked') return stop(settled.kind.page);
+  stepMs.settle = deps.timers.now() - t0;
   const clicked: string[] = [];
-  let after = facts;
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
-  if ((kind === 'cheapest' || kind === 'view-more') && 'click' in loaded.driverOrProbe) {
-    const driver = loaded.driverOrProbe;
-    if (kind === 'cheapest') {
-      const tab = facts?.page.cheapestTabs[0]?.name ?? '';
-      if (tab !== '') {
-        await driver.click('tab', tab, d);
-        clicked.push(`tab:${tab.replace(/\d[\d,]*/g, '<n>')}`);
-      }
-    } else {
+  if (kind === 'cheapest' || kind === 'view-more') {
+    const tab = settled.facts.page.cheapestTabs[0]?.name ?? '';
+    if (kind === 'cheapest' && tab !== '') {
+      await driver.click('tab', tab, d);
+      clicked.push(`tab:${tab.replace(/\d[\d,]*/g, '<n>')}`);
+    } else if (kind === 'view-more') {
       await driver.click('button', deps.selectors.results.viewMoreButton, d);
       clicked.push(`button:${deps.selectors.results.viewMoreButton}`);
     }
-    after = (await pollUntilSettled(driver, d, deps.timers, deps.pollMs, deps.selectors)).facts;
+    if (clicked.length > 0) {
+      settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, deps.selectors);
+      if (settled.kind.kind !== 'results')
+        return stop(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
+    }
   }
   const data = {
     kind,
-    landing: loaded.landing,
-    hops: loaded.hops,
-    page: after?.page ?? null,
-    settle: after?.settle ?? null,
+    landing: page.url(),
+    hops: [...guard.hops],
+    page: settled.facts.page,
+    settle: settled.facts.settle,
     clicked,
-    names: await loaded.driverOrProbe.resultNames(d),
-    list: await loaded.driverOrProbe.listFacts(d),
-    form: await loaded.driverOrProbe.formFacts(d),
-    headings: await loaded.driverOrProbe.headingNames(d),
+    names: await driver.resultNames(d),
+    list: await driver.listFacts(d),
+    form: await driver.formFacts(d),
+    headings: await driver.headingNames(d),
   };
-  d.clear();
-  await loaded.page.close().catch(() => undefined);
-  return { data, noFlights: after?.page.text.noFlights === true };
+  stepMs.read = deps.timers.now() - t0;
+  return { kind: 'read', data, noFlights: settled.facts.page.text.noFlights, stepMs };
 }
 
 function meta(
@@ -465,18 +408,6 @@ function meta(
   };
 }
 
-function writeUnrecorded(
-  root: string,
-  day: string,
-  facts: { data: Record<string, unknown> },
-  secrets: readonly string[],
-): void {
-  const text = `${JSON.stringify({ recordedAt: day, recordedBy: RECORDED_BY, appeared: facts.data }, null, 2)}\n`;
-  assertClean(text, secrets);
-  mkdirSync(join(root, 'no-flights'), { recursive: true });
-  writeFileSync(join(root, 'no-flights', 'unrecorded.meta.json'), text);
-}
-
 /**
  * Rule 3: the consent probe. A throwaway profile `<data>/probe-<time>-<pid>` (deleted in a `finally`, a thrown error
  * included), no SOCS, the probe guard, a page typed without `click`. It records the consent page's facts and starts no
@@ -492,47 +423,76 @@ async function consentProbe(
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   try {
     await claim(s.pacer, deps, ctx);
-    let loaded: LoadedPage;
     const context = await deps.launch(profile);
+    const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
     try {
-      loaded = await loadPage(context, deps, cfg, probeUrl(cfg.pointOfSale), true);
-      if (loaded.blocked !== null) {
-        const until = s.cooldown.start(loaded.blocked).until;
-        ctx.err(`the probe stopped on ${loaded.blocked}; cooling down until ${until}`);
+      const page = await d.race(context.newPage());
+      d.onExpire(() => void page.close().catch(() => undefined));
+      const guard = await d.race(installProbeGuard(context, page, deps.log, deps.selectors));
+      const probe: ProbePage = probePage(createDriver(page, guard, deps.selectors));
+      const t0 = deps.timers.now();
+      let blocked: BlockedPage | null = null;
+      try {
+        await probe.goto(probeUrl(cfg.pointOfSale), d);
+      } catch (e) {
+        if (guard.refused === null) throw e;
+        blocked = guard.refused;
+      }
+      let settled: Settled | null = null;
+      if (blocked === null) {
+        settled = await pollUntilSettled(probe, d, deps.timers, deps.pollMs, reading(deps.selectors));
+        if (settled.kind.kind === 'blocked' && settled.kind.page !== 'consent-unhandled')
+          blocked = settled.kind.page;
+      }
+      if (blocked !== null) {
+        const until = s.cooldown.start(blocked).until;
+        ctx.err(`the probe stopped on ${blocked}; cooling down until ${until}`);
         return EX_UNAVAILABLE;
       }
-      const facts = await readRecording(loaded, deps, 'consent-probe');
+      const data = {
+        kind: 'consent-probe',
+        landing: page.url(),
+        hops: [...guard.hops],
+        page: settled?.facts.page ?? null,
+        settle: settled?.facts.settle ?? null,
+        clicked: [],
+        names: await probe.resultNames(d),
+        list: await probe.listFacts(d),
+        form: await probe.formFacts(d),
+        headings: await probe.headingNames(d),
+      };
       const path = writeRecording(
         deps.root,
         'consent-probe',
         s.day,
         {
-          facts: facts.data,
-          meta: meta(deps, 'consent-probe', 'missing', loaded.stepMs, { profile: 'throwaway' }),
+          facts: data,
+          meta: meta(
+            deps,
+            'consent-probe',
+            'missing',
+            { settle: deps.timers.now() - t0 },
+            { profile: 'throwaway' },
+          ),
         },
         [cfg.key.reveal()],
       );
       ctx.out(`recorded ${path}`);
       return 0;
+    } catch (e) {
+      if (e instanceof DeadlineExceeded)
+        throw new RecordingRefused(
+          `the page did not settle within CAMOUFOX_PAGE_TIMEOUT_SECONDS (${cfg.pageTimeoutSeconds})`,
+        );
+      throw e;
     } finally {
+      d.clear();
       s.pacer.release();
-      await context.close().catch(() => undefined);
+      await bounded(() => context.close(), FINALLY_MS, deps.timers);
     }
   } finally {
     rmSync(profile, { recursive: true, force: true });
   }
-}
-
-/** A Logger for the command line: warnings and errors as JSON lines on stderr (host names only, never a URL). */
-export function stderrLog(err: (line: string) => void): Logger {
-  const log: Logger = {
-    debug: () => undefined,
-    info: () => undefined,
-    warn: (o, msg) => err(JSON.stringify({ level: 'warn', msg, ...o })),
-    error: (o, msg) => err(JSON.stringify({ level: 'error', msg, ...o })),
-    child: () => log,
-  };
-  return log;
 }
 
 /** The real dependencies: the system clock, real timers, and the browser launched with the prepared options. */

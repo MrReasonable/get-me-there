@@ -19,11 +19,18 @@ interface ShownDate {
   month: number;
   year: number | null;
 }
-/** "Thu, 5 Nov", "5 Nov 2026", "Thursday, 5 November" → its parts; null when unreadable. */
+/**
+ * "Thu, 5 Nov", "5 Nov 2026", "Thursday, 5 November", and month-first "Thu, Nov 5", "Nov 5, 2026" (fix round 1,
+ * prov-int M5: the option names under hl=en-GB are month-first, so the field may be) → its parts; null when unreadable.
+ */
 export function readShownDate(s: string): ShownDate | null {
+  const t = s.trim();
   const m =
     /^(?:(?<wd>[A-Z][a-z]{2})[a-z]*,? )?(?<day>[0-9]{1,2}) (?<mon>[A-Z][a-z]{2})[a-z]*(?: (?<year>[0-9]{4}))?$/.exec(
-      s.trim(),
+      t,
+    ) ??
+    /^(?:(?<wd>[A-Z][a-z]{2})[a-z]*,? )?(?<mon>[A-Z][a-z]{2})[a-z]* (?<day>[0-9]{1,2})(?:,? (?<year>[0-9]{4}))?$/.exec(
+      t,
     );
   const g = m?.groups;
   if (g === undefined) return null;

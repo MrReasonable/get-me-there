@@ -5,6 +5,8 @@
   ~/Library/LaunchAgents/uk.dominey.get-me-there.camoufox-worker.plist, replace /PATH/TO/get-me-there with your
   checkout and /Users/YOU with your home, then: launchctl bootstrap gui/$(id -u) <that plist>.
   No secret lives here: the key stays in ~/.local/state/get-me-there/camoufox/worker.env (0600), which run.ts loads.
+  `env -i` empties the environment first, so nothing a login profile exports reaches the worker (run.ts refuses an
+  inherited CAMOUFOX_* or DEBUG anyway); set PATH to where node and pnpm live on this Mac (`command -v pnpm`).
   A start-check failure exits 78; KeepAlive restarts only an unsuccessful exit, never faster than once a minute.
   Stop it with: launchctl bootout gui/$(id -u)/uk.dominey.get-me-there.camoufox-worker
 -->
@@ -14,9 +16,17 @@
   <string>uk.dominey.get-me-there.camoufox-worker</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>-lc</string>
-    <string>cd /PATH/TO/get-me-there &amp;&amp; exec pnpm --filter @gmt/camoufox-worker start</string>
+    <string>/usr/bin/env</string>
+    <string>-i</string>
+    <string>HOME=/Users/YOU</string>
+    <string>PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>TMPDIR=/tmp</string>
+    <string>pnpm</string>
+    <string>--dir</string>
+    <string>/PATH/TO/get-me-there</string>
+    <string>--filter</string>
+    <string>@gmt/camoufox-worker</string>
+    <string>start</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/PATH/TO/get-me-there</string>

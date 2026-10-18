@@ -1,23 +1,33 @@
 import { mkdirSync } from 'node:fs';
 import type { Server } from 'node:http';
-import { type Clock, type Logger, systemClock, type Versions, type WorkerStatus } from '@gmt/core';
+import {
+  CAMOUFOX_JS_VERSION,
+  type Clock,
+  type Logger,
+  systemClock,
+  type Versions,
+  type WorkerStatus,
+} from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import type { ContextLike } from './driver.js';
-import { CAMOUFOX_JS_VERSION, type LaunchOptions, launchContext, prepareLaunch } from './launch.js';
+import { type LaunchOptions, launchContext, prepareLaunch } from './launch.js';
 import { acquireLock, sweepProbeProfiles } from './lock.js';
+import { stderrLog } from './log.js';
 import { GRAMMAR_VERSION } from './names.js';
 import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
-import { stderrLog } from './record.js';
 import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE } from './run.js';
 import { flagsOf, SELECTORS, type Selectors } from './selectors.js';
 import { BIND_HOST, createWorkerServer, portOf } from './server.js';
 import { PageSession } from './session.js';
 import { loadSocs } from './socs.js';
-import { realTimers, type Timers } from './timers.js';
+import { bounded, realTimers, type Timers } from './timers.js';
+
+/** The status route's bound on a cold relaunch plus its cookie read: under the app's 10 s status timeout. */
+const STATUS_CHECK_MS = 8000;
 
 /**
  * The worker process (spec §2, §13; brief Task 14.5; decision 69). Start checks, in order, each exiting 78 naming the
@@ -152,10 +162,20 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
   });
   const status = async (): Promise<WorkerStatus> => {
     const active = cooldown.active();
-    const account =
-      standingRefusal || refusal.active() !== null
-        ? { found: false, names: [], checkedAt: deps.clock.now() }
-        : await checkAccountCookies(await session.currentContext(), deps.clock);
+    let account: WorkerStatus['accountCookie'];
+    if (standingRefusal || refusal.active() !== null)
+      account = { found: false, names: [], checkedAt: deps.clock.now() };
+    else {
+      // why: fix round 1 (prov-int M7): after a wipe the context relaunches cold; status bounds that launch and its
+      // cookie read under the app's 10 s status timeout and answers 500 past it, never a stale or guessed answer
+      const checked = await bounded(
+        async () => checkAccountCookies(await session.currentContext(), deps.clock),
+        STATUS_CHECK_MS,
+        deps.timers,
+      );
+      if (checked.overran) throw new Error('the browser did not answer the account-cookie check in time');
+      account = checked.value;
+    }
     return {
       ok: active === null && refusal.active() === null && !account.found,
       coolingDownUntil: active?.until ?? null,

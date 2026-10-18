@@ -63,6 +63,24 @@ function readBundleVersion(file: string): BundleVersion {
 }
 
 /**
+ * The top-level `version.json` (fix round 1, prov-int M1): camoufox-js reads only its `release`, so `release` is
+ * required; a `build` beside it must agree.
+ */
+function readTopVersion(file: string): BundleVersion {
+  const v = readBundleVersion(file);
+  const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
+  const obj = typeof raw === 'object' && raw !== null ? raw : {};
+  const release = 'release' in obj && typeof obj.release === 'string' ? obj.release : undefined;
+  if (release === undefined) throw new InstallRefused(`${file}: version.json names no release`);
+  const build = 'build' in obj && typeof obj.build === 'string' ? obj.build : undefined;
+  if (build !== undefined && build !== release)
+    throw new InstallRefused(
+      `${file} disagrees with the pinned bundle (build ${build}, release ${release}); it is never rewritten silently`,
+    );
+  return { version: v.version, build: release };
+}
+
+/**
  * Verifies or creates the install layout for the pinned build. `env` is the worker's environment, read only for the
  * CAMOUFOX_INSTALL_DIR refusal.
  */
@@ -118,7 +136,7 @@ export function ensureInstallLayout(o: {
     writeFileSync(topVersion, JSON.stringify({ version: v.version, release: v.build }));
     created.push('version.json');
   } else {
-    const top = readBundleVersion(topVersion);
+    const top = readTopVersion(topVersion);
     if (top.version !== v.version || top.build !== v.build)
       throw new InstallRefused(
         `${topVersion} disagrees with the pinned bundle; it is never rewritten silently`,

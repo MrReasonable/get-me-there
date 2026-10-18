@@ -235,3 +235,32 @@ describe('worker rules: source facts through the compiler API', () => {
     expect(callsTo('continue')).toEqual([]);
   });
 });
+
+// why: fix round 1 (sec I1): the agent starts the worker with an emptied environment, never a login shell's exports
+describe('the launchd agent example', () => {
+  const plist = readFileSync(
+    fileURLToPath(
+      new URL('../launchd/uk.dominey.get-me-there.camoufox-worker.plist.example', import.meta.url),
+    ),
+    'utf8',
+  );
+  const args = [
+    ...(plist
+      .split('<key>ProgramArguments</key>')[1]
+      ?.split('</array>')[0]
+      ?.matchAll(/<string>([^<]*)<\/string>/g) ?? []),
+  ].map((m) => m[1]);
+  it('runs /usr/bin/env -i with only HOME, PATH and TMPDIR, then pnpm start', () => {
+    expect(args.slice(0, 2)).toEqual(['/usr/bin/env', '-i']);
+    expect(args.filter((a) => a?.includes('=')).map((a) => a?.split('=')[0])).toEqual([
+      'HOME',
+      'PATH',
+      'TMPDIR',
+    ]);
+    expect(args.slice(-3)).toEqual(['--filter', '@gmt/camoufox-worker', 'start']);
+  });
+  it('has no login shell and carries no key', () => {
+    expect(plist).not.toMatch(/-lc|-l\b|zsh|bash/);
+    expect(plist).not.toMatch(/CAMOUFOX_WORKER_KEY=|EnvironmentVariables/);
+  });
+});

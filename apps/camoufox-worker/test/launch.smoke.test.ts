@@ -4,20 +4,16 @@
 // install layout in ~/Library/Caches/camoufox, launches through the worker's own options into a throwaway profile under
 // the checkout's gitignored data/ directory, opens about:blank only (never Google), and writes what it observed to
 // fixtures/recorded/launch/<date>.meta.json (gitignored, local-only).
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CAMOUFOX_JS_VERSION } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { PageLike } from '../src/driver.js';
 import { installGuard } from '../src/guard.js';
 import { DEFAULT_BINARY_BUILD, ensureInstallLayout } from '../src/install.js';
-import {
-  buildLaunchOptions,
-  CAMOUFOX_JS_VERSION,
-  launchContext,
-  launchOptionsForMeta,
-} from '../src/launch.js';
+import { buildLaunchOptions, launchContext, launchOptionsForMeta } from '../src/launch.js';
 import { installDir } from '../src/paths.js';
 import { memoryLog } from './support/log.js';
 
@@ -49,6 +45,23 @@ const title = `launch smoke: Camoufox ${PIN} through camoufox-js's install layou
   enabled ? '' : ' (skipped: needs CAMOUFOX_LAUNCH_SMOKE=1 and the pinned Camoufox installed on this Mac)'
 }`;
 
+/** Every path under the install directory (bundles excepted) with its size and modification time. */
+function snapshot(): string[] {
+  const root = installDir(homedir());
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (p === join(root, 'browsers')) continue;
+      const st = lstatSync(p);
+      out.push(`${p.slice(root.length)} ${st.size} ${st.mtimeMs}`);
+      if (st.isDirectory()) walk(p);
+    }
+  };
+  walk(root);
+  return out.sort();
+}
+
 function hasEvaluate(p: PageLike): p is PageLike & { evaluate(fn: () => string): Promise<string> } {
   return 'evaluate' in p && typeof p.evaluate === 'function';
 }
@@ -72,7 +85,25 @@ describe.skipIf(!enabled)(title, () => {
     mkdirSync(profile, { recursive: true, mode: 0o700 });
     const hosts = new Set<string>();
     const started = Date.now();
-    const context = await launchContext(options, profile);
+    // why: fix round 1 (sec M5, prov-int M8): camoufox-js's add-on download, IP and geolocation lookups and release
+    // fetch are Node-side fetches in this process, which the context's request listener can never see; any fetch
+    // during the launch throws and is recorded
+    const before = snapshot();
+    const nodeFetches: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request) => {
+      nodeFetches.push(input instanceof Request ? input.url : input.toString());
+      throw new Error('launch smoke: no Node-side fetch is allowed during the launch');
+    };
+    let context: Awaited<ReturnType<typeof launchContext>>;
+    try {
+      context = await launchContext(options, profile);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(nodeFetches).toEqual([]);
+    // why: an add-on or GeoIP download would land under the install directory; nothing there changes during the launch
+    expect(snapshot()).toEqual(before);
     try {
       context.on('request', (r) => {
         try {
@@ -87,6 +118,8 @@ describe.skipIf(!enabled)(title, () => {
       const userAgent = hasEvaluate(page) ? await page.evaluate(() => navigator.userAgent) : '';
       expect(userAgent).toContain(`Firefox/${layout.ffMajor}`);
       expect(await context.cookies()).toEqual([]);
+      // why: the context's requests are page traffic only (about:blank makes none); the Node-side hosts are covered by
+      // the fetch trap above
       const quietHosts = [...hosts];
       for (const bad of [
         'addons.mozilla.org',
@@ -113,6 +146,7 @@ describe.skipIf(!enabled)(title, () => {
             created: layout.created,
             userAgent,
             hostsWhileIdle: quietHosts,
+            nodeFetchesDuringLaunch: nodeFetches,
             launchOptions: launchOptionsForMeta(options),
             durationMs: Date.now() - started,
           },

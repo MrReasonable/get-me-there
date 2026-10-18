@@ -21,6 +21,10 @@ export class FakeContext implements ContextLike {
   closed = 0;
   addCookiesThrows = false;
   newPageThrows = false;
+  /** Fix round 1 (prov-int I1): the calls before a page opens, each never resolving. */
+  addCookiesHangs = false;
+  newPageHangs = false;
+  routeHangs = false;
   /** When set, cookies() never resolves on the call with this index (0-based). */
   hangCookiesOn: number | null = null;
   /** Called after each page load to change the jar (Google rewriting SOCS, a sign-in…). */
@@ -37,6 +41,7 @@ export class FakeContext implements ContextLike {
     return Promise.resolve(this.jar.map((c) => ({ ...c })));
   }
   addCookies(cookies: CookieInput[]): Promise<void> {
+    if (this.addCookiesHangs) return new Promise(() => undefined);
     if (this.addCookiesThrows) return Promise.reject(new Error('addCookies failed'));
     this.added.push(cookies);
     for (const c of cookies) {
@@ -47,6 +52,7 @@ export class FakeContext implements ContextLike {
   }
   route(url: string, handler: (route: RouteLike, request: RequestLike) => unknown): Promise<void> {
     this.routes.push({ url, handler });
+    if (this.routeHangs) return new Promise(() => undefined);
     return Promise.resolve();
   }
   on(event: 'request', listener: (r: RequestLike) => void): unknown {
@@ -79,6 +85,7 @@ export class FakeContext implements ContextLike {
     return outcome;
   }
   newPage(): Promise<PageLike> {
+    if (this.newPageHangs) return new Promise(() => undefined);
     if (this.newPageThrows) return Promise.reject(new Error('newPage failed'));
     const nav = this.navigations[Math.min(this.pages.length, this.navigations.length - 1)] ?? null;
     const p = new FakePage(this, nav);

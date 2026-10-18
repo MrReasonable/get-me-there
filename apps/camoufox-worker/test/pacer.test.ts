@@ -105,3 +105,19 @@ describe('Pacer (spec §2: start to start, 2 s tolerance, persisted, never rando
     );
   });
 });
+
+// why: fix round 1 (TS M5): both bounds are inclusive
+describe('Pacer bounds', () => {
+  it('accepts 30 and 600 seconds and refuses 29 and 601', () => {
+    for (const ok of [30, 600])
+      expect(
+        () => new Pacer({ dir: tmpDir(), minSpacingSeconds: ok, clock: fixedClock(T0) }),
+        String(ok),
+      ).not.toThrow();
+    for (const bad of [29, 601])
+      expect(
+        () => new Pacer({ dir: tmpDir(), minSpacingSeconds: bad, clock: fixedClock(T0) }),
+        String(bad),
+      ).toThrow(/from 30 to 600/);
+  });
+});

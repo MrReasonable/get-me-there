@@ -12,7 +12,7 @@ import { SELECTORS, type Selectors } from './selectors.js';
  */
 export type RouteDecision = { action: 'continue' } | { action: 'abort'; kind: BlockedPage };
 
-/** What the guard saw on one page: main-frame hops and sub-frame navigation URLs, plus the first refused navigation. */
+/** What the guard saw on one page: main-frame hops and sub-frame navigation URLs, plus the first refused main-frame navigation. */
 export interface GuardState {
   hops: string[];
   frameUrls: string[];
@@ -27,13 +27,19 @@ function urlOf(s: string): URL | null {
   }
 }
 
-/** True when `raw` is on the results allowlist. */
+/** True when `u` is https on `host` with the default port and no user or password (fix round 1, sec M2). */
+function plainHttps(u: URL, host: string): boolean {
+  return (
+    u.protocol === 'https:' && u.hostname === host && u.port === '' && u.username === '' && u.password === ''
+  );
+}
+
+/** True when `raw` is on the results allowlist; the classifier reads the same rule. */
 export function onAllowlist(raw: string, S: Selectors = SELECTORS): boolean {
   const u = urlOf(raw);
   return (
     u !== null &&
-    u.protocol === 'https:' &&
-    u.hostname === S.hosts.results &&
+    plainHttps(u, S.hosts.results) &&
     (u.pathname === S.resultsPath || u.pathname.startsWith(`${S.resultsPath}/`))
   );
 }
@@ -52,17 +58,24 @@ export function decideRoute(url: string, isNavigation: boolean, S: Selectors = S
   return { action: 'abort', kind: refusalKind(url, S) };
 }
 
+/** The consent host's path that records a choice; the probe never navigates there (fix round 1, sec M3). */
+const CONSENT_SAVE_PATH = '/save';
+
 /**
- * The consent probe's variant (Task 14.2; the recorder only): also admits `https://consent.google.com/` documents and
- * nothing else. Never reachable from the server path (rules.test.ts pins that only record.ts imports it).
+ * The consent probe's variant (Task 14.2; the recorder only): also admits GET document navigations to
+ * `https://consent.google.com/`, except its `/save` path, and nothing else. Never reachable from the server path
+ * (rules.test.ts pins that only record.ts imports it).
  */
 export function decideProbeRoute(
   url: string,
   isNavigation: boolean,
+  method = 'GET',
   S: Selectors = SELECTORS,
 ): RouteDecision {
   const u = urlOf(url);
-  if (isNavigation && u !== null && u.protocol === 'https:' && u.hostname === S.hosts.consent)
+  const save =
+    u !== null && (u.pathname === CONSENT_SAVE_PATH || u.pathname.startsWith(`${CONSENT_SAVE_PATH}/`));
+  if (isNavigation && u !== null && method === 'GET' && !save && plainHttps(u, S.hosts.consent))
     return { action: 'continue' };
   return decideRoute(url, isNavigation, S);
 }
@@ -92,7 +105,7 @@ function install(
   context: ContextLike,
   page: PageLike,
   log: Logger,
-  decide: (url: string, isNavigation: boolean) => RouteDecision,
+  decide: (url: string, isNavigation: boolean, method: string) => RouteDecision,
 ): Promise<GuardState> {
   let entry = installed.get(context);
   if (entry === undefined) {
@@ -108,10 +121,13 @@ function install(
     });
     const ready = context.route('**/*', async (route: RouteLike) => {
       const req = route.request();
-      const d = decide(req.url(), req.isNavigationRequest());
+      const d = decide(req.url(), req.isNavigationRequest(), req.method());
       if (d.action === 'continue') return route.fallback();
-      // why: the first refusal names the page kind the session answers with; the host only, never the URL (spec §14).
-      state.refused ??= d.kind;
+      // why: the first main-frame refusal names the page kind the session answers with (a refused sub-frame is aborted
+      // but never names the page, fix round 1 prov-int M6; a frameless one counts as the main frame's, failing closed);
+      // the host only, never the URL (spec §14).
+      const frame = frameOf(req);
+      if (frame === null || isMainFrame(frame)) state.refused ??= d.kind;
       log.warn({ kind: d.kind, host: urlOf(req.url())?.hostname ?? 'unparsable' }, 'navigation refused');
       return route.abort('blockedbyclient');
     });
@@ -141,5 +157,5 @@ export function installProbeGuard(
   log: Logger,
   S: Selectors = SELECTORS,
 ) {
-  return install(context, page, log, (u, n) => decideProbeRoute(u, n, S));
+  return install(context, page, log, (u, n, m) => decideProbeRoute(u, n, m, S));
 }

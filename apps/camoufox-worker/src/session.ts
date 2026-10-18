@@ -73,6 +73,9 @@ function detailOf(e: unknown): string {
 
 export class PageSession {
   private context: ContextLike | null = null;
+  // why: fix round 1 (prov-int M7): memoised on the promise, so a status call and a page call arriving together
+  // launch one persistent context on the profile, never two
+  private launching: Promise<ContextLike> | null = null;
   private readonly S: Selectors;
   private readonly finallyMs: number;
   private readonly pollMs: number;
@@ -89,16 +92,31 @@ export class PageSession {
     return this.busySince;
   }
 
-  /** The context, launched on first use and after a wipe. */
-  async currentContext(): Promise<ContextLike> {
-    this.context ??= await this.d.launch();
-    return this.context;
+  /** The context, launched on first use and after a wipe; one launch in flight at a time. */
+  currentContext(): Promise<ContextLike> {
+    if (this.context !== null) return Promise.resolve(this.context);
+    if (this.launching === null) {
+      const p = this.d.launch();
+      this.launching = p;
+      p.then(
+        (c) => {
+          // why: a launch that outlived a discard (its caller's deadline passed) is closed, never kept
+          if (this.launching === p) this.context = c;
+          else void c.close().catch(() => undefined);
+        },
+        () => undefined,
+      ).finally(() => {
+        if (this.launching === p) this.launching = null;
+      });
+    }
+    return this.launching;
   }
 
   /** Closes the context (bounded) and forgets it; with `wipe`, removes the profile so the next page starts clean. */
   async discard(wipe: boolean): Promise<void> {
     const c = this.context;
     this.context = null;
+    this.launching = null;
     if (c !== null) await bounded(() => c.close(), this.finallyMs, this.d.timers);
     if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
   }
@@ -154,21 +172,25 @@ export class PageSession {
     let stop: BlockedPage | null = null;
     let wipe = false;
     let merged = false;
+    // why: fix round 1 (prov-int I1): every call before goto races the page deadline (rule 9), so a stalled browser
+    // answers not-ready instead of holding the pacer for good; a failure here discards the context
+    let preGotoFailed = false;
     try {
-      context = await this.currentContext();
+      const c = await deadline.race(this.currentContext());
+      context = c;
       // why: TS2-10: the only cookie the worker ever sets.
-      await context.addCookies([socsCookie(this.d.socs)]);
-      const account = await checkAccountCookies(context, this.d.clock);
+      await deadline.race(c.addCookies([socsCookie(this.d.socs)]));
+      const account = await deadline.race(checkAccountCookies(c, this.d.clock));
       if (account.found) {
         stop = 'signed-in';
         answer = this.blockedPlaceholder('signed-in');
       } else {
-        const p = await context.newPage();
+        const p = await deadline.race(c.newPage());
         page = p;
         deadline.onExpire(() => {
           void p.close().catch(() => undefined);
         });
-        const guard = await installGuard(context, p, this.d.log, this.S);
+        const guard = await deadline.race(installGuard(c, p, this.d.log, this.S));
         const driver = (this.d.driverFor ?? createDriver)(p, guard, this.S);
         stage = 'navigate';
         contacted = true;
@@ -190,6 +212,7 @@ export class PageSession {
         }
       }
     } catch (e) {
+      preGotoFailed = !contacted;
       answer =
         e instanceof DeadlineExceeded || deadline.expired()
           ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started) }
@@ -200,7 +223,7 @@ export class PageSession {
     deadline.clear();
 
     // Rule 5: after goto, on every path, the SOCS read-back by value, then the page closed, each under its own bound.
-    let discard = false;
+    let discard = preGotoFailed;
     if (contacted && context !== null) {
       const c = context;
       const back = await bounded(() => c.cookies(), this.finallyMs, this.d.timers);
@@ -287,9 +310,22 @@ export class PageSession {
       }
     }
     const list = readList(await driver.listFacts(d), req);
-    // why: decision 69: a page in another currency, or one with no option for any cell, is not a page this app reads.
-    if (list.currency !== 'GBP' || list.minMinor === null)
+    // why: decision 69: a page in another currency, or one with no option read for any cell, is not a page this app
+    // reads; one whose options are all for another cell was read (fix round 1, prov I1): a cell issue, never a block
+    if (list.currency !== 'GBP' || (list.minMinor === null && list.optionsOtherCell === 0))
       return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    if (list.minMinor === null)
+      return {
+        answer: this.cells(
+          {
+            status: 'none-for-cell',
+            optionsOtherCell: list.optionsOtherCell,
+            optionsUnparsed: list.optionsUnparsed,
+          },
+          list.pointOfSale,
+        ),
+        stop: null,
+      };
     return {
       answer: this.cells(
         {

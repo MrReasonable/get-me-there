@@ -174,6 +174,32 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(await w.done).toBe(0);
     expect(() => acquireLock(t.dataDir).release()).not.toThrow();
   });
+  // why: fix round 1 (prov-int M7): after a wipe a status poll must not wait on a cold launch past the app's timeout
+  it('a status poll whose relaunch hangs answers 500 within its bound, and the worker keeps serving', async () => {
+    let launches = 0;
+    const t = setup({
+      deps: {
+        launch: async () => {
+          launches++;
+          if (launches > 1) return new Promise(() => undefined);
+          const c = new FakeContext();
+          c.navigations = [
+            { hops: [URL0, 'https://www.google.com/travel/flights/search'], tree: resultsTree() },
+          ];
+          // why: Google rewrites SOCS on the first page, so the session wipes the profile and drops the context
+          c.afterGoto = (jar) => jar.map((x) => (x.name === 'SOCS' ? { ...x, value: 'changed' } : x));
+          return c;
+        },
+      },
+    });
+    const w = await running(t);
+    expect((await post(w)).status).toBe(423);
+    const s = await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } });
+    expect(s.status).toBe(500);
+    expect(launches).toBe(2);
+    t.shutdown();
+    expect(await w.done).toBe(0);
+  });
   it('SIGTERM mid-page answers that page, then exits 0', async () => {
     let open: () => void = () => undefined;
     const gate = new Promise<void>((r) => {

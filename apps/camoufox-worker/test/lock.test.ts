@@ -60,3 +60,30 @@ describe('the data-directory lock (devops-006: one worker per profile)', () => {
     expect(existsSync(join(dir, 'profile'))).toBe(true);
   });
 });
+
+// why: fix round 1 (arch M13): process.kill(0, 0) signals the process group, so 0 is never a live holder
+describe('lock edges', () => {
+  it('a lock file holding 0 or a negative pid is taken over without asking whether it is alive', () => {
+    for (const held of ['0', '-1']) {
+      const dir = tmpDir();
+      writeFileSync(join(dir, 'worker.lock'), held);
+      const asked: number[] = [];
+      const l = acquireLock(dir, {
+        pid: 7,
+        isAlive: (p) => {
+          asked.push(p);
+          return true;
+        },
+      });
+      expect(asked).toEqual([]);
+      expect(lockHeld(dir, () => true)).toBe(true);
+      l.release();
+    }
+  });
+  it('the sweep leaves near-miss names alone', () => {
+    const dir = tmpDir();
+    for (const name of ['probe', 'probes', 'xprobe-1', 'probe-1']) mkdirSync(join(dir, name));
+    expect(sweepProbeProfiles(dir)).toEqual(['probe-1']);
+    for (const name of ['probe', 'probes', 'xprobe-1']) expect(existsSync(join(dir, name)), name).toBe(true);
+  });
+});

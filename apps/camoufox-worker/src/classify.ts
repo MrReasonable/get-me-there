@@ -1,4 +1,5 @@
 import type { BlockedPage } from '@gmt/core';
+import { onAllowlist } from './guard.js';
 import { SELECTORS, type Selectors } from './selectors.js';
 
 /**
@@ -49,12 +50,8 @@ export function classifyPage(f: PageFacts, S: Selectors = SELECTORS): PageKind {
   if (f.accountControl) return { kind: 'blocked', page: 'signed-in' };
   if (onHost(S.hosts.consent) || f.text.consentHeading) return { kind: 'blocked', page: 'consent-unhandled' };
   if (onHost(S.hosts.signIn) || f.text.signInHeading) return { kind: 'blocked', page: 'sign-in' };
-  const allowed = (u: URL | null): boolean =>
-    u !== null &&
-    u.protocol === 'https:' &&
-    u.hostname === S.hosts.results &&
-    (u.pathname === S.resultsPath || u.pathname.startsWith(`${S.resultsPath}/`));
-  if (!all.every(allowed)) return { kind: 'blocked', page: 'off-allowlist' };
+  // why: the guard's one allowlist rule (fix round 1: the port and user checks live there once)
+  if (![f.url, ...f.hops].every((x) => onAllowlist(x, S))) return { kind: 'blocked', page: 'off-allowlist' };
   if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights) return { kind: 'no-flights' };
   const tabs = f.cheapestTabs;
   if (tabs.length === 1 && tabs.every((x) => x.inTablist) && f.dateGridButtons === 1 && f.resultLinks > 0)

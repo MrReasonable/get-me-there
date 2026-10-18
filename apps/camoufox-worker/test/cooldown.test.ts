@@ -115,3 +115,13 @@ describe('CooldownStore (spec §2: cool-down by cause, persisted, fail closed)',
     expect(statSync(join(dir, 'cooldown.json')).mode & 0o777).toBe(0o600);
   });
 });
+
+// why: fix round 1 (TS M5): the lower bound is inclusive
+describe('CooldownStore bounds', () => {
+  it('accepts 24 hours and refuses 23', () => {
+    expect(() => new CooldownStore({ dir: tmpDir(), botHours: 24, clock: fixedClock(T0) })).not.toThrow();
+    expect(() => new CooldownStore({ dir: tmpDir(), botHours: 23, clock: fixedClock(T0) })).toThrow(
+      /at least 24/,
+    );
+  });
+});

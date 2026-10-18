@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadWorkerConfig } from '../src/config.js';
@@ -7,6 +7,7 @@ import { CooldownStore } from '../src/cooldown.js';
 import { createDriver, probePage } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
+import { profileDir } from '../src/paths.js';
 import {
   assertClean,
   parseRecordArgs,
@@ -15,6 +16,7 @@ import {
   record,
   stderrLog,
 } from '../src/record.js';
+import { Refusal } from '../src/refusal.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
@@ -56,6 +58,7 @@ function setup(o: { socs?: boolean; navigations?: FakeContext['navigations']; la
     launch: async (profile) => {
       profiles.push(profile);
       if (o.launchThrows === true) throw new Error('launch failed');
+      mkdirSync(profile, { recursive: true });
       const c = new FakeContext();
       c.navigations = o.navigations ?? [{ hops: [URL0, LANDED], tree: resultsTree() }];
       contexts.push(c);
@@ -377,6 +380,192 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()?.cause).toBe(
       'sign-in',
     );
+  });
+});
+
+// Fix round 1 (sec I2, I3, M4, M6; prov-int I2, I3, I4): the recorder applies the server's stop rules to the shared
+// profile, reads SOCS back after its clicks, classifies every re-poll, and never exempts --no-flights.
+describe('the recorder under the server’s stop rules (fix round 1)', () => {
+  const cooldownOf = (t: ReturnType<typeof setup>) =>
+    new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active();
+  const withContext = (t: ReturnType<typeof setup>, shape: (c: FakeContext) => void): RecordDeps => ({
+    ...t.deps,
+    launch: async (p) => {
+      const c = await t.deps.launch(p);
+      if (c instanceof FakeContext) shape(c);
+      return c;
+    },
+  });
+  it('a standing signed-in refusal refuses before any launch, naming clear-signed-in', async () => {
+    const t = setup();
+    new Refusal({ dir: t.dataDir, clock: t.timers.clock }).set('a signed-in account control');
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    expect(t.profiles).toEqual([]);
+    expect(t.err.join()).toMatch(/clear-signed-in/);
+  });
+  it('an account cookie sets the persisted signed-in refusal', async () => {
+    const t = setup();
+    const r = await record(
+      t.ctx(Q),
+      cfg,
+      withContext(t, (c) => c.jar.push({ name: 'SID', value: 'x', domain: '.google.com', path: '/' })),
+    );
+    expect(r).toBe(EX_UNAVAILABLE);
+    expect(new Refusal({ dir: t.dataDir, clock: t.timers.clock }).active()).not.toBeNull();
+    expect(existsSync(profileDir(t.dataDir))).toBe(true);
+  });
+  it('a signed-in page sets the persisted signed-in refusal', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [URL0, LANDED],
+          tree: resultsTree({ extra: [n('button', 'Google Account: Example Person')] }),
+        },
+      ],
+    });
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('signed-in');
+    expect(new Refusal({ dir: t.dataDir, clock: t.timers.clock }).active()).not.toBeNull();
+  });
+  it('a consent landing wipes the shared profile', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [URL0, 'https://consent.google.com/ml?continue=x'],
+          tree: n('document', '', [n('heading', 'Before you continue to Google')]),
+        },
+      ],
+    });
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    expect(existsSync(profileDir(t.dataDir))).toBe(false);
+    expect(t.contexts[0]?.closed).toBeGreaterThanOrEqual(1);
+  });
+  it('a SOCS rewritten by the page wipes the shared profile', async () => {
+    const t = setup();
+    const deps = withContext(t, (c) => {
+      c.afterGoto = (jar) => jar.map((x) => (x.name === 'SOCS' ? { ...x, value: 'accepted' } : x));
+    });
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(existsSync(profileDir(t.dataDir))).toBe(false);
+  });
+  it('--cheapest: a SOCS the click changes is read back after the click: consent-unhandled, wiped, nothing recorded as cheapest', async () => {
+    const t = setup();
+    const deps = withContext(t, (c) => {
+      c.onNewPage = (p) => {
+        p.onClick = () => {
+          c.jar = c.jar.map((x) => (x.name === 'SOCS' ? { ...x, value: 'accepted-by-click' } : x));
+        };
+      };
+    });
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('consent-unhandled');
+    expect(existsSync(profileDir(t.dataDir))).toBe(false);
+    const facts = written(t.root).filter((f) => f.endsWith('.facts.json'));
+    for (const f of facts)
+      expect(JSON.parse(readFileSync(join(t.root, f), 'utf8')).failure, f).toBe('consent-unhandled');
+  });
+  it('--cheapest: a captcha after the click is that stop: 48 h, nothing written', async () => {
+    const t = setup();
+    const deps = withContext(t, (c) => {
+      c.onNewPage = (p) => {
+        p.onClick = () =>
+          p.setTrees([n('document', '', [text('Our systems have detected unusual traffic')])]);
+      };
+    });
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('unusual-traffic');
+    expect(written(t.root)).toEqual([]);
+  });
+  it('one deadline covers the load and the clicks: a click past it is the deadline refusal, not a crash', async () => {
+    const fetching = n('document', '', [text('Fetching results')]);
+    const t = setup({ navigations: [{ hops: [URL0, LANDED], tree: resultsTree() }] });
+    const deps = withContext(t, (c) => {
+      c.onNewPage = (p) => {
+        const g = p.goto.bind(p);
+        p.goto = async (u, o) => {
+          const r = await g(u, o);
+          // why: 44 polls of 2 s (88 s) to settle, then the click needs more polls than the 90 s deadline leaves
+          p.setTrees([...Array(44).fill(fetching), resultsTree()]);
+          return r;
+        };
+        p.onClick = () => p.setTrees([...Array(5).fill(fetching), resultsTree()]);
+      };
+    });
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/did not settle within CAMOUFOX_PAGE_TIMEOUT_SECONDS/);
+    expect(written(t.root)).toEqual([]);
+  });
+  it('an off-allowlist hop that arrives after the last settling poll records nothing and cools down', async () => {
+    const t = setup();
+    const deps = withContext(t, (c) => {
+      c.onNewPage = (p) => {
+        const byRole = p.getByRole.bind(p);
+        let fired = false;
+        p.getByRole = (role, o) => {
+          if (role === 'textbox' && !fired) {
+            fired = true;
+            p.emitFrameNavigated({ url: () => 'https://www.example.test/late', parentFrame: () => null });
+          }
+          return byRole(role, o);
+        };
+      };
+    });
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(written(t.root)).toEqual([]);
+    expect(cooldownOf(t)?.cause).toBe('off-allowlist');
+  });
+  it('--no-flights: an off-allowlist landing is refused like any other (no exemption)', async () => {
+    const t = setup({ navigations: [{ hops: [URL0, 'https://www.example.test/x'], tree: resultsTree() }] });
+    expect(await record(t.ctx([...Q, '--no-flights']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    expect(written(t.root)).toEqual([]);
+    expect(cooldownOf(t)?.cause).toBe('off-allowlist');
+  });
+  it('--no-flights: a page that never settles writes unrecorded.meta.json from what appeared and exits 0', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [URL0, LANDED],
+          tree: n('document', '', [n('heading', 'Sorry, nothing matched these dates')]),
+        },
+      ],
+    });
+    expect(await record(t.ctx([...Q, '--no-flights']), cfg, t.deps)).toBe(0);
+    expect(written(t.root)).toEqual(['no-flights/unrecorded.meta.json']);
+    const u = JSON.parse(readFileSync(join(t.root, 'no-flights/unrecorded.meta.json'), 'utf8'));
+    // why: what appeared is the page facts and its headings, never printed text (rule 6)
+    expect(u.appeared.headings).toEqual(['Sorry, nothing matched these dates']);
+    expect(t.out.join()).toMatch(/NO_FLIGHTS_VERIFIED stays false/);
+  });
+  it('a read-back that never answers writes nothing and refuses', async () => {
+    const t = setup();
+    // why: cookies() call 0 is the account check, call 1 the read-back after the page
+    const deps = withContext(t, (c) => (c.hangCookiesOn = 1));
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/read-back overran/);
+    expect(written(t.root)).toEqual([]);
+  });
+  it('a captcha page whose SOCS also changed keeps captcha, and the profile is wiped', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [URL0, LANDED],
+          tree: resultsTree(),
+          frames: ['https://www.google.com/recaptcha/api2/anchor?k=x'],
+        },
+      ],
+    });
+    const deps = withContext(t, (c) => {
+      c.afterGoto = (jar) => jar.map((x) => (x.name === 'SOCS' ? { ...x, value: 'accepted' } : x));
+    });
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('captcha');
+    expect(existsSync(profileDir(t.dataDir))).toBe(false);
+  });
+  it('recordings are written 0600 in 0700 directories', async () => {
+    const t = setup();
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
+    for (const f of written(t.root)) expect(statSync(join(t.root, f)).mode & 0o777, f).toBe(0o600);
+    expect(statSync(join(t.root, 'results', '2026-10-18')).mode & 0o777).toBe(0o700);
   });
 });
 

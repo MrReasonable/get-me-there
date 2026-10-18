@@ -48,6 +48,13 @@ export const MONTHS = [
 const MONTH_NAMES: readonly string[] = MONTHS;
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const DATE = '[A-Z][a-z]+, [A-Z][a-z]+ [0-9]{1,2}';
+const DURATION = '[0-9]+ hrs?(?: [0-9]+ min)?|[0-9]+ min';
+/**
+ * The tail after the duration (fix round 1, prov-int M3): only the feasibility load's stopover sentences, repeated.
+ * The airport and city carry no full stop, so an appended sentence can never hide inside one; a stopover whose name
+ * holds a dot leaves the option unparsed (counted, never misread).
+ */
+const STOPOVER = `Stopover \\([0-9]+ of [0-9]+\\) is a (?:${DURATION})(?: overnight)? stopover at [^.]+ in [^.]+\\.`;
 
 function grammarFor(interstitials: readonly Interstitial[]): RegExp {
   // why: the group is always present (empty when no interstitial is listed), so it is defined whenever the name matches.
@@ -60,7 +67,7 @@ function grammarFor(interstitials: readonly Interstitial[]): RegExp {
       '(?<stops>Nonstop|Non-stop|[0-9]+ stops?) flight with (?<carriers>[^.]+(?:\\.[^ .][^.]*)*)\\. ' +
       'Leaves (?<from>.+?) at [0-9]{1,2}:[0-9]{2} on [A-Z][a-z]+, (?<month>[A-Z][a-z]+) (?<day>[0-9]{1,2}) ' +
       `and arrives at (?<to>.+?) at [0-9]{1,2}:[0-9]{2} on ${DATE}\\. ` +
-      'Total duration (?<duration>[0-9]+ hrs?(?: [0-9]+ min)?|[0-9]+ min)\\.(?<tail>.*?) ?Select flight$',
+      `Total duration (?<duration>${DURATION})\\.(?<tail>(?: ${STOPOVER})*) Select flight$`,
   );
 }
 const cache = new WeakMap<readonly Interstitial[], RegExp>();

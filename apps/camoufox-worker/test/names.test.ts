@@ -48,6 +48,28 @@ describe('parseOptionName (dated grammar)', () => {
     expect(parseOptionName(ONE_STOP.replace('1 stop flight', '2 stops flight'))?.stops).toBe(2);
     expect(parseOptionName(nonstop.replace('Nonstop', 'Non-stop'))?.stops).toBe(0);
   });
+  // why: fix round 1 (prov-int M3): after the duration only the stopover sentences may follow, then the end
+  it('reads two stopover sentences in the tail', () => {
+    const two = ONE_STOP.replace('1 stop flight', '2 stops flight').replace(
+      'Stopover (1 of 1) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon.',
+      'Stopover (1 of 2) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon. Stopover (2 of 2) is a 55 min stopover at Example Airport in Example City.',
+    );
+    expect(parseOptionName(two)).toMatchObject({ stops: 2, durationMinutes: 760 });
+  });
+  it.each([
+    [
+      'an unknown appended sentence',
+      ONE_STOP.replace(' Select flight', ' This flight has free wifi. Select flight'),
+    ],
+    [
+      'an unknown sentence before the stopover',
+      ONE_STOP.replace('min. Stopover', 'min. Lower emissions. Stopover'),
+    ],
+    ['text after Select flight', `${ONE_STOP} now`],
+    ['a stopover sentence of another form', ONE_STOP.replace('Stopover (1 of 1) is a', 'Stopover 1 is a')],
+  ])('refuses %s', (_n, name) => {
+    expect(parseOptionName(name)).toBeNull();
+  });
   it.each([
     ['a decimal price', ONE_STOP.replace('From 478', 'From 478.50')],
     ['another currency phrase', ONE_STOP.replace('British pounds', 'US dollars')],

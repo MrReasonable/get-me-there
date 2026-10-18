@@ -1,5 +1,5 @@
 {
-  "$schema": "../../packages/core/node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
     "command": "pnpm exec vitest run --coverage.enabled=false"

@@ -3,6 +3,7 @@ import {
   BACKGROUND_PREFS,
   buildLaunchOptions,
   installedCamoufoxJsVersion,
+  launchContext,
   launchOptionsForMeta,
   prepareLaunch,
 } from '../src/launch.js';
@@ -92,7 +93,31 @@ describe('prepareLaunch (brief Task 14.5 start checks, in order)', () => {
       buildLaunchOptions({ ffMajor: 152, home: '/Users/op', path: '/usr/bin', tmp: '/tmp' }),
     );
   });
+  // why: fix round 1 (prov-int M2): the camoufox-js pin is checked, through a seam, in both places
+  it('refuses another camoufox-js version (0.11.6) naming the pin', () => {
+    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
+    expect(() =>
+      prepareLaunch({
+        ...base,
+        platform: 'darwin',
+        installDir: f.installDir,
+        readCamoufoxJs: () => '0.11.6',
+      }),
+    ).toThrow('camoufox-js is 0.11.6; this worker is verified against 0.11.5 only');
+  });
   it('refuses off macOS before touching the install directory', () => {
     expect(() => prepareLaunch({ ...base, platform: 'linux', installDir: '/nowhere' })).toThrow(/macOS only/);
+  });
+});
+
+describe('launchContext (the pin again, at the launch itself)', () => {
+  it('refuses another camoufox-js version before importing it', async () => {
+    await expect(
+      launchContext(
+        buildLaunchOptions({ ffMajor: 152, home: '/h', path: '/p', tmp: '/t' }),
+        '/nowhere',
+        () => '0.11.6',
+      ),
+    ).rejects.toThrow('camoufox-js is 0.11.6; this worker is verified against 0.11.5 only');
   });
 });

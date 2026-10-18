@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+// why: fix round 1 (arch M11): the pin's one copy is core's, which the app's smoke reads too
+import { CAMOUFOX_JS_VERSION } from '@gmt/core';
 import type { ContextLike } from './driver.js';
 import { ensureInstallLayout, type InstallFacts } from './install.js';
 import { assertMacOS } from './platform.js';
@@ -11,7 +13,11 @@ import { assertMacOS } from './platform.js';
  * humanised input, service workers blocked, signal handling left to the worker, a minimal browser environment (never the
  * worker's own key) and the six preferences that switch off the browser's own background services.
  */
-export const CAMOUFOX_JS_VERSION = '0.11.5';
+/** Refuses any camoufox-js but the pin, naming both. */
+function assertPinned(version: string): void {
+  if (version !== CAMOUFOX_JS_VERSION)
+    throw new Error(`camoufox-js is ${version}; this worker is verified against ${CAMOUFOX_JS_VERSION} only`);
+}
 
 export const BACKGROUND_PREFS = {
   'toolkit.telemetry.enabled': false,
@@ -67,10 +73,12 @@ export function installedCamoufoxJsVersion(): string {
  * Launches Camoufox into the persistent profile `userDataDir` and returns its context. camoufox-js is imported here,
  * lazily, so no other module (and no unit test) loads it; its module reads INSTALL_DIR at import.
  */
-export async function launchContext(options: LaunchOptions, userDataDir: string): Promise<ContextLike> {
-  const version = installedCamoufoxJsVersion();
-  if (version !== CAMOUFOX_JS_VERSION)
-    throw new Error(`camoufox-js is ${version}; this worker is verified against ${CAMOUFOX_JS_VERSION} only`);
+export async function launchContext(
+  options: LaunchOptions,
+  userDataDir: string,
+  readCamoufoxJs: () => string = installedCamoufoxJsVersion,
+): Promise<ContextLike> {
+  assertPinned(readCamoufoxJs());
   const { Camoufox } = await import('camoufox-js');
   return Camoufox({
     ...options,
@@ -93,6 +101,8 @@ export function prepareLaunch(o: {
   home: string;
   path: string;
   tmp: string;
+  /** Test seam (fix round 1, prov-int M2): reads the installed camoufox-js version. */
+  readCamoufoxJs?: () => string;
 }): { options: LaunchOptions; install: InstallFacts; camoufoxJs: string } {
   assertMacOS(o.platform);
   const install = ensureInstallLayout({
@@ -100,11 +110,8 @@ export function prepareLaunch(o: {
     pinnedBuild: o.pinnedBuild,
     installDirOverride: o.installDirOverride,
   });
-  const camoufoxJs = installedCamoufoxJsVersion();
-  if (camoufoxJs !== CAMOUFOX_JS_VERSION)
-    throw new Error(
-      `camoufox-js is ${camoufoxJs}; this worker is verified against ${CAMOUFOX_JS_VERSION} only`,
-    );
+  const camoufoxJs = (o.readCamoufoxJs ?? installedCamoufoxJsVersion)();
+  assertPinned(camoufoxJs);
   return {
     options: buildLaunchOptions({ ffMajor: install.ffMajor, home: o.home, path: o.path, tmp: o.tmp }),
     install,

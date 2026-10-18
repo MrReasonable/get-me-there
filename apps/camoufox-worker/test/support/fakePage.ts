@@ -222,6 +222,7 @@ export class FakePage implements PageLike {
       const req: RequestLike = {
         url: () => hop,
         isNavigationRequest: () => true,
+        method: () => 'GET',
         redirectedFrom: () => from,
         frame: () => frame,
       };
@@ -236,6 +237,7 @@ export class FakePage implements PageLike {
       this.context?.emitRequest({
         url: () => f,
         isNavigationRequest: () => true,
+        method: () => 'GET',
         redirectedFrom: () => null,
         frame: () => sub,
       });

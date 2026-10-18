@@ -49,6 +49,8 @@ function setup(
     hops?: string[];
     selectors?: Selectors;
     shape?: (c: FakeContext) => void;
+    /** Replaces the fake launch (fix round 1: a launch that never resolves). */
+    launch?: () => Promise<FakeContext>;
   } = {},
 ) {
   const dataDir = tmpDir();
@@ -61,9 +63,12 @@ function setup(
   const cooldown = new CooldownStore({ dir: dataDir, botHours: 48, clock });
   const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
   const refusal = new Refusal({ dir: dataDir, clock });
+  const launches = { count: 0 };
   const make = (): PageSession =>
     new PageSession({
       launch: async () => {
+        launches.count++;
+        if (o.launch !== undefined) return o.launch();
         const c = new FakeContext();
         c.navigations = [{ hops: o.hops ?? [URL0, LANDED], tree: o.tree ?? resultsTree() }];
         if (o.trees !== undefined)
@@ -93,7 +98,19 @@ function setup(
       log: memoryLog(),
       versions,
     });
-  return { dataDir, profileDir, timers, clock, contexts, cooldown, pacer, refusal, session: make(), make };
+  return {
+    dataDir,
+    profileDir,
+    timers,
+    clock,
+    contexts,
+    cooldown,
+    pacer,
+    refusal,
+    launches,
+    session: make(),
+    make,
+  };
 }
 type Setup = ReturnType<typeof setup>;
 /** The pacer was released: a claim after the spacing succeeds. */
@@ -281,7 +298,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     const t = setup({ tree: resultsTree({ form: [] }) });
     expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
   });
-  it('another currency, or no option for this cell, → unrecognised', async () => {
+  it('another currency → unrecognised; only another cell’s option → none-for-cell', async () => {
     const a = setup({
       tree: resultsTree({
         extra: [],
@@ -290,8 +307,12 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       }),
     });
     expect((await a.session.page(REQ)).answer.kind).toBe('cells');
+    // why: fix round 1 (prov I1): only another cell's option is a cell issue (none-for-cell), never a block
     const b = setup({ tree: resultsTree({ top: [option(300, { on: 'Friday, November 6' })], other: [] }) });
-    expect((await b.session.page(REQ)).answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+    expect((await b.session.page(REQ)).answer).toMatchObject({
+      kind: 'cells',
+      cell: { status: 'none-for-cell' },
+    });
     const tree = resultsTree();
     tree.children = (tree.children ?? []).map((c) =>
       c.name === 'Currency GBP' ? n('button', 'Currency USD') : c,
@@ -384,7 +405,8 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     const before = t.timers.now();
     const r = await t.session.page(REQ);
     expect(r.answer).toEqual({ kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran' });
-    expect(t.timers.now() - before).toBeGreaterThanOrEqual(5000);
+    // why: fix round 1 (TS M1): the bound is exactly 5 s of fake time, not merely at least that
+    expect(t.timers.now() - before).toBe(5000);
     expect(ctx0(t).closed).toBe(1);
     t.clock.advance(30_000);
     await t.session.page(REQ);
@@ -397,6 +419,11 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       stage: 'read',
       detail: 'page close overran',
     });
+    // why: fix round 1 (TS I4): the context really is discarded, and the next page relaunches
+    expect(ctx0(t).closed).toBe(1);
+    t.clock.advance(30_000);
+    await t.session.page(REQ);
+    expect(t.contexts).toHaveLength(2);
   });
   it('close() throws after a block → the block answer stands, pacer released', async () => {
     const t = setup({
@@ -474,5 +501,116 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(t.session.busy()).toBe('2026-10-18T05:00:00.000Z');
     await p;
     expect(t.session.busy()).toBeNull();
+  });
+
+  // why: fix round 1 (prov-int I1): every call before the page opens races the page deadline; a hang never wedges the
+  // worker, and the context is discarded so the next page relaunches
+  it.each([
+    ['addCookies', (c: FakeContext) => (c.addCookiesHangs = true)],
+    ['the account-cookie read', (c: FakeContext) => (c.hangCookiesOn = 0)],
+    ['newPage', (c: FakeContext) => (c.newPageHangs = true)],
+    ['the guard’s route registration', (c: FakeContext) => (c.routeHangs = true)],
+  ])(
+    'a never-resolving %s → not-ready at the deadline, Google not contacted, pacer released, relaunched next',
+    async (_n, hang) => {
+      let first = true;
+      const t = setup({
+        shape: (c) => {
+          if (first) hang(c);
+          first = false;
+        },
+      });
+      const pending = t.session.page(REQ);
+      for (let i = 0; i < 5; i++) await flush();
+      t.timers.runOut();
+      const r = await pending;
+      expect(r).toEqual({ answer: { kind: 'not-ready', elapsedMs: 90_000 }, googleContacted: false });
+      expect(ctx0(t).closed).toBe(1);
+      expect(released(t)).toBe(true);
+      t.clock.advance(30_000);
+      expect((await t.session.page(REQ)).answer.kind).toBe('cells');
+      expect(t.contexts).toHaveLength(2);
+    },
+  );
+  it('a never-resolving launch → not-ready at the deadline, pacer released', async () => {
+    const t = setup({ launch: () => new Promise(() => undefined) });
+    const pending = t.session.page(REQ);
+    for (let i = 0; i < 5; i++) await flush();
+    t.timers.runOut();
+    expect((await pending).answer.kind).toBe('not-ready');
+    expect(released(t)).toBe(true);
+  });
+  it('an error before goto discards the context (the next page relaunches)', async () => {
+    let first = true;
+    const t = setup({
+      shape: (c) => {
+        if (first) c.newPageThrows = true;
+        first = false;
+      },
+    });
+    expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'browser-error', stage: 'launch' });
+    t.clock.advance(30_000);
+    expect((await t.session.page(REQ)).answer.kind).toBe('cells');
+    expect(t.contexts).toHaveLength(2);
+  });
+  // why: fix round 1 (prov-int M7): one launch however many callers arrive together
+  it('currentContext is memoised on the launch promise: two concurrent callers launch once', async () => {
+    const t = setup();
+    const [a, b] = await Promise.all([t.session.currentContext(), t.session.currentContext()]);
+    expect(a).toBe(b);
+    expect(t.launches.count).toBe(1);
+  });
+  // why: fix round 1 (TS I3): a block whose read-back then hangs keeps its cool-down
+  it('a captcha page whose SOCS read-back hangs → captcha, 48 h, context discarded', async () => {
+    const t = setup({
+      shape: (c) => {
+        c.hangCookiesOn = 1;
+        c.navigations = [
+          {
+            hops: [URL0, LANDED],
+            tree: resultsTree(),
+            frames: ['https://www.google.com/recaptcha/api2/anchor?k=x'],
+          },
+        ];
+      },
+    });
+    const r = await t.session.page(REQ);
+    expect(r.answer).toEqual({ kind: 'blocked', page: 'captcha', cooldownUntil: '2026-10-20T05:00:05.000Z' });
+    expect(t.cooldown.active()?.cause).toBe('captcha');
+    expect(ctx0(t).closed).toBe(1);
+  });
+  // why: fix round 1 (TS M2): the deadline itself closes the page, before the finally's close
+  it('at expiry the page is closed by the deadline (before the finally runs)', async () => {
+    const t = setup({ tree: n('document', '', [text('Fetching results')]) });
+    let closedAtExpiry = -1;
+    const pending = t.session.page(REQ);
+    for (let i = 0; i < 5; i++) await flush();
+    const p = page0(t);
+    const fire = t.timers.runOut.bind(t.timers);
+    fire();
+    closedAtExpiry = p.calls.closed;
+    await pending;
+    expect(closedAtExpiry).toBeGreaterThanOrEqual(1);
+  });
+  // why: fix round 1 (TS M3): clear-signed-in owns the wipe of a signed-in profile; the page never wipes it
+  it('a signed-in stop leaves the profile directory in place', async () => {
+    const t = setup({ tree: resultsTree({ extra: [n('button', 'Google Account: Example Person')] }) });
+    expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'blocked', page: 'signed-in' });
+    expect(existsSync(t.profileDir)).toBe(true);
+  });
+  // why: fix round 1 (prov I1): every option for another cell is a cell issue, never a block
+  it('every option for another cell → cells none-for-cell with the counts, no cool-down', async () => {
+    const t = setup({
+      tree: resultsTree({
+        top: [option(300, { on: 'Friday, November 6' })],
+        other: [option(310, { on: 'Friday, November 6' })],
+      }),
+    });
+    expect((await t.session.page(REQ)).answer).toMatchObject({
+      kind: 'cells',
+      pointOfSale: 'GB',
+      cell: { status: 'none-for-cell', optionsOtherCell: 2, optionsUnparsed: 0 },
+    });
+    expect(t.cooldown.active()).toBeNull();
   });
 });

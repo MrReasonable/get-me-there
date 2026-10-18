@@ -25,3 +25,20 @@ describe('pageUrl (spec §2: the feasibility form, never tfs)', () => {
     expect(probeUrl('GB')).toBe('https://www.google.com/travel/flights?curr=GBP&hl=en-GB&gl=GB');
   });
 });
+
+// why: fix round 1 (arch M13): gl is the request's own, whatever it is
+describe('pageUrl gl', () => {
+  it('passes another point of sale through unchanged', () => {
+    const u = new URL(
+      pageUrl({
+        origin: asIata('LHR'),
+        destination: asIata('JFK'),
+        departureDate: asIsoDate('2026-11-05'),
+        returnDate: asIsoDate('2026-11-15'),
+        gl: 'US',
+      }),
+    );
+    expect(u.searchParams.get('gl')).toBe('US');
+    expect(probeUrl('US')).toBe('https://www.google.com/travel/flights?curr=GBP&hl=en-GB&gl=US');
+  });
+});

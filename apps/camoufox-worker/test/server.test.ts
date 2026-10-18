@@ -204,11 +204,14 @@ describe('the worker server (brief §6 table, one it per row)', () => {
     expect((await t.post(BODY)).status).toBe(502);
     expect(t.fatalCount()).toBe(1);
   });
-  it('a page handler that throws answers 500', async () => {
+  it('a page handler that throws answers 500, saying Google may have been contacted (the conservative reading)', async () => {
     const t = await start(async () => {
       throw new Error('boom');
     });
-    expect((await t.post(BODY)).status).toBe(500);
+    const r = await t.post(BODY);
+    expect(r.status).toBe(500);
+    // why: fix round 1 (arch M8): the server cannot know whether goto ran, so the page caps count it
+    expect(r.headers.get('x-gmt-google-contacted')).toBe('1');
   });
   it('logs one line per request with route, status and kind, and never the key', async () => {
     const t = await start({ answer: cells, googleContacted: true });

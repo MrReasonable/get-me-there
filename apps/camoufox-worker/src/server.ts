@@ -79,6 +79,8 @@ export function createWorkerServer(d: ServerDeps): Server {
     const route = `${req.method ?? '?'} ${(req.url ?? '').split('?')[0]}`;
     const done = (status: number, kind: string): void =>
       d.log.info({ route, status, kind, durationMs: d.now() - started }, 'worker request');
+    // why: fix round 1 (arch M8): once the page handler ran, a 500 cannot say Google was not contacted
+    let pageCalled = false;
     void (async () => {
       if (!keyOk(req.headers[WORKER_KEY_HEADER], d.key)) {
         send(res, 401, undefined, false);
@@ -105,6 +107,7 @@ export function createWorkerServer(d: ServerDeps): Server {
         send(res, 400, { kind: 'bad-request' }, false);
         return done(400, 'bad-request');
       }
+      pageCalled = true;
       const result = await d.page(r.data);
       const status = ANSWER_STATUS[result.answer.kind];
       const extra: Record<string, string> =
@@ -114,7 +117,7 @@ export function createWorkerServer(d: ServerDeps): Server {
       if (result.fatal === true) d.onFatal();
     })().catch((e: unknown) => {
       d.log.error({ route, error: e instanceof Error ? e.name : 'unknown' }, 'worker request failed');
-      if (!res.headersSent) send(res, 500, undefined, false);
+      if (!res.headersSent) send(res, 500, undefined, pageCalled);
       else res.end();
     });
   });

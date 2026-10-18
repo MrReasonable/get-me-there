@@ -71,6 +71,9 @@ export function parseCapture(raw: unknown, clock: Clock): SocsCapture {
   if (Date.parse(at.data) > Date.parse(now)) throw new ConsentNotCaptured('dated in the future');
   if (at.data.slice(0, 10) < monthsBefore(now, SOCS_MAX_AGE_MONTHS))
     throw new ConsentNotCaptured('older than 13 months, the cookie’s stated lifetime');
+  // why: fix round 1 (prov-int M11): addCookies would drop an expired cookie and every page would stop as consent
+  if (expires * 1000 <= Date.parse(clock.now()))
+    throw new ConsentNotCaptured('the cookie has expired; run capture-socs again');
   return { value, domain: SOCS_DOMAIN, path: '/', expires, secure: true, sameSite, capturedAt: at.data };
 }
 
@@ -137,16 +140,25 @@ export function socsCookie(c: SocsCapture): CookieInput {
 
 export type ReadBack = 'same' | 'changed' | 'missing';
 
+/** Every cookie domain the browser sends to www.google.com: the captured one and the host-only forms (sec M1). */
+const SENT_TO_RESULTS_HOST: readonly string[] = [
+  SOCS_DOMAIN,
+  'google.com',
+  'www.google.com',
+  '.www.google.com',
+];
+
 /**
- * Ruling 9: `same` only when the SOCS cookies on `.google.com` all hold exactly the captured value; `changed` when one
- * holds another; `missing` when there is none there (a SOCS on another domain does not count). Both `changed` and
- * `missing` stop the page, whatever SOCS_STABLE says.
+ * Ruling 9: `missing` when no SOCS is on `.google.com`; `changed` when any SOCS the browser would send to
+ * www.google.com (the `.google.com` one or a host-only one, fix round 1 sec M1) holds another value; else `same`.
+ * Both `changed` and `missing` stop the page, whatever SOCS_STABLE says.
  */
 export function readBack(
   cookies: ReadonlyArray<Pick<CookieLike, 'name' | 'value' | 'domain'>>,
   capture: SocsCapture,
 ): ReadBack {
-  const ours = cookies.filter((c) => c.name === SOCS_NAME && c.domain === SOCS_DOMAIN);
-  if (ours.length === 0) return 'missing';
-  return ours.every((c) => c.value === capture.value) ? 'same' : 'changed';
+  const socs = cookies.filter((c) => c.name === SOCS_NAME);
+  if (!socs.some((c) => c.domain === SOCS_DOMAIN)) return 'missing';
+  const sent = socs.filter((c) => SENT_TO_RESULTS_HOST.includes(c.domain));
+  return sent.every((c) => c.value === capture.value) ? 'same' : 'changed';
 }

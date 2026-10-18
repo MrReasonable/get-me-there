@@ -113,6 +113,31 @@ describe('createDriver.resultNames (PIE-R2-10)', () => {
   });
 });
 
+// why: fix round 1 (prov-int M4): a real result link's text is the visible card, not the option sentence
+describe('createDriver.resultNames reads aria-label before the text', () => {
+  it('a link whose label and text differ yields the label', async () => {
+    const { driver, d } = setup([
+      resultsTree({
+        top: [
+          n('listitem', '', [n('link', 'the label', [], { ariaLabel: 'the label', text: 'the card text' })]),
+        ],
+        other: [],
+      }),
+    ]);
+    expect(await driver.resultNames(d)).toEqual(['the label']);
+  });
+  it('a name of exactly the length bound is kept; one more character is null', async () => {
+    const at = 'x'.repeat(SELECTORS.maxNameLength);
+    const { driver, d } = setup([
+      resultsTree({
+        top: [n('listitem', '', [n('link', at)]), n('listitem', '', [n('link', `${at}x`)])],
+        other: [],
+      }),
+    ]);
+    expect(await driver.resultNames(d)).toEqual([at, null]);
+  });
+});
+
 describe('createDriver list, form and click', () => {
   it('listFacts reads the tab, the stated count, currency and location', async () => {
     const { driver, d } = setup();

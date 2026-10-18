@@ -18,9 +18,10 @@ const main: FrameLike = { url: () => 'x', parentFrame: () => null };
 const sub: FrameLike = { url: () => 'y', parentFrame: () => main };
 const req = (
   url: string,
-  o: { nav?: boolean; from?: RequestLike | null; frame?: FrameLike; noFrame?: boolean } = {},
+  o: { nav?: boolean; from?: RequestLike | null; frame?: FrameLike; noFrame?: boolean; method?: string } = {},
 ): RequestLike => ({
   url: () => url,
+  method: () => o.method ?? 'GET',
   isNavigationRequest: () => o.nav ?? true,
   redirectedFrom: () => o.from ?? null,
   frame: () => {
@@ -50,6 +51,13 @@ describe('decideRoute (brief §6 allowlist)', () => {
     ['https://accounts.google.com/ServiceLogin', 'sign-in'],
     ['https://www.example.test/', 'off-allowlist'],
     ['not a url', 'off-allowlist'],
+    // why: fix round 1 (TS I1, sec M2): another host with the results path, and a port or user on the right host
+    ['https://www.example.test/travel/flights', 'off-allowlist'],
+    ['https://google.com/travel/flights', 'off-allowlist'],
+    ['https://www.google.com.evil.test/travel/flights', 'off-allowlist'],
+    ['https://www.google.com:8443/travel/flights', 'off-allowlist'],
+    ['https://user@www.google.com/travel/flights', 'off-allowlist'],
+    ['https://u:p@www.google.com/travel/flights', 'off-allowlist'],
   ])('%s is aborted as %s', (u, kind) => {
     expect(decideRoute(u, true)).toEqual({ action: 'abort', kind });
   });
@@ -65,6 +73,23 @@ describe('decideRoute (brief §6 allowlist)', () => {
 });
 
 describe('decideProbeRoute (the recorder’s consent probe only)', () => {
+  // why: fix round 1 (sec M3): the probe reads the consent page; it can never reach the endpoint that records a choice
+  it('refuses a POST to consent.google.com and its /save path by any method', () => {
+    expect(decideProbeRoute('https://consent.google.com/ml', true, 'POST')).toEqual({
+      action: 'abort',
+      kind: 'consent-unhandled',
+    });
+    for (const u of [
+      'https://consent.google.com/save',
+      'https://consent.google.com/save?x=1',
+      'https://consent.google.com/save/x',
+    ])
+      expect(decideProbeRoute(u, true, 'GET'), u).toEqual({ action: 'abort', kind: 'consent-unhandled' });
+    expect(decideProbeRoute('https://consent.google.com:8443/ml', true, 'GET')).toEqual({
+      action: 'abort',
+      kind: 'consent-unhandled',
+    });
+  });
   it('also admits https://consent.google.com/ documents and nothing else', () => {
     expect(decideProbeRoute('https://consent.google.com/ml?continue=x', true)).toEqual({
       action: 'continue',
@@ -152,6 +177,29 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     expect(state.refused).toBe('consent-unhandled');
     const next = await installGuard(ctx, new FakePage(ctx), log);
     expect(next).toEqual({ hops: [], frameUrls: [], refused: null });
+  });
+  // why: fix round 1 (prov-int M6): a refused sub-frame never names the page; only a main-frame refusal does
+  it('a refused sub-frame navigation is aborted but leaves refused null; a main-frame one sets it', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('https://www.example.test/frame', { frame: sub }))).toBe('aborted');
+    expect(state.refused).toBeNull();
+    expect(await ctx.routeRequest(req('https://consent.google.com/ml'))).toBe('aborted');
+    expect(state.refused).toBe('consent-unhandled');
+  });
+  it('a frameless navigation refusal counts as the main frame’s (fail closed)', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    await ctx.routeRequest(req('https://www.example.test/', { noFrame: true }));
+    expect(state.refused).toBe('off-allowlist');
+  });
+  it('the probe guard refuses a POST navigation to the consent host', async () => {
+    const ctx = new FakeContext();
+    const state = await installProbeGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('https://consent.google.com/save', { method: 'POST' }))).toBe(
+      'aborted',
+    );
+    expect(state.refused).toBe('consent-unhandled');
   });
   it('the probe guard admits the consent page', async () => {
     const ctx = new FakeContext();

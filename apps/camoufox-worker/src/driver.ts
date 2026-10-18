@@ -38,6 +38,7 @@ export interface PageLike {
 }
 export interface RequestLike {
   url(): string;
+  method(): string;
   isNavigationRequest(): boolean;
   redirectedFrom(): RequestLike | null;
   frame(): FrameLike;

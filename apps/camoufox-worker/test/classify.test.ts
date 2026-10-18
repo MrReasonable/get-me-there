@@ -121,4 +121,52 @@ describe('classifyPage (spec §2, brief §9; blocked kinds first, total)', () =>
       }),
     ).toEqual({ kind: 'blocked', page: 'captcha' });
   });
+  // why: fix round 1 (TS I1, sec M2): the host, the port and the user are each part of the rule
+  it.each([
+    [
+      'a landing URL on another host with the results path',
+      facts({ url: 'https://www.example.test/travel/flights/search' }),
+    ],
+    [
+      'a hop on another host with the results path',
+      facts({ hops: ['https://www.example.test/travel/flights'] }),
+    ],
+    ['google.com without www', facts({ url: 'https://google.com/travel/flights' })],
+    ['a look-alike host', facts({ url: 'https://www.google.com.evil.test/travel/flights' })],
+    ['an explicit port', facts({ url: 'https://www.google.com:8443/travel/flights' })],
+    ['a user in the URL', facts({ url: 'https://user@www.google.com/travel/flights' })],
+    ['a user and password in a hop', facts({ hops: ['https://u:p@www.google.com/travel/flights'] })],
+  ])('%s → off-allowlist', (_n, f) => {
+    expect(classifyPage(f)).toEqual({ kind: 'blocked', page: 'off-allowlist' });
+  });
+  // why: fix round 1 (TS I2): the table's order, pinned pairwise (brief §9)
+  it('row 1 before row 2: a captcha frame on a /sorry/ page is captcha', () => {
+    expect(
+      classifyPage(
+        facts({
+          url: 'https://www.google.com/sorry/index',
+          frameUrls: ['https://www.google.com/recaptcha/api2/anchor'],
+        }),
+      ),
+    ).toEqual({ kind: 'blocked', page: 'captcha' });
+    expect(classifyPage(facts({ text: t({ challenge: true, unusualTraffic: true }) }))).toEqual({
+      kind: 'blocked',
+      page: 'captcha',
+    });
+  });
+  it('row 2 before row 3: unusual-traffic text beside an account control is unusual-traffic', () => {
+    expect(classifyPage(facts({ accountControl: true, text: t({ unusualTraffic: true }) }))).toEqual({
+      kind: 'blocked',
+      page: 'unusual-traffic',
+    });
+  });
+  it('row 5 before row 6: a sign-in heading on an off-allowlist URL is sign-in', () => {
+    expect(
+      classifyPage(facts({ url: 'https://www.google.com/search?q=x', text: t({ signInHeading: true }) })),
+    ).toEqual({ kind: 'blocked', page: 'sign-in' });
+  });
+  // why: fix round 1 (TS M4): exactly one Date grid button
+  it('two Date grid buttons → unrecognised', () => {
+    expect(classifyPage(facts({ dateGridButtons: 2 }))).toEqual({ kind: 'blocked', page: 'unrecognised' });
+  });
 });

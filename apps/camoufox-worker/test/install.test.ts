@@ -66,6 +66,33 @@ describe('ensureInstallLayout (decision 69 round 2, item 1; PIE-R2-03)', () => {
     fakeInstall({ version: '150.0.1', build: 'beta.25' }, { home: f.home, id: '150.0.1-beta.25-aaaa' });
     expect(run(f.installDir).bundleDir).toBe(f.bundleDir);
   });
+  // why: fix round 1 (arch M13, prov-int M2): two bundles with the pinned build are ambiguous, never a guess
+  it('two bundles with the pinned build refuse', () => {
+    const f = fakeInstall(BUNDLE);
+    fakeInstall(BUNDLE, { home: f.home, id: '152.0.4-beta.28-ffff0000' });
+    expect(() => run(f.installDir)).toThrow(
+      /CAMOUFOX_BINARY_BUILD is 152\.0\.4-beta\.28 but the installed bundles are/,
+    );
+  });
+  // why: fix round 1 (prov-int M1): camoufox-js reads only `release` from the top-level file
+  it('a top-level version.json with build but no release refuses', () => {
+    const f = fakeInstall(BUNDLE);
+    symlinkSync(f.app, join(f.installDir, 'Camoufox.app'));
+    writeFileSync(
+      join(f.installDir, 'version.json'),
+      JSON.stringify({ version: '152.0.4', build: 'beta.28' }),
+    );
+    expect(() => run(f.installDir)).toThrow(/version\.json names no release/);
+  });
+  it('a top-level version.json whose build and release disagree refuses; agreeing ones pass', () => {
+    const f = fakeInstall(BUNDLE);
+    symlinkSync(f.app, join(f.installDir, 'Camoufox.app'));
+    const top = join(f.installDir, 'version.json');
+    writeFileSync(top, JSON.stringify({ version: '152.0.4', release: 'beta.28', build: 'beta.27' }));
+    expect(() => run(f.installDir)).toThrow(/disagrees with the pinned bundle/);
+    writeFileSync(top, JSON.stringify({ version: '152.0.4', release: 'beta.28', build: 'beta.28' }));
+    expect(run(f.installDir).created).toEqual([]);
+  });
   it('a top-level version.json that disagrees with the bundle refuses, never rewritten', () => {
     const f = fakeInstall(BUNDLE);
     writeFileSync(

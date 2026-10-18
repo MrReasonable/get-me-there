@@ -1,13 +1,16 @@
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseEnv } from 'node:util';
 import { defaultDataDir, workerEnvFile } from './paths.js';
 
 /**
  * The one launcher every worker script goes through (brief Task 14.1; decision 69 round 2, item 11; SEC-R2-006). It
  * resolves the data directory and `<data>/worker.env`, refuses (exit 78) when the directory is not 0700 or the file is
- * not 0600 and the user's own, loads that same file with `process.loadEnvFile`, and dispatches to the named entry. It is
- * the worker's only `process.env` reader: entries receive the environment as a value.
+ * not 0600 and the user's own, parses that same file, and dispatches to the named entry. It is the worker's only
+ * `process.env` reader: entries receive the environment as a value, built from the file's values plus PASS_THROUGH
+ * only, and `process.env` is never written (fix round 1, sec I1: the inherited environment never overrides the file;
+ * an inherited CAMOUFOX_* or POINT_OF_SALE that differs from the file, or a debug switch, refuses with 78).
  */
 export const EX_CONFIG = 78;
 export const EX_SOFTWARE = 70;
@@ -72,6 +75,34 @@ export function checkEnvFiles(
   return { envFile, present: true };
 }
 
+/** What an entry may take from the inherited environment; everything else comes from worker.env. */
+export const PASS_THROUGH: readonly string[] = ['HOME', 'PATH', 'TMPDIR', 'CAMOUFOX_DATA_DIR'];
+/** Switches that make playwright-core write protocol traffic (the SOCS value among it) to the log. */
+const DEBUG_SWITCHES: readonly string[] = ['DEBUG', 'PWDEBUG', 'DEBUG_FILE'];
+
+/**
+ * The entry's environment: PASS_THROUGH from `inherited`, then the file's values. Refuses a debug switch, and any
+ * inherited CAMOUFOX_* (but CAMOUFOX_DATA_DIR) or POINT_OF_SALE whose value is not the file's, naming the variable
+ * and never a value: camoufox-js and Playwright read `process.env` themselves, so it must agree with the file.
+ */
+export function entryEnv(inherited: Env, file: Env, envFile: string): Env {
+  for (const name of DEBUG_SWITCHES)
+    if (inherited[name] !== undefined && inherited[name] !== '')
+      throw new EnvFileRefused(
+        `${name} is set in the environment; unset it (it would log the browser's traffic)`,
+      );
+  for (const [name, value] of Object.entries(inherited)) {
+    const ours = (name.startsWith('CAMOUFOX_') && name !== 'CAMOUFOX_DATA_DIR') || name === 'POINT_OF_SALE';
+    if (ours && value !== undefined && value !== file[name])
+      throw new EnvFileRefused(
+        `${name} is set in the environment and differs from ${envFile}; unset it, or start the worker from a clean shell`,
+      );
+  }
+  const env: Record<string, string | undefined> = {};
+  for (const name of PASS_THROUGH) if (inherited[name] !== undefined) env[name] = inherited[name];
+  return { ...env, ...file };
+}
+
 /** The data directory: CAMOUFOX_DATA_DIR when set (absolute; development), else ~/.local/state/get-me-there/camoufox. */
 export function resolveDataDir(env: Env): string {
   const override = env.CAMOUFOX_DATA_DIR;
@@ -85,10 +116,11 @@ export function resolveDataDir(env: Env): string {
 }
 
 export interface RunDeps {
-  /** The live environment; `loadEnvFile` adds the file's values to it. */
-  env: Record<string, string | undefined>;
+  /** The inherited environment; read, never written. */
+  env: Env;
   uid: number;
-  loadEnvFile: (path: string) => void;
+  /** Reads worker.env's text (readFileSync by default). */
+  readEnvFile?: (path: string) => string;
   entries: Readonly<Record<string, () => Promise<Entry>>>;
   /** Commands that may run before worker.env exists (capture-socs). */
   withoutEnvFile: ReadonlySet<string>;
@@ -106,18 +138,20 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
     return EX_CONFIG;
   }
   let dataDir: string;
+  let env: Env;
   try {
     dataDir = resolveDataDir(deps.env);
     const { envFile, present } = checkEnvFiles(dataDir, deps.uid, deps.stat);
-    if (present) deps.loadEnvFile(envFile);
-    else if (!deps.withoutEnvFile.has(command))
+    if (!present && !deps.withoutEnvFile.has(command))
       throw new EnvFileRefused(`${envFile} is missing (docs/setup.md section 14)`);
+    const file = present ? parseEnv((deps.readEnvFile ?? ((p) => readFileSync(p, 'utf8')))(envFile)) : {};
+    env = entryEnv(deps.env, file, envFile);
   } catch (e) {
     deps.err(e instanceof Error ? e.message : String(e));
     return EX_CONFIG;
   }
   const entry = await load();
-  return entry({ env: { ...deps.env }, dataDir, args, out: deps.out, err: deps.err });
+  return entry({ env, dataDir, args, out: deps.out, err: deps.err });
 }
 
 /** The entry functions, loaded lazily so a command loads only its own modules. */
@@ -135,7 +169,6 @@ export async function main(argv: readonly string[], entries = ENTRIES): Promise<
     return await run(argv, {
       env: process.env,
       uid: process.getuid?.() ?? -1,
-      loadEnvFile: (p) => process.loadEnvFile(p),
       entries,
       withoutEnvFile: new Set(['capture-socs']),
       out: (l) => process.stdout.write(`${l}\n`),
