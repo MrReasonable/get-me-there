@@ -32,6 +32,9 @@ import {
 } from '@gmt/db';
 import { fxHttpLimits } from '@gmt/engine';
 import {
+  camoufoxHttpLimits,
+  camoufoxProvider,
+  camoufoxStatusHttpLimits,
   createHttpKit,
   type FixtureRecorder,
   fixtureHttpLimits,
@@ -129,6 +132,8 @@ export function collectSecrets(config: Config): Secret[] {
   if (config.providers.searchapi !== null) out.push(config.providers.searchapi.key);
   if (config.smtp !== null) out.push(config.smtp.pass);
   if (config.auth !== null) out.push(config.auth.pass);
+  // WP14: the camoufox worker key (spec §2), scrubbed like every other credential.
+  if (config.providers.camoufox !== null) out.push(config.providers.camoufox.key);
   return out;
 }
 
@@ -162,6 +167,13 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
     ...(config.providers.travelpayouts === null
       ? {}
       : { travelpayouts: travelpayoutsHttpLimits(config.providers.travelpayouts.limits, config) }),
+    // WP14: camoufox and its unledgered status route, only when CAMOUFOX_ENABLED=true (spec §2, §5.3 rev 32).
+    ...(config.providers.camoufox === null
+      ? {}
+      : {
+          camoufox: camoufoxHttpLimits(config.providers.camoufox, config),
+          'camoufox-status': camoufoxStatusHttpLimits(config.providers.camoufox, config),
+        }),
     // why: decision 32 — the FX client's http policy lives beside it in the engine (fx/limits.ts), one copy
     fx: fxHttpLimits(timing),
   };
@@ -210,6 +222,19 @@ export function providersFor(
       }),
     );
   }
+  // WP14: camoufox, off by default; a definition must still name it (spec §2).
+  const cf = config.providers.camoufox;
+  if (cf !== null)
+    out.push(
+      camoufoxProvider({
+        http: deps.http,
+        log: deps.log,
+        clock: deps.clock,
+        key: cf.key,
+        workerUrl: cf.workerUrl,
+        pointOfSale: config.pointOfSale,
+      }),
+    );
   return out;
 }
 

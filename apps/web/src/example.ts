@@ -11,3 +11,6 @@ export const EXAMPLE_DEFINITION = apiContract.definitionCreateRequestSchema.pars
 
 /** The example's route in words, for the import button; copy.ts takes it as an argument. */
 export const EXAMPLE_LABEL = 'London to New York';
+
+/** The worked example's coverage arithmetic for the camoufox Providers note (WP14 Task 14.10): one airport pair's cells. */
+export const EXAMPLE_PAIR_CELLS = 'one London → New York airport pair has 2,184';

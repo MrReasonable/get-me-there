@@ -82,6 +82,8 @@ export function ProvidersView() {
           {/* why: ruling 5: which call cap stops a £0-per-call plan; information, not a warning, so no alert role */}
           {p.capNote !== null ? <p data-cost="">{p.capNote}</p> : null}
           {p.excludedFromSchedule ? <p>{COPY.excludedFromSchedule}</p> : null}
+          {/* why: WP14 Task 14.10: what camoufox costs and covers, said where the operator turns it on */}
+          {p.providerId === 'camoufox' ? <p>{COPY.camoufox.note}</p> : null}
           {p.capabilities.discovery !== null ? (
             <Capability title={COPY.capabilityDiscovery} info={p.capabilities.discovery} />
           ) : null}

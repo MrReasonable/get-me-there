@@ -4,6 +4,7 @@ import { COPY } from '../../src/copy.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[]> = {
+  'camoufox.coolingDown': ['2026-10-20T05:00:00.000Z'],
   'alertsView.notSaved': ['database is locked'],
   'alertsView.cooldownText': [336],
   'alertsView.classPartial': ['checked bag'],

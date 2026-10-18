@@ -1,5 +1,6 @@
 import {
   type apiContract,
+  type BlockedPage,
   type Buckets,
   type Cabin,
   CONSTRAINT_LABELS,
@@ -19,6 +20,7 @@ import {
   type VerdictClass,
 } from '@gmt/core';
 import type { z } from 'zod';
+import { EXAMPLE_PAIR_CELLS } from './example.js';
 
 /** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
 const noun = (n: number | string, one: string, many: string): string => (String(n) === '1' ? one : many);
@@ -421,6 +423,24 @@ export const COPY = {
   retry: 'Retry errors',
 
   // providers view (spec §10, §11)
+  /**
+   * WP14 (prov-008, prov-015, ruling 11): the camoufox provider's own words. Each page kind is worded distinctly, and
+   * only a real check is called a bot check; the adapter writes the same words to last_error.
+   */
+  camoufox: {
+    pageKinds: {
+      captcha: 'Google showed a bot check (CAPTCHA)',
+      'unusual-traffic': 'Google reported unusual traffic',
+      'consent-unhandled': 'Google showed its cookie page (the rejection did not hold)',
+      'sign-in': 'Google asked to sign in',
+      'signed-in': 'the browser profile was signed in',
+      'off-allowlist': 'Google sent the browser elsewhere',
+      unrecognised: "Google's page was not one this app reads (it may have changed)",
+    } satisfies Record<BlockedPage, string>,
+    coolingDown: (until: string) => `cooling down until ${until}; Google was not contacted`,
+    unavailable: 'browser worker not reachable',
+    note: `Off by default. Reads Google Flights in your own Camoufox browser, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds. It prices at most the monthly page cap of day pairs a month (1,500 by default; ${EXAMPLE_PAIR_CELLS}), so most cells stay unsearched or skipped. On any bot check or page it does not recognise it stops and pauses (48 hours for a check, 1 hour for an unknown page). Google's terms do not permit this automated access.`,
+  },
   providersHeading: 'Providers',
   providerEnabled: 'configured',
   providerDisabled: 'not configured',
