@@ -34,6 +34,7 @@ export type Role =
   | 'slider'
   | 'option'
   | 'tabpanel'
+  | 'grid'
   | 'gridcell'
   | 'img';
 
@@ -84,6 +85,13 @@ export interface Selectors {
     priceGraphButton: string;
     /** Inside the graph's dialog (exploration only): the chart region, the Dates tab and the forward scroll button. */
     graphDialog: { chartRegion: string; datesTab: string; scrollForwards: string };
+    /** The date grid inside that dialog (WP15; recorder only until GRID_VERIFIED): its names, all exact. */
+    dateGrid: {
+      dialog: string;
+      datesTab: string;
+      grid: string;
+      scroll: { left: string; right: string; up: string; down: string };
+    };
     /** Google's own "no flights" line; a hypothesis until NO_FLIGHTS_VERIFIED. */
     noFlights: RegExp;
   };
@@ -147,6 +155,14 @@ export const SELECTORS: Selectors = {
     // why: observed 2026-10-18 (graph-explore/2026-10-18/1): the button opens a dialog "Price insights" holding a tablist
     // ("Dates", "Price graph"), a region "Price graph" with no accessible children, and "Scroll forwards"
     graphDialog: { chartRegion: 'Price graph', datesTab: 'Dates', scrollForwards: 'Scroll forwards' },
+    // why: observed 2026-10-18 (graph-explore/2026-10-18/2): the dialog "Price insights", its tab "Dates" holding an
+    // empty grid "Date grid", and the four scroll buttons around it
+    dateGrid: {
+      dialog: 'Price insights',
+      datesTab: 'Dates',
+      grid: 'Date grid',
+      scroll: { left: 'Scroll left', right: 'Scroll right', up: 'Scroll up', down: 'Scroll down' },
+    },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },
   form: {

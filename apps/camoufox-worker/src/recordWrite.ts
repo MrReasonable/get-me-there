@@ -197,13 +197,24 @@ export function writeGraphExplore(
   rec: Record<string, unknown>,
   secrets: readonly string[],
 ): string {
+  return writeExploration(root, 'graph-explore', day, rec, secrets);
+}
+
+/** The same write for a `--grid` recording (`<root>/grid/<day>/<n>.json`, WP15 Task 15.1). */
+export function writeExploration(
+  root: string,
+  kind: 'graph-explore' | 'grid',
+  day: string,
+  rec: Record<string, unknown>,
+  secrets: readonly string[],
+): string {
   const text = `${JSON.stringify(rec, null, 2)}\n`;
   assertClean(text, secrets);
   if (URL_WITH_QUERY.test(text))
     throw new RecordingRefused('the exploration holds a query string; nothing written');
-  const dir = join(root, 'graph-explore', day);
+  const dir = join(root, kind, day);
   mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-  chmodSync(join(root, 'graph-explore'), DIR_MODE);
+  chmodSync(join(root, kind), DIR_MODE);
   chmodSync(dir, DIR_MODE);
   const used = readdirSync(dir)
     .map((f) => /^(\d+)\.json$/.exec(f)?.[1])

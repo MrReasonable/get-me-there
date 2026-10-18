@@ -12,12 +12,22 @@ export const KINDS = [
   'consent-probe',
   'no-flights',
   'graph-explore',
+  'grid',
 ] as const;
 export type RecordingKind = (typeof KINDS)[number];
 export const RECORDED_BY = 'camoufox-worker record';
 export const MAX_PAGES = 3;
 /** The stability check's spacing between its three pages (rule 2). */
 export const STABILITY_PAGES = 3;
+
+/** The grid's four scroll directions (WP15; the buttons "Scroll left", "Scroll right", "Scroll up", "Scroll down"). */
+export const GRID_DIRECTIONS = ['left', 'right', 'up', 'down'] as const;
+export type GridDirection = (typeof GRID_DIRECTIONS)[number];
+/** `--grid` without `--moves`: one move each way, so the recording measures both axes in both directions. */
+export const DEFAULT_GRID_MOVES: readonly GridDirection[] = ['right', 'down', 'left', 'up'];
+/** At most this many moves on one recorded page. */
+export const RECORD_MAX_MOVES = 12;
+const isDirection = (m: string): m is GridDirection => GRID_DIRECTIONS.some((x) => x === m);
 
 export class RecordingRefused extends Error {
   constructor(message: string) {
@@ -30,6 +40,8 @@ export interface RecordArgs {
   kind: RecordingKind;
   request: { origin: Iata; destination: Iata; departureDate: IsoDate; returnDate: IsoDate } | null;
   pages: number;
+  /** The scrolls a `--grid` page makes, in order; empty for every other kind. */
+  moves: GridDirection[];
 }
 
 /** Parses the recorder's flags; throws RecordingRefused naming what is wrong. */
@@ -38,7 +50,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
   const values = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? '';
-    if (['--origin', '--destination', '--depart', '--return', '--pages'].includes(a)) {
+    if (['--origin', '--destination', '--depart', '--return', '--pages', '--moves'].includes(a)) {
       const v = args[i + 1];
       if (v === undefined) throw new RecordingRefused(`${a} needs a value`);
       values.set(a, v);
@@ -57,13 +69,16 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
       flags.add(a);
     else throw new RecordingRefused(`unknown argument ${a}`);
   }
-  // why: decision 69: grid mode is not built in WP14, so nothing (the recorder included) loads the grid.
-  if (flags.has('--grid'))
-    throw new RecordingRefused('--grid: grid mode is not built in this work package (decision 69)');
   if (flags.size > 1)
     throw new RecordingRefused(
-      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --no-flights, --graph-explore',
+      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --no-flights, --graph-explore, --grid',
     );
+  const movesRaw = values.get('--moves');
+  if (movesRaw !== undefined && !flags.has('--grid')) throw new RecordingRefused('--moves needs --grid');
+  const moveNames = movesRaw === undefined ? [...DEFAULT_GRID_MOVES] : movesRaw.split(',');
+  const moves = moveNames.filter(isDirection);
+  if (moves.length !== moveNames.length || moves.length > RECORD_MAX_MOVES)
+    throw new RecordingRefused(`--moves takes 1 to ${RECORD_MAX_MOVES} of ${GRID_DIRECTIONS.join(', ')}`);
   const kind: RecordingKind = flags.has('--cheapest')
     ? 'cheapest'
     : flags.has('--view-more')
@@ -76,12 +91,14 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
             ? 'no-flights'
             : flags.has('--graph-explore')
               ? 'graph-explore'
-              : 'results';
+              : flags.has('--grid')
+                ? 'grid'
+                : 'results';
   const pagesRaw = values.get('--pages') ?? (kind === 'socs-stability' ? String(STABILITY_PAGES) : '1');
   const pages = Number(pagesRaw);
   if (!/^\d+$/.test(pagesRaw) || pages < 1 || pages > MAX_PAGES)
     throw new RecordingRefused(`--pages must be 1 to ${MAX_PAGES}`);
-  if (kind === 'consent-probe') return { kind, request: null, pages: 1 };
+  if (kind === 'consent-probe') return { kind, request: null, pages: 1, moves: [] };
   const origin = iataSchema.safeParse(values.get('--origin') ?? '');
   const destination = iataSchema.safeParse(values.get('--destination') ?? '');
   const departureDate = isoDateSchema.safeParse(values.get('--depart') ?? '');
@@ -99,5 +116,6 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
       returnDate: returnDate.data,
     },
     pages,
+    moves: kind === 'grid' ? moves : [],
   };
 }

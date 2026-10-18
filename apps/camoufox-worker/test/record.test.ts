@@ -41,6 +41,7 @@ import {
   resultsTree,
   text,
 } from './support/fakePage.js';
+import { gridTree, plusDays } from './support/gridTree.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers, flush } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
@@ -319,7 +320,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       'no-flights/2026-10-18/1.meta.json',
     ]);
   });
-  it('rule 5: --cheapest clicks the Cheapest tab, --view-more clicks View more, a plain run clicks nothing; --grid is refused', async () => {
+  it('rule 5: --cheapest clicks the Cheapest tab, --view-more clicks View more, a plain run clicks nothing', async () => {
     const a = setup();
     expect(await record(a.ctx([...Q, '--cheapest']), cfg, a.deps)).toBe(0);
     expect(a.contexts[0]?.pages[0]?.calls.clicks).toEqual(['tab:Cheapest from 451 British pounds']);
@@ -331,9 +332,6 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     const c = setup();
     expect(await record(c.ctx(Q), cfg, c.deps)).toBe(0);
     expect(c.contexts[0]?.pages[0]?.calls.clicks).toEqual([]);
-    const g = setup();
-    expect(await record(g.ctx([...Q, '--grid']), cfg, g.deps)).toBe(EX_CONFIG);
-    expect(g.profiles).toEqual([]);
   });
   // why: ruling of 2026-10-18: the Cheapest tab's information pop-up is closed through its own button, then the tab
   it('--cheapest closes the tab’s pop-up, clicks the tab, settles again and records what it clicked', async () => {
@@ -1404,6 +1402,239 @@ describe('record --graph-explore', () => {
   });
 });
 
+// WP15 Task 15.1: the recorder's --grid (rulings of 2026-10-18). One page, the Price graph and Dates clicks, then the
+// named moves, each at least 5 s after the last, each view counted only once its lines change and then hold still.
+// Synthetic trees in recording 2's shape (test/support/gridTree.ts).
+describe('record --grid', () => {
+  const cooldownOf = (t: ReturnType<typeof setup>) =>
+    new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();
+  const G = [...Q, '--grid'];
+  const results = (): FakeNode => resultsTree({ extra: [n('button', 'Price graph')] });
+  // why: with the dialog open the results list is hidden, as recording 2's classification showed (PA-01)
+  const dialogPage = (g: FakeNode): FakeNode => n('document', '', [...formNodes(), g]);
+  interface Run {
+    /** The trees each view shows, by the view's first departure and first return. */
+    view?: (depart: string, ret: string) => FakeNode[];
+    /** Called on every scroll click with the time it happened. */
+    onScroll?: (dir: string, at: number) => void;
+    /** Step of a scroll, in days (the synthetic hypothesis). */
+    step?: number;
+    pollMs?: number;
+  }
+  const gridRun = (o: Run = {}) => {
+    const t = setup({ navigations: [{ hops: [URL0, LANDED], tree: results() }] });
+    const step = o.step ?? 7;
+    let at = { depart: '2027-03-11', ret: '2027-03-21' };
+    const show = (pg: FakePage) =>
+      pg.setTrees(o.view?.(at.depart, at.ret) ?? [dialogPage(gridTree({ depart: at.depart, ret: at.ret }))]);
+    const deps: RecordDeps = {
+      ...t.deps,
+      ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
+      launch: async (prof) => {
+        const c = await t.deps.launch(prof);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            pg.onClick = (x) => {
+              if (x.role === 'button' && x.name === 'Price graph')
+                pg.setTrees([dialogPage(gridTree({ ...at, tab: 'graph' }))]);
+              else if (x.role === 'tab' && x.name === 'Dates') show(pg);
+              else if (x.role === 'button' && (x.name ?? '').startsWith('Scroll ')) {
+                const dir = (x.name ?? '').slice(7);
+                o.onScroll?.(dir, t.timers.now());
+                const dd = dir === 'right' ? step : dir === 'left' ? -step : 0;
+                const dr = dir === 'down' ? step : dir === 'up' ? -step : 0;
+                at = { depart: plusDays(at.depart, dd), ret: plusDays(at.ret, dr) };
+                show(pg);
+              }
+            };
+          };
+        return c;
+      },
+    };
+    return { t, deps };
+  };
+  const recOf = (t: ReturnType<typeof setup>) =>
+    JSON.parse(readFileSync(join(t.root, 'grid/2026-10-18/1.json'), 'utf8'));
+
+  it('parses --grid and --moves, and refuses bad moves before any launch', () => {
+    expect(parseRecordArgs(G)).toMatchObject({ kind: 'grid', moves: ['right', 'down', 'left', 'up'] });
+    expect(parseRecordArgs([...G, '--moves', 'right,right'])).toMatchObject({ moves: ['right', 'right'] });
+    expect(parseRecordArgs(Q).moves).toEqual([]);
+    for (const bad of [
+      [...G, '--moves', 'sideways'],
+      [...G, '--moves', Array(13).fill('right').join(',')],
+      [...Q, '--moves', 'right'],
+      [...G, '--cheapest'],
+      [...G, '--moves'],
+    ])
+      expect(() => parseRecordArgs(bad), bad.join(' ')).toThrow(/--moves|--grid|needs a value/);
+  });
+  it('clicks Price graph, Dates and each scroll 5 s apart, and records every view, move delta and timing', async () => {
+    const scrolls: number[] = [];
+    const { t, deps } = gridRun({ onScroll: (_d, at) => scrolls.push(at) });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual([
+      'button:Price graph',
+      'tab:Dates',
+      'button:Scroll right',
+      'button:Scroll down',
+      'button:Scroll left',
+      'button:Scroll up',
+    ]);
+    for (let i = 1; i < scrolls.length; i++)
+      expect((scrolls[i] ?? 0) - (scrolls[i - 1] ?? 0)).toBeGreaterThanOrEqual(5000);
+    expect(written(t.root)).toEqual(['grid/2026-10-18/1.json']);
+    const file = join(t.root, 'grid/2026-10-18/1.json');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const text = readFileSync(file, 'utf8');
+    expect(text).not.toMatch(/https?:\/\/[^\s"]*\?/);
+    const rec = recOf(t);
+    expect(rec).toMatchObject({
+      kind: 'grid',
+      socsReadBack: 'same',
+      window: [1280, 900],
+      clicked: [
+        'button:Price graph',
+        'tab:Dates',
+        'button:Scroll right',
+        'button:Scroll down',
+        'button:Scroll left',
+        'button:Scroll up',
+      ],
+      results: { cheapestTabName: 'Cheapest from 451 British pounds', listMinimumPounds: 451 },
+    });
+    expect(rec.views).toHaveLength(5);
+    const v0 = rec.views[0];
+    expect(v0.candidates).toHaveLength(49);
+    expect(v0.candidates[0]).toMatch(/, 11 Mar to 21 Mar$/);
+    expect(v0.lines.texts).toEqual([
+      '0000 Thu 11 Mar Fri 12 Mar Sat 13 Mar Sun 14 Mar Mon 15 Mar Tue 16 Mar Wed 17 Mar',
+      'Sun 21 Mar Mon 22 Mar Tue 23 Mar Wed 24 Mar Thu 25 Mar Fri 26 Mar Sat 27 Mar 0000 Return',
+    ]);
+    expect(v0.labels.count).toBe(0);
+    expect(v0.datesGrid).toEqual({ dialog: 1, datesSelected: 1, grid: 1, scrollButtons: 4 });
+    expect(v0.selectedLines).toEqual([
+      `14 – 24 Mar 2027£${v0.candidates[24].match(/^£(\d+)/)?.[1]} · Round trip`,
+    ]);
+    expect(v0.snapshot).toContain('- tabpanel "Dates":');
+    expect(rec.moves.map((m: { dir: string; delta: unknown }) => [m.dir, m.delta])).toEqual([
+      ['right', { departures: 7, returns: 0 }],
+      ['down', { departures: 0, returns: 7 }],
+      ['left', { departures: -7, returns: 0 }],
+      ['up', { departures: 0, returns: -7 }],
+    ]);
+    expect(Object.keys(rec.moves[0]).sort()).toEqual([
+      'clickMs',
+      'delta',
+      'dir',
+      'polls',
+      'readMs',
+      'settleMs',
+    ]);
+    expect(cooldownOf(t)).toBeNull();
+  });
+  it('reads the labels form the same way, and measures a step other than seven', async () => {
+    const { t, deps } = gridRun({
+      step: 1,
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, labels: 'labels' }))],
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right,down']), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(rec.views[0].labels.count).toBe(14);
+    expect(rec.views[0].lines.count).toBe(0);
+    expect(rec.moves.map((m: { delta: unknown }) => m.delta)).toEqual([
+      { departures: 1, returns: 0 },
+      { departures: 0, returns: 1 },
+    ]);
+  });
+  it('a view after a scroll counts only once its lines change, then hold for two polls (12 s polls fit the move budget)', async () => {
+    let calls = 0;
+    const { t, deps } = gridRun({
+      pollMs: 12_000,
+      view: (d, r) => {
+        calls++;
+        if (calls === 1) return [dialogPage(gridTree({ depart: d, ret: r }))];
+        // why: the old view stays for two more polls after the click, then the moved one shows
+        const old = dialogPage(gridTree({ depart: plusDays(d, -7), ret: r }));
+        return [old, old, dialogPage(gridTree({ depart: d, ret: r }))];
+      },
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(rec.moves[0]).toMatchObject({ dir: 'right', delta: { departures: 7, returns: 0 } });
+    expect(rec.moves[0].polls).toBeGreaterThanOrEqual(4);
+  });
+  it('a view that has not changed by the end of its move budget is recorded timed out; the file is still written', async () => {
+    let calls = 0;
+    const { t, deps } = gridRun({
+      pollMs: 12_000,
+      view: (d, r) => {
+        calls++;
+        const same = dialogPage(gridTree({ depart: '2027-03-11', ret: '2027-03-21' }));
+        return calls === 1 ? [same] : [same, same, same, same, dialogPage(gridTree({ depart: d, ret: r }))];
+      },
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right,down']), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(rec.moves).toEqual([{ dir: 'right', step: 'move-1-settle', reason: 'timed-out', timedOut: true }]);
+    expect(rec.views).toHaveLength(1);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).not.toContain('button:Scroll down');
+    expect(cooldownOf(t)).toBeNull();
+  });
+  it('a challenge after a scroll is that stop with its cool-down; only the stop record is written', async () => {
+    let calls = 0;
+    const { t, deps } = gridRun({
+      view: (d, r) =>
+        ++calls === 1
+          ? [dialogPage(gridTree({ depart: d, ret: r }))]
+          : [n('document', '', [text('Our systems have detected unusual traffic')])],
+    });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('unusual-traffic');
+    expect(written(t.root)).toEqual([]);
+    expect(written(t.root, { stopped: true })).toEqual(['stopped/2026-10-18/1.facts.json']);
+  });
+  it('a panel that is not the dates-grid view is recorded and no scroll is tried', async () => {
+    const { t, deps } = gridRun({
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, scroll: false }))],
+    });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(rec.views[0].datesGrid.scrollButtons).toBe(0);
+    expect(rec.moves).toEqual([{ dir: 'right', skipped: 'not-dates-grid' }]);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual(['button:Price graph', 'tab:Dates']);
+  });
+  it('a panel holding an e-mail address is refused: nothing written', async () => {
+    const { t, deps } = gridRun({
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, extra: [text('someone@example.test')] }))],
+    });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/e-mail address; nothing written/);
+    expect(written(t.root)).toEqual([]);
+  });
+  it('logs each step as "grid step"', async () => {
+    const { t, deps } = gridRun();
+    const log = memoryLog();
+    expect(await record(t.ctx([...G, '--moves', 'right']), cfg, { ...deps, log })).toBe(0);
+    const ends = log.lines
+      .filter((l) => l.msg === 'grid step' && Reflect.get(l.o, 'phase') === 'end')
+      .map((l) => Reflect.get(l.o, 'step'));
+    expect([...new Set(ends)]).toEqual([
+      'read-results',
+      'find-graph-button',
+      'click-graph',
+      'dialog-poll',
+      'find-dates-tab',
+      'click-dates-tab',
+      'dates-poll',
+      'read-view',
+      'find-scroll',
+      'click-scroll',
+      'move-1-poll',
+    ]);
+  });
+});
+
 describe('parseRecordArgs', () => {
   it.each([
     [['--origin'], /needs a value/],
@@ -1420,7 +1651,12 @@ describe('parseRecordArgs', () => {
   });
   it('defaults to one results page; the probe needs no query; stability defaults to three pages', () => {
     expect(parseRecordArgs(Q)).toMatchObject({ kind: 'results', pages: 1 });
-    expect(parseRecordArgs(['--consent-probe'])).toEqual({ kind: 'consent-probe', request: null, pages: 1 });
+    expect(parseRecordArgs(['--consent-probe'])).toEqual({
+      kind: 'consent-probe',
+      request: null,
+      pages: 1,
+      moves: [],
+    });
     expect(parseRecordArgs([...Q, '--stability']).pages).toBe(3);
     expect(parseRecordArgs([...Q, '--no-flights']).kind).toBe('no-flights');
   });

@@ -23,6 +23,7 @@ import {
   type StepOptions,
 } from './driver.js';
 import { exploreGraph, stripSnapshotQueries } from './graph.js';
+import { exploreGrid, GRID_SCROLL_SPACING_MS, MOVE_BUDGET_MS, MOVE_RESERVE_MS } from './gridRecord.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
 import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
@@ -31,6 +32,7 @@ import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
 import type { View } from './ready.js';
 import {
+  type GridDirection,
   parseRecordArgs,
   RECORDED_BY,
   type RecordArgs,
@@ -42,7 +44,7 @@ import {
   stopRecord,
   stripQuery,
   tightenRecordings,
-  writeGraphExplore,
+  writeExploration,
   writeRecording,
   writeStopRecord,
   writeUnrecorded,
@@ -189,7 +191,15 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
         // within twice that from the start (budget.next in interact); `budget.d` is the current deadline
         const pageStart = deps.timers.now();
-        const budget = pageBudget(deps.timers, cfg.pageTimeoutSeconds * 1000, pageStart);
+        const pageMs = cfg.pageTimeoutSeconds * 1000;
+        // why: WP15 ruling 10: a grid page's overall cap is the first view's budget plus, per move, the spacing and the
+        // move's own budget
+        const budget = pageBudget(
+          deps.timers,
+          pageMs,
+          pageStart,
+          2 * pageMs + args.moves.length * (GRID_SCROLL_SPACING_MS + MOVE_BUDGET_MS + MOVE_RESERVE_MS),
+        );
         const d = budget.d;
         let outcome: Outcome | null = null;
         let failure: unknown = null;
@@ -228,6 +238,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               deps,
               args.kind,
               pageUrl({ ...req, gl: cfg.pointOfSale }),
+              args.moves,
             );
           }
         } catch (e) {
@@ -356,14 +367,17 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           return EX_UNAVAILABLE;
         }
         if (outcome.kind === 'stop') throw new RecordingRefused('unreachable');
-        if (args.kind === 'graph-explore' && outcome.kind === 'read') {
-          const path = writeGraphExplore(
+        if ((args.kind === 'graph-explore' || args.kind === 'grid') && outcome.kind === 'read') {
+          const path = writeExploration(
             deps.root,
+            args.kind,
             day,
             {
               recordedAt: deps.clock.now(),
               recordedBy: RECORDED_BY,
               ...outcome.data,
+              // why: ruling 7: the fixed window the grid's layout was read at
+              window: deps.launchOptions.window,
               socsReadBack: back,
               versions: {
                 selectors: SELECTORS_VERSION,
@@ -441,6 +455,7 @@ async function interact(
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
+  moves: readonly GridDirection[],
 ): Promise<Outcome> {
   let d = budget.d;
   const poll = (S: Selectors, view: View) =>
@@ -528,6 +543,57 @@ async function interact(
       return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
     return null;
   };
+  if (kind === 'grid') {
+    if (settled.kind.kind !== 'results')
+      throw new RecordingRefused('the results page shows no flights; there is no date grid to record');
+    const steps: StepOptions = { timers: deps.timers, log: deps.log, startedAt: pageStart, flow: 'grid' };
+    try {
+      const g = await exploreGrid(driver, page, d, {
+        timers: deps.timers,
+        pollMs: deps.pollMs,
+        S: deps.selectors,
+        steps,
+        clicked,
+        moves,
+        next: () => {
+          d = budget.next();
+          return d;
+        },
+        nextFor: (ms) => {
+          d = budget.nextFor(ms);
+          return d;
+        },
+      });
+      if (g.kind === 'blocked') return await stop(g.page, g.rule, g.facts);
+      stepMs.read = deps.timers.now() - t0;
+      return {
+        kind: 'read',
+        data: {
+          kind,
+          landing: stripQuery(page.url()),
+          hops: guard.hops.map(stripQuery),
+          results: g.results,
+          views: g.views.map((v) => ({ ...v, snapshot: stripSnapshotQueries(v.snapshot) })),
+          moves: g.moves,
+          clicked,
+          classification: g.classification,
+        },
+        noFlights: false,
+        stepMs,
+        facts: g.facts,
+        clicked,
+        headings: [],
+      };
+    } catch (e) {
+      if (e instanceof DeadlineExceeded) throw e;
+      const blocked = await classifyAfterFailedStep(d, steps, 'best');
+      if (blocked !== null) return blocked;
+      const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'grid';
+      throw new RecordingRefused(
+        `the date grid recording ended at the ${step} step; the debug log has the step lines`,
+      );
+    }
+  }
   if (kind === 'graph-explore') {
     // why: a no-flights page has no graph; nothing is clicked and nothing stopped the page, so no cool-down
     if (settled.kind.kind !== 'results')

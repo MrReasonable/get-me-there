@@ -86,6 +86,7 @@ describe('worker rules: launch and dependencies', () => {
         'locale',
         'os',
         'serviceWorkers',
+        'window',
       ].sort(),
     );
     expect([
@@ -230,9 +231,12 @@ describe('worker rules: source facts through the compiler API', () => {
   });
   // why: the Price graph exploration (2026-10-18) stores a printed snapshot for reading by people; nothing parses it, and
   // the provider path (session.ts, server.ts) never reaches it
-  it('ariaSnapshot is called only in graph.ts, and exploreGraph is imported only by record.ts', () => {
-    expect([...new Set(callsTo('ariaSnapshot').map((c) => c.f))]).toEqual(['graph.ts']);
-    expect(importersOf(['exploreGraph'])).toEqual(['record.ts']);
+  it('ariaSnapshot is called only in dialogSettle.ts and graph.ts, and the explorations are imported only by record.ts', () => {
+    expect([...new Set(callsTo('ariaSnapshot').map((c) => c.f))].sort()).toEqual([
+      'dialogSettle.ts',
+      'graph.ts',
+    ]);
+    expect(importersOf(['exploreGraph', 'exploreGrid'])).toEqual(['record.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>

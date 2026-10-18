@@ -8,10 +8,19 @@
  * The printed snapshot is stored for people to read, never parsed: nothing in the provider path imports this module
  * (rules.test.ts pins that), and only `record --graph-explore` calls it.
  */
-import { createHash } from 'node:crypto';
-import type { BlockedPage } from '@gmt/core';
-import type { PageFacts } from './classify.js';
-import { type ClassifyRule, classifyPageWithRule } from './classify.js';
+import type { ClassifyRule } from './classify.js';
+import {
+  type Blocked,
+  type Control,
+  type Facts,
+  MAX_CONTROLS_PER_ROLE,
+  panelOf,
+  readCells,
+  type SettleOptions,
+  type Skipped,
+  settle,
+  soft,
+} from './dialogSettle.js';
 import {
   CheapestStepFailed,
   CLICK_TIMEOUT_MS,
@@ -24,11 +33,9 @@ import {
   type PageLike,
   POLL_TIMEOUT_MS,
   runStep,
-  type SettleFacts,
   type StepOptions,
   timeoutOf,
 } from './driver.js';
-import { STABLE_MS } from './ready.js';
 import type { Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
 
@@ -41,8 +48,7 @@ export const CONTROL_ROLES = ['button', 'tab', 'slider', 'option', 'link'] as co
 export const READ_CONTROLS_MS = 25_000;
 /** Polling stops while this much of the deadline is left: one more poll and the control read must still fit. */
 export const GRAPH_RESERVE_MS = POLL_TIMEOUT_MS + READ_CONTROLS_MS;
-/** At most this many controls of one role are named (a graph may hold one per day); the rest are counted. */
-export const MAX_CONTROLS_PER_ROLE = 1000;
+export { type Control, MAX_CONTROLS_PER_ROLE, type Skipped } from './dialogSettle.js';
 
 /** One dialog or region on the page: its role, its index among that role's matches, and its accessible name. */
 export interface RegionRef {
@@ -81,12 +87,6 @@ function regionOf(page: PageLike, ref: RegionRef | null): LocatorLike {
   return ref === null ? page.getByRole('main').nth(0) : page.getByRole(ref.role).nth(ref.index);
 }
 
-/** A control inside the region: its role and accessible name (`null` when unreadable or longer than the limit). */
-export interface Control {
-  role: (typeof CONTROL_ROLES)[number] | 'gridcell';
-  name: string | null;
-}
-
 async function readControls(
   region: LocatorLike,
   d: Deadline,
@@ -104,16 +104,6 @@ async function readControls(
     if (n > MAX_CONTROLS_PER_ROLE) unnamed[role] = n - MAX_CONTROLS_PER_ROLE;
   }
   return { controls, unnamed };
-}
-
-/**
- * An exploration step that overran or failed (ruling of 2026-10-18, the run on 802e405): recorded, and the run goes on.
- * Only a classifier stop or the page deadline ends the run once the graph has settled.
- */
-export interface Skipped {
-  step: string;
-  reason: string;
-  timedOut: boolean;
 }
 
 /**
@@ -139,9 +129,6 @@ export interface DatesRead {
   cells: Control[];
   polls: number;
 }
-
-type Facts = { page: PageFacts; settle: SettleFacts };
-type Blocked = { kind: 'blocked'; page: BlockedPage; rule: ClassifyRule; facts: Facts };
 
 /** What the exploration found, or the stop the classifier made on one of its polls. */
 export type GraphOutcome =
@@ -184,18 +171,6 @@ export interface GraphOptions {
 export const MAX_CHART_ELEMENTS = 200;
 /** The chart text's own bound (ruling of 2026-10-18). */
 export const CHART_TEXT_MS = 10_000;
-
-/** Runs a step whose overrun or failure is recorded instead of ending the run; the page deadline still ends it. */
-async function soft<T>(
-  fn: () => Promise<T>,
-): Promise<{ ok: true; value: T } | { ok: false; skipped: Skipped }> {
-  try {
-    return { ok: true, value: await fn() };
-  } catch (e) {
-    if (!(e instanceof CheapestStepFailed)) throw e;
-    return { ok: false, skipped: { step: e.step, reason: e.reason, timedOut: e.reason === 'timed-out' } };
-  }
-}
 
 async function readChart(region: LocatorLike, d: Deadline, steps: StepOptions): Promise<ChartRead> {
   const skipped: Skipped[] = [];
@@ -251,98 +226,6 @@ async function readChart(region: LocatorLike, d: Deadline, steps: StepOptions): 
   };
 }
 
-/** The names of every button and day cell in the panel, buttons first. */
-async function readCells(panel: LocatorLike, d: Deadline, S: Selectors): Promise<Control[]> {
-  const out: Control[] = [];
-  for (const role of ['button', 'gridcell'] as const) {
-    const l = panel.getByRole(role);
-    for (let i = 0, n = Math.min(await countOf(l, d), MAX_CONTROLS_PER_ROLE); i < n; i++) {
-      const name = await nameOf(l.nth(i), d);
-      out.push({ role, name: name === null || name.length > S.maxNameLength ? null : name });
-    }
-  }
-  return out;
-}
-
-/** The first visible tabpanel in the container, or the container itself when none is. */
-async function panelOf(
-  container: LocatorLike,
-  d: Deadline,
-): Promise<{ locator: LocatorLike; found: number; index: number | null }> {
-  const panels = container.getByRole('tabpanel');
-  const found = await countOf(panels, d);
-  for (let i = 0; i < found; i++)
-    if (await d.race(panels.nth(i).isVisible())) return { locator: panels.nth(i), found, index: i };
-  return { locator: container, found, index: null };
-}
-
-/**
- * Polls `find` (classified on every poll) until the printed snapshot it names holds still across two polls at least
- * STABLE_MS apart. `name` names the steps (`<name>-poll`) and the overrun (`<name>-settle`).
- */
-async function settle<T>(
-  name: string,
-  driver: Pick<Driver, 'readFacts'>,
-  d: Deadline,
-  o: GraphOptions,
-  steps: StepOptions,
-  find: (st: Deadline) => Promise<{ value: T; id: string; snapshot: string }>,
-): Promise<
-  | {
-      kind: 'settled';
-      value: T;
-      snapshot: string;
-      polls: number;
-      facts: Facts;
-      rule: ClassifyRule;
-      pageKind: string;
-    }
-  | Blocked
-> {
-  let previous: { key: string; at: number } | null = null;
-  for (let polls = 1; ; polls++) {
-    if (d.remaining() < GRAPH_RESERVE_MS) throw new CheapestStepFailed(`${name}-settle`, 'timed-out');
-    const poll = await runStep(`${name}-poll`, POLL_TIMEOUT_MS, d, steps, async (st) => {
-      const read = await driver.readFacts(st, { timers: o.timers, lookupMs: LOOKUP_TIMEOUT_MS });
-      return { read, ...(await find(st)) };
-    });
-    const facts = { page: poll.read.page, settle: poll.read.settle };
-    const { kind, rule } = classifyPageWithRule(facts.page, o.S);
-    if (kind.kind === 'blocked' && kind.page !== 'unrecognised')
-      return { kind: 'blocked', page: kind.page, rule, facts };
-    const key = `${poll.id}:${createHash('sha256').update(poll.snapshot).digest('hex')}`;
-    const at = o.timers.now();
-    // why: settled means stable content: the same container and the same printed snapshot across two polls 2 s apart
-    const stable =
-      poll.snapshot.trim() !== '' &&
-      previous !== null &&
-      previous.key === key &&
-      at - previous.at >= STABLE_MS;
-    steps.log?.debug(
-      {
-        view: name,
-        elapsedMs: at - (steps.startedAt ?? at),
-        container: poll.id,
-        snapshotLength: poll.snapshot.length,
-        stable,
-      },
-      'graph poll',
-    );
-    if (stable)
-      return {
-        kind: 'settled',
-        value: poll.value,
-        snapshot: poll.snapshot,
-        polls,
-        facts,
-        rule,
-        pageKind: kind.kind,
-      };
-    previous = { key, at };
-    await o.timers.sleep(o.pollMs, d.signal);
-  }
-}
-
 /**
  * The exploration under the deadline `d`. A step that overruns or fails throws CheapestStepFailed naming it; the
  * deadline's own expiry surfaces as DeadlineExceeded. A poll the classifier reads as a blocked kind (other than
@@ -356,6 +239,7 @@ export async function exploreGraph(
 ): Promise<GraphOutcome> {
   const { timers, S } = o;
   const steps: StepOptions = { ...o.steps, flow: 'graph' };
+  const so: SettleOptions = { timers, pollMs: o.pollMs, S, reserveMs: GRAPH_RESERVE_MS };
   const button = page.getByRole('button', { name: S.results.priceGraphButton, exact: true });
   // why: page locators reach the main frame only; exactly one button by its exact name, or nothing is clicked
   const found = await runStep('find-graph-button', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(button, st));
@@ -367,7 +251,7 @@ export async function exploreGraph(
     o.clicked.push(`button:${S.results.priceGraphButton}`);
   });
   const clickMs = timers.now() - clickAt;
-  const graph = await settle('graph', driver, d, o, steps, async (st) => {
+  const graph = await settle('graph', driver, d, so, steps, async (st) => {
     const ref = appeared(before, await listRegions(page, st));
     const snapshot = await st.race(
       regionOf(page, ref).ariaSnapshot({ timeout: Math.max(1, st.remaining()) }),
@@ -420,7 +304,7 @@ export async function exploreGraph(
   const dd = o.next?.() ?? d;
   const datesAt = timers.now();
   const view = async (name: string, readStep: string): Promise<DatesRead | Blocked> => {
-    const s = await settle(name, driver, dd, o, steps, async (st) => {
+    const s = await settle(name, driver, dd, so, steps, async (st) => {
       const p = await panelOf(container, st);
       const snapshot = await st.race(p.locator.ariaSnapshot({ timeout: Math.max(1, st.remaining()) }));
       return { value: p, id: `panel:${p.index ?? 'dialog'}`, snapshot };
