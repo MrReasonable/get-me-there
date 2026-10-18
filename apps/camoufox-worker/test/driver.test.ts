@@ -50,8 +50,10 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
         resultsReturned: true,
         fetching: false,
         cheapestPriced: true,
+        cheapestSelected: false,
         linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
       },
+      names: [expect.stringMatching(/^From 478/), expect.stringMatching(/^From 451/)],
     });
   });
   it('reads the blocked signals: challenge text, unusual traffic, headings, an account control', async () => {
@@ -93,6 +95,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       resultsReturned: false,
       fetching: false,
       cheapestPriced: false,
+      cheapestSelected: false,
       linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
     });
   });
@@ -292,7 +295,7 @@ describe('settling on stable content (ruling of 2026-10-18)', () => {
     const d = timers.deadline(deadlineMs);
     const lines = memoryLog();
     const driver = createDriver(page, guard({ hops: ['https://www.google.com/travel/flights?q=x'] }));
-    const run = pollUntilSettled(driver, d, timers, 2000, SELECTORS, lines);
+    const run = pollUntilSettled(driver, d, timers, 2000, SELECTORS, { log: lines, startedAt: timers.now() });
     return { run, timers, lines };
   };
   it('a tab named exactly like the evidence settles once its links are stable across two polls', async () => {
@@ -301,8 +304,26 @@ describe('settling on stable content (ruling of 2026-10-18)', () => {
     expect(s.kind).toEqual({ kind: 'results' });
     expect(s.polls).toBe(2);
     expect(lines.lines.filter((l) => l.level === 'debug').map((l) => l.o)).toEqual([
-      { resultsReturned: true, fetching: false, cheapestPriced: true, stable: false, resultLinks: 2 },
-      { resultsReturned: true, fetching: false, cheapestPriced: true, stable: true, resultLinks: 2 },
+      {
+        view: 'best',
+        elapsedMs: 0,
+        resultsReturned: true,
+        fetching: false,
+        cheapestPriced: true,
+        cheapestSelected: false,
+        stable: false,
+        resultLinks: 2,
+      },
+      {
+        view: 'best',
+        elapsedMs: 2000,
+        resultsReturned: true,
+        fetching: false,
+        cheapestPriced: true,
+        cheapestSelected: false,
+        stable: true,
+        resultLinks: 2,
+      },
     ]);
   });
   it('links that change between polls do not settle', async () => {
@@ -424,5 +445,54 @@ describe('clickCheapest (ruling of 2026-10-18)', () => {
       { error: 'TimeoutError', target: 'tab:Cheapest' },
     ]);
     expect(JSON.stringify(lines.lines)).not.toContain('https://');
+  });
+});
+
+// why: ruling of 2026-10-18: the Cheapest view reads the selected tab, and logs which names moved between polls
+describe('the Cheapest view', () => {
+  it('readFacts reports the Cheapest tab selected through aria-selected', async () => {
+    const t = resultsTree({ tab: 'Cheapest from £443' });
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+    const { driver, d } = setup([t]);
+    expect((await driver.readFacts(d)).settle.cheapestSelected).toBe(true);
+  });
+  it('a Cheapest view whose links keep changing logs the changed names (60 characters each) at debug', async () => {
+    const view = (p: number) => {
+      const t = resultsTree({ tab: 'Cheapest from £443', top: [option(p)] });
+      for (const c of descendants([t]))
+        if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+      t.children = (t.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+      return t;
+    };
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([view(400), view(401), view(401)]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const s = await pollUntilSettled(
+      createDriver(page, guard()),
+      timers.deadline(90_000),
+      timers,
+      2000,
+      SELECTORS,
+      {
+        view: 'cheapest',
+        log: lines,
+        startedAt: timers.now(),
+      },
+    );
+    expect(s.polls).toBe(3);
+    const changed = lines.lines.filter((l) => l.msg === 'settle names changed').map((l) => l.o);
+    expect(changed).toEqual([
+      {
+        view: 'cheapest',
+        elapsedMs: 2000,
+        changed: [
+          'From 401 British pounds round trip total. 1 stop flight with',
+          'From 400 British pounds round trip total. 1 stop flight with',
+        ],
+      },
+    ]);
   });
 });

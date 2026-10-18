@@ -646,4 +646,51 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect((await t.session.page(REQ)).answer.kind).toBe('cells');
     expect(page0(t).calls.clicks).toEqual(['button:Close dialogue', `tab:${POP}`]);
   });
+
+  // why: ruling of 2026-10-18 (the Cheapest flow): after the click the Cheapest view gets its own settle budget,
+  // CAMOUFOX_PAGE_TIMEOUT_SECONDS again from the click, within an overall cap of twice that
+  const fetching = n('document', '', [text('Fetching results')]);
+  const cheapestView = () => {
+    const t = resultsTree({ tab: 'Cheapest from £443' });
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+    // the Cheapest view shows no "N results returned." line
+    t.children = (t.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+    return t;
+  };
+  const flow = (firstPolls: number, cheapestPolls: number) =>
+    setup({
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          const g = p.goto.bind(p);
+          p.goto = async (u, o) => {
+            const r = await g(u, o);
+            p.setTrees([...Array(firstPolls).fill(fetching), resultsTree({ tab: 'Cheapest from £443' })]);
+            return r;
+          };
+          p.onClick = (x) => {
+            if (x.role === 'tab') p.setTrees([...Array(cheapestPolls).fill(fetching), cheapestView()]);
+          };
+        };
+      },
+    });
+  it('the Cheapest view settles without the results line, on its own budget from the click', async () => {
+    // 41 fetching polls (82 s), then the first view settles (84 s); after the click 10 more polls (20 s): over the old
+    // single 90 s deadline, within the click's own 90 s
+    const t = flow(41, 10);
+    const r = await t.session.page(REQ);
+    expect(r.answer).toMatchObject({ kind: 'cells', cell: { status: 'price' } });
+    expect(page0(t).calls.clicks).toEqual(['tab:Cheapest from £443']);
+  });
+  it('the overall cap holds: a Cheapest view that never settles ends not-ready within twice the page timeout', async () => {
+    const t = flow(41, 1000);
+    const r = await t.session.page(REQ);
+    expect(r.answer.kind).toBe('not-ready');
+    const elapsed = r.answer.kind === 'not-ready' ? r.answer.elapsedMs : -1;
+    expect(elapsed).toBeGreaterThan(90_000);
+    expect(elapsed).toBeLessThanOrEqual(180_000);
+    // the second budget is 90 s from the click, which came after the first view's 84 s
+    expect(elapsed).toBe(84_000 + 90_000);
+  });
 });

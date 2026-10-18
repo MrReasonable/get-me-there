@@ -6,14 +6,14 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
     expect(SELECTORS_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}-/);
     expect(SELECTORS.version).toBe(SELECTORS_VERSION);
   });
-  it('reports every flag; only RESULTS_VERIFIED is true before the recordings, and grid stays off in WP14', () => {
+  it('reports every flag; RESULTS_VERIFIED and SOCS_STABLE are true (2026-10-18), and grid stays off in WP14', () => {
     expect(flagsOf()).toEqual({
       RESULTS_VERIFIED: true,
       FORM_VERIFIED: false,
       CHEAPEST_FLOW_VERIFIED: false,
       VIEW_MORE_ADDS_CHEAPER: false,
       NO_FLIGHTS_VERIFIED: false,
-      SOCS_STABLE: false,
+      SOCS_STABLE: true,
       GRID_VERIFIED: false,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);

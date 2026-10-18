@@ -1,18 +1,22 @@
 import type { PageFacts } from './classify.js';
 import type { SettleFacts } from './driver.js';
 
+/** Which tab the page shows: the first view (Best) or the Cheapest view after its click. */
+export type View = 'best' | 'cheapest';
+
 /**
- * Settled (spec §2; brief §9; prov-002, PIE-05; operator ruling of 2026-10-18): a results page is read only when the
- * "<N> results returned." line is present, no "Fetching results" is visible outside the Cheapest tab (the tab keeps a
- * hidden loading label in its name once loaded), the Cheapest tab's name carries a price, there is at least one result
- * link, and the result links (their names and count) are unchanged across two polls at least STABLE_MS apart. The
- * session polls this within the page deadline, classifying blocked kinds on every poll.
+ * Settled (spec §2; brief §9; prov-002, PIE-05; operator rulings of 2026-10-18): no "Fetching results" is visible
+ * outside the Cheapest tab (the tab keeps a hidden loading label in its name), the Cheapest tab's name carries a price,
+ * and there is at least one result link. The Best view also needs the "<N> results returned." line; the Cheapest view
+ * shows none, and needs its tab selected instead. The links must also hold still across two polls (stableAcross).
  */
 export function isSettled(
   page: Pick<PageFacts, 'resultLinks'>,
-  settle: Omit<SettleFacts, 'linkSignature'>,
+  settle: Pick<SettleFacts, 'resultsReturned' | 'fetching' | 'cheapestPriced' | 'cheapestSelected'>,
+  view: View = 'best',
 ): boolean {
-  return settle.resultsReturned && !settle.fetching && settle.cheapestPriced && page.resultLinks > 0;
+  const common = !settle.fetching && settle.cheapestPriced && page.resultLinks > 0;
+  return common && (view === 'best' ? settle.resultsReturned : settle.cheapestSelected);
 }
 
 /** The least time between the two polls whose links must agree. */

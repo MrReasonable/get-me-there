@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import type { Logger } from '@gmt/core';
 import { classifyPage, type PageFacts, type PageKind } from './classify.js';
 import { type GuardState, onAllowlist } from './guard.js';
-import { isSettled, type Previous, stableAcross } from './ready.js';
+import { isSettled, type Previous, stableAcross, type View } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
 
@@ -83,6 +83,8 @@ export interface SettleFacts {
   /** "Fetching results" visible outside the tab (ruling of 2026-10-18). */
   fetching: boolean;
   cheapestPriced: boolean;
+  /** The Cheapest tab is the selected one (`aria-selected`), which settles the Cheapest view (ruling of 2026-10-18). */
+  cheapestSelected: boolean;
   /** A short hash of the result links' names, compared across polls (stable content). */
   linkSignature: string;
 }
@@ -101,7 +103,8 @@ export interface Driver {
   goto(url: string, d: Deadline): Promise<void>;
   /** The page's heading names (what a recording stores of a page it could not classify). */
   headingNames(d: Deadline): Promise<string[]>;
-  readFacts(d: Deadline): Promise<{ page: PageFacts; settle: SettleFacts }>;
+  /** One poll: the page facts, the settle facts and the result names the signature hashes (never recorded twice). */
+  readFacts(d: Deadline): Promise<{ page: PageFacts; settle: SettleFacts; names: Array<string | null> }>;
   resultNames(d: Deadline): Promise<Array<string | null>>;
   listFacts(d: Deadline): Promise<ListFacts>;
   formFacts(d: Deadline): Promise<FormFacts>;
@@ -212,9 +215,12 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         resultsReturned: await has(page.getByText(S.results.resultsReturned), d),
         fetching: visibleFetching > visibleInTabs,
         cheapestPriced: cheapestTabs.length === 1 && cheapestTabs.every((t) => /\d/.test(t.name)),
+        cheapestSelected:
+          inList === 1 &&
+          (await d.race(tabsInList.nth(0).getAttribute('aria-selected', timeoutOf(d)))) === 'true',
         linkSignature: createHash('sha256').update(JSON.stringify(names)).digest('hex').slice(0, 16),
       };
-      return { page: facts, settle };
+      return { page: facts, settle, names };
     },
 
     resultNames,
@@ -316,6 +322,22 @@ export interface Settled {
   polls: number;
 }
 
+/** How a poll settles and what it logs: the view, the debug log, and the page's start (for elapsed times). */
+export interface PollOptions {
+  view?: View;
+  log?: Logger;
+  /** timers.now() when the page started; debug lines carry elapsed ms from it. */
+  startedAt?: number;
+}
+
+/** The first 60 characters of each name present in one poll's links and absent from the other's. */
+function changedNames(before: ReadonlyArray<string | null>, after: ReadonlyArray<string | null>): string[] {
+  const a = new Set(before);
+  const b = new Set(after);
+  const out = [...after.filter((x) => !a.has(x)), ...before.filter((x) => !b.has(x))];
+  return [...new Set(out)].map((x) => (x ?? '(unreadable)').slice(0, 60));
+}
+
 /**
  * Polls `readFacts` every `pollMs` within the deadline (spec §2 "settled"; brief Task 14.4 rule 4): a blocked kind other
  * than `unrecognised` stops at once on any poll; a no-flights page stops; a settled page returns however it classified
@@ -327,11 +349,16 @@ export async function pollUntilSettled(
   timers: Timers,
   pollMs: number,
   S: Selectors = SELECTORS,
-  log?: Logger,
+  o: PollOptions = {},
 ): Promise<Settled> {
+  const view = o.view ?? 'best';
+  const log = o.log;
+  const startedAt = o.startedAt ?? timers.now();
   let previous: Previous | null = null;
+  let previousNames: Array<string | null> | null = null;
   for (let polls = 1; ; polls++) {
-    const facts = await driver.readFacts(d);
+    const read = await driver.readFacts(d);
+    const facts = { page: read.page, settle: read.settle };
     const kind = classifyPage(facts.page, S);
     if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
       return { kind, facts, polls };
@@ -340,22 +367,41 @@ export async function pollUntilSettled(
       links: facts.page.resultLinks,
       at: timers.now(),
     };
-    const settled = isSettled(facts.page, facts.settle);
+    const settled = isSettled(facts.page, facts.settle, view);
     // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least 2 s apart
     const stable = settled && stableAcross(previous, current);
-    // why: one debug line a poll, the four booleans and the link count only, so a page that never settles is diagnosable
+    const elapsedMs = timers.now() - startedAt;
+    // why: one debug line a poll: the view, the booleans, the link count and the elapsed time only, so a page that
+    // never settles is diagnosable
     log?.debug(
       {
+        view,
+        elapsedMs,
         resultsReturned: facts.settle.resultsReturned,
         fetching: facts.settle.fetching,
         cheapestPriced: facts.settle.cheapestPriced,
+        cheapestSelected: facts.settle.cheapestSelected,
         stable,
         resultLinks: facts.page.resultLinks,
       },
       'settle poll',
     );
     if (stable) return { kind, facts, polls };
+    // why: ruling of 2026-10-18: on the Cheapest view, which names moved between two settled polls (60 characters
+    // each), so a view that never holds still shows why
+    if (
+      view === 'cheapest' &&
+      settled &&
+      previous !== null &&
+      previousNames !== null &&
+      previous.signature !== current.signature
+    )
+      log?.debug(
+        { view, elapsedMs, changed: changedNames(previousNames, read.names) },
+        'settle names changed',
+      );
     previous = settled ? current : null;
+    previousNames = settled ? read.names : null;
     await timers.sleep(pollMs, d.signal);
   }
 }

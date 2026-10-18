@@ -10,6 +10,7 @@ import {
   type WorkerAnswer,
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
+import { type PageBudget, pageBudget } from './budget.js';
 import type { CooldownStore } from './cooldown.js';
 import {
   type ContextLike,
@@ -163,7 +164,10 @@ export class PageSession {
 
     this.busySince = this.d.clock.now();
     const started = this.d.timers.now();
-    const deadline = this.d.timers.deadline(this.d.pageTimeoutMs);
+    // why: ruling of 2026-10-18: the first view has CAMOUFOX_PAGE_TIMEOUT_SECONDS; the Cheapest flow gets the same again
+    // from its click (budget.next), never past twice that from the start. `budget.d` is whichever deadline is current.
+    const budget = pageBudget(this.d.timers, this.d.pageTimeoutMs, started);
+    const deadline = budget.d;
     let stage: Stage = 'launch';
     let contacted = false;
     let page: PageLike | null = null;
@@ -187,7 +191,7 @@ export class PageSession {
       } else {
         const p = await deadline.race(c.newPage());
         page = p;
-        deadline.onExpire(() => {
+        budget.onExpire(() => {
           void p.close().catch(() => undefined);
         });
         const guard = await deadline.race(installGuard(c, p, this.d.log, this.S));
@@ -206,7 +210,7 @@ export class PageSession {
           stop = refused;
           answer = this.blockedPlaceholder(refused);
         } else {
-          const r = await this.read(driver, req, deadline);
+          const r = await this.read(driver, req, budget, started);
           answer = r.answer;
           stop = r.stop;
         }
@@ -214,13 +218,13 @@ export class PageSession {
     } catch (e) {
       preGotoFailed = !contacted;
       answer =
-        e instanceof DeadlineExceeded || deadline.expired()
+        e instanceof DeadlineExceeded || budget.d.expired()
           ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started) }
           : { kind: 'browser-error', stage, detail: detailOf(e) };
     } finally {
       this.d.pacer.release();
     }
-    deadline.clear();
+    budget.d.clear();
 
     // Rule 5: after goto, on every path, the SOCS read-back by value, then the page closed, each under its own bound.
     let discard = preGotoFailed;
@@ -285,10 +289,18 @@ export class PageSession {
   private async read(
     driver: Driver,
     req: PageRequest,
-    d: ReturnType<Timers['deadline']>,
+    budget: PageBudget,
+    started: number,
   ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
     const S = this.S;
-    let settled: Settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, this.d.log);
+    let d = budget.d;
+    const poll = (view: 'best' | 'cheapest') =>
+      pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
+        view,
+        log: this.d.log,
+        startedAt: started,
+      });
+    let settled: Settled = await poll('best');
     if (settled.kind.kind === 'blocked')
       return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
     if (settled.kind.kind === 'no-flights')
@@ -296,13 +308,14 @@ export class PageSession {
     const form = checkForm(await driver.formFacts(d), req);
     if (form !== 'ok') return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
     // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
-    const after = async (): Promise<WorkerAnswer | null> => {
-      settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, this.d.log);
+    const after = async (view: 'best' | 'cheapest'): Promise<WorkerAnswer | null> => {
+      settled = await poll(view);
       if (settled.kind.kind === 'results') return null;
       return this.blockedPlaceholder(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
     };
     if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
       let read = true;
+      d = budget.next();
       try {
         await driver.clickCheapest(d, this.d.log);
       } catch (e) {
@@ -313,13 +326,13 @@ export class PageSession {
         read = false;
       }
       if (read) {
-        const stop = await after();
+        const stop = await after('cheapest');
         if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
       }
     }
     if (S.VIEW_MORE_ADDS_CHEAPER) {
       await driver.click('button', S.results.viewMoreButton, d);
-      const stop = await after();
+      const stop = await after(settled.facts.settle.cheapestSelected ? 'cheapest' : 'best');
       if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
     }
     const list = readList(await driver.listFacts(d), req);

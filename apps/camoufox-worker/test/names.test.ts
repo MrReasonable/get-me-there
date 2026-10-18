@@ -24,6 +24,7 @@ describe('parseOptionName (dated grammar)', () => {
       to: 'John F. Kennedy International Airport',
       interstitials: [],
       durationMinutes: 760,
+      operatedBy: null,
     });
   });
   it('thousands separators are exact', () => {
@@ -64,6 +65,37 @@ describe('parseOptionName (dated grammar)', () => {
       durationMinutes: 494,
       carriers: 'Example Air',
     });
+  });
+  // why: ruling of 2026-10-18 (the view-more recording): an "Operated by …." sentence may follow the carriers, in both
+  // recorded forms; the marketing carrier stays the one named first (synthetic carriers here)
+  it.each([
+    [
+      'Operated by Example Regional as Example Connect for Example Airlines.',
+      'Example Regional as Example Connect for Example Airlines',
+    ],
+    ['Operated by EXAMPLE Airways.', 'EXAMPLE Airways'],
+  ])('reads "%s" with the marketing carrier first', (sentence, operator) => {
+    const name = ONE_STOP.replace(
+      '1 stop flight with Tap Air Portugal.',
+      `1 stop flight with Example Air and Other Air. ${sentence}`,
+    );
+    expect(parseOptionName(name)).toMatchObject({
+      carriers: 'Example Air and Other Air',
+      operatedBy: operator,
+      stops: 1,
+    });
+  });
+  it('a name without the sentence has no operator', () => {
+    expect(parseOptionName(ONE_STOP)?.operatedBy).toBeNull();
+  });
+  it.each([
+    ['an operator sentence of another form', 'Flown by Example Regional.'],
+    ['two operator sentences', 'Operated by A. Operated by B.'],
+    ['an empty operator', 'Operated by .'],
+  ])('refuses %s', (_n, sentence) => {
+    expect(
+      parseOptionName(ONE_STOP.replace('Tap Air Portugal.', `Tap Air Portugal. ${sentence}`)),
+    ).toBeNull();
   });
   it('reads two stopover sentences in the tail', () => {
     const two = ONE_STOP.replace('1 stop flight', '2 stops flight').replace(
@@ -138,3 +170,27 @@ describe.skipIf(!present)(skipTitle('recorded result names parse (Task 14.2 resu
     for (const n of names) expect(parseOptionName(n)?.stops).toBe(0);
   });
 });
+
+// why: the ruling's evidence: the view-more recording's "Operated by" names parse, the marketing carrier first
+const viewMore = recordingsPresentForKind(ROOT, 'view-more');
+describe.skipIf(!viewMore)(
+  skipTitle('recorded operated-by names parse (Task 14.2 view-more kind)', viewMore),
+  () => {
+    it('each recorded "Operated by" name parses with the carrier named after "flight with"', () => {
+      const names: string[] = [];
+      const dir = join(ROOT, 'view-more');
+      for (const day of readdirSync(dir).filter((x) => statSync(join(dir, x)).isDirectory()))
+        for (const f of readdirSync(join(dir, day)).filter((x) => x.endsWith('.facts.json'))) {
+          const raw: unknown = JSON.parse(readFileSync(join(dir, day, f), 'utf8'));
+          if (typeof raw === 'object' && raw !== null && 'names' in raw && Array.isArray(raw.names))
+            for (const n of raw.names)
+              if (typeof n === 'string' && n.includes('. Operated by ')) names.push(n);
+        }
+      expect(names.length).toBeGreaterThan(0);
+      for (const n of names) {
+        const marketing = /flight with (.+?)\. Operated by /.exec(n)?.[1];
+        expect(parseOptionName(n)?.carriers, n.slice(0, 60)).toBe(marketing);
+      }
+    });
+  },
+);

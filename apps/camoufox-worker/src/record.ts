@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type BlockedPage, CAMOUFOX_JS_VERSION, type Clock, type Logger, systemClock } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
+import { type PageBudget, pageBudget } from './budget.js';
 import { classifyPage } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
@@ -22,6 +23,7 @@ import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
 import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
+import type { View } from './ready.js';
 import {
   parseRecordArgs,
   RECORDED_BY,
@@ -34,7 +36,7 @@ import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
-import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
+import { bounded, DeadlineExceeded, realTimers, type Timers } from './timers.js';
 import { pageUrl, probeUrl } from './url.js';
 
 export { stderrLog } from './log.js';
@@ -150,7 +152,11 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         await claim(pacer, deps, ctx);
         const c: ContextLike = context ?? (await deps.launch(profile));
         context = c;
-        const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
+        // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
+        // within twice that from the start (budget.next in interact); `budget.d` is the current deadline
+        const pageStart = deps.timers.now();
+        const budget = pageBudget(deps.timers, cfg.pageTimeoutSeconds * 1000, pageStart);
+        const d = budget.d;
         let outcome: Outcome | null = null;
         let failure: unknown = null;
         let page: PageLike | null = null;
@@ -166,14 +172,15 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             const p = await d.race(c.newPage());
             page = p;
             // why: --no-flights reads what appeared once the deadline passes, so its page stays open until then
-            if (args.kind !== 'no-flights') d.onExpire(() => void p.close().catch(() => undefined));
+            if (args.kind !== 'no-flights') budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
             const driver = createDriver(p, guard, deps.selectors);
             outcome = await interact(
               driver,
               p,
               guard,
-              d,
+              budget,
+              pageStart,
               deps,
               args.kind,
               pageUrl({ ...req, gl: cfg.pointOfSale }),
@@ -182,7 +189,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         } catch (e) {
           failure = e;
         } finally {
-          d.clear();
+          budget.d.clear();
         }
         // Rule 5, as the server: after the whole interaction, the read-back by value, then the page closed, bounded.
         let back: ReadBack | 'overran' = 'missing';
@@ -322,11 +329,15 @@ async function interact(
   driver: Driver,
   page: PageLike,
   guard: GuardState,
-  d: Deadline,
+  budget: PageBudget,
+  pageStart: number,
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
 ): Promise<Outcome> {
+  let d = budget.d;
+  const poll = (S: Selectors, view: View) =>
+    pollUntilSettled(driver, d, deps.timers, deps.pollMs, S, { view, log: deps.log, startedAt: pageStart });
   const stepMs: Record<string, number> = {};
   const t0 = deps.timers.now();
   const stop = (p: BlockedPage): Outcome => ({
@@ -345,7 +356,7 @@ async function interact(
   stepMs.goto = deps.timers.now() - t0;
   let settled: Settled;
   try {
-    settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, reading(deps.selectors), deps.log);
+    settled = await poll(reading(deps.selectors), 'best');
   } catch (e) {
     // why: rule 4 (prov-int I3): a --no-flights page that never settles is "what appeared", read once more
     if (!(e instanceof DeadlineExceeded) || kind !== 'no-flights') throw e;
@@ -376,6 +387,7 @@ async function interact(
   if (kind === 'cheapest' || kind === 'view-more') {
     if (kind === 'cheapest' && settled.facts.page.cheapestTabs.length === 1) {
       // why: ruling of 2026-10-18: the tab's own information pop-up closed through its exact button, then the tab
+      d = budget.next();
       try {
         clicked.push(...(await driver.clickCheapest(d, deps.log)));
       } catch (e) {
@@ -389,7 +401,7 @@ async function interact(
       clicked.push(`button:${deps.selectors.results.viewMoreButton}`);
     }
     if (clicked.length > 0) {
-      settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, deps.selectors, deps.log);
+      settled = await poll(deps.selectors, kind === 'cheapest' ? 'cheapest' : 'best');
       if (settled.kind.kind !== 'results')
         return stop(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
     }
@@ -461,14 +473,10 @@ async function consentProbe(
       }
       let settled: Settled | null = null;
       if (blocked === null) {
-        settled = await pollUntilSettled(
-          probe,
-          d,
-          deps.timers,
-          deps.pollMs,
-          reading(deps.selectors),
-          deps.log,
-        );
+        settled = await pollUntilSettled(probe, d, deps.timers, deps.pollMs, reading(deps.selectors), {
+          log: deps.log,
+          startedAt: t0,
+        });
         if (settled.kind.kind === 'blocked' && settled.kind.page !== 'consent-unhandled')
           blocked = settled.kind.page;
       }

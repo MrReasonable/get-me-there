@@ -217,7 +217,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(t.timers.sleeps.filter((ms) => ms >= 26_000)).toEqual([26_000, 26_000]);
     expect(t.contexts[0]?.added).toHaveLength(3);
   });
-  it('rule 2: a read-back other than same leaves SOCS_STABLE false and says an operator ruling is needed', async () => {
+  it('rule 2: a read-back other than same says SOCS_STABLE needs an operator ruling', async () => {
     const t = setup();
     let page = 0;
     const r = await record(t.ctx([...Q, '--stability']), cfg, {
@@ -230,7 +230,6 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       },
     });
     expect(r).toBe(EX_UNAVAILABLE);
-    expect(SELECTORS.SOCS_STABLE).toBe(false);
     expect(t.err.join()).toMatch(/operator ruling/);
   });
   it('rule 3: the consent probe uses a throwaway profile, no SOCS, the probe guard and no click; it starts no cool-down and deletes its profile', async () => {
@@ -334,6 +333,52 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual(['button:Close dialogue', `tab:${POP}`]);
     const facts = JSON.parse(readFileSync(join(t.root, 'cheapest/2026-10-18/1.facts.json'), 'utf8'));
     expect(facts.clicked).toEqual(['button:Close dialogue', 'tab:Cheapest']);
+  });
+  // why: ruling of 2026-10-18: the Cheapest view settles on its selected tab (no results line), on its own budget
+  // from the click, within twice the page timeout
+  const cheapestFlow = (firstPolls: number, cheapestPolls: number) => {
+    const t = setup();
+    const fetching = n('document', '', [text('Fetching results')]);
+    const view = () => {
+      const v = resultsTree({ tab: 'Cheapest from £443' });
+      for (const c of descendants([v]))
+        if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+      v.children = (v.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+      return v;
+    };
+    const deps: RecordDeps = {
+      ...t.deps,
+      launch: async (prof) => {
+        const c = await t.deps.launch(prof);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            const g = pg.goto.bind(pg);
+            pg.goto = async (u, o) => {
+              const r = await g(u, o);
+              pg.setTrees([...Array(firstPolls).fill(fetching), resultsTree({ tab: 'Cheapest from £443' })]);
+              return r;
+            };
+            pg.onClick = (x) => {
+              if (x.role === 'tab') pg.setTrees([...Array(cheapestPolls).fill(fetching), view()]);
+            };
+          };
+        return c;
+      },
+    };
+    return { t, deps };
+  };
+  it('--cheapest: the Cheapest view settles without the results line, on its own budget from the click', async () => {
+    const { t, deps } = cheapestFlow(41, 10);
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, deps)).toBe(0);
+    expect(written(t.root)).toContain('cheapest/2026-10-18/1.facts.json');
+  });
+  it('--cheapest: a Cheapest view that never settles ends at the cap, nothing written, no cool-down', async () => {
+    const { t, deps } = cheapestFlow(41, 1000);
+    const before = t.timers.now();
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/did not settle/);
+    expect(written(t.root)).toEqual([]);
+    expect(t.timers.now() - before).toBeLessThanOrEqual(180_000 + 10_000);
   });
   it('--cheapest whose tab cannot be clicked refuses plainly, with no cool-down', async () => {
     const t = setup();

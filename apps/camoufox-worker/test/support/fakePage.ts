@@ -19,6 +19,8 @@ export interface FakeNode {
   hang?: boolean;
   /** Not visible (a hidden label inside another control's name). */
   hidden?: boolean;
+  /** `aria-selected="true"` (a selected tab). */
+  selected?: boolean;
 }
 export const n = (
   role: string,
@@ -146,7 +148,13 @@ export class FakeLocator implements LocatorLike {
   }
   getAttribute(name: string, o?: { timeout?: number }): Promise<string | null> {
     return this.read(o, (x) =>
-      name === 'aria-label' ? (x.ariaLabel === undefined ? (x.name ?? null) : x.ariaLabel) : null,
+      name === 'aria-label'
+        ? x.ariaLabel === undefined
+          ? (x.name ?? null)
+          : x.ariaLabel
+        : name === 'aria-selected'
+          ? String(x.selected === true)
+          : null,
     );
   }
   textContent(o?: { timeout?: number }): Promise<string | null> {
@@ -158,6 +166,8 @@ export class FakeLocator implements LocatorLike {
   click(o?: { timeout?: number }): Promise<void> {
     return this.read(o, (x) => {
       this.page.calls.clicks.push(`${x.role ?? ''}:${x.name ?? ''}`);
+      // why: as in the browser, a clicked tab becomes the selected one
+      if (x.role === 'tab') x.selected = true;
       this.page.onClick(x);
     });
   }

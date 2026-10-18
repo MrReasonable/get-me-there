@@ -8,8 +8,9 @@
  * "Cheapest from £…", "N results returned.", unnamed lists, each after a heading "Top departing flights" or
  * "Other departing flights", of `listitem`s each holding one `link` named with the whole option, the "Date grid" button, "Currency GBP" and
  * "Location·United Kingdom"), and the consent page's heading from the signed-out test. Everything else (the search
- * form's controls, the Cheapest flow, "View more", the no-flights line, SOCS stability, the grid) is unverified until
- * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked.
+ * form's controls, the Cheapest flow, "View more", the no-flights line, the grid) is unverified until
+ * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked. SOCS stability
+ * is verified by the 2026-10-18 socs-stability recording (operator ruling).
  */
 export const SELECTORS_VERSION = '2026-10-18-results';
 
@@ -140,7 +141,8 @@ export const SELECTORS: Selectors = {
   CHEAPEST_FLOW_VERIFIED: false,
   VIEW_MORE_ADDS_CHEAPER: false,
   NO_FLIGHTS_VERIFIED: false,
-  SOCS_STABLE: false,
+  // why: set 2026-10-18 by operator ruling: the socs-stability recording's passes 1–3 all read the cookie back `same`
+  SOCS_STABLE: true,
   // why: decision 69: grid mode is not built in WP14; this flag stays false here whatever a recording shows.
   GRID_VERIFIED: false,
 };
@@ -148,6 +150,8 @@ export const SELECTORS: Selectors = {
 /** The recording that proved each true flag (TS-13): its date and what it was. */
 export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
   RESULTS_VERIFIED: '2026-10-18 feasibility load (signed in, through camofox-browser; brief introduction)',
+  SOCS_STABLE:
+    '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
 };
 
 /** The flags as `/v1/status` reports them. */

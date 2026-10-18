@@ -10,7 +10,9 @@
  * duration 12 hrs 40 min. Stopover (1 of 1) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon. Select
  * flight"
  */
-export const GRAMMAR_VERSION = '2026-10-18-feasibility';
+// why: re-dated 2026-10-18 from the recordings (operator ruling): the "Operated by …." sentence after the carriers,
+// and runs of spaces between the closing sentences
+export const GRAMMAR_VERSION = '2026-10-18-recordings';
 
 export interface Interstitial {
   sentence: string;
@@ -27,6 +29,8 @@ export interface ParsedOption {
   from: string;
   to: string;
   interstitials: string[];
+  /** The operating carrier when the name states one ("Operated by …."), else null; `carriers` stays the marketing one. */
+  operatedBy: string | null;
   durationMinutes: number;
 }
 
@@ -65,6 +69,8 @@ function grammarFor(interstitials: readonly Interstitial[]): RegExp {
   return new RegExp(
     `^From (?<price>[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+) British pounds round trip total\\.${inter} ` +
       '(?<stops>Nonstop|Non-stop|[0-9]+ stops?) flight with (?<carriers>[^.]+(?:\\.[^ .][^.]*)*)\\. ' +
+      // why: observed 2026-10-18 (the view-more recording): "Operated by X as Y for Z." or "Operated by X.", once
+      '(?:Operated by (?<operator>[^.]+)\\. )?' +
       'Leaves (?<from>.+?) at [0-9]{1,2}:[0-9]{2} on [A-Z][a-z]+, (?<month>[A-Z][a-z]+) (?<day>[0-9]{1,2}) ' +
       `and arrives at (?<to>.+?) at [0-9]{1,2}:[0-9]{2} on ${DATE}\\. ` +
       // why: observed 2026-10-18: a name with no stopover sentence carries a run of spaces before "Select flight"; only
@@ -115,5 +121,6 @@ export function parseOptionName(
     interstitials:
       inter === '' ? [] : interstitials.filter((i) => inter.includes(i.sentence)).map((i) => i.sentence),
     durationMinutes: minutesOf(group(m, 'duration')),
+    operatedBy: m.groups?.operator ?? null,
   };
 }
