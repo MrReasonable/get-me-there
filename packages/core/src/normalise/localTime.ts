@@ -58,11 +58,12 @@ export function parseVendorTime(value: string): VendorTimeParts {
  * why: `tzOffset` is not a validator. It caches offsets under a key that is `""` on ICU builds that
  * print a zero offset as "GMT", and falls back to an unanchored `±HH` regex on the zone string, so
  * `''`, `'Garbage-05'` and `'+05:30'` can all yield a number (review arch-001). `Intl.DateTimeFormat`
- * throws RangeError on an unknown zone; offset-form strings are refused before it, because an
- * airport zone without DST rules would hash wrong wall times.
+ * throws RangeError on an unknown zone. Offset-form strings (`'+05:30'`) are refused because an
+ * airport zone without DST rules would hash wrong wall times; they, like `'GMT'` and `'EST'`, have
+ * no `/`, so the region check refuses them (and `Etc/GMT+5`, a real region zone, is accepted).
  */
 export function requireZone(tz: string | null): string {
-  if (tz === null || /^[+-]\d/.test(tz) || (!tz.includes('/') && tz !== 'UTC')) {
+  if (tz === null || (!tz.includes('/') && tz !== 'UTC')) {
     throw new NormalisationError('unknown-airport-tz', `time zone ${JSON.stringify(tz)}`);
   }
   try {
@@ -86,7 +87,9 @@ export function wallToInstant(p: WallTime, tz: string): number {
   const wall = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s, p.ms);
   const before = tzOffset(tz, new Date(wall - 24 * HOUR_MS));
   const after = tzOffset(tz, new Date(wall + 24 * HOUR_MS));
-  const candidates = [wall - before * MINUTE_MS, wall - after * MINUTE_MS].sort((a, b) => a - b);
+  // why: an overlap needs the offset to fall, so `before > after` and the first occurrence is
+  // already first in this list; a gap leaves at most one valid candidate. No sort is needed.
+  const candidates = [wall - before * MINUTE_MS, wall - after * MINUTE_MS];
   const valid = candidates.filter((c) => tzOffset(tz, new Date(c)) * MINUTE_MS === wall - c);
   // why: no valid candidate means the wall time sits in a gap; reading it with the offset in
   // force before the gap lands after the gap, i.e. shifted forward by the gap length.
@@ -99,8 +102,8 @@ export function localMinute(instantMs: number, tz: string): string {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
 }
 
+// why: `Z` has no digits, so it falls through to 0 without a special case.
 function suffixOffsetMinutes(suffix: string): number {
-  if (suffix === 'Z') return 0;
   const sign = suffix.startsWith('-') ? -1 : 1;
   const digits = suffix.slice(1).replace(':', '');
   return sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2, 4)));
@@ -126,7 +129,7 @@ export function vendorInstant(value: string, timeKind: TimeKind, tz: string): nu
     throw new NormalisationError('bad-local-time', `offset time without offset ${JSON.stringify(value)}`);
   }
   const wall = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s, p.ms);
-  return wall - suffixOffsetMinutes(p.suffix ?? 'Z') * MINUTE_MS;
+  return wall - (p.suffix === undefined ? 0 : suffixOffsetMinutes(p.suffix)) * MINUTE_MS;
 }
 
 /**
