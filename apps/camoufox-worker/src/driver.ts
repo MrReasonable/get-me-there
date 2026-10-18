@@ -1,0 +1,228 @@
+/**
+ * The locator-based page driver (decision 69 round 2, items 5 and 6; brief §7 and §9). Roles and accessible names are
+ * read through Playwright locators (`getByRole(role, { name })`, `getByText`, a link's `aria-label` or, when absent,
+ * its text); the printed aria snapshot is never parsed. Every call takes the remaining page deadline as its own
+ * `timeout` where the API has one, and races the deadline, whose expiry closes the page.
+ *
+ * The browser shapes below are the narrow structural subset of playwright-core 1.59.1's `BrowserContext`, `Page`,
+ * `Frame`, `Locator`, `Route` and `Request` the worker uses (verified in `types/types.d.ts`); the real objects satisfy
+ * them, and the tests' fakes implement them.
+ */
+import type { PageFacts } from './classify.js';
+import type { GuardState } from './guard.js';
+import { type Role, SELECTORS, type Selectors } from './selectors.js';
+import type { Deadline } from './timers.js';
+
+export interface LocatorLike {
+  count(): Promise<number>;
+  nth(index: number): LocatorLike;
+  getAttribute(name: string, options?: { timeout?: number }): Promise<string | null>;
+  textContent(options?: { timeout?: number }): Promise<string | null>;
+  inputValue(options?: { timeout?: number }): Promise<string>;
+  click(options?: { timeout?: number }): Promise<void>;
+  getByRole(role: Role, options?: { name?: string | RegExp; exact?: boolean }): LocatorLike;
+}
+export interface FrameLike {
+  url(): string;
+  parentFrame(): FrameLike | null;
+}
+export interface PageLike {
+  goto(url: string, options?: { timeout?: number; waitUntil?: 'domcontentloaded' }): Promise<unknown>;
+  url(): string;
+  frames(): FrameLike[];
+  on(event: 'framenavigated', listener: (frame: FrameLike) => void): unknown;
+  getByRole(role: Role, options?: { name?: string | RegExp; exact?: boolean }): LocatorLike;
+  getByText(text: string | RegExp, options?: { exact?: boolean }): LocatorLike;
+  close(): Promise<void>;
+}
+export interface RequestLike {
+  url(): string;
+  isNavigationRequest(): boolean;
+  redirectedFrom(): RequestLike | null;
+  frame(): FrameLike;
+}
+export interface RouteLike {
+  request(): RequestLike;
+  abort(errorCode?: string): Promise<void>;
+  fallback(): Promise<void>;
+}
+export interface CookieLike {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+}
+export interface CookieInput {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: 'Strict' | 'Lax' | 'None';
+}
+export interface ContextLike {
+  cookies(urls?: string | string[]): Promise<CookieLike[]>;
+  addCookies(cookies: CookieInput[]): Promise<void>;
+  route(url: string, handler: (route: RouteLike, request: RequestLike) => unknown): Promise<void>;
+  on(event: 'request', listener: (request: RequestLike) => void): unknown;
+  newPage(): Promise<PageLike>;
+  close(): Promise<void>;
+}
+
+/** Readiness facts (spec §2 "settled"; brief §9): read beside the page facts on every poll. */
+export interface SettleFacts {
+  resultsReturned: boolean;
+  fetching: boolean;
+  cheapestPriced: boolean;
+}
+/** The list reader's input (brief Task 14.3): one `names` entry per result link, `null` when unreadable or too long. */
+export interface ListFacts {
+  names: Array<string | null>;
+  cheapestTabName: string;
+  resultsStated: number | null;
+  currencyName: string | null;
+  locationName: string | null;
+}
+/** The search form's fields as the page shows them (brief Task 14.3), or null when the controls are absent. */
+export type FormFacts = { tripType: string; passengers: string; departure: string; return: string } | null;
+
+export interface Driver {
+  goto(url: string, d: Deadline): Promise<void>;
+  readFacts(d: Deadline): Promise<{ page: PageFacts; settle: SettleFacts }>;
+  resultNames(d: Deadline): Promise<Array<string | null>>;
+  listFacts(d: Deadline): Promise<ListFacts>;
+  formFacts(d: Deadline): Promise<FormFacts>;
+  click(role: Role, name: string, d: Deadline): Promise<void>;
+}
+
+/** The deadline's remaining time as a Playwright timeout; never 0, which Playwright reads as "no timeout". */
+const timeoutOf = (d: Deadline): { timeout: number } => ({ timeout: Math.max(1, d.remaining()) });
+
+/** A locator's accessible name as the brief reads it: `aria-label`, else the text; `null` when neither is readable. */
+async function nameOf(l: LocatorLike, d: Deadline): Promise<string | null> {
+  const label = await d.race(l.getAttribute('aria-label', timeoutOf(d)));
+  if (label !== null) return label;
+  return d.race(l.textContent(timeoutOf(d)));
+}
+
+async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
+  return d.race(l.count());
+}
+
+/** The driver over one page; `guard` is that page's guard state (hops and frame URLs). */
+export function createDriver(page: PageLike, guard: GuardState, S: Selectors = SELECTORS): Driver {
+  const resultLinks = (): LocatorLike =>
+    page.getByRole('list', { name: S.results.resultLists }).getByRole('listitem').getByRole('link');
+  const has = async (l: LocatorLike, d: Deadline): Promise<boolean> => (await countOf(l, d)) > 0;
+  const firstName = async (l: LocatorLike, d: Deadline): Promise<string | null> =>
+    (await countOf(l, d)) === 0 ? null : nameOf(l.nth(0), d);
+
+  return {
+    async goto(url, d) {
+      await d.race(page.goto(url, { ...timeoutOf(d), waitUntil: 'domcontentloaded' }));
+    },
+
+    async readFacts(d) {
+      const url = page.url();
+      const accountButtons = await countOf(page.getByRole('button', { name: S.blocked.accountControl }), d);
+      const accountLinks = await countOf(page.getByRole('link', { name: S.blocked.accountControl }), d);
+      const allTabs = page.getByRole('tab', { name: S.results.cheapestTab });
+      const tabsInList = page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab });
+      const total = await countOf(allTabs, d);
+      const inList = await countOf(tabsInList, d);
+      const cheapestTabs: PageFacts['cheapestTabs'] = [];
+      for (let i = 0; i < inList; i++)
+        cheapestTabs.push({ name: (await nameOf(tabsInList.nth(i), d)) ?? '', inTablist: true });
+      for (let i = inList; i < total; i++) cheapestTabs.push({ name: '', inTablist: false });
+      const facts: PageFacts = {
+        url,
+        hops: [...guard.hops],
+        frameUrls: [...new Set([...page.frames().map((f) => f.url()), ...guard.frameUrls])],
+        text: {
+          unusualTraffic: await has(page.getByText(S.blocked.unusualTraffic), d),
+          consentHeading: await has(page.getByRole('heading', { name: S.consent.heading }), d),
+          signInHeading: await has(page.getByRole('heading', { name: S.blocked.signInHeading }), d),
+          challenge: await has(page.getByText(S.blocked.challenge), d),
+          noFlights: await has(page.getByText(S.results.noFlights), d),
+        },
+        accountControl: accountButtons + accountLinks > 0,
+        cheapestTabs,
+        dateGridButtons: await countOf(
+          page.getByRole('button', { name: S.results.dateGridButton, exact: true }),
+          d,
+        ),
+        resultLinks: await countOf(resultLinks(), d),
+      };
+      const settle: SettleFacts = {
+        resultsReturned: await has(page.getByText(S.results.resultsReturned), d),
+        fetching:
+          (await has(page.getByText(S.results.fetching), d)) ||
+          cheapestTabs.some((t) => S.results.fetching.test(t.name)),
+        cheapestPriced: cheapestTabs.length === 1 && cheapestTabs.every((t) => /\d/.test(t.name)),
+      };
+      return { page: facts, settle };
+    },
+
+    async resultNames(d) {
+      const links = resultLinks();
+      const n = await countOf(links, d);
+      const names: Array<string | null> = [];
+      for (let i = 0; i < n; i++) {
+        const name = await nameOf(links.nth(i), d);
+        // why: PIE-R2-10: a name too long is counted as unparsed upstream, never parsed and never dropped.
+        names.push(name === null || name.length > S.maxNameLength ? null : name);
+      }
+      return names;
+    },
+
+    async listFacts(d) {
+      const names = await this.resultNames(d);
+      const tab = await firstName(
+        page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab }),
+        d,
+      );
+      const stated = Number.parseInt(
+        (await firstText(page.getByText(S.results.resultsReturned), d)) ?? '',
+        10,
+      );
+      return {
+        names,
+        cheapestTabName: tab ?? '',
+        resultsStated: Number.isNaN(stated) ? null : stated,
+        currencyName: await firstName(page.getByRole('button', { name: S.results.currencyButton }), d),
+        locationName: await firstName(page.getByRole('button', { name: S.results.locationButton }), d),
+      };
+    },
+
+    async formFacts(d) {
+      const trip = page.getByRole('combobox', { name: S.form.tripType });
+      const pax = page.getByRole('button', { name: S.form.passengers });
+      const dep = page.getByRole('textbox', { name: S.form.departure, exact: true });
+      const ret = page.getByRole('textbox', { name: S.form.return, exact: true });
+      const counts = [
+        await countOf(trip, d),
+        await countOf(pax, d),
+        await countOf(dep, d),
+        await countOf(ret, d),
+      ];
+      if (counts.some((c) => c !== 1)) return null;
+      return {
+        tripType: (await nameOf(trip, d)) ?? '',
+        passengers: (await nameOf(pax, d)) ?? '',
+        departure: await d.race(dep.inputValue(timeoutOf(d))),
+        return: await d.race(ret.inputValue(timeoutOf(d))),
+      };
+    },
+
+    async click(role, name, d) {
+      await d.race(page.getByRole(role, { name, exact: true }).nth(0).click(timeoutOf(d)));
+    },
+  };
+}
+
+async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
+  if ((await countOf(l, d)) === 0) return null;
+  return d.race(l.nth(0).textContent(timeoutOf(d)));
+}

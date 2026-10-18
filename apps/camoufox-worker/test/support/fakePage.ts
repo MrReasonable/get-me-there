@@ -1,0 +1,294 @@
+// A fake Playwright page shaped like playwright-core 1.59.1's (PageLike): a synthetic accessibility tree of roles,
+// accessible names and text that locators query, scripted navigation (hops, the route guard, framenavigated), and a
+// record of every call's timeout. Synthetic only; nothing here is copied from a recording.
+import type { FrameLike, LocatorLike, PageLike, RequestLike } from '../../src/driver.js';
+import type { Role } from '../../src/selectors.js';
+import type { FakeContext } from './fakeContext.js';
+
+export interface FakeNode {
+  role?: string;
+  /** The accessible name. */
+  name?: string;
+  /** `aria-label`; defaults to `name`; `null` makes the driver fall back to the text. */
+  ariaLabel?: string | null;
+  /** textContent; defaults to `name`. */
+  text?: string | null;
+  value?: string;
+  children?: FakeNode[];
+  /** Every read of this node never resolves (a hanging browser call). */
+  hang?: boolean;
+}
+export const n = (
+  role: string,
+  name: string,
+  children: FakeNode[] = [],
+  extra: Partial<FakeNode> = {},
+): FakeNode => ({
+  role,
+  name,
+  children,
+  ...extra,
+});
+export const text = (t: string): FakeNode => ({ role: 'text', name: t, text: t });
+
+export const RESULTS_URL = 'https://www.google.com/travel/flights/search?tfs=x';
+
+/** One result option's accessible name in the feasibility grammar (synthetic airline). */
+export function optionName(
+  pounds: number | string,
+  o: { on?: string; from?: string; to?: string } = {},
+): string {
+  const on = o.on ?? 'Thursday, November 5';
+  return `From ${pounds} British pounds round trip total. 1 stop flight with Example Air. Leaves ${o.from ?? 'Heathrow Airport'} at 12:25 on ${on} and arrives at ${o.to ?? 'John F. Kennedy International Airport'} at 20:05 on ${on}. Total duration 12 hrs 40 min. Select flight`;
+}
+export const option = (pounds: number, o: { on?: string; from?: string; to?: string } = {}): FakeNode =>
+  n('listitem', '', [n('link', optionName(pounds, o))]);
+
+/** The search form's controls (the brief's round-1 hypothesis; Task 14.2's recording replaces the names). */
+export function formNodes(
+  o: { trip?: string; adults?: string; dep?: string; ret?: string } = {},
+): FakeNode[] {
+  return [
+    n('combobox', `Change ticket type. ${o.trip ?? 'Round trip'}`),
+    n('button', `${o.adults ?? '1'} passenger, change number of passengers.`),
+    n('textbox', 'Departure', [], { value: o.dep ?? 'Thu, 5 Nov' }),
+    n('textbox', 'Return', [], { value: o.ret ?? 'Sun, 15 Nov' }),
+  ];
+}
+
+/** A settled results page shaped like the feasibility load's tree (roles and names only). */
+export function resultsTree(
+  o: {
+    tab?: string;
+    top?: FakeNode[];
+    other?: FakeNode[];
+    extra?: FakeNode[];
+    count?: number;
+    form?: FakeNode[];
+  } = {},
+): FakeNode {
+  const top = o.top ?? [option(478)];
+  const other = o.other ?? [option(451)];
+  return n('document', 'Google Flights', [
+    ...(o.form ?? formNodes()),
+    n('tablist', '', [n('tab', 'Best'), n('tab', o.tab ?? 'Cheapest from 451 British pounds')]),
+    text(`${o.count ?? top.length + other.length} results returned.`),
+    n('list', 'Top departing flights', top),
+    n('list', 'Other departing flights', other),
+    n('button', 'View more flights'),
+    n('button', 'Date grid'),
+    n('button', 'Currency GBP'),
+    n('button', 'Location·United Kingdom'),
+    ...(o.extra ?? []),
+  ]);
+}
+
+function nameMatches(actual: string, want: string | RegExp | undefined, exact: boolean | undefined): boolean {
+  if (want === undefined) return true;
+  if (typeof want !== 'string') return want.test(actual);
+  return exact === true ? actual === want : actual.toLowerCase().includes(want.toLowerCase());
+}
+function descendants(nodes: readonly FakeNode[]): FakeNode[] {
+  const out: FakeNode[] = [];
+  const walk = (x: FakeNode): void => {
+    for (const c of x.children ?? []) {
+      out.push(c);
+      walk(c);
+    }
+  };
+  for (const x of nodes) walk(x);
+  return out;
+}
+const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
+
+export interface Calls {
+  timeouts: number[];
+  clicks: string[];
+  gotos: Array<{ url: string; timeout: number | undefined; waitUntil: string | undefined }>;
+  closed: number;
+}
+
+export class FakeLocator implements LocatorLike {
+  constructor(
+    private readonly page: FakePage,
+    private readonly find: () => FakeNode[],
+  ) {}
+  private node(): FakeNode | undefined {
+    return this.find()[0];
+  }
+  private read<T>(o: { timeout?: number } | undefined, f: (x: FakeNode) => T): Promise<T> {
+    if (o?.timeout !== undefined) this.page.calls.timeouts.push(o.timeout);
+    if (this.page.isClosed)
+      return Promise.reject(new Error('Target page, context or browser has been closed'));
+    const x = this.node();
+    if (x === undefined) return Promise.reject(new Error('locator resolved to no element'));
+    if (x.hang === true || this.page.hangAll) return this.page.hangUntilClosed<T>();
+    return Promise.resolve(f(x));
+  }
+  count(): Promise<number> {
+    if (this.page.isClosed)
+      return Promise.reject(new Error('Target page, context or browser has been closed'));
+    if (this.page.hangAll) return this.page.hangUntilClosed<number>();
+    return Promise.resolve(this.find().length);
+  }
+  nth(index: number): FakeLocator {
+    return new FakeLocator(this.page, () => {
+      const x = this.find()[index];
+      return x === undefined ? [] : [x];
+    });
+  }
+  getAttribute(name: string, o?: { timeout?: number }): Promise<string | null> {
+    return this.read(o, (x) =>
+      name === 'aria-label' ? (x.ariaLabel === undefined ? (x.name ?? null) : x.ariaLabel) : null,
+    );
+  }
+  textContent(o?: { timeout?: number }): Promise<string | null> {
+    return this.read(o, (x) => (x.text === undefined ? (x.name ?? null) : x.text));
+  }
+  inputValue(o?: { timeout?: number }): Promise<string> {
+    return this.read(o, (x) => x.value ?? '');
+  }
+  click(o?: { timeout?: number }): Promise<void> {
+    return this.read(o, (x) => {
+      this.page.calls.clicks.push(`${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.onClick(x);
+    });
+  }
+  getByRole(role: Role, o: { name?: string | RegExp; exact?: boolean } = {}): FakeLocator {
+    return new FakeLocator(this.page, () =>
+      descendants(this.find()).filter((x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact)),
+    );
+  }
+}
+
+export interface Navigation {
+  /** The main-frame URLs of the navigation: the first is requested, each later one redirected from the one before. */
+  hops: string[];
+  /** The tree the page shows after it, or an error goto rejects with. */
+  tree?: FakeNode;
+  throws?: string;
+  /** Sub-frame URLs that load with the page. */
+  frames?: string[];
+  hang?: boolean;
+}
+
+/** A scripted page. `trees` are what successive `readFacts` polls see (the last repeats). */
+export class FakePage implements PageLike {
+  readonly calls: Calls = { timeouts: [], clicks: [], gotos: [], closed: 0 };
+  isClosed = false;
+  hangAll = false;
+  closeThrows = false;
+  closeHangs = false;
+  private current = 'about:blank';
+  private frameList: string[] = [];
+  private polls = 0;
+  private trees: FakeNode[] = [n('document', '')];
+  private readonly navListeners: Array<(f: FrameLike) => void> = [];
+  private readonly closers: Array<() => void> = [];
+  onClick: (x: FakeNode) => void = () => undefined;
+
+  constructor(
+    private readonly context: FakeContext | null,
+    private readonly navigation: Navigation | null = null,
+  ) {}
+
+  setTrees(trees: FakeNode[]): void {
+    this.trees = trees;
+    this.polls = 0;
+  }
+  setUrl(url: string): void {
+    this.current = url;
+  }
+  hangUntilClosed<T>(): Promise<T> {
+    return new Promise<T>((_resolve, reject) => {
+      this.closers.push(() => reject(new Error('Target page, context or browser has been closed')));
+    });
+  }
+  private tree(): FakeNode {
+    const t = this.trees[Math.min(this.polls, this.trees.length - 1)];
+    return t ?? n('document', '');
+  }
+  private mainFrame: FrameLike = { url: () => this.current, parentFrame: () => null };
+
+  async goto(url: string, o?: { timeout?: number; waitUntil?: 'domcontentloaded' }): Promise<unknown> {
+    this.calls.gotos.push({ url, timeout: o?.timeout, waitUntil: o?.waitUntil });
+    if (o?.timeout !== undefined) this.calls.timeouts.push(o.timeout);
+    const nav = this.navigation ?? { hops: [url] };
+    if (nav.hang === true) return this.hangUntilClosed();
+    let prev: RequestLike | null = null;
+    const frame = this.mainFrame;
+    for (const [i, hop] of nav.hops.entries()) {
+      const from: RequestLike | null = prev;
+      const req: RequestLike = {
+        url: () => hop,
+        isNavigationRequest: () => true,
+        redirectedFrom: () => from,
+        frame: () => frame,
+      };
+      this.context?.emitRequest(req);
+      // why: context.route sees only the first URL of a redirect chain (playwright-core 1.59.1).
+      if (i === 0 && this.context !== null && (await this.context.routeRequest(req)) === 'aborted')
+        throw new Error('NS_ERROR_FAILURE: navigation aborted (blockedbyclient)');
+      prev = req;
+    }
+    for (const f of nav.frames ?? []) {
+      const sub: FrameLike = { url: () => f, parentFrame: () => frame };
+      this.context?.emitRequest({
+        url: () => f,
+        isNavigationRequest: () => true,
+        redirectedFrom: () => null,
+        frame: () => sub,
+      });
+      this.frameList.push(f);
+    }
+    if (nav.throws !== undefined) throw new Error(nav.throws);
+    this.current = nav.hops.at(-1) ?? url;
+    for (const l of this.navListeners) l(this.mainFrame);
+    if (nav.tree !== undefined) this.setTrees([nav.tree]);
+    return null;
+  }
+  url(): string {
+    // why: the driver reads the URL once per readFacts, so each read is one poll of the scripted trees.
+    const u = this.current;
+    this.polls += 1;
+    return u;
+  }
+  frames(): FrameLike[] {
+    const main = this.mainFrame;
+    return [main, ...this.frameList.map((f) => ({ url: () => f, parentFrame: () => main }))];
+  }
+  /** Fires framenavigated for `frame` (a sub-frame, or the main frame again). */
+  emitFrameNavigated(frame: FrameLike): void {
+    for (const l of this.navListeners) l(frame);
+  }
+  on(event: 'framenavigated', listener: (f: FrameLike) => void): unknown {
+    if (event === 'framenavigated') this.navListeners.push(listener);
+    return this;
+  }
+  private root(): FakeNode[] {
+    // why: the first poll (the url() read) has already advanced the counter, so the tree index is polls − 1.
+    const t = this.trees[Math.min(Math.max(0, this.polls - 1), this.trees.length - 1)];
+    return [t ?? this.tree()];
+  }
+  getByRole(role: Role, o: { name?: string | RegExp; exact?: boolean } = {}): FakeLocator {
+    return new FakeLocator(this, () =>
+      descendants(this.root()).filter((x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact)),
+    );
+  }
+  getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
+    return new FakeLocator(this, () =>
+      descendants(this.root()).filter((x) => {
+        const content = x.text === undefined ? (x.role === 'text' ? (x.name ?? '') : '') : (x.text ?? '');
+        return content !== '' && nameMatches(content, t, o.exact);
+      }),
+    );
+  }
+  close(): Promise<void> {
+    this.calls.closed += 1;
+    this.isClosed = true;
+    for (const c of this.closers.splice(0)) c();
+    if (this.closeHangs) return never();
+    if (this.closeThrows) return Promise.reject(new Error('close failed'));
+    return Promise.resolve();
+  }
+}

@@ -36,3 +36,9 @@ packages/providers/fixtures/recorded/**/*.json
 apps/web/test-results/
 apps/web/playwright-report/
 apps/web/e2e/.tmp/
+
+# why: the camoufox worker's recordings are Google page facts, vendor content that never enters git (plan decisions
+# 61, 68, 69); the per-kind directories and their .gitkeep stay tracked so a fresh checkout has the layout.
+apps/camoufox-worker/fixtures/recorded/**
+!apps/camoufox-worker/fixtures/recorded/**/
+!apps/camoufox-worker/fixtures/recorded/**/.gitkeep
