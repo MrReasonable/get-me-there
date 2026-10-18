@@ -1,5 +1,13 @@
 # Release notes
 
+## Unreleased
+
+- **SearchApi itinerary search asks for the cheapest options.** Every step of the itinerary
+  search now sends `show_cheapest_flights=true` beside the price sort, so it chooses among
+  Google's cheapest options rather than its default "best" set, which could leave a cheaper
+  one out. SearchApi's docs list no extra cost for it: a step is still one billed search
+  (`docs/providers.md`). This settles the v0.1.0 follow-up below.
+
 ## v0.1.0
 
 The first release: the design spec's Phases 1 to 3. One self-hosted container finds the
