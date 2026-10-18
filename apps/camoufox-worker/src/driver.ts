@@ -113,7 +113,66 @@ export interface Driver {
    * The Cheapest flow's clicks (ruling of 2026-10-18): the tab's own information pop-up closed through its exact
    * close button when there is one, on the results page, then the tab. Returns what was clicked, in order.
    */
-  clickCheapest(d: Deadline, log?: Logger): Promise<string[]>;
+  clickCheapest(d: Deadline, o: StepOptions): Promise<string[]>;
+}
+
+/** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
+export interface StepOptions {
+  timers: Timers;
+  log?: Logger;
+  startedAt?: number;
+}
+
+/** Each lookup's own bound in the Cheapest flow, inside the page deadline (ruling of 2026-10-18). */
+export const LOOKUP_TIMEOUT_MS = 5000;
+
+/** A Cheapest-flow step that failed or timed out; the caller falls back (never a hang to the page deadline). */
+export class CheapestStepFailed extends Error {
+  constructor(
+    readonly step: string,
+    readonly reason: 'timed-out' | 'failed' | 'not-found' | 'not-selected',
+  ) {
+    super(`the Cheapest flow's ${step} step ${reason}`);
+    this.name = 'CheapestStepFailed';
+  }
+}
+
+/**
+ * Runs one step under its own bound (`ms`, never past the page deadline `d`), logging its start and end at debug with
+ * the elapsed ms since the page started (ruling of 2026-10-18). A step that overruns logs its name and throws
+ * CheapestStepFailed; the page deadline's own expiry still surfaces as DeadlineExceeded.
+ */
+export async function runStep<T>(
+  name: string,
+  ms: number,
+  d: Deadline,
+  o: StepOptions,
+  fn: (step: Deadline) => Promise<T>,
+): Promise<T> {
+  const started = o.startedAt ?? o.timers.now();
+  const elapsed = (): number => o.timers.now() - started;
+  const timeoutMs = Math.max(1, Math.min(ms, d.remaining()));
+  const step = o.timers.deadline(timeoutMs);
+  o.log?.debug({ step: name, phase: 'start', elapsedMs: elapsed() }, 'cheapest step');
+  try {
+    const value = await d.race(step.race(fn(step)));
+    o.log?.debug({ step: name, phase: 'end', elapsedMs: elapsed() }, 'cheapest step');
+    return value;
+  } catch (e) {
+    if (d.expired()) throw e;
+    if (step.expired()) {
+      o.log?.debug({ step: name, elapsedMs: elapsed(), timeoutMs }, 'cheapest step timed out');
+      throw new CheapestStepFailed(name, 'timed-out');
+    }
+    // why: a failed step logs only the error class and the step, never a URL or a message holding one
+    o.log?.debug(
+      { step: name, error: e instanceof Error ? e.name : 'unknown', elapsedMs: elapsed() },
+      'cheapest step failed',
+    );
+    throw new CheapestStepFailed(name, 'failed');
+  } finally {
+    step.clear();
+  }
 }
 
 /** Each click's own bound, always inside the page deadline (ruling of 2026-10-18). */
@@ -268,27 +327,30 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       await d.race(page.getByRole(role, { name, exact: true }).nth(0).click(clickTimeoutOf(d)));
     },
 
-    async clickCheapest(d, log) {
+    async clickCheapest(d, o) {
       const clicked: string[] = [];
-      // why: a failed click logs only the error class and the target, never a URL or a message holding one
-      const attempt = async (l: LocatorLike, target: string): Promise<void> => {
-        try {
-          await d.race(l.click(clickTimeoutOf(d)));
-        } catch (e) {
-          log?.debug({ error: e instanceof Error ? e.name : 'unknown', target }, 'click failed');
-          throw e;
-        }
-        clicked.push(target);
-      };
-      const tab = page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab }).nth(0);
+      const tabs = page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab });
+      const tab = tabs.nth(0);
+      // why: every await is its own timed step (ruling of 2026-10-18): 5 s for a lookup, 10 s for a click
+      const click = (name: string, l: LocatorLike, target: string): Promise<void> =>
+        runStep(name, CLICK_TIMEOUT_MS, d, o, async (st) => {
+          await st.race(l.click(clickTimeoutOf(st)));
+          clicked.push(target);
+        });
       // why: page locators reach the main frame only; the close button must sit inside the Cheapest tab itself, have
       // exactly the selector's name, be the only one there, and the page must be on the results allowlist
       if (onAllowlist(page.url(), S)) {
         const close = tab.getByRole('button', { name: S.results.cheapestPopupClose, exact: true });
-        if ((await countOf(close, d)) === 1)
-          await attempt(close.nth(0), `button:${S.results.cheapestPopupClose}`);
+        const found = await runStep('find-popup', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(close, st));
+        if (found === 1) await click('close-popup', close.nth(0), `button:${S.results.cheapestPopupClose}`);
       }
-      await attempt(tab, 'tab:Cheapest');
+      const tabCount = await runStep('find-tab', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(tabs, st));
+      if (tabCount !== 1) throw new CheapestStepFailed('find-tab', 'not-found');
+      await click('click-tab', tab, 'tab:Cheapest');
+      const selected = await runStep('confirm-selected', LOOKUP_TIMEOUT_MS, d, o, (st) =>
+        st.race(tab.getAttribute('aria-selected', timeoutOf(st))),
+      );
+      if (selected !== 'true') throw new CheapestStepFailed('confirm-selected', 'not-selected');
       return clicked;
     },
   };

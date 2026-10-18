@@ -49,6 +49,8 @@ function setup(
     hops?: string[];
     selectors?: Selectors;
     shape?: (c: FakeContext) => void;
+    /** The session's log (fix round: the Cheapest step lines). */
+    log?: ReturnType<typeof memoryLog>;
     /** Replaces the fake launch (fix round 1: a launch that never resolves). */
     launch?: () => Promise<FakeContext>;
   } = {},
@@ -95,7 +97,7 @@ function setup(
       timers,
       selectors: o.selectors ?? SELECTORS,
       pageTimeoutMs: 90_000,
-      log: memoryLog(),
+      log: o.log ?? memoryLog(),
       versions,
     });
   return {
@@ -650,6 +652,11 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
   // why: ruling of 2026-10-18 (the Cheapest flow): after the click the Cheapest view gets its own settle budget,
   // CAMOUFOX_PAGE_TIMEOUT_SECONDS again from the click, within an overall cap of twice that
   const fetching = n('document', '', [text('Fetching results')]);
+  const loadingWithTab = () =>
+    n('document', '', [
+      n('tablist', '', [n('tab', 'Cheapest from £443', [], { selected: true })]),
+      text('Fetching results'),
+    ]);
   const cheapestView = () => {
     const t = resultsTree({ tab: 'Cheapest from £443' });
     for (const c of descendants([t]))
@@ -670,7 +677,9 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
             return r;
           };
           p.onClick = (x) => {
-            if (x.role === 'tab') p.setTrees([...Array(cheapestPolls).fill(fetching), cheapestView()]);
+            // why: as in the browser, the selected tab stays while the Cheapest view loads
+            if (x.role === 'tab')
+              p.setTrees([...Array(cheapestPolls).fill(loadingWithTab()), cheapestView()]);
           };
         };
       },
@@ -692,5 +701,59 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(elapsed).toBeLessThanOrEqual(180_000);
     // the second budget is 90 s from the click, which came after the first view's 84 s
     expect(elapsed).toBe(84_000 + 90_000);
+  });
+
+  // why: ruling of 2026-10-18 (the hung rerun): a Cheapest click that never answers is its own 10 s step; the page
+  // falls back to the Best view, and the tab's price goes with it (the adapter marks the cell partial)
+  it('a Cheapest click that never resolves falls back to the Best view with the tab price, within seconds', async () => {
+    const tree = resultsTree({ tab: 'Cheapest from £443' });
+    for (const c of descendants([tree]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') c.clickHang = true;
+    const t = setup({ tree, selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true } });
+    const before = t.timers.now();
+    const pending = t.session.page(REQ);
+    for (let i = 0; i < 10; i++) await flush();
+    // only the click's own 10 s step bound is pending; it fires first
+    t.timers.runOut();
+    const r = await pending;
+    expect(r.answer).toMatchObject({ kind: 'cells', cell: { status: 'price', tabMinor: 44300 } });
+    expect(t.timers.now() - before).toBeLessThan(30_000);
+  });
+  it('the Cheapest steps and the first Cheapest poll log in order', async () => {
+    const lines = memoryLog();
+    const t = setup({ selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true }, log: lines });
+    expect((await t.session.page(REQ)).answer.kind).toBe('cells');
+    expect(
+      lines.lines
+        .filter((l) => l.msg === 'cheapest step')
+        .map((l) => `${String(Reflect.get(l.o, 'step'))}:${String(Reflect.get(l.o, 'phase'))}`),
+    ).toEqual([
+      'find-popup:start',
+      'find-popup:end',
+      'find-tab:start',
+      'find-tab:end',
+      'click-tab:start',
+      'click-tab:end',
+      'confirm-selected:start',
+      'confirm-selected:end',
+      'first-cheapest-poll:start',
+      'first-cheapest-poll:end',
+    ]);
+  });
+
+  it('a Cheapest click that lands on a challenge page stops with its cool-down, never a fallback', async () => {
+    const t = setup({
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          p.onClick = (x) => {
+            if (x.role === 'tab')
+              p.setTrees([n('document', '', [text('Our systems have detected unusual traffic')])]);
+          };
+        };
+      },
+    });
+    expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'blocked', page: 'unusual-traffic' });
+    expect(t.cooldown.active()?.cause).toBe('unusual-traffic');
   });
 });

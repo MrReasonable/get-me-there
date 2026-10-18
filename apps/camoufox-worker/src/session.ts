@@ -11,13 +11,16 @@ import {
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
+import { classifyPageWithRule } from './classify.js';
 import type { CooldownStore } from './cooldown.js';
 import {
   type ContextLike,
   createDriver,
   type Driver,
+  LOOKUP_TIMEOUT_MS,
   type PageLike,
   pollUntilSettled,
+  runStep,
   type Settled,
 } from './driver.js';
 import { checkForm } from './form.js';
@@ -316,14 +319,32 @@ export class PageSession {
     if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
       let read = true;
       d = budget.next();
+      const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
       try {
-        await driver.clickCheapest(d, this.d.log);
+        await driver.clickCheapest(d, steps);
+        // why: the first Cheapest poll is a timed step too, so a view that never answers falls back, never hangs
+        const cur = d;
+        await runStep('first-cheapest-poll', LOOKUP_TIMEOUT_MS, cur, steps, (st) => driver.readFacts(st));
       } catch (e) {
-        // why: the honesty rule (ruling of 2026-10-18): a Cheapest flow that cannot be clicked is read as the list
-        // stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the deadline still ends
-        // the page as not-ready
+        // why: the honesty rule (rulings of 2026-10-18): a Cheapest flow whose step fails or times out is read as the
+        // Best view stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the page
+        // deadline still ends the page as not-ready
         if (e instanceof DeadlineExceeded || d.expired()) throw e;
         read = false;
+        // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
+        // classified once, under its own step, and a blocked kind stops the page with its cool-down, as on any poll
+        const cur = d;
+        const seen = await runStep('classify-after-failed-step', LOOKUP_TIMEOUT_MS, cur, steps, (st) =>
+          driver.readFacts(st),
+        ).catch((err: unknown) => {
+          if (err instanceof DeadlineExceeded || cur.expired()) throw err;
+          return null;
+        });
+        if (seen !== null) {
+          const k = classifyPageWithRule(seen.page, S);
+          if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+            return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page };
+        }
       }
       if (read) {
         const stop = await after('cheapest');

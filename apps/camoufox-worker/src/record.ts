@@ -8,13 +8,16 @@ import { classifyPageWithRule } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import {
+  CheapestStepFailed,
   type ContextLike,
   createDriver,
   type Driver,
+  LOOKUP_TIMEOUT_MS,
   type PageLike,
   type ProbePage,
   pollUntilSettled,
   probePage,
+  runStep,
   type Settled,
 } from './driver.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
@@ -474,12 +477,32 @@ async function interact(
     if (kind === 'cheapest' && settled.facts.page.cheapestTabs.length === 1) {
       // why: ruling of 2026-10-18: the tab's own information pop-up closed through its exact button, then the tab
       d = budget.next();
+      const steps = { timers: deps.timers, log: deps.log, startedAt: pageStart };
       try {
-        clicked.push(...(await driver.clickCheapest(d, deps.log)));
+        clicked.push(...(await driver.clickCheapest(d, steps)));
+        // why: the first Cheapest poll is a timed step too (ruling of 2026-10-18)
+        const cur = d;
+        await runStep('first-cheapest-poll', LOOKUP_TIMEOUT_MS, cur, steps, (st) => driver.readFacts(st));
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
+        // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
+        // classified once, under its own step, and a blocked kind is that stop, with its cool-down
+        const cur = d;
+        const seen = await runStep('classify-after-failed-step', LOOKUP_TIMEOUT_MS, cur, steps, (st) =>
+          driver.readFacts(st),
+        ).catch((err: unknown) => {
+          if (err instanceof DeadlineExceeded || cur.expired()) throw err;
+          return null;
+        });
+        if (seen !== null) {
+          const k = classifyPageWithRule(seen.page, deps.selectors);
+          if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+            return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
+        }
+        // why: otherwise the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
+        const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'click';
         throw new RecordingRefused(
-          'the Cheapest tab could not be clicked; the debug log names the error class',
+          `the Cheapest tab could not be clicked: the ${step} step; the debug log has the step lines`,
         );
       }
     } else if (kind === 'view-more') {

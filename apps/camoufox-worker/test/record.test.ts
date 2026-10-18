@@ -363,7 +363,12 @@ describe('the recorder (brief Task 14.2 rules)', () => {
               return r;
             };
             pg.onClick = (x) => {
-              if (x.role === 'tab') pg.setTrees([...Array(cheapestPolls).fill(fetching), view()]);
+              // why: as in the browser, the selected tab stays while the Cheapest view loads
+              const loading = n('document', '', [
+                n('tablist', '', [n('tab', 'Cheapest from £443', [], { selected: true })]),
+                text('Fetching results'),
+              ]);
+              if (x.role === 'tab') pg.setTrees([...Array(cheapestPolls).fill(loading), view()]);
             };
           };
         return c;

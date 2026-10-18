@@ -21,6 +21,8 @@ export interface FakeNode {
   hidden?: boolean;
   /** `aria-selected="true"` (a selected tab). */
   selected?: boolean;
+  /** A click on this node never resolves (every other read answers). */
+  clickHang?: boolean;
 }
 export const n = (
   role: string,
@@ -164,6 +166,7 @@ export class FakeLocator implements LocatorLike {
     return this.read(o, (x) => x.value ?? '');
   }
   click(o?: { timeout?: number }): Promise<void> {
+    if (this.node()?.clickHang === true) return this.page.hangUntilClosed<void>();
     return this.read(o, (x) => {
       this.page.calls.clicks.push(`${x.role ?? ''}:${x.name ?? ''}`);
       // why: as in the browser, a clicked tab becomes the selected one

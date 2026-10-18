@@ -390,7 +390,7 @@ describe('clickCheapest (ruling of 2026-10-18)', () => {
     const d = timers.deadline(90_000);
     const lines = memoryLog();
     const driver = createDriver(page, guard());
-    const clicked = await driver.clickCheapest(d, lines);
+    const clicked = await driver.clickCheapest(d, { timers, log: lines, startedAt: timers.now() });
     return { page, clicked, lines };
   };
   it('the pop-up from the evidence is closed, then the tab clicked', async () => {
@@ -425,7 +425,8 @@ describe('clickCheapest (ruling of 2026-10-18)', () => {
   });
   it('each click carries its own timeout inside the page deadline', async () => {
     const { page } = await run(withTab(n('tab', POPUP_TAB, [n('button', 'Close dialogue')])));
-    expect(page.calls.timeouts.slice(-2)).toEqual([CLICK_TIMEOUT_MS, CLICK_TIMEOUT_MS]);
+    // the two clicks carry the click bound; the lookups around them their own 5 s bound
+    expect(page.calls.timeouts.filter((x) => x === CLICK_TIMEOUT_MS)).toHaveLength(2);
   });
   it('a click that fails logs its error class and the target name at debug, never a URL, and throws', async () => {
     const tab = n('tab', 'Cheapest from £443', [], { hang: false });
@@ -440,9 +441,15 @@ describe('clickCheapest (ruling of 2026-10-18)', () => {
     };
     const timers = fakeTimers();
     const lines = memoryLog();
-    await expect(createDriver(page, guard()).clickCheapest(timers.deadline(90_000), lines)).rejects.toThrow();
-    expect(lines.lines.filter((l) => l.level === 'debug').map((l) => l.o)).toEqual([
-      { error: 'TimeoutError', target: 'tab:Cheapest' },
+    await expect(
+      createDriver(page, guard()).clickCheapest(timers.deadline(90_000), {
+        timers,
+        log: lines,
+        startedAt: timers.now(),
+      }),
+    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'click-tab', reason: 'failed' });
+    expect(lines.lines.filter((l) => l.msg === 'cheapest step failed').map((l) => l.o)).toEqual([
+      { step: 'click-tab', error: 'TimeoutError', elapsedMs: 0 },
     ]);
     expect(JSON.stringify(lines.lines)).not.toContain('https://');
   });
@@ -494,5 +501,109 @@ describe('the Cheapest view', () => {
         ],
       },
     ]);
+  });
+});
+
+// why: the rerun of 2026-10-18 hung between the Best view settling and the first Cheapest poll with nothing logged;
+// every await of the Cheapest flow now has its own step timeout (10 s clicks, 5 s lookups) and logs its start and end
+describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
+  const POP = 'Cheapest from £443 Close dialogue Looking for the lowest fares?';
+  const tree = (o: { popup?: boolean; hangClick?: boolean } = {}) => {
+    const t = resultsTree({ tab: POP });
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === POP) {
+        c.children = o.popup === false ? [] : [n('button', 'Close dialogue')];
+        if (o.hangClick === true) c.clickHang = true;
+      }
+    return t;
+  };
+  const steps = (lines: ReturnType<typeof memoryLog>) =>
+    lines.lines
+      .filter((l) => l.msg === 'cheapest step')
+      .map((l) => `${String(Reflect.get(l.o, 'step'))}:${String(Reflect.get(l.o, 'phase'))}`);
+  it('the step lines appear in order, each with its elapsed ms', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree()]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const clicked = await createDriver(page, guard()).clickCheapest(timers.deadline(90_000), {
+      timers,
+      log: lines,
+      startedAt: timers.now(),
+    });
+    expect(clicked).toEqual(['button:Close dialogue', 'tab:Cheapest']);
+    expect(steps(lines)).toEqual([
+      'find-popup:start',
+      'find-popup:end',
+      'close-popup:start',
+      'close-popup:end',
+      'find-tab:start',
+      'find-tab:end',
+      'click-tab:start',
+      'click-tab:end',
+      'confirm-selected:start',
+      'confirm-selected:end',
+    ]);
+    expect(
+      lines.lines
+        .filter((l) => l.msg === 'cheapest step')
+        .every((l) => typeof Reflect.get(l.o, 'elapsedMs') === 'number'),
+    ).toBe(true);
+  });
+  it('a lookup that never resolves times out at 5 s with its step name logged', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree()]);
+    page.hangAll = true;
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const run = createDriver(page, guard()).clickCheapest(timers.deadline(90_000), {
+      timers,
+      log: lines,
+      startedAt: timers.now(),
+    });
+    for (let i = 0; i < 5; i++) await flush();
+    timers.runOut();
+    await expect(run).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'find-popup' });
+    expect(lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o)).toEqual([
+      { step: 'find-popup', elapsedMs: 5000, timeoutMs: 5000 },
+    ]);
+  });
+  it('a click that never resolves times out at 10 s as its own step', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree({ popup: false, hangClick: true })]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const run = createDriver(page, guard()).clickCheapest(timers.deadline(90_000), {
+      timers,
+      log: lines,
+      startedAt: timers.now(),
+    });
+    for (let i = 0; i < 5; i++) await flush();
+    timers.runOut();
+    await expect(run).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'click-tab' });
+    expect(
+      lines.lines
+        .filter((l) => l.msg === 'cheapest step timed out')
+        .map((l) => Reflect.get(l.o, 'timeoutMs')),
+    ).toEqual([10_000]);
+  });
+  it('a tab that is not selected after its click fails the confirm step', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree({ popup: false })]);
+    page.onClick = (x) => {
+      x.selected = false;
+    };
+    const timers = fakeTimers();
+    await expect(
+      createDriver(page, guard()).clickCheapest(timers.deadline(90_000), {
+        timers,
+        log: memoryLog(),
+        startedAt: timers.now(),
+      }),
+    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'confirm-selected' });
   });
 });
