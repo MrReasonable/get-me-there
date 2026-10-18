@@ -11,6 +11,7 @@ export const KINDS = [
   'socs-stability',
   'consent-probe',
   'no-flights',
+  'graph-explore',
 ] as const;
 export type RecordingKind = (typeof KINDS)[number];
 export const RECORDED_BY = 'camoufox-worker record';
@@ -43,7 +44,15 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
       values.set(a, v);
       i++;
     } else if (
-      ['--cheapest', '--view-more', '--stability', '--consent-probe', '--no-flights', '--grid'].includes(a)
+      [
+        '--cheapest',
+        '--view-more',
+        '--stability',
+        '--consent-probe',
+        '--no-flights',
+        '--graph-explore',
+        '--grid',
+      ].includes(a)
     )
       flags.add(a);
     else throw new RecordingRefused(`unknown argument ${a}`);
@@ -53,7 +62,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
     throw new RecordingRefused('--grid: grid mode is not built in this work package (decision 69)');
   if (flags.size > 1)
     throw new RecordingRefused(
-      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --no-flights',
+      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --no-flights, --graph-explore',
     );
   const kind: RecordingKind = flags.has('--cheapest')
     ? 'cheapest'
@@ -65,7 +74,9 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
           ? 'consent-probe'
           : flags.has('--no-flights')
             ? 'no-flights'
-            : 'results';
+            : flags.has('--graph-explore')
+              ? 'graph-explore'
+              : 'results';
   const pagesRaw = values.get('--pages') ?? (kind === 'socs-stability' ? String(STABILITY_PAGES) : '1');
   const pages = Number(pagesRaw);
   if (!/^\d+$/.test(pagesRaw) || pages < 1 || pages > MAX_PAGES)

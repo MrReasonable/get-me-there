@@ -182,3 +182,34 @@ function nextFactsIndex(dir: string): number {
     .map(Number);
   return used.length === 0 ? 1 : Math.max(...used) + 1;
 }
+
+/** An absolute URL that still carries a query string (the graph exploration's last check before writing). */
+const URL_WITH_QUERY = /\bhttps?:\/\/[^\s"'<>?]*\?/;
+
+/**
+ * Writes one Price graph exploration to `<root>/graph-explore/<day>/<n>.json`, 0600 in 0700 directories, after the
+ * fail-closed scan (the key, the SOCS value, an account name or an e-mail address anywhere, the snapshot included) and
+ * a check that no URL in it still carries a query string. Exploration only: nothing reads these files yet.
+ */
+export function writeGraphExplore(
+  root: string,
+  day: string,
+  rec: Record<string, unknown>,
+  secrets: readonly string[],
+): string {
+  const text = `${JSON.stringify(rec, null, 2)}\n`;
+  assertClean(text, secrets);
+  if (URL_WITH_QUERY.test(text))
+    throw new RecordingRefused('the exploration holds a query string; nothing written');
+  const dir = join(root, 'graph-explore', day);
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  chmodSync(join(root, 'graph-explore'), DIR_MODE);
+  chmodSync(dir, DIR_MODE);
+  const used = readdirSync(dir)
+    .map((f) => /^(\d+)\.json$/.exec(f)?.[1])
+    .filter((x): x is string => x !== undefined)
+    .map(Number);
+  const file = join(dir, `${used.length === 0 ? 1 : Math.max(...used) + 1}.json`);
+  writeFileSync(file, text, { mode: FILE_MODE });
+  return file;
+}

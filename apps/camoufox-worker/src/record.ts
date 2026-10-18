@@ -20,7 +20,9 @@ import {
   probePage,
   runStep,
   type Settled,
+  type StepOptions,
 } from './driver.js';
+import { exploreGraph, stripSnapshotQueries } from './graph.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
 import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
@@ -40,6 +42,7 @@ import {
   stopRecord,
   stripQuery,
   tightenRecordings,
+  writeGraphExplore,
   writeRecording,
   writeStopRecord,
   writeUnrecorded,
@@ -48,7 +51,7 @@ import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
-import { bounded, DeadlineExceeded, realTimers, type Timers } from './timers.js';
+import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
 import { pageUrl, probeUrl } from './url.js';
 
 export { stderrLog } from './log.js';
@@ -61,8 +64,9 @@ export { stderrLog } from './log.js';
  * (bounded), the cool-down on any block, the persisted refusal on either signed-in cause, and the profile wiped on a
  * consent stop or a SOCS that is not the captured one. It writes what the locators read to
  * `fixtures/recorded/<kind>/<date>/<n>.{facts,meta}.json` (gitignored, local-only, 0600: decision 61). It never stores
- * printed ARIA text, a cookie value, the worker key, an account name or an e-mail address. The consent probe is the
- * one navigation exception, and it lives only here.
+ * a cookie value, the worker key, an account name or an e-mail address, and stores printed ARIA text only in the Price
+ * graph exploration (`graph-explore/<date>/<n>.json`, queries stripped, never parsed). The consent probe is the one
+ * navigation exception, and it lives only here.
  */
 export {
   KINDS,
@@ -352,6 +356,27 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           return EX_UNAVAILABLE;
         }
         if (outcome.kind === 'stop') throw new RecordingRefused('unreachable');
+        if (args.kind === 'graph-explore' && outcome.kind === 'read') {
+          const path = writeGraphExplore(
+            deps.root,
+            day,
+            {
+              recordedAt: deps.clock.now(),
+              recordedBy: RECORDED_BY,
+              ...outcome.data,
+              socsReadBack: back,
+              versions: {
+                selectors: SELECTORS_VERSION,
+                camoufoxJs: CAMOUFOX_JS_VERSION,
+                binary: deps.binary,
+              },
+              timings: outcome.stepMs,
+            },
+            secrets,
+          );
+          ctx.out(`recorded ${path}`);
+          continue;
+        }
         if (outcome.kind === 'appeared' || (args.kind === 'no-flights' && !outcome.noFlights)) {
           writeUnrecorded(deps.root, day, { data: outcome.data }, secrets);
           ctx.out(
@@ -483,33 +508,93 @@ async function interact(
   }
   if (settled.kind.kind === 'blocked') return await stop(settled.kind.page, settled.rule, settled.facts);
   stepMs.settle = deps.timers.now() - t0;
+  // why: a failed step may be a page that is no results page at all (a challenge after the click): it is classified
+  // once, under its own step, and a blocked kind is that stop, with its cool-down; otherwise null (end plainly)
+  const classifyAfterFailedStep = async (
+    cur: Deadline,
+    steps: StepOptions,
+    view: View,
+  ): Promise<Outcome | null> => {
+    const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
+    const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
+      driver.readFacts(st, lookups),
+    ).catch((err: unknown) => {
+      if (err instanceof DeadlineExceeded || cur.expired()) throw err;
+      return null;
+    });
+    if (seen === null) return null;
+    const k = classifyPageWithRule(seen.page, deps.selectors, view);
+    if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+      return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
+    return null;
+  };
+  if (kind === 'graph-explore') {
+    // why: a no-flights page has no graph; nothing is clicked and nothing stopped the page, so no cool-down
+    if (settled.kind.kind !== 'results')
+      throw new RecordingRefused('the results page shows no flights; there is no Price graph to explore');
+    // why: as the Cheapest flow: the click and the graph's settle have their own page budget from here
+    d = budget.next();
+    const steps: StepOptions = { timers: deps.timers, log: deps.log, startedAt: pageStart, flow: 'graph' };
+    const before = deps.timers.now();
+    try {
+      const g = await exploreGraph(driver, page, d, {
+        timers: deps.timers,
+        pollMs: deps.pollMs,
+        S: deps.selectors,
+        steps,
+        clicked,
+      });
+      if (g.kind === 'blocked') return await stop(g.page, g.rule, g.facts);
+      stepMs.click = g.clickMs;
+      stepMs.graph = deps.timers.now() - before;
+      stepMs.read = deps.timers.now() - t0;
+      return {
+        kind: 'read',
+        data: {
+          kind,
+          landing: stripQuery(page.url()),
+          hops: guard.hops.map(stripQuery),
+          region: g.region,
+          snapshot: stripSnapshotQueries(g.snapshot),
+          controls: g.controls,
+          unnamedControls: g.unnamed,
+          clicked,
+          polls: g.polls,
+          classification: g.classification,
+        },
+        noFlights: false,
+        stepMs,
+        facts: g.facts,
+        clicked,
+        headings: [],
+      };
+    } catch (e) {
+      if (e instanceof DeadlineExceeded) throw e;
+      const blocked = await classifyAfterFailedStep(d, steps, 'best');
+      if (blocked !== null) return blocked;
+      // why: the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
+      const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'graph';
+      throw new RecordingRefused(
+        e instanceof CheapestStepFailed && e.step === 'graph-settle'
+          ? `the Price graph did not settle within its budget (${step}); the debug log has the poll lines`
+          : `the Price graph exploration ended at the ${step} step; the debug log has the step lines`,
+      );
+    }
+  }
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {
     if (kind === 'cheapest' && settled.facts.page.cheapestTabs.length === 1) {
       // why: ruling of 2026-10-18: the tab's own information pop-up closed through its exact button, then the tab
       d = budget.next();
       const steps = { timers: deps.timers, log: deps.log, startedAt: pageStart };
-      const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
       try {
         clicked.push(...(await driver.clickCheapest(d, steps)));
         // why: rulings of 2026-10-18: every Cheapest poll is a 20 s step with 5 s lookups; an overrun is polled again
         settled = await poll(deps.selectors, 'cheapest');
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
-        // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
-        // classified once, under its own step, and a blocked kind is that stop, with its cool-down
-        const cur = d;
-        const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st, lookups),
-        ).catch((err: unknown) => {
-          if (err instanceof DeadlineExceeded || cur.expired()) throw err;
-          return null;
-        });
-        if (seen !== null) {
-          const k = classifyPageWithRule(seen.page, deps.selectors, 'cheapest');
-          if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-            return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
-        }
+        const blocked = await classifyAfterFailedStep(d, steps, 'cheapest');
+        if (blocked !== null) return blocked;
         // why: otherwise the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
         const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'click';
         // why: the budget's end is the view not settling, said as such; any other step is the click flow

@@ -30,7 +30,17 @@ import { Refusal } from '../src/refusal.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
-import { descendants, FakePage, type Navigation, n, option, resultsTree, text } from './support/fakePage.js';
+import {
+  descendants,
+  type FakeNode,
+  FakePage,
+  formNodes,
+  type Navigation,
+  n,
+  option,
+  resultsTree,
+  text,
+} from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers, flush } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
@@ -903,6 +913,249 @@ describe('the recorder under the server’s stop rules (fix round 1)', () => {
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
     for (const f of written(t.root)) expect(statSync(join(t.root, f)).mode & 0o777, f).toBe(0o600);
     expect(statSync(join(t.root, 'results', '2026-10-18')).mode & 0o777).toBe(0o700);
+  });
+});
+
+// The Price graph exploration (observed 2026-10-18): the Best view settled as list mode does, exactly one "Price graph"
+// button clicked under its own step, the region that appeared polled until its printed snapshot holds still, and one
+// local exploration file written. Synthetic trees only.
+describe('record --graph-explore', () => {
+  const cooldownOf = (t: ReturnType<typeof setup>) =>
+    new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();
+  const dialog = (extra: FakeNode[] = []): FakeNode =>
+    n('dialog', 'Price graph', [
+      n('heading', 'Price graph'),
+      n('tablist', '', [n('tab', 'Dates', [], { selected: true })]),
+      n('slider', 'Trip length'),
+      n('listbox', '', [n('option', '10 days')]),
+      n('button', 'Tuesday, 1 December 2026, 412 British pounds'),
+      n('link', 'Learn more', [], { href: 'https://www.google.com/travel/flights/help?tfs=synthetic-query' }),
+      ...extra,
+    ]);
+  const page = (o: { button?: FakeNode[]; extra?: FakeNode[] } = {}): FakeNode =>
+    resultsTree({ extra: [...(o.button ?? [n('button', 'Price graph')]), ...(o.extra ?? [])] });
+  /** A run whose Price graph click shows `after` (the trees successive polls see). */
+  const graphRun = (after: FakeNode[], o: { button?: FakeNode[]; onClick?: (p: FakePage) => void } = {}) => {
+    const t = setup({ navigations: [{ hops: [URL0, LANDED], tree: page(o) }] });
+    const deps: RecordDeps = {
+      ...t.deps,
+      launch: async (prof) => {
+        const c = await t.deps.launch(prof);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            pg.onClick = (x) => {
+              if (x.name !== 'Price graph') return;
+              if (o.onClick !== undefined) o.onClick(pg);
+              else pg.setTrees(after);
+            };
+          };
+        return c;
+      },
+    };
+    return { t, deps };
+  };
+  const drive = async (t: ReturnType<typeof setup>, run: Promise<number>): Promise<number> => {
+    let code: number | null = null;
+    void run.then((c) => {
+      code = c;
+    });
+    for (let i = 0; i < 80 && code === null; i++) {
+      for (let j = 0; j < 5; j++) await flush();
+      if (code === null) t.timers.runOut();
+    }
+    return run;
+  };
+  const G = [...Q, '--graph-explore'];
+
+  it('parses --graph-explore with the same query arguments', () => {
+    expect(parseRecordArgs(G)).toMatchObject({ kind: 'graph-explore', pages: 1 });
+    expect(() => parseRecordArgs([...G, '--cheapest'])).toThrow(/--graph-explore/);
+  });
+  it('clicks the one Price graph button, polls the dialog that appeared until it holds still, and writes one 0600 exploration file', async () => {
+    const { t, deps } = graphRun([page(), page({ extra: [dialog()] })]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual(['button:Price graph']);
+    // why: SOCS is set before the page and read back after it, as for every kind
+    expect(t.contexts[0]?.added).toHaveLength(1);
+    expect(written(t.root)).toEqual(['graph-explore/2026-10-18/1.json']);
+    const file = join(t.root, 'graph-explore/2026-10-18/1.json');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(statSync(join(t.root, 'graph-explore', '2026-10-18')).mode & 0o777).toBe(0o700);
+    const text = readFileSync(file, 'utf8');
+    const rec = JSON.parse(text);
+    expect(rec).toMatchObject({
+      kind: 'graph-explore',
+      recordedBy: 'camoufox-worker record',
+      region: { role: 'dialog', name: 'Price graph', appeared: true },
+      clicked: ['button:Price graph'],
+      socsReadBack: 'same',
+      landing: 'https://www.google.com/travel/flights/search',
+      classification: { kind: 'results' },
+    });
+    expect(rec.snapshot).toContain('- dialog "Price graph":');
+    expect(rec.snapshot).toContain('- slider "Trip length"');
+    expect(rec.snapshot).not.toContain('Top departing flights');
+    expect(rec.controls).toEqual([
+      { role: 'button', name: 'Tuesday, 1 December 2026, 412 British pounds' },
+      { role: 'tab', name: 'Dates' },
+      { role: 'slider', name: 'Trip length' },
+      { role: 'option', name: '10 days' },
+      { role: 'link', name: 'Learn more' },
+    ]);
+    expect(Object.keys(rec.timings).sort()).toEqual(['click', 'goto', 'graph', 'read', 'settle']);
+    expect(rec.polls).toBeGreaterThanOrEqual(2);
+    // why: no query string is written: the landing, the hops and the snapshot's link targets keep their paths only
+    expect(text).not.toContain('tfs=');
+    expect(text).not.toMatch(/https?:\/\/[^\s"]*\?/);
+    expect(rec.snapshot).toContain('/url: https://www.google.com/travel/flights/help');
+    expect(cooldownOf(t)).toBeNull();
+  });
+  it('the snapshot must hold still across two polls 2 s apart: a dialog still changing is polled again', async () => {
+    const loading = page({ extra: [dialog([text('Loading prices')])] });
+    const { t, deps } = graphRun([page(), loading, page({ extra: [dialog()] })]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = JSON.parse(readFileSync(join(t.root, 'graph-explore/2026-10-18/1.json'), 'utf8'));
+    expect(rec.snapshot).not.toContain('Loading prices');
+    expect(rec.polls).toBeGreaterThanOrEqual(3);
+    expect(t.timers.sleeps.filter((ms) => ms === 2000).length).toBeGreaterThanOrEqual(2);
+  });
+  it('a region that was already there before the click is not the one that appeared', async () => {
+    const before = n('region', 'Price insights', [n('button', 'Old insight')]);
+    const { t, deps } = graphRun([page({ extra: [before, dialog()] })], {
+      button: [n('button', 'Price graph'), before],
+    });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = JSON.parse(readFileSync(join(t.root, 'graph-explore/2026-10-18/1.json'), 'utf8'));
+    expect(rec.region).toEqual({ role: 'dialog', name: 'Price graph', appeared: true });
+  });
+  it('when no dialog or region appears, the main landmark is recorded', async () => {
+    const { t, deps } = graphRun([page()]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = JSON.parse(readFileSync(join(t.root, 'graph-explore/2026-10-18/1.json'), 'utf8'));
+    expect(rec.region).toEqual({ role: 'main', name: '', appeared: false });
+    expect(rec.snapshot).toContain('Top departing flights');
+  });
+  it.each([
+    ['no Price graph button', []],
+    ['two Price graph buttons', [n('button', 'Price graph'), n('button', 'Price graph')]],
+  ])(
+    '%s ends plainly at the find-graph-button step: no click, no cool-down, nothing written',
+    async (_l, button) => {
+      const { t, deps } = graphRun([page()], { button });
+      expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+      expect(t.err.join()).toMatch(/Price graph.*find-graph-button/);
+      expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual([]);
+      expect(cooldownOf(t)).toBeNull();
+      expect(written(t.root, { stopped: true })).toEqual([]);
+    },
+  );
+  it('a click that never answers ends at the click-graph step within its own timeout, with no cool-down', async () => {
+    const { t, deps } = graphRun([page()], { button: [n('button', 'Price graph', [], { clickHang: true })] });
+    expect(await drive(t, record(t.ctx(G), cfg, deps))).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/click-graph \(timed-out\)/);
+    expect(cooldownOf(t)).toBeNull();
+    expect(written(t.root, { stopped: true })).toEqual([]);
+  });
+  it('logs each step at debug as the Cheapest flow does', async () => {
+    const { t, deps } = graphRun([page({ extra: [dialog()] })]);
+    const log = memoryLog();
+    expect(await record(t.ctx(G), cfg, { ...deps, log })).toBe(0);
+    const steps = log.lines
+      .filter((l) => l.msg === 'graph step')
+      .map((l) => [Reflect.get(l.o, 'step'), Reflect.get(l.o, 'phase')]);
+    expect(steps.slice(0, 6)).toEqual([
+      ['find-graph-button', 'start'],
+      ['find-graph-button', 'end'],
+      ['list-regions', 'start'],
+      ['list-regions', 'end'],
+      ['click-graph', 'start'],
+      ['click-graph', 'end'],
+    ]);
+    expect(steps).toContainEqual(['graph-poll', 'end']);
+    expect(steps.at(-1)).toEqual(['read-controls', 'end']);
+  });
+  it('a graph that never holds still ends plainly at the graph-settle step, within the page budget, with no cool-down', async () => {
+    let i = 0;
+    const { t, deps } = graphRun([], {
+      onClick: (pg) =>
+        pg.setTrees(Array.from({ length: 200 }, () => page({ extra: [dialog([text(`Loading ${i++}`)])] }))),
+    });
+    const before = t.timers.now();
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/Price graph did not settle.*graph-settle/);
+    expect(t.timers.now() - before).toBeLessThanOrEqual(180_000);
+    expect(cooldownOf(t)).toBeNull();
+    expect(written(t.root, { stopped: true })).toEqual([]);
+  });
+  it('a captcha after the click is that stop: the classifier decides, 48 h, nothing recorded', async () => {
+    const { t, deps } = graphRun([n('document', '', [text('Our systems have detected unusual traffic')])]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('unusual-traffic');
+    expect(written(t.root)).toEqual([]);
+    const stops = written(t.root, { stopped: true });
+    expect(stops).toEqual(['stopped/2026-10-18/1.facts.json']);
+    const stop = JSON.parse(readFileSync(join(t.root, stops[0] ?? ''), 'utf8'));
+    expect(stop).toMatchObject({ kind: 'graph-explore', clicked: ['button:Price graph'] });
+  });
+  it('a signed-in account control after the click sets the refusal', async () => {
+    const { t, deps } = graphRun([
+      page({ extra: [dialog(), n('button', 'Google Account: Example Person')] }),
+    ]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('signed-in');
+    expect(new Refusal({ dir: t.dataDir, clock: t.timers.clock }).active()).not.toBeNull();
+  });
+  it('a SOCS the click changes is consent-unhandled: the profile is wiped and no exploration is written', async () => {
+    const { t, deps } = graphRun([], {
+      onClick: (pg) => pg.setTrees([page({ extra: [dialog()] })]),
+    });
+    const wrapped: RecordDeps = {
+      ...deps,
+      launch: async (p) => {
+        const c = await deps.launch(p);
+        if (c instanceof FakeContext) {
+          const shape = c.onNewPage;
+          c.onNewPage = (pg) => {
+            shape(pg);
+            const click = pg.onClick;
+            pg.onClick = (x) => {
+              click(x);
+              c.jar = c.jar.map((k) => (k.name === 'SOCS' ? { ...k, value: 'accepted-by-click' } : k));
+            };
+          };
+        }
+        return c;
+      },
+    };
+    expect(await record(t.ctx(G), cfg, wrapped)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('consent-unhandled');
+    expect(existsSync(profileDir(t.dataDir))).toBe(false);
+    expect(written(t.root).filter((f) => f.startsWith('graph-explore/') && f.endsWith('/1.json'))).toEqual(
+      [],
+    );
+  });
+  it.each([
+    ['an e-mail address', 'Contact someone@example.test'],
+    ['an account name', 'Google Account: Example Person'],
+  ])('a snapshot holding %s is refused: nothing written', async (_l, bad) => {
+    const { t, deps } = graphRun([page({ extra: [dialog([text(bad)])] })]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/nothing written/);
+    expect(written(t.root)).toEqual([]);
+  });
+  it('a results page showing no flights has no graph to explore: refused plainly, nothing clicked', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [URL0, LANDED],
+          tree: n('document', '', [...formNodes(), text('No flights found'), n('main', '')]),
+        },
+      ],
+    });
+    expect(await record(t.ctx(G), cfg, t.deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/no flights/);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual([]);
+    expect(cooldownOf(t)).toBeNull();
   });
 });
 

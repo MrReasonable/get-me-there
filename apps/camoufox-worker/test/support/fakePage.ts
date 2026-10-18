@@ -29,6 +29,8 @@ export interface FakeNode {
   countHang?: boolean;
   /** What `getAttribute('aria-selected')` answers, when it differs from the role state (a replaced node). */
   ariaSelectedAttr?: string;
+  /** A link's target, which the printed snapshot shows as a `/url:` line (as Playwright's does). */
+  href?: string;
 }
 export const n = (
   role: string,
@@ -199,10 +201,25 @@ export class FakeLocator implements LocatorLike {
       descendants(this.find()).filter((x) => textMatches(x, t, o.exact)),
     );
   }
+  ariaSnapshot(o?: { timeout?: number }): Promise<string> {
+    return this.read(o, (x) => printed(x, 0).join('\n'));
+  }
   isVisible(): Promise<boolean> {
     const x = this.node();
     return Promise.resolve(x !== undefined && x.hidden !== true);
   }
+}
+
+/** A synthetic printed snapshot in Playwright's YAML-like shape: `- role "name":`, children indented, a link's `/url:`. */
+function printed(x: FakeNode, depth: number): string[] {
+  const pad = '  '.repeat(depth);
+  if (x.role === 'text') return [`${pad}- text: ${x.name ?? ''}`];
+  const kids = [
+    ...(x.href === undefined ? [] : [`${pad}  - /url: ${x.href}`]),
+    ...(x.children ?? []).flatMap((c) => printed(c, depth + 1)),
+  ];
+  const head = `${pad}- ${x.role ?? 'generic'}${x.name === undefined || x.name === '' ? '' : ` "${x.name}"`}`;
+  return kids.length === 0 ? [head] : [`${head}:`, ...kids];
 }
 
 /** Playwright's role query: the role, the accessible name and, when asked, the selected state. */

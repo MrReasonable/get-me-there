@@ -25,7 +25,14 @@ export type Role =
   | 'listitem'
   | 'combobox'
   | 'textbox'
-  | 'main';
+  | 'main'
+  // why: the Price graph exploration (2026-10-18) looks for whichever of these appeared after its click, and lists the
+  // controls inside it; nothing here assumes how the graph itself is built
+  | 'dialog'
+  | 'alertdialog'
+  | 'region'
+  | 'slider'
+  | 'option';
 
 export const FLAG_NAMES = [
   'RESULTS_VERIFIED',
@@ -70,6 +77,8 @@ export interface Selectors {
     currencyButton: RegExp;
     locationButton: RegExp;
     viewMoreButton: string;
+    /** The button that opens the price-per-departure-day graph (exact name; the exploration recorder only). */
+    priceGraphButton: string;
     /** Google's own "no flights" line; a hypothesis until NO_FLIGHTS_VERIFIED. */
     noFlights: RegExp;
   };
@@ -127,6 +136,9 @@ export const SELECTORS: Selectors = {
     currencyButton: /^Currency /,
     locationButton: /^Location/,
     viewMoreButton: 'View more flights',
+    // why: observed 2026-10-18 (the feasibility load's results page names it); clicked only by record --graph-explore,
+    // never by the provider, until a recording shows what the graph holds
+    priceGraphButton: 'Price graph',
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },
   form: {
