@@ -144,6 +144,27 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     expect(r.pointOfSale).toBe('GB');
     expect(classes(budget)).toEqual(['page']);
   });
+  // why: ruling of 2026-10-18 (the honesty rule): a Cheapest tab below every price read is named, and the cell partial
+  it('a Cheapest tab price below every option read: partial, the note naming the tab price', async () => {
+    const { p, tile } = setup();
+    server.use(
+      http.post(URL_, () =>
+        HttpResponse.json(price({ amountMinor: 46200, tabMinor: 44300 }), contacted(true)),
+      ),
+    );
+    const r = await p.discovery?.fetchTile(tile, Q, ctx);
+    if (r?.kind !== 'tile') throw new Error('tile');
+    expect(r.prices[0]?.amountMinor).toBe(46200);
+    expect(r.cellIssues).toEqual([
+      {
+        cell: tile.coveredCells[0],
+        reason: 'parse',
+        offersDropped: 1,
+        detail:
+          'return date: the date asked for; Google shows a lower fare under Cheapest that could not be read (£443)',
+      },
+    ]);
+  });
   it('unparsed options and a cheaper tab mark the cell partial (offers-dropped), never only a note', async () => {
     const { p, tile } = setup();
     server.use(
@@ -162,7 +183,7 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
         reason: 'parse',
         offersDropped: 3,
         detail:
-          'return date: the date asked for; options unread: 2; the Cheapest tab showed a lower price; options for another cell: 1',
+          'return date: the date asked for; options unread: 2; Google shows a lower fare under Cheapest that could not be read (£399); options for another cell: 1',
       },
     ]);
   });

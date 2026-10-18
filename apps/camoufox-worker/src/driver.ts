@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { Logger } from '@gmt/core';
 import { classifyPage, type PageFacts, type PageKind } from './classify.js';
-import type { GuardState } from './guard.js';
+import { type GuardState, onAllowlist } from './guard.js';
 import { isSettled, type Previous, stableAcross } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
@@ -106,10 +106,22 @@ export interface Driver {
   listFacts(d: Deadline): Promise<ListFacts>;
   formFacts(d: Deadline): Promise<FormFacts>;
   click(role: Role, name: string, d: Deadline): Promise<void>;
+  /**
+   * The Cheapest flow's clicks (ruling of 2026-10-18): the tab's own information pop-up closed through its exact
+   * close button when there is one, on the results page, then the tab. Returns what was clicked, in order.
+   */
+  clickCheapest(d: Deadline, log?: Logger): Promise<string[]>;
 }
+
+/** Each click's own bound, always inside the page deadline (ruling of 2026-10-18). */
+export const CLICK_TIMEOUT_MS = 10_000;
 
 /** The deadline's remaining time as a Playwright timeout; never 0, which Playwright reads as "no timeout". */
 const timeoutOf = (d: Deadline): { timeout: number } => ({ timeout: Math.max(1, d.remaining()) });
+/** A click's timeout: its own bound, within what the deadline has left. */
+const clickTimeoutOf = (d: Deadline): { timeout: number } => ({
+  timeout: Math.max(1, Math.min(CLICK_TIMEOUT_MS, d.remaining())),
+});
 
 /** A locator's accessible name as the brief reads it: `aria-label`, else the text; `null` when neither is readable. */
 async function nameOf(l: LocatorLike, d: Deadline): Promise<string | null> {
@@ -247,7 +259,31 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     },
 
     async click(role, name, d) {
-      await d.race(page.getByRole(role, { name, exact: true }).nth(0).click(timeoutOf(d)));
+      await d.race(page.getByRole(role, { name, exact: true }).nth(0).click(clickTimeoutOf(d)));
+    },
+
+    async clickCheapest(d, log) {
+      const clicked: string[] = [];
+      // why: a failed click logs only the error class and the target, never a URL or a message holding one
+      const attempt = async (l: LocatorLike, target: string): Promise<void> => {
+        try {
+          await d.race(l.click(clickTimeoutOf(d)));
+        } catch (e) {
+          log?.debug({ error: e instanceof Error ? e.name : 'unknown', target }, 'click failed');
+          throw e;
+        }
+        clicked.push(target);
+      };
+      const tab = page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab }).nth(0);
+      // why: page locators reach the main frame only; the close button must sit inside the Cheapest tab itself, have
+      // exactly the selector's name, be the only one there, and the page must be on the results allowlist
+      if (onAllowlist(page.url(), S)) {
+        const close = tab.getByRole('button', { name: S.results.cheapestPopupClose, exact: true });
+        if ((await countOf(close, d)) === 1)
+          await attempt(close.nth(0), `button:${S.results.cheapestPopupClose}`);
+      }
+      await attempt(tab, 'tab:Cheapest');
+      return clicked;
     },
   };
 }
@@ -258,10 +294,10 @@ async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
 }
 
 /**
- * The consent probe's page (Task 14.2; SEC-R2-003): the driver without `click`, so a click on a consent page does not
+ * The consent probe's page (Task 14.2; SEC-R2-003): the driver without `click` or `clickCheapest`, so a click on a consent page does not
  * compile. Imported only by record.ts (rules.test.ts pins that).
  */
-export type ProbePage = Omit<Driver, 'click'>;
+export type ProbePage = Omit<Driver, 'click' | 'clickCheapest'>;
 export function probePage(d: Driver): ProbePage {
   return {
     goto: d.goto,

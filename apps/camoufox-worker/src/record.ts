@@ -374,10 +374,16 @@ async function interact(
   const clicked: string[] = [];
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {
-    const tab = settled.facts.page.cheapestTabs[0]?.name ?? '';
-    if (kind === 'cheapest' && tab !== '') {
-      await driver.click('tab', tab, d);
-      clicked.push(`tab:${tab.replace(/\d[\d,]*/g, '<n>')}`);
+    if (kind === 'cheapest' && settled.facts.page.cheapestTabs.length === 1) {
+      // why: ruling of 2026-10-18: the tab's own information pop-up closed through its exact button, then the tab
+      try {
+        clicked.push(...(await driver.clickCheapest(d, deps.log)));
+      } catch (e) {
+        if (e instanceof DeadlineExceeded) throw e;
+        throw new RecordingRefused(
+          'the Cheapest tab could not be clicked; the debug log names the error class',
+        );
+      }
     } else if (kind === 'view-more') {
       await driver.click('button', deps.selectors.results.viewMoreButton, d);
       clicked.push(`button:${deps.selectors.results.viewMoreButton}`);

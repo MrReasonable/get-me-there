@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
@@ -49,6 +49,22 @@ describe('parseOptionName (dated grammar)', () => {
     expect(parseOptionName(nonstop.replace('Nonstop', 'Non-stop'))?.stops).toBe(0);
   });
   // why: fix round 1 (prov-int M3): after the duration only the stopover sentences may follow, then the end
+  // why: observed in the 2026-10-18 recordings: a name with no stopover sentence ends "… min.   Select flight", with
+  // a run of spaces where the empty tail sits (synthetic carrier here)
+  it('a non-stop name with a run of spaces before "Select flight" parses', () => {
+    const nonstop = ONE_STOP.replace(
+      '1 stop flight with Tap Air Portugal',
+      'Non-stop flight with Example Air',
+    ).replace(
+      'Total duration 12 hrs 40 min. Stopover (1 of 1) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon. Select flight',
+      'Total duration 8 hrs 14 min.   Select flight',
+    );
+    expect(parseOptionName(nonstop)).toMatchObject({
+      stops: 0,
+      durationMinutes: 494,
+      carriers: 'Example Air',
+    });
+  });
   it('reads two stopover sentences in the tail', () => {
     const two = ONE_STOP.replace('1 stop flight', '2 stops flight').replace(
       'Stopover (1 of 1) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon.',
@@ -108,7 +124,10 @@ describe.skipIf(!present)(skipTitle('recorded result names parse (Task 14.2 resu
   it('a recorded non-stop name parses', () => {
     const names: string[] = [];
     const dir = join(ROOT, 'results');
-    for (const day of existsSync(dir) ? readdirSync(dir) : [])
+    // why: a kind directory also holds its tracked .gitkeep; only day directories are read
+    for (const day of existsSync(dir)
+      ? readdirSync(dir).filter((x) => statSync(join(dir, x)).isDirectory())
+      : [])
       for (const f of readdirSync(join(dir, day)).filter((x) => x.endsWith('.facts.json'))) {
         const raw: unknown = JSON.parse(readFileSync(join(dir, day, f), 'utf8'));
         if (typeof raw === 'object' && raw !== null && 'names' in raw && Array.isArray(raw.names))

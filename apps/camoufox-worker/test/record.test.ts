@@ -30,7 +30,7 @@ import { Refusal } from '../src/refusal.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
-import { FakePage, type Navigation, n, option, resultsTree, text } from './support/fakePage.js';
+import { descendants, FakePage, type Navigation, n, option, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
@@ -267,7 +267,9 @@ describe('the recorder (brief Task 14.2 rules)', () => {
   });
   it('rule 3: the probe page has no click method, and another blocked kind cools down as usual', async () => {
     const page = new FakePage(null);
-    expect('click' in probePage(createDriver(page, { hops: [], frameUrls: [], refused: null }))).toBe(false);
+    const probe = probePage(createDriver(page, { hops: [], frameUrls: [], refused: null }));
+    expect('click' in probe).toBe(false);
+    expect('clickCheapest' in probe).toBe(false);
     const t = setup({
       navigations: [
         {
@@ -310,7 +312,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(await record(a.ctx([...Q, '--cheapest']), cfg, a.deps)).toBe(0);
     expect(a.contexts[0]?.pages[0]?.calls.clicks).toEqual(['tab:Cheapest from 451 British pounds']);
     const facts = JSON.parse(readFileSync(join(a.root, 'cheapest/2026-10-18/1.facts.json'), 'utf8'));
-    expect(facts.clicked).toEqual(['tab:Cheapest from <n> British pounds']);
+    expect(facts.clicked).toEqual(['tab:Cheapest']);
     const b = setup();
     expect(await record(b.ctx([...Q, '--view-more']), cfg, b.deps)).toBe(0);
     expect(b.contexts[0]?.pages[0]?.calls.clicks).toEqual(['button:View more flights']);
@@ -320,6 +322,40 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     const g = setup();
     expect(await record(g.ctx([...Q, '--grid']), cfg, g.deps)).toBe(EX_CONFIG);
     expect(g.profiles).toEqual([]);
+  });
+  // why: ruling of 2026-10-18: the Cheapest tab's information pop-up is closed through its own button, then the tab
+  it('--cheapest closes the tab’s pop-up, clicks the tab, settles again and records what it clicked', async () => {
+    const POP = 'Cheapest from £443 Close dialogue Looking for the lowest fares?';
+    const tree = resultsTree({ tab: POP });
+    for (const c of descendants([tree]))
+      if (c.role === 'tab' && c.name === POP) c.children = [n('button', 'Close dialogue')];
+    const t = setup({ navigations: [{ hops: [URL0, LANDED], tree }] });
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, t.deps)).toBe(0);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual(['button:Close dialogue', `tab:${POP}`]);
+    const facts = JSON.parse(readFileSync(join(t.root, 'cheapest/2026-10-18/1.facts.json'), 'utf8'));
+    expect(facts.clicked).toEqual(['button:Close dialogue', 'tab:Cheapest']);
+  });
+  it('--cheapest whose tab cannot be clicked refuses plainly, with no cool-down', async () => {
+    const t = setup();
+    const deps: RecordDeps = {
+      ...t.deps,
+      launch: async (p) => {
+        const c = await t.deps.launch(p);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            pg.onClick = () => {
+              throw Object.assign(new Error('locator.click: Timeout'), { name: 'TimeoutError' });
+            };
+          };
+        return c;
+      },
+    };
+    expect(await record(t.ctx([...Q, '--cheapest']), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/the Cheapest tab could not be clicked/);
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active(),
+    ).toBeNull();
+    expect(written(t.root)).toEqual([]);
   });
   it('rule 6: nothing is written when the facts hold the key, the SOCS value, an account name or an e-mail address', async () => {
     for (const bad of [KEY, SOCS_VALUE, 'Google Account: Example', 'someone@example.test'])

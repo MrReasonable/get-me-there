@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDriver, pollUntilSettled } from '../src/driver.js';
+import { CLICK_TIMEOUT_MS, createDriver, pollUntilSettled } from '../src/driver.js';
 import type { GuardState } from '../src/guard.js';
 import { SELECTORS } from '../src/selectors.js';
 import { bounded, DeadlineExceeded } from '../src/timers.js';
@@ -347,5 +347,82 @@ describe('result links by their own name (ruling of 2026-10-18)', () => {
     const { driver, d } = setup([evidence()]);
     expect(await driver.resultNames(d)).not.toContain('Learn more about tracked prices');
     expect((await driver.resultNames(d)).some((x) => x?.includes('outside main') === true)).toBe(false);
+  });
+});
+
+// why: ruling of 2026-10-18 (the Cheapest recording): Google attaches an information pop-up to the Cheapest tab whose
+// "Close dialogue" button intercepts the tab's click; only that button, inside that tab, may be clicked to close it
+describe('clickCheapest (ruling of 2026-10-18)', () => {
+  const POPUP_TAB =
+    'Cheapest from £443 Close dialogue Looking for the lowest fares? These additional budget picks help you save but may involve trade-offs';
+  const withTab = (tab: ReturnType<typeof n>, extra: ReturnType<typeof n>[] = []) => {
+    const t = resultsTree();
+    for (const c of descendants([t])) if (c.role === 'tablist') c.children = [n('tab', 'Best'), tab];
+    t.children = [...(t.children ?? []), ...extra];
+    return t;
+  };
+  const run = async (tree: ReturnType<typeof n>, url = RESULTS_URL) => {
+    const page = new FakePage(null);
+    page.setUrl(url);
+    page.setTrees([tree]);
+    const timers = fakeTimers();
+    const d = timers.deadline(90_000);
+    const lines = memoryLog();
+    const driver = createDriver(page, guard());
+    const clicked = await driver.clickCheapest(d, lines);
+    return { page, clicked, lines };
+  };
+  it('the pop-up from the evidence is closed, then the tab clicked', async () => {
+    const tab = n('tab', POPUP_TAB, [n('button', 'Close dialogue')]);
+    const { page, clicked } = await run(withTab(tab));
+    expect(page.calls.clicks).toEqual(['button:Close dialogue', `tab:${POPUP_TAB}`]);
+    expect(clicked).toEqual(['button:Close dialogue', 'tab:Cheapest']);
+  });
+  it('no pop-up: the tab is clicked directly', async () => {
+    const { page, clicked } = await run(withTab(n('tab', 'Cheapest from £443')));
+    expect(page.calls.clicks).toEqual(['tab:Cheapest from £443']);
+    expect(clicked).toEqual(['tab:Cheapest']);
+  });
+  it('a "Close dialogue" button anywhere else is never clicked', async () => {
+    const tree = withTab(n('tab', 'Cheapest from £443'), [
+      n('button', 'Close dialogue'),
+      n('dialog', '', [n('button', 'Close dialogue')]),
+    ]);
+    const { page } = await run(tree);
+    expect(page.calls.clicks).toEqual(['tab:Cheapest from £443']);
+  });
+  it('a name only near "Close dialogue" (not exact) inside the tab is never clicked', async () => {
+    const { page } = await run(withTab(n('tab', POPUP_TAB, [n('button', 'Close dialogue now')])));
+    expect(page.calls.clicks).toEqual([`tab:${POPUP_TAB}`]);
+  });
+  it('off the results page nothing is closed', async () => {
+    const { page } = await run(
+      withTab(n('tab', POPUP_TAB, [n('button', 'Close dialogue')])),
+      'https://www.example.test/',
+    );
+    expect(page.calls.clicks).toEqual([`tab:${POPUP_TAB}`]);
+  });
+  it('each click carries its own timeout inside the page deadline', async () => {
+    const { page } = await run(withTab(n('tab', POPUP_TAB, [n('button', 'Close dialogue')])));
+    expect(page.calls.timeouts.slice(-2)).toEqual([CLICK_TIMEOUT_MS, CLICK_TIMEOUT_MS]);
+  });
+  it('a click that fails logs its error class and the target name at debug, never a URL, and throws', async () => {
+    const tab = n('tab', 'Cheapest from £443', [], { hang: false });
+    const tree = withTab(tab);
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree]);
+    page.onClick = () => {
+      throw Object.assign(new Error('locator.click: Timeout 10000ms exceeded at https://www.google.com/x'), {
+        name: 'TimeoutError',
+      });
+    };
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    await expect(createDriver(page, guard()).clickCheapest(timers.deadline(90_000), lines)).rejects.toThrow();
+    expect(lines.lines.filter((l) => l.level === 'debug').map((l) => l.o)).toEqual([
+      { error: 'TimeoutError', target: 'tab:Cheapest' },
+    ]);
+    expect(JSON.stringify(lines.lines)).not.toContain('https://');
   });
 });

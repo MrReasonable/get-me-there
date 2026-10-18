@@ -14,6 +14,7 @@ import {
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type FlightProvider,
+  formatPence,
   type Logger,
   type PageRequest,
   type ProviderContext,
@@ -64,7 +65,12 @@ export function priceIssue(
   const tabBelow = p.tabMinor !== null && p.tabMinor < p.amountMinor;
   const parts = [RETURN_DATE_LABEL];
   if (p.optionsUnparsed > 0) parts.push(`options unread: ${p.optionsUnparsed}`);
-  if (tabBelow) parts.push('the Cheapest tab showed a lower price');
+  // why: the honesty rule (ruling of 2026-10-18): a lower fare under the Cheapest tab that was not read is named, and
+  // the cell is partial (offersDropped), so the higher minimum never passes for the cell's cheapest
+  if (tabBelow && p.tabMinor !== null)
+    parts.push(
+      `Google shows a lower fare under Cheapest that could not be read (${formatPence(p.tabMinor)})`,
+    );
   if (p.optionsOtherCell > 0) parts.push(`options for another cell: ${p.optionsOtherCell}`);
   return {
     cell,

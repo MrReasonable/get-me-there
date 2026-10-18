@@ -295,19 +295,32 @@ export class PageSession {
       return { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
     const form = checkForm(await driver.formFacts(d), req);
     if (form !== 'ok') return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
-    // why: the worker clicks only names its selectors module marks verified (PIE-09), re-reading the facts after each.
-    const clicks: Array<[boolean, 'tab' | 'button', string]> = [
-      [S.CHEAPEST_FLOW_VERIFIED, 'tab', settled.facts.page.cheapestTabs[0]?.name ?? ''],
-      [S.VIEW_MORE_ADDS_CHEAPER, 'button', S.results.viewMoreButton],
-    ];
-    for (const [verified, role, name] of clicks) {
-      if (!verified || name === '') continue;
-      await driver.click(role, name, d);
+    // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
+    const after = async (): Promise<WorkerAnswer | null> => {
       settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, this.d.log);
-      if (settled.kind.kind !== 'results') {
-        const page: BlockedPage = settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised';
-        return { answer: this.blockedPlaceholder(page), stop: page };
+      if (settled.kind.kind === 'results') return null;
+      return this.blockedPlaceholder(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
+    };
+    if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
+      let read = true;
+      try {
+        await driver.clickCheapest(d, this.d.log);
+      } catch (e) {
+        // why: the honesty rule (ruling of 2026-10-18): a Cheapest flow that cannot be clicked is read as the list
+        // stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the deadline still ends
+        // the page as not-ready
+        if (e instanceof DeadlineExceeded || d.expired()) throw e;
+        read = false;
       }
+      if (read) {
+        const stop = await after();
+        if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
+      }
+    }
+    if (S.VIEW_MORE_ADDS_CHEAPER) {
+      await driver.click('button', S.results.viewMoreButton, d);
+      const stop = await after();
+      if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
     }
     const list = readList(await driver.listFacts(d), req);
     // why: decision 69: a page in another currency, or one with no option read for any cell, is not a page this app

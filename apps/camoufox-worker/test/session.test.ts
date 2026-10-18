@@ -10,7 +10,7 @@ import { SELECTORS, type Selectors } from '../src/selectors.js';
 import { PageSession } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
-import { type FakeNode, formNodes, n, option, resultsTree, text } from './support/fakePage.js';
+import { descendants, type FakeNode, formNodes, n, option, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers, flush } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
@@ -614,5 +614,36 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       cell: { status: 'none-for-cell', optionsOtherCell: 2, optionsUnparsed: 0 },
     });
     expect(t.cooldown.active()).toBeNull();
+  });
+
+  // why: ruling of 2026-10-18 (the honesty rule): when the Cheapest flow cannot be read, the page's own list is read
+  // and the tab's lower price travels to the adapter, which marks the cell partial
+  it('a Cheapest tab that cannot be clicked: the list is still read, with the tab price, never a block', async () => {
+    const t = setup({
+      tree: resultsTree({ tab: 'Cheapest from £443' }),
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          p.onClick = () => {
+            throw Object.assign(new Error('locator.click: Timeout'), { name: 'TimeoutError' });
+          };
+        };
+      },
+    });
+    const r = await t.session.page(REQ);
+    expect(r.answer).toMatchObject({
+      kind: 'cells',
+      cell: { status: 'price', amountMinor: 45100, tabMinor: 44300 },
+    });
+    expect(t.cooldown.active()).toBeNull();
+  });
+  it('with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked', async () => {
+    const POP = 'Cheapest from £443 Close dialogue Looking for the lowest fares?';
+    const tree = resultsTree({ tab: POP });
+    for (const c of descendants([tree]))
+      if (c.role === 'tab' && c.name === POP) c.children = [n('button', 'Close dialogue')];
+    const t = setup({ tree, selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true } });
+    expect((await t.session.page(REQ)).answer.kind).toBe('cells');
+    expect(page0(t).calls.clicks).toEqual(['button:Close dialogue', `tab:${POP}`]);
   });
 });

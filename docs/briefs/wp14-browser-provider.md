@@ -1256,7 +1256,7 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     const r = await p.discovery?.fetchTile(tile, Q, ctx);
     if (r?.kind !== 'tile') throw new Error('tile');
     expect(r.cellIssues).toEqual([{ cell: tile.coveredCells[0], reason: 'parse', offersDropped: 3,
-      detail: 'return date: the date asked for; options unread: 2; the Cheapest tab showed a lower price; options for another cell: 1' }]);
+      detail: 'return date: the date asked for; options unread: 2; Google shows a lower fare under Cheapest that could not be read (£399); options for another cell: 1' }]);
   });
   it('no flights: neither a price nor noFares (written no_data)', async () => {
     const { p, tile } = setup();

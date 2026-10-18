@@ -62,6 +62,8 @@ export interface Selectors {
     dateGridButton: string;
     /** A result link's own accessible name (the result-name grammar then reads it whole). */
     resultLink: RegExp;
+    /** The one button that may close the information pop-up attached to the Cheapest tab (exact name). */
+    cheapestPopupClose: string;
     resultsReturned: RegExp;
     fetching: RegExp;
     currencyButton: RegExp;
@@ -114,6 +116,11 @@ export const SELECTORS: Selectors = {
     // level-3 heading "Top departing flights" / "Other departing flights" precedes each), so results are found by the
     // link's own name inside `main`, never by a list name. The grammar still checks the price and currency.
     resultLink: /^From [\d,]+ [A-Za-z ]+ round trip total\. /,
+    // why: observed 2026-10-18 (the Cheapest recording): Google attaches an information pop-up ("Looking for the
+    // lowest fares? …") to the Cheapest tab, and its close button intercepts the tab's click. Operator ruling of
+    // 2026-10-18: only this button, by exact name, inside that tab, on the results page, may be clicked to close it;
+    // it is not a consent or verification page, and nothing else is ever clicked to dismiss anything.
+    cheapestPopupClose: 'Close dialogue',
     resultsReturned: /^\d+ results? returned\.$/,
     fetching: /Fetching results/,
     currencyButton: /^Currency /,

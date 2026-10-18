@@ -67,7 +67,9 @@ function grammarFor(interstitials: readonly Interstitial[]): RegExp {
       '(?<stops>Nonstop|Non-stop|[0-9]+ stops?) flight with (?<carriers>[^.]+(?:\\.[^ .][^.]*)*)\\. ' +
       'Leaves (?<from>.+?) at [0-9]{1,2}:[0-9]{2} on [A-Z][a-z]+, (?<month>[A-Z][a-z]+) (?<day>[0-9]{1,2}) ' +
       `and arrives at (?<to>.+?) at [0-9]{1,2}:[0-9]{2} on ${DATE}\\. ` +
-      `Total duration (?<duration>${DURATION})\\.(?<tail>(?: ${STOPOVER})*) Select flight$`,
+      // why: observed 2026-10-18: a name with no stopover sentence carries a run of spaces before "Select flight"; only
+      // spaces may sit between the sentences, never other text
+      `Total duration (?<duration>${DURATION})\\.(?<tail>(?: +${STOPOVER})*) +Select flight$`,
   );
 }
 const cache = new WeakMap<readonly Interstitial[], RegExp>();
