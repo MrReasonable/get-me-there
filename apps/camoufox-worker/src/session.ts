@@ -2,10 +2,8 @@ import { rmSync } from 'node:fs';
 import {
   type BlockedPage,
   type Clock,
-  GRID_GRAMMAR_VERSION,
   GRID_MOVE_BUDGET_MS,
   GRID_MOVE_RESERVE_MS,
-  type GridRequest,
   type IsoDateTime,
   type ListRequest,
   type Logger,
@@ -30,11 +28,10 @@ import {
   type Settled,
 } from './driver.js';
 import { checkForm } from './form.js';
-import { gridPage } from './gridPage.js';
+import { readGrid } from './gridSession.js';
 import { installGuard } from './guard.js';
 import { readList } from './list.js';
 import type { Pacer } from './pacer.js';
-import { pointOfSaleOf } from './pointOfSale.js';
 import type { Refusal } from './refusal.js';
 import { SELECTORS, type Selectors } from './selectors.js';
 import { readBack, type SocsCapture, socsCookie } from './socs.js';
@@ -268,7 +265,19 @@ export class PageSession {
         } else {
           const r =
             req.mode === 'grid'
-              ? await this.readGrid(driver, p, req, budget, started, counter)
+              ? await readGrid(
+                  {
+                    driver,
+                    page: p,
+                    req,
+                    budget,
+                    started,
+                    counter,
+                    S: this.S,
+                    pollMs: this.pollMs,
+                  },
+                  this.d,
+                )
               : await this.read(driver, req, budget, started);
           answer = r.answer;
           stop = r.stop;
@@ -349,82 +358,6 @@ export class PageSession {
   /** A blocked answer whose end the stop handling fills in; it never leaves the session as it is. */
   private blockedPlaceholder(page: BlockedPage): WorkerAnswer {
     return { kind: 'blocked', page, cooldownUntil: this.d.clock.now() };
-  }
-
-  /**
-   * A grid page (spec §2 rev 34): the Best view settled and classified, the search form and the currency checked
-   * before anything is clicked (PA-12), then the dialog flow. Google's no-flights page (past the sale window) is a grid
-   * answer with no views, which the adapter reads as no data for the tile's cells.
-   */
-  private async readGrid(
-    driver: Driver,
-    page: PageLike,
-    req: GridRequest,
-    budget: PageBudget,
-    started: number,
-    counter: { scrolls: number },
-  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
-    const S = this.S;
-    const d = budget.d;
-    const settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
-      view: 'best',
-      log: this.d.log,
-      startedAt: started,
-    });
-    if (settled.kind.kind === 'blocked')
-      return {
-        answer: this.blockedPlaceholder(settled.kind.page),
-        stop: settled.kind.page,
-        rule: settled.rule,
-      };
-    const grid = (
-      views: Extract<WorkerAnswer, { kind: 'grid' }>['views'],
-      ended: Extract<WorkerAnswer, { kind: 'grid' }>['ended'],
-      notes: string[],
-      pointOfSale: string,
-    ): WorkerAnswer => ({
-      kind: 'grid',
-      fetchedAt: this.d.clock.now(),
-      currency: 'GBP',
-      pointOfSale,
-      views,
-      scrolls: counter.scrolls,
-      ended,
-      notes,
-      versions: { ...this.d.versions, gridGrammar: GRID_GRAMMAR_VERSION },
-    });
-    if (settled.kind.kind === 'no-flights')
-      return { answer: grid([], 'no-flights', [], 'unknown'), stop: null };
-    const form = checkForm(await driver.formFacts(d), {
-      departureDate: req.start.departureDate,
-      returnDate: req.start.returnDate,
-    });
-    const list = await driver.listFacts(d);
-    if (form !== 'ok' || list.currencyName !== 'Currency GBP')
-      return {
-        answer: this.blockedPlaceholder('unrecognised'),
-        stop: 'unrecognised',
-        rule: form !== 'ok' ? `search-form:${form}` : 'currency',
-      };
-    const g = this.d.grid;
-    const r = await gridPage(driver, page, budget, req, {
-      timers: this.d.timers,
-      pollMs: this.pollMs,
-      S,
-      steps: { timers: this.d.timers, log: this.d.log, startedAt: started },
-      spacingMs: g?.spacingMs ?? 0,
-      stepDays: g?.stepDays ?? { departures: 1, returns: 1 },
-      // why: CA 10: the operator's date, as the app's planner takes it
-      today: this.d.clock.todayLondon(),
-      counter,
-    });
-    if (r.kind === 'stop')
-      return {
-        answer: this.blockedPlaceholder(r.page),
-        stop: r.page,
-        rule: `grid:${r.notes.at(-1) ?? r.page}`,
-      };
-    return { answer: grid(r.views, r.ended, r.notes, pointOfSaleOf(list.locationName)), stop: null };
   }
 
   private async read(

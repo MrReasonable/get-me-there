@@ -1,7 +1,16 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type BlockedPage, CAMOUFOX_JS_VERSION, type Clock, type Logger, systemClock } from '@gmt/core';
+import {
+  type BlockedPage,
+  CAMOUFOX_JS_VERSION,
+  type Clock,
+  GRID_MIN_SCROLL_SPACING_SECONDS,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
+  type Logger,
+  systemClock,
+} from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
 import { classifyPageWithRule } from './classify.js';
@@ -22,8 +31,6 @@ import {
   type Settled,
   type StepOptions,
 } from './driver.js';
-import { exploreGraph, stripSnapshotQueries } from './graph.js';
-import { exploreGrid, GRID_SCROLL_SPACING_MS, MOVE_BUDGET_MS, MOVE_RESERVE_MS } from './gridRecord.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
 import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
@@ -39,6 +46,7 @@ import {
   type RecordingKind,
   RecordingRefused,
 } from './recordArgs.js';
+import { type Outcome, recordGraph, recordGrid, type Seen } from './recordDialogs.js';
 import {
   type StopFacts,
   stopRecord,
@@ -67,8 +75,8 @@ export { stderrLog } from './log.js';
  * consent stop or a SOCS that is not the captured one. It writes what the locators read to
  * `fixtures/recorded/<kind>/<date>/<n>.{facts,meta}.json` (gitignored, local-only, 0600: decision 61). It never stores
  * a cookie value, the worker key, an account name or an e-mail address, and stores printed ARIA text only in the Price
- * graph exploration (`graph-explore/<date>/<n>.json`, queries stripped, never parsed). The consent probe is the one
- * navigation exception, and it lives only here.
+ * graph exploration and the date grid recording (`graph-explore/<date>/<n>.json` and `grid/<date>/<n>.json`, queries
+ * stripped, never parsed; recordDialogs.ts). The consent probe is the one navigation exception, and it lives only here.
  */
 export {
   KINDS,
@@ -100,30 +108,6 @@ export interface RecordDeps {
   pid: number;
   isAlive?: (pid: number) => boolean;
 }
-
-/** One page's outcome: the facts read (or what appeared), or the stop it met. */
-/** What the classifier saw on a page, for a stop record (diagnostics of 2026-10-18). */
-interface Seen {
-  facts: StopFacts | null;
-  clicked: string[];
-  headings: string[];
-}
-type Outcome =
-  | ({
-      kind: 'read';
-      data: Record<string, unknown>;
-      noFlights: boolean;
-      stepMs: Record<string, number>;
-    } & Seen)
-  | { kind: 'appeared'; data: Record<string, unknown>; stepMs: Record<string, number> }
-  | ({
-      kind: 'stop';
-      page: BlockedPage;
-      rule: string;
-      landing: string;
-      hops: string[];
-      stepMs: Record<string, number>;
-    } & Seen);
 
 export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordDeps): Promise<number> {
   let args: RecordArgs;
@@ -198,7 +182,9 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           deps.timers,
           pageMs,
           pageStart,
-          2 * pageMs + args.moves.length * (GRID_SCROLL_SPACING_MS + MOVE_BUDGET_MS + MOVE_RESERVE_MS),
+          2 * pageMs +
+            args.moves.length *
+              (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
         );
         const d = budget.d;
         let outcome: Outcome | null = null;
@@ -543,121 +529,24 @@ async function interact(
       return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
     return null;
   };
-  if (kind === 'grid') {
-    if (settled.kind.kind !== 'results')
-      throw new RecordingRefused('the results page shows no flights; there is no date grid to record');
-    const steps: StepOptions = { timers: deps.timers, log: deps.log, startedAt: pageStart, flow: 'grid' };
-    try {
-      const g = await exploreGrid(driver, page, d, {
-        timers: deps.timers,
-        pollMs: deps.pollMs,
-        S: deps.selectors,
-        steps,
-        clicked,
-        moves,
-        next: () => {
-          d = budget.next();
-          return d;
-        },
-        nextFor: (ms) => {
-          d = budget.nextFor(ms);
-          return d;
-        },
-      });
-      if (g.kind === 'blocked') return await stop(g.page, g.rule, g.facts);
-      stepMs.read = deps.timers.now() - t0;
-      return {
-        kind: 'read',
-        data: {
-          kind,
-          landing: stripQuery(page.url()),
-          hops: guard.hops.map(stripQuery),
-          results: g.results,
-          views: g.views.map((v) => ({ ...v, snapshot: stripSnapshotQueries(v.snapshot) })),
-          moves: g.moves,
-          clicked,
-          classification: g.classification,
-        },
-        noFlights: false,
-        stepMs,
-        facts: g.facts,
-        clicked,
-        headings: [],
-      };
-    } catch (e) {
-      if (e instanceof DeadlineExceeded) throw e;
-      const blocked = await classifyAfterFailedStep(d, steps, 'best');
-      if (blocked !== null) return blocked;
-      const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'grid';
-      throw new RecordingRefused(
-        `the date grid recording ended at the ${step} step; the debug log has the step lines`,
-      );
-    }
-  }
-  if (kind === 'graph-explore') {
-    // why: a no-flights page has no graph; nothing is clicked and nothing stopped the page, so no cool-down
-    if (settled.kind.kind !== 'results')
-      throw new RecordingRefused('the results page shows no flights; there is no Price graph to explore');
-    // why: as the Cheapest flow: the click and the graph's settle have their own page budget from here
-    d = budget.next();
-    const steps: StepOptions = { timers: deps.timers, log: deps.log, startedAt: pageStart, flow: 'graph' };
-    const before = deps.timers.now();
-    try {
-      const g = await exploreGraph(driver, page, d, {
-        timers: deps.timers,
-        pollMs: deps.pollMs,
-        S: deps.selectors,
-        steps,
-        clicked,
-        next: () => {
-          d = budget.next();
-          return d;
-        },
-      });
-      if (g.kind === 'blocked') return await stop(g.page, g.rule, g.facts);
-      stepMs.click = g.clickMs;
-      stepMs.graph = deps.timers.now() - before - g.datesMs - g.scrollMs;
-      if (g.dates !== null) stepMs.dates = g.datesMs;
-      if (g.scrolled !== null && 'snapshot' in g.scrolled) stepMs.scroll = g.scrollMs;
-      stepMs.read = deps.timers.now() - t0;
-      return {
-        kind: 'read',
-        data: {
-          kind,
-          landing: stripQuery(page.url()),
-          hops: guard.hops.map(stripQuery),
-          region: g.region,
-          snapshot: stripSnapshotQueries(g.snapshot),
-          controls: g.controls,
-          unnamedControls: g.unnamed,
-          // why: graph.ts strips the queries from the chart text and every panel snapshot as it reads them
-          chart: g.chart,
-          datesTabs: g.datesTabs,
-          dates: g.dates,
-          scrollButtons: g.scrollButtons,
-          scrolled: g.scrolled,
-          clicked,
-          polls: g.polls,
-          classification: g.classification,
-        },
-        noFlights: false,
-        stepMs,
-        facts: g.facts,
-        clicked,
-        headings: [],
-      };
-    } catch (e) {
-      if (e instanceof DeadlineExceeded) throw e;
-      const blocked = await classifyAfterFailedStep(d, steps, 'best');
-      if (blocked !== null) return blocked;
-      // why: the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
-      const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'graph';
-      throw new RecordingRefused(
-        e instanceof CheapestStepFailed && e.step === 'graph-settle'
-          ? `the Price graph did not settle within its budget (${step}); the debug log has the poll lines`
-          : `the Price graph exploration ended at the ${step} step; the debug log has the step lines`,
-      );
-    }
+  if (kind === 'grid' || kind === 'graph-explore') {
+    // why: no-flights and results are the only kinds left after the blocked stop above
+    const shown = settled.kind.kind === 'results' ? 'results' : 'no-flights';
+    const c = {
+      driver,
+      page,
+      guard,
+      budget,
+      d,
+      pageStart,
+      t0,
+      deps,
+      stepMs,
+      clicked,
+      stop,
+      classifyAfterFailedStep,
+    };
+    return kind === 'grid' ? await recordGrid(c, shown, moves) : await recordGraph(c, shown);
   }
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {

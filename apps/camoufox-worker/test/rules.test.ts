@@ -244,12 +244,13 @@ describe('worker rules: source facts through the compiler API', () => {
   });
   // why: the Price graph exploration (2026-10-18) stores a printed snapshot for reading by people; nothing parses it, and
   // the provider path (session.ts, server.ts) never reaches it
-  it('ariaSnapshot is called only in dialogSettle.ts and graph.ts, and the explorations are imported only by record.ts', () => {
+  it('ariaSnapshot is called only in dialogSettle.ts and graph.ts, and the explorations are reached only from record.ts', () => {
     expect([...new Set(callsTo('ariaSnapshot').map((c) => c.f))].sort()).toEqual([
       'dialogSettle.ts',
       'graph.ts',
     ]);
-    expect(importersOf(['exploreGraph', 'exploreGrid'])).toEqual(['record.ts']);
+    expect(importersOf(['exploreGraph', 'exploreGrid'])).toEqual(['recordDialogs.ts']);
+    expect(importersOf(['recordGraph', 'recordGrid'])).toEqual(['record.ts']);
   });
   // why: WP15 Task 15.11: the grid flows click only the dialog's named controls (Price graph, Dates, the four scrolls)
   it('the grid flows find buttons and tabs only by the selectors module’s names', () => {
@@ -278,10 +279,12 @@ describe('worker rules: source facts through the compiler API', () => {
     expect(named.length).toBeGreaterThan(0);
   });
   it('the grid page is reached only from the page session, and the recorder’s flow only from record.ts', () => {
-    expect(importersOf(['gridPage'])).toEqual(['session.ts']);
-    expect(importersOf(['exploreGrid'])).toEqual(['record.ts']);
-    // why: CA 6: the server process never loads the recorder's module; the move budgets live in core
-    expect(moduleImporters('./gridRecord.js')).toEqual(['record.ts']);
+    expect(importersOf(['gridPage'])).toEqual(['gridSession.ts']);
+    expect(importersOf(['readGrid'])).toEqual(['session.ts']);
+    expect(importersOf(['exploreGrid'])).toEqual(['recordDialogs.ts']);
+    // why: CA 6: the server process never loads the recorder's modules; the move budgets live in core
+    expect(moduleImporters('./gridRecord.js')).toEqual(['recordDialogs.ts']);
+    expect(moduleImporters('./recordDialogs.js')).toEqual(['record.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>
