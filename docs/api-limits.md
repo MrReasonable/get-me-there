@@ -113,14 +113,14 @@ window's start and end with calls and cost so far.
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
   derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and
   120 at the default). Concurrency is 1.
-- Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, at least 24) after a bot check, a sign-in, a signed-in profile or a
-  cookie page; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
+- Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, at least 24) after a challenge, sign-in or consent page or a
+  signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
 - Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every
   free provider shares.
 - Coverage: with the defaults, 100 day pairs a run and 1,500 a month, against 2,184 day pairs for one worked-example
   airport pair (8,736 for its four pairs), so a full pass of one pair takes 22 runs.
-- Costs (the spec's §2, in full on docs/setup.md section 14): **Google's terms** (the `robots.txt` disallow of
-  `/travel/flights/search` is a known cost), **The operator's IP and account**, **Brittleness**, **Speed** (50–90 s a
+- Costs (the spec's §2, in full on docs/setup.md section 14): **Terms** (read the provider's terms before enabling
+  it; the operator is responsible for how it is used), **The operator's IP and account**, **Brittleness**, **Speed** (50–90 s a
   page, 1½–2½ hours a run), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
 
 ## Reconciling with the vendor dashboard

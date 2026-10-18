@@ -60,7 +60,7 @@ function setup(
   const timers = fakeTimers();
   const clock = timers.clock;
   const contexts: FakeContext[] = [];
-  const cooldown = new CooldownStore({ dir: dataDir, botHours: 48, clock });
+  const cooldown = new CooldownStore({ dir: dataDir, challengeHours: 48, clock });
   const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
   const refusal = new Refusal({ dir: dataDir, clock });
   const launches = { count: 0 };

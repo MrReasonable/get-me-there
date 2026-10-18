@@ -14,9 +14,9 @@ import {
 } from '@gmt/core';
 import type { ResponseFacts } from '../http/types.js';
 
-/** brief Task 14.10: each page kind worded distinctly; only a real check is called a bot check (prov-008). */
+/** brief Task 14.10: each page kind worded distinctly; only a real CAPTCHA is called a challenge page (prov-008). */
 export const BLOCKED_WORDS: Readonly<Record<BlockedPage, string>> = {
-  captcha: 'Google showed a bot check (CAPTCHA)',
+  captcha: 'Google showed a challenge page (CAPTCHA)',
   'unusual-traffic': 'Google reported unusual traffic',
   'consent-unhandled': 'Google showed its cookie page (the rejection did not hold)',
   'sign-in': 'Google asked to sign in',

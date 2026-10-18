@@ -25,7 +25,7 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
     expect(cf.filter((o) => o.status === 'error' && o.reason === 'blocked')).toHaveLength(1);
     expect(cf.filter((o) => o.status === 'skipped' && o.reason === 'provider_disabled')).toHaveLength(11);
     expect(cf.find((o) => o.status === 'error')?.lastError).toMatch(
-      /bot check \(CAPTCHA\); cooling down until/,
+      /challenge page \(CAPTCHA\); cooling down until/,
     );
     expect(outcomes(e, ex.id, 'travelpayouts').filter((o) => o.status === 'priced')).toHaveLength(12);
     expect(ex.status).toBe('completed');

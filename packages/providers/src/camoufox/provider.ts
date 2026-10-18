@@ -35,7 +35,7 @@ export const CAMOUFOX_DISCOVERY_INFO: CapabilityInfo = {
   sourceKind: 'scraped-self',
   maxAgeHours: 0,
   provenanceNote:
-    "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. Camoufox presents a generated browser fingerprint; Google's terms do not permit this automated access; the operator turned it on. Constraints are not checked; no return leg, seller or baggage is read.",
+    "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.",
 };
 export const CAMOUFOX_SUPPLIED_FIELDS: readonly SuppliedField[] = ['price'];
 export const CAMOUFOX_CABINS: readonly Cabin[] = ['economy'];

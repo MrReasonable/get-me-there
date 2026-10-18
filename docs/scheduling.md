@@ -48,7 +48,7 @@ regenerates the table and fails if this page and the code disagree.
 | SearchApi `40usd`: both providers, daily (`0 5 * * *`) | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 50 → 60 | 30.42 | Travelpayouts 170 of 50,000; SearchApi 2,330 of 10,000 | yes |
 | SearchApi `40usd`: both providers, weekly, `maxCells` 200 | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101; SearchApi itinerary search 1,000 → 1,200 | 4.33 | Travelpayouts 148 of 50,000; SearchApi 5,638 of 10,000 | yes |
 | SearchApi `trial`: both providers, weekly | Travelpayouts calendar 28 → 34; SearchApi calendar 84 → 101 (refused: over the provider-lifetime cap); SearchApi itinerary search 50 → 60 (refused: over the provider-lifetime cap) | 4.33 | Travelpayouts 148 of 50,000; SearchApi 0 (scheduled runs leave it out) | yes |
-| Camoufox: list mode, one airport pair (LHR → JFK), weekly | Camoufox calendar 100 → 100 | 4.33 | Camoufox 434 of 1,500 | no |
+| Camoufox: list mode, one airport pair (LHR → JFK), weekly | Camoufox calendar 100 → 100 | 4.33 | Camoufox 434 of 1,500 | yes |
 <!-- cadence-table:end -->
 
 On `trial` the 100 lifetime credits cannot hold one full SearchApi run of the example, so a
@@ -58,9 +58,9 @@ smoke test.
 Camoufox (off by default, docs/setup.md section 14) prices one day pair a page, so its row is
 one airport pair, not the example's four: 100 cells a run (`CAMOUFOX_EXECUTION_PAGE_CAP`; the
 retry factor never asks for more than the cap), so a full pass of the pair's 2,184 cells takes
-22 runs, and at about 50–90 seconds a page a run takes about 1½–2½ hours. Its "no" is the budget
-fit's coverage warning, not a refusal: every weekly refresh needs 2,184 cells and the month
-allows 1,500 pages, so most of the pair's cells stay unsearched or skipped.
+22 runs, and at about 50–90 seconds a page a run takes about 1½–2½ hours. It fits every cap, but the
+budget fit also warns on coverage: every weekly refresh needs 2,184 cells and the month allows
+1,500 pages, so most of the pair's cells stay unsearched or skipped.
 
 When you save a definition, the form shows its budget fit: runs a month × the estimate,
 compared with every cap. A warning there means the schedule will meet a cap before the month

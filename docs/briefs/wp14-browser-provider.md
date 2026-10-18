@@ -51,7 +51,7 @@ any parser depends on them; Task 14.1 builds only what the recorder needs, and l
 
 Build an opt-in, off-by-default `camoufox` discovery provider that reads the cheapest round-trip price Google Flights
 lists for one day pair per page, in the operator's own Camoufox launched by a host-side worker in its own signed-out
-profile, at a fixed low rate, stopping at once on any bot check or page it does not recognise, behind the same contract,
+profile, at a fixed low rate, stopping at once on any page that is not a recognised results page, behind the same contract,
 ledger, caps and labels as every other provider.
 
 ## 2. Scope
@@ -341,7 +341,7 @@ including `better-sqlite3 ^13`, `fingerprint-generator`, `impit`):
 Create:
 
 - `apps/camoufox-worker/`: `package.json`, `tsconfig.json`, `tsconfig.test.json`, `vitest.config.ts`,
-  `stryker.config.json`, `launchd/uk.dominey.get-me-there.camoufox-worker.plist.example`,
+  `stryker.config.json`, `launchd/local.get-me-there.camoufox-worker.plist.example`,
   `fixtures/recorded/<kind>/.gitkeep` for each recording kind
 - `apps/camoufox-worker/src/`: `run.ts` (the one launcher every script goes through: resolves `<data>/worker.env`,
   checks its mode, loads it with `process.loadEnvFile`, dispatches; the only `process.env` reader), `main.ts`,
@@ -902,7 +902,7 @@ after the spacing succeeds) and that the page is closed, and after `goto` that t
 ### Task 14.5: The worker's HTTP server, config, status and the launchd agent
 
 **Files:** create `src/{config.ts,server.ts,main.ts,clearSignedIn.ts,status.ts}`,
-`launchd/uk.dominey.get-me-there.camoufox-worker.plist.example`, `test/{config,server,main,status}.test.ts`.
+`launchd/local.get-me-there.camoufox-worker.plist.example`, `test/{config,server,main,status}.test.ts`.
 
 Rules (round 1's, corrected): settings come only from `<data>/worker.env` through `run.ts`; `config.ts` refuses, naming
 the variable never the value, a missing or short (< 32) `CAMOUFOX_WORKER_KEY`, a `CAMOUFOX_WORKER_PORT` outside
@@ -1469,24 +1469,25 @@ monthly camoufox load for a weekly schedule is min(4.33 × 100, 4.33 × 2,184) a
 - `httpLimitsFor` adds `camoufox` and `camoufox-status`; `providersFor` adds the provider; `collectSecrets` adds the key;
   `defaultDefinitionInput` never adds camoufox to a new definition (asserted; arch-010).
 - Copy (prov-008, prov-015, ruling 11): the outcome reasons map gains `blocked`: "stopped: Google showed a page this app
-  does not read, or a check (the detail says which)"; `last_error` words each page kind distinctly: "Google showed a bot
-  check (CAPTCHA)", "Google reported unusual traffic", "Google showed its cookie page (the rejection did not hold)",
+  does not read, or a check (the detail says which)"; `last_error` words each page kind distinctly: "Google showed a
+  challenge page (CAPTCHA)", "Google reported unusual traffic", "Google showed its cookie page (the rejection did not hold)",
   "Google asked to sign in", "the browser profile was signed in", "Google sent the browser elsewhere", "Google's page was
   not one this app reads (it may have changed)", "cooling down until <time>; Google was not contacted"; the skip reason
   `provider_unavailable`: "browser worker not reachable". The narrow-screen legend at `copy.ts`'s `phoneProviders`
   string gains ", CF Camoufox (Google Flights prices via Camoufox)". The Providers note `camoufoxNote`: "Off by default.
-  Reads Google Flights in your own Camoufox browser, in its own signed-out profile, from your own IP address, one day
-  pair a page, at most one page every 30 seconds. It prices at most the monthly page cap of day pairs a month (1,500 by
-  default; one London → New York airport pair has 2,184), so most cells stay unsearched or skipped. On any bot check or
-  page it does not recognise it stops and pauses (48 hours for a check, 1 hour for an unknown page). Google's terms do
-  not permit this automated access."
+  Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your
+  own IP address, one day pair a page, at most one page every 30 seconds. It prices at most the monthly page cap of day
+  pairs a month (1,500 by default; one London → New York airport pair has 2,184), so most cells stay unsearched or
+  skipped. Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent
+  page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the
+  provider's terms before enabling it; the operator is responsible for how it is used."
 
 - [ ] **Step 1: Write the failing tests** — wiring: off by default (no limits, no provider); on: `httpLimitsFor(c)
 .camoufox` has hosts `['host.docker.internal']`, port 8090, scheme `http:`, `billable: 'never'`, concurrency 1,
 `retryTransport: false`; `camoufox-status` present; the provider has discovery only; the key is a collected secret;
 `defaultDefinitionInput(...)`'s discovery providers never include `camoufox`. Copy: the legend contains the CF entry;
 `camoufoxNote` mentions "signed-out profile", "own IP address" and "1,500"; no copy string matches the banned words;
-the `unrecognised` and `cooling-down` wordings do not contain "bot check" (prov-008).
+only the CAPTCHA kind is worded "challenge page" (prov-008).
 
 - [ ] **Step 2–4: Run, implement, run** — `pnpm --filter @gmt/api test && pnpm --filter @gmt/web test`; PASS.
 
@@ -1545,8 +1546,8 @@ test `apps/api/test/deploy/camoufoxDocs.test.ts`.
 
 `docs/setup.md` section 14, "The Camoufox provider (optional, off by default; macOS only)", in this order:
 
-1. **What it is and what it costs** — spec §2's costs under their bold names, verbatim (**Google's terms** with the
-   robots.txt disallow of `/travel/flights/search` as a known cost, **The operator's IP and account**,
+1. **What it is and what it costs** — spec §2's costs under their bold names, verbatim (**Terms**: "Read the
+   provider's terms before enabling it; the operator is responsible for how it is used.", **The operator's IP and account**,
    **Brittleness**, **Speed** with 50–90 s a page and 1½–2½ hours a run, **Availability**, **Image size**, **The worker
    key**: any program or container that can reach the worker, which on Docker Desktop is every container on the Mac, is
    stopped only by `CAMOUFOX_WORKER_KEY`), and the coverage paragraph.
@@ -1582,7 +1583,7 @@ test `apps/api/test/deploy/camoufoxDocs.test.ts`.
    live status: cool-down, account-cookie check, flags, versions); `lsof -nP -iTCP:8090 -sTCP:LISTEN` shows
    `127.0.0.1`.
 7. **Turn it off or recover** — `CAMOUFOX_ENABLED=false` and restart the app;
-   `launchctl bootout gui/$(id -u)/uk.dominey.get-me-there.camoufox-worker`; an in-flight page finishes before the
+   `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker`; an in-flight page finishes before the
    worker exits. After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes the profile
    first). Deleting the cool-down record ends a pause early, which defeats its purpose.
 

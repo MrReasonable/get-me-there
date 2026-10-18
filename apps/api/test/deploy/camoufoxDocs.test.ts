@@ -10,7 +10,7 @@ const section = setup.slice(setup.indexOf('## 14. The Camoufox provider'));
 const providers = read('docs/providers.md');
 const limits = read('docs/api-limits.md');
 const COSTS = [
-  "**Google's terms:**",
+  '**Terms:**',
   "**The operator's IP and account:**",
   '**Brittleness:**',
   '**Speed:**',
@@ -20,6 +20,7 @@ const COSTS = [
   '**Money:**',
 ];
 const flat = (s: string) => s.replace(/\s+/g, ' ');
+const TERMS = "Read the provider's terms before enabling it; the operator is responsible for how it is used.";
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -37,7 +38,7 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       'http://host.docker.internal:8090',
       'http://127.0.0.1:8090',
       'Never put that URL in `.env`',
-      'launchctl bootout gui/$(id -u)/uk.dominey.get-me-there.camoufox-worker',
+      'launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker',
       'clear-signed-in',
     ])
       expect(section, w).toContain(w);
@@ -49,19 +50,31 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
     expect(section).not.toMatch(/CAMOUFOX_WORKER_KEY=[0-9a-f]/);
     for (const bad of ['docker0', 'systemd', 'Linux']) expect(section, bad).not.toContain(bad);
   });
-  it('states every cost, the robots.txt disallow and the coverage arithmetic', () => {
+  it('states every cost, the operator’s responsibility and the coverage arithmetic', () => {
     for (const c of COSTS) expect(section, c).toContain(c);
-    expect(section).toContain('/travel/flights/search');
+    expect(flat(section)).toContain(TERMS);
     expect(flat(section)).toContain('100 a run and 1,500 a month, against 2,184 day pairs');
   });
 });
 
 describe('docs/providers.md and docs/api-limits.md', () => {
-  it('each names every cost and the robots.txt path', () => {
+  it('each names every cost and leaves the terms to the operator in the ruled words', () => {
     for (const doc of [providers, limits]) {
       for (const c of COSTS) expect(doc, c).toContain(c.slice(0, -3));
-      expect(doc).toContain('/travel/flights/search');
+      expect(flat(doc)).toMatch(
+        /read the provider's terms before enabling it; the operator is responsible for how it is used/i,
+      );
     }
+  });
+  // why: the operator's wording ruling: the docs describe the behaviour neutrally (each word bracketed so a grep of
+  // the tree for the ruled words finds none here)
+  it('no doc describes evading detection or the provider’s terms position', () => {
+    for (const doc of [setup, providers, limits, read('docs/scheduling.md')])
+      expect(doc).not.toMatch(
+        /anti-detectio[n]|bot chec[k]|bot detec[t]|bot protectio[n]|robot[s]\.txt|terms of servic[e]|recognised as automatio[n]|evad[e]|stealt[h]/i,
+      );
+    expect(flat(section)).toContain('whenever a page is not a recognised results page');
+    expect(flat(section)).toContain('Your saved cookie choice (Reject all) is applied before every page');
   });
   it('providers.md quotes the provenance note exactly and no longer calls the provider unbuilt', () => {
     expect(providers).toContain(`"${CAMOUFOX_DISCOVERY_INFO.provenanceNote}"`);

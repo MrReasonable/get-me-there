@@ -152,7 +152,7 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
       },
       profileDir: join(dir, 'profile'),
       socs,
-      cooldown: new CooldownStore({ dir, botHours: 48, clock: timers.clock }),
+      cooldown: new CooldownStore({ dir, challengeHours: 48, clock: timers.clock }),
       pacer: new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock }),
       refusal: new Refusal({ dir, clock: timers.clock }),
       clock: timers.clock,
@@ -239,9 +239,7 @@ describe('worker rules: source facts through the compiler API', () => {
 // why: fix round 1 (sec I1): the agent starts the worker with an emptied environment, never a login shell's exports
 describe('the launchd agent example', () => {
   const plist = readFileSync(
-    fileURLToPath(
-      new URL('../launchd/uk.dominey.get-me-there.camoufox-worker.plist.example', import.meta.url),
-    ),
+    fileURLToPath(new URL('../launchd/local.get-me-there.camoufox-worker.plist.example', import.meta.url)),
     'utf8',
   );
   const args = [

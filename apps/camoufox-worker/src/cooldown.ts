@@ -11,10 +11,10 @@ import {
 
 /**
  * The cool-down store (spec §2 "Navigation and the stops"; decision 69 "Cool-downs by cause"): a stop pauses every
- * page load for CAMOUFOX_COOLDOWN_HOURS (default 48, at least 24) after a bot check, a sign-in wall, a signed-in
+ * page load for CAMOUFOX_COOLDOWN_HOURS (default 48, at least 24) after a challenge or verification page, a sign-in page, a signed-in
  * control, a consent page or an off-allowlist navigation, and for a fixed 1 hour after an unrecognised page. Persisted
  * in `<data>/cooldown.json` (written atomically, 0600), so it survives a restart; an unreadable record fails closed to
- * a fresh bot-length cool-down with cause `unrecognised`; any read error other than "no file" is thrown, never read as
+ * a fresh full-length cool-down with cause `unrecognised`; any read error other than "no file" is thrown, never read as
  * "no cool-down".
  */
 export const UNRECOGNISED_HOURS = 1;
@@ -45,20 +45,20 @@ function parseRecord(text: string): CooldownRecord | null {
 
 export class CooldownStore {
   private readonly path: string;
-  private readonly botHours: number;
+  private readonly challengeHours: number;
   private readonly clock: Clock;
 
-  constructor(o: { dir: string; botHours: number; clock: Clock }) {
-    if (!Number.isInteger(o.botHours) || o.botHours < 24)
+  constructor(o: { dir: string; challengeHours: number; clock: Clock }) {
+    if (!Number.isInteger(o.challengeHours) || o.challengeHours < 24)
       throw new Error('CAMOUFOX_COOLDOWN_HOURS must be a whole number of at least 24');
     this.path = join(o.dir, FILE);
-    this.botHours = o.botHours;
+    this.challengeHours = o.challengeHours;
     this.clock = o.clock;
   }
 
   /** The hours a stop of this kind pauses for. */
   hoursFor(cause: BlockedPage): number {
-    return cause === 'unrecognised' ? UNRECOGNISED_HOURS : this.botHours;
+    return cause === 'unrecognised' ? UNRECOGNISED_HOURS : this.challengeHours;
   }
 
   private read(): CooldownRecord | null {

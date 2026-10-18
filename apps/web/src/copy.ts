@@ -425,11 +425,11 @@ export const COPY = {
   // providers view (spec §10, §11)
   /**
    * WP14 (prov-008, prov-015, ruling 11): the camoufox provider's own words. Each page kind is worded distinctly, and
-   * only a real check is called a bot check; the adapter writes the same words to last_error.
+   * only a real CAPTCHA is called a challenge page; the adapter writes the same words to last_error.
    */
   camoufox: {
     pageKinds: {
-      captcha: 'Google showed a bot check (CAPTCHA)',
+      captcha: 'Google showed a challenge page (CAPTCHA)',
       'unusual-traffic': 'Google reported unusual traffic',
       'consent-unhandled': 'Google showed its cookie page (the rejection did not hold)',
       'sign-in': 'Google asked to sign in',
@@ -439,7 +439,7 @@ export const COPY = {
     } satisfies Record<BlockedPage, string>,
     coolingDown: (until: string) => `cooling down until ${until}; Google was not contacted`,
     unavailable: 'browser worker not reachable',
-    note: `Off by default. Reads Google Flights in your own Camoufox browser, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds. It prices at most the monthly page cap of day pairs a month (1,500 by default; ${EXAMPLE_PAIR_CELLS}), so most cells stay unsearched or skipped. On any bot check or page it does not recognise it stops and pauses (48 hours for a check, 1 hour for an unknown page). Google's terms do not permit this automated access.`,
+    note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds. It prices at most the monthly page cap of day pairs a month (1,500 by default; ${EXAMPLE_PAIR_CELLS}), so most cells stay unsearched or skipped. Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
   providersHeading: 'Providers',
   providerEnabled: 'configured',

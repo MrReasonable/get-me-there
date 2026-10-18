@@ -101,7 +101,11 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     lock.release();
     return refuse(check, e);
   };
-  const cooldown = new CooldownStore({ dir: ctx.dataDir, botHours: cfg.cooldownHours, clock: deps.clock });
+  const cooldown = new CooldownStore({
+    dir: ctx.dataDir,
+    challengeHours: cfg.cooldownHours,
+    clock: deps.clock,
+  });
   const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
   const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: deps.clock });
   let socs: ReturnType<typeof loadSocs>;

@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 32.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 33.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -105,7 +105,7 @@ Google has no public API.
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (the app's own conservative assumption, flagged as assumed and shown as "assumed ≤24h (undocumented)": a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
-| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode is designed and not built; no return legs, flight numbers or sellers; the results path is disallowed by Google's `robots.txt` (read 2026-10-18) | £0 in money; the operator's IP, Google's terms and selector upkeep | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
+| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode is designed and not built; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
 on the understanding that its data is obtained in a way Google's terms
@@ -117,7 +117,7 @@ integrated.
 2026-10-18): the `camoufox` provider.** If SearchApi is withdrawn, re-priced
 above the ceiling or loses Google's date grid, discovery can fall back to a
 `FlightProvider` with id `'camoufox'` that reads Google Flights in Camoufox
-(an anti-detection Firefox build the operator has installed), behind the
+(a Firefox-based browser the operator has installed), behind the
 same contract, ledger, caps and labels as every other provider. It is **off
 by default**: nothing runs until the operator starts the worker and sets
 `CAMOUFOX_ENABLED=true` (§12, §13), and a definition must still name it.
@@ -190,7 +190,7 @@ inside the allowlist (`RawOffer.verified`). Its prices are calendar basis
 (§6.9): "constraints not checked", with the search link.
 
 *Limits (operator rulings of 2026-10-18, plan decisions 68 and 69).* Camoufox
-is the browser, with the fingerprint it generates itself; the worker adds no
+is the browser as the operator installed it; the worker adds no
 humanised input, no geolocation lookup and no add-on, and passes the browser
 a minimal environment (never the worker's own secrets). **The worker's own,
 signed-out profile:** it refuses to start, and stops before any page, when
@@ -258,7 +258,10 @@ signed-in control, a consent page or an off-allowlist navigation it **stops
 at once** and cools down for `CAMOUFOX_COOLDOWN_HOURS` (default 48,
 configurable, at least 24). A page it cannot recognise (a layout change, a
 search form that disagrees with the query) stops it too, for a fixed **1
-hour**: a page change is not a bot check. Either way the cell outcome is
+hour**: a page change is not a challenge page. In short, the worker stops and
+cools down whenever a page is not a recognised results page: a challenge or
+verification page, a sign-in page, a consent page, or anything unrecognised.
+Either way the cell outcome is
 `error` with reason `blocked` (a `ProviderError` of kind `blocked`, never
 retried; the page kind, worded distinctly, goes to `last_error`), the
 provider is disabled for the rest of that execution (including a manual
@@ -307,9 +310,8 @@ Flights prices via Camoufox: the cheapest round-trip price Google Flights
 listed for this day pair when this app's own Camoufox browser read the page
 on the operator's machine, from the operator's IP address, in the currency
 the page states. Return date: the date asked for, which the page's search
-form showed; the listed options state only the departure. Camoufox presents a
-generated browser fingerprint; Google's terms do not permit this automated
-access; the operator turned it on. Constraints are not checked; no return
+form showed; the listed options state only the departure. The operator turned
+this provider on. Constraints are not checked; no return
 leg, seller or baggage is read." Vendor links: `google.com` only.
 `pointOfSale` is the ISO country of the page's stated location, through a
 dated table, or `'unknown'` when the page states none; it is stored as
@@ -323,15 +325,8 @@ its four pairs). The estimate says how many cells a run will price and how
 many runs a full pass takes; the rest of the cells read skipped or not
 searched in View D.
 
-*Costs, stated plainly.* **Google's terms:** scraping Google is against its
-terms, which this spec has stated since revision 1 and the operator accepted
-in choosing Camoufox. Google's Terms of Service bar automated access that
-ignores its machine-readable instructions, and `www.google.com/robots.txt`
-disallows `/travel/flights/search` for every user agent (read 2026-10-18),
-the path Google's results live under: a known cost. Camoufox exists to avoid
-being recognised as automation, which makes the access deliberate rather
-than incidental; SearchApi carried this exposure one step removed, this
-provider carries it directly. **The operator's IP and account:** every page
+*Costs, stated plainly.* **Terms:** Read the provider's terms before enabling
+it; the operator is responsible for how it is used. **The operator's IP and account:** every page
 load comes from the operator's own address (no proxies), so a block, CAPTCHA
 or wider restriction lands on that address, and through it on the operator's
 other Google use from the same network; the worker's profile is never signed
@@ -464,7 +459,8 @@ verification as a free history source (§7 `route_price_history`).
     every cell of a provider whose `cabins` excludes the definition's cabin;
     no call is made and parity is unaffected.
   - `error`: `reason` is the `ProviderError.kind` (including `blocked`,
-    the `camoufox` provider's hard stop on a bot check, §2), or `fx-unavailable`,
+    the `camoufox` provider's hard stop on a page that is not a recognised results
+    page, §2), or `fx-unavailable`,
     `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
     `no-priced-options`, `unmappable-carrier`; the vendor's message,
     URL-stripped, is in `last_error`, never in `reason`.
@@ -1867,7 +1863,7 @@ CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; minimum 30, maximum 6
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per calendar month (provider-month; no-page rows not counted)
 CAMOUFOX_BILLING_DAY=1                   # 1–28, the month boundary for the page cap
-CAMOUFOX_COOLDOWN_HOURS=48               # pause after a bot check or consent page; minimum 24 (an unrecognised page pauses a fixed 1 h)
+CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; minimum 24 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
 # worker side only, macOS only (its one 0600 env file <data>/worker.env, docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_BINARY_BUILD, CAMOUFOX_WORKER_PORT
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
@@ -1988,7 +1984,7 @@ as specified in §5.3; no secrets, no full URLs.
 |---|---|---|
 | Research providers, pick one, integrate ≥1 | Two integrated; Amadeus/Duffel rejected | §2 |
 | "Documented, authorised interfaces" | SearchApi scraping-derived, opt-in, labelled | Ian's decision 2026-10-14 |
-| No brittle scraping that violates provider terms | The `camoufox` provider (§2) scrapes Google Flights itself in the operator's own Camoufox, launched by a host-side worker: opt-in, off by default, no proxies, a fixed low rate, a hard stop and cool-down on any bot check, never solving a challenge, labelled `scraped-self` | Ian's decisions 2026-10-14 and 2026-10-18 (continuity if SearchApi goes); its costs are stated in §2 |
+| No brittle scraping that violates provider terms | The `camoufox` provider (§2) scrapes Google Flights itself in the operator's own Camoufox, launched by a host-side worker: opt-in, off by default, no proxies, a fixed low rate, a stop and cool-down on any page that is not a recognised results page, never solving a challenge, labelled `scraped-self` | Ian's decisions 2026-10-14 and 2026-10-18 (continuity if SearchApi goes); its costs are stated in §2 |
 | "Cheapest available / bookable" | "Cheapest round trip found"; provenance and age on every price | No path guarantees bookability |
 | Free to operate | £0 config is Travelpayouts-only; SearchApi means the $40 plan | Its free allowance is a one-off trial |
 | A specific set of origins and destinations as the initial set | No airports in code at all; every definition names its own, with autocomplete and a free coverage check; the docs example is London → New York | A personal tool should not need a code change to search a different route, and the operator's own route is private |
@@ -2059,12 +2055,26 @@ profile, service workers blocked, every navigation and redirect guarded
 set across both Google hosts; `SOCS` compared by value; discovery only, `list` mode built and `grid` mode designed; the
 search form and settle checks; `scraped-self` with `maxAgeHours` 0; no
 proxies; consent rejected through a pre-set `SOCS` capture and any consent
-page a stop; cool-downs by cause (48 h for bot checks and consent, 1 h for
+page a stop; cool-downs by cause (48 h for challenge, sign-in and consent pages, 1 h for
 an unrecognised page); a preflight status read; `no-page` ledger rows outside
 the page caps; spacing start to start; a page cap frozen per execution;
-robots.txt as a known cost; coverage and costs stated. With the §1, §3,
+coverage and costs stated. With the §1, §3,
 §5.1–§5.3, §8.1, §11, §12, §13, §15 and §16 rules it needs (plan decisions 68
 and 69).
+
+
+### Revision 33: neutral wording for the camoufox provider (2026-10-18)
+
+§2, §8.1, §12, §15 and §17 (operator ruling): Camoufox is described as a
+Firefox-based browser the operator has installed; the stop rule reads "the
+worker stops and cools down whenever a page is not a recognised results
+page: a challenge or verification page, a sign-in page, a consent page, or
+anything unrecognised"; consent reads "the operator's saved cookie choice
+(Reject all) is applied before every page; a consent page stops it"; the
+cost that stated the terms position reads "Read the provider's terms before
+enabling it; the operator is responsible for how it is used"; the
+provenance note drops the same sentence. No rule, test or safety check
+changes.
 
 ### Revision 29: CodeRabbit batch 3 (2026-10-17)
 

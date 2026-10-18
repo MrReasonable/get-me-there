@@ -107,7 +107,11 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   }
   try {
     sweepProbeProfiles(ctx.dataDir);
-    const cooldown = new CooldownStore({ dir: ctx.dataDir, botHours: cfg.cooldownHours, clock: deps.clock });
+    const cooldown = new CooldownStore({
+      dir: ctx.dataDir,
+      challengeHours: cfg.cooldownHours,
+      clock: deps.clock,
+    });
     const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
     // why: fix round 1 (sec I2): the server's first stop, before anything opens: a standing refusal is cleared only by
     // clear-signed-in, which wipes the profile first

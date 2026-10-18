@@ -148,9 +148,9 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     const t = setup({ navigations: [{ hops: [URL0, 'https://www.example.test/x'], tree: resultsTree() }] });
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_UNAVAILABLE);
     expect(written(t.root)).toEqual([]);
-    expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()?.cause).toBe(
-      'off-allowlist',
-    );
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active()?.cause,
+    ).toBe('off-allowlist');
   });
   it('rule 1: a consent landing is recorded as the failure it is, starts the 48 h cool-down and stops the session', async () => {
     const t = setup({
@@ -170,10 +170,12 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       hops: ['https://www.google.com/travel/flights', 'https://consent.google.com/ml'],
       socsReadBack: 'same',
     });
-    expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()).toEqual({
-      until: '2026-10-20T05:00:00.000Z',
-      cause: 'consent-unhandled',
-    });
+    expect(new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active()).toEqual(
+      {
+        until: '2026-10-20T05:00:00.000Z',
+        cause: 'consent-unhandled',
+      },
+    );
     expect(t.contexts[0]?.pages).toHaveLength(1);
     expect(t.err.join()).toMatch(/operator ruling/);
   });
@@ -189,9 +191,9 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       },
     });
     expect(await r).toBe(EX_UNAVAILABLE);
-    expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()?.cause).toBe(
-      'consent-unhandled',
-    );
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active()?.cause,
+    ).toBe('consent-unhandled');
   });
   it('rule 2: --stability loads three pages of the same query 30 s apart and records each read-back', async () => {
     const t = setup();
@@ -248,7 +250,9 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     ]);
     const facts = JSON.parse(readFileSync(join(t.root, 'consent-probe/2026-10-18/1.facts.json'), 'utf8'));
     expect(facts.page.text.consentHeading).toBe(true);
-    expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()).toBeNull();
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active(),
+    ).toBeNull();
   });
   it('rule 3: the probe page has no click method, and another blocked kind cools down as usual', async () => {
     const page = new FakePage(null);
@@ -262,9 +266,9 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       ],
     });
     expect(await record(t.ctx(['--consent-probe']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
-    expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()?.cause).toBe(
-      'unusual-traffic',
-    );
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active()?.cause,
+    ).toBe('unusual-traffic');
     expect(existsSync(t.profiles[0] ?? '')).toBe(false);
   });
   it('rule 3: the probe deletes its profile when the launch throws', async () => {
@@ -341,7 +345,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
   });
   it('a standing cool-down refuses before any launch', async () => {
     const t = setup();
-    new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).start('captcha');
+    new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).start('captcha');
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_UNAVAILABLE);
     expect(t.profiles).toEqual([]);
   });
@@ -377,9 +381,9 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       },
     });
     expect(r).toBe(EX_UNAVAILABLE);
-    expect(new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active()?.cause).toBe(
-      'sign-in',
-    );
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active()?.cause,
+    ).toBe('sign-in');
   });
 });
 
@@ -387,7 +391,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
 // profile, reads SOCS back after its clicks, classifies every re-poll, and never exempts --no-flights.
 describe('the recorder under the server’s stop rules (fix round 1)', () => {
   const cooldownOf = (t: ReturnType<typeof setup>) =>
-    new CooldownStore({ dir: t.dataDir, botHours: 48, clock: t.timers.clock }).active();
+    new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();
   const withContext = (t: ReturnType<typeof setup>, shape: (c: FakeContext) => void): RecordDeps => ({
     ...t.deps,
     launch: async (p) => {
