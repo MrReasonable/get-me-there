@@ -934,8 +934,51 @@ describe('record --graph-explore', () => {
     ]);
   const page = (o: { button?: FakeNode[]; extra?: FakeNode[] } = {}): FakeNode =>
     resultsTree({ extra: [...(o.button ?? [n('button', 'Price graph')]), ...(o.extra ?? [])] });
-  /** A run whose Price graph click shows `after` (the trees successive polls see). */
-  const graphRun = (after: FakeNode[], o: { button?: FakeNode[]; onClick?: (p: FakePage) => void } = {}) => {
+  /** One month of the Dates tab: a grid of priced day cells and the day buttons (synthetic names). */
+  const month = (m: string, extra: FakeNode[] = []): FakeNode[] => [
+    n('grid', `${m} 2027`, [
+      n('gridcell', `Sunday, 14 ${m} 2027, from £462`),
+      n('gridcell', `Monday, 15 ${m} 2027, from £470`),
+    ]),
+    n('button', `Choose 14 ${m}`),
+    ...extra,
+  ];
+  /**
+   * The dialog the 2026-10-18 recording saw ("Price insights": a tablist, the stay buttons, a "Price graph" region,
+   * the scroll and closing buttons), synthetic names and children; with `dates`, the Dates tab's panel instead.
+   */
+  const insights = (
+    o: { dates?: FakeNode[]; chart?: FakeNode[]; scroll?: boolean; extra?: FakeNode[] } = {},
+  ) =>
+    n('dialog', 'Price insights', [
+      n('tablist', '', [
+        n('tab', 'Dates', [], { selected: o.dates !== undefined }),
+        n('tab', 'Price graph', [], { selected: o.dates === undefined }),
+      ]),
+      text('10-day trip'),
+      n('button', 'Reduce your stay by one day'),
+      n('button', 'Extend your stay by one day'),
+      ...(o.dates === undefined
+        ? [text('Sun 14 Mar - Wed 24 Mar From £462'), n('region', 'Price graph', o.chart ?? [])]
+        : [n('tabpanel', 'Dates', o.dates)]),
+      ...(o.scroll === false ? [] : [n('button', 'Scroll forwards'), n('button', 'Scroll backwards')]),
+      n('button', 'Cancel'),
+      n('button', 'OK'),
+      ...(o.extra ?? []),
+    ]);
+  /**
+   * A run whose Price graph click shows `after` (the trees successive polls see); the Dates tab's click shows `dates`
+   * and Scroll forwards shows `scrolled`.
+   */
+  const graphRun = (
+    after: FakeNode[],
+    o: {
+      button?: FakeNode[];
+      onClick?: (p: FakePage) => void;
+      dates?: FakeNode[];
+      scrolled?: FakeNode[];
+    } = {},
+  ) => {
     const t = setup({ navigations: [{ hops: [URL0, LANDED], tree: page(o) }] });
     const deps: RecordDeps = {
       ...t.deps,
@@ -944,9 +987,13 @@ describe('record --graph-explore', () => {
         if (c instanceof FakeContext)
           c.onNewPage = (pg) => {
             pg.onClick = (x) => {
-              if (x.name !== 'Price graph') return;
-              if (o.onClick !== undefined) o.onClick(pg);
-              else pg.setTrees(after);
+              if (x.role === 'button' && x.name === 'Price graph') {
+                if (o.onClick !== undefined) o.onClick(pg);
+                else pg.setTrees(after);
+              } else if (x.role === 'tab' && x.name === 'Dates')
+                pg.setTrees(o.dates ?? [page({ extra: [insights({ dates: month('March') })] })]);
+              else if (x.name === 'Scroll forwards')
+                pg.setTrees(o.scrolled ?? [page({ extra: [insights({ dates: month('April') })] })]);
             };
           };
         return c;
@@ -954,6 +1001,8 @@ describe('record --graph-explore', () => {
     };
     return { t, deps };
   };
+  const recOf = (t: ReturnType<typeof setup>) =>
+    JSON.parse(readFileSync(join(t.root, 'graph-explore/2026-10-18/1.json'), 'utf8'));
   const drive = async (t: ReturnType<typeof setup>, run: Promise<number>): Promise<number> => {
     let code: number | null = null;
     void run.then((c) => {
@@ -974,7 +1023,12 @@ describe('record --graph-explore', () => {
   it('clicks the one Price graph button, polls the dialog that appeared until it holds still, and writes one 0600 exploration file', async () => {
     const { t, deps } = graphRun([page(), page({ extra: [dialog()] })]);
     expect(await record(t.ctx(G), cfg, deps)).toBe(0);
-    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual(['button:Price graph']);
+    // why: the Dates tab's click shows a panel with Scroll forwards, clicked once
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual([
+      'button:Price graph',
+      'tab:Dates',
+      'button:Scroll forwards',
+    ]);
     // why: SOCS is set before the page and read back after it, as for every kind
     expect(t.contexts[0]?.added).toHaveLength(1);
     expect(written(t.root)).toEqual(['graph-explore/2026-10-18/1.json']);
@@ -987,7 +1041,7 @@ describe('record --graph-explore', () => {
       kind: 'graph-explore',
       recordedBy: 'camoufox-worker record',
       region: { role: 'dialog', name: 'Price graph', appeared: true },
-      clicked: ['button:Price graph'],
+      clicked: ['button:Price graph', 'tab:Dates', 'button:Scroll forwards'],
       socsReadBack: 'same',
       landing: 'https://www.google.com/travel/flights/search',
       classification: { kind: 'results' },
@@ -1002,7 +1056,17 @@ describe('record --graph-explore', () => {
       { role: 'option', name: '10 days' },
       { role: 'link', name: 'Learn more' },
     ]);
-    expect(Object.keys(rec.timings).sort()).toEqual(['click', 'goto', 'graph', 'read', 'settle']);
+    expect(Object.keys(rec.timings).sort()).toEqual([
+      'click',
+      'dates',
+      'goto',
+      'graph',
+      'read',
+      'scroll',
+      'settle',
+    ]);
+    // why: this dialog holds no chart region
+    expect(rec.chart).toBeNull();
     expect(rec.polls).toBeGreaterThanOrEqual(2);
     // why: no query string is written: the landing, the hops and the snapshot's link targets keep their paths only
     expect(text).not.toContain('tfs=');
@@ -1072,7 +1136,7 @@ describe('record --graph-explore', () => {
       ['click-graph', 'end'],
     ]);
     expect(steps).toContainEqual(['graph-poll', 'end']);
-    expect(steps.at(-1)).toEqual(['read-controls', 'end']);
+    expect(steps.at(-1)).toEqual(['read-scrolled-cells', 'end']);
   });
   it('a graph that never holds still ends plainly at the graph-settle step, within the page budget, with no cool-down', async () => {
     let i = 0;
@@ -1141,6 +1205,137 @@ describe('record --graph-explore', () => {
     const { t, deps } = graphRun([page({ extra: [dialog([text(bad)])] })]);
     expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toMatch(/nothing written/);
+    expect(written(t.root)).toEqual([]);
+  });
+  it('the observed dialog: the chart region\u2019s text and elements, the Dates tab settled and read, then one scroll forwards', async () => {
+    const chart = [
+      n('generic', '', [], { ariaLabel: null, text: '£462' }),
+      n('img', 'Bar for 14 March', [], { ariaLabel: 'Bar for 14 March' }),
+    ];
+    const { t, deps } = graphRun([page({ extra: [insights({ chart })] })]);
+    const log = memoryLog();
+    expect(await record(t.ctx(G), cfg, { ...deps, log })).toBe(0);
+    expect(t.contexts[0]?.pages[0]?.calls.clicks).toEqual([
+      'button:Price graph',
+      'tab:Dates',
+      'button:Scroll forwards',
+    ]);
+    const rec = recOf(t);
+    expect(rec.region).toEqual({ role: 'dialog', name: 'Price insights', appeared: true });
+    expect(rec.clicked).toEqual(['button:Price graph', 'tab:Dates', 'button:Scroll forwards']);
+    // why: text and attributes only, never HTML
+    expect(rec.chart).toEqual({
+      text: '£462',
+      count: 2,
+      elements: [
+        { role: 'generic', ariaLabel: null },
+        { role: 'img', ariaLabel: 'Bar for 14 March' },
+      ],
+    });
+    expect(rec.dates.panel).toEqual({ found: 1, index: 0 });
+    expect(rec.dates.snapshot).toContain('- tabpanel "Dates":');
+    expect(rec.dates.snapshot).toContain('gridcell "Sunday, 14 March 2027, from £462"');
+    expect(rec.dates.cells).toEqual([
+      { role: 'button', name: 'Choose 14 March' },
+      { role: 'gridcell', name: 'Sunday, 14 March 2027, from £462' },
+      { role: 'gridcell', name: 'Monday, 15 March 2027, from £470' },
+    ]);
+    expect(rec.dates.polls).toBeGreaterThanOrEqual(2);
+    expect(rec.scrollButtons).toBe(1);
+    expect(rec.scrolled.snapshot).toContain('gridcell "Sunday, 14 April 2027, from £462"');
+    expect(rec.scrolled.cells).toContainEqual({ role: 'gridcell', name: 'Monday, 15 April 2027, from £470' });
+    expect(Object.keys(rec.timings).sort()).toEqual([
+      'click',
+      'dates',
+      'goto',
+      'graph',
+      'read',
+      'scroll',
+      'settle',
+    ]);
+    const steps = log.lines
+      .filter((l) => l.msg === 'graph step' && Reflect.get(l.o, 'phase') === 'end')
+      .map((l) => Reflect.get(l.o, 'step'));
+    expect([...new Set(steps)]).toEqual([
+      'find-graph-button',
+      'list-regions',
+      'click-graph',
+      'graph-poll',
+      'read-controls',
+      'chart-text',
+      'find-dates-tab',
+      'click-dates-tab',
+      'dates-poll',
+      'read-dates-cells',
+      'find-scroll-forwards',
+      'click-scroll-forwards',
+      'scroll-poll',
+      'read-scrolled-cells',
+    ]);
+  });
+  it('without a chart region the chart is null, and without a Dates tab the dates are skipped and counted', async () => {
+    const noTabs = n('dialog', 'Price insights', [n('button', 'OK')]);
+    const { t, deps } = graphRun([page({ extra: [noTabs] })]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect([rec.chart, rec.dates, rec.datesTabs, rec.scrolled]).toEqual([null, null, 0, null]);
+    expect(rec.clicked).toEqual(['button:Price graph']);
+  });
+  it('a Dates panel without a Scroll forwards button is recorded unscrolled, the count kept', async () => {
+    const { t, deps } = graphRun([page({ extra: [insights({ scroll: false })] })], {
+      dates: [page({ extra: [insights({ dates: month('March'), scroll: false })] })],
+    });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect([rec.scrollButtons, rec.scrolled, rec.clicked]).toEqual([
+      0,
+      null,
+      ['button:Price graph', 'tab:Dates'],
+    ]);
+    expect(rec.dates.cells).toHaveLength(3);
+    expect(Object.keys(rec.timings)).not.toContain('scroll');
+  });
+  it('a chart text read that never answers ends plainly at the chart-text step (5 s), with no cool-down', async () => {
+    const region = insights();
+    for (const x of descendants([region])) if (x.role === 'region') x.innerTextHang = true;
+    const { t, deps } = graphRun([page({ extra: [region] })]);
+    expect(await drive(t, record(t.ctx(G), cfg, deps))).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/chart-text \(timed-out\)/);
+    expect(cooldownOf(t)).toBeNull();
+    expect(written(t.root, { stopped: true })).toEqual([]);
+  });
+  it('a Dates panel that never holds still ends plainly at the dates-settle step', async () => {
+    let i = 0;
+    const { t, deps } = graphRun([page({ extra: [insights()] })], {
+      dates: Array.from({ length: 200 }, () =>
+        page({ extra: [insights({ dates: month('March', [text(`Loading ${i++}`)]) })] }),
+      ),
+    });
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/dates-settle/);
+    expect(cooldownOf(t)).toBeNull();
+    expect(written(t.root)).toEqual([]);
+  });
+  it.each([
+    ['the Dates panel', 'dates'],
+    ['the scrolled panel', 'scrolled'],
+  ] as const)('an e-mail address in %s is refused: nothing written', async (_l, where) => {
+    const bad = [
+      page({ extra: [insights({ dates: month('May', [text('Contact someone@example.test')]) })] }),
+    ];
+    const { t, deps } = graphRun(
+      [page({ extra: [insights()] })],
+      where === 'dates' ? { dates: bad } : { scrolled: bad },
+    );
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/e-mail address; nothing written/);
+    expect(written(t.root)).toEqual([]);
+  });
+  it('an account name in the chart text is refused: nothing written', async () => {
+    const chart = [n('generic', '', [], { text: 'Google Account: Example Person' })];
+    const { t, deps } = graphRun([page({ extra: [insights({ chart })] })]);
+    expect(await record(t.ctx(G), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/account name; nothing written/);
     expect(written(t.root)).toEqual([]);
   });
   it('a results page showing no flights has no graph to explore: refused plainly, nothing clicked', async () => {

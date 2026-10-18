@@ -543,10 +543,16 @@ async function interact(
         S: deps.selectors,
         steps,
         clicked,
+        next: () => {
+          d = budget.next();
+          return d;
+        },
       });
       if (g.kind === 'blocked') return await stop(g.page, g.rule, g.facts);
       stepMs.click = g.clickMs;
-      stepMs.graph = deps.timers.now() - before;
+      stepMs.graph = deps.timers.now() - before - g.datesMs - g.scrollMs;
+      if (g.dates !== null) stepMs.dates = g.datesMs;
+      if (g.scrolled !== null) stepMs.scroll = g.scrollMs;
       stepMs.read = deps.timers.now() - t0;
       return {
         kind: 'read',
@@ -558,6 +564,14 @@ async function interact(
           snapshot: stripSnapshotQueries(g.snapshot),
           controls: g.controls,
           unnamedControls: g.unnamed,
+          chart: g.chart === null ? null : { ...g.chart, text: stripSnapshotQueries(g.chart.text) },
+          datesTabs: g.datesTabs,
+          dates: g.dates === null ? null : { ...g.dates, snapshot: stripSnapshotQueries(g.dates.snapshot) },
+          scrollButtons: g.scrollButtons,
+          scrolled:
+            g.scrolled === null
+              ? null
+              : { ...g.scrolled, snapshot: stripSnapshotQueries(g.scrolled.snapshot) },
           clicked,
           polls: g.polls,
           classification: g.classification,

@@ -26,6 +26,10 @@ export interface LocatorLike {
   isVisible(): Promise<boolean>;
   /** The printed accessibility snapshot: stored by the graph exploration only, never parsed (graph.ts). */
   ariaSnapshot(options?: { timeout?: number }): Promise<string>;
+  /** The rendered text (the graph exploration's chart region only; never HTML). */
+  innerText(options?: { timeout?: number }): Promise<string>;
+  /** Every element below this one (`*`, the graph exploration's chart region only). */
+  locator(selector: '*'): LocatorLike;
   getByRole(
     role: Role,
     options?: { name?: string | RegExp; exact?: boolean; selected?: boolean },

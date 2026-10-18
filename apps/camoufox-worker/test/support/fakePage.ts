@@ -29,6 +29,8 @@ export interface FakeNode {
   countHang?: boolean;
   /** What `getAttribute('aria-selected')` answers, when it differs from the role state (a replaced node). */
   ariaSelectedAttr?: string;
+  /** `innerText()` on this node never answers (every other read does). */
+  innerTextHang?: boolean;
   /** A link's target, which the printed snapshot shows as a `/url:` line (as Playwright's does). */
   href?: string;
 }
@@ -167,7 +169,9 @@ export class FakeLocator implements LocatorLike {
           : x.ariaLabel
         : name === 'aria-selected'
           ? (x.ariaSelectedAttr ?? String(x.selected === true))
-          : null,
+          : name === 'role'
+            ? (x.role ?? null)
+            : null,
     );
   }
   textContent(o?: { timeout?: number }): Promise<string | null> {
@@ -199,6 +203,21 @@ export class FakeLocator implements LocatorLike {
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
     return new FakeLocator(this.page, () =>
       descendants(this.find()).filter((x) => textMatches(x, t, o.exact)),
+    );
+  }
+  innerText(o?: { timeout?: number }): Promise<string> {
+    if (this.node()?.innerTextHang === true) return this.page.hangUntilClosed<string>();
+    return this.read(o, (x) =>
+      descendants([x])
+        .map((c) => (c.text === undefined ? (c.role === 'text' ? (c.name ?? '') : '') : (c.text ?? '')))
+        .filter((t) => t !== '')
+        .join('\n'),
+    );
+  }
+  /** `locator('*')`: every element below this one, in document order (the only selector the worker uses). */
+  locator(selector: '*'): FakeLocator {
+    return new FakeLocator(this.page, () =>
+      selector === '*' ? descendants(this.find()).filter((x) => x.role !== 'text') : [],
     );
   }
   ariaSnapshot(o?: { timeout?: number }): Promise<string> {

@@ -32,7 +32,9 @@ export type Role =
   | 'alertdialog'
   | 'region'
   | 'slider'
-  | 'option';
+  | 'option'
+  | 'tabpanel'
+  | 'gridcell';
 
 export const FLAG_NAMES = [
   'RESULTS_VERIFIED',
@@ -79,6 +81,8 @@ export interface Selectors {
     viewMoreButton: string;
     /** The button that opens the price-per-departure-day graph (exact name; the exploration recorder only). */
     priceGraphButton: string;
+    /** Inside the graph's dialog (exploration only): the chart region, the Dates tab and the forward scroll button. */
+    graphDialog: { chartRegion: string; datesTab: string; scrollForwards: string };
     /** Google's own "no flights" line; a hypothesis until NO_FLIGHTS_VERIFIED. */
     noFlights: RegExp;
   };
@@ -139,6 +143,9 @@ export const SELECTORS: Selectors = {
     // why: observed 2026-10-18 (the feasibility load's results page names it); clicked only by record --graph-explore,
     // never by the provider, until a recording shows what the graph holds
     priceGraphButton: 'Price graph',
+    // why: observed 2026-10-18 (graph-explore/2026-10-18/1): the button opens a dialog "Price insights" holding a tablist
+    // ("Dates", "Price graph"), a region "Price graph" with no accessible children, and "Scroll forwards"
+    graphDialog: { chartRegion: 'Price graph', datesTab: 'Dates', scrollForwards: 'Scroll forwards' },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },
   form: {
