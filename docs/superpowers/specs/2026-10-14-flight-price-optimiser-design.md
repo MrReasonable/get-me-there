@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 30.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 31.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -433,6 +433,11 @@ export class AbortedError extends Error {}
   when the query has `maxStops` (0 `nonstop`, 1 `one_stop_or_fewer`, 2
   `two_stops_or_fewer`; nothing above 2), so billed calls go to itineraries
   the rule allows; verdicts still check stops from the segments.
+- **Cheapest set.** SearchApi `google_flights` sends
+  `show_cheapest_flights=true` on every step beside `sort_by=price`, since
+  Google's default is its "best" set, which may leave a cheaper option out;
+  each step is still one billed search. `google_flights_calendar` has no
+  such parameter and sends none.
 - **Empty is per capability.** `authorised-cached`: a schema-valid success
   envelope with zero entries → every covered cell `no_data`; a malformed
   envelope or `success:false` → `parse`. `scraped-aggregate`: an empty grid
@@ -452,7 +457,11 @@ export class AbortedError extends Error {}
   `no_data` with reason `cabin-not-offered` for a non-economy definition
   without calling it. All hard-coded. The dated allowlist
   (`fixtures/recorded/<provider>/params-<date>.json`) enumerates parameter
-  names **and values**; tests assert both.
+  names **and values**; tests assert both, and the code's allowlist equals
+  the newest file. A parameter added later from the vendor docs is a later
+  dated file; each recording keeps the allowlist of its date, and replay
+  matches a request against a recording made before a parameter existed
+  without that parameter only, every other name and value still matching.
 - **Errors.** 401/403 → `auth`; 402 → `quota`; 400 → `parse`
   (non-retryable) with the vendor's message in `last_error`; 404 → `upstream`
   non-retryable; 429 → `rate-limit`, or `quota` when the adapter's
@@ -557,8 +566,8 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
 
 Vendor parameter names from the allowlist (`travel_class` values `economy |
 premium_economy | business | first_class`). Step 1 (outbound options,
-cheapest-first among the options the vendor returns; `show_cheapest_flights`
-is not sent, a named follow-up) → step 2 per `expandTop` outbound (round-trip price for that
+cheapest-first among the options the vendor returns; every step sends
+`show_cheapest_flights=true` and `sort_by=price`) → step 2 per `expandTop` outbound (round-trip price for that
 pairing) → optional step 3 (`booking_token` → options; `booking_request` is a
 POST, stored as `{ kind: 'post', url, postData }`, rendered as a browser form,
 never fetched server-side; phone-only → `none`).
@@ -1746,6 +1755,13 @@ as specified in §5.3; no secrets, no full URLs.
 stated", or the code and "market", from `core`'s labels) on the full price
 displays and the alert email's provenance line, and keeps it off the compact
 calendar face and the phone face.
+
+### Revision 31: SearchApi cheapest set (2026-10-18)
+
+§5.2, §5.4: SearchApi `google_flights` sends `show_cheapest_flights=true`
+on every step (docs read 2026-10-18: no other value, no extra cost, no
+response change); the allowlist gains a later dated file, and replay
+reaches recordings made before it through the dated allowlist history.
 
 ### Revision 29: CodeRabbit batch 3 (2026-10-17)
 

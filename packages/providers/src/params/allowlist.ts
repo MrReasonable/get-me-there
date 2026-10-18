@@ -1,8 +1,10 @@
+import { type Dirent, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { type IsoDate, isoDateSchema, type ProviderId, providerIdSchema } from '@gmt/core';
 import { z } from 'zod';
 import { loadRecordedJson } from '../http/recordedFiles.js';
 import { defaultRecordedRoot } from '../http/recorder.js';
-import { parseOrThrow } from '../util.js';
+import { byPair, errnoCode, parseOrThrow } from '../util.js';
 
 /**
  * Dated parameter allowlist, spec §5.2: every parameter name **and value** an adapter may send, per endpoint key
@@ -104,18 +106,16 @@ export function loadParamsAllowlist(path: string, root: string = defaultRecorded
   return parseOrThrow(allowlistFileSchema, loadRecordedJson(path, root), `refusing params allowlist ${path}`);
 }
 
-/**
- * Throws ParamsNotAllowedError unless every query parameter of `url` is listed, with an allowed value, under the most
- * specific matching key for `endpointPath` (spec §5.2). Adapters call it before http-kit; messages name parameters only.
- */
-export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: string, url: URL): void {
+type Selected = { entry: ParamsAllowlist['endpoints'][string] } | { refusal: string };
+
+/** The entry `url` selects for `endpointPath` (the most specific matching key), or why none does. */
+function selectEntry(allowlist: ParamsAllowlist, endpointPath: string, url: URL): Selected {
   const who = `${allowlist.provider} ${endpointPath}`;
-  if (url.pathname !== endpointPath)
-    throw new ParamsNotAllowedError(`${who}: URL path does not match the endpoint`);
+  if (url.pathname !== endpointPath) return { refusal: `${who}: URL path does not match the endpoint` };
   // why: key selection and value checks must read one value per name; a vendor may honour the last of several (review I2).
   const seen = new Set<string>();
   for (const name of url.searchParams.keys()) {
-    if (seen.has(name)) throw new ParamsNotAllowedError(`${who}: parameter ${name} is repeated`);
+    if (seen.has(name)) return { refusal: `${who}: parameter ${name} is repeated` };
     seen.add(name);
   }
   let bare: string | undefined;
@@ -132,20 +132,28 @@ export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: s
   }
   // why: two matching discriminated keys would otherwise be resolved by sort order, a rule no file author wrote (I2).
   if (matching.length > 1)
-    throw new ParamsNotAllowedError(
-      `${who}: more than one discriminated allowlist entry matches this request`,
-    );
+    return { refusal: `${who}: more than one discriminated allowlist entry matches this request` };
   const key = matching[0] ?? bare;
-  if (key === undefined) {
-    throw new ParamsNotAllowedError(
-      discriminated
-        ? `${who}: no allowlist entry matches this request's discriminator`
-        : `${who}: endpoint is not in the ${allowlist.recordedAt} allowlist`,
-    );
-  }
-  const entry = allowlist.endpoints[key];
+  const entry = key === undefined ? undefined : allowlist.endpoints[key];
   if (entry === undefined)
-    throw new ParamsNotAllowedError(`${who}: endpoint is not in the ${allowlist.recordedAt} allowlist`);
+    return {
+      refusal:
+        key === undefined && discriminated
+          ? `${who}: no allowlist entry matches this request's discriminator`
+          : `${who}: endpoint is not in the ${allowlist.recordedAt} allowlist`,
+    };
+  return { entry };
+}
+
+/**
+ * Throws ParamsNotAllowedError unless every query parameter of `url` is listed, with an allowed value, under the most
+ * specific matching key for `endpointPath` (spec §5.2). Adapters call it before http-kit; messages name parameters only.
+ */
+export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: string, url: URL): void {
+  const who = `${allowlist.provider} ${endpointPath}`;
+  const selected = selectEntry(allowlist, endpointPath, url);
+  if ('refusal' in selected) throw new ParamsNotAllowedError(selected.refusal);
+  const { entry } = selected;
   for (const [name, value] of url.searchParams.entries()) {
     if (!entry.names.includes(name))
       throw new ParamsNotAllowedError(
@@ -157,4 +165,40 @@ export function assertRequestAllowed(allowlist: ParamsAllowlist, endpointPath: s
         `${who}: a value of ${name} is not in the ${allowlist.recordedAt} allowlist`,
       );
   }
+}
+
+/**
+ * The parameter names the entry `url` selects lists, or undefined when the request selects no entry. Replay reads it to
+ * tell which of a request's parameters a recording's own allowlist could not have sent (spec §5.2 dated history).
+ */
+export function allowedNames(
+  allowlist: ParamsAllowlist,
+  endpointPath: string,
+  url: URL,
+): readonly string[] | undefined {
+  const selected = selectEntry(allowlist, endpointPath, url);
+  return 'entry' in selected ? selected.entry.names : undefined;
+}
+
+const PARAMS_FILE = /^params-\d{4}-\d{2}-\d{2}\.json$/;
+
+/**
+ * Every dated allowlist under `root` (`<provider>/params-<date>.json`), loaded and validated, in provider then date
+ * order: the dated allowlist history. A parameter added on a later date is in the later file only, so a recording keeps
+ * the allowlist it was made under (plan decision 24) and replay can tell what that recording could not have sent.
+ */
+export function loadParamsHistory(root: string = defaultRecordedRoot()): ParamsAllowlist[] {
+  let dirs: Dirent[];
+  try {
+    dirs = readdirSync(root, { withFileTypes: true });
+  } catch (e) {
+    // why: a missing tree is the fresh-checkout case (decision 61), an empty history; any other failure is itself.
+    if (errnoCode(e) === 'ENOENT') return [];
+    throw e;
+  }
+  const out: ParamsAllowlist[] = [];
+  for (const dir of dirs.filter((d) => d.isDirectory()))
+    for (const name of readdirSync(join(root, dir.name)).filter((n) => PARAMS_FILE.test(n)))
+      out.push(loadParamsAllowlist(join(root, dir.name, name), root));
+  return out.sort((a, b) => byPair([a.provider, a.recordedAt], [b.provider, b.recordedAt]));
 }

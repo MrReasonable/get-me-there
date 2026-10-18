@@ -111,8 +111,8 @@ interface Usable {
 
 /**
  * `VerificationCapability.search` for SearchApi: the spec §5.4 chain.
- * - Step 1: options sorted by price (sent with sort_by=price, then sorted locally; "cheapest" holds over the
- *   options the vendor returned only). Zero options → `empty`; options but none priced and usable →
+ * - Step 1: the cheapest options sorted by price (sent with show_cheapest_flights=true and sort_by=price on every
+ *   step, then sorted locally; "cheapest" still holds over the options the vendor returned only). Zero options → `empty`; options but none priced and usable →
  *   `upstream`/`no-priced-options`; a currency core does not know → `upstream`/`currency-unsupported`.
  * - Step 2 for the `expandTop` cheapest: every priced return option is an offer, `verified: false`, whose seller is
  *   the airline the vendor states on the first outbound flight; with no stated airline those offers are dropped and

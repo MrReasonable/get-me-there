@@ -103,6 +103,8 @@ export function paramRules(): Readonly<Record<EndpointKey, EndpointRules>> {
         ...shared,
         // why: plan decision 24 — sorted by price (separate_tickets is shared, decision 29)
         sort_by: { fixed: ['price'] },
+        // why: sent on every google_flights step, as the adapter does (vendor docs read 2026-10-18)
+        show_cheapest_flights: { fixed: ['true'] },
         // why: ruling 8: sent when a definition sets maxStops; the vendor's documented set (docs read 2026-10-17)
         stops: { documented: ['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer'] },
         departure_token: { kind: 'opaque-token' },
