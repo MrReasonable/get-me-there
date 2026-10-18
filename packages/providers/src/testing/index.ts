@@ -1,5 +1,6 @@
 // `@gmt/providers/testing`: the only module tree that imports msw (plan decision 7). Production code never imports it.
 export { withContentHash } from '../http/recorder.js';
+export { loadParamsHistory } from '../params/allowlist.js'; // replay's dated allowlist history (spec §5.2)
 export { fixtureHandlers, type RequestHandler } from './handlers.js';
 export {
   type GuardHooks,

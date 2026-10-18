@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { withContentHash } from '../../src/http/recorder.js';
 import {
+  allowedNames,
   assertRequestAllowed,
   loadParamsAllowlist,
+  loadParamsHistory,
   ParamsNotAllowedError,
 } from '../../src/params/allowlist.js';
 
@@ -224,5 +226,51 @@ describe('one reading of the parameters for the key and the request (review I2)'
       }),
     );
     expect(() => assertRequestAllowed(two, EP, url('engine=google_flights&type=1'))).toThrow(/more than one/);
+  });
+});
+
+describe('allowedNames (the names the selected entry lists)', () => {
+  it('reads the entry the request selects, and undefined when it selects none', () => {
+    const a = allowlist();
+    expect(allowedNames(a, EP, url(flights))).toEqual([
+      'currency',
+      'departure_id',
+      'departure_token',
+      'engine',
+      'gl',
+    ]);
+    expect(allowedNames(a, '/other', url('q=1', '/other'))).toEqual(['q']);
+    expect(allowedNames(a, EP, url('engine=google_hotels'))).toBeUndefined();
+    expect(allowedNames(a, EP, url(flights, '/elsewhere'))).toBeUndefined();
+    expect(allowedNames(a, EP, url(`${flights}&gl=us`))).toBeUndefined();
+  });
+});
+
+describe('loadParamsHistory (spec §5.2 dated allowlist history)', () => {
+  it('loads every provider’s params-<date>.json in provider then date order, skipping other files', () => {
+    write(withContentHash(good));
+    mkdirSync(join(root, 'travelpayouts'), { recursive: true });
+    writeFileSync(
+      join(root, 'searchapi', 'params-2026-10-18.json'),
+      JSON.stringify(withContentHash({ ...good, recordedAt: '2026-10-18' })),
+    );
+    writeFileSync(
+      join(root, 'travelpayouts', 'params-2026-10-15.json'),
+      JSON.stringify(withContentHash({ ...good, provider: 'travelpayouts', recordedAt: '2026-10-15' })),
+    );
+    writeFileSync(join(root, 'searchapi', 'notes.json'), '{}');
+    writeFileSync(join(root, 'stray.json'), '{}');
+    expect(loadParamsHistory(root).map((a) => [a.provider, a.recordedAt])).toEqual([
+      ['searchapi', '2026-10-14'],
+      ['searchapi', '2026-10-18'],
+      ['travelpayouts', '2026-10-15'],
+    ]);
+  });
+
+  it('is empty for a tree that does not exist (a fresh checkout), and refuses a file that fails validation', () => {
+    expect(loadParamsHistory(join(tmpdir(), 'gmt-par-absent', 'fixtures', 'recorded'))).toEqual([]);
+    write({ ...withContentHash(good), contentSha256: 'edited' });
+    expect(() => loadParamsHistory(root)).toThrow();
+    expect(() => loadParamsHistory(join(root, 'searchapi', 'params-2026-10-14.json'))).toThrow(/ENOTDIR/);
   });
 });

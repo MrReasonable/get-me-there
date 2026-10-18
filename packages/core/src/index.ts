@@ -30,6 +30,7 @@ export * from './coverage/rollUp.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
 export * from './labels/age.js';
+export { pointOfSaleLabel } from './labels/pointOfSale.js';
 export { SOURCE_LABELS, sourceLabel } from './labels/source.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';

@@ -4,7 +4,7 @@
 import { copyFileSync, cpSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { RecordedFixture } from '@gmt/providers';
+import { loadParamsAllowlist, type ParamsAllowlist, type RecordedFixture } from '@gmt/providers';
 import { loadRecorded, withContentHash } from '@gmt/providers/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RECORDED_BY } from '../../src/tools/record.js';
@@ -324,15 +324,45 @@ describe('checkWorkedExampleTree (the recorded-tree manifest)', { timeout: 20_00
     );
   });
 
-  it('rejects a second allowlist file for a provider (r3-ts-003)', async () => {
+  it('rejects a copied allowlist file whose name is not its own date (r3-ts-003)', async () => {
     const root = freshTree();
     copyFileSync(
       join(root, 'searchapi', 'params-2026-10-20.json'),
       join(root, 'searchapi', 'params-2026-10-21.json'),
     );
-    expect(checkWorkedExampleTree(root, OK)).toContain('searchapi: 2 allowlist files, expected 1');
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'searchapi allowlist: params-2026-10-21.json is dated 2026-10-20 inside',
+    );
+  });
+
+  it('accepts a later dated allowlist beside the recorded one: the dated history (spec §5.2)', async () => {
+    const root = freshTree();
+    const recorded = loadParamsAllowlist(join(root, 'searchapi', 'params-2026-10-20.json'), root);
+    writeFileSync(join(root, 'searchapi', 'params-2026-10-21.json'), redated(recorded, '2026-10-21'));
+    expect(checkWorkedExampleTree(root, OK)).toEqual([]);
+  });
+
+  it('rejects a tree whose only allowlist is dated after its recordings', async () => {
+    const root = freshTree();
+    const recorded = loadParamsAllowlist(join(root, 'searchapi', 'params-2026-10-20.json'), root);
+    rmSync(join(root, 'searchapi', 'params-2026-10-20.json'));
+    writeFileSync(join(root, 'searchapi', 'params-2026-10-21.json'), redated(recorded, '2026-10-21'));
+    expect(checkWorkedExampleTree(root, OK)).toContain(
+      'searchapi allowlist: no allowlist is dated on or before 2026-10-20',
+    );
+  });
+
+  it('rejects a provider with no allowlist file', async () => {
+    const root = freshTree();
+    rmSync(join(root, 'searchapi', 'params-2026-10-20.json'));
+    expect(checkWorkedExampleTree(root, OK)).toContain('searchapi: no allowlist file');
   });
 });
+
+/** The same allowlist under another date, hashed afresh, as a later file of the dated history would be. */
+function redated(a: ParamsAllowlist, day: string): string {
+  return JSON.stringify(withContentHash({ provider: a.provider, recordedAt: day, endpoints: a.endpoints }));
+}
 
 function asObject(v: unknown): Record<string, unknown> {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error('not an object');

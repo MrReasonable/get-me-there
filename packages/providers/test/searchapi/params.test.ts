@@ -60,6 +60,14 @@ describe('SEARCHAPI_PARAMS (spec §5.2 dated allowlist, plan decision 24)', () =
     expect(fl?.values.stops).toEqual(['nonstop', 'one_stop_or_fewer', 'two_stops_or_fewer']);
     expect(cal?.names).not.toContain('sort_by');
   });
+
+  it('lists show_cheapest_flights=true on google_flights only, dated from the docs it was read in (2026-10-18)', () => {
+    const cal = SEARCHAPI_PARAMS.endpoints['/api/v1/search?engine=google_flights_calendar'];
+    const fl = SEARCHAPI_PARAMS.endpoints['/api/v1/search?engine=google_flights'];
+    expect(SEARCHAPI_PARAMS.recordedAt).toBe('2026-10-18');
+    expect(fl?.values.show_cheapest_flights).toEqual(['true']);
+    expect(cal?.names).not.toContain('show_cheapest_flights');
+  });
 });
 
 describe('request builders (spec §5.2 point of sale, §5.4 travel_class)', () => {
@@ -112,6 +120,7 @@ describe('request builders (spec §5.2 point of sale, §5.4 travel_class)', () =
       'outbound_date',
       'return_date',
       'separate_tickets',
+      'show_cheapest_flights',
       'sort_by',
       'travel_class',
     ]);
@@ -131,6 +140,16 @@ describe('request builders (spec §5.2 point of sale, §5.4 travel_class)', () =
     expect(allowed(p)).not.toThrow();
   });
 
+  it('sends show_cheapest_flights=true and sort_by=price on every itinerary step, with or without stops, never on the calendar', () => {
+    for (const q of [cellQ, { ...cellQ, maxStops: 0 }])
+      for (const token of [undefined, { departure_token: 't' }, { booking_token: 't' }]) {
+        const p = flightsParams(q, 'GB', token);
+        expect(p).toMatchObject({ show_cheapest_flights: 'true', sort_by: 'price' });
+        expect(allowed(p)).not.toThrow();
+      }
+    expect(calendarParams(calQ, rect, 'GB')).not.toHaveProperty('show_cheapest_flights');
+  });
+
   it('sends no stops without maxStops, or above the two the vendor documents (no filter is narrower than the rule)', () => {
     expect(flightsParams(cellQ, 'GB')).not.toHaveProperty('stops');
     expect(flightsParams({ ...cellQ, maxStops: 3 }, 'GB')).not.toHaveProperty('stops');
@@ -140,6 +159,8 @@ describe('request builders (spec §5.2 point of sale, §5.4 travel_class)', () =
     expect(allowed({ ...calendarParams(calQ, rect, 'GB'), departure_token: 'tok' })).toThrow();
     expect(allowed({ ...flightsParams(cellQ, 'GB'), outbound_date_start: '2026-11-02' })).toThrow();
     expect(allowed({ ...calendarParams(calQ, rect, 'GB'), sort_by: 'price' })).toThrow();
+    expect(allowed({ ...calendarParams(calQ, rect, 'GB'), show_cheapest_flights: 'true' })).toThrow();
+    expect(allowed({ ...flightsParams(cellQ, 'GB'), show_cheapest_flights: 'false' })).toThrow();
   });
 
   it('refuses an unknown name, a disallowed value and a stops filter on the calendar or an undocumented stops value', () => {

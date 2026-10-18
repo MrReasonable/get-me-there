@@ -28,7 +28,7 @@ import {
   optionSchema,
 } from '../../src/searchapi/shapes.js';
 import { majorToMinor } from '../../src/shared/money.js';
-import { replayHandlers } from '../../src/testing/index.js';
+import { loadParamsHistory, replayHandlers } from '../../src/testing/index.js';
 import { recordingsPresent, skipTitle } from '../../src/testing/recordings.js';
 import { obj } from '../support/guards.js';
 import { server } from '../support/msw.js';
@@ -50,9 +50,12 @@ import { bookingBody, CELL_QUERY, ECHO, flightsBody, OUT_A, option } from './sup
 const present = recordingsPresent(RECORDED_ROOT);
 
 let misses: (() => string[]) | null = null;
-/** Serves the recorded tree for this test; afterEach asserts nothing missed. */
+/**
+ * Serves the recorded tree for this test; afterEach asserts nothing missed. The dated allowlist history lets a recording
+ * made before a parameter was added answer the request that now carries it (spec §5.2).
+ */
 function replay(): void {
-  const r = replayHandlers(RECORDED_ROOT);
+  const r = replayHandlers(RECORDED_ROOT, { allowlists: loadParamsHistory(RECORDED_ROOT) });
   server.use(...r.handlers);
   misses = r.misses;
 }
@@ -153,6 +156,20 @@ describe.skipIf(!present)(
       expect(SEARCHAPI_PARAMS).toEqual(loadParamsAllowlist(latestParamsPath()));
     });
 
+    it('the recordings predate show_cheapest_flights: none sends it, and each passes the allowlist of its date', () => {
+      const history = loadParamsHistory(RECORDED_ROOT).filter((a) => a.provider === 'searchapi');
+      expect(history.at(-1)).toEqual(SEARCHAPI_PARAMS);
+      for (const r of searchApiRecordings()) {
+        expect(r.params).not.toHaveProperty('show_cheapest_flights');
+        const own = history.filter((a) => a.recordedAt <= r.recordedAt.slice(0, 10)).at(-1);
+        if (own === undefined) throw new Error(`no allowlist is dated on or before ${r.recordedAt}`);
+        expect(own.endpoints['/api/v1/search?engine=google_flights']?.names).not.toContain(
+          'show_cheapest_flights',
+        );
+        assertRequestAllowed(own, SEARCHAPI_ENDPOINT_PATH, new URL(r.request.url));
+      }
+    });
+
     it('every recorded request passes it', () => {
       for (const r of searchApiRecordings())
         assertRequestAllowed(SEARCHAPI_PARAMS, SEARCHAPI_ENDPOINT_PATH, new URL(r.request.url));
@@ -240,6 +257,10 @@ describe.skipIf(!present)(
         ctx(),
       );
       expect(sentUrls(k.events)).toHaveLength(1 + step2s.length + step3s.length);
+      // why: every step now asks for the cheapest set; the recordings predate it and answer through the dated history.
+      expect(sentUrls(k.events).map((u) => u.searchParams.get('show_cheapest_flights'))).toEqual(
+        sentUrls(k.events).map(() => 'true'),
+      );
       expect(res).toMatchObject({
         coverage: 'priced',
         partial: false,

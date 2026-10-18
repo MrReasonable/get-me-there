@@ -181,13 +181,26 @@ export function checkWorkedExampleTree(
     const names = existsSync(dir)
       ? readdirSync(dir).filter((n) => /^params-\d{4}-\d{2}-\d{2}\.json$/.test(n))
       : [];
-    if (names.length !== 1) {
-      fail(`${provider}: ${names.length} allowlist files, expected 1`);
+    if (names.length === 0) {
+      fail(`${provider}: no allowlist file`);
       continue;
     }
+    // why: the files are the dated allowlist history (spec §5.2): the recording run writes one, and a parameter added
+    // later from the vendor docs adds a later file. Each file must carry its own date, so a stray copy is caught
+    // (r3-ts-003), and each recording is held to the allowlist of its date, the latest on or before it.
     try {
-      const allow = loadParamsAllowlist(join(dir, names[0] ?? ''), root);
-      for (const f of files) assertRequestAllowed(allow, f.endpointPath, new URL(f.request.url));
+      const history = names.sort().map((n) => {
+        const allow = loadParamsAllowlist(join(dir, n), root);
+        if (n !== `params-${allow.recordedAt}.json`)
+          throw new Error(`${n} is dated ${allow.recordedAt} inside`);
+        return allow;
+      });
+      for (const f of files) {
+        const allow = history.filter((a) => a.recordedAt <= f.recordedAt.slice(0, 10)).at(-1);
+        if (allow === undefined)
+          throw new Error(`no allowlist is dated on or before ${f.recordedAt.slice(0, 10)}`);
+        assertRequestAllowed(allow, f.endpointPath, new URL(f.request.url));
+      }
     } catch (e) {
       fail(`${provider} allowlist: ${e instanceof Error ? e.message : String(e)}`);
     }

@@ -658,6 +658,11 @@ export class AbortedError extends Error {}
   when the query has `maxStops` (0 `nonstop`, 1 `one_stop_or_fewer`, 2
   `two_stops_or_fewer`; nothing above 2), so billed calls go to itineraries
   the rule allows; verdicts still check stops from the segments.
+- **Cheapest set.** SearchApi `google_flights` sends
+  `show_cheapest_flights=true` on every step beside `sort_by=price`, since
+  Google's default is its "best" set, which may leave a cheaper option out;
+  each step is still one billed search. `google_flights_calendar` has no
+  such parameter and sends none.
 - **Empty is per capability.** `authorised-cached`: a schema-valid success
   envelope with zero entries → every covered cell `no_data`; a malformed
   envelope or `success:false` → `parse`. `scraped-aggregate`: an empty grid
@@ -677,7 +682,11 @@ export class AbortedError extends Error {}
   `no_data` with reason `cabin-not-offered` for a non-economy definition
   without calling it. All hard-coded. The dated allowlist
   (`fixtures/recorded/<provider>/params-<date>.json`) enumerates parameter
-  names **and values**; tests assert both.
+  names **and values**; tests assert both, and the code's allowlist equals
+  the newest file. A parameter added later from the vendor docs is a later
+  dated file; each recording keeps the allowlist of its date, and replay
+  matches a request against a recording made before a parameter existed
+  without that parameter only, every other name and value still matching.
 - **Errors.** 401/403 → `auth`; 402 → `quota`; 400 → `parse`
   (non-retryable) with the vendor's message in `last_error`; 404 → `upstream`
   non-retryable; 429 → `rate-limit`, or `quota` when the adapter's
@@ -797,8 +806,8 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
 
 Vendor parameter names from the allowlist (`travel_class` values `economy |
 premium_economy | business | first_class`). Step 1 (outbound options,
-cheapest-first among the options the vendor returns; `show_cheapest_flights`
-is not sent, a named follow-up) → step 2 per `expandTop` outbound (round-trip price for that
+cheapest-first among the options the vendor returns; every step sends
+`show_cheapest_flights=true` and `sort_by=price`) → step 2 per `expandTop` outbound (round-trip price for that
 pairing) → optional step 3 (`booking_token` → options; `booking_request` is a
 POST, stored as `{ kind: 'post', url, postData }`, rendered as a browser form,
 never fetched server-side; phone-only → `none`).
@@ -1702,8 +1711,14 @@ a variant of `PriceCell`, never a second price renderer: `PriceCell`
 validates the complete provenance (provider, source kind, fetched and
 observed time, point of sale, FX status) before it prints an amount, and a
 face keeps "≈" on a converted price. Point of sale is validated on every
-price but is not a face item: it is one install-wide setting (§12
-`POINT_OF_SALE`), or `'unknown'` where the vendor ignores it. Each row also carries the operator's per-destination note from
+price and shown, in words from `core` ("UK market" for GB, "market not stated"
+for `'unknown'`, otherwise the code and "market"), on the full price displays:
+the Results rows and header, the cell detail panel, Duration, History and the
+alert events table, and on the alert email's provenance line, because the same
+flight can be priced differently by market. It is not a face item: the compact
+calendar face and the phone face leave it out, so the 375px widths do not change.
+It is one install-wide setting (§12 `POINT_OF_SALE`), or `'unknown'` where the
+vendor ignores it. Each row also carries the operator's per-destination note from
 the definition (free text such as "onward leg not included") on every row
 for that destination. Optional operator-entered onward cost per destination
 renders as an "adjusted" column, labelled operator-entered, sortable, never
@@ -2018,6 +2033,20 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 30: point of sale on full price displays (2026-10-18)
+
+§11: the provenance line lists point of sale ("UK market", "market not
+stated", or the code and "market", from `core`'s labels) on the full price
+displays and the alert email's provenance line, and keeps it off the compact
+calendar face and the phone face.
+
+### Revision 31: SearchApi cheapest set (2026-10-18)
+
+§5.2, §5.4: SearchApi `google_flights` sends `show_cheapest_flights=true`
+on every step (docs read 2026-10-18: no other value, no extra cost, no
+response change); the allowlist gains a later dated file, and replay
+reaches recordings made before it through the dated allowlist history.
 
 ### Revision 32: the camoufox provider (2026-10-18)
 

@@ -772,3 +772,41 @@ describe('keyboard operation of the table (spec §9 item 6, §11 accessibility)'
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 });
+
+describe('Results point of sale (spec §11)', () => {
+  it('wide: each row names its market in its price cell; 375px: nothing is added and no row prints it', async () => {
+    countResults(resultsResponse({ rows: five }));
+    const wide = view();
+    await table();
+    // why: every wide row's own market words (rows one, three and four are SearchApi GB, the calendar row Aviasales
+    // 'unknown'); each row's price-cell labels are all checked, so a wrong or missing one on any row fails.
+    const expected = ['UK market', 'UK market', 'UK market', 'UK market', 'market not stated'];
+    expect(five.map((r) => r.provenance.pointOfSale)).toEqual(['GB', 'GB', 'GB', 'GB', 'unknown']);
+    const rows = dataRows();
+    expect(rows).toHaveLength(five.length);
+    rows.forEach((r, n) => {
+      const labels = within(r).getAllByTestId('point-of-sale');
+      expect(labels.length).toBeGreaterThan(0);
+      for (const e of labels) expect(e).toHaveTextContent(new RegExp(`^${expected[n]}$`));
+    });
+    // the headline above the rows is the server's cheapest, a SearchApi (GB) row, so it names the UK market
+    const inRows = new Set(rows.flatMap((r) => [...r.querySelectorAll('[data-testid="point-of-sale"]')]));
+    const headline = screen.getAllByTestId('point-of-sale').filter((e) => !inRows.has(e));
+    expect(headline.map((e) => e.textContent)).toEqual(['UK market']);
+    wide.unmount();
+
+    setViewportWidth(375);
+    view();
+    await table();
+    // why: jsdom has no layout, so "nothing overflows" is asserted as structure: the phone row's price cell is the
+    // compact form, which carries no market words, so the 375px row is exactly as wide as before.
+    for (const r of dataRows()) {
+      expect(within(r).queryByTestId('point-of-sale')).toBeNull();
+      expect(r.textContent ?? '').not.toMatch(/market/);
+    }
+    // the full headline above the rows is a full display: it names its market and wraps (flex-wrap) rather than widening
+    const header = screen.getAllByTestId('point-of-sale');
+    expect(header).toHaveLength(1);
+    expect(header[0]?.closest('[data-testid="provenance"]')).toHaveClass('flex-wrap');
+  });
+});

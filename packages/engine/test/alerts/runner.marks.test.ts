@@ -132,7 +132,7 @@ describe('staleness by effective age through core isStale (spec §3, §8.1; deci
     const body = f.notifier.digests()[0]?.body ?? '';
     expect(notesOf(body)).toEqual(['   Notes: stale: older than 192h', '   Notes: stale: older than 192h']);
     expect(body).toContain(
-      "   Provenance: Google Flights via SearchApi · fetched 8d ago · vendor's cache age unknown",
+      "   Provenance: Google Flights via SearchApi · UK market · fetched 8d ago · vendor's cache age unknown",
     );
     const staleByPrice = body
       .split('\n\n')

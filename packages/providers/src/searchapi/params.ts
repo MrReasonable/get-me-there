@@ -36,6 +36,14 @@ export const TRAVEL_CLASS: Readonly<Record<Cabin, string>> = {
  */
 export const SORT_BY_PRICE = 'price';
 /**
+ * `show_cheapest_flights` value for `google_flights`, sent on every step. The docs page (read 2026-10-18): "Set to `true`
+ * to show the cheapest flights. By default, best flights are shown." Without it step 1 holds Google's "best" set, which
+ * may leave out a cheaper option; `sort_by=price` only orders what comes back. The page names no other value, no extra
+ * cost (only HTTP 200 is billed, per search) and no change to the response sections; the adapter reads `best_flights`
+ * and `other_flights` either way. The calendar engine documents no such parameter, so it is not sent there.
+ */
+export const SHOW_CHEAPEST_FLIGHTS = 'true';
+/**
  * `separate_tickets` value for both engines. Both docs pages say "Set to `1` to hide separate and self-transfer
  * tickets, or `0` to show them" (default `0`; re-read 2026-10-15). Sent on both, so discovery ranks cells by the
  * same kind of fare verification searches (plan decision 29). ItineraryQuery carries no self-transfer permission
@@ -60,17 +68,18 @@ function stopsOf(maxStops: number | undefined): Record<string, string> {
   return {};
 }
 
-// why: the date of WP4b's recording run; the Task 5.9 test fails until it equals the recorded file's
-// recordedAt (print it with the command in Task 5.9 Step 3). The hash is computed, never copied.
-const RECORDED_AT: IsoDate = asIsoDate('2026-10-15');
+// why: the date of the newest params-<date>.json: WP4b's recording run wrote 2026-10-15, and show_cheapest_flights,
+// read from the docs on 2026-10-18, is a later file of the dated history (the recordings keep the 2026-10-15 one and
+// replay through the history). The recorded suite fails until this equals the newest file. The hash is computed.
+const RECORDED_AT: IsoDate = asIsoDate('2026-10-18');
 
 const TRAVEL_CLASSES = ['business', 'economy', 'first_class', 'premium_economy'];
 const CALENDAR_KEY = `${SEARCHAPI_ENDPOINT_PATH}?engine=google_flights_calendar`;
 const FLIGHTS_KEY = `${SEARCHAPI_ENDPOINT_PATH}?engine=google_flights`;
 
 /**
- * Every parameter name and value this adapter may send (spec §5.2), in WP4's `ParamsAllowlist` shape, equal to
- * WP4b's recorded `params-<date>.json` (plan decision 24). Both engines share `/api/v1/search`, so each has an
+ * Every parameter name and value this adapter may send (spec §5.2), in WP4's `ParamsAllowlist` shape, equal to the
+ * newest `params-<date>.json` of the dated history (plan decision 24). Both engines share `/api/v1/search`, so each has an
  * engine-qualified key and `assertRequestAllowed` holds it to its own names. `gl` is the recorded point of
  * sale only; another POINT_OF_SALE needs a new recording (the constructor refuses it).
  */
@@ -131,6 +140,7 @@ export const SEARCHAPI_PARAMS: ParamsAllowlist = withContentHash({
         'outbound_date',
         'return_date',
         'separate_tickets',
+        'show_cheapest_flights',
         'sort_by',
         'stops',
         'travel_class',
@@ -149,6 +159,7 @@ export const SEARCHAPI_PARAMS: ParamsAllowlist = withContentHash({
         outbound_date: 'any',
         return_date: 'any',
         separate_tickets: [EXCLUDE_SEPARATE_TICKETS],
+        show_cheapest_flights: [SHOW_CHEAPEST_FLIGHTS],
         sort_by: [SORT_BY_PRICE],
         stops: STOPS_VALUES,
         travel_class: TRAVEL_CLASSES,
@@ -211,7 +222,8 @@ export function calendarParams(
  * `google_flights` parameters for one cell (spec §5.4). Steps 2 and 3 resend them plus one token: the docs show
  * this for `booking_token`; for `departure_token` it is evidenced by WP4b's SA-05 recording, not by the docs.
  * `stops` follows the query's maxStops (ruling 8), so the billed calls go to itineraries the rule allows; the calendar
- * engine sends none, since DiscoveryQuery has no maxStops (decision 24).
+ * engine sends none, since DiscoveryQuery has no maxStops (decision 24). `show_cheapest_flights=true` rides on every
+ * step, so each step chooses among the cheapest options rather than Google's best set.
  */
 export function flightsParams(
   q: ItineraryQuery,
@@ -226,6 +238,7 @@ export function flightsParams(
     outbound_date: q.departureDate,
     return_date: q.returnDate,
     sort_by: SORT_BY_PRICE,
+    show_cheapest_flights: SHOW_CHEAPEST_FLIGHTS,
     separate_tickets: EXCLUDE_SEPARATE_TICKETS,
     ...stopsOf(q.maxStops),
     ...common(pointOfSale, q.cabin),
