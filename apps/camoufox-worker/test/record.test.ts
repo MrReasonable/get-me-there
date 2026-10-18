@@ -32,7 +32,7 @@ import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
 import { descendants, FakePage, type Navigation, n, option, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
-import { fakeTimers } from './support/timers.js';
+import { fakeTimers, flush } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
 
 const KEY = 'synthetic-worker-key-0123456789abcdef';
@@ -388,6 +388,65 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(t.err.join()).toMatch(/did not settle/);
     expect(written(t.root)).toEqual([]);
     expect(t.timers.now() - before).toBeLessThanOrEqual(180_000 + 10_000);
+  });
+  // why: ruling of 2026-10-18 (the rerun on 51c2992): a Cheapest poll whose lookup overruns is unsettled, polled again
+  const overrunFlow = (overrunPolls: number) => {
+    const t = setup();
+    const view = (hang: boolean) => {
+      const v = resultsTree({ tab: 'Cheapest from £443' });
+      for (const c of descendants([v])) {
+        if (c.role === 'tab' && c.name === 'Cheapest from £443') c.selected = true;
+        // the poll's result-link lookup overruns on these polls (confirm-selected reads the tab and answers)
+        if (c.role === 'link') c.countHang = hang;
+      }
+      v.children = (v.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+      return v;
+    };
+    const deps: RecordDeps = {
+      ...t.deps,
+      launch: async (prof) => {
+        const c = await t.deps.launch(prof);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            pg.onClick = (x) => {
+              if (x.role === 'tab')
+                pg.setTrees([
+                  ...Array(overrunPolls)
+                    .fill(null)
+                    .map(() => view(true)),
+                  view(false),
+                ]);
+            };
+          };
+        return c;
+      },
+    };
+    return { t, deps };
+  };
+  const drive = async (t: ReturnType<typeof setup>, run: Promise<number>): Promise<number> => {
+    let code: number | null = null;
+    void run.then((c) => {
+      code = c;
+    });
+    for (let i = 0; i < 80 && code === null; i++) {
+      for (let j = 0; j < 5; j++) await flush();
+      if (code === null) t.timers.runOut();
+    }
+    return run;
+  };
+  it('--cheapest: a first poll that times out and a second that settles produces a recording', async () => {
+    const { t, deps } = overrunFlow(1);
+    expect(await drive(t, record(t.ctx([...Q, '--cheapest']), cfg, deps))).toBe(0);
+    expect(written(t.root)).toContain('cheapest/2026-10-18/1.facts.json');
+  });
+  it('--cheapest: polls that keep timing out end plainly at the budget, no cool-down, nothing recorded', async () => {
+    const { t, deps } = overrunFlow(10_000);
+    expect(await drive(t, record(t.ctx([...Q, '--cheapest']), cfg, deps))).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/the Cheapest view did not settle within its budget/);
+    expect(
+      new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active(),
+    ).toBeNull();
+    expect(written(t.root)).toEqual([]);
   });
   it('--cheapest whose tab cannot be clicked refuses plainly, with no cool-down', async () => {
     const t = setup();

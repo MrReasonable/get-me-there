@@ -482,11 +482,7 @@ async function interact(
       const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
       try {
         clicked.push(...(await driver.clickCheapest(d, steps)));
-        // why: rulings of 2026-10-18: the first Cheapest poll and every later one is a 20 s step with 5 s lookups
-        const cur = d;
-        await runStep('first-cheapest-poll', POLL_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st, lookups),
-        );
+        // why: rulings of 2026-10-18: every Cheapest poll is a 20 s step with 5 s lookups; an overrun is polled again
         settled = await poll(deps.selectors, 'cheapest');
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
@@ -506,8 +502,11 @@ async function interact(
         }
         // why: otherwise the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
         const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'click';
+        // why: the budget's end is the view not settling, said as such; any other step is the click flow
         throw new RecordingRefused(
-          `the Cheapest tab could not be clicked: the ${step} step; the debug log has the step lines`,
+          e instanceof CheapestStepFailed && e.step === 'cheapest-poll'
+            ? `the Cheapest view did not settle within its budget (${step}); the debug log has the poll lines`
+            : `the Cheapest tab could not be clicked: the ${step} step; the debug log has the step lines`,
         );
       }
     } else if (kind === 'view-more') {

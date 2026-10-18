@@ -699,8 +699,10 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     const elapsed = r.answer.kind === 'not-ready' ? r.answer.elapsedMs : -1;
     expect(elapsed).toBeGreaterThan(90_000);
     expect(elapsed).toBeLessThanOrEqual(180_000);
-    // the second budget is 90 s from the click, which came after the first view's 84 s
-    expect(elapsed).toBe(84_000 + 90_000);
+    // why: ruling of 2026-10-18: Cheapest polling ends when only the fallback's reserve is left of the click's 90 s
+    // budget; with no list to read the page is not-ready (never unrecognised, never a cool-down)
+    expect(elapsed).toBeGreaterThan(84_000 + 90_000 - 20_000 - 5000);
+    expect(t.cooldown.active()).toBeNull();
   });
 
   // why: ruling of 2026-10-18 (the hung rerun): a Cheapest click that never answers is its own 10 s step; the page
@@ -736,9 +738,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       'click-tab:end',
       'confirm-selected:start',
       'confirm-selected:end',
-      'first-cheapest-poll:start',
-      'first-cheapest-poll:end',
-      // each later Cheapest poll is its own bounded step (two polls show the links stable)
+      // each Cheapest poll is its own bounded step (two polls show the links stable)
       'cheapest-poll:start',
       'cheapest-poll:end',
       'cheapest-poll:start',
@@ -760,5 +760,35 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     });
     expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'blocked', page: 'unusual-traffic' });
     expect(t.cooldown.active()?.cause).toBe('unusual-traffic');
+  });
+
+  // why: ruling of 2026-10-18 (the rerun on 51c2992): Cheapest polls that keep overrunning end at the budget, and the
+  // server reads the list as it stands with the tab's price (the adapter marks the cell partial)
+  it('Cheapest polls that keep timing out fall back to the list with the tab price', async () => {
+    const tree = resultsTree({ tab: 'Cheapest from £443' });
+    const t = setup({
+      tree,
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          p.onClick = (x) => {
+            if (x.role === 'tab') x.selectedQueryHang = true;
+          };
+        };
+      },
+    });
+    const pending = t.session.page(REQ);
+    let r: Awaited<typeof pending> | null = null;
+    void pending.then((x) => {
+      r = x;
+    });
+    for (let i = 0; i < 80 && r === null; i++) {
+      for (let j = 0; j < 5; j++) await flush();
+      if (r === null) t.timers.runOut();
+    }
+    expect(await pending).toMatchObject({
+      answer: { kind: 'cells', cell: { status: 'price', tabMinor: 44300 } },
+    });
+    expect(t.cooldown.active()).toBeNull();
   });
 });

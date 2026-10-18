@@ -305,6 +305,7 @@ export class PageSession {
         startedAt: started,
       });
     let settled: Settled = await poll('best');
+    let fellBack = false;
     if (settled.kind.kind === 'blocked')
       return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
     if (settled.kind.kind === 'no-flights')
@@ -322,20 +323,18 @@ export class PageSession {
       const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
       const lookups = { timers: this.d.timers, lookupMs: LOOKUP_TIMEOUT_MS };
       let cheapStop: WorkerAnswer | null = null;
+      fellBack = false;
       try {
         await driver.clickCheapest(d, steps);
-        // why: rulings of 2026-10-18: the first Cheapest poll and every later one is a 20 s step with 5 s lookups
-        // inside it, so a slow or stalled view fails a step and falls back, never hangs
-        const cur = d;
-        await runStep('first-cheapest-poll', POLL_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st, lookups),
-        );
+        // why: rulings of 2026-10-18: every Cheapest poll is a 20 s step with 5 s lookups inside it; one that overruns
+        // is polled again, and only the budget's end fails the flow (then it falls back)
         cheapStop = await after('cheapest');
       } catch (e) {
         // why: the honesty rule (rulings of 2026-10-18): a Cheapest flow whose step fails or times out is read as the
         // Best view stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the page
         // deadline still ends the page as not-ready
         if (e instanceof DeadlineExceeded || d.expired()) throw e;
+        fellBack = true;
         // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
         // classified once, under its own step, and a blocked kind stops the page with its cool-down, as on any poll
         const cur = d;
@@ -360,6 +359,13 @@ export class PageSession {
       if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
     }
     const list = readList(await driver.listFacts(d), req);
+    // why: ruling of 2026-10-18: a Cheapest view that never settled and left no list to read is a page that did not
+    // settle (not-ready, no cool-down), never an unrecognised page
+    if (fellBack && list.minMinor === null && list.optionsOtherCell === 0)
+      return {
+        answer: { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started) },
+        stop: null,
+      };
     // why: decision 69: a page in another currency, or one with no option read for any cell, is not a page this app
     // reads; one whose options are all for another cell was read (fix round 1, prov I1): a cell issue, never a block
     if (list.currency !== 'GBP' || (list.minMinor === null && list.optionsOtherCell === 0))

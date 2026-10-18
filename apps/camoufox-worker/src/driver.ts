@@ -24,7 +24,10 @@ export interface LocatorLike {
   inputValue(options?: { timeout?: number }): Promise<string>;
   click(options?: { timeout?: number }): Promise<void>;
   isVisible(): Promise<boolean>;
-  getByRole(role: Role, options?: { name?: string | RegExp; exact?: boolean }): LocatorLike;
+  getByRole(
+    role: Role,
+    options?: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+  ): LocatorLike;
   getByText(text: string | RegExp, options?: { exact?: boolean }): LocatorLike;
 }
 export interface FrameLike {
@@ -36,7 +39,10 @@ export interface PageLike {
   url(): string;
   frames(): FrameLike[];
   on(event: 'framenavigated', listener: (frame: FrameLike) => void): unknown;
-  getByRole(role: Role, options?: { name?: string | RegExp; exact?: boolean }): LocatorLike;
+  getByRole(
+    role: Role,
+    options?: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+  ): LocatorLike;
   getByText(text: string | RegExp, options?: { exact?: boolean }): LocatorLike;
   close(): Promise<void>;
 }
@@ -133,6 +139,8 @@ export const LOOKUP_TIMEOUT_MS = 5000;
  * lookups, which the larger Cheapest view slows, so the poll has 20 s and each lookup inside it keeps its 5 s.
  */
 export const POLL_TIMEOUT_MS = 20_000;
+/** What the Cheapest polling leaves of its budget for the fallback read (the Best view's list), ruling of 2026-10-18. */
+export const FALLBACK_RESERVE_MS = POLL_TIMEOUT_MS;
 
 /** Bounds each single lookup of a readFacts call (the Cheapest view's polls). */
 export interface LookupBound {
@@ -142,18 +150,30 @@ export interface LookupBound {
 
 /** A single lookup that overran its own bound inside a bounded poll. */
 export class LookupTimedOut extends Error {
-  constructor() {
-    super('a single lookup overran its bound');
+  constructor(
+    /** Which lookup overran (ruling of 2026-10-18), e.g. `cheapest-tab-selected`, `result-links`. */
+    readonly lookup: string,
+    readonly lookupMs: number,
+  ) {
+    super(`the ${lookup} lookup overran its bound`);
     this.name = 'LookupTimedOut';
   }
+}
+
+/** A deadline whose lookups are bounded one by one, and the name of the lookup in flight. */
+interface Lookups {
+  d: Deadline;
+  /** Names the lookups that follow, until the next call (lookups run one at a time within a readFacts). */
+  at(name: string): void;
 }
 
 /**
  * A deadline whose every `race` is also bounded on its own by `ms` (never past `d`): each lookup through it gets a fresh
  * bound, cleared once it answers. `remaining()` (the Playwright timeout) is the smaller of the two.
  */
-function perLookup(d: Deadline, timers: Timers, ms: number): Deadline {
-  return {
+function perLookup(d: Deadline, timers: Timers, ms: number): Lookups {
+  let current = 'lookup';
+  const bounded: Deadline = {
     signal: d.signal,
     remaining: () => Math.min(ms, d.remaining()),
     expired: () => d.expired(),
@@ -164,11 +184,17 @@ function perLookup(d: Deadline, timers: Timers, ms: number): Deadline {
       try {
         return await d.race(one.race(p));
       } catch (e) {
-        if (one.expired() && !d.expired()) throw new LookupTimedOut();
+        if (one.expired() && !d.expired()) throw new LookupTimedOut(current, ms);
         throw e;
       } finally {
         one.clear();
       }
+    },
+  };
+  return {
+    d: bounded,
+    at: (name) => {
+      current = name;
     },
   };
 }
@@ -213,7 +239,12 @@ export async function runStep<T>(
     }
     // why: a failed step logs only the error class and the step, never a URL or a message holding one
     o.log?.debug(
-      { step: name, error: e instanceof Error ? e.name : 'unknown', elapsedMs: elapsed() },
+      {
+        step: name,
+        error: e instanceof Error ? e.name : 'unknown',
+        ...(e instanceof LookupTimedOut ? { lookup: e.lookup, lookupMs: e.lookupMs } : {}),
+        elapsedMs: elapsed(),
+      },
       'cheapest step failed',
     );
     throw new CheapestStepFailed(name, 'failed');
@@ -283,54 +314,78 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     },
 
     async readFacts(outer, o) {
-      // why: inside a bounded poll every single lookup keeps its own 5 s bound (ruling of 2026-10-18)
-      const d = o === undefined ? outer : perLookup(outer, o.timers, o.lookupMs);
+      // why: inside a bounded poll every single lookup keeps its own 5 s bound and is named, so an overrun says which
+      // (rulings of 2026-10-18); outside one, `at` names nothing
+      const bound = o === undefined ? null : perLookup(outer, o.timers, o.lookupMs);
+      const d = bound?.d ?? outer;
+      const at = (name: string): void => bound?.at(name);
       const url = page.url();
+      at('account-control');
       const accountButtons = await countOf(page.getByRole('button', { name: S.blocked.accountControl }), d);
       const accountLinks = await countOf(page.getByRole('link', { name: S.blocked.accountControl }), d);
       const allTabs = page.getByRole('tab', { name: S.results.cheapestTab });
       const tabsInList = page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab });
+      at('cheapest-tabs');
       const total = await countOf(allTabs, d);
       const inList = await countOf(tabsInList, d);
+      // why: ruling of 2026-10-18: the selected state through the role query (counting the selected Cheapest tab),
+      // never getAttribute on a node the page may have replaced
+      at('cheapest-tab-selected');
+      const selectedInList = await countOf(
+        page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab, selected: true }),
+        d,
+      );
+      const oneSelected = inList === 1 && selectedInList === 1;
       const cheapestTabs: PageFacts['cheapestTabs'] = [];
+      at('cheapest-tab-name');
       for (let i = 0; i < inList; i++)
         cheapestTabs.push({
           name: (await nameOf(tabsInList.nth(i), d)) ?? '',
           inTablist: true,
-          selected: (await d.race(tabsInList.nth(i).getAttribute('aria-selected', timeoutOf(d)))) === 'true',
+          selected: oneSelected,
         });
       for (let i = inList; i < total; i++) cheapestTabs.push({ name: '', inTablist: false });
+      at('unusual-traffic-text');
+      const unusualTraffic = await has(page.getByText(S.blocked.unusualTraffic), d);
+      at('consent-heading');
+      const consentHeading = await has(page.getByRole('heading', { name: S.consent.heading }), d);
+      at('sign-in-heading');
+      const signInHeading = await has(page.getByRole('heading', { name: S.blocked.signInHeading }), d);
+      at('challenge-text');
+      const challenge = await has(page.getByText(S.blocked.challenge), d);
+      // why: ruling of 2026-10-18: visible only, as the loading check (a hidden status line never counts)
+      at('no-flights-text');
+      const noFlights = (await visibleCount(page.getByText(S.results.noFlights), d)) > 0;
+      at('date-grid-buttons');
+      const dateGridButtons = await countOf(
+        page.getByRole('button', { name: S.results.dateGridButton, exact: true }),
+        d,
+      );
+      at('result-links');
+      const links = await countOf(resultLinks(), d);
       const facts: PageFacts = {
         url,
         hops: [...guard.hops],
         frameUrls: [...new Set([...page.frames().map((f) => f.url()), ...guard.frameUrls])],
-        text: {
-          unusualTraffic: await has(page.getByText(S.blocked.unusualTraffic), d),
-          consentHeading: await has(page.getByRole('heading', { name: S.consent.heading }), d),
-          signInHeading: await has(page.getByRole('heading', { name: S.blocked.signInHeading }), d),
-          challenge: await has(page.getByText(S.blocked.challenge), d),
-          // why: ruling of 2026-10-18: visible only, as the loading check (a hidden status line never counts)
-          noFlights: (await visibleCount(page.getByText(S.results.noFlights), d)) > 0,
-        },
+        text: { unusualTraffic, consentHeading, signInHeading, challenge, noFlights },
         accountControl: accountButtons + accountLinks > 0,
         cheapestTabs,
-        dateGridButtons: await countOf(
-          page.getByRole('button', { name: S.results.dateGridButton, exact: true }),
-          d,
-        ),
-        resultLinks: await countOf(resultLinks(), d),
+        dateGridButtons,
+        resultLinks: links,
       };
       // why: ruling of 2026-10-18: the loading text counts only when visible and outside the tab (never the tab's name)
+      at('fetching-text');
       const visibleFetching = await visibleCount(page.getByText(S.results.fetching), d);
       const visibleInTabs = await visibleCount(page.getByRole('tab').getByText(S.results.fetching), d);
+      at('result-names');
       const names = await resultNames(d);
+      at('results-returned');
+      const resultsReturned = await has(page.getByText(S.results.resultsReturned), d);
       const settle: SettleFacts = {
-        resultsReturned: await has(page.getByText(S.results.resultsReturned), d),
+        resultsReturned,
         fetching: visibleFetching > visibleInTabs,
         cheapestPriced: cheapestTabs.length === 1 && cheapestTabs.every((t) => /\d/.test(t.name)),
-        cheapestSelected:
-          inList === 1 &&
-          (await d.race(tabsInList.nth(0).getAttribute('aria-selected', timeoutOf(d)))) === 'true',
+        cheapestSelected: oneSelected,
         linkSignature: createHash('sha256').update(JSON.stringify(names)).digest('hex').slice(0, 16),
       };
       return { page: facts, settle, names };
@@ -401,10 +456,14 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const tabCount = await runStep('find-tab', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(tabs, st));
       if (tabCount !== 1) throw new CheapestStepFailed('find-tab', 'not-found');
       await click('click-tab', tab, 'tab:Cheapest');
+      // why: ruling of 2026-10-18: through the role query, never getAttribute on a node the page may replace
       const selected = await runStep('confirm-selected', LOOKUP_TIMEOUT_MS, d, o, (st) =>
-        st.race(tab.getAttribute('aria-selected', timeoutOf(st))),
+        countOf(
+          page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab, selected: true }),
+          st,
+        ),
       );
-      if (selected !== 'true') throw new CheapestStepFailed('confirm-selected', 'not-selected');
+      if (selected !== 1) throw new CheapestStepFailed('confirm-selected', 'not-selected');
       return clicked;
     },
   };
@@ -475,18 +534,33 @@ export async function pollUntilSettled(
   let previous: Previous | null = null;
   let previousNames: Array<string | null> | null = null;
   for (let polls = 1; ; polls++) {
+    // why: ruling of 2026-10-18 (the rerun on 51c2992): Cheapest polling goes on until only the reserve the fallback
+    // needs is left; then the flow fails as a step and the caller falls back
+    if (view === 'cheapest' && d.remaining() < FALLBACK_RESERVE_MS)
+      throw new CheapestStepFailed('cheapest-poll', 'timed-out');
     const pollStart = timers.now();
-    // why: ruling of 2026-10-18: each Cheapest-view poll is its own 20 s step with 5 s lookups inside it
-    const read =
-      view === 'cheapest'
-        ? await runStep(
-            'cheapest-poll',
-            POLL_TIMEOUT_MS,
-            d,
-            { timers, ...(log === undefined ? {} : { log }), startedAt },
-            (st) => driver.readFacts(st, { timers, lookupMs: LOOKUP_TIMEOUT_MS }),
-          )
-        : await driver.readFacts(d);
+    // why: ruling of 2026-10-18: each Cheapest-view poll is its own 20 s step with 5 s lookups inside it; one that
+    // overruns (a lookup or the poll) is "not settled yet", polled again at the normal interval
+    let read: Awaited<ReturnType<typeof driver.readFacts>>;
+    try {
+      read =
+        view === 'cheapest'
+          ? await runStep(
+              'cheapest-poll',
+              POLL_TIMEOUT_MS,
+              d,
+              { timers, ...(log === undefined ? {} : { log }), startedAt },
+              (st) => driver.readFacts(st, { timers, lookupMs: LOOKUP_TIMEOUT_MS }),
+            )
+          : await driver.readFacts(d);
+    } catch (e) {
+      if (!(e instanceof CheapestStepFailed) || view !== 'cheapest') throw e;
+      // an unsettled poll: the links must hold still across two good polls from here
+      previous = null;
+      previousNames = null;
+      await timers.sleep(pollMs, d.signal);
+      continue;
+    }
     const pollDurationMs = timers.now() - pollStart;
     const facts = { page: read.page, settle: read.settle };
     const { kind, rule } = classifyPageWithRule(facts.page, S, view);

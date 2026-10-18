@@ -659,7 +659,7 @@ describe('Cheapest poll and lookup bounds', () => {
       lines.lines.filter((l) => l.msg === 'settle poll').map((l) => Reflect.get(l.o, 'pollDurationMs')),
     ).toEqual([8000, 8000]);
   });
-  it('a Cheapest poll that takes 25 s times out at 20 s with its step name', async () => {
+  it('a Cheapest poll that takes 25 s times out at 20 s with its step name, each time until the reserve', async () => {
     const { driver, timers } = slow(25_000);
     const lines = memoryLog();
     await expect(
@@ -670,9 +670,10 @@ describe('Cheapest poll and lookup bounds', () => {
       }),
     ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'cheapest-poll', reason: 'timed-out' });
     // why: the fake sleep advances the clock in one jump, so the 20 s bound is seen at the 25 s mark here
-    expect(lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o)).toMatchObject([
-      { step: 'cheapest-poll', timeoutMs: POLL_TIMEOUT_MS },
-    ]);
+    // why: ruling of 2026-10-18: an overrun poll is unsettled, polled again until only the fallback's reserve is left
+    const timedOut = lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o);
+    expect(timedOut.length).toBeGreaterThan(1);
+    expect(timedOut[0]).toMatchObject({ step: 'cheapest-poll', timeoutMs: POLL_TIMEOUT_MS });
   });
   it('a single lookup inside a bounded poll still times out at 5 s', async () => {
     const page = new FakePage(null);
@@ -709,5 +710,95 @@ describe('no-flights text is visible-only', () => {
     expect((await t.driver.readFacts(t.d)).page.cheapestTabs).toEqual([
       { name: 'Cheapest from £443', inTablist: true, selected: true },
     ]);
+  });
+});
+
+// why: ruling of 2026-10-18 (the rerun on 51c2992): the selected state is read through the role query, a lookup that
+// overruns names itself, and a Cheapest poll that overruns is "not settled yet", never a failure
+describe('the Cheapest poll that overruns (ruling of 2026-10-18)', () => {
+  const view = (o: { hang?: boolean } = {}) => {
+    const t = resultsTree({ tab: 'Cheapest from £443' });
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') {
+        c.selected = true;
+        if (o.hang === true) c.selectedQueryHang = true;
+      }
+    t.children = (t.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+    return t;
+  };
+  it('the selected state is read through the role query, never the attribute', async () => {
+    const t = view();
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === 'Cheapest from £443') c.ariaSelectedAttr = 'false';
+    const s = setup([t]);
+    const read = await s.driver.readFacts(s.d);
+    expect(read.page.cheapestTabs[0]?.selected).toBe(true);
+    expect(read.settle.cheapestSelected).toBe(true);
+  });
+  it('a poll whose lookup overruns names the lookup, and the next poll settles', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([view({ hang: true }), view()]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const run = pollUntilSettled(
+      createDriver(page, guard()),
+      timers.deadline(90_000),
+      timers,
+      2000,
+      SELECTORS,
+      {
+        view: 'cheapest',
+        log: lines,
+        startedAt: timers.now(),
+      },
+    );
+    let done = false;
+    void run.finally(() => {
+      done = true;
+    });
+    for (let i = 0; i < 20 && !done; i++) {
+      for (let j = 0; j < 5; j++) await flush();
+      if (!done) timers.runOut();
+    }
+    const s = await run;
+    expect(s.kind).toEqual({ kind: 'results' });
+    expect(lines.lines.filter((l) => l.msg === 'cheapest step failed').map((l) => l.o)).toMatchObject([
+      { step: 'cheapest-poll', error: 'LookupTimedOut', lookup: 'cheapest-tab-selected', lookupMs: 5000 },
+    ]);
+  });
+  it('repeated overruns end only when the budget is nearly spent, as a failed step the caller falls back from', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([view({ hang: true })]);
+    const timers = fakeTimers();
+    const run = pollUntilSettled(
+      createDriver(page, guard()),
+      timers.deadline(90_000),
+      timers,
+      2000,
+      SELECTORS,
+      {
+        view: 'cheapest',
+        startedAt: timers.now(),
+      },
+    );
+    let settledWith: unknown = null;
+    void run.catch((e: unknown) => {
+      settledWith = e;
+    });
+    for (let i = 0; i < 60 && settledWith === null; i++) {
+      for (let j = 0; j < 5; j++) await flush();
+      if (settledWith === null) timers.runOut();
+    }
+    expect(settledWith).toMatchObject({
+      name: 'CheapestStepFailed',
+      step: 'cheapest-poll',
+      reason: 'timed-out',
+    });
+    // polling went on until the reserve the fallback needs was all that was left
+    expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBeGreaterThanOrEqual(
+      90_000 - 20_000 - 7000,
+    );
   });
 });

@@ -23,6 +23,12 @@ export interface FakeNode {
   selected?: boolean;
   /** A click on this node never resolves (every other read answers). */
   clickHang?: boolean;
+  /** A `selected: true` role query that would match this node never answers (a re-rendering tab). */
+  selectedQueryHang?: boolean;
+  /** Any locator whose matches include this node never answers its count (a lookup that overruns). */
+  countHang?: boolean;
+  /** What `getAttribute('aria-selected')` answers, when it differs from the role state (a replaced node). */
+  ariaSelectedAttr?: string;
 }
 export const n = (
   role: string,
@@ -123,6 +129,8 @@ export class FakeLocator implements LocatorLike {
   constructor(
     private readonly page: FakePage,
     private readonly find: () => FakeNode[],
+    /** This locator's count never answers when this returns true (selectedQueryHang). */
+    private readonly countHangs: () => boolean = () => false,
   ) {}
   private node(): FakeNode | undefined {
     return this.find()[0];
@@ -139,7 +147,8 @@ export class FakeLocator implements LocatorLike {
   count(): Promise<number> {
     if (this.page.isClosed)
       return Promise.reject(new Error('Target page, context or browser has been closed'));
-    if (this.page.hangAll) return this.page.hangUntilClosed<number>();
+    if (this.page.hangAll || this.countHangs() || this.find().some((x) => x.countHang === true))
+      return this.page.hangUntilClosed<number>();
     return Promise.resolve(this.find().length);
   }
   nth(index: number): FakeLocator {
@@ -155,7 +164,7 @@ export class FakeLocator implements LocatorLike {
           ? (x.name ?? null)
           : x.ariaLabel
         : name === 'aria-selected'
-          ? String(x.selected === true)
+          ? (x.ariaSelectedAttr ?? String(x.selected === true))
           : null,
     );
   }
@@ -174,9 +183,15 @@ export class FakeLocator implements LocatorLike {
       this.page.onClick(x);
     });
   }
-  getByRole(role: Role, o: { name?: string | RegExp; exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this.page, () =>
-      descendants(this.find()).filter((x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact)),
+  getByRole(
+    role: Role,
+    o: { name?: string | RegExp; exact?: boolean; selected?: boolean } = {},
+  ): FakeLocator {
+    const all = () => descendants(this.find()).filter((x) => roleMatches(x, role, o));
+    return new FakeLocator(
+      this.page,
+      all,
+      () => o.selected === true && candidates(descendants(this.find()), role, o),
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
@@ -188,6 +203,22 @@ export class FakeLocator implements LocatorLike {
     const x = this.node();
     return Promise.resolve(x !== undefined && x.hidden !== true);
   }
+}
+
+/** Playwright's role query: the role, the accessible name and, when asked, the selected state. */
+function roleMatches(
+  x: FakeNode,
+  role: Role,
+  o: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+): boolean {
+  if (x.role !== role || !nameMatches(x.name ?? '', o.name, o.exact)) return false;
+  return o.selected === undefined || (x.selected === true) === o.selected;
+}
+/** True when a node the query would consider is marked to make a selected-state query hang. */
+function candidates(nodes: FakeNode[], role: Role, o: { name?: string | RegExp; exact?: boolean }): boolean {
+  return nodes.some(
+    (x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact) && x.selectedQueryHang === true,
+  );
 }
 
 function textMatches(x: FakeNode, t: string | RegExp, exact: boolean | undefined): boolean {
@@ -306,9 +337,14 @@ export class FakePage implements PageLike {
     const t = this.trees[Math.min(Math.max(0, this.polls - 1), this.trees.length - 1)];
     return [t ?? this.tree()];
   }
-  getByRole(role: Role, o: { name?: string | RegExp; exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this, () =>
-      descendants(this.root()).filter((x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact)),
+  getByRole(
+    role: Role,
+    o: { name?: string | RegExp; exact?: boolean; selected?: boolean } = {},
+  ): FakeLocator {
+    return new FakeLocator(
+      this,
+      () => descendants(this.root()).filter((x) => roleMatches(x, role, o)),
+      () => o.selected === true && candidates(descendants(this.root()), role, o),
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
