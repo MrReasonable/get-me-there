@@ -20,7 +20,7 @@ export const PARTIAL_EXPANSION = 'partial-expansion';
  * partial-expansion, price-unconfirmed, offers-dropped:n (ruling 2026-10-15, decisions 45 and 48; `pricedReason`).
  */
 export function isPartialExpansion(reason: string | null): boolean {
-  return (reason ?? '').split(';').includes(PARTIAL_EXPANSION);
+  return reason?.split(';').includes(PARTIAL_EXPANSION) === true;
 }
 
 /**
@@ -33,7 +33,7 @@ export const PRICE_UNCONFIRMED = 'price-unconfirmed';
 
 /** True when a priced reason says no price of the outcome was confirmed (decision 45). */
 export function isPriceUnconfirmed(reason: string | null): boolean {
-  return (reason ?? '').split(';').includes(PRICE_UNCONFIRMED);
+  return reason?.split(';').includes(PRICE_UNCONFIRMED) === true;
 }
 
 /**
@@ -61,8 +61,9 @@ function withPartialExpansion(reason: string | null): string {
 /** Roll-up reason for an `error` cell whose error outcomes disagree on their reason (spec §6.6). */
 export const MIXED_ERROR_REASON = 'mixed';
 
+// why: an own-key scan, so a null reason and inherited names such as `toString` are refused alike.
 function isSkipReason(r: string | null): r is SkipReason {
-  return r !== null && Object.hasOwn(SKIP_RANK, r);
+  return Object.keys(SKIP_RANK).some((k) => k === r);
 }
 
 /**
@@ -104,10 +105,8 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
   if (priced.length > 0) {
     let min = Number.POSITIVE_INFINITY;
     for (const o of priced) {
-      if (o.minPence === null) {
-        throw new Error('a priced outcome has no minPence (spec §3: priced means a price was written)');
-      }
-      if (!isPriceUnconfirmed(o.reason)) min = Math.min(min, o.minPence);
+      const pence = pricedMinPence(o);
+      if (!isPriceUnconfirmed(o.reason)) min = Math.min(min, pence);
     }
     const partial = priced.some((o) => isPartialExpansion(o.reason));
     const unconfirmed = min === Number.POSITIVE_INFINITY;
@@ -119,13 +118,11 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
     };
   }
   if (of('not_run').length > 0) return { status: 'not_run', reason: null, minPence: null };
-  const errors = of('error');
-  if (errors.length > 0) {
-    const reasons = new Set(errors.map((o) => o.reason));
-    const [only] = reasons;
+  const [first, ...rest] = of('error');
+  if (first !== undefined) {
     return {
       status: 'error',
-      reason: reasons.size === 1 && only !== undefined ? only : MIXED_ERROR_REASON,
+      reason: rest.every((o) => o.reason === first.reason) ? first.reason : MIXED_ERROR_REASON,
       minPence: null,
     };
   }
@@ -140,6 +137,14 @@ export function rollUp(outcomes: CellOutcome[]): RollUp {
   }
   const reason = skipReasons.reduce((best, r) => (SKIP_RANK[r] < SKIP_RANK[best] ? r : best));
   return { status: 'skipped', reason, minPence: null };
+}
+
+/** The price of a `priced` outcome; throws when it has none (spec §3: priced means a price was written). */
+function pricedMinPence(o: CellOutcome): number {
+  if (o.minPence === null) {
+    throw new Error('a priced outcome has no minPence (spec §3: priced means a price was written)');
+  }
+  return o.minPence;
 }
 
 /** Spec §6.6 merge order; only statuses a fetch produces take part. */
@@ -197,23 +202,21 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
   if (ra === null || rb === null) {
     throw new Error(`mergeWithinProvider: cannot merge ${a.status} with ${b.status}`);
   }
-  for (const o of [a, b]) {
-    if (o.status === 'priced' && o.minPence === null) {
-      throw new Error('a priced outcome has no minPence (spec §3: priced means a price was written)');
-    }
-  }
+  // why: a priced outcome without a price is a broken invariant; refuse it before any merge rule runs.
+  for (const o of [a, b]) if (o.status === 'priced') pricedMinPence(o);
   const aFresh = a.reusedFromExecutionId === null;
   if (aFresh !== (b.reusedFromExecutionId === null)) {
     const [fresh, reused] = aFresh ? [a, b] : [b, a];
     // why: a failed fetch is not evidence against a price or a "no fares" answer; it only counts an attempt.
     return fresh.status === 'error' && reused.status !== 'error' ? reused : fresh;
   }
-  if (ra !== rb) return ra > rb ? a : b;
+  if (ra > rb) return a;
+  if (ra < rb) return b;
   if (a.status === 'priced') {
     // why: decision 45 — a confirmed price beats an unconfirmed one whatever the amounts
     const ua = isPriceUnconfirmed(a.reason);
     const ub = isPriceUnconfirmed(b.reason);
-    const cheaper = b.minPence !== null && a.minPence !== null && b.minPence < a.minPence ? b : a;
+    const cheaper = pricedMinPence(b) < pricedMinPence(a) ? b : a;
     const source = ua === ub ? cheaper : ua ? b : a;
     // why: offers-dropped:n describes the source's own fetch and stays with it; partial-expansion is a
     // property of the cell's data and survives the merge whichever input carried it (ruling 2026-10-15).
@@ -221,8 +224,8 @@ export function mergeWithinProvider(a: CellOutcome, b: CellOutcome): CellOutcome
     return partial ? { ...source, reason: withPartialExpansion(source.reason) } : source;
   }
   // why: return the input that supplies the chosen reason whole, so `reason`, `lastError`, `fetchedAt`
-  // and `attempts` always describe the same attempt (the sort is stable, so a tie keeps `a`).
-  const named = [a, b].flatMap((o) => (o.reason === null ? [] : [{ o, r: o.reason }]));
-  named.sort((x, y) => (x.r < y.r ? -1 : x.r > y.r ? 1 : 0));
-  return named[0]?.o ?? a;
+  // and `attempts` always describe the same attempt. A strict `<` keeps the earlier input on a tie (`a`).
+  const [firstNamed, ...otherNamed] = [a, b].flatMap((o) => (o.reason === null ? [] : [{ o, r: o.reason }]));
+  if (firstNamed === undefined) return a;
+  return otherNamed.reduce((best, c) => (c.r < best.r ? c : best), firstNamed).o;
 }
