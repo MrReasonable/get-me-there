@@ -345,7 +345,7 @@ async function interact(
   stepMs.goto = deps.timers.now() - t0;
   let settled: Settled;
   try {
-    settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, reading(deps.selectors));
+    settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, reading(deps.selectors), deps.log);
   } catch (e) {
     // why: rule 4 (prov-int I3): a --no-flights page that never settles is "what appeared", read once more
     if (!(e instanceof DeadlineExceeded) || kind !== 'no-flights') throw e;
@@ -383,7 +383,7 @@ async function interact(
       clicked.push(`button:${deps.selectors.results.viewMoreButton}`);
     }
     if (clicked.length > 0) {
-      settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, deps.selectors);
+      settled = await pollUntilSettled(driver, d, deps.timers, deps.pollMs, deps.selectors, deps.log);
       if (settled.kind.kind !== 'results')
         return stop(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
     }
@@ -455,7 +455,14 @@ async function consentProbe(
       }
       let settled: Settled | null = null;
       if (blocked === null) {
-        settled = await pollUntilSettled(probe, d, deps.timers, deps.pollMs, reading(deps.selectors));
+        settled = await pollUntilSettled(
+          probe,
+          d,
+          deps.timers,
+          deps.pollMs,
+          reading(deps.selectors),
+          deps.log,
+        );
         if (settled.kind.kind === 'blocked' && settled.kind.page !== 'consent-unhandled')
           blocked = settled.kind.page;
       }

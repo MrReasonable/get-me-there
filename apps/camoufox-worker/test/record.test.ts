@@ -213,7 +213,8 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       'socs-stability/2026-10-18/2.meta.json',
       'socs-stability/2026-10-18/3.meta.json',
     ]);
-    expect(t.timers.sleeps.filter((ms) => ms >= 28_000)).toEqual([28_000, 28_000]);
+    // why: each page spends one 2 s stability poll (ruling of 2026-10-18), so the spacing waits 30 − 2 − 2 = 26 s
+    expect(t.timers.sleeps.filter((ms) => ms >= 26_000)).toEqual([26_000, 26_000]);
     expect(t.contexts[0]?.added).toHaveLength(3);
   });
   it('rule 2: a read-back other than same leaves SOCS_STABLE false and says an operator ruling is needed', async () => {
@@ -350,8 +351,8 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     const t = setup();
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
-    expect(t.timers.sleeps).toContain(28_000);
-    expect(t.out.join()).toMatch(/waiting 28 s for the spacing/);
+    expect(t.timers.sleeps).toContain(26_000);
+    expect(t.out.join()).toMatch(/waiting 26 s for the spacing/);
   });
   it('a standing cool-down refuses before any launch', async () => {
     const t = setup();

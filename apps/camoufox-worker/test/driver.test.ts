@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDriver } from '../src/driver.js';
+import { createDriver, pollUntilSettled } from '../src/driver.js';
 import type { GuardState } from '../src/guard.js';
 import { SELECTORS } from '../src/selectors.js';
-import { bounded } from '../src/timers.js';
-import { FakePage, n, option, RESULTS_URL, resultsTree, text } from './support/fakePage.js';
+import { bounded, DeadlineExceeded } from '../src/timers.js';
+import { descendants, FakePage, n, option, RESULTS_URL, resultsTree, text } from './support/fakePage.js';
+import { memoryLog } from './support/log.js';
 import { fakeTimers, flush } from './support/timers.js';
 
 const guard = (o: Partial<GuardState> = {}): GuardState => ({ hops: [], frameUrls: [], refused: null, ...o });
@@ -45,7 +46,12 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
         dateGridButtons: 1,
         resultLinks: 2,
       },
-      settle: { resultsReturned: true, fetching: false, cheapestPriced: true },
+      settle: {
+        resultsReturned: true,
+        fetching: false,
+        cheapestPriced: true,
+        linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
+      },
     });
   });
   it('reads the blocked signals: challenge text, unusual traffic, headings, an account control', async () => {
@@ -70,7 +76,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
     expect(page.accountControl).toBe(true);
     expect(page.cheapestTabs).toEqual([]);
   });
-  it('a Cheapest tab outside a tablist is reported as such; a loading tab is fetching', async () => {
+  it('a Cheapest tab outside a tablist is reported as such; a loading word in the tab name is not fetching', async () => {
     const { driver, d } = setup([
       n('document', '', [
         n('tablist', '', [n('tab', 'Cheapest from Fetching results 451 British pounds')]),
@@ -82,7 +88,13 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       { name: 'Cheapest from Fetching results 451 British pounds', inTablist: true },
       { name: '', inTablist: false },
     ]);
-    expect(r.settle).toEqual({ resultsReturned: false, fetching: true, cheapestPriced: false });
+    // why: ruling of 2026-10-18: a loading word in the tab's own name is not the page loading
+    expect(r.settle).toEqual({
+      resultsReturned: false,
+      fetching: false,
+      cheapestPriced: false,
+      linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
+    });
   });
   it('each poll sees the next scripted tree', async () => {
     const { driver, d } = setup([n('document', '', [text('Fetching results')]), resultsTree()]);
@@ -247,5 +259,59 @@ describe('deadlines (ruling 6, PIE-R2-06)', () => {
       ),
     ).toEqual({ overran: true });
     expect(timers.now() - start).toBe(5000);
+  });
+});
+
+// why: the operator's ruling after the second recording run (2026-10-18): the Cheapest tab keeps a hidden
+// "Fetching results" label in its name on a loaded page, so settling reads stable content, and the loading text counts
+// only when visible outside the tab
+describe('settling on stable content (ruling of 2026-10-18)', () => {
+  const EVIDENCE_TAB = 'Cheapest from Fetching results 451 British pounds Learn more about ranking';
+  const tree = (
+    o: { top?: ReturnType<typeof option>[]; tab?: string; extra?: ReturnType<typeof n>[] } = {},
+  ) => {
+    const t = resultsTree({ tab: o.tab ?? EVIDENCE_TAB, ...(o.top === undefined ? {} : { top: o.top }) });
+    // the hidden loading label inside the tab, as on the evidence page
+    for (const c of descendants([t]))
+      if (c.role === 'tab' && c.name === (o.tab ?? EVIDENCE_TAB))
+        c.children = [{ ...text('Fetching results'), hidden: true }];
+    t.children = [...(t.children ?? []), ...(o.extra ?? [])];
+    return t;
+  };
+  const poll = async (trees: ReturnType<typeof resultsTree>[], deadlineMs = 90_000) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees(trees);
+    const timers = fakeTimers();
+    const d = timers.deadline(deadlineMs);
+    const lines = memoryLog();
+    const driver = createDriver(page, guard({ hops: ['https://www.google.com/travel/flights?q=x'] }));
+    const run = pollUntilSettled(driver, d, timers, 2000, SELECTORS, lines);
+    return { run, timers, lines };
+  };
+  it('a tab named exactly like the evidence settles once its links are stable across two polls', async () => {
+    const { run, lines } = await poll([tree()]);
+    const s = await run;
+    expect(s.kind).toEqual({ kind: 'results' });
+    expect(s.polls).toBe(2);
+    expect(lines.lines.filter((l) => l.level === 'debug').map((l) => l.o)).toEqual([
+      { resultsReturned: true, fetching: false, cheapestPriced: true, stable: false, resultLinks: 2 },
+      { resultsReturned: true, fetching: false, cheapestPriced: true, stable: true, resultLinks: 2 },
+    ]);
+  });
+  it('links that change between polls do not settle', async () => {
+    const trees = Array.from({ length: 60 }, (_, i) => tree({ top: [option(400 + i)] }));
+    const { run } = await poll(trees);
+    await expect(run).rejects.toThrow(DeadlineExceeded);
+  });
+  it('a visible "Fetching results" outside the tab blocks settling', async () => {
+    const { run } = await poll([tree({ extra: [text('Fetching results')] })]);
+    await expect(run).rejects.toThrow(DeadlineExceeded);
+  });
+  it('a tab with no price does not settle', async () => {
+    const { run } = await poll([
+      tree({ tab: 'Cheapest from Fetching results British pounds Learn more about ranking' }),
+    ]);
+    await expect(run).rejects.toThrow(DeadlineExceeded);
   });
 });

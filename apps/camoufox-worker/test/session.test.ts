@@ -138,6 +138,7 @@ beforeEach(() => {
   expect.hasAssertions();
 });
 
+// Fake times below include the one extra 2 s poll a page needs to show stable links (ruling of 2026-10-18).
 describe('PageSession (spec §2; brief Task 14.4)', () => {
   it('settled results → cells; SOCS set before goto; the read-back ran; pacer released; page closed', async () => {
     const t = setup();
@@ -145,7 +146,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(r).toEqual({
       answer: {
         kind: 'cells',
-        fetchedAt: '2026-10-18T05:00:00.000Z',
+        fetchedAt: '2026-10-18T05:00:02.000Z',
         currency: 'GBP',
         pointOfSale: 'GB',
         notes: [],
@@ -198,7 +199,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       expect(r.answer).toEqual({
         kind: 'blocked',
         page: 'consent-unhandled',
-        cooldownUntil: '2026-10-20T05:00:00.000Z',
+        cooldownUntil: '2026-10-20T05:00:02.000Z',
       });
       expect(r.googleContacted).toBe(true);
       expect(existsSync(t.profileDir)).toBe(false);
@@ -233,7 +234,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect((await t.session.page(REQ)).answer).toEqual({
       kind: 'blocked',
       page: 'unrecognised',
-      cooldownUntil: '2026-10-20T05:00:00.000Z',
+      cooldownUntil: '2026-10-20T05:00:02.000Z',
     });
     expect(t.cooldown.active()?.cause).toBe('unrecognised');
   });
@@ -291,7 +292,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect((await t.session.page(REQ)).answer).toEqual({
       kind: 'blocked',
       page: 'unrecognised',
-      cooldownUntil: '2026-10-18T06:00:00.000Z',
+      cooldownUntil: '2026-10-18T06:00:02.000Z',
     });
   });
   it('an absent form → unrecognised', async () => {
@@ -406,7 +407,8 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     const r = await t.session.page(REQ);
     expect(r.answer).toEqual({ kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran' });
     // why: fix round 1 (TS M1): the bound is exactly 5 s of fake time, not merely at least that
-    expect(t.timers.now() - before).toBe(5000);
+    // the 2 s stability poll (ruling of 2026-10-18), then exactly the 5 s bound
+    expect(t.timers.now() - before).toBe(2000 + 5000);
     expect(ctx0(t).closed).toBe(1);
     t.clock.advance(30_000);
     await t.session.page(REQ);
@@ -460,7 +462,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     await t.session.page(REQ);
     t.clock.advance(5000);
     expect(await t.session.page(REQ)).toEqual({
-      answer: { kind: 'spacing', retryAfterSeconds: 23 },
+      answer: { kind: 'spacing', retryAfterSeconds: 21 },
       googleContacted: false,
     });
     expect(ctx0(t).pages).toHaveLength(1);

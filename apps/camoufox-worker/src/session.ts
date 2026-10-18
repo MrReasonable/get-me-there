@@ -288,7 +288,7 @@ export class PageSession {
     d: ReturnType<Timers['deadline']>,
   ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
     const S = this.S;
-    let settled: Settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S);
+    let settled: Settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, this.d.log);
     if (settled.kind.kind === 'blocked')
       return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
     if (settled.kind.kind === 'no-flights')
@@ -303,7 +303,7 @@ export class PageSession {
     for (const [verified, role, name] of clicks) {
       if (!verified || name === '') continue;
       await driver.click(role, name, d);
-      settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S);
+      settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, this.d.log);
       if (settled.kind.kind !== 'results') {
         const page: BlockedPage = settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised';
         return { answer: this.blockedPlaceholder(page), stop: page };

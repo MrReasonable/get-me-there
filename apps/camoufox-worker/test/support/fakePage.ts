@@ -17,6 +17,8 @@ export interface FakeNode {
   children?: FakeNode[];
   /** Every read of this node never resolves (a hanging browser call). */
   hang?: boolean;
+  /** Not visible (a hidden label inside another control's name). */
+  hidden?: boolean;
 }
 export const n = (
   role: string,
@@ -88,7 +90,7 @@ function nameMatches(actual: string, want: string | RegExp | undefined, exact: b
   if (typeof want !== 'string') return want.test(actual);
   return exact === true ? actual === want : actual.toLowerCase().includes(want.toLowerCase());
 }
-function descendants(nodes: readonly FakeNode[]): FakeNode[] {
+export function descendants(nodes: readonly FakeNode[]): FakeNode[] {
   const out: FakeNode[] = [];
   const walk = (x: FakeNode): void => {
     for (const c of x.children ?? []) {
@@ -159,6 +161,20 @@ export class FakeLocator implements LocatorLike {
       descendants(this.find()).filter((x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact)),
     );
   }
+  getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
+    return new FakeLocator(this.page, () =>
+      descendants(this.find()).filter((x) => textMatches(x, t, o.exact)),
+    );
+  }
+  isVisible(): Promise<boolean> {
+    const x = this.node();
+    return Promise.resolve(x !== undefined && x.hidden !== true);
+  }
+}
+
+function textMatches(x: FakeNode, t: string | RegExp, exact: boolean | undefined): boolean {
+  const content = x.text === undefined ? (x.role === 'text' ? (x.name ?? '') : '') : (x.text ?? '');
+  return content !== '' && nameMatches(content, t, exact);
 }
 
 export interface Navigation {
@@ -278,12 +294,7 @@ export class FakePage implements PageLike {
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this, () =>
-      descendants(this.root()).filter((x) => {
-        const content = x.text === undefined ? (x.role === 'text' ? (x.name ?? '') : '') : (x.text ?? '');
-        return content !== '' && nameMatches(content, t, o.exact);
-      }),
-    );
+    return new FakeLocator(this, () => descendants(this.root()).filter((x) => textMatches(x, t, o.exact)));
   }
   close(): Promise<void> {
     this.calls.closed += 1;

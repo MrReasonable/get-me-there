@@ -8,9 +8,11 @@
  * `Frame`, `Locator`, `Route` and `Request` the worker uses (verified in `types/types.d.ts`); the real objects satisfy
  * them, and the tests' fakes implement them.
  */
+import { createHash } from 'node:crypto';
+import type { Logger } from '@gmt/core';
 import { classifyPage, type PageFacts, type PageKind } from './classify.js';
 import type { GuardState } from './guard.js';
-import { isSettled } from './ready.js';
+import { isSettled, type Previous, stableAcross } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
 
@@ -21,7 +23,9 @@ export interface LocatorLike {
   textContent(options?: { timeout?: number }): Promise<string | null>;
   inputValue(options?: { timeout?: number }): Promise<string>;
   click(options?: { timeout?: number }): Promise<void>;
+  isVisible(): Promise<boolean>;
   getByRole(role: Role, options?: { name?: string | RegExp; exact?: boolean }): LocatorLike;
+  getByText(text: string | RegExp, options?: { exact?: boolean }): LocatorLike;
 }
 export interface FrameLike {
   url(): string;
@@ -76,8 +80,11 @@ export interface ContextLike {
 /** Readiness facts (spec §2 "settled"; brief §9): read beside the page facts on every poll. */
 export interface SettleFacts {
   resultsReturned: boolean;
+  /** "Fetching results" visible outside the tab (ruling of 2026-10-18). */
   fetching: boolean;
   cheapestPriced: boolean;
+  /** A short hash of the result links' names, compared across polls (stable content). */
+  linkSignature: string;
 }
 /** The list reader's input (brief Task 14.3): one `names` entry per result link, `null` when unreadable or too long. */
 export interface ListFacts {
@@ -120,6 +127,13 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
   const resultLinks = (): LocatorLike =>
     page.getByRole('list', { name: S.results.resultLists }).getByRole('listitem').getByRole('link');
   const has = async (l: LocatorLike, d: Deadline): Promise<boolean> => (await countOf(l, d)) > 0;
+  // why: ruling of 2026-10-18: a hidden label (the Cheapest tab keeps "Fetching results" in its name once loaded) is
+  // never read as the page still loading; only the matches a visitor would see count
+  const visibleCount = async (l: LocatorLike, d: Deadline): Promise<number> => {
+    let v = 0;
+    for (let i = 0, n = await countOf(l, d); i < n; i++) if (await d.race(l.nth(i).isVisible())) v++;
+    return v;
+  };
   const firstName = async (l: LocatorLike, d: Deadline): Promise<string | null> =>
     (await countOf(l, d)) === 0 ? null : nameOf(l.nth(0), d);
 
@@ -178,12 +192,15 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         ),
         resultLinks: await countOf(resultLinks(), d),
       };
+      // why: ruling of 2026-10-18: the loading text counts only when visible and outside the tab (never the tab's name)
+      const visibleFetching = await visibleCount(page.getByText(S.results.fetching), d);
+      const visibleInTabs = await visibleCount(page.getByRole('tab').getByText(S.results.fetching), d);
+      const names = await resultNames(d);
       const settle: SettleFacts = {
         resultsReturned: await has(page.getByText(S.results.resultsReturned), d),
-        fetching:
-          (await has(page.getByText(S.results.fetching), d)) ||
-          cheapestTabs.some((t) => S.results.fetching.test(t.name)),
+        fetching: visibleFetching > visibleInTabs,
         cheapestPriced: cheapestTabs.length === 1 && cheapestTabs.every((t) => /\d/.test(t.name)),
+        linkSignature: createHash('sha256').update(JSON.stringify(names)).digest('hex').slice(0, 16),
       };
       return { page: facts, settle };
     },
@@ -274,13 +291,35 @@ export async function pollUntilSettled(
   timers: Timers,
   pollMs: number,
   S: Selectors = SELECTORS,
+  log?: Logger,
 ): Promise<Settled> {
+  let previous: Previous | null = null;
   for (let polls = 1; ; polls++) {
     const facts = await driver.readFacts(d);
     const kind = classifyPage(facts.page, S);
     if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
       return { kind, facts, polls };
-    if (isSettled(facts.page, facts.settle)) return { kind, facts, polls };
+    const current = {
+      signature: facts.settle.linkSignature,
+      links: facts.page.resultLinks,
+      at: timers.now(),
+    };
+    const settled = isSettled(facts.page, facts.settle);
+    // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least 2 s apart
+    const stable = settled && stableAcross(previous, current);
+    // why: one debug line a poll, the four booleans and the link count only, so a page that never settles is diagnosable
+    log?.debug(
+      {
+        resultsReturned: facts.settle.resultsReturned,
+        fetching: facts.settle.fetching,
+        cheapestPriced: facts.settle.cheapestPriced,
+        stable,
+        resultLinks: facts.page.resultLinks,
+      },
+      'settle poll',
+    );
+    if (stable) return { kind, facts, polls };
+    previous = settled ? current : null;
     await timers.sleep(pollMs, d.signal);
   }
 }
