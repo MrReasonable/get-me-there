@@ -123,12 +123,18 @@ by default**: nothing runs until the operator starts the worker and sets
 `CAMOUFOX_ENABLED=true` (§12, §13), and a definition must still name it.
 
 *Method.* A host-side worker (`apps/camoufox-worker`, a Node process on the
-operator's machine) launches its own Camoufox with `camoufox-js` 0.11.5 and
-`playwright-core` 1.59.1 (the pair the operator's camofox-browser 1.13.1
-runs this binary with), from the operator's installed binary
-(`CAMOUFOX_EXECUTABLE`), in a persistent profile directory of its own under
-the worker's data directory, never shared and never seeded from any cookie
-file. The worker never calls the camofox-browser REST server, so that
+operator's Mac; **macOS only** in this build, refusing to start elsewhere)
+launches its own Camoufox with `camoufox-js` 0.11.5 and `playwright-core`
+1.59.1, through `camoufox-js`'s own install-directory layout, the one the
+2026-10-18 loads used: `~/Library/Caches/camoufox` holding a `Camoufox.app`
+symlink to the installed bundle and a top-level `version.json` in
+`camoufox-js`'s `{version, release}` form. At start the worker checks both
+entries and creates any that is missing, never modifies the bundle, and
+refuses to start when the bundle's own `version.json` (which names its build
+`build`) differs from the pinned build. The profile is a persistent directory
+of the worker's own under its data directory, never shared and never seeded
+from any cookie file; service workers are blocked (`serviceWorkers:
+'block'`). The worker never calls the camofox-browser REST server, so that
 server's automatic consent acceptance, shared access key, bootstrap cookies
 and crash telemetry do not apply. The app's adapter calls the worker over
 HTTP at `CAMOUFOX_WORKER_URL` (`http://127.0.0.1:8090` for `pnpm dev`,
@@ -139,11 +145,15 @@ call makes at most one Google document load at
 <destination> on <depart> returning <return>&curr=GBP&hl=en-GB&gl=<POINT_OF_SALE>`,
 the form the feasibility load used. Before reading, the worker checks the
 page's own search form (round trip, one adult, departure and return dates)
-against the query, and waits, polling the accessibility snapshot within
+against the query, and waits, polling the page through Playwright's locators within
 `CAMOUFOX_PAGE_TIMEOUT_SECONDS`, until the page is settled (the "N results
 returned." line is present and no node still reads "Fetching results").
 Selectors are accessible roles and names, never CSS classes, in one dated
-module, and option names are read by one dated grammar.
+module. Option names are read from each result link through Playwright's
+locators (the link's accessible name), never by parsing printed
+accessibility text, and parsed by one dated grammar; a name the grammar
+cannot read, or one longer than a generous limit, is counted as unparsed,
+never silently dropped.
 
 - **`list` (the only mode built):** one cell per page. Until a recording
   confirms the "Cheapest" tab's flow, the worker clicks nothing: it reads
@@ -184,18 +194,25 @@ is the browser, with the fingerprint it generates itself; the worker adds no
 humanised input, no geolocation lookup and no add-on, and passes the browser
 a minimal environment (never the worker's own secrets). **The worker's own,
 signed-out profile:** it refuses to start, and stops before any page, when
-the profile holds a Google account cookie (`SID`, `HSID`, `SSID`, `APISID`,
-`SAPISID`, `LSID`, `__Secure-1PSID`, `__Secure-3PSID`), read with
-`context.cookies()`; a page showing a signed-in account control ("Google
+the profile holds a Google account cookie: any cookie on a `google.com`
+domain (both `www.google.com` and `accounts.google.com`, read together with
+`context.cookies()`) named in the dated set `SID`, `HSID`, `SSID`, `APISID`,
+`SAPISID`, `__Secure-1PSID`, `__Secure-3PSID`, `__Secure-1PAPISID`,
+`__Secure-3PAPISID`, `__Secure-1PSIDTS`, `__Secure-3PSIDTS`,
+`__Secure-1PSIDCC`, `__Secure-3PSIDCC`, `SIDCC`, `LSID`, `__Host-1PLSID`,
+`__Host-3PLSID`, `__Host-GAPS`, `OSID`, `__Secure-OSID`, `ACCOUNT_CHOOSER`,
+or any cookie at all on `accounts.google.com`; a page showing a signed-in account control ("Google
 Account: …") is `blocked`, page `signed-in`, and the worker refuses to serve
 until the operator clears a persisted flag after wiping the profile. **No
 proxies** of any kind: every page comes from the operator's own IP address.
 **No challenge is ever solved or bypassed**: no CAPTCHA solver, no clicking a
 challenge, no waiting a challenge out. One page at a time (concurrency 1), at
 least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never lower, never
-randomised) from the **start** of one page load to the start of the next, the
-same measure as the app's limiter, enforced in both; the last page time is
-persisted, so a restart keeps the spacing. At most
+randomised) from the **start** of one page load to the start of the next. The
+app's limiter takes that spacing directly as its minimum interval between
+starts; the worker enforces the same spacing with a fixed 2 s tolerance for
+arrival jitter. The last page time is persisted, so a restart keeps the
+spacing. At most
 `CAMOUFOX_EXECUTION_PAGE_CAP` page loads per execution (default 100, at most
 400; frozen into the execution's budget snapshot at creation) and
 `CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500).
@@ -213,21 +230,28 @@ window (`capture-socs`, which stamps the time and writes the file 0600), with
 its domain, path, expiry, `secure` and `sameSite`; the worker refuses to start
 without a capture, or with one older than 13 months (the cookie's stated
 lifetime) or dated in the future. After every page, on every path, success
-and failure alike, the worker reads `SOCS` back with `context.cookies()`. A
-consent page at any step, or a `SOCS` value changed or missing after a page,
-is **`blocked`, page `consent-unhandled`**: the worker closes the context,
-wipes the profile and cools down. A recording run first proves, in a
-throwaway profile, that a pre-set rejection keeps the consent page away and
-that Google leaves the value unchanged across pages; the exact-value
-read-back is enabled only once that probe passes.
+and failure alike, the worker reads `SOCS` back with `context.cookies()` and
+**compares the value**: a consent page at any step, or a `SOCS` value changed
+or missing after a page, is **`blocked`, page `consent-unhandled`**: the
+worker closes the context, wipes the profile and cools down. The recordings
+(below) prove, in throwaway profiles, that a pre-set rejection keeps the
+consent page away and that Google leaves the value unchanged across pages;
+if Google turns out to rewrite it, the operator rules on that with the
+recording, and the comparison is never weakened in the meantime.
 
-*Navigation and the stops.* The worker opens only the URL form above,
+*Navigation and the stops.* The worker opens only the URL form above and
 clicks only names in its selectors module (none until a recording verifies
-them), and aborts, through Playwright's request routing, every document or
-frame navigation outside `https://www.google.com/travel/flights…`; an aborted
-or landed navigation to `consent.google.com` is `consent-unhandled`, to
-`accounts.google.com` is `sign-in`, and anywhere else is `off-allowlist`.
-(Subresources load as in any browser.) The worker classifies the page on
+them). Every navigation is guarded twice: `context.route` aborts any
+document or frame request outside `https://www.google.com/travel/flights…`
+(it sees a redirect's first URL only), and a `framenavigated` and `request`
+guard checks every navigation's final URL, redirect hops included, so a
+302 to another host stops the page however it arrived. A navigation to
+`consent.google.com` is `consent-unhandled`, to `accounts.google.com`
+`sign-in`, and anywhere else `off-allowlist`. (Subresources load as in any
+browser; the browser's own background connections are observed in the
+launch smoke and its telemetry, crash-report, Normandy and captive-portal
+services are switched off by preference.) A CAPTCHA is detected by a
+reCAPTCHA frame URL or the page's challenge text, never by an element name. The worker classifies the page on
 every snapshot, blocked kinds first. On a CAPTCHA (a reCAPTCHA frame or
 checkbox), an "unusual traffic" page (`/sorry/`), a sign-in wall, a
 signed-in control, a consent page or an off-allowlist navigation it **stops
@@ -250,6 +274,19 @@ operator is notified once per cool-down, never once per run. A connection
 the worker refuses mid-run is `provider-unavailable`: not retried, and the
 first one disables camoufox for the rest of the execution while other
 providers continue.
+
+*Recordings first.* Before any parser depends on Google's page, the
+operator records, in this order: (1) the `SOCS` capture from an ordinary
+private window; (2) with `SOCS` pre-set, the results, Cheapest and View-more
+pages, each landing on `www.google.com/travel/flights` (the evidence that the
+pre-set rejection keeps the consent page away), and three spaced pages whose
+`SOCS` read-back stays equal; (3) a consent probe in a throwaway profile, the
+one narrow navigation exception, which lives only in the recorder, records
+the consent page, clicks nothing, starts no cool-down and deletes its profile
+in a `finally` (a start-up sweep removes any left by a killed run); (4) a "no
+flights" page, from a valid query the operator picks at recording time for a
+pair or date with no service, or a record that none appeared, in which case
+the no-flights line stays unverified.
 
 *Ledger and caps.* Every worker call through the adapter is one
 `provider_requests` row under the **free-provider rules** (never billable,
@@ -310,7 +347,10 @@ while the operator's machine is on and the worker is running; otherwise its
 cells read skipped ("browser worker not reachable") and every other provider
 runs. **Image size:** none in the app image, which is unchanged; Camoufox
 (several hundred megabytes) and the worker's dependencies live on the
-operator's machine. **Money:** none, against SearchApi's ~£32 a month.
+operator's Mac. **The worker key:** any process or container that can reach
+the worker's address (Docker Desktop forwards `host.docker.internal` to the
+Mac's loopback for every container) is stopped only by
+`CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
 
 **Consequences baked into the design:**
 
@@ -1814,7 +1854,7 @@ CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per calendar month (provid
 CAMOUFOX_BILLING_DAY=1                   # 1–28, the month boundary for the page cap
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a bot check or consent page; minimum 24 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
-# worker side only (its own 0600 env file, docs/setup.md §14): CAMOUFOX_EXECUTABLE, CAMOUFOX_DATA_DIR, CAMOUFOX_WORKER_BIND, CAMOUFOX_WORKER_PORT
+# worker side only, macOS only (its one 0600 env file <data>/worker.env, docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_BINARY_BUILD, CAMOUFOX_WORKER_PORT
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
 # --- email (all or nothing) ---
 SMTP_HOST=
@@ -1892,30 +1932,28 @@ growth), `api-limits.md` (preset table, per-provider facts, reconciliation),
 `scheduling.md` (cron examples, cadence table, pausing).
 
 **The `camoufox` worker** (§2, opt-in) is not part of the image or of
-compose: it runs on the operator's machine, launching the operator's
-installed Camoufox binary itself (`camoufox-js`, `playwright-core`; no
-camofox-browser server is needed or called). It is started from a checkout
-with `pnpm --filter @gmt/camoufox-worker start` (from source, like the api's
-`tool` script) or by a documented launchd agent (systemd on Linux) that
-restarts it on failure no faster than once a minute; it reads its settings
-once from a 0600 env file in its data directory
-(`~/.local/state/get-me-there/camoufox/`, mode 0700), never from the command
-line. It refuses to start, exiting 78, when the binary's `version.json`
-(which names its build `build`, not `release`) or the `camoufox-js` version
-is not the pinned one, when its profile holds a Google account cookie, when
-the `SOCS` capture is missing, stale or future-dated, when another worker
-holds the data directory's lock, or when `CAMOUFOX_WORKER_BIND` is neither a
-loopback address nor the address of a Docker bridge interface (`docker0`,
-`br-*`); it listens on that address, port 8090. Docker Desktop forwards
-`host.docker.internal` to the host's loopback; on Linux, compose maps it to
-`host-gateway` and the worker binds the bridge address, with a host firewall
-rule admitting only the compose subnet. The worker persists its cool-downs,
-its signed-in refusal and its last page time in the data directory, so one
-pacer and one cool-down serve every app that calls it, the container and
-`pnpm dev` alike. The app image is built without the worker (the Docker
-build excludes `apps/camoufox-worker` from its context and its install), and
-the `app` service changes only by the `CAMOUFOX_*` environment lines and one
-`extra_hosts` entry. The app works unchanged with the worker absent: with
+compose: it runs on the operator's Mac (macOS only in this build),
+launching the operator's installed Camoufox itself (`camoufox-js`,
+`playwright-core`; no camofox-browser server is needed or called). It is
+started from a checkout with `pnpm --filter @gmt/camoufox-worker start` (from
+source, like the api's `tool` script) or by a documented launchd agent that
+restarts it on failure no faster than once a minute. Every worker command
+loads its settings from one file, `<data>/worker.env`, where `<data>` is
+`~/.local/state/get-me-there/camoufox` (mode 0700), checking that file's mode
+(0600, the user's own) before loading it; nothing secret is ever typed on a
+command line. It refuses to start, exiting 78, when the platform is not
+macOS, when the bundle's build or the `camoufox-js` version is not the
+pinned one, when the install-directory entries cannot be verified or
+created, when its profile holds a Google account cookie, when the `SOCS`
+capture is missing, stale or future-dated, or when another worker holds the
+data directory's lock. It listens on `127.0.0.1` port 8090 only; Docker
+Desktop forwards `host.docker.internal` to it. The worker persists its
+cool-downs, its signed-in refusal and its last page time in the data
+directory, so one pacer and one cool-down serve every app that calls it,
+the container and `pnpm dev` alike. The app image is built without the
+worker (the Docker build excludes `apps/camoufox-worker` from its context and
+its install), and the `app` service changes only by the `CAMOUFOX_*`
+environment lines. The app works unchanged with the worker absent: with
 `CAMOUFOX_ENABLED=false` the provider is not built; with it true and the
 worker down, the stage's preflight skips the provider's cells as
 `provider_unavailable` with no ledger rows, and every other provider runs.
@@ -1984,9 +2022,12 @@ as specified in §5.3; no secrets, no full URLs.
 ### Revision 32: the camoufox provider (2026-10-18)
 
 §2 "Continuity fallback" rewritten as a built, opt-in `camoufox` provider:
-a host-side worker that launches the operator's Camoufox binary itself
-through `camoufox-js` in its own signed-out profile (never the camofox-browser
-server); discovery only, `list` mode built and `grid` mode designed; the
+a host-side worker (macOS only) that launches the operator's Camoufox
+itself through `camoufox-js`'s own install layout in its own signed-out
+profile, service workers blocked, every navigation and redirect guarded
+(never the camofox-browser server); recordings first, starting with the
+`SOCS` capture; result names read through locators; a named account-cookie
+set across both Google hosts; `SOCS` compared by value; discovery only, `list` mode built and `grid` mode designed; the
 search form and settle checks; `scraped-self` with `maxAgeHours` 0; no
 proxies; consent rejected through a pre-set `SOCS` capture and any consent
 page a stop; cool-downs by cause (48 h for bot checks and consent, 1 h for
