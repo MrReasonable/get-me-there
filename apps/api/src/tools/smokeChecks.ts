@@ -6,15 +6,22 @@
  * record (calendar_prices, price_observations) is proved by layer B and the final pass's end-to-end trace.
  */
 import {
+  type CapabilityInfo,
+  type CellKey,
   type DiscoveryQuery,
+  type DiscoveryTileResult,
   daysBetween,
   effectiveAge,
   formatAgeFull,
   formatPence,
   type IsoDateTime,
+  londonDateOf,
   provenanceSchema,
   type SourceKind,
+  searchLinkFor,
+  type WorkerStatus,
 } from '@gmt/core';
+import { CAMOUFOX_DISCOVERY_INFO } from '@gmt/providers';
 import { majorToMinor } from '@gmt/providers/recording';
 import type { Ports } from '../wiring.js';
 import { cheapestOption } from './recordRequests.js';
@@ -336,6 +343,175 @@ export function checklist(i: ChecklistInput): SmokeCheck[] {
     saSeen.length === 0
       ? 'no SearchApi request'
       : `separate_tickets=1 on ${excluded} of ${saSeen.length} SearchApi request(s); split bookings skipped: ${splits.join(', ') || 'none'}`,
+  );
+  return checks;
+}
+
+/** What the camoufox stage of the smoke saw (WP14 Task 14.13): the worker's status, the one tile and its cell. */
+export interface CamoufoxRun {
+  status: WorkerStatus | null;
+  /** Why the status could not be read (unreachable, or an answer this build cannot read). */
+  statusError: string | null;
+  tile: DiscoveryTileResult | null;
+  cell: CellKey | null;
+  info: CapabilityInfo | null;
+}
+
+/** The camoufox-js version the app's build of the worker protocol was verified with (spec §2). */
+const CAMOUFOX_JS = '0.11.5';
+/** The SOCS cookie's stated lifetime in days (13 months; the worker refuses an older capture). */
+const SOCS_MAX_DAYS = 396;
+
+/**
+ * The camoufox rows (brief Task 14.13; cost-013, prov-014, TS-19): the worker's live status, at most one page, and what
+ * that page priced. `look` rows are for the operator; a block exits 1 with its cool-down end.
+ */
+export function camoufoxChecks(ports: Ports, run: CamoufoxRun | null, executionId: string): SmokeCheck[] {
+  const NAMES = [
+    'camoufox worker',
+    'camoufox signed out',
+    'camoufox consent',
+    'camoufox settings match',
+    'camoufox one page',
+    'camoufox not blocked',
+    'camoufox cell',
+    'camoufox partial',
+    'camoufox provenance',
+    'camoufox selectors',
+    'camoufox compare',
+  ] as const;
+  const cfg = ports.config.providers.camoufox;
+  if (run === null || cfg === null)
+    return NAMES.map((name) => ({ name, status: 'skip', detail: 'not configured' }));
+  const checks: SmokeCheck[] = [];
+  const add = (name: (typeof NAMES)[number], status: SmokeCheck['status'], detail: string): void => {
+    checks.push({ name, status, detail });
+  };
+  const s = run.status;
+  const now = ports.clock.now();
+
+  add(
+    'camoufox worker',
+    s === null ? 'fail' : s.versions.camoufoxJs === CAMOUFOX_JS ? 'pass' : 'fail',
+    s === null
+      ? `not reachable: ${run.statusError ?? 'no answer'}`
+      : `camoufox-js ${s.versions.camoufoxJs}, Camoufox ${s.versions.binary}`,
+  );
+  add(
+    'camoufox signed out',
+    s === null ? 'fail' : s.accountCookie.found || s.signedInRefusal ? 'fail' : 'pass',
+    s === null
+      ? 'no status'
+      : s.accountCookie.found
+        ? `account cookies ${s.accountCookie.names.join(', ')} (checked ${s.accountCookie.checkedAt})`
+        : s.signedInRefusal
+          ? 'a signed-in refusal stands: run clear-signed-in'
+          : `no account cookie (checked ${s.accountCookie.checkedAt})`,
+  );
+  const error = run.tile?.kind === 'tile-error' ? run.tile.error : null;
+  const consentBlock =
+    error !== null && /\[blocked:consent-unhandled\]|\(consent-unhandled\)/.test(error.message);
+  const captured = s?.socsCapturedAt ?? null;
+  const fresh = captured !== null && daysBetween(londonDateOf(captured), londonDateOf(now)) <= SOCS_MAX_DAYS;
+  add(
+    'camoufox consent',
+    consentBlock || !fresh ? 'fail' : s?.socsStable === true ? 'pass' : 'look',
+    consentBlock
+      ? 'Google showed its cookie page (the rejection did not hold)'
+      : !fresh
+        ? 'no SOCS capture younger than 13 months: run capture-socs'
+        : `SOCS captured ${captured ?? ''}${s?.socsStable === true ? '' : '; its stability is not yet proved by a recording (SOCS_STABLE false)'}`,
+  );
+  const same =
+    s !== null && s.cooldownHours === cfg.cooldownHours && s.pageTimeoutSeconds === cfg.pageTimeoutSeconds;
+  add(
+    'camoufox settings match',
+    s === null ? 'fail' : same ? 'pass' : 'fail',
+    s === null
+      ? 'no status'
+      : `cool-down ${s.cooldownHours} h (app ${cfg.cooldownHours}), page timeout ${s.pageTimeoutSeconds} s (app ${cfg.pageTimeoutSeconds})`,
+  );
+  const rows = ports.db.raw
+    .prepare<[string], { pageClass: string | null }>(
+      "SELECT page_class AS pageClass FROM provider_requests WHERE execution_id = ? AND provider_id = 'camoufox' ORDER BY id",
+    )
+    .all(executionId);
+  const pages = rows.filter((r) => r.pageClass !== 'no-page').length;
+  const waits = rows.length - pages;
+  add(
+    'camoufox one page',
+    pages === 1 ? 'pass' : pages > 1 ? 'fail' : 'look',
+    `${pages} page(s) loaded${waits > 0 ? `; ${waits} spacing wait(s) or refusals that loaded no page` : ''}`,
+  );
+  const blocked = error !== null && error.kind === 'blocked';
+  const ok = run.tile?.kind === 'tile';
+  add(
+    'camoufox not blocked',
+    ok ? 'pass' : 'fail',
+    ok ? 'the page was read' : error === null ? 'no tile' : `${error.kind}: ${error.message}`,
+  );
+  const tile = run.tile?.kind === 'tile' ? run.tile : null;
+  const price = tile?.prices[0];
+  const cell = run.cell;
+  if (tile === null || cell === null) {
+    for (const name of ['camoufox cell', 'camoufox partial', 'camoufox provenance'] as const)
+      add(name, 'skip', blocked ? 'blocked' : 'no page read');
+  } else {
+    const sameCell =
+      price !== undefined &&
+      price.departureDate === cell.departureDate &&
+      price.returnDate === cell.returnDate &&
+      price.origin === cell.origin &&
+      price.destination === cell.destination;
+    const issue = tile.cellIssues?.[0];
+    const others = Number(/options for another cell: (\d+)/.exec(issue?.detail ?? '')?.[1] ?? 0);
+    add(
+      'camoufox cell',
+      price === undefined ? (others > 0 ? 'fail' : 'look') : sameCell ? 'pass' : 'fail',
+      price === undefined
+        ? `no price for ${cell.departureDate}–${cell.returnDate}${others > 0 ? `; every option was for another cell (${others})` : ' (Google listed no flights)'}`
+        : `${formatPence(price.amountMinor)} departing ${price.departureDate}, returning ${price.returnDate} (the date asked for, shown in the search form)`,
+    );
+    add(
+      'camoufox partial',
+      issue !== undefined && issue.offersDropped > 0 ? 'look' : 'pass',
+      issue === undefined ? 'every option read' : issue.detail,
+    );
+    const info = run.info;
+    const good =
+      info !== null &&
+      info.sourceKind === 'scraped-self' &&
+      info.maxAgeHours === 0 &&
+      info.provenanceNote === CAMOUFOX_DISCOVERY_INFO.provenanceNote &&
+      (price === undefined || price.currency === 'GBP');
+    add(
+      'camoufox provenance',
+      good ? 'pass' : 'fail',
+      `scraped-self, maxAgeHours 0, GBP, point of sale ${tile.pointOfSale} (as the page stated)`,
+    );
+  }
+  const falseFlags =
+    s === null
+      ? []
+      : Object.entries(s.flags)
+          .filter(([, v]) => !v)
+          .map(([k]) => k);
+  add(
+    'camoufox selectors',
+    s === null ? 'fail' : falseFlags.length > 0 ? 'look' : 'pass',
+    s === null
+      ? 'no status'
+      : `selectors ${s.versions.selectors}, grammar ${s.versions.grammar}; ${falseFlags.length > 0 ? `still unverified: ${falseFlags.join(', ')}` : 'every flag verified'}`,
+  );
+  const link = cell === null ? null : searchLinkFor('camoufox', cell, 'economy');
+  add(
+    'camoufox compare',
+    tile === null ? 'skip' : 'look',
+    tile === null || link === null
+      ? blocked
+        ? 'blocked'
+        : 'no page read'
+      : `open ${link.url} and compare the price by eye`,
   );
   return checks;
 }

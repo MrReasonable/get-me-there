@@ -16,17 +16,34 @@
 import { mkdirSync } from 'node:fs';
 import { relative } from 'node:path';
 import {
+  AbortedError,
   type DiscoveryQuery,
+  type FlightProvider,
   formatPence,
   type IsoDateTime,
   ProviderError,
   type ResponseCache,
+  WORKER_KEY_HEADER,
+  workerStatusSchema,
 } from '@gmt/core';
-import { createHttpKit, createRecorder, type HttpKit, type HttpKitDeps } from '@gmt/providers';
+import {
+  createHttpKit,
+  createRecorder,
+  type HttpKit,
+  type HttpKitDeps,
+  planSingleCells,
+} from '@gmt/providers';
 import { safeMessage } from '../safeMessage.js';
 import { httpLimitsFor, type Ports, providersFor } from '../wiring.js';
 import { SMOKE_EXPAND_TOP, type SmokeCli, smokeQuery, smokeWorstCase } from './smokeArgs.js';
-import { type Answer, checklist, type Seen, type SmokeCheck } from './smokeChecks.js';
+import {
+  type Answer,
+  type CamoufoxRun,
+  camoufoxChecks,
+  checklist,
+  type Seen,
+  type SmokeCheck,
+} from './smokeChecks.js';
 import {
   openHiddenExecution,
   spendPosition,
@@ -75,10 +92,17 @@ export interface SmokeResult {
   executionId: string | null;
 }
 
+/**
+ * The free calls camoufox's one tile may ledger (WP14): one page, and up to two refusals for the worker's spacing that
+ * load nothing; it draws on the execution's free-call cap like any free provider.
+ */
+export const CAMOUFOX_SMOKE_ATTEMPTS = 3;
+
 /** The hidden tool execution: the run's space, min(--budget, worst case) as its cap, and its stored estimate. */
 function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, budget: number): string {
   const tp = ports.config.providers.travelpayouts !== null;
   const sa = ports.config.providers.searchapi !== null;
+  const cf = ports.config.providers.camoufox !== null;
   const chainCalls = 1 + 2 * SMOKE_EXPAND_TOP;
   return openHiddenExecution(ports, {
     tool: 'smoke:live',
@@ -92,7 +116,7 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
     expandTop: SMOKE_EXPAND_TOP,
     budget,
     worst,
-    maxFreeCalls: worst.freeCalls,
+    maxFreeCalls: worst.freeCalls + (cf ? CAMOUFOX_SMOKE_ATTEMPTS : 0),
     estimate: toolEstimate(
       ports,
       [
@@ -114,6 +138,16 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
                 stage: 'verification' as const,
                 calls: chainCalls,
                 planCalls: chainCalls,
+              },
+            ]
+          : []),
+        ...(cf
+          ? [
+              {
+                providerId: 'camoufox' as const,
+                stage: 'discovery' as const,
+                calls: CAMOUFOX_SMOKE_ATTEMPTS,
+                planCalls: 1,
               },
             ]
           : []),
@@ -195,7 +229,8 @@ export async function runSmoke(
     );
   }
   const configured = VENDORS.filter((v) => ports.config.providers[v] !== null);
-  if (configured.length === 0)
+  const camoufox = ports.config.providers.camoufox !== null;
+  if (configured.length === 0 && !camoufox)
     return refuse(EXIT.smokeNoProviders, 'no provider configured: set TRAVELPAYOUTS_TOKEN or SEARCHAPI_KEY');
 
   const q = smokeQuery(ports.clock.todayLondon(), origin, destination);
@@ -205,7 +240,7 @@ export async function runSmoke(
     `smoke: ${origin}→${destination} departures ${q.departureFrom}–${q.departureTo}, ${q.minNights}–${q.maxNights} nights; one tile per provider${configured.includes('searchapi') ? ', then one SearchApi itinerary chain' : ''}`,
   );
   say(
-    `this run: at most ${worst.credits} SearchApi credit(s), frozen at ${cap} by --budget ${cli.args.budget}; at most ${worst.freeCalls} free Travelpayouts call(s)`,
+    `this run: at most ${worst.credits} SearchApi credit(s), frozen at ${cap} by --budget ${cli.args.budget}; at most ${worst.freeCalls} free Travelpayouts call(s)${camoufox ? '; one camoufox list tile (at most one Google page load) after its worker status' : ''}`,
   );
   const position = spendPosition(ports, worst, cli.args.budget);
   for (const l of position.lines) say(l);
@@ -246,6 +281,9 @@ export async function runSmoke(
   const limits: HttpKitDeps['limits'] = {
     ...(all.travelpayouts === undefined ? {} : { travelpayouts: all.travelpayouts }),
     ...(all.searchapi === undefined ? {} : { searchapi: all.searchapi }),
+    // why: WP14: the worker's status route (unledgered) and its page route, when camoufox is configured
+    ...(all.camoufox === undefined ? {} : { camoufox: all.camoufox }),
+    ...(all['camoufox-status'] === undefined ? {} : { 'camoufox-status': all['camoufox-status'] }),
   };
   const kit = createHttpKit({
     budget: ports.budget,
@@ -276,15 +314,15 @@ export async function runSmoke(
     },
     stats: () => kit.stats(),
   };
-  const providers = providersFor(ports.config, { http, log, clock: ports.clock }).filter((p) =>
-    configured.some((id) => id === p.id),
-  );
+  const wired = providersFor(ports.config, { http, log, clock: ports.clock });
+  const providers = wired.filter((p) => configured.some((id) => id === p.id));
   const runStart = ports.clock.now();
   const executionId = openSmokeExecution(ports, q, worst, cli.args.budget);
   const ctx: Ctx = { executionId, signal: opts.signal, recordFixtures: recorder !== null };
 
   const found = new Map<Vendor, Discovery>();
   let itinerary: Chain | null = null;
+  let cfRun: CamoufoxRun | null = null;
   try {
     const blocked = 'Travelpayouts failed first (auth, quota or configuration); no credit spent';
     for (const id of configured) {
@@ -322,6 +360,14 @@ export async function runSmoke(
         saCell,
         ctx,
       );
+    if (camoufox && !opts.signal.aborted)
+      cfRun = await camoufoxStage(
+        ports,
+        wired.find((p) => p.id === 'camoufox'),
+        q,
+        ctx,
+        http,
+      );
   } catch (e) {
     ports.repos.executions.setStatus(executionId, 'cancelled', {
       finishedAt: ports.clock.now(),
@@ -333,24 +379,30 @@ export async function runSmoke(
   const reports = [...found.values()]
     .map((d) => d.report)
     .concat(itinerary === null ? [] : [itinerary.report]);
-  const checks = checklist({
-    ports,
-    q,
-    executionId,
-    runStart,
-    cap,
-    configured,
-    found,
-    itinerary,
-    seen,
-    answers,
-  });
+  const checks = [
+    ...(configured.length === 0
+      ? []
+      : checklist({ ports, q, executionId, runStart, cap, configured, found, itinerary, seen, answers })),
+    ...camoufoxChecks(ports, camoufox ? cfRun : null, executionId),
+  ];
   const written = track?.take() ?? [];
   const now = ports.clock.now();
   for (const r of reports)
     say(
       `${r.providerId} ${r.stage}: ${r.status}${r.prices > 0 ? ` · ${r.prices} price(s)` : ''}${r.cheapest === null ? '' : ` · cheapest ${describePrice(r.cheapest, now)}`}${r.detail === '' ? '' : ` · ${r.detail}`}`,
     );
+  if (cfRun !== null) {
+    const t = cfRun.tile;
+    say(
+      `camoufox discovery: ${t === null ? 'no tile' : t.kind === 'tile' ? (t.prices[0] === undefined ? 'no flights listed' : `priced · ${formatPence(t.prices[0].amountMinor)}`) : `error · ${t.error.message}`}`,
+    );
+    const until =
+      t?.kind === 'tile-error'
+        ? /cooling down until (\S+?)[;,)\s]/.exec(`${t.error.message} `)?.[1]
+        : undefined;
+    if (until !== undefined)
+      say(`camoufox is cooling down until ${until}; every further page will be refused until then`);
+  }
   say('checklist:');
   for (const c of checks) say(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
   const summary = headline(reports, now);
@@ -384,6 +436,59 @@ export async function runSmoke(
     fixturesWritten: root === undefined ? [] : written.map((f) => relative(root, f)).sort(),
     executionId,
   };
+}
+
+/**
+ * WP14 Task 14.13: the camoufox stage. The worker's /v1/status (never ledgered), then one list tile for the query's
+ * first cell (at most one Google page load), through the real adapter and this run's http-kit. Never throws for a worker
+ * failure: the rows say what happened.
+ */
+async function camoufoxStage(
+  ports: Ports,
+  provider: FlightProvider | undefined,
+  q: DiscoveryQuery,
+  ctx: Ctx,
+  http: HttpKit,
+): Promise<CamoufoxRun> {
+  const cfg = ports.config.providers.camoufox;
+  const cap = provider?.discovery;
+  if (cfg === null || cap === undefined)
+    return { status: null, statusError: 'not configured', tile: null, cell: null, info: null };
+  let status: CamoufoxRun['status'] = null;
+  let statusError: string | null = null;
+  try {
+    const res = await http.request({
+      providerId: 'camoufox-status',
+      executionId: ctx.executionId,
+      tileIndex: null,
+      endpointPath: '/v1/status',
+      method: 'GET',
+      url: new URL('/v1/status', cfg.workerUrl),
+      headers: { [WORKER_KEY_HEADER]: cfg.key.reveal(), accept: 'application/json' },
+      cache: 'never',
+      signal: ctx.signal,
+      recordFixtures: false,
+    });
+    const parsed = workerStatusSchema.safeParse(res.body);
+    if (parsed.success) status = parsed.data;
+    else statusError = 'an answer this build of the worker protocol cannot read';
+  } catch (e) {
+    if (e instanceof AbortedError) throw e;
+    statusError = safeMessage(e, ports.secrets);
+  }
+  const names = (iata: string): string[] => {
+    const a = ports.repos.airports.get(iata);
+    return a === null ? [] : [a.name];
+  };
+  const query: DiscoveryQuery = {
+    ...q,
+    airportNames: { origin: names(q.origin), destination: names(q.destination) },
+  };
+  const [plan] = planSingleCells(query);
+  if (plan === undefined) return { status, statusError, tile: null, cell: null, info: cap.info };
+  // why: a spend refusal or an abort propagates as for the vendors; every worker answer is a tile result
+  const tile = await cap.fetchTile({ ...plan, index: 0 }, query, ctx);
+  return { status, statusError, tile, cell: plan.coveredCells[0] ?? null, info: cap.info };
 }
 
 /**
