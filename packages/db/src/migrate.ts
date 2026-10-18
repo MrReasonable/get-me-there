@@ -35,7 +35,11 @@ export function applyMigrations(db: Db, migrationsDir: string): { applied: strin
     migrate(db.drizzle, { migrationsFolder: migrationsDir });
     const broken = db.raw.pragma('foreign_key_check');
     if (Array.isArray(broken) && broken.length > 0)
-      throw new Error(`foreign_key_check found ${broken.length} broken references`);
+      // why: fix round 1 (arch M14): the migration is already recorded, so every boot fails here until the database is
+      // restored; the message names that way back
+      throw new Error(
+        `foreign_key_check found ${broken.length} broken references after the migration was recorded; restore the pre-migration backup (the backups directory beside DATABASE_PATH)`,
+      );
   } catch (err) {
     throw new Error(
       `migration failed in ${migrationsDir}: ${err instanceof Error ? err.message : String(err)}`,

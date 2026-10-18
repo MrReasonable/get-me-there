@@ -231,3 +231,30 @@ describe('WP14: the image stays browser-free and the app runs without the camouf
     expect(step).not.toMatch(/>>?\s*\.env/);
   });
 });
+
+// why: WP14 fix round 1 (TS I6, TS M9): the worker's recorded suites skip visibly too, and the size limit is pinned
+describe('WP14 fix round 1: the worker recorded suites and the image size step', () => {
+  const ci = text('ci.yml');
+  const step = (name) => ci.split(`- name: ${name}`)[1]?.split('\n      - ')[0] ?? '';
+  it('the visible-skip step runs the worker project and greps each worker suite title', () => {
+    const s = step('recording-dependent suites skip visibly (decision 61)');
+    expect(s).toContain('--project camoufox-worker');
+    expect(s).toContain('test/recorded.test.ts');
+    expect(s).toContain('test/names.test.ts');
+    for (const title of [
+      'recorded results pages (spec §2, Task 14.2)',
+      'recorded cheapest pages (spec §2, Task 14.2)',
+      'recorded view-more pages (spec §2, Task 14.2)',
+      'recorded SOCS stability (ruling 9)',
+      'recorded consent probe (rule 3)',
+      'recorded no-flights page (rule 4)',
+      'recorded result names parse (Task 14.2 results kind)',
+    ])
+      expect(s, title).toContain(`'${title}'`);
+  });
+  it('the image size step fails above 5 MB over main', () => {
+    const s = step("Image size stays within 5 MB of main's (WP14, arch-002)");
+    expect(s).toContain('test $(( new - old )) -le 5000000');
+    expect(s).toContain("docker image inspect get-me-there:main --format '{{.Size}}'");
+  });
+});

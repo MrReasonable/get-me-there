@@ -71,6 +71,8 @@ describe('migration 0005 (spec §5.1 rev 32)', () => {
     writeFileSync(journal, readFileSync(journal, 'utf8'));
     const db = openTracked(tmpDbPath());
     expect(() => applyMigrations(db, dir)).toThrow(/foreign_key_check found 1 broken/);
+    // why: fix round 1 (arch M14): the migration is already recorded, so the message names the way back
+    expect(() => applyMigrations(db, dir)).toThrow(/restore the pre-migration backup/);
     expect(db.raw.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 });

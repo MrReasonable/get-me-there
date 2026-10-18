@@ -201,13 +201,29 @@ for (const [name, dir] of Object.entries(dirs)) {
       bad++;
     }
 }
-// why: the worker's tests take @gmt/providers only through its testing export, and its devDependency is the only one.
+// why: the worker's tests reach the workspace only through @gmt/core and @gmt/providers' testing export, and
+// @gmt/providers is its only @gmt devDependency (WP14 fix round 1, arch M10: every @gmt specifier, not only providers).
+const WORKER_TEST_SPECS = new Set(['@gmt/core', '@gmt/providers/testing']);
 for (const f of walk('apps/camoufox-worker/test'))
   for (const spec of importsOf(f, readFileSync(f, 'utf8')))
-    if (spec?.startsWith('@gmt/providers') && spec !== '@gmt/providers/testing') {
-      console.error(`${f} imports ${spec}; worker tests may import only @gmt/providers/testing`);
+    if (spec?.startsWith('@gmt/') && !WORKER_TEST_SPECS.has(spec)) {
+      console.error(
+        `${f} imports ${spec}; worker tests may import only @gmt/core and @gmt/providers/testing`,
+      );
       bad++;
     }
+{
+  const dev = Object.keys(
+    JSON.parse(readFileSync('apps/camoufox-worker/package.json', 'utf8')).devDependencies ?? {},
+  );
+  const gmt = dev.filter((d) => d.startsWith('@gmt/'));
+  if (gmt.length !== 1 || gmt[0] !== '@gmt/providers') {
+    console.error(
+      `@gmt/camoufox-worker's @gmt devDependencies must be exactly @gmt/providers (found ${gmt.join(', ') || 'none'})`,
+    );
+    bad++;
+  }
+}
 
 // The operator scripts are source too; their tests are not scanned, as no package's test/ tree is.
 for (const f of walk('scripts')) {

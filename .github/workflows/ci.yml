@@ -35,6 +35,8 @@ jobs:
         shell: bash
         run: |
           pnpm exec vitest run --project api --project providers --project engine test/recorded/ test/searchapi/recorded.test.ts test/travelpayouts/replay.test.ts test/layerB/ --reporter=verbose | tee recorded-skip.log
+          # why: WP14: the camoufox worker's recorded pages are local-only too (decision 61)
+          pnpm exec vitest run --project camoufox-worker test/recorded.test.ts test/names.test.ts --reporter=verbose | tee -a recorded-skip.log
           suffix='(skipped: recordings not present, local-only, decision 61)'
           for title in \
             'local recorded tree for the worked example' \
@@ -42,7 +44,14 @@ jobs:
             'WP4b recordings this brief relies on (§7 "Inputs from WP4b") — pending-fixtures' \
             'SEARCHAPI_PARAMS against the recording (spec §5.2, plan decision 24) — pending-fixtures' \
             'recorded replay through the adapter (spec §5.2, §5.4, §9 item 2) — pending-fixtures' \
-            'layer B: the engine over the real adapters on the recorded session (spec §9 item 4)'; do
+            'layer B: the engine over the real adapters on the recorded session (spec §9 item 4)' \
+            'recorded results pages (spec §2, Task 14.2)' \
+            'recorded cheapest pages (spec §2, Task 14.2)' \
+            'recorded view-more pages (spec §2, Task 14.2)' \
+            'recorded SOCS stability (ruling 9)' \
+            'recorded consent probe (rule 3)' \
+            'recorded no-flights page (rule 4)' \
+            'recorded result names parse (Task 14.2 results kind)'; do
             grep -qF "$title $suffix" recorded-skip.log || { echo "not skipped visibly: $title"; exit 1; }
           done
       - run: pnpm secret-scan

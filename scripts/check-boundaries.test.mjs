@@ -249,7 +249,7 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
       }),
     );
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/worker tests may import only @gmt\/providers\/testing/);
+    expect(r.stderr).toMatch(/worker tests may import only @gmt\/core and @gmt\/providers\/testing/);
     expect(r.stderr).toMatch(/imports @gmt\/camoufox-worker/);
     expect(
       run(
@@ -258,6 +258,30 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
         }),
       ).status,
     ).toBe(0);
+  });
+  // why: WP14 fix round 1 (arch M10): worker tests reach no other workspace package but core and the testing export
+  it('WP14: a worker test importing @gmt/db or @gmt/engine fails; @gmt/core passes', () => {
+    const r = run(
+      tree({
+        'apps/camoufox-worker/test/a.test.ts': "import { openDatabase } from '@gmt/db';\n",
+        'apps/camoufox-worker/test/b.test.ts': "import { buildContext } from '@gmt/engine';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(
+      /a\.test\.ts imports @gmt\/db; worker tests may import only @gmt\/core and @gmt\/providers\/testing/,
+    );
+    expect(r.stderr).toMatch(/b\.test\.ts imports @gmt\/engine/);
+    expect(
+      run(tree({ 'apps/camoufox-worker/test/c.test.ts': "import { asIata } from '@gmt/core';\n" })).status,
+    ).toBe(0);
+  });
+  it('WP14: the worker’s @gmt devDependencies are exactly @gmt/providers', () => {
+    const pkg = JSON.parse(readFileSync(join(REPO, 'apps/camoufox-worker/package.json'), 'utf8'));
+    pkg.devDependencies['@gmt/db'] = 'workspace:*';
+    const r = run(tree({ 'apps/camoufox-worker/package.json': JSON.stringify(pkg) }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/@gmt\/camoufox-worker's @gmt devDependencies must be exactly @gmt\/providers/);
   });
   it('process.env outside the api bootstrap fails, in any package', () => {
     const r = run(
