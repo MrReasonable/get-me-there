@@ -249,6 +249,7 @@ describe('WP14 fix round 1: the worker recorded suites and the image size step',
       'recorded consent probe (rule 3)',
       'recorded no-flights page (rule 4)',
       'recorded result names parse (Task 14.2 results kind)',
+      'recorded operated-by names parse (Task 14.2 view-more kind)',
     ])
       expect(s, title).toContain(`'${title}'`);
   });

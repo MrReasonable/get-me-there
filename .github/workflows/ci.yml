@@ -51,7 +51,8 @@ jobs:
             'recorded SOCS stability (ruling 9)' \
             'recorded consent probe (rule 3)' \
             'recorded no-flights page (rule 4)' \
-            'recorded result names parse (Task 14.2 results kind)'; do
+            'recorded result names parse (Task 14.2 results kind)' \
+            'recorded operated-by names parse (Task 14.2 view-more kind)'; do
             grep -qF "$title $suffix" recorded-skip.log || { echo "not skipped visibly: $title"; exit 1; }
           done
       - run: pnpm secret-scan
