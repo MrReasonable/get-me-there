@@ -115,6 +115,16 @@ describe('evaluateAlertRules, verified basis (spec §6.8)', () => {
     expect(() => run([rule({ thresholdPence: null })], [verified()])).toThrow(RangeError);
     const dropping = verified({ previous: { pricePence: 50_000, fetchedAt: hoursAgo(6) } });
     expect(() => run([rule({ type: 'dropPct', pct: null })], [dropping])).toThrow(RangeError);
+    // the message names the rule and the missing field
+    expect(() => run([rule({ thresholdPence: null })], [verified()])).toThrow(
+      'alert rule r1 (absolute) has no thresholdPence',
+    );
+    expect(() => run([rule({ type: 'dropAbs', thresholdPence: null })], [dropping])).toThrow(
+      'alert rule r1 (dropAbs) has no thresholdPence',
+    );
+    expect(() => run([rule({ type: 'dropPct', pct: null })], [dropping])).toThrow(
+      'alert rule r1 (dropPct) has no pct',
+    );
   });
 });
 

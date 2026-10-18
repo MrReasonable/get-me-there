@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dedupKey, identityKey, isSuppressed } from '../../src/alerts/dedup.js';
+import { dedupKey, identityKey, isSuppressed, span } from '../../src/alerts/dedup.js';
 import type { PriorFiring } from '../../src/types/alerts.js';
 import { calendar, cell, hoursAgo, NOW, prior, rule, verified } from '../helpers/alerts.js';
 
@@ -111,5 +111,25 @@ describe('isSuppressed (spec §6.8 cooldown, default 336 h; ruling 8 repeat step
       suppressed: true,
       reason: 'same price band alerted under 1h ago; cooldown 2w (336h)',
     });
+  });
+});
+
+describe('span', () => {
+  it('reads under an hour as "under 1h" and exactly one hour as "1h"', () => {
+    expect(span(0)).toBe('under 1h');
+    expect(span(1)).toBe('1h');
+    expect(span(47)).toBe('47h');
+    expect(span(48)).toBe('2d (48h)');
+  });
+});
+
+describe('isSuppressed, firings stamped at the same instant', () => {
+  it('measures the step from the first listed firing of that instant, not the last', () => {
+    const at10h = hoursAgo(10);
+    const first = prior({ pricePence: 41_200, dedupKey: 'r1|h1|412', firedAt: at10h });
+    const second = prior({ pricePence: 50_000, dedupKey: 'r1|h1|500', firedAt: at10h });
+    const reasonFor = (priors: PriorFiring[]) => isSuppressed(at(49_000), priors, 336, NOW).reason;
+    expect(reasonFor([first, second])).toContain('alerted at £412 ');
+    expect(reasonFor([second, first])).toContain('alerted at £500 ');
   });
 });
