@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { BlockedPage } from '@gmt/core';
+import type { PageFacts } from './classify.js';
+import type { SettleFacts } from './driver.js';
 import { RECORDED_BY, type RecordingKind, RecordingRefused } from './recordArgs.js';
 
 /**
@@ -99,4 +102,83 @@ export function tightenRecordings(root: string): void {
     }
   };
   walk(root);
+}
+
+/** The facts a stop record takes from the classifier's last read (diagnostics of 2026-10-18). */
+export interface StopFacts {
+  page: PageFacts;
+  settle: SettleFacts;
+}
+
+/** A URL as host and path only: no scheme, port, user or query (never a query string in a stop record). */
+export function hostPath(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.hostname}${u.pathname}`;
+  } catch {
+    return 'unparsable';
+  }
+}
+
+/**
+ * A stop record: the facts the classifier received, every URL reduced to host and path, the rule that fired, what was
+ * clicked and the page's headings. Never page HTML, never a query string.
+ */
+export function stopRecord(o: {
+  cause: BlockedPage;
+  rule: string;
+  kind: RecordingKind;
+  landing: string;
+  hops: readonly string[];
+  socsReadBack: string;
+  recordedAt: string;
+  facts: StopFacts | null;
+  clicked: readonly string[];
+  headings: readonly string[];
+}): Record<string, unknown> {
+  const p = o.facts?.page ?? null;
+  return {
+    recordedAt: o.recordedAt,
+    recordedBy: RECORDED_BY,
+    kind: o.kind,
+    cause: o.cause,
+    rule: o.rule,
+    url: hostPath(p?.url ?? o.landing),
+    hops: (p?.hops ?? o.hops).map(hostPath),
+    frameUrls: (p?.frameUrls ?? []).map(hostPath),
+    text: p?.text ?? null,
+    accountControl: p?.accountControl ?? null,
+    cheapestTabs: p?.cheapestTabs ?? null,
+    dateGridButtons: p?.dateGridButtons ?? null,
+    resultLinks: p?.resultLinks ?? null,
+    settle: o.facts?.settle ?? null,
+    clicked: [...o.clicked],
+    headings: [...o.headings],
+    socsReadBack: o.socsReadBack,
+  };
+}
+
+/** Writes a stop record to `<root>/stopped/<day>/<n>.facts.json`, 0600 in 0700 directories, after the fail-closed scan. */
+export function writeStopRecord(
+  root: string,
+  day: string,
+  rec: Record<string, unknown>,
+  secrets: readonly string[],
+): string {
+  const text = `${JSON.stringify(rec, null, 2)}\n`;
+  assertClean(text, secrets);
+  const dir = join(root, 'stopped', day);
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  const n = nextFactsIndex(dir);
+  const file = join(dir, `${n}.facts.json`);
+  writeFileSync(file, text, { mode: FILE_MODE });
+  return file;
+}
+
+function nextFactsIndex(dir: string): number {
+  const used = readdirSync(dir)
+    .map((f) => /^(\d+)\.facts\.json$/.exec(f)?.[1])
+    .filter((x): x is string => x !== undefined)
+    .map(Number);
+  return used.length === 0 ? 1 : Math.max(...used) + 1;
 }

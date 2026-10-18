@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPage, type PageFacts } from '../src/classify.js';
+import { classifyPage, classifyPageWithRule, type PageFacts } from '../src/classify.js';
 import { SELECTORS } from '../src/selectors.js';
 
 const RESULTS = 'https://www.google.com/travel/flights/search?tfs=x';
@@ -168,5 +168,44 @@ describe('classifyPage (spec §2, brief §9; blocked kinds first, total)', () =>
   // why: fix round 1 (TS M4): exactly one Date grid button
   it('two Date grid buttons → unrecognised', () => {
     expect(classifyPage(facts({ dateGridButtons: 2 }))).toEqual({ kind: 'blocked', page: 'unrecognised' });
+  });
+});
+
+// why: the recording-run diagnostics of 2026-10-18: every decision names the rule that fired
+describe('classifyPageWithRule', () => {
+  it.each([
+    ['captcha-frame', facts({ frameUrls: ['https://www.google.com/recaptcha/api2/anchor'] }), 'captcha'],
+    ['challenge-text', facts({ text: t({ challenge: true }) }), 'captcha'],
+    ['sorry-path', facts({ url: 'https://www.google.com/sorry/index' }), 'unusual-traffic'],
+    ['unusual-traffic-text', facts({ text: t({ unusualTraffic: true }) }), 'unusual-traffic'],
+    ['account-control', facts({ accountControl: true }), 'signed-in'],
+    ['consent-host', facts({ hops: ['https://consent.google.com/ml'] }), 'consent-unhandled'],
+    ['consent-heading', facts({ text: t({ consentHeading: true }) }), 'consent-unhandled'],
+    ['sign-in-host', facts({ hops: ['https://accounts.google.com/x'] }), 'sign-in'],
+    ['sign-in-heading', facts({ text: t({ signInHeading: true }) }), 'sign-in'],
+    ['off-allowlist', facts({ url: 'https://www.google.com/search?q=x' }), 'off-allowlist'],
+    ['cheapest-tab-count', facts({ cheapestTabs: [] }), 'unrecognised'],
+    [
+      'cheapest-tab-outside-tablist',
+      facts({ cheapestTabs: [{ name: 'Cheapest from 1 British pounds', inTablist: false }] }),
+      'unrecognised',
+    ],
+    ['date-grid-buttons', facts({ dateGridButtons: 0 }), 'unrecognised'],
+    ['no-result-links', facts({ resultLinks: 0 }), 'unrecognised'],
+  ])('%s → blocked:%s', (rule, f, page) => {
+    expect(classifyPageWithRule(f)).toEqual({ kind: { kind: 'blocked', page }, rule });
+  });
+  it('results and no-flights name their rules too', () => {
+    expect(classifyPageWithRule(facts())).toEqual({ kind: { kind: 'results' }, rule: 'results' });
+    expect(
+      classifyPageWithRule(facts({ text: t({ noFlights: true }) }), {
+        ...SELECTORS,
+        NO_FLIGHTS_VERIFIED: true,
+      }),
+    ).toEqual({ kind: { kind: 'no-flights' }, rule: 'no-flights-line' });
+  });
+  it('classifyPage is the same decision without the rule', () => {
+    for (const f of [facts(), facts({ resultLinks: 0 }), facts({ accountControl: true })])
+      expect(classifyPage(f)).toEqual(classifyPageWithRule(f).kind);
   });
 });

@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { Logger } from '@gmt/core';
-import { classifyPage, type PageFacts, type PageKind } from './classify.js';
+import { type ClassifyRule, classifyPageWithRule, type PageFacts, type PageKind } from './classify.js';
 import { type GuardState, onAllowlist } from './guard.js';
 import { isSettled, type Previous, stableAcross, type View } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
@@ -318,6 +318,8 @@ export function probePage(d: Driver): ProbePage {
 /** Why `pollUntilSettled` stopped: a blocked kind, a no-flights page, or a settled page and how it classified. */
 export interface Settled {
   kind: PageKind;
+  /** The classifier rule that decided `kind` (diagnostics of 2026-10-18). */
+  rule: ClassifyRule;
   facts: { page: PageFacts; settle: SettleFacts };
   polls: number;
 }
@@ -359,9 +361,9 @@ export async function pollUntilSettled(
   for (let polls = 1; ; polls++) {
     const read = await driver.readFacts(d);
     const facts = { page: read.page, settle: read.settle };
-    const kind = classifyPage(facts.page, S);
+    const { kind, rule } = classifyPageWithRule(facts.page, S);
     if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
-      return { kind, facts, polls };
+      return { kind, rule, facts, polls };
     const current = {
       signature: facts.settle.linkSignature,
       links: facts.page.resultLinks,
@@ -386,7 +388,7 @@ export async function pollUntilSettled(
       },
       'settle poll',
     );
-    if (stable) return { kind, facts, polls };
+    if (stable) return { kind, rule, facts, polls };
     // why: ruling of 2026-10-18: on the Cheapest view, which names moved between two settled polls (60 characters
     // each), so a view that never holds still shows why
     if (

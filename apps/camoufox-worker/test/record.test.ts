@@ -93,7 +93,11 @@ function setup(o: { socs?: boolean; navigations?: FakeContext['navigations']; la
   });
   return { dataDir, root, timers, contexts, profiles, out, err, deps, ctx };
 }
-function written(root: string): string[] {
+/** Files written under the root; stop records (`stopped/`) only when asked, since "nothing written" means recordings. */
+function written(root: string, o: { stopped?: boolean } = {}): string[] {
+  return writtenAll(root).filter((f) => o.stopped === true || !f.startsWith('stopped/'));
+}
+function writtenAll(root: string): string[] {
   const out: string[] = [];
   const walk = (d: string, rel: string): void => {
     for (const e of readdirSync(d, { withFileTypes: true }))
@@ -733,6 +737,79 @@ describe('the recorder under the server’s stop rules (fix round 1)', () => {
     expect(statSync(join(t.root, 'cheapest')).mode & 0o777).toBe(0o700);
     expect(statSync(old).mode & 0o777).toBe(0o700);
     expect(statSync(join(old, '1.facts.json')).mode & 0o777).toBe(0o600);
+  });
+  // why: diagnostics of 2026-10-18: every stop writes the facts the classifier saw (host and path only, never a query),
+  // names the rule that fired, and logs the decision at debug
+  it('a stop writes a stopped record without any query string, naming the rule, 0600', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [`${URL0}&x=secret-query`, `${LANDED}&more=secret-query`],
+          tree: resultsTree(),
+          frames: ['https://www.google.com/recaptcha/api2/anchor?k=secret-query'],
+        },
+      ],
+    });
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    const files = written(t.root, { stopped: true }).filter((f) => f.startsWith('stopped/'));
+    expect(files).toEqual(['stopped/2026-10-18/1.facts.json']);
+    const text = readFileSync(join(t.root, files[0] ?? ''), 'utf8');
+    expect(text).not.toContain('secret-query');
+    expect(text).not.toContain('?');
+    expect(text).not.toMatch(/<html|<div/i);
+    expect(statSync(join(t.root, files[0] ?? '')).mode & 0o777).toBe(0o600);
+    const rec = JSON.parse(text);
+    expect(rec).toMatchObject({
+      cause: 'captcha',
+      rule: 'captcha-frame',
+      kind: 'results',
+      url: 'www.google.com/travel/flights/search',
+      hops: ['www.google.com/travel/flights', 'www.google.com/travel/flights/search'],
+      frameUrls: expect.arrayContaining(['www.google.com/recaptcha/api2/anchor']),
+      text: { challenge: false },
+      accountControl: false,
+      cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }],
+      dateGridButtons: 1,
+      resultLinks: 2,
+      clicked: [],
+      socsReadBack: 'same',
+    });
+    expect(rec.settle).toMatchObject({ resultsReturned: true });
+    expect(Array.isArray(rec.headings)).toBe(true);
+  });
+  it('a stop logs the classifier decision at debug: cause, rule, elapsed ms since the page started', async () => {
+    // a page that settles but carries no Date grid button: unrecognised, by the date-grid rule
+    const tree = resultsTree();
+    tree.children = (tree.children ?? []).filter((c) => c.name !== 'Date grid');
+    const t = setup({ navigations: [{ hops: [URL0, LANDED], tree }] });
+    const log = memoryLog();
+    expect(await record(t.ctx(Q), cfg, { ...t.deps, log })).toBe(EX_UNAVAILABLE);
+    const decisions = log.lines.filter((l) => l.msg === 'classifier decision').map((l) => l.o);
+    expect(decisions).toEqual([{ cause: 'unrecognised', rule: 'date-grid-buttons', elapsedMs: 2000 }]);
+    const rec = JSON.parse(readFileSync(join(t.root, 'stopped/2026-10-18/1.facts.json'), 'utf8'));
+    expect(rec).toMatchObject({ cause: 'unrecognised', rule: 'date-grid-buttons', dateGridButtons: 0 });
+  });
+  it('a stop with no page (an account cookie) still writes its record and decision', async () => {
+    const t = setup();
+    const log = memoryLog();
+    const deps: RecordDeps = {
+      ...t.deps,
+      log,
+      launch: async (p) => {
+        const c = await t.deps.launch(p);
+        if (c instanceof FakeContext)
+          c.jar.push({ name: 'SID', value: 'x', domain: '.google.com', path: '/' });
+        return c;
+      },
+    };
+    expect(await record(t.ctx(Q), cfg, deps)).toBe(EX_UNAVAILABLE);
+    expect(JSON.parse(readFileSync(join(t.root, 'stopped/2026-10-18/1.facts.json'), 'utf8'))).toMatchObject({
+      cause: 'signed-in',
+      rule: 'account-cookie',
+    });
+    expect(log.lines.filter((l) => l.msg === 'classifier decision').map((l) => l.o)).toMatchObject([
+      { cause: 'signed-in', rule: 'account-cookie' },
+    ]);
   });
   it('recordings are written 0600 in 0700 directories', async () => {
     const t = setup();

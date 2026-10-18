@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { type BlockedPage, CAMOUFOX_JS_VERSION, type Clock, type Logger, systemClock } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
-import { classifyPage } from './classify.js';
+import { classifyPageWithRule } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import {
@@ -31,7 +31,15 @@ import {
   type RecordingKind,
   RecordingRefused,
 } from './recordArgs.js';
-import { stripQuery, tightenRecordings, writeRecording, writeUnrecorded } from './recordWrite.js';
+import {
+  type StopFacts,
+  stopRecord,
+  stripQuery,
+  tightenRecordings,
+  writeRecording,
+  writeStopRecord,
+  writeUnrecorded,
+} from './recordWrite.js';
 import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
@@ -84,10 +92,28 @@ export interface RecordDeps {
 }
 
 /** One page's outcome: the facts read (or what appeared), or the stop it met. */
+/** What the classifier saw on a page, for a stop record (diagnostics of 2026-10-18). */
+interface Seen {
+  facts: StopFacts | null;
+  clicked: string[];
+  headings: string[];
+}
 type Outcome =
-  | { kind: 'read'; data: Record<string, unknown>; noFlights: boolean; stepMs: Record<string, number> }
+  | ({
+      kind: 'read';
+      data: Record<string, unknown>;
+      noFlights: boolean;
+      stepMs: Record<string, number>;
+    } & Seen)
   | { kind: 'appeared'; data: Record<string, unknown>; stepMs: Record<string, number> }
-  | { kind: 'stop'; page: BlockedPage; landing: string; hops: string[]; stepMs: Record<string, number> };
+  | ({
+      kind: 'stop';
+      page: BlockedPage;
+      rule: string;
+      landing: string;
+      hops: string[];
+      stepMs: Record<string, number>;
+    } & Seen);
 
 export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordDeps): Promise<number> {
   let args: RecordArgs;
@@ -167,7 +193,17 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           const account = await d.race(checkAccountCookies(c, deps.clock));
           if (account.found) {
             ctx.err(`the profile holds Google account cookies (${account.names.join(', ')})`);
-            outcome = { kind: 'stop', page: 'signed-in', landing: '', hops: [], stepMs: {} };
+            outcome = {
+              kind: 'stop',
+              page: 'signed-in',
+              rule: 'account-cookie',
+              landing: '',
+              hops: [],
+              stepMs: {},
+              facts: null,
+              clicked: [],
+              headings: [],
+            };
           } else {
             const p = await d.race(c.newPage());
             page = p;
@@ -234,6 +270,38 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           throw new RecordingRefused('the SOCS read-back overran; nothing written');
         }
         if (stopKind !== null) {
+          // why: diagnostics of 2026-10-18: every stop writes what the classifier saw and logs the decision
+          const rule =
+            outcome.kind === 'stop'
+              ? outcome.rule
+              : offList
+                ? 'off-allowlist-late-hop'
+                : `socs-read-back:${back}`;
+          const seen: Seen =
+            outcome.kind === 'appeared'
+              ? { facts: null, clicked: [], headings: [] }
+              : { facts: outcome.facts, clicked: outcome.clicked, headings: outcome.headings };
+          deps.log.debug(
+            { cause: stopKind, rule, elapsedMs: deps.timers.now() - pageStart },
+            'classifier decision',
+          );
+          writeStopRecord(
+            deps.root,
+            day,
+            stopRecord({
+              cause: stopKind,
+              rule,
+              kind: args.kind,
+              landing: outcome.kind === 'stop' ? outcome.landing : landing,
+              hops: outcome.kind === 'stop' ? outcome.hops : late,
+              socsReadBack: back,
+              recordedAt: deps.clock.now(),
+              facts: seen.facts,
+              clicked: seen.clicked,
+              headings: seen.headings,
+            }),
+            secrets,
+          );
           const changed = !overran && back !== 'same';
           const merged = changed && stopKind !== 'consent-unhandled';
           const hours = merged
@@ -340,18 +408,36 @@ async function interact(
     pollUntilSettled(driver, d, deps.timers, deps.pollMs, S, { view, log: deps.log, startedAt: pageStart });
   const stepMs: Record<string, number> = {};
   const t0 = deps.timers.now();
-  const stop = (p: BlockedPage): Outcome => ({
-    kind: 'stop',
-    page: p,
-    landing: page.url(),
-    hops: [...guard.hops],
-    stepMs,
-  });
+  const clicked: string[] = [];
+  // why: diagnostics of 2026-10-18: a stop keeps the facts the classifier saw, the rule that fired, what was clicked and
+  // the page's headings (read under their own short bound, never the page deadline, which may have passed)
+  const stop = async (p: BlockedPage, rule: string, facts: StopFacts | null = null): Promise<Outcome> => {
+    const h = deps.timers.deadline(FINALLY_MS);
+    let headings: string[] = [];
+    try {
+      headings = await driver.headingNames(h);
+    } catch {
+      headings = [];
+    } finally {
+      h.clear();
+    }
+    return {
+      kind: 'stop',
+      page: p,
+      rule,
+      landing: page.url(),
+      hops: [...guard.hops],
+      stepMs,
+      facts,
+      clicked,
+      headings,
+    };
+  };
   try {
     await driver.goto(url, d);
   } catch (e) {
     if (guard.refused === null) throw e;
-    return stop(guard.refused);
+    return await stop(guard.refused, `guard-refused:${guard.refused}`);
   }
   stepMs.goto = deps.timers.now() - t0;
   let settled: Settled;
@@ -363,8 +449,9 @@ async function interact(
     const after = deps.timers.deadline(FINALLY_MS * 2);
     try {
       const facts = await driver.readFacts(after);
-      const k = classifyPage(facts.page, reading(deps.selectors));
-      if (k.kind === 'blocked' && k.page !== 'unrecognised') return stop(k.page);
+      const k = classifyPageWithRule(facts.page, reading(deps.selectors));
+      if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+        return await stop(k.kind.page, k.rule, { page: facts.page, settle: facts.settle });
       return {
         kind: 'appeared',
         data: {
@@ -380,9 +467,8 @@ async function interact(
       after.clear();
     }
   }
-  if (settled.kind.kind === 'blocked') return stop(settled.kind.page);
+  if (settled.kind.kind === 'blocked') return await stop(settled.kind.page, settled.rule, settled.facts);
   stepMs.settle = deps.timers.now() - t0;
-  const clicked: string[] = [];
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {
     if (kind === 'cheapest' && settled.facts.page.cheapestTabs.length === 1) {
@@ -403,7 +489,11 @@ async function interact(
     if (clicked.length > 0) {
       settled = await poll(deps.selectors, kind === 'cheapest' ? 'cheapest' : 'best');
       if (settled.kind.kind !== 'results')
-        return stop(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
+        return await stop(
+          settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised',
+          settled.kind.kind === 'blocked' ? settled.rule : `${settled.kind.kind}-after-click`,
+          settled.facts,
+        );
     }
   }
   const data = {
@@ -419,7 +509,15 @@ async function interact(
     headings: await driver.headingNames(d),
   };
   stepMs.read = deps.timers.now() - t0;
-  return { kind: 'read', data, noFlights: settled.facts.page.text.noFlights, stepMs };
+  return {
+    kind: 'read',
+    data,
+    noFlights: settled.facts.page.text.noFlights,
+    stepMs,
+    facts: settled.facts,
+    clicked,
+    headings: data.headings,
+  };
 }
 
 function meta(
