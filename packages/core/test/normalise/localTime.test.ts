@@ -1,11 +1,28 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { NormalisationError } from '../../src/errors.js';
-import { departLocal, localMinute, parseVendorTime, wallToInstant } from '../../src/normalise/localTime.js';
+import {
+  departLocal,
+  localMinute,
+  parseVendorTime,
+  requireZone,
+  vendorInstant,
+  wallToInstant,
+} from '../../src/normalise/localTime.js';
 import { toIsoDateTime } from '../../src/normalise/timestamps.js';
 
 const LONDON = 'Europe/London';
 const NEW_YORK = 'America/New_York';
+
+function messageOf(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (e) {
+    if (e instanceof NormalisationError) return e.message;
+    throw e;
+  }
+  return 'no error';
+}
 
 function reasonOf(fn: () => unknown): string {
   try {
@@ -135,5 +152,76 @@ describe('timestamp format rejection (spec §6.3)', () => {
         },
       ),
     );
+  });
+});
+
+describe('vendor time strictness and diagnostics', () => {
+  it('rejects text before or after the timestamp (the whole string must match)', () => {
+    for (const v of [
+      'x2027-03-14T10:05',
+      '2027-03-14T10:05x',
+      '2027-03-14T10:05Zjunk',
+      '12027-03-14T10:05',
+    ]) {
+      expect(
+        reasonOf(() => parseVendorTime(v)),
+        v,
+      ).toBe('bad-local-time');
+    }
+  });
+
+  it('trims surrounding whitespace before parsing', () => {
+    expect(parseVendorTime('  2027-03-14T10:05\n')).toMatchObject({ y: 2027, mo: 3, d: 14, h: 10, mi: 5 });
+  });
+
+  it('names the offending value in each bad-local-time message', () => {
+    expect(messageOf(() => parseVendorTime('14/03/2027 10:05'))).toBe(
+      'bad-local-time: unrecognised time "14/03/2027 10:05"',
+    );
+    expect(messageOf(() => parseVendorTime('2027-03-14T24:00'))).toBe(
+      'bad-local-time: out-of-range time "2027-03-14T24:00"',
+    );
+    expect(messageOf(() => vendorInstant('2027-03-14T10:05Z', 'local', LONDON))).toBe(
+      'bad-local-time: local time with suffix "2027-03-14T10:05Z"',
+    );
+    expect(messageOf(() => vendorInstant('2027-03-14T10:05+01:00', 'utc', LONDON))).toBe(
+      'bad-local-time: utc time with offset "2027-03-14T10:05+01:00"',
+    );
+    expect(messageOf(() => vendorInstant('2027-03-14T10:05', 'offset', LONDON))).toBe(
+      'bad-local-time: offset time without offset "2027-03-14T10:05"',
+    );
+  });
+
+  it('reads a Z, a bare utc time and a signed offset as the right instants', () => {
+    const noon = Date.UTC(2027, 5, 1, 12, 0);
+    expect(vendorInstant('2027-06-01T12:00Z', 'utc', 'UTC')).toBe(noon);
+    expect(vendorInstant('2027-06-01T12:00', 'utc', 'UTC')).toBe(noon);
+    expect(vendorInstant('2027-06-01T12:00Z', 'offset', 'UTC')).toBe(noon);
+    expect(vendorInstant('2027-06-01T12:00+02:00', 'offset', 'UTC')).toBe(noon - 2 * 3_600_000);
+    expect(vendorInstant('2027-06-01T12:00-0530', 'offset', 'UTC')).toBe(noon + 5.5 * 3_600_000);
+  });
+});
+
+describe('requireZone', () => {
+  it('returns a valid zone unchanged, including region zones whose name contains a sign and digit', () => {
+    expect(requireZone(LONDON)).toBe(LONDON);
+    expect(requireZone('UTC')).toBe('UTC');
+    expect(requireZone('Etc/GMT+5')).toBe('Etc/GMT+5');
+  });
+
+  it('refuses null, unknown and offset-form zones with unknown-airport-tz and a message naming them', () => {
+    expect(reasonOf(() => requireZone(null))).toBe('unknown-airport-tz');
+    expect(messageOf(() => requireZone(null))).toBe('unknown-airport-tz: time zone null');
+    expect(messageOf(() => requireZone('+05:30'))).toBe('unknown-airport-tz: time zone "+05:30"');
+    expect(messageOf(() => requireZone('Mars/Olympus_Mons'))).toBe(
+      'unknown-airport-tz: time zone "Mars/Olympus_Mons"',
+    );
+  });
+});
+
+describe('wall times after a spring-forward gap resolve to the real instant', () => {
+  it('New York 14 Mar 2027 03:30 is already EDT (07:30Z), and is its own wall time', () => {
+    expect(toIsoDateTime('2027-03-14T03:30', 'local', NEW_YORK)).toBe('2027-03-14T07:30:00.000Z');
+    expect(departLocal('2027-03-14T03:30', 'local', NEW_YORK)).toBe('2027-03-14T03:30');
   });
 });

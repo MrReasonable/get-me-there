@@ -123,6 +123,10 @@ describe('itinerary identity (spec §6.4)', () => {
     expect(() => canonicalFlightNumber('VS938A')).toThrow('flight number "VS938A"');
     expect(() => canonicalFlightNumber('0')).toThrow('flight number "0"');
     expect(() => canonicalFlightNumber(0)).toThrow('flight number 0');
+    expect(() => canonicalFlightNumber('4U8888', 'VS')).toThrow(
+      'flight number "4U8888" does not belong to VS',
+    );
+    expect(reasonOf(() => canonicalFlightNumber('4U8888', 'VS'))).toBe('unmappable-carrier');
     expect(() => canonicalFlightNumber(-1)).toThrow('flight number -1');
     expect(() => canonicalFlightNumber(1.5)).toThrow('flight number 1.5');
     expect(canonicalFlightNumber(1)).toBe(1);

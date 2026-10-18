@@ -1,6 +1,11 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { isPartialExpansion, mergeWithinProvider, rollUp } from '../../src/coverage/rollUp.js';
+import {
+  isPartialExpansion,
+  isPriceUnconfirmed,
+  mergeWithinProvider,
+  rollUp,
+} from '../../src/coverage/rollUp.js';
 import type { CellOutcome, CellOutcomeStatus, RollUp, SkipReason } from '../../src/types/execution.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
 import { key, outcome } from '../helpers/space.js';
@@ -188,12 +193,32 @@ describe('rollUp precedence (spec §6.6)', () => {
       expect(isPartialExpansion('partial-expansion-x')).toBe(false);
       expect(isPartialExpansion(null)).toBe(false);
     });
+    it('isPriceUnconfirmed reads the parts of a priced reason', () => {
+      expect(isPriceUnconfirmed('price-unconfirmed')).toBe(true);
+      expect(isPriceUnconfirmed('partial-expansion;price-unconfirmed;offers-dropped:1')).toBe(true);
+      expect(isPriceUnconfirmed('partial-expansion')).toBe(false);
+      expect(isPriceUnconfirmed(null)).toBe(false);
+    });
     it('error carries the reason when every error input agrees, else mixed', () => {
       expect(rollUp([o('error', { reason: 'parse' }), o('error', { reason: 'parse' })]).reason).toBe('parse');
       expect(rollUp([o('error', { reason: 'parse' }), o('error', { reason: 'upstream' })]).reason).toBe(
         'mixed',
       );
       expect(rollUp([o('error'), o('error')]).reason).toBeNull();
+    });
+    it('error is mixed whenever any input disagrees with the first, wherever it sits', () => {
+      const e = (reason: string) => o('error', { reason });
+      expect(rollUp([e('parse'), e('upstream'), e('parse')]).reason).toBe('mixed');
+      expect(rollUp([e('parse'), e('parse'), e('upstream')]).reason).toBe('mixed');
+      expect(rollUp([e('parse'), e('parse'), e('parse')]).reason).toBe('parse');
+    });
+    it('only a no_data outcome is ignored as cabin-not-offered; the same reason on another status counts', () => {
+      expect(rollUp([o('error', { reason: 'cabin-not-offered' })])).toEqual({
+        status: 'error',
+        reason: 'cabin-not-offered',
+        minPence: null,
+      });
+      expect(rollUp([o('empty', { reason: 'cabin-not-offered' }), skipped('budget')]).status).toBe('empty');
     });
     it('not_run, empty and an asked no_data carry null', () => {
       expect(rollUp([o('not_run')]).reason).toBeNull();
@@ -259,6 +284,8 @@ describe('rollUp precedence (spec §6.6)', () => {
     expect(() => rollUp([o('priced')])).toThrow(/no minPence/);
     expect(() => rollUp([o('skipped', { reason: 'tired' })])).toThrow(/unknown reason: tired/);
     expect(() => rollUp([o('skipped')])).toThrow(/unknown reason: null/);
+    // an inherited property name is not a skip reason
+    expect(() => rollUp([o('skipped', { reason: 'toString' })])).toThrow(/unknown reason: toString/);
   });
 });
 
@@ -463,6 +490,13 @@ describe('mergeWithinProvider (spec §6.6 monotone merge)', () => {
     const none = m('error', null, null, { lastError: 'no reason' });
     expect(mergeWithinProvider(none, b)).toEqual(b);
     expect(mergeWithinProvider(none, { ...none, attempts: 9 })).toEqual(none);
+    // the same named reason on both: still `a`, in either argument order
+    const twinA = m('error', null, 'parse', { lastError: 'first', attempts: 1 });
+    const twinB = m('error', null, 'parse', { lastError: 'second', attempts: 2 });
+    expect(mergeWithinProvider(twinA, twinB)).toEqual(twinA);
+    expect(mergeWithinProvider(twinB, twinA)).toEqual(twinB);
+    // a named reason beats a null one whichever side it is on
+    expect(mergeWithinProvider(b, none)).toEqual(b);
   });
 
   it('property: a fresh error against a reused priced, empty or no_data outcome keeps the reused one whole', () => {

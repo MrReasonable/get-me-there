@@ -103,6 +103,7 @@ describe('formatAgeShort: the face form of the calendar day and the phone (rulin
   it.each([
     [{ kind: 'observed', fetchedHours: 0, observedHours: 120 }, '5d old'],
     [{ kind: 'observed', fetchedHours: 0, observedHours: 0 }, 'just now'],
+    [{ kind: 'observed', fetchedHours: 1, observedHours: 1 }, '1h old'],
     [{ kind: 'observed', fetchedHours: 3, observedHours: 3 }, '3h old'],
     [{ kind: 'bounded', fetchedHours: 2, maxAgeHours: 48 }, '≤2d old'],
     [{ kind: 'bounded', fetchedHours: 0, maxAgeHours: 24 }, '≤24h old'],

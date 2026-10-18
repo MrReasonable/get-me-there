@@ -237,6 +237,29 @@ describe('evaluateConstraints (spec §6.2)', () => {
     expect(() =>
       evaluateConstraints(IT, OFFER, { departureWindowLocal: { from, to } }, 'economy', ALL),
     ).toThrow(RangeError);
+    expect(() =>
+      evaluateConstraints(IT, OFFER, { departureWindowLocal: { from, to } }, 'economy', ALL),
+    ).toThrow(`window must be HH:mm: ${from}–${to}`);
+  });
+
+  it('a window whose edges are equal admits only that minute, not the whole day', () => {
+    // departures are exactly 20:00 (outbound) and 10:00 (inbound): no single minute holds both
+    const w = { departureWindowLocal: { from: '20:00', to: '20:00' } };
+    expect(evaluateConstraints(IT, OFFER, w, 'economy', ALL).departureWindowLocal).toBe('fail');
+  });
+
+  it('a window whose edges are equal passes when every departure is at exactly that minute', () => {
+    const [firstBack, ...restBack] = IT.inbound;
+    if (firstBack === undefined) throw new Error('fixture has an inbound segment');
+    const bothAt2000 = {
+      ...IT,
+      inbound: [{ ...firstBack, departLocal: '2027-03-28T20:00' }, ...restBack],
+    };
+    const w = { departureWindowLocal: { from: '20:00', to: '20:00' } };
+    expect(evaluateConstraints(bothAt2000, OFFER, w, 'economy', ALL).departureWindowLocal).toBe('pass');
+    // one minute off either side of the single-minute window fails
+    const off = { departureWindowLocal: { from: '20:01', to: '20:01' } };
+    expect(evaluateConstraints(bothAt2000, OFFER, off, 'economy', ALL).departureWindowLocal).toBe('fail');
   });
 
   it('a window wrapping midnight includes both of its edges', () => {
@@ -245,6 +268,17 @@ describe('evaluateConstraints (spec §6.2)', () => {
     expect(evaluateConstraints(IT, OFFER, w, 'economy', ALL).departureWindowLocal).toBe('pass');
     const narrow = { departureWindowLocal: { from: '20:01', to: '10:00' } };
     expect(evaluateConstraints(IT, OFFER, narrow, 'economy', ALL).departureWindowLocal).toBe('fail');
+  });
+
+  it('maxStops judges each direction on its own', () => {
+    const stops = (stopsOut: number, stopsIn: number) =>
+      evaluateConstraints({ ...IT, stopsOut, stopsIn }, OFFER, { maxStops: 1 }, 'economy', ALL).maxStops;
+    expect(stops(2, 0)).toBe('fail');
+    expect(stops(0, 2)).toBe('fail');
+    expect(stops(1, 1)).toBe('pass');
+    expect(evaluateConstraints({ ...IT, stopsIn: 0 }, OFFER, { maxStops: 0 }, 'economy', ALL).maxStops).toBe(
+      'fail',
+    );
   });
 
   it('maxStops and maxJourneyMinutes judge the inbound direction too', () => {

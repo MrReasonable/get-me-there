@@ -78,3 +78,13 @@ describe('validateVendorUrl length cap and default port (review sec-001)', () =>
     });
   });
 });
+
+describe('LINK_ALLOWLIST', () => {
+  it('gives the fixture provider no host at all, so a synthetic price is never followable', () => {
+    expect(LINK_ALLOWLIST.fixture).toEqual([]);
+    expect(validateVendorUrl('https://www.google.com/x', LINK_ALLOWLIST.fixture)).toEqual({ kind: 'none' });
+    expect(validateVendorUrl('https://www.aviasales.com/x', LINK_ALLOWLIST.fixture)).toEqual({
+      kind: 'none',
+    });
+  });
+});
