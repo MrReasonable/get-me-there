@@ -19,7 +19,7 @@ import {
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
 import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
-import { stderrLog } from './log.js';
+import { debugLogging, stderrLog } from './log.js';
 import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
 import {
@@ -514,11 +514,12 @@ async function consentProbe(
 export function realRecordDeps(
   prepared: ReturnType<typeof prepareLaunch>,
   err: (line: string) => void,
+  debug = false,
 ): RecordDeps {
   return {
     clock: systemClock,
     timers: realTimers,
-    log: stderrLog(err),
+    log: stderrLog(err, debug),
     launch: (profile) => launchContext(prepared.options, profile),
     launchOptions: launchOptionsForMeta(prepared.options),
     binary: prepared.install.build,
@@ -541,5 +542,5 @@ export const entry: Entry = async (ctx) => {
     path: cfg.path,
     tmp: cfg.tmp,
   });
-  return record(ctx, cfg, realRecordDeps(prepared, ctx.err));
+  return record(ctx, cfg, realRecordDeps(prepared, ctx.err, debugLogging(ctx.env)));
 };

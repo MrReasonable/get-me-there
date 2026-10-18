@@ -41,6 +41,8 @@ export interface Selectors {
   hosts: { results: string; consent: string; signIn: string };
   /** The one allowed document path and its subtree (`/travel/flightsevil` is refused). */
   resultsPath: string;
+  /** The one sub-frame document prefix allowed on the results host (never the main frame; never `/recaptcha/`). */
+  frontEndFramePrefix: string;
   blocked: {
     /** A frame on the results host whose path starts here is a reCAPTCHA (PIE-R2-09: never an iframe name). */
     captchaPath: string;
@@ -92,6 +94,9 @@ export const SELECTORS: Selectors = {
   version: SELECTORS_VERSION,
   hosts: { results: 'www.google.com', consent: 'consent.google.com', signIn: 'accounts.google.com' },
   resultsPath: '/travel/flights',
+  // why: observed 2026-10-18; the app's bscframe helper iframe (`/_/FlightsFrontendUi/bscframe`): aborting it kept the
+  // first recording run's page from settling. Operator ruling of 2026-10-18: sub-frames only, this prefix only.
+  frontEndFramePrefix: '/_/FlightsFrontendUi/',
   blocked: {
     captchaPath: '/recaptcha/',
     sorryPathPrefix: '/sorry/',

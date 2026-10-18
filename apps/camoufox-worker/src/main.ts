@@ -14,7 +14,7 @@ import { CooldownStore } from './cooldown.js';
 import type { ContextLike } from './driver.js';
 import { type LaunchOptions, launchContext, prepareLaunch } from './launch.js';
 import { acquireLock, sweepProbeProfiles } from './lock.js';
-import { stderrLog } from './log.js';
+import { debugLogging, stderrLog } from './log.js';
 import { GRAMMAR_VERSION } from './names.js';
 import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
@@ -247,7 +247,7 @@ export const entry: Entry = async (ctx) => {
     platform: process.platform,
     clock: systemClock,
     timers: realTimers,
-    log: stderrLog(ctx.err),
+    log: stderrLog(ctx.err, debugLogging(ctx.env)),
     selectors: SELECTORS,
     prepare: prepareLaunch,
     launch: launchContext,

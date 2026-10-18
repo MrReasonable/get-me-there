@@ -669,7 +669,8 @@ Add "Google Flights prices via Camoufox" to a definition's discovery providers. 
 
 `pnpm --filter @gmt/camoufox-worker status` reads the key from `worker.env` itself and prints the worker's current status:
 the cool-down, the account-cookie check, the verification flags and the versions. `lsof -nP -iTCP:8090 -sTCP:LISTEN`
-shows it listening on `127.0.0.1` only.
+shows it listening on `127.0.0.1` only. To see which navigation a stopped page refused, add `CAMOUFOX_LOG_DEBUG=true` to
+`worker.env` and restart the worker: each refusal then also logs its path (never its query) in the agent's error log.
 
 ### Turn it off or recover
 

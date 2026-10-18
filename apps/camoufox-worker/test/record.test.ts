@@ -16,6 +16,7 @@ import { CooldownStore } from '../src/cooldown.js';
 import { createDriver, probePage } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
+import { debugLogging } from '../src/log.js';
 import { profileDir } from '../src/paths.js';
 import {
   assertClean,
@@ -706,5 +707,39 @@ describe('the real recorder dependencies (no launch)', () => {
       { level: 'warn', msg: 'navigation refused', host: 'www.example.test' },
       { level: 'error', msg: 'boom', x: 1 },
     ]);
+  });
+});
+
+// why: ruling of 2026-10-18: a refused path is diagnosable without a code change, by CAMOUFOX_LOG_DEBUG=true in worker.env
+describe('stderrLog debug lines', () => {
+  it('prints debug lines only when asked', () => {
+    const on: string[] = [];
+    const off: string[] = [];
+    stderrLog((l) => on.push(l), true).debug({ path: '/_/OtherUi/x' }, 'navigation refused (path)');
+    stderrLog((l) => off.push(l)).debug({ path: '/_/OtherUi/x' }, 'navigation refused (path)');
+    expect(on.map((l) => JSON.parse(l))).toEqual([
+      { level: 'debug', msg: 'navigation refused (path)', path: '/_/OtherUi/x' },
+    ]);
+    expect(off).toEqual([]);
+  });
+  it('debugLogging reads CAMOUFOX_LOG_DEBUG=true only', () => {
+    expect([undefined, '', 'false', '1', 'true'].map((v) => debugLogging({ CAMOUFOX_LOG_DEBUG: v }))).toEqual(
+      [false, false, false, false, true],
+    );
+  });
+  it('the real recorder dependencies take the switch', () => {
+    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
+    const prepared = prepareLaunch({
+      platform: 'darwin',
+      installDir: f.installDir,
+      pinnedBuild: '152.0.4-beta.28',
+      installDirOverride: undefined,
+      home: '/h',
+      path: '/p',
+      tmp: '/t',
+    });
+    const lines: string[] = [];
+    realRecordDeps(prepared, (l) => lines.push(l), true).log.debug({ a: 1 }, 'x');
+    expect(lines).toHaveLength(1);
   });
 });

@@ -166,7 +166,13 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     await expect(page.goto('https://www.example.test/?q=secret')).rejects.toThrow(/blockedbyclient/);
     expect(state.refused).toBe('off-allowlist');
     expect(JSON.stringify(logs)).not.toContain('secret');
-    expect(logs.map((l) => l.o)).toEqual([{ kind: 'off-allowlist', host: 'www.example.test' }]);
+    // why: the host at warn (spec §14); the path without its query at debug only (ruling of 2026-10-18)
+    expect(logs.filter((l) => l.level === 'warn').map((l) => l.o)).toEqual([
+      { kind: 'off-allowlist', host: 'www.example.test' },
+    ]);
+    expect(logs.filter((l) => l.level === 'debug').map((l) => l.o)).toEqual([
+      { kind: 'off-allowlist', path: '/' },
+    ]);
   });
   it('the refusal keeps the first kind and the next page starts clean', async () => {
     const ctx = new FakeContext();
@@ -208,5 +214,55 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     await page.goto('https://consent.google.com/ml?continue=x');
     expect(state.refused).toBeNull();
     expect(state.hops).toEqual(['https://consent.google.com/ml?continue=x']);
+  });
+});
+
+// why: the operator's ruling of 2026-10-18 (the first recording run): the Flights app's own helper iframe
+// (`/_/FlightsFrontendUi/bscframe`) loads as a sub-frame document; only that prefix, only in a sub-frame
+describe('the Flights front-end sub-frame (ruling of 2026-10-18)', () => {
+  const BSC = 'https://www.google.com/_/FlightsFrontendUi/bscframe';
+  it('a bscframe sub-frame navigation continues', () => {
+    expect(decideRoute(BSC, true, false)).toEqual({ action: 'continue' });
+  });
+  it('the same path as a main-frame navigation is refused', () => {
+    expect(decideRoute(BSC, true, true)).toEqual({ action: 'abort', kind: 'off-allowlist' });
+    expect(decideRoute(BSC, true)).toEqual({ action: 'abort', kind: 'off-allowlist' });
+  });
+  it.each([
+    'https://www.google.com/_/FlightsFrontendUi/../recaptcha/api2/anchor',
+    'https://www.google.com/_/FlightsFrontendUi/%2e%2e/recaptcha/api2/anchor',
+    'https://www.google.com/_/FlightsFrontendUiX/bscframe',
+    'https://www.google.com/_/OtherUi/x',
+    'https://www.google.com/recaptcha/api2/anchor',
+    'http://www.google.com/_/FlightsFrontendUi/bscframe',
+    'https://www.google.com:8443/_/FlightsFrontendUi/bscframe',
+    'https://www.example.test/_/FlightsFrontendUi/bscframe',
+  ])('a sub-frame %s is refused', (u) => {
+    expect(decideRoute(u, true, false)).toMatchObject({ action: 'abort' });
+  });
+  it('through the guard: bscframe continues, a /recaptcha/ sub-frame is aborted and still feeds the challenge rule', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req(BSC, { frame: sub }))).toBe('continued');
+    expect(await ctx.routeRequest(req(BSC))).toBe('aborted');
+    const captcha = req('https://www.google.com/recaptcha/api2/anchor?k=x', { frame: sub });
+    ctx.emitRequest(captcha);
+    expect(await ctx.routeRequest(captcha)).toBe('aborted');
+    expect(state.frameUrls).toContain('https://www.google.com/recaptcha/api2/anchor?k=x');
+  });
+  it('a frameless request with the bscframe path is treated as the main frame (refused)', async () => {
+    const ctx = new FakeContext();
+    await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req(BSC, { noFrame: true }))).toBe('aborted');
+  });
+  it('a refusal logs the host at warn and the path without its query at debug', async () => {
+    const ctx = new FakeContext();
+    await installGuard(ctx, new FakePage(ctx), log);
+    await ctx.routeRequest(req('https://www.google.com/_/OtherUi/x?secret=1', { frame: sub }));
+    expect(JSON.stringify(logs)).not.toContain('secret');
+    expect(logs.map((l) => [l.level, l.o])).toEqual([
+      ['warn', { kind: 'off-allowlist', host: 'www.google.com' }],
+      ['debug', { kind: 'off-allowlist', path: '/_/OtherUi/x' }],
+    ]);
   });
 });
