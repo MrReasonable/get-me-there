@@ -238,5 +238,40 @@ describe.skipIf(!present)(
       expect(cells.some((c) => c.amountMinor >= 100_000)).toBe(true);
       expect(views.some((v) => v.offPlan === 'near-today' && v.cells.length < 49)).toBe(true);
     });
+    // why: fix round 2 (ruling 2): the live 0-night recording (14 → 15 Mar, `up`, 2026-10-19): short views near the
+    // diagonal, on plan, holding same-day pairs, and the step up moving the returns back one day
+    it('a 0-night page reads its short views near the diagonal, same-day pairs included, and steps up one day', async () => {
+      let diagonal = 0;
+      for (const { file, rec } of recordings()) {
+        const r = await serve(rec);
+        if (r.answer.kind !== 'grid') continue;
+        const short = r.answer.views.filter(
+          (v) =>
+            v.offPlan === null &&
+            v.cells.length < 49 &&
+            v.cells.some((c) => c.departureDate === c.returnDate),
+        );
+        if (short.length === 0) continue;
+        diagonal++;
+        for (const v of short) {
+          expect(
+            v.cells.every((c) => c.returnDate >= c.departureDate),
+            file,
+          ).toBe(true);
+          const possible = v.departures.flatMap((d) => v.returns.filter((x) => x >= d)).length;
+          expect(v.cells, file).toHaveLength(possible);
+        }
+        const [a, b] = r.answer.views;
+        if (rec.moves[0]?.dir === 'up' && a !== undefined && b !== undefined) {
+          const day = (x: string | undefined) => Date.parse(`${x ?? ''}T00:00:00Z`) / 86_400_000;
+          expect(
+            [day(b.departures[0]) - day(a.departures[0]), day(b.returns[0]) - day(a.returns[0])],
+            file,
+          ).toEqual([0, -1]);
+          expect(b.cells.length, file).toBeLessThan(a.cells.length);
+        }
+      }
+      expect(diagonal).toBeGreaterThan(0);
+    });
   },
 );
