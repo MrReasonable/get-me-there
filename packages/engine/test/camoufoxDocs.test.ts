@@ -1,11 +1,11 @@
 // WP15 Task 15.10 (fix round 1, TS 11): the grid figures the operator docs state are the estimate's own, for the worked
 // example's four airport pairs (8,736 day pairs, 10–21 nights) at the defaults and at a page cap of 312.
 import { readFileSync } from 'node:fs';
-import { asIata, asIsoDate } from '@gmt/core';
+import { asIata, asIsoDate, parseConfig } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { estimateStart } from '../src/estimate.js';
 import { buildSnapshot } from '../src/snapshot.js';
-import { engineWith, stubCamoufox } from './support/camoufox.js';
+import { engineWith, realCamoufox } from './support/camoufox.js';
 
 const doc = (path: string) =>
   readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8').replace(/\s+/g, ' ');
@@ -14,9 +14,30 @@ const providers = doc('docs/providers.md');
 
 /** The worked example's run estimate at a page cap (the default scroll caps and spacing). */
 function estimate(pageCap: number) {
-  const e = engineWith([stubCamoufox({ cells: 1, grid: { pageAllowance: pageCap, scrollAllowance: 600 } })], {
-    camoufoxConfigCap: pageCap,
+  // why: re-review N3: the real adapter, with the grid settings as the app's config gives them (wiring.ts's mapping)
+  const parsed = parseConfig(
+    {
+      NODE_ENV: 'test',
+      DATABASE_PATH: ':memory:',
+      BIND_ADDRESS: '127.0.0.1',
+      CAMOUFOX_ENABLED: 'true',
+      CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
+      CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
+      CAMOUFOX_MODE: 'grid',
+      CAMOUFOX_EXECUTION_PAGE_CAP: String(pageCap),
+    },
+    { realpath: (p) => p },
+  );
+  const cf = parsed.ok ? parsed.config.providers.camoufox : null;
+  if (cf === null) throw new Error('config');
+  const real = realCamoufox([], 1, {
+    executionPageCap: cf.executionPageCap,
+    executionScrollCap: cf.executionScrollCap,
+    scrollCap: cf.gridScrollCap,
+    scrollSpacingSeconds: cf.gridScrollSpacingSeconds,
+    pageTimeoutSeconds: cf.pageTimeoutSeconds,
   });
+  const e = engineWith([real], { camoufoxConfigCap: pageCap });
   const def = e.ctx.repos.definitions.update(e.definition.id, {
     window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
     minNights: 10,

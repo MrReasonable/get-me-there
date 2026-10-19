@@ -235,7 +235,13 @@ export function realCamoufox(
   answers: Array<{ status: number; body: unknown }>,
   cells: number,
   /** WP15 fix round 1 (TS 4): the real adapter in grid mode, with the run's page and scroll caps. */
-  grid?: { executionPageCap: number; executionScrollCap: number },
+  grid?: {
+    executionPageCap: number;
+    executionScrollCap: number;
+    scrollCap?: number;
+    scrollSpacingSeconds?: number;
+    pageTimeoutSeconds?: number;
+  },
 ): Stub {
   let ctxOf: () => EngineContext = () => {
     throw new Error('stub not bound');
@@ -287,10 +293,10 @@ export function realCamoufox(
       : {
           grid: {
             mode: 'grid' as const,
-            ...grid,
             scrollCap: 30,
             scrollSpacingSeconds: 5,
             pageTimeoutSeconds: 90,
+            ...grid,
           },
           scrollsLeft: (executionId: string | null) => ctxOf().budget.scrollsLeft('camoufox', executionId),
         }),
@@ -314,6 +320,7 @@ export function realCamoufox(
         return discovery.fetchTile(plan, q, pctx);
       },
       ...(discovery.estimateTile === undefined ? {} : { estimateTile: discovery.estimateTile }),
+      ...(discovery.interleavePairs === undefined ? {} : { interleavePairs: discovery.interleavePairs }),
     },
   };
 }
