@@ -5,9 +5,12 @@
  * `provider-unavailable`; each attempt's page class comes from `x-gmt-google-contacted` (absent → `page`, the
  * conservative reading). `camoufox-status` is the unledgered preflight's id, GET /v1/status only.
  */
-import { type Config, GOOGLE_CONTACTED_HEADER } from '@gmt/core';
+import { type Config, GOOGLE_CONTACTED_HEADER, GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS } from '@gmt/core';
 import type { ProviderHttpLimits } from '../http/types.js';
 import { classifyWorkerAnswer } from './answer.js';
+
+/** One move's own budget and its reserve, in seconds (core's shared constants: the worker uses the same). */
+const MOVE_SECONDS = (GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS) / 1000;
 
 type CamoufoxConfig = NonNullable<Config['providers']['camoufox']>;
 
@@ -49,10 +52,10 @@ export function camoufoxHttpLimits(
     costPerCallMicroGbp: 0,
     maxWaitSeconds: cfg.maxWaitSeconds,
     // why: spec §2 rev 34 (ruling 10): a grid page may run its first view's budget (twice the page timeout) and, per
-    // scroll, the spacing and a move's 60 s budget
+    // scroll, the spacing and a move's own budget with its reserve (core's GRID_MOVE_*, 60 s)
     requestTimeoutSeconds:
       c.mode === 'grid'
-        ? 2 * c.pageTimeoutSeconds + c.gridScrollCap * (c.gridScrollSpacingSeconds + 60) + 15
+        ? 2 * c.pageTimeoutSeconds + c.gridScrollCap * (c.gridScrollSpacingSeconds + MOVE_SECONDS) + 15
         : c.pageTimeoutSeconds + 15,
     minIntervalMs: c.minSpacingSeconds * 1000,
     retryTransport: false,

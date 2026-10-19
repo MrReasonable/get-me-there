@@ -708,9 +708,11 @@ verified on the worker").
   its cool-down, and nothing from that page is kept. A scroll whose view never changes ends the page with the views
   already read. A view whose dates differ from the plan (near today, or at the end of the sale window) is kept and
   ends the page. A view the worker cannot read as the grid, or whose cells no longer match the dated grammar, stops it
-  for an hour. Past the sale window Google shows its no-flights page: the day pairs on or after the page's first pair
-  on both dates read as no data, and the others as issues. Day pairs the grid could not show read as issues on the
-  cell (resumable), never as prices. A 0-night stay opens its first block a day later and scrolls up once to it.
+  for an hour. Google's no-flights page says nothing of day pairs it did not show: on the probe page past the planning
+  horizon (the end of the sale window) its day pairs read as no data; on any other page only the pair it asked for
+  does, and the rest stay not searched yet (resumable). Day pairs the grid could not show read as issues on the cell
+  (resumable), never as prices. A 0-night stay opens its first block a day later and scrolls up once to it (with no
+  scroll left, or a per-page cap of 0, it reads the view it opens on instead).
 
 ### Choose it
 

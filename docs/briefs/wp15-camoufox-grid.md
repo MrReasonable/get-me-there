@@ -76,8 +76,8 @@ query, 2027-09-10, landed on the no-flights page). `SOCS` read back unchanged on
   page takes the year nearest the query's departure.
 - **Year boundary.** Run 3 (27 Dec 2026 to 6 Jan 2027) read December departures and January returns correctly.
 - **Sale window.** A query 327 days out (2027-09-10) answered with the no-flights page, no grid. A grid page that lands
-  there is `no_data` only for its covered cells on or after its first pair on both dates (which the sale window's end
-  implies); its other covered cells are `no-flights-at-start` issues. The planner plans no block cell whose departure or
+  there marks its cells `no_data` only on the probe page past the horizon (the sale window's end); the line is generic,
+  so inside the horizon only the query cell is `no_data` and every other covered cell is a `no-flights-unseen` issue. The planner plans no block cell whose departure or
   return passes `GRID_HORIZON_DAYS` (320, dated); one probe page covers those cells, opened at their least departure and
   least return.
 - **Grid vs list.** The selected cell's grid price equals the Best list's minimum in all four runs (£462, £499, £481,
@@ -559,8 +559,8 @@ are split out.
     dropped and counted in `notes`; each view's unparsed count goes to `notes` as `unparsed:<n>@<view>` (PA-07); a covered
     cell with no parsed cell on a read view is an issue `error`/`parse`/`cell-unparsed`, resumable, never `empty` or
     `no_data`; a structurally unparsed view's covered cells are issues `view-unparsed`; cells of views not reached are
-    issues `page-not-ready`, `off-plan-view:<cause>` or `scroll-allowance`; a no-flights page is `no_data` only for the
-    covered cells on or after its first pair on both dates, the others `no-flights-at-start`; a cell read twice fails the
+    issues `page-not-ready`, `off-plan-view:<cause>` or `scroll-allowance`; a no-flights page is `no_data` for every
+    cell of the probe page and, inside the horizon, for its query cell only, the others `no-flights-unseen`; a cell read twice fails the
     tile (`parse`, `grid-cell-read-twice`), nothing stored; the preflight refuses a worker scroll cap or spacing that
     differs; `estimateTile` gives each tile's seconds with a scroll at the longer of 9.3 s and the spacing.
   - `scrolls` reaches `scroll_count` through `finalise` on every answer that carries it.

@@ -263,8 +263,8 @@ never silently dropped.
   reports its scroll cap and spacing in its status, and the preflight skips
   the provider (`provider_disabled`, naming the setting) while they, or the
   page timeout, differ from the app's. A page whose first read view lies past
-  its allowance (a 0-night lead scroll with none left) is not sent; its cells
-  stay `scroll-allowance` issues.
+  its allowance (a 0-night lead scroll with none left) drops the lead scroll
+  and reads the view it opens on.
   **Settles and deadlines.** The first view, after the Dates click, settles by
   the two-stable-polls rule. A view after a scroll counts only when its
   departures or returns line differs from the view before the move, and then
@@ -275,12 +275,14 @@ never silently dropped.
   the whole page, the views already read included. A scroll that does not
   settle in its budget ends the page: the views read so far are kept, and the
   covered cells of the blocks not reached are `error` (`parse`, detail
-  `page-not-ready`), resumable, with no cool-down. A grid page that settles
-  on Google's no-flights page (past the sale window) is `no_data` only for
-  its covered cells on or after the page's first pair on both dates, which
-  the sale window's end implies; every other covered cell is `error`
-  (`parse`, `no-flights-at-start`), resumable, and a note counts the inferred
-  cells. A pair read in two views of one page fails the tile (`parse`), and
+  `page-not-ready`), resumable, with no cool-down. Google's no-flights line
+  is generic and says nothing of cells the page never showed: on the probe
+  page past the horizon (the grid-path request marked `probe`) it is the
+  sale window's end, and every covered cell is `no_data`; on any other grid
+  page only the query cell is `no_data`, and every other covered cell is
+  `error` (`parse`, `no-flights-unseen`), resumable, with a note counting the
+  no-data cells. A 0-night page with no scroll left, or under a per-page cap
+  of 0, drops its lead scroll and reads the view it opens on. A pair read in two views of one page fails the tile (`parse`), and
   nothing from the page is stored.
   **Edges of the sale window.** The departures and returns lines are the
   source of truth for which dates a view shows. A first view shifted near
@@ -2281,9 +2283,9 @@ changes.
 §2's `grid` paragraph, from the branch review of work package 15 and
 CodeRabbit's pass on its pull request: the lattice anchored at today once a
 window has started; the horizon bounding returns as well as departures, with
-the probe opened at the least pair past it; a no-flights page `no_data` only
-for the cells on or after its first pair on both dates, the others resumable
-issues; a 0-night diagonal block opened a day later and scrolled up to; block
+the probe opened at the least pair past it; a no-flights page `no_data`
+for every cell of the probe page and, inside the horizon, for its query cell
+only, the others resumable (`no-flights-unseen`); a 0-night diagonal block opened a day later and scrolled up to; block
 moves that keep every view holding round trips; the page's scroll allowance
 from what the guard says the caps leave; the preflight's check of the
 worker's scroll cap and spacing; the off-plan causes named only from what is

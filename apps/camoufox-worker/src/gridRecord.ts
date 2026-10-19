@@ -4,7 +4,7 @@
  * one "Price graph" button and, in the dialog "Price insights", the one "Dates" tab, then makes the named moves with the
  * four scroll buttons. Every view is settled (the first by two stable polls; each after a scroll only once its
  * departures or returns line has changed, then holds still) and classified on every poll; each scroll starts at least
- * GRID_SCROLL_SPACING_MS after the last; each move has its own budget. It records what it reads, through locators, for
+ * the core's least scroll spacing after the last; each move has its own budget. It records what it reads, through locators, for
  * the grammar and the planner to be written from: the lines and labels with their element counts, the cell candidates in
  * order, the dates-grid check, and per move its timings and how many days each line moved. Nothing parses the printed
  * snapshot; it is stored for people to read. Only `record --grid` calls this module (rules.test.ts pins that).
@@ -33,12 +33,9 @@ import type { Selectors } from './selectors.js';
 import type { Deadline, Timers } from './timers.js';
 
 /** Scroll clicks start at least this far apart (ruling 12: 5 s, fixed, never randomised). */
-export const GRID_SCROLL_SPACING_MS = GRID_MIN_SCROLL_SPACING_SECONDS * 1000;
-/** A move's own budget for its click, settle and read (ruling 10), and the reserve kept past it for the read. */
-export const MOVE_BUDGET_MS = GRID_MOVE_BUDGET_MS;
-export const MOVE_RESERVE_MS = GRID_MOVE_RESERVE_MS;
-/** One view's read: the lines, the labels, the 49 candidates' names and the dates-grid check. */
-export const READ_VIEW_MS = MOVE_RESERVE_MS;
+const SPACING_MS = GRID_MIN_SCROLL_SPACING_SECONDS * 1000;
+/** One view's read: the lines, the labels, the 49 candidates' names and the dates-grid check (the move's reserve). */
+const READ_VIEW_MS = GRID_MOVE_RESERVE_MS;
 
 const DAY = '(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \\d{1,2} [A-Z][a-z]{2,3}';
 /** One day label's whole text ("Thu 11 Mar"). */
@@ -210,7 +207,7 @@ export async function exploreGrid(
       o.clicked.push(target);
     });
   await click('click-graph', button.nth(0), `button:${S.results.priceGraphButton}`, dd);
-  const so = { timers, pollMs: o.pollMs, S, reserveMs: MOVE_RESERVE_MS };
+  const so = { timers, pollMs: o.pollMs, S, reserveMs: GRID_MOVE_RESERVE_MS };
   const dialogs = page.getByRole('dialog', { name: G.dialog, exact: true });
   const dialog = dialogs.nth(0);
   const opened = await settle('dialog', driver, dd, so, steps, async (st) => {
@@ -310,9 +307,9 @@ export async function exploreGrid(
   let lastScrollAt: number | null = null;
   for (const [i, dir] of o.moves.entries()) {
     // why: ruling 12: scroll clicks start at least the fixed spacing apart; never randomised
-    const wait = lastScrollAt === null ? 0 : lastScrollAt + GRID_SCROLL_SPACING_MS - timers.now();
+    const wait = lastScrollAt === null ? 0 : lastScrollAt + SPACING_MS - timers.now();
     if (wait > 0) await timers.sleep(wait);
-    const dm = o.nextFor(MOVE_BUDGET_MS + MOVE_RESERVE_MS);
+    const dm = o.nextFor(GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS);
     const target = dialog.getByRole('button', { name: G.scroll[dir], exact: true });
     const step = await soft(async () => {
       const n = await runStep('find-scroll', LOOKUP_TIMEOUT_MS, dm, steps, (st) => countOf(target, st));
