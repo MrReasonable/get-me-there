@@ -70,6 +70,8 @@ export type TileRequest =
       start: { departureDate: IsoDate; returnDate: IsoDate };
       moves: GridMove[];
       reads: boolean[];
+      /** The probe page past the planning horizon: its no-flights answer is the sale window's end (ruling on N1). */
+      probe?: true;
     };
 export interface TilePlan {
   index: number;

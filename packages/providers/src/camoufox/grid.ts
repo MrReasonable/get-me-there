@@ -140,7 +140,8 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
   // why: joined[i] says whether block i + 1 is reached from block i by scrolling; a page's first block may cost a lead
   // scroll (leadOf), which joining the block onto the page before saves
   const joined = moves.map(() => false);
-  const lead = path.map(leadOf);
+  // why: re-review N4: with a per-page cap of 0 there is no lead scroll; the diagonal page still opens a day later
+  const lead = path.map((b) => (o.scrollCap >= 1 ? leadOf(b) : 0));
   let pages = path.length;
   let scrolls = lead.reduce((a, b) => a + b, 0);
   const pageScrolls = (i: number): number => {
@@ -171,7 +172,8 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
   const close = (): void => {
     const first = current?.blocks[0];
     if (current === null || first === undefined) return;
-    const up = leadOf(first) === 1;
+    const diagonal = leadOf(first) === 1;
+    const up = diagonal && o.scrollCap >= 1;
     tiles.push({
       index: tiles.length,
       coveredCells: current.blocks.flatMap((b) => b.cells),
@@ -179,7 +181,7 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
         kind: 'grid-path',
         start: {
           departureDate: addDays(first.depFrom, 3),
-          returnDate: addDays(first.retFrom, up ? 4 : 3),
+          returnDate: addDays(first.retFrom, diagonal ? 4 : 3),
         },
         moves: up ? ['up', ...current.moves] : current.moves,
         reads: up ? [false, ...current.reads] : current.reads,
@@ -229,6 +231,7 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
         start: { departureDate: dep, returnDate: ret > dep ? ret : addDays(dep, 1) },
         moves: [],
         reads: [true],
+        probe: true,
       },
     });
   }

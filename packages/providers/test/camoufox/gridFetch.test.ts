@@ -214,27 +214,25 @@ describe('camoufox grid mode', () => {
       detail: expect.stringMatching(/CAMOUFOX_PAGE_TIMEOUT_SECONDS.*240.*90/),
     });
   });
-  it('a 0-night page whose lead scroll the caps do not leave is never sent: its cells are scroll-allowance issues (CodeRabbit)', async () => {
-    let sent = 0;
+  // why: re-review N2: a page held back leaves no ledger row and breaks parity; with no scroll left the page drops its
+  // lead scroll and reads the view it opens on, a day later on the returns, so only the same-day corner is unseen
+  it('a 0-night page with no scroll left drops its lead scroll and reads the view it opens on (re-review N2)', async () => {
+    let sent: unknown;
     server.use(
-      http.post(URL_, () => {
-        sent++;
-        return HttpResponse.json(answer({ views: [], ended: 'allowance' }), contacted);
+      http.post(URL_, async ({ request }) => {
+        sent = await body(request);
+        return HttpResponse.json(answer({ views: [], ended: 'complete' }), contacted);
       }),
     );
     const { d, budget } = setup(undefined, { scrollsLeft: () => 0 });
     const q = { ...Q, minNights: 0, maxNights: 0 };
     const [tile] = d.plan(q);
     if (tile?.request.kind !== 'grid-path') throw new Error('tile');
-    expect(tile.request.reads[0]).toBe(false);
+    expect([tile.request.moves, tile.request.reads]).toEqual([['up'], [false, true]]);
     const r = await d.fetchTile(tile, q, ctx);
-    expect(sent).toBe(0);
-    expect(budget.rowsOf('camoufox')).toEqual([]);
-    if (r.kind !== 'tile') throw new Error('tile');
-    expect(r.cellIssues?.map((i) => i.detail.split(' ')[0])).toEqual(
-      Array(tile.coveredCells.length).fill('scroll-allowance'),
-    );
-    expect(r.notes).toContain('scroll-allowance-before-first-read');
+    expect(sent).toMatchObject({ moves: [], reads: [true], scrollAllowance: 0 });
+    expect(r.kind === 'tile' && r.notes).toContain('lead-scroll-dropped');
+    expect(budget.rowsOf('camoufox')).toHaveLength(1);
   });
   it('a page asks for no more scrolls than the run’s and the month’s caps leave, and reserves that many (CA 1)', async () => {
     const left: Array<string | null> = [];
@@ -401,63 +399,63 @@ describe('camoufox grid mode', () => {
     // why: PA M3: the words state only what is known, never a cause the page did not show
     for (const i of r.cellIssues ?? []) expect(i.detail).not.toMatch(/sale window/);
   });
-  it('the no-flights page is no data only for the covered cells on or after its start on both axes; the rest are issues (PA I1)', async () => {
+  // why: ruling on N1 (2026-10-19): the no-flights line is generic; inside the horizon it says nothing of cells the page
+  // never showed, so only the query cell is no data and every other planned cell stays unsearched
+  it('inside the horizon a no-flights page is no data for its query cell only; the others are no-flights-unseen issues', async () => {
     const { d } = setup();
     const [tile] = d.plan(Q);
-    if (tile === undefined) throw new Error('tile');
+    if (tile?.request.kind !== 'grid-path') throw new Error('tile');
+    expect(tile.request.probe).toBeUndefined();
     server.use(
       http.post(URL_, () => HttpResponse.json(answer({ views: [], ended: 'no-flights' }), contacted)),
     );
     const r = await d.fetchTile(tile, Q, ctx);
     if (r.kind !== 'tile') throw new Error('tile');
-    // why: the page opened at 14 → 24 Mar; the sale window's end implies nothing for the departures 11–13 Mar
     expect([r.prices, r.noFares]).toEqual([[], []]);
-    expect(r.cellIssues?.map((i) => [i.cell.departureDate, i.reason, i.detail.split(' ')[0]])).toEqual([
-      ['2027-03-11', 'parse', 'no-flights-at-start'],
-      ['2027-03-12', 'parse', 'no-flights-at-start'],
-      ['2027-03-13', 'parse', 'no-flights-at-start'],
-    ]);
-    expect(r.notes).toContain('no-flights-inferred:4');
+    // why: the page asked 14 → 24 Mar, a covered cell; the six others were never shown
+    expect(r.cellIssues?.map((i) => [i.cell.departureDate, i.reason, i.detail.split(' ')[0]])).toEqual(
+      ['2027-03-11', '2027-03-12', '2027-03-13', '2027-03-15', '2027-03-16', '2027-03-17'].map((dep) => [
+        dep,
+        'parse',
+        'no-flights-unseen',
+      ]),
+    );
+    expect(r.notes).toContain('no-flights-inferred:1');
   });
-  it('a joined page that lands on no flights infers nothing for its blocks reached by scrolls that lie before its start on an axis (PA I1)', async () => {
+  it('a joined page inside the horizon that lands on no flights leaves every later block unsearched', async () => {
     const { d } = setup({ executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 });
     const wide = { ...Q, departureTo: asIsoDate('2027-03-31'), maxNights: 21 };
     server.use(
       http.post(URL_, () => HttpResponse.json(answer({ views: [], ended: 'no-flights' }), contacted)),
     );
-    let before = 0;
-    for (const tile of d.plan(wide)) {
+    const tiles = d.plan(wide);
+    expect(tiles.some((t) => t.request.kind === 'grid-path' && t.request.moves.length > 0)).toBe(true);
+    for (const tile of tiles) {
       if (tile.request.kind !== 'grid-path') throw new Error('tile');
       const start = tile.request.start;
       const r = await d.fetchTile(tile, wide, ctx);
       if (r.kind !== 'tile') throw new Error('tile');
-      const issues = r.cellIssues ?? [];
-      const earlier = tile.coveredCells.filter(
-        (c) => c.departureDate < start.departureDate || c.returnDate < start.returnDate,
+      const query = tile.coveredCells.filter(
+        (c) => c.departureDate === start.departureDate && c.returnDate === start.returnDate,
       );
-      expect(issues.map((i) => cellKeyString(i.cell)).sort()).toEqual(earlier.map(cellKeyString).sort());
-      expect(r.notes).toContain(`no-flights-inferred:${tile.coveredCells.length - earlier.length}`);
-      before += earlier.length;
+      expect((r.cellIssues ?? []).length).toBe(tile.coveredCells.length - query.length);
+      expect((r.cellIssues ?? []).every((i) => i.detail.startsWith('no-flights-unseen'))).toBe(true);
     }
-    expect(before).toBeGreaterThan(0);
-    // why: a block reached by scrolling up the returns holds cells departing on or after the start but returning
-    // before it: those are issues too
-    const [one] = d.plan(Q);
-    if (one?.request.kind !== 'grid-path') throw new Error('tile');
-    const shifted = {
-      ...one,
-      request: {
-        ...one.request,
-        start: { departureDate: asIsoDate('2027-03-12'), returnDate: asIsoDate('2027-03-25') },
-      },
-    };
-    const r = await d.fetchTile(shifted, Q, ctx);
-    expect(r.kind === 'tile' && r.cellIssues?.map((i) => i.cell.departureDate)).toEqual([
-      '2027-03-11',
-      '2027-03-12',
-      '2027-03-13',
-      '2027-03-14',
-    ]);
+  });
+  it('the probe page past the horizon is no data for every cell it covers (the sale window’s end)', async () => {
+    const { d } = setup();
+    // why: the kit's clock is 2026-10-14, so the horizon ends 2027-08-30
+    const late = { ...Q, departureFrom: asIsoDate('2027-08-20'), departureTo: asIsoDate('2027-09-10') };
+    const probe = d.plan(late).at(-1);
+    if (probe?.request.kind !== 'grid-path') throw new Error('probe');
+    expect(probe.request.probe).toBe(true);
+    server.use(
+      http.post(URL_, () => HttpResponse.json(answer({ views: [], ended: 'no-flights' }), contacted)),
+    );
+    const r = await d.fetchTile(probe, late, ctx);
+    if (r.kind !== 'tile') throw new Error('tile');
+    expect([r.prices, r.noFares, r.cellIssues ?? []]).toEqual([[], [], []]);
+    expect(r.notes).toContain(`no-flights-inferred:${probe.coveredCells.length}`);
   });
   it('two views that both price one covered pair fail the tile: nothing from the page is stored (PA M1, CodeRabbit)', async () => {
     const { d } = setup();

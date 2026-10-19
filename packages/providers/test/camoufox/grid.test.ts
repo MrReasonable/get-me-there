@@ -208,6 +208,18 @@ describe('planGridTiles: fix round 1', () => {
       tiles.flatMap((t) => (t.request.kind === 'grid-path' ? t.request.moves : [])).length,
     ).toBeGreaterThan(0);
   });
+  it('with a per-page scroll cap of 0 a 0-night diagonal page opens a day later with no scroll (re-review N4)', () => {
+    const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 0, maxNights: 3 };
+    const tiles = planGridTiles(q, opts({ pageAllowance: 400, scrollCap: 0 }));
+    expect(tiles.every(asRequest)).toBe(true);
+    expect(tiles.every((t) => t.request.kind === 'grid-path' && t.request.moves.length === 0)).toBe(true);
+    expect(tiles[0]?.request).toEqual({
+      kind: 'grid-path',
+      start: { departureDate: '2027-03-04', returnDate: '2027-03-05' },
+      moves: [],
+      reads: [true],
+    });
+  });
   it('between blocks the returns move first when they go later, and the departures first when they go earlier (PIE M1)', () => {
     // why: one stay, two columns: the move between them is 7 days later on both axes
     const q = { ...WORKED, departureTo: addDays(WORKED.departureFrom, 13), minNights: 10, maxNights: 10 };

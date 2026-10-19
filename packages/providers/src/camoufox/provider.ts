@@ -32,7 +32,7 @@ import {
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
-import { gridTile, issueOf } from './gridTile.js';
+import { gridTile } from './gridTile.js';
 import { camoufoxPreflight } from './preflight.js';
 import { planSingleCells } from './tiles.js';
 
@@ -239,30 +239,22 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the caps leave; the worker stops there (`allowance`)
     // and the unreached cells are resumable issues, while a page with no scroll left still reads its first block
     const left = o.scrollsLeft?.(ctx.executionId) ?? null;
-    const allowance = left === null ? path.moves.length : Math.max(0, Math.min(path.moves.length, left));
-    // why: CodeRabbit on PR #9: a page whose first read view lies past the allowance (a 0-night lead scroll) would load
-    // a page and read nothing; it is not sent, and its cells stay resumable
-    const firstRead = path.reads.indexOf(true);
-    if (firstRead > allowance)
-      return {
-        kind: 'tile',
-        index: plan.index,
-        coveredCells: plan.coveredCells,
-        fetchedAt: o.clock.now(),
-        pointOfSale: 'unknown',
-        prices: [],
-        noFares: [],
-        notes: ['scroll-allowance-before-first-read'],
-        cellIssues: plan.coveredCells.map((c) => issueOf(c, 'scroll-allowance')),
-      };
+    // why: CodeRabbit on PR #9 and re-review N2: a page whose first read view lies past what the caps leave (a 0-night
+    // lead scroll with none left) drops its lead scrolls and reads the view it opens on, a day later on the returns;
+    // the cells that view does not show stay resumable issues, and the page keeps its ledger row
+    const firstRead = Math.max(0, path.reads.indexOf(true));
+    const leadDropped = left !== null && firstRead > left;
+    const moves = leadDropped ? path.moves.slice(firstRead) : path.moves;
+    const reads = leadDropped ? [true, ...path.reads.slice(firstRead + 1)] : path.reads;
+    const allowance = left === null ? moves.length : Math.max(0, Math.min(moves.length, left));
     const request = pageRequestSchema.safeParse({
       mode: 'grid',
       origin: q.origin,
       destination: q.destination,
       gl: o.pointOfSale,
       start: path.start,
-      moves: path.moves,
-      reads: path.reads,
+      moves,
+      reads,
       scrollAllowance: allowance,
     });
     if (!request.success)
@@ -304,7 +296,10 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${a.data.fetchedAt} is outside this request`, WHERE),
       );
-    return gridTile(plan, a.data);
+    const mapped = gridTile(plan, a.data);
+    return leadDropped && mapped.kind === 'tile'
+      ? { ...mapped, notes: [...mapped.notes, 'lead-scroll-dropped'] }
+      : mapped;
   }
 
   const grid = o.grid?.mode === 'grid' ? o.grid : null;

@@ -2,9 +2,10 @@
  * The camoufox grid answer as a discovery tile (spec §2, §5.2, §7 rev 34; plan decision 70; WP15 Task 15.7). Every
  * covered cell ends one of three ways, and never as `empty`:
  * - priced: a parsed cell of a read view, with `returnDateSource: 'grid-cell'` and Google's mark kept as the vendor's;
- * - no data: Google's no-flights page (past the sale window), for the covered cells on or after the page's start on
- *   both axes only, which the sale window's end implies (PA I1); every other covered cell is an issue
- *   (`no-flights-at-start`), and a note counts the inferred cells (`no-flights-inferred:<n>`);
+ * - no data: Google's no-flights page. Its line is generic, so it says nothing of cells the page never showed (ruling on
+ *   N1): on the probe page past the planning horizon it is the sale window's end, and every covered cell is no data;
+ *   on any other page only the query cell is, and every other covered cell stays unsearched (`no-flights-unseen`,
+ *   resumable). A note counts the no-data cells (`no-flights-inferred:<n>`);
  * - an issue (`error`, reason `parse`, resumable) naming why: `cell-unparsed` (its view was read but the cell was not
  *   parsed), `view-unparsed` (its view failed the structural check), or, for a view the page did not reach,
  *   `page-not-ready`, `off-plan-view` or `scroll-allowance` by how the page ended.
@@ -37,8 +38,8 @@ const WORDS: Readonly<Record<string, string>> = {
   'view-unparsed': 'the date grid view holding this day pair failed its check, so none of it was kept',
   'page-not-ready': 'a scroll did not settle before the grid reached this day pair',
   'off-plan-view': 'the grid showed other dates than planned, so the page ended before this day pair',
-  'no-flights-at-start':
-    'the page showed no flights at its start, which says nothing for this day pair: it is earlier on an axis',
+  'no-flights-unseen':
+    'the page answered no flights for the pair it asked; this day pair was not shown, so it is not searched yet',
   'scroll-allowance': 'the run’s scroll allowance ended before the grid reached this day pair',
 };
 
@@ -58,12 +59,12 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
     pointOfSale: answer.pointOfSale,
   };
   if (answer.ended === 'no-flights') {
-    const start = plan.request.kind === 'grid-path' ? plan.request.start : null;
+    const req = plan.request.kind === 'grid-path' ? plan.request : null;
     const inferred = (c: CellKey): boolean =>
-      start !== null && c.departureDate >= start.departureDate && c.returnDate >= start.returnDate;
-    const issues = plan.coveredCells
-      .filter((c) => !inferred(c))
-      .map((c) => issueOf(c, 'no-flights-at-start'));
+      req !== null &&
+      (req.probe === true ||
+        (c.departureDate === req.start.departureDate && c.returnDate === req.start.returnDate));
+    const issues = plan.coveredCells.filter((c) => !inferred(c)).map((c) => issueOf(c, 'no-flights-unseen'));
     return {
       ...base,
       prices: [],

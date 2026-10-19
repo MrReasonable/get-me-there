@@ -149,3 +149,23 @@ describe('camoufox grid pages across the pairs (fix round 2)', () => {
     expect(new Set(lp.slice(0, 4)).size).toBe(1);
   });
 });
+
+// why: re-review N2: with the month's scrolls spent, a 0-night page still loads (it drops its lead scroll), so the pass
+// keeps its ledger parity and raises no parity notice
+describe('camoufox grid pages with no scroll left (re-review N2)', () => {
+  it('a fresh run of 0-night pages with the month scroll cap spent loads every page and reports no parity break', async () => {
+    const cf = realCamoufox(
+      Array.from({ length: 4 }, () => grid([], 'complete', 0)),
+      14,
+      { executionPageCap: 100, executionScrollCap: 600 },
+    );
+    const e = engineWith([cf], { env: { CAMOUFOX_MONTHLY_SCROLL_CAP: '0' } });
+    e.ctx.repos.definitions.update(e.definition.id, { minNights: 0, maxNights: 0 });
+    const ex = await e.runToEnd();
+    expect(cf.calls.length).toBeGreaterThan(0);
+    expect(e.ledgerRows('camoufox')).toHaveLength(cf.calls.length);
+    const notices = e.notifications.map((n) => n.kind);
+    expect(notices).not.toContain('parity_break');
+    expect(ex.status).not.toBe('failed');
+  });
+});
