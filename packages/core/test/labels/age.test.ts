@@ -170,6 +170,14 @@ describe('an assumed bound reads as an assumption on every form (N4, pie-007)', 
       sourceKind: 'authorised-cached',
     } as const;
     expect(withAssumedBound(tp, undefined)).toBe(tp);
+    // why: only SearchApi's date grid states no age; another provider's aggregate row is taken as stated
+    const other = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 24,
+      providerId: 'fixture',
+      sourceKind: 'scraped-aggregate',
+    } as const;
+    expect(withAssumedBound(other, undefined)).toBe(other);
   });
   it('a grid-cell row is assumed from its own facts, with camoufox in list mode or off (fix round 1, PA I2)', () => {
     const grid = { fetchedAt: p.fetchedAt, maxAgeHours: 24, returnDateSource: 'grid-cell' } as const;
