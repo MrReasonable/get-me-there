@@ -198,6 +198,15 @@ export function planGridTiles(q: DiscoveryQuery, o: GridPlanOptions): TilePlan[]
     }
   }
   close();
+  // why: fix round 2 (ruling 1): the pages that join blocks by scrolls come first, so a pair's share of the run's pages
+  // reaches its scrolls before the page cap binds; the order is otherwise the path's (a stable sort)
+  const blocksOf = (t: TilePlan): number =>
+    t.request.kind === 'grid-path' ? t.request.reads.filter((x) => x).length : 0;
+  const ordered = tiles
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (blocksOf(a.t) > 1 === blocksOf(b.t) > 1 ? a.i - b.i : blocksOf(a.t) > 1 ? -1 : 1))
+    .map(({ t }, index) => ({ ...t, index }));
+  tiles.splice(0, tiles.length, ...ordered);
   // why: the engine's tiles partition a pair's cells; the cells past the horizon go to one probe page, opened at their
   // least departure and least return (PA I1, M4): Google's no-flights page there is evidence of no data only for the
   // cells on or after it on both axes (gridTile), and a page that shows prices leaves the cells it did not show as

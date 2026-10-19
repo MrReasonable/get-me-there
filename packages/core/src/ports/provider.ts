@@ -213,6 +213,11 @@ export interface DiscoveryCapability {
    * time and each scroll's) states each tile's scrolls and seconds; the engine's estimate reads them from here.
    */
   estimateTile?(plan: TilePlan): { scrolls: number; seconds: number };
+  /**
+   * Fix round 2 (ruling 1): the engine takes the pairs' tiles in turn (round-robin) rather than pair by pair, so a run
+   * capped in pages spreads them across every pair (camoufox grid mode).
+   */
+  interleavePairs?: true;
   fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult>;
   /** Optional, unledgered (spec §5.1 rev 32); absent for every provider but camoufox. */
   preflight?(ctx: ProviderContext): Promise<PreflightResult>;

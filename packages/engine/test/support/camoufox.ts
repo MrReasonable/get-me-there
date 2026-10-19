@@ -210,6 +210,7 @@ function stub(
       ...(o.grid === undefined
         ? {}
         : {
+            interleavePairs: true as const,
             estimateTile: (t: TilePlan) =>
               gridTileEstimate(t, {
                 ...GRID_TIMES,

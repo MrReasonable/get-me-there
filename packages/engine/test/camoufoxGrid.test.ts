@@ -1,9 +1,11 @@
 // WP15 Task 15.8 (fix round 1, TS 4): the real camoufox adapter in grid mode through the engine: a page that ended
 // before its last block leaves only its unread cells for the resume (decision 50), and a blocked grid page disables the
 // provider as in list mode. Synthetic worker answers; no page is loaded.
-import { addDays, asIsoDate, asIsoDateTime, type IsoDate } from '@gmt/core';
+import { addDays, asIata, asIsoDate, asIsoDateTime, type IsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { engineWith, outcomes, realCamoufox } from './support/camoufox.js';
+import { buildSnapshot } from '../src/snapshot.js';
+import { planTiles } from '../src/stages/discovery.js';
+import { engineWith, outcomes, realCamoufox, stubCamoufox } from './support/camoufox.js';
 import { T0 } from './support/harness.js';
 
 const B = asIsoDateTime('2026-10-23T05:00:00.000Z');
@@ -98,5 +100,51 @@ describe('camoufox grid mode through the engine (Task 15.8)', () => {
     expect(o.filter((x) => x.status === 'skipped' && x.reason === 'provider_disabled')).toHaveLength(7);
     expect(cf.calls).toHaveLength(1);
     expect(e.ledgerRows('camoufox')).toHaveLength(1);
+  });
+});
+
+// why: fix round 2 (ruling 1): a capped camoufox grid run spreads its pages across the pairs, never finishing pair 1
+describe('camoufox grid pages across the pairs (fix round 2)', () => {
+  function fourPairs(pageCap: number, grid = true) {
+    const cf = stubCamoufox({
+      cells: 1,
+      ...(grid ? { grid: { pageAllowance: pageCap, scrollAllowance: 600 } } : {}),
+    });
+    const e = engineWith([cf], { camoufoxConfigCap: pageCap });
+    const def = e.ctx.repos.definitions.update(e.definition.id, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-01-31') },
+      minNights: 10,
+      maxNights: 12,
+      origins: [asIata('LHR'), asIata('LGW')],
+      destinations: [asIata('JFK'), asIata('EWR')],
+    });
+    return { cf, e, def };
+  }
+  it('a run capped at 8 pages loads pages for every one of the four pairs', async () => {
+    const { cf, e } = fourPairs(8);
+    await e.runToEnd();
+    // why: the ninth call is the one the page cap refuses at reserve
+    expect(e.ledgerRows('camoufox')).toHaveLength(8);
+    expect(new Set(cf.queries.slice(0, 8).map((q) => `${q.origin}-${q.destination}`)).size).toBe(4);
+  });
+  it('the plan takes the pairs in turn for grid pages; list mode keeps each pair’s cells together', () => {
+    const grid = fourPairs(8);
+    const cap = grid.e.ctx.providers.get('camoufox')?.discovery;
+    if (cap === undefined) throw new Error('camoufox');
+    const built = buildSnapshot(grid.e.ctx, grid.def);
+    const pairs = planTiles('camoufox', cap, built.snapshot, built.cells).map(
+      (t) => `${t.query.origin}-${t.query.destination}`,
+    );
+    expect(new Set(pairs.slice(0, 4)).size).toBe(4);
+    const indexes = planTiles('camoufox', cap, built.snapshot, built.cells).map((t) => t.plan.index);
+    expect(indexes).toEqual(indexes.map((_x, i) => i));
+    const list = fourPairs(8, false);
+    const lcap = list.e.ctx.providers.get('camoufox')?.discovery;
+    if (lcap === undefined) throw new Error('camoufox');
+    const lb = buildSnapshot(list.e.ctx, list.def);
+    const lp = planTiles('camoufox', lcap, lb.snapshot, lb.cells).map(
+      (t) => `${t.query.origin}-${t.query.destination}`,
+    );
+    expect(new Set(lp.slice(0, 4)).size).toBe(1);
   });
 });

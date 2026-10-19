@@ -242,6 +242,31 @@ describe('planGridTiles: fix round 1', () => {
   });
 });
 
+describe('planGridTiles: joined pages first (fix round 2)', () => {
+  it('a pair’s pages that join blocks by scrolls come first, single-block pages after, the probe last', () => {
+    const tiles = planGridTiles(WORKED, opts({ pageAllowance: 25, scrollAllowance: 150, horizonDays: 300 }));
+    const blocks = (t: TilePlan) =>
+      t.request.kind === 'grid-path' ? t.request.reads.filter((x) => x).length : 0;
+    const counts = tiles.slice(0, -1).map(blocks);
+    // why: 21 joined moves; the pages that hold them are the pair's first pages, so its share of 25 pages reaches them
+    const joined = counts.filter((n) => n > 1).length;
+    expect(joined).toBeGreaterThan(0);
+    expect(counts.slice(0, joined).every((n) => n > 1)).toBe(true);
+    expect(counts.slice(joined).every((n) => n === 1)).toBe(true);
+    const first25 = tiles
+      .slice(0, 25)
+      .flatMap((t) => (t.request.kind === 'grid-path' ? t.request.moves : []));
+    expect(first25).toHaveLength(147);
+    expect(tiles.map((t) => t.index)).toEqual(tiles.map((_t, i) => i));
+    const probe = tiles.at(-1);
+    expect(
+      probe?.coveredCells.every(
+        (c) => c.departureDate > addDays(TODAY, 300) || c.returnDate > addDays(TODAY, 300),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('gridTileEstimate', () => {
   it('a page is the page time plus each scroll’s time', () => {
     const [t] = planGridTiles(WORKED, opts({ pageAllowance: 1 }));

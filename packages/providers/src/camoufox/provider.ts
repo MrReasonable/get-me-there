@@ -320,7 +320,12 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       info: grid === null ? CAMOUFOX_DISCOVERY_INFO : CAMOUFOX_GRID_INFO,
       plan,
       fetchTile,
-      ...(grid === null ? {} : { estimateTile: (t: TilePlan) => gridTileEstimate(t, timesOf(grid)) }),
+      ...(grid === null
+        ? {}
+        : {
+            estimateTile: (t: TilePlan) => gridTileEstimate(t, timesOf(grid)),
+            interleavePairs: true as const,
+          }),
       preflight: (ctx) =>
         camoufoxPreflight(
           {

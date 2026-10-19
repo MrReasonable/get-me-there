@@ -82,6 +82,17 @@ const sameCells = (a: readonly CellKey[], b: readonly CellKey[]): boolean => {
   return ka.length === kb.length && ka.every((k, i) => k === kb[i]);
 };
 
+/** The lists' items taken in turn: the first of each, then the second of each, and so on. */
+function roundRobin<T>(lists: readonly T[][]): T[] {
+  const out: T[] = [];
+  for (let i = 0, n = Math.max(0, ...lists.map((l) => l.length)); i < n; i++)
+    for (const l of lists) {
+      const x = l[i];
+      if (x !== undefined) out.push(x);
+    }
+  return out;
+}
+
 /**
  * Groups cells by pair in snapshot order and plans each pair over its cells; tile indexes are made unique across
  * pairs. Spec §5.2 "tiles partition the query's cells", asserted here, at the point that decides coverage
@@ -103,7 +114,7 @@ export function planTiles(
     else list.push(c);
   }
   const out: PlannedTile[] = [];
-  let offset = 0;
+  const perPair: PlannedTile[][] = [];
   for (const origin of snapshot.resolved.origins) {
     for (const destination of snapshot.resolved.destinations) {
       const pairCells = byPair.get(`${origin}|${destination}`);
@@ -123,12 +134,15 @@ export function planTiles(
         throw new Error(
           `discovery plan for ${providerId} ${origin}-${destination} does not partition its ${pairCells.length} cells`,
         );
-      // why: plan() numbers tiles from 0 per pair; the ledger's tile_index must be unique within one
-      // pass of one provider so parity can count distinct tiles (spec §8.1 "Parity").
-      for (const p of plans) out.push({ plan: { ...p, index: offset + p.index }, query });
-      offset += plans.length;
+      perPair.push(plans.map((p) => ({ plan: p, query })));
     }
   }
+  // why: fix round 2 (ruling 1): a provider that asks for it (camoufox grid) has its pairs' tiles taken in turn, so a
+  // run capped in pages spreads them across every pair; every other provider keeps each pair's tiles together
+  const ordered = cap.interleavePairs === true ? roundRobin(perPair) : perPair.flat();
+  // why: plan() numbers tiles from 0 per pair; the ledger's tile_index must be unique within one pass of one provider
+  // so parity can count distinct tiles (spec §8.1 "Parity"): they are renumbered in the order they run
+  for (const [i, t] of ordered.entries()) out.push({ plan: { ...t.plan, index: i }, query: t.query });
   return out;
 }
 
